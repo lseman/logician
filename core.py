@@ -1,18 +1,22 @@
 """
-LLM Agent Framework
+LLM Agent Framework — with built-in logging (default DEBUG to stdout)
+Supports TOON (Token-Oriented Object Notation) for tool calls as JSON alternative
 """
 from __future__ import annotations
 import json
+import os
 import sqlite3
 import time
 import uuid
 import math
+import logging
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import httpx
 import numpy as np
+
 # ===================== Optional Chroma deps =====================
 try:
     import chromadb
@@ -21,6 +25,91 @@ try:
 except ImportError:
     chromadb = None
     HAS_CHROMA = False
+
+# ===================== Optional TOON deps =====================
+try:
+    from toon_format import encode, decode
+    HAS_TOON = True
+except ImportError:
+    HAS_TOON = False
+    encode = decode = None
+
+# =====================================================================
+# Logging
+# =====================================================================
+def _resolve_log_level(value: Optional[str | int]) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip().upper()
+        return getattr(logging, value, logging.ERROR)
+    return logging.ERROR
+
+class _JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": datetime.fromtimestamp(record.created).isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        # Attach extras (avoid default record attrs)
+        for k, v in record.__dict__.items():
+            if k.startswith("_"):
+                continue
+            if k in ("args","name","msg","levelno","levelname","pathname","filename",
+                     "module","exc_info","exc_text","stack_info","lineno","funcName",
+                     "created","msecs","relativeCreated","thread","threadName",
+                     "processName","process"):
+                continue
+            try:
+                json.dumps({k: v})
+                payload[k] = v
+            except Exception:
+                payload[k] = str(v)
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+def get_logger(name: str,
+               level: Optional[str | int] = None,
+               json_logs: Optional[bool] = None) -> logging.Logger:
+    """
+    Create/reuse a module logger with a single ConsoleHandler.
+    Defaults pulled from env or sensible DEBUG defaults.
+    """
+    logger = logging.getLogger(name)
+    # Resolve global defaults once
+    root = logging.getLogger()
+    if not getattr(root, "_configured_by_agent_logger", False):
+        env_level = os.getenv("AGENT_LOG_LEVEL")
+        env_json = os.getenv("AGENT_LOG_JSON")
+        root.setLevel(_resolve_log_level(env_level or logging.ERROR))
+        # Avoid duplicate handlers if user already configured logging
+        if not root.handlers:
+            ch = logging.StreamHandler()
+            if (env_json and env_json.strip().lower() in ("1","true","yes")):
+                ch.setFormatter(_JsonFormatter())
+            else:
+                fmt = "%(asctime)s | %(levelname)-8s | %(name)s: %(message)s"
+                ch.setFormatter(logging.Formatter(fmt=fmt, datefmt="%H:%M:%S"))
+            root.addHandler(ch)
+        root._configured_by_agent_logger = True # type: ignore[attr-defined]
+    # Per-logger tuning (optional)
+    if level is not None:
+        logger.setLevel(_resolve_log_level(level))
+    if json_logs is not None:
+        # Replace formatter on root console handler
+        for h in logging.getLogger().handlers:
+            if isinstance(h, logging.StreamHandler):
+                h.setFormatter(_JsonFormatter() if json_logs else logging.Formatter(
+                    fmt="%(asctime)s | %(levelname)-8s | %(name)s: %(message)s",
+                    datefmt="%H:%M:%S",
+                ))
+    return logger
+
+log = get_logger("agent.framework") # module-level logger
+
 # =====================================================================
 # Config
 # =====================================================================
@@ -42,8 +131,14 @@ class Config:
     rag_top_k: int = 3
     chroma_path: str = "message_history.chroma"
     # NEW: Self-Reflection
-    enable_reflection: bool = False  # Toggle self-reflection loop
+    enable_reflection: bool = False # Toggle self-reflection loop
     reflection_prompt: str = "You are critiquing your own response. Review the conversation and final output: [FINAL]. If it's incomplete, unclear, or needs tools/refinement, output a tool call or improved text. Otherwise, say 'COMPLETE'."
+    # NEW: Logging config
+    log_level: str | int = field(default_factory=lambda: os.getenv("AGENT_LOG_LEVEL", "ERROR"))
+    log_json: bool = field(default_factory=lambda: os.getenv("AGENT_LOG_JSON", "0").lower() in ("1","true","yes"))
+    # NEW: TOON config
+    use_toon_for_tools: bool = True  # Use TOON instead of JSON for tool calls
+
 # =====================================================================
 # Data Models
 # =====================================================================
@@ -89,6 +184,7 @@ class AgentResponse:
     # NEW:
     debug: Dict[str, Any] = field(default_factory=dict) # raw structured trace
     trace_md: str = "" # pretty printable markdown
+
 # =====================================================================
 # Chroma-based MessageDB (replaces FAISS)
 # =====================================================================
@@ -101,9 +197,10 @@ class MessageDB:
     def __post_init__(self) -> None:
         if not HAS_CHROMA:
             raise ImportError("ChromaDB not installed. Run: pip install chromadb")
-        self._init_sqlite() # Keep lightweight SQL for metadata
+        self._log = get_logger("agent.db")
+        self._init_sqlite()
         self._init_chroma()
-        self.encoder = None # Lazy init in _embed
+        self.encoder = None
 
     # --------------- SQLite (metadata only) ---------------
     def _conn(self) -> sqlite3.Connection:
@@ -113,6 +210,7 @@ class MessageDB:
         return conn
 
     def _init_sqlite(self) -> None:
+        self._log.debug("Initializing SQLite at %s", self.db_path)
         with self._conn() as conn:
             conn.execute(
                 """
@@ -124,7 +222,7 @@ class MessageDB:
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     tool_call_id TEXT,
                     name TEXT,
-                    chroma_id TEXT UNIQUE -- Link to Chroma doc ID
+                    chroma_id TEXT UNIQUE
                 );
                 """
             )
@@ -138,11 +236,11 @@ class MessageDB:
 
     # --------------- Chroma ---------------
     def _init_chroma(self) -> None:
+        self._log.debug("Initializing Chroma at %s", self.chroma_path)
         self.client = chromadb.PersistentClient(path=self.chroma_path)
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=self.embedding_model_name
         )
-        # One collection for all; filter by metadata.session_id
         self.collection = self.client.get_or_create_collection(
             name="messages",
             embedding_function=ef,
@@ -152,40 +250,31 @@ class MessageDB:
     def _embed(self, text: str) -> np.ndarray:
         from sentence_transformers import SentenceTransformer
         if self.encoder is None:
+            self._log.debug("Loading SentenceTransformer(%s)", self.embedding_model_name)
             self.encoder = SentenceTransformer(self.embedding_model_name)
-        v = self.encoder.encode([text], normalize_embeddings=True)
-        return v[0].astype(np.float32)
+        return self.encoder.encode([text], normalize_embeddings=True)[0].astype(np.float32)
 
     def save_message(self, session_id: str, msg: Message) -> int:
+        self._log.debug("Saving message role=%s len=%d session=%s",
+                        msg.role.value, len(msg.content), session_id[:8])
         chroma_id = str(uuid.uuid4())
         emb = self._embed(msg.content)
-        # Save to Chroma (vectors + metadata)
         self.collection.add(
             documents=[msg.content],
-            metadatas=[
-                {
-                    "session_id": session_id,
-                    "role": msg.role.value,
-                    "name": msg.name or "",
-                    "tool_call_id": msg.tool_call_id or "",
-                }
-            ],
+            metadatas=[{
+                "session_id": session_id,
+                "role": msg.role.value,
+                "name": msg.name or "",
+                "tool_call_id": msg.tool_call_id or "",
+            }],
             ids=[chroma_id],
-            embeddings=[emb.tolist()], # Chroma accepts lists
+            embeddings=[emb.tolist()],
         )
-        # Save metadata to SQLite
         with self._conn() as conn:
             conn.execute(
                 """INSERT INTO messages (session_id, role, content, tool_call_id, name, chroma_id)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    session_id,
-                    msg.role.value,
-                    msg.content,
-                    msg.tool_call_id,
-                    msg.name,
-                    chroma_id,
-                ),
+                (session_id, msg.role.value, msg.content, msg.tool_call_id, msg.name, chroma_id),
             )
             rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.commit()
@@ -199,8 +288,11 @@ class MessageDB:
         use_semantic: bool = False,
         semantic_query: Optional[str] = None,
     ) -> List[Message]:
+        self._log.debug(
+            "Loading history session=%s limit=%d semantic=%s",
+            session_id[:8], limit, use_semantic
+        )
         if use_semantic and semantic_query:
-            # Chroma semantic search (with session filter)
             results = self.collection.query(
                 query_texts=[semantic_query],
                 n_results=limit,
@@ -219,7 +311,6 @@ class MessageDB:
                 for doc, meta in zip(docs, metas)
             ]
         else:
-            # Chronological via SQL
             with self._conn() as conn:
                 rows = conn.execute(
                     """SELECT role, content, name, tool_call_id
@@ -245,9 +336,8 @@ class MessageDB:
         return msgs
 
     def clear_session(self, session_id: str) -> None:
-        # Delete from Chroma
+        self._log.info("Clearing session %s", session_id[:8])
         self.collection.delete(where={"session_id": session_id})
-        # Delete from SQL
         with self._conn() as conn:
             conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
             conn.commit()
@@ -258,10 +348,10 @@ class MessageDB:
                 "SELECT session_id, MAX(timestamp) FROM messages GROUP BY session_id ORDER BY MAX(timestamp) DESC"
             ).fetchall()
 
-    # Bonus: Cross-session semantic search (new perk!)
     def global_semantic_search(
         self, query: str, k: int = 20, session_filter: Optional[str] = None
     ) -> List[Message]:
+        self._log.debug("Global semantic search q=%r k=%d filter=%s", query, k, session_filter)
         where = {"session_id": session_filter} if session_filter else {}
         results = self.collection.query(
             query_texts=[query],
@@ -280,6 +370,7 @@ class MessageDB:
             )
             for doc, meta in zip(docs, metas)
         ]
+
 # =====================================================================
 # RAG DocumentDB (Chroma-based)
 # =====================================================================
@@ -293,6 +384,8 @@ class DocumentDB:
     def __post_init__(self) -> None:
         if not HAS_CHROMA:
             raise ImportError("ChromaDB not installed. Run: pip install chromadb")
+        self._log = get_logger("agent.rag")
+        self._log.debug("Initializing RAG store at %s [%s]", self.chroma_path, self.collection_name)
         self.client = chromadb.PersistentClient(path=self.chroma_path)
         ef = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=self.embedding_model_name
@@ -306,22 +399,16 @@ class DocumentDB:
         texts: List[str],
         metadatas: List[Dict[str, Any]] = None,
         ids: List[str] = None,
-        chunk_size: int = 512, # Simple chunking; enhance with langchain if needed
+        chunk_size: int = 512,
     ) -> List[str]:
-        """Add texts (chunked) to Chroma. Returns added IDs."""
         if metadatas is None:
             metadatas = [{"source": "unknown"} for _ in texts]
         if ids is None:
             ids = [str(uuid.uuid4()) for _ in texts]
-        # Chunk long texts
-        chunks = []
-        chunk_metas = []
-        chunk_ids = []
+        chunks, chunk_metas, chunk_ids = [], [], []
         for i, text in enumerate(texts):
             if len(text) > chunk_size:
-                for j, chunk in enumerate(
-                    [text[k : k + chunk_size] for k in range(0, len(text), chunk_size)]
-                ):
+                for j, chunk in enumerate([text[k:k+chunk_size] for k in range(0, len(text), chunk_size)]):
                     chunks.append(chunk)
                     chunk_metas.append({**metadatas[i], "chunk": j})
                     chunk_ids.append(f"{ids[i]}_{j}")
@@ -329,26 +416,22 @@ class DocumentDB:
                 chunks.append(text)
                 chunk_metas.append(metadatas[i])
                 chunk_ids.append(ids[i])
-        self.collection.add(
-            documents=chunks,
-            metadatas=chunk_metas,
-            ids=chunk_ids,
-        )
+        self._log.info("Adding %d chunks to RAG store", len(chunks))
+        self.collection.add(documents=chunks, metadatas=chunk_metas, ids=chunk_ids)
         return chunk_ids
 
     def query(
         self, query: str, n_results: int = 3, where: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
-        """Retrieve top-k chunks with metadata. Returns [{'content': ..., 'metadata': ...}, ...]"""
+        self._log.debug("RAG query %r topk=%d where=%s", query, n_results, where)
         results = self.collection.query(
             query_texts=[query],
             n_results=n_results,
-            where=where, # e.g., {"source": "my_pdf.pdf"}
+            where=where,
         )
-        return [
-            {"content": doc, "metadata": meta}
-            for doc, meta in zip(results["documents"][0], results["metadatas"][0])
-        ]
+        return [{"content": doc, "metadata": meta}
+                for doc, meta in zip(results["documents"][0], results["metadatas"][0])]
+
 # =====================================================================
 # Llama.cpp Client
 # =====================================================================
@@ -368,6 +451,7 @@ class LlamaCppClient:
         self.template = chat_template
         self.stop = list(stop)
         self.retry_attempts = max(0, retry_attempts)
+        self._log = get_logger("agent.llama")
 
     def _format_messages(self, messages: List[Message]) -> str:
         if self.template == "chatml":
@@ -404,14 +488,20 @@ class LlamaCppClient:
         last_exc = None
         for attempt in range(1, self.retry_attempts + 2):
             try:
+                self._log.debug("HTTP %s %s (attempt %d)", method, url, attempt)
                 resp = client.request(method, url, **kw)
                 resp.raise_for_status()
                 return resp
             except Exception as e:
                 last_exc = e
+                self._log.warning("Request failed (attempt %d/%d): %s",
+                                  attempt, self.retry_attempts + 1, e)
                 if attempt <= self.retry_attempts:
-                    time.sleep(0.6 * attempt)
+                    backoff = 0.6 * attempt
+                    self._log.debug("Backoff %.2fs", backoff)
+                    time.sleep(backoff)
                 else:
+                    self._log.error("Giving up after %d attempts", attempt)
                     raise
         assert False, last_exc # pragma: no cover
 
@@ -426,15 +516,15 @@ class LlamaCppClient:
         with httpx.Client(timeout=self.timeout) as client:
             if self.use_chat:
                 payload = {
-                    "messages": [
-                        {"role": m.role.value, "content": m.content} for m in messages
-                    ],
+                    "messages": [{"role": m.role.value, "content": m.content} for m in messages],
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stop": self.stop,
                     "stream": bool(stream),
                 }
                 url = f"{self.base_url}/v1/chat/completions"
+                self._log.info("POST /v1/chat/completions temp=%s max_tokens=%s stream=%s",
+                               temperature, max_tokens, stream)
                 if stream:
                     r = self._request(client, "POST", url, json=payload)
                     full = []
@@ -445,9 +535,7 @@ class LlamaCppClient:
                             data = json.loads(line.decode("utf-8"))
                         except Exception:
                             continue
-                        delta = (
-                            data.get("choices", [{}])[0].get("delta", {}).get("content")
-                        )
+                        delta = data.get("choices", [{}])[0].get("delta", {}).get("content")
                         if delta:
                             full.append(delta)
                             if on_token:
@@ -467,6 +555,8 @@ class LlamaCppClient:
                     "stream": bool(stream),
                 }
                 url = f"{self.base_url}/completion"
+                self._log.info("POST /completion temp=%s n_predict=%s stream=%s",
+                               temperature, max_tokens, stream)
                 if stream:
                     r = self._request(client, "POST", url, json=payload)
                     full = []
@@ -487,12 +577,14 @@ class LlamaCppClient:
                     r = self._request(client, "POST", url, json=payload)
                     data = r.json()
                     return data.get("content", "").strip()
+
 # =====================================================================
 # Tool Registry
 # =====================================================================
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: Dict[str, Tool] = {}
+        self._log = get_logger("agent.tools")
 
     def register(
         self,
@@ -501,6 +593,7 @@ class ToolRegistry:
         parameters: List[ToolParameter],
         function: Callable[..., Any],
     ) -> "ToolRegistry":
+        self._log.info("Registering tool: %s", name)
         self._tools[name] = Tool(name, description, parameters, function)
         return self
 
@@ -510,16 +603,28 @@ class ToolRegistry:
     def list_tools(self) -> List[Tool]:
         return list(self._tools.values())
 
-    def tools_schema_prompt(self) -> str:
+    def tools_schema_prompt(self, use_toon: bool = True) -> str:
         if not self._tools:
             return ""
-        lines = [
-            "\n\nTOOLS AVAILABLE (use only if needed):",
-            "Return EXACT JSON when calling a tool:",
-            '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',
-            "Do NOT add extra text before/after the JSON.",
-            "",
-        ]
+        if use_toon:
+            lines = [
+                "\n\nTOOLS AVAILABLE (use only if needed):",
+                "Return EXACT TOON when calling a tool (no extra text):",
+                "tool_call:",
+                "  name: <tool_name>",
+                "  arguments:",
+                "    <param1>: <value1>",
+                "    ...",
+                "",
+            ]
+        else:
+            lines = [
+                "\n\nTOOLS AVAILABLE (use only if needed):",
+                "Return EXACT JSON when calling a tool:",
+                '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',
+                "Do NOT add extra text before/after the JSON.",
+                "",
+            ]
         for t in self._tools.values():
             lines.append(f"Tool: {t.name}")
             lines.append(f" Description: {t.description}")
@@ -531,15 +636,26 @@ class ToolRegistry:
             lines.append("")
         return "\n".join(lines)
 
-    def execute(self, call: ToolCall) -> str:
+    def execute(self, call: ToolCall, use_toon: bool = True) -> str:
         tool = self.get(call.name)
         if not tool:
+            self._log.error("Tool not found: %s", call.name)
             return f"Error: tool '{call.name}' not found."
         try:
+            self._log.debug("Executing tool=%s args=%s", call.name, call.arguments)
             out = tool.function(**(call.arguments or {}))
+            if isinstance(out, str):
+                preview = out[:160].replace("\n", " ")
+            else:
+                preview = json.dumps(out, ensure_ascii=False)[:160]
+            self._log.debug("Tool result preview: %s", preview)
+            if use_toon and HAS_TOON and isinstance(out, (dict, list)):
+                return encode(out)
             return out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
         except Exception as e:
+            self._log.exception("Error executing tool %s", call.name)
             return f"Error executing '{call.name}': {e}"
+
 # =====================================================================
 # Agent (with always-on debug trace + RAG + Self-Reflection)
 # =====================================================================
@@ -559,6 +675,17 @@ class Agent:
             use_chat_api=use_chat_api,
             chat_template=chat_template,
         )
+        # Apply logging config
+        get_logger("agent.framework", self.config.log_level, self.config.log_json)
+        self._log = get_logger("agent")
+        self._log.info("Initializing Agent chat_api=%s template=%s",
+                       self.config.use_chat_api, self.config.chat_template)
+
+        # TOON fallback check
+        if self.config.use_toon_for_tools and not HAS_TOON:
+            self._log.warning("TOON enabled but toon_format not installed. Falling back to JSON.")
+            self.config.use_toon_for_tools = False
+
         self.llm = LlamaCppClient(
             base_url=self.config.llama_cpp_url,
             timeout=self.config.timeout,
@@ -580,11 +707,21 @@ class Agent:
         self.current_session_id: Optional[str] = None
 
     def _default_system_prompt(self) -> str:
-        return (
-            "You are a reliable assistant. If a TOOL is needed, output EXACT JSON:\n"
-            '{"tool_call":{"name":"<tool>","arguments":{...}}}\n'
-            "If no tool is needed, answer normally and clearly."
-        )
+        if self.config.use_toon_for_tools:
+            return (
+                "You are a reliable assistant. If a TOOL is needed, output EXACT TOON:\n"
+                "tool_call:\n"
+                "  name: <tool>\n"
+                "  arguments:\n"
+                "    ...\n"
+                "If no tool is needed, answer normally and clearly."
+            )
+        else:
+            return (
+                "You are a reliable assistant. If a TOOL is needed, output EXACT JSON:\n"
+                '{"tool_call":{"name":"<tool>","arguments":{...}}}\n'
+                "If no tool is needed, answer normally and clearly."
+            )
 
     # ------------- Public API -------------
     def add_tool(
@@ -618,7 +755,7 @@ class Agent:
         sid = session_id or self.current_session_id
         if sid:
             self.db.clear_session(sid)
-            self.current_session_id = None
+        self.current_session_id = None
         return self
 
     def list_sessions(self) -> List[Tuple[str, str]]:
@@ -642,23 +779,17 @@ class Agent:
         debug_events: List[Dict[str, Any]] = []
 
         def _event(kind: str, **data: Any) -> None:
-            debug_events.append(
-                {
-                    "t": round(time.perf_counter() - started_ts, 6),
-                    "kind": kind,
-                    **data,
-                }
-            )
+            debug_events.append({"t": round(time.perf_counter() - started_ts, 6), "kind": kind, **data})
 
         temp = temperature if temperature is not None else self.config.temperature
         n_tok = max_tokens if max_tokens is not None else self.config.max_tokens
-        # Session
         self.current_session_id = session_id or str(uuid.uuid4())
+        self._log.info("Run message=%r session=%s", message, self.current_session_id[:8])
         # Build conversation
         convo: List[Message] = [
             Message(
                 role=MessageRole.SYSTEM,
-                content=self.system_prompt + self.tools.tools_schema_prompt(),
+                content=self.system_prompt + self.tools.tools_schema_prompt(self.config.use_toon_for_tools),
             )
         ]
         history = self.db.load_history(
@@ -683,11 +814,8 @@ class Agent:
                         content=f"Use this relevant document context if helpful: {rag_context}",
                     )
                 )
-                _event(
-                    "rag_retrieval",
-                    n_results=len(rag_results),
-                    preview=rag_context[:200],
-                )
+                _event("rag_retrieval", n_results=len(rag_results), preview=rag_context[:200])
+                self._log.debug("RAG hits=%d preview=%r", len(rag_results), rag_context[:120])
         user_msg = Message(role=MessageRole.USER, content=message)
         convo.append(user_msg)
         self.db.save_message(self.current_session_id, user_msg)
@@ -698,18 +826,13 @@ class Agent:
         while iterations < self.config.max_iterations:
             iterations += 1
             if verbose:
-                print(
-                    f"\n--- Iter {iterations} • session={self.current_session_id[:8]} ---"
-                )
-            # Generate
-            _event(
-                "llm_request_begin",
-                temperature=temp,
-                max_tokens=n_tok,
-                stream=self.config.stream and (stream_callback is not None),
-                chat_api=self.config.use_chat_api,
-                stop=self.config.stop,
-            )
+                print(f"\n--- Iter {iterations} • session={self.current_session_id[:8]} ---")
+            _event("llm_request_begin",
+                   temperature=temp,
+                   max_tokens=n_tok,
+                   stream=self.config.stream and (stream_callback is not None),
+                   chat_api=self.config.use_chat_api,
+                   stop=self.config.stop)
             gen_start = time.perf_counter()
             text = self.llm.generate(
                 convo,
@@ -720,14 +843,10 @@ class Agent:
             )
             gen_dur = time.perf_counter() - gen_start
             _event("llm_response_raw", duration_s=round(gen_dur, 6), sample=text[:240])
-            if verbose:
-                # print(f"LLM (first 240 chars): {text[:240]}")
-                print(f"LLM response:\n{text}\n")
-            # Record assistant message verbatim
+            self._log.debug("LLM response (%.3fs) sample=%r", gen_dur, text[:160])
             asst = Message(role=MessageRole.ASSISTANT, content=text)
             convo.append(asst)
             self.db.save_message(self.current_session_id, asst)
-            # Parse potential tool call
             call = self._parse_tool_call_strict(text)
             if not call:
                 _event("final_answer", content_preview=text[:240])
@@ -737,148 +856,140 @@ class Agent:
                 msg = "[Tool-call limit reached] Provide your final answer succinctly."
                 convo.append(Message(role=MessageRole.SYSTEM, content=msg))
                 _event("guardrail_stop", reason="max_consecutive_tool_calls")
+                self._log.warning("Guardrail stop: max_consecutive_tool_calls")
                 break
             tool_calls.append(call)
             if verbose:
                 print(f"→ Tool call: {call.name}({call.arguments})")
             _event("parsed_tool_call", name=call.name, arguments=call.arguments)
-            # Execute tool
+            self._log.info("Tool call: %s args=%s", call.name, call.arguments)
             exec_start = time.perf_counter()
-            result = self.tools.execute(call)
+            result = self.tools.execute(call, use_toon=self.config.use_toon_for_tools)
             exec_dur = time.perf_counter() - exec_start
             if verbose:
                 print(f"← Tool result (first 240): {result[:240]}")
-            _event(
-                "tool_result",
-                name=call.name,
-                duration_s=round(exec_dur, 6),
-                result_preview=result[:240],
-            )
-            tool_msg = Message(
-                role=MessageRole.TOOL,
-                name=call.name,
-                tool_call_id=call.id,
-                content=result,
-            )
+            _event("tool_result", name=call.name, duration_s=round(exec_dur, 6), result_preview=result[:240])
+            self._log.debug("Tool result (%.3fs) preview=%r", exec_dur, result[:160])
+            tool_msg = Message(role=MessageRole.TOOL, name=call.name, tool_call_id=call.id, content=result)
             convo.append(tool_msg)
             self.db.save_message(self.current_session_id, tool_msg)
-        # Extract last assistant content
-        final = next(
-            (m.content for m in reversed(convo) if m.role == MessageRole.ASSISTANT), ""
-        )
-
-        # NEW: Optional self-reflection (if enabled)
-        if self.config.enable_reflection and iterations < self.config.max_iterations:
-            _event("reflection_begin", current_final=final[:100])
-            reflect_temp = temp * 0.8  # Cooler for critique
-            reflect_tokens = int(n_tok * 0.6)  # Shorter generation
-            
-            # Build reflection prompt
-            reflect_sys = self.config.reflection_prompt.replace("[FINAL]", final)
-            reflect_convo = [Message(role=MessageRole.SYSTEM, content=reflect_sys)]
-            reflect_convo.extend([m for m in convo[-4:] if m.role != MessageRole.SYSTEM])  # Last few turns for context
-            
-            reflect_start = time.perf_counter()
-            reflect_text = self.llm.generate(
-                reflect_convo,
-                temperature=reflect_temp,
-                max_tokens=reflect_tokens,
-                stream=False,  # No stream for critique
-            )
-            reflect_dur = time.perf_counter() - reflect_start
-            _event("reflection_response", duration_s=round(reflect_dur, 6), sample=reflect_text[:200])
-            
-            if verbose:
-                print(f"Reflection critique:\n{reflect_text}\n")
-            
-            # Save reflection as assistant message
-            reflect_msg = Message(role=MessageRole.ASSISTANT, content=reflect_text)
-            convo.append(reflect_msg)
-            self.db.save_message(self.current_session_id, reflect_msg)
-            
-            # Parse for continuation
-            reflect_call = self._parse_tool_call_strict(reflect_text)
-            if reflect_call:
-                # Continue loop with new tool call
-                tool_calls.append(reflect_call)
-                consecutive_tools += 1
-                if consecutive_tools > self.config.max_consecutive_tool_calls:
-                    _event("guardrail_stop", reason="max_consecutive_tool_calls (in reflection)")
-                    # No break; just skip execution
+            final = next((m.content for m in reversed(convo) if m.role == MessageRole.ASSISTANT), "")
+            # Optional self-reflection
+            if self.config.enable_reflection and iterations < self.config.max_iterations:
+                _event("reflection_begin", current_final=final[:100])
+                reflect_temp = temp * 0.8
+                reflect_tokens = int(n_tok * 0.6)
+                reflect_sys = self.config.reflection_prompt.replace("[FINAL]", final)
+                reflect_convo = [Message(role=MessageRole.SYSTEM, content=reflect_sys)]
+                reflect_convo.extend([m for m in convo[-4:] if m.role != MessageRole.SYSTEM])
+                reflect_start = time.perf_counter()
+                reflect_text = self.llm.generate(reflect_convo, temperature=reflect_temp, max_tokens=reflect_tokens, stream=False)
+                reflect_dur = time.perf_counter() - reflect_start
+                _event("reflection_response", duration_s=round(reflect_dur, 6), sample=reflect_text[:200])
+                self._log.info("Reflection (%.3fs) sample=%r", reflect_dur, reflect_text[:120])
+                reflect_msg = Message(role=MessageRole.ASSISTANT, content=reflect_text)
+                convo.append(reflect_msg)
+                self.db.save_message(self.current_session_id, reflect_msg)
+                reflect_call = self._parse_tool_call_strict(reflect_text)
+                if reflect_call:
+                    tool_calls.append(reflect_call)
+                    consecutive_tools += 1
+                    if consecutive_tools > self.config.max_consecutive_tool_calls:
+                        _event("guardrail_stop", reason="max_consecutive_tool_calls (in reflection)")
+                        self._log.warning("Guardrail stop in reflection")
+                    else:
+                        exec_start = time.perf_counter()
+                        result = self.tools.execute(reflect_call, use_toon=self.config.use_toon_for_tools)
+                        exec_dur = time.perf_counter() - exec_start
+                        _event("tool_result (reflection)", name=reflect_call.name, duration_s=round(exec_dur, 6), result_preview=result[:100])
+                        tool_msg = Message(role=MessageRole.TOOL, name=reflect_call.name, tool_call_id=reflect_call.id, content=result)
+                        convo.append(tool_msg)
+                        self.db.save_message(self.current_session_id, tool_msg)
+                        iterations += 1
+                elif "COMPLETE" in reflect_text.upper() or len(reflect_text.strip()) < 20:
+                    _event("reflection_complete", reason="explicit or short")
                 else:
-                    # Execute and append result (reuse existing tool exec logic)
-                    exec_start = time.perf_counter()
-                    result = self.tools.execute(reflect_call)
-                    exec_dur = time.perf_counter() - exec_start
-                    _event("tool_result (reflection)", name=reflect_call.name, duration_s=round(exec_dur, 6), result_preview=result[:100])
-                    tool_msg = Message(role=MessageRole.TOOL, name=reflect_call.name, tool_call_id=reflect_call.id, content=result)
-                    convo.append(tool_msg)
-                    self.db.save_message(self.current_session_id, tool_msg)
-                    iterations += 1  # Count this iter
-            elif "COMPLETE" in reflect_text.upper() or len(reflect_text.strip()) < 20:  # Heuristic for "good enough"
-                _event("reflection_complete", reason="explicit or short")
-            else:
-                # Refine final response
-                final = reflect_text  # Or: f"{final}\n\nRefined: {reflect_text}" for chaining
-                _event("reflection_refine", preview=final[-100:])
-
-        # Build structured debug + pretty markdown
-        debug = {
-            "session_id": self.current_session_id,
-            "iterations": iterations,
-            "tool_calls": [
-                {"name": tc.name, "arguments": tc.arguments} for tc in tool_calls
-            ],
-            "events": debug_events,
-            "config": {
-                "temperature": temp,
-                "max_tokens": n_tok,
-                "use_chat_api": self.config.use_chat_api,
-                "chat_template": self.config.chat_template,
-                "stop": self.config.stop,
-                "stream": self.config.stream,
-                "max_consecutive_tool_calls": self.config.max_consecutive_tool_calls,
-            },
-            "timings": {
-                "total_duration_s": round(time.perf_counter() - started_ts, 6),
-            },
-        }
-        trace_md = self._render_trace_markdown(debug)
-        return AgentResponse(
-            messages=convo,
-            tool_calls=tool_calls,
-            iterations=iterations,
-            final_response=final,
-            debug=debug,
-            trace_md=trace_md,
-        )
+                    final = reflect_text
+                    _event("reflection_refine", preview=final[-100:])
+            debug = {
+                "session_id": self.current_session_id,
+                "iterations": iterations,
+                "tool_calls": [{"name": tc.name, "arguments": tc.arguments} for tc in tool_calls],
+                "events": debug_events,
+                "config": {
+                    "temperature": temp,
+                    "max_tokens": n_tok,
+                    "use_chat_api": self.config.use_chat_api,
+                    "chat_template": self.config.chat_template,
+                    "stop": self.config.stop,
+                    "stream": self.config.stream,
+                    "max_consecutive_tool_calls": self.config.max_consecutive_tool_calls,
+                },
+                "timings": {
+                    "total_duration_s": round(time.perf_counter() - started_ts, 6),
+                },
+            }
+            trace_md = self._render_trace_markdown(debug)
+            self._log.info("Run complete iterations=%s tool_calls=%s total=%.3fs",
+                           iterations, len(tool_calls), debug["timings"]["total_duration_s"])
+            return AgentResponse(
+                messages=convo,
+                tool_calls=tool_calls,
+                iterations=iterations,
+                final_response=final,
+                debug=debug,
+                trace_md=trace_md,
+            )
 
     # ------------- Parsing -------------
     def _parse_tool_call_strict(self, text: str) -> Optional[ToolCall]:
+        use_toon = self.config.use_toon_for_tools and HAS_TOON
+
+        if use_toon:
+            # Extract TOON block (heuristic for 'tool_call:' start)
+            lines = text.splitlines()
+            in_block = False
+            block_lines = []
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("tool_call:"):
+                    in_block = True
+                    block_lines = [line]
+                elif in_block and stripped and not stripped.startswith(("  ", "    ")):  # End block
+                    break
+                elif in_block:
+                    block_lines.append(line)
+            
+            if in_block and block_lines:
+                toon_block = "\n".join(block_lines).strip()
+                try:
+                    data = decode(toon_block)
+                    if isinstance(data, dict) and "tool_call" in data:
+                        td = data["tool_call"]
+                        name = td.get("name")
+                        args = td.get("arguments", {})
+                        if isinstance(name, str) and isinstance(args, dict):
+                            return ToolCall(id=f"call_{time.time():.6f}", name=name, arguments=args)
+                except Exception as e:
+                    self._log.warning("TOON decode failed: %s", e)
+
+        # Fallback to JSON if TOON fails or disabled
         for candidate in self._extract_json_candidates(text):
             try:
                 data = json.loads(candidate)
             except Exception:
                 continue
-            if (
-                isinstance(data, dict)
-                and "tool_call" in data
-                and isinstance(data["tool_call"], dict)
-            ):
+            if isinstance(data, dict) and "tool_call" in data and isinstance(data["tool_call"], dict):
                 td = data["tool_call"]
                 name = td.get("name")
                 args = td.get("arguments", {})
                 if isinstance(name, str) and isinstance(args, dict):
-                    return ToolCall(
-                        id=f"call_{time.time():.6f}", name=name, arguments=args
-                    )
+                    return ToolCall(id=f"call_{time.time():.6f}", name=name, arguments=args)
             if isinstance(data, dict) and "name" in data and "arguments" in data:
                 name = data["name"]
                 args = data["arguments"]
                 if isinstance(name, str) and isinstance(args, dict):
-                    return ToolCall(
-                        id=f"call_{time.time():.6f}", name=name, arguments=args
-                    )
+                    return ToolCall(id=f"call_{time.time():.6f}", name=name, arguments=args)
         return None
 
     def _extract_json_candidates(self, s: str) -> Iterable[str]:
@@ -892,48 +1003,29 @@ class Agent:
             elif ch == "}":
                 stack -= 1
                 if stack == 0 and start is not None:
-                    yield s[start : i + 1]
+                    yield s[start: i + 1]
                     start = None
 
     # ------------- Debug rendering -------------
     def _render_trace_markdown(self, debug: Dict[str, Any]) -> str:
-        """Compact, copy-pastable Markdown block showing the agent command & steps."""
         lines = []
         lines.append(f"### Agent Trace — session `{debug['session_id'][:8]}`")
         lines.append("")
-        lines.append(
-            f"- **Iterations**: {debug['iterations']} | **Total**: {debug['timings']['total_duration_s']} s"
-        )
+        lines.append(f"- **Iterations**: {debug['iterations']} | **Total**: {debug['timings']['total_duration_s']} s")
         cfg = debug["config"]
-        lines.append(
-            f"- **Cfg**: temp={cfg['temperature']} max_tokens={cfg['max_tokens']} chat_api={cfg['use_chat_api']} template=`{cfg['chat_template']}` stream={cfg['stream']}"
-        )
+        lines.append(f"- **Cfg**: temp={cfg['temperature']} max_tokens={cfg['max_tokens']} chat_api={cfg['use_chat_api']} template=`{cfg['chat_template']}` stream={cfg['stream']}")
         if debug["tool_calls"]:
-            # Show the FIRST agent command (tool JSON) prominently
             first = debug["tool_calls"][0]
-            argsp = json.dumps(first["arguments"], ensure_ascii=False)
             lines.append("")
             lines.append("**Agent command (first tool call):**")
             lines.append("")
             lines.append("```json")
-            lines.append(
-                json.dumps(
-                    {
-                        "tool_call": {
-                            "name": first["name"],
-                            "arguments": first["arguments"],
-                        }
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            lines.append(json.dumps({"tool_call": {"name": first["name"], "arguments": first["arguments"]}}, ensure_ascii=False, indent=2))
             lines.append("```")
         else:
             lines.append("")
             lines.append("_No tool call emitted by model (direct answer)._")
-        # Timeline
-        lines.append("")
+            lines.append("")
         lines.append("**Timeline**")
         lines.append("")
         for ev in debug["events"]:
@@ -942,9 +1034,7 @@ class Agent:
             if kind == "user_message":
                 lines.append(f"- [{t}] user → “{ev['message'][:80]}”")
             elif kind == "llm_request_begin":
-                lines.append(
-                    f"- [{t}] llm_request (temp={ev['temperature']}, max_tokens={ev['max_tokens']}, stream={ev['stream']})"
-                )
+                lines.append(f"- [{t}] llm_request (temp={ev['temperature']}, max_tokens={ev['max_tokens']}, stream={ev['stream']})")
             elif kind == "llm_response_raw":
                 sample = ev.get("sample", "")[:80].replace("\n", " ")
                 lines.append(f"- [{t}] llm_response ({ev['duration_s']}s) → “{sample}”")
@@ -953,20 +1043,13 @@ class Agent:
                 lines.append(f"- [{t}] parsed_tool_call: {ev['name']}({ap}…)")
             elif kind == "tool_result":
                 rp = ev.get("result_preview", "")[:80].replace("\n", " ")
-                lines.append(
-                    f"- [{t}] tool_result {ev['name']} ({ev['duration_s']}s) → “{rp}”"
-                )
+                lines.append(f"- [{t}] tool_result {ev['name']} ({ev['duration_s']}s) → “{rp}”")
             elif kind == "final_answer":
-                lines.append(
-                    f"- [{t}] final_answer → “{ev['content_preview'].replace(chr(10), ' ')[:80]}”"
-                )
+                lines.append(f"- [{t}] final_answer → “{ev['content_preview'].replace(chr(10), ' ')[:80]}”")
             elif kind == "guardrail_stop":
                 lines.append(f"- [{t}] guardrail_stop: {ev['reason']}")
             elif kind == "rag_retrieval":
-                lines.append(
-                    f"- [{t}] rag_retrieval: {ev['n_results']} docs (preview: {ev['preview']}…)"
-                )
-            # NEW: Reflection events
+                lines.append(f"- [{t}] rag_retrieval: {ev['n_results']} docs (preview: {ev['preview']}…)")
             elif kind == "reflection_begin":
                 lines.append(f"- [{t}] reflection_begin (final preview: {ev['current_final']}…)")
             elif kind == "reflection_response":
@@ -978,6 +1061,7 @@ class Agent:
                 lines.append(f"- [{t}] reflection_refine → “{ev['preview']}”")
         lines.append("")
         return "\n".join(lines)
+
 # =====================================================================
 # Convenience creator
 # =====================================================================
@@ -995,11 +1079,15 @@ def create_agent(
         llama_cpp_url=llm_url,
         use_chat_api=use_chat_api,
         chat_template=chat_template,
+        use_toon_for_tools=True,  # Enable TOON by default
     )
     if config_overrides:
         for k, v in config_overrides.items():
             if hasattr(cfg, k):
                 setattr(cfg, k, v)
+    # Apply logging options immediately
+    get_logger("agent.framework", cfg.log_level, cfg.log_json)
+    log.info("create_agent: url=%s chat_api=%s template=%s", cfg.llama_cpp_url, cfg.use_chat_api, cfg.chat_template)
     agent = Agent(
         llm_url=cfg.llama_cpp_url,
         system_prompt=system_prompt,

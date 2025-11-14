@@ -2,6 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 AcademicAgent — Literature search + RAG over papers (with debug output)
+Token-aware chunking aligned with the embedding model (Sentence-Transformers/HF),
+fast sentence splitting via BlingFire (with regex fallback), and robust DOI->PDF
+resolution with a hard timeout budget.
+
+Now with Semantic Scholar search integrated (tool: semantic_scholar_search).
 """
 from __future__ import annotations
 import io
@@ -9,6 +14,7 @@ import json
 import re
 import time
 import uuid
+import os
 import inspect
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional, Tuple, Iterable
@@ -18,7 +24,6 @@ import numpy as np
 
 # API SDKs
 import arxiv
-from semanticscholar import SemanticScholar  # noqa: F401  (kept for future use)
 from habanero import Crossref
 
 try:
@@ -29,6 +34,9 @@ except Exception:
 
 # Framework imports
 from core import Agent, ToolParameter, DocumentDB
+
+# How long we're willing to spend trying to turn a DOI into a direct PDF URL
+DOI_RESOLVE_TIMEOUT_S: float = 8.0
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -41,44 +49,165 @@ def _year_from_date(s: Optional[str]) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-# NLTK sentence tokenizer (best-effort)
-import nltk
-nltk.download('punkt', quiet=True)
+# ─── Sentence splitting (fast) ───
+try:
+    import blingfire
+    HAS_BLINGFIRE = True
+except Exception:
+    HAS_BLINGFIRE = False
 
-def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 150) -> List[str]:
-    text = re.sub(r'\s+', ' ', text).strip()
-    if len(text) <= chunk_size:
-        return [text]
+# ─── Tokenizer aligned with embeddings ───
+from functools import lru_cache
+try:
+    from transformers import AutoTokenizer
+    HAS_HF = True
+except Exception:
+    HAS_HF = False
+
+
+@lru_cache(maxsize=4)
+def _get_tokenizer(model_name: str):
+    """
+    Use the same tokenizer as the embedding model to make chunk sizes
+    match the embedding model’s token budget.
+    """
+    if not HAS_HF:
+        return None
     try:
-        sentences = nltk.sent_tokenize(text)
+        tok = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+        return tok
     except Exception:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-    if not sentences:
-        sentences = [text]
-    chunks, current = [], ''
-    for sent in sentences:
-        if len(current + ' ' + sent) <= chunk_size:
-            current = (current + ' ' + sent).strip()
+        return None
+
+
+def _split_sentences(text: str) -> List[str]:
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return []
+    if HAS_BLINGFIRE:
+        s = blingfire.text_to_sentences(text)  # one sentence per line
+        return [t.strip() for t in s.splitlines() if t.strip()]
+    # Lightweight regex fallback
+    return [t.strip() for t in re.split(r"(?<=[.!?])\s+", text) if t.strip()]
+
+
+def _chunk_text(
+    text: str,
+    chunk_size: int = 1200,              # legacy chars-based size (fallback path)
+    overlap: int = 150,                  # legacy chars-based overlap (fallback path)
+    *,
+    embedding_model_name: str = "all-MiniLM-L6-v2",
+    max_tokens: Optional[int] = None,    # token-aware if tokenizer is available
+    overlap_tokens: Optional[int] = None
+) -> List[str]:
+    """
+    Prefer token-aware chunking using the same HF tokenizer as the embedding model.
+    If the tokenizer is unavailable, fall back to a sentence-aware char-based packer.
+    """
+    tok = _get_tokenizer(embedding_model_name)
+    if tok is None:
+        # Char-based fallback (keeps old behavior)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) <= chunk_size:
+            return [text]
+        sents = _split_sentences(text) or [text]
+        chunks, cur = [], ""
+        for s in sents:
+            nxt = (cur + " " + s).strip() if cur else s
+            if len(nxt) <= chunk_size:
+                cur = nxt
+            else:
+                if cur:
+                    chunks.append(cur)
+                cur = s
+                while len(cur) > chunk_size:
+                    chunks.append(cur[:chunk_size])
+                    cur = cur[chunk_size:]
+        if cur:
+            chunks.append(cur)
+        if overlap > 0 and len(chunks) > 1:
+            for i in range(1, len(chunks)):
+                prepend = chunks[i - 1][-overlap:]
+                chunks[i] = (prepend + chunks[i]).strip()
+        return [c for c in chunks if c]
+
+    # Token-aware path
+    if max_tokens is None:
+        # Heuristic defaults; many MiniLM models were trained ~256 tokens.
+        lower = embedding_model_name.lower()
+        if "mini" in lower or "small" in lower:
+            max_tokens = 240
+        elif "base" in lower or "mpnet" in lower or "e5" in lower:
+            max_tokens = 350
         else:
-            if current:
-                chunks.append(current)
-            current = sent
-            if len(current) > chunk_size:
-                chunks.append(current[:chunk_size])
-                current = current[chunk_size:]
-    if current:
-        chunks.append(current)
-    if overlap > 0 and len(chunks) > 1:
-        for i in range(1, len(chunks)):
-            prepend = chunks[i-1][-overlap:]
-            chunks[i] = prepend + chunks[i]
-    return chunks
+            max_tokens = 300
+    if overlap_tokens is None:
+        overlap_tokens = max(16, max_tokens // 6)  # ~15–20%
+
+    def tok_len(t: str) -> int:
+        return len(tok.encode(t, add_special_tokens=False))
+
+    sents = _split_sentences(text) or [text]
+    chunks: List[str] = []
+    cur_sents: List[str] = []
+    cur_ids_len = 0
+
+    for s in sents:
+        s_len = tok_len(s)
+        if s_len > max_tokens:
+            # Flush current
+            if cur_sents:
+                chunks.append(" ".join(cur_sents).strip())
+                cur_sents, cur_ids_len = [], 0
+            # Hard-split this long sentence by tokens
+            ids = tok.encode(s, add_special_tokens=False)
+            start = 0
+            while start < len(ids):
+                end = min(start + max_tokens, len(ids))
+                piece = tok.decode(ids[start:end], skip_special_tokens=True).strip()
+                if piece:
+                    chunks.append(piece)
+                if end >= len(ids):
+                    break
+                start = max(0, end - overlap_tokens)
+            continue
+
+        # Try to add to current chunk
+        if cur_ids_len + s_len <= max_tokens:
+            cur_sents.append(s)
+            cur_ids_len += s_len
+        else:
+            if cur_sents:
+                chunk_text = " ".join(cur_sents).strip()
+                if chunk_text:
+                    chunks.append(chunk_text)
+                if overlap_tokens > 0:
+                    prev_ids = tok.encode(chunk_text, add_special_tokens=False)
+                    keep_ids = prev_ids[-overlap_tokens:] if overlap_tokens <= len(prev_ids) else prev_ids
+                    prefix = tok.decode(keep_ids, skip_special_tokens=True).strip()
+                    cur_sents = [prefix] if prefix else []
+                    cur_ids_len = tok_len(prefix) if prefix else 0
+                else:
+                    cur_sents, cur_ids_len = [], 0
+            # Start new chunk with current sentence
+            if s_len <= max_tokens:
+                cur_sents.append(s)
+                cur_ids_len = tok_len(" ".join(cur_sents))
+
+    if cur_sents:
+        chunk_text = " ".join(cur_sents).strip()
+        if chunk_text:
+            chunks.append(chunk_text)
+
+    return [c for c in chunks if c]
+
 
 try:
     import fitz  # PyMuPDF
     HAS_FITZ = True
 except Exception:
     HAS_FITZ = False
+
 
 def _read_pdf_bytes(pdf_bytes: bytes) -> str:
     """Extract text from PDF bytes."""
@@ -96,6 +225,8 @@ def _read_pdf_bytes(pdf_bytes: bytes) -> str:
         return "\n".join(txt)
     except Exception:
         return ""
+
+
 def _http_get_bytes(client: httpx.Client, url: str, timeout: float, headers: Optional[Dict[str, str]] = None) -> bytes:
     """Fetch URL with retries."""
     backoff = 0.6
@@ -114,20 +245,22 @@ def _http_get_bytes(client: httpx.Client, url: str, timeout: float, headers: Opt
     return b""
 
 
-def _http_head(client: httpx.Client, url: str, timeout: float, headers: Optional[Dict[str, str]] = None) -> Optional[httpx.Response]:
+def _http_head(client: httpx.Client, url: str, timeout: float | httpx.Timeout, headers: Optional[Dict[str, str]] = None) -> Optional[httpx.Response]:
     """HEAD helper with graceful fallback (some servers block HEAD)."""
     try:
-        r = client.head(url, timeout=timeout, follow_redirects=True, headers=headers)
+        to = timeout if isinstance(timeout, httpx.Timeout) else httpx.Timeout(timeout)
+        r = client.head(url, timeout=to, follow_redirects=True, headers=headers)
         r.raise_for_status()
         return r
     except Exception:
         return None
 
 
-def _http_get_response(client: httpx.Client, url: str, timeout: float, headers: Optional[Dict[str, str]] = None) -> Optional[httpx.Response]:
+def _http_get_response(client: httpx.Client, url: str, timeout: float | httpx.Timeout, headers: Optional[Dict[str, str]] = None) -> Optional[httpx.Response]:
     """GET helper that returns the Response object (for header inspection)."""
     try:
-        r = client.get(url, timeout=timeout, follow_redirects=True, headers=headers)
+        to = timeout if isinstance(timeout, httpx.Timeout) else httpx.Timeout(timeout)
+        r = client.get(url, timeout=to, follow_redirects=True, headers=headers)
         r.raise_for_status()
         return r
     except Exception:
@@ -169,7 +302,9 @@ def _as_dictlike(x) -> Dict[str, Any]:
 
 
 def _ensure_list_items(raw):
-    """Semantic Scholar may return a list or {'data': [...]}."""
+    """Semantic Scholar may return a list or {'data': [...]}.
+    Crossref returns dict with message.items. arXiv handled by SDK.
+    """
     if isinstance(raw, list):
         return raw
     if isinstance(raw, dict) and isinstance(raw.get("data"), list):
@@ -219,7 +354,7 @@ def _parse_indices_arg(s: str, upper_bound: int) -> List[int]:
         for p in parts:
             if not p:
                 continue
-            m = re.match(r"^(\d+)\s*(?:\-|\.\.)\s*(\d+)$", p)
+            m = re.match(r"^(\d+)\s*(?:\-|\..)\s*(\d+)$", p)
             if m:
                 a, b = int(m.group(1)), int(m.group(2))
                 if a <= b:
@@ -246,6 +381,7 @@ def _normalize_arxiv_id(arxiv_id: Optional[str]) -> Optional[str]:
     s = s.replace("arXiv:", "").replace("ARXIV:", "").strip()
     return s
 
+
 def _arxiv_pdf_url(entry_id: Optional[str], arxiv_id: Optional[str]) -> Optional[str]:
     """Return a robust arXiv PDF URL regardless of arxiv lib version."""
     aid = _normalize_arxiv_id(arxiv_id)
@@ -260,12 +396,12 @@ def _arxiv_pdf_url(entry_id: Optional[str], arxiv_id: Optional[str]) -> Optional
         return url
     return None
 
+
 def _crossref_pick_pdf_link(item: Dict[str, Any]) -> Optional[str]:
     """
     Prefer official Crossref 'link' entries with content-type application/pdf.
     Heuristics:
-      1) link[].content-type == 'application/pdf'
-         - Prefer version=='vor' (version of record) if available
+      1) link[].content-type == 'application/pdf' (prefer version=='vor')
       2) any link URL ending with .pdf
       3) None (let DOI resolution try later)
     """
@@ -282,33 +418,56 @@ def _crossref_pick_pdf_link(item: Dict[str, Any]) -> Optional[str]:
     if not pdf_links:
         return None
 
-    # Prefer VOR (version of record) when present
     vor = [l for l in pdf_links if (l or {}).get("version", "").lower() == "vor"]
     pick = (vor[0] if vor else pdf_links[0])
     return (pick or {}).get("URL") or None
 
-def _resolve_doi_to_pdf_url(client: httpx.Client, doi: str, timeout: float = 30.0) -> Optional[str]:
+
+def _resolve_doi_to_pdf_url(
+    client: httpx.Client,
+    doi: str,
+    timeout: float = DOI_RESOLVE_TIMEOUT_S,
+) -> Optional[str]:
     """
-    Try to resolve DOI to a PDF URL by requesting with Accept: application/pdf.
+    Resolve DOI -> direct PDF URL using 'Accept: application/pdf' with a hard deadline.
     Strategy:
-      - HEAD https://doi.org/<doi> with Accept: application/pdf (follow redirects)
-      - If HEAD blocked or inconclusive, GET with same header and check content-type
-      - If final response has 'application/pdf' in Content-Type, return final URL
+      - Try HEAD first (fast). If Content-Type=application/pdf, return final URL.
+      - If inconclusive and time remains, do GET with same Accept header.
     """
     if not doi:
         return None
+
     base = f"https://doi.org/{doi}"
-    accept_pdf = {"Accept": "application/pdf", "User-Agent": "AcademicAgent/1.0"}
+    headers = {"Accept": "application/pdf", "User-Agent": "AcademicAgent/1.0"}
 
-    # HEAD first
-    r_head = _http_head(client, base, timeout=timeout, headers=accept_pdf)
-    if r_head is not None:
-        ctype = (r_head.headers.get("Content-Type") or "").lower()
-        if "application/pdf" in ctype:
-            return str(r_head.url)
+    # Hard deadline across both attempts
+    deadline = time.monotonic() + max(0.1, float(timeout))
 
-    # Fallback to GET (may download content; acceptable since we'll parse anyway)
-    r_get = _http_get_response(client, base, timeout=timeout, headers=accept_pdf)
+    def _remaining_timeout() -> Optional[httpx.Timeout]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        remaining = max(0.1, remaining)
+        connect = min(3.0, max(0.05, 0.3 * remaining))
+        read = max(0.05, 0.6 * remaining)
+        write = min(2.0, max(0.05, 0.1 * remaining))
+        return httpx.Timeout(connect=connect, read=read, write=write, pool=read)
+
+    # Attempt HEAD (fast path)
+    to = _remaining_timeout()
+    if to is not None:
+        r_head = _http_head(client, base, timeout=to, headers=headers)
+        if r_head is not None:
+            ctype = (r_head.headers.get("Content-Type") or "").lower()
+            if "application/pdf" in ctype:
+                return str(r_head.url)
+
+    # Attempt GET if we still have time
+    to = _remaining_timeout()
+    if to is None:
+        return None
+
+    r_get = _http_get_response(client, base, timeout=to, headers=headers)
     if r_get is not None:
         ctype = (r_get.headers.get("Content-Type") or "").lower()
         if "application/pdf" in ctype:
@@ -447,17 +606,126 @@ class AcademicContext:
             f"Last query: {self.last_query or 'None'}"
         )
 
+# ─── Semantic Scholar (Graph API) helper ───
+def _s2_request(
+    client: httpx.Client,
+    path: str,
+    params: Dict[str, Any],
+    *,
+    timeout: float = 20.0,
+    max_retries: int = 3,
+) -> Dict[str, Any]:
+    """
+    Minimal wrapper for Semantic Scholar Graph API.
+    - Respects 429 with Retry-After
+    - Exponential backoff
+    - Returns {} on hard failure
+    """
+    base = "https://api.semanticscholar.org/graph/v1"
+    url = f"{base}/{path.lstrip('/')}"
+    backoff = 0.8
+
+    for attempt in range(max_retries):
+        try:
+            r = client.get(url, params=params, timeout=timeout, follow_redirects=True)
+            if r.status_code == 429:
+                # Respect Retry-After if provided
+                ra = r.headers.get("Retry-After")
+                if ra:
+                    try:
+                        sleep_for = max(0.5, float(ra))
+                    except Exception:
+                        sleep_for = backoff * (attempt + 1)
+                else:
+                    sleep_for = backoff * (attempt + 1)
+                time.sleep(sleep_for)
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            if attempt == max_retries - 1:
+                return {}
+            time.sleep(backoff * (attempt + 1))
+    return {}
+
+
+# ─── LLM tool echo policy ───
+# Only give the model enough to plan next steps (avoid long JSON)
+MAX_TITLES_ECHO = 12
+
+def _titles_payload(papers, added_new: int) -> str:
+    titles = [p.title[:160] for p in papers[:MAX_TITLES_ECHO] if getattr(p, "title", "")]
+    return json.dumps(
+        {"count": len(papers), "added_new": added_new, "titles": titles},
+        ensure_ascii=False,
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Tool Classes (with debug output)
 # ──────────────────────────────────────────────────────────────────────────────
 class SearchTools:
     """Paper search across multiple sources."""
-
-    __tools__ = ["arxiv_search", "crossref_search"]
+    __tools__ = ["arxiv_search", "semantic_scholar_search", "crossref_search", "auto_multi_search"]
 
     def __init__(self, ctx: AcademicContext):
         self.ctx = ctx
 
+        # Small HTTP client; add S2 API key if present
+        s2_key = os.getenv("S2_API_KEY") or os.getenv("SEMANTIC_SCHOLAR_API_KEY")
+        headers = {"User-Agent": "AcademicAgent/1.0"}
+        if s2_key:
+            headers["x-api-key"] = s2_key
+        self.http = httpx.Client(headers=headers)
+
+    def auto_multi_search(
+        self,
+        query: str,
+        per_source_limit: str = "10",
+        order: str = "s2,arxiv,crossref",
+        open_access_only: str = "false"
+    ) -> str:
+        """
+        Run multi-source search (no ingestion). Returns counts and top titles per source.
+        This keeps the LLM planning lightweight and ensures breadth before ingestion.
+        """
+        print(f"\n[MultiSearch] query={query!r} per_source_limit={per_source_limit} order={order}")
+
+        lim = str(max(1, min(int(per_source_limit), 20)))
+        srcs = [s.strip().lower() for s in (order or "").split(",") if s.strip()]
+        srcs = [s for s in srcs if s in ("s2", "arxiv", "crossref")]
+        if not srcs:
+            srcs = ["s2", "arxiv", "crossref"]
+
+        summary: Dict[str, Any] = {"query": query, "sources": []}
+        before_count = len(self.ctx.papers)
+
+        for s in srcs:
+            try:
+                if s == "s2":
+                    print(f"[MultiSearch] S2(limit={lim})")
+                    payload = self.semantic_scholar_search(query, lim, open_access_only=open_access_only)
+                    payload_obj = json.loads(payload)
+                    summary["sources"].append({"name": "s2", **payload_obj})
+                elif s == "arxiv":
+                    print(f"[MultiSearch] arXiv(max_results={lim})")
+                    payload = self.arxiv_search(query, lim, arxiv.SortCriterion.SubmittedDate, "0")
+                    payload_obj = json.loads(payload)
+                    summary["sources"].append({"name": "arxiv", **payload_obj})
+                elif s == "crossref":
+                    print(f"[MultiSearch] Crossref(rows={lim})")
+                    payload = self.crossref_search(query, lim, "", "relevance", "desc")
+                    payload_obj = json.loads(payload)
+                    summary["sources"].append({"name": "crossref", **payload_obj})
+            except Exception as e:
+                print(f"[MultiSearch] {s} error: {e}")
+                summary["sources"].append({"name": s, "error": str(e), "count": 0, "added_new": 0, "titles": []})
+
+        after_count = len(self.ctx.papers)
+        summary["new_total_added"] = after_count - before_count
+        return json.dumps(summary, ensure_ascii=False)
+    
+    # ——— arXiv ———
     def arxiv_search(
         self,
         query: str,
@@ -465,7 +733,6 @@ class SearchTools:
         sort_by: str = arxiv.SortCriterion.SubmittedDate,
         start: str = "0"
     ) -> str:
-        """Search arXiv for papers. Returns normalized Paper list as JSON."""
         print(f"\n[arXiv] Searching for: '{query}'")
         print(f"   Parameters: max_results={max_results}, sort_by={sort_by}")
 
@@ -529,12 +796,96 @@ class SearchTools:
         self.ctx.last_search_source = "arxiv"
         print(f"   Added {added} new papers to context (total: {len(self.ctx.papers)})")
 
-        return json.dumps({
-            "found": len(papers),
-            "added_new": added,
-            "papers": [asdict(p) for p in papers]
-        }, ensure_ascii=False)
+        return _titles_payload(papers, added)
 
+
+    # ——— Semantic Scholar (pure API) ———
+    def semantic_scholar_search(
+        self,
+        query: str,
+        limit: str = "10",
+        fields: str = "title,authors,venue,year,publicationDate,publicationTypes,externalIds,url,openAccessPdf,abstract",
+        open_access_only: str = "false",
+        offset: str = "0"
+    ) -> str:
+        """Search Semantic Scholar Graph API directly (no SDK)."""
+        print(f"\n[SemanticScholar/API] Searching for: '{query}'")
+        print(f"   Parameters: limit={limit}, offset={offset}, open_access_only={open_access_only}")
+
+        lim = max(1, min(int(limit), 50))
+        off = max(0, int(offset))
+        fields_list = [f.strip() for f in (fields or "").split(',') if f.strip()]
+        fields_param = ",".join(fields_list) if fields_list else "title,authors,venue,year,publicationDate,externalIds,url,openAccessPdf,abstract"
+
+        params = {
+            "query": query,
+            "limit": lim,
+            "offset": off,
+            "fields": fields_param,
+        }
+
+        raw = _s2_request(self.http, "paper/search", params, timeout=20.0, max_retries=3)
+        items = (raw.get("data") or []) if isinstance(raw, dict) else []
+        print(f"   Found {len(items)} papers (raw)")
+
+        want_open = str(open_access_only).lower() in ("true", "1", "yes")
+        papers: List[Paper] = []
+
+        for i, item in enumerate(items, 1):
+            # item fields per Graph API
+            title = (item.get("title") or "").strip()
+            venue = (item.get("venue") or None) or None
+            year = item.get("year") or _year_from_date(item.get("publicationDate"))
+            abs_ = item.get("abstract")
+            url = item.get("url")
+
+            ext = item.get("externalIds") or {}
+            doi = ext.get("DOI")
+            arx = _normalize_arxiv_id(ext.get("ArXiv")) if ext else None
+
+            # Authors
+            auth_raw = item.get("authors") or []
+            authors = []
+            for a in auth_raw:
+                nm = a.get("name") if isinstance(a, dict) else str(a)
+                if nm:
+                    authors.append(nm)
+
+            # PDF
+            pdf_url = None
+            oapdf = item.get("openAccessPdf") or {}
+            if isinstance(oapdf, dict):
+                pdf_url = oapdf.get("url") or pdf_url
+            if (not pdf_url) and arx:
+                pdf_url = _arxiv_pdf_url(None, arx)
+
+            if want_open and not pdf_url:
+                continue
+
+            papers.append(Paper(
+                title=title,
+                authors=authors,
+                year=year,
+                venue=venue,
+                abstract=abs_,
+                doi=doi,
+                arxiv_id=arx,
+                url=url,
+                pdf_url=pdf_url,
+                source="s2",
+                extra={"publicationTypes": item.get("publicationTypes")}
+            ))
+            print(f"   [{i}] {title[:80]} ({year}) {'PDF' if pdf_url else 'no-PDF'}")
+
+        added = self.ctx.add_papers(papers)
+        self.ctx.last_query = query
+        self.ctx.last_search_source = "s2"
+        print(f"   Added {added} new papers to context (total: {len(self.ctx.papers)})")
+
+        return _titles_payload(papers, added)
+
+
+    # ——— Crossref ———
     def crossref_search(
         self,
         query: str,
@@ -543,7 +894,6 @@ class SearchTools:
         sort: str = "",
         order: str = "desc"
     ) -> str:
-        """Search Crossref for papers. Returns normalized Paper list as JSON."""
         print(f"\n[Crossref] Searching for: '{query}'")
         print(f"   Parameters: rows={rows}, filter='{filter}', sort='{sort}', order='{order}'")
 
@@ -599,7 +949,6 @@ class SearchTools:
             url = item.get("URL") or (f"https://doi.org/{doi}" if doi else None)
             abstract = item.get("abstract")
 
-            # NEW: Try to populate PDF from Crossref itself
             pdf_url = _crossref_pick_pdf_link(item)
 
             papers.append(Paper(
@@ -611,7 +960,7 @@ class SearchTools:
                 doi=doi,
                 arxiv_id=None,
                 url=url,
-                pdf_url=pdf_url,  # may be None; ingestion can still resolve via DOI later
+                pdf_url=pdf_url,
                 source="crossref",
                 extra={"type": item.get("type")}
             ))
@@ -622,16 +971,11 @@ class SearchTools:
         self.ctx.last_search_source = "crossref"
         print(f"   Added {added} new papers to context (total: {len(self.ctx.papers)})")
 
-        return json.dumps({
-            "found": len(papers),
-            "added_new": added,
-            "papers": [asdict(p) for p in papers]
-        }, ensure_ascii=False)
+        return _titles_payload(papers, added)
 
 
 class IngestionTools:
     """Paper ingestion into RAG DocumentDB."""
-
     __tools__ = ["ingest_papers", "ingest_all"]
 
     def __init__(self, ctx: AcademicContext, doc_db: DocumentDB):
@@ -678,14 +1022,14 @@ class IngestionTools:
                 print(f"\n   [{idx}/{len(papers)}] Processing: {paper.title[:120]}")
 
                 # Ensure arXiv PDF if missing
-                if (not paper.pdf_url) and (paper.source == "arxiv"):
+                if (not paper.pdf_url) and (paper.source in ("arxiv", "s2")) and paper.arxiv_id:
                     paper.pdf_url = _arxiv_pdf_url(paper.url, paper.arxiv_id)
 
-                # NEW: If Crossref item lacks PDF but has DOI, try DOI→PDF resolution
-                if (not paper.pdf_url) and paper.source == "crossref" and paper.doi:
+                # If item lacks PDF but has DOI, try DOI→PDF resolution (works for s2 and crossref)
+                if (not paper.pdf_url) and paper.doi:
                     print("       • Resolving DOI to PDF (Accept: application/pdf)...")
                     try:
-                        resolved = _resolve_doi_to_pdf_url(client, paper.doi, timeout=30.0)
+                        resolved = _resolve_doi_to_pdf_url(client, paper.doi, timeout=DOI_RESOLVE_TIMEOUT_S)
                         if resolved:
                             paper.pdf_url = resolved
                             paper.extra["pdf_via_doi"] = True
@@ -704,8 +1048,6 @@ class IngestionTools:
                     print(f"       • Fetching PDF from {paper.pdf_url[:120]} ...")
                     try:
                         pdf_start = time.time()
-                        # If PDF came from DOI resolution, we already negotiated Accept header.
-                        # For direct fetching now, plain GET is fine.
                         pdf_bytes = _http_get_bytes(client, paper.pdf_url, timeout=30.0)
                         pdf_dur = time.time() - pdf_start
 
@@ -727,9 +1069,16 @@ class IngestionTools:
                 else:
                     print(f"       • No PDF URL available")
 
-                # Chunk and add to vector store
-                print(f"       • Chunking text (size={cs}, overlap={ov})")
-                chunks = _chunk_text(text, chunk_size=cs, overlap=ov)
+                # Chunk and add to vector store — token-aware, aligned with embeddings
+                print(f"       • Chunking text with embedding-aligned tokenizer")
+                chunks = _chunk_text(
+                    text,
+                    chunk_size=cs,
+                    overlap=ov,
+                    embedding_model_name=self.doc_db.embedding_model_name,
+                    max_tokens=None,
+                    overlap_tokens=None,
+                )
                 if not chunks:
                     print(f"       • No chunks generated, skipping")
                     continue
@@ -786,6 +1135,8 @@ class IngestionTools:
             parts.append(f"PDF: {paper.pdf_url}")
         if paper.extra.get("pdf_via_doi"):
             parts.append(f"PDF-Note: resolved via DOI Accept: application/pdf")
+        if paper.extra.get("publicationTypes"):
+            parts.append(f"Type: {paper.extra.get('publicationTypes')}")
         parts.append(f"Source: {paper.source}")
 
         text = "\n".join(parts) + "\n\n"
@@ -796,7 +1147,6 @@ class IngestionTools:
 
 class QueryTools:
     """RAG-based Q&A over ingested papers."""
-
     __tools__ = ["qa_papers", "list_papers"]
 
     def __init__(self, ctx: AcademicContext, doc_db: DocumentDB):
@@ -923,7 +1273,6 @@ class OrchestrationTools:
     Optional "one-shot" pipeline to reduce error surface:
       search → ingest → qa, in a single tool call.
     """
-
     __tools__ = ["search_ingest_qa"]
 
     def __init__(self, ctx: AcademicContext, doc_db: DocumentDB):
@@ -967,6 +1316,9 @@ class OrchestrationTools:
                 elif src == "crossref":
                     print(f"[Orchestrator] Searching Crossref (rows={lim})")
                     self.search.crossref_search(q, lim, "", "relevance", "desc")
+                elif src == "s2":
+                    print(f"[Orchestrator] Searching Semantic Scholar (limit={lim})")
+                    self.search.semantic_scholar_search(q, lim)
             except Exception as e:
                 print(f"[Orchestrator] Search error on {src}: {e}")
 
@@ -1080,39 +1432,46 @@ class AcademicAgent:
     def _get_system_prompt(self) -> str:
         return """You are an expert academic research assistant with literature search and RAG capabilities.
 
-Your workflow for research questions:
-1. Search: Use arxiv_search or crossref_search to find relevant papers
-   - Aim for 5-15 papers from recent years
-   - Use multiple sources for comprehensive coverage
+    Workflow for research questions (MUST follow in order):
 
-2. Ingest: Call ingest_all or ingest_papers to add papers to the RAG system
-   - use_pdf=true for full-text when available
-   - This enables citation-backed answers
+    1) SEARCH (breadth-first)
+    - Always run a multi-source search BEFORE any ingestion.
+    - Preferred: call `auto_multi_search` with per_source_limit 8–15 and order "s2,arxiv,crossref".
+    - If `auto_multi_search` is unavailable, explicitly call ALL of:
+        a) semantic_scholar_search
+        b) arxiv_search
+        c) crossref_search
+    - Tool outputs are intentionally minimal (counts + titles). Do not ask for more detail here.
 
-3. Answer: Use qa_papers with the user's question
-   - Returns context and bibliography
-   - Cite sources as [1], [2], etc.
-   - Always include a Bibliography section at the end
+    2) INSPECT
+    - Optionally call `list_papers` to see indices and coverage.
 
-4. Best Practices:
-   - Only cite papers that were actually retrieved
-   - Be precise and concise
-   - Use tables for comparisons when appropriate
-   - If no relevant papers found, acknowledge and suggest broader search
+    3) INGEST (only after SEARCH)
+    - Call `ingest_all` (or `ingest_papers` by indices) to load content into the RAG index.
+    - Prefer use_pdf="true" when available.
 
-For non-research questions, respond naturally without tools.
+    4) ANSWER
+    - Call `qa_papers` with the user question.
+    - Cite papers with [1], [2], etc., and end with a Bibliography section.
+    - Only cite papers actually retrieved.
 
-CRITICAL: Return tool calls as exact JSON on a single line, no extra text:
-{"tool_call":{"name":"tool_name","arguments":{"param":"value"}}}
+    Constraints:
+    - Do NOT call ingestion before completing multi-source search.
+    - Aim for 5–15 papers total, across at least two distinct sources if possible.
+    - Be concise and precise; use tables for comparisons when helpful.
 
-Examples:
-- Select specific papers by index:
-{"tool_call":{"name":"ingest_papers","arguments":{"paper_indices":"[0,1,2,3]","use_pdf":"true","chunk_size":"512","overlap":"128"}}}
-- Ingest all fetched:
-{"tool_call":{"name":"ingest_all","arguments":{"use_pdf":"true","chunk_size":"512","overlap":"128"}}}
-- One-shot pipeline:
-{"tool_call":{"name":"search_ingest_qa","arguments":{"user_question":"<your question here>","per_source_limit":"10","ingest_use_pdf":"true"}}}
-"""
+    CRITICAL: Return tool calls as exact JSON on a single line, no extra text:
+    {"tool_call":{"name":"tool_name","arguments":{"param":"value"}}}
+
+    Recommended sequence examples:
+
+    # Multi-source → list → ingest → QA
+    {"tool_call":{"name":"auto_multi_search","arguments":{"query":"<topic>","per_source_limit":"10","order":"s2,arxiv,crossref"}}}
+    {"tool_call":{"name":"list_papers","arguments":{}}}
+    {"tool_call":{"name":"ingest_all","arguments":{"use_pdf":"true","chunk_size":"512","overlap":"128"}}}
+    {"tool_call":{"name":"qa_papers","arguments":{"question":"<your question here>","top_k":"5"}}}
+    """
+
 
     def _mount_tools_auto(self):
         try:
@@ -1194,3 +1553,4 @@ if __name__ == "__main__":
     print(response.final_response)
     print("\n" + "="*80)
     print(f"Trace:\n{response.trace_md}")
+
