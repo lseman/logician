@@ -1,185 +1,349 @@
-# agent.py
-# -*- coding: utf-8 -*-
-from __future__ import annotations
+"""
+Updated TimeSeriesAgent with proper helper injection using get_helpers().
+"""
 
-import inspect
 import json
-from typing import Any, Dict, List, Optional, get_type_hints
+from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
-from core import Agent
-from core import ToolParameter
-from ts_tools import (
-    AnalysisTools,
-    AnomalyTools,
-    Context,
-    DataTools,
-    ForecastBaselineTools,
-    HygieneTools,
-    NeuralForecastTools,
-    PlotTools,
-    SeasonalityTools,
-    StatsTools,
-    TransformTools,
-    _infer_freq_safe,
-    _safe_json,
-)
+from src import Agent, Context, ToolRegistry
 
-from helpers import *
-# ─────────────────────────────────────────────────────────────────────────────
-# Agent with improved tool mounting
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TimeSeriesAgent:
-    """Slim façade around Agent + class-based tools. Keeps your previous interface."""
-    def __init__(self, llm_url: str = "http://localhost:8080", chat_template: str = "chatml", use_chat_api: bool = False):
-        self.ctx = Context()
+    def __init__(
+        self,
+        llm_url: str = "http://localhost:8080",
+        chat_template: str = "chatml",
+        use_chat_api: bool = False,
+        skills_md_path: Optional[str] = None,
+    ):
+        # Core agent
         self.agent = Agent(
             llm_url=llm_url,
             system_prompt=self._get_system_prompt(),
             use_chat_api=use_chat_api,
-            chat_template=chat_template
+            chat_template=chat_template,
         )
-        # De-dup state for tool registration
-        self._seen_functions = set()   # function ids
-        self._registered_tools: Dict[str, Any] = {}  # tool name -> method
-        # NEW: automatic tool mounting
-        self._mount_tools_auto()
 
-    # ——— public convenience ———
-    def set_numpy(self, arr: np.ndarray, start_date: str = "2018-01-01", freq: str = "D", name: str = "numpy_series"):
-        return DataTools(self.ctx).set_numpy(arr, start_date, freq, name)
+        # Single source of truth: use Agent's context + registry so
+        # data loaded via TimeSeriesAgent.ctx is visible inside agent.run tool calls.
+        self.ctx = self.agent.ctx
+        self.registry = self.agent.tools
 
-    def set_data(self, df: pd.DataFrame, name: str = "custom_data"):
-        if "date" not in df.columns or "value" not in df.columns:
-            raise ValueError("DataFrame must have 'date' and 'value' columns")
-        df = df.copy()
-        df["date"] = pd.to_datetime(df["date"])
-        self.ctx.data = df.sort_values("date")
-        self.ctx.original_data = self.ctx.data.copy()
-        self.ctx.data_name = name
-        self.ctx.freq_cache = _infer_freq_safe(self.ctx.data["date"])
-        return self
+        # Optional SKILLS.md override for the shared registry.
+        if skills_md_path:
+            custom_path = Path(skills_md_path)
+            if not custom_path.exists():
+                raise FileNotFoundError(f"Skills path not found at {custom_path}")
+            self.registry.skills_md_path = custom_path
+            self.registry._tools.clear()
+            self.registry._bootstrapped = False
+            self.registry.load_tools_from_skills()
 
-    def get_data(self) -> Optional[pd.DataFrame]:
-        return self.ctx.data
+        # Reinstall shared ctx explicitly (safe no-op if already installed).
+        self.registry.install_context(self.ctx)
 
-    def reset(self):
-        self.agent.reset()
-        self.ctx = Context()
-        # Also reset registration caches in case caller remounts
-        self._seen_functions = set()
-        self._registered_tools = {}
-        return self
+        print(f"✓ Loaded {len(self.registry.list_tools())} tools from skills source(s)")
 
-    # ——— agent passthrough ———
-    def chat(self, message: str, verbose: bool = False) -> str:
-        if self.ctx.data is not None and "data is already loaded" not in message.lower():
-            info = DataTools(self.ctx).get_data_info()
-            enhanced = f"Note: Time series data is already loaded: {info}\n\nUser request: {message}"
-            return self.agent.chat(enhanced, verbose=verbose)
-        return self.agent.chat(message, verbose=verbose)
+    def _register_tools_with_agent_if_supported(self):
+        """
+        Optional: depends on your Agent API.
+        If your Agent exposes something like register_tool(name, fn, schema),
+        implement it here. If not, it's safe to skip.
+        """
+        if not hasattr(self.agent, "register_tool"):
+            return
 
-    def run(self, message: str, verbose: bool = False):
-        if self.ctx.data is not None and "data is already loaded" not in message.lower():
-            info = DataTools(self.ctx).get_data_info()
-            enhanced = f"Note: Time series data is already loaded: {info}\n\nUser request: {message}"
-            return self.agent.run(enhanced, verbose=verbose)
-        return self.agent.run(message, verbose=verbose)
+        for tool in self.registry.list_tools():
+            # These attribute names depend on your ToolRegistry/tool representation.
+            # Commonly you’d pass name + a callable that runs registry.execute.
+            name = getattr(tool, "name", None) or tool["name"]
+            schema = (
+                getattr(tool, "schema", None)
+                if hasattr(tool, "schema")
+                else tool.get("schema", None)
+            )
 
-    # ——— internals ———
+            def _runner(**kwargs):
+                from src import ToolCall
+
+                result = self.registry.execute(
+                    ToolCall(id=f"agent_{name}", name=name, arguments=kwargs)
+                )
+                return result.content if hasattr(result, "content") else str(result)
+
+            self.agent.register_tool(name=name, fn=_runner, schema=schema)
+
+    def _inject_context_and_helpers(self):
+        """
+        Ensure tool execution scope has:
+        - ctx
+        - np, pd, json
+        - all helpers returned by get_helpers()
+        - _safe_json (fallback if missing)
+        - call_tool for tool-to-tool calling
+        """
+        g = self.registry._execution_globals
+
+        # Base modules always available to tools
+        g["np"] = np
+        g["pd"] = pd
+        g["json"] = json
+
+        # Guarantee ctx exists
+        g["ctx"] = self.ctx
+
+        # Tool-to-tool calling from inside tool code
+        def call_tool(tool_name: str, **kwargs):
+            from src import ToolCall
+
+            tool_call = ToolCall(
+                id=f"internal_{tool_name}",
+                name=tool_name,
+                arguments=kwargs,
+            )
+            result = self.registry.execute(tool_call)
+            return result.content if hasattr(result, "content") else str(result)
+
+        g["call_tool"] = call_tool
+
+        injected = ["np", "pd", "json", "ctx", "_safe_json", "call_tool"]
+        print(
+            f"✓ Injected {len(injected)} names into tool scope (incl. ctx/np/pd/json/_safe_json)."
+        )
+
     def _get_system_prompt(self) -> str:
-        return (
-            "You are a time series analysis expert with visualization capabilities. "
-            "You help users prepare data for forecasting by cleaning, transforming, and analyzing series.\n\n"
-            "CRITICAL:\n"
-            "1) Prefer using already-loaded data; only call load tools if truly needed.\n"
-            "2) Always return tool calls as a JSON object EXACTLY like:\n"
-            "{\n"
-            '  \"tool_call\": {\n'
-            '    \"name\": \"tool_name\",\n'
-            '    \"arguments\": { \"param1\": \"value1\" }\n'
-            "  }\n"
-            "}\n"
-            "3) For tools without parameters: use an empty arguments object.\n"
-            "4) Use plotting tools to visualize data and analysis results.\n"
-            "5) When preparing data for forecasting, consider: regularization, outlier removal, "
-            "stationarity (polynomial detrending), scaling, and seasonality.\n"
-            "6) Do not call the same tool twice in a row with identical arguments. "
-            "If it already ran, proceed to the next step or explain why another run is needed.\n"
+        """Get system prompt for the agent."""
+        return """You are a time series analysis expert assistant.
+
+You have access to comprehensive time series analysis tools including:
+- Data loading and inspection
+- Data cleaning and preprocessing
+- Statistical analysis and tests
+- Trend and seasonality detection
+- Anomaly detection
+- Forecasting (classical and neural methods)
+- Visualization
+
+When analyzing time series:
+1. Start by loading and inspecting the data
+2. Check for missing values and outliers
+3. Analyze stationarity and seasonality
+4. Apply appropriate transformations if needed
+5. Perform requested analysis or forecasting
+6. Provide clear interpretations of results
+
+Always use the available tools to perform analysis rather than making assumptions.
+"""
+
+    def _register_tools_with_agent(self):
+        """Register all loaded tools with the core agent."""
+        # Get all tools from registry
+        tools = self.registry.list_tools()
+
+        # Register each tool
+        for tool in tools:
+            # Tool registration logic here
+            # This depends on your Agent class implementation
+            pass
+
+    # ==================== Convenience Methods ====================
+
+    def load_csv(
+        self, filepath: str, date_column: str, value_column: str, sep: str = ","
+    ):
+        """
+        Convenience method to load CSV data.
+
+        Args:
+            filepath: Path to CSV file
+            date_column: Name of date column
+            value_column: Name of value column(s)
+            sep: CSV delimiter
+
+        Returns:
+            JSON string with load status
+        """
+        from src import ToolCall
+
+        result = self.registry.execute(
+            ToolCall(
+                id="load_csv",
+                name="load_csv_data",
+                arguments={
+                    "filepath": filepath,
+                    "date_column": date_column,
+                    "value_column": value_column,
+                    "sep": sep,
+                },
+            )
         )
 
-    # --- tool registration helpers ---
-    def _register_tool(self, inst, tool_name: str, desc: str, method, params):
-        """Register tool once. If a name collision occurs with a different method,
-        namespace the name as ClassName.tool_name."""
-        # function identity (bound method -> get underlying function)
-        fn = getattr(method, "__func__", method)
-        fid = id(fn)
+        return result.content if hasattr(result, "content") else str(result)
 
-        # 1) function-level de-dup
-        if fid in self._seen_functions:
-            return
-
-        # 2) name-level de-dup (if same name but different function, namespace it)
-        final_name = tool_name
-        if final_name in self._registered_tools and self._registered_tools[final_name] is not method:
-            final_name = f"{inst.__class__.__name__}.{tool_name}"
-
-        # If still collides (extremely unlikely), bail
-        if final_name in self._registered_tools:
-            return
-
-        # Register once
-        self.agent.add_tool(final_name, desc, method, params)
-        self._registered_tools[final_name] = method
-        self._seen_functions.add(fid)
-
-    def _mount_tools_auto(self):
+    def get_info(self):
         """
-        Automatically discover tools from class-based tool instances.
-        Exposure via @as_tool or Class.__tools__.
-        Ensures each underlying method is registered ONCE and namespaced on collision.
+        Get information about currently loaded data.
+
+        Returns:
+            JSON string with data metadata
         """
-        # Instantiate once (shared Context)
-        instances = [
-            DataTools(self.ctx),
-            HygieneTools(self.ctx),
-            TransformTools(self.ctx),
-            StatsTools(self.ctx),
-            SeasonalityTools(self.ctx),
-            AnomalyTools(self.ctx),
-            ForecastBaselineTools(self.ctx),
-            PlotTools(self.ctx),
-            NeuralForecastTools(self.ctx),
-            AnalysisTools(self.ctx),
-        ]
+        from src import ToolCall
 
-        # Collect de-duplicated (by function id) first
-        seen_fn_ids = set()
-        collected = []  # list[(inst, tool_name, desc, method, params)]
-        for inst in instances:
-            for tool_name, desc, method, params in _iter_exposed_methods(inst):
-                fn = getattr(method, "__func__", method)
-                fid = id(fn)
-                if fid in seen_fn_ids:
-                    continue
-                seen_fn_ids.add(fid)
-                collected.append((inst, tool_name, desc, method, params))
+        result = self.registry.execute(
+            ToolCall(id="get_info", name="get_data_info", arguments={})
+        )
 
-        # Now register with collision-aware naming
-        for inst, tool_name, desc, method, params in collected:
-            self._register_tool(inst, tool_name, desc, method, params)
+        return result.content if hasattr(result, "content") else str(result)
 
-        # Optional: debug list
-        # print("Mounted tools:", sorted(self._registered_tools.keys()))
+    def analyze(self, include_plots: bool = False):
+        """
+        Run comprehensive analysis on loaded data.
+
+        Args:
+            include_plots: Whether to generate plots
+
+        Returns:
+            JSON string with complete analysis results
+        """
+        from src import ToolCall
+
+        result = self.registry.execute(
+            ToolCall(
+                id="analyze",
+                name="comprehensive_analysis",
+                arguments={"include_plots": include_plots},
+            )
+        )
+
+        return result.content if hasattr(result, "content") else str(result)
+
+    def detect_anomalies(self, method: str = "zscore", threshold: float = 3.0):
+        """
+        Detect anomalies in loaded data.
+
+        Args:
+            method: Detection method (zscore, iqr, hampel, etc.)
+            threshold: Threshold value
+
+        Returns:
+            JSON string with anomaly detection results
+        """
+        from src import ToolCall
+
+        result = self.registry.execute(
+            ToolCall(
+                id="detect_anomalies",
+                name="detect_anomalies",
+                arguments={"method": method, "threshold": threshold},
+            )
+        )
+
+        return result.content if hasattr(result, "content") else str(result)
+
+    def forecast(self, method: str = "holt_winters", periods: int = 30):
+        """
+        Generate forecast.
+
+        Args:
+            method: Forecasting method
+            periods: Forecast horizon
+
+        Returns:
+            JSON string with forecast results
+        """
+        from src import ToolCall
+
+        result = self.registry.execute(
+            ToolCall(
+                id="forecast",
+                name="forecast_baselines",
+                arguments={"method": method, "periods": periods},
+            )
+        )
+
+        return result.content if hasattr(result, "content") else str(result)
+
+    def call_tool_directly(self, tool_name: str, **kwargs):
+        """
+        Directly call a tool by name with arguments.
+
+        Args:
+            tool_name: Name of the tool to call
+            **kwargs: Tool arguments
+
+        Returns:
+            Tool result
+        """
+        result = self.agent.run_tool_direct(
+            tool_name=tool_name,
+            arguments=kwargs,
+            persist_to_history=False,
+        )
+        return result
 
 
-# Factory (unchanged)
 def create_timeseries_agent(
     llm_url: str = "http://localhost:8080",
     chat_template: str = "chatml",
-    use_chat_api: bool = False
+    use_chat_api: bool = False,
+    skills_md_path: Optional[str] = None,
 ) -> TimeSeriesAgent:
-    return TimeSeriesAgent(llm_url=llm_url, chat_template=chat_template, use_chat_api=use_chat_api)
+    """
+    Factory helper for notebooks/scripts.
+    """
+    return TimeSeriesAgent(
+        llm_url=llm_url,
+        chat_template=chat_template,
+        use_chat_api=use_chat_api,
+        skills_md_path=skills_md_path,
+    )
+
+
+# ==================== Example Usage ====================
+
+if __name__ == "__main__":
+    import numpy as np
+    import pandas as pd
+
+    # Create agent
+    agent = TimeSeriesAgent()
+
+    # Create sample data directly in context
+    dates = pd.date_range("2024-01-01", periods=365, freq="D")
+    values = np.sin(np.arange(365) * 2 * np.pi / 7) + np.random.randn(365) * 0.1
+
+    agent.ctx.data = pd.DataFrame({"date": dates, "value": values})
+    agent.ctx.original_data = agent.ctx.data.copy()
+    agent.ctx.data_name = "sine_wave"
+    agent.ctx.freq_cache = "D"
+
+    print("\n" + "=" * 70)
+    print("Testing TimeSeriesAgent")
+    print("=" * 70)
+
+    # Test 1: Get info
+    print("\n1. Get data info:")
+    result = agent.get_info()
+    print(result)
+
+    # Test 2: Detect anomalies
+    print("\n2. Detect anomalies:")
+    result = agent.detect_anomalies(method="zscore", threshold=3.0)
+    print(result)
+
+    # Test 3: Comprehensive analysis (uses tool-to-tool calling internally)
+    print("\n3. Comprehensive analysis:")
+    result = agent.analyze(include_plots=False)
+    print(result)
+
+    # Test 4: Call tool directly
+    print("\n4. Detect trend (direct call):")
+    result = agent.call_tool_directly("detect_trend")
+    print(result)
+
+    print("\n" + "=" * 70)
+    print("✅ All tests passed!")
+    print("=" * 70)

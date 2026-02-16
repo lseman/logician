@@ -1,4 +1,43 @@
-__pycache__
-*.chroma
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Local environments
+.venv/
+venv/
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+
+# Runtime DB/state
 *.db
+*.db-shm
+*.db-wal
 agent_sessions*
+notebook_test_sessions*
+clean_test_sessions*
+repl_demo_sessions*
+
+# Vector/chroma stores
+*.chroma/
+*.vector/
+message_history.chroma/
+message_history.vector/
+rag_docs.chroma/
+rag_docs.vector/
+
+# Generated artifacts
+lightning_logs/
+plots/
+
+# Temp scratch files
+Untitled-1

@@ -1,0 +1,68 @@
+<svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="800" height="200" fill="#ffffff"/>
+  
+  <!-- Logo symbol (left side) -->
+  <g transform="translate(80, 0)">
+    <!-- Logic circuit paths (scaled down) -->
+    <g stroke="url(#pathGradientLight)" stroke-width="2.5" fill="none" stroke-linecap="round">
+      <path d="M 60 30 L 60 60"/>
+      <circle cx="60" cy="63" r="4" fill="#3b82f6"/>
+      <path d="M 60 67 L 45 80 M 60 67 L 75 80"/>
+      <circle cx="45" cy="80" r="4" fill="#3b82f6"/>
+      <circle cx="75" cy="80" r="4" fill="#3b82f6"/>
+      <path d="M 42 80 L 35 90 M 48 80 L 52 90"/>
+      <path d="M 72 80 L 68 90 M 78 80 L 85 90"/>
+      <circle cx="35" cy="90" r="3" fill="#2563eb"/>
+      <circle cx="52" cy="90" r="3" fill="#2563eb"/>
+      <circle cx="68" cy="90" r="3" fill="#2563eb"/>
+      <circle cx="85" cy="90" r="3" fill="#2563eb"/>
+      <path d="M 35 93 L 48 105 M 52 93 L 48 105 M 68 93 L 72 105 M 85 93 L 72 105"/>
+      <circle cx="48" cy="105" r="4" fill="#3b82f6"/>
+      <circle cx="72" cy="105" r="4" fill="#3b82f6"/>
+      <path d="M 48 109 L 60 125 M 72 109 L 60 125"/>
+      <circle cx="60" cy="125" r="5" fill="#3b82f6"/>
+      <path d="M 60 130 L 60 150"/>
+    </g>
+    
+    <!-- Center "L" -->
+    <text x="60" y="95" font-size="36" font-weight="bold" font-family="system-ui, sans-serif" 
+          fill="url(#textGradientLight)" text-anchor="middle" dominant-baseline="middle">L</text>
+    
+    <!-- Logic symbols -->
+    <g fill="#3b82f6" opacity="0.6" font-family="serif" font-size="12">
+      <text x="33" y="83">∧</text>
+      <text x="80" y="83">∨</text>
+      <text x="54" y="145">→</text>
+    </g>
+  </g>
+  
+  <!-- Text content -->
+  <g transform="translate(200, 100)">
+    <text x="0" y="0" font-size="64" font-weight="bold" font-family="system-ui, sans-serif" 
+          fill="url(#titleGradientLight)">Logician</text>
+    <text x="0" y="35" font-size="20" font-family="system-ui, sans-serif" 
+          fill="#3b82f6" font-weight="500">LLM Agent Framework for llama.cpp</text>
+    <text x="0" y="60" font-size="14" font-family="system-ui, sans-serif" 
+          fill="#64748b">Tools • RAG • Execution Traces</text>
+  </g>
+  
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="pathGradientLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1e40af"/>
+    </linearGradient>
+    
+    <linearGradient id="textGradientLight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1e40af"/>
+    </linearGradient>
+    
+    <linearGradient id="titleGradientLight" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+</svg>

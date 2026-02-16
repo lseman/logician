@@ -1,17 +1,17 @@
-
 # ─────────────────────────────────────────────────────────────────────────────
 # NEW: tooling for automatic discovery (with de-dup + namespacing)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Decorator (opt-in per method). Use on methods to mark them as tools.
-from typing import Any, Dict, List, Optional, get_type_hints
 import inspect
-import json
-from core import ToolParameter
+from typing import Any, Dict, List, Optional, get_type_hints
+
+from src import ToolParameter
 
 
 def as_tool(name: Optional[str] = None, desc: Optional[str] = None):
     """Mark an instance method as a tool. Optionally override name/description."""
+
     def _wrap(fn):
         setattr(fn, "_tool_exposed", True)
         if name is not None:
@@ -19,6 +19,7 @@ def as_tool(name: Optional[str] = None, desc: Optional[str] = None):
         if desc is not None:
             setattr(fn, "_tool_desc_override", desc)
         return fn
+
     return _wrap
 
 
@@ -114,8 +115,11 @@ def _iter_exposed_methods(instance):
             if fid in yielded_fn_ids:
                 continue
             tool_name = meta.get("name", name) if isinstance(meta, dict) else name
-            desc = (meta.get("desc") if isinstance(meta, dict) else None) or _first_line_doc(fn) or name
+            desc = (
+                (meta.get("desc") if isinstance(meta, dict) else None)
+                or _first_line_doc(fn)
+                or name
+            )
             params = _tool_params_from_signature(method)
             yielded_fn_ids.add(fid)
             yield tool_name, desc, method, params
-

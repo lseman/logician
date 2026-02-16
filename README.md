@@ -1,5 +1,9 @@
 # Logician
 
+![Logician Logo](logo/logician-banner-light.svg#gh-light-mode-only)
+![Logician Logo](logo/logician-banner.svg#gh-dark-mode-only)
+
+
 *A LLM agent framework for llama.cpp with tools, RAG, and rich execution traces.*
 
 Logician is a small, batteries-included framework for building **tool-using agents** on top of `llama.cpp`. It focuses on:
@@ -59,3 +63,11 @@ Logician is currently intended to be used **from source** inside your project.
 git clone https://github.com/lseman/logician.git
 cd logician
 pip install -e .
+
+## Project Layout
+
+- `src/`: core framework (agent, memory, DB, tool registry, backends)
+- `skills/`: tool definitions loaded by `ToolRegistry`
+- `apps/plotting/`: plotting and visualization helpers used by notebooks/scripts
+- `apps/runners/`: executable demo/diagnostic runners
+- Top-level files like `run.py`, `repl_demo.py`, and `test_clean_session.py` are compatibility entrypoints that forward to `apps/runners/*`
