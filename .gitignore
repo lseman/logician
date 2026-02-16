@@ -41,3 +41,5 @@ plots/
 
 # Temp scratch files
 Untitled-1
+
+*.ipynb
