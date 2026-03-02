@@ -1,6 +1,7 @@
 # agent_core/db_message.py
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import threading
@@ -8,9 +9,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from .db_core import _HNSWCollection, _SQLITE_PRAGMAS
-from .logging_utils import get_logger
-from .messages import Message, MessageRole
+from .core import _HNSWCollection, _SQLITE_PRAGMAS
+from ..logging_utils import get_logger
+from ..messages import Message, MessageRole
 
 
 @dataclass
@@ -64,6 +65,15 @@ class MessageDB:
                 tool_call_id TEXT,
                 name TEXT,
                 vector_id TEXT UNIQUE
+            );
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_runtime_state (
+                session_id TEXT PRIMARY KEY,
+                state_json TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             """
         )
@@ -138,14 +148,19 @@ class MessageDB:
             return
         if self._collection is not None:
             return
-        self._collection = _HNSWCollection(
-            root_path=self.vector_path,
-            collection_name=self.vector_collection_name,
-            embedding_model_name=self.embedding_model_name,
-            rerank_enabled=self.rerank_enabled,
-            reranker_model_name=self.reranker_model_name,
-            min_similarity=self.min_similarity,
-        )
+        try:
+            self._collection = _HNSWCollection(
+                root_path=self.vector_path,
+                collection_name=self.vector_collection_name,
+                embedding_model_name=self.embedding_model_name,
+                rerank_enabled=self.rerank_enabled,
+                reranker_model_name=self.reranker_model_name,
+                min_similarity=self.min_similarity,
+            )
+        except ImportError as e:
+            self.vector_enabled = False
+            self._collection = None
+            self._log.warning("Disabling vector memory: %s", e)
 
     @staticmethod
     def _hybrid_doc_key(row: dict[str, Any]) -> str:
@@ -259,7 +274,7 @@ class MessageDB:
             return rows
 
         placeholders = ",".join("?" for _ in vector_ids)
-        sql_rows = self._conn.execute(
+        db_rows = self._conn.execute(
             f"""
             SELECT id, vector_id, role, content, name, tool_call_id
             FROM messages
@@ -268,21 +283,19 @@ class MessageDB:
             tuple(vector_ids),
         ).fetchall()
         by_vector_id: dict[str, tuple[int, str, str, str | None, str | None]] = {
-            str(v_id): (int(mid), str(role), str(content), name, tool_id)
-            for (mid, v_id, role, content, name, tool_id) in sql_rows
+            str(vector_id): (int(row_id), str(role), str(content), name, tool_call_id)
+            for (row_id, vector_id, role, content, name, tool_call_id) in db_rows
         }
-
         for row in rows:
             v_id = str(row.get("vector_id", ""))
             mapped = by_vector_id.get(v_id)
             if mapped is None:
                 continue
-            mid, role, content, name, tool_id = mapped
-            row["row_id"] = mid
-            row["role"] = role
-            row["content"] = content
-            row["name"] = name
-            row["tool_call_id"] = tool_id
+            row["row_id"] = mapped[0]
+            row["role"] = mapped[1]
+            row["content"] = mapped[2]
+            row["name"] = mapped[3]
+            row["tool_call_id"] = mapped[4]
         return rows
 
     def _hybrid_search_rows(
@@ -292,68 +305,37 @@ class MessageDB:
         *,
         session_filter: str | None = None,
     ) -> list[dict[str, Any]]:
-        if k <= 0:
-            return []
+        keyword_rows = self._keyword_search_rows(query, k, session_filter=session_filter)
+        vector_rows = self._vector_search_rows(query, k, session_filter=session_filter)
 
-        fetch_k = max(k, k * 3)
-        vector_rows = self._vector_search_rows(
-            query, fetch_k, session_filter=session_filter
-        )
-        keyword_rows = self._keyword_search_rows(
-            query, fetch_k, session_filter=session_filter
-        )
+        if not keyword_rows:
+            return vector_rows[:k]
+        if not vector_rows:
+            return keyword_rows[:k]
 
-        rrf_k = max(1, int(self.hybrid_rrf_k))
-        vec_w = float(max(0.0, self.hybrid_vector_weight))
+        scores: dict[str, float] = {}
+        rows_by_key: dict[str, dict[str, Any]] = {}
         kw_w = float(max(0.0, self.hybrid_keyword_weight))
-
-        fused_scores: dict[str, float] = {}
-        fused_rows: dict[str, dict[str, Any]] = {}
-
-        for rank, row in enumerate(vector_rows, start=1):
-            key = self._hybrid_doc_key(row)
-            fused_scores[key] = fused_scores.get(key, 0.0) + (vec_w / (rrf_k + rank))
-            fused_rows[key] = row
+        vec_w = float(max(0.0, self.hybrid_vector_weight))
 
         for rank, row in enumerate(keyword_rows, start=1):
             key = self._hybrid_doc_key(row)
-            fused_scores[key] = fused_scores.get(key, 0.0) + (kw_w / (rrf_k + rank))
-            if key not in fused_rows:
-                fused_rows[key] = row
+            rows_by_key[key] = row
+            scores[key] = scores.get(key, 0.0) + kw_w / float(self.hybrid_rrf_k + rank)
 
-        ranked_keys = sorted(
-            fused_scores.keys(), key=lambda kk: fused_scores[kk], reverse=True
-        )
-        out: list[dict[str, Any]] = []
-        for key in ranked_keys[:k]:
-            row = dict(fused_rows[key])
-            row["hybrid_score"] = float(fused_scores[key])
-            out.append(row)
-        return out
+        for rank, row in enumerate(vector_rows, start=1):
+            key = self._hybrid_doc_key(row)
+            rows_by_key[key] = row
+            scores[key] = scores.get(key, 0.0) + vec_w / float(self.hybrid_rrf_k + rank)
 
-    @staticmethod
-    def _rows_to_messages(rows: list[dict[str, Any]]) -> list[Message]:
-        out: list[Message] = []
-        for row in rows:
-            try:
-                role = MessageRole(str(row.get("role")))
-            except Exception:
-                continue
-            out.append(
-                Message(
-                    role=role,
-                    content=str(row.get("content", "")),
-                    name=(row.get("name") or None),
-                    tool_call_id=(row.get("tool_call_id") or None),
-                )
-            )
-        return out
+        ranked_keys = sorted(scores.keys(), key=lambda key: scores[key], reverse=True)
+        return [rows_by_key[key] for key in ranked_keys[:k]]
 
     def _search_messages(
         self,
         query: str,
-        *,
         k: int,
+        *,
         session_filter: str | None = None,
         mode: str = "vector",
     ) -> list[dict[str, Any]]:
@@ -399,6 +381,9 @@ class MessageDB:
 
         if self.vector_enabled and vector_id is not None:
             try:
+                self._ensure_vector()
+                if not self.vector_enabled or self._collection is None:
+                    return rowid
                 meta = {
                     "session_id": session_id,
                     "role": msg.role.value,
@@ -427,6 +412,33 @@ class MessageDB:
     ) -> list[Message]:
         if self._conn is None:
             raise RuntimeError("SQLite connection is not initialized.")
+
+        def to_messages(rows: list[tuple[Any, ...]]) -> list[Message]:
+            return [
+                Message(
+                    role=MessageRole(role),
+                    content=content,
+                    name=name,
+                    tool_call_id=tool_call_id,
+                )
+                for (_, role, content, name, tool_call_id) in rows
+            ]
+
+        def summary_checkpoint_row() -> tuple[Any, ...] | None:
+            return self._conn.execute(
+                """
+                SELECT id, role, content, name, tool_call_id
+                FROM messages
+                WHERE session_id=? AND role=? AND content LIKE ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (
+                    session_id,
+                    MessageRole.SYSTEM.value,
+                    "[Session summary inserted by /compact]%",
+                ),
+            ).fetchone()
 
         recent_tail = max(0, int(recent_tail))
         limit = max(1, int(limit))
@@ -461,45 +473,41 @@ class MessageDB:
                     session_filter=session_id,
                     mode=mode_norm,
                 )
-                semantic_ids: list[int] = []
-                for row in rows:
-                    rid = row.get("row_id")
-                    if rid is None:
-                        continue
-                    rid_i = int(rid)
-                    if rid_i in recent_id_set:
-                        continue
-                    semantic_ids.append(rid_i)
+                semantic_ids = [
+                    int(r["row_id"]) for r in rows if r.get("row_id") is not None
+                ]
+                chosen_ids: list[int] = list(reversed(recent_ids))
+                for msg_id in semantic_ids:
+                    if msg_id not in recent_id_set and msg_id not in chosen_ids:
+                        chosen_ids.append(msg_id)
+                    if len(chosen_ids) >= limit:
+                        break
 
-                budget_left = max(0, limit - len(recent_ids))
-                selected_ids = recent_ids + semantic_ids[:budget_left]
-
-                if selected_ids:
-                    placeholders = ",".join("?" for _ in selected_ids)
+                if not chosen_ids:
+                    use_semantic = False
+                else:
+                    placeholders = ",".join("?" for _ in chosen_ids)
                     selected_rows = self._conn.execute(
                         f"""
-                        SELECT role, content, name, tool_call_id
+                        SELECT id, role, content, name, tool_call_id
                         FROM messages
                         WHERE id IN ({placeholders})
                         ORDER BY id ASC
                         """,
-                        tuple(selected_ids),
+                        tuple(chosen_ids),
                     ).fetchall()
-                    msgs = [
-                        Message(role=MessageRole(r), content=c, name=n, tool_call_id=t)
-                        for (r, c, n, t) in selected_rows
-                    ]
-                else:
-                    msgs = []
-
-                if not msgs:
-                    # Fallback if semantic rows could not be mapped to SQL row IDs.
-                    msgs = self._rows_to_messages(rows[:limit])
-                return self._maybe_summarize(msgs, summarize_old)
+                    if summarize_old and limit > 1:
+                        summary_row = summary_checkpoint_row()
+                        if summary_row is not None:
+                            summary_id = int(summary_row[0])
+                            selected_ids = {int(row[0]) for row in selected_rows}
+                            if summary_id not in selected_ids:
+                                selected_rows = [summary_row, *selected_rows[-(limit - 1) :]]
+                    return to_messages(selected_rows)
 
         rows = self._conn.execute(
             """
-            SELECT role, content, name, tool_call_id
+            SELECT id, role, content, name, tool_call_id
             FROM messages
             WHERE session_id=?
             ORDER BY id DESC
@@ -507,36 +515,100 @@ class MessageDB:
             """,
             (session_id, limit),
         ).fetchall()
+        rows = list(reversed(rows))
+        if summarize_old and limit > 1:
+            summary_row = summary_checkpoint_row()
+            if summary_row is not None:
+                summary_id = int(summary_row[0])
+                row_ids = {int(row[0]) for row in rows}
+                if summary_id not in row_ids:
+                    rows = [summary_row, *rows[-(limit - 1) :]]
+        return to_messages(rows)
 
-        msgs = [
-            Message(role=MessageRole(r), content=c, name=n, tool_call_id=t)
-            for (r, c, n, t) in reversed(rows)
-        ]
-        return self._maybe_summarize(msgs, summarize_old)
-
-    def _maybe_summarize(
-        self, msgs: list[Message], summarize_old: bool
-    ) -> list[Message]:
-        if not summarize_old:
-            return msgs
-        if len(msgs) <= 14:
-            return msgs
-
-        cut = len(msgs) // 2
-        old = msgs[:cut]
-        keybits = "; ".join(m.content[:48].replace("\n", " ") for m in old[-4:])
-        summary = Message(
-            role=MessageRole.SYSTEM,
-            content=f"[Summary of {len(old)} prior turns] Key points: {keybits} ...",
-        )
-        return [summary] + msgs[cut:]
-
-    def clear_session(self, session_id: str) -> None:
+    def get_session_messages(self, session_id: str) -> list[Message]:
         if self._conn is None:
             raise RuntimeError("SQLite connection is not initialized.")
 
-        self._log.info("Clearing session %s", session_id[:8])
+        rows = self._conn.execute(
+            """
+            SELECT role, content, name, tool_call_id
+            FROM messages
+            WHERE session_id=?
+            ORDER BY id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [
+            Message(
+                role=MessageRole(role),
+                content=content,
+                name=name,
+                tool_call_id=tool_call_id,
+            )
+            for (role, content, name, tool_call_id) in rows
+        ]
 
+    def count_session_messages(self, session_id: str) -> int:
+        if self._conn is None:
+            raise RuntimeError("SQLite connection is not initialized.")
+
+        row = self._conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM messages
+            WHERE session_id=?
+            """,
+            (session_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def save_session_runtime_state(
+        self, session_id: str, state: dict[str, Any] | None
+    ) -> None:
+        if self._conn is None:
+            raise RuntimeError("SQLite connection is not initialized.")
+
+        payload = json.dumps(state or {}, ensure_ascii=False)
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO session_runtime_state (session_id, state_json, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    state_json=excluded.state_json,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (session_id, payload),
+            )
+            self._conn.commit()
+
+    def load_session_runtime_state(self, session_id: str) -> dict[str, Any] | None:
+        if self._conn is None:
+            raise RuntimeError("SQLite connection is not initialized.")
+
+        row = self._conn.execute(
+            """
+            SELECT state_json
+            FROM session_runtime_state
+            WHERE session_id=?
+            """,
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return json.loads(str(row[0]))
+        except Exception:
+            self._log.exception(
+                "Failed to decode runtime state for session=%s", session_id[:8]
+            )
+            return None
+
+    def clear_session_messages(self, session_id: str) -> None:
+        if self._conn is None:
+            raise RuntimeError("SQLite connection is not initialized.")
+
+        self._log.info("Clearing session messages %s", session_id[:8])
         with self._lock:
             self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
             self._conn.commit()
@@ -545,13 +617,29 @@ class MessageDB:
             try:
                 self.collection.delete(where={"session_id": session_id})
             except Exception as e:
-                self._log.exception(
+                self._log.warning(
                     "Vector delete failed for session=%s: %s", session_id[:8], e
                 )
+
+    def clear_session_runtime_state(self, session_id: str) -> None:
+        if self._conn is None:
+            raise RuntimeError("SQLite connection is not initialized.")
+
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM session_runtime_state WHERE session_id=?",
+                (session_id,),
+            )
+            self._conn.commit()
+
+    def clear_session(self, session_id: str) -> None:
+        self.clear_session_messages(session_id)
+        self.clear_session_runtime_state(session_id)
 
     def list_sessions(self) -> list[tuple[str, str]]:
         if self._conn is None:
             raise RuntimeError("SQLite connection is not initialized.")
+
         rows = self._conn.execute(
             """
             SELECT session_id, MAX(timestamp) FROM messages
@@ -559,23 +647,34 @@ class MessageDB:
             ORDER BY MAX(timestamp) DESC
             """
         ).fetchall()
-        return [(str(sid), str(ts)) for (sid, ts) in rows]
+        return [(str(session_id), str(last_ts)) for (session_id, last_ts) in rows]
 
     def global_semantic_search(
         self,
         query: str,
-        k: int = 20,
+        k: int = 8,
         session_filter: str | None = None,
         retrieval_mode: str = "vector",
     ) -> list[Message]:
         mode_norm = str(retrieval_mode or "vector").strip().lower()
         if mode_norm in ("vector", "hybrid") and (not self.vector_enabled):
             return []
-        if mode_norm == "keyword" and (not self._fts_enabled):
-            return []
-        if mode_norm == "hybrid" and (not self._fts_enabled):
+        if mode_norm in ("keyword", "hybrid") and (not self._fts_enabled):
+            if mode_norm == "keyword":
+                return []
             mode_norm = "vector"
+
         rows = self._search_messages(
             query, k=k, session_filter=session_filter, mode=mode_norm
         )
-        return self._rows_to_messages(rows)
+        return [
+            Message(
+                role=MessageRole(str(r["role"])),
+                content=str(r["content"]),
+                name=(str(r["name"]) if r.get("name") else None),
+                tool_call_id=(
+                    str(r["tool_call_id"]) if r.get("tool_call_id") else None
+                ),
+            )
+            for r in rows
+        ]

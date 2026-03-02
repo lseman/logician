@@ -3,6 +3,13 @@
 Diagnose LLM backend issues by testing the raw LLM without agent framework.
 """
 
+import sys
+from pathlib import Path
+
+AGENT_ROOT = Path(__file__).resolve().parents[1]
+if str(AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(AGENT_ROOT))
+
 from src.backends import LlamaCppClient
 from src.messages import Message, MessageRole
 

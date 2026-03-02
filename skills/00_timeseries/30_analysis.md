@@ -1,3 +1,39 @@
+---
+name: Analysis
+summary: Run diagnostics on trend, stationarity, seasonality, anomalies, lag structure, and multivariate relationships.
+triggers:
+  - analyze the series
+  - stationarity test
+  - detect anomalies
+  - check trend
+  - seasonality diagnostics
+  - acf pacf
+anti_triggers:
+  - make a forecast plot
+  - load a csv
+aliases:
+  - diagnostics
+  - anomaly
+  - trend
+  - seasonality
+  - stationarity
+preferred_tools:
+  - compute_statistics
+  - stationarity_tests
+  - detect_trend
+  - stl_seasonality
+  - detect_anomalies
+example_queries:
+  - Analyze this series for trend, seasonality, and anomalies.
+  - Run stationarity checks and show the strongest ACF/PACF lags.
+when_not_to_use:
+  - The user only wants data ingestion or a final forecast without diagnostic detail.
+next_skills:
+  - forecasting
+  - plotting
+  - recommendations
+---
+
 ## Tool: compute_statistics
 
 **Description:** Compute descriptive statistics.
@@ -485,4 +521,3 @@ def change_points(penalty=0, column=None):
 ```
 
 ---
-

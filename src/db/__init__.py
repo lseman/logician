@@ -1,7 +1,6 @@
-# agent_core/db.py
 from __future__ import annotations
 
-from .db_core import (
+from .core import (
     _SQLITE_PRAGMAS,
     _EmbeddingRuntime,
     _HNSWCollection,
@@ -13,8 +12,8 @@ from .db_core import (
     _prepare_embedding_input,
     _stable_collection_name,
 )
-from .db_doc import DocumentDB
-from .db_message import MessageDB
+from .document import DocumentDB
+from .message import MessageDB
 
 __all__ = [
     "MessageDB",

@@ -48,10 +48,10 @@ class Memory:
         retrieval_mode: str = "vector",
     ) -> List[Message]:
         """Loads conversation history with optional semantic search."""
-        history_recent_tail = int(getattr(self.config, "history_recent_tail", 8))
+        history_recent_tail = int(self.config.history_recent_tail)
         return self._db.load_history(
             sid,
-            limit=getattr(self.config, "history_limit", 18),
+            limit=self.config.history_limit,
             summarize_old=True,
             use_semantic=use_semantic_retrieval,
             semantic_query=message if use_semantic_retrieval else None,
@@ -89,6 +89,30 @@ class Memory:
     def save_message(self, sid: str, message: Message) -> None:
         """Persists a message to the database."""
         self._db.save_message(sid, message)
+
+    def get_session_messages(self, sid: str) -> List[Message]:
+        """Loads the full persisted transcript for a session."""
+        return self._db.get_session_messages(sid)
+
+    def count_session_messages(self, sid: str) -> int:
+        """Returns the total persisted message count for a session."""
+        return self._db.count_session_messages(sid)
+
+    def save_runtime_state(self, sid: str, state: dict[str, Any] | None) -> None:
+        """Persists runtime tool/data state for a session."""
+        self._db.save_session_runtime_state(sid, state)
+
+    def load_runtime_state(self, sid: str) -> dict[str, Any] | None:
+        """Loads persisted runtime tool/data state for a session."""
+        return self._db.load_session_runtime_state(sid)
+
+    def clear_session_messages(self, sid: str) -> None:
+        """Clears only the persisted transcript for a session."""
+        self._db.clear_session_messages(sid)
+
+    def clear_runtime_state(self, sid: str) -> None:
+        """Clears only the persisted runtime state for a session."""
+        self._db.clear_session_runtime_state(sid)
 
     def clear_session(self, sid: str) -> None:
         """Clears a session from memory."""

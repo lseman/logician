@@ -3,10 +3,23 @@
 Test different chat templates to find the right one.
 """
 
+import sys
+import unittest
+from pathlib import Path
+
+AGENT_ROOT = Path(__file__).resolve().parents[1]
+if str(AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(AGENT_ROOT))
+
 from src.backends import LlamaCppClient
 from src.messages import Message, MessageRole
 
 TEMPLATES = ["chatml", "llama2", "mistral", "alpaca", "vicuna", "zephyr"]
+
+
+class ChatTemplateSmokeTests(unittest.TestCase):
+    def test_template_inventory_is_not_empty(self) -> None:
+        self.assertGreaterEqual(len(TEMPLATES), 1)
 
 def test_template(template_name):
     """Test a specific chat template."""

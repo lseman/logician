@@ -1,3 +1,34 @@
+---
+name: Plotting
+summary: Visualize the loaded series, diagnostics, and forecast outputs as saved charts for inspection or reporting.
+triggers:
+  - plot the series
+  - visualize diagnostics
+  - make a chart
+  - save a forecast plot
+anti_triggers:
+  - choose preprocessing transformations
+  - compute stationarity without charts
+aliases:
+  - plot
+  - chart
+  - visualize
+  - figure
+preferred_tools:
+  - plot_series
+  - plot_diagnostics
+  - plot_forecast
+example_queries:
+  - Plot diagnostics and inspect anomalies in the series.
+  - Create a saved chart of the forecast with intervals.
+next_skills:
+  - analysis
+  - forecasting
+  - recommendations
+when_not_to_use:
+  - The user only wants numeric output or textual diagnostics with no visualization.
+---
+
 ## Tool: plot_series
 
 **Description:** Plot a series with optional anomaly markers and save to file.
@@ -249,4 +280,3 @@ def plot_forecast(method="holt_winters", periods=30, season_length=0, with_inter
 ```
 
 ---
-

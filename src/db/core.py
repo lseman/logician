@@ -14,8 +14,8 @@ from typing import Any
 
 import numpy as np
 
-from .logging_utils import get_logger
-from .messages import Message, MessageRole
+from ..logging_utils import get_logger
+from ..messages import Message, MessageRole
 
 
 # ============================================================================
@@ -262,9 +262,11 @@ class _RerankerRuntime:
             return None
         if self._model is not None:
             return self._model
-        try:
+        with self._lock:
+            if self._model is not None:
+                return self._model
             CrossEncoder = _lazy_import_cross_encoder()
-            self._log.info("Loading reranker: %s", self.model_name)
+            self._log.info("Loading reranker model: %s", self.model_name)
             kwargs, mode_note = _resolve_model_load_kwargs(
                 quant_mode_env="AGENT_RERANK_QUANT",
                 force_cuda_env="AGENT_FORCE_CUDA",
@@ -282,34 +284,28 @@ class _RerankerRuntime:
                     }
                 self._model = CrossEncoder(self.model_name, **kwargs)
             return self._model
-        except Exception as e:
-            self._log.warning("Reranker unavailable (%s): %s", self.model_name, e)
-            self._model = None
-            return None
 
     def rerank(
         self,
         query: str,
         rows: list[dict[str, Any]],
+        *,
         top_k: int,
     ) -> list[dict[str, Any]]:
+        if not rows:
+            return rows
         model = self._ensure()
-        if model is None or not rows:
+        if model is None:
             return rows[:top_k]
-        with self._lock:
-            try:
-                pairs = [[query, r.get("content", "")] for r in rows]
-                scores = model.predict(pairs)
-                ranked = sorted(
-                    enumerate(rows), key=lambda x: float(scores[x[0]]), reverse=True
-                )
-                out: list[dict[str, Any]] = []
-                for idx, row in ranked[:top_k]:
-                    out.append({**row, "rerank_score": float(scores[idx])})
-                return out
-            except Exception as e:
-                self._log.warning("Reranker predict failed: %s", e)
-                return rows[:top_k]
+        pairs = [(query, str(r.get("content", ""))) for r in rows]
+        scores = model.predict(pairs)
+        ranked = [
+            {**row, "rerank_score": float(score)}
+            for score, row in sorted(
+                zip(scores, rows), key=lambda item: item[0], reverse=True
+            )
+        ]
+        return ranked[:top_k]
 
 
 # ============================================================================

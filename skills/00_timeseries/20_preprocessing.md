@@ -1,3 +1,38 @@
+---
+name: Preprocessing
+summary: Clean and regularize a time series before analysis or forecasting by filling gaps, removing outliers, detrending, transforming, and scaling.
+triggers:
+  - clean the data
+  - fill missing values
+  - resample series
+  - regularize frequency
+  - remove outliers
+  - detrend
+anti_triggers:
+  - choose forecast model
+  - explain tool inventory
+aliases:
+  - cleaning
+  - preprocess
+  - impute
+  - resample
+  - transform
+preferred_tools:
+  - regularize_series
+  - fill_missing
+  - hampel_filter
+  - detrend
+  - transform_series
+example_queries:
+  - Regularize this series to daily frequency and fill the missing values.
+  - Remove outliers and detrend the data before forecasting.
+next_skills:
+  - analysis
+  - forecasting
+when_not_to_use:
+  - The main user request is pure diagnostics, visualization, or model selection with no data cleanup step.
+---
+
 ## Tool: regularize_series
 
 **Description:** Resample to regular frequency and interpolate gaps.
@@ -267,4 +302,3 @@ def scale_series(method="robust", column=None):
 ```
 
 ---
-

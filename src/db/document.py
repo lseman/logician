@@ -6,8 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from .db_core import _HNSWCollection
-from .logging_utils import get_logger
+from .core import _HNSWCollection
+from ..logging_utils import get_logger
 
 
 @dataclass

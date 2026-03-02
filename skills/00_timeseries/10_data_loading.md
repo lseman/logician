@@ -1,3 +1,37 @@
+---
+name: Data Loading
+summary: Load datasets into the agent context from CSV files, NumPy arrays, or synthetic generators, then inspect the active data state.
+triggers:
+  - load csv
+  - read file
+  - import dataset
+  - inspect dataset columns
+  - create sample data
+anti_triggers:
+  - forecast horizon
+  - choose model
+aliases:
+  - load
+  - csv
+  - dataset
+  - import
+  - columns
+preferred_tools:
+  - load_csv_data
+  - get_data_info
+  - set_numpy
+  - create_sample_data
+  - restore_original
+example_queries:
+  - Load a CSV and tell me what columns and frequency it has.
+  - Create a synthetic seasonal series so I can test the pipeline.
+when_not_to_use:
+  - Data is already loaded and the user is asking to transform, analyze, plot, or forecast it.
+next_skills:
+  - preprocessing
+  - analysis
+---
+
 ## Tool: set_numpy
 
 **Description:** Load 1D/2D NumPy array as time series (univariate only).
@@ -221,4 +255,3 @@ def restore_original():
 ```
 
 ---
-

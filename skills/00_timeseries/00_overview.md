@@ -1,3 +1,22 @@
+---
+name: Overview
+summary: Capability overview and setup guidance for the time-series skill pack.
+triggers:
+  - what can you do
+  - available tools
+  - skill overview
+  - setup instructions
+aliases:
+  - overview
+  - capabilities
+  - toolbox
+example_queries:
+  - What time-series analysis tools are available?
+  - Show me the recommended workflow before I start.
+when_not_to_use:
+  - The user already asked for a concrete load, analysis, forecast, or plotting action.
+---
+
 # Time Series Analysis - Complete Skills
 
 All time series analysis tools for dynamic loading via ToolRegistry.
@@ -293,4 +312,3 @@ ctx.is_multivariate   # bool
 ```
 
 ---
-

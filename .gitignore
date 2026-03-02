@@ -43,3 +43,5 @@ plots/
 Untitled-1
 
 *.ipynb
+plugins/
+agent_config.json

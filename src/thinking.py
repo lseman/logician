@@ -8,8 +8,8 @@ from .config import ThinkingConfig
 # FIXED: import prompt utilities from prompt.py
 from .prompt import get_prompt, Prompt
 
-# FIXED: import reasoner utilities from reasoner.py
-from .reasoner import get_reasoner, Reasoner
+# FIXED: import reasoner utilities from the reasoners package
+from .reasoners import Reasoner, get_reasoner
 
 
 # ==============================================================================

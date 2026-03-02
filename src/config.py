@@ -11,8 +11,8 @@ from typing import Literal, Optional
 # ---------------------------------------------------------------------
 @dataclass
 class ThinkingConfig:
-    prompt: Optional[str] = None          # name from PROMPT_REGISTRY
-    reasoner: Optional[str] = None        # name from REASONER_REGISTRY
+    prompt: Optional[str] = None  # name from PROMPT_REGISTRY
+    reasoner: Optional[str] = None  # name from REASONER_REGISTRY
 
     # Pipeline order:
     #   "prompt"
@@ -64,6 +64,16 @@ class Config:
     rag_top_k: int = 20
     vector_path: str = "message_history.vector"
 
+    # Conversation context
+    history_limit: int = 18
+    history_recent_tail: int = 8
+    tool_result_max_chars: int = 6000
+    assistant_ctx_max_chars: int = 12000
+    trace_context_max_messages: int = 8
+    trace_context_max_chars: int = 500
+    tool_memory_items: int = 8
+    compact_summary_max_chars: int = 4000
+
     # Self-Reflection (light critique loop)
     enable_reflection: bool = False
     reflection_prompt: str = (
@@ -78,13 +88,22 @@ class Config:
         default_factory=lambda: os.getenv("AGENT_LOG_LEVEL", "ERROR")
     )
     log_json: bool = field(
-        default_factory=lambda: os.getenv("AGENT_LOG_JSON", "0").lower()
-        in ("1", "true", "yes")
+        default_factory=lambda: (
+            os.getenv("AGENT_LOG_JSON", "0").lower() in ("1", "true", "yes")
+        )
     )
 
     # Tools
     use_toon_for_tools: bool = True
     tool_schema_mode: Literal["rich", "compact", "json_schema"] = "rich"
+    enable_skill_routing: bool = True
+    dynamic_skill_routing: bool = True
+    skill_top_k: int = 3
+    skill_include_playbooks: bool = True
+    skill_compact_fallback: bool = True
 
     # NEW — Thinking pipeline (Prompt + Reasoner)
     thinking: ThinkingConfig | None = None
+
+    # MCP servers  {name: {"url": ..., "headers": {...}, "enabled": bool}}
+    mcp_servers: dict = field(default_factory=dict)

@@ -6,7 +6,10 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
-import httpx
+try:
+    import httpx
+except Exception:  # pragma: no cover
+    httpx = None  # type: ignore
 
 from .logging_utils import get_logger
 from .messages import Message, MessageRole
@@ -84,11 +87,11 @@ class LlamaCppClient:
 
     def _request(
         self,
-        client: httpx.Client,
+        client: Any,
         method: str,
         url: str,
         **kw: Any,
-    ) -> httpx.Response:
+    ) -> Any:
         last_exc: Exception | None = None
         for attempt in range(1, self.retry_attempts + 2):
             try:
@@ -141,6 +144,11 @@ class LlamaCppClient:
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
     ) -> str:
+        if httpx is None:
+            raise ImportError(
+                "httpx is required for the HTTP llama.cpp backend. "
+                "Install it with: pip install httpx"
+            )
         with httpx.Client(timeout=self.timeout) as client:
             if self.use_chat:
                 payload = {

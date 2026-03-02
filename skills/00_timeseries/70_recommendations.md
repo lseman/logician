@@ -1,3 +1,25 @@
+---
+name: Recommendations
+summary: Suggest next-step transformations or decisions based on the current diagnostic state of the loaded series.
+triggers:
+  - what should i do next
+  - recommend transformations
+  - suggest preprocessing
+  - choose the next step
+aliases:
+  - recommend
+  - suggestion
+  - next step
+  - advice
+preferred_tools:
+  - suggest_transformations
+example_queries:
+  - Recommend the next preprocessing steps for this series.
+  - Suggest transformations based on the diagnostics we already ran.
+when_not_to_use:
+  - The user already specified the exact transformation or tool they want to run.
+---
+
 ## Tool: suggest_transformations
 
 **Description:** Intelligent transformation suggestions.

@@ -1,3 +1,25 @@
+---
+name: Pipelines
+summary: Compose multiple tools into end-to-end workflows for full analysis, reporting, and repeatable time-series runs.
+triggers:
+  - end to end analysis
+  - full pipeline
+  - comprehensive analysis
+  - run the whole workflow
+aliases:
+  - pipeline
+  - workflow
+  - comprehensive
+  - end to end
+preferred_tools:
+  - comprehensive_analysis
+example_queries:
+  - Run a full end-to-end analysis and summarize the results.
+  - Execute the complete workflow and save the plots.
+when_not_to_use:
+  - The user wants one focused tool step instead of an orchestrated multi-step workflow.
+---
+
 ## Tool: comprehensive_analysis
 
 **Description:** Full analysis pipeline with tool-to-tool calling.
@@ -107,4 +129,3 @@ def comprehensive_analysis(include_plots=True, save_dir=None):
 ```
 
 ---
-

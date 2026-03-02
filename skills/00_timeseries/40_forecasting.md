@@ -1,3 +1,38 @@
+---
+name: Forecasting
+summary: Produce baseline and neural forecasts, compare models, evaluate rolling performance, and recommend forecast horizons.
+triggers:
+  - forecast the next
+  - compare models
+  - choose a forecast model
+  - rolling evaluation
+  - prediction intervals
+  - neural forecast
+anti_triggers:
+  - plot diagnostics only
+  - load columns from csv
+aliases:
+  - forecasting
+  - horizon
+  - future
+  - model selection
+  - intervals
+preferred_tools:
+  - suggest_models
+  - stat_forecast
+  - neural_forecast
+  - ensemble_forecast
+  - cross_validate
+example_queries:
+  - Forecast the next 24 steps and compare neural forecast models.
+  - Recommend a horizon and produce prediction intervals for the future values.
+next_skills:
+  - plotting
+  - recommendations
+when_not_to_use:
+  - The user is still trying to load or clean data and has not asked for future predictions yet.
+---
+
 ## Tool: stat_forecast
 
 **Description:** Statistical forecast using Nixtla's StatsForecast. Supports 13 methods from naive baselines to auto-tuned models.
