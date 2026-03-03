@@ -1,63 +1,5 @@
----
-name: Overview
-summary: Capability overview and setup guidance for the time-series skill pack.
-triggers:
-  - what can you do
-  - available tools
-  - skill overview
-  - setup instructions
-aliases:
-  - overview
-  - capabilities
-  - toolbox
-example_queries:
-  - What time-series analysis tools are available?
-  - Show me the recommended workflow before I start.
-when_not_to_use:
-  - The user already asked for a concrete load, analysis, forecast, or plotting action.
----
+from __future__ import annotations
 
-# Time Series Analysis - Complete Skills
-
-All time series analysis tools for dynamic loading via ToolRegistry.
-
-## Setup Instructions
-
-**Important:** `ToolRegistry` must execute the `## Bootstrap: helpers` block before registering tools.
-
-Then you only need to inject `ctx`:
-
-```python
-from src.tools import ToolRegistry, Context  # adjust import path if your package name differs
-
-ctx = Context()
-registry = ToolRegistry(auto_load_from_skills=True)
-registry.install_context(ctx)
-```
-
-## Analysis Playbooks
-
-Use these high-level flows to make tool use more deliberate and useful for real time-series work.
-
-1. **Quick Diagnostic Pass**
-   `get_data_info` -> `compute_statistics` -> `detect_trend` -> `stationarity_tests` -> `stl_seasonality` -> `detect_anomalies`
-2. **Preprocessing Pass**
-   `regularize_series` -> `fill_missing` -> `hampel_filter` -> `detrend` -> `transform_series` -> `scale_series`
-3. **Forecasting Pass**
-   `suggest_horizon` -> `forecast_baselines` or `ensemble_forecast` -> `rolling_eval` -> `plot_forecast`
-4. **Visual QA Pass**
-   `plot_series` -> `plot_diagnostics` -> `plot_forecast`
-
-These playbooks are guidance only; tools can be used independently.
-
-## Bootstrap: helpers
-
-**Description:**
-Core helpers + `Context` definition used by all time-series tools. This block is executed by `ToolRegistry` *before* registering any `## Tool:` sections, and its symbols are injected into tool execution globals (`np`, `pd`, `json`, `_safe_json`, `_infer_freq_safe`, `_guess_season_length`, `_metrics`, `_regularize_series`, `Context`).
-
-**Implementation:**
-
-```python
 # =============================================================================
 # SKILLS BOOTSTRAP — helpers + Context
 # Executed once before Tool sections are loaded
@@ -290,25 +232,3 @@ class Context:
         self.nf_best_model = None
         self.nf_cv_full = None
         self.nf_pred_col = None
-```
-
-## Context Reference
-
-The `ctx` object is available to all tools:
-
-```python
-# ctx attributes:
-ctx.data              # pd.DataFrame with 'date' + value columns
-ctx.original_data     # Backup DataFrame
-ctx.data_name         # str
-ctx.freq_cache        # Optional[str]
-ctx.anomaly_store     # Dict[str, List[int]] - cached indices
-ctx.anomaly_meta      # Dict[str, Dict[str, Any]] - metadata
-
-# ctx properties:
-ctx.loaded            # bool
-ctx.value_columns     # List[str]
-ctx.is_multivariate   # bool
-```
-
----

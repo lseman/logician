@@ -8,13 +8,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from rich.text import Text
+from src.agent import create_agent
+from src.logging_utils import get_logger
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Input, RichLog, Static
-
-from src.agent import create_agent
-from src.logging_utils import get_logger
 
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = Path(__file__).with_name("agent_config.json")

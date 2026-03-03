@@ -5,8 +5,12 @@ Unified tools package with skill-aware loading and prompt rendering.
 
 from __future__ import annotations
 
+import inspect
 import json
+import re
+import sys
 import time
+import types
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, TypedDict
 
@@ -67,6 +71,9 @@ class ToolRegistry:
         }
         self._execution_globals["call_tool"] = self.call_tool
         self._execution_globals["_safe_json"] = _safe_json_fallback
+        self._legacy_py_tool_metadata_by_module: Optional[
+            dict[str, dict[str, dict[str, Any]]]
+        ] = None
 
         self._bootstrapped: bool = False
         self._version: int = 0
@@ -172,36 +179,394 @@ class ToolRegistry:
         return self.execute(call, use_toon=False)
 
     def load_tools_from_skills(self) -> None:
+        python_count = self._load_python_skill_modules()
+
         skill_contents = self._catalog.read_skill_source_contents()
-        if not skill_contents:
-            self._log.warning(
-                "No skills source found (checked %s and %s)",
-                self.skills_md_path,
-                self.skills_dir_path,
+        guidance_contents = [
+            (path, content)
+            for path, content in skill_contents
+            if path.name.upper() == "SKILL.MD"
+        ]
+        if guidance_contents:
+            self._catalog.build_skill_catalog(guidance_contents)
+            self._log.info(
+                "Loaded %d guidance skill card(s) from SKILL.md",
+                len(guidance_contents),
             )
-            return
+        elif not skill_contents:
+            self._log.info("No SKILL.md guidance sources found")
 
-        # build_skill_catalog parses and caches ALL tool sections in one pass.
-        # We reuse catalog.all_tool_sections instead of re-parsing every file.
-        self._catalog.build_skill_catalog(skill_contents)
-        self._run_bootstrap_blocks(skill_contents)
+        if python_count > 0:
+            self._version += 1
 
-        tool_sections = self._catalog.all_tool_sections
-        for tool_info in tool_sections:
-            try:
-                self._register_tool_from_section(tool_info)
-            except Exception as e:
-                self._log.error(
-                    "Failed to register tool '%s': %s",
-                    tool_info.get("name", "unknown"),
-                    e,
-                )
-        self._log.info(
-            "Loaded %d tools from %d skill source(s)",
-            len(tool_sections),
-            len(skill_contents),
+    def _load_python_skill_modules(self) -> int:
+        if not self.skills_dir_path.is_dir():
+            return 0
+
+        py_skill_files = sorted(
+            p
+            for p in self.skills_dir_path.rglob("*.py")
+            if p.name != "__init__.py" and not p.name.startswith("_")
         )
-        self._version += 1
+        if not py_skill_files:
+            return 0
+
+        total_registered = 0
+        for module_path in py_skill_files:
+            total_registered += self._register_tools_from_python_module(module_path)
+
+        self._log.info(
+            "Loaded %d tool(s) from %d Python skill module(s)",
+            total_registered,
+            len(py_skill_files),
+        )
+        return total_registered
+
+    def _register_tools_from_python_module(self, module_path: Path) -> int:
+        code = module_path.read_text(encoding="utf-8")
+        collector = self._LLMToolCollector()
+        legacy_meta = self._legacy_md_tool_metadata_for_module(module_path)
+        execution_globals = dict(self._execution_globals)
+        execution_globals["llm"] = collector
+        module_name = "skills_" + re.sub(
+            r"[^a-zA-Z0-9_]+",
+            "_",
+            str(module_path.relative_to(self.skills_dir_path).with_suffix("")),
+        ).strip("_")
+        transient_module = types.ModuleType(module_name)
+        transient_module.__file__ = str(module_path)
+        sys.modules[module_name] = transient_module
+        execution_globals["__file__"] = str(module_path)
+        execution_globals["__name__"] = module_name
+
+        exec(code, execution_globals, execution_globals)
+        transient_module.__dict__.update(execution_globals)
+        registered = 0
+        skill_id = self._catalog._skill_id_from_source(module_path)
+
+        for tool_fn in collector.tools:
+            meta = getattr(tool_fn, "__llm_tool_meta__", {})
+            tool_name = str(
+                meta.get("name") or getattr(tool_fn, "__name__", "")
+            ).strip()
+            if not tool_name:
+                continue
+            if tool_name in self._tools:
+                self._log.info(
+                    "Skipping Python tool '%s' from %s because name is already registered",
+                    tool_name,
+                    module_path,
+                )
+                continue
+
+            legacy_info = legacy_meta.get(tool_name, {})
+            description = str(
+                legacy_info.get("description")
+                or meta.get("description")
+                or inspect.getdoc(tool_fn)
+                or ""
+            ).strip()
+            tool_fn.__doc__ = self._compose_tool_docstring(
+                tool_fn,
+                base_description=description,
+                legacy_info=legacy_info,
+            )
+            params = self._parameters_from_signature(tool_fn)
+            wrapped = self._wrap_tool_function(tool_fn, tool_name)
+            self._tools[tool_name] = Tool(
+                name=tool_name,
+                description=description,
+                parameters=params,
+                function=wrapped,
+                skill_id=skill_id,
+                source_path=str(module_path),
+            )
+            self._catalog.tool_docs[tool_name] = inspect.getdoc(tool_fn) or description
+            self._log.info("✓ Loaded Python tool: %s (%s)", tool_name, module_path)
+            registered += 1
+
+        for key, value in execution_globals.items():
+            if key in {"__name__", "__file__", "llm"}:
+                continue
+            self._execution_globals[key] = value
+        self._execution_globals["call_tool"] = self.call_tool
+        if "ctx" not in self._execution_globals:
+            self._execution_globals["ctx"] = None
+        if "_safe_json" not in self._execution_globals:
+            self._execution_globals["_safe_json"] = _safe_json_fallback
+        return registered
+
+    def _parameters_from_signature(
+        self, func: Callable[..., Any]
+    ) -> list[ToolParameter]:
+        sig = inspect.signature(func)
+        out: list[ToolParameter] = []
+        for p in sig.parameters.values():
+            if p.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+            ann = p.annotation
+            ptype = "string"
+            if ann is not inspect._empty:
+                ptype = self._annotation_to_type_name(ann)
+            required = p.default is inspect._empty
+            out.append(
+                ToolParameter(
+                    name=p.name,
+                    type=ptype,
+                    description="",
+                    required=required,
+                )
+            )
+        return out
+
+    def _annotation_to_type_name(self, annotation: Any) -> str:
+        origin = getattr(annotation, "__origin__", None)
+        if origin in (list, List):
+            return "list"
+        if origin in (dict, Dict):
+            return "dict"
+        if annotation in (int,):
+            return "int"
+        if annotation in (float,):
+            return "float"
+        if annotation in (bool,):
+            return "bool"
+        if annotation in (list,):
+            return "list"
+        if annotation in (dict,):
+            return "dict"
+        if annotation in (str,):
+            return "string"
+        text = str(annotation)
+        if "int" in text:
+            return "int"
+        if "float" in text:
+            return "float"
+        if "bool" in text:
+            return "bool"
+        if "list" in text:
+            return "list"
+        if "dict" in text:
+            return "dict"
+        return "string"
+
+    def _legacy_md_tool_metadata_for_module(
+        self, module_path: Path
+    ) -> dict[str, dict[str, Any]]:
+        rel_module = str(module_path.relative_to(self.skills_dir_path)).replace(
+            "\\", "/"
+        )
+        py_snapshot = self._load_python_legacy_tool_metadata_map()
+        out: dict[str, dict[str, Any]] = dict(py_snapshot.get(rel_module, {}))
+        if not out and rel_module in ("99_qol/00_firecrawl.py", "99_qol/tools.py"):
+            out = dict(py_snapshot.get("99_qol/80_websearch.py", {}))
+
+        md_path = module_path.with_suffix(".md")
+        if not md_path.is_file():
+            return out
+        try:
+            raw = md_path.read_text(encoding="utf-8")
+            manifest, content = self._catalog._split_frontmatter(raw)
+            sections = self._catalog.parse_tool_sections(content, md_path)
+            skill_summary = manifest.get("summary") or self._catalog._skill_summary(
+                content
+            )
+            triggers = self._catalog._manifest_list(manifest, "triggers")
+            when_not_to_use = self._catalog._manifest_list(manifest, "when_not_to_use")
+            anti_triggers = self._catalog._manifest_list(manifest, "anti_triggers")
+
+            for sec in sections:
+                section_content = sec.get("content", "")
+                out[sec["name"]] = {
+                    "description": sec.get("description", ""),
+                    "parameters": sec.get("parameters", []),
+                    "returns": self._extract_markdown_field(section_content, "Returns"),
+                    "side_effects": self._extract_markdown_field(
+                        section_content, "Side effects"
+                    ),
+                    "triggers": triggers,
+                    "when_not_to_use": when_not_to_use,
+                    "anti_triggers": anti_triggers,
+                    "skill_summary": str(skill_summary or "").strip(),
+                }
+            return out
+        except Exception as exc:
+            self._log.warning(
+                "Failed to parse legacy markdown metadata for %s: %s",
+                module_path,
+                exc,
+            )
+            return out
+
+    def _load_python_legacy_tool_metadata_map(
+        self,
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        if self._legacy_py_tool_metadata_by_module is not None:
+            return self._legacy_py_tool_metadata_by_module
+
+        metadata_path = self.skills_dir_path / "_legacy_tool_metadata.py"
+        if not metadata_path.is_file():
+            self._legacy_py_tool_metadata_by_module = {}
+            return self._legacy_py_tool_metadata_by_module
+
+        try:
+            namespace: dict[str, Any] = {}
+            exec(metadata_path.read_text(encoding="utf-8"), namespace, namespace)
+            raw = namespace.get("TOOL_METADATA_BY_MODULE", {})
+            if not isinstance(raw, dict):
+                raw = {}
+            self._legacy_py_tool_metadata_by_module = {
+                str(k): v for k, v in raw.items() if isinstance(v, dict)
+            }
+            return self._legacy_py_tool_metadata_by_module
+        except Exception as exc:
+            self._log.warning(
+                "Failed to load Python legacy tool metadata from %s: %s",
+                metadata_path,
+                exc,
+            )
+            self._legacy_py_tool_metadata_by_module = {}
+            return self._legacy_py_tool_metadata_by_module
+
+    def _extract_markdown_field(self, section_content: str, field_name: str) -> str:
+        match = re.search(
+            rf"\*\*{re.escape(field_name)}:\*\*\s*(.+?)(?:\n\n\*\*|$)",
+            section_content,
+            flags=re.DOTALL,
+        )
+        if not match:
+            return ""
+        return re.sub(r"\s+", " ", match.group(1)).strip()
+
+    def _compose_tool_docstring(
+        self,
+        tool_fn: Callable[..., Any],
+        *,
+        base_description: str,
+        legacy_info: dict[str, Any],
+    ) -> str:
+        description = (
+            base_description.strip()
+            or "Run this tool when it best fits the user request."
+        )
+
+        triggers = [
+            str(t).strip() for t in legacy_info.get("triggers", []) if str(t).strip()
+        ]
+        if not triggers:
+            triggers = [
+                f"user asks to {getattr(tool_fn, '__name__', 'run this tool').replace('_', ' ')}"
+            ]
+
+        avoid_candidates = []
+        avoid_candidates.extend(
+            str(item).strip()
+            for item in legacy_info.get("when_not_to_use", [])
+            if str(item).strip()
+        )
+        avoid_candidates.extend(
+            str(item).strip()
+            for item in legacy_info.get("anti_triggers", [])
+            if str(item).strip()
+        )
+        avoid_when = (
+            avoid_candidates[0]
+            if avoid_candidates
+            else "another specialized tool is a clearer match"
+        )
+
+        legacy_params = legacy_info.get("parameters", [])
+        if legacy_params:
+
+            def _param_fields(param: Any) -> tuple[str, str, bool, str]:
+                if isinstance(param, dict):
+                    return (
+                        str(param.get("name", "")).strip(),
+                        str(param.get("type", "string")).strip(),
+                        bool(param.get("required", False)),
+                        str(param.get("description", "")).strip(),
+                    )
+                return (
+                    str(getattr(param, "name", "")).strip(),
+                    str(getattr(param, "type", "string")).strip(),
+                    bool(getattr(param, "required", False)),
+                    str(getattr(param, "description", "")).strip(),
+                )
+
+            parts: list[str] = []
+            for param in legacy_params:
+                pname, ptype, prequired, pdesc = _param_fields(param)
+                if not pname:
+                    continue
+                parts.append(
+                    f"{pname} ({ptype}, {'required' if prequired else 'optional'}): {pdesc}"
+                )
+            inputs_text = "; ".join(parts) if parts else "none"
+        else:
+            sig = inspect.signature(tool_fn)
+            args: list[str] = []
+            for p in sig.parameters.values():
+                if p.kind in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                ):
+                    continue
+                if p.default is inspect._empty:
+                    args.append(f"{p.name} (required)")
+                else:
+                    args.append(f"{p.name} (optional, default={p.default!r})")
+            inputs_text = ", ".join(args) if args else "none"
+
+        returns_text = str(legacy_info.get("returns") or "").strip()
+        if not returns_text:
+            returns_text = (
+                "JSON string payload with status, results, and/or error details."
+            )
+
+        side_effects = str(legacy_info.get("side_effects") or "").strip()
+        if not side_effects:
+            side_effects = (
+                "May read/update shared tool context depending on implementation."
+            )
+
+        return (
+            f"Use when: {description}\n\n"
+            f"Triggers: {', '.join(triggers)}.\n"
+            f"Avoid when: {avoid_when}.\n"
+            f"Inputs: {inputs_text}.\n"
+            f"Returns: {returns_text}.\n"
+            f"Side effects: {side_effects}"
+        )
+
+    class _LLMToolCollector:
+        def __init__(self) -> None:
+            self.tools: list[Callable[..., Any]] = []
+
+        def tool(
+            self,
+            func: Optional[Callable[..., Any]] = None,
+            *,
+            name: Optional[str] = None,
+            description: Optional[str] = None,
+        ) -> Callable[..., Any]:
+            def decorator(inner: Callable[..., Any]) -> Callable[..., Any]:
+                setattr(
+                    inner,
+                    "__llm_tool_meta__",
+                    {
+                        "name": name or getattr(inner, "__name__", ""),
+                        "description": description,
+                    },
+                )
+                self.tools.append(inner)
+                return inner
+
+            if func is None:
+                return decorator
+            return decorator(func)
 
     def reload_skills(self) -> int:
         """Reload all skill files from disk, re-registering every tool.
@@ -376,6 +741,13 @@ class ToolRegistry:
     def _wrap_tool_function(self, func: Callable, tool_name: str) -> Callable:
         def wrapped(**kwargs):
             try:
+                func_globals = getattr(func, "__globals__", None)
+                if isinstance(func_globals, dict):
+                    func_globals["ctx"] = self._execution_globals.get("ctx")
+                    func_globals["_safe_json"] = self._execution_globals.get(
+                        "_safe_json", _safe_json_fallback
+                    )
+                    func_globals["call_tool"] = self.call_tool
                 return func(**kwargs)
             except Exception as e:
                 self._log.exception("Error in tool '%s'", tool_name)

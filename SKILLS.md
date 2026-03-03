@@ -2,22 +2,33 @@
 
 Skills are organised under `skills/` in category subdirectories.
 
+## Skill Formats
+
+- `SKILL.md`: instruction-only guidance skills (no executable tools).
+- `*.py`: executable tools exposed as plain Python functions decorated with `@llm.tool`.
+- `skills/_legacy_tool_metadata.py`: migrated metadata snapshot (description/parameters/triggers/returns) used to compose rich runtime tool docstrings.
+
 ## Layout
 
 ### `skills/00_timeseries/` — time-series analysis tools
-- `00_overview.md`: setup, playbooks, bootstrap helpers, and context reference
-- `10_data_loading.md`: loading and data setup tools
-- `20_preprocessing.md`: cleaning and transformation tools
-- `30_analysis.md`: statistical analysis, trend, seasonality, anomaly, and break detection
-- `40_forecasting.md`: baseline and ensemble forecasting tools
-- `50_pipelines.md`: end-to-end orchestration tools
-- `60_plotting.md`: visualization tools
-- `70_recommendations.md`: suggestion helpers
+- Canonical executable modules with `@llm.tool` functions:
+	- `00_overview.py` (helpers/bootstrap)
+	- `10_data_loading.py`
+	- `20_preprocessing.py`
+	- `30_analysis.py`
+	- `40_forecasting.py`
+	- `50_pipelines.py`
+	- `60_plotting.py`
+	- `70_recommendations.py`
 
 ### `skills/99_qol/` — general quality-of-life tools
-- `80_websearch.md`: web search and scraping via self-hosted Firecrawl
+- `tools.py`: canonical executable tool module with `@llm.tool` functions.
 
 ## Loader behavior
-`ToolRegistry` scans all `*.md` files under `skills/` **recursively** (subdirectories
-are discovered automatically). Files are loaded in alphabetical path order, so
-subdirectory prefix numbers control load sequence across categories.
+`ToolRegistry` loads in this order:
+
+1. Python skill modules: all `skills/**/*.py` files (except private/init modules), registering any `@llm.tool` functions.
+2. Metadata enrichment: migrated tool metadata from `skills/_legacy_tool_metadata.py` is applied to runtime docstrings.
+3. Guidance skills: `SKILL.md` files are loaded as instruction-only cards.
+
+Executable legacy `## Tool:` markdown sections have been fully migrated and removed.
