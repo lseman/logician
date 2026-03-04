@@ -9,9 +9,9 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
-from .evaluation import EvalOutput, EvalSpec, _fitness_from_runs, _stable_rng_from_tag
+from .evaluation import EvalSpec, _fitness_from_runs, _stable_rng_from_tag
 from .metaheuristics.ga import GAConfig, GeneticAlgorithm
-from .models import EoHConfig, EoHResult, Individual
+from .models import EoHConfig, EoHResult, EvalOutput, Individual
 from .prompts import (
     ParsedHeuristic,
     _e1_crossover_prompt,

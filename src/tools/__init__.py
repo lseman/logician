@@ -852,6 +852,16 @@ class ToolRegistry:
             )
         return out
 
+    def openai_tool_schemas(
+        self, include_tool_names: Sequence[str] | None = None
+    ) -> list[_OpenAIToolSchema]:
+        """Public alias for generating OpenAI-compatible tool schema dicts.
+
+        Used by constrained decoding: pass the returned list as ``tools=`` to
+        ``LlamaCppClient.generate()`` to activate llama.cpp native function calling.
+        """
+        return self._openai_tool_schemas(include_tool_names)
+
     def tools_schema_prompt(
         self,
         use_toon: bool = True,

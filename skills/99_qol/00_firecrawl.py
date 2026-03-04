@@ -19,13 +19,6 @@ _FIRECRAWL_BASE_URL = os.environ.get("FIRECRAWL_URL", "http://localhost:3002")
 _FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY", "")
 
 
-def _safe_json(obj: Any) -> str:
-    try:
-        return json.dumps(obj, indent=2, ensure_ascii=False, default=str)
-    except Exception as exc:
-        return json.dumps({"status": "error", "error": f"json failed: {exc}"})
-
-
 @llm.tool(
     description="Search the web via the self-hosted Firecrawl API and return clean markdown content for the top results."
 )

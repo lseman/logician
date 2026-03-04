@@ -143,6 +143,7 @@ class LlamaCppClient:
         max_tokens: int,
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         if httpx is None:
             raise ImportError(
@@ -151,6 +152,9 @@ class LlamaCppClient:
             )
         with httpx.Client(timeout=self.timeout) as client:
             if self.use_chat:
+                # Constrained decoding via native function-calling disables streaming
+                # (llama.cpp tool_calls delta handling differs; we keep it simple).
+                _use_stream = bool(stream) and not bool(tools)
                 payload = {
                     "messages": [
                         {"role": m.role.value, "content": m.content} for m in messages
@@ -158,16 +162,20 @@ class LlamaCppClient:
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stop": self.stop,
-                    "stream": bool(stream),
+                    "stream": _use_stream,
                 }
+                if tools:
+                    payload["tools"] = tools
+                    payload["tool_choice"] = "auto"
                 url = f"{self.base_url}/v1/chat/completions"
                 self._log.info(
-                    "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s",
+                    "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d",
                     temperature,
                     max_tokens,
-                    stream,
+                    _use_stream,
+                    len(tools) if tools else 0,
                 )
-                if stream:
+                if _use_stream:
                     r = self._request(client, "POST", url, json=payload)
                     full: list[str] = []
                     for line in r.iter_lines():
@@ -177,9 +185,7 @@ class LlamaCppClient:
                         if not data:
                             continue
                         delta = (
-                            data.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content")
+                            data.get("choices", [{}])[0].get("delta", {}).get("content")
                         )
                         if delta:
                             full.append(delta)
@@ -189,7 +195,21 @@ class LlamaCppClient:
                 else:
                     r = self._request(client, "POST", url, json=payload)
                     data = r.json()
-                    return data["choices"][0]["message"]["content"].strip()
+                    msg = data["choices"][0]["message"]
+                    # Native function-call response → reformat to existing tool_call JSON
+                    # so the existing parser handles it without modification.
+                    if msg.get("tool_calls"):
+                        tc = msg["tool_calls"][0]
+                        fn = tc.get("function", {})
+                        name = fn.get("name", "")
+                        try:
+                            args = json.loads(fn.get("arguments") or "{}")
+                        except Exception:
+                            args = {}
+                        return json.dumps(
+                            {"tool_call": {"name": name, "arguments": args}}
+                        )
+                    return (msg.get("content") or "").strip()
             else:
                 prompt = format_messages_for_template(messages, self.template)
                 payload = {
@@ -225,6 +245,26 @@ class LlamaCppClient:
                     r = self._request(client, "POST", url, json=payload)
                     data = r.json()
                     return data.get("content", "").strip()
+
+    def count_tokens(self, text: str) -> int:
+        """Count tokens for *text* via the llama.cpp ``/tokenize`` endpoint.
+
+        Falls back to a character-based estimate (÷4) on any error so callers
+        degrade gracefully when the endpoint is unavailable.
+        """
+        if httpx is None:
+            return max(1, len(text) // 4)
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                r = client.post(
+                    f"{self.base_url}/tokenize",
+                    json={"content": text},
+                )
+                r.raise_for_status()
+                data = r.json()
+                return max(1, len(data.get("tokens", [])))
+        except Exception:
+            return max(1, len(text) // 4)
 
 
 # =====================================================================
@@ -277,6 +317,7 @@ class VLLMClient:
         max_tokens: int,
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
+        tools: list[dict[str, Any]] | None = None,  # accepted but ignored
     ) -> str:
         prompt = format_messages_for_template(messages, self.template)
         sampling_params = SamplingParams(
@@ -299,3 +340,7 @@ class VLLMClient:
         if on_token:
             on_token(text)
         return text
+
+    def count_tokens(self, text: str) -> int:
+        """Character-based token estimate (no external tokenize endpoint available)."""
+        return max(1, len(text) // 4)

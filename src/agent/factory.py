@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..config import Config
+from ..config import Config, ThinkingConfig
 
 if TYPE_CHECKING:
     from .core import Agent
@@ -29,7 +29,19 @@ def create_agent(
 
     if config_overrides:
         for k, v in config_overrides.items():
-            if hasattr(cfg, k):
+            if k == "thinking":
+                if isinstance(v, dict):
+                    v = ThinkingConfig(
+                        **{
+                            kk: vv
+                            for kk, vv in v.items()
+                            if hasattr(ThinkingConfig, kk)
+                            or kk in ThinkingConfig.__dataclass_fields__
+                        }
+                    )
+                if hasattr(cfg, k):
+                    setattr(cfg, k, v)
+            elif hasattr(cfg, k):
                 setattr(cfg, k, v)
 
     return Agent(

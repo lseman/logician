@@ -1,88 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
 # =============================================================================
 # SKILLS BOOTSTRAP — helpers + Context
 # Executed once before Tool sections are loaded
 # =============================================================================
-
-import json
 import numpy as np
 import pandas as pd
-
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-
-# -------------------------
-# JSON helpers
-# -------------------------
-
-def _json_default(o: Any) -> Any:
-    if isinstance(o, (np.integer,)):
-        return int(o)
-    if isinstance(o, (np.floating,)):
-        return float(o)
-    if isinstance(o, (np.ndarray,)):
-        return o.tolist()
-
-    if isinstance(o, (pd.Timestamp, datetime)):
-        return o.isoformat()
-    if isinstance(o, (pd.Timedelta,)):
-        return str(o)
-    if isinstance(o, (pd.Index,)):
-        return o.astype(str).tolist()
-
-    if hasattr(o, "to_dict"):
-        try:
-            return o.to_dict()
-        except Exception:
-            pass
-
-    return str(o)
-
-
-def _safe_json(d) -> str:
-    try:
-        return json.dumps(d, indent=2, ensure_ascii=False, default=_json_default)
-    except Exception as e:
-        return json.dumps(
-            {"status": "error", "error": f"JSON serialization failed: {e}"},
-            indent=2,
-            ensure_ascii=False,
-        )
-
-
-def _try_parse_json(obj: Any) -> Dict[str, Any]:
-    if isinstance(obj, dict):
-        return obj
-
-    if isinstance(obj, str):
-        s = obj.strip()
-        if not s:
-            return {"status": "error", "error": "empty response"}
-
-        try:
-            parsed = json.loads(s)
-            return parsed if isinstance(parsed, dict) else {"status": "ok", "data": parsed}
-        except Exception:
-            # attempt to salvage a dict substring
-            try:
-                start, end = s.find("{"), s.rfind("}")
-                if start != -1 and end != -1 and end >= start:
-                    parsed = json.loads(s[start:end+1])
-                    return parsed if isinstance(parsed, dict) else {"status": "ok", "data": parsed}
-            except Exception:
-                pass
-
-        return {"status": "error", "error": "invalid JSON payload", "raw": s[:2000]}
-
-    return {"status": "error", "error": f"unsupported response type: {type(obj).__name__}"}
-
 
 # -------------------------
 # Frequency inference
 # -------------------------
+
 
 def _infer_freq_safe(index: pd.DatetimeIndex) -> Optional[str]:
     try:
@@ -96,7 +27,12 @@ def _infer_freq_safe(index: pd.DatetimeIndex) -> Optional[str]:
         try:
             deltas = (index[1:] - index[:-1]).to_series().dt.total_seconds()
         except Exception:
-            deltas = pd.Series([(index[i] - index[i - 1]).total_seconds() for i in range(1, len(index))])
+            deltas = pd.Series(
+                [
+                    (index[i] - index[i - 1]).total_seconds()
+                    for i in range(1, len(index))
+                ]
+            )
 
         if deltas.empty:
             return None
@@ -123,7 +59,10 @@ def _infer_freq_safe(index: pd.DatetimeIndex) -> Optional[str]:
 # Regularization
 # -------------------------
 
-def _regularize_series(df: pd.DataFrame, freq: Optional[str], method: str) -> pd.DataFrame:
+
+def _regularize_series(
+    df: pd.DataFrame, freq: Optional[str], method: str
+) -> pd.DataFrame:
     df = df.sort_values("date").drop_duplicates(subset=["date"]).set_index("date")
     freq = freq or _infer_freq_safe(df.index)
 
@@ -147,6 +86,7 @@ def _regularize_series(df: pd.DataFrame, freq: Optional[str], method: str) -> pd
 # -------------------------
 # Season length guess
 # -------------------------
+
 
 def _guess_season_length(y: np.ndarray) -> int:
     y = np.asarray(y, dtype=float)
@@ -172,6 +112,7 @@ def _guess_season_length(y: np.ndarray) -> int:
 # Metrics
 # -------------------------
 
+
 def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -186,13 +127,16 @@ def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
         "RMSE": float(np.sqrt(mse_val)),
         "MSE": mse_val,
         "MAE": float(np.mean(np.abs(err))),
-        "MAPE": float(np.mean(np.abs(err) / np.maximum(np.abs(y_true[ok]), 1e-8)) * 100.0),
+        "MAPE": float(
+            np.mean(np.abs(err) / np.maximum(np.abs(y_true[ok]), 1e-8)) * 100.0
+        ),
     }
 
 
 # -------------------------
 # Context
 # -------------------------
+
 
 @dataclass
 class Context:

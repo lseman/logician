@@ -102,6 +102,38 @@ class Config:
     skill_include_playbooks: bool = True
     skill_compact_fallback: bool = True
 
+    # Auto-compact: keep session from growing unboundedly
+    auto_compact: bool = True
+    auto_compact_threshold: int = 2  # compact when messages > history_limit * threshold
+
+    # Constrained decoding: use OpenAI function-calling protocol (use_chat_api=True only)
+    # llama.cpp will enforce the grammar server-side, eliminating malformed tool-call parses.
+    constrained_decoding: bool = False
+
+    # Tool result cache: per-Agent in-memory cache of read-only tool results across turns.
+    # Tools whose names contain any entry in tool_cache_write_patterns are never cached.
+    tool_cache_enabled: bool = True
+    tool_cache_ttl: int = 3600  # seconds; 0 = never expire
+    tool_cache_max_size: int = 256  # max number of cached entries
+    tool_cache_write_patterns: list = field(
+        default_factory=lambda: [
+            "write",
+            "exec",
+            "commit",
+            "push",
+            "apply_patch",
+            "delete",
+            "remove",
+            "create_file",
+            "mkdir",
+        ]
+    )
+
+    # Token-accurate context budgeting: set to your model's context window (e.g. 4096)
+    # to enforce a hard token cap before each generate() call via the /tokenize endpoint.
+    # 0 = disabled — char-based limits (tool_result_max_chars, assistant_ctx_max_chars) apply.
+    context_token_budget: int = 0
+
     # NEW — Thinking pipeline (Prompt + Reasoner)
     thinking: ThinkingConfig | None = None
 

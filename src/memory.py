@@ -1,18 +1,19 @@
-
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional
 from dataclasses import dataclass, field
+from typing import Any, Callable, List, Optional
 
-from .db import DocumentDB, MessageDB
-from .messages import Message, MessageRole
 from .config import Config
+from .db import DocumentDB, MessageDB
+from .messages import Message
+
 
 @dataclass
 class Memory:
     """
     Manages short-term (conversation history) and long-term (vector/rag) memory.
     """
+
     config: Config
     db_path: str = "agent_sessions.db"
     embedding_model: Optional[str] = None
@@ -27,9 +28,12 @@ class Memory:
             db_path=self.db_path,
             vector_path=self.config.vector_path,
             embedding_model_name=self._embedding_model_name,
+            # Reranking on short chat turns is expensive and yields no benefit;
+            # cross-encoder reranking is reserved for document RAG (DocumentDB).
+            rerank_enabled=False,
         )
         if not self.lazy_rag and self.config.rag_enabled and self._embedding_model_name:
-             self._ensure_doc_db()
+            self._ensure_doc_db()
 
     def _ensure_doc_db(self) -> None:
         if self._doc_db is not None:
@@ -59,7 +63,9 @@ class Memory:
             recent_tail=history_recent_tail,
         )
 
-    def get_rag_context(self, message: str, event_cb: Callable[..., None]) -> Optional[str]:
+    def get_rag_context(
+        self, message: str, event_cb: Callable[..., None]
+    ) -> Optional[str]:
         """Retrieves relevant RAG context for the message."""
         if not self.config.rag_enabled:
             return None
@@ -78,7 +84,7 @@ class Memory:
             f"[Doc: {r['metadata'].get('source', 'unknown')}] {r['content']}"
             for r in rag_results
         )
-        
+
         event_cb(
             "rag_retrieval",
             n_results=len(rag_results),
@@ -121,7 +127,7 @@ class Memory:
     def list_sessions(self) -> List[tuple[str, str]]:
         """Lists all stored sessions."""
         return self._db.list_sessions()
-    
+
     def semantic_search(
         self,
         query: str,
@@ -129,6 +135,6 @@ class Memory:
         k: int = 8,
         retrieval_mode: str = "vector",
     ) -> List[Message]:
-         return self._db.global_semantic_search(
+        return self._db.global_semantic_search(
             query, k, session_filter=session_id, retrieval_mode=retrieval_mode
         )
