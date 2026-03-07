@@ -42,22 +42,46 @@ Return ONLY the 3 examples, no preamble.
             [{"role": "user", "content": self._EXEMPLAR_PROMPT}],
             temperature=0.6,
             max_tokens=self.config.get("max_tokens", 1024),
-        )
+        ).strip()
 
         solve_prompt = (
             exemplars.strip()
             + f"\n\n---\n\nNow answer the following using the same structured reasoning:\n\n"
-            f"Q: {query}\nREASONING:"
+            f"Q: {query}\n"
+            "REASONING: <explain briefly>\n"
+            "Final answer: <your final answer>"
         )
 
         out = self._chat(
             [{"role": "user", "content": solve_prompt}],
             temperature=self.config.get("temperature", 0.3),
-        )
+        ).strip()
 
-        # Prepend "REASONING:" that we injected as part of the prompt
-        full = "REASONING:" + out
+        if not out:
+            fallback = (initial_solution or "").strip()
+            return ReasoningTrace(
+                reasoning="",
+                answer=fallback,
+                metadata={
+                    "method": "auto_cot",
+                    "degraded": True,
+                    "reason": "empty_generation",
+                    "exemplar_preview": exemplars[:200],
+                },
+            )
+
+        full = out if out.lstrip().lower().startswith("reasoning:") else f"REASONING: {out}"
         reasoning, answer = self._split(full)
+
+        answer = (answer or "").strip()
+        bad_answer_tokens = {"reasoning:", "reasoning", "final answer:", "final answer"}
+        if not answer or answer.lower() in bad_answer_tokens:
+            extracted = (self._extract_answer(out) or "").strip()
+            if extracted.lower() not in bad_answer_tokens:
+                answer = extracted
+            else:
+                answer = (initial_solution or out).strip()
+
         return ReasoningTrace(
             reasoning,
             answer,

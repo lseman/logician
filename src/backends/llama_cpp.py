@@ -1,4 +1,3 @@
-# agent_core/backends.py
 from __future__ import annotations
 
 import json
@@ -11,62 +10,11 @@ try:
 except Exception:  # pragma: no cover
     httpx = None  # type: ignore
 
-from .logging_utils import get_logger
-from .messages import Message, MessageRole
-
-# ===================== Optional vLLM deps =====================
-try:
-    from vllm import LLM, SamplingParams  # type: ignore
-
-    HAS_VLLM = True
-except Exception:  # pragma: no cover
-    LLM = None  # type: ignore
-    SamplingParams = None  # type: ignore
-    HAS_VLLM = False
+from ..logging_utils import get_logger
+from ..messages import Message
+from .common import count_tokens_local, format_messages_for_template
 
 
-def format_messages_for_template(
-    messages: list[Message],
-    template: str,
-) -> str:
-    """Convert chat messages to a single prompt according to a template."""
-
-    if template == "chatml":
-        out: list[str] = []
-        for m in messages:
-            out.append(f"<|im_start|>{m.role.value}\n{m.content}<|im_end|>")
-        out.append("<|im_start|>assistant\n")
-        return "\n".join(out)
-
-    if template == "llama2":
-        segs: list[str] = []
-        sys = [m for m in messages if m.role == MessageRole.SYSTEM]
-        if sys:
-            segs.append(f"<s>[INST] <<SYS>>\n{sys[-1].content}\n<</SYS>>\n")
-        for m in messages:
-            if m.role == MessageRole.USER:
-                segs.append(f"{m.content} [/INST] ")
-            elif m.role == MessageRole.ASSISTANT:
-                segs.append(f"{m.content} </s><s>[INST] ")
-        return "".join(segs)
-
-    if template == "zephyr":
-        out: list[str] = []
-        for m in messages:
-            out.append(f"<|{m.role.value}|>\n{m.content}</s>")
-        out.append("<|assistant|>\n")
-        return "\n".join(out)
-
-    # Fallback: simple role-tagged text
-    return (
-        "".join(f"{m.role.value.upper()}: {m.content}\n" for m in messages)
-        + "ASSISTANT: "
-    )
-
-
-# =====================================================================
-# Llama.cpp Client (HTTP)
-# =====================================================================
 class LlamaCppClient:
     def __init__(
         self,
@@ -176,27 +124,40 @@ class LlamaCppClient:
                     len(tools) if tools else 0,
                 )
                 if _use_stream:
-                    r = self._request(client, "POST", url, json=payload)
-                    full: list[str] = []
-                    for line in r.iter_lines():
-                        if not line:
-                            continue
-                        data = self._parse_stream_json_line(line)
-                        if not data:
-                            continue
-                        delta = (
-                            data.get("choices", [{}])[0].get("delta", {}).get("content")
+                    with client.stream("POST", url, json=payload) as r:
+                        r.raise_for_status()
+                        full: list[str] = []
+                        _stream_finish_reason: str | None = None
+                        for line in r.iter_lines():
+                            if not line:
+                                continue
+                            data = self._parse_stream_json_line(line)
+                            if not data:
+                                continue
+                            _choice = data.get("choices", [{}])[0]
+                            delta = _choice.get("delta", {}).get("content")
+                            if delta:
+                                full.append(delta)
+                                if on_token:
+                                    on_token(delta)
+                            if _choice.get("finish_reason"):
+                                _stream_finish_reason = _choice["finish_reason"]
+                    if _stream_finish_reason == "length":
+                        self._log.warning(
+                            "Response truncated (finish_reason=length): "
+                            "max_tokens limit reached mid-generation"
                         )
-                        if delta:
-                            full.append(delta)
-                            if on_token:
-                                on_token(delta)
                     return "".join(full).strip()
                 else:
                     r = self._request(client, "POST", url, json=payload)
                     data = r.json()
+                    if data.get("choices", [{}])[0].get("finish_reason") == "length":
+                        self._log.warning(
+                            "Response truncated (finish_reason=length): "
+                            "max_tokens limit reached mid-generation"
+                        )
                     msg = data["choices"][0]["message"]
-                    # Native function-call response → reformat to existing tool_call JSON
+                    # Native function-call response -> reformat to existing tool_call JSON
                     # so the existing parser handles it without modification.
                     if msg.get("tool_calls"):
                         tc = msg["tool_calls"][0]
@@ -227,33 +188,56 @@ class LlamaCppClient:
                     stream,
                 )
                 if stream:
-                    r = self._request(client, "POST", url, json=payload)
-                    full: list[str] = []
-                    for line in r.iter_lines():
-                        if not line:
-                            continue
-                        data = self._parse_stream_json_line(line)
-                        if not data:
-                            continue
-                        tok = data.get("content")
-                        if tok:
-                            full.append(tok)
-                            if on_token:
-                                on_token(tok)
+                    with client.stream("POST", url, json=payload) as r:
+                        r.raise_for_status()
+                        full: list[str] = []
+                        _stopped_limit = False
+                        for line in r.iter_lines():
+                            if not line:
+                                continue
+                            data = self._parse_stream_json_line(line)
+                            if not data:
+                                continue
+                            tok = data.get("content")
+                            if tok:
+                                full.append(tok)
+                                if on_token:
+                                    on_token(tok)
+                            if data.get("stopped_limit"):
+                                _stopped_limit = True
+                    if _stopped_limit:
+                        self._log.warning(
+                            "Response truncated (stopped_limit=true): "
+                            "n_predict limit reached mid-generation"
+                        )
                     return "".join(full).strip()
                 else:
                     r = self._request(client, "POST", url, json=payload)
                     data = r.json()
+                    if data.get("stopped_limit"):
+                        self._log.warning(
+                            "Response truncated (stopped_limit=true): "
+                            "n_predict limit reached mid-generation"
+                        )
                     return data.get("content", "").strip()
 
     def count_tokens(self, text: str) -> int:
-        """Count tokens for *text* via the llama.cpp ``/tokenize`` endpoint.
+        """Count tokens for *text*.
 
-        Falls back to a character-based estimate (÷4) on any error so callers
-        degrade gracefully when the endpoint is unavailable.
+        Priority:
+        1. tiktoken (local, zero-latency) via count_tokens_local()
+        2. llama.cpp ``/tokenize`` endpoint (server-exact, adds HTTP round-trip)
+        3. char//4 heuristic (last resort)
         """
+        # Fast local path — tiktoken gives ≈95% accuracy vs the server tokenizer
+        # at zero latency, which is ideal for budget trimming decisions.
+        from .common import HAS_TIKTOKEN
+        if HAS_TIKTOKEN:
+            return count_tokens_local(text)
+
+        # Slower-but-exact server path when tiktoken is not installed.
         if httpx is None:
-            return max(1, len(text) // 4)
+            return count_tokens_local(text)
         try:
             with httpx.Client(timeout=5.0) as client:
                 r = client.post(
@@ -264,83 +248,4 @@ class LlamaCppClient:
                 data = r.json()
                 return max(1, len(data.get("tokens", [])))
         except Exception:
-            return max(1, len(text) // 4)
-
-
-# =====================================================================
-# vLLM Client (in-process Python backend)
-# =====================================================================
-class VLLMClient:
-    """
-    In-process vLLM backend.
-
-    Notes:
-    - Uses the Python API (no HTTP).
-    - For simplicity, streaming here calls `on_token` once with the full text.
-    """
-
-    def __init__(
-        self,
-        model: str,
-        chat_template: str,
-        stop: Iterable[str],
-        tensor_parallel_size: int = 1,
-        gpu_memory_utilization: float = 0.9,
-        dtype: str = "auto",
-    ) -> None:
-        if not HAS_VLLM:
-            raise ImportError("vLLM is not installed. Install with: pip install vllm")
-        self.template = chat_template
-        self.stop = list(stop)
-        self._log = get_logger("agent.vllm")
-        self._log.info(
-            "Loading vLLM model=%s tp=%d mem=%.2f dtype=%s",
-            model,
-            tensor_parallel_size,
-            gpu_memory_utilization,
-            dtype,
-        )
-        extra_kwargs: dict[str, Any] = {}
-        if dtype != "auto":
-            extra_kwargs["dtype"] = dtype
-        self.llm = LLM(
-            model=model,
-            tensor_parallel_size=tensor_parallel_size,
-            gpu_memory_utilization=gpu_memory_utilization,
-            **extra_kwargs,
-        )
-
-    def generate(
-        self,
-        messages: list[Message],
-        temperature: float,
-        max_tokens: int,
-        stream: bool = False,
-        on_token: Callable[[str], None] | None = None,
-        tools: list[dict[str, Any]] | None = None,  # accepted but ignored
-    ) -> str:
-        prompt = format_messages_for_template(messages, self.template)
-        sampling_params = SamplingParams(
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stop=self.stop,
-        )
-        self._log.info(
-            "vLLM.generate temp=%s max_tokens=%s stream=%s",
-            temperature,
-            max_tokens,
-            stream,
-        )
-
-        outputs = self.llm.generate(
-            [prompt], sampling_params, use_tqdm=False, stream=False
-        )
-        text = outputs[0].outputs[0].text
-        text = text.strip()
-        if on_token:
-            on_token(text)
-        return text
-
-    def count_tokens(self, text: str) -> int:
-        """Character-based token estimate (no external tokenize endpoint available)."""
-        return max(1, len(text) // 4)
+            return count_tokens_local(text)

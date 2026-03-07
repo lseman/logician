@@ -231,6 +231,7 @@ class SkillCard:
     name: str
     summary: str
     source_path: str
+    description: str = ""
     tool_names: list[str] = field(default_factory=list)
     playbooks: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)

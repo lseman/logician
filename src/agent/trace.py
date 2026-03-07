@@ -185,12 +185,7 @@ def _render_tool_progress_reminder(
     max_items: int = 8,
 ) -> str:
     if not tool_calls:
-        return (
-            "[Iteration memory]\n"
-            "Already executed tool calls in this run: none yet.\n"
-            "Do NOT repeat identical tool calls once tools start being used.\n"
-            "If enough evidence is already available, provide the final answer."
-        )
+        return ""
 
     seen: set[tuple[str, str]] = set()
     ordered_unique: list[tuple[str, str]] = []

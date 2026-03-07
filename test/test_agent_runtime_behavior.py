@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -263,6 +264,88 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
         self.assertEqual(self.agent.ctx.data_name, "alpha.csv")
         self.agent.chat("Say hello", session_id="beta")
         self.assertEqual(self.agent.ctx.data_name, "beta.csv")
+
+    def test_context7_docs_nudge_triggers_for_docs_intent(self) -> None:
+        with patch.object(
+            self.agent,
+            "_context7_tool_names",
+            return_value=["resolve_library_id", "query_docs"],
+        ):
+            nudge = self.agent._context7_docs_nudge(
+                "Need latest docs for pydantic validators",
+                tool_calls=[],
+                selection=None,
+            )
+        self.assertIn("Context7", nudge)
+        self.assertIn("resolve", nudge.lower())
+
+    def test_context7_docs_nudge_stops_after_context7_tool_call(self) -> None:
+        nudge = self.agent._context7_docs_nudge(
+            "Need docs for numpy array creation",
+            tool_calls=[
+                ToolCall(
+                    id="ctx7_1",
+                    name="resolve_library_id",
+                    arguments={"query": "numpy"},
+                )
+            ],
+            selection=None,
+        )
+        self.assertEqual(nudge, "")
+
+    def test_edit_recovery_nudge_for_missing_old_string(self) -> None:
+        call = ToolCall(
+            id="edit_1",
+            name="edit_file_replace",
+            arguments={
+                "path": "src/example.py",
+                "old_string": "missing",
+                "new_string": "updated",
+            },
+        )
+        result = json.dumps(
+            {"status": "error", "error": "old_string not found in file"}
+        )
+        nudge = self.agent._edit_tool_recovery_nudge(call, result)
+        self.assertIn("Edit recovery", nudge)
+        self.assertIn("3-5 unchanged lines", nudge)
+
+    def test_write_detection_for_edit_tools_requires_success(self) -> None:
+        call = ToolCall(
+            id="edit_2",
+            name="edit_file_replace",
+            arguments={"path": "src/example.py"},
+        )
+        ok_result = json.dumps(
+            {"status": "ok", "path": "src/example.py", "lines_added": 2}
+        )
+        err_result = json.dumps({"status": "error", "error": "old_string not found"})
+        self.assertTrue(self.agent._tool_call_applied_write(call, ok_result))
+        self.assertFalse(self.agent._tool_call_applied_write(call, err_result))
+
+    def test_editing_intent_detects_feature_implementation_requests(self) -> None:
+        self.assertTrue(
+            self.agent._is_editing_intent(
+                "Implement a new command in rust-cli to switch tabs faster."
+            )
+        )
+
+    def test_docs_intent_detects_library_integration_without_word_docs(self) -> None:
+        self.assertTrue(
+            self.agent._docs_intent(
+                "Implement pydantic validators in our FastAPI request model."
+            )
+        )
+
+    def test_patch_tools_require_prewrite_inspection(self) -> None:
+        self.assertTrue(self.agent._requires_prewrite_inspection("edit_file_replace"))
+        self.assertTrue(self.agent._requires_prewrite_inspection("apply_unified_diff"))
+        self.assertFalse(self.agent._requires_prewrite_inspection("write_file"))
+
+    def test_inspection_tool_detection(self) -> None:
+        self.assertTrue(self.agent._is_inspection_tool_name("rg_search"))
+        self.assertTrue(self.agent._is_inspection_tool_name("read_file"))
+        self.assertFalse(self.agent._is_inspection_tool_name("write_file"))
 
 
 if __name__ == "__main__":

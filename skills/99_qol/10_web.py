@@ -136,18 +136,29 @@ def web_search(query: str, n: int = 6) -> str:
     # DDG lite returns an HTML table; extract result rows
     results: list[dict] = []
 
-    # Pattern: result links appear as <a class="result-link" href="...">Title</a>
-    # followed by snippet text in the next table cell.
-    link_re = re.compile(
-        r'<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-        re.DOTALL,
+    # DDG Lite uses single-quoted attributes and places href before class.
+    # Match the full opening tag of result links, then extract href separately.
+    link_tag_re = re.compile(
+        r"<a\b([^>]*?\bclass=['\"]result-link['\"][^>]*)>(.*?)</a>",
+        re.DOTALL | re.IGNORECASE,
     )
+    href_attr_re = re.compile(r'\bhref="([^"]+)"')
     snippet_re = re.compile(
-        r'<td[^>]+class="result-snippet"[^>]*>(.*?)</td>', re.DOTALL
+        r"<td\b[^>]*\bclass=['\"]result-snippet['\"][^>]*>(.*?)</td>",
+        re.DOTALL | re.IGNORECASE,
     )
 
-    links = link_re.findall(body)
-    snippets = [html.unescape(_html_to_text(s)) for s in snippet_re.findall(body)]
+    links = []
+    for attrs, title_raw in link_tag_re.findall(body):
+        m = href_attr_re.search(attrs)
+        if m:
+            links.append((m.group(1), title_raw))
+
+    def _snippet_text(raw: str) -> str:
+        # Collapse newlines so bold-wrapped words don't produce line breaks
+        return re.sub(r"\s+", " ", html.unescape(_html_to_text(raw))).strip()
+
+    snippets = [_snippet_text(s) for s in snippet_re.findall(body)]
 
     for i, (href, title_raw) in enumerate(links[:n]):
         # DDG lite wraps results in redirect URLs; extract the real URL

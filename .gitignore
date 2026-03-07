@@ -47,3 +47,13 @@ plugins/
 agent_config.json
 *.svg
 *.png
+
+# Rust / rust-cli
+target/
+rust-cli/target/
+*.rs.bk
+/logician
+
+*.svg
+*.png
+.agent_history

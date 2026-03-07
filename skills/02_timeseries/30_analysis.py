@@ -430,27 +430,21 @@ def get_cached_anomalies(column=None):
     return _safe_json({"indices": ctx.anomaly_store, "meta": ctx.anomaly_meta})
 
 
-@llm.tool(description="Detect structural breaks using ruptures.")
-def change_points(penalty=0, column=None):
-    """Use when: Detect structural breaks using ruptures.
+@llm.tool(description="Detect structural breaks or regimes using ruptures or HMM.")
+def change_points(algorithm="ruptures", penalty=0, n_regimes=2, column=None):
+    """Use when: Detect structural breaks/regimes.
 
     Triggers: analyze the series, stationarity test, detect anomalies, check trend, seasonality diagnostics, acf pacf.
     Avoid when: The user only wants data ingestion or a final forecast without diagnostic detail..
-    Inputs: penalty (float, optional): Penalty value (default auto); column (str, optional): Specific column (default all).
-    Returns: JSON with change points.
+    Inputs: algorithm (str, optional): 'ruptures' or 'hmm'; penalty (float, optional): Penalty value for ruptures; n_regimes (int, optional): Number of states for HMM; column (str, optional): Specific column.
+    Returns: JSON with change points or regimes.
     Side effects: May read/update shared tool context depending on implementation.
     """
     if not ctx.loaded:
         return _safe_json({"status": "error", "error": "No data loaded"})
 
-    try:
-        import ruptures as rpt
-    except ImportError:
-        return _safe_json({"status": "error", "error": "ruptures not available"})
-
     cols = [column] if column else ctx.value_columns
     out = {}
-    pen = float(penalty) if penalty else None
 
     for col in cols:
         if col not in ctx.data.columns:
@@ -459,12 +453,35 @@ def change_points(penalty=0, column=None):
         y = ctx.data[col].values.astype(float)
 
         try:
-            algo = rpt.Pelt(model="l2").fit(y)
-            bks = algo.predict(pen=pen)
-            n_points = len(y)
-            cps = [int(b) for b in bks if b < n_points]
-            cp_rows = [{"index": c, "date": str(ctx.data["date"].iloc[c])} for c in cps]
-            out[col] = {"status": "ok", "change_points": cp_rows, "penalty": pen}
+            if algorithm == "hmm":
+                try:
+                    from hmmlearn.hmm import GaussianHMM
+                except ImportError:
+                    return _safe_json({"status": "error", "error": "hmmlearn not available"})
+                
+                # Reshape for hmmlearn
+                y_hmm = y.reshape(-1, 1)
+                model = GaussianHMM(n_components=int(n_regimes), covariance_type="diag", n_iter=100)
+                model.fit(y_hmm)
+                hidden_states = model.predict(y_hmm)
+                
+                # find indices where state changes
+                changes = np.where(hidden_states[:-1] != hidden_states[1:])[0] + 1
+                cp_rows = [{"index": int(c), "date": str(ctx.data["date"].iloc[c]), "regime": int(hidden_states[c])} for c in changes]
+                out[col] = {"status": "ok", "algorithm": "hmm", "n_regimes": int(n_regimes), "change_points": cp_rows}
+            else:
+                try:
+                    import ruptures as rpt
+                except ImportError:
+                    return _safe_json({"status": "error", "error": "ruptures not available"})
+                    
+                pen = float(penalty) if penalty else None
+                algo = rpt.Pelt(model="l2").fit(y)
+                bks = algo.predict(pen=pen)
+                n_points = len(y)
+                cps = [int(b) for b in bks if b < n_points]
+                cp_rows = [{"index": c, "date": str(ctx.data["date"].iloc[c])} for c in cps]
+                out[col] = {"status": "ok", "algorithm": "ruptures", "change_points": cp_rows, "penalty": pen}
         except Exception as exc:
             out[col] = {"status": "error", "error": str(exc)}
 

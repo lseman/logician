@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foreblocks-agent"
+version = "0.1.0"
+description = "Autonomous agent system for time series analysis and software engineering"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Logician", email = "logician@example.com" }]
+keywords = ["agent", "time-series", "forecasting", "software-engineering"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "pydantic>=2.5.0",
+    "eoh>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.8.0",
+    "ruff>=0.1.0",
+    "black>=24.1.0",
+    "pre-commit>=3.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/logician/foreblocks"
+Documentation = "https://foreblocks.readthedocs.io"
+Repository = "https://github.com/logician/foreblocks"
+Issues = "https://github.com/logician/foreblocks/issues"
+
+[tool.setuptools]
+packages = [
+    "foreblocks",
+    "foreblocks.cli",
+    "foreblocks.apps",
+    "foreblocks.skills",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+python_methods = ["test_*"]
+python_classes = ["Test*"]
+python_modules = ["test_*"]
+python_packages = ["test"]
+addopts = "-v --tb=short --cov=foreblocks --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["foreblocks"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "pass",
+]
+ignore_errors = true

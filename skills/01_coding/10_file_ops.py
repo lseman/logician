@@ -9,8 +9,21 @@ if "llm" not in globals():
     llm = _NoOpLLM()
 
 import fnmatch
-import re
 from pathlib import Path
+
+
+def _resolve_path(path: str) -> Path:
+    """Resolve path against default_cwd (if set) so relative paths work correctly."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        base = (
+            (_coding_config.get("default_cwd") or None)
+            if "_coding_config" in globals()
+            else None
+        )
+        if base:
+            p = Path(base) / p
+    return p.resolve()
 
 
 @llm.tool(
@@ -29,7 +42,7 @@ def read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
     Side effects: Reads from filesystem; no writes.
     """
     try:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if not p.exists():
             return _safe_json({"status": "error", "error": f"File not found: {path}"})
         if not p.is_file():
@@ -80,11 +93,10 @@ def write_file(path: str, content: str, mode: str = "w") -> str:
     if mode not in ("w", "a"):
         return _safe_json({"status": "error", "error": "mode must be 'w' or 'a'"})
     try:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8") if mode == "w" else p.open(
-            "a", encoding="utf-8"
-        ).write(content)
+        with p.open(mode, encoding="utf-8") as fh:
+            fh.write(content)
         return _safe_json(
             {
                 "status": "ok",
@@ -113,7 +125,7 @@ def edit_file_replace(path: str, old_string: str, new_string: str) -> str:
     Side effects: Modifies the file in-place; no backup is created.
     """
     try:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if not p.is_file():
             return _safe_json({"status": "error", "error": f"File not found: {path}"})
 
@@ -160,10 +172,9 @@ def list_directory(path: str = ".", glob_pattern: str = "*") -> str:
     Side effects: Read-only.
     """
     try:
-        p = Path(path).expanduser().resolve()
+        p = _resolve_path(path)
         if not p.is_dir():
             return _safe_json({"status": "error", "error": f"Not a directory: {path}"})
-
         entries = []
         for child in sorted(p.iterdir()):
             if not fnmatch.fnmatch(child.name, glob_pattern):
@@ -182,85 +193,6 @@ def list_directory(path: str = ".", glob_pattern: str = "*") -> str:
                 "path": str(p),
                 "count": len(entries),
                 "entries": entries,
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
-
-
-@llm.tool(
-    description="Search for a regex or literal pattern across files in a directory."
-)
-def search_in_files(
-    pattern: str,
-    directory: str = ".",
-    file_glob: str = "**/*.py",
-    is_regex: bool = False,
-    max_results: int = 50,
-) -> str:
-    """Use when: Find where a function, variable, or string appears across the codebase.
-
-    Triggers: search code, find in files, grep, where is defined, find usage, locate function.
-    Avoid when: You already know the exact file — use read_file instead.
-    Inputs:
-      pattern (str, required): Literal string or regex to search for.
-      directory (str, optional): Root directory to search from (default ".").
-      file_glob (str, optional): Glob to filter files (default "**/*.py").
-      is_regex (bool, optional): Treat pattern as regex (default False).
-      max_results (int, optional): Maximum number of matches to return (default 50).
-    Returns: JSON with list of matches (file, line, text).
-    Side effects: Read-only.
-    """
-    try:
-        root = Path(directory).expanduser().resolve()
-        if not root.is_dir():
-            return _safe_json(
-                {"status": "error", "error": f"Not a directory: {directory}"}
-            )
-
-        flags = re.IGNORECASE
-        rx = (
-            re.compile(pattern, flags)
-            if is_regex
-            else re.compile(re.escape(pattern), flags)
-        )
-
-        matches = []
-        for fpath in sorted(root.glob(file_glob)):
-            if not fpath.is_file():
-                continue
-            try:
-                for lineno, line in enumerate(
-                    fpath.read_text(encoding="utf-8", errors="replace").splitlines(), 1
-                ):
-                    if rx.search(line):
-                        matches.append(
-                            {
-                                "file": str(fpath.relative_to(root)),
-                                "line": lineno,
-                                "text": line.rstrip(),
-                            }
-                        )
-                        if len(matches) >= max_results:
-                            return _safe_json(
-                                {
-                                    "status": "ok",
-                                    "pattern": pattern,
-                                    "count": len(matches),
-                                    "truncated": True,
-                                    "matches": matches,
-                                }
-                            )
-            except Exception:
-                pass
-
-        return _safe_json(
-            {
-                "status": "ok",
-                "pattern": pattern,
-                "count": len(matches),
-                "truncated": False,
-                "matches": matches,
             }
         )
     except Exception as exc:

@@ -235,6 +235,7 @@ def start_background_process(
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
             text=True,
             cwd=resolved_cwd,
             env=os.environ.copy(),
@@ -272,6 +273,39 @@ def start_background_process(
         return _safe_json(
             {"status": "ok", "name": name, "pid": proc.pid, "command": command}
         )
+    except Exception as exc:
+        return _safe_json({"status": "error", "error": str(exc)})
+
+
+@llm.tool(description="Send input (stdin) to a running background process.")
+def send_input_to_process(name: str, input_text: str) -> str:
+    """Use when: Interact with a REPL, shell, or interactive prompt running in the background.
+
+    Triggers: send input, type into process, write to process, stdin, interact.
+    Avoid when: The process doesn't read from stdin.
+    Inputs:
+      name (str, required): Process label used in start_background_process.
+      input_text (str, required): Text to send. Ensure to include newlines (\\n) if executing a command.
+    Returns: JSON with status.
+    Side effects: Writes to the process's standard input.
+    """
+    global _bg_procs
+    if name not in _bg_procs:
+        return _safe_json({"status": "error", "error": f"No process named '{name}'"})
+
+    entry = _bg_procs[name]
+    proc = entry["proc"]
+    
+    if proc.poll() is not None:
+        return _safe_json({"status": "error", "error": f"Process '{name}' is not running (exit code {proc.returncode})"})
+        
+    if proc.stdin is None:
+        return _safe_json({"status": "error", "error": f"Process '{name}' has no stdin pipe"})
+
+    try:
+        proc.stdin.write(input_text)
+        proc.stdin.flush()
+        return _safe_json({"status": "ok", "name": name, "bytes_written": len(input_text)})
     except Exception as exc:
         return _safe_json({"status": "error", "error": str(exc)})
 

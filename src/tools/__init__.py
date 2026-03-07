@@ -77,13 +77,14 @@ class ToolRegistry:
 
         self._bootstrapped: bool = False
         self._version: int = 0
+        self._forced_skill_ids: list[str] = []
+        self._forced_skill_reason: str = ""
 
-        if auto_load_from_skills and self._catalog.iter_skills_sources():
-            self._log.info(
-                "Auto-loading tools from %d source(s)",
-                len(self._catalog.iter_skills_sources()),
-            )
-            self.load_tools_from_skills()
+        if auto_load_from_skills:
+            _sources = self._catalog.iter_skills_sources()
+            if _sources:
+                self._log.info("Auto-loading tools from %d source(s)", len(_sources))
+                self.load_tools_from_skills()
 
     def __repr__(self) -> str:
         return (
@@ -135,8 +136,12 @@ class ToolRegistry:
     def list(self) -> list[Tool]:
         return self.list_tools()
 
-    def list_skills(self) -> list[SkillCard]:
+    def _sync_catalog_with_registered_tools(self) -> None:
         self._catalog.ensure_skill_catalog()
+        self._catalog.hydrate_tool_backed_skills(self._tools.values())
+
+    def list_skills(self) -> list[SkillCard]:
+        self._sync_catalog_with_registered_tools()
         return list(self._catalog.skills.values())
 
     def route_query_to_skills(
@@ -146,11 +151,14 @@ class ToolRegistry:
         top_k: int = 3,
         min_score: float = 2.0,
     ) -> SkillSelection:
+        self._sync_catalog_with_registered_tools()
+        forced = self._consume_forced_skill_ids()
         return self._catalog.route_query_to_skills(
             query,
             [tool.name for tool in self._iter_tools_for_prompt()],
             top_k=top_k,
             min_score=min_score,
+            forced_skill_ids=forced,
         )
 
     def skill_routing_prompt(
@@ -162,7 +170,13 @@ class ToolRegistry:
         top_k: int = 3,
         include_playbooks: bool = True,
         include_compact_fallback: bool = True,
+        include_on_demand_context: bool = True,
+        on_demand_context_max_chars: int = 2600,
+        on_demand_context_max_skills: int = 2,
+        on_demand_context_max_files_per_skill: int = 5,
     ) -> tuple[str, SkillSelection]:
+        self._sync_catalog_with_registered_tools()
+        forced = self._consume_forced_skill_ids()
         return self._catalog.skill_routing_prompt(
             query,
             [tool.name for tool in self._iter_tools_for_prompt()],
@@ -172,6 +186,12 @@ class ToolRegistry:
             top_k=top_k,
             include_playbooks=include_playbooks,
             include_compact_fallback=include_compact_fallback,
+            include_on_demand_context=include_on_demand_context,
+            on_demand_context_max_chars=on_demand_context_max_chars,
+            on_demand_context_max_skills=on_demand_context_max_skills,
+            on_demand_context_max_files_per_skill=on_demand_context_max_files_per_skill,
+            # Keep forced skills as explicit context for the next routing pass only.
+            forced_skill_ids=forced,
         )
 
     def call_tool(self, name: str, **kwargs: Any) -> str:
@@ -180,33 +200,187 @@ class ToolRegistry:
 
     def load_tools_from_skills(self) -> None:
         python_count = self._load_python_skill_modules()
-
-        skill_contents = self._catalog.read_skill_source_contents()
-        guidance_contents = [
-            (path, content)
-            for path, content in skill_contents
-            if path.name.upper() == "SKILL.MD"
-        ]
-        if guidance_contents:
-            self._catalog.build_skill_catalog(guidance_contents)
-            self._log.info(
-                "Loaded %d guidance skill card(s) from SKILL.md",
-                len(guidance_contents),
-            )
-        elif not skill_contents:
-            self._log.info("No SKILL.md guidance sources found")
-
-        if python_count > 0:
+        builtin_count = self._register_builtin_tools()
+        # Defer skill catalog building (SKILL.md parsing + routing index) to first
+        # routing query via ensure_skill_catalog(). Building it here at startup adds
+        # ~100-200ms of YAML parsing and tokenization with no benefit — the catalog
+        # is only needed when the agent routes a query for the first time.
+        if python_count > 0 or builtin_count > 0:
             self._version += 1
+
+    def _register_builtin_tools(self) -> int:
+        """Register internal meta-tools that are always available."""
+        registered = 0
+        if "invoke_skill" not in self._tools:
+            self._tools["invoke_skill"] = Tool(
+                name="invoke_skill",
+                description=(
+                    "Force a specific skill into the next routing pass. "
+                    "Use when user asks to explicitly apply a named skill."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="skill",
+                        type="string",
+                        description="Skill id/name/query to force (e.g. 'brainstorming').",
+                        required=True,
+                    ),
+                    ToolParameter(
+                        name="reason",
+                        type="string",
+                        description="Optional rationale to store with the forced skill.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="top_k",
+                        type="integer",
+                        description="How many matched skills to force (default 1, max 3).",
+                        required=False,
+                    ),
+                ],
+                function=self._invoke_skill_tool,
+                skill_id="meta_skills",
+                source_path="<builtin>",
+            )
+            self._catalog.tool_docs["invoke_skill"] = (
+                "**Description:** Force a skill into the next routing pass.\n\n"
+                "**Parameters:**\n"
+                "- skill (string, required): Skill id, name, alias, or intent text.\n"
+                "- reason (string, optional): Why the skill is being forced.\n"
+                "- top_k (integer, optional): Number of matched skills to force."
+            )
+            self._log.info("✓ Loaded builtin tool: invoke_skill")
+            registered += 1
+        return registered
+
+    def _consume_forced_skill_ids(self) -> list[str]:
+        if not self._forced_skill_ids:
+            return []
+        out = list(dict.fromkeys(self._forced_skill_ids))
+        self._forced_skill_ids.clear()
+        self._forced_skill_reason = ""
+        return out
+
+    def _score_skill_name_match(self, query: str, card: SkillCard) -> float:
+        q = (query or "").strip().lower()
+        if not q:
+            return 0.0
+        fields = [card.id.replace("_", " "), card.name, *card.aliases]
+        best = 0.0
+        for field in fields:
+            f = str(field or "").strip().lower()
+            if not f:
+                continue
+            ratio = self._catalog._fuzzy_similarity(q, f)
+            if f == q:
+                ratio = max(ratio, 1.0)
+            elif f.startswith(q) or q.startswith(f):
+                ratio = max(ratio, 0.92)
+            best = max(best, ratio)
+        return best
+
+    def _resolve_skill_candidates(self, query: str, *, top_k: int) -> list[SkillCard]:
+        self._sync_catalog_with_registered_tools()
+        q = (query or "").strip()
+        if not q:
+            return []
+        q_l = q.lower()
+
+        direct: list[SkillCard] = []
+        seen: set[str] = set()
+        for card in self._catalog.skills.values():
+            names = [card.id, card.id.replace("_", " "), card.name, *card.aliases]
+            if any(str(name or "").strip().lower() == q_l for name in names):
+                if card.id not in seen:
+                    seen.add(card.id)
+                    direct.append(card)
+        if direct:
+            return direct[: max(1, top_k)]
+
+        routed = self._catalog.route_query_to_skills(
+            q,
+            [tool.name for tool in self._iter_tools_for_prompt()],
+            top_k=max(3, top_k),
+            min_score=0.8,
+        ).selected_skills
+        if routed:
+            return routed[: max(1, top_k)]
+
+        fuzzy: list[tuple[float, SkillCard]] = []
+        for card in self._catalog.skills.values():
+            score = self._score_skill_name_match(q, card)
+            if score >= 0.45:
+                fuzzy.append((score, card))
+        fuzzy.sort(key=lambda item: item[0], reverse=True)
+        out: list[SkillCard] = []
+        for _, card in fuzzy:
+            out.append(card)
+            if len(out) >= max(1, top_k):
+                break
+        return out
+
+    def _invoke_skill_tool(
+        self,
+        skill: str,
+        reason: str = "",
+        top_k: int = 1,
+    ) -> str:
+        q = str(skill or "").strip()
+        if not q:
+            return json.dumps(
+                {"status": "error", "error": "Parameter 'skill' is required."},
+                ensure_ascii=False,
+            )
+        k = max(1, min(3, int(top_k or 1)))
+        matches = self._resolve_skill_candidates(q, top_k=k)
+        if not matches:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"No skill match found for '{q}'.",
+                },
+                ensure_ascii=False,
+            )
+
+        forced_ids = [card.id for card in matches]
+        self._forced_skill_ids = list(dict.fromkeys(forced_ids))
+        self._forced_skill_reason = str(reason or "").strip()
+
+        return json.dumps(
+            {
+                "status": "ok",
+                "forced_skill_ids": self._forced_skill_ids,
+                "reason": self._forced_skill_reason,
+                "message": (
+                    "Forced skill(s) will be injected into the next routing pass."
+                ),
+                "matches": [
+                    {
+                        "id": card.id,
+                        "name": card.name,
+                        "summary": card.summary[:180],
+                    }
+                    for card in matches
+                ],
+            },
+            ensure_ascii=False,
+        )
 
     def _load_python_skill_modules(self) -> int:
         if not self.skills_dir_path.is_dir():
             return 0
 
+        import os as _os
+
         py_skill_files = sorted(
-            p
-            for p in self.skills_dir_path.rglob("*.py")
-            if p.name != "__init__.py" and not p.name.startswith("_")
+            Path(root) / fname
+            for root, _dirs, files in _os.walk(
+                str(self.skills_dir_path), followlinks=True
+            )
+            for fname in files
+            if fname.endswith(".py")
+            and fname != "__init__.py"
+            and not fname.startswith("_")
         )
         if not py_skill_files:
             return 0
@@ -239,7 +413,15 @@ class ToolRegistry:
         execution_globals["__file__"] = str(module_path)
         execution_globals["__name__"] = module_name
 
-        exec(code, execution_globals, execution_globals)
+        try:
+            exec(code, execution_globals, execution_globals)
+        except Exception as exc:
+            self._log.warning(
+                "Skipping Python skill module %s due to import/runtime error: %s",
+                module_path,
+                exc,
+            )
+            return 0
         transient_module.__dict__.update(execution_globals)
         registered = 0
         skill_id = self._catalog._skill_id_from_source(module_path)

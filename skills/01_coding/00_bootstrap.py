@@ -70,6 +70,7 @@ def _run_cmd(
             timeout=timeout,
             cwd=resolved_cwd,
             env=os.environ.copy(),
+            stdin=subprocess.DEVNULL,
         )
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""

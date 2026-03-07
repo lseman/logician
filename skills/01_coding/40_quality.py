@@ -57,9 +57,6 @@ def run_pytest(
 
     # Parse summary line: "3 passed, 1 failed, 2 errors in 0.42s"
     summary = {"passed": 0, "failed": 0, "errors": 0, "warnings": 0}
-    sm = re.search(
-        r"(\d+) passed|(\d+) failed|(\d+) error|(\d+) warning", out, re.IGNORECASE
-    )
     for m in re.finditer(r"(\d+) (passed|failed|error|warning)", out, re.IGNORECASE):
         key = m.group(2).lower().rstrip("s")
         key = (
@@ -171,6 +168,50 @@ def run_ruff(
             "violations": violations[:100],
         }
     )
+
+
+@llm.tool(
+    description="Automatically format and fix code using ruff (or black/isort fallback)."
+)
+def auto_format(path: str = "", venv_path: str = "") -> str:
+    """Use when: You want to automatically format a file or directory to meet style guidelines.
+
+    Triggers: format code, auto-format, run black, run ruff format, reformat.
+    Avoid when: You only want to see errors without changing files — use run_ruff instead.
+    Inputs:
+      path (str, optional): File or directory to format (default: configured cwd).
+      venv_path (str, optional): Virtualenv to use.
+    Returns: JSON with formatting status and output.
+    Side effects: Modifies source files in-place.
+    """
+    target = _resolve_target(path)
+    cwd = _coding_config.get("default_cwd")
+    v = venv_path or None
+
+    # First try ruff (fixes + formatting)
+    fixed = _run_cmd(f"python -m ruff check --fix {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
+    formatted = _run_cmd(f"python -m ruff format {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
+    
+    if "No module named ruff" not in formatted["stdout"] and formatted["exit_code"] == 0:
+        return _safe_json({
+            "status": "ok",
+            "tool": "ruff",
+            "fix_output": fixed["stdout"].strip()[-1000:],
+            "format_output": formatted["stdout"].strip()[-1000:],
+        })
+
+    # Fallback to black and isort
+    isort_res = _run_cmd(f"python -m isort {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
+    black_res = _run_cmd(f"python -m black {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
+
+    overall_exit = black_res["exit_code"] if black_res["exit_code"] != 0 else isort_res["exit_code"]
+    
+    return _safe_json({
+        "status": "ok" if overall_exit == 0 else "error",
+        "tool": "black+isort",
+        "isort_output": isort_res["stdout"].strip()[-500:],
+        "black_output": black_res["stdout"].strip()[-500:],
+    })
 
 
 @llm.tool(description="Run mypy for static type checking and return structured errors.")
@@ -570,5 +611,140 @@ def detect_project(path: str = ".") -> str:
             "venv_auto_applied": auto_venv,
             "entrypoints": entrypoints,
             "config_files": config_files,
+        }
+    )
+
+
+@llm.tool(
+    description=(
+        "Run a project-aware intelligent quality gate that auto-detects project setup, "
+        "executes lint/type/test checks, and returns prioritized fix guidance."
+    )
+)
+def smart_quality_gate(
+    path: str = ".",
+    mode: str = "balanced",
+    venv_path: str = "",
+) -> str:
+    """Use when: You want a stronger, SOTA-like coding validation pass with actionable next steps.
+
+    Triggers: intelligent check, quality gate, pre-commit check, is code ready, prioritize fixes.
+    Avoid when: You only need one checker quickly; use run_ruff/run_mypy/run_pytest directly.
+    Inputs:
+      path (str, optional): Project/file path to validate (default ".").
+      mode (str, optional): "fast" (ruff+mypy), "balanced" (ruff+mypy+pytest if configured),
+                            "full" (ruff+mypy+pytest always).
+      venv_path (str, optional): Virtualenv to use.
+    Returns: JSON with project context, checker outputs, and prioritized fix plan.
+    Side effects: Executes shell quality commands; may run tests.
+    """
+    import json as _json
+
+    target = _resolve_target(path)
+    selected_mode = str(mode or "balanced").strip().lower()
+    if selected_mode not in {"fast", "balanced", "full"}:
+        selected_mode = "balanced"
+
+    def _parse(payload: str) -> dict:
+        try:
+            return _json.loads(payload)
+        except Exception:
+            return {"status": "error", "raw": str(payload)[:500]}
+
+    project = _parse(detect_project(path=target))
+    venv = venv_path or _coding_config.get("venv_path") or ""
+
+    ruff_res = _parse(run_ruff(path=target, fix=False, venv_path=venv))
+    mypy_res = _parse(run_mypy(path=target, strict=False, venv_path=venv))
+
+    should_run_tests = selected_mode == "full" or (
+        selected_mode == "balanced" and bool(project.get("test_runner"))
+    )
+    pytest_res = (
+        _parse(run_pytest(path=target, venv_path=venv))
+        if should_run_tests
+        else {"status": "skipped", "reason": "mode_or_project"}
+    )
+
+    lint_count = int(ruff_res.get("count", 0) or 0)
+    type_errs = int(mypy_res.get("error_count", 0) or 0)
+    test_fail = int((pytest_res.get("summary", {}) or {}).get("failed", 0) or 0)
+    test_err = int((pytest_res.get("summary", {}) or {}).get("errors", 0) or 0)
+
+    prioritized: list[dict] = []
+    if test_fail or test_err:
+        prioritized.append(
+            {
+                "priority": 1,
+                "category": "tests",
+                "count": test_fail + test_err,
+                "action": "Fix failing tests first to recover behavioral correctness.",
+                "examples": (pytest_res.get("failures", []) or [])[:3],
+            }
+        )
+    if type_errs:
+        prioritized.append(
+            {
+                "priority": 2,
+                "category": "typing",
+                "count": type_errs,
+                "action": "Fix mypy errors next to tighten contracts and prevent runtime bugs.",
+                "examples": (mypy_res.get("errors", []) or [])[:5],
+            }
+        )
+    if lint_count:
+        prioritized.append(
+            {
+                "priority": 3,
+                "category": "lint",
+                "count": lint_count,
+                "action": "Resolve lint issues last; start with auto-fixable items via run_ruff(fix=True).",
+                "examples": (ruff_res.get("violations", []) or [])[:5],
+            }
+        )
+
+    overall = "pass" if not prioritized else "fail"
+    next_commands = [
+        "run_ruff(path=..., fix=True)",
+        "run_mypy(path=...)",
+        "run_pytest(path=...)",
+    ]
+    if overall == "pass":
+        next_commands = ["run_quality_check(path=...)"]
+
+    return _safe_json(
+        {
+            "status": overall,
+            "mode": selected_mode,
+            "project": {
+                "type": project.get("type", "unknown"),
+                "language": project.get("language", "unknown"),
+                "build_tool": project.get("build_tool"),
+                "test_runner": project.get("test_runner"),
+                "venv_path": project.get("venv_path")
+                or _coding_config.get("venv_path"),
+            },
+            "summary": {
+                "lint_violations": lint_count,
+                "type_errors": type_errs,
+                "test_failures": test_fail,
+                "test_errors": test_err,
+            },
+            "checks": {
+                "ruff": {
+                    "status": ruff_res.get("status"),
+                    "count": lint_count,
+                },
+                "mypy": {
+                    "status": mypy_res.get("status"),
+                    "error_count": type_errs,
+                },
+                "pytest": {
+                    "status": pytest_res.get("status"),
+                    "summary": pytest_res.get("summary", {}),
+                },
+            },
+            "prioritized_fix_plan": prioritized,
+            "recommended_next_commands": next_commands,
         }
     )

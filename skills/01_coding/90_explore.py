@@ -191,6 +191,41 @@ def _outline_generic(source: str, lang: str) -> dict:
     return {"functions": functions, "classes": classes}
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"1", "true", "yes", "y", "on"}:
+            return True
+        if v in {"0", "false", "no", "n", "off", ""}:
+            return False
+    return default
+
+
+def _coerce_int(value: Any, *, name: str, default: int) -> tuple[int, str | None]:
+    if value is None:
+        return default, None
+    if isinstance(value, bool):
+        return int(value), None
+    if isinstance(value, int):
+        return value, None
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value), None
+        return 0, f"Invalid {name}: expected integer, got {value!r}"
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return default, None
+        if re.fullmatch(r"[+-]?\d+", text):
+            return int(text), None
+        return 0, f"Invalid {name}: expected integer, got {value!r}"
+    return 0, f"Invalid {name}: expected integer, got {type(value).__name__}"
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -510,6 +545,7 @@ def _explore_run(cmd: str, cwd: str | None = None, timeout: int = 30) -> dict:
             text=True,
             timeout=timeout,
             cwd=cwd,
+            stdin=subprocess.DEVNULL,
         )
         return {
             "status": "ok" if proc.returncode == 0 else "error",
@@ -569,6 +605,23 @@ def rg_search(
       rg_search("def run", context_lines=2)           -- show 2 lines around each match
       rg_search("import torch", fixed_string=True)    -- exact literal search
     """
+    pattern = str(pattern)
+    directory = str(directory or ".")
+    file_glob = str(file_glob or "")
+    file_type = str(file_type or "")
+    case_sensitive = _coerce_bool(case_sensitive, default=False)
+    fixed_string = _coerce_bool(fixed_string, default=False)
+    context_lines_i, err = _coerce_int(
+        context_lines, name="context_lines", default=0
+    )
+    if err:
+        return _safe_json({"status": "error", "error": err})
+    max_results_i, err = _coerce_int(max_results, name="max_results", default=80)
+    if err:
+        return _safe_json({"status": "error", "error": err})
+    context_lines = max(0, context_lines_i)
+    max_results = max(1, max_results_i)
+
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         return _safe_json({"status": "error", "error": f"Not a directory: {directory}"})
@@ -701,6 +754,30 @@ def rg_search(
 
 
 @llm.tool(
+    description="Find all references/calls to a specific function, class, or variable across the workspace."
+)
+def find_references(name: str, directory: str = ".", file_glob: str = "") -> str:
+    """Use when: You need to locate where a specific symbol is used or called.
+
+    Triggers: find references, usages of, who calls, where is used, find usages.
+    Avoid when: You want to find the definition (use find_symbol instead).
+    Inputs:
+      name (str, required): The exact name of the symbol (e.g. 'compute_statistics').
+      directory (str, optional): Root folder to search in (default '.').
+      file_glob (str, optional): Glob to filter files (default '').
+    Returns: JSON with matches and snippets.
+    """
+    pattern = rf"\b{name}\b"
+    return rg_search(
+        pattern=pattern,
+        directory=directory,
+        file_glob=file_glob,
+        context_lines=1,
+        max_results=30
+    )
+
+
+@llm.tool(
     description=(
         "Find files or directories by name pattern using fd (fast alternative to find). "
         "Falls back to pure-Python glob if fd is not installed. "
@@ -723,7 +800,7 @@ def fd_find(
     Avoid when: You want to search file *contents* — use rg_search or search_in_files.
     Inputs:
       pattern (str, required): Name pattern to match. fd uses smart-case regex, e.g.
-                               "config", "test_.*\.py", "__init__".
+                               "config", "test_.*\\.py", "__init__".
       directory (str, optional): Root directory to search (default ".").
       file_type (str, optional): "f" = files only (default), "d" = directories only, "" = both.
       extension (str, optional): Filter by extension, e.g. "py", "json", "md" (no dot).

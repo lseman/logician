@@ -1,73 +1,273 @@
 # Logician
 
-![Logician Logo](logo/logician-banner-light.svg#gh-light-mode-only)
-![Logician Logo](logo/logician-banner.svg#gh-dark-mode-only)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/logician?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 
-
-*A LLM agent framework for llama.cpp with tools, RAG, and rich execution traces.*
-
-Logician is a small, batteries-included framework for building **tool-using agents** on top of `llama.cpp`. It focuses on:
-
-- **Deterministic tool calling** (JSON or TOON – Token-Oriented Object Notation)
-- **First-class logging & traces** (structured logs + markdown timelines)
-- **Persistent memory & semantic search** over conversations
-- **Optional RAG** over external documents
-- **Self-reflection loops** (optional second-pass critique/improvement)
+*A lightweight, deterministic LLM agent framework built on llama.cpp with tool calling, RAG, persistent memory, and structured tracing."
 
 ---
 
-## Features
+## 🎯 What Is Logician?
 
-- 🔧 **Tool Registry**
-  - Simple `add_tool(...)` API with typed `ToolParameter`s
-  - Model sees a clear, generated tools prompt (JSON or TOON format)
-  - Central `ToolRegistry` that logs registration and execution
+Logician is a **production-grade agent framework** for building **tool-using AI agents** on top of `llama.cpp`. It provides:
 
-- 📒 **Persistent Memory (MessageDB)**
-  - Conversation history stored in SQLite
-  - Semantic search over past messages via Chroma + SentenceTransformers
-  - Automatic summarization of long histories into a synthetic SYSTEM message
-
-- 📚 **RAG Document Store (DocumentDB)**
-  - Separate Chroma collection for external documents
-  - Chunking, metadata, and top-k retrieval injected into prompt as SYSTEM context
-
-- 🧠 **Self-Reflection (optional)**
-  - Agent can critique its own final answer and optionally refine or call more tools
-  - Configurable reflection prompt and temperature / token budget
-
-- ⚙️ **llama.cpp Client**
-  - Supports both `/v1/chat/completions` and `/completion` APIs
-  - Streaming (`stream=True`) with token callback
-  - Retry with backoff, configurable stop tokens, temperature, and max tokens
-
-- 📈 **Logging & Tracing**
-  - Central logging configuration via `AGENT_LOG_LEVEL` and `AGENT_LOG_JSON`
-  - Per-module loggers (`agent`, `agent.tools`, `agent.db`, `agent.rag`, `agent.llama`)
-  - Every `Agent.run(...)` returns an `AgentResponse` with:
-    - `debug`: structured trace (events, timings, config)
-    - `trace_md`: markdown timeline for quick inspection or UI rendering
-
-- 🧾 **TOON Tool Calls (Optional)**
-  - If `toon_format` is installed, agent can prefer **TOON** over JSON
-  - Strict parsing for both TOON and JSON tool call payloads
-  - Automatic fallback to JSON when TOON is not available
+- **Deterministic tool execution** (JSON or TOON format)
+- **Persistent memory** with semantic search over conversations
+- **RAG integration** for external knowledge
+- **Structured logging & tracing** for debugging and monitoring
+- **Self-reflection** loops for iterative improvement
+- **llama.cpp backend** for local, privacy-preserving inference
 
 ---
 
-## Installation
-
-Logician is currently intended to be used **from source** inside your project.
+## 🚀 Quick Start
 
 ```bash
+# Clone and install
 git clone https://github.com/lseman/logician.git
 cd logician
 pip install -e .
 
-## Project Layout
+# Run a demo
+python apps/runners/demo.py
 
-- `src/`: core framework (agent, memory, DB, tool registry, backends)
-- `skills/`: tool definitions loaded by `ToolRegistry`
-- `apps/plotting/`: plotting and visualization helpers used by notebooks/scripts
-- `apps/runners/`: executable demo/diagnostic runners
-- Top-level files like `run.py`, `repl_demo.py`, and `test_clean_session.py` are compatibility entrypoints that forward to `apps/runners/*`
+# Or start a REPL
+python apps/runners/repl_demo.py
+```
+
+### Basic Usage
+
+```python
+from agent import Agent
+from agent.tools import ToolRegistry
+
+# Register your tools
+tool_registry = ToolRegistry()
+
+# Create agent
+agent = Agent(
+    model="llama3:8b",
+    tools=[tool_registry],
+    memory_path=".memory",
+)
+
+# Run with reflection
+result = agent.run(
+    prompt="Analyze this time series and forecast next 30 days",
+    max_turns=5,
+    use_reflection=True,
+)
+
+print(result.answer)
+print(result.trace_md)  # Markdown timeline
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Agent Core                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  Planning    │→│   Acting      │→│   Observing       │  │
+│  │  (think)     │  │   (tools)    │  │   (verify)       │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│                         Backends                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ llama.cpp    │  │  vLLM        │  │  MCP Client      │  │
+│  │ (local)      │  │ (GPU)        │  │ (model context)  │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     Memory & Storage                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  MessageDB   │  │  DocumentDB  │  │  RAG Vector Store │  │
+│  │  (SQLite)    │  │  (Chroma)    │  │  (Chroma)        │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## ✨ Key Features
+
+### 🛠️ Tool Registry
+
+- **Typed parameters** for safe tool calling
+- **Dynamic tool loading** via `add_tool(...)` API
+- **Dual format support**: JSON or TOON (Token-Oriented Object Notation)
+
+```python
+from agent.tools import ToolParameter, ToolRegistry
+
+tool_registry.add_tool(
+    name="fetch_data",
+    description="Fetch time series data from CSV",
+    parameters={
+        "filepath": ToolParameter(type="string", required=True),
+        "date_column": ToolParameter(type="string", required=True),
+    },
+)
+```
+
+### 🧠 Persistent Memory (MessageDB)
+
+- **SQLite storage** for conversation history
+- **Semantic search** via Chroma + SentenceTransformers
+- **Auto-summarization** of long histories into SYSTEM prompts
+
+### 📚 RAG Document Store
+
+- **Separate Chroma collection** for external documents
+- **Chunking & metadata** with top-k retrieval
+- **Injected as SYSTEM context** in prompts
+
+```python
+from agent import DocumentDB
+db = DocumentDB(collection_name="docs")
+db.add_directory("./docs/")
+
+# Documents appear as SYSTEM context in agent prompts
+```
+
+### 🔄 Self-Reflection
+
+- **Second-pass critique** of final answers
+- **Optional refinement** or additional tool calls
+- **Configurable** prompt and token budget
+
+```python
+result = agent.run(
+    prompt="Debug this code",
+    use_reflection=True,  # Enable self-reflection
+    reflection_prompt="Review your answer for accuracy and completeness",
+)
+```
+
+### 📊 Logging & Tracing
+
+- **Structured logging** via `AGENT_LOG_LEVEL` and `AGENT_LOG_JSON`
+- **Per-module loggers**: `agent`, `agent.tools`, `agent.db`, `agent.rag`
+- **Trace output**:
+  - `debug`: structured JSON trace (events, timings, config)
+  - `trace_md`: markdown timeline for UI rendering
+
+### ⚙️ llama.cpp Backend
+
+- **Dual API support**: `/v1/chat/completions` and `/completion`
+- **Streaming** with token callbacks
+- **Retry with backoff**, configurable stop tokens
+- **Temperature, max tokens**, and other inference parameters
+
+---
+
+## 📦 Project Structure
+
+```
+agent/
+├── src/
+│   ├── agent/          # Core agent logic
+│   │   ├── core.py     # Main agent loop
+│   │   ├── trace.py    # Structured tracing
+│   │   ├── memory.py   # Memory management
+│   │   └── tools/      # Tool registry
+│   ├── backends/       # Model backends
+│   ├── db/             # Database layer
+│   ├── eoh/            # Evolution of Heuristics (meta-learning)
+│   ├── mcp/            # Model Context Protocol client
+│   └── reasoners/      # Reasoning strategies (CoT, ToT, etc.)
+├── apps/
+│   ├── runners/        # Demo and diagnostic runners
+│   └── plotting/       # Visualization helpers
+├── skills/             # Tool definitions
+├── tests/              # Unit and integration tests
+├── docs/               # Documentation
+├── pyproject.toml      # Dependencies and build config
+└── README.md
+```
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AGENT_LOG_LEVEL` | Log level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
+| `AGENT_LOG_JSON` | Emit JSON logs | `false` |
+| `AGENT_MODEL_PATH` | Path to llama.cpp model | `./models/` |
+| `AGENT_MEMORY_PATH` | Memory storage path | `.memory` |
+| `AGENT_TOON_FORMAT` | Use TOON format | `false` |
+
+### Agent Parameters
+
+```python
+agent = Agent(
+    model="llama3:8b",
+    tools=[tool_registry],
+    memory_path=".memory",
+    max_turns=10,
+    temperature=0.7,
+    use_reflection=True,
+    toon_format=False,
+)
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run specific test
+pytest tests/test_agent.py
+
+# Run with coverage
+pytest tests/ --cov=src/agent
+```
+
+---
+
+## 🚧 Roadmap
+
+- [ ] **Python SDK** for easier integration
+- [ ] **UI dashboard** for tracing and monitoring
+- [ ] **Multi-agent collaboration** workflows
+- [ ] **Fine-tuning support** for custom models
+- [ ] **Event streaming** for real-time tracing
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) for the inference backend
+- [Chroma](https://www.trychroma.com/) for vector storage
+- [SentenceTransformers](https://www.sbert.net/) for embeddings
+
+---
+
+**Need help?** Open an issue or join the discussion.

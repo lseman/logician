@@ -43,11 +43,57 @@ class Config:
     temperature: float = 0.7
     max_tokens: int = 1024
     max_iterations: int = 8
+    # When True, max_iterations is treated as a strict budget for the full turn,
+    # disabling extra post-loop passes (synthesis/reflection/thinking) once
+    # the main loop has exhausted the iteration limit.
+    strict_iteration_budget: bool = False
+
+    # ── Pre-turn deliberation ("think before acting") ──────────────────────────
+    # Before the first tool-call iteration, ask the LLM to produce a brief plan.
+    # The plan is injected as a system message that anchors the whole turn.
+    # Inspired by R1/o1 extended thinking and LATS deliberation.
+    pre_turn_thinking: bool = False
+    pre_turn_thinking_max_tokens: int = 512
+    pre_turn_thinking_prompt: str = (
+        "Before taking any action, briefly plan your approach:\n"
+        "1. What is the core task or question?\n"
+        "2. What information or capabilities do you need?\n"
+        "3. What is your step-by-step approach?\n"
+        "Be concise. You will then proceed to execute this plan."
+    )
+    # Optional post-tool reflection after each tool result.
+    post_tool_thinking: bool = False
+    post_tool_thinking_max_tokens: int = 256
+    post_tool_thinking_prompt: str = (
+        "Briefly: what did this tool result tell you, and what is your precise next step?"
+    )
+
+    # ── Confidence-gated stopping ───────────────────────────────────────────────
+    # After a candidate final answer is produced (no tool call emitted), score
+    # it via a lightweight LLM judge call.  If the score falls below the
+    # threshold the agent gets another iteration to improve, up to max_retries.
+    # Inspired by process-reward models and self-evaluation stopping criteria.
+    confidence_gate_enabled: bool = False
+    confidence_gate_threshold: float = 7.0  # 0–10 scale
+    confidence_gate_max_retries: int = 2
+
+    # ── Extended ThinkingStrategy scope ────────────────────────────────────────
+    # By default, the ThinkingStrategy post-pass only ran when no tools were
+    # used.  Set this to True to also apply it after tool-using turns during
+    # the synthesis phase — allows reasoners (Reflexion/SSR/ToT) to refine
+    # tool-gathered evidence into a polished final answer.
+    thinking_apply_after_tools: bool = True
     use_chat_api: bool = True
     chat_template: str = "chatml"
     stop: tuple[str, ...] = ("<|im_end|>", "</s>", "[INST]", "USER:", "<|user|>")
-    stream: bool = False
+    stream: bool = True
     max_consecutive_tool_calls: int = 5
+    # Edit-heavy requests often require more chained tool calls/iterations.
+    editing_min_iterations: int = 12
+    editing_max_consecutive_tool_calls: int = 10
+    editing_force_action_nudges: int = 2
+    editing_require_inspection_nudges: int = 3
+    editing_failure_repair_nudges: int = 3
     retry_attempts: int = 2
 
     # Backend
@@ -84,6 +130,7 @@ class Config:
     )
 
     # Logging
+    debug_trace: bool = True
     log_level: str | int = field(
         default_factory=lambda: os.getenv("AGENT_LOG_LEVEL", "ERROR")
     )
@@ -101,6 +148,11 @@ class Config:
     skill_top_k: int = 3
     skill_include_playbooks: bool = True
     skill_compact_fallback: bool = True
+    skill_include_on_demand_context: bool = True
+    skill_on_demand_context_max_chars: int = 2600
+    skill_on_demand_context_max_skills: int = 2
+    skill_on_demand_context_max_files_per_skill: int = 5
+    context7_docs_auto_nudge: bool = True
 
     # Auto-compact: keep session from growing unboundedly
     auto_compact: bool = True
@@ -128,6 +180,52 @@ class Config:
             "mkdir",
         ]
     )
+
+    # Verification guardrail: after write-like tool calls, require at least one
+    # verification-style tool call (tests/lint/check) before final answer.
+    require_verification_after_writes: bool = True
+    verification_tool_patterns: list = field(
+        default_factory=lambda: [
+            "test",
+            "pytest",
+            "unittest",
+            "lint",
+            "ruff",
+            "mypy",
+            "typecheck",
+            "check",
+            "verify",
+            "validate",
+            "build",
+        ]
+    )
+    language_verification_matrix: dict = field(
+        default_factory=lambda: {
+            "python": [
+                "run_ruff(path=...)",
+                "run_pytest(path=...)",
+                "run_mypy(path=...)",
+            ],
+            "rust": [
+                'run_shell(cmd="cargo check")',
+                'run_shell(cmd="cargo test")',
+                'run_shell(cmd="cargo clippy")',
+            ],
+            "javascript": [
+                'run_shell(cmd="npm test")',
+                'run_shell(cmd="npm run lint")',
+            ],
+            "go": [
+                'run_shell(cmd="go test ./...")',
+                'run_shell(cmd="go vet ./...")',
+            ],
+        }
+    )
+    verification_auto_repair_max_attempts: int = 3
+
+    # Append a compact quality checklist to final answers after tool-driven runs.
+    append_quality_checklist: bool = True
+    quality_checklist_max_tools: int = 5
 
     # Token-accurate context budgeting: set to your model's context window (e.g. 4096)
     # to enforce a hard token cap before each generate() call via the /tokenize endpoint.

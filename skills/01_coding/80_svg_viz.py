@@ -74,7 +74,16 @@ _NODE_COLORS: dict[str, str] = {
 }
 
 _FONT = "ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace"
-_FONT_SANS = "'Segoe UI', system-ui, -apple-system, sans-serif"
+_FONT_SANS = "'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif"
+
+_ICONS = {
+    "function": "M12 15a3 3 0 100-6 3 3 0 000 6zm0 2a5 5 0 110-10 5 5 0 010 10zm-7-2a1 1 0 11-2 0 1 1 0 012 0zm14 0a1 1 0 11-2 0 1 1 0 012 0z",
+    "class": "M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm0 2v14h14V5H5z",
+    "module": "M12 2L2 7l10 5 10-5-10-5zm0 13l-10-5v6l10 5 10-5v-6l-10 5z",
+    "file": "M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L16.5 7H13V3.5zM6 20V4h5v4h4v12H6z",
+    "dir": "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z",
+    "step": "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z",
+}
 
 # ---------------------------------------------------------------------------
 # SVG primitives
@@ -103,6 +112,15 @@ def _svg_header(w: int, h: int, title: str = "") -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'width="{w}" height="{h}" viewBox="0 0 {w} {h}">\n'
         f"  {title_tag}"
+        f'  <style>\n'
+        f'    .node {{ transition: transform 0.2s ease-in-out, filter 0.2s; }}\n'
+        f'    .node:hover {{ transform: scale(1.02); filter: brightness(1.1); cursor: pointer; }}\n'
+        f'    @keyframes drawIn {{ from {{ stroke-dasharray: 0 1000; filter: opacity(0); }} to {{ stroke-dasharray: 1000 1000; filter: opacity(1); }} }}\n'
+        f'    .edge {{ animation: 0.8s ease-out 0s 1 drawIn; opacity: 0.85; transition: stroke-width 0.2s; }}\n'
+        f'    .edge:hover {{ stroke-width: 2.5; opacity: 1; filter: drop-shadow(0 0 3px rgba(88,166,255,0.6)); }}\n'
+        f'    .badge {{ transition: transform 0.2s; }}\n'
+        f'    .node:hover .badge {{ transform: translateY(-1px); }}\n'
+        f'  </style>\n'
         f'  <rect width="{w}" height="{h}" fill="{_T["bg"]}"/>\n'
     )
 
@@ -112,8 +130,20 @@ def _svg_footer() -> str:
 
 
 def _svg_defs(arrow_color: str = _T["text_muted"]) -> str:
-    """Arrow-head + drop-shadow filter definitions."""
+    """Arrow-head + drop-shadow + gradients definitions."""
     return f"""  <defs>
+    <linearGradient id="grad-function" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="{_T["surface2"]}" />
+      <stop offset="100%" stop-color="{_T["surface"]}" />
+    </linearGradient>
+    <linearGradient id="grad-class" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2a313a" />
+      <stop offset="100%" stop-color="{_T["surface2"]}" />
+    </linearGradient>
+    <linearGradient id="grad-module" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#252c34" />
+      <stop offset="100%" stop-color="{_T["surface2"]}" />
+    </linearGradient>
     <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
       <polygon points="0 0, 10 3.5, 0 7" fill="{arrow_color}"/>
     </marker>
@@ -126,8 +156,9 @@ def _svg_defs(arrow_color: str = _T["text_muted"]) -> str:
     <marker id="arr-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
       <polygon points="0 0, 10 3.5, 0 7" fill="{_T["orange"]}"/>
     </marker>
-    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.5"/>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.6"/>
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000000" flood-opacity="0.8"/>
     </filter>
   </defs>\n"""
 
@@ -143,9 +174,9 @@ def _svg_node_rect(
     accent: str = "",
     badge: str = "",
 ) -> str:
-    fill = _NODE_COLORS.get(node_type, _NODE_COLORS["default"])
+    fill = f"url(#grad-{node_type})" if f"grad-{node_type}" in ["grad-function", "grad-class", "grad-module"] else _NODE_COLORS.get(node_type, _NODE_COLORS["default"])
     stroke = accent or _T["border"]
-    lines: list[str] = []
+    lines: list[str] = [f'  <g class="node" transform-origin="{x + w//2} {y + h//2}">']
 
     # Shadow + outer rect
     lines.append(
@@ -178,17 +209,32 @@ def _svg_node_rect(
 
     if badge:
         bx, by = x + w - 2, y + 2
-        bw = max(20, len(badge) * 6 + 8)
+        bw = max(20, len(badge) * 6 + 10)
+        lines.append(f'  <g class="badge">')
         lines.append(
-            f'  <rect x="{bx - bw}" y="{by}" width="{bw}" height="14" rx="7" fill="{_T["surface2"]}" '
-            f'stroke="{_T["border"]}" stroke-width="1"/>'
+            f'  <rect x="{bx - bw}" y="{by}" width="{bw}" height="16" rx="8" fill="{_T["surface"]}" '
+            f'stroke="{_T["border"]}" stroke-width="1.5" filter="url(#shadow)"/>'
         )
         lines.append(
-            f'  <text x="{bx - bw // 2}" y="{by + 7}" text-anchor="middle" dominant-baseline="middle" '
-            f'font-family="{_FONT}" font-size="9" fill="{_T["text_muted"]}">{_esc(badge)}</text>'
+            f'  <text x="{bx - bw // 2}" y="{by + 8}" text-anchor="middle" dominant-baseline="middle" '
+            f'font-family="{_FONT}" font-size="9" font-weight="600" fill="{_T["text_muted"]}">{_esc(badge)}</text>'
         )
+        lines.append('  </g>')
 
+    lines.append('  </g>')
     return "\n".join(lines)
+
+
+def _svg_icon(x: int, y: int, size: int, icon_name: str, color: str) -> str:
+    path = _ICONS.get(icon_name)
+    if not path:
+        return ""
+    scale = size / 24.0
+    return (
+        f'  <g transform="translate({x}, {y}) scale({scale})">'
+        f'<path d="{path}" fill="{color}"/></g>'
+    )
+
 
 
 def _svg_edge(
@@ -207,8 +253,8 @@ def _svg_edge(
     mx = (x1 + x2) // 2
     path = f"M{x1},{y1} C{mx},{y1} {mx},{y2} {x2},{y2}"
     lines = [
-        f'  <path d="{path}" fill="none" stroke="{c}" stroke-width="1.5" '
-        f'{dash}marker-end="url(#{marker})" opacity="0.85"/>'
+        f'  <path class="edge" d="{path}" fill="none" stroke="{c}" stroke-width="1.5" '
+        f'{dash}marker-end="url(#{marker})"/>'
     ]
     if label:
         lx = (x1 + x2) // 2
@@ -810,11 +856,13 @@ def svg_class_diagram(
             )
             y_cur += LINE_H
         for meth in c["methods"]:
-            icon = "⚙" if meth.startswith("__") else "→"
+            is_dunder = meth.startswith("__")
+            icon_name = "function" if not is_dunder else "step"
+            parts.append(_svg_icon(bx + 10, y_cur - 9, 12, icon_name, _T["blue"]))
             parts.append(
-                f'  <text x="{bx + 10}" y="{y_cur}" font-family="{_FONT}" '
+                f'  <text x="{bx + 26}" y="{y_cur}" font-family="{_FONT}" '
                 f'font-size="10" fill="{_T["blue"]}">'
-                f"{icon} {_esc(_trunc(meth + '()', 23))}</text>"
+                f"{_esc(_trunc(meth + '()', 21))}</text>"
             )
             y_cur += LINE_H
 
@@ -1355,18 +1403,19 @@ def svg_directory_tree(
         ext = n.get("ext", "")
         fc = n.get("file_count", 0)
 
-        icon_text = "▶" if ntype == "dir" else "·"
         icon_col = _T["yellow"] if ntype == "dir" else color
+        icon_name = "dir" if ntype == "dir" else "file"
 
+        parts.append(_svg_icon(x, y + 5, 14, icon_name, icon_col))
         parts.append(
-            f'  <text x="{x}" y="{y + 15}" font-family="{_FONT}" font-size="11" '
-            f'fill="{icon_col}" font-weight="{"700" if ntype == "dir" else "400"}">'
-            f"{icon_text} {_esc(_trunc(label, 40))}"
+            f'  <text x="{x + 18}" y="{y + 15}" font-family="{_FONT}" font-size="11" '
+            f'fill="{_T["text"]}" font-weight="{"700" if ntype == "dir" else "400"}">'
+            f"{_esc(_trunc(label, 40))}"
             f"{'  ' + _esc(f'({fc} files)') if fc and ntype == 'dir' else ''}"
             f"</text>"
         )
         if ext and ntype == "file":
-            ex = x + max(140, len(label) * 7 + 20)
+            ex = x + max(140, len(label) * 7 + 24)
             parts.append(
                 f'  <text x="{ex}" y="{y + 14}" font-family="{_FONT}" font-size="9" '
                 f'fill="{color}" opacity="0.7">{_esc(ext)}</text>'
