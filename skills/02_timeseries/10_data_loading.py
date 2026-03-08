@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 if "llm" not in globals():
 
     class _NoOpLLM:  # no-op fallback for standalone use; registry injects real llm
@@ -107,7 +109,13 @@ def load_csv_data(filepath, date_column, value_column, sep=","):
 
 
 @llm.tool(description="Create synthetic time series for testing.")
-def create_sample_data(pattern, n_points=200, noise_level=1.0):
+def create_sample_data(
+    pattern: Literal[
+        "trend", "seasonal", "random", "anomaly", "stationary", "cyclic_trend"
+    ],
+    n_points=200,
+    noise_level=1.0,
+):
     """Use when: Create synthetic time series for testing.
 
     Triggers: load csv, read file, import dataset, inspect dataset columns, create sample data.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 if "llm" not in globals():
 
     class _NoOpLLM:  # no-op fallback for standalone use; registry injects real llm
@@ -319,7 +321,12 @@ def stl_seasonality(period=0, column=None):
 
 
 @llm.tool(description="Detect anomalies - returns counts only (indices cached).")
-def detect_anomalies(method, threshold=3.0, period=0, column=None):
+def detect_anomalies(
+    method: Literal["zscore", "iqr", "hampel", "stl_resid", "iforest"],
+    threshold=3.0,
+    period=0,
+    column=None,
+):
     """Use when: Detect anomalies - returns counts only (indices cached).
 
     Triggers: analyze the series, stationarity test, detect anomalies, check trend, seasonality diagnostics, acf pacf.
@@ -431,7 +438,12 @@ def get_cached_anomalies(column=None):
 
 
 @llm.tool(description="Detect structural breaks or regimes using ruptures or HMM.")
-def change_points(algorithm="ruptures", penalty=0, n_regimes=2, column=None):
+def change_points(
+    algorithm: Literal["ruptures", "hmm"] = "ruptures",
+    penalty=0,
+    n_regimes=2,
+    column=None,
+):
     """Use when: Detect structural breaks/regimes.
 
     Triggers: analyze the series, stationarity test, detect anomalies, check trend, seasonality diagnostics, acf pacf.

@@ -21,6 +21,10 @@ pub enum BridgeEvent {
         name: String,
         args: Value,
     },
+    Image {
+        tool: String,
+        path: String,
+    },
     Skill {
         skill_ids: Vec<String>,
         selected_tools: Vec<String>,
@@ -37,8 +41,10 @@ pub struct BridgeState {
     pub session: String,
     pub msg_count: u64,
     pub agents: Vec<String>,
+    pub mcp_servers: Vec<String>,
     pub pipeline: Option<Value>,
     pub rapidfuzz: bool,
+    pub tiktoken: bool,
     pub tool_count: u64,
     pub skill_count: u64,
 }
@@ -57,8 +63,17 @@ impl BridgeState {
                         .collect()
                 })
                 .unwrap_or_default(),
+            mcp_servers: v["mcp_servers"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             pipeline: v.get("pipeline").filter(|p| !p.is_null()).cloned(),
             rapidfuzz: v["rapidfuzz"].as_bool().unwrap_or(false),
+            tiktoken: v["tiktoken"].as_bool().unwrap_or(false),
             tool_count: v["tool_count"].as_u64().unwrap_or(0),
             skill_count: v["skill_count"].as_u64().unwrap_or(0),
         }
@@ -182,6 +197,10 @@ impl PythonBridge {
             "tool" => BridgeEvent::Tool {
                 name: v["name"].as_str().unwrap_or("unknown").to_string(),
                 args: v.get("args").cloned().unwrap_or_default(),
+            },
+            "image" => BridgeEvent::Image {
+                tool: v["tool"].as_str().unwrap_or("unknown").to_string(),
+                path: v["path"].as_str().unwrap_or("").to_string(),
             },
             "skill" => BridgeEvent::Skill {
                 skill_ids: v["skill_ids"]

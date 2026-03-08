@@ -4,10 +4,11 @@ import json
 from dataclasses import dataclass, field
 from functools import lru_cache
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 try:
     from toon_format import decode, encode
@@ -19,7 +20,7 @@ except ImportError:
 
 
 @lru_cache(maxsize=1)
-def check_optional_deps() -> Dict[str, bool]:
+def check_optional_deps() -> dict[str, bool]:
     deps = {
         "scipy": False,
         "statsmodels": False,
@@ -68,24 +69,24 @@ def check_optional_deps() -> Dict[str, bool]:
 
 @dataclass
 class Context:
-    data: Optional[pd.DataFrame] = None
-    original_data: Optional[pd.DataFrame] = None
+    data: pd.DataFrame | None = None
+    original_data: pd.DataFrame | None = None
     data_name: str = ""
-    freq_cache: Optional[str] = None
+    freq_cache: str | None = None
 
-    anomaly_store: Dict[str, List[int]] = field(default_factory=dict)
-    anomaly_meta: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    anomaly_store: dict[str, list[int]] = field(default_factory=dict)
+    anomaly_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    nf_best_model: Optional[str] = None
-    nf_cv_full: Optional[pd.DataFrame] = None
-    nf_pred_col: Optional[str] = None
+    nf_best_model: str | None = None
+    nf_cv_full: pd.DataFrame | None = None
+    nf_pred_col: str | None = None
 
     @property
     def loaded(self) -> bool:
         return self.data is not None and len(self.data) > 0
 
     @property
-    def value_columns(self) -> List[str]:
+    def value_columns(self) -> list[str]:
         if self.data is None:
             return []
         return [c for c in self.data.columns if c != "date"]
@@ -125,13 +126,13 @@ class Context:
         return value
 
     @staticmethod
-    def _serialize_frame(df: Optional[pd.DataFrame]) -> Optional[str]:
+    def _serialize_frame(df: pd.DataFrame | None) -> str | None:
         if df is None:
             return None
         return df.to_json(orient="split", date_format="iso")
 
     @staticmethod
-    def _deserialize_frame(payload: Optional[str]) -> Optional[pd.DataFrame]:
+    def _deserialize_frame(payload: str | None) -> pd.DataFrame | None:
         if not payload:
             return None
         frame = pd.read_json(StringIO(payload), orient="split")
@@ -155,7 +156,7 @@ class Context:
             "nf_pred_col": self.nf_pred_col,
         }
 
-    def load_state(self, state: Optional[dict[str, Any]]) -> None:
+    def load_state(self, state: dict[str, Any] | None) -> None:
         self.reset()
         if not state:
             return
@@ -191,22 +192,141 @@ def _safe_json_fallback(obj: Any) -> str:
         )
 
 
-@dataclass
-class ToolParameter:
+class ToolParameter(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        str_strip_whitespace=True,
+    )
+
     name: str
     type: str
-    description: str
+    description: str = ""
     required: bool = True
+    enum: list[Any] | None = None
+
+    def __init__(self, *args: Any, **data: Any) -> None:
+        if args:
+            fields = ("name", "type", "description", "required")
+            if len(args) > len(fields):
+                raise TypeError("ToolParameter() received too many positional arguments")
+            for idx, value in enumerate(args):
+                key = fields[idx]
+                if key in data:
+                    raise TypeError(
+                        f"ToolParameter() got multiple values for argument '{key}'"
+                    )
+                data[key] = value
+        super().__init__(**data)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        name = str(value or "").strip()
+        if not name:
+            raise ValueError("Tool parameter name must be non-empty")
+        return name
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _normalize_type(cls, value: Any) -> str:
+        raw = str(value or "").strip().lower()
+        aliases = {
+            "string": "string",
+            "str": "string",
+            "int": "int",
+            "integer": "int",
+            "float": "float",
+            "number": "float",
+            "bool": "bool",
+            "boolean": "bool",
+            "list": "list",
+            "array": "list",
+            "dict": "dict",
+            "object": "dict",
+            "map": "dict",
+        }
+        return aliases.get(raw, raw or "string")
+
+    @field_validator("enum", mode="before")
+    @classmethod
+    def _normalize_enum(cls, value: Any) -> list[Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, tuple):
+            items = list(value)
+        elif isinstance(value, list):
+            items = value
+        else:
+            items = [value]
+
+        out: list[Any] = []
+        seen: set[str] = set()
+        for item in items:
+            norm = item.item() if isinstance(item, np.generic) else item
+            if norm is not None and not isinstance(norm, (str, int, float, bool)):
+                continue
+            key = json.dumps(norm, ensure_ascii=False, sort_keys=True, default=str)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(norm)
+        return out or None
 
 
-@dataclass
-class Tool:
+class Tool(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        arbitrary_types_allowed=True,
+        validate_assignment=True,
+        str_strip_whitespace=True,
+    )
+
     name: str
     description: str
-    parameters: list[ToolParameter]
-    function: Callable[..., Any]
+    parameters: list[ToolParameter] = Field(default_factory=list)
+    function: Any
     skill_id: str | None = None
     source_path: str | None = None
+
+    def __init__(self, *args: Any, **data: Any) -> None:
+        if args:
+            fields = (
+                "name",
+                "description",
+                "parameters",
+                "function",
+                "skill_id",
+                "source_path",
+            )
+            if len(args) > len(fields):
+                raise TypeError("Tool() received too many positional arguments")
+            for idx, value in enumerate(args):
+                key = fields[idx]
+                if key in data:
+                    raise TypeError(f"Tool() got multiple values for argument '{key}'")
+                data[key] = value
+        super().__init__(**data)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        name = str(value or "").strip()
+        if not name:
+            raise ValueError("Tool name must be non-empty")
+        return name
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value: Any) -> str:
+        return str(value or "").strip()
+
+    @field_validator("function")
+    @classmethod
+    def _validate_function(cls, value: Any) -> Any:
+        if not callable(value):
+            raise TypeError("Tool function must be callable")
+        return value
 
     def __repr__(self) -> str:
         return (

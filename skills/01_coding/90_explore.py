@@ -15,7 +15,7 @@ fd_find           -- fast file/directory finder by name pattern (falls back to p
 from __future__ import annotations
 
 import json as _json_mod
-from typing import Any
+from typing import Any, Literal
 
 if "llm" not in globals():
 
@@ -38,7 +38,10 @@ import ast
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
+
+_PROJECT_MAP_CACHE: dict[tuple[str, int], dict[str, Any]] = {}
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -224,6 +227,54 @@ def _coerce_int(value: Any, *, name: str, default: int) -> tuple[int, str | None
             return int(text), None
         return 0, f"Invalid {name}: expected integer, got {value!r}"
     return 0, f"Invalid {name}: expected integer, got {type(value).__name__}"
+
+
+def _project_map_git_identity(root: Path) -> tuple[str, str | None, str | None]:
+    """Return (identity, repo_root, head) for cache invalidation.
+
+    For git repos, identity includes HEAD + working tree dirty hash so cache is
+    invalidated on commits and local edits. Outside git repos, identity falls
+    back to root mtime.
+    """
+    try:
+        p = root if root.is_dir() else root.parent
+        top = subprocess.run(
+            ["git", "-C", str(p), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+        if top.returncode != 0:
+            raise RuntimeError("not a git repo")
+        repo_root = top.stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+        if head.returncode != 0 or not head.stdout.strip():
+            raise RuntimeError("cannot resolve HEAD")
+        head_sha = head.stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", repo_root, "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        dirty_sig = str(hash((dirty.stdout or "").strip()))
+        identity = f"git:{repo_root}:{head_sha}:{dirty_sig}"
+        return identity, repo_root, head_sha
+    except Exception:
+        mtime_ns = 0
+        try:
+            mtime_ns = int(root.stat().st_mtime_ns)
+        except Exception:
+            pass
+        return f"fs:{str(root)}:{mtime_ns}", None, None
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +517,17 @@ def get_project_map(directory: str = ".", max_depth: int = 3) -> str:
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         return _safe_json({"status": "error", "error": f"Not a directory: {directory}"})
+    max_depth = max(0, int(max_depth))
+
+    cache_key = (str(root), max_depth)
+    identity, repo_root, head_sha = _project_map_git_identity(root)
+    cached = _PROJECT_MAP_CACHE.get(cache_key)
+    if cached and cached.get("identity") == identity:
+        payload = dict(cached.get("payload", {}))
+        payload["cache_hit"] = True
+        payload["cache_identity"] = identity
+        payload["generated_at"] = cached.get("generated_at", payload.get("generated_at"))
+        return _safe_json(payload)
 
     files: list[dict] = []
 
@@ -516,15 +578,31 @@ def get_project_map(directory: str = ".", max_depth: int = 3) -> str:
                 "summary": first_doc,
             }
         )
+    payload = {
+        "status": "ok",
+        "root": str(root),
+        "file_count": len(files),
+        "files": files,
+        "cache_hit": False,
+        "cache_identity": identity,
+        "generated_at": int(time.time()),
+    }
+    if repo_root and head_sha:
+        payload["git_repo_root"] = repo_root
+        payload["git_head"] = head_sha
 
-    return _safe_json(
-        {
-            "status": "ok",
-            "root": str(root),
-            "file_count": len(files),
-            "files": files,
-        }
-    )
+    _PROJECT_MAP_CACHE[cache_key] = {
+        "identity": identity,
+        "payload": payload,
+        "generated_at": payload["generated_at"],
+    }
+
+    # Bound cache size to keep long-running sessions predictable.
+    if len(_PROJECT_MAP_CACHE) > 48:
+        for stale_key in list(_PROJECT_MAP_CACHE.keys())[: len(_PROJECT_MAP_CACHE) - 48]:
+            _PROJECT_MAP_CACHE.pop(stale_key, None)
+
+    return _safe_json(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -787,7 +865,7 @@ def find_references(name: str, directory: str = ".", file_glob: str = "") -> str
 def fd_find(
     pattern: str,
     directory: str = ".",
-    file_type: str = "f",
+    file_type: Literal["f", "d", ""] = "f",
     extension: str = "",
     max_depth: int = 8,
     max_results: int = 50,

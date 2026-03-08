@@ -25,12 +25,15 @@ if "_safe_json" not in globals():
         return _j.dumps(obj, ensure_ascii=False)
 
 
-import difflib
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
+from ._search_replace_helpers import (
+    resolve_path as _resolve_path,
+    run_subprocess as _run_subprocess,
+    unified_diff_text as _unified_diff_text,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -39,43 +42,21 @@ from pathlib import Path
 
 
 def _resolve(path: str) -> Path:
-    p = Path(path).expanduser()
-    if not p.is_absolute():
-        base_cwd = (
-            (_coding_config.get("default_cwd") or None)
-            if "_coding_config" in globals()
-            else None
-        )
-        if base_cwd:
-            p = Path(base_cwd) / p
-    return p.resolve()
+    base_cwd = (
+        (_coding_config.get("default_cwd") or None)
+        if "_coding_config" in globals()
+        else None
+    )
+    return _resolve_path(path, base_cwd=base_cwd)
 
 
 def _run(cmd: list[str], cwd: str | None = None, timeout: int = 30) -> dict:
     """Run a subprocess and return {stdout, stderr, returncode}."""
-    try:
-        r = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
-        )
-        return {"stdout": r.stdout, "stderr": r.stderr, "returncode": r.returncode}
-    except FileNotFoundError:
-        return {"stdout": "", "stderr": f"command not found: {cmd[0]}", "returncode": 127}
-    except subprocess.TimeoutExpired:
-        return {"stdout": "", "stderr": "timeout", "returncode": -1}
-    except Exception as exc:
-        return {"stdout": "", "stderr": str(exc), "returncode": -1}
+    return _run_subprocess(cmd, cwd=cwd, timeout=timeout)
 
 
 def _unified_diff(original: str, updated: str, label: str = "file") -> str:
-    lines_a = original.splitlines(keepends=True)
-    lines_b = updated.splitlines(keepends=True)
-    return "".join(
-        difflib.unified_diff(lines_a, lines_b, fromfile=f"a/{label}", tofile=f"b/{label}", n=3)
-    )
+    return _unified_diff_text(original, updated, label=label)
 
 
 # ---------------------------------------------------------------------------

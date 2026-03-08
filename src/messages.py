@@ -18,3 +18,5 @@ class Message:
     content: str
     name: str | None = None
     tool_call_id: str | None = None
+    # When False, persist in SQLite but skip vector embedding indexing.
+    vectorize: bool = True

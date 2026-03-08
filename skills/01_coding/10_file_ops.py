@@ -10,6 +10,7 @@ if "llm" not in globals():
 
 import fnmatch
 from pathlib import Path
+from typing import Literal
 
 
 def _resolve_path(path: str) -> Path:
@@ -78,7 +79,7 @@ def read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
 @llm.tool(
     description="Write (create or overwrite/append) a file with the given content."
 )
-def write_file(path: str, content: str, mode: str = "w") -> str:
+def write_file(path: str, content: str, mode: Literal["w", "a"] = "w") -> str:
     """Use when: Create a new file or overwrite/append an existing one.
 
     Triggers: write file, create file, save file, overwrite file, append to file.

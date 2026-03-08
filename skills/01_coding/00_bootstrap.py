@@ -11,6 +11,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+# Marker consumed by skills_health organization audit.
+_CODING_BOOTSTRAP_ONLY = True
+
 # --------------------------------------------------------------------------
 # Persistent config shared across all coding tools in this execution context
 # --------------------------------------------------------------------------

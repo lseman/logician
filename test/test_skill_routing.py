@@ -1,14 +1,16 @@
 import importlib.util
 import json
 import logging
+import os
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
 
 try:
-    from src.tools.catalog import SkillCatalog
+    from src.tools.registry.catalog import SkillCatalog
     from src.tools import Context, ToolRegistry, ToolCall
 except ModuleNotFoundError:
     src_dir = Path(__file__).resolve().parents[1] / "src"
@@ -34,7 +36,7 @@ except ModuleNotFoundError:
     sys.modules["src.tools"] = tools_module
     tools_spec.loader.exec_module(tools_module)
 
-    from src.tools.catalog import SkillCatalog
+    from src.tools.registry.catalog import SkillCatalog
     from src.tools import Context, ToolRegistry, ToolCall
 
 
@@ -43,6 +45,71 @@ def _registry() -> ToolRegistry:
 
 
 class SkillRoutingTests(unittest.TestCase):
+    def test_symlinked_superpowers_skill_is_discovered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skills_root = root / "skills"
+            plugin_root = root / "plugins" / "superpowers" / "skills"
+            skill_dir = plugin_root / "brainstorming"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                """```skill
+---
+name: brainstorming
+description: Use before implementation to explore alternatives.
+---
+
+## Process
+Generate options first.
+```""",
+                encoding="utf-8",
+            )
+
+            skills_root.mkdir(parents=True, exist_ok=True)
+            link_path = skills_root / "10_superpowers"
+            try:
+                os.symlink(plugin_root, link_path, target_is_directory=True)
+            except (AttributeError, NotImplementedError, OSError):
+                self.skipTest("Symlink creation not available on this platform.")
+
+            catalog = SkillCatalog(
+                skills_md_path=skills_root,
+                skills_dir_path=skills_root,
+                log=logging.getLogger("test.skill_routing"),
+            )
+            catalog.ensure_skill_catalog()
+
+            self.assertIn("sp__brainstorming", catalog.skills)
+
+    def test_unreadable_markdown_source_does_not_abort_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            good_skill = root / "brainstorming"
+            good_skill.mkdir(parents=True, exist_ok=True)
+            (good_skill / "SKILL.md").write_text(
+                """```skill
+---
+name: brainstorming
+description: Use before implementation to explore alternatives.
+---
+
+## Process
+Generate options first.
+```""",
+                encoding="utf-8",
+            )
+            # Intentionally invalid UTF-8 markdown source; should be skipped.
+            (root / "broken.md").write_bytes(b"\xff\xfe\xfa")
+
+            catalog = SkillCatalog(
+                skills_md_path=root,
+                skills_dir_path=root,
+                log=logging.getLogger("test.skill_routing"),
+            )
+            catalog.ensure_skill_catalog()
+
+            self.assertIn("sp__brainstorming", catalog.skills)
+
     def test_guidance_routing_uses_related_markdown_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -328,6 +395,45 @@ Avoid when: the task is already straightforward.
 
             self.assertTrue(selection.selected_skills)
             self.assertEqual(selection.selected_skills[0].id, "sp__strategic_thinking")
+
+    def test_usage_and_recency_bias_contribute_to_ranking(self) -> None:
+        registry = _registry()
+        # Ensure the catalog is hydrated before recording usage stats.
+        _ = registry.list_skills()
+        registry._catalog.note_skill_usage("analysis", timestamp=time.time() - 30)
+        registry._catalog.note_skill_usage("analysis", timestamp=time.time() - 10)
+        registry._catalog.note_skill_usage("analysis")
+
+        registry.route_query_to_skills(
+            "Inspect anomalies and diagnostics in this series.",
+            top_k=2,
+        )
+        breakdown = registry._catalog.get_last_skill_score_breakdown()
+        analysis_breakdown = breakdown.get("analysis", {})
+        contrib = analysis_breakdown.get("contributions", {})
+        self.assertGreater(float(contrib.get("usage_bias", 0.0)), 0.0)
+        self.assertGreater(float(contrib.get("recency_bias", 0.0)), 0.0)
+
+    def test_routing_weights_can_be_overridden_via_env(self) -> None:
+        prev = os.environ.get("AGENT_SKILL_ROUTING_WEIGHTS")
+        try:
+            os.environ["AGENT_SKILL_ROUTING_WEIGHTS"] = json.dumps(
+                {"bm25": 0.5, "dense": 0.0}
+            )
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                catalog = SkillCatalog(
+                    skills_md_path=root,
+                    skills_dir_path=root,
+                    log=logging.getLogger("test.skill_routing"),
+                )
+                self.assertAlmostEqual(catalog._routing_weights["bm25"], 0.5)
+                self.assertAlmostEqual(catalog._routing_weights["dense"], 0.0)
+        finally:
+            if prev is None:
+                os.environ.pop("AGENT_SKILL_ROUTING_WEIGHTS", None)
+            else:
+                os.environ["AGENT_SKILL_ROUTING_WEIGHTS"] = prev
 
 
 if __name__ == "__main__":

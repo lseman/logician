@@ -11,6 +11,7 @@ if "llm" not in globals():
 import json
 import re
 from pathlib import Path
+from typing import Literal
 
 
 def _resolve_target(path: str) -> str:
@@ -623,7 +624,7 @@ def detect_project(path: str = ".") -> str:
 )
 def smart_quality_gate(
     path: str = ".",
-    mode: str = "balanced",
+    mode: Literal["fast", "balanced", "full"] = "balanced",
     venv_path: str = "",
 ) -> str:
     """Use when: You want a stronger, SOTA-like coding validation pass with actionable next steps.

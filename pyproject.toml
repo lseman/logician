@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "foreblocks-agent"
+name = "logician"
 version = "0.1.0"
 description = "Autonomous agent system for time series analysis and software engineering"
 readme = "README.md"
@@ -23,8 +23,13 @@ dependencies = [
     "numpy>=1.24.0",
     "pandas>=2.0.0",
     "pydantic>=2.5.0",
+    "tiktoken>=0.7.0",
     "eoh>=0.1.0",
 ]
+
+[project.scripts]
+logician-bridge = "logician_bridge:main"
+logician-messaging = "logician_messaging:main"
 
 [project.optional-dependencies]
 dev = [
@@ -38,21 +43,20 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/logician/foreblocks"
-Documentation = "https://foreblocks.readthedocs.io"
-Repository = "https://github.com/logician/foreblocks"
-Issues = "https://github.com/logician/foreblocks/issues"
+Homepage = "https://github.com/logician/logician"
+Documentation = "https://logician.readthedocs.io"
+Repository = "https://github.com/logician/logician"
+Issues = "https://github.com/logician/logician/issues"
 
 [tool.setuptools]
-packages = [
-    "foreblocks",
-    "foreblocks.cli",
-    "foreblocks.apps",
-    "foreblocks.skills",
+py-modules = [
+    "logician_bridge",
+    "logician_messaging",
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["src*"]
 
 [tool.ruff]
 line-length = 100
@@ -76,10 +80,10 @@ python_methods = ["test_*"]
 python_classes = ["Test*"]
 python_modules = ["test_*"]
 python_packages = ["test"]
-addopts = "-v --tb=short --cov=foreblocks --cov-report=term-missing"
+addopts = "-v --tb=short --cov=src --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["foreblocks"]
+source = ["src"]
 
 [tool.coverage.report]
 exclude_lines = [

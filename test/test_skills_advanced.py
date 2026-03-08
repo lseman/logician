@@ -1,39 +1,37 @@
-import importlib.util
-import sys
-import os
+import importlib
+import tempfile
+import unittest
+from pathlib import Path
 
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
-edit_block = load_module("edit_block", "skills/02_coding/65_edit_block.py")
-advanced_mining = load_module("advanced_mining", "skills/01_timeseries/80_advanced_mining.py")
+class SkillAdvancedBehaviorTests(unittest.TestCase):
+    def test_apply_edit_block_replaces_exact_block(self) -> None:
+        edit_block = importlib.import_module("skills.01_coding.65_edit_block")
+        apply_edit_block = getattr(edit_block, "apply_edit_block")
 
-import json
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "dummy.py"
+            target.write_text(
+                "def foo():\n"
+                "    print('bar')\n",
+                encoding="utf-8",
+            )
 
-print("edit_block loaded!", "apply_edit_block" in dir(edit_block))
-print("advanced_mining loaded!", "discover_motifs" in dir(advanced_mining))
+            block = (
+                "<<<< SEARCH\n"
+                "def foo():\n"
+                "    print('bar')\n"
+                "====\n"
+                "def foo():\n"
+                "    print('baz')\n"
+                ">>>> REPLACE"
+            )
+            raw = apply_edit_block(str(target), block)
+            self.assertIn('"status":"ok"', raw.replace(" ", ""))
+            updated = target.read_text(encoding="utf-8")
+            self.assertIn("print('baz')", updated)
+            self.assertNotIn("print('bar')", updated)
 
-# Test edit block logic
-test_file = "dummy_file.py"
-with open(test_file, "w") as f:
-    f.write("def foo():\n    print('bar')\n")
 
-blocks = """<<<< SEARCH
-def foo():
-    print('bar')
-====
-def foo():
-    print('baz')
->>>> REPLACE"""
-
-res = edit_block.apply_edit_block(test_file, blocks)
-print("edit block result:", res)
-
-with open(test_file, "r") as f:
-    print("file content:", f.read())
-
-os.remove(test_file)
+if __name__ == "__main__":
+    unittest.main()

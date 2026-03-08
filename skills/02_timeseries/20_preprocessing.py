@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 if "llm" not in globals():
 
     class _NoOpLLM:  # no-op fallback for standalone use; registry injects real llm
@@ -10,7 +12,10 @@ if "llm" not in globals():
 
 
 @llm.tool(description="Resample to regular frequency and interpolate gaps.")
-def regularize_series(freq="", method="linear"):
+def regularize_series(
+    freq: str = "",
+    method: Literal["linear", "ffill", "pad"] = "linear",
+):
     """Use when: Resample to regular frequency and interpolate gaps.
 
     Triggers: clean the data, fill missing values, resample series, regularize frequency, remove outliers, detrend.
@@ -42,7 +47,7 @@ def regularize_series(freq="", method="linear"):
 
 
 @llm.tool(description="Fill missing values via interpolation.")
-def fill_missing(method="time"):
+def fill_missing(method: Literal["time", "ffill"] = "time"):
     """Use when: Fill missing values via interpolation.
 
     Triggers: clean the data, fill missing values, resample series, regularize frequency, remove outliers, detrend.
@@ -122,7 +127,11 @@ def hampel_filter(window=15, n_sigmas=3.0):
 
 
 @llm.tool(description="Remove polynomial trend via fitting.")
-def detrend(method="linear", degree=2, column=None):
+def detrend(
+    method: Literal["linear", "polynomial"] = "linear",
+    degree=2,
+    column=None,
+):
     """Use when: Remove polynomial trend via fitting.
 
     Triggers: clean the data, fill missing values, resample series, regularize frequency, remove outliers, detrend.
@@ -163,7 +172,7 @@ def detrend(method="linear", degree=2, column=None):
 
 
 @llm.tool(description="Apply log, sqrt, or Box-Cox transformation.")
-def transform_series(method, column=None):
+def transform_series(method: Literal["log", "sqrt", "boxcox"], column=None):
     """Use when: Apply log, sqrt, or Box-Cox transformation.
 
     Triggers: clean the data, fill missing values, resample series, regularize frequency, remove outliers, detrend.
@@ -216,7 +225,10 @@ def transform_series(method, column=None):
 
 
 @llm.tool(description="Standardize or normalize data.")
-def scale_series(method="robust", column=None):
+def scale_series(
+    method: Literal["standard", "minmax", "robust"] = "robust",
+    column=None,
+):
     """Use when: Standardize or normalize data.
 
     Triggers: clean the data, fill missing values, resample series, regularize frequency, remove outliers, detrend.

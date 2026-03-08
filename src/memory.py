@@ -42,7 +42,10 @@ class Memory:
             return
         if not self._embedding_model_name:
             return
-        self._doc_db = DocumentDB(embedding_model_name=self._embedding_model_name)
+        self._doc_db = DocumentDB(
+            vector_path=self.config.rag_vector_path,
+            embedding_model_name=self._embedding_model_name,
+        )
 
     def load_history(
         self,

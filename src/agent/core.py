@@ -55,6 +55,39 @@ _FOLLOW_UP_PHRASES = (
 
 _THINK_BLOCK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
 _UNSET = object()
+_SOCIAL_MESSAGES = {
+    "hi",
+    "hello",
+    "hey",
+    "yo",
+    "sup",
+    "thanks",
+    "thank you",
+    "thx",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "morning",
+    "afternoon",
+    "evening",
+    "how are you",
+    "whats up",
+    "what's up",
+}
+_SOCIAL_GREETING_TOKENS = {"hi", "hello", "hey", "yo"}
+_TOOL_EXECUTION_CLAIM_PATTERNS = (
+    r"\b(?:i|we)\s+(?:have\s+|has\s+|had\s+|already\s+|just\s+)?"
+    r"(?:ran|run|executed|called|used|invoked|applied|checked|verified|searched|"
+    r"inspected|opened|read|edited|modified|updated|created|wrote|deleted)\b",
+    r"\b(?:i['’]?ve|we['’]?ve|it|data|dataset|sample)\s+"
+    r"(?:already\s+|just\s+)?"
+    r"(?:generated|created|loaded|saved|computed|prepared|produced|updated|applied)\b",
+    r"\b(?:has|have)\s+been\s+"
+    r"(?:generated|created|loaded|saved|computed|prepared|produced|updated|applied)\b",
+    r"\b(?:is|are)\s+now\s+(?:available|loaded|ready|saved)\b",
+    r"\b(?:tool|tools|command|commands)\b.{0,40}\b(?:ran|run|executed|called|used)\b",
+    r"\b(?:done|completed|finished)\b.{0,40}\b(?:tool|command|task|change|update|edit)\b",
+)
 
 
 class Agent:
@@ -266,9 +299,27 @@ class Agent:
         self._cached_use_toon = use_toon
         return self._cached_sys_tools_prompt
 
+    def _is_social_message(self, message: str) -> bool:
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+        normalized = re.sub(r"[^a-z0-9\s']", " ", text)
+        normalized = " ".join(normalized.split())
+        if not normalized:
+            return False
+        if normalized in _SOCIAL_MESSAGES:
+            return True
+        tokens = normalized.split()
+        if len(tokens) <= 3 and tokens[0] in _SOCIAL_GREETING_TOKENS:
+            trailing = [tok for tok in tokens[1:] if tok not in {"there", "team", "all"}]
+            return not trailing
+        return False
+
     def _is_follow_up_message(self, message: str) -> bool:
         text = (message or "").strip().lower()
         if not text:
+            return False
+        if self._is_social_message(text):
             return False
         if any(phrase in text for phrase in _FOLLOW_UP_PHRASES):
             return True
@@ -422,6 +473,8 @@ class Agent:
     ) -> str:
         if not bool(getattr(self.config, "dynamic_skill_routing", True)):
             return message
+        if self._is_social_message(message):
+            return message
 
         state_lines: list[str] = []
         if self.ctx.loaded:
@@ -444,9 +497,7 @@ class Agent:
                     f"Current best forecast model in memory: {self.ctx.nf_best_model}."
                 )
         else:
-            state_lines.append(
-                "No dataset is loaded yet, so data loading is the relevant skill."
-            )
+            state_lines.append("No dataset is loaded yet.")
 
         recent_calls = tool_calls or []
         preview_by_sig = tool_result_preview_by_sig or {}
@@ -488,7 +539,7 @@ class Agent:
             return message
 
         bullets = "\n".join(f"- {line}" for line in state_lines)
-        return f"{message.strip()}\n\nRuntime state for skill routing:\n{bullets}"
+        return f"{message.strip()}\n\nRuntime context:\n{bullets}"
 
     def _resolve_system_prompt(
         self,
@@ -708,6 +759,84 @@ class Agent:
             f"Prefer tools such as: {preview}. Return exactly one tool_call now."
         )
 
+    def _response_claims_tool_execution(
+        self,
+        text: str,
+        *,
+        preferred_tool_names: list[str] | None = None,
+    ) -> bool:
+        cleaned = self._strip_internal_reasoning_tags(text or "").strip()
+        if not cleaned:
+            return False
+        lower = cleaned.lower()
+
+        # Not an execution claim if clearly phrased as future intent.
+        if re.search(
+            r"\b(?:i|we)\s+(?:will|can|could|should|might|may|plan to|intend to|need to)\b",
+            lower,
+        ):
+            return False
+
+        if any(re.search(pattern, lower) for pattern in _TOOL_EXECUTION_CLAIM_PATTERNS):
+            return True
+
+        # Common hallucinated completion phrasing even without explicit "I ran X".
+        if re.search(
+            r"\b(?:in|into)\s+(?:the\s+)?(?:tool\s+)?(?:context|memory)\b",
+            lower,
+        ) and re.search(
+            r"\b(?:generated|created|loaded|saved|updated|applied|available|ready)\b",
+            lower,
+        ):
+            return True
+
+        # Additional signal: mentions a known selected tool name in a past-tense context.
+        for tool_name in preferred_tool_names or []:
+            t = str(tool_name or "").strip().lower()
+            if not t:
+                continue
+            if t in lower and re.search(
+                r"\b(?:ran|executed|called|used|invoked|applied|finished|completed|done)\b",
+                lower,
+            ):
+                return True
+        return False
+
+    def _tool_claim_guard_nudge(
+        self,
+        *,
+        message: str,
+        response_text: str,
+        selection: SkillSelection | None,
+        tool_calls: list[ToolCall],
+        editing_intent: bool,
+    ) -> str:
+        if tool_calls:
+            return ""
+
+        expected_tools = list(selection.selected_tools[:8]) if selection else []
+        likely_tool_task = bool(
+            expected_tools
+            or editing_intent
+            or self._docs_intent(message)
+        )
+        if not likely_tool_task:
+            return ""
+
+        if not self._response_claims_tool_execution(
+            response_text,
+            preferred_tool_names=expected_tools,
+        ):
+            return ""
+
+        tool_hint = ", ".join(expected_tools[:4]) if expected_tools else "the most relevant tool"
+        return (
+            "[Unverified tool execution claim] You said a tool/action already ran, "
+            "but this run has no matching tool_call yet. Do not claim tool execution "
+            "without actually calling a tool.\n"
+            f"Now emit exactly one tool_call (no prose). Suggested tools: {tool_hint}."
+        )
+
     def _create_base_conversation(self, message: str) -> list[Message]:
         return [
             Message(
@@ -776,11 +905,13 @@ class Agent:
         result_full: str,
         tool_result_max_chars: int,
     ) -> str:
+        persisted_result, vectorize = self._tool_result_for_persistence(call, result_full)
         tool_msg_full = Message(
             role=MessageRole.TOOL,
             name=call.name,
             tool_call_id=call.id,
-            content=result_full,
+            content=persisted_result,
+            vectorize=vectorize,
         )
         self.memory.save_message(sid, tool_msg_full)
         result_ctx = _truncate_text(result_full, tool_result_max_chars)
@@ -842,13 +973,17 @@ class Agent:
                     content=f"[direct_tool_call] {tool_name} {json.dumps(args, ensure_ascii=False)}",
                 ),
             )
+            persisted_result, vectorize = self._tool_result_for_persistence(
+                call, result_full
+            )
             self.memory.save_message(
                 sid_for_persistence,
                 Message(
                     role=MessageRole.TOOL,
                     name=tool_name,
                     tool_call_id=call.id,
-                    content=result_full,
+                    content=persisted_result,
+                    vectorize=vectorize,
                 ),
             )
 
@@ -1182,6 +1317,113 @@ class Agent:
         except Exception:
             return None
         return payload if isinstance(payload, dict) else None
+
+    def _tool_history_should_skip_vector(self, tool_name: str) -> bool:
+        lname = str(tool_name or "").strip().lower()
+        if not lname:
+            return False
+        patterns = list(
+            getattr(self.config, "tool_history_vector_exclude_patterns", [])
+        )
+        for raw in patterns:
+            token = str(raw or "").strip().lower()
+            if token and token in lname:
+                return True
+        return False
+
+    def _compact_tool_payload_for_history(
+        self,
+        *,
+        call: ToolCall,
+        payload: dict[str, Any],
+        max_chars: int,
+    ) -> dict[str, Any]:
+        compact: dict[str, Any] = {
+            "status": str(payload.get("status", "ok") or "ok"),
+            "tool": call.name,
+        }
+        for key in (
+            "path",
+            "returned_lines",
+            "total_lines",
+            "has_more",
+            "next_start_line",
+            "root",
+            "file_count",
+            "count",
+            "matches_found",
+            "message",
+            "error",
+            "error_type",
+        ):
+            if key in payload:
+                compact[key] = payload.get(key)
+
+        content = payload.get("content")
+        if isinstance(content, str) and content:
+            compact["content_chars"] = len(content)
+            compact["content_sha1"] = hashlib.sha1(
+                content.encode("utf-8", errors="replace")
+            ).hexdigest()[:16]
+            compact["content_preview"] = _truncate_text(
+                content,
+                min(900, max(240, max_chars // 2)),
+            )
+
+        matches = payload.get("matches")
+        if isinstance(matches, list):
+            compact["matches_total"] = len(matches)
+            preview: list[dict[str, Any]] = []
+            for item in matches[:12]:
+                if not isinstance(item, dict):
+                    continue
+                preview.append(
+                    {
+                        "file": item.get("file"),
+                        "line": item.get("line"),
+                        "text": _truncate_text(str(item.get("text", "")), 140),
+                        "match": item.get("match"),
+                    }
+                )
+            if preview:
+                compact["matches_preview"] = preview
+
+        files = payload.get("files")
+        if isinstance(files, list):
+            compact["files_total"] = len(files)
+            compact["files_preview"] = files[:20]
+
+        entries = payload.get("entries")
+        if isinstance(entries, list):
+            compact["entries_total"] = len(entries)
+            compact["entries_preview"] = entries[:24]
+
+        return compact
+
+    def _tool_result_for_persistence(
+        self,
+        call: ToolCall,
+        result_full: str,
+    ) -> tuple[str, bool]:
+        """Return persisted tool text + whether it should be vector indexed."""
+        text = str(result_full or "")
+        if not self._tool_history_should_skip_vector(call.name):
+            return text, True
+
+        max_chars = max(
+            400,
+            int(getattr(self.config, "tool_history_summary_max_chars", 2200)),
+        )
+        payload = self._parse_tool_result_payload(text)
+        if isinstance(payload, dict):
+            compact = self._compact_tool_payload_for_history(
+                call=call,
+                payload=payload,
+                max_chars=max_chars,
+            )
+            compact_text = json.dumps(compact, ensure_ascii=False)
+            return _truncate_text(compact_text, max_chars), False
+        return _truncate_text(text, max_chars), False
 
     def _tool_result_is_error(self, result_text: str) -> bool:
         text = str(result_text or "").strip()
@@ -2022,6 +2264,12 @@ class Agent:
         write_tool_called = False
         verification_after_write = False
         verification_nudged_once = False
+        tool_claim_guard_nudges = 0
+        max_tool_claim_guard_nudges = max(
+            1,
+            int(getattr(self.config, "tool_claim_guard_max_nudges", 2)),
+        )
+        schema_validation_nudges: dict[str, int] = {}
         last_skill_signature: tuple[tuple[str, ...], tuple[str, ...]] | None = None
         svg_nudged_once = False
         docs_nudged_once = False
@@ -2362,6 +2610,32 @@ class Agent:
                 # ─────────────────────────────────────────────────────────────
 
                 if (
+                    bool(getattr(self.config, "tool_claim_guard_enabled", True))
+                    and tool_claim_guard_nudges < max_tool_claim_guard_nudges
+                    and iterations < max_iterations
+                ):
+                    tool_claim_nudge = self._tool_claim_guard_nudge(
+                        message=message,
+                        response_text=text,
+                        selection=selection,
+                        tool_calls=tool_calls,
+                        editing_intent=editing_intent,
+                    )
+                    if tool_claim_nudge:
+                        tool_claim_guard_nudges += 1
+                        convo.append(
+                            Message(role=MessageRole.SYSTEM, content=tool_claim_nudge)
+                        )
+                        tracer.emit(
+                            "tool_claim_guard_nudge",
+                            iteration=iterations,
+                            nudge=tool_claim_guard_nudges,
+                            preview=self._strip_internal_reasoning_tags(text)[:180],
+                        )
+                        consecutive_tools = 0
+                        continue
+
+                if (
                     bool(
                         getattr(
                             self.config,
@@ -2688,7 +2962,7 @@ class Agent:
                 _max_size = int(getattr(self.config, "tool_cache_max_size", 256))
                 if (
                     self._is_tool_cacheable(call.name)
-                    and not result_full.startswith("Error:")
+                    and not self._tool_result_is_error(result_full)
                     and len(self._tool_result_cache) < _max_size
                 ):
                     self._tool_result_cache[_cache_key] = (time.time(), result_full)
@@ -2758,6 +3032,50 @@ class Agent:
                     nudge=edit_failure_repair_nudges,
                     preview=edit_repair_nudge[:240],
                 )
+
+            payload = self._parse_tool_result_payload(result_full)
+            error_type = (
+                str(payload.get("error_type", "")).strip().lower()
+                if isinstance(payload, dict)
+                else ""
+            )
+            if (
+                error_type in {"schema_validation_failed", "schema_type_validation_failed"}
+                and iterations < max_iterations
+            ):
+                seen_nudges = int(schema_validation_nudges.get(call.name, 0))
+                if seen_nudges < 2:
+                    schema_validation_nudges[call.name] = seen_nudges + 1
+                    allowed = []
+                    if isinstance(payload, dict):
+                        raw_allowed = payload.get("allowed_arguments", [])
+                        if isinstance(raw_allowed, list):
+                            allowed = [str(item) for item in raw_allowed if str(item)]
+                    allowed_text = (
+                        f" Allowed arguments: {', '.join(allowed[:12])}."
+                        if allowed
+                        else ""
+                    )
+                    convo.append(
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content=(
+                                f"[Schema validation failed] Tool `{call.name}` rejected the arguments."
+                                f"{allowed_text} "
+                                "Call `describe_tool` for this tool now, then retry with corrected arguments. "
+                                "Do not repeat the same invalid argument keys."
+                            ),
+                        )
+                    )
+                    tracer.emit(
+                        "schema_validation_nudge",
+                        iteration=iterations,
+                        tool=call.name,
+                        error_type=error_type,
+                        nudge=seen_nudges + 1,
+                    )
+                    consecutive_tools = 0
+                    continue
 
             if write_tool_called and is_verification_tool:
                 failed_verification, failure_summary = self._verification_failure_details(
@@ -2922,13 +3240,17 @@ class Agent:
                         r_result = self.tools.execute(
                             r_call, use_toon=self.config.use_toon_for_tools
                         )
+                        persisted_result, vectorize = self._tool_result_for_persistence(
+                            r_call, r_result
+                        )
                         self.memory.save_message(
                             sid,
                             Message(
                                 role=MessageRole.TOOL,
                                 name=r_call.name,
                                 tool_call_id=r_call.id,
-                                content=r_result,
+                                content=persisted_result,
+                                vectorize=vectorize,
                             ),
                         )
                         reflect_convo.extend(
@@ -3010,6 +3332,34 @@ class Agent:
                 self._log.warning("Thinking pass failed: %s", _exc)
                 tracer.emit("thinking_error", error=str(_exc))
             tracer.emit("thinking_end", preview=final[:200])
+
+        if (
+            bool(getattr(self.config, "tool_claim_guard_enabled", True))
+            and bool(
+                getattr(
+                    self.config, "tool_claim_guard_append_runtime_note", True
+                )
+            )
+            and final.strip()
+            and not tool_calls
+            and self._response_claims_tool_execution(final)
+        ):
+            runtime_note = (
+                "[Runtime note] No tool call was executed in this turn. "
+                "Treat completion claims above as unverified."
+            )
+            final = f"{final.rstrip()}\n\n{runtime_note}".strip()
+            self.memory.save_message(
+                sid,
+                Message(role=MessageRole.ASSISTANT, content=final),
+            )
+            convo.append(
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=_truncate_text(final, assistant_ctx_max_chars),
+                )
+            )
+            tracer.emit("tool_claim_runtime_note_appended")
 
         if (
             bool(getattr(self.config, "append_quality_checklist", True))

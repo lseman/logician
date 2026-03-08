@@ -32,7 +32,7 @@ bun run clean
 ### High-Level Structure
 
 ```
-foreblocks/agent/
+logician/
 ├── cli/                 # TypeScript/React/Ink CLI application
 │   └── src/
 │       └── index.tsx   # Main CLI entry point
@@ -98,7 +98,7 @@ Skills are Python modules in `skills/` directory that extend agent capabilities:
 
 ```bash
 # Run all tests with coverage
-pytest tests/ --cov=foreblocks --cov-report=term-missing
+pytest test/ --cov=src --cov-report=term-missing
 
 # Run single test file
 pytest tests/test_mcp_context7.py -v

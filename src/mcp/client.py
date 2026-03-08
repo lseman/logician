@@ -102,7 +102,7 @@ class MCPClient:
             "params": {
                 "protocolVersion": _MCP_PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
-                "clientInfo": {"name": "foreblocks-agent", "version": "1.0"},
+                "clientInfo": {"name": "logician", "version": "1.0"},
             },
         }
         result = self._rpc(payload)

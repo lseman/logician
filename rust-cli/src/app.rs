@@ -2,11 +2,13 @@ use chrono::Local;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::{layout::Rect, Frame};
 use serde_json::Value;
 use std::fmt;
 use uuid::Uuid;
 
 use crate::bridge::{BridgeEvent, BridgeState};
+use crate::image::ImageRenderer;
 use crate::markdown::{render_markdown, render_streaming};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -158,35 +160,44 @@ impl MessageRenderer for DefaultRenderer {
             }
             Role::Tool => {
                 let mut tool_lines = Vec::new();
-                let mut it = text.lines();
-                if let Some(name) = it.next() {
-                    tool_lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(
-                            name.to_string(),
+                for (idx, line) in text.lines().enumerate() {
+                    let (prefix, style) = if idx == 0 {
+                        (
+                            "  ▸ ",
                             Style::default()
                                 .fg(Color::Cyan)
                                 .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                }
-                for l in it {
+                        )
+                    } else {
+                        ("    ", Style::default().fg(Color::Cyan))
+                    };
                     tool_lines.push(Line::from(vec![
-                        Span::styled("  ", Style::default()),
-                        Span::styled(l.to_string(), Style::default().fg(Color::Cyan)),
+                        Span::styled(prefix.to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(line.to_string(), style),
                     ]));
                 }
                 tool_lines
             }
-            Role::Skill => text
-                .lines()
-                .map(|l| {
-                    Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(l.to_string(), Style::default().fg(Color::Magenta)),
-                    ])
-                })
-                .collect(),
+            Role::Skill => {
+                let mut skill_lines = Vec::new();
+                for (idx, line) in text.lines().enumerate() {
+                    let (prefix, style) = if idx == 0 {
+                        (
+                            "  ◆ ",
+                            Style::default()
+                                .fg(Color::Magenta)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        ("    ", Style::default().fg(Color::Magenta))
+                    };
+                    skill_lines.push(Line::from(vec![
+                        Span::styled(prefix.to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(line.to_string(), style),
+                    ]));
+                }
+                skill_lines
+            }
         }
     }
 }
@@ -264,8 +275,9 @@ struct SlashCommandSpec {
 }
 
 const SLASH_POPUP_LIMIT: usize = 8;
+const INPUT_HISTORY_LIMIT: usize = 200;
 
-const SLASH_COMMANDS: [SlashCommandSpec; 22] = [
+const SLASH_COMMANDS: [SlashCommandSpec; 28] = [
     SlashCommandSpec {
         command: "/help",
         description: "Show command list",
@@ -275,8 +287,16 @@ const SLASH_COMMANDS: [SlashCommandSpec; 22] = [
         description: "Alias for /help",
     },
     SlashCommandSpec {
+        command: "/version",
+        description: "Show CLI and bridge version info",
+    },
+    SlashCommandSpec {
         command: "/status",
         description: "Show runtime state snapshot",
+    },
+    SlashCommandSpec {
+        command: "/skills-health",
+        description: "Show skill loader diagnostics",
     },
     SlashCommandSpec {
         command: "/changes",
@@ -299,6 +319,10 @@ const SLASH_COMMANDS: [SlashCommandSpec; 22] = [
         description: "Clear visible transcript only",
     },
     SlashCommandSpec {
+        command: "/close",
+        description: "Close image side panel",
+    },
+    SlashCommandSpec {
         command: "/agents",
         description: "List loaded agents",
     },
@@ -313,6 +337,14 @@ const SLASH_COMMANDS: [SlashCommandSpec; 22] = [
     SlashCommandSpec {
         command: "/context",
         description: "Show session/data context",
+    },
+    SlashCommandSpec {
+        command: "/compact",
+        description: "Summarize older conversation history",
+    },
+    SlashCommandSpec {
+        command: "/reset",
+        description: "Reset runtime tool state for session",
     },
     SlashCommandSpec {
         command: "/sessions",
@@ -354,6 +386,10 @@ const SLASH_COMMANDS: [SlashCommandSpec; 22] = [
         command: "/exit",
         description: "Alias for /quit",
     },
+    SlashCommandSpec {
+        command: "/q",
+        description: "Alias for /quit",
+    },
 ];
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -368,11 +404,21 @@ pub struct App {
     pub live: Option<Message>,
     // Raw stream buffer (for Ctrl+P view)
     pub raw_buf: String,
+    // Per-turn tool execution tracking (receipt-style UX).
+    current_turn_tool_names: Vec<String>,
+    last_turn_tool_names: Vec<String>,
+    last_turn_iterations: u64,
+    // Optional inline image preview for image-producing tools.
+    image_renderer: Option<ImageRenderer>,
+    image_path: Option<String>,
 
     // Input
     pub input: String,
     pub input_cursor: usize, // char offset
     slash_selected: usize,
+    input_history: Vec<String>,
+    input_history_index: Option<usize>,
+    input_history_draft: Option<String>,
 
     // Scroll  (lines from top)
     pub scroll_top: u16,
@@ -407,9 +453,17 @@ impl App {
             cached_lines_raw: Vec::new(),
             live: None,
             raw_buf: String::new(),
+            current_turn_tool_names: Vec::new(),
+            last_turn_tool_names: Vec::new(),
+            last_turn_iterations: 0,
+            image_renderer: ImageRenderer::new().ok(),
+            image_path: None,
             input: String::new(),
             input_cursor: 0,
             slash_selected: 0,
+            input_history: Vec::new(),
+            input_history_index: None,
+            input_history_draft: None,
             scroll_top: 0,
             at_bottom: true,
             last_area_h: 40,
@@ -417,7 +471,7 @@ impl App {
             phase_note: "ready".into(),
             busy: false,
             spinner_tick: 0,
-            trace_on: false,
+            trace_on: true,
             raw_on: false,
             bridge_state: BridgeState::default(),
             connected: false,
@@ -437,12 +491,24 @@ impl App {
         } else {
             self.bridge_state.agents.join(", ")
         };
+        let mcps = if self.bridge_state.mcp_servers.is_empty() {
+            "-".to_string()
+        } else {
+            self.bridge_state.mcp_servers.join(", ")
+        };
         let text = format!(
             "# Logician CLI powered by `rust`\n\n\
 **Agents**: {agents}  \n\
-**Rapidfuzz**: {}  \n\n\
+**MCPs**: {mcps}  \n\
+**Rapidfuzz**: {}  \n\
+**Tiktoken**: {}  \n\n\
 Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C quit",
             if self.bridge_state.rapidfuzz {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            if self.bridge_state.tiktoken {
                 "enabled"
             } else {
                 "disabled"
@@ -466,6 +532,292 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         self.add_message(Role::System, text);
     }
 
+    pub fn has_image_preview(&self) -> bool {
+        self.image_path.is_some() && self.image_renderer.is_some()
+    }
+
+    pub fn image_preview_path(&self) -> Option<&str> {
+        self.image_path.as_deref()
+    }
+
+    pub fn render_image_preview(&mut self, frame: &mut Frame, area: Rect) -> Result<(), String> {
+        if area.width < 2 || area.height < 2 {
+            return Err("preview area too small".to_string());
+        }
+        let renderer = self
+            .image_renderer
+            .as_mut()
+            .ok_or_else(|| "image renderer unavailable".to_string())?;
+        renderer
+            .render_in_frame(frame, area)
+            .map_err(|err| err.to_string())
+    }
+
+    fn clear_image_preview(&mut self) {
+        if let Some(renderer) = self.image_renderer.as_mut() {
+            renderer.clear();
+        }
+        self.image_path = None;
+    }
+
+    fn load_image_preview(&mut self, path: &str) -> Result<bool, String> {
+        let normalized = path.trim();
+        if normalized.is_empty() {
+            return Err("empty image path".to_string());
+        }
+        let changed = self.image_path.as_deref() != Some(normalized);
+        let renderer = self
+            .image_renderer
+            .as_mut()
+            .ok_or_else(|| "image renderer unavailable".to_string())?;
+        renderer
+            .load_path(normalized)
+            .map_err(|err| err.to_string())?;
+        self.image_path = Some(normalized.to_string());
+        Ok(changed)
+    }
+
+    fn truncate_inline(text: &str, max_chars: usize) -> String {
+        if max_chars == 0 {
+            return String::new();
+        }
+        let mut out = String::new();
+        let mut count = 0usize;
+        for ch in text.chars() {
+            if count >= max_chars {
+                out.push('…');
+                return out;
+            }
+            out.push(ch);
+            count += 1;
+        }
+        out
+    }
+
+    fn summarize_json_value(value: &Value) -> String {
+        match value {
+            Value::Null => "null".to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Number(v) => v.to_string(),
+            Value::String(v) => {
+                let compact = v.split_whitespace().collect::<Vec<_>>().join(" ");
+                format!("\"{}\"", Self::truncate_inline(&compact, 64))
+            }
+            Value::Array(items) => {
+                if items.is_empty() {
+                    "[]".to_string()
+                } else if items.len() <= 3 {
+                    let parts = items
+                        .iter()
+                        .map(Self::summarize_json_value)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("[{parts}]")
+                } else {
+                    format!("[{} items]", items.len())
+                }
+            }
+            Value::Object(map) => format!("{{{} keys}}", map.len()),
+        }
+    }
+
+    fn summarize_name_list(items: &[String], limit: usize) -> String {
+        if items.is_empty() {
+            return "none".to_string();
+        }
+        let mut out = items.iter().take(limit).cloned().collect::<Vec<_>>();
+        if items.len() > limit {
+            out.push(format!("+{} more", items.len() - limit));
+        }
+        out.join(", ")
+    }
+
+    fn format_tool_event_text(name: &str, args: &Value, sequence: usize) -> String {
+        let mut lines = vec![format!("call #{sequence} `{name}`")];
+
+        match args {
+            Value::Object(map) => {
+                lines.push(format!("arguments: {} key(s)", map.len()));
+                if map.is_empty() {
+                    lines.push("• none".to_string());
+                } else {
+                    for (key, value) in map.iter().take(6) {
+                        lines.push(format!("• {key} = {}", Self::summarize_json_value(value)));
+                    }
+                    if map.len() > 6 {
+                        lines.push(format!("• ... +{} more key(s)", map.len() - 6));
+                    }
+                    if map.len() > 4 {
+                        let raw = serde_json::to_string(args).unwrap_or_default();
+                        if !raw.is_empty() {
+                            lines.push(format!("raw: {}", Self::truncate_inline(&raw, 180)));
+                        }
+                    }
+                }
+            }
+            _ => {
+                lines.push(format!("arguments: {}", Self::summarize_json_value(args)));
+            }
+        }
+
+        lines.join("\n")
+    }
+
+    fn format_skill_event_text(skill_ids: &[String], selected_tools: &[String]) -> String {
+        let mut lines = Vec::new();
+        if skill_ids.is_empty() {
+            lines.push("activated skills: none".to_string());
+        } else {
+            lines.push(format!(
+                "activated skills ({}): {}",
+                skill_ids.len(),
+                Self::summarize_name_list(skill_ids, 6)
+            ));
+        }
+
+        if selected_tools.is_empty() {
+            lines.push("routed tools: none".to_string());
+        } else {
+            lines.push(format!(
+                "routed tools ({}): {}",
+                selected_tools.len(),
+                Self::summarize_name_list(selected_tools, 10)
+            ));
+        }
+
+        lines.join("\n")
+    }
+
+    fn extract_tool_names_from_chat_result(v: &Value) -> Vec<String> {
+        let mut out: Vec<String> = v["tool_calls"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item["name"].as_str())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(|name| name.to_string())
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+        if out.is_empty() {
+            let count = v["tool_call_count"].as_u64().unwrap_or(0);
+            if count > 0 {
+                out = vec!["(reported by runtime)".to_string(); count as usize];
+            }
+        }
+        out
+    }
+
+    fn response_claims_completed_action(text: &str) -> bool {
+        let lower = text.trim().to_lowercase();
+        if lower.is_empty() {
+            return false;
+        }
+        if [
+            " i will ",
+            " we'll ",
+            " we will ",
+            " i can ",
+            " we can ",
+            " could ",
+            " should ",
+            " might ",
+            " may ",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+        {
+            return false;
+        }
+        let strong_phrases = [
+            "i've generated",
+            "i have generated",
+            "i've created",
+            "i have created",
+            "has been generated",
+            "has been created",
+            "created successfully",
+            "generated successfully",
+            "is now available",
+            "saved successfully",
+            "loaded successfully",
+            "in tool context",
+            "in the tool context",
+        ];
+        if strong_phrases.iter().any(|p| lower.contains(p)) {
+            return true;
+        }
+        let past_verbs = [
+            "generated",
+            "created",
+            "loaded",
+            "saved",
+            "executed",
+            "called",
+            "used",
+            "invoked",
+            "applied",
+            "updated",
+            "finished",
+            "completed",
+            "done",
+        ];
+        let claim_subject = [
+            "i ", "we ", "tool ", "tools ", "data ", "dataset ", "sample ",
+        ];
+        past_verbs.iter().any(|verb| lower.contains(verb))
+            && claim_subject.iter().any(|subject| lower.contains(subject))
+    }
+
+    fn finalize_turn_receipt(&mut self, v: &Value, assistant_text: &str) {
+        let reported_tool_names = Self::extract_tool_names_from_chat_result(v);
+        let reported_count = if reported_tool_names.is_empty() {
+            v["tool_call_count"].as_u64().unwrap_or(0) as usize
+        } else {
+            reported_tool_names.len()
+        };
+        let observed_count = self.current_turn_tool_names.len();
+        let runtime_tools = if !reported_tool_names.is_empty() {
+            reported_tool_names
+        } else {
+            self.current_turn_tool_names.clone()
+        };
+        self.last_turn_tool_names = runtime_tools.clone();
+        self.last_turn_iterations = v["iterations"].as_u64().unwrap_or(0);
+
+        if !runtime_tools.is_empty() {
+            let mut uniq = Vec::<String>::new();
+            for name in &runtime_tools {
+                if !uniq.iter().any(|existing| existing == name) {
+                    uniq.push(name.clone());
+                }
+            }
+            let preview = uniq.iter().take(6).cloned().collect::<Vec<_>>().join(", ");
+            self.add_system_message(format!(
+                "Turn receipt: tools={} · iterations={} · {}",
+                runtime_tools.len(),
+                self.last_turn_iterations,
+                preview
+            ));
+        }
+
+        if reported_count != observed_count && (reported_count > 0 || observed_count > 0) {
+            self.add_system_message(format!(
+                "Runtime note: tool event mismatch (observed events={observed_count}, runtime reported={reported_count})."
+            ));
+        }
+
+        if runtime_tools.is_empty() && Self::response_claims_completed_action(assistant_text) {
+            self.add_system_message(
+                "Runtime note: assistant claimed work was completed, but no tool call was recorded for this turn."
+                    .to_string(),
+            );
+        }
+
+        self.current_turn_tool_names.clear();
+    }
+
     fn trace(&mut self, text: impl Into<String>) {
         let line = format!("{}  {}", Local::now().format("%H:%M:%S"), text.into());
         self.trace_log.push(line.clone());
@@ -479,7 +831,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
 
     fn push_message(&mut self, message: Message) {
         self.cached_lines.extend(message.rendered.iter().cloned());
-        self.cached_lines_raw.extend(message.rendered_for_raw_mode());
+        self.cached_lines_raw
+            .extend(message.rendered_for_raw_mode());
         self.messages.push(message);
     }
 
@@ -489,6 +842,10 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         self.cached_lines_raw.clear();
         self.live = None;
         self.raw_buf.clear();
+        self.current_turn_tool_names.clear();
+        self.last_turn_tool_names.clear();
+        self.last_turn_iterations = 0;
+        self.clear_image_preview();
         self.scroll_top = 0;
         self.at_bottom = true;
     }
@@ -660,9 +1017,32 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
 
             BridgeEvent::Tool { name, args } => {
                 self.stop_live_message();
-                let args_pretty = serde_json::to_string_pretty(&args).unwrap_or_default();
-                self.trace(format!("tool={name}"));
-                self.add_message(Role::Tool, format!("{name}\n{args_pretty}"));
+                let call_number = self.current_turn_tool_names.len() + 1;
+                self.trace(format!("tool#{call_number}={name}"));
+                self.current_turn_tool_names.push(name.clone());
+                self.add_message(
+                    Role::Tool,
+                    Self::format_tool_event_text(&name, &args, call_number),
+                );
+            }
+
+            BridgeEvent::Image { tool, path } => {
+                self.stop_live_message();
+                self.trace(format!("image tool={tool} path={path}"));
+                match self.load_image_preview(&path) {
+                    Ok(changed) => {
+                        if changed {
+                            self.add_system_message(format!(
+                                "Image preview updated from `{tool}`: `{path}`"
+                            ));
+                        }
+                    }
+                    Err(err) => {
+                        self.add_system_message(format!(
+                            "Image preview failed for `{path}` from `{tool}`: {err}"
+                        ));
+                    }
+                }
             }
 
             BridgeEvent::Skill {
@@ -670,20 +1050,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 selected_tools,
             } => {
                 self.stop_live_message();
-                let skills = if skill_ids.is_empty() {
-                    "none".to_string()
-                } else {
-                    skill_ids.join(", ")
-                };
-                let tools = if selected_tools.is_empty() {
-                    "none".to_string()
-                } else {
-                    selected_tools.join(", ")
-                };
+                let skills = Self::summarize_name_list(&skill_ids, 6);
+                let tools = Self::summarize_name_list(&selected_tools, 10);
                 self.trace(format!("skills={skills} tools={tools}"));
                 self.add_message(
                     Role::Skill,
-                    format!("Activated skills: {skills}\nAvailable tools: {tools}"),
+                    Self::format_skill_event_text(&skill_ids, &selected_tools),
                 );
             }
 
@@ -710,6 +1082,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         // Finalize live message
         match result {
             Ok(v) => {
+                let assistant_text = v["assistant"].as_str().unwrap_or("").to_string();
                 let fallback = v["assistant"].as_str().map(|s| s.to_string());
                 self.flush_live_message(fallback);
 
@@ -727,10 +1100,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 if let Some(state) = v.get("state") {
                     self.bridge_state = BridgeState::from_value(state);
                 }
+                self.finalize_turn_receipt(&v, &assistant_text);
             }
             Err(e) => {
                 self.live = None;
                 self.raw_buf.clear();
+                self.current_turn_tool_names.clear();
                 self.phase = Phase::Error;
                 self.phase_note = "chat failed".into();
                 self.add_system_message(format!("Chat failed: {e}"));
@@ -794,6 +1169,16 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             return true;
         }
 
+        if lower == "/close" {
+            if self.has_image_preview() {
+                self.clear_image_preview();
+                self.add_system_message("Image side panel closed.");
+            } else {
+                self.add_system_message("Image side panel is already closed.");
+            }
+            return true;
+        }
+
         if lower == "/trace" || lower.starts_with("/trace ") {
             let arg = lower.strip_prefix("/trace").unwrap_or("").trim();
             let next = match arg {
@@ -818,38 +1203,59 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             return false;
         }
 
+        if lower == "/version" {
+            self.add_system_message(format!(
+                "logician-cli {}\nbridge: use /version for full runtime details",
+                env!("CARGO_PKG_VERSION")
+            ));
+            return true;
+        }
+
         false
     }
 
     #[allow(dead_code)]
     fn help_text() -> String {
         [
-            "## Commands",
+            "# Command Palette",
             "",
-            "| Command | What it does |",
-            "| --- | --- |",
-            "| `/help` | Show this command list |",
-            "| `/status` | Show runtime state snapshot |",
-            "| `/changes [path] [--staged]` | Show git status and diff preview |",
-            "| `/doctor` | Run local health checks |",
-            "| `/bug [note]` | Save a reproducible bug report file |",
-            "| `/trace [on\\|off]` | Toggle trace messages in transcript |",
-            "| `/clear` | Clear visible transcript only |",
-            "| `/agents` | List loaded agents |",
-            "| `/agent <name>` | Switch active agent |",
-            "| `/pipeline <a> <b> [rounds]` | Enable inter-agent pipeline |",
-            "| `/pipeline stop` | Disable current pipeline |",
-            "| `/context` | Show session/data context |",
-            "| `/sessions` / `/load <id>` | List and load previous sessions |",
-            "| `/export [path]` | Export chat history to markdown |",
-            "| `/upload <file> [label]` | Ingest one document into RAG |",
-            "| `/upload-dir <dir>` | Bulk ingest documents into RAG |",
-            "| `/docs <library> [query]` | Fetch Context7 library docs |",
-            "| `/new` | Start a new session |",
-            "| `/reload` | Reload config and agents |",
-            "| `/quit` | Exit CLI |",
+            "## Essentials",
+            "- `/help` or `/?`                      Show this help",
+            "- `/version`                           Show version details",
+            "- `/status`                            Runtime state snapshot",
+            "- `/skills-health [--sources] [n]`    Skill loader diagnostics",
             "",
-            "Shortcuts: `Ctrl+Q` quit · `Ctrl+O` trace toggle · `Ctrl+P` raw stream · `Ctrl+C` exit.",
+            "## Workflow",
+            "- `/agents`                            List loaded agents",
+            "- `/agent <name>`                      Switch active agent",
+            "- `/pipeline <a> <b> [rounds]`         Enable inter-agent pipeline",
+            "- `/pipeline stop`                     Disable current pipeline",
+            "- `/context`                           Show session/data context",
+            "- `/compact [keep_last]`               Summarize older history",
+            "- `/reset`                             Reset runtime tool state",
+            "",
+            "## Sessions and Files",
+            "- `/sessions`                          List previous sessions",
+            "- `/load <id>`                         Load a previous session",
+            "- `/export [path]`                     Export transcript to markdown",
+            "- `/upload <file> [label]`             Ingest one doc into RAG",
+            "- `/upload-dir <dir> [glob] [max]`     Bulk ingest docs into RAG",
+            "- `/docs <library> [query]`            Fetch Context7 docs",
+            "",
+            "## Diagnostics",
+            "- `/changes [path] [--staged]`         Git status + diff preview",
+            "- `/doctor`                            Local health checks",
+            "- `/bug [note]`                        Save bug report file",
+            "- `/trace [on|off]`                    Toggle trace messages",
+            "- `/clear`                             Clear visible transcript only",
+            "- `/close`                             Close image side panel",
+            "",
+            "## Session Control",
+            "- `/new`                               Start a new session",
+            "- `/reload`                            Reload config and agents",
+            "- `/quit`, `/exit`, `/q`               Exit CLI",
+            "",
+            "Shortcuts: `Up/Down` input history · `PgUp/PgDn` scroll · `Ctrl+Q` quit · `Ctrl+O` trace · `Ctrl+P` raw stream · `Ctrl+C` exit.",
         ]
         .join("\n")
     }
@@ -865,6 +1271,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         } else {
             s.agents.join(", ")
         };
+        let mcps = if s.mcp_servers.is_empty() {
+            "-".to_string()
+        } else {
+            s.mcp_servers.join(", ")
+        };
         let session = &s.session[..s.session.len().min(24)];
         let pipeline = if let Some(p) = &s.pipeline {
             format!(
@@ -877,9 +1288,10 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             "off".to_string()
         };
         self.add_system_message(format!(
-            "active: {}\nsession: {}\nmessages: {}\nagents: {}\npipeline: {}\nrapidfuzz: {}\ntrace: {}",
-            s.active, session, s.msg_count, agents, pipeline,
+            "active: {}\nsession: {}\nmessages: {}\nagents: {}\nmcp: {}\npipeline: {}\nrapidfuzz: {}\ntiktoken: {}\ntrace: {}",
+            s.active, session, s.msg_count, agents, mcps, pipeline,
             if s.rapidfuzz { "enabled" } else { "disabled" },
+            if s.tiktoken { "enabled" } else { "disabled" },
             if self.trace_on { "on" } else { "off" },
         ));
     }
@@ -966,12 +1378,72 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         if text.is_empty() {
             return;
         }
+        self.clear_input_history_nav();
         let ci = self.char_idx();
         let before: String = self.input.chars().take(ci).collect();
         let after: String = self.input.chars().skip(ci).collect();
         self.input = format!("{before}{text}{after}");
         self.input_cursor += text.chars().count();
         self.normalize_slash_selection();
+    }
+
+    fn push_input_history(&mut self, text: &str) {
+        let entry = text.trim();
+        if entry.is_empty() {
+            return;
+        }
+        self.input_history.push(entry.to_string());
+        if self.input_history.len() > INPUT_HISTORY_LIMIT {
+            let overflow = self.input_history.len() - INPUT_HISTORY_LIMIT;
+            self.input_history.drain(0..overflow);
+        }
+        self.clear_input_history_nav();
+    }
+
+    fn clear_input_history_nav(&mut self) {
+        self.input_history_index = None;
+        self.input_history_draft = None;
+    }
+
+    fn set_input_from_history_value(&mut self, value: String) {
+        self.input = value;
+        self.input_cursor = self.input.chars().count();
+        self.normalize_slash_selection();
+    }
+
+    fn history_prev(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+        let next_idx = match self.input_history_index {
+            Some(idx) => idx.saturating_sub(1),
+            None => {
+                self.input_history_draft = Some(self.input.clone());
+                self.input_history.len().saturating_sub(1)
+            }
+        };
+        self.input_history_index = Some(next_idx);
+        if let Some(entry) = self.input_history.get(next_idx).cloned() {
+            self.set_input_from_history_value(entry);
+        }
+    }
+
+    fn history_next(&mut self) {
+        let Some(idx) = self.input_history_index else {
+            return;
+        };
+        if idx + 1 < self.input_history.len() {
+            let next_idx = idx + 1;
+            self.input_history_index = Some(next_idx);
+            if let Some(entry) = self.input_history.get(next_idx).cloned() {
+                self.set_input_from_history_value(entry);
+            }
+            return;
+        }
+
+        self.input_history_index = None;
+        let draft = self.input_history_draft.take().unwrap_or_default();
+        self.set_input_from_history_value(draft);
     }
 
     // ── Status bar text ───────────────────────────────────────────────────────
@@ -984,7 +1456,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             String::new()
         };
         format!(
-            "{}{} · {} · agent:{} · msgs:{} · tools:{} · skills:{} · trace:{} · raw:{} · Ctrl+O/P",
+            "{}{} · {} · agent:{} · msgs:{} · tools:{} · skills:{} · last_turn_tools:{} · image:{} · trace:{} · raw:{} · Ctrl+O/P",
             spin,
             self.phase,
             self.phase_note,
@@ -992,6 +1464,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             self.bridge_state.msg_count,
             self.bridge_state.tool_count,
             self.bridge_state.skill_count,
+            self.last_turn_tool_names.len(),
+            if self.has_image_preview() { "on" } else { "off" },
             if self.trace_on { "on" } else { "off" },
             if self.raw_on { "on" } else { "off" },
         )
@@ -1038,11 +1512,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
 
         // Scroll keys (work even when busy)
         match key.code {
-            KeyCode::Up => {
+            KeyCode::Up if self.busy => {
                 self.scroll_up(3);
                 return KeyAction::None;
             }
-            KeyCode::Down => {
+            KeyCode::Down if self.busy => {
                 self.scroll_down(3);
                 return KeyAction::None;
             }
@@ -1071,9 +1545,14 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 if text.is_empty() {
                     return KeyAction::None;
                 }
+                self.push_input_history(&text);
                 self.input.clear();
                 self.input_cursor = 0;
                 self.slash_selected = 0;
+                if text.starts_with('/') && self.handle_local_slash(&text) {
+                    return KeyAction::None;
+                }
+                self.current_turn_tool_names.clear();
                 self.add_message(Role::User, text.clone());
                 self.busy = true;
                 self.phase = Phase::Thinking;
@@ -1083,6 +1562,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             KeyCode::Backspace => {
                 if self.input_cursor > 0 {
                     // Remove char before cursor
+                    self.clear_input_history_nav();
                     let before: String = self.input.chars().take(self.char_idx()).collect();
                     let after: String = self.input.chars().skip(self.char_idx()).collect();
                     let new_before: String = before
@@ -1098,11 +1578,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 let ci = self.char_idx();
                 let total = self.input.chars().count();
                 if ci < total {
+                    self.clear_input_history_nav();
                     let before: String = self.input.chars().take(ci).collect();
                     let after: String = self.input.chars().skip(ci + 1).collect();
                     self.input = format!("{before}{after}");
                     self.normalize_slash_selection();
                 }
+            }
+            KeyCode::Up => {
+                self.history_prev();
+            }
+            KeyCode::Down => {
+                self.history_next();
             }
             KeyCode::Left => {
                 self.input_cursor = self.input_cursor.saturating_sub(1);
@@ -1245,6 +1732,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         let Some((start, end, _)) = self.slash_token_span() else {
             return false;
         };
+        self.clear_input_history_nav();
         let chars: Vec<char> = self.input.chars().collect();
         let before: String = chars[..start].iter().collect();
         let after: String = chars[end..].iter().collect();

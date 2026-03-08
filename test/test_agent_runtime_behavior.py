@@ -22,6 +22,21 @@ class _FakeLLM:
         return self.response
 
 
+class _SequenceFakeLLM:
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.calls = 0
+
+    def generate(self, messages, temperature, max_tokens, stream=False, on_token=None):
+        if not self._responses:
+            self.calls += 1
+            return ""
+        idx = min(self.calls, len(self._responses) - 1)
+        out = self._responses[idx]
+        self.calls += 1
+        return out
+
+
 class AgentRuntimeBehaviorTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -121,7 +136,7 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
 
         self.assertIsNotNone(selection)
         assert selection is not None
-        self.assertIn("Runtime state for skill routing", routing_query)
+        self.assertIn("Runtime context", routing_query)
         self.assertIn("ACTIVE SKILLS FOR THIS REQUEST", prompt)
         self.assertTrue(
             any(
@@ -129,6 +144,20 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
                 for skill in selection.selected_skills
             )
         )
+
+    def test_social_greeting_does_not_inject_skill_routing_context(self) -> None:
+        prompt, selection, routing_query = self.agent._resolve_system_prompt("hi")
+
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertEqual(routing_query.strip(), "hi")
+        self.assertEqual(selection.selected_skills, [])
+        self.assertEqual(selection.selected_tools, [])
+        self.assertNotIn("ACTIVE SKILLS FOR THIS REQUEST", prompt)
+
+    def test_short_greeting_is_not_treated_as_follow_up(self) -> None:
+        self.assertFalse(self.agent._is_follow_up_message("hi"))
+        self.assertTrue(self.agent._is_follow_up_message("continue"))
 
     def test_describe_runtime_context_reports_history_budget(self) -> None:
         sid = "history_budget_case"
@@ -236,6 +265,44 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(other.ctx.nf_best_model, "NHITS")
         finally:
             db = getattr(other.memory, "_db", None)
+            if db is not None:
+                db.close()
+
+    def test_tool_claim_guard_forces_real_tool_call_before_finalizing(self) -> None:
+        sid = "tool_claim_guard_case"
+        agent = create_agent(
+            llm_url="http://localhost:8080",
+            db_path=str(self.db_path),
+            config_overrides={
+                "rag_enabled": False,
+                "vector_path": str(self.vector_path),
+                "max_iterations": 4,
+                "use_toon_for_tools": False,
+                "tool_claim_guard_enabled": True,
+            },
+        )
+        try:
+            agent.llm = _SequenceFakeLLM(
+                [
+                    (
+                        "I’ve generated a synthetic sine wave time series with 100 points "
+                        "and moderate noise. The data is now available in the tool context."
+                    ),
+                    '{"tool_call":{"name":"search_tools","arguments":{"query":"csv","top_k":3}}}',
+                    "Done. I ran the tool and used the result.",
+                ]
+            )
+
+            response = agent.chat("Find the best tool for csv ingestion.", session_id=sid)
+            self.assertTrue(response.startswith("Done. I ran the tool and used the result."))
+
+            messages = agent.memory.get_session_messages(sid)
+            tool_msgs = [m for m in messages if m.role == MessageRole.TOOL]
+            self.assertTrue(tool_msgs)
+            self.assertEqual(tool_msgs[-1].name, "search_tools")
+            self.assertGreaterEqual(getattr(agent.llm, "calls", 0), 3)
+        finally:
+            db = getattr(agent.memory, "_db", None)
             if db is not None:
                 db.close()
 

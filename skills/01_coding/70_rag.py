@@ -8,6 +8,7 @@ Tool inventory
 rag_add_file   -- chunk and ingest a file into the RAG store
 rag_add_text   -- ingest a raw text string directly
 rag_add_dir    -- recursively ingest all matching files in a directory
+rag_promote_paths -- explicitly promote selected files/folders to retrievable context
 rag_list       -- show what sources are currently indexed
 rag_search     -- manually query the RAG store (useful for debugging)
 """
@@ -22,8 +23,18 @@ if "llm" not in globals():
 
     llm = _NoOpLLM()
 
+if "_safe_json" not in globals():
+
+    def _safe_json(obj: Any) -> str:  # type: ignore[misc]
+        try:
+            return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            return json.dumps({"status": "error", "error": repr(obj)})
+
 import uuid
+import json
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Lazy DocumentDB accessor
@@ -58,6 +69,31 @@ def _doc_db_from_agent():
     except Exception:
         pass
     return _get_doc_db()
+
+
+def _parse_promote_paths(raw: str) -> list[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        except Exception:
+            pass
+    out: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "," in line:
+            out.extend(part.strip() for part in line.split(",") if part.strip())
+        else:
+            out.append(line)
+    if out:
+        return out
+    return [text]
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +311,158 @@ def rag_add_dir(
                 "status": "ok",
                 "files_processed": len(files),
                 "total_chunks_added": total_chunks,
+                "results": results,
+            }
+        )
+    except Exception as exc:
+        return _safe_json({"status": "error", "error": str(exc)})
+
+
+@llm.tool(
+    description=(
+        "Promote selected files/folders into RAG in one command. "
+        "Accepts a JSON list or newline/comma-separated paths."
+    )
+)
+def rag_promote_paths(
+    paths: str,
+    recursive: bool = True,
+    glob: str = "**/*.{py,md,txt,rst}",
+    chunk_size: int = 400,
+    overlap: float = 0.2,
+    max_files: int = 80,
+) -> str:
+    """Use when: You want explicit control over which repo paths become retrievable context.
+
+    Triggers: promote to rag, index selected files, add these paths to context, ingest these folders.
+    Avoid when: You only need one file — use rag_add_file.
+    Inputs:
+      paths (str, required): JSON array or newline/comma-separated list of file/dir paths.
+      recursive (bool, optional): Recurse into directories (default True).
+      glob (str, optional): Directory file glob (default "**/*.{py,md,txt,rst}").
+      chunk_size (int, optional): Target tokens per chunk (default 400).
+      overlap (float, optional): Chunk overlap ratio (default 0.2).
+      max_files (int, optional): Total file cap across directory promotions (default 80, max 300).
+    Returns: JSON summary with per-path outcomes.
+    Side effects: Writes to the RAG vector store.
+    """
+    try:
+        parsed_paths = _parse_promote_paths(paths)
+        if not parsed_paths:
+            return _safe_json(
+                {"status": "error", "error": "No paths provided in 'paths'."}
+            )
+
+        budget = max(1, min(int(max_files or 80), 300))
+        remaining = budget
+        results: list[dict[str, Any]] = []
+        total_chunks = 0
+        total_files = 0
+
+        for raw in parsed_paths:
+            p = Path(raw).expanduser().resolve()
+            if not p.exists():
+                results.append(
+                    {"path": str(raw), "status": "error", "error": "Path not found"}
+                )
+                continue
+
+            if p.is_file():
+                if remaining <= 0:
+                    results.append(
+                        {
+                            "path": str(p),
+                            "status": "skipped",
+                            "reason": "max_files budget exhausted",
+                        }
+                    )
+                    continue
+                out = json.loads(
+                    rag_add_file(
+                        path=str(p),
+                        source_label=p.name,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                    )
+                )
+                chunks_added = int(out.get("chunks_added", 0) or 0)
+                status = str(out.get("status", "error"))
+                results.append(
+                    {
+                        "path": str(p),
+                        "kind": "file",
+                        "status": status,
+                        "chunks_added": chunks_added,
+                        "error": out.get("error"),
+                    }
+                )
+                if status == "ok":
+                    total_chunks += chunks_added
+                    total_files += 1
+                    remaining -= 1
+                continue
+
+            if p.is_dir():
+                if remaining <= 0:
+                    results.append(
+                        {
+                            "path": str(p),
+                            "status": "skipped",
+                            "reason": "max_files budget exhausted",
+                        }
+                    )
+                    continue
+                dir_glob = glob
+                if not recursive:
+                    dir_glob = glob.replace("**/", "")
+                out = json.loads(
+                    rag_add_dir(
+                        directory=str(p),
+                        glob=dir_glob,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                        max_files=remaining,
+                    )
+                )
+                files_processed = int(out.get("files_processed", 0) or 0)
+                chunks_added = int(out.get("total_chunks_added", 0) or 0)
+                status = str(out.get("status", "error"))
+                results.append(
+                    {
+                        "path": str(p),
+                        "kind": "directory",
+                        "status": status,
+                        "files_processed": files_processed,
+                        "chunks_added": chunks_added,
+                        "error": out.get("error"),
+                    }
+                )
+                if status == "ok":
+                    total_chunks += chunks_added
+                    total_files += files_processed
+                    remaining = max(0, remaining - files_processed)
+                continue
+
+            results.append(
+                {
+                    "path": str(p),
+                    "status": "error",
+                    "error": "Unsupported path type",
+                }
+            )
+
+        success_count = sum(1 for item in results if item.get("status") == "ok")
+        overall = "ok" if success_count > 0 else "error"
+        return _safe_json(
+            {
+                "status": overall,
+                "selected_paths": parsed_paths,
+                "items_total": len(results),
+                "items_ok": success_count,
+                "files_processed": total_files,
+                "total_chunks_added": total_chunks,
+                "max_files_budget": budget,
+                "max_files_remaining": remaining,
                 "results": results,
             }
         )

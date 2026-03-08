@@ -1,6 +1,7 @@
 use pulldown_cmark::{CodeBlockKind, Event as MdEvent, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use serde_json::Value as JsonValue;
 
 // ── think-tag pre-processing ──────────────────────────────────────────────────
 
@@ -60,6 +61,18 @@ fn split_think(text: &str) -> Vec<Segment> {
         });
     }
     segs
+}
+
+fn maybe_pretty_json_payload(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return None;
+    }
+    let parsed: JsonValue = serde_json::from_str(trimmed).ok()?;
+    serde_json::to_string_pretty(&parsed).ok()
 }
 
 // ── Streaming renderer (plain text with think coloring) ───────────────────────
@@ -591,6 +604,12 @@ impl MdRenderer {
 pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     if text.is_empty() {
         return vec![];
+    }
+
+    if let Some(pretty) = maybe_pretty_json_payload(text) {
+        let mut r = MdRenderer::new();
+        r.process(&format!("```json\n{pretty}\n```"));
+        return r.out;
     }
 
     let segs = split_think(text);

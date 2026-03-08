@@ -8,6 +8,7 @@ import re
 import sqlite3
 import threading
 import uuid
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,24 @@ from ..messages import Message, MessageRole
 # ============================================================================
 # Helpers: optional imports + model handling
 # ============================================================================
+@contextlib.contextmanager
+def _suppress_fd_output() -> Any:
+    """Temporarily silence low-level stdout/stderr from noisy native loaders."""
+    old_fd1 = os.dup(1)
+    old_fd2 = os.dup(2)
+    null_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null_fd, 1)
+    os.dup2(null_fd, 2)
+    os.close(null_fd)
+    try:
+        yield
+    finally:
+        os.dup2(old_fd1, 1)
+        os.close(old_fd1)
+        os.dup2(old_fd2, 2)
+        os.close(old_fd2)
+
+
 def _lazy_import_sentence_transformers():
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
@@ -190,7 +209,19 @@ class _EmbeddingRuntime:
                     )
                     self._log.info("Embedding load kwargs: %s", mode_note)
                     try:
-                        enc = SentenceTransformer(candidate, **kwargs)
+                        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+                        os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+                        try:
+                            from transformers.utils import logging as _tf_logging
+
+                            _tf_logging.set_verbosity_error()
+                            disable_pb = getattr(_tf_logging, "disable_progress_bar", None)
+                            if callable(disable_pb):
+                                disable_pb()
+                        except Exception:
+                            pass
+                        with _suppress_fd_output():
+                            enc = SentenceTransformer(candidate, **kwargs)
                     except TypeError:
                         # Some sentence-transformers versions may not accept quantization_config.
                         if "quantization_config" in kwargs:
@@ -202,7 +233,8 @@ class _EmbeddingRuntime:
                                 for k, v in kwargs.items()
                                 if k != "quantization_config"
                             }
-                        enc = SentenceTransformer(candidate, **kwargs)
+                        with _suppress_fd_output():
+                            enc = SentenceTransformer(candidate, **kwargs)
                     self._GLOBAL_ENCODERS[candidate] = enc
 
                 self._encoder = enc
@@ -273,7 +305,19 @@ class _RerankerRuntime:
             )
             self._log.info("Reranker load kwargs: %s", mode_note)
             try:
-                self._model = CrossEncoder(self.model_name, **kwargs)
+                os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+                os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+                try:
+                    from transformers.utils import logging as _tf_logging
+
+                    _tf_logging.set_verbosity_error()
+                    disable_pb = getattr(_tf_logging, "disable_progress_bar", None)
+                    if callable(disable_pb):
+                        disable_pb()
+                except Exception:
+                    pass
+                with _suppress_fd_output():
+                    self._model = CrossEncoder(self.model_name, **kwargs)
             except TypeError:
                 if "quantization_config" in kwargs:
                     self._log.warning(
@@ -282,7 +326,8 @@ class _RerankerRuntime:
                     kwargs = {
                         k: v for k, v in kwargs.items() if k != "quantization_config"
                     }
-                self._model = CrossEncoder(self.model_name, **kwargs)
+                with _suppress_fd_output():
+                    self._model = CrossEncoder(self.model_name, **kwargs)
             return self._model
 
     def rerank(

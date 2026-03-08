@@ -57,3 +57,4 @@ rust-cli/target/
 *.svg
 *.png
 .agent_history
+.local/

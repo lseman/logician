@@ -359,7 +359,10 @@ class MessageDB:
         if self._conn is None:
             raise RuntimeError("SQLite connection is not initialized.")
 
-        vector_id = str(uuid.uuid4()) if self.vector_enabled else None
+        vectorize = bool(getattr(msg, "vectorize", True))
+        vector_id = (
+            str(uuid.uuid4()) if (self.vector_enabled and vectorize) else None
+        )
 
         with self._lock:
             cur = self._conn.execute(
@@ -379,7 +382,7 @@ class MessageDB:
             rowid = int(cur.lastrowid)
             self._conn.commit()
 
-        if self.vector_enabled and vector_id is not None:
+        if self.vector_enabled and vectorize and vector_id is not None:
             try:
                 self._ensure_vector()
                 if not self.vector_enabled or self._collection is None:

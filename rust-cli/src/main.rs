@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
-    event::{DisableBracketedPaste, EnableBracketedPaste, Event, EventStream},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, EventStream, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -14,6 +17,7 @@ use tokio::sync::mpsc;
 
 mod app;
 mod bridge;
+mod image;
 mod markdown;
 mod ui;
 
@@ -31,16 +35,16 @@ fn resolve_default_bridge_script() -> String {
 
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            candidates.push(exe_dir.join("python_bridge.py"));
+            candidates.push(exe_dir.join("logician_bridge.py"));
         }
     }
 
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("python_bridge.py"));
-        candidates.push(cwd.join("cli").join("python_bridge.py"));
+        candidates.push(cwd.join("logician_bridge.py"));
+        candidates.push(cwd.join("cli").join("logician_bridge.py"));
         if let Some(parent) = cwd.parent() {
-            candidates.push(parent.join("python_bridge.py"));
-            candidates.push(parent.join("cli").join("python_bridge.py"));
+            candidates.push(parent.join("logician_bridge.py"));
+            candidates.push(parent.join("cli").join("logician_bridge.py"));
         }
     }
 
@@ -48,7 +52,7 @@ fn resolve_default_bridge_script() -> String {
         return path.to_string_lossy().to_string();
     }
 
-    "cli/python_bridge.py".to_string()
+    "logician_bridge.py".to_string()
 }
 
 // ── Command results sent back to the main loop from spawned tasks ──────────────
@@ -81,7 +85,12 @@ async fn main() -> Result<()> {
     // Terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
@@ -94,6 +103,7 @@ async fn main() -> Result<()> {
         terminal.backend_mut(),
         LeaveAlternateScreen,
         DisableBracketedPaste,
+        DisableMouseCapture,
     )?;
     terminal.show_cursor()?;
 
@@ -231,6 +241,11 @@ async fn run_loop(
                     Event::Paste(text) => {
                         app.handle_paste(&text);
                     }
+                    Event::Mouse(mouse) => match mouse.kind {
+                        MouseEventKind::ScrollUp => app.scroll_up(3),
+                        MouseEventKind::ScrollDown => app.scroll_down(3),
+                        _ => {}
+                    },
                     Event::Resize(_, _) => {
                         terminal.autoresize()?;
                     }

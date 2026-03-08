@@ -55,11 +55,13 @@ class Config:
     pre_turn_thinking: bool = False
     pre_turn_thinking_max_tokens: int = 512
     pre_turn_thinking_prompt: str = (
-        "Before taking any action, briefly plan your approach:\n"
-        "1. What is the core task or question?\n"
-        "2. What information or capabilities do you need?\n"
+        "Before taking any action, briefly plan your approach. "
+        "Consider: loaded data, recent tool results, MCP servers.\n\n"
+        "1. What is the core task?\n"
+        "2. Name the most relevant skill(s) explicitly.\n"
         "3. What is your step-by-step approach?\n"
-        "Be concise. You will then proceed to execute this plan."
+        "4. Are there pitfalls or required verifications?\n\n"
+        "Be concise. You will then execute this plan."
     )
     # Optional post-tool reflection after each tool result.
     post_tool_thinking: bool = False
@@ -109,6 +111,7 @@ class Config:
     rag_enabled: bool = True
     rag_top_k: int = 20
     vector_path: str = "message_history.vector"
+    rag_vector_path: str = "rag_docs.vector"
 
     # Conversation context
     history_limit: int = 18
@@ -119,6 +122,19 @@ class Config:
     trace_context_max_chars: int = 500
     tool_memory_items: int = 8
     compact_summary_max_chars: int = 4000
+    # Keep bulky read/search tool payloads out of vector history indexing.
+    # Matching uses lowercase substring checks on tool names.
+    tool_history_vector_exclude_patterns: list[str] = field(
+        default_factory=lambda: [
+            "read_file",
+            "read_file_smart",
+            "rg_search",
+            "get_file_outline",
+            "get_project_map",
+        ]
+    )
+    # Max chars kept when persisting compacted tool payload summaries.
+    tool_history_summary_max_chars: int = 2200
 
     # Self-Reflection (light critique loop)
     enable_reflection: bool = False
@@ -153,6 +169,13 @@ class Config:
     skill_on_demand_context_max_skills: int = 2
     skill_on_demand_context_max_files_per_skill: int = 5
     context7_docs_auto_nudge: bool = True
+    # If the model claims it already ran tools without emitting a tool call in
+    # this run, inject a corrective nudge and require a real tool call.
+    tool_claim_guard_enabled: bool = True
+    tool_claim_guard_max_nudges: int = 2
+    # If a final answer still contains completed-action claims while zero tool
+    # calls were actually executed, append a runtime transparency note.
+    tool_claim_guard_append_runtime_note: bool = True
 
     # Auto-compact: keep session from growing unboundedly
     auto_compact: bool = True

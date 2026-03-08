@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 if "llm" not in globals():
 
     class _NoOpLLM:  # no-op fallback for standalone use; registry injects real llm
@@ -12,7 +14,25 @@ if "llm" not in globals():
 @llm.tool(
     description="Statistical forecast using Nixtla's StatsForecast. Supports 13 methods from naive baselines to auto-tuned models."
 )
-def stat_forecast(method, periods, season_length=0, level=None):
+def stat_forecast(
+    method: Literal[
+        "naive",
+        "snaive",
+        "moving_avg",
+        "ses",
+        "holt_winters",
+        "auto_arima",
+        "auto_ets",
+        "auto_theta",
+        "auto_ces",
+        "adida",
+        "croston",
+        "mstl",
+    ],
+    periods,
+    season_length=0,
+    level=None,
+):
     """Use when: Statistical forecast using Nixtla's StatsForecast. Supports 13 methods from naive baselines to auto-tuned models.
 
     Triggers: forecast the next, compare models, choose a forecast model, rolling evaluation, prediction intervals, neural forecast.
@@ -154,7 +174,19 @@ def stat_forecast(method, periods, season_length=0, level=None):
     description="Deep learning forecast using Nixtla's NeuralForecast. Supports SOTA architectures including N-BEATS, N-HiTS, PatchTST, TimesNet, TFT, iTransformer, TiDE, KAN, and more."
 )
 def neural_forecast(
-    method,
+    method: Literal[
+        "nbeats",
+        "nhits",
+        "patchtst",
+        "timesnet",
+        "tft",
+        "itransformer",
+        "timellm",
+        "mlp",
+        "lstm",
+        "tide",
+        "kan",
+    ],
     periods,
     season_length=0,
     level=None,
@@ -472,7 +504,7 @@ def ensemble_forecast(
     season_length=0,
     level=None,
     cv_windows=3,
-    weighting="inverse_mae",
+    weighting: Literal["inverse_mae", "inverse_rmse", "equal"] = "inverse_mae",
 ):
     """Use when: Cross-validation-weighted ensemble combining statistical and neural forecasters. Weights are computed via rolling-origin CV using inverse MAE (or RMSE/equal).
 

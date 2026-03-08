@@ -1,11 +1,17 @@
-import sys
-sys.path.insert(0, '/data/back_home/baseline/foreblocks/agent')
+import importlib
+import unittest
 
-import logging
-logging.basicConfig(level=logging.ERROR)
 
-import skills.02_coding.65_edit_block as edit_block
-import skills.01_timeseries.80_advanced_mining as advanced_mining
+class SkillImportsSmokeTests(unittest.TestCase):
+    def test_import_core_skill_modules(self) -> None:
+        edit_block_mod = importlib.import_module("skills.01_coding.65_edit_block")
+        advanced_mining_mod = importlib.import_module(
+            "skills.02_timeseries.80_advanced_mining"
+        )
 
-print("Edit Block loaded:", dir(edit_block))
-print("Advanced Mining loaded:", dir(advanced_mining))
+        self.assertTrue(hasattr(edit_block_mod, "apply_edit_block"))
+        self.assertTrue(hasattr(advanced_mining_mod, "discover_motifs"))
+
+
+if __name__ == "__main__":
+    unittest.main()

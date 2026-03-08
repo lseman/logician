@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-messaging_agent.py — Telegram / WhatsApp (Twilio) front-end for the Foreblocks agent.
+logician_messaging.py — Telegram / WhatsApp (Twilio) front-end for the Logician agent.
 
 Usage
 -----
     # Telegram
-    PLATFORM=telegram TELEGRAM_TOKEN=<token> python messaging_agent.py
+    PLATFORM=telegram TELEGRAM_TOKEN=<token> python logician_messaging.py
 
     # WhatsApp via Twilio (runs an HTTP webhook server)
     PLATFORM=whatsapp TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... \
         TWILIO_WHATSAPP_FROM=whatsapp:+14155238886 \
-        python messaging_agent.py
+        python logician_messaging.py
 
     # Override LLM endpoint / system prompt via env:
     LLM_URL=http://localhost:8080 AGENT_SYSTEM_PROMPT="You are a helpful assistant." ...
@@ -43,7 +43,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
     level=logging.INFO,
 )
-log = logging.getLogger("messaging_agent")
+log = logging.getLogger("logician_messaging")
 
 # ---------------------------------------------------------------------------
 # Paths & config
@@ -52,8 +52,24 @@ log = logging.getLogger("messaging_agent")
 ROOT = Path(__file__).parent.resolve()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+SRC_DIR = ROOT / "src"
+if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-CONFIG_PATH = ROOT / "agent_config.json"
+from src.runtime_paths import state_path  # noqa: E402
+
+
+def _resolve_config_path() -> Path:
+    raw = str(os.getenv("LOGICIAN_CONFIG_PATH", "") or "").strip()
+    if not raw:
+        # Backward-compatible fallback.
+        raw = str(os.getenv("FOREBLOCKS_CONFIG_PATH", "") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return ROOT / "agent_config.json"
+
+
+CONFIG_PATH = _resolve_config_path()
 
 # ---------------------------------------------------------------------------
 # Agent bootstrap
@@ -68,6 +84,15 @@ def _load_agent():
     if CONFIG_PATH.exists():
         with CONFIG_PATH.open(encoding="utf-8") as f:
             cfg = json.load(f)
+
+    # Honor generic env vars from config so runtime feature flags can be
+    # toggled without shell export steps.
+    if isinstance(cfg.get("env"), dict):
+        for key, value in dict(cfg.get("env") or {}).items():
+            k = str(key or "").strip()
+            if not k or value is None:
+                continue
+            os.environ[k] = str(value)
 
     llm_url = os.getenv("LLM_URL", cfg.get("endpoint", "http://localhost:8080"))
     system_prompt = os.getenv("AGENT_SYSTEM_PROMPT", cfg.get("system_prompt"))
@@ -87,6 +112,8 @@ def _load_agent():
         "history_limit": int(
             os.getenv("HISTORY_LIMIT", str(cfg.get("history_limit", 18)))
         ),
+        "vector_path": str(state_path("message_history.vector")),
+        "rag_vector_path": str(state_path("rag_docs.vector")),
     }
 
     mcp = cfg.get("mcp")
@@ -98,8 +125,10 @@ def _load_agent():
         system_prompt=system_prompt,
         use_chat_api=use_chat_api,
         chat_template=chat_template,
-        db_path=str(ROOT / "messaging_sessions.db"),
-        embedding_model=None,
+        db_path=str(state_path("messaging_sessions.db")),
+        embedding_model=str(cfg.get("embedding_model"))
+        if cfg.get("embedding_model")
+        else None,
         config_overrides=overrides,
     )
     log.info("Agent loaded  endpoint=%s  template=%s", llm_url, chat_template)
@@ -223,7 +252,7 @@ def run_telegram(runner: AgentRunner) -> None:
         sys.exit(1)
 
     HELP_TEXT = textwrap.dedent("""
-        *Foreblocks Agent*
+        *Logician Agent*
 
         Send any message and I'll respond.
 
@@ -237,7 +266,7 @@ def run_telegram(runner: AgentRunner) -> None:
         user_key = str(update.effective_user.id)
         runner.reset(user_key)
         await update.message.reply_text(
-            "👋 Hello! I'm the Foreblocks agent. Ask me anything.\n"
+            "👋 Hello! I'm the Logician agent. Ask me anything.\n"
             "Use /reset to start a fresh conversation, /help for more.",
         )
 
@@ -314,7 +343,7 @@ def run_whatsapp(runner: AgentRunner) -> None:
         sys.exit(1)
 
     validator = RequestValidator(auth_token)
-    flask_app = Flask("messaging_agent")
+    flask_app = Flask("logician_messaging")
 
     @flask_app.post("/whatsapp")
     def whatsapp_webhook():
@@ -342,7 +371,7 @@ def run_whatsapp(runner: AgentRunner) -> None:
             reply_text = "🔄 Session reset. Fresh start!"
         elif body.lower() in ("/help", "help"):
             reply_text = (
-                "Foreblocks Agent\n\n"
+                "Logician Agent\n\n"
                 "Send any message to chat.\n"
                 "Commands:\n"
                 "  reset — start a fresh conversation\n"

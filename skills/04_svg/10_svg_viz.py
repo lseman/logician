@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 # ===========================================================================
-# CODE VISUALIZATION SKILL  —  80_svg_viz.py
+# SVG VISUALIZATION SKILL  —  10_svg_viz.py
 #
-# Generates self-contained SVG diagrams for code understanding:
+# Generates self-contained SVG assets:
 #   • Call graphs          (function-level callers / callees)
 #   • Class diagrams       (UML-style inheritance + members)
 #   • Import dependency    (inter-module dependency graph)
 #   • Pipeline diagrams    (sequential processing stages)
 #   • Data-flow diagrams   (arbitrary node/edge JSON)
 #   • Directory trees      (filesystem structure)
+#   • Hero banners         (modern marketing-style SVG headers)
+#   • Feature grids        (clean card-based visual overviews)
 #
 # Zero external dependencies — uses only CPython stdlib.
 # All generated SVGs embed fonts / styles inline so they render correctly
@@ -1423,3 +1425,232 @@ def svg_directory_tree(
 
     parts.append(_svg_footer())
     return _save_and_return("\n".join(parts), output_path, "directory_tree.svg")
+
+
+@llm.tool(
+    description=(
+        "Generate a modern, high-polish SVG hero banner with gradients, glow accents, "
+        "and title/subtitle typography."
+    )
+)
+def svg_hero_banner(
+    title: str,
+    subtitle: str = "",
+    output_path: str = "",
+    theme: str = "aurora",
+    cta_label: str = "Explore",
+    width: int = 1400,
+    height: int = 720,
+) -> str:
+    """Use when: You want a visually strong, modern SVG header/hero image.
+
+    Triggers: hero banner, landing header, promo svg, modern gradient banner,
+              beautiful svg, polished visual.
+    Avoid when: You need structural engineering/code diagrams (use svg_* diagram tools).
+    Inputs:
+      title (str, required): Main headline text.
+      subtitle (str, optional): Secondary headline line.
+      output_path (str, required-ish): Absolute path for SVG, e.g. "/tmp/hero.svg".
+      theme (str, optional): One of "aurora", "sunset", "ocean", "mono".
+      cta_label (str, optional): Label text for a call-to-action chip.
+      width (int, optional): Canvas width (default 1400).
+      height (int, optional): Canvas height (default 720).
+    Returns: JSON {status, path, size_bytes}.
+    Side effects: Writes an SVG file.
+    """
+    themes: dict[str, tuple[str, str, str, str]] = {
+        "aurora": ("#0b1020", "#132a55", "#58a6ff", "#7ee787"),
+        "sunset": ("#1a0d1a", "#4a1f3c", "#ff8f5e", "#ffd37a"),
+        "ocean": ("#08151f", "#12384d", "#3fb6ff", "#48e5c2"),
+        "mono": ("#101417", "#1f252b", "#9aa4af", "#e6edf3"),
+    }
+    bg0, bg1, accent_a, accent_b = themes.get(theme.strip().lower(), themes["aurora"])
+
+    W = max(720, min(2800, int(width)))
+    H = max(360, min(1600, int(height)))
+    title_text = _trunc(title or "Untitled Banner", 92)
+    subtitle_text = _trunc(subtitle, 140)
+    cta = _trunc(cta_label, 28) or "Explore"
+
+    parts = [
+        _svg_header(W, H, "Hero Banner"),
+        f"""  <defs>
+    <linearGradient id="hero-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="{bg0}" />
+      <stop offset="100%" stop-color="{bg1}" />
+    </linearGradient>
+    <radialGradient id="hero-glow-a" cx="20%" cy="15%" r="55%">
+      <stop offset="0%" stop-color="{accent_a}" stop-opacity="0.44"/>
+      <stop offset="100%" stop-color="{accent_a}" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hero-glow-b" cx="85%" cy="75%" r="58%">
+      <stop offset="0%" stop-color="{accent_b}" stop-opacity="0.38"/>
+      <stop offset="100%" stop-color="{accent_b}" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="hero-blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+  </defs>""",
+        f'  <rect x="0" y="0" width="{W}" height="{H}" fill="url(#hero-bg)"/>',
+        f'  <rect x="-40" y="-20" width="{int(W * 0.62)}" height="{int(H * 0.62)}" fill="url(#hero-glow-a)" filter="url(#hero-blur)"/>',
+        f'  <rect x="{int(W * 0.43)}" y="{int(H * 0.34)}" width="{int(W * 0.7)}" height="{int(H * 0.7)}" fill="url(#hero-glow-b)" filter="url(#hero-blur)"/>',
+    ]
+
+    grid_gap = max(48, min(96, W // 24))
+    for x in range(0, W + 1, grid_gap):
+        parts.append(
+            f'  <line x1="{x}" y1="0" x2="{x}" y2="{H}" stroke="{_T["border"]}" stroke-opacity="0.18" stroke-width="1"/>'
+        )
+    for y in range(0, H + 1, grid_gap):
+        parts.append(
+            f'  <line x1="0" y1="{y}" x2="{W}" y2="{y}" stroke="{_T["border"]}" stroke-opacity="0.13" stroke-width="1"/>'
+        )
+
+    tx = max(56, W // 16)
+    ty = max(118, H // 5)
+    title_size = max(40, min(86, W // 18))
+    subtitle_size = max(16, min(30, W // 54))
+    parts.extend(
+        [
+            f'  <text x="{tx}" y="{ty}" font-family="{_FONT_SANS}" font-size="{title_size}" font-weight="800" fill="{_T["text"]}" letter-spacing="-1">{_esc(title_text)}</text>',
+            (
+                f'  <text x="{tx}" y="{ty + title_size + 28}" font-family="{_FONT_SANS}" '
+                f'font-size="{subtitle_size}" fill="{_T["text_muted"]}">{_esc(subtitle_text)}</text>'
+                if subtitle_text
+                else ""
+            ),
+        ]
+    )
+
+    chip_w = max(96, min(260, 26 + len(cta) * 12))
+    chip_h = 44
+    chip_x = tx
+    chip_y = ty + title_size + (62 if subtitle_text else 34)
+    parts.extend(
+        [
+            f'  <rect x="{chip_x}" y="{chip_y}" width="{chip_w}" height="{chip_h}" rx="22" fill="{_T["surface2"]}" stroke="{accent_a}" stroke-width="1.5"/>',
+            f'  <text x="{chip_x + chip_w // 2}" y="{chip_y + 23}" text-anchor="middle" dominant-baseline="middle" font-family="{_FONT_SANS}" font-size="15" font-weight="700" fill="{_T["text"]}">{_esc(cta)}</text>',
+        ]
+    )
+
+    sig = "Generated by Logician SVG Studio"
+    parts.append(
+        f'  <text x="{W - 18}" y="{H - 14}" text-anchor="end" font-family="{_FONT}" font-size="10" fill="{_T["text_muted"]}" opacity="0.7">{_esc(sig)}</text>'
+    )
+
+    parts.append(_svg_footer())
+    return _save_and_return("\n".join(p for p in parts if p), output_path, "hero_banner.svg")
+
+
+def _parse_feature_items(features: str) -> list[dict[str, str]]:
+    raw = _parse_steps_input(features)
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append({"name": item.strip(), "desc": ""})
+            continue
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("title") or "").strip()
+        desc = str(item.get("desc") or item.get("description") or "").strip()
+        badge = str(item.get("badge") or item.get("value") or "").strip()
+        if not name:
+            continue
+        out.append({"name": name, "desc": desc, "badge": badge})
+    return out[:18]
+
+
+@llm.tool(
+    description=(
+        "Generate a modern card-grid SVG from feature/metric items for product pages, "
+        "presentations, and polished visual summaries."
+    )
+)
+def svg_feature_grid(
+    features: str,
+    output_path: str = "",
+    title: str = "Feature Grid",
+    subtitle: str = "",
+    columns: int = 3,
+) -> str:
+    """Use when: You want a clean, modern SVG summary with cards/badges.
+
+    Triggers: feature grid, metric cards, product highlights, capability overview,
+              polished svg cards, modern dashboard graphic.
+    Avoid when: You need node-edge diagrams (use svg_data_flow/svg_pipeline).
+    Inputs:
+      features (str, required): JSON list or comma/newline list of feature names.
+      output_path (str, required-ish): Absolute SVG path, e.g. "/tmp/features.svg".
+      title (str, optional): Top title.
+      subtitle (str, optional): Optional subtitle.
+      columns (int, optional): 2..4 cards per row (default 3).
+    Returns: JSON {status, path, size_bytes}.
+    Side effects: Writes an SVG file.
+    """
+    items = _parse_feature_items(features)
+    if not items:
+        return _safe_json({"status": "error", "error": "No feature items parsed."})
+
+    cols = max(2, min(4, int(columns)))
+    rows = (len(items) + cols - 1) // cols
+    card_w, card_h = 320, 176
+    x_gap, y_gap = 24, 20
+    left_pad, top_pad = 28, 92
+    W = max(860, left_pad * 2 + cols * card_w + (cols - 1) * x_gap)
+    H = max(420, top_pad + rows * card_h + (rows - 1) * y_gap + 40)
+
+    parts = [
+        _svg_header(W, H, "Feature Grid"),
+        f"""  <defs>
+    <linearGradient id="grid-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f1726"/>
+      <stop offset="100%" stop-color="#1b2233"/>
+    </linearGradient>
+    <linearGradient id="card-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#242d3a"/>
+      <stop offset="100%" stop-color="#1a222d"/>
+    </linearGradient>
+    <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+  </defs>""",
+        f'  <rect x="0" y="0" width="{W}" height="{H}" fill="url(#grid-bg)"/>',
+        _svg_title_bar(W, _trunc(title, 90), _trunc(subtitle, 120) if subtitle else f"{len(items)} cards"),
+    ]
+
+    for idx, item in enumerate(items):
+        r, c = divmod(idx, cols)
+        x = left_pad + c * (card_w + x_gap)
+        y = top_pad + r * (card_h + y_gap)
+        nm = _trunc(item.get("name", ""), 46)
+        desc = _trunc(item.get("desc", ""), 130)
+        badge = _trunc(item.get("badge", ""), 18)
+
+        parts.extend(
+            [
+                f'  <g class="node" transform-origin="{x + card_w//2} {y + card_h//2}">',
+                f'  <rect x="{x}" y="{y}" width="{card_w}" height="{card_h}" rx="12" fill="url(#card-grad)" stroke="{_T["border"]}" stroke-width="1.5" filter="url(#card-shadow)"/>',
+                f'  <rect x="{x}" y="{y}" width="{card_w}" height="4" rx="2" fill="{_T["blue"]}"/>',
+                f'  <text x="{x + 18}" y="{y + 34}" font-family="{_FONT_SANS}" font-size="12" fill="{_T["text_muted"]}" font-weight="700">#{idx + 1:02d}</text>',
+                f'  <text x="{x + 18}" y="{y + 62}" font-family="{_FONT_SANS}" font-size="20" fill="{_T["text"]}" font-weight="700">{_esc(nm)}</text>',
+                (
+                    f'  <text x="{x + 18}" y="{y + 92}" font-family="{_FONT_SANS}" font-size="12" fill="{_T["text_muted"]}">{_esc(desc)}</text>'
+                    if desc
+                    else ""
+                ),
+                (
+                    f'  <rect x="{x + card_w - 92}" y="{y + card_h - 36}" width="76" height="24" rx="12" fill="{_T["surface2"]}" stroke="{_T["blue"]}" stroke-width="1"/>'
+                    if badge
+                    else ""
+                ),
+                (
+                    f'  <text x="{x + card_w - 54}" y="{y + card_h - 24}" text-anchor="middle" font-family="{_FONT}" font-size="11" fill="{_T["text"]}" font-weight="700">{_esc(badge)}</text>'
+                    if badge
+                    else ""
+                ),
+                "  </g>",
+            ]
+        )
+
+    parts.append(_svg_footer())
+    return _save_and_return("\n".join(p for p in parts if p), output_path, "feature_grid.svg")

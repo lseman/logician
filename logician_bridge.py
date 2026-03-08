@@ -32,9 +32,16 @@ def _resolve_root_dir() -> Path:
 ROOT_DIR = _resolve_root_dir()
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+SRC_DIR = ROOT_DIR / "src"
+if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-DB_PATH = ROOT_DIR / "agent_sessions.db"
-VECTOR_PATH = ROOT_DIR / "message_history.vector"
+from src.runtime_paths import state_path
+
+
+DB_PATH = state_path("agent_sessions.db")
+VECTOR_PATH = state_path("message_history.vector")
+RAG_VECTOR_PATH = state_path("rag_docs.vector")
 
 
 @lru_cache(maxsize=1)
@@ -46,9 +53,16 @@ def _agent_factory():
 
 @lru_cache(maxsize=1)
 def _has_rapidfuzz() -> bool:
-    from src.tools.catalog import HAS_RAPIDFUZZ
+    from src.tools.registry.catalog import HAS_RAPIDFUZZ
 
     return bool(HAS_RAPIDFUZZ)
+
+
+@lru_cache(maxsize=1)
+def _has_tiktoken() -> bool:
+    from src.backends.common import HAS_TIKTOKEN
+
+    return bool(HAS_TIKTOKEN)
 
 
 def _new_session_id() -> str:
@@ -88,6 +102,85 @@ def _extract_context7_library_id(raw: Any) -> str | None:
     return None
 
 
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")
+_IMAGE_KEY_HINTS = ("image", "plot", "chart", "figure", "output", "path", "file")
+_IMAGE_PATH_RE = re.compile(
+    r"(?i)(?:https?://|file://|[a-z]:)?[a-z0-9_./\\-]+\.(?:png|jpe?g|webp|bmp|gif|svg)"
+)
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
+_HTML_IMAGE_SRC_RE = re.compile(
+    r"""<img[^>]+src=["']([^"']+\.(?:png|jpe?g|webp|bmp|gif|svg))["']""",
+    re.IGNORECASE,
+)
+
+
+def _normalize_image_path(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    path = value.strip().strip("\"'<>")
+    if not path:
+        return None
+    if path.startswith("file://"):
+        path = path[7:]
+    # Keep local path stable for terminal renderer cache keys.
+    path = path.split("?", 1)[0].split("#", 1)[0].strip()
+    if not path:
+        return None
+    if any(ch.isspace() for ch in path):
+        return None
+
+    lower = path.lower()
+    if any(lower.endswith(ext) for ext in _IMAGE_EXTENSIONS):
+        return path
+    return None
+
+
+def _extract_image_paths(payload: Any, *, limit: int = 8) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    stack: list[Any] = [payload]
+    scanned = 0
+
+    def _add(raw: Any) -> None:
+        if len(out) >= limit:
+            return
+        path = _normalize_image_path(raw)
+        if not path or path in seen:
+            return
+        seen.add(path)
+        out.append(path)
+
+    while stack and len(out) < limit and scanned < 500:
+        scanned += 1
+        cur = stack.pop()
+        if isinstance(cur, dict):
+            for key, value in cur.items():
+                key_l = str(key or "").lower()
+                if isinstance(value, str) and any(h in key_l for h in _IMAGE_KEY_HINTS):
+                    _add(value)
+                stack.append(value)
+            continue
+        if isinstance(cur, (list, tuple, set)):
+            stack.extend(list(cur))
+            continue
+        if not isinstance(cur, str):
+            continue
+
+        _add(cur)
+        text = cur.strip()
+        if not text:
+            continue
+        for match in _MARKDOWN_IMAGE_RE.finditer(text):
+            _add(match.group(1))
+        for match in _HTML_IMAGE_SRC_RE.finditer(text):
+            _add(match.group(1))
+        for match in _IMAGE_PATH_RE.finditer(text):
+            _add(match.group(0))
+
+    return out
+
+
 def _resolve_config_path(raw_path: str | None) -> Path:
     """Resolve config path using practical lookup order for CLI bridge calls."""
     if raw_path:
@@ -117,12 +210,48 @@ def _resolve_config_path(raw_path: str | None) -> Path:
     return bridge_candidate
 
 
+@lru_cache(maxsize=1)
+def _detected_versions() -> dict[str, str]:
+    versions: dict[str, str] = {
+        "python": sys.version.split()[0],
+    }
+
+    pyproject = ROOT_DIR / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            text = pyproject.read_text(encoding="utf-8")
+            match = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"\s*$', text)
+            if match:
+                versions["agent"] = match.group(1).strip()
+        except Exception:
+            pass
+
+    cargo = ROOT_DIR / "rust-cli" / "Cargo.toml"
+    if cargo.is_file():
+        try:
+            text = cargo.read_text(encoding="utf-8")
+            match = re.search(
+                r'(?sm)^\[package\].*?^\s*version\s*=\s*"([^"]+)"\s*$',
+                text,
+            )
+            if match:
+                versions["cli"] = match.group(1).strip()
+        except Exception:
+            pass
+
+    return versions
+
+
 @contextlib.contextmanager
 def _silent_load():
-    null = open(os.devnull, "w")
-    old_stdout, old_stderr = sys.stdout, sys.stderr
-    sys.stdout = null
-    sys.stderr = null
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+    try:
+        sys.stderr.flush()
+    except Exception:
+        pass
     old_fd1 = os.dup(1)
     old_fd2 = os.dup(2)
     null_fd = os.open(os.devnull, os.O_WRONLY)
@@ -132,13 +261,18 @@ def _silent_load():
     try:
         yield
     finally:
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
         os.dup2(old_fd1, 1)
         os.close(old_fd1)
         os.dup2(old_fd2, 2)
         os.close(old_fd2)
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
-        null.close()
 
 
 class BridgeServer:
@@ -181,6 +315,7 @@ class BridgeServer:
             }
             # Keep vector store local to this bridge workspace.
             ov["vector_path"] = str(VECTOR_PATH)
+            ov["rag_vector_path"] = str(RAG_VECTOR_PATH)
             # Backward-compat alias used by agent_config.json.
             if "mcp_servers" not in ov and (mcp := merged.get("mcp")):
                 ov["mcp_servers"] = mcp
@@ -189,6 +324,18 @@ class BridgeServer:
         def make_agent(block: dict[str, Any]):
             create_agent = _agent_factory()
             merged = {**cfg, **block}
+            # Apply config-provided environment variables before agent creation.
+            # Supports top-level env plus per-agent env overrides in multi-agent mode.
+            env_map: dict[str, Any] = {}
+            if isinstance(cfg.get("env"), dict):
+                env_map.update(dict(cfg.get("env") or {}))
+            if isinstance(block.get("env"), dict):
+                env_map.update(dict(block.get("env") or {}))
+            for key, value in env_map.items():
+                k = str(key or "").strip()
+                if not k or value is None:
+                    continue
+                os.environ[k] = str(value)
             for ek, env_key in [
                 ("firecrawl_url", "FIRECRAWL_URL"),
                 ("firecrawl_api_key", "FIRECRAWL_API_KEY"),
@@ -201,6 +348,7 @@ class BridgeServer:
                 use_chat_api=merged.get("use_chat_api", True),
                 chat_template=merged.get("chat_template", "chatml"),
                 db_path=str(DB_PATH),
+                embedding_model=merged.get("embedding_model"),
                 config_overrides=build_overrides(merged),
             )
 
@@ -218,6 +366,21 @@ class BridgeServer:
         if self.active is None:
             raise RuntimeError("No active agent")
         return self.agents[self.active]
+
+    def _active_mcp_names(self) -> list[str]:
+        active = self.active or ""
+        if not active or active not in self.agents:
+            return []
+        try:
+            clients = getattr(self.agents[active], "_mcp_clients", []) or []
+            names = [
+                str(getattr(client, "name", "")).strip()
+                for client in clients
+                if str(getattr(client, "name", "")).strip()
+            ]
+            return sorted(dict.fromkeys(names))
+        except Exception:
+            return []
 
     def _state_snapshot(self) -> dict[str, Any]:
         active = self.active or ""
@@ -266,8 +429,10 @@ class BridgeServer:
             "session": sid,
             "msg_count": msgs,
             "agents": sorted(self.agents.keys()),
+            "mcp_servers": self._active_mcp_names(),
             "pipeline": self.pipeline,
             "rapidfuzz": _has_rapidfuzz(),
+            "tiktoken": _has_tiktoken(),
             "tool_count": tool_count,
             "skill_count": skill_count,
         }
@@ -353,37 +518,68 @@ class BridgeServer:
             out.append("bye")
 
         elif cmd == "/help":
-            out.extend(
-                [
-                    "Command palette:",
-                    "  /status                          runtime state snapshot",
-                    "  /agents                          list loaded agents",
-                    "  /agent <name>                    switch active agent",
-                    "  /pipeline <a> <b> [rounds]       set inter-agent pipeline",
-                    "  /pipeline stop                   disable pipeline",
-                    "  /context                         session/data context",
-                    "  /compact [keep_last]             summarize old history",
-                    "  /reset                           reset runtime tool state",
-                    "  /sessions                        list stored sessions",
-                    "  /load <id_prefix>                load prior session",
-                    "  /export [path]                   export transcript",
-                    "  /upload <file> [label]           ingest one doc to RAG",
-                    "  /upload-dir <dir> [glob] [max]   bulk ingest docs to RAG",
-                    "  /docs <library> [query]          fetch Context7 documentation",
-                    "  /changes [path] [--staged]        show git status + diff preview",
-                    "  /trace [on|off]                  client-side trace toggle",
-                    "  /clear                           client-side transcript clear",
-                    "  /doctor                          client-side health checks",
-                    "  /bug [note]                      client-side bug report file",
-                    "  /new                             start new session",
-                    "  /reload                          reload config + agents",
-                    "  /quit                            exit",
-                ]
+            out.append(
+                "\n".join(
+                    [
+                        "# Command Palette",
+                        "",
+                        "## Essentials",
+                        "- `/help` or `/?`                     show this help",
+                        "- `/version`                          show version/runtime info",
+                        "- `/status`                           runtime state snapshot",
+                        "- `/skills-health [--sources] [n]`   skill loader diagnostics",
+                        "",
+                        "## Workflow",
+                        "- `/agents`                           list loaded agents",
+                        "- `/agent <name>`                     switch active agent",
+                        "- `/pipeline <a> <b> [rounds]`        set inter-agent pipeline",
+                        "- `/pipeline stop`                    disable pipeline",
+                        "- `/context`                          session/data context",
+                        "- `/compact [keep_last]`              summarize old history",
+                        "- `/reset`                            reset runtime tool state",
+                        "",
+                        "## Sessions and Docs",
+                        "- `/sessions`                         list stored sessions",
+                        "- `/load <id_prefix>`                 load prior session",
+                        "- `/export [path]`                    export transcript",
+                        "- `/upload <file> [label]`            ingest one doc to RAG",
+                        "- `/upload-dir <dir> [glob] [max]`    bulk ingest docs to RAG",
+                        "- `/docs <library> [query]`           fetch Context7 docs",
+                        "",
+                        "## Diagnostics",
+                        "- `/changes [path] [--staged]`        show git status + diff preview",
+                        "- `/trace [on|off]`                   client-side trace toggle",
+                        "- `/clear`                            client-side transcript clear",
+                        "- `/doctor`                           client-side health checks",
+                        "- `/bug [note]`                       client-side bug report file",
+                        "",
+                        "## Session Control",
+                        "- `/new`                              start new session",
+                        "- `/reload`                           reload config + agents",
+                        "- `/quit`, `/exit`, `/q`              exit",
+                    ]
+                )
+            )
+
+        elif cmd == "/version":
+            versions = _detected_versions()
+            out.append(
+                "\n".join(
+                    [
+                        "# Version",
+                        "",
+                        f"- agent: `{versions.get('agent', 'unknown')}`",
+                        f"- cli: `{versions.get('cli', 'unknown')}`",
+                        f"- bridge: `{Path(__file__).name}`",
+                        f"- python: `{versions.get('python', 'unknown')}`",
+                    ]
+                )
             )
 
         elif cmd == "/status":
             snap = self._state_snapshot()
             agents = ", ".join(snap.get("agents", []) or []) or "-"
+            mcps = ", ".join(snap.get("mcp_servers", []) or []) or "-"
             pipeline = snap.get("pipeline")
             if pipeline:
                 ptxt = (
@@ -398,10 +594,108 @@ class BridgeServer:
                     f"session: {snap.get('session', '-')}",
                     f"messages: {snap.get('msg_count', 0)}",
                     f"agents: {agents}",
+                    f"mcp: {mcps}",
                     f"pipeline: {ptxt}",
                     f"rapidfuzz: {'enabled' if snap.get('rapidfuzz') else 'disabled'}",
+                    f"tiktoken: {'enabled' if snap.get('tiktoken') else 'disabled'}",
                 ]
             )
+
+        elif cmd == "/skills-health":
+            ag = self._active_agent()
+            include_sources = False
+            max_items = 25
+            for arg in args:
+                if arg in {"--sources", "-s"}:
+                    include_sources = True
+                    continue
+                try:
+                    max_items = max(1, min(200, int(arg)))
+                except Exception:
+                    out.append(f"ignored invalid argument: {arg}")
+
+            raw = ag.tools.call_tool(
+                "skills_health",
+                include_sources=include_sources,
+                max_items=max_items,
+            )
+            payload = _parse_tool_payload(raw)
+            if str(payload.get("status", "")).lower() != "ok":
+                out.append(
+                    f"skills_health failed: {payload.get('error', 'unknown error')}"
+                )
+            else:
+                paths = payload.get("paths", {}) or {}
+                discovery = payload.get("discovery", {}) or {}
+                catalog = payload.get("catalog", {}) or {}
+                coding = payload.get("coding", {}) or {}
+                organization = payload.get("organization", {}) or {}
+                registry = payload.get("registry", {}) or {}
+                checks = payload.get("checks", {}) or {}
+
+                out.extend(
+                    [
+                        f"skills_dir: {paths.get('skills_dir_path', '-')}",
+                        f"skills_md: {paths.get('skills_md_path', '-')}",
+                        "discovery: "
+                        f"sources={discovery.get('source_count', 0)} "
+                        f"readable={discovery.get('readable_count', 0)} "
+                        f"unreadable={discovery.get('unreadable_count', 0)} "
+                        f"superpowers={discovery.get('superpowers_skill_md_count', 0)}",
+                        "catalog: "
+                        f"total={catalog.get('skills_total', 0)} "
+                        f"guidance={catalog.get('guidance_only_skills', 0)} "
+                        f"tool_backed={catalog.get('tool_backed_skills', 0)} "
+                        f"superpowers={catalog.get('superpowers_skills', 0)}",
+                        "coding: "
+                        f"maturity={coding.get('maturity', 'unknown')} "
+                        f"coverage={coding.get('required_coverage_pct', 0.0)}% "
+                        f"missing_required={coding.get('missing_required_count', 0)} "
+                        f"coding_tools={coding.get('coding_tools_total', 0)}",
+                        "organization: "
+                        f"status={organization.get('status', 'unknown')} "
+                        f"modules={organization.get('coding_modules_count', 0)} "
+                        f"issues={organization.get('issues_count', 0)}",
+                        "registry: "
+                        f"tools={registry.get('tools_total', 0)} "
+                        f"python={registry.get('python_skill_tools', 0)} "
+                        f"builtin={registry.get('builtin_tools', 0)}",
+                        "checks: "
+                        f"brainstorming_present={checks.get('brainstorming_present', False)} "
+                        f"missing_tool_links={checks.get('missing_tools_by_skill_count', 0)}",
+                    ]
+                )
+
+                missing = checks.get("missing_tools_by_skill", []) or []
+                if missing:
+                    out.append("missing tool links:")
+                    for item in missing[:10]:
+                        skill_id = str(item.get("skill_id", "?"))
+                        miss = item.get("missing_tools", []) or []
+                        preview = ", ".join(str(v) for v in miss[:6])
+                        if len(miss) > 6:
+                            preview += f" … (+{len(miss) - 6})"
+                        out.append(f"  {skill_id}: {preview}")
+
+                missing_required = coding.get("missing_required_tools", []) or []
+                if missing_required:
+                    preview = ", ".join(str(v) for v in missing_required[:10])
+                    if len(missing_required) > 10:
+                        preview += f" … (+{len(missing_required) - 10})"
+                    out.append(f"missing required capability tools: {preview}")
+
+                org_issues = organization.get("issues", []) or []
+                if org_issues:
+                    out.append("organization issues:")
+                    for issue in org_issues[:10]:
+                        out.append(f"  - {issue}")
+
+                if include_sources:
+                    sources = discovery.get("sources", []) or []
+                    if sources:
+                        out.append("sample sources:")
+                        for src in sources[:10]:
+                            out.append(f"  {src}")
 
         elif cmd == "/agents":
             if self.active is None:
@@ -844,6 +1138,7 @@ class BridgeServer:
 
         sid = self.sessions.setdefault(active, _new_session_id())
         token_seen = False
+        emitted_image_events: set[tuple[str, str]] = set()
 
         def _token(tok: str):
             nonlocal token_seen
@@ -857,6 +1152,15 @@ class BridgeServer:
 
         def _tool(name: str, tool_args: dict[str, Any]):
             self._emit("tool", {"name": name, "args": tool_args or {}})
+            for path in _extract_image_paths(tool_args or {}):
+                key = (str(name or "").strip(), path)
+                if key in emitted_image_events:
+                    continue
+                emitted_image_events.add(key)
+                self._emit(
+                    "image",
+                    {"tool": key[0] or "unknown_tool", "path": path, "source": "args"},
+                )
 
         def _skill(skill_ids: list[str], selected_tools: list[str]):
             self._emit(
@@ -899,31 +1203,76 @@ class BridgeServer:
 
         ag = self._active_agent()
         self._emit("phase", {"state": "thinking", "note": "running agent"})
-        response = ag.chat(
+        run_resp = ag.run(
             raw,
             session_id=sid,
             verbose=False,
             use_semantic_retrieval=True,
             retrieval_mode="hybrid",
-            stream=_token,
+            stream_callback=_token,
             tool_callback=_tool,
             skill_callback=_skill,
         )
+        response_text = str(getattr(run_resp, "final_response", "") or "")
+        tool_calls_payload: list[dict[str, Any]] = []
+        for call in list(getattr(run_resp, "tool_calls", []) or []):
+            call_name = str(getattr(call, "name", "") or "")
+            call_args = dict(getattr(call, "arguments", {}) or {})
+            tool_calls_payload.append(
+                {
+                    "name": call_name,
+                    "arguments": call_args,
+                }
+            )
+            for path in _extract_image_paths(call_args):
+                key = (call_name, path)
+                if key in emitted_image_events:
+                    continue
+                emitted_image_events.add(key)
+                self._emit(
+                    "image",
+                    {"tool": call_name or "unknown_tool", "path": path, "source": "call"},
+                )
+
+        for msg in list(getattr(run_resp, "messages", []) or []):
+            role = str(getattr(msg, "role", "") or "").lower()
+            if not role.endswith("tool"):
+                continue
+            tool_name = str(getattr(msg, "name", "") or "tool_result")
+            content = str(getattr(msg, "content", "") or "")
+            if not content:
+                continue
+            for path in _extract_image_paths(content):
+                key = (tool_name, path)
+                if key in emitted_image_events:
+                    continue
+                emitted_image_events.add(key)
+                self._emit(
+                    "image",
+                    {
+                        "tool": tool_name,
+                        "path": path,
+                        "source": "tool_result",
+                    },
+                )
         # Some backends/modes return a full answer without incremental token callbacks
         # (for example constrained decoding or non-streaming server paths). Emit a
         # synthetic token stream so the TUI still shows streaming output.
-        if not token_seen and response:
+        if not token_seen and response_text:
             self._emit(
                 "phase",
                 {"state": "streaming", "note": "rendering response"},
             )
-            text = str(response)
+            text = response_text
             chunk_size = 96
             for i in range(0, len(text), chunk_size):
                 self._emit("token", {"token": text[i : i + chunk_size]})
         return {
             "pipeline": False,
-            "assistant": response,
+            "assistant": response_text,
+            "iterations": int(getattr(run_resp, "iterations", 0) or 0),
+            "tool_call_count": len(tool_calls_payload),
+            "tool_calls": tool_calls_payload,
             "state": self._state_snapshot(),
         }
 
