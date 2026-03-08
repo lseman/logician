@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import time
@@ -12,6 +13,7 @@ def parse_tool_calls(text: str, use_toon: bool) -> list[ToolCall]:
     calls: list[ToolCall] = []
     if use_toon and HAS_TOON and decode is not None:
         calls.extend(_parse_toon_tool_calls(text))
+    calls.extend(_parse_jinja_tool_calls(text))
     calls.extend(_parse_json_tool_calls(text))
 
     out: list[ToolCall] = []
@@ -28,6 +30,59 @@ def parse_tool_calls(text: str, use_toon: bool) -> list[ToolCall]:
 def parse_tool_call_strict(text: str, use_toon: bool) -> ToolCall | None:
     calls = parse_tool_calls(text, use_toon=use_toon)
     return calls[0] if calls else None
+
+
+def _new_tool_call(name: str, args: dict) -> ToolCall:
+    return ToolCall(
+        id=f"call_{time.time():.6f}",
+        name=name,
+        arguments=args,
+    )
+
+
+def _parse_tool_calls_from_object(data: object) -> list[ToolCall]:
+    calls: list[ToolCall] = []
+    if not isinstance(data, dict):
+        return calls
+
+    if "tool_call" in data:
+        call_data = data["tool_call"]
+        if isinstance(call_data, dict):
+            name = call_data.get("name")
+            args = call_data.get("arguments", {})
+            if isinstance(name, str) and isinstance(args, dict):
+                calls.append(_new_tool_call(name, args))
+                return calls
+
+    if "name" in data and "arguments" in data:
+        name = data["name"]
+        args = data["arguments"]
+        if isinstance(name, str) and isinstance(args, dict):
+            calls.append(_new_tool_call(name, args))
+
+    # Anthropic-native tool block shape:
+    # {"type":"tool_use","name":"...","input":{...}}
+    if (
+        data.get("type") == "tool_use"
+        and isinstance(data.get("name"), str)
+        and isinstance(data.get("input"), dict)
+    ):
+        calls.append(_new_tool_call(str(data["name"]), dict(data["input"])))
+
+    # Anthropic response wrapper shape:
+    # {"content":[{"type":"tool_use","name":"...","input":{...}}], ...}
+    if isinstance(data.get("content"), list):
+        for block in data["content"]:
+            if not isinstance(block, dict):
+                continue
+            if (
+                block.get("type") == "tool_use"
+                and isinstance(block.get("name"), str)
+                and isinstance(block.get("input"), dict)
+            ):
+                calls.append(_new_tool_call(str(block["name"]), dict(block["input"])))
+
+    return calls
 
 
 def _parse_toon_tool_calls(text: str) -> list[ToolCall]:
@@ -62,11 +117,7 @@ def _parse_toon_tool_calls(text: str) -> list[ToolCall]:
                     args = call_data.get("arguments", {})
                     if isinstance(name, str) and isinstance(args, dict):
                         calls.append(
-                            ToolCall(
-                                id=f"call_{time.time():.6f}",
-                                name=name,
-                                arguments=args,
-                            )
+                            _new_tool_call(name, args)
                         )
         except Exception:
             pass
@@ -144,66 +195,143 @@ def _parse_json_tool_calls(text: str) -> list[ToolCall]:
             data = _lenient_json_loads(json_candidate)
         except Exception:
             continue
+        calls.extend(_parse_tool_calls_from_object(data))
+    return calls
 
-        if isinstance(data, dict) and "tool_call" in data:
-            call_data = data["tool_call"]
-            if isinstance(call_data, dict):
-                name = call_data.get("name")
-                args = call_data.get("arguments", {})
-                if isinstance(name, str) and isinstance(args, dict):
-                    calls.append(
-                        ToolCall(
-                            id=f"call_{time.time():.6f}",
-                            name=name,
-                            arguments=args,
-                        )
-                    )
-                    continue
 
-        if isinstance(data, dict) and "name" in data and "arguments" in data:
-            name = data["name"]
-            args = data["arguments"]
-            if isinstance(name, str) and isinstance(args, dict):
-                calls.append(
-                    ToolCall(id=f"call_{time.time():.6f}", name=name, arguments=args)
-                )
+def _parse_jinja_tool_calls(text: str) -> list[ToolCall]:
+    calls: list[ToolCall] = []
 
-        # Anthropic-native tool block shape:
-        # {"type":"tool_use","name":"...","input":{...}}
-        if (
-            isinstance(data, dict)
-            and data.get("type") == "tool_use"
-            and isinstance(data.get("name"), str)
-            and isinstance(data.get("input"), dict)
-        ):
-            calls.append(
-                ToolCall(
-                    id=f"call_{time.time():.6f}",
-                    name=str(data["name"]),
-                    arguments=dict(data["input"]),
-                )
-            )
+    # Common Jinja/templated wrapper used by several chat templates:
+    # <tool_call> ... </tool_call>
+    for body in re.findall(r"(?is)<tool_call[^>]*>(.*?)</tool_call>", text):
+        payload = body.strip()
+        if not payload:
+            continue
+        parsed = _parse_object_lenient(payload)
+        if parsed is not None:
+            calls.extend(_parse_tool_calls_from_object(parsed))
 
-        # Anthropic response wrapper shape:
-        # {"content":[{"type":"tool_use","name":"...","input":{...}}], ...}
-        if isinstance(data, dict) and isinstance(data.get("content"), list):
-            for block in data["content"]:
-                if not isinstance(block, dict):
-                    continue
-                if (
-                    block.get("type") == "tool_use"
-                    and isinstance(block.get("name"), str)
-                    and isinstance(block.get("input"), dict)
-                ):
-                    calls.append(
-                        ToolCall(
-                            id=f"call_{time.time():.6f}",
-                            name=str(block["name"]),
-                            arguments=dict(block["input"]),
-                        )
-                    )
+    # Jinja expression wrappers:
+    # {{ {"name":"x","arguments":{...}} }}
+    for expr in re.findall(r"(?is)\{\{\s*(.*?)\s*\}\}", text):
+        payload = expr.strip()
+        if not payload:
+            continue
+        parsed = _parse_object_lenient(payload)
+        if parsed is not None:
+            calls.extend(_parse_tool_calls_from_object(parsed))
+
+    # Function-call style often emitted by Jinja-based templates:
+    # tool_call(name="x", arguments={...})
+    # tool_call("x", {"arg": 1})
+    for args_text in _extract_function_call_args(text, "tool_call"):
+        parsed = _parse_jinja_tool_call_args(args_text)
+        if parsed is None:
+            continue
+        calls.append(_new_tool_call(parsed[0], parsed[1]))
 
     return calls
+
+
+def _parse_object_lenient(payload: str) -> object | None:
+    text = payload.strip()
+    if not text:
+        return None
+    try:
+        return _lenient_json_loads(text)
+    except Exception:
+        pass
+    try:
+        obj = ast.literal_eval(text)
+    except Exception:
+        return None
+    return obj
+
+
+def _extract_function_call_args(text: str, function_name: str) -> list[str]:
+    out: list[str] = []
+    if not text or not function_name:
+        return out
+
+    pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(", re.IGNORECASE)
+    n = len(text)
+    for m in pattern.finditer(text):
+        open_idx = text.find("(", m.start())
+        if open_idx < 0 or open_idx >= n:
+            continue
+
+        depth = 0
+        in_string = False
+        quote = ""
+        escaped = False
+        i = open_idx
+        while i < n:
+            ch = text[i]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == quote:
+                    in_string = False
+                i += 1
+                continue
+
+            if ch in ("'", '"'):
+                in_string = True
+                quote = ch
+                i += 1
+                continue
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    out.append(text[open_idx + 1 : i].strip())
+                    break
+            i += 1
+    return out
+
+
+def _parse_jinja_tool_call_args(args_text: str) -> tuple[str, dict] | None:
+    if not args_text.strip():
+        return None
+    try:
+        node = ast.parse(f"f({args_text})", mode="eval")
+    except Exception:
+        return None
+    call_node = node.body
+    if not isinstance(call_node, ast.Call):
+        return None
+
+    kwargs: dict[str, object] = {}
+    for kw in call_node.keywords:
+        if kw.arg is None:
+            continue
+        try:
+            kwargs[kw.arg] = ast.literal_eval(kw.value)
+        except Exception:
+            return None
+
+    pos_args: list[object] = []
+    for arg in call_node.args:
+        try:
+            pos_args.append(ast.literal_eval(arg))
+        except Exception:
+            return None
+
+    name: object | None = kwargs.get("name")
+    if not isinstance(name, str) and pos_args:
+        name = pos_args[0]
+
+    arguments: object | None = kwargs.get("arguments")
+    if not isinstance(arguments, dict) and len(pos_args) >= 2:
+        arguments = pos_args[1]
+
+    if isinstance(name, str) and isinstance(arguments, dict):
+        return name, arguments
+    return None
 
 
 def _extract_json_objects(text: str) -> List[str]:

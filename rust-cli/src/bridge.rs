@@ -17,9 +17,18 @@ pub enum BridgeEvent {
         state: String,
         note: String,
     },
-    Tool {
+    ToolStart {
         name: String,
         args: Value,
+        sequence: u64,
+    },
+    ToolEnd {
+        name: String,
+        sequence: u64,
+        status: String,
+        duration_ms: u64,
+        cache_hit: bool,
+        error: Option<String>,
     },
     Image {
         tool: String,
@@ -194,9 +203,27 @@ impl PythonBridge {
                     .unwrap_or("")
                     .to_string(),
             },
-            "tool" => BridgeEvent::Tool {
+            "tool_start" => BridgeEvent::ToolStart {
                 name: v["name"].as_str().unwrap_or("unknown").to_string(),
                 args: v.get("args").cloned().unwrap_or_default(),
+                sequence: v["sequence"].as_u64().unwrap_or(0),
+            },
+            "tool_end" => BridgeEvent::ToolEnd {
+                name: v["name"].as_str().unwrap_or("unknown").to_string(),
+                sequence: v["sequence"].as_u64().unwrap_or(0),
+                status: v["status"].as_str().unwrap_or("ok").to_string(),
+                duration_ms: v["duration_ms"].as_u64().unwrap_or(0),
+                cache_hit: v["cache_hit"].as_bool().unwrap_or(false),
+                error: v
+                    .get("error")
+                    .and_then(|e| e.as_str())
+                    .map(|e| e.to_string()),
+            },
+            "tool" => BridgeEvent::ToolStart {
+                // Backward compatibility for older bridge event schema.
+                name: v["name"].as_str().unwrap_or("unknown").to_string(),
+                args: v.get("args").cloned().unwrap_or_default(),
+                sequence: v["sequence"].as_u64().unwrap_or(0),
             },
             "image" => BridgeEvent::Image {
                 tool: v["tool"].as_str().unwrap_or("unknown").to_string(),

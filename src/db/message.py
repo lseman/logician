@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from .core import _HNSWCollection, _SQLITE_PRAGMAS
+from .core import _HNSWCollection, _SQLITE_PRAGMAS, create_vector_collection
 from ..logging_utils import get_logger
 from ..messages import Message, MessageRole
 
@@ -19,15 +19,20 @@ class MessageDB:
     db_path: str = "agent_sessions.db"
     vector_path: str = "message_history.vector"
     embedding_model_name: str = (
-        "google/embeddinggemma-300m|intfloat/e5-small-v2|BAAI/bge-small-en-v1.5"
+        "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
+        "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"
+        "intfloat/e5-mistral-7b-instruct|BAAI/bge-small-en-v1.5|"
+        "google/embeddinggemma-300m|intfloat/e5-small-v2"
     )
 
     vector_enabled: bool = True
     lazy_vector: bool = True
     vector_collection_name: str = "messages"
+    vector_backend: str = "usearch"
     rerank_enabled: bool = True
     reranker_model_name: str = (
-        "jinaai/jina-reranker-v2-base-multilingual|BAAI/bge-reranker-v2.5-gemma2-lightweight"
+        "BAAI/bge-reranker-v2.5-gemma2-lightweight|BAAI/bge-reranker-v2-m3|"
+        "mixedbread-ai/mxbai-rerank-xsmall-v1|jinaai/jina-reranker-v2-base-multilingual"
     )
     min_similarity: float = 0.18
     hybrid_rrf_k: int = 60
@@ -149,7 +154,8 @@ class MessageDB:
         if self._collection is not None:
             return
         try:
-            self._collection = _HNSWCollection(
+            self._collection = create_vector_collection(
+                backend=self.vector_backend,
                 root_path=self.vector_path,
                 collection_name=self.vector_collection_name,
                 embedding_model_name=self.embedding_model_name,

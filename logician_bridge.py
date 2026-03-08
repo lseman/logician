@@ -69,6 +69,41 @@ def _new_session_id() -> str:
     return f"cli_{uuid.uuid4().hex[:8]}"
 
 
+_BRIDGE_COMMAND_SPECS: list[tuple[str, str]] = [
+    ("/help", "Show command list"),
+    ("/version", "Show version/runtime info"),
+    ("/status", "Runtime state snapshot"),
+    ("/skills-health", "Skill loader diagnostics"),
+    ("/agents", "List loaded agents"),
+    ("/agent", "Switch active agent (`/agent <name>`)"),
+    ("/pipeline", "Set/stop inter-agent pipeline (`/pipeline <a> <b> [rounds]`)"),
+    ("/context", "Show session/data context"),
+    ("/compact [keep_last]", "Summarize old history"),
+    ("/reset", "Reset runtime tool state"),
+    ("/sessions", "List stored sessions"),
+    ("/load", "Load prior session (`/load <id_prefix>`)"),
+    ("/export", "Export transcript (`/export [path]`)"),
+    ("/mount", "Mount codebase (`/mount <dir> [glob] [max] [depth]`)"),
+    ("/mount-code", "Alias for /mount"),
+    ("/upload", "Ingest one doc (`/upload <file> [label]`)"),
+    ("/upload-dir", "Bulk ingest docs (`/upload-dir <dir> [glob] [max]`)"),
+    ("/docs", "Fetch Context7 docs (`/docs <library> [query]`)"),
+    ("/changes", "Show git status + diff preview (`/changes [path] [--staged]`)"),
+    ("/new", "Start new session"),
+    ("/reload", "Reload config + agents"),
+    ("/quit", "Exit"),
+    ("/exit", "Alias for /quit"),
+    ("/q", "Alias for /quit"),
+]
+
+
+def _bridge_commands_manifest() -> list[dict[str, str]]:
+    return [
+        {"command": command, "description": description}
+        for command, description in _BRIDGE_COMMAND_SPECS
+    ]
+
+
 def _extract_context7_library_id(raw: Any) -> str | None:
     text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
 
@@ -452,6 +487,7 @@ class BridgeServer:
         return {
             "config_path": str(config_path),
             "state": self._state_snapshot(),
+            "commands": _bridge_commands_manifest(),
         }
 
     def slash(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -518,48 +554,14 @@ class BridgeServer:
             out.append("bye")
 
         elif cmd == "/help":
-            out.append(
-                "\n".join(
-                    [
-                        "# Command Palette",
-                        "",
-                        "## Essentials",
-                        "- `/help` or `/?`                     show this help",
-                        "- `/version`                          show version/runtime info",
-                        "- `/status`                           runtime state snapshot",
-                        "- `/skills-health [--sources] [n]`   skill loader diagnostics",
-                        "",
-                        "## Workflow",
-                        "- `/agents`                           list loaded agents",
-                        "- `/agent <name>`                     switch active agent",
-                        "- `/pipeline <a> <b> [rounds]`        set inter-agent pipeline",
-                        "- `/pipeline stop`                    disable pipeline",
-                        "- `/context`                          session/data context",
-                        "- `/compact [keep_last]`              summarize old history",
-                        "- `/reset`                            reset runtime tool state",
-                        "",
-                        "## Sessions and Docs",
-                        "- `/sessions`                         list stored sessions",
-                        "- `/load <id_prefix>`                 load prior session",
-                        "- `/export [path]`                    export transcript",
-                        "- `/upload <file> [label]`            ingest one doc to RAG",
-                        "- `/upload-dir <dir> [glob] [max]`    bulk ingest docs to RAG",
-                        "- `/docs <library> [query]`           fetch Context7 docs",
-                        "",
-                        "## Diagnostics",
-                        "- `/changes [path] [--staged]`        show git status + diff preview",
-                        "- `/trace [on|off]`                   client-side trace toggle",
-                        "- `/clear`                            client-side transcript clear",
-                        "- `/doctor`                           client-side health checks",
-                        "- `/bug [note]`                       client-side bug report file",
-                        "",
-                        "## Session Control",
-                        "- `/new`                              start new session",
-                        "- `/reload`                           reload config + agents",
-                        "- `/quit`, `/exit`, `/q`              exit",
-                    ]
-                )
-            )
+            lines = ["# Command Palette", ""]
+            for item in _bridge_commands_manifest():
+                command = str(item.get("command", "")).strip()
+                description = str(item.get("description", "")).strip()
+                if not command:
+                    continue
+                lines.append(f"- `{command}`  {description}")
+            out.append("\n".join(lines))
 
         elif cmd == "/version":
             versions = _detected_versions()
@@ -850,6 +852,136 @@ class BridgeServer:
                 lines.extend([f"### {role}{ntag}", "", m.content or "", "", "---", ""])
             Path(out_path).write_text("\n".join(lines), encoding="utf-8")
             out.append(f"exported {len(msgs)} messages -> {out_path}")
+
+        elif cmd in {"/mount", "/mount-code"}:
+            if not args:
+                out.append("usage: /mount <directory> [glob] [max_files] [map_depth]")
+            else:
+                ag = self._active_agent()
+                sid = self.sessions.get(self.active or "", "") or None
+                sid_text = str(sid or self.sessions.get(self.active or "", "") or "-")
+                directory = args[0]
+                glob_pattern = (
+                    args[1]
+                    if len(args) > 1
+                    else "**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}"
+                )
+
+                max_files = 120
+                if len(args) > 2:
+                    try:
+                        max_files = max(1, min(400, int(args[2])))
+                    except Exception:
+                        out.append(f"invalid max_files '{args[2]}', using 120")
+
+                map_depth = 3
+                if len(args) > 3:
+                    try:
+                        map_depth = max(1, min(10, int(args[3])))
+                    except Exception:
+                        out.append(f"invalid map_depth '{args[3]}', using 3")
+
+                project_map_payload: dict[str, Any]
+                try:
+                    project_map_raw = ag.run_tool_direct(
+                        "get_project_map",
+                        {"directory": directory, "max_depth": map_depth},
+                        session_id=sid,
+                        persist_to_history=True,
+                    )
+                    project_map_payload = _parse_tool_payload(project_map_raw)
+                except Exception as exc:
+                    project_map_payload = {"status": "error", "error": str(exc)}
+
+                promote_payload: dict[str, Any]
+                used_fallback = False
+                try:
+                    promote_raw = ag.run_tool_direct(
+                        "rag_promote_paths",
+                        {
+                            "paths": json.dumps([directory], ensure_ascii=False),
+                            "recursive": True,
+                            "glob": glob_pattern,
+                            "chunk_size": 400,
+                            "overlap": 0.2,
+                            "max_files": max_files,
+                        },
+                        session_id=sid,
+                        persist_to_history=True,
+                    )
+                    promote_payload = _parse_tool_payload(promote_raw)
+                except Exception:
+                    used_fallback = True
+                    try:
+                        fallback_raw = ag.run_tool_direct(
+                            "docling_add_dir",
+                            {
+                                "directory": directory,
+                                "glob": glob_pattern,
+                                "max_files": max_files,
+                            },
+                            session_id=sid,
+                            persist_to_history=True,
+                        )
+                        fallback_payload = _parse_tool_payload(fallback_raw)
+                        promote_payload = {
+                            "status": fallback_payload.get("status", "error"),
+                            "files_processed": fallback_payload.get("files_processed", 0),
+                            "total_chunks_added": fallback_payload.get(
+                                "total_chunks_added",
+                                fallback_payload.get("chunks_added", 0),
+                            ),
+                            "error": fallback_payload.get("error"),
+                        }
+                    except Exception as exc:
+                        promote_payload = {"status": "error", "error": str(exc)}
+
+                out.append(f"mounted path: {directory}")
+                out.append(f"session: {sid_text}")
+
+                if str(project_map_payload.get("status", "")).lower() == "ok":
+                    out.append(
+                        "context persisted: yes "
+                        f"(project map: {project_map_payload.get('file_count', 0)} files, depth={map_depth})"
+                    )
+                else:
+                    out.append(
+                        "context persisted: partial "
+                        "(project map failed: "
+                        f"{project_map_payload.get('error', 'unknown error')}"
+                        ")"
+                    )
+
+                if str(promote_payload.get("status", "")).lower() == "ok":
+                    files_processed = int(promote_payload.get("files_processed", 0) or 0)
+                    chunks_added = int(promote_payload.get("total_chunks_added", 0) or 0)
+                    fallback_note = " (fallback=docling_add_dir)" if used_fallback else ""
+                    out.append(
+                        "rag persisted: yes "
+                        f"({files_processed} files, {chunks_added} chunks{fallback_note})"
+                    )
+                else:
+                    out.append(
+                        "rag persisted: no "
+                        "(mount failed: "
+                        f"{promote_payload.get('error', 'unknown error')}"
+                        ")"
+                    )
+
+                try:
+                    ctx_info = ag.describe_runtime_context(sid_text)
+                    out.append(
+                        "context window readiness: "
+                        f"session_messages={ctx_info.get('persisted_messages', 0)} "
+                        f"loaded_per_turn={ctx_info.get('loaded_message_budget', 0)}/"
+                        f"{ctx_info.get('history_limit', 0)}"
+                    )
+                except Exception:
+                    pass
+
+                out.append(
+                    "ready: ask with repo-relative paths; retrieval will use mounted RAG + live tools."
+                )
 
         elif cmd == "/upload":
             if not args:
@@ -1150,8 +1282,32 @@ class BridgeServer:
                 )
             self._emit("token", {"token": tok})
 
-        def _tool(name: str, tool_args: dict[str, Any]):
-            self._emit("tool", {"name": name, "args": tool_args or {}})
+        def _tool(
+            name: str,
+            tool_args: dict[str, Any],
+            meta: dict[str, Any] | None = None,
+        ):
+            info = meta if isinstance(meta, dict) else {}
+            stage = str(info.get("stage", "start") or "start").strip().lower()
+            sequence = int(info.get("sequence", 0) or 0)
+            if stage == "end":
+                payload: dict[str, Any] = {
+                    "name": name,
+                    "sequence": sequence,
+                    "status": str(info.get("status", "ok") or "ok"),
+                    "duration_ms": int(info.get("duration_ms", 0) or 0),
+                    "cache_hit": bool(info.get("cache_hit", False)),
+                }
+                error = str(info.get("error", "") or "").strip()
+                if error:
+                    payload["error"] = error
+                self._emit("tool_end", payload)
+                return
+
+            self._emit(
+                "tool_start",
+                {"name": name, "args": tool_args or {}, "sequence": sequence},
+            )
             for path in _extract_image_paths(tool_args or {}):
                 key = (str(name or "").strip(), path)
                 if key in emitted_image_events:

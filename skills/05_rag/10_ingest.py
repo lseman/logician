@@ -1,19 +1,22 @@
-"""RAG document management tools.
+"""RAG ingestion tools.
 
-These tools let the agent and users populate (and inspect) the RAG vector store
-so that `get_rag_context()` actually returns useful results.
+Focused on writing data into the RAG index.
 
 Tool inventory
 --------------
-rag_add_file   -- chunk and ingest a file into the RAG store
-rag_add_text   -- ingest a raw text string directly
-rag_add_dir    -- recursively ingest all matching files in a directory
-rag_promote_paths -- explicitly promote selected files/folders to retrievable context
-rag_list       -- show what sources are currently indexed
-rag_search     -- manually query the RAG store (useful for debugging)
+rag_add_file      -- chunk + ingest one file
+rag_add_text      -- ingest an inline text payload
+rag_add_dir       -- bulk ingest matching files from a directory
+rag_promote_paths -- promote selected files/folders into RAG
 """
 
 from __future__ import annotations
+
+import json
+import re
+import uuid
+from pathlib import Path
+from typing import Any
 
 if "llm" not in globals():
 
@@ -31,10 +34,6 @@ if "_safe_json" not in globals():
         except Exception:
             return json.dumps({"status": "error", "error": repr(obj)})
 
-import uuid
-import json
-from pathlib import Path
-from typing import Any
 
 # ---------------------------------------------------------------------------
 # Lazy DocumentDB accessor
@@ -43,7 +42,6 @@ from typing import Any
 
 def _get_doc_db():
     """Return a DocumentDB instance, reusing the one on the live agent if present."""
-    # When running inside the agent, `ctx` may expose the Memory object.
     try:
         from src.db.document import DocumentDB
 
@@ -55,13 +53,11 @@ def _get_doc_db():
 def _doc_db_from_agent():
     """Try to get DocumentDB from the live agent's memory (avoids a second model load)."""
     try:
-        # The ToolRegistry injects `ctx` into execution_globals; the agent sets ctx.memory.
         mem = globals().get("ctx") and getattr(globals()["ctx"], "memory", None)
         if mem is not None:
             doc_db = getattr(mem, "_doc_db", None)
             if doc_db is not None:
                 return doc_db
-            # Force materialise it (lazy_rag=True by default)
             if hasattr(mem, "_ensure_doc_db"):
                 mem._ensure_doc_db()
                 if mem._doc_db is not None:
@@ -75,6 +71,7 @@ def _parse_promote_paths(raw: str) -> list[str]:
     text = str(raw or "").strip()
     if not text:
         return []
+
     if text.startswith("["):
         try:
             parsed = json.loads(text)
@@ -82,6 +79,7 @@ def _parse_promote_paths(raw: str) -> list[str]:
                 return [str(item).strip() for item in parsed if str(item).strip()]
         except Exception:
             pass
+
     out: list[str] = []
     for line in text.splitlines():
         line = line.strip()
@@ -91,9 +89,22 @@ def _parse_promote_paths(raw: str) -> list[str]:
             out.extend(part.strip() for part in line.split(",") if part.strip())
         else:
             out.append(line)
+
     if out:
         return out
     return [text]
+
+
+def _expand_brace_glob(glob: str) -> list[str]:
+    """Expand a single-level brace glob such as **/*.{py,md,txt}."""
+    brace_match = re.search(r"\{([^}]+)\}", glob)
+    if not brace_match:
+        return [glob]
+
+    exts = brace_match.group(1).split(",")
+    prefix = glob[: brace_match.start()]
+    suffix = glob[brace_match.end() :]
+    return [f"{prefix}{ext.strip()}{suffix}" for ext in exts if ext.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +160,7 @@ def rag_add_file(
                 "source": label,
                 "path": str(p),
                 "chunks_added": len(ids),
-                "chunk_ids": ids[:10],  # show first 10
+                "chunk_ids": ids[:10],
             }
         )
     except Exception as exc:
@@ -238,22 +249,9 @@ def rag_add_dir(
                 {"status": "error", "error": f"Not a directory: {directory}"}
             )
 
-        max_files = min(int(max_files), 200)
-
-        # Expand brace patterns like {py,md,txt} into multiple globs
-        import re as _re
-
-        brace_match = _re.search(r"\{([^}]+)\}", glob)
-        if brace_match:
-            exts = brace_match.group(1).split(",")
-            prefix = glob[: brace_match.start()]
-            suffix = glob[brace_match.end() :]
-            patterns = [f"{prefix}{ext.strip()}{suffix}" for ext in exts]
-        else:
-            patterns = [glob]
-
+        max_files = min(max(1, int(max_files)), 200)
         files: list[Path] = []
-        for pat in patterns:
+        for pat in _expand_brace_glob(glob):
             for f in sorted(root.glob(pat)):
                 if f.is_file() and f not in files:
                     files.append(f)
@@ -265,24 +263,23 @@ def rag_add_dir(
                     "status": "ok",
                     "message": "No matching files found",
                     "files_processed": 0,
+                    "total_chunks_added": 0,
+                    "results": [],
                 }
             )
 
         doc_db = _doc_db_from_agent()
         results = []
         total_chunks = 0
+
         for fp in files:
+            rel = str(fp.relative_to(root))
             try:
                 text = fp.read_text(encoding="utf-8", errors="replace")
                 if not text.strip():
-                    results.append(
-                        {
-                            "file": str(fp.relative_to(root)),
-                            "status": "skipped",
-                            "reason": "empty",
-                        }
-                    )
+                    results.append({"file": rel, "status": "skipped", "reason": "empty"})
                     continue
+
                 ids = doc_db.add_documents(
                     texts=[text],
                     metadatas=[{"source": fp.name, "path": str(fp)}],
@@ -290,21 +287,9 @@ def rag_add_dir(
                     chunk_overlap_ratio=overlap,
                 )
                 total_chunks += len(ids)
-                results.append(
-                    {
-                        "file": str(fp.relative_to(root)),
-                        "status": "ok",
-                        "chunks": len(ids),
-                    }
-                )
-            except Exception as e:
-                results.append(
-                    {
-                        "file": str(fp.relative_to(root)),
-                        "status": "error",
-                        "error": str(e),
-                    }
-                )
+                results.append({"file": rel, "status": "ok", "chunks": len(ids)})
+            except Exception as exc:
+                results.append({"file": rel, "status": "error", "error": str(exc)})
 
         return _safe_json(
             {
@@ -377,6 +362,7 @@ def rag_promote_paths(
                         }
                     )
                     continue
+
                 out = json.loads(
                     rag_add_file(
                         path=str(p),
@@ -412,9 +398,8 @@ def rag_promote_paths(
                         }
                     )
                     continue
-                dir_glob = glob
-                if not recursive:
-                    dir_glob = glob.replace("**/", "")
+
+                dir_glob = glob if recursive else glob.replace("**/", "")
                 out = json.loads(
                     rag_add_dir(
                         directory=str(p),
@@ -465,49 +450,6 @@ def rag_promote_paths(
                 "max_files_remaining": remaining,
                 "results": results,
             }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
-
-
-@llm.tool(
-    description="Query the RAG vector store directly. Useful for debugging what the agent will retrieve."
-)
-def rag_search(query: str, top_k: int = 5) -> str:
-    """Use when: Inspect what RAG context the agent would retrieve for a given query.
-
-    Triggers: what's in rag, search memory, check rag, debug retrieval, what do you know about.
-    Inputs:
-      query (str, required): The search query.
-      top_k (int, optional): Number of results to return (default 5).
-    Returns: JSON with matching chunks, sources, and similarity distances.
-    Side effects: Read-only.
-    """
-    try:
-        doc_db = _doc_db_from_agent()
-        results = doc_db.query(query, n_results=min(int(top_k), 20))
-        if not results:
-            return _safe_json(
-                {
-                    "status": "ok",
-                    "query": query,
-                    "results": [],
-                    "message": "No matches found — RAG store may be empty.",
-                }
-            )
-
-        hits = [
-            {
-                "source": r["metadata"].get("source", "unknown"),
-                "distance": round(r["distance"], 4),
-                "chunk": r["metadata"].get("chunk", 0),
-                "preview": r["content"][:300]
-                + ("…" if len(r["content"]) > 300 else ""),
-            }
-            for r in results
-        ]
-        return _safe_json(
-            {"status": "ok", "query": query, "count": len(hits), "results": hits}
         )
     except Exception as exc:
         return _safe_json({"status": "error", "error": str(exc)})

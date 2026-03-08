@@ -10,7 +10,7 @@ def mock_run_cmd(cmd, cwd=None, timeout=None, venv_path=None):
     return {"exit_code": proc.returncode, "stdout": proc.stdout + proc.stderr}
 builtins._run_cmd = mock_run_cmd
 
-auto_format = getattr(importlib.import_module("skills.01_coding.40_quality"), "auto_format")
+auto_format = getattr(importlib.import_module("skills.01_coding.50_quality"), "auto_format")
 
 from pathlib import Path
 dummy = Path("dummy.py")

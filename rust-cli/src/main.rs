@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -55,6 +56,21 @@ fn resolve_default_bridge_script() -> String {
     "logician_bridge.py".to_string()
 }
 
+// ── CLI Arguments ───────────────────────────────────────────────────────────
+
+#[derive(Parser, Debug)]
+#[command(name = "logician")]
+#[command(about = "Logician CLI - AI-assisted engineering agent")]
+struct Args {
+    /// Python command to execute bridge script
+    #[arg(long, short = 'p', env = "PYTHON")]
+    python_cmd: Option<String>,
+
+    /// Bridge script path
+    #[arg(long, short = 'b', env = "LOGICIAN_BRIDGE_SCRIPT")]
+    bridge_script: Option<String>,
+}
+
 // ── Command results sent back to the main loop from spawned tasks ──────────────
 
 enum CmdResult {
@@ -67,21 +83,18 @@ enum CmdResult {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Parse bridge command from args or env  (default: python bridge.py)
-    let bridge_cmd: String;
-    let bridge_args: Vec<String>;
-
-    let raw_args: Vec<String> = std::env::args().skip(1).collect();
-    if raw_args.is_empty() {
-        bridge_cmd = std::env::var("LOGICIAN_BRIDGE_CMD")
-            .or_else(|_| std::env::var("PYTHON"))
-            .unwrap_or_else(|_| "python3".into());
-        bridge_args = vec![resolve_default_bridge_script()];
-    } else {
-        bridge_cmd = raw_args[0].clone();
-        bridge_args = raw_args[1..].to_vec();
-    }
-
+    // Parse CLI arguments with clap
+    let args = Args::parse();
+    
+    // Resolve bridge command and script
+    let bridge_cmd = args.python_cmd
+        .or_else(|| std::env::var("PYTHON").ok())
+        .unwrap_or_else(|| "python3".into());
+    
+    let bridge_script = args.bridge_script
+        .or_else(|| std::env::var("LOGICIAN_BRIDGE_SCRIPT").ok())
+        .unwrap_or_else(resolve_default_bridge_script);
+    
     // Terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -95,7 +108,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
-    let result = run(&mut terminal, &bridge_cmd, &bridge_args).await;
+    let result = run(&mut terminal, &bridge_cmd, &[bridge_script.clone()]).await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -245,7 +258,7 @@ async fn run_loop(
                         MouseEventKind::ScrollUp => app.scroll_up(3),
                         MouseEventKind::ScrollDown => app.scroll_down(3),
                         _ => {}
-                    },
+                    }
                     Event::Resize(_, _) => {
                         terminal.autoresize()?;
                     }

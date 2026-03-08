@@ -262,10 +262,10 @@ pub enum KeyAction {
     ToggleRawStream,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct SlashPopupEntry {
-    pub command: &'static str,
-    pub description: &'static str,
+    pub command: String,
+    pub description: String,
 }
 
 #[derive(Clone, Copy)]
@@ -276,6 +276,25 @@ struct SlashCommandSpec {
 
 const SLASH_POPUP_LIMIT: usize = 8;
 const INPUT_HISTORY_LIMIT: usize = 200;
+
+const LOCAL_ONLY_SLASH_COMMANDS: [SlashCommandSpec; 4] = [
+    SlashCommandSpec {
+        command: "/?",
+        description: "Alias for /help",
+    },
+    SlashCommandSpec {
+        command: "/trace",
+        description: "Toggle trace messages",
+    },
+    SlashCommandSpec {
+        command: "/clear",
+        description: "Clear visible transcript only",
+    },
+    SlashCommandSpec {
+        command: "/close",
+        description: "Close image side panel",
+    },
+];
 
 const SLASH_COMMANDS: [SlashCommandSpec; 28] = [
     SlashCommandSpec {
@@ -301,14 +320,6 @@ const SLASH_COMMANDS: [SlashCommandSpec; 28] = [
     SlashCommandSpec {
         command: "/changes",
         description: "Show git status and diff preview",
-    },
-    SlashCommandSpec {
-        command: "/doctor",
-        description: "Run local health checks",
-    },
-    SlashCommandSpec {
-        command: "/bug",
-        description: "Save reproducible bug report file",
     },
     SlashCommandSpec {
         command: "/trace",
@@ -363,6 +374,14 @@ const SLASH_COMMANDS: [SlashCommandSpec; 28] = [
         description: "Ingest one document into RAG",
     },
     SlashCommandSpec {
+        command: "/mount",
+        description: "Mount codebase (context + RAG)",
+    },
+    SlashCommandSpec {
+        command: "/mount-code",
+        description: "Alias for /mount",
+    },
+    SlashCommandSpec {
         command: "/upload-dir",
         description: "Bulk ingest docs into RAG",
     },
@@ -392,6 +411,12 @@ const SLASH_COMMANDS: [SlashCommandSpec; 28] = [
     },
 ];
 
+#[derive(Clone)]
+struct SlashCommand {
+    command: String,
+    description: String,
+}
+
 // ── App state ─────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -416,6 +441,7 @@ pub struct App {
     pub input: String,
     pub input_cursor: usize, // char offset
     slash_selected: usize,
+    slash_commands: Vec<SlashCommand>,
     input_history: Vec<String>,
     input_history_index: Option<usize>,
     input_history_draft: Option<String>,
@@ -461,6 +487,7 @@ impl App {
             input: String::new(),
             input_cursor: 0,
             slash_selected: 0,
+            slash_commands: Self::default_slash_commands(),
             input_history: Vec::new(),
             input_history_index: None,
             input_history_draft: None,
@@ -480,9 +507,81 @@ impl App {
         }
     }
 
+    fn append_slash_command(
+        commands: &mut Vec<SlashCommand>,
+        command: impl Into<String>,
+        description: impl Into<String>,
+    ) {
+        let raw = command.into();
+        let command = raw
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if command.is_empty() || !command.starts_with('/') {
+            return;
+        }
+        if commands
+            .iter()
+            .any(|item| item.command.eq_ignore_ascii_case(&command))
+        {
+            return;
+        }
+        let description = description.into().trim().to_string();
+        commands.push(SlashCommand {
+            command,
+            description,
+        });
+    }
+
+    fn default_slash_commands() -> Vec<SlashCommand> {
+        let mut out: Vec<SlashCommand> = Vec::new();
+        for spec in SLASH_COMMANDS {
+            Self::append_slash_command(&mut out, spec.command, spec.description);
+        }
+        out
+    }
+
+    fn install_bridge_commands(&mut self, v: &Value) {
+        let Some(items) = v.get("commands").and_then(|value| value.as_array()) else {
+            return;
+        };
+        let mut merged: Vec<SlashCommand> = Vec::new();
+        for item in items {
+            let command = item
+                .get("command")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if command.is_empty() {
+                continue;
+            }
+            let description = item
+                .get("description")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            Self::append_slash_command(&mut merged, command, description);
+        }
+
+        if merged.is_empty() {
+            return;
+        }
+
+        for spec in LOCAL_ONLY_SLASH_COMMANDS {
+            Self::append_slash_command(&mut merged, spec.command, spec.description);
+        }
+        self.slash_commands = merged;
+        self.normalize_slash_selection();
+    }
+
     // ── Init ─────────────────────────────────────────────────────────────────
 
     pub fn handle_init(&mut self, v: Value) {
+        self.install_bridge_commands(&v);
         let state = v.get("state").unwrap_or(&v);
         self.bridge_state = BridgeState::from_value(state);
         self.connected = true;
@@ -660,6 +759,34 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             }
         }
 
+        lines.join("\n")
+    }
+
+    fn format_tool_completion_text(
+        name: &str,
+        sequence: usize,
+        status: &str,
+        duration_ms: u64,
+        cache_hit: bool,
+        error: Option<&str>,
+    ) -> String {
+        let normalized = status.trim().to_lowercase();
+        let label = if normalized == "ok" {
+            "completed"
+        } else {
+            "failed"
+        };
+        let mut lines = vec![format!(
+            "{label} #{sequence} `{name}` in {} ms{}",
+            duration_ms,
+            if cache_hit { " (cache hit)" } else { "" },
+        )];
+        if let Some(err) = error {
+            let short = Self::truncate_inline(err.trim(), 220);
+            if !short.is_empty() {
+                lines.push(format!("error: {short}"));
+            }
+        }
         lines.join("\n")
     }
 
@@ -1015,14 +1142,53 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 self.trace(format!("phase={state} note={note}"));
             }
 
-            BridgeEvent::Tool { name, args } => {
+            BridgeEvent::ToolStart {
+                name,
+                args,
+                sequence,
+            } => {
                 self.stop_live_message();
-                let call_number = self.current_turn_tool_names.len() + 1;
+                let call_number = if sequence == 0 {
+                    self.current_turn_tool_names.len() + 1
+                } else {
+                    sequence as usize
+                };
                 self.trace(format!("tool#{call_number}={name}"));
                 self.current_turn_tool_names.push(name.clone());
                 self.add_message(
                     Role::Tool,
                     Self::format_tool_event_text(&name, &args, call_number),
+                );
+            }
+
+            BridgeEvent::ToolEnd {
+                name,
+                sequence,
+                status,
+                duration_ms,
+                cache_hit,
+                error,
+            } => {
+                self.stop_live_message();
+                let call_number = if sequence == 0 {
+                    self.current_turn_tool_names.len()
+                } else {
+                    sequence as usize
+                };
+                let status_l = status.to_lowercase();
+                self.trace(format!(
+                    "tool_end#{call_number}={name} status={status_l} duration_ms={duration_ms}"
+                ));
+                self.add_message(
+                    Role::Tool,
+                    Self::format_tool_completion_text(
+                        &name,
+                        call_number,
+                        &status,
+                        duration_ms,
+                        cache_hit,
+                        error.as_deref(),
+                    ),
                 );
             }
 
@@ -1124,6 +1290,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                         }
                     }
                 }
+                self.install_bridge_commands(&v);
                 if let Some(state) = v.get("state") {
                     self.bridge_state = BridgeState::from_value(state);
                 }
@@ -1159,7 +1326,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         let lower = lower.as_str();
 
         if lower == "/help" || lower == "/?" {
-            self.add_system_message(Self::help_text());
+            self.add_system_message(self.help_text());
             return true;
         }
 
@@ -1215,49 +1382,23 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
     }
 
     #[allow(dead_code)]
-    fn help_text() -> String {
-        [
-            "# Command Palette",
-            "",
-            "## Essentials",
-            "- `/help` or `/?`                      Show this help",
-            "- `/version`                           Show version details",
-            "- `/status`                            Runtime state snapshot",
-            "- `/skills-health [--sources] [n]`    Skill loader diagnostics",
-            "",
-            "## Workflow",
-            "- `/agents`                            List loaded agents",
-            "- `/agent <name>`                      Switch active agent",
-            "- `/pipeline <a> <b> [rounds]`         Enable inter-agent pipeline",
-            "- `/pipeline stop`                     Disable current pipeline",
-            "- `/context`                           Show session/data context",
-            "- `/compact [keep_last]`               Summarize older history",
-            "- `/reset`                             Reset runtime tool state",
-            "",
-            "## Sessions and Files",
-            "- `/sessions`                          List previous sessions",
-            "- `/load <id>`                         Load a previous session",
-            "- `/export [path]`                     Export transcript to markdown",
-            "- `/upload <file> [label]`             Ingest one doc into RAG",
-            "- `/upload-dir <dir> [glob] [max]`     Bulk ingest docs into RAG",
-            "- `/docs <library> [query]`            Fetch Context7 docs",
-            "",
-            "## Diagnostics",
-            "- `/changes [path] [--staged]`         Git status + diff preview",
-            "- `/doctor`                            Local health checks",
-            "- `/bug [note]`                        Save bug report file",
-            "- `/trace [on|off]`                    Toggle trace messages",
-            "- `/clear`                             Clear visible transcript only",
-            "- `/close`                             Close image side panel",
-            "",
-            "## Session Control",
-            "- `/new`                               Start a new session",
-            "- `/reload`                            Reload config and agents",
-            "- `/quit`, `/exit`, `/q`               Exit CLI",
-            "",
-            "Shortcuts: `Up/Down` input history · `PgUp/PgDn` scroll · `Ctrl+Q` quit · `Ctrl+O` trace · `Ctrl+P` raw stream · `Ctrl+C` exit.",
-        ]
-        .join("\n")
+    fn help_text(&self) -> String {
+        let mut lines: Vec<String> = vec![
+            "# Command Palette".to_string(),
+            "".to_string(),
+            "## Available Commands".to_string(),
+        ];
+        for item in &self.slash_commands {
+            let description = if item.description.is_empty() {
+                "No description"
+            } else {
+                item.description.as_str()
+            };
+            lines.push(format!("- `{}`  {}", item.command, description));
+        }
+        lines.push("".to_string());
+        lines.push("Shortcuts: `Up/Down` input history · mouse wheel / `PgUp/PgDn` scroll · `Shift+Drag` select text · `Ctrl+Q` quit · `Ctrl+O` trace · `Ctrl+P` raw stream · `Ctrl+C` exit.".to_string());
+        lines.join("\n")
     }
 
     // ── Status ────────────────────────────────────────────────────────────────
@@ -1342,17 +1483,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         };
 
         let query = token.trim_start_matches('/').to_lowercase();
-        let mut scored: Vec<(i32, usize, SlashPopupEntry)> = SLASH_COMMANDS
+        let mut scored: Vec<(i32, usize, SlashPopupEntry)> = self
+            .slash_commands
             .iter()
             .enumerate()
             .filter_map(|(order, spec)| {
-                Self::slash_score(&query, *spec, order).map(|score| {
+                Self::slash_score(&query, spec, order).map(|score| {
                     (
                         score,
                         order,
                         SlashPopupEntry {
-                            command: spec.command,
-                            description: spec.description,
+                            command: spec.command.clone(),
+                            description: spec.description.clone(),
                         },
                     )
                 })
@@ -1363,7 +1505,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             b.0.cmp(&a.0)
                 .then_with(|| a.2.command.len().cmp(&b.2.command.len()))
                 .then_with(|| a.1.cmp(&b.1))
-                .then_with(|| a.2.command.cmp(b.2.command))
+                .then_with(|| a.2.command.cmp(&b.2.command))
         });
 
         let cap = limit.max(1);
@@ -1469,6 +1611,10 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             if self.trace_on { "on" } else { "off" },
             if self.raw_on { "on" } else { "off" },
         )
+    }
+
+    pub fn last_turn_tool_count(&self) -> usize {
+        self.last_turn_tool_names.len()
     }
 
     // ── Keyboard handling ─────────────────────────────────────────────────────
@@ -1708,7 +1854,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             return false;
         }
         let idx = self.slash_selected.min(entries.len().saturating_sub(1));
-        self.replace_slash_token(entries[idx].command)
+        self.replace_slash_token(&entries[idx].command)
     }
 
     fn should_complete_slash_on_enter(&self) -> bool {
@@ -1719,11 +1865,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         if normalized == "/" {
             return true;
         }
-        !Self::is_known_slash_command(&normalized)
+        !self.is_known_slash_command(&normalized)
     }
 
-    fn is_known_slash_command(token: &str) -> bool {
-        SLASH_COMMANDS
+    fn is_known_slash_command(&self, token: &str) -> bool {
+        self.slash_commands
             .iter()
             .any(|spec| spec.command.eq_ignore_ascii_case(token))
     }
@@ -1749,7 +1895,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         true
     }
 
-    fn slash_score(query: &str, spec: SlashCommandSpec, order: usize) -> Option<i32> {
+    fn slash_score(query: &str, spec: &SlashCommand, order: usize) -> Option<i32> {
         let q = query.trim();
         if q.is_empty() {
             return Some(3_000 - order as i32);

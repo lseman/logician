@@ -4,7 +4,7 @@ import unittest
 
 class SkillImportsSmokeTests(unittest.TestCase):
     def test_import_core_skill_modules(self) -> None:
-        edit_block_mod = importlib.import_module("skills.01_coding.65_edit_block")
+        edit_block_mod = importlib.import_module("skills.01_coding.75_edit_block")
         advanced_mining_mod = importlib.import_module(
             "skills.02_timeseries.80_advanced_mining"
         )

@@ -169,7 +169,11 @@ class Agent:
         self._cached_use_toon: bool = bool(self.config.use_toon_for_tools)
         self._cached_tools_version: int = -1
 
-        self._embedding_model_name = embedding_model or "BAAI/bge-base-en-v1.5"
+        self._embedding_model_name = embedding_model or (
+            "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
+            "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"
+            "intfloat/e5-mistral-7b-instruct|BAAI/bge-small-en-v1.5"
+        )
         self.memory = Memory(
             config=self.config,
             db_path=db_path,
@@ -1001,7 +1005,7 @@ class Agent:
         retrieval_mode: str = "vector",
         stream: Callable[[str], None] | None = None,
         fresh_session: bool = False,
-        tool_callback: Callable[[str, dict], None] | None = None,
+        tool_callback: Callable[..., None] | None = None,
         skill_callback: Callable[[list[str], list[str]], None] | None = None,
     ) -> str:
         return self.run(
@@ -2170,7 +2174,7 @@ class Agent:
         retrieval_mode: str = "vector",
         stream_callback: Callable[[str], None] | None = None,
         fresh_session: bool = False,
-        tool_callback: Callable[[str, dict], None] | None = None,
+        tool_callback: Callable[..., None] | None = None,
         skill_callback: Callable[[list[str], list[str]], None] | None = None,
     ) -> AgentResponse:
         debug_on = bool(getattr(self.config, "debug_trace", True))
@@ -2931,6 +2935,31 @@ class Agent:
                 consecutive_tools = 0
                 continue
 
+            call_sequence = len(tool_calls)
+
+            def _emit_tool_callback(stage: str, **payload: Any) -> None:
+                if tool_callback is None:
+                    return
+                envelope: dict[str, Any] = {
+                    "stage": str(stage or "").strip().lower(),
+                    "sequence": int(call_sequence),
+                }
+                envelope.update(payload)
+                try:
+                    tool_callback(call.name, dict(call.arguments or {}), envelope)
+                    return
+                except TypeError:
+                    # Backward compatibility for legacy 2-arg callbacks.
+                    if envelope["stage"] != "start":
+                        return
+                except Exception:
+                    return
+
+                try:
+                    tool_callback(call.name, dict(call.arguments or {}))
+                except Exception:
+                    return
+
             exec_start = time.perf_counter()
             _cache_key = self._tool_cache_key(call)
             _cached_result: str | None = None
@@ -2943,11 +2972,7 @@ class Agent:
                         _cached_result = _r
 
             # Notify the UI (or any observer) that a tool is about to run.
-            if tool_callback is not None:
-                try:
-                    tool_callback(call.name, dict(call.arguments or {}))
-                except Exception:
-                    pass
+            _emit_tool_callback("start")
 
             if _cached_result is not None:
                 result_full = _cached_result
@@ -2966,6 +2991,16 @@ class Agent:
                     and len(self._tool_result_cache) < _max_size
                 ):
                     self._tool_result_cache[_cache_key] = (time.time(), result_full)
+
+            raw_tool_result = result_full
+            tool_failed = self._tool_result_is_error(raw_tool_result)
+            tool_error = ""
+            if tool_failed:
+                tool_error = (
+                    str(raw_tool_result).strip().splitlines()[0][:260]
+                    if str(raw_tool_result).strip()
+                    else "tool returned an error payload"
+                )
 
             # Structured tool error recovery: replace bare "Error:" strings with
             # diagnostic guidance so the LLM gets actionable context.
@@ -2994,6 +3029,13 @@ class Agent:
                 duration_s=round(exec_dur, 6),
                 result_preview=result_ctx[:240],
                 cache_hit=_cached_result is not None,
+            )
+            _emit_tool_callback(
+                "end",
+                status=("error" if tool_failed else "ok"),
+                duration_ms=int(round(exec_dur * 1000.0)),
+                cache_hit=(_cached_result is not None),
+                error=tool_error,
             )
             seen_tool_signatures.add(curr_sig)
             tool_result_preview_by_sig[curr_sig] = result_ctx[:240]

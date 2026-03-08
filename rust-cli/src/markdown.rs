@@ -3,6 +3,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value as JsonValue;
 
+const MAX_RENDER_CODE_LINES: usize = 160;
+const MAX_RENDER_CODE_CHARS: usize = 12_000;
+
 // ── think-tag pre-processing ──────────────────────────────────────────────────
 
 #[derive(Debug)]
@@ -73,6 +76,78 @@ fn maybe_pretty_json_payload(text: &str) -> Option<String> {
     }
     let parsed: JsonValue = serde_json::from_str(trimmed).ok()?;
     serde_json::to_string_pretty(&parsed).ok()
+}
+
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut count = 0usize;
+    for ch in text.chars() {
+        if count >= max_chars.saturating_sub(1) {
+            out.push('…');
+            return out;
+        }
+        out.push(ch);
+        count += 1;
+    }
+    out
+}
+
+fn maybe_labeled_json_payload(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    let (label, payload) = trimmed.split_once(':')?;
+    let label = label.trim();
+    let payload = payload.trim();
+    if label.is_empty() || payload.is_empty() {
+        return None;
+    }
+    let pretty = maybe_pretty_json_payload(payload)?;
+    Some((format!("{label}:"), pretty))
+}
+
+fn normalize_raw_json_blocks(text: &str) -> String {
+    if text.trim().is_empty() {
+        return text.to_string();
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut in_code_fence = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_code_fence = !in_code_fence;
+            out.push(line.to_string());
+            continue;
+        }
+
+        if !in_code_fence {
+            if let Some(pretty) = maybe_pretty_json_payload(trimmed) {
+                out.push("```json".to_string());
+                out.extend(pretty.lines().map(|ln| ln.to_string()));
+                out.push("```".to_string());
+                continue;
+            }
+
+            if let Some((label, pretty)) = maybe_labeled_json_payload(line) {
+                out.push(label);
+                out.push("```json".to_string());
+                out.extend(pretty.lines().map(|ln| ln.to_string()));
+                out.push("```".to_string());
+                continue;
+            }
+        }
+
+        out.push(line.to_string());
+    }
+
+    let mut rendered = out.join("\n");
+    if text.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered
 }
 
 // ── Streaming renderer (plain text with think coloring) ───────────────────────
@@ -267,7 +342,31 @@ impl MdRenderer {
             )]));
         }
 
-        for cl in &content_lines {
+        let mut visible_lines: Vec<String> = Vec::new();
+        let mut total_chars = 0usize;
+        let mut truncated = false;
+        for (idx, cl) in content_lines.iter().enumerate() {
+            if idx >= MAX_RENDER_CODE_LINES {
+                truncated = true;
+                break;
+            }
+            let line_chars = cl.chars().count();
+            if total_chars + line_chars > MAX_RENDER_CODE_CHARS {
+                let remaining = MAX_RENDER_CODE_CHARS.saturating_sub(total_chars);
+                if remaining > 1 {
+                    visible_lines.push(truncate_with_ellipsis(cl, remaining));
+                }
+                truncated = true;
+                break;
+            }
+            visible_lines.push((*cl).to_string());
+            total_chars += line_chars + 1;
+        }
+        if truncated {
+            visible_lines.push("… [expand on demand]".to_string());
+        }
+
+        for cl in &visible_lines {
             self.out.push(Line::from(vec![
                 Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
                 Span::styled(cl.to_string(), Style::default().fg(Color::Cyan)),
@@ -646,8 +745,9 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     .add_modifier(Modifier::DIM),
             )]));
         } else {
+            let normalized = normalize_raw_json_blocks(&seg.text);
             let mut r = MdRenderer::new();
-            r.process(&seg.text);
+            r.process(&normalized);
             all.extend(r.out);
         }
     }

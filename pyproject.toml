@@ -24,6 +24,7 @@ dependencies = [
     "pandas>=2.0.0",
     "pydantic>=2.5.0",
     "tiktoken>=0.7.0",
+    "usearch>=2.0.0",
     "eoh>=0.1.0",
 ]
 

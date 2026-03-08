@@ -112,6 +112,22 @@ class Config:
     rag_top_k: int = 20
     vector_path: str = "message_history.vector"
     rag_vector_path: str = "rag_docs.vector"
+    # Vector index backend selector: "usearch" (default) or "hnsw".
+    vector_backend: str = "usearch"
+    rag_vector_backend: str = "usearch"
+    rag_rerank_enabled: bool = True
+    rag_rerank_fetch_k: int = 30
+    rag_min_similarity: float = 0.20
+    # Cap dominance from a single source file in retrieval output.
+    rag_per_source_max_chunks: int = 4
+    # Lightweight in-memory query cache for repeated RAG lookups in a session.
+    rag_query_cache_enabled: bool = True
+    rag_query_cache_ttl_sec: int = 90
+    rag_query_cache_max_entries: int = 256
+    # HNSW query/index knobs (affect speed/quality trade-off).
+    rag_hnsw_ef_search: int = 128
+    rag_hnsw_m: int = 16
+    rag_hnsw_ef_construction: int = 200
 
     # Conversation context
     history_limit: int = 18

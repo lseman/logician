@@ -23,11 +23,16 @@ class Memory:
     _doc_db: Optional[DocumentDB] = field(default=None, init=False)
 
     def __post_init__(self):
-        self._embedding_model_name = self.embedding_model or "BAAI/bge-base-en-v1.5"
+        self._embedding_model_name = self.embedding_model or (
+            "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
+            "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"
+            "intfloat/e5-mistral-7b-instruct|BAAI/bge-small-en-v1.5"
+        )
         self._db = MessageDB(
             db_path=self.db_path,
             vector_path=self.config.vector_path,
             embedding_model_name=self._embedding_model_name,
+            vector_backend=str(getattr(self.config, "vector_backend", "usearch")),
             # Reranking on short chat turns is expensive and yields no benefit;
             # cross-encoder reranking is reserved for document RAG (DocumentDB).
             rerank_enabled=False,
@@ -45,6 +50,25 @@ class Memory:
         self._doc_db = DocumentDB(
             vector_path=self.config.rag_vector_path,
             embedding_model_name=self._embedding_model_name,
+            vector_backend=str(getattr(self.config, "rag_vector_backend", "usearch")),
+            rerank_enabled=bool(getattr(self.config, "rag_rerank_enabled", True)),
+            rerank_fetch_k=int(getattr(self.config, "rag_rerank_fetch_k", 30)),
+            min_similarity=float(getattr(self.config, "rag_min_similarity", 0.20)),
+            hnsw_ef_search=int(getattr(self.config, "rag_hnsw_ef_search", 128)),
+            hnsw_m=int(getattr(self.config, "rag_hnsw_m", 16)),
+            hnsw_ef_construction=int(
+                getattr(self.config, "rag_hnsw_ef_construction", 200)
+            ),
+            per_source_max_chunks=int(
+                getattr(self.config, "rag_per_source_max_chunks", 4)
+            ),
+            query_cache_enabled=bool(
+                getattr(self.config, "rag_query_cache_enabled", True)
+            ),
+            query_cache_ttl_sec=int(getattr(self.config, "rag_query_cache_ttl_sec", 90)),
+            query_cache_max_entries=int(
+                getattr(self.config, "rag_query_cache_max_entries", 256)
+            ),
         )
 
     def load_history(

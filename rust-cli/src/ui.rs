@@ -249,15 +249,204 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     };
 
     f.render_widget(
-        Paragraph::new(Line::from("─".repeat(area.width as usize)))
-            .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(status_border_line(area.width, app.phase.color())),
         border_area,
     );
 
-    let text = app.status_text();
-    let color = app.phase.color();
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, Style::default().fg(color)))),
-        text_area,
+    let line = status_line(app, area.width as usize);
+    f.render_widget(Paragraph::new(line), text_area);
+}
+
+fn status_border_line(width: u16, phase_color: Color) -> Line<'static> {
+    let w = width as usize;
+    if w == 0 {
+        return Line::raw("");
+    }
+    let label = " STATUS ";
+    if w <= label.len() {
+        return Line::from(Span::styled(
+            "─".repeat(w),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    let mut text = String::with_capacity(w);
+    text.push_str(label);
+    text.push_str(&"─".repeat(w - label.len()));
+    Line::from(Span::styled(
+        text,
+        Style::default()
+            .fg(phase_color)
+            .add_modifier(Modifier::DIM),
+    ))
+}
+
+fn status_line(app: &App, max_width: usize) -> Line<'static> {
+    if max_width < 52 {
+        let compact = format!(
+            "{} {} · {} · {}",
+            if app.connected { "online" } else { "offline" },
+            app.phase,
+            app.phase_note,
+            app.bridge_state.active
+        );
+        return Line::from(Span::styled(compact, Style::default().fg(Color::Gray)));
+    }
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    push_chip(
+        &mut spans,
+        if app.connected { "net" } else { "net" },
+        if app.connected { "online" } else { "offline" },
+        if app.connected {
+            Color::Green
+        } else {
+            Color::Red
+        },
     );
+    push_sep(&mut spans);
+
+    let phase_label = if app.busy {
+        format!("{} {}", spinner_char(app.spinner_tick), app.phase)
+    } else {
+        app.phase.to_string()
+    };
+    push_chip(&mut spans, "phase", &phase_label, app.phase.color());
+    if !app.phase_note.trim().is_empty() {
+        push_sep(&mut spans);
+        push_kv(&mut spans, "note", &app.phase_note, Color::Gray);
+    }
+    push_gap(&mut spans);
+
+    push_kv(&mut spans, "agent", &app.bridge_state.active, Color::LightBlue);
+    push_sep(&mut spans);
+    push_kv(
+        &mut spans,
+        "msgs",
+        &app.bridge_state.msg_count.to_string(),
+        Color::Yellow,
+    );
+    push_sep(&mut spans);
+    push_kv(
+        &mut spans,
+        "tools",
+        &app.bridge_state.tool_count.to_string(),
+        Color::Cyan,
+    );
+    push_sep(&mut spans);
+    push_kv(
+        &mut spans,
+        "skills",
+        &app.bridge_state.skill_count.to_string(),
+        Color::Magenta,
+    );
+    push_sep(&mut spans);
+    push_kv(
+        &mut spans,
+        "last",
+        &app.last_turn_tool_count().to_string(),
+        Color::Gray,
+    );
+    push_gap(&mut spans);
+
+    push_toggle(&mut spans, "trace", app.trace_on);
+    push_sep(&mut spans);
+    push_toggle(&mut spans, "raw", app.raw_on);
+    push_sep(&mut spans);
+    push_toggle(&mut spans, "image", app.has_image_preview());
+
+    let hint = vec![
+        Span::raw("  "),
+        Span::styled("Ctrl+O", Style::default().fg(Color::Gray)),
+        Span::raw("/"),
+        Span::styled("Ctrl+P", Style::default().fg(Color::Gray)),
+    ];
+    if spans_width(&spans) + spans_width(&hint) <= max_width {
+        spans.extend(hint);
+    }
+
+    if spans_width(&spans) > max_width {
+        let text = app.status_text();
+        let clipped = clip_to_width(&text, max_width.saturating_sub(1));
+        return Line::from(Span::styled(clipped, Style::default().fg(Color::Gray)));
+    }
+    Line::from(spans)
+}
+
+fn spinner_char(tick: usize) -> &'static str {
+    const SPINNERS: [&str; 10] = ["|", "/", "-", "\\", "|", "/", "-", "\\", "|", "/"];
+    SPINNERS[tick % SPINNERS.len()]
+}
+
+fn push_chip(spans: &mut Vec<Span<'static>>, label: &str, value: &str, color: Color) {
+    spans.push(Span::styled(
+        "[",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+    ));
+    spans.push(Span::styled(
+        label.to_string(),
+        Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+    ));
+    spans.push(Span::styled(
+        ":",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+    ));
+    spans.push(Span::styled(
+        value.to_string(),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(
+        "]",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+    ));
+}
+
+fn push_kv(spans: &mut Vec<Span<'static>>, key: &str, value: &str, color: Color) {
+    spans.push(Span::styled(
+        format!("{}:", key),
+        Style::default().fg(Color::DarkGray),
+    ));
+    spans.push(Span::styled(
+        value.to_string(),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ));
+}
+
+fn push_toggle(spans: &mut Vec<Span<'static>>, key: &str, enabled: bool) {
+    let color = if enabled { Color::Green } else { Color::DarkGray };
+    let value = if enabled { "on" } else { "off" };
+    push_kv(spans, key, value, color);
+}
+
+fn push_gap(spans: &mut Vec<Span<'static>>) {
+    spans.push(Span::raw("  "));
+}
+
+fn push_sep(spans: &mut Vec<Span<'static>>) {
+    spans.push(Span::styled(
+        " · ",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+    ));
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|s| s.content.chars().count()).sum()
+}
+
+fn clip_to_width(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        return text.to_string();
+    }
+    if max_chars == 1 {
+        return "…".to_string();
+    }
+    let mut out = String::with_capacity(max_chars);
+    for ch in chars.into_iter().take(max_chars - 1) {
+        out.push(ch);
+    }
+    out.push('…');
+    out
 }

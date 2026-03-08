@@ -68,3 +68,37 @@ def format_messages_for_template(
         + "ASSISTANT: "
     )
 
+
+def normalize_chat_api_messages(
+    messages: list[Message],
+    *,
+    collapse_system_to_first: bool = False,
+) -> list[Message]:
+    """Normalize message order/content for strict chat templates.
+
+    Some server-side Jinja templates (including llama.cpp variants) require
+    that there is at most one ``system`` message and it appears at index 0.
+    When ``collapse_system_to_first`` is True, all system messages are merged
+    (in original order) into a single leading system message.
+    """
+    if not collapse_system_to_first or not messages:
+        return list(messages)
+
+    system_parts: list[str] = []
+    non_system: list[Message] = []
+    for msg in messages:
+        if msg.role == MessageRole.SYSTEM:
+            text = str(msg.content or "").strip()
+            if text:
+                system_parts.append(text)
+            continue
+        non_system.append(msg)
+
+    if not system_parts:
+        return list(messages)
+
+    merged_system = Message(
+        role=MessageRole.SYSTEM,
+        content="\n\n".join(system_parts),
+    )
+    return [merged_system, *non_system]

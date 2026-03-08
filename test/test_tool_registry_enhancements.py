@@ -370,6 +370,7 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
                 "/skills/01_coding/" not in source_path
                 and "/skills/02_timeseries/" not in source_path
                 and "/skills/04_svg/" not in source_path
+                and "/skills/05_rag/" not in source_path
             ):
                 continue
             tool_names.append(tool.name)

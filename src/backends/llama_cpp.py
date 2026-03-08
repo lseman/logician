@@ -12,7 +12,11 @@ except Exception:  # pragma: no cover
 
 from ..logging_utils import get_logger
 from ..messages import Message
-from .common import count_tokens_local, format_messages_for_template
+from .common import (
+    count_tokens_local,
+    format_messages_for_template,
+    normalize_chat_api_messages,
+)
 
 
 class LlamaCppClient:
@@ -100,12 +104,24 @@ class LlamaCppClient:
             )
         with httpx.Client(timeout=self.timeout) as client:
             if self.use_chat:
+                strict_jinja = self.template.strip().lower() == "jinja"
+                chat_messages = normalize_chat_api_messages(
+                    messages,
+                    collapse_system_to_first=strict_jinja,
+                )
+                if strict_jinja and len(chat_messages) != len(messages):
+                    self._log.debug(
+                        "Normalized chat messages for strict Jinja template: %d -> %d",
+                        len(messages),
+                        len(chat_messages),
+                    )
                 # Constrained decoding via native function-calling disables streaming
                 # (llama.cpp tool_calls delta handling differs; we keep it simple).
                 _use_stream = bool(stream) and not bool(tools)
                 payload = {
                     "messages": [
-                        {"role": m.role.value, "content": m.content} for m in messages
+                        {"role": m.role.value, "content": m.content}
+                        for m in chat_messages
                     ],
                     "temperature": temperature,
                     "max_tokens": max_tokens,
