@@ -5,26 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Build CLI binary
-bun run build
-
-# Run CLI in dev mode with hot-reload
-bun run dev
-
 # Run all tests
-pytest tests/
+pytest test/
 
-# Run single test
-pytest tests/test_example.py::TestExample::test_something -v
+# Run single test file
+pytest test/test_mcp_context7.py -v
 
-# Type check TypeScript
-bun run typecheck
+# Run specific test
+pytest test/test_example.py::TestExample::test_something -v
 
-# Install dependencies
-bun run install
+# Run tests with coverage
+pytest test/ --cov=src --cov-report=term-missing
 
-# Clean built artifacts
-bun run clean
+# Type check
+mypy src/
+
+# Lint / format
+ruff check src/ skills/
+ruff format src/ skills/
+
+# Build Rust CLI
+cd rust-cli && cargo build --release
+
+# Run Rust CLI tests
+cd rust-cli && cargo test
+
+# Check Rust code
+cd rust-cli && cargo clippy
 ```
 
 ## Architecture Overview
@@ -32,55 +39,74 @@ bun run clean
 ### High-Level Structure
 
 ```
-logician/
-├── cli/                 # TypeScript/React/Ink CLI application
-│   └── src/
-│       └── index.tsx   # Main CLI entry point
-├── src/                 # Python agent core
+agent/
+├── src/                  # Python agent core
 │   ├── agent/
-│   │   └── core.py     # Main Agent class with tool execution loop
-│   ├── backends/       # LLM backends (llama_cpp, vllm)
-│   ├── db/             # SQLite + Chroma vector store layer
-│   ├── reasoners/      # Reasoning strategies (CoT, Reflexion, SSR, ToT)
-│   ├── tools/          # ToolRegistry and tool execution
-│   └── config.py       # Configuration dataclasses
-├── skills/             # Dynamic skills loaded at runtime
-│   ├── 00_global/      # Bootstrap, think, scratchpad, todo
-│   ├── 01_coding/      # File operations, shell, git, quality checks
-│   └── 02_timeseries/  # Time series analysis skills
-├── test/               # pytest test suite
-├── agent_config.json   # Agent configuration (MCP servers, etc.)
-├── Makefile            # Build and dev scripts
-└── pyproject.toml      # Project metadata and dependencies
+│   │   └── core.py       # Main Agent class with tool execution loop
+│   ├── backends/         # LLM backends (llama_cpp, vllm)
+│   ├── db/               # SQLite + Chroma vector store layer
+│   ├── eoh/              # Evolution of Heuristics module
+│   ├── mcp/              # MCP client integration
+│   ├── memory.py         # Conversation memory management
+│   ├── reasoners/        # Reasoning strategies (CoT, Reflexion, SSR, ToT)
+│   ├── thinking.py       # Pre/post-tool thinking logic
+│   ├── tools/            # ToolRegistry and tool execution
+│   └── config.py         # Configuration dataclasses
+├── skills/               # Dynamic skills loaded at runtime
+│   ├── 10_superpowers/   # 14 core agent meta-skills (debugging, planning, TDD, etc.)
+│   ├── 20_ralph/         # Ralph PRD + autonomous execution format
+│   ├── 30_anthropics/    # Anthropic-sourced skill patterns (frontend, MCP builder, etc.)
+│   ├── global/           # Session utilities: think, scratch, todo, orchestrator
+│   ├── coding/           # Coding skills: explore, edit_block, multi_edit, search_replace,
+│   │                     #   patch, quality, shell, git, repl, web
+│   ├── timeseries/       # Data loading, preprocessing, analysis, forecasting, plotting
+│   ├── academic/         # Literature review + systematic search (S2, OpenAlex, IEEE)
+│   ├── svg/              # SVG diagram and visual asset generation
+│   ├── rag/              # RAG ingestion, retrieval, and tuning
+│   └── qol/              # Context ingestion: firecrawl, docling
+├── rust-cli/             # Rust TUI binary
+│   └── src/
+│       ├── main.rs
+│       ├── ui.rs         # Ratatui-based TUI
+│       └── bridge.rs     # Python bridge (logician_bridge.py)
+├── logician_bridge.py    # Python bridge: HTTP ↔ LLM backend translator
+├── logician_messaging.py # Message formatting and history management
+├── agent_config.json     # Agent runtime configuration
+├── SOUL.md               # Agent operating charter (identity, routing, workflows)
+├── SKILLS.md             # Skills index and conventions
+├── skills_health.md      # Skill routing diagnostic checklist
+├── common_mistakes.md    # Common agent error patterns to avoid
+├── Makefile              # Quick dev shortcuts
+└── pyproject.toml        # Project metadata and dependencies
 ```
 
 ### Core Flow
 
-1. **Initialization**: Agent loads configuration from `agent_config.json` and `src/config.py`
-2. **Skill Loading**: Dynamic skills loaded from `skills/` directory via `src/tools/__init__.py`
-3. **Tool Execution**: Tools routed through `ToolRegistry` with skill-based prioritization
-4. **Reasoning**: Reasoning strategies (CoT, Reflexion, SSR, ToT) applied based on `ThinkingConfig`
-5. **Memory**: Conversation history persisted in SQLite + vector embeddings in Chroma
-6. **RAG**: Context7 MCP server provides remote document retrieval
+1. **Initialization**: Agent loads config from `agent_config.json` and `src/config.py`
+2. **Skill Loading**: Skills dynamically loaded from `skills/` via `src/tools/__init__.py`
+3. **Skill Routing**: Hybrid BM25 + dense embedding + fuzzy routing selects skills (see `env.AGENT_SKILL_ROUTING_WEIGHTS` in config)
+4. **Tool Execution**: Tools routed through `ToolRegistry`
+5. **Reasoning**: CoT / Reflexion / SSR / ToT applied per `ThinkingConfig`
+6. **Memory**: History persisted in SQLite + vector embeddings in ChromaDB
+7. **RAG**: Context7 MCP server provides remote doc retrieval; local `rag/` skill for local ingestion
 
 ### Key Components
 
 #### Agent Core (`src/agent/core.py`)
-- Main `Agent` class orchestrating tool execution loop
-- Manages context window, tracing, and memory integration
-- Applies thinking strategies after tool calls and at turn boundaries
+- Main `Agent` class with `PLAN → ACT → OBSERVE → VERIFY → REPORT` loop
+- Manages context window, tracing, memory, verification gate
+- Applies thinking strategies at tool boundaries and turn ends
 
 #### Tool Registry (`src/tools/__init__.py`)
-- Central tool dispatch system
-- `load_tools_from_skills()` dynamically loads tools from skill modules
+- Central tool dispatch
+- `load_tools_from_skills()` dynamically loads from skill modules
 - Integrates MCP clients for external tool access
-- SkillCatalog routing for intelligent tool selection
+- SkillCatalog: hybrid routing with usage-recency bias
 
 #### Configuration (`src/config.py`)
-- `Config`: Core LLM settings (llama_cpp_url, temperature, timeout)
-- `ThinkingConfig`: Prompt+reasoner combinations and pipeline ordering
-- Tool configuration: `use_toon_for_tools`, `enable_skill_routing`, `auto_compact`
-- Verification patterns for write operations
+- `Config`: LLM endpoint, temperature, timeout, context budget
+- `ThinkingConfig`: reasoner pipeline ordering and token budgets
+- Verification patterns, skill routing weights, auto-compact behavior
 
 #### Reasoners (`src/reasoners/`)
 - `auto_cot.py`: Automatic chain-of-thought
@@ -89,40 +115,59 @@ logician/
 - `tot.py`: Tree-of-thoughts exploration
 
 #### Skills System
-Skills are Python modules in `skills/` directory that extend agent capabilities:
-- Each skill defines tools and/or prompts
-- Loaded dynamically based on routing configuration
-- Organized by domain (global, coding, timeseries)
+- Each skill: `skills/<group>/<skill_name>/SKILL.md` + optional `scripts/` dir
+- `SKILL.md` YAML frontmatter: `name`, `description`, `aliases`, `triggers`, `preferred_tools`, `when_not_to_use`, `next_skills`
+- Skills export tools via `__tools__ = [...]` in their script modules
+
+#### Rust TUI (`rust-cli/`)
+- Ratatui-based terminal UI
+- Communicates with Python core via `logician_bridge.py`
+- Config loaded from `agent_config.json` in the run directory
 
 ## Testing
 
 ```bash
-# Run all tests with coverage
+# Full test suite
 pytest test/ --cov=src --cov-report=term-missing
 
-# Run single test file
-pytest tests/test_mcp_context7.py -v
+# MCP integration tests
+pytest test/test_mcp_context7.py -v
 
-# Run specific test
-pytest tests/test_example.py::TestExample::test_something -v
+# Rust unit tests
+cd rust-cli && cargo test
 ```
 
 ## Environment Variables
 
 ```bash
-AGENT_LOG_LEVEL      # Logging level (default: ERROR)
-AGENT_LOG_JSON       # Enable JSON logging (0/1)
+AGENT_LOG_LEVEL                    # Logging level (default: ERROR)
+AGENT_LOG_JSON                     # Enable JSON logging (0/1)
+AGENT_SKILL_DENSE_ENABLED          # Enable dense skill routing (0/1)
+AGENT_SKILL_DENSE_MODEL            # Embedding model for dense routing
+AGENT_SKILL_ROUTING_RECALL_K       # Top-K candidates in dense retrieval
+AGENT_SKILL_ROUTING_MIN_SCORE      # Minimum routing score threshold
+AGENT_SKILL_USAGE_HALF_LIFE_HOURS  # Recency bias decay for usage scoring
+AGENT_SKILL_ROUTING_WEIGHTS        # Comma-sep routing signal weights
 ```
 
 ## MCP Servers
 
-Context7 MCP server configured in `agent_config.json`:
-- URL: https://api.context7.com/mcp
-- Provides remote document retrieval for RAG
+Context7 configured in `agent_config.json`:
+- URL: `https://mcp.context7.com/mcp`
+- Provides remote documentation retrieval
+
+## External API Keys (in `agent_config.json` → `env`)
+
+- `S2_API_KEY` — Semantic Scholar
+- `OPENALEX_MAILTO` — OpenAlex
+- `IEEE_API_KEY` — IEEE Xplore
+- `UNPAYWALL_EMAIL` — Unpaywall OA resolver
 
 ## Coding Guidelines
 
-- Python 3.10+ with type hints
+- Python 3.10+ with type hints throughout
 - Clean, idiomatic code; explicit over implicit
 - No unnecessary abstractions
 - Prefer clarity and reproducibility for research code
+- Run `ruff check` + `mypy` before committing Python changes
+- Run `cargo clippy` before committing Rust changes

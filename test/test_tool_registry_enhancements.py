@@ -1,5 +1,7 @@
 import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Literal
@@ -9,6 +11,7 @@ if str(AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_ROOT))
 
 from src.tools import Context, Tool, ToolCall, ToolParameter, ToolRegistry
+from src.tools.registry import SkillCatalog
 
 
 class ToolRegistryEnhancementsTests(unittest.TestCase):
@@ -150,7 +153,7 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertGreaterEqual(organization.get("issues_count", 0), 0)
         self.assertIn("bootstrap_only_modules", organization)
         self.assertIn(
-            "00_bootstrap.py",
+            "bootstrap.py",
             organization.get("bootstrap_only_modules", []),
         )
         self.assertIn("coding_required_coverage_pct", checks)
@@ -225,6 +228,166 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("pattern"), "seasonal")
         self.assertEqual(payload.get("n"), 90)
+
+    def test_python_skill_module_can_register_tools_via_explicit_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            scripts_dir = root / "coding" / "toy" / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "toy.py"
+            module_path.write_text(
+                """
+def hello(name: str = "world") -> str:
+    \"\"\"Use when: Return a greeting string.\"\"\"
+    return _safe_json({"status": "ok", "message": f"hello {name}"})
+
+
+__tools__ = [hello]
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = self._registry()
+            registry.skills_dir_path = root
+            registry.skills_md_path = root
+            registry._catalog = SkillCatalog(
+                skills_md_path=root,
+                skills_dir_path=root,
+                log=registry._log,
+            )
+
+            registry.load_tools_from_skills()
+
+            tool = registry.get("hello")
+            self.assertIsNotNone(tool)
+            assert tool is not None
+            self.assertEqual(tool.description, "Return a greeting string.")
+
+            raw = registry.execute(
+                ToolCall(id="call_hello", name="hello", arguments={"name": "codex"}),
+                use_toon=False,
+            )
+            payload = json.loads(raw)
+            self.assertEqual(payload.get("status"), "ok")
+            self.assertEqual(payload.get("message"), "hello codex")
+
+    def test_python_skill_module_can_register_tools_via_tool_decorator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            scripts_dir = root / "coding" / "toy" / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "toy.py"
+            module_path.write_text(
+                """
+from skills.coding.bootstrap.runtime_access import tool
+
+
+@tool
+def hello(name: str = "world") -> str:
+    \"\"\"Return a greeting string.\"\"\"
+    return _safe_json({"status": "ok", "message": f"hello {name}"})
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = self._registry()
+            registry.skills_dir_path = root
+            registry.skills_md_path = root
+            registry._catalog = SkillCatalog(
+                skills_md_path=root,
+                skills_dir_path=root,
+                log=registry._log,
+            )
+
+            registry.load_tools_from_skills()
+
+            tool = registry.get("hello")
+            self.assertIsNotNone(tool)
+            assert tool is not None
+            self.assertEqual(tool.description, "Return a greeting string.")
+
+    def test_tool_decorator_injects_module_skill_context_into_docstring(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+
+        tool = registry.get("read_file")
+        self.assertIsNotNone(tool)
+        assert tool is not None
+        doc = str(getattr(tool.function, "__doc__", "") or "")
+        self.assertIn("Skill context:", doc)
+        self.assertIn("Skill: File Ops", doc)
+        self.assertIn("Preferred tools in this skill: read_file, write_file, list_directory", doc)
+
+    def test_python_skill_modules_can_use_lazy_numpy_and_pandas_globals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            scripts_dir = root / "coding" / "array_ops" / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "array_ops.py"
+            module_path.write_text(
+                """
+def summarize() -> str:
+    arr = np.asarray([1, 2, 3], dtype=float)
+    frame = pd.DataFrame({"value": arr.tolist()})
+    return _safe_json(
+        {
+            "status": "ok",
+            "sum": float(arr.sum()),
+            "rows": int(len(frame)),
+        }
+    )
+
+
+__tools__ = [summarize]
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = self._registry()
+            registry.skills_dir_path = root
+            registry.skills_md_path = root
+            registry._catalog = SkillCatalog(
+                skills_md_path=root,
+                skills_dir_path=root,
+                log=registry._log,
+            )
+
+            registry.load_tools_from_skills()
+            raw = registry.execute(
+                ToolCall(id="lazy_np_pd", name="summarize", arguments={}),
+                use_toon=False,
+            )
+            payload = json.loads(raw)
+            self.assertEqual(payload.get("status"), "ok")
+            self.assertEqual(payload.get("sum"), 6.0)
+            self.assertEqual(payload.get("rows"), 3)
+
+    def test_import_src_tools_does_not_eagerly_import_heavy_optional_deps(self) -> None:
+        script = f"""
+import json
+import sys
+sys.path.insert(0, {str(AGENT_ROOT)!r})
+import src.tools
+print(json.dumps({{
+    "numpy": "numpy" in sys.modules,
+    "pandas": "pandas" in sys.modules,
+    "sentence_transformers": "sentence_transformers" in sys.modules,
+}}))
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            cwd=AGENT_ROOT,
+            check=True,
+        )
+        payload = json.loads(proc.stdout.strip())
+        self.assertFalse(payload["numpy"])
+        self.assertFalse(payload["pandas"])
+        self.assertFalse(payload["sentence_transformers"])
 
     def test_stringified_annotations_are_typed_correctly(self) -> None:
         registry = self._registry()
@@ -357,6 +520,7 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
 
     def test_coding_and_timeseries_schema_audit(self) -> None:
         registry = self._registry()
+        registry.activate_lazy_skill_group("timeseries")
         registry.load_tools_from_skills()
 
         allowed_types = {"string", "int", "float", "bool", "list", "dict"}
@@ -367,10 +531,10 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         for tool in registry.list_tools():
             source_path = str(tool.source_path or "")
             if (
-                "/skills/01_coding/" not in source_path
-                and "/skills/02_timeseries/" not in source_path
-                and "/skills/04_svg/" not in source_path
-                and "/skills/05_rag/" not in source_path
+                "/skills/coding/" not in source_path
+                and "/skills/lazy_timeseries/" not in source_path
+                and "/skills/svg/" not in source_path
+                and "/skills/rag/" not in source_path
             ):
                 continue
             tool_names.append(tool.name)

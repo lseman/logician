@@ -42,6 +42,13 @@ pub enum BridgeEvent {
     Exit(Option<i32>),
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TodoItem {
+    pub title: String,
+    pub status: String,
+    pub note: String,
+}
+
 // ── Bridge state returned by the Python process ───────────────────────────────
 
 #[derive(Debug, Clone, Default)]
@@ -56,6 +63,7 @@ pub struct BridgeState {
     pub tiktoken: bool,
     pub tool_count: u64,
     pub skill_count: u64,
+    pub todo: Vec<TodoItem>,
 }
 
 impl BridgeState {
@@ -85,6 +93,18 @@ impl BridgeState {
             tiktoken: v["tiktoken"].as_bool().unwrap_or(false),
             tool_count: v["tool_count"].as_u64().unwrap_or(0),
             skill_count: v["skill_count"].as_u64().unwrap_or(0),
+            todo: v["todo"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| TodoItem {
+                            title: x["title"].as_str().unwrap_or("").to_string(),
+                            status: x["status"].as_str().unwrap_or("not-started").to_string(),
+                            note: x["note"].as_str().unwrap_or("").to_string(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }

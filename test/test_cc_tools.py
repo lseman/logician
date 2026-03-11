@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 
-SKILL_MODULE = Path(__file__).resolve().parents[1] / "skills/coding/cc_tools/scripts/tools.py"
+SKILL_MODULE = Path(__file__).resolve().parents[1] / "skills/coding/cc_tools/cc_tools.py"
 
 def _load_tools_module() -> dict:
     ns: dict = {}

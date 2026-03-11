@@ -13,6 +13,7 @@ from ..embeddings import (
     _EmbeddingRuntime,
     _RerankerRuntime,
     _lazy_import_hnswlib,
+    _resolve_vector_collection_dir,
     _stable_collection_name,
 )
 
@@ -39,8 +40,12 @@ class _HNSWCollection:
             reranker_model_name, rerank_enabled, self._log
         )
 
-        stable_name = _stable_collection_name(collection_name, embedding_model_name)
-        self._dir = Path(root_path) / stable_name
+        self._dir = _resolve_vector_collection_dir(
+            root_path=root_path,
+            collection_name=collection_name,
+            embedding_model_name=embedding_model_name,
+            backend=self._backend,
+        )
         self._dir.mkdir(parents=True, exist_ok=True)
 
         self._state_file = self._dir / "state.json"
@@ -53,7 +58,7 @@ class _HNSWCollection:
         self._ef_search = int(ef_search)
         self._min_similarity = float(max(0.0, min(1.0, min_similarity)))
 
-        self._hnswlib = _lazy_import_hnswlib()
+        self._hnswlib: Any | None = None
         self._index: Any | None = None
 
         self._lock = threading.RLock()
@@ -64,10 +69,17 @@ class _HNSWCollection:
         self._max_elements = 0
         self._knn_filter_supported: bool | None = None
 
-        self._load()
+        with self._lock:
+            self._load_payload()
+
+    def _ensure_backend(self) -> Any:
+        if self._hnswlib is None:
+            self._hnswlib = _lazy_import_hnswlib()
+        return self._hnswlib
 
     def _new_index(self, *, dim: int, max_elements: int) -> Any:
-        idx = self._hnswlib.Index(space=self._space, dim=dim)
+        hnswlib = self._ensure_backend()
+        idx = hnswlib.Index(space=self._space, dim=dim)
         idx.init_index(
             max_elements=max_elements,
             ef_construction=self._ef_construction,
@@ -76,6 +88,19 @@ class _HNSWCollection:
         )
         idx.set_ef(self._ef_search)
         return idx
+
+    @staticmethod
+    def _index_count(idx: Any) -> int:
+        for attr in ("get_current_count", "element_count", "cur_element_count"):
+            value = getattr(idx, attr, None)
+            try:
+                if callable(value):
+                    return int(value())
+                if value is not None:
+                    return int(value)
+            except Exception:
+                continue
+        return -1
 
     def _load_payload(self) -> None:
         if not self._payload_file.exists():
@@ -133,6 +158,21 @@ class _HNSWCollection:
         if "next_label" in state and state["next_label"]:
             self._next_label = max(self._next_label, int(state["next_label"]))
 
+        saved_model = str(state.get("embedding_model", "") or "").strip()
+        if saved_model:
+            try:
+                self._embedder.prefer_candidate(saved_model)
+            except Exception:
+                pass
+
+        saved_backend = str(state.get("backend", "") or "").strip().lower()
+        if saved_backend and saved_backend != self._backend:
+            raise RuntimeError(
+                f"Vector backend mismatch for {self._dir}: saved backend is "
+                f"'{saved_backend}', runtime backend is '{self._backend}'. "
+                "Use the matching backend or rebuild the collection."
+            )
+
         if self._dim is None:
             self._dim = self._embedder.dim()
 
@@ -140,13 +180,24 @@ class _HNSWCollection:
             self._max_elements = max(1024, self._next_label + 128)
 
         loaded = False
+        expected_active = self._active_count()
         if self._index_file.exists():
             try:
-                idx = self._hnswlib.Index(space=self._space, dim=self._dim)
+                hnswlib = self._ensure_backend()
+                idx = hnswlib.Index(space=self._space, dim=self._dim)
                 idx.load_index(str(self._index_file), max_elements=self._max_elements)
                 idx.set_ef(self._ef_search)
-                self._index = idx
-                loaded = True
+                loaded_count = self._index_count(idx)
+                count_match = loaded_count < 0 or loaded_count == expected_active
+                if count_match:
+                    self._index = idx
+                    loaded = True
+                else:
+                    self._log.warning(
+                        "Discarding stale HNSW index (loaded_count=%s expected_active=%s). Rebuilding from payload.",
+                        loaded_count,
+                        expected_active,
+                    )
             except Exception as exc:
                 self._log.warning(
                     "Failed to load HNSW index (%s), rebuilding from payload.",

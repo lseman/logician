@@ -26,7 +26,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let [msgs_area, popup_area, input_area, status_area] =
         compute_layout(area, show_popup, popup_items.len());
-    let (chat_area, image_area) = split_chat_and_image(msgs_area, app.has_image_preview());
+    let (chat_area, panels_area) = split_chat_and_panels(msgs_area, app.has_image_preview(), app.todo_on);
+    let (image_area, todo_area) = split_panels(panels_area, app.has_image_preview(), app.todo_on);
 
     // Side-effect kept here but isolated — feeds scroll logic for this frame.
     app.update_area_h(chat_area.height);
@@ -34,6 +35,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_messages(f, app, chat_area);
     if let Some(img_area) = image_area {
         draw_image_panel(f, app, img_area);
+    }
+    if let Some(td_area) = todo_area {
+        draw_todo_panel(f, app, td_area);
     }
     if show_popup {
         draw_slash_popup(f, app, popup_area, &popup_items);
@@ -66,20 +70,51 @@ fn compute_layout(area: Rect, show_popup: bool, popup_item_count: usize) -> [Rec
     [chunks[0], chunks[1], chunks[2], chunks[3]]
 }
 
-fn split_chat_and_image(area: Rect, show_image: bool) -> (Rect, Option<Rect>) {
-    if !show_image || area.height < 6 || area.width < 40 {
+fn split_chat_and_panels(area: Rect, show_image: bool, show_todo: bool) -> (Rect, Option<Rect>) {
+    if (!show_image && !show_todo) || area.height < 6 || area.width < 50 {
         return (area, None);
     }
 
-    if area.width < 90 {
-        let chunks =
-            Layout::vertical([Constraint::Percentage(64), Constraint::Percentage(36)]).split(area);
+    let panel_pct = if show_image && show_todo { 45 } else { 38 };
+
+    if area.width < 100 {
+        let chunks = Layout::vertical([
+            Constraint::Percentage(100 - panel_pct),
+            Constraint::Percentage(panel_pct),
+        ])
+        .split(area);
         return (chunks[0], Some(chunks[1]));
     }
 
-    let chunks =
-        Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(100 - panel_pct),
+        Constraint::Percentage(panel_pct),
+    ])
+    .split(area);
     (chunks[0], Some(chunks[1]))
+}
+
+fn split_panels(area: Option<Rect>, show_image: bool, show_todo: bool) -> (Option<Rect>, Option<Rect>) {
+    let Some(area) = area else {
+        return (None, None);
+    };
+
+    if show_image && show_todo {
+        // Prefer vertical split for panels if horizontal space is tight, 
+        // but here we are already in the "side" area.
+        let chunks = if area.width > area.height * 2 {
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area)
+        } else {
+            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area)
+        };
+        return (Some(chunks[0]), Some(chunks[1]));
+    }
+
+    if show_image {
+        (Some(area), None)
+    } else {
+        (None, Some(area))
+    }
 }
 
 // ── Messages panel ────────────────────────────────────────────────────────────
@@ -127,6 +162,56 @@ fn draw_image_panel(f: &mut Frame, app: &mut App, area: Rect) {
             inner,
         );
     }
+}
+
+fn draw_todo_panel(f: &mut Frame, app: &App, area: Rect) {
+    if area.width < 4 || area.height < 4 {
+        return;
+    }
+
+    let block = Block::default()
+        .title(" Task Checklist ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut list_items = Vec::new();
+    if app.bridge_state.todo.is_empty() {
+        list_items.push(ListItem::new(Line::from(vec![Span::styled(
+            "  No active tasks.",
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        )])));
+    } else {
+        for item in &app.bridge_state.todo {
+            let symbol = match item.status.as_str() {
+                "completed" | "done" => " [x] ",
+                "in-progress" | "doing" => " [/] ",
+                _ => " [ ] ",
+            };
+            let color = match item.status.as_str() {
+                "completed" | "done" => Color::Green,
+                "in-progress" | "doing" => Color::Yellow,
+                _ => Color::Gray,
+            };
+
+            list_items.push(ListItem::new(Line::from(vec![
+                Span::styled(symbol, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::styled(item.title.clone(), Style::default().fg(Color::White)),
+            ])));
+            if !item.note.is_empty() {
+                list_items.push(ListItem::new(Line::from(vec![
+                    Span::styled("     ", Style::default()),
+                    Span::styled(
+                        item.note.clone(),
+                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    ),
+                ])));
+            }
+        }
+    }
+
+    f.render_widget(List::new(list_items), inner);
 }
 
 // ── Input line ────────────────────────────────────────────────────────────────
@@ -350,15 +435,17 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
 
     push_toggle(&mut spans, "trace", app.trace_on);
     push_sep(&mut spans);
-    push_toggle(&mut spans, "raw", app.raw_on);
-    push_sep(&mut spans);
     push_toggle(&mut spans, "image", app.has_image_preview());
+    push_sep(&mut spans);
+    push_toggle(&mut spans, "task", app.todo_on);
 
     let hint = vec![
         Span::raw("  "),
         Span::styled("Ctrl+O", Style::default().fg(Color::Gray)),
         Span::raw("/"),
         Span::styled("Ctrl+P", Style::default().fg(Color::Gray)),
+        Span::raw("/"),
+        Span::styled("Ctrl+T", Style::default().fg(Color::Gray)),
     ];
     if spans_width(&spans) + spans_width(&hint) <= max_width {
         spans.extend(hint);

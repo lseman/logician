@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -72,6 +74,17 @@ def _lazy_import_usearch_index():
         ) from e
 
 
+def _lazy_import_chromadb():
+    try:
+        import chromadb  # type: ignore
+
+        return chromadb
+    except Exception as e:
+        raise ImportError(
+            "chromadb not installed or failed to import. Run: pip install chromadb"
+        ) from e
+
+
 def _lazy_import_torch():
     try:
         import torch  # type: ignore
@@ -88,6 +101,27 @@ def _lazy_import_bitsandbytes_config():
         return BitsAndBytesConfig
     except Exception:
         return None
+
+
+def _reset_hf_hub_client() -> None:
+    try:
+        import huggingface_hub  # type: ignore
+
+        close_session = getattr(huggingface_hub, "close_session", None)
+        if callable(close_session):
+            close_session()
+            return
+    except Exception:
+        pass
+
+    try:
+        from huggingface_hub.utils import _http  # type: ignore
+
+        close_session = getattr(_http, "close_session", None)
+        if callable(close_session):
+            close_session()
+    except Exception:
+        pass
 
 
 def _resolve_model_load_kwargs(
@@ -134,6 +168,29 @@ def _resolve_model_load_kwargs(
     return kwargs, ", ".join(notes)
 
 
+def _hf_cache_root() -> Path:
+    hf_home = os.getenv("HF_HOME", "").strip()
+    if hf_home:
+        return Path(hf_home).expanduser() / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def _hf_model_cache_dir(model_name: str) -> Path:
+    repo_id = str(model_name or "").strip().replace("/", "--")
+    return _hf_cache_root() / f"models--{repo_id}"
+
+
+def _hf_model_cached(model_name: str) -> bool:
+    cache_dir = _hf_model_cache_dir(model_name)
+    snapshots = cache_dir / "snapshots"
+    if not snapshots.exists():
+        return False
+    try:
+        return any(child.is_dir() for child in snapshots.iterdir())
+    except Exception:
+        return False
+
+
 def _embedding_candidates(name: str) -> list[str]:
     parts = [p.strip() for p in str(name).split("|")]
     return [p for p in parts if p]
@@ -170,6 +227,40 @@ def _stable_collection_name(base: str, embedding_model_name: str) -> str:
     return f"{base}__{model_slug}__{digest}"
 
 
+def _resolve_vector_collection_dir(
+    *,
+    root_path: str,
+    collection_name: str,
+    embedding_model_name: str,
+    backend: str,
+) -> Path:
+    root = Path(root_path)
+    stable_name = _stable_collection_name(collection_name, embedding_model_name)
+    backend_norm = str(backend or "").strip().lower() or "usearch"
+
+    preferred = root / backend_norm / stable_name
+    if preferred.exists():
+        return preferred
+
+    legacy = root / stable_name
+    if not legacy.exists():
+        return preferred
+
+    state_file = legacy / "state.json"
+    if not state_file.exists():
+        return legacy
+
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        return legacy
+
+    saved_backend = str(state.get("backend", "") or "").strip().lower()
+    if not saved_backend or saved_backend == backend_norm:
+        return legacy
+    return preferred
+
+
 # ============================================================================
 # Embedding + reranking wrappers
 # ============================================================================
@@ -187,6 +278,16 @@ class _EmbeddingRuntime:
     @property
     def resolved_model_name(self) -> str:
         return self._resolved_model_name or self._model_name_raw
+
+    def prefer_candidate(self, candidate: str) -> None:
+        candidate_s = str(candidate or "").strip()
+        if not candidate_s or self._encoder is not None:
+            return
+        candidates = _embedding_candidates(self._model_name_raw)
+        if candidate_s not in candidates:
+            return
+        ordered = [candidate_s] + [item for item in candidates if item != candidate_s]
+        self._model_name_raw = "|".join(ordered)
 
     def _ensure_encoder(self) -> Any:
         if self._encoder is not None:
@@ -219,6 +320,8 @@ class _EmbeddingRuntime:
                         quant_mode_env="AGENT_EMBED_QUANT",
                         force_cuda_env="AGENT_FORCE_CUDA",
                     )
+                    if _hf_model_cached(candidate):
+                        kwargs["local_files_only"] = True
                     self._log.info("Embedding load kwargs: %s", mode_note)
                     try:
                         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
@@ -232,8 +335,18 @@ class _EmbeddingRuntime:
                                 disable_pb()
                         except Exception:
                             pass
+                        _reset_hf_hub_client()
                         with _suppress_fd_output():
-                            enc = SentenceTransformer(candidate, **kwargs)
+                            try:
+                                enc = SentenceTransformer(candidate, **kwargs)
+                            except RuntimeError as exc:
+                                if "client has been closed" not in str(exc).lower():
+                                    raise
+                                self._log.warning(
+                                    "Hugging Face hub client was closed; resetting and retrying model load."
+                                )
+                                _reset_hf_hub_client()
+                                enc = SentenceTransformer(candidate, **kwargs)
                     except TypeError:
                         # Some sentence-transformers versions may not accept quantization_config.
                         if "quantization_config" in kwargs:
@@ -329,6 +442,8 @@ class _RerankerRuntime:
                     quant_mode_env="AGENT_RERANK_QUANT",
                     force_cuda_env="AGENT_FORCE_CUDA",
                 )
+                if _hf_model_cached(candidate):
+                    kwargs["local_files_only"] = True
                 self._log.info("Reranker load kwargs: %s", mode_note)
                 try:
                     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")

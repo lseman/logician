@@ -196,8 +196,6 @@ class AgentRunner:
             response: str = self._agent.chat(
                 text,
                 session_id=sid,
-                use_semantic_retrieval=True,
-                retrieval_mode="hybrid",
             )
         except Exception as exc:
             log.exception("Agent error  user=%s", user_key)

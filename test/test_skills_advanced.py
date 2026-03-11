@@ -6,7 +6,9 @@ from pathlib import Path
 
 class SkillAdvancedBehaviorTests(unittest.TestCase):
     def test_apply_edit_block_replaces_exact_block(self) -> None:
-        edit_block = importlib.import_module("skills.01_coding.75_edit_block")
+        edit_block = importlib.import_module(
+            "skills.coding.edit_block.edit_block"
+        )
         apply_edit_block = getattr(edit_block, "apply_edit_block")
 
         with tempfile.TemporaryDirectory() as td:

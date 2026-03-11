@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from typing import Any, Literal
 
 from .types import _SKILL_PREFIX_SEPARATORS
 from ..runtime import SkillCard, SkillSelection
+
+_ROUTING_META_TOOL_NAMES = (
+    "describe_tool",
+    "search_tools",
+)
 
 
 class RegistryRoutingMixin:
@@ -34,13 +40,14 @@ class RegistryRoutingMixin:
     ) -> SkillSelection:
         self._sync_catalog_with_registered_tools()
         forced = self._consume_forced_skill_ids()
-        return self._catalog.route_query_to_skills(
+        selection = self._catalog.route_query_to_skills(
             query,
             [tool.name for tool in self._iter_tools_for_prompt()],
             top_k=top_k,
             min_score=min_score,
             forced_skill_ids=forced,
         )
+        return self._augment_selection_tool_visibility(query, selection)
 
     def skill_routing_prompt(
         self,
@@ -58,10 +65,31 @@ class RegistryRoutingMixin:
     ) -> tuple[str, SkillSelection]:
         self._sync_catalog_with_registered_tools()
         forced = self._consume_forced_skill_ids()
-        return self._catalog.skill_routing_prompt(
+        available_tool_names = [tool.name for tool in self._iter_tools_for_prompt()]
+
+        def _render_augmented_tool_prompt(**kwargs: Any) -> str:
+            include_tool_names = kwargs.pop("include_tool_names", None)
+            compact_fallback_tool_names = kwargs.pop("compact_fallback_tool_names", None)
+            if include_tool_names is None and compact_fallback_tool_names is None:
+                return self.tools_schema_prompt(**kwargs)
+            (
+                include_tool_names,
+                compact_fallback_tool_names,
+            ) = self._augment_tool_name_lists(
+                query=query,
+                selected_tool_names=include_tool_names,
+                fallback_tool_names=compact_fallback_tool_names,
+            )
+            return self.tools_schema_prompt(
+                **kwargs,
+                include_tool_names=include_tool_names,
+                compact_fallback_tool_names=compact_fallback_tool_names,
+            )
+
+        prompt, selection = self._catalog.skill_routing_prompt(
             query,
-            [tool.name for tool in self._iter_tools_for_prompt()],
-            self.tools_schema_prompt,
+            available_tool_names,
+            _render_augmented_tool_prompt,
             use_toon=use_toon,
             mode=mode,
             top_k=top_k,
@@ -74,6 +102,88 @@ class RegistryRoutingMixin:
             # Keep forced skills as explicit context for the next routing pass only.
             forced_skill_ids=forced,
         )
+        selection = self._augment_selection_tool_visibility(query, selection)
+        return prompt, selection
+
+    def _augment_selection_tool_visibility(
+        self,
+        query: str,
+        selection: SkillSelection,
+    ) -> SkillSelection:
+        if not selection.selected_skills:
+            return selection
+
+        selected_tools, fallback_tools = self._augment_tool_name_lists(
+            query=query,
+            selected_tool_names=selection.selected_tools,
+            fallback_tool_names=selection.fallback_tools,
+        )
+        return SkillSelection(
+            query=selection.query,
+            selected_skills=list(selection.selected_skills),
+            selected_tools=selected_tools,
+            fallback_tools=fallback_tools,
+        )
+
+    def _augment_tool_name_lists(
+        self,
+        *,
+        query: str,
+        selected_tool_names: list[str] | tuple[str, ...] | None,
+        fallback_tool_names: list[str] | tuple[str, ...] | None,
+    ) -> tuple[list[str], list[str] | None]:
+        selected_tools: list[str] = []
+        seen: set[str] = set()
+
+        for tool_name in self._explicit_tool_mentions(query):
+            if tool_name in self._tools and tool_name not in seen:
+                selected_tools.append(tool_name)
+                seen.add(tool_name)
+
+        for tool_name in selected_tool_names or []:
+            tname = str(tool_name)
+            if tname in self._tools and tname not in seen:
+                selected_tools.append(tname)
+                seen.add(tname)
+
+        for tool_name in _ROUTING_META_TOOL_NAMES:
+            if tool_name in self._tools and tool_name not in seen:
+                selected_tools.append(tool_name)
+                seen.add(tool_name)
+
+        if fallback_tool_names is None:
+            return selected_tools, None
+        fallback_tools = [
+            str(tool_name)
+            for tool_name in fallback_tool_names
+            if str(tool_name) in self._tools and str(tool_name) not in seen
+        ]
+        return selected_tools, fallback_tools
+
+    def _explicit_tool_mentions(self, query: str) -> list[str]:
+        text = str(query or "").strip()
+        if not text:
+            return []
+
+        lower = text.lower()
+        mentioned: list[str] = []
+        seen: set[str] = set()
+
+        for tool in self._iter_tools_for_prompt():
+            name = str(getattr(tool, "name", "") or "").strip()
+            if not name or name in seen:
+                continue
+            lname = name.lower()
+            matched = bool(
+                re.search(
+                    rf"(?<![a-z0-9_]){re.escape(lname)}(?![a-z0-9_])",
+                    lower,
+                )
+            )
+            if matched:
+                mentioned.append(name)
+                seen.add(name)
+        return mentioned
 
     def _consume_forced_skill_ids(self) -> list[str]:
         if not self._forced_skill_ids:
@@ -208,6 +318,7 @@ class RegistryRoutingMixin:
         skill: str,
         reason: str = "",
         top_k: int = 1,
+        args: str = "",
     ) -> str:
         q = str(skill or "").strip()
         if not q:
@@ -229,6 +340,38 @@ class RegistryRoutingMixin:
         forced_ids = [card.id for card in matches]
         self._forced_skill_ids = list(dict.fromkeys(forced_ids))
         self._forced_skill_reason = str(reason or "").strip()
+
+        args_str = str(args or "").strip()
+        if args_str:
+            target_skill = matches[0]
+            if not target_skill.tool_names:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"Skill '{target_skill.id}' has no executable tools to run with args.",
+                        "forced_skill_ids": self._forced_skill_ids,
+                    },
+                    ensure_ascii=False,
+                )
+            primary_tool = target_skill.tool_names[0]
+            if hasattr(self, "call_tool"):
+                try:
+                    parsed_args = json.loads(args_str)
+                    if not isinstance(parsed_args, dict):
+                        raise ValueError("Args must be a JSON dictionary.")
+                    execution_result = getattr(self, "call_tool")(primary_tool, **parsed_args)
+                    if not isinstance(execution_result, str):
+                        execution_result = json.dumps(execution_result, ensure_ascii=False)
+                    return execution_result
+                except Exception as e:
+                    return json.dumps(
+                        {
+                            "status": "error",
+                            "error": f"Execution of {primary_tool} failed: {e}",
+                            "forced_skill_ids": self._forced_skill_ids,
+                        },
+                        ensure_ascii=False,
+                    )
 
         return json.dumps(
             {

@@ -114,9 +114,15 @@ class RegistryPromptingMixin:
         return "\n\nTOOLS JSON SCHEMA:\n" + json.dumps(payload, ensure_ascii=False)
 
     def _compact_tools_prompt(self, tools_for_prompt: Sequence[Tool], use_toon: bool) -> str:
+        availability_note = (
+            "The listed tools may be a routed subset, not the entire runtime. "
+            "If the user names a different tool, verify with search_tools/describe_tool "
+            "or available_tools.json before claiming it is unavailable."
+        )
         if use_toon:
             header = [
                 "\n\nTOOLS (compact): use only if needed.",
+                availability_note,
                 "Tool call format (TOON):",
                 "Return exactly one tool_call per response.",
                 "tool_call:",
@@ -128,6 +134,7 @@ class RegistryPromptingMixin:
         else:
             header = [
                 "\n\nTOOLS (compact): use only if needed.",
+                availability_note,
                 "Tool call format (JSON):",
                 "Return exactly one tool_call per response.",
                 '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',
@@ -147,6 +154,8 @@ class RegistryPromptingMixin:
         if use_toon:
             header = [
                 "\n\nTOOLS AVAILABLE (use only if needed):",
+                "This may be a routed subset, not the full runtime tool list.",
+                "If the user names another tool, verify with search_tools/describe_tool or available_tools.json before saying it does not exist.",
                 "Return EXACT TOON format when calling:",
                 "Return exactly one tool_call per response.",
                 "tool_call:",
@@ -159,6 +168,8 @@ class RegistryPromptingMixin:
         else:
             header = [
                 "\n\nTOOLS AVAILABLE (use only if needed):",
+                "This may be a routed subset, not the full runtime tool list.",
+                "If the user names another tool, verify with search_tools/describe_tool or available_tools.json before saying it does not exist.",
                 "Return EXACT JSON when calling:",
                 "Return exactly one tool_call per response.",
                 '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',

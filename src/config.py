@@ -55,13 +55,16 @@ class Config:
     pre_turn_thinking: bool = False
     pre_turn_thinking_max_tokens: int = 512
     pre_turn_thinking_prompt: str = (
-        "Before taking any action, briefly plan your approach. "
-        "Consider: loaded data, recent tool results, MCP servers.\n\n"
-        "1. What is the core task?\n"
-        "2. Name the most relevant skill(s) explicitly.\n"
-        "3. What is your step-by-step approach?\n"
-        "4. Are there pitfalls or required verifications?\n\n"
-        "Be concise. You will then execute this plan."
+        "Before taking any action, name your plan explicitly.\n\n"
+        "1. What is the exact task? (one sentence)\n"
+        "2. Which skill(s) will you use? Name them explicitly "
+        "(e.g. 'explore → edit_block → quality', or 'think → orchestrator → coding/parallel_dispatch').\n"
+        "3. What is your ordered step list? (max 5 steps — be concrete, not vague)\n"
+        "4. What could go wrong and what will you verify?\n\n"
+        "If this is a coding task: use fd_find/rg_search before guessing paths; "
+        "read before writing; run ruff/pytest after writes. "
+        "If multi-file: reads can parallelize, writes must serialize.\n"
+        "Be concise — you will execute this plan immediately after."
     )
     # Optional post-tool reflection after each tool result.
     post_tool_thinking: bool = False
@@ -97,6 +100,9 @@ class Config:
     editing_require_inspection_nudges: int = 3
     editing_failure_repair_nudges: int = 3
     retry_attempts: int = 2
+    lazy_mcp_init: bool = True
+    default_use_semantic_retrieval: bool = True
+    default_retrieval_mode: Literal["vector", "keyword", "hybrid"] = "hybrid"
 
     # Backend
     backend: str = "llama_cpp"  # or "vllm"
@@ -112,7 +118,7 @@ class Config:
     rag_top_k: int = 20
     vector_path: str = "message_history.vector"
     rag_vector_path: str = "rag_docs.vector"
-    # Vector index backend selector: "usearch" (default) or "hnsw".
+    # Vector index backend selector: "usearch" (default), "hnsw", or "chromadb".
     vector_backend: str = "usearch"
     rag_vector_backend: str = "usearch"
     rag_rerank_enabled: bool = True
@@ -192,6 +198,11 @@ class Config:
     # If a final answer still contains completed-action claims while zero tool
     # calls were actually executed, append a runtime transparency note.
     tool_claim_guard_append_runtime_note: bool = True
+    # Guard against statements that contradict the latest filesystem/git
+    # inspection tool result.
+    inspection_result_guard_enabled: bool = True
+    inspection_result_guard_max_nudges: int = 2
+    inspection_result_guard_append_runtime_note: bool = True
 
     # Auto-compact: keep session from growing unboundedly
     auto_compact: bool = True
@@ -217,6 +228,21 @@ class Config:
             "remove",
             "create_file",
             "mkdir",
+            # Edit tools — must never return stale cached results
+            "edit_file_replace",
+            "apply_unified_diff",
+            "apply_edit_block",
+            "multi_edit",
+            "rg_replace",
+            "regex_replace",
+        ]
+    )
+    # Read-only tools that still reflect live runtime state should bypass the
+    # generic tool cache to avoid stale status/config snapshots.
+    tool_cache_exclude_patterns: list = field(
+        default_factory=lambda: [
+            "rag_tuning_status",
+            "rag_benchmark",
         ]
     )
 
@@ -261,6 +287,8 @@ class Config:
         }
     )
     verification_auto_repair_max_attempts: int = 3
+    enable_reflexion_repair: bool = True
+    reflexion_repair_max_attempts: int = 1
 
     # Append a compact quality checklist to final answers after tool-driven runs.
     append_quality_checklist: bool = True

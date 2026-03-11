@@ -121,6 +121,8 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
 
     def test_follow_up_queries_use_runtime_skill_hints(self) -> None:
         self._load_dummy_context()
+        self.agent.tools.activate_lazy_skill_group("timeseries")
+        self.agent.tools.reload_skills()
         call = ToolCall(
             id="call_1",
             name="load_csv_data",
@@ -145,19 +147,183 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
             )
         )
 
+    def test_load_skills_command_activates_lazy_skill_group(self) -> None:
+        self.assertNotIn("forecasting", {skill.id for skill in self.agent.tools.list_skills()})
+
+        response = self.agent.chat("/load-skills timeseries", session_id="load_skills_cmd")
+
+        self.assertIn("Loaded: timeseries.", response)
+        self.assertIn("timeseries", self.agent.tools.active_lazy_skill_groups())
+        self.assertIn("forecasting", {skill.id for skill in self.agent.tools.list_skills()})
+
     def test_social_greeting_does_not_inject_skill_routing_context(self) -> None:
         prompt, selection, routing_query = self.agent._resolve_system_prompt("hi")
 
         self.assertIsNotNone(selection)
         assert selection is not None
+        # The routing query must not be enriched with runtime context for social messages
         self.assertEqual(routing_query.strip(), "hi")
-        self.assertEqual(selection.selected_skills, [])
-        self.assertEqual(selection.selected_tools, [])
+        # The prompt must NOT inject ACTIVE SKILLS or CODING WORKFLOW HINT sections
         self.assertNotIn("ACTIVE SKILLS FOR THIS REQUEST", prompt)
+        self.assertNotIn("CODING WORKFLOW HINT", prompt)
+
+    def test_coding_prompt_prefers_find_and_scoped_read_tools(self) -> None:
+        prompt = self.agent._build_system_prompt_for_message(
+            "Edit rust-cli/src/main.rs and find the config loader before patching it."
+        )
+
+        self.assertIn("CODING WORKFLOW HINT", prompt)
+        self.assertIn("find_path", prompt)
+        self.assertIn("find_in_file", prompt)
+        self.assertIn("sed_read", prompt)
+        self.assertIn("read_file_smart", prompt)
 
     def test_short_greeting_is_not_treated_as_follow_up(self) -> None:
         self.assertFalse(self.agent._is_follow_up_message("hi"))
         self.assertTrue(self.agent._is_follow_up_message("continue"))
+
+    def test_social_greeting_uses_fast_path_without_mcp_and_without_hardcoded_reply(
+        self,
+    ) -> None:
+        agent = create_agent(
+            llm_url="http://localhost:8080",
+            db_path=str(self.db_path),
+            config_overrides={
+                "rag_enabled": False,
+                "vector_path": str(self.vector_path),
+                "max_iterations": 4,
+                "pre_turn_thinking": True,
+            },
+        )
+        try:
+            llm = _SequenceFakeLLM(["Hello from the model"])
+            agent.llm = llm
+            load_calls = 0
+
+            def _fake_load():
+                nonlocal load_calls
+                load_calls += 1
+
+            agent._load_mcp_servers = _fake_load  # type: ignore[method-assign]
+
+            response = agent.chat("hi", session_id="social_fast_path_case")
+
+            self.assertEqual(response, "Hello from the model")
+            self.assertEqual(llm.calls, 1)
+            self.assertEqual(load_calls, 0)
+            self.assertFalse(agent._mcp_loaded)
+        finally:
+            db = getattr(agent.memory, "_db", None)
+            if db is not None:
+                db.close()
+
+    def test_social_greeting_falls_through_to_main_llm_flow_when_fast_path_is_empty(
+        self,
+    ) -> None:
+        agent = create_agent(
+            llm_url="http://localhost:8080",
+            db_path=str(self.db_path),
+            config_overrides={
+                "rag_enabled": False,
+                "vector_path": str(self.vector_path),
+                "max_iterations": 2,
+                "pre_turn_thinking": False,
+            },
+        )
+        try:
+            llm = _SequenceFakeLLM(["", "Hello from the main flow"])
+            agent.llm = llm
+            load_calls = 0
+
+            def _fake_load():
+                nonlocal load_calls
+                load_calls += 1
+
+            agent._load_mcp_servers = _fake_load  # type: ignore[method-assign]
+
+            response = agent.chat("hi", session_id="social_main_flow_case")
+
+            self.assertEqual(response, "Hello from the main flow")
+            self.assertEqual(llm.calls, 2)
+            self.assertEqual(load_calls, 1)
+        finally:
+            db = getattr(agent.memory, "_db", None)
+            if db is not None:
+                db.close()
+
+    def test_explicit_reasoning_request_does_not_loop_on_plan_only_reply(self) -> None:
+        agent = create_agent(
+            llm_url="http://localhost:8080",
+            db_path=str(self.db_path),
+            config_overrides={
+                "rag_enabled": False,
+                "vector_path": str(self.vector_path),
+                "max_iterations": 4,
+                "pre_turn_thinking": False,
+            },
+        )
+        try:
+            llm = _SequenceFakeLLM(
+                [
+                    "**Restatement**: You want a safe migration plan first.\n"
+                    "**Goal**: Identify the right implementation sequence.\n"
+                    "**Plan**:\n"
+                    "1. Inspect the current architecture.\n"
+                    "2. Identify risk points.\n"
+                    "3. Implement only after the plan is sound.\n"
+                    "**Key risks**: state drift during migration.\n"
+                    "**Starting with**: I would inspect the architecture boundaries first."
+                ]
+            )
+            agent.llm = llm
+
+            response = agent.chat(
+                "Think through the architecture before implementing the migration."
+            )
+
+            self.assertIn("**Plan**", response)
+            self.assertEqual(llm.calls, 1)
+        finally:
+            db = getattr(agent.memory, "_db", None)
+            if db is not None:
+                db.close()
+
+    def test_edit_recovery_nudge_prefers_find_path_and_sed_read_for_missing_file(self) -> None:
+        nudge = self.agent._edit_tool_recovery_nudge(
+            ToolCall(id="1", name="edit_file_replace", arguments={"path": "foo.py"}),
+            '{"status":"error","error":"File not found: foo.py"}',
+        )
+
+        self.assertIn("find_path", nudge)
+        self.assertIn("sed_read", nudge)
+
+    def test_retrieval_settings_default_to_config(self) -> None:
+        use_semantic, mode = self.agent._resolve_retrieval_settings(None, None)
+
+        # Defaults updated to enable semantic hybrid retrieval for better long-session context
+        self.assertTrue(use_semantic)
+        self.assertEqual(mode, "hybrid")
+
+    def test_lazy_mcp_init_defers_server_load_until_first_run(self) -> None:
+        agent = self._make_agent()
+        try:
+            self.assertFalse(agent._mcp_loaded)
+            calls = 0
+
+            def _fake_load():
+                nonlocal calls
+                calls += 1
+
+            agent._load_mcp_servers = _fake_load  # type: ignore[method-assign]
+            agent._ensure_mcp_servers_loaded()
+            agent._ensure_mcp_servers_loaded()
+
+            self.assertEqual(calls, 1)
+            self.assertTrue(agent._mcp_loaded)
+        finally:
+            db = getattr(agent.memory, "_db", None)
+            if db is not None:
+                db.close()
 
     def test_describe_runtime_context_reports_history_budget(self) -> None:
         sid = "history_budget_case"
@@ -300,6 +466,52 @@ class AgentRuntimeBehaviorTests(unittest.TestCase):
             tool_msgs = [m for m in messages if m.role == MessageRole.TOOL]
             self.assertTrue(tool_msgs)
             self.assertEqual(tool_msgs[-1].name, "search_tools")
+            self.assertGreaterEqual(getattr(agent.llm, "calls", 0), 3)
+        finally:
+            db = getattr(agent.memory, "_db", None)
+            if db is not None:
+                db.close()
+
+    def test_reflexion_repair_is_capped_per_turn(self) -> None:
+        sid = "reflexion_repair_cap_case"
+        agent = create_agent(
+            llm_url="http://localhost:8080",
+            db_path=str(self.db_path),
+            config_overrides={
+                "rag_enabled": False,
+                "vector_path": str(self.vector_path),
+                "max_iterations": 4,
+                "use_toon_for_tools": False,
+                "append_quality_checklist": False,
+                "enable_reflexion_repair": True,
+                "reflexion_repair_max_attempts": 1,
+            },
+        )
+        try:
+            agent.llm = _SequenceFakeLLM(
+                [
+                    '{"tool_call":{"name":"run_shell","arguments":{"cmd":"false"}}}',
+                    '{"tool_call":{"name":"run_shell","arguments":{"cmd":"false"}}}',
+                    "Final answer after capped repair.",
+                ]
+            )
+            repair_calls = 0
+
+            def _fake_repair(call, result_text, tracer):
+                del call, result_text, tracer
+                nonlocal repair_calls
+                repair_calls += 1
+                return "[Reflexion Repair] Retry once with corrected arguments."
+
+            with patch.object(agent, "_run_reflexion_repair", side_effect=_fake_repair):
+                with patch.object(agent.tools, "execute", return_value="Error: boom"):
+                    response = agent.chat(
+                        "Run the shell command and fix any issue.",
+                        session_id=sid,
+                    )
+
+            self.assertEqual(repair_calls, 1)
+            self.assertEqual(response, "Final answer after capped repair.")
             self.assertGreaterEqual(getattr(agent.llm, "calls", 0), 3)
         finally:
             db = getattr(agent.memory, "_db", None)

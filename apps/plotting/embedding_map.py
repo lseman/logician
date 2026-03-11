@@ -6,6 +6,38 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, (str, bytes, bytearray)):
+        return [value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        converted = tolist()
+        if converted is None:
+            return []
+        if isinstance(converted, list):
+            return converted
+        if isinstance(converted, tuple):
+            return list(converted)
+        return [converted]
+    try:
+        return list(value)
+    except Exception:
+        return [value]
+
+
+def _first_batch(value):
+    seq = _as_list(value)
+    if not seq:
+        return []
+    return _as_list(seq[0])
+
+
 def _embed_texts(model_name: str, texts):
     from sentence_transformers import SentenceTransformer
 
@@ -146,13 +178,14 @@ def plot_session_embedding_map(
     results = collection.get(
         where={"session_id": sid}, include=["metadatas", "documents", "embeddings"]
     )
-    if not results["documents"]:
+    texts = _first_batch(results.get("documents"))
+    if not texts:
         raise RuntimeError(f"No messages for session_id={sid}")
-    texts = results["documents"]
-    metas = results["metadatas"]
+    metas = _first_batch(results.get("metadatas"))
+    embeddings = _first_batch(results.get("embeddings"))
 
-    if results["embeddings"] and results["embeddings"][0]:
-        X = np.array(results["embeddings"])
+    if embeddings:
+        X = np.asarray(embeddings, dtype=np.float32)
     else:
         X = _embed_texts(embedding_model, texts)
     roles = [meta["role"] for meta in metas]
@@ -227,4 +260,3 @@ def plot_session_embedding_map(
         "label_mode": label_mode,
         "saved": bool(save_path),
     }
-
