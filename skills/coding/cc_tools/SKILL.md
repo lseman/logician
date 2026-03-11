@@ -27,6 +27,12 @@ preferred_tools:
   - cc_read
   - cc_edit
   - cc_multi_edit
+example_queries:
+  - find all Python files in src/
+  - where is this function defined
+  - read lines 40 to 80 of config.py
+  - fix the bug in the parse function
+  - add a new method to this class
 when_not_to_use:
   - shell execution (use shell skill)
   - git operations (use git skill)
