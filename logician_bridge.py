@@ -83,7 +83,10 @@ _BRIDGE_COMMAND_SPECS: list[tuple[str, str]] = [
     ("/sessions", "List stored sessions"),
     ("/load", "Load prior session (`/load <id_prefix>`)"),
     ("/export", "Export transcript (`/export [path]`)"),
-    ("/mount", "Mount codebase (`/mount <dir> [glob] [max] [depth]`)"),
+    (
+        "/mount",
+        "Mount codebase (`/mount <dir> [glob] [max] [depth] [-exclude subdir]`)",
+    ),
     ("/mount-code", "Alias for /mount"),
     ("/upload", "Ingest one doc (`/upload <file> [label]`)"),
     ("/upload-dir", "Bulk ingest docs (`/upload-dir <dir> [glob] [max]`)"),
@@ -138,6 +141,61 @@ def _extract_context7_library_id(raw: Any) -> str | None:
 
 
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")
+
+
+def _parse_exclude_args(raw: str) -> list[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+
+    seen: set[str] = set()
+    excludes: list[str] = []
+    for line in text.splitlines():
+        for part in line.split(","):
+            item = part.strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            excludes.append(item)
+    return excludes
+
+
+def _parse_mount_args(args: list[str]) -> dict[str, Any]:
+    if not args:
+        return {"status": "error", "error": "usage: /mount <directory> [glob] [max_files] [map_depth] [-exclude subdir]"}
+
+    directory = args[0]
+    positional: list[str] = []
+    excludes: list[str] = []
+    idx = 1
+    while idx < len(args):
+        token = args[idx]
+        if token in {"-exclude", "--exclude"}:
+            if idx + 1 >= len(args):
+                return {"status": "error", "error": f"missing value for {token}"}
+            excludes.extend(_parse_exclude_args(args[idx + 1]))
+            idx += 2
+            continue
+        positional.append(token)
+        idx += 1
+
+    if len(positional) > 3:
+        return {
+            "status": "error",
+            "error": "usage: /mount <directory> [glob] [max_files] [map_depth] [-exclude subdir]",
+        }
+
+    return {
+        "status": "ok",
+        "directory": directory,
+        "glob": positional[0]
+        if positional
+        else "**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}",
+        "max_files": positional[1] if len(positional) > 1 else None,
+        "map_depth": positional[2] if len(positional) > 2 else None,
+        "exclude": ",".join(excludes),
+        "exclude_display": excludes,
+    }
 _IMAGE_KEY_HINTS = ("image", "plot", "chart", "figure", "output", "path", "file")
 _IMAGE_PATH_RE = re.compile(
     r"(?i)(?:https?://|file://|[a-z]:)?[a-z0-9_./\\-]+\.(?:png|jpe?g|webp|bmp|gif|svg)"
@@ -421,15 +479,16 @@ class BridgeServer:
         active = self.active or ""
         sid = self.sessions.get(active, "")
         msgs = 0
+        todo = []
         if active and sid and active in self.agents:
             try:
-                msgs = (
-                    self.agents[active]
-                    .describe_runtime_context(sid)
-                    .get("persisted_messages", 0)
-                )
+                ctx = self.agents[active].describe_runtime_context(sid)
+                msgs = ctx.get("persisted_messages", 0)
+                todo = ctx.get("todo", [])
             except Exception:
                 msgs = 0
+                todo = []
+
         tool_count = 0
         skill_count = 0
         if active and active in self.agents:
@@ -470,6 +529,7 @@ class BridgeServer:
             "tiktoken": _has_tiktoken(),
             "tool_count": tool_count,
             "skill_count": skill_count,
+            "todo": todo,
         }
 
     def init(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -854,38 +914,43 @@ class BridgeServer:
             out.append(f"exported {len(msgs)} messages -> {out_path}")
 
         elif cmd in {"/mount", "/mount-code"}:
-            if not args:
-                out.append("usage: /mount <directory> [glob] [max_files] [map_depth]")
+            parsed_mount = _parse_mount_args(args)
+            if parsed_mount.get("status") != "ok":
+                out.append(str(parsed_mount.get("error", "invalid /mount arguments")))
             else:
                 ag = self._active_agent()
                 sid = self.sessions.get(self.active or "", "") or None
                 sid_text = str(sid or self.sessions.get(self.active or "", "") or "-")
-                directory = args[0]
-                glob_pattern = (
-                    args[1]
-                    if len(args) > 1
-                    else "**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}"
-                )
+                directory = str(parsed_mount["directory"])
+                glob_pattern = str(parsed_mount["glob"])
+                exclude = str(parsed_mount.get("exclude", ""))
+                exclude_display = list(parsed_mount.get("exclude_display", []))
 
                 max_files = 120
-                if len(args) > 2:
+                raw_max_files = parsed_mount.get("max_files")
+                if raw_max_files is not None:
                     try:
-                        max_files = max(1, min(400, int(args[2])))
+                        max_files = max(1, min(400, int(raw_max_files)))
                     except Exception:
-                        out.append(f"invalid max_files '{args[2]}', using 120")
+                        out.append(f"invalid max_files '{raw_max_files}', using 120")
 
                 map_depth = 3
-                if len(args) > 3:
+                raw_map_depth = parsed_mount.get("map_depth")
+                if raw_map_depth is not None:
                     try:
-                        map_depth = max(1, min(10, int(args[3])))
+                        map_depth = max(1, min(10, int(raw_map_depth)))
                     except Exception:
-                        out.append(f"invalid map_depth '{args[3]}', using 3")
+                        out.append(f"invalid map_depth '{raw_map_depth}', using 3")
 
                 project_map_payload: dict[str, Any]
                 try:
                     project_map_raw = ag.run_tool_direct(
                         "get_project_map",
-                        {"directory": directory, "max_depth": map_depth},
+                        {
+                            "directory": directory,
+                            "max_depth": map_depth,
+                            "exclude": exclude,
+                        },
                         session_id=sid,
                         persist_to_history=True,
                     )
@@ -905,6 +970,7 @@ class BridgeServer:
                             "chunk_size": 400,
                             "overlap": 0.2,
                             "max_files": max_files,
+                            "exclude": exclude,
                         },
                         session_id=sid,
                         persist_to_history=True,
@@ -919,6 +985,7 @@ class BridgeServer:
                                 "directory": directory,
                                 "glob": glob_pattern,
                                 "max_files": max_files,
+                                "exclude": exclude,
                             },
                             session_id=sid,
                             persist_to_history=True,
@@ -937,6 +1004,8 @@ class BridgeServer:
                         promote_payload = {"status": "error", "error": str(exc)}
 
                 out.append(f"mounted path: {directory}")
+                if exclude_display:
+                    out.append(f"excluded: {', '.join(exclude_display)}")
                 out.append(f"session: {sid_text}")
 
                 if str(project_map_payload.get("status", "")).lower() == "ok":
@@ -1347,8 +1416,6 @@ class BridgeServer:
                             message,
                             session_id=sid_cur,
                             verbose=False,
-                            use_semantic_retrieval=True,
-                            retrieval_mode="hybrid",
                         )
                     except Exception as exc:
                         resp = f"[error] {exc}"
@@ -1363,8 +1430,6 @@ class BridgeServer:
             raw,
             session_id=sid,
             verbose=False,
-            use_semantic_retrieval=True,
-            retrieval_mode="hybrid",
             stream_callback=_token,
             tool_callback=_tool,
             skill_callback=_skill,

@@ -14,6 +14,46 @@ from ..logging_utils import get_logger
 from ..messages import Message, MessageRole
 
 
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, (str, bytes, bytearray)):
+        return [value]
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        converted = tolist()
+        if converted is None:
+            return []
+        if isinstance(converted, list):
+            return converted
+        if isinstance(converted, tuple):
+            return list(converted)
+        return [converted]
+    try:
+        return list(value)
+    except Exception:
+        return [value]
+
+
+def _first_batch(value: Any) -> list[Any]:
+    seq = _as_list(value)
+    if not seq:
+        return []
+    first = seq[0]
+    if isinstance(first, dict):
+        return seq
+    if isinstance(first, (str, bytes, bytearray)):
+        return seq
+    inner = _as_list(first)
+    if len(seq) == 1:
+        return inner
+    return seq
+
+
 @dataclass
 class MessageDB:
     db_path: str = "agent_sessions.db"
@@ -256,10 +296,10 @@ class MessageDB:
             where=where,
             include=["metadatas", "documents", "distances", "ids"],
         )
-        docs = results.get("documents", [[]])[0]
-        metas = results.get("metadatas", [[]])[0]
-        dists = results.get("distances", [[]])[0]
-        ids = results.get("ids", [[]])[0]
+        docs = _first_batch(results.get("documents"))
+        metas = _first_batch(results.get("metadatas"))
+        dists = _first_batch(results.get("distances"))
+        ids = _first_batch(results.get("ids"))
 
         rows: list[dict[str, Any]] = []
         for doc, meta, dist, vector_id in zip(docs, metas, dists, ids):

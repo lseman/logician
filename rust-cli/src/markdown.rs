@@ -484,7 +484,12 @@ impl MdRenderer {
             if self.in_code {
                 match &event {
                     MdEvent::Text(t) => {
-                        self.code_buf.push(t.to_string());
+                        // pulldown_cmark delivers the entire code block body as
+                        // a single Text event with embedded '\n' characters.
+                        // Split here so render_code_block sees one entry per line.
+                        for line in t.split('\n') {
+                            self.code_buf.push(line.to_string());
+                        }
                     }
                     MdEvent::End(TagEnd::CodeBlock) => {
                         self.in_code = false;

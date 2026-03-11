@@ -39,13 +39,30 @@ except ImportError:
     _rf_fuzz = None  # type: ignore
     HAS_RAPIDFUZZ = False
 
-try:
-    from sentence_transformers import SentenceTransformer
+_SENTENCE_TRANSFORMER_TYPE: Any | None = None
+_SENTENCE_TRANSFORMER_IMPORT_ATTEMPTED = False
+_SENTENCE_TRANSFORMER_IMPORT_ERROR = ""
 
-    HAS_SENTENCE_TRANSFORMERS = True
-except ImportError:
-    SentenceTransformer = None  # type: ignore
-    HAS_SENTENCE_TRANSFORMERS = False
+
+def _lazy_import_sentence_transformer() -> Any | None:
+    global _SENTENCE_TRANSFORMER_TYPE
+    global _SENTENCE_TRANSFORMER_IMPORT_ATTEMPTED
+    global _SENTENCE_TRANSFORMER_IMPORT_ERROR
+
+    if _SENTENCE_TRANSFORMER_IMPORT_ATTEMPTED:
+        return _SENTENCE_TRANSFORMER_TYPE
+
+    _SENTENCE_TRANSFORMER_IMPORT_ATTEMPTED = True
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as exc:
+        _SENTENCE_TRANSFORMER_TYPE = None
+        _SENTENCE_TRANSFORMER_IMPORT_ERROR = str(exc) or exc.__class__.__name__
+        return None
+
+    _SENTENCE_TRANSFORMER_TYPE = SentenceTransformer
+    _SENTENCE_TRANSFORMER_IMPORT_ERROR = ""
+    return _SENTENCE_TRANSFORMER_TYPE
 
 
 _SKILL_STOPWORDS = {
@@ -520,7 +537,7 @@ class CodeBlockExtractor:
 
 class SkillCatalog:
     # Bump when cache schema changes to force invalidation.
-    _CACHE_VERSION = 8
+    _CACHE_VERSION = 10
 
     def __init__(
         self, *, skills_md_path: Path, skills_dir_path: Path, log: Any
@@ -528,6 +545,7 @@ class SkillCatalog:
         self.skills_md_path = skills_md_path
         self.skills_dir_path = skills_dir_path
         self._log = log
+        self._active_lazy_skill_groups: set[str] = set()
         self._skills: dict[str, SkillCard] = {}
         self._tool_docs: dict[str, str] = {}
         self._all_tool_sections: list[ToolSection] = []
@@ -661,6 +679,31 @@ class SkillCatalog:
     def _cache_path(self) -> Path:
         return self.skills_dir_path / ".skills_catalog_cache.json"
 
+    @staticmethod
+    def _normalize_lazy_skill_group_name(value: str) -> str:
+        text = str(value or "").strip().lower()
+        text = text.strip("/").replace("-", "_").replace(" ", "_")
+        if text.startswith("lazy_"):
+            text = text[len("lazy_") :]
+        text = "".join(ch for ch in text if ch.isalnum() or ch == "_").strip("_")
+        return text
+
+    def set_active_lazy_skill_groups(self, groups: Sequence[str] | set[str]) -> None:
+        self._active_lazy_skill_groups = {
+            group
+            for group in (
+                self._normalize_lazy_skill_group_name(item) for item in (groups or [])
+            )
+            if group
+        }
+
+    def _is_lazy_skill_group_dir_name(self, name: str) -> bool:
+        return str(name or "").strip().startswith("lazy_")
+
+    def _is_lazy_skill_group_active(self, name: str) -> bool:
+        group = self._normalize_lazy_skill_group_name(name)
+        return bool(group) and group in self._active_lazy_skill_groups
+
     def _catalog_fingerprint(self, skill_md_paths: list[Path]) -> str:
         """SHA1 over sorted (path, mtime) pairs + cache version."""
         parts = [f"v{self._CACHE_VERSION}"]
@@ -741,10 +784,28 @@ class SkillCatalog:
             # 10_superpowers and 20_ralph (rglob follow_symlinks needs Python 3.13+).
 
             results: list[Path] = []
-            for root, _dirs, files in os.walk(str(directory), followlinks=True):
+            for root, dirs, files in os.walk(str(directory), followlinks=True):
+                root_path = Path(root)
+                try:
+                    rel_parts = root_path.relative_to(directory).parts
+                except Exception:
+                    rel_parts = ()
+
+                if rel_parts:
+                    top_level = rel_parts[0]
+                    if self._is_lazy_skill_group_dir_name(top_level) and not self._is_lazy_skill_group_active(top_level):
+                        dirs[:] = []
+                        continue
+                else:
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if not self._is_lazy_skill_group_dir_name(d)
+                        or self._is_lazy_skill_group_active(d)
+                    ]
                 for fname in files:
                     if fname.lower().endswith(".md"):
-                        results.append(Path(root) / fname)
+                        results.append(root_path / fname)
             return sorted(results)
 
         if self.skills_md_path.is_dir():
@@ -876,6 +937,98 @@ class SkillCatalog:
             next_skills=[],
         )
 
+    def _normalize_skill_slug(self, raw: str) -> str:
+        text = re.sub(r"^\d+[_-]*", "", str(raw or ""))
+        text = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
+        return text or "skill"
+
+    def _skill_root_for_source(self, source_path: Path) -> Path | None:
+        start = source_path if source_path.is_dir() else source_path.parent
+        for candidate in (start, *start.parents):
+            skill_md = candidate / "SKILL.md"
+            if skill_md.is_file():
+                return candidate
+            try:
+                if candidate == self.skills_dir_path or candidate == self.skills_md_path:
+                    break
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _is_python_skill_module(path: Path) -> bool:
+        return (
+            path.is_file()
+            and path.suffix == ".py"
+            and path.name != "__init__.py"
+            and not path.name.startswith("_")
+        )
+
+    def _skill_root_has_python_tools(self, skill_root: Path) -> bool:
+        try:
+            for path in skill_root.rglob("*.py"):
+                if self._is_python_skill_module(path):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _parse_tool_backed_skill_card(
+        self, source_path: Path, raw_content: str
+    ) -> SkillCard:
+        manifest, body = self._split_frontmatter(raw_content)
+        skill_id = self._skill_id_from_source(source_path)
+        display_name = (
+            str(manifest.get("name") or "").strip()
+            or source_path.parent.name.replace("-", " ").replace("_", " ").title()
+        )
+        description = str(manifest.get("description") or "").strip()
+        summary = description or self._skill_summary(body)
+        playbooks = [
+            sec["heading"]
+            for sec in self.parse_markdown_h2_sections(body)
+            if sec["heading"]
+        ]
+        aliases = self._skill_aliases(skill_id, manifest)
+        triggers = self._manifest_list(manifest, "triggers")
+        if description:
+            triggers = [description, *triggers]
+        triggers.extend(self._extract_use_when_clauses(body))
+        anti_triggers = self._manifest_list(manifest, "anti_triggers")
+        anti_triggers.extend(self._extract_labeled_items(body, "Avoid when"))
+        preferred_tools = self._manifest_list(manifest, "preferred_tools")
+        example_queries = self._manifest_list(manifest, "example_queries")
+        when_not_to_use = self._manifest_list(manifest, "when_not_to_use")
+        next_skills = self._manifest_list(manifest, "next_skills")
+        related_context = self._guidance_related_markdown_content(source_path)
+        keywords = self._skill_keywords(
+            summary,
+            playbooks,
+            [],
+            triggers=triggers,
+            example_queries=example_queries,
+            aliases=aliases,
+            content=f"{body}\n{related_context}",
+            content_max_chars=12000,
+        )
+        return SkillCard(
+            id=skill_id,
+            name=display_name,
+            summary=summary,
+            source_path=str(source_path),
+            description=description or summary,
+            tool_names=[],
+            playbooks=playbooks,
+            keywords=keywords,
+            aliases=aliases,
+            triggers=list(dict.fromkeys(item for item in triggers if item)),
+            anti_triggers=list(dict.fromkeys(item for item in anti_triggers if item)),
+            preferred_tools=preferred_tools,
+            example_queries=example_queries,
+            when_not_to_use=when_not_to_use,
+            next_skills=next_skills,
+        )
+
     def _guidance_related_markdown_content(self, source_path: Path) -> str:
         """Collect bounded routing text from all markdown files in a guidance skill.
 
@@ -960,12 +1113,15 @@ class SkillCatalog:
 
             source_path = str(getattr(tool, "source_path", "") or "")
             tool_desc = str(getattr(tool, "description", "") or "").strip()
+            skill_meta_raw = getattr(tool, "skill_meta", None)
+            skill_meta = skill_meta_raw if isinstance(skill_meta_raw, dict) else {}
             card = cards.get(skill_id)
             if card is None:
                 card = self._new_tool_backed_skill_card(
                     skill_id=skill_id,
                     source_path=source_path,
                     tool_desc=tool_desc,
+                    skill_meta=skill_meta,
                 )
                 cards[skill_id] = card
                 changed = True
@@ -975,6 +1131,7 @@ class SkillCatalog:
                 skill_id=skill_id,
                 tool_name=tool_name,
                 tool_desc=tool_desc,
+                skill_meta=skill_meta,
             ):
                 changed = True
 
@@ -983,28 +1140,72 @@ class SkillCatalog:
         return changed
 
     def _new_tool_backed_skill_card(
-        self, *, skill_id: str, source_path: str, tool_desc: str
+        self,
+        *,
+        skill_id: str,
+        source_path: str,
+        tool_desc: str,
+        skill_meta: dict[str, Any] | None = None,
     ) -> SkillCard:
-        display_name = skill_id.replace("_", " ").title()
+        meta = skill_meta if isinstance(skill_meta, dict) else {}
+        display_name = str(meta.get("name") or "").strip() or skill_id.replace("_", " ").title()
         default_summary = (
             f"Tool-backed skill group '{display_name}' loaded from Python modules."
+        )
+        description = str(meta.get("description") or "").strip() or tool_desc or default_summary
+        aliases = [skill_id.replace("_", " ")]
+        aliases.extend(str(item).strip() for item in meta.get("aliases", []) if str(item).strip())
+        triggers = list(_TOOL_BACKED_DEFAULT_TRIGGERS.get(skill_id, []))
+        triggers.extend(str(item).strip() for item in meta.get("triggers", []) if str(item).strip())
+        anti_triggers = list(_TOOL_BACKED_DEFAULT_ANTI_TRIGGERS.get(skill_id, []))
+        anti_triggers.extend(
+            str(item).strip() for item in meta.get("anti_triggers", []) if str(item).strip()
+        )
+        preferred_tools = [
+            str(item).strip() for item in meta.get("preferred_tools", []) if str(item).strip()
+        ]
+        example_queries = [
+            str(item).strip() for item in meta.get("example_queries", []) if str(item).strip()
+        ]
+        when_not_to_use = [
+            str(item).strip() for item in meta.get("when_not_to_use", []) if str(item).strip()
+        ]
+        next_skills = [
+            str(item).strip() for item in meta.get("next_skills", []) if str(item).strip()
+        ]
+        playbooks = [str(item).strip() for item in meta.get("workflow", []) if str(item).strip()]
+        keywords = self._skill_keywords(
+            description,
+            playbooks,
+            preferred_tools,
+            triggers=triggers,
+            example_queries=example_queries,
+            aliases=aliases,
+            content="\n".join([description, *playbooks]),
         )
         return SkillCard(
             id=skill_id,
             name=display_name,
-            summary=tool_desc or default_summary,
+            summary=description,
             source_path=source_path,
-            description=tool_desc or default_summary,
+            description=description,
             tool_names=[],
-            playbooks=[],
-            keywords=[],
-            aliases=[skill_id.replace("_", " ")],
-            triggers=list(_TOOL_BACKED_DEFAULT_TRIGGERS.get(skill_id, [])),
-            anti_triggers=list(_TOOL_BACKED_DEFAULT_ANTI_TRIGGERS.get(skill_id, [])),
-            preferred_tools=[],
-            example_queries=[],
-            when_not_to_use=[_TOOL_BACKED_DEFAULT_WHEN_NOT_TO_USE],
-            next_skills=list(_TOOL_BACKED_DEFAULT_NEXT_SKILLS.get(skill_id, [])),
+            playbooks=playbooks,
+            keywords=keywords,
+            aliases=list(dict.fromkeys(item for item in aliases if item)),
+            triggers=list(dict.fromkeys(item for item in triggers if item)),
+            anti_triggers=list(dict.fromkeys(item for item in anti_triggers if item)),
+            preferred_tools=preferred_tools,
+            example_queries=example_queries,
+            when_not_to_use=when_not_to_use or [_TOOL_BACKED_DEFAULT_WHEN_NOT_TO_USE],
+            next_skills=list(
+                dict.fromkeys(
+                    [
+                        *next_skills,
+                        *list(_TOOL_BACKED_DEFAULT_NEXT_SKILLS.get(skill_id, [])),
+                    ]
+                )
+            ),
         )
 
     @staticmethod
@@ -1047,14 +1248,20 @@ class SkillCatalog:
             card.description = tool_desc
             changed = True
 
-        if not card.triggers and skill_id in _TOOL_BACKED_DEFAULT_TRIGGERS:
-            card.triggers = list(_TOOL_BACKED_DEFAULT_TRIGGERS[skill_id])
+        if skill_id in _TOOL_BACKED_DEFAULT_TRIGGERS and self._append_unique_strings(
+            card.triggers,
+            _TOOL_BACKED_DEFAULT_TRIGGERS[skill_id],
+        ):
             changed = True
-        if not card.anti_triggers and skill_id in _TOOL_BACKED_DEFAULT_ANTI_TRIGGERS:
-            card.anti_triggers = list(_TOOL_BACKED_DEFAULT_ANTI_TRIGGERS[skill_id])
+        if skill_id in _TOOL_BACKED_DEFAULT_ANTI_TRIGGERS and self._append_unique_strings(
+            card.anti_triggers,
+            _TOOL_BACKED_DEFAULT_ANTI_TRIGGERS[skill_id],
+        ):
             changed = True
-        if not card.next_skills and skill_id in _TOOL_BACKED_DEFAULT_NEXT_SKILLS:
-            card.next_skills = list(_TOOL_BACKED_DEFAULT_NEXT_SKILLS[skill_id])
+        if skill_id in _TOOL_BACKED_DEFAULT_NEXT_SKILLS and self._append_unique_strings(
+            card.next_skills,
+            _TOOL_BACKED_DEFAULT_NEXT_SKILLS[skill_id],
+        ):
             changed = True
         if not card.when_not_to_use:
             card.when_not_to_use = [_TOOL_BACKED_DEFAULT_WHEN_NOT_TO_USE]
@@ -1068,6 +1275,7 @@ class SkillCatalog:
         skill_id: str,
         tool_name: str,
         tool_desc: str,
+        skill_meta: dict[str, Any] | None = None,
     ) -> bool:
         changed = False
         if tool_name not in card.tool_names:
@@ -1109,6 +1317,82 @@ class SkillCatalog:
         keywords = _skill_tokens(f"{tool_name.replace('_', ' ')} {tool_desc}")
         if self._append_unique_strings(card.keywords, keywords):
             changed = True
+        if self._apply_tool_backed_skill_meta(card=card, skill_id=skill_id, skill_meta=skill_meta):
+            changed = True
+        return changed
+
+    def _apply_tool_backed_skill_meta(
+        self,
+        *,
+        card: SkillCard,
+        skill_id: str,
+        skill_meta: dict[str, Any] | None,
+    ) -> bool:
+        meta = skill_meta if isinstance(skill_meta, dict) else {}
+        if not meta:
+            return False
+
+        changed = False
+        name = str(meta.get("name") or "").strip()
+        description = str(meta.get("description") or "").strip()
+        aliases = [str(item).strip() for item in meta.get("aliases", []) if str(item).strip()]
+        triggers = [str(item).strip() for item in meta.get("triggers", []) if str(item).strip()]
+        anti_triggers = [
+            str(item).strip() for item in meta.get("anti_triggers", []) if str(item).strip()
+        ]
+        preferred_tools = [
+            str(item).strip() for item in meta.get("preferred_tools", []) if str(item).strip()
+        ]
+        example_queries = [
+            str(item).strip() for item in meta.get("example_queries", []) if str(item).strip()
+        ]
+        when_not_to_use = [
+            str(item).strip() for item in meta.get("when_not_to_use", []) if str(item).strip()
+        ]
+        next_skills = [
+            str(item).strip() for item in meta.get("next_skills", []) if str(item).strip()
+        ]
+        workflow = [str(item).strip() for item in meta.get("workflow", []) if str(item).strip()]
+
+        if name and card.name != name:
+            card.name = name
+            changed = True
+        if description and card.summary != description:
+            card.summary = description
+            changed = True
+        if description and card.description != description:
+            card.description = description
+            changed = True
+        if self._append_unique_strings(card.aliases, aliases):
+            changed = True
+        if self._append_unique_strings(card.triggers, triggers):
+            changed = True
+        if self._append_unique_strings(card.anti_triggers, anti_triggers):
+            changed = True
+        if self._append_unique_strings(card.preferred_tools, preferred_tools):
+            changed = True
+        if self._append_unique_strings(card.example_queries, example_queries):
+            changed = True
+        if self._append_unique_strings(card.next_skills, next_skills):
+            changed = True
+        if self._append_unique_strings(card.playbooks, workflow):
+            changed = True
+        if when_not_to_use and card.when_not_to_use != when_not_to_use:
+            card.when_not_to_use = when_not_to_use
+            changed = True
+
+        content = "\n".join([description, *workflow, *example_queries])
+        keywords = self._skill_keywords(
+            description or card.summary,
+            card.playbooks,
+            card.tool_names,
+            triggers=card.triggers,
+            example_queries=card.example_queries,
+            aliases=card.aliases,
+            content=content,
+        )
+        if self._append_unique_strings(card.keywords, keywords):
+            changed = True
         return changed
 
     def build_skill_catalog(
@@ -1120,9 +1404,12 @@ class SkillCatalog:
         cards: dict[str, SkillCard] = {}
         all_sections: list[ToolSection] = []
         for source_path, source_content in skill_contents:
-            # Superpowers SKILL.md files are guidance-only — handle separately.
             if source_path.name.upper() == "SKILL.MD":
-                card = self._parse_superpowers_card(source_path, source_content)
+                skill_root = self._skill_root_for_source(source_path)
+                if skill_root is not None and self._skill_root_has_python_tools(skill_root):
+                    card = self._parse_tool_backed_skill_card(source_path, source_content)
+                else:
+                    card = self._parse_superpowers_card(source_path, source_content)
                 if card:
                     cards[card.id] = card
                 continue
@@ -1364,8 +1651,11 @@ class SkillCatalog:
             return self._dense_model
         if self._dense_model_disabled_reason:
             return None
-        if not HAS_SENTENCE_TRANSFORMERS or SentenceTransformer is None:
+        sentence_transformer = _lazy_import_sentence_transformer()
+        if sentence_transformer is None:
             self._dense_model_disabled_reason = "sentence_transformers_missing"
+            if _SENTENCE_TRANSFORMER_IMPORT_ERROR:
+                self._dense_model_disabled_reason = _SENTENCE_TRANSFORMER_IMPORT_ERROR
             self._log.info(
                 "Dense routing disabled: sentence-transformers is not installed."
             )
@@ -1385,7 +1675,7 @@ class SkillCatalog:
             except Exception:
                 pass
             with _suppress_fd_output():
-                self._dense_model = SentenceTransformer(self._dense_model_name)
+                self._dense_model = sentence_transformer(self._dense_model_name)
             self._log.info("Dense routing model enabled: %s", self._dense_model_name)
             return self._dense_model
         except Exception as exc:
@@ -2219,14 +2509,17 @@ class SkillCatalog:
         return "\n".join(kept_lines).strip()
 
     def _skill_id_from_source(self, source_path: Path) -> str:
+        skill_root = self._skill_root_for_source(source_path)
+        if skill_root is not None and self._skill_root_has_python_tools(skill_root):
+            return self._normalize_skill_slug(skill_root.name)
+
         # SKILL.md files (Superpowers format) use their *parent directory* as the id.
         if source_path.name.upper() == "SKILL.MD":
             raw = source_path.parent.name
-            raw = re.sub(r"[^a-zA-Z0-9]+", "_", raw).strip("_").lower()
+            raw = self._normalize_skill_slug(raw)
             return f"sp__{raw}" if raw else "sp__skill"
         stem = source_path.stem
-        stem = re.sub(r"^\d+[_-]*", "", stem)
-        stem = re.sub(r"[^a-zA-Z0-9]+", "_", stem).strip("_").lower()
+        stem = self._normalize_skill_slug(stem)
         return stem or "skill"
 
     def _skill_name_from_source(self, source_path: Path) -> str:

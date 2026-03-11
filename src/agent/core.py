@@ -13,6 +13,7 @@ from ..config import Config
 from ..logging_utils import get_logger
 from ..memory import Memory
 from ..messages import Message, MessageRole
+from ..reasoners.reflexion import ReflexionReasoner
 from ..thinking import ThinkingStrategy
 from ..tools import (
     HAS_TOON,
@@ -75,6 +76,7 @@ _SOCIAL_MESSAGES = {
     "what's up",
 }
 _SOCIAL_GREETING_TOKENS = {"hi", "hello", "hey", "yo"}
+_LOAD_SKILLS_RE = re.compile(r"^\s*/load-skills(?:\s+(?P<args>.+?))?\s*$", re.IGNORECASE)
 _TOOL_EXECUTION_CLAIM_PATTERNS = (
     r"\b(?:i|we)\s+(?:have\s+|has\s+|had\s+|already\s+|just\s+)?"
     r"(?:ran|run|executed|called|used|invoked|applied|checked|verified|searched|"
@@ -162,7 +164,10 @@ class Agent:
         self.tools.install_context(self.ctx)
         self.tools.load_tools_from_skills()
         self._mcp_clients: list[Any] = []
-        self._load_mcp_servers()
+        self._mcp_loaded = False
+        if not bool(getattr(self.config, "lazy_mcp_init", True)):
+            self._load_mcp_servers()
+            self._mcp_loaded = True
 
         self._cached_sys_tools_prompt: str = ""
         self._cached_sys_prompt_base: str = ""
@@ -186,6 +191,37 @@ class Agent:
         # Per-agent in-memory tool result cache (persists across turns within the
         # same Agent instance; cleared on reset()).
         self._tool_result_cache: dict[str, tuple[float, str]] = {}
+        
+        self._export_available_tools()
+
+    def _export_available_tools(self) -> None:
+        """Export a list of currently available tools to a JSON file."""
+        import json
+        from pathlib import Path
+
+        try:
+            out_path = Path.cwd() / "available_tools.json"
+            tools = []
+            for t in self.tools.list_tools():
+                tools.append({
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": [
+                        {
+                            "name": p.name,
+                            "type": p.type,
+                            "description": p.description,
+                            "required": p.required
+                        }
+                        for p in t.parameters
+                    ]
+                })
+            out_path.write_text(
+                json.dumps(tools, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            self._log.warning("Failed to export available_tools.json: %s", e)
 
     def get_last_context_text(self) -> str:
         """Return a human-readable Markdown dump of the last context window sent to the LLM."""
@@ -249,6 +285,12 @@ class Agent:
                 self._log.warning(
                     "MCP '%s' failed to initialise: %s — skipping", name, exc
                 )
+
+    def _ensure_mcp_servers_loaded(self) -> None:
+        if self._mcp_loaded:
+            return
+        self._load_mcp_servers()
+        self._mcp_loaded = True
 
     def _load_soul_or_default(self) -> str:
         soul_path = Path(__file__).resolve().parents[2] / "SOUL.md"
@@ -402,6 +444,39 @@ class Agent:
         )
         return any(token in text for token in project_targets)
 
+    def _allows_reasoning_only_response(
+        self,
+        message: str,
+        selection: SkillSelection | None = None,
+    ) -> bool:
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+
+        explicit_reasoning = any(
+            re.search(pattern, text)
+            for pattern in (
+                r"/think\b",
+                r"\bthink(?:\s+through|\s+about|\s+before)?\b",
+                r"\breason(?:\s+about|\s+through|\s+before)?\b",
+                r"\bdecompose\b",
+                r"\bbrainstorm\b",
+                r"\bbest approach\b",
+                r"\bplan (?:this|that|it|the approach|the migration|the work|first)\b",
+                r"\bbefore acting\b",
+                r"\bbefore any action\b",
+                r"\bbefore implementing\b",
+            )
+        )
+        if explicit_reasoning:
+            return True
+
+        if selection is None:
+            return False
+
+        reasoning_skill_ids = {"think", "sp__think", "sp__strategic_thinking"}
+        return any(skill.id in reasoning_skill_ids for skill in selection.selected_skills)
+
     def _reset_context_state(self) -> None:
         reset = getattr(self.ctx, "reset", None)
         if callable(reset):
@@ -552,8 +627,23 @@ class Agent:
         tool_calls: list[ToolCall] | None = None,
         tool_result_preview_by_sig: dict[tuple[str, str], str] | None = None,
     ) -> tuple[str, SkillSelection | None, str]:
+        coding_hint = self._coding_workflow_hint(message)
         if bool(getattr(self.config, "enable_skill_routing", True)):
             schema_mode = str(getattr(self.config, "tool_schema_mode", "rich"))
+            # Social messages (greetings, thanks, etc.) must never trigger skill routing —
+            # injecting ACTIVE SKILLS playbooks into a greeting inflates the context window
+            # and confuses the model into thinking it needs to call tools.
+            if self._is_social_message(message):
+                prompt = self._system_plus_tools_prompt()
+                if coding_hint:
+                    prompt += coding_hint
+                empty_selection = SkillSelection(
+                    query=message,
+                    selected_skills=[],
+                    selected_tools=[],
+                    fallback_tools=[],
+                )
+                return prompt, empty_selection, message
             routing_query = self._compose_skill_routing_query(
                 message,
                 tool_calls=tool_calls,
@@ -588,9 +678,44 @@ class Agent:
                 ),
             )
             if selection.selected_skills:
-                return self.system_prompt + routed_prompt, selection, routing_query
-            return self._system_plus_tools_prompt(), selection, routing_query
-        return self._system_plus_tools_prompt(), None, message
+                prompt = self.system_prompt + routed_prompt
+                if coding_hint:
+                    prompt += coding_hint
+                return prompt, selection, routing_query
+            prompt = self._system_plus_tools_prompt()
+            if coding_hint:
+                prompt += coding_hint
+            return prompt, selection, routing_query
+        prompt = self._system_plus_tools_prompt()
+        if coding_hint:
+            prompt += coding_hint
+        return prompt, None, message
+
+    def _coding_workflow_hint(self, message: str) -> str:
+        text = (message or "").strip().lower()
+        if not text or self._is_social_message(text):
+            return ""
+        code_terms = (
+            r"\b(file|files|path|directory|repo|repository|code|function|class|module|"
+            r"symbol|regex|search|replace|edit|patch|read|lines?)\b"
+        )
+        file_hint = (
+            r"(?:^|[\s`\"'])[\w./\\-]+\.(?:py|rs|ts|tsx|js|jsx|go|java|c|cpp|h|hpp|md|json|toml|ya?ml)"
+        )
+        if not (
+            self._is_editing_intent(text)
+            or re.search(code_terms, text)
+            or re.search(file_hint, text)
+        ):
+            return ""
+        return (
+            "\n\nCODING WORKFLOW HINT:\n"
+            "- Prefer `find_path`/`fd_find` to locate files by name before guessing paths.\n"
+            "- Prefer `find_in_file` for single-file search and `rg_search` for workspace search.\n"
+            "- Prefer `sed_read` for exact line ranges and `read_file_smart` for large files or symbol-focused reads.\n"
+            "- Use `read_file` for small direct reads only.\n"
+            "- Use `run_shell` only when the dedicated file/search/edit tools are insufficient.\n"
+        )
 
     def _build_system_prompt_for_message(
         self,
@@ -615,6 +740,25 @@ class Agent:
         temp = temperature if temperature is not None else self.config.temperature
         n_tok = max_tokens if max_tokens is not None else self.config.max_tokens
         return temp, n_tok
+
+    def _resolve_retrieval_settings(
+        self,
+        use_semantic_retrieval: bool | None,
+        retrieval_mode: str | None,
+    ) -> tuple[bool, str]:
+        use_semantic = (
+            bool(use_semantic_retrieval)
+            if use_semantic_retrieval is not None
+            else bool(getattr(self.config, "default_use_semantic_retrieval", False))
+        )
+        mode = str(
+            retrieval_mode
+            if retrieval_mode is not None
+            else getattr(self.config, "default_retrieval_mode", "vector")
+        ).strip().lower()
+        if mode not in {"vector", "keyword", "hybrid"}:
+            mode = "vector"
+        return use_semantic, mode
 
     @staticmethod
     def _strip_internal_reasoning_tags(text: str) -> str:
@@ -841,6 +985,167 @@ class Agent:
             f"Now emit exactly one tool_call (no prose). Suggested tools: {tool_hint}."
         )
 
+    @staticmethod
+    def _inspection_payload_summary(
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> str:
+        lname = str(tool_name or "").strip().lower()
+        if lname == "get_project_map":
+            root = str(payload.get("root", "") or "").strip()
+            files = payload.get("files", [])
+            sample: list[str] = []
+            if isinstance(files, list):
+                sample = [
+                    str(item.get("path", "")).strip()
+                    for item in files[:5]
+                    if isinstance(item, dict) and str(item.get("path", "")).strip()
+                ]
+            return (
+                f"root={root or '?'} file_count={int(payload.get('file_count', 0) or 0)}"
+                + (f" sample_files={sample}" if sample else "")
+            )
+        if lname == "list_directory":
+            path = str(payload.get("path", "") or "").strip()
+            entries = payload.get("entries", [])
+            sample = []
+            if isinstance(entries, list):
+                sample = [
+                    str(item.get("name", "")).strip()
+                    for item in entries[:5]
+                    if isinstance(item, dict) and str(item.get("name", "")).strip()
+                ]
+            return (
+                f"path={path or '?'} count={int(payload.get('count', 0) or 0)}"
+                + (f" sample_entries={sample}" if sample else "")
+            )
+        if lname in {"read_file", "read_file_smart"}:
+            path = str(payload.get("path", "") or "").strip()
+            total = int(payload.get("total_lines", 0) or 0)
+            returned = str(payload.get("returned_lines", "") or "").strip()
+            return (
+                f"path={path or '?'} total_lines={total} returned_lines={returned or '?'}"
+            )
+        if lname == "git_status":
+            repo = str(payload.get("repo", "") or "").strip()
+            staged = payload.get("staged", [])
+            unstaged = payload.get("unstaged", [])
+            untracked = payload.get("untracked", [])
+            return (
+                f"repo={repo or '?'} staged={len(staged) if isinstance(staged, list) else 0} "
+                f"unstaged={len(unstaged) if isinstance(unstaged, list) else 0} "
+                f"untracked={len(untracked) if isinstance(untracked, list) else 0}"
+            )
+        return f"tool={tool_name}"
+
+    def _inspection_result_contradiction(
+        self,
+        *,
+        response_text: str,
+        tool_name: str,
+        payload: dict[str, Any] | None,
+    ) -> str:
+        if not isinstance(payload, dict):
+            return ""
+        if str(payload.get("status", "ok")).strip().lower() != "ok":
+            return ""
+
+        cleaned = self._strip_internal_reasoning_tags(response_text or "").strip()
+        if not cleaned:
+            return ""
+        lower = cleaned.lower()
+        lname = str(tool_name or "").strip().lower()
+
+        def _mentions_empty() -> bool:
+            patterns = (
+                r"\b(?:is|was|looks)\s+empty\b",
+                r"\bno\s+files\b",
+                r"\b0\s+files\b",
+                r"\bcontains\s+no\s+files\b",
+                r"\bdirectory\s+is\s+empty\b",
+            )
+            return any(re.search(pattern, lower) for pattern in patterns)
+
+        if lname == "get_project_map":
+            count = int(payload.get("file_count", 0) or 0)
+            if count > 0 and _mentions_empty():
+                return "The draft says the directory is empty, but get_project_map found files."
+
+        if lname == "list_directory":
+            count = int(payload.get("count", 0) or 0)
+            if count > 0 and _mentions_empty():
+                return "The draft says the directory is empty, but list_directory returned entries."
+
+        if lname in {"read_file", "read_file_smart"}:
+            total = int(payload.get("total_lines", 0) or 0)
+            path = str(payload.get("path", "") or "").strip().lower()
+            if total > 0 and re.search(r"\b(?:file\s+is\s+empty|empty\s+file)\b", lower):
+                return "The draft says the file is empty, but read_file returned non-empty content."
+            if path and re.search(r"\bnot\s+a\s+file\b|\bfile\s+not\s+found\b", lower):
+                return "The draft says the file was missing/invalid, but read_file succeeded."
+
+        if lname == "git_status":
+            staged = payload.get("staged", [])
+            unstaged = payload.get("unstaged", [])
+            untracked = payload.get("untracked", [])
+            n_changed = 0
+            if isinstance(staged, list):
+                n_changed += len(staged)
+            if isinstance(unstaged, list):
+                n_changed += len(unstaged)
+            if isinstance(untracked, list):
+                n_changed += len(untracked)
+            if n_changed > 0 and re.search(
+                r"\b(?:clean\s+working\s+tree|no\s+changes|nothing\s+to\s+commit)\b",
+                lower,
+            ):
+                return "The draft says the working tree is clean, but git_status reported changes."
+
+        return ""
+
+    def _inspection_result_guard_nudge(
+        self,
+        *,
+        response_text: str,
+        tool_name: str,
+        payload: dict[str, Any] | None,
+    ) -> str:
+        contradiction = self._inspection_result_contradiction(
+            response_text=response_text,
+            tool_name=tool_name,
+            payload=payload,
+        )
+        if not contradiction:
+            return ""
+        summary = self._inspection_payload_summary(tool_name, payload or {})
+        return (
+            "[Tool-result consistency check] Your draft contradicts the latest inspection tool result. "
+            f"{contradiction}\n"
+            f"Latest `{tool_name}` summary: {summary}\n"
+            "Revise the answer so it matches the tool output exactly. "
+            "If you are unsure, call one more inspection tool instead of guessing."
+        )
+
+    def _inspection_result_runtime_note(
+        self,
+        *,
+        final_text: str,
+        tool_name: str,
+        payload: dict[str, Any] | None,
+    ) -> str:
+        contradiction = self._inspection_result_contradiction(
+            response_text=final_text,
+            tool_name=tool_name,
+            payload=payload,
+        )
+        if not contradiction:
+            return ""
+        summary = self._inspection_payload_summary(tool_name, payload or {})
+        return (
+            "[Runtime note] The final answer above conflicts with the latest inspection tool result. "
+            f"{contradiction} Latest `{tool_name}` summary: {summary}"
+        )
+
     def _create_base_conversation(self, message: str) -> list[Message]:
         return [
             Message(
@@ -901,6 +1206,166 @@ class Agent:
         asst_ctx = _truncate_text(text, assistant_ctx_max_chars)
         convo.append(Message(role=MessageRole.ASSISTANT, content=asst_ctx))
 
+    def _handle_runtime_command(
+        self,
+        *,
+        message: str,
+        sid: str,
+        temp: float,
+        n_tok: int,
+        tracer: _TraceCollector,
+        debug_on: bool,
+    ) -> AgentResponse | None:
+        match = _LOAD_SKILLS_RE.fullmatch(message or "")
+        if not match:
+            return None
+
+        convo = self._create_base_conversation(message)
+        self._append_user_message(convo, sid, message, tracer.emit)
+
+        available = self.tools.available_lazy_skill_groups()
+        raw_args = str(match.group("args") or "").strip()
+        loaded_now: list[str] = []
+        already_loaded: list[str] = []
+        missing: list[str] = []
+
+        if raw_args:
+            requested = [
+                item.strip()
+                for item in re.split(r"[\s,]+", raw_args)
+                if item.strip()
+            ]
+            for item in requested:
+                changed, canonical = self.tools.activate_lazy_skill_group(item)
+                if canonical is None:
+                    missing.append(item)
+                elif changed:
+                    loaded_now.append(canonical)
+                else:
+                    already_loaded.append(canonical)
+
+            if loaded_now:
+                self.tools.reload_skills()
+                self._cached_sys_tools_prompt = ""
+                self._export_available_tools()
+
+        active = self.tools.active_lazy_skill_groups()
+        if not raw_args:
+            reply = (
+                "Lazy skill groups: "
+                + (", ".join(available) if available else "none")
+                + ". Active: "
+                + (", ".join(active) if active else "none")
+                + ". Use `/load-skills <group>` to activate one."
+            )
+        else:
+            parts: list[str] = []
+            if loaded_now:
+                parts.append(f"Loaded: {', '.join(loaded_now)}.")
+            if already_loaded:
+                parts.append(f"Already active: {', '.join(already_loaded)}.")
+            if missing:
+                parts.append(f"Unknown lazy skill groups: {', '.join(missing)}.")
+            parts.append(
+                "Active lazy skill groups: "
+                + (", ".join(active) if active else "none")
+                + "."
+            )
+            if available:
+                parts.append("Available lazy skill groups: " + ", ".join(available) + ".")
+            reply = " ".join(parts)
+
+        self._append_assistant_message(convo, sid, reply, assistant_ctx_max_chars=512)
+        tracer.emit(
+            "runtime_command",
+            command="load-skills",
+            requested=raw_args,
+            loaded=loaded_now,
+            already_loaded=already_loaded,
+            missing=missing,
+            active=active,
+        )
+        self._persist_runtime_state(sid)
+
+        debug = tracer.build_debug_payload(
+            sid=sid,
+            iterations=0,
+            tool_calls=[],
+            temp=temp,
+            n_tok=n_tok,
+            config=self.config,
+        )
+        trace_md = render_trace_markdown(debug) if debug_on else ""
+        return AgentResponse(
+            messages=convo,
+            tool_calls=[],
+            iterations=0,
+            final_response=reply,
+            debug=debug,
+            trace_md=trace_md,
+        )
+
+    def _run_social_fast_path(
+        self,
+        *,
+        message: str,
+        sid: str,
+        temp: float,
+        n_tok: int,
+        tracer: _TraceCollector,
+        debug_on: bool,
+    ) -> AgentResponse | None:
+        convo = self._create_base_conversation(message)
+        self._append_user_message(convo, sid, message, tracer.emit)
+        llm_messages = [
+            Message(role=MessageRole.SYSTEM, content=self.system_prompt),
+            Message(
+                role=MessageRole.USER,
+                content=(
+                    "Reply briefly and naturally to this social message. "
+                    "Do not call tools.\n\n"
+                    f"User message: {message}"
+                ),
+            ),
+        ]
+        try:
+            final = (
+                self._llm_generate(
+                    llm_messages,
+                    temperature=temp,
+                    max_tokens=min(int(n_tok), 80),
+                    stream=False,
+                    on_token=None,
+                )
+                or ""
+            ).strip()
+        except Exception:
+            final = ""
+        if not final:
+            return None
+        self._append_assistant_message(convo, sid, final, assistant_ctx_max_chars=512)
+        tracer.emit("social_fast_path", preview=final[:120])
+        self._persist_runtime_state(sid)
+
+        debug = tracer.build_debug_payload(
+            sid=sid,
+            iterations=0,
+            tool_calls=[],
+            temp=temp,
+            n_tok=n_tok,
+            config=self.config,
+        )
+        trace_md = render_trace_markdown(debug) if debug_on else ""
+
+        return AgentResponse(
+            messages=convo,
+            tool_calls=[],
+            iterations=0,
+            final_response=final,
+            debug=debug,
+            trace_md=trace_md,
+        )
+
     def _append_tool_message(
         self,
         convo: list[Message],
@@ -918,7 +1383,44 @@ class Agent:
             vectorize=vectorize,
         )
         self.memory.save_message(sid, tool_msg_full)
-        result_ctx = _truncate_text(result_full, tool_result_max_chars)
+        
+        # Smart tool result summarization
+        # Instead of generic truncation, use LLM to extract relevant bits if too large.
+        if len(result_full) > tool_result_max_chars and bool(getattr(self.config, "auto_compact", True)):
+            try:
+                # Fast summary loop
+                summary_prompt = (
+                    "You ran the tool '{tool}' with arguments: {args}\n\n"
+                    "The result is {chars} characters long (too large for context). "
+                    "Extract the most relevant insights, errors, or data points from the result.\n\n"
+                    "--- START RESULT ---\n"
+                    "{res}\n"
+                    "--- END RESULT ---\n\n"
+                    "Provide a concise summary of the useful information."
+                ).format(
+                    tool=call.name,
+                    args=json.dumps(call.arguments, ensure_ascii=False),
+                    chars=len(result_full),
+                    # Provide up to twice the max_chars to the summarizer so it has enough context to condense
+                    res=result_full[: tool_result_max_chars * 2],
+                )
+                
+                result_ctx = self._llm_generate(
+                    [Message(role=MessageRole.USER, content=summary_prompt)],
+                    temperature=0.0,
+                    max_tokens=tool_result_max_chars // 4,
+                    stream=False,
+                    on_token=None,
+                )
+                if result_ctx:
+                    result_ctx = f"[LLM Summarized ({len(result_full)} chars)] {result_ctx.strip()}"
+                else:
+                    result_ctx = _truncate_text(result_full, tool_result_max_chars)
+            except Exception:
+                result_ctx = _truncate_text(result_full, tool_result_max_chars)
+        else:
+            result_ctx = _truncate_text(result_full, tool_result_max_chars)
+            
         convo.append(
             Message(
                 role=MessageRole.TOOL,
@@ -1001,13 +1503,16 @@ class Agent:
         message: str,
         session_id: str | None = None,
         verbose: bool = False,
-        use_semantic_retrieval: bool = False,
-        retrieval_mode: str = "vector",
+        use_semantic_retrieval: bool | None = None,
+        retrieval_mode: str | None = None,
         stream: Callable[[str], None] | None = None,
         fresh_session: bool = False,
         tool_callback: Callable[..., None] | None = None,
         skill_callback: Callable[[list[str], list[str]], None] | None = None,
     ) -> str:
+        use_semantic_retrieval, retrieval_mode = self._resolve_retrieval_settings(
+            use_semantic_retrieval, retrieval_mode
+        )
         return self.run(
             message,
             session_id=session_id,
@@ -1045,10 +1550,15 @@ class Agent:
         """Return True when a tool's result may be cached (read-only pattern check)."""
         if not bool(getattr(self.config, "tool_cache_enabled", True)):
             return False
+        exclude_patterns: list[str] = list(
+            getattr(self.config, "tool_cache_exclude_patterns", [])
+        )
         patterns: list[str] = list(
             getattr(self.config, "tool_cache_write_patterns", [])
         )
         name_lower = tool_name.lower()
+        if any(str(pat).lower() in name_lower for pat in exclude_patterns):
+            return False
         return not any(pat in name_lower for pat in patterns)
 
     def _is_write_tool_name(self, tool_name: str) -> bool:
@@ -1577,7 +2087,9 @@ class Agent:
         if not failed:
             return ""
 
+        partial = False
         snippets: list[str] = []
+        payload = self._parse_tool_result_payload(text)
         if isinstance(payload, dict):
             for key in ("error", "message", "stderr"):
                 value = payload.get(key)
@@ -1585,13 +2097,19 @@ class Agent:
                     snippets.append(value.strip())
             results = payload.get("results")
             if isinstance(results, list):
+                total = len(results)
+                failed = 0
                 for item in results:
                     if isinstance(item, dict) and item.get("status") != "ok":
+                        failed += 1
                         err = item.get("error")
                         if isinstance(err, str) and err.strip():
                             snippets.append(err.strip())
                         if len(snippets) >= 4:
                             break
+                if 0 < failed < total:
+                    partial = True
+
         if not snippets:
             snippets.append(text)
         err_summary = " | ".join(snippets)[:420]
@@ -1609,7 +2127,7 @@ class Agent:
             )
         elif re.search(r"file not found|not a file|no such file", lower):
             action = (
-                "Verify the path first (`list_directory`, `fd_find`, or `read_file`), then "
+                "Verify the path first (`find_path`, `fd_find`, `list_directory`, or `sed_read`), then "
                 "retry with the exact repository-relative path."
             )
         elif re.search(r"patch validation failed|hunk|diff has no hunks|failed to apply", lower):
@@ -1639,6 +2157,60 @@ class Agent:
             f"Next step: {action}\n"
             "Return exactly one repair tool_call now."
         )
+
+    def _run_reflexion_repair(
+        self,
+        call: ToolCall,
+        result_text: str,
+        tracer: _TraceCollector,
+    ) -> str | None:
+        """Run SOTA reflexion pass to fix a failed tool call."""
+        if not bool(getattr(self.config, "enable_reflexion_repair", False)):
+            return None
+
+        # Only for certain failure-prone tools
+        if not (self._is_edit_tool_name(call.name) or "shell" in call.name):
+            return None
+
+        tracer.emit("reflexion_repair_begin", tool=call.name)
+        reasoner = ReflexionReasoner(self.llm)
+        
+        # Build mini-context for reflexion
+        payload = {
+            "tool": call.name,
+            "arguments": call.arguments,
+            "error": str(result_text)[:2000]
+        }
+        
+        prompt = f"""
+I attempted to run a tool and it failed. 
+{json.dumps(payload, indent=2)}
+
+Analyze the error and the original intent. 
+If this was a file edit, check for indentation, missing anchors, or typos.
+If this was a shell command, check for syntax or missing dependencies.
+
+Return a corrected tool call in the same format.
+"""
+        try:
+            # ReflexionReasoner expects a query and returns a trace
+            trace = reasoner.solve(prompt)
+            fix_text = trace.answer or trace.reasoning
+            
+            # Extract new tool call if possible
+            new_calls = parse_tool_calls(fix_text, use_toon=False)
+            if new_calls:
+                tracer.emit("reflexion_repair_success", tool=call.name, fix=fix_text[:200])
+                # We return the first suggested tool call as a nudge
+                call_json = json.dumps({
+                    "name": new_calls[0].name,
+                    "arguments": new_calls[0].arguments
+                })
+                return f"[Reflexion Repair] Based on analysis, retry with: {call_json}"
+        except Exception as e:
+            tracer.emit("reflexion_repair_error", error=str(e))
+        
+        return None
 
     def _is_shell_verification_call(self, call: ToolCall, profile: str) -> bool:
         tool_name = (call.name or "").lower()
@@ -1778,6 +2350,12 @@ class Agent:
 
         Returns 5.0 on any failure so the gate is a no-op when the scoring
         call itself is unavailable.
+
+        Designed to work with reasoning models that emit <think>…</think> blocks:
+        - The prompt requests the score inside <score>…</score> tags so it can be
+          extracted even when the model prepends a thinking section.
+        - Falls back to bare-number regex if no tag is present.
+        - Strips think blocks before both extraction attempts.
         """
         prompt = (
             "[Question]\n"
@@ -1786,23 +2364,33 @@ class Agent:
             f"{answer[:1200]}\n\n"
             "Rate the above answer on a scale from 0 to 10 for completeness, "
             "accuracy, and confidence.\n"
-            "Output only a single number, e.g. '8.5'."
+            "Output your score inside XML tags like this: <score>8.5</score>\n"
+            "Output ONLY the tag with the number — no explanation."
         )
         try:
             raw = (
                 self._llm_generate(
                     [Message(role=MessageRole.USER, content=prompt)],
                     temperature=0.0,
-                    max_tokens=16,
+                    # Allow enough tokens for a think-block + score tag.
+                    max_tokens=96,
                     stream=False,
                     on_token=None,
                 )
                 or ""
             ).strip()
-            m = re.search(r"\b(10(?:\.0+)?|[0-9](?:\.\d+)?)\b", raw)
+            # Strip reasoning-model think blocks before parsing.
+            cleaned = _THINK_BLOCK_RE.sub("", raw).strip()
+            # Primary: extract from <score> tag.
+            tag_m = re.search(r"<score>\s*(10(?:\.0+)?|[0-9](?:\.\d+)?)\s*</score>", cleaned)
+            if tag_m:
+                return float(tag_m.group(1))
+            # Fallback: bare number anywhere in the cleaned response.
+            m = re.search(r"\b(10(?:\.0+)?|[0-9](?:\.\d+)?)\b", cleaned)
             return float(m.group(0)) if m else 5.0
         except Exception:
             return 5.0
+
 
     def _llm_generate(
         self,
@@ -1813,6 +2401,7 @@ class Agent:
         stream: bool,
         on_token: Callable[[str], None] | None,
         tools: Any = _UNSET,
+        grammar: str | None = None,
     ) -> str:
         kwargs: dict[str, Any] = {
             "temperature": temperature,
@@ -1822,14 +2411,19 @@ class Agent:
         }
         if tools is not _UNSET:
             kwargs["tools"] = tools
+        if grammar is not None:
+            kwargs["grammar"] = grammar
 
         try:
             return self.llm.generate(messages, **kwargs)
         except TypeError as exc:
             # Compatibility fallback for test doubles or legacy backends that
-            # don't accept a "tools" keyword argument.
+            # don't accept a "tools" or "grammar" keyword argument.
             if "tools" in kwargs and "unexpected keyword argument 'tools'" in str(exc):
                 kwargs.pop("tools", None)
+                return self.llm.generate(messages, **kwargs)
+            if "grammar" in kwargs and "unexpected keyword argument 'grammar'" in str(exc):
+                kwargs.pop("grammar", None)
                 return self.llm.generate(messages, **kwargs)
             raise
 
@@ -1957,6 +2551,17 @@ class Agent:
             }
         else:
             runtime_snapshot = self._runtime_context_snapshot()
+        # NEW: Try to fetch todo list for SOTA TUI tracking
+        todo_summary = []
+        try:
+            todo_res = self.run_tool_direct("todo", {"command": "view"}, session_id=sid)
+            payload = json.loads(todo_res)
+            if isinstance(payload, dict) and "todos" in payload:
+                # [{id, title, status, note}, ...]
+                todo_summary = payload["todos"]
+        except Exception:
+            pass
+
         return {
             "session_id": sid,
             "persisted_messages": persisted_messages,
@@ -1965,6 +2570,7 @@ class Agent:
             "loaded_message_budget": min(persisted_messages, history_limit),
             "history_over_budget": persisted_messages > history_limit,
             "runtime": runtime_snapshot,
+            "todo": todo_summary,
         }
 
     @staticmethod
@@ -2170,8 +2776,8 @@ class Agent:
         temperature: float | None = None,
         max_tokens: int | None = None,
         verbose: bool = False,
-        use_semantic_retrieval: bool = False,
-        retrieval_mode: str = "vector",
+        use_semantic_retrieval: bool | None = None,
+        retrieval_mode: str | None = None,
         stream_callback: Callable[[str], None] | None = None,
         fresh_session: bool = False,
         tool_callback: Callable[..., None] | None = None,
@@ -2181,6 +2787,9 @@ class Agent:
         tracer = _TraceCollector(enabled=debug_on)
 
         temp, n_tok = self._resolve_generation_settings(temperature, max_tokens)
+        use_semantic_retrieval, retrieval_mode = self._resolve_retrieval_settings(
+            use_semantic_retrieval, retrieval_mode
+        )
 
         requested_sid = session_id or str(uuid.uuid4())
         if fresh_session:
@@ -2194,6 +2803,31 @@ class Agent:
             self._activate_session_runtime(requested_sid)
         sid = requested_sid
         self._log.info("Run session=%s msg_len=%d", sid[:8], len(message))
+
+        runtime_command = self._handle_runtime_command(
+            message=message,
+            sid=sid,
+            temp=temp,
+            n_tok=n_tok,
+            tracer=tracer,
+            debug_on=debug_on,
+        )
+        if runtime_command is not None:
+            return runtime_command
+
+        if self._is_social_message(message):
+            social_fast_path = self._run_social_fast_path(
+                message=message,
+                sid=sid,
+                temp=temp,
+                n_tok=n_tok,
+                tracer=tracer,
+                debug_on=debug_on,
+            )
+            if social_fast_path is not None:
+                return social_fast_path
+
+        self._ensure_mcp_servers_loaded()
 
         # Auto-compact: keep session from growing unboundedly
         if bool(getattr(self.config, "auto_compact", True)) and not fresh_session:
@@ -2226,6 +2860,7 @@ class Agent:
         tool_result_preview_by_sig: dict[tuple[str, str], str] = {}
         iterations = 0
         consecutive_tools = 0
+        _last_tool_name: str | None = None
         editing_intent = self._is_editing_intent(message)
         max_iterations = int(self.config.max_iterations)
         max_consecutive_tool_calls = int(self.config.max_consecutive_tool_calls)
@@ -2272,6 +2907,18 @@ class Agent:
         max_tool_claim_guard_nudges = max(
             1,
             int(getattr(self.config, "tool_claim_guard_max_nudges", 2)),
+        )
+        inspection_result_guard_nudges = 0
+        max_inspection_result_guard_nudges = max(
+            1,
+            int(getattr(self.config, "inspection_result_guard_max_nudges", 2)),
+        )
+        latest_inspection_tool_name = ""
+        latest_inspection_payload: dict[str, Any] | None = None
+        reflexion_repair_attempts = 0
+        max_reflexion_repair_attempts = max(
+            0,
+            int(getattr(self.config, "reflexion_repair_max_attempts", 1)),
         )
         schema_validation_nudges: dict[str, int] = {}
         last_skill_signature: tuple[tuple[str, ...], tuple[str, ...]] | None = None
@@ -2459,6 +3106,15 @@ class Agent:
                 constrained=_tools_payload is not None,
             )
 
+            # GBNF grammar-constrained decoding: if the previous tool was
+            # grammar-registered (e.g. cc_edit), pass the grammar to the backend
+            # so it enforces valid tool-call structure. Only when not in chat-api mode.
+            _grammar: str | None = None
+            if not _tools_payload and not getattr(self.config, "use_chat_api", False):
+                _last = getattr(self, "_last_tool_name", None) or _last_tool_name
+                if _last:
+                    _grammar = self.tools.get_grammar(_last)
+
             gen_start = time.perf_counter()
             try:
                 text = self._llm_generate(
@@ -2468,6 +3124,7 @@ class Agent:
                     stream=_do_stream,
                     on_token=stream_callback,
                     tools=_tools_payload,
+                    grammar=_grammar,
                 )
             except Exception as e:
                 gen_dur = time.perf_counter() - gen_start
@@ -2640,6 +3297,33 @@ class Agent:
                         continue
 
                 if (
+                    bool(getattr(self.config, "inspection_result_guard_enabled", True))
+                    and latest_inspection_tool_name
+                    and inspection_result_guard_nudges
+                    < max_inspection_result_guard_nudges
+                    and iterations < max_iterations
+                ):
+                    inspection_nudge = self._inspection_result_guard_nudge(
+                        response_text=text,
+                        tool_name=latest_inspection_tool_name,
+                        payload=latest_inspection_payload,
+                    )
+                    if inspection_nudge:
+                        inspection_result_guard_nudges += 1
+                        convo.append(
+                            Message(role=MessageRole.SYSTEM, content=inspection_nudge)
+                        )
+                        tracer.emit(
+                            "inspection_result_guard_nudge",
+                            iteration=iterations,
+                            nudge=inspection_result_guard_nudges,
+                            tool=latest_inspection_tool_name,
+                            preview=self._strip_internal_reasoning_tags(text)[:180],
+                        )
+                        consecutive_tools = 0
+                        continue
+
+                if (
                     bool(
                         getattr(
                             self.config,
@@ -2725,7 +3409,10 @@ class Agent:
                     .endswith("?")
                     and iterations < max_iterations - 1
                 )
-                if _looks_like_plan:
+                if _looks_like_plan and not self._allows_reasoning_only_response(
+                    message,
+                    selection,
+                ):
                     # Nudge the model to act instead of just planning.
                     convo.append(
                         Message(
@@ -2777,7 +3464,10 @@ class Agent:
                         or len(_clean_text) <= 600
                         or not attempted_write
                     )
-                    if _needs_action_nudge:
+                    if _needs_action_nudge and not self._allows_reasoning_only_response(
+                        message,
+                        selection,
+                    ):
                         edit_action_nudges += 1
                         convo.append(
                             Message(
@@ -2870,8 +3560,8 @@ class Agent:
                         role=MessageRole.SYSTEM,
                         content=(
                             "[Inspect before edit] Before patch/edit tools, inspect the target code first. "
-                            "Call discovery/read tools now (for example: rg_search, get_file_outline, "
-                            "read_file, find_symbol) and then emit the edit call."
+                            "Call discovery/read tools now (for example: find_path, find_in_file, "
+                            "sed_read, read_file_smart, rg_search, or get_file_outline) and then emit the edit call."
                         ),
                     )
                 )
@@ -2992,6 +3682,7 @@ class Agent:
                 ):
                     self._tool_result_cache[_cache_key] = (time.time(), result_full)
 
+            _last_tool_name = call.name
             raw_tool_result = result_full
             tool_failed = self._tool_result_is_error(raw_tool_result)
             tool_error = ""
@@ -3001,6 +3692,26 @@ class Agent:
                     if str(raw_tool_result).strip()
                     else "tool returned an error payload"
                 )
+                # NEW: SOTA Reflexion Repair Loop
+                repair_nudge = None
+                if reflexion_repair_attempts < max_reflexion_repair_attempts:
+                    repair_nudge = self._run_reflexion_repair(
+                        call, raw_tool_result, tracer
+                    )
+                else:
+                    tracer.emit(
+                        "reflexion_repair_skipped",
+                        reason="turn_budget_exhausted",
+                        tool=call.name,
+                        attempts=reflexion_repair_attempts,
+                        limit=max_reflexion_repair_attempts,
+                    )
+                if repair_nudge and iterations < max_iterations:
+                    reflexion_repair_attempts += 1
+                    convo.append(Message(role=MessageRole.SYSTEM, content=repair_nudge))
+                    # We skip the rest of the loop and retry with the repair hint.
+                    consecutive_tools = 0
+                    continue
 
             # Structured tool error recovery: replace bare "Error:" strings with
             # diagnostic guidance so the LLM gets actionable context.
@@ -3043,6 +3754,8 @@ class Agent:
                 result_full
             ):
                 inspection_tool_called = True
+                latest_inspection_tool_name = str(call.name or "").strip()
+                latest_inspection_payload = self._parse_tool_result_payload(result_full)
 
             if is_write_tool and not is_verification_tool:
                 write_applied = self._tool_call_applied_write(call, result_full)
@@ -3402,6 +4115,40 @@ class Agent:
                 )
             )
             tracer.emit("tool_claim_runtime_note_appended")
+
+        if (
+            bool(getattr(self.config, "inspection_result_guard_enabled", True))
+            and bool(
+                getattr(
+                    self.config,
+                    "inspection_result_guard_append_runtime_note",
+                    True,
+                )
+            )
+            and final.strip()
+            and latest_inspection_tool_name
+        ):
+            runtime_note = self._inspection_result_runtime_note(
+                final_text=final,
+                tool_name=latest_inspection_tool_name,
+                payload=latest_inspection_payload,
+            )
+            if runtime_note:
+                final = f"{final.rstrip()}\n\n{runtime_note}".strip()
+                self.memory.save_message(
+                    sid,
+                    Message(role=MessageRole.ASSISTANT, content=final),
+                )
+                convo.append(
+                    Message(
+                        role=MessageRole.ASSISTANT,
+                        content=_truncate_text(final, assistant_ctx_max_chars),
+                    )
+                )
+                tracer.emit(
+                    "inspection_result_runtime_note_appended",
+                    tool=latest_inspection_tool_name,
+                )
 
         if (
             bool(getattr(self.config, "append_quality_checklist", True))

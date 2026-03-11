@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...logging_utils import get_logger
+from .chromadb import _ChromaDBCollection
 from .hnsw import _HNSWCollection
 from .usearch import _USEARCHCollection
 
@@ -20,9 +20,9 @@ def create_vector_collection(
     min_similarity: float = 0.18,
 ) -> _HNSWCollection:
     backend_norm = str(backend or "usearch").strip().lower()
-    if backend_norm not in ("hnsw", "usearch"):
+    if backend_norm not in ("chromadb", "hnsw", "usearch"):
         raise ValueError(
-            f"Unsupported vector backend '{backend}'. Expected one of: hnsw, usearch."
+            f"Unsupported vector backend '{backend}'. Expected one of: chromadb, hnsw, usearch."
         )
 
     kwargs = {
@@ -38,15 +38,12 @@ def create_vector_collection(
         "min_similarity": min_similarity,
     }
 
+    if backend_norm == "chromadb":
+        return _ChromaDBCollection(**kwargs)
     if backend_norm == "hnsw":
         return _HNSWCollection(**kwargs)
 
-    try:
-        return _USEARCHCollection(**kwargs)
-    except ImportError as exc:
-        log = get_logger("agent.vector")
-        log.warning("USEARCH backend unavailable (%s); falling back to HNSW.", exc)
-        return _HNSWCollection(**kwargs)
+    return _USEARCHCollection(**kwargs)
 
 
 __all__ = ["create_vector_collection"]

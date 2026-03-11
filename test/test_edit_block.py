@@ -1,6 +1,9 @@
 from pathlib import Path
 import importlib
-apply_edit_block = getattr(importlib.import_module("skills.01_coding.75_edit_block"), "apply_edit_block")
+apply_edit_block = getattr(
+    importlib.import_module("skills.coding.edit_block.edit_block"),
+    "apply_edit_block",
+)
 
 def main():
     dummy = Path("dummy.py")

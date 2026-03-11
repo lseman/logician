@@ -6,8 +6,6 @@ from functools import lru_cache
 from io import StringIO
 from typing import Any
 
-import numpy as np
-import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 try:
@@ -17,6 +15,20 @@ try:
 except ImportError:
     encode = decode = None  # type: ignore
     HAS_TOON = False
+
+
+@lru_cache(maxsize=1)
+def _numpy() -> Any:
+    import numpy as np
+
+    return np
+
+
+@lru_cache(maxsize=1)
+def _pandas() -> Any:
+    import pandas as pd
+
+    return pd
 
 
 @lru_cache(maxsize=1)
@@ -108,6 +120,8 @@ class Context:
 
     @staticmethod
     def _normalize_json_value(value: Any) -> Any:
+        np = _numpy()
+        pd = _pandas()
         if isinstance(value, dict):
             return {
                 str(key): Context._normalize_json_value(item)
@@ -135,6 +149,7 @@ class Context:
     def _deserialize_frame(payload: str | None) -> pd.DataFrame | None:
         if not payload:
             return None
+        pd = _pandas()
         frame = pd.read_json(StringIO(payload), orient="split")
         if "date" in frame.columns:
             try:
@@ -253,6 +268,7 @@ class ToolParameter(BaseModel):
     def _normalize_enum(cls, value: Any) -> list[Any] | None:
         if value is None:
             return None
+        np = _numpy()
         if isinstance(value, tuple):
             items = list(value)
         elif isinstance(value, list):
@@ -288,6 +304,7 @@ class Tool(BaseModel):
     function: Any
     skill_id: str | None = None
     source_path: str | None = None
+    skill_meta: dict[str, Any] | None = None
 
     def __init__(self, *args: Any, **data: Any) -> None:
         if args:
@@ -298,6 +315,7 @@ class Tool(BaseModel):
                 "function",
                 "skill_id",
                 "source_path",
+                "skill_meta",
             )
             if len(args) > len(fields):
                 raise TypeError("Tool() received too many positional arguments")

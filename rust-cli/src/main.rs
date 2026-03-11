@@ -238,7 +238,64 @@ async fn run_loop(
                     Event::Key(key) => {
                         match app.handle_key(key) {
                             KeyAction::Quit => break,
-                            KeyAction::Submit(text) => {
+                            KeyAction::Submit(mut text) => {
+                                let trimmed = text.trim();
+                                if trimmed == "/mount" || trimmed == "/mount-code" {
+                                    // 1. Suspend UI
+                                    let _ = disable_raw_mode();
+                                    let _ = execute!(
+                                        terminal.backend_mut(),
+                                        LeaveAlternateScreen,
+                                        DisableBracketedPaste,
+                                        DisableMouseCapture,
+                                    );
+                                    let _ = terminal.show_cursor();
+
+                                    // 2. Run fzf over directories
+                                    let sh_script = "if command -v fd >/dev/null 2>&1; then fd -t d; else find . -type d -not -path '*/\\.*' 2>/dev/null; fi | fzf --prompt='Mount dir> '";
+                                    let output = std::process::Command::new("sh")
+                                        .arg("-c")
+                                        .arg(sh_script)
+                                        .stdin(std::process::Stdio::inherit())
+                                        .stdout(std::process::Stdio::piped())
+                                        .stderr(std::process::Stdio::inherit())
+                                        .output();
+
+                                    // 3. Resume UI
+                                    let _ = enable_raw_mode();
+                                    let _ = execute!(
+                                        terminal.backend_mut(),
+                                        EnterAlternateScreen,
+                                        EnableBracketedPaste,
+                                        EnableMouseCapture
+                                    );
+                                    let _ = terminal.hide_cursor();
+                                    let _ = terminal.clear();
+
+                                    if let Ok(out) = output {
+                                        if out.status.success() {
+                                            if let Ok(dir) = String::from_utf8(out.stdout) {
+                                                let dir = dir.trim();
+                                                if !dir.is_empty() {
+                                                    text = format!("{} {} **/*.{{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}}", trimmed, dir);
+                                                } else {
+                                                    continue;
+                                                }
+                                            } else {
+                                                continue;
+                                            }
+                                        } else if out.status.code() == Some(127) {
+                                            app.add_system_message("fzf is not installed. Please install fzf for interactive folder selection.");
+                                            continue;
+                                        } else {
+                                            continue;
+                                        }
+                                    } else {
+                                        app.add_system_message("Failed to execute shell command for fzf.");
+                                        continue;
+                                    }
+                                }
+
                                 if let Some(b) = &bridge {
                                     dispatch_command(b.clone(), text, cmd_tx.clone());
                                 } else {
@@ -248,6 +305,7 @@ async fn run_loop(
                             }
                             KeyAction::ToggleTrace => app.toggle_trace(),
                             KeyAction::ToggleRawStream => app.toggle_raw_stream(),
+                            KeyAction::ToggleTasks => app.toggle_todo(),
                             KeyAction::None => {}
                         }
                     }

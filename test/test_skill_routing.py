@@ -40,8 +40,12 @@ except ModuleNotFoundError:
     from src.tools import Context, ToolRegistry, ToolCall
 
 
-def _registry() -> ToolRegistry:
-    return ToolRegistry(auto_load_from_skills=True)
+def _registry(*, load_lazy_skill_groups: tuple[str, ...] = ()) -> ToolRegistry:
+    registry = ToolRegistry(auto_load_from_skills=False)
+    for group in load_lazy_skill_groups:
+        registry.activate_lazy_skill_group(group)
+    registry.load_tools_from_skills()
+    return registry
 
 
 class SkillRoutingTests(unittest.TestCase):
@@ -240,6 +244,69 @@ Walk backwards from the failure site until you find the first bad input.""",
 
             self.assertEqual(set(catalog.skills.keys()), {"sp__debugging"})
 
+    def test_folder_skill_with_scripts_dir_hydrates_tool_backed_card(self) -> None:
+        prev_skills_dir = os.environ.get("AGENT_SKILLS_DIR")
+        prev_skills_md = os.environ.get("AGENT_SKILLS_MD_PATH")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                skills_root = root / "skills"
+                skill_dir = skills_root / "rag"
+                scripts_dir = skill_dir / "scripts"
+                scripts_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(
+                    """---
+name: RAG
+description: Use for ingestion and semantic retrieval.
+preferred_tools:
+  - demo_lookup
+---
+
+## Scope
+
+Use when: the user wants semantic retrieval over indexed content.
+""",
+                    encoding="utf-8",
+                )
+                (scripts_dir / "lookup.py").write_text(
+                    '''if "llm" not in globals():
+    class _NoOpLLM:
+        def tool(self, func=None, *, name=None, description=None):
+            return func if func is not None else (lambda f: f)
+    llm = _NoOpLLM()
+
+@llm.tool(description="Search indexed content.")
+def demo_lookup(query: str) -> str:
+    return query
+''',
+                    encoding="utf-8",
+                )
+
+                os.environ["AGENT_SKILLS_DIR"] = str(skills_root)
+                os.environ.pop("AGENT_SKILLS_MD_PATH", None)
+
+                registry = ToolRegistry(auto_load_from_skills=True)
+                registry.install_context(Context())
+                skills = {skill.id: skill for skill in registry.list_skills()}
+
+                self.assertIn("rag", skills)
+                self.assertNotIn("sp__rag", skills)
+                self.assertEqual(skills["rag"].name, "RAG")
+                self.assertIn("demo_lookup", skills["rag"].tool_names)
+                tool = registry.get("demo_lookup")
+                self.assertIsNotNone(tool)
+                assert tool is not None
+                self.assertEqual(tool.skill_id, "rag")
+        finally:
+            if prev_skills_dir is None:
+                os.environ.pop("AGENT_SKILLS_DIR", None)
+            else:
+                os.environ["AGENT_SKILLS_DIR"] = prev_skills_dir
+            if prev_skills_md is None:
+                os.environ.pop("AGENT_SKILLS_MD_PATH", None)
+            else:
+                os.environ["AGENT_SKILLS_MD_PATH"] = prev_skills_md
+
     def test_on_demand_context_is_loaded_for_selected_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -285,7 +352,7 @@ Walk backward from the symptom through each caller until the first invalid value
             self.assertIn("Walk backward from the symptom", prompt)
 
     def test_skill_catalog_reads_explicit_manifest_metadata(self) -> None:
-        registry = _registry()
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
         skills = {skill.id: skill for skill in registry.list_skills()}
 
         self.assertIn("forecasting", skills)
@@ -300,8 +367,23 @@ Walk backward from the symptom through each caller until the first invalid value
             ["suggest_models", "stat_forecast", "neural_forecast"],
         )
 
-    def test_skill_router_prefers_forecasting_for_forecast_queries(self) -> None:
+    def test_real_rag_folder_skill_groups_rag_tools(self) -> None:
         registry = _registry()
+        skills = {skill.id: skill for skill in registry.list_skills()}
+
+        self.assertIn("rag", skills)
+        rag = skills["rag"]
+        self.assertEqual(rag.name, "RAG")
+        self.assertIn("rag_add_file", rag.tool_names)
+        self.assertIn("rag_search", rag.tool_names)
+        self.assertIn("rag_tuning_status", rag.tool_names)
+        self.assertIn(
+            "document ingestion, retrieval, and retrieval-quality tuning",
+            rag.description,
+        )
+
+    def test_skill_router_prefers_forecasting_for_forecast_queries(self) -> None:
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
         selection = registry.route_query_to_skills(
             "Forecast the next 24 steps and compare neural forecast models.",
             top_k=2,
@@ -315,7 +397,7 @@ Walk backward from the symptom through each caller until the first invalid value
         self.assertIn("neural_forecast", selection.selected_tools)
 
     def test_skill_router_prefers_data_loading_for_csv_queries(self) -> None:
-        registry = _registry()
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
         selection = registry.route_query_to_skills(
             "Load a CSV file and inspect the dataset columns before analysis.",
             top_k=2,
@@ -326,7 +408,7 @@ Walk backward from the symptom through each caller until the first invalid value
         self.assertIn("load_csv_data", selection.selected_tools)
 
     def test_skill_routing_prompt_includes_active_skill_summary(self) -> None:
-        registry = _registry()
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
         prompt, selection = registry.skill_routing_prompt(
             "Plot diagnostics and inspect anomalies in the series.",
             top_k=2,
@@ -346,8 +428,40 @@ Walk backward from the symptom through each caller until the first invalid value
         )
         self.assertIn("avoid when:", prompt)
 
-    def test_anti_triggers_reduce_incorrect_skill_matches(self) -> None:
+    def test_skill_routing_keeps_meta_tools_available_during_routed_turns(self) -> None:
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
+        selection = registry.route_query_to_skills(
+            "Forecast the next 24 steps and compare neural forecast models.",
+            top_k=2,
+        )
+
+        self.assertIn("describe_tool", selection.selected_tools)
+        self.assertIn("search_tools", selection.selected_tools)
+
+    def test_skill_routing_prioritizes_explicit_tool_mentions(self) -> None:
         registry = _registry()
+        selection = registry.route_query_to_skills(
+            "Use firecrawl_search to search the docs site before crawling it.",
+            top_k=2,
+        )
+
+        self.assertTrue(selection.selected_skills)
+        self.assertEqual(selection.selected_tools[0], "firecrawl_search")
+
+    def test_skill_routing_prompt_marks_routed_tool_list_as_subset(self) -> None:
+        registry = _registry()
+        prompt, selection = registry.skill_routing_prompt(
+            "Use firecrawl_search to search the docs site before crawling it.",
+            top_k=2,
+        )
+
+        self.assertTrue(selection.selected_skills)
+        self.assertIn("routed subset", prompt)
+        self.assertIn("available_tools.json", prompt)
+        self.assertIn("describe_tool", prompt)
+
+    def test_anti_triggers_reduce_incorrect_skill_matches(self) -> None:
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
         selection = registry.route_query_to_skills(
             "Load a CSV file, inspect dataset columns, and do not plot diagnostics yet.",
             top_k=2,
@@ -397,7 +511,7 @@ Avoid when: the task is already straightforward.
             self.assertEqual(selection.selected_skills[0].id, "sp__strategic_thinking")
 
     def test_usage_and_recency_bias_contribute_to_ranking(self) -> None:
-        registry = _registry()
+        registry = _registry(load_lazy_skill_groups=("timeseries",))
         # Ensure the catalog is hydrated before recording usage stats.
         _ = registry.list_skills()
         registry._catalog.note_skill_usage("analysis", timestamp=time.time() - 30)
@@ -434,6 +548,64 @@ Avoid when: the task is already straightforward.
                 os.environ.pop("AGENT_SKILL_ROUTING_WEIGHTS", None)
             else:
                 os.environ["AGENT_SKILL_ROUTING_WEIGHTS"] = prev
+
+    def test_think_skill_routes_on_ambiguous_decompose_query(self) -> None:
+        """Think or orchestrator skill should win on deliberate-reasoning / decompose queries."""
+        registry = _registry()
+        selection = registry.route_query_to_skills(
+            "Think through this ambiguous multi-step task and decompose it before taking any action.",
+            top_k=3,
+        )
+        selected_ids = [s.id for s in selection.selected_skills]
+        self.assertTrue(selected_ids, "Expected at least one skill to be selected")
+        # think or orchestrator must appear — both are valid for deliberate reasoning queries
+        self.assertTrue(
+            any(sid in selected_ids for sid in ("think", "orchestrator", "sp__think")),
+            f"Expected think or orchestrator in {selected_ids}",
+        )
+
+    def test_lazy_timeseries_skills_are_hidden_until_activated(self) -> None:
+        registry = _registry()
+        skills = {skill.id for skill in registry.list_skills()}
+
+        self.assertNotIn("forecasting", skills)
+
+        changed, group = registry.activate_lazy_skill_group("timeseries")
+        self.assertTrue(changed)
+        self.assertEqual(group, "timeseries")
+        registry.reload_skills()
+
+        skills = {skill.id for skill in registry.list_skills()}
+        self.assertIn("forecasting", skills)
+
+    def test_parallel_dispatch_routes_on_fan_out_read_query(self) -> None:
+        """parallel_dispatch skill should route when user asks for parallel reads."""
+        registry = _registry()
+        selection = registry.route_query_to_skills(
+            "Read these five files in parallel then consolidate the findings before writing.",
+            top_k=3,
+        )
+        selected_ids = [s.id for s in selection.selected_skills]
+        self.assertTrue(selected_ids, "Expected at least one skill to be selected")
+        # coding/ group skills may be registered as flat IDs or with sp__ prefix depending on catalog
+        self.assertTrue(
+            any(sid in selected_ids for sid in ("parallel_dispatch", "sp__parallel_dispatch")),
+            f"Expected parallel_dispatch in {selected_ids}",
+        )
+
+    def test_memory_management_routes_on_context_checkpoint_query(self) -> None:
+        """memory_management skill should route on session-checkpoint / context-length queries."""
+        registry = _registry()
+        selection = registry.route_query_to_skills(
+            "Create a session checkpoint before the next phase — context is getting very long.",
+            top_k=3,
+        )
+        selected_ids = [s.id for s in selection.selected_skills]
+        self.assertTrue(selected_ids, "Expected at least one skill to be selected")
+        self.assertTrue(
+            any(sid in selected_ids for sid in ("memory_management", "sp__memory_management")),
+            f"Expected memory_management in {selected_ids}",
+        )
 
 
 if __name__ == "__main__":

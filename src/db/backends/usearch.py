@@ -12,12 +12,21 @@ from ..embeddings import (
     _EmbeddingRuntime,
     _RerankerRuntime,
     _lazy_import_usearch_index,
+    _resolve_vector_collection_dir,
     _stable_collection_name,
 )
 from .hnsw import _HNSWCollection
 
 
 class _USEARCHCollection(_HNSWCollection):
+    @staticmethod
+    def _first_non_none_attr(obj: Any, names: tuple[str, ...]) -> Any:
+        for name in names:
+            value = getattr(obj, name, None)
+            if value is not None:
+                return value
+        return None
+
     def __init__(
         self,
         *,
@@ -39,8 +48,12 @@ class _USEARCHCollection(_HNSWCollection):
             reranker_model_name, rerank_enabled, self._log
         )
 
-        stable_name = _stable_collection_name(collection_name, embedding_model_name)
-        self._dir = Path(root_path) / stable_name
+        self._dir = _resolve_vector_collection_dir(
+            root_path=root_path,
+            collection_name=collection_name,
+            embedding_model_name=embedding_model_name,
+            backend=self._backend,
+        )
         self._dir.mkdir(parents=True, exist_ok=True)
 
         self._state_file = self._dir / "state.json"
@@ -53,7 +66,7 @@ class _USEARCHCollection(_HNSWCollection):
         self._ef_search = int(ef_search)
         self._min_similarity = float(max(0.0, min(1.0, min_similarity)))
 
-        self._usearch_index_cls = _lazy_import_usearch_index()
+        self._usearch_index_cls: Any | None = None
         self._index: Any | None = None
 
         self._lock = threading.RLock()
@@ -64,7 +77,13 @@ class _USEARCHCollection(_HNSWCollection):
         self._max_elements = 0
         self._knn_filter_supported: bool | None = False
 
-        self._load()
+        with self._lock:
+            self._load_payload()
+
+    def _ensure_backend(self) -> Any:
+        if self._usearch_index_cls is None:
+            self._usearch_index_cls = _lazy_import_usearch_index()
+        return self._usearch_index_cls
 
     def _metric_name(self) -> str:
         space = str(self._space or "").strip().lower()
@@ -79,6 +98,7 @@ class _USEARCHCollection(_HNSWCollection):
     def _new_index(self, *, dim: int, max_elements: int) -> Any:
         del max_elements
         metric = self._metric_name()
+        index_cls = self._ensure_backend()
         options: list[dict[str, Any]] = [
             {
                 "ndim": dim,
@@ -93,10 +113,10 @@ class _USEARCHCollection(_HNSWCollection):
         ]
         for kwargs in options:
             try:
-                return self._usearch_index_cls(**kwargs)
+                return index_cls(**kwargs)
             except TypeError:
                 continue
-        return self._usearch_index_cls(dim)
+        return index_cls(dim)
 
     def _load_usearch_index(self, idx: Any) -> bool:
         if not self._index_file.exists():
@@ -152,6 +172,14 @@ class _USEARCHCollection(_HNSWCollection):
             self._next_label = max(self._next_label, int(state["next_label"]))
         if "max_elements" in state and state["max_elements"]:
             self._max_elements = int(state["max_elements"])
+
+        saved_backend = str(state.get("backend", "") or "").strip().lower()
+        if saved_backend and saved_backend != self._backend:
+            raise RuntimeError(
+                f"Vector backend mismatch for {self._dir}: saved backend is "
+                f"'{saved_backend}', runtime backend is '{self._backend}'. "
+                "Use the matching backend or rebuild the collection."
+            )
 
         if self._dim is None:
             self._dim = self._embedder.dim()
@@ -259,15 +287,13 @@ class _USEARCHCollection(_HNSWCollection):
             if len(result) >= 2:
                 dists = result[1]
         else:
-            keys = (
-                getattr(result, "keys", None)
-                or getattr(result, "ids", None)
-                or getattr(result, "labels", None)
+            keys = self._first_non_none_attr(
+                result,
+                ("keys", "ids", "labels"),
             )
-            dists = (
-                getattr(result, "distances", None)
-                or getattr(result, "scores", None)
-                or getattr(result, "values", None)
+            dists = self._first_non_none_attr(
+                result,
+                ("distances", "scores", "values"),
             )
             if keys is None and hasattr(result, "__iter__"):
                 tmp_keys: list[int] = []

@@ -97,6 +97,16 @@ trait MessageRenderer {
 
 struct DefaultRenderer;
 
+impl DefaultRenderer {
+    fn tool_message_is_error(text: &str) -> bool {
+        let lower = text.trim().to_lowercase();
+        lower.starts_with("failed ")
+            || lower.starts_with("error:")
+            || lower.contains("\nerror:")
+            || lower.contains(" status=error")
+    }
+}
+
 impl MessageRenderer for DefaultRenderer {
     fn render_header(&self, role: Role, streaming: bool) -> Line<'static> {
         if role == Role::Assistant && streaming {
@@ -160,16 +170,25 @@ impl MessageRenderer for DefaultRenderer {
             }
             Role::Tool => {
                 let mut tool_lines = Vec::new();
+                let is_error = Self::tool_message_is_error(text);
+                let emphasis = if is_error { Color::Red } else { Color::Cyan };
                 for (idx, line) in text.lines().enumerate() {
                     let (prefix, style) = if idx == 0 {
                         (
                             "  ▸ ",
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(emphasis)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else if is_error && line.trim_start().starts_with("error:") {
+                        (
+                            "    ",
+                            Style::default()
+                                .fg(Color::Red)
                                 .add_modifier(Modifier::BOLD),
                         )
                     } else {
-                        ("    ", Style::default().fg(Color::Cyan))
+                        ("    ", Style::default().fg(emphasis))
                     };
                     tool_lines.push(Line::from(vec![
                         Span::styled(prefix.to_string(), Style::default().fg(Color::DarkGray)),
@@ -260,6 +279,8 @@ pub enum KeyAction {
     ToggleTrace,
     /// Toggle raw stream display
     ToggleRawStream,
+    /// Toggle task panel
+    ToggleTasks,
 }
 
 #[derive(Clone)]
@@ -454,6 +475,7 @@ pub struct App {
     // Phase / status
     pub phase: Phase,
     pub phase_note: String,
+    pub last_tool_error: Option<String>,
     pub busy: bool,
     pub spinner_tick: usize,
 
@@ -469,6 +491,7 @@ pub struct App {
 
     // Trace buffer (not rendered into messages when trace_on=false)
     pub trace_log: Vec<String>,
+    pub todo_on: bool,
 }
 
 impl App {
@@ -496,6 +519,7 @@ impl App {
             last_area_h: 40,
             phase: Phase::Ready,
             phase_note: "ready".into(),
+            last_tool_error: None,
             busy: false,
             spinner_tick: 0,
             trace_on: true,
@@ -504,6 +528,7 @@ impl App {
             connected: false,
             should_quit: false,
             trace_log: Vec::new(),
+            todo_on: false,
         }
     }
 
@@ -1190,6 +1215,15 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                         error.as_deref(),
                     ),
                 );
+                if status_l == "error" || status_l == "failed" {
+                    let detail = error
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(|value| Self::truncate_inline(value, 220))
+                        .unwrap_or_else(|| "tool execution failed".to_string());
+                    self.last_tool_error = Some(format!("{name}: {detail}"));
+                }
             }
 
             BridgeEvent::Image { tool, path } => {
@@ -1337,11 +1371,20 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         }
 
         if lower == "/close" {
+            let mut closed_any = false;
             if self.has_image_preview() {
                 self.clear_image_preview();
                 self.add_system_message("Image side panel closed.");
-            } else {
-                self.add_system_message("Image side panel is already closed.");
+                closed_any = true;
+            }
+            if self.todo_on {
+                self.todo_on = false;
+                self.add_system_message("Task side panel closed.");
+                closed_any = true;
+            }
+
+            if !closed_any {
+                self.add_system_message("No side panels are open to close.");
             }
             return true;
         }
@@ -1456,6 +1499,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         } else {
             self.clamp_scroll();
         }
+    }
+
+    pub fn toggle_todo(&mut self) {
+        self.todo_on = !self.todo_on;
+        self.trace(format!("todo_panel={}", self.todo_on));
     }
 
     pub fn handle_paste(&mut self, text: &str) {
@@ -1695,6 +1743,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 self.input.clear();
                 self.input_cursor = 0;
                 self.slash_selected = 0;
+                self.last_tool_error = None;
                 if text.starts_with('/') && self.handle_local_slash(&text) {
                     return KeyAction::None;
                 }
@@ -1783,6 +1832,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return KeyAction::ToggleRawStream;
+            }
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return KeyAction::ToggleTasks;
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return KeyAction::Quit;
