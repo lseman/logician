@@ -141,6 +141,21 @@ def test_grammars_exported(tools_ns):
     for v in grammars.values():
         assert isinstance(v, str) and len(v) > 20
 
+def test_registry_collects_grammars():
+    """ToolRegistry collects __grammars__ from skill modules."""
+    from src.tools import ToolRegistry
+    registry = ToolRegistry(auto_load_from_skills=True)
+    grammar = registry.get_grammar("cc_edit")
+    assert grammar is not None
+    assert len(grammar) > 50
+
+
+def test_registry_get_grammar_unknown_returns_none():
+    from src.tools import ToolRegistry
+    registry = ToolRegistry(auto_load_from_skills=False)
+    assert registry.get_grammar("nonexistent_tool_xyz") is None
+
+
 # __tools__ export
 def test_tools_exported(tools_ns):
     tools = tools_ns.get("__tools__", [])

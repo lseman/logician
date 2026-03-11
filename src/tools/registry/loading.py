@@ -11,8 +11,6 @@ import types
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence, get_args, get_origin
 
-import numpy as np
-
 from ...mcp.client import MCPClient, MCPToolDef
 from .catalog import ToolSection
 from .types import _BuiltinToolDefinition
@@ -49,8 +47,8 @@ class RegistryLoadingMixin:
             {
                 "name": "invoke_skill",
                 "description": (
-                    "Force a specific skill into the next routing pass. "
-                    "Use when user asks to explicitly apply a named skill."
+                    "Force a specific skill into the next routing pass, or optionally execute its primary tool directly. "
+                    "Use when user asks to explicitly apply a named skill, or when you know exactly what arguments to pass."
                 ),
                 "parameters": [
                     ToolParameter(
@@ -71,14 +69,21 @@ class RegistryLoadingMixin:
                         description="How many matched skills to force (default 1, max 3).",
                         required=False,
                     ),
+                    ToolParameter(
+                        name="args",
+                        type="string",
+                        description="Optional JSON dictionary string. If provided, the primary tool of the matched skill will be directly executed with these arguments.",
+                        required=False,
+                    ),
                 ],
                 "function": self._invoke_skill_tool,
                 "doc": (
-                    "**Description:** Force a skill into the next routing pass.\n\n"
+                    "**Description:** Force a skill into the next routing pass or execute it immediately.\n\n"
                     "**Parameters:**\n"
                     "- skill (string, required): Skill id, name, alias, or intent text.\n"
                     "- reason (string, optional): Why the skill is being forced.\n"
-                    "- top_k (integer, optional): Number of matched skills to force."
+                    "- top_k (integer, optional): Number of matched skills to force.\n"
+                    "- args (string, optional): JSON string of arguments to execute the primary tool directly."
                 ),
             },
             {
@@ -177,16 +182,58 @@ class RegistryLoadingMixin:
 
         import os as _os
 
-        py_skill_files = sorted(
-            Path(root) / fname
-            for root, _dirs, files in _os.walk(
-                str(self.skills_dir_path), followlinks=True
+        py_skill_files: list[Path] = []
+        seen: set[str] = set()
+        for root, dirs, files in _os.walk(str(self.skills_dir_path), followlinks=True):
+            root_path = Path(root)
+            try:
+                rel_parts = root_path.relative_to(self.skills_dir_path).parts
+            except Exception:
+                rel_parts = ()
+
+            if rel_parts:
+                top_level = rel_parts[0]
+                if self._is_lazy_skill_group_dir_name(top_level) and not self._is_lazy_skill_group_active(top_level):
+                    dirs[:] = []
+                    continue
+            else:
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not self._is_lazy_skill_group_dir_name(d)
+                    or self._is_lazy_skill_group_active(d)
+                ]
+
+            # When a skill folder defines scripts/, only modules inside that tree
+            # should be auto-loaded as executable tools.
+            has_child_skill_dirs = any(
+                (root_path / d).is_dir()
+                and d not in {"scripts", "__pycache__"}
+                and not d.startswith(".")
+                for d in dirs
             )
-            for fname in files
-            if fname.endswith(".py")
-            and fname != "__init__.py"
-            and not fname.startswith("_")
-        )
+            if (
+                "scripts" not in rel_parts
+                and (root_path / "scripts").is_dir()
+                and ((root_path / "SKILL.md").is_file() or not has_child_skill_dirs)
+            ):
+                dirs[:] = [d for d in dirs if d == "scripts"]
+                continue
+
+            for fname in files:
+                if (
+                    not fname.endswith(".py")
+                    or fname == "__init__.py"
+                    or fname.startswith("_")
+                ):
+                    continue
+                module_path = root_path / fname
+                key = str(module_path.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                py_skill_files.append(module_path)
+        py_skill_files = sorted(py_skill_files)
         if not py_skill_files:
             return 0
 
@@ -291,14 +338,14 @@ class RegistryLoadingMixin:
     def _register_collected_python_tools(
         self,
         *,
-        collector: Any,
+        tool_entries: Sequence[tuple[Callable[..., Any], dict[str, Any]]],
         module_path: Path,
         skill_id: str,
         legacy_meta: dict[str, dict[str, Any]],
+        skill_meta: dict[str, Any] | None,
     ) -> int:
         registered = 0
-        for tool_fn in collector.tools:
-            meta = getattr(tool_fn, "__llm_tool_meta__", {})
+        for tool_fn, meta in tool_entries:
             tool_name = str(meta.get("name") or getattr(tool_fn, "__name__", "")).strip()
             if not tool_name:
                 continue
@@ -314,7 +361,7 @@ class RegistryLoadingMixin:
             description = str(
                 legacy_info.get("description")
                 or meta.get("description")
-                or inspect.getdoc(tool_fn)
+                or self._python_tool_doc_summary(tool_fn)
                 or ""
             ).strip()
             tool_fn.__doc__ = self._compose_tool_docstring(
@@ -334,15 +381,93 @@ class RegistryLoadingMixin:
                 function=wrapped,
                 skill_id=skill_id,
                 source_path=str(module_path),
+                skill_meta=dict(skill_meta or {}),
             )
             self._catalog.tool_docs[tool_name] = inspect.getdoc(tool_fn) or description
             self._log.info("✓ Loaded Python tool: %s (%s)", tool_name, module_path)
             registered += 1
         return registered
 
+    @staticmethod
+    def _python_tool_doc_summary(tool_fn: Callable[..., Any]) -> str:
+        doc = inspect.getdoc(tool_fn) or ""
+        if not doc:
+            return ""
+        first_block = doc.split("\n\n", 1)[0].strip()
+        first_line = next((line.strip() for line in first_block.splitlines() if line.strip()), "")
+        if first_line.lower().startswith("use when:"):
+            first_line = first_line[len("use when:") :].strip()
+        return first_line
+
+    def _python_tool_entries_from_module(
+        self,
+        *,
+        execution_globals: dict[str, Any],
+        collector: Any,
+        module_path: Path,
+    ) -> list[tuple[Callable[..., Any], dict[str, Any]]]:
+        """Resolve exported tools for a Python skill module.
+
+        `__tools__` is the preferred authoring contract. The collector remains
+        only as a compatibility path for older decorator-based modules and tests.
+        """
+        entries: list[tuple[Callable[..., Any], dict[str, Any]]] = []
+        seen: set[int] = set()
+
+        for tool_fn in collector.tools:
+            entries.append((tool_fn, getattr(tool_fn, "__llm_tool_meta__", {})))
+            seen.add(id(tool_fn))
+
+        for candidate in execution_globals.values():
+            if not callable(candidate):
+                continue
+            if not bool(getattr(candidate, "__tool__", False)):
+                continue
+            if id(candidate) in seen:
+                continue
+            entries.append((candidate, getattr(candidate, "__llm_tool_meta__", {})))
+            seen.add(id(candidate))
+
+        exports = execution_globals.get("__tools__", ())
+        tool_meta_raw = execution_globals.get("__tool_meta__", {})
+        tool_meta = tool_meta_raw if isinstance(tool_meta_raw, dict) else {}
+        if exports:
+            if isinstance(exports, (str, bytes)) or not isinstance(exports, Sequence):
+                self._log.warning(
+                    "Ignoring invalid __tools__ export in %s; expected a sequence of callables or function names",
+                    module_path,
+                )
+                return entries
+
+            for export in exports:
+                tool_fn: Callable[..., Any] | None = None
+                if callable(export):
+                    tool_fn = export
+                elif isinstance(export, str):
+                    candidate = execution_globals.get(export)
+                    if callable(candidate):
+                        tool_fn = candidate
+                if tool_fn is None:
+                    self._log.warning(
+                        "Ignoring invalid __tools__ entry %r in %s",
+                        export,
+                        module_path,
+                    )
+                    continue
+                if id(tool_fn) in seen:
+                    continue
+                meta = getattr(tool_fn, "__llm_tool_meta__", {})
+                explicit_meta = tool_meta.get(getattr(tool_fn, "__name__", ""), {})
+                if isinstance(explicit_meta, dict):
+                    meta = {**meta, **explicit_meta}
+                entries.append((tool_fn, meta))
+                seen.add(id(tool_fn))
+
+        return entries
+
     def _merge_python_module_globals(self, execution_globals: dict[str, Any]) -> None:
         for key, value in execution_globals.items():
-            if key in {"__name__", "__file__", "llm"}:
+            if key in {"__name__", "__file__", "llm", "__skill__", "__tools__", "__tool_meta__"}:
                 continue
             self._execution_globals[key] = value
         self._execution_globals["call_tool"] = self.call_tool
@@ -356,6 +481,11 @@ class RegistryLoadingMixin:
         collector = self._LLMToolCollector()
         legacy_meta = self._legacy_md_tool_metadata_for_module(module_path)
         execution_globals = dict(self._execution_globals)
+        execution_globals.pop("__skill__", None)
+        execution_globals.pop("__tools__", None)
+        execution_globals.pop("__tool_meta__", None)
+        # New-style modules register through `__tools__`. Keep `llm` injected only
+        # so older decorator-based modules continue to load during migration.
         execution_globals["llm"] = collector
         raw_parts, safe_parts, package_name, module_name = self._python_module_import_names(
             module_path
@@ -385,13 +515,27 @@ class RegistryLoadingMixin:
             return 0
         transient_module.__dict__.update(execution_globals)
         skill_id = self._catalog._skill_id_from_source(module_path)
-        registered = self._register_collected_python_tools(
+        skill_meta_raw = execution_globals.get("__skill__", {})
+        skill_meta = dict(skill_meta_raw) if isinstance(skill_meta_raw, dict) else None
+        tool_entries = self._python_tool_entries_from_module(
+            execution_globals=execution_globals,
             collector=collector,
+            module_path=module_path,
+        )
+        registered = self._register_collected_python_tools(
+            tool_entries=tool_entries,
             module_path=module_path,
             skill_id=skill_id,
             legacy_meta=legacy_meta,
+            skill_meta=skill_meta,
         )
         self._merge_python_module_globals(execution_globals)
+        # Collect GBNF grammars exported by skill modules (llama.cpp constrained decoding)
+        grammars_raw = execution_globals.get("__grammars__", {})
+        if isinstance(grammars_raw, dict):
+            for tool_name, grammar in grammars_raw.items():
+                if isinstance(tool_name, str) and isinstance(grammar, str):
+                    self._grammars[tool_name] = grammar
         if registered > 0:
             self._invalidate_skill_resolution_cache()
         return registered
@@ -503,7 +647,15 @@ class RegistryLoadingMixin:
         out: list[Any] = []
         seen: set[str] = set()
         for value in values:
-            norm = value.item() if isinstance(value, np.generic) else value
+            item_method = getattr(value, "item", None)
+            module_name = type(value).__module__
+            if callable(item_method) and module_name.startswith("numpy"):
+                try:
+                    norm = item_method()
+                except Exception:
+                    norm = value
+            else:
+                norm = value
             if norm is not None and not isinstance(norm, (str, int, float, bool)):
                 continue
             key = json.dumps(norm, ensure_ascii=False, sort_keys=True, default=str)
@@ -803,6 +955,10 @@ class RegistryLoadingMixin:
         base_description: str,
         legacy_info: dict[str, Any],
     ) -> str:
+        existing_doc = inspect.getdoc(tool_fn) or ""
+        if existing_doc and not legacy_info:
+            return existing_doc
+
         description = (
             base_description.strip()
             or "Run this tool when it best fits the user request."
@@ -826,6 +982,8 @@ class RegistryLoadingMixin:
         )
 
     class _LLMToolCollector:
+        """Compatibility shim for older `@llm.tool(...)` Python skill modules."""
+
         def __init__(self) -> None:
             self.tools: list[Callable[..., Any]] = []
 
@@ -864,6 +1022,7 @@ class RegistryLoadingMixin:
         self._catalog._skills.clear()
         self._catalog._tool_docs.clear()
         self._catalog._all_tool_sections.clear()
+        self._catalog.set_active_lazy_skill_groups(self._active_lazy_skill_groups)
         # Allow bootstrap to re-run so any helper globals are refreshed.
         self._bootstrapped = False
         self._invalidate_skill_resolution_cache()

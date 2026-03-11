@@ -6,6 +6,7 @@ Unified tools package with skill-aware loading and prompt rendering.
 from __future__ import annotations
 
 import json
+import importlib
 import os
 import sys
 import time
@@ -16,9 +17,6 @@ try:  # Python 3.11+
     from typing import Self
 except ImportError:  # pragma: no cover - Python 3.10 fallback
     Self = Any  # type: ignore[assignment,misc]
-
-import numpy as np
-import pandas as pd
 
 from ..logging_utils import get_logger
 from .parser import parse_tool_call_strict, parse_tool_calls
@@ -43,6 +41,28 @@ from .runtime import (
     _safe_json_fallback,
     check_optional_deps,
 )
+
+
+class _LazyModuleProxy:
+    """Import an optional dependency only when a skill actually touches it."""
+
+    def __init__(self, module_name: str) -> None:
+        self._module_name = module_name
+        self._module: Any | None = None
+
+    def _load(self) -> Any:
+        if self._module is None:
+            self._module = importlib.import_module(self._module_name)
+        return self._module
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._load(), name)
+
+    def __dir__(self) -> list[str]:
+        return sorted(set(dir(type(self)) + dir(self._load())))
+
+    def __repr__(self) -> str:
+        return f"<lazy module proxy {self._module_name!r}>"
 
 
 class ToolRegistry(
@@ -77,8 +97,8 @@ class ToolRegistry(
         self._execution_globals: ExecutionGlobals = {
             "__builtins__": __builtins__,
             "json": json,
-            "np": np,
-            "pd": pd,
+            "np": _LazyModuleProxy("numpy"),
+            "pd": _LazyModuleProxy("pandas"),
             "ctx": None,
         }
         self._execution_globals["call_tool"] = self.call_tool
@@ -88,10 +108,12 @@ class ToolRegistry(
         ] | None = None
 
         self._bootstrapped: bool = False
+        self._active_lazy_skill_groups: set[str] = set()
         self._version: int = 0
         self._forced_skill_ids: list[str] = []
         self._forced_skill_reason: str = ""
         self._tool_exec_stats: ToolExecutionStats = {}
+        self._grammars: dict[str, str] = {}
         self._strict_tool_arg_validation: bool = True
         self._coerce_tool_argument_types: bool = True
         self._skill_resolution_epoch: int = 0
@@ -101,6 +123,53 @@ class ToolRegistry(
             if _sources or self.skills_dir_path.is_dir():
                 self._log.info("Auto-loading tools from %d source(s)", len(_sources))
                 self.load_tools_from_skills()
+
+    @staticmethod
+    def _normalize_lazy_skill_group_name(value: str) -> str:
+        text = str(value or "").strip().lower()
+        text = text.strip("/").replace("-", "_").replace(" ", "_")
+        if text.startswith("lazy_"):
+            text = text[len("lazy_") :]
+        text = "".join(ch for ch in text if ch.isalnum() or ch == "_").strip("_")
+        return text
+
+    def _is_lazy_skill_group_dir_name(self, name: str) -> bool:
+        return str(name or "").strip().startswith("lazy_")
+
+    def _is_lazy_skill_group_active(self, name: str) -> bool:
+        group = self._normalize_lazy_skill_group_name(name)
+        return bool(group) and group in self._active_lazy_skill_groups
+
+    def available_lazy_skill_groups(self) -> list[str]:
+        if not self.skills_dir_path.is_dir():
+            return []
+        groups: list[str] = []
+        for child in sorted(self.skills_dir_path.iterdir(), key=lambda p: p.name):
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            if not self._is_lazy_skill_group_dir_name(child.name):
+                continue
+            group = self._normalize_lazy_skill_group_name(child.name)
+            if group:
+                groups.append(group)
+        return groups
+
+    def active_lazy_skill_groups(self) -> list[str]:
+        return sorted(self._active_lazy_skill_groups)
+
+    def activate_lazy_skill_group(self, name: str) -> tuple[bool, str | None]:
+        group = self._normalize_lazy_skill_group_name(name)
+        if not group:
+            return False, None
+        available = set(self.available_lazy_skill_groups())
+        if group not in available:
+            return False, None
+        changed = group not in self._active_lazy_skill_groups
+        if changed:
+            self._active_lazy_skill_groups.add(group)
+            self._catalog.set_active_lazy_skill_groups(self._active_lazy_skill_groups)
+            self._invalidate_skill_resolution_cache()
+        return changed, group
 
     @staticmethod
     def _resolve_skills_paths() -> tuple[Path, Path]:

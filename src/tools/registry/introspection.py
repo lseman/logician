@@ -20,7 +20,17 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
             "get_project_map",
             "get_file_outline",
         ],
-        "nice_to_have": ["find_symbol", "find_references"],
+        "nice_to_have": [
+            "find_symbol",
+            "find_references",
+            "find_path",
+            "find_in_file",
+            "read_file_smart",
+            "sed_read",
+            "cc_glob",
+            "cc_grep",
+            "cc_read",
+        ],
     },
     "editing": {
         "required": [
@@ -30,7 +40,17 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
             "apply_unified_diff",
             "apply_edit_block",
         ],
-        "nice_to_have": ["multi_patch", "regex_replace", "show_diff", "count_in_file"],
+        "nice_to_have": [
+            "multi_patch",
+            "regex_replace",
+            "rg_replace",
+            "sed_replace",
+            "show_diff",
+            "count_in_file",
+            "cc_edit",
+            "cc_write",
+            "cc_multi_edit",
+        ],
     },
     "execution": {
         "required": ["run_shell", "run_python"],
@@ -62,6 +82,7 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
 }
 
 _CODING_SKILL_IDS = {
+    "cc_tools",
     "file_ops",
     "multi_edit",
     "web",
@@ -514,6 +535,14 @@ class RegistryIntrospectionMixin:
     def tool_execution_stats(self) -> ToolExecutionStats:
         return {name: dict(stats) for name, stats in self._tool_exec_stats.items()}
 
+    def get_grammar(self, tool_name: str) -> str | None:
+        """Return the GBNF grammar for a tool, or None if not registered.
+
+        Used by Agent.run() to enable llama.cpp constrained decoding for
+        grammar-aware tools (e.g. cc_edit, cc_multi_edit).
+        """
+        return self._grammars.get(str(tool_name or "").strip())
+
     def _tool_public_metadata(self, tool: Tool) -> dict[str, Any]:
         return {
             "name": tool.name,
@@ -740,7 +769,7 @@ class RegistryIntrospectionMixin:
             card
             for card in cards
             if (
-                self._normalized_path_text(card.source_path).find("/01_coding/") >= 0
+                self._normalized_path_text(card.source_path).find("/coding/") >= 0
                 or card.id in _CODING_SKILL_IDS
             )
         ]
@@ -779,7 +808,7 @@ class RegistryIntrospectionMixin:
         }
 
     def _coding_organization_audit(self) -> dict[str, Any]:
-        coding_dir = self.skills_dir_path / "01_coding"
+        coding_dir = self.skills_dir_path / "coding"
         if not coding_dir.is_dir():
             return {
                 "status": "missing",
@@ -792,30 +821,19 @@ class RegistryIntrospectionMixin:
 
         modules = sorted(
             p
-            for p in coding_dir.glob("*.py")
-            if p.is_file() and p.name != "__init__.py" and not p.name.startswith("_")
+            for p in coding_dir.rglob("*.py")
+            if p.is_file()
+            and p.name != "__init__.py"
+            and not p.name.startswith("_")
+            and "__pycache__" not in p.parts
         )
-        module_names = [p.name for p in modules]
+        module_names = [
+            str(p.relative_to(coding_dir)).replace("\\", "/") for p in modules
+        ]
 
-        prefix_pattern = re.compile(r"^(\d+)_")
         no_prefix: list[str] = []
-        prefix_to_names: dict[int, list[str]] = {}
-        for name in module_names:
-            m = prefix_pattern.match(name)
-            if not m:
-                no_prefix.append(name)
-                continue
-            idx = int(m.group(1))
-            prefix_to_names.setdefault(idx, []).append(name)
-
-        duplicate_prefixes = sorted(
-            idx for idx, names in prefix_to_names.items() if len(names) > 1
-        )
+        duplicate_prefixes: list[int] = []
         large_prefix_gaps: list[list[int]] = []
-        sorted_prefixes = sorted(prefix_to_names.keys())
-        for left, right in zip(sorted_prefixes, sorted_prefixes[1:]):
-            if right - left > 20:
-                large_prefix_gaps.append([left, right])
 
         source_paths: set[str] = set()
         for tool in self._tools.values():
@@ -841,20 +859,6 @@ class RegistryIntrospectionMixin:
             modules_without_registered_tools.append(module.name)
 
         issues: list[str] = []
-        if no_prefix:
-            issues.append(
-                "Module(s) without numeric prefix: " + ", ".join(no_prefix[:8])
-            )
-        if duplicate_prefixes:
-            issues.append(
-                "Duplicate numeric prefixes: "
-                + ", ".join(str(idx) for idx in duplicate_prefixes[:10])
-            )
-        if large_prefix_gaps:
-            issues.append(
-                "Large numbering gaps: "
-                + ", ".join(f"{a}->{b}" for a, b in large_prefix_gaps[:10])
-            )
         if modules_without_registered_tools:
             issues.append(
                 "Module(s) with no registered tool: "
@@ -865,6 +869,7 @@ class RegistryIntrospectionMixin:
             "status": "ok" if not issues else "needs_attention",
             "coding_dir": str(coding_dir),
             "coding_dir_exists": True,
+            "coding_module_root": str(coding_dir),
             "coding_modules_count": len(module_names),
             "coding_modules": module_names,
             "bootstrap_only_modules": bootstrap_only_modules,
