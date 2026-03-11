@@ -156,6 +156,15 @@ def test_registry_get_grammar_unknown_returns_none():
     assert registry.get_grammar("nonexistent_tool_xyz") is None
 
 
+def test_registry_grammar_survives_reload():
+    """Grammar is re-collected after skills reload."""
+    from src.tools import ToolRegistry
+    registry = ToolRegistry(auto_load_from_skills=True)
+    assert registry.get_grammar("cc_edit") is not None
+    registry.reload_skills()
+    assert registry.get_grammar("cc_edit") is not None, "grammar lost after reload"
+
+
 # __tools__ export
 def test_tools_exported(tools_ns):
     tools = tools_ns.get("__tools__", [])
