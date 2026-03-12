@@ -6,6 +6,7 @@ import re
 import time
 import uuid
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
@@ -38,6 +39,12 @@ from .trace import (
     _vprint_block,
     render_trace_markdown,
 )
+
+from .loop import AgentLoop
+from .guardrails import GuardrailEngine, default_guards
+from .prompt import PromptBuilder, default_prompt_builder
+from .dispatcher import ToolDispatcher
+from .types import TurnResult
 
 if TYPE_CHECKING:
     pass
@@ -77,6 +84,12 @@ _SOCIAL_MESSAGES = {
 }
 _SOCIAL_GREETING_TOKENS = {"hi", "hello", "hey", "yo"}
 _LOAD_SKILLS_RE = re.compile(r"^\s*/load-skills(?:\s+(?P<args>.+?))?\s*$", re.IGNORECASE)
+_LIST_TOOLS_PATTERNS = (
+    re.compile(r"^\s*list\s+(?:the\s+)?(?:available\s+)?tools\s*$", re.IGNORECASE),
+    re.compile(r"^\s*show\s+(?:the\s+)?(?:available\s+)?tools\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(?:what|which)\s+tools\s+(?:do\s+you\s+have|are\s+available)\s*\??\s*$", re.IGNORECASE),
+    re.compile(r"^\s*available\s+tools\s*$", re.IGNORECASE),
+)
 _TOOL_EXECUTION_CLAIM_PATTERNS = (
     r"\b(?:i|we)\s+(?:have\s+|has\s+|had\s+|already\s+|just\s+)?"
     r"(?:ran|run|executed|called|used|invoked|applied|checked|verified|searched|"
@@ -89,6 +102,14 @@ _TOOL_EXECUTION_CLAIM_PATTERNS = (
     r"\b(?:is|are)\s+now\s+(?:available|loaded|ready|saved)\b",
     r"\b(?:tool|tools|command|commands)\b.{0,40}\b(?:ran|run|executed|called|used)\b",
     r"\b(?:done|completed|finished)\b.{0,40}\b(?:tool|command|task|change|update|edit)\b",
+)
+_INVENTORY_REQUEST_PATTERNS = (
+    re.compile(r"\b(?:list|show|enumerate)\b", re.IGNORECASE),
+    re.compile(r"\b(?:what|which)\b.*\b(?:files|tools|functions|modules|directories)\b", re.IGNORECASE),
+)
+_GENERIC_FOLLOW_UP_RE = re.compile(
+    r"(?:\n\s*)?(?:would you like me to:?\s*|let me know how you'd like to proceed!?[\s:]*)$",
+    re.IGNORECASE,
 )
 
 
@@ -193,6 +214,9 @@ class Agent:
         self._tool_result_cache: dict[str, tuple[float, str]] = {}
         
         self._export_available_tools()
+
+        # Build the new SOTA agent loop (Phase A refactor)
+        self._agent_loop = self._build_agent_loop()
 
     def _export_available_tools(self) -> None:
         """Export a list of currently available tools to a JSON file."""
@@ -306,13 +330,21 @@ class Agent:
                 "  name: <tool>\n"
                 "  arguments:\n"
                 "    ...\n"
-                "Return exactly one tool_call per response.\n"
+                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.\n"
+                "Never batch writes, edits, or verification commands.\n"
+                "Prefer batching when the relevant read-only targets are already known.\n"
+                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.\n"
+                "Never narrate internal policy checks or quote system instructions.\n"
                 "If no tool is needed, answer normally and clearly."
             )
         return (
             "You are a reliable assistant. If a TOOL is needed, output EXACT JSON:\n"
             '{"tool_call":{"name":"<tool>","arguments":{...}}}\n'
-            "Return exactly one tool_call per response.\n"
+            "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.\n"
+            "Never batch writes, edits, or verification commands.\n"
+            "Prefer batching when the relevant read-only targets are already known.\n"
+            "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.\n"
+            "Never narrate internal policy checks or quote system instructions.\n"
             "If no tool is needed, answer normally and clearly."
         )
 
@@ -368,6 +400,11 @@ class Agent:
         if self._is_social_message(text):
             return False
         if any(phrase in text for phrase in _FOLLOW_UP_PHRASES):
+            return True
+        if (
+            len(text.split()) <= 12
+            and re.search(r"\b(it|this|that|these|those|them)\b", text)
+        ):
             return True
         return len(text.split()) <= 4
 
@@ -578,6 +615,65 @@ class Agent:
         else:
             state_lines.append("No dataset is loaded yet.")
 
+        def _recent_session_follow_up_lines() -> list[str]:
+            sid = self.current_session_id
+            if not sid or not self._is_follow_up_message(message):
+                return []
+            try:
+                recent_messages = self.memory.get_session_messages(sid)
+            except Exception:
+                return []
+            tool_messages = [
+                msg
+                for msg in recent_messages
+                if msg.role == MessageRole.TOOL and getattr(msg, "name", "")
+            ]
+            if not tool_messages:
+                return []
+
+            lines: list[str] = []
+            last_tool_msg = tool_messages[-1]
+            last_tool_name = str(last_tool_msg.name or "").strip()
+            if last_tool_name:
+                lines.append(f"Previous session tool executed: {last_tool_name}.")
+                last_tool = self.tools.get(last_tool_name)
+                last_skill_id = last_tool.skill_id if last_tool else None
+                if last_skill_id:
+                    lines.append(
+                        "The previous session tool came from the "
+                        f"{last_skill_id.replace('_', ' ')} skill."
+                    )
+                    skill_card = self.tools._catalog.skills.get(last_skill_id)
+                    next_skills = skill_card.next_skills if skill_card else []
+                    if next_skills:
+                        pretty = ", ".join(s.replace("_", " ") for s in next_skills)
+                        lines.append(
+                            f"For this follow-up, the likely next skills are: {pretty}."
+                        )
+
+            inspected_paths: list[str] = []
+            seen_paths: set[str] = set()
+            for msg in reversed(tool_messages[-8:]):
+                payload = self._parse_tool_result_payload(msg.content or "")
+                if not isinstance(payload, dict):
+                    continue
+                path = str(payload.get("path", "") or "").strip()
+                if not path or path in seen_paths:
+                    continue
+                seen_paths.add(path)
+                inspected_paths.append(path)
+                if len(inspected_paths) >= 4:
+                    break
+            if inspected_paths:
+                lines.append(
+                    "Recently inspected files: " + ", ".join(inspected_paths) + "."
+                )
+
+            preview = self._compact_preview(last_tool_msg.content or "", limit=240)
+            if preview:
+                lines.append(f"Latest prior tool result preview: {preview}")
+            return lines
+
         recent_calls = tool_calls or []
         preview_by_sig = tool_result_preview_by_sig or {}
         if recent_calls:
@@ -613,6 +709,8 @@ class Agent:
             state_lines.append(
                 "For this follow-up, the likely next skills are: preprocessing, analysis, forecasting."
             )
+        else:
+            state_lines.extend(_recent_session_follow_up_lines())
 
         if not state_lines:
             return message
@@ -714,7 +812,94 @@ class Agent:
             "- Prefer `find_in_file` for single-file search and `rg_search` for workspace search.\n"
             "- Prefer `sed_read` for exact line ranges and `read_file_smart` for large files or symbol-focused reads.\n"
             "- Use `read_file` for small direct reads only.\n"
+            "- If multiple relevant file paths are already known, prefer one batched response with 2-4 independent read-only inspections.\n"
+            "- For repo/directory architecture, review, refactor, or improvement questions, inspect enough files before concluding; do not answer from a listing or a single file when more evidence is cheap.\n"
+            "- On follow-up improvement/review questions, ground recommendations in the files you inspected; if current evidence is thin, inspect more first.\n"
             "- Use `run_shell` only when the dedicated file/search/edit tools are insufficient.\n"
+        )
+
+    def _is_codebase_analysis_request(
+        self,
+        message: str,
+        *,
+        tool_calls: list[ToolCall] | None = None,
+    ) -> bool:
+        text = (message or "").strip().lower()
+        if not text or self._is_social_message(text) or self._is_editing_intent(text):
+            return False
+        review_terms = (
+            r"\b(review|improve|improvement|refactor|cleanup|maintainability|"
+            r"architecture|architectural|design|trade[- ]?offs?|structure|performance)\b"
+        )
+        if not re.search(review_terms, text):
+            return False
+        code_terms = (
+            r"\b(file|files|path|directory|repo|repository|code|function|class|module|"
+            r"symbol|search|read|rust|python|javascript|typescript|go)\b"
+        )
+        file_hint = (
+            r"(?:^|[\s`\"'])[\w./\\-]+\.(?:py|rs|ts|tsx|js|jsx|go|java|c|cpp|h|hpp|md|json|toml|ya?ml)"
+        )
+        if re.search(code_terms, text) or re.search(file_hint, text):
+            return True
+        recent_calls = tool_calls or []
+        return bool(recent_calls) and any(
+            self._is_inspection_tool_name(call.name) for call in recent_calls
+        )
+
+    def _inspected_content_paths(self, tool_calls: list[ToolCall]) -> set[str]:
+        strong_read_tools = {
+            "read_file",
+            "read_file_smart",
+            "sed_read",
+            "get_file_outline",
+            "find_in_file",
+        }
+        out: set[str] = set()
+        for call in tool_calls:
+            if call.name not in strong_read_tools:
+                continue
+            for path in self._extract_paths_from_tool_call(call):
+                path_s = str(path or "").strip()
+                if not path_s or path_s.endswith("/"):
+                    continue
+                if self._lang_from_path(path_s) or re.search(
+                    r"\.[a-z0-9]{1,10}$", path_s.lower()
+                ):
+                    out.add(path_s)
+        return out
+
+    def _analysis_evidence_nudge(
+        self,
+        *,
+        message: str,
+        tool_calls: list[ToolCall],
+        write_tool_called: bool,
+    ) -> str:
+        if write_tool_called or not self._is_codebase_analysis_request(
+            message, tool_calls=tool_calls
+        ):
+            return ""
+        inspected_paths = self._inspected_content_paths(tool_calls)
+        if len(inspected_paths) >= 2:
+            return ""
+        if tool_calls and not any(self._is_inspection_tool_name(c.name) for c in tool_calls):
+            return ""
+        inspected_count = len(inspected_paths)
+        if inspected_count == 0:
+            evidence_state = "You have not inspected any concrete code files yet."
+        else:
+            evidence_state = (
+                f"You have only inspected {inspected_count} concrete file so far: "
+                + ", ".join(sorted(inspected_paths)[:3])
+                + "."
+            )
+        return (
+            "[Evidence first] This is a codebase review / architecture / improvement request. "
+            f"{evidence_state} Do not finalize from a listing or a single file. "
+            "Inspect at least 2 relevant files before answering. "
+            "If the paths are already known, prefer one batched response with 2-4 independent "
+            "read-only calls (for example entrypoint + core modules), then ground the answer in those files."
         )
 
     def _build_system_prompt_for_message(
@@ -1146,6 +1331,202 @@ class Agent:
             f"{contradiction} Latest `{tool_name}` summary: {summary}"
         )
 
+    def _current_turn_flow_stage(
+        self,
+        *,
+        editing_intent: bool,
+        tool_calls: list[ToolCall],
+        inspection_tool_called: bool,
+        write_tool_called: bool,
+        verification_after_write: bool,
+        verification_required: bool,
+    ) -> str:
+        if write_tool_called and verification_required and not verification_after_write:
+            return "verify"
+        edit_flow_active = editing_intent and (
+            not tool_calls
+            or inspection_tool_called
+            or write_tool_called
+            or any(
+                self._requires_prewrite_inspection(c.name)
+                or self._is_write_tool_name(c.name)
+                for c in tool_calls
+            )
+        )
+        if edit_flow_active and not inspection_tool_called and not write_tool_called:
+            return "inspect"
+        if edit_flow_active and not write_tool_called:
+            return "edit"
+        return "answer"
+
+    def _guardrail_stall_response(
+        self,
+        *,
+        issue: str,
+        flow_stage: str,
+        verification_profile: str,
+        last_verification_failure_summary: str,
+        tool_name: str = "",
+    ) -> str:
+        next_step = "either take a different concrete action or state the blocker clearly."
+        reason = "the run repeated the same recovery step without making progress."
+
+        if flow_stage == "inspect":
+            reason = (
+                "the run kept restating or planning instead of inspecting the target first."
+            )
+            next_step = (
+                "call one discovery/read tool now, such as find_path, rg_search, "
+                "sed_read, read_file_smart, or get_file_outline."
+            )
+        elif flow_stage == "edit":
+            reason = (
+                "the run kept discussing edits without issuing a concrete write/edit tool call."
+            )
+            next_step = (
+                "emit exactly one edit tool call now, such as edit_file_replace, "
+                "multi_edit, apply_unified_diff, apply_edit_block, or write_file."
+            )
+        elif flow_stage == "verify":
+            verify_hint = self._verification_guidance(verification_profile)
+            reason = (
+                "the run kept trying to finish without completing verification after writes."
+            )
+            next_step = f"run one relevant verification tool now. {verify_hint}".strip()
+
+        if issue == "tool_claim":
+            reason = "the draft kept claiming tool execution without an actual tool call."
+        elif issue == "inspection_result":
+            reason = "the draft kept contradicting the latest inspection result."
+        elif issue == "duplicate_tool_call":
+            tool_label = f" `{tool_name}`" if tool_name else ""
+            reason = f"the same tool call{tool_label} was repeated without new information."
+            next_step = (
+                "reuse the earlier result, choose a different tool, or explain the blocker."
+            )
+        elif issue == "schema_validation":
+            tool_label = f" `{tool_name}`" if tool_name else ""
+            reason = f"tool schema validation for{tool_label} kept failing with no correction."
+            next_step = "call describe_tool, then retry with corrected argument keys only."
+        elif issue == "repeated_draft":
+            reason = "the model repeated materially the same draft instead of adapting to runtime feedback."
+        elif issue == "repeated_prompt":
+            reason = "the runtime was about to send the same effective prompt to the model again."
+        elif issue == "analysis_evidence":
+            reason = "the run kept trying to answer a codebase review/design question from thin evidence."
+            next_step = (
+                "inspect at least one or two more relevant files first, ideally as a batched "
+                "read-only tool response if the paths are already known."
+            )
+
+        failure_note = ""
+        if flow_stage == "verify" and last_verification_failure_summary:
+            failure_note = (
+                f"\nRecent verification failures:\n{last_verification_failure_summary.strip()}"
+            )
+
+        return (
+            "[Flow stop] I am stopping this turn because "
+            f"{reason}\n"
+            f"Next required step: {next_step}"
+            f"{failure_note}"
+        ).strip()
+
+    @staticmethod
+    def _normalize_repeated_draft_key(text: str) -> str:
+        cleaned = " ".join(str(text or "").split()).strip().lower()
+        if len(cleaned) > 400:
+            cleaned = cleaned[:400]
+        return cleaned
+
+    def _drafts_are_similar(
+        self,
+        previous: str,
+        current: str,
+        *,
+        threshold: float | None = None,
+    ) -> bool:
+        prev = self._normalize_repeated_draft_key(previous)
+        curr = self._normalize_repeated_draft_key(current)
+        if not prev or not curr:
+            return False
+        if prev == curr:
+            return True
+        score = SequenceMatcher(a=prev, b=curr).ratio()
+        limit = float(
+            threshold
+            if threshold is not None
+            else getattr(self.config, "repeated_draft_similarity_threshold", 0.88)
+        )
+        return score >= limit
+
+    @staticmethod
+    def _prompt_signature(messages: list[Message]) -> str:
+        payload = [
+            (
+                getattr(message.role, "value", str(message.role)),
+                str(getattr(message, "name", "") or ""),
+                str(message.content or ""),
+            )
+            for message in messages
+        ]
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()[:24]
+
+    @staticmethod
+    def _looks_like_inventory_request(message: str) -> bool:
+        text = str(message or "").strip()
+        if not text:
+            return False
+        return any(pattern.search(text) for pattern in _INVENTORY_REQUEST_PATTERNS)
+
+    def _sanitize_generic_follow_up(self, *, message: str, final: str) -> str:
+        text = str(final or "").rstrip()
+        if not text or not self._looks_like_inventory_request(message):
+            return text
+
+        lines = text.splitlines()
+        cut_idx: int | None = None
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            lower = stripped.lower()
+            if lower.startswith("would you like me to"):
+                cut_idx = idx
+                break
+            if lower.startswith("let me know how you'd like to proceed"):
+                cut_idx = idx
+                break
+        if cut_idx is None:
+            return text
+
+        trimmed = "\n".join(lines[:cut_idx]).rstrip()
+        return trimmed or text
+
+    def _is_safe_multi_tool_batch(
+        self,
+        calls: list[ToolCall],
+        *,
+        verification_profile: str,
+    ) -> bool:
+        if not bool(getattr(self.config, "allow_multi_tool_calls", True)):
+            return False
+        max_calls = max(2, int(getattr(self.config, "multi_tool_call_max_calls", 4)))
+        if len(calls) < 2 or len(calls) > max_calls:
+            return False
+        for call in calls:
+            if self._is_write_tool_name(call.name):
+                return False
+            if self._requires_prewrite_inspection(call.name):
+                return False
+            if self._is_verification_tool_call(call, verification_profile):
+                return False
+            if not self._is_tool_cacheable(call.name):
+                return False
+        return True
+
     def _create_base_conversation(self, message: str) -> list[Message]:
         return [
             Message(
@@ -1284,6 +1665,74 @@ class Agent:
             already_loaded=already_loaded,
             missing=missing,
             active=active,
+        )
+        self._persist_runtime_state(sid)
+
+        debug = tracer.build_debug_payload(
+            sid=sid,
+            iterations=0,
+            tool_calls=[],
+            temp=temp,
+            n_tok=n_tok,
+            config=self.config,
+        )
+        trace_md = render_trace_markdown(debug) if debug_on else ""
+        return AgentResponse(
+            messages=convo,
+            tool_calls=[],
+            iterations=0,
+            final_response=reply,
+            debug=debug,
+            trace_md=trace_md,
+        )
+
+    def _is_tool_inventory_request(self, message: str) -> bool:
+        text = str(message or "").strip()
+        if not text or len(text) > 80:
+            return False
+        return any(pattern.fullmatch(text) for pattern in _LIST_TOOLS_PATTERNS)
+
+    def _run_tool_inventory_fast_path(
+        self,
+        *,
+        message: str,
+        sid: str,
+        temp: float,
+        n_tok: int,
+        tracer: _TraceCollector,
+        debug_on: bool,
+    ) -> AgentResponse:
+        convo = self._create_base_conversation(message)
+        self._append_user_message(convo, sid, message, tracer.emit)
+
+        tool_names = sorted(tool.name for tool in self.tools.list_tools())
+        active_lazy = self.tools.active_lazy_skill_groups()
+        available_lazy = [
+            group
+            for group in self.tools.available_lazy_skill_groups()
+            if group not in set(active_lazy)
+        ]
+
+        lines = [
+            f"Available tools ({len(tool_names)}):",
+            ", ".join(tool_names),
+        ]
+        if active_lazy:
+            lines.append("Active lazy skill groups: " + ", ".join(active_lazy) + ".")
+        if available_lazy:
+            lines.append(
+                "Hidden lazy skill groups: "
+                + ", ".join(available_lazy)
+                + ". Use `/load-skills <group>` to activate one."
+            )
+        reply = "\n\n".join(lines)
+
+        self._append_assistant_message(convo, sid, reply, assistant_ctx_max_chars=12000)
+        tracer.emit(
+            "tool_inventory_fast_path",
+            tool_count=len(tool_names),
+            active_lazy=active_lazy,
+            hidden_lazy=available_lazy,
         )
         self._persist_runtime_state(sid)
 
@@ -2769,6 +3218,32 @@ Return a corrected tool call in the same format.
             except Exception as e:
                 print(f"\n[Error]: {e}")
 
+    def _build_agent_loop(self) -> AgentLoop:
+        """Construct the SOTA AgentLoop with default components."""
+        guards = default_guards(self.config)
+        prompt_builder = default_prompt_builder(
+            tool_schema_fn=lambda: self.tools.tools_schema_prompt(),
+            domain_schema_fn=lambda groups: "",  # Phase B: domain tools stub
+            routing_fn=lambda query: "",         # Phase B: routing stub
+        )
+        dispatcher = ToolDispatcher(self.tools)
+        return AgentLoop(
+            llm=self.llm,
+            guardrails=GuardrailEngine(guards),
+            prompt_builder=prompt_builder,
+            dispatcher=dispatcher,
+            config=self.config,
+        )
+
+    async def run_loop(self, message: str) -> TurnResult:
+        """Run a turn using the new SOTA AgentLoop.
+
+        This is the new entry point for the refactored agent.
+        The existing run() method remains available for backwards compatibility.
+        """
+        messages = [Message(role=MessageRole.USER, content=message)]
+        return await self._agent_loop.run(messages)
+
     def run(
         self,
         message: str,
@@ -2814,6 +3289,16 @@ Return a corrected tool call in the same format.
         )
         if runtime_command is not None:
             return runtime_command
+
+        if self._is_tool_inventory_request(message):
+            return self._run_tool_inventory_fast_path(
+                message=message,
+                sid=sid,
+                temp=temp,
+                n_tok=n_tok,
+                tracer=tracer,
+                debug_on=debug_on,
+            )
 
         if self._is_social_message(message):
             social_fast_path = self._run_social_fast_path(
@@ -2920,11 +3405,15 @@ Return a corrected tool call in the same format.
             0,
             int(getattr(self.config, "reflexion_repair_max_attempts", 1)),
         )
+        guardrail_nudge_counts: Counter[str] = Counter()
+        last_no_call_draft_text = ""
+        repeated_no_call_draft_count = 0
         schema_validation_nudges: dict[str, int] = {}
         last_skill_signature: tuple[tuple[str, ...], tuple[str, ...]] | None = None
         svg_nudged_once = False
         docs_nudged_once = False
         _confidence_gate_retries = 0
+        last_llm_prompt_signature = ""
 
         tool_result_max_chars = int(getattr(self.config, "tool_result_max_chars", 6000))
         assistant_ctx_max_chars = int(
@@ -3059,6 +3548,40 @@ Return a corrected tool call in the same format.
                 )
 
             llm_convo = self._trim_convo_to_budget(llm_convo, n_tok)
+            llm_prompt_signature = self._prompt_signature(llm_convo)
+            if llm_prompt_signature == last_llm_prompt_signature:
+                stall_response = self._guardrail_stall_response(
+                    issue="repeated_prompt",
+                    flow_stage=self._current_turn_flow_stage(
+                        editing_intent=editing_intent,
+                        tool_calls=tool_calls,
+                        inspection_tool_called=inspection_tool_called,
+                        write_tool_called=write_tool_called,
+                        verification_after_write=verification_after_write,
+                        verification_required=bool(
+                            getattr(
+                                self.config,
+                                "require_verification_after_writes",
+                                True,
+                            )
+                        ),
+                    ),
+                    verification_profile=verification_profile,
+                    last_verification_failure_summary=last_verification_failure_summary,
+                )
+                self._append_assistant_message(
+                    convo,
+                    sid,
+                    stall_response,
+                    assistant_ctx_max_chars,
+                )
+                tracer.emit(
+                    "guardrail_flow_stop",
+                    iteration=iterations,
+                    reason="repeated_prompt",
+                )
+                break
+            last_llm_prompt_signature = llm_prompt_signature
             self._last_context_messages = list(llm_convo)
 
             context_snapshot = _render_context_snapshot(
@@ -3079,7 +3602,7 @@ Return a corrected tool call in the same format.
                     limit=12000,
                 )
 
-            _do_stream = (stream_callback is not None) or self.config.stream
+            _do_stream = bool(self.config.stream) and stream_callback is None
 
             # Constrained decoding: pass OpenAI tool schemas to llama.cpp so it
             # enforces valid JSON tool-call structure server-side.  Streaming is
@@ -3122,7 +3645,7 @@ Return a corrected tool call in the same format.
                     temperature=temp,
                     max_tokens=n_tok,
                     stream=_do_stream,
-                    on_token=stream_callback,
+                    on_token=None,
                     tools=_tools_payload,
                     grammar=_grammar,
                 )
@@ -3160,6 +3683,183 @@ Return a corrected tool call in the same format.
                 use_toon=self.config.use_toon_for_tools,
             )
 
+            if len(parsed_calls) > 1 and self._is_safe_multi_tool_batch(
+                parsed_calls,
+                verification_profile=verification_profile,
+            ):
+                tracer.emit(
+                    "multi_tool_calls_batch",
+                    iteration=iterations,
+                    count=len(parsed_calls),
+                    names=[c.name for c in parsed_calls[:8]],
+                )
+                consecutive_tools += len(parsed_calls)
+                if consecutive_tools > max_consecutive_tool_calls:
+                    msg = (
+                        "[Tool-call limit reached] Pause and decide the single highest-value next step. "
+                        "If you already have enough evidence, provide the final answer now; otherwise emit exactly one next tool call."
+                    )
+                    convo.append(Message(role=MessageRole.SYSTEM, content=msg))
+                    tracer.emit(
+                        "guardrail_stop",
+                        reason="max_consecutive_tool_calls_nudge",
+                        limit=max_consecutive_tool_calls,
+                    )
+                    consecutive_tools = 0
+                    if iterations < max_iterations:
+                        continue
+                    break
+
+                batch_interrupted = False
+                for batch_call in parsed_calls:
+                    tool_calls.append(batch_call)
+                    verification_profile = self._infer_verification_profile(
+                        message, tool_calls
+                    )
+                    tracer.emit(
+                        "parsed_tool_call",
+                        iteration=iterations,
+                        name=batch_call.name,
+                        arguments=batch_call.arguments,
+                        batched=True,
+                    )
+
+                    curr_sig = _tool_call_signature(batch_call)
+                    if curr_sig in seen_tool_signatures:
+                        tracer.emit(
+                            "duplicate_tool_call_blocked",
+                            iteration=iterations,
+                            name=batch_call.name,
+                            arguments=batch_call.arguments,
+                            batched=True,
+                        )
+                        prev_preview = tool_result_preview_by_sig.get(curr_sig, "")
+                        rule_msg = (
+                            "[Tool-calling rule] You already called this exact tool with the same arguments "
+                            "in this run. Reuse prior result, call a different tool, or provide the final answer."
+                        )
+                        if prev_preview:
+                            rule_msg += f"\nPrevious result preview: {prev_preview[:300]}"
+                        convo.append(Message(role=MessageRole.SYSTEM, content=rule_msg))
+                        tool_calls.pop()
+                        consecutive_tools = 0
+                        batch_interrupted = True
+                        break
+
+                    call_sequence = len(tool_calls)
+
+                    def _emit_tool_callback(stage: str, **payload: Any) -> None:
+                        if tool_callback is None:
+                            return
+                        envelope: dict[str, Any] = {
+                            "stage": str(stage or "").strip().lower(),
+                            "sequence": int(call_sequence),
+                        }
+                        envelope.update(payload)
+                        try:
+                            tool_callback(batch_call.name, dict(batch_call.arguments or {}), envelope)
+                            return
+                        except TypeError:
+                            if envelope["stage"] != "start":
+                                return
+                        except Exception:
+                            return
+
+                        try:
+                            tool_callback(batch_call.name, dict(batch_call.arguments or {}))
+                        except Exception:
+                            return
+
+                    exec_start = time.perf_counter()
+                    _cache_key = self._tool_cache_key(batch_call)
+                    _cached_result: str | None = None
+                    if self._is_tool_cacheable(batch_call.name):
+                        _entry = self._tool_result_cache.get(_cache_key)
+                        if _entry is not None:
+                            _ts, _r = _entry
+                            _ttl = float(getattr(self.config, "tool_cache_ttl", 3600))
+                            if _ttl <= 0 or (time.time() - _ts) < _ttl:
+                                _cached_result = _r
+
+                    _emit_tool_callback("start")
+
+                    if _cached_result is not None:
+                        result_full = _cached_result
+                        exec_dur = 0.0
+                        tracer.emit("tool_cache_hit", name=batch_call.name, key=_cache_key[:8])
+                    else:
+                        result_full = self.tools.execute(
+                            batch_call, use_toon=self.config.use_toon_for_tools
+                        )
+                        exec_dur = time.perf_counter() - exec_start
+                        _max_size = int(getattr(self.config, "tool_cache_max_size", 256))
+                        if (
+                            self._is_tool_cacheable(batch_call.name)
+                            and not self._tool_result_is_error(result_full)
+                            and len(self._tool_result_cache) < _max_size
+                        ):
+                            self._tool_result_cache[_cache_key] = (time.time(), result_full)
+
+                    _last_tool_name = batch_call.name
+                    raw_tool_result = result_full
+                    tool_failed = self._tool_result_is_error(raw_tool_result)
+                    tool_error = ""
+                    if tool_failed:
+                        tool_error = (
+                            str(raw_tool_result).strip().splitlines()[0][:260]
+                            if str(raw_tool_result).strip()
+                            else "tool returned an error payload"
+                        )
+
+                    if isinstance(result_full, str) and result_full.startswith("Error:"):
+                        result_full = (
+                            f"[Tool '{batch_call.name}' failed] {result_full}\n\n"
+                            "Diagnose this failure: check argument types, file paths, or permissions. "
+                            "Options: (a) retry with corrected arguments, "
+                            "(b) use a different tool, or (c) explain the blocker clearly."
+                        )
+
+                    result_ctx = self._append_tool_message(
+                        convo=convo,
+                        sid=sid,
+                        call=batch_call,
+                        result_full=result_full,
+                        tool_result_max_chars=tool_result_max_chars,
+                    )
+                    self._persist_runtime_state(sid)
+                    tracer.emit(
+                        "tool_result",
+                        iteration=iterations,
+                        name=batch_call.name,
+                        duration_s=round(exec_dur, 6),
+                        result_preview=result_ctx[:240],
+                        cache_hit=_cached_result is not None,
+                        batched=True,
+                    )
+                    _emit_tool_callback(
+                        "end",
+                        status=("error" if tool_failed else "ok"),
+                        duration_ms=int(round(exec_dur * 1000.0)),
+                        cache_hit=(_cached_result is not None),
+                        error=tool_error,
+                    )
+                    seen_tool_signatures.add(curr_sig)
+                    tool_result_preview_by_sig[curr_sig] = result_ctx[:240]
+                    if self._is_inspection_tool_name(batch_call.name) and not self._tool_result_is_error(
+                        result_full
+                    ):
+                        inspection_tool_called = True
+                        latest_inspection_tool_name = str(batch_call.name or "").strip()
+                        latest_inspection_payload = self._parse_tool_result_payload(result_full)
+
+                if batch_interrupted:
+                    continue
+
+                guardrail_nudge_counts.clear()
+                last_no_call_draft_text = ""
+                repeated_no_call_draft_count = 0
+                continue
+
             if len(parsed_calls) > 1:
                 tracer.emit(
                     "multi_tool_calls_detected",
@@ -3171,8 +3871,9 @@ Return a corrected tool call in the same format.
                     Message(
                         role=MessageRole.SYSTEM,
                         content=(
-                            "[Tool-calling rule] Return EXACTLY ONE tool_call per response. "
-                            "Do not batch calls. Pick the single next-best tool."
+                            "[Tool-calling rule] Return EXACTLY ONE tool_call per response unless you are batching "
+                            "2-4 independent read-only calls (for example multiple file reads/searches). "
+                            "Never batch writes/edits/verifications in the same response."
                         ),
                     )
                 )
@@ -3182,6 +3883,20 @@ Return a corrected tool call in the same format.
             call = parsed_calls[0] if parsed_calls else None
 
             if not call:
+                flow_stage = self._current_turn_flow_stage(
+                    editing_intent=editing_intent,
+                    tool_calls=tool_calls,
+                    inspection_tool_called=inspection_tool_called,
+                    write_tool_called=write_tool_called,
+                    verification_after_write=verification_after_write,
+                    verification_required=bool(
+                        getattr(
+                            self.config,
+                            "require_verification_after_writes",
+                            True,
+                        )
+                    ),
+                )
                 # ── Truncation guard ─────────────────────────────────────────
                 # If the model hit max_tokens mid-JSON the brace-counting parser
                 # returns nothing.  Detect this and, for write_file calls, try
@@ -3260,7 +3975,7 @@ Return a corrected tool call in the same format.
                                     "for targeted edits."
                                 ),
                             )
-                        )
+                    )
                     tracer.emit(
                         "truncated_tool_call_detected",
                         iteration=iterations,
@@ -3269,6 +3984,42 @@ Return a corrected tool call in the same format.
                     )
                     continue
                 # ─────────────────────────────────────────────────────────────
+
+                _guardrail_limit = max(
+                    0,
+                    int(getattr(self.config, "guardrail_stall_nudge_limit", 1)),
+                )
+                _repeated_draft_limit = max(
+                    0,
+                    int(getattr(self.config, "repeated_draft_stall_limit", 1)),
+                )
+                if _stripped_text:
+                    if self._drafts_are_similar(last_no_call_draft_text, _stripped_text):
+                        repeated_no_call_draft_count += 1
+                    else:
+                        last_no_call_draft_text = _stripped_text
+                        repeated_no_call_draft_count = 1
+                    if repeated_no_call_draft_count > _repeated_draft_limit:
+                        stall_response = self._guardrail_stall_response(
+                            issue="repeated_draft",
+                            flow_stage=flow_stage,
+                            verification_profile=verification_profile,
+                            last_verification_failure_summary=last_verification_failure_summary,
+                        )
+                        self._append_assistant_message(
+                            convo,
+                            sid,
+                            stall_response,
+                            assistant_ctx_max_chars,
+                        )
+                        tracer.emit(
+                            "guardrail_flow_stop",
+                            iteration=iterations,
+                            reason="repeated_draft",
+                            stage=flow_stage,
+                            preview=_stripped_text[:180],
+                        )
+                        break
 
                 if (
                     bool(getattr(self.config, "tool_claim_guard_enabled", True))
@@ -3283,6 +4034,27 @@ Return a corrected tool call in the same format.
                         editing_intent=editing_intent,
                     )
                     if tool_claim_nudge:
+                        guardrail_nudge_counts["tool_claim"] += 1
+                        if guardrail_nudge_counts["tool_claim"] > _guardrail_limit:
+                            stall_response = self._guardrail_stall_response(
+                                issue="tool_claim",
+                                flow_stage=flow_stage,
+                                verification_profile=verification_profile,
+                                last_verification_failure_summary=last_verification_failure_summary,
+                            )
+                            self._append_assistant_message(
+                                convo,
+                                sid,
+                                stall_response,
+                                assistant_ctx_max_chars,
+                            )
+                            tracer.emit(
+                                "guardrail_flow_stop",
+                                iteration=iterations,
+                                reason="tool_claim",
+                                stage=flow_stage,
+                            )
+                            break
                         tool_claim_guard_nudges += 1
                         convo.append(
                             Message(role=MessageRole.SYSTEM, content=tool_claim_nudge)
@@ -3309,6 +4081,29 @@ Return a corrected tool call in the same format.
                         payload=latest_inspection_payload,
                     )
                     if inspection_nudge:
+                        guardrail_nudge_counts["inspection_result"] += 1
+                        if guardrail_nudge_counts["inspection_result"] > _guardrail_limit:
+                            stall_response = self._guardrail_stall_response(
+                                issue="inspection_result",
+                                flow_stage=flow_stage,
+                                verification_profile=verification_profile,
+                                last_verification_failure_summary=last_verification_failure_summary,
+                                tool_name=latest_inspection_tool_name,
+                            )
+                            self._append_assistant_message(
+                                convo,
+                                sid,
+                                stall_response,
+                                assistant_ctx_max_chars,
+                            )
+                            tracer.emit(
+                                "guardrail_flow_stop",
+                                iteration=iterations,
+                                reason="inspection_result",
+                                stage=flow_stage,
+                                tool=latest_inspection_tool_name,
+                            )
+                            break
                         inspection_result_guard_nudges += 1
                         convo.append(
                             Message(role=MessageRole.SYSTEM, content=inspection_nudge)
@@ -3333,10 +4128,30 @@ Return a corrected tool call in the same format.
                     )
                     and write_tool_called
                     and not verification_after_write
-                    and not verification_nudged_once
                     and iterations < max_iterations
                 ):
                     verify_hint = self._verification_guidance(verification_profile)
+                    guardrail_nudge_counts["verification_required"] += 1
+                    if guardrail_nudge_counts["verification_required"] > _guardrail_limit:
+                        stall_response = self._guardrail_stall_response(
+                            issue="verification_required",
+                            flow_stage=flow_stage,
+                            verification_profile=verification_profile,
+                            last_verification_failure_summary=last_verification_failure_summary,
+                        )
+                        self._append_assistant_message(
+                            convo,
+                            sid,
+                            stall_response,
+                            assistant_ctx_max_chars,
+                        )
+                        tracer.emit(
+                            "guardrail_flow_stop",
+                            iteration=iterations,
+                            reason="verification_required",
+                            stage=flow_stage,
+                        )
+                        break
                     convo.append(
                         Message(
                             role=MessageRole.SYSTEM,
@@ -3361,6 +4176,27 @@ Return a corrected tool call in the same format.
                     and verification_repair_nudges < max_verification_repair_nudges
                     and iterations < max_iterations
                 ):
+                    guardrail_nudge_counts["verification_failed"] += 1
+                    if guardrail_nudge_counts["verification_failed"] > _guardrail_limit:
+                        stall_response = self._guardrail_stall_response(
+                            issue="verification_failed",
+                            flow_stage=flow_stage,
+                            verification_profile=verification_profile,
+                            last_verification_failure_summary=last_verification_failure_summary,
+                        )
+                        self._append_assistant_message(
+                            convo,
+                            sid,
+                            stall_response,
+                            assistant_ctx_max_chars,
+                        )
+                        tracer.emit(
+                            "guardrail_flow_stop",
+                            iteration=iterations,
+                            reason="verification_failed",
+                            stage=flow_stage,
+                        )
+                        break
                     verification_repair_nudges += 1
                     failure_note = (
                         f"\nRecent verification failures:\n{last_verification_failure_summary}\n"
@@ -3409,31 +4245,85 @@ Return a corrected tool call in the same format.
                     .endswith("?")
                     and iterations < max_iterations - 1
                 )
-                if _looks_like_plan and not self._allows_reasoning_only_response(
+                _allows_reasoning_only = self._allows_reasoning_only_response(
                     message,
                     selection,
-                ):
-                    # Nudge the model to act instead of just planning.
-                    convo.append(
-                        Message(
-                            role=MessageRole.SYSTEM,
-                            content=(
-                                "[Reasoning without action detected] "
-                                "You described a plan but did not call any tool. "
-                                "Proceed immediately: emit your first tool call now."
-                            ),
-                        )
-                    )
-                    tracer.emit(
-                        "plan_without_action_nudge",
-                        iteration=iterations,
-                        preview=text[:120],
-                    )
-                    continue
+                )
 
                 if (
-                    editing_intent
-                    and not write_tool_called
+                    flow_stage == "inspect"
+                    and edit_inspection_nudges < max_edit_inspection_nudges
+                    and iterations < max_iterations
+                ):
+                    _clean_text = self._strip_internal_reasoning_tags(text)
+                    _clean_lower = _clean_text.lower()
+                    _completion_claim = any(
+                        phrase in _clean_lower
+                        for phrase in (
+                            "done",
+                            "completed",
+                            "finished",
+                            "updated",
+                            "edited",
+                            "changed",
+                            "implemented",
+                            "fixed",
+                            "all set",
+                            "i have",
+                            "i've",
+                        )
+                    )
+                    _needs_inspection_nudge = (
+                        not tool_calls
+                        or _completion_claim
+                        or len(_clean_text) <= 600
+                        or _looks_like_plan
+                    )
+                    if _needs_inspection_nudge and not _allows_reasoning_only:
+                        guardrail_nudge_counts["editing_inspection"] += 1
+                        if guardrail_nudge_counts["editing_inspection"] > _guardrail_limit:
+                            stall_response = self._guardrail_stall_response(
+                                issue="editing_inspection",
+                                flow_stage=flow_stage,
+                                verification_profile=verification_profile,
+                                last_verification_failure_summary=last_verification_failure_summary,
+                            )
+                            self._append_assistant_message(
+                                convo,
+                                sid,
+                                stall_response,
+                                assistant_ctx_max_chars,
+                            )
+                            tracer.emit(
+                                "guardrail_flow_stop",
+                                iteration=iterations,
+                                reason="editing_inspection",
+                                stage=flow_stage,
+                            )
+                            break
+                        edit_inspection_nudges += 1
+                        convo.append(
+                            Message(
+                                role=MessageRole.SYSTEM,
+                                content=(
+                                    "[Inspect before edit] This request is code/file editing. "
+                                    "Do not finalize or propose edits yet. Inspect the target first with one "
+                                    "discovery/read tool now (for example find_path, find_in_file, sed_read, "
+                                    "read_file_smart, rg_search, or get_file_outline)."
+                                ),
+                            )
+                        )
+                        tracer.emit(
+                            "editing_inspection_required_nudge",
+                            iteration=iterations,
+                            nudge=edit_inspection_nudges,
+                            preview=text[:160],
+                        )
+                        consecutive_tools = 0
+                        continue
+
+                if (
+                    flow_stage == "edit"
                     and edit_action_nudges < max_edit_action_nudges
                     and iterations < max_iterations
                 ):
@@ -3462,12 +4352,31 @@ Return a corrected tool call in the same format.
                         not tool_calls
                         or _completion_claim
                         or len(_clean_text) <= 600
+                        or _looks_like_plan
                         or not attempted_write
                     )
-                    if _needs_action_nudge and not self._allows_reasoning_only_response(
-                        message,
-                        selection,
-                    ):
+                    if _needs_action_nudge and not _allows_reasoning_only:
+                        guardrail_nudge_counts["editing_action"] += 1
+                        if guardrail_nudge_counts["editing_action"] > _guardrail_limit:
+                            stall_response = self._guardrail_stall_response(
+                                issue="editing_action",
+                                flow_stage=flow_stage,
+                                verification_profile=verification_profile,
+                                last_verification_failure_summary=last_verification_failure_summary,
+                            )
+                            self._append_assistant_message(
+                                convo,
+                                sid,
+                                stall_response,
+                                assistant_ctx_max_chars,
+                            )
+                            tracer.emit(
+                                "guardrail_flow_stop",
+                                iteration=iterations,
+                                reason="editing_action",
+                                stage=flow_stage,
+                            )
+                            break
                         edit_action_nudges += 1
                         convo.append(
                             Message(
@@ -3487,6 +4396,85 @@ Return a corrected tool call in the same format.
                         )
                         consecutive_tools = 0
                         continue
+
+                analysis_evidence_nudge = self._analysis_evidence_nudge(
+                    message=message,
+                    tool_calls=tool_calls,
+                    write_tool_called=write_tool_called,
+                )
+                if analysis_evidence_nudge and iterations < max_iterations:
+                    guardrail_nudge_counts["analysis_evidence"] += 1
+                    if guardrail_nudge_counts["analysis_evidence"] > _guardrail_limit:
+                        stall_response = self._guardrail_stall_response(
+                            issue="analysis_evidence",
+                            flow_stage=flow_stage,
+                            verification_profile=verification_profile,
+                            last_verification_failure_summary=last_verification_failure_summary,
+                        )
+                        self._append_assistant_message(
+                            convo,
+                            sid,
+                            stall_response,
+                            assistant_ctx_max_chars,
+                        )
+                        tracer.emit(
+                            "guardrail_flow_stop",
+                            iteration=iterations,
+                            reason="analysis_evidence",
+                            stage=flow_stage,
+                        )
+                        break
+                    convo.append(
+                        Message(role=MessageRole.SYSTEM, content=analysis_evidence_nudge)
+                    )
+                    tracer.emit(
+                        "analysis_evidence_required_nudge",
+                        iteration=iterations,
+                        inspected_files=len(self._inspected_content_paths(tool_calls)),
+                        preview=text[:160],
+                    )
+                    consecutive_tools = 0
+                    continue
+
+                if _looks_like_plan and not _allows_reasoning_only:
+                    guardrail_nudge_counts["plan_without_action"] += 1
+                    if guardrail_nudge_counts["plan_without_action"] > _guardrail_limit:
+                        stall_response = self._guardrail_stall_response(
+                            issue="plan_without_action",
+                            flow_stage=flow_stage,
+                            verification_profile=verification_profile,
+                            last_verification_failure_summary=last_verification_failure_summary,
+                        )
+                        self._append_assistant_message(
+                            convo,
+                            sid,
+                            stall_response,
+                            assistant_ctx_max_chars,
+                        )
+                        tracer.emit(
+                            "guardrail_flow_stop",
+                            iteration=iterations,
+                            reason="plan_without_action",
+                            stage=flow_stage,
+                        )
+                        break
+                    # Nudge the model to act instead of just planning.
+                    convo.append(
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content=(
+                                "[Reasoning without action detected] "
+                                "You described a plan but did not call any tool. "
+                                "Proceed immediately: emit your first tool call now."
+                            ),
+                        )
+                    )
+                    tracer.emit(
+                        "plan_without_action_nudge",
+                        iteration=iterations,
+                        preview=text[:120],
+                    )
+                    continue
 
                 # ── Confidence-gated stopping ─────────────────────────────────
                 # Score the candidate answer; if it falls below the threshold
@@ -3607,6 +4595,45 @@ Return a corrected tool call in the same format.
 
             curr_sig = _tool_call_signature(call)
             if curr_sig in seen_tool_signatures:
+                guardrail_nudge_counts["duplicate_tool_call"] += 1
+                if guardrail_nudge_counts["duplicate_tool_call"] > max(
+                    0,
+                    int(getattr(self.config, "guardrail_stall_nudge_limit", 1)),
+                ):
+                    stall_response = self._guardrail_stall_response(
+                        issue="duplicate_tool_call",
+                        flow_stage=self._current_turn_flow_stage(
+                            editing_intent=editing_intent,
+                            tool_calls=tool_calls,
+                            inspection_tool_called=inspection_tool_called,
+                            write_tool_called=write_tool_called,
+                            verification_after_write=verification_after_write,
+                            verification_required=bool(
+                                getattr(
+                                    self.config,
+                                    "require_verification_after_writes",
+                                    True,
+                                )
+                            ),
+                        ),
+                        verification_profile=verification_profile,
+                        last_verification_failure_summary=last_verification_failure_summary,
+                        tool_name=call.name,
+                    )
+                    tool_calls.pop()
+                    self._append_assistant_message(
+                        convo,
+                        sid,
+                        stall_response,
+                        assistant_ctx_max_chars,
+                    )
+                    tracer.emit(
+                        "guardrail_flow_stop",
+                        iteration=iterations,
+                        reason="duplicate_tool_call",
+                        tool=call.name,
+                    )
+                    break
                 tracer.emit(
                     "duplicate_tool_call_blocked",
                     iteration=iterations,
@@ -3801,6 +4828,44 @@ Return a corrected tool call in the same format.
                 seen_nudges = int(schema_validation_nudges.get(call.name, 0))
                 if seen_nudges < 2:
                     schema_validation_nudges[call.name] = seen_nudges + 1
+                    guardrail_nudge_counts[f"schema_validation:{call.name}"] += 1
+                    if guardrail_nudge_counts[f"schema_validation:{call.name}"] > max(
+                        0,
+                        int(getattr(self.config, "guardrail_stall_nudge_limit", 1)),
+                    ):
+                        stall_response = self._guardrail_stall_response(
+                            issue="schema_validation",
+                            flow_stage=self._current_turn_flow_stage(
+                                editing_intent=editing_intent,
+                                tool_calls=tool_calls,
+                                inspection_tool_called=inspection_tool_called,
+                                write_tool_called=write_tool_called,
+                                verification_after_write=verification_after_write,
+                                verification_required=bool(
+                                    getattr(
+                                        self.config,
+                                        "require_verification_after_writes",
+                                        True,
+                                    )
+                                ),
+                            ),
+                            verification_profile=verification_profile,
+                            last_verification_failure_summary=last_verification_failure_summary,
+                            tool_name=call.name,
+                        )
+                        self._append_assistant_message(
+                            convo,
+                            sid,
+                            stall_response,
+                            assistant_ctx_max_chars,
+                        )
+                        tracer.emit(
+                            "guardrail_flow_stop",
+                            iteration=iterations,
+                            reason="schema_validation",
+                            tool=call.name,
+                        )
+                        break
                     allowed = []
                     if isinstance(payload, dict):
                         raw_allowed = payload.get("allowed_arguments", [])
@@ -3850,6 +4915,10 @@ Return a corrected tool call in the same format.
                     verification_blocking_failures = False
                     last_verification_failure_summary = ""
                     verification_repair_nudges = 0
+
+            guardrail_nudge_counts.clear()
+            last_no_call_draft_text = ""
+            repeated_no_call_draft_count = 0
 
             # ── Post-tool reflection ("afterthought") ────────────────────────
             # After each tool result land, ask the LLM to briefly synthesise what
@@ -4088,6 +5157,21 @@ Return a corrected tool call in the same format.
                 tracer.emit("thinking_error", error=str(_exc))
             tracer.emit("thinking_end", preview=final[:200])
 
+        sanitized_final = self._sanitize_generic_follow_up(message=message, final=final)
+        if sanitized_final != final:
+            final = sanitized_final
+            self.memory.save_message(
+                sid,
+                Message(role=MessageRole.ASSISTANT, content=final),
+            )
+            convo.append(
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=_truncate_text(final, assistant_ctx_max_chars),
+                )
+            )
+            tracer.emit("generic_follow_up_sanitized", preview=final[:200])
+
         if (
             bool(getattr(self.config, "tool_claim_guard_enabled", True))
             and bool(
@@ -4187,6 +5271,12 @@ Return a corrected tool call in the same format.
         )
 
         trace_md = render_trace_markdown(debug) if debug_on else ""
+
+        if stream_callback is not None and final:
+            try:
+                stream_callback(final)
+            except Exception:
+                pass
 
         return AgentResponse(
             messages=convo,
