@@ -231,7 +231,7 @@ class AgentLoop:
             convo.append(assistant_msg)
             self._save_message(assistant_msg, session_id)
 
-            results = await self.dispatcher.dispatch(tool_calls, state)
+            results = await self.dispatcher.dispatch(tool_calls, state, self.config)
             tool_msgs = format_tool_results(results)
             convo.extend(tool_msgs)
             for tm in tool_msgs:

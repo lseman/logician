@@ -42,7 +42,7 @@ class FakeDispatcher:
     def __init__(self) -> None:
         self.dispatched: list[ToolCall] = []
 
-    async def dispatch(self, calls, state):
+    async def dispatch(self, calls, state, config=None):
         self.dispatched.extend(calls)
         state.consecutive_tool_count += len(calls)
         return []
