@@ -5,10 +5,8 @@ import concurrent.futures
 import hashlib
 import json
 import re
-import time
 import uuid
 from collections import Counter
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
@@ -27,24 +25,16 @@ from ..tools import (
     ToolRegistry,
     parse_tool_calls,
 )
-from ..tools.parser import (
-    detect_truncated_tool_call,
-    extract_partial_write_from_truncated,
-)
 from .trace import (
     AgentResponse,
-    _render_context_snapshot,
-    _render_tool_progress_reminder,
     _tool_call_signature,
     _TraceCollector,
     _truncate_text,
-    _vprint_block,
-    render_trace_markdown,
 )
 
 from .loop import AgentLoop
 from .guardrails import GuardrailEngine, default_guards
-from .prompt import PromptBuilder, default_prompt_builder
+from .prompt import default_prompt_builder
 from .dispatcher import ToolDispatcher
 from .types import TurnResult
 
@@ -427,6 +417,7 @@ class Agent:
             return not trailing
         return False
 
+
     def _is_follow_up_message(self, message: str) -> bool:
         text = (message or "").strip().lower()
         if not text:
@@ -514,39 +505,6 @@ class Agent:
             "agent",
         )
         return any(token in text for token in project_targets)
-
-    def _allows_reasoning_only_response(
-        self,
-        message: str,
-        selection: SkillSelection | None = None,
-    ) -> bool:
-        text = (message or "").strip().lower()
-        if not text:
-            return False
-
-        explicit_reasoning = any(
-            re.search(pattern, text)
-            for pattern in (
-                r"/think\b",
-                r"\bthink(?:\s+through|\s+about|\s+before)?\b",
-                r"\breason(?:\s+about|\s+through|\s+before)?\b",
-                r"\bdecompose\b",
-                r"\bbrainstorm\b",
-                r"\bbest approach\b",
-                r"\bplan (?:this|that|it|the approach|the migration|the work|first)\b",
-                r"\bbefore acting\b",
-                r"\bbefore any action\b",
-                r"\bbefore implementing\b",
-            )
-        )
-        if explicit_reasoning:
-            return True
-
-        if selection is None:
-            return False
-
-        reasoning_skill_ids = {"think", "sp__think", "sp__strategic_thinking"}
-        return any(skill.id in reasoning_skill_ids for skill in selection.selected_skills)
 
     def _reset_context_state(self) -> None:
         reset = getattr(self.ctx, "reset", None)
@@ -752,6 +710,7 @@ class Agent:
         bullets = "\n".join(f"- {line}" for line in state_lines)
         return f"{message.strip()}\n\nRuntime context:\n{bullets}"
 
+
     def _resolve_system_prompt(
         self,
         message: str,
@@ -903,38 +862,6 @@ class Agent:
                     out.add(path_s)
         return out
 
-    def _analysis_evidence_nudge(
-        self,
-        *,
-        message: str,
-        tool_calls: list[ToolCall],
-        write_tool_called: bool,
-    ) -> str:
-        if write_tool_called or not self._is_codebase_analysis_request(
-            message, tool_calls=tool_calls
-        ):
-            return ""
-        inspected_paths = self._inspected_content_paths(tool_calls)
-        if len(inspected_paths) >= 2:
-            return ""
-        if tool_calls and not any(self._is_inspection_tool_name(c.name) for c in tool_calls):
-            return ""
-        inspected_count = len(inspected_paths)
-        if inspected_count == 0:
-            evidence_state = "You have not inspected any concrete code files yet."
-        else:
-            evidence_state = (
-                f"You have only inspected {inspected_count} concrete file so far: "
-                + ", ".join(sorted(inspected_paths)[:3])
-                + "."
-            )
-        return (
-            "[Evidence first] This is a codebase review / architecture / improvement request. "
-            f"{evidence_state} Do not finalize from a listing or a single file. "
-            "Inspect at least 2 relevant files before answering. "
-            "If the paths are already known, prefer one batched response with 2-4 independent "
-            "read-only calls (for example entrypoint + core modules), then ground the answer in those files."
-        )
 
     def _build_system_prompt_for_message(
         self,
@@ -952,13 +879,6 @@ class Agent:
 
     def _ensure_doc_db(self) -> None:
         self.memory._ensure_doc_db()
-
-    def _resolve_generation_settings(
-        self, temperature: float | None, max_tokens: int | None
-    ) -> tuple[float, int]:
-        temp = temperature if temperature is not None else self.config.temperature
-        n_tok = max_tokens if max_tokens is not None else self.config.max_tokens
-        return temp, n_tok
 
     def _resolve_retrieval_settings(
         self,
@@ -991,48 +911,6 @@ class Agent:
         stripped = _THINK_BLOCK_RE.sub("", text)
         return stripped.strip()
 
-    def _svg_tool_call_nudge(
-        self,
-        message: str,
-        *,
-        selection: SkillSelection | None,
-        tool_calls: list[ToolCall],
-    ) -> str:
-        """Return a strict instruction when the user explicitly asks for SVG output."""
-        if tool_calls:
-            return ""
-        text = (message or "").strip().lower()
-        if not text:
-            return ""
-
-        asks_svg = bool(re.search(r"\bsvg\b", text))
-        asks_diagram = bool(
-            re.search(
-                r"\b(diagram|graph|chart|visuali[sz]e|visualization|visualisation)\b",
-                text,
-            )
-        )
-        creation_intent = bool(
-            re.search(r"\b(create|generate|build|make|draw|render|produce)\b", text)
-        )
-        if not asks_svg and not (asks_diagram and creation_intent):
-            return ""
-
-        selected_tools = list(selection.selected_tools) if selection else []
-        svg_tools = [name for name in selected_tools if name.startswith("svg_")]
-        if not svg_tools:
-            svg_tools = [
-                tool.name for tool in self.tools.list_tools() if tool.name.startswith("svg_")
-            ]
-        if not svg_tools:
-            return ""
-
-        tool_preview = ", ".join(svg_tools[:8])
-        return (
-            "SVG/diagram generation requested. Return exactly one tool_call now "
-            "(no prose). Use one of these tools: "
-            f"{tool_preview}. Include concrete output_path/path arguments."
-        )
 
     def _context7_tool_names(self) -> list[str]:
         names: list[str] = []
@@ -1061,6 +939,7 @@ class Agent:
         tool = self.tools.get(tname)
         skill_id = str(getattr(tool, "skill_id", "") or "").lower() if tool else ""
         return skill_id == "mcp__context7"
+
 
     def _docs_intent(self, message: str) -> bool:
         text = (message or "").strip().lower()
@@ -1126,85 +1005,6 @@ class Agent:
             f"Prefer tools such as: {preview}. Return exactly one tool_call now."
         )
 
-    def _response_claims_tool_execution(
-        self,
-        text: str,
-        *,
-        preferred_tool_names: list[str] | None = None,
-    ) -> bool:
-        cleaned = self._strip_internal_reasoning_tags(text or "").strip()
-        if not cleaned:
-            return False
-        lower = cleaned.lower()
-
-        # Not an execution claim if clearly phrased as future intent.
-        if re.search(
-            r"\b(?:i|we)\s+(?:will|can|could|should|might|may|plan to|intend to|need to)\b",
-            lower,
-        ):
-            return False
-
-        if any(re.search(pattern, lower) for pattern in _TOOL_EXECUTION_CLAIM_PATTERNS):
-            return True
-
-        # Common hallucinated completion phrasing even without explicit "I ran X".
-        if re.search(
-            r"\b(?:in|into)\s+(?:the\s+)?(?:tool\s+)?(?:context|memory)\b",
-            lower,
-        ) and re.search(
-            r"\b(?:generated|created|loaded|saved|updated|applied|available|ready)\b",
-            lower,
-        ):
-            return True
-
-        # Additional signal: mentions a known selected tool name in a past-tense context.
-        for tool_name in preferred_tool_names or []:
-            t = str(tool_name or "").strip().lower()
-            if not t:
-                continue
-            if t in lower and re.search(
-                r"\b(?:ran|executed|called|used|invoked|applied|finished|completed|done)\b",
-                lower,
-            ):
-                return True
-        return False
-
-    def _tool_claim_guard_nudge(
-        self,
-        *,
-        message: str,
-        response_text: str,
-        selection: SkillSelection | None,
-        tool_calls: list[ToolCall],
-        editing_intent: bool,
-    ) -> str:
-        if tool_calls:
-            return ""
-
-        expected_tools = list(selection.selected_tools[:8]) if selection else []
-        likely_tool_task = bool(
-            expected_tools
-            or editing_intent
-            or self._docs_intent(message)
-        )
-        if not likely_tool_task:
-            return ""
-
-        if not self._response_claims_tool_execution(
-            response_text,
-            preferred_tool_names=expected_tools,
-        ):
-            return ""
-
-        tool_hint = ", ".join(expected_tools[:4]) if expected_tools else "the most relevant tool"
-        return (
-            "[Unverified tool execution claim] You said a tool/action already ran, "
-            "but this run has no matching tool_call yet. Do not claim tool execution "
-            "without actually calling a tool.\n"
-            f"Now emit exactly one tool_call (no prose). Suggested tools: {tool_hint}."
-        )
-
-    @staticmethod
     def _inspection_payload_summary(
         tool_name: str,
         payload: dict[str, Any],
@@ -1322,6 +1122,7 @@ class Agent:
 
         return ""
 
+
     def _inspection_result_guard_nudge(
         self,
         *,
@@ -1364,555 +1165,6 @@ class Agent:
             "[Runtime note] The final answer above conflicts with the latest inspection tool result. "
             f"{contradiction} Latest `{tool_name}` summary: {summary}"
         )
-
-    def _current_turn_flow_stage(
-        self,
-        *,
-        editing_intent: bool,
-        tool_calls: list[ToolCall],
-        inspection_tool_called: bool,
-        write_tool_called: bool,
-        verification_after_write: bool,
-        verification_required: bool,
-    ) -> str:
-        if write_tool_called and verification_required and not verification_after_write:
-            return "verify"
-        edit_flow_active = editing_intent and (
-            not tool_calls
-            or inspection_tool_called
-            or write_tool_called
-            or any(
-                self._requires_prewrite_inspection(c.name)
-                or self._is_write_tool_name(c.name)
-                for c in tool_calls
-            )
-        )
-        if edit_flow_active and not inspection_tool_called and not write_tool_called:
-            return "inspect"
-        if edit_flow_active and not write_tool_called:
-            return "edit"
-        return "answer"
-
-    def _guardrail_stall_response(
-        self,
-        *,
-        issue: str,
-        flow_stage: str,
-        verification_profile: str,
-        last_verification_failure_summary: str,
-        tool_name: str = "",
-    ) -> str:
-        next_step = "either take a different concrete action or state the blocker clearly."
-        reason = "the run repeated the same recovery step without making progress."
-
-        if flow_stage == "inspect":
-            reason = (
-                "the run kept restating or planning instead of inspecting the target first."
-            )
-            next_step = (
-                "call one discovery/read tool now, such as find_path, rg_search, "
-                "sed_read, read_file_smart, or get_file_outline."
-            )
-        elif flow_stage == "edit":
-            reason = (
-                "the run kept discussing edits without issuing a concrete write/edit tool call."
-            )
-            next_step = (
-                "emit exactly one edit tool call now, such as edit_file_replace, "
-                "multi_edit, apply_unified_diff, apply_edit_block, or write_file."
-            )
-        elif flow_stage == "verify":
-            verify_hint = self._verification_guidance(verification_profile)
-            reason = (
-                "the run kept trying to finish without completing verification after writes."
-            )
-            next_step = f"run one relevant verification tool now. {verify_hint}".strip()
-
-        if issue == "tool_claim":
-            reason = "the draft kept claiming tool execution without an actual tool call."
-        elif issue == "inspection_result":
-            reason = "the draft kept contradicting the latest inspection result."
-        elif issue == "duplicate_tool_call":
-            tool_label = f" `{tool_name}`" if tool_name else ""
-            reason = f"the same tool call{tool_label} was repeated without new information."
-            next_step = (
-                "reuse the earlier result, choose a different tool, or explain the blocker."
-            )
-        elif issue == "schema_validation":
-            tool_label = f" `{tool_name}`" if tool_name else ""
-            reason = f"tool schema validation for{tool_label} kept failing with no correction."
-            next_step = "call describe_tool, then retry with corrected argument keys only."
-        elif issue == "repeated_draft":
-            reason = "the model repeated materially the same draft instead of adapting to runtime feedback."
-        elif issue == "repeated_prompt":
-            reason = "the runtime was about to send the same effective prompt to the model again."
-        elif issue == "analysis_evidence":
-            reason = "the run kept trying to answer a codebase review/design question from thin evidence."
-            next_step = (
-                "inspect at least one or two more relevant files first, ideally as a batched "
-                "read-only tool response if the paths are already known."
-            )
-
-        failure_note = ""
-        if flow_stage == "verify" and last_verification_failure_summary:
-            failure_note = (
-                f"\nRecent verification failures:\n{last_verification_failure_summary.strip()}"
-            )
-
-        return (
-            "[Flow stop] I am stopping this turn because "
-            f"{reason}\n"
-            f"Next required step: {next_step}"
-            f"{failure_note}"
-        ).strip()
-
-    @staticmethod
-    def _normalize_repeated_draft_key(text: str) -> str:
-        cleaned = " ".join(str(text or "").split()).strip().lower()
-        if len(cleaned) > 400:
-            cleaned = cleaned[:400]
-        return cleaned
-
-    def _drafts_are_similar(
-        self,
-        previous: str,
-        current: str,
-        *,
-        threshold: float | None = None,
-    ) -> bool:
-        prev = self._normalize_repeated_draft_key(previous)
-        curr = self._normalize_repeated_draft_key(current)
-        if not prev or not curr:
-            return False
-        if prev == curr:
-            return True
-        score = SequenceMatcher(a=prev, b=curr).ratio()
-        limit = float(
-            threshold
-            if threshold is not None
-            else getattr(self.config, "repeated_draft_similarity_threshold", 0.88)
-        )
-        return score >= limit
-
-    @staticmethod
-    def _prompt_signature(messages: list[Message]) -> str:
-        payload = [
-            (
-                getattr(message.role, "value", str(message.role)),
-                str(getattr(message, "name", "") or ""),
-                str(message.content or ""),
-            )
-            for message in messages
-        ]
-        return hashlib.sha256(
-            json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        ).hexdigest()[:24]
-
-    @staticmethod
-    def _looks_like_inventory_request(message: str) -> bool:
-        text = str(message or "").strip()
-        if not text:
-            return False
-        return any(pattern.search(text) for pattern in _INVENTORY_REQUEST_PATTERNS)
-
-    def _sanitize_generic_follow_up(self, *, message: str, final: str) -> str:
-        text = str(final or "").rstrip()
-        if not text or not self._looks_like_inventory_request(message):
-            return text
-
-        lines = text.splitlines()
-        cut_idx: int | None = None
-        for idx, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            lower = stripped.lower()
-            if lower.startswith("would you like me to"):
-                cut_idx = idx
-                break
-            if lower.startswith("let me know how you'd like to proceed"):
-                cut_idx = idx
-                break
-        if cut_idx is None:
-            return text
-
-        trimmed = "\n".join(lines[:cut_idx]).rstrip()
-        return trimmed or text
-
-    def _is_safe_multi_tool_batch(
-        self,
-        calls: list[ToolCall],
-        *,
-        verification_profile: str,
-    ) -> bool:
-        if not bool(getattr(self.config, "allow_multi_tool_calls", True)):
-            return False
-        max_calls = max(2, int(getattr(self.config, "multi_tool_call_max_calls", 4)))
-        if len(calls) < 2 or len(calls) > max_calls:
-            return False
-        for call in calls:
-            if self._is_write_tool_name(call.name):
-                return False
-            if self._requires_prewrite_inspection(call.name):
-                return False
-            if self._is_verification_tool_call(call, verification_profile):
-                return False
-            if not self._is_tool_cacheable(call.name):
-                return False
-        return True
-
-    def _create_base_conversation(self, message: str) -> list[Message]:
-        return [
-            Message(
-                role=MessageRole.SYSTEM,
-                content=self._build_system_prompt_for_message(message),
-            )
-        ]
-
-    def _load_and_append_history(
-        self,
-        convo: list[Message],
-        sid: str,
-        message: str,
-        use_semantic_retrieval: bool,
-        retrieval_mode: str = "vector",
-    ) -> None:
-        history = self.memory.load_history(
-            sid, message, use_semantic_retrieval, retrieval_mode=retrieval_mode
-        )
-        convo.extend(history)
-
-    def _append_rag_context(
-        self,
-        convo: list[Message],
-        message: str,
-        event_cb: Callable[..., None],
-    ) -> None:
-        rag_context = self.memory.get_rag_context(message, event_cb)
-        if rag_context:
-            convo.append(
-                Message(
-                    role=MessageRole.SYSTEM,
-                    content=f"Use this document context if helpful:\n{rag_context}",
-                )
-            )
-
-    def _append_user_message(
-        self,
-        convo: list[Message],
-        sid: str,
-        message: str,
-        event_cb: Callable[..., None],
-    ) -> None:
-        user_msg = Message(role=MessageRole.USER, content=message)
-        convo.append(user_msg)
-        self.memory.save_message(sid, user_msg)
-        event_cb("user_message", session=sid, message_preview=message[:120])
-
-    def _append_assistant_message(
-        self,
-        convo: list[Message],
-        sid: str,
-        text: str,
-        assistant_ctx_max_chars: int,
-    ) -> None:
-        asst_full = Message(role=MessageRole.ASSISTANT, content=text)
-        self.memory.save_message(sid, asst_full)
-        asst_ctx = _truncate_text(text, assistant_ctx_max_chars)
-        convo.append(Message(role=MessageRole.ASSISTANT, content=asst_ctx))
-
-    def _handle_runtime_command(
-        self,
-        *,
-        message: str,
-        sid: str,
-        temp: float,
-        n_tok: int,
-        tracer: _TraceCollector,
-        debug_on: bool,
-    ) -> AgentResponse | None:
-        match = _LOAD_SKILLS_RE.fullmatch(message or "")
-        if not match:
-            return None
-
-        convo = self._create_base_conversation(message)
-        self._append_user_message(convo, sid, message, tracer.emit)
-
-        available = self.tools.available_lazy_skill_groups()
-        raw_args = str(match.group("args") or "").strip()
-        loaded_now: list[str] = []
-        already_loaded: list[str] = []
-        missing: list[str] = []
-
-        if raw_args:
-            requested = [
-                item.strip()
-                for item in re.split(r"[\s,]+", raw_args)
-                if item.strip()
-            ]
-            for item in requested:
-                changed, canonical = self.tools.activate_lazy_skill_group(item)
-                if canonical is None:
-                    missing.append(item)
-                elif changed:
-                    loaded_now.append(canonical)
-                else:
-                    already_loaded.append(canonical)
-
-            if loaded_now:
-                self.tools.reload_skills()
-                self._cached_sys_tools_prompt = ""
-                self._export_available_tools()
-
-        active = self.tools.active_lazy_skill_groups()
-        if not raw_args:
-            reply = (
-                "Lazy skill groups: "
-                + (", ".join(available) if available else "none")
-                + ". Active: "
-                + (", ".join(active) if active else "none")
-                + ". Use `/load-skills <group>` to activate one."
-            )
-        else:
-            parts: list[str] = []
-            if loaded_now:
-                parts.append(f"Loaded: {', '.join(loaded_now)}.")
-            if already_loaded:
-                parts.append(f"Already active: {', '.join(already_loaded)}.")
-            if missing:
-                parts.append(f"Unknown lazy skill groups: {', '.join(missing)}.")
-            parts.append(
-                "Active lazy skill groups: "
-                + (", ".join(active) if active else "none")
-                + "."
-            )
-            if available:
-                parts.append("Available lazy skill groups: " + ", ".join(available) + ".")
-            reply = " ".join(parts)
-
-        self._append_assistant_message(convo, sid, reply, assistant_ctx_max_chars=512)
-        tracer.emit(
-            "runtime_command",
-            command="load-skills",
-            requested=raw_args,
-            loaded=loaded_now,
-            already_loaded=already_loaded,
-            missing=missing,
-            active=active,
-        )
-        self._persist_runtime_state(sid)
-
-        debug = tracer.build_debug_payload(
-            sid=sid,
-            iterations=0,
-            tool_calls=[],
-            temp=temp,
-            n_tok=n_tok,
-            config=self.config,
-        )
-        trace_md = render_trace_markdown(debug) if debug_on else ""
-        return AgentResponse(
-            messages=convo,
-            tool_calls=[],
-            iterations=0,
-            final_response=reply,
-            debug=debug,
-            trace_md=trace_md,
-        )
-
-    def _is_tool_inventory_request(self, message: str) -> bool:
-        text = str(message or "").strip()
-        if not text or len(text) > 80:
-            return False
-        return any(pattern.fullmatch(text) for pattern in _LIST_TOOLS_PATTERNS)
-
-    def _run_tool_inventory_fast_path(
-        self,
-        *,
-        message: str,
-        sid: str,
-        temp: float,
-        n_tok: int,
-        tracer: _TraceCollector,
-        debug_on: bool,
-    ) -> AgentResponse:
-        convo = self._create_base_conversation(message)
-        self._append_user_message(convo, sid, message, tracer.emit)
-
-        tool_names = sorted(tool.name for tool in self.tools.list_tools())
-        active_lazy = self.tools.active_lazy_skill_groups()
-        available_lazy = [
-            group
-            for group in self.tools.available_lazy_skill_groups()
-            if group not in set(active_lazy)
-        ]
-
-        lines = [
-            f"Available tools ({len(tool_names)}):",
-            ", ".join(tool_names),
-        ]
-        if active_lazy:
-            lines.append("Active lazy skill groups: " + ", ".join(active_lazy) + ".")
-        if available_lazy:
-            lines.append(
-                "Hidden lazy skill groups: "
-                + ", ".join(available_lazy)
-                + ". Use `/load-skills <group>` to activate one."
-            )
-        reply = "\n\n".join(lines)
-
-        self._append_assistant_message(convo, sid, reply, assistant_ctx_max_chars=12000)
-        tracer.emit(
-            "tool_inventory_fast_path",
-            tool_count=len(tool_names),
-            active_lazy=active_lazy,
-            hidden_lazy=available_lazy,
-        )
-        self._persist_runtime_state(sid)
-
-        debug = tracer.build_debug_payload(
-            sid=sid,
-            iterations=0,
-            tool_calls=[],
-            temp=temp,
-            n_tok=n_tok,
-            config=self.config,
-        )
-        trace_md = render_trace_markdown(debug) if debug_on else ""
-        return AgentResponse(
-            messages=convo,
-            tool_calls=[],
-            iterations=0,
-            final_response=reply,
-            debug=debug,
-            trace_md=trace_md,
-        )
-
-    def _run_social_fast_path(
-        self,
-        *,
-        message: str,
-        sid: str,
-        temp: float,
-        n_tok: int,
-        tracer: _TraceCollector,
-        debug_on: bool,
-    ) -> AgentResponse | None:
-        convo = self._create_base_conversation(message)
-        self._append_user_message(convo, sid, message, tracer.emit)
-        llm_messages = [
-            Message(role=MessageRole.SYSTEM, content=self.system_prompt),
-            Message(
-                role=MessageRole.USER,
-                content=(
-                    "Reply briefly and naturally to this social message. "
-                    "Do not call tools.\n\n"
-                    f"User message: {message}"
-                ),
-            ),
-        ]
-        try:
-            final = (
-                self._llm_generate(
-                    llm_messages,
-                    temperature=temp,
-                    max_tokens=min(int(n_tok), 80),
-                    stream=False,
-                    on_token=None,
-                )
-                or ""
-            ).strip()
-        except Exception:
-            final = ""
-        if not final:
-            return None
-        self._append_assistant_message(convo, sid, final, assistant_ctx_max_chars=512)
-        tracer.emit("social_fast_path", preview=final[:120])
-        self._persist_runtime_state(sid)
-
-        debug = tracer.build_debug_payload(
-            sid=sid,
-            iterations=0,
-            tool_calls=[],
-            temp=temp,
-            n_tok=n_tok,
-            config=self.config,
-        )
-        trace_md = render_trace_markdown(debug) if debug_on else ""
-
-        return AgentResponse(
-            messages=convo,
-            tool_calls=[],
-            iterations=0,
-            final_response=final,
-            debug=debug,
-            trace_md=trace_md,
-        )
-
-    def _append_tool_message(
-        self,
-        convo: list[Message],
-        sid: str,
-        call: ToolCall,
-        result_full: str,
-        tool_result_max_chars: int,
-    ) -> str:
-        persisted_result, vectorize = self._tool_result_for_persistence(call, result_full)
-        tool_msg_full = Message(
-            role=MessageRole.TOOL,
-            name=call.name,
-            tool_call_id=call.id,
-            content=persisted_result,
-            vectorize=vectorize,
-        )
-        self.memory.save_message(sid, tool_msg_full)
-        
-        # Smart tool result summarization
-        # Instead of generic truncation, use LLM to extract relevant bits if too large.
-        if len(result_full) > tool_result_max_chars and bool(getattr(self.config, "auto_compact", True)):
-            try:
-                # Fast summary loop
-                summary_prompt = (
-                    "You ran the tool '{tool}' with arguments: {args}\n\n"
-                    "The result is {chars} characters long (too large for context). "
-                    "Extract the most relevant insights, errors, or data points from the result.\n\n"
-                    "--- START RESULT ---\n"
-                    "{res}\n"
-                    "--- END RESULT ---\n\n"
-                    "Provide a concise summary of the useful information."
-                ).format(
-                    tool=call.name,
-                    args=json.dumps(call.arguments, ensure_ascii=False),
-                    chars=len(result_full),
-                    # Provide up to twice the max_chars to the summarizer so it has enough context to condense
-                    res=result_full[: tool_result_max_chars * 2],
-                )
-                
-                result_ctx = self._llm_generate(
-                    [Message(role=MessageRole.USER, content=summary_prompt)],
-                    temperature=0.0,
-                    max_tokens=tool_result_max_chars // 4,
-                    stream=False,
-                    on_token=None,
-                )
-                if result_ctx:
-                    result_ctx = f"[LLM Summarized ({len(result_full)} chars)] {result_ctx.strip()}"
-                else:
-                    result_ctx = _truncate_text(result_full, tool_result_max_chars)
-            except Exception:
-                result_ctx = _truncate_text(result_full, tool_result_max_chars)
-        else:
-            result_ctx = _truncate_text(result_full, tool_result_max_chars)
-            
-        convo.append(
-            Message(
-                role=MessageRole.TOOL,
-                name=call.name,
-                tool_call_id=call.id,
-                content=result_ctx,
-            )
-        )
-        return result_ctx
 
     def add_tool(
         self,
@@ -2020,52 +1272,6 @@ class Agent:
 
     # ── Tool result cache helpers ───────────────────────────────────────
 
-    def _tool_cache_key(self, call: ToolCall) -> str:
-        """Stable hash key for a tool call (name + sorted arguments)."""
-        payload = (
-            call.name
-            + "\x00"
-            + json.dumps(call.arguments, sort_keys=True, ensure_ascii=False)
-        )
-        return hashlib.sha256(payload.encode()).hexdigest()[:24]
-
-    def _is_tool_cacheable(self, tool_name: str) -> bool:
-        """Return True when a tool's result may be cached (read-only pattern check)."""
-        if not bool(getattr(self.config, "tool_cache_enabled", True)):
-            return False
-        exclude_patterns: list[str] = list(
-            getattr(self.config, "tool_cache_exclude_patterns", [])
-        )
-        patterns: list[str] = list(
-            getattr(self.config, "tool_cache_write_patterns", [])
-        )
-        name_lower = tool_name.lower()
-        if any(str(pat).lower() in name_lower for pat in exclude_patterns):
-            return False
-        return not any(pat in name_lower for pat in patterns)
-
-    def _is_write_tool_name(self, tool_name: str) -> bool:
-        patterns: list[str] = list(
-            getattr(self.config, "tool_cache_write_patterns", [])
-        )
-        name_lower = (tool_name or "").lower()
-        if name_lower in {
-            "write_file",
-            "edit_file_replace",
-            "multi_edit",
-            "apply_unified_diff",
-            "multi_patch",
-            "apply_edit_block",
-        }:
-            return True
-        if any(
-            token in name_lower
-            for token in ("edit_file", "multi_edit", "unified_diff", "multi_patch")
-        ):
-            return True
-        return any(str(p).lower() in name_lower for p in patterns)
-
-    @staticmethod
     def _looks_like_path(value: str) -> bool:
         text = str(value or "").strip()
         if not text:
@@ -2139,171 +1345,6 @@ class Agent:
             return "python"
         return None
 
-    def _infer_verification_profile(
-        self, message: str, tool_calls: list[ToolCall]
-    ) -> str:
-        text = (message or "").lower()
-        scores: dict[str, int] = {
-            "rust": 0,
-            "python": 0,
-            "javascript": 0,
-            "go": 0,
-        }
-
-        if re.search(r"\b(rust|cargo|clippy|rustfmt|crates?)\b", text):
-            scores["rust"] += 3
-        if re.search(r"\b(python|ruff|pytest|mypy|pyproject|pip)\b", text):
-            scores["python"] += 3
-        if re.search(r"\b(javascript|typescript|node|npm|pnpm|yarn|eslint|vitest|jest)\b", text):
-            scores["javascript"] += 3
-        if re.search(r"\b(go|golang|go test|go vet|golint)\b", text):
-            scores["go"] += 3
-
-        for call in tool_calls:
-            for path in self._extract_paths_from_tool_call(call):
-                lang = self._lang_from_path(path)
-                if lang in scores:
-                    scores[lang] += 2
-
-        active = [lang for lang, score in scores.items() if score > 0]
-        if len(active) > 1:
-            return "mixed"
-        if len(active) == 1:
-            return active[0]
-        return "generic"
-
-    def _verification_guidance(self, profile: str) -> str:
-        matrix = getattr(self.config, "language_verification_matrix", {}) or {}
-
-        def _commands(lang: str, defaults: list[str]) -> list[str]:
-            raw = matrix.get(lang, defaults)
-            if not isinstance(raw, list):
-                return defaults
-            cleaned = [str(item).strip() for item in raw if str(item).strip()]
-            return cleaned or defaults
-
-        py_cmds = _commands(
-            "python",
-            ["run_ruff(path=...)", "run_pytest(path=...)", "run_mypy(path=...)"],
-        )
-        rust_cmds = _commands(
-            "rust",
-            [
-                'run_shell(cmd="cargo check")',
-                'run_shell(cmd="cargo test")',
-                'run_shell(cmd="cargo clippy")',
-            ],
-        )
-        js_cmds = _commands(
-            "javascript",
-            ['run_shell(cmd="npm run lint")', 'run_shell(cmd="npm test")'],
-        )
-        go_cmds = _commands(
-            "go",
-            ['run_shell(cmd="go test ./...")', 'run_shell(cmd="go vet ./...")'],
-        )
-
-        if profile == "rust":
-            return (
-                "Rust verification: "
-                + ", ".join(f"`{cmd}`" for cmd in rust_cmds)
-                + ". "
-                "Do not use `run_ruff` for Rust-only edits."
-            )
-        if profile == "python":
-            return (
-                "Python verification: "
-                + ", ".join(f"`{cmd}`" for cmd in py_cmds)
-                + "."
-            )
-        if profile == "javascript":
-            return (
-                "JavaScript/TypeScript verification: "
-                + ", ".join(f"`{cmd}`" for cmd in js_cmds)
-                + "."
-            )
-        if profile == "go":
-            return (
-                "Go verification: "
-                + ", ".join(f"`{cmd}`" for cmd in go_cmds)
-                + "."
-            )
-        if profile == "mixed":
-            return (
-                "Mixed-language verification: run checks for each changed language "
-                "(Python/Rust/JS/Go as applicable)."
-                + "."
-            )
-        return (
-            "Use project-appropriate verification (tests/lint/check/build) for the files you changed."
-        )
-
-    def _verification_failure_details(self, result_text: str) -> tuple[bool, str]:
-        text = str(result_text or "").strip()
-        if not text:
-            return False, ""
-
-        failed = False
-        details: list[str] = []
-        payload: Any = None
-        try:
-            payload = json.loads(text)
-        except Exception:
-            payload = None
-
-        if isinstance(payload, dict):
-            status = str(payload.get("status", "")).lower()
-            if status in {"error", "failed", "fail"}:
-                failed = True
-            for key in ("ok", "success", "passed"):
-                if key in payload and payload.get(key) is False:
-                    failed = True
-
-            summary = payload.get("summary")
-            if isinstance(summary, dict):
-                for k in ("failed", "failures", "errors"):
-                    v = summary.get(k, 0)
-                    if isinstance(v, (int, float)) and v > 0:
-                        failed = True
-
-            for key in ("error", "stderr", "message"):
-                val = payload.get(key)
-                if isinstance(val, str) and val.strip():
-                    details.append(val.strip())
-
-            for key in ("failures", "errors"):
-                vals = payload.get(key)
-                if isinstance(vals, list) and vals:
-                    details.append(str(vals[0]))
-
-        lower = text.lower()
-        if re.search(
-            r"\b(failed|traceback|could not compile|panic|assertionerror)\b",
-            lower,
-        ):
-            failed = True
-        if re.search(r"\b(failed|errors?)\s*[:=]\s*[1-9]\d*\b", lower):
-            failed = True
-        if "exit code" in lower and not re.search(r"exit code\s*[:=]?\s*0\b", lower):
-            failed = True
-
-        if not details:
-            for line in text.splitlines():
-                line_s = line.strip()
-                if not line_s:
-                    continue
-                if re.search(
-                    r"(failed|error|traceback|could not compile|panic)",
-                    line_s.lower(),
-                ):
-                    details.append(line_s)
-                if len(details) >= 6:
-                    break
-
-        summary = "\n".join(details).strip()
-        if len(summary) > 1500:
-            summary = summary[:1500].rstrip() + " ..."
-        return failed, summary
 
     def _parse_tool_result_payload(self, result_text: str) -> dict[str, Any] | None:
         text = str(result_text or "").strip()
@@ -2422,6 +1463,28 @@ class Agent:
             return _truncate_text(compact_text, max_chars), False
         return _truncate_text(text, max_chars), False
 
+    def _is_write_tool_name(self, tool_name: str) -> bool:
+        patterns: list[str] = list(
+            getattr(self.config, "tool_cache_write_patterns", [])
+        )
+        name_lower = (tool_name or "").lower()
+        if name_lower in {
+            "write_file",
+            "edit_file_replace",
+            "multi_edit",
+            "apply_unified_diff",
+            "multi_patch",
+            "apply_edit_block",
+        }:
+            return True
+        if any(
+            token in name_lower
+            for token in ("edit_file", "multi_edit", "unified_diff", "multi_patch")
+        ):
+            return True
+        return any(str(p).lower() in name_lower for p in patterns)
+
+    @staticmethod
     def _tool_result_is_error(self, result_text: str) -> bool:
         text = str(result_text or "").strip()
         if not text:
@@ -2436,6 +1499,7 @@ class Agent:
             if payload.get("ok") is False or payload.get("success") is False:
                 return True
         return False
+
 
     def _tool_call_applied_write(self, call: ToolCall, result_text: str) -> bool:
         if not self._is_write_tool_name(call.name):
@@ -2498,6 +1562,7 @@ class Agent:
         }:
             return True
         return any(token in name for token in ("edit", "patch", "write_file"))
+
 
     def _is_inspection_tool_name(self, tool_name: str) -> bool:
         name = str(tool_name or "").strip().lower()
@@ -2694,134 +1759,6 @@ Return a corrected tool call in the same format.
             tracer.emit("reflexion_repair_error", error=str(e))
         
         return None
-
-    def _is_shell_verification_call(self, call: ToolCall, profile: str) -> bool:
-        tool_name = (call.name or "").lower()
-        if tool_name not in {"run_shell", "shell", "bash", "exec"}:
-            return False
-
-        args = call.arguments or {}
-        cmd = (
-            args.get("cmd")
-            or args.get("command")
-            or args.get("script")
-            or args.get("shell_command")
-            or ""
-        )
-        cmd_s = str(cmd).lower()
-        if not cmd_s:
-            return False
-
-        rust_ok = bool(
-            re.search(
-                r"\bcargo\s+(check|test|clippy|fmt(?:\s+--\s+check)?)\b|\brustfmt\b.*--check",
-                cmd_s,
-            )
-        )
-        python_ok = bool(
-            re.search(
-                r"\bruff\b|\bpytest\b|\bmypy\b|\bpyright\b|\bpython\s+-m\s+pytest\b",
-                cmd_s,
-            )
-        )
-        js_ok = bool(
-            re.search(
-                r"\b(npm|pnpm|yarn)\s+(run\s+)?(test|lint)\b|\bjest\b|\bvitest\b|\beslint\b",
-                cmd_s,
-            )
-        )
-        go_ok = bool(
-            re.search(
-                r"\bgo\s+(test|vet|fmt)\b|\bgolint\b",
-                cmd_s,
-            )
-        )
-
-        if profile == "rust":
-            return rust_ok
-        if profile == "python":
-            return python_ok
-        if profile == "javascript":
-            return js_ok
-        if profile == "go":
-            return go_ok
-        if profile == "mixed":
-            return rust_ok or python_ok or js_ok or go_ok
-        return rust_ok or python_ok or js_ok or go_ok or bool(
-            re.search(r"\b(test|lint|check|verify|validate|build)\b", cmd_s)
-        )
-
-    def _is_verification_tool_call(self, call: ToolCall, profile: str) -> bool:
-        if self._is_shell_verification_call(call, profile):
-            return True
-
-        name_lower = (call.name or "").lower()
-        patterns: list[str] = list(
-            getattr(self.config, "verification_tool_patterns", [])
-        )
-        generic_match = any(str(p).lower() in name_lower for p in patterns)
-
-        if profile == "rust":
-            if "ruff" in name_lower or "pytest" in name_lower or "mypy" in name_lower:
-                return False
-            rust_name_match = bool(
-                re.search(r"\b(cargo|clippy|rust|build|test|check|verify)\b", name_lower)
-            )
-            return rust_name_match or generic_match
-
-        if profile == "python":
-            py_name_match = bool(re.search(r"\b(ruff|pytest|mypy|pyright|lint|test)\b", name_lower))
-            return py_name_match or generic_match
-        if profile == "javascript":
-            js_name_match = bool(re.search(r"\b(eslint|jest|vitest|lint|test|npm|pnpm|yarn)\b", name_lower))
-            return js_name_match or generic_match
-        if profile == "go":
-            go_name_match = bool(re.search(r"\b(go|golang|vet|test|lint)\b", name_lower))
-            return go_name_match or generic_match
-
-        return generic_match
-
-    def _build_quality_checklist(
-        self,
-        *,
-        tool_calls: list[ToolCall],
-        iterations: int,
-        write_tool_called: bool,
-        verification_after_write: bool,
-        iteration_budget: int | None = None,
-    ) -> str:
-        if not tool_calls:
-            return ""
-
-        max_tools = max(1, int(getattr(self.config, "quality_checklist_max_tools", 5)))
-        tool_names = [c.name for c in tool_calls]
-        unique_names: list[str] = []
-        seen: set[str] = set()
-        for name in tool_names:
-            if name in seen:
-                continue
-            seen.add(name)
-            unique_names.append(name)
-            if len(unique_names) >= max_tools:
-                break
-
-        if write_tool_called:
-            verification_status = (
-                "confirmed" if verification_after_write else "not confirmed"
-            )
-        else:
-            verification_status = "not required"
-
-        tools_preview = ", ".join(unique_names) if unique_names else "none"
-        budget = int(iteration_budget or self.config.max_iterations)
-        return (
-            "**Quality Checklist**\n"
-            f"- Iterations: {iterations}/{budget}\n"
-            f"- Tools called: {len(tool_calls)}\n"
-            f"- Tool summary: {tools_preview}\n"
-            f"- Write operations detected: {'yes' if write_tool_called else 'no'}\n"
-            f"- Verification after writes: {verification_status}"
-        )
 
     def _score_answer_confidence(
         self,
