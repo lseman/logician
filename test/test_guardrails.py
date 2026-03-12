@@ -1,0 +1,282 @@
+"""Tests for GuardrailEngine and all 6 built-in guards."""
+from __future__ import annotations
+
+import pytest
+
+from src.agent.guardrails import (
+    ConsecutiveToolGuard,
+    DuplicateToolGuard,
+    GuardrailEngine,
+    GuardrailResult,
+    InspectionGuard,
+    StallGuard,
+    ToolClaimGuard,
+    VerificationGuard,
+)
+from src.agent.state import TurnState
+from src.config import Config
+from src.tools.runtime import ToolCall
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def make_state(**kwargs) -> TurnState:
+    state = TurnState(turn_id="test-turn")
+    for k, v in kwargs.items():
+        setattr(state, k, v)
+    return state
+
+
+def make_call(name: str, args: dict | None = None) -> ToolCall:
+    return ToolCall(id="tc-1", name=name, arguments=args or {})
+
+
+# ---------------------------------------------------------------------------
+# GuardrailEngine
+# ---------------------------------------------------------------------------
+
+class AlwaysPassGuard:
+    name = "always_pass"
+
+    def check(self, state, response, tool_calls):
+        return GuardrailResult(passed=True, guard_name=self.name)
+
+
+class NudgeGuard:
+    name = "nudge"
+
+    def check(self, state, response, tool_calls):
+        return GuardrailResult(passed=False, nudge="nudge msg", guard_name=self.name)
+
+
+class HardStopGuard:
+    name = "hard_stop"
+
+    def check(self, state, response, tool_calls):
+        return GuardrailResult(
+            passed=False, nudge="stop msg", hard_stop=True, guard_name=self.name
+        )
+
+
+def test_engine_all_pass():
+    engine = GuardrailEngine([AlwaysPassGuard(), AlwaysPassGuard()])
+    result = engine.run(make_state(), "response", [])
+    assert result.passed
+
+
+def test_engine_one_nudge():
+    engine = GuardrailEngine([AlwaysPassGuard(), NudgeGuard()])
+    result = engine.run(make_state(), "response", [])
+    assert not result.passed
+    assert result.nudge == "nudge msg"
+    assert not result.hard_stop
+
+
+def test_engine_hard_stop_beats_nudge_even_when_later():
+    # NudgeGuard is first, HardStopGuard is second — hard_stop must win
+    engine = GuardrailEngine([NudgeGuard(), HardStopGuard()])
+    result = engine.run(make_state(), "response", [])
+    assert result.hard_stop
+    assert result.guard_name == "hard_stop"
+
+
+# ---------------------------------------------------------------------------
+# DuplicateToolGuard
+# ---------------------------------------------------------------------------
+
+def test_duplicate_first_call_passes():
+    guard = DuplicateToolGuard()
+    state = make_state()
+    call = make_call("read_file", {"path": "/tmp/foo"})
+    result = guard.check(state, "", [call])
+    assert result.passed
+
+
+def test_duplicate_second_call_nudges():
+    guard = DuplicateToolGuard()
+    state = make_state()
+    call = make_call("read_file", {"path": "/tmp/foo"})
+    # Simulate one prior occurrence
+    sig = state.tool_signature(call)
+    state.seen_signatures[sig] = 2
+    result = guard.check(state, "", [call])
+    assert not result.passed
+    assert not result.hard_stop
+    assert "read_file" in result.nudge
+
+
+def test_duplicate_third_call_hard_stops():
+    guard = DuplicateToolGuard()
+    state = make_state()
+    call = make_call("read_file", {"path": "/tmp/foo"})
+    sig = state.tool_signature(call)
+    state.seen_signatures[sig] = 3
+    result = guard.check(state, "", [call])
+    assert not result.passed
+    assert result.hard_stop
+
+
+# ---------------------------------------------------------------------------
+# ConsecutiveToolGuard
+# ---------------------------------------------------------------------------
+
+def test_consecutive_under_limit_passes():
+    config = Config(max_consecutive_tool_calls=5)
+    guard = ConsecutiveToolGuard(config)
+    state = make_state(consecutive_tool_count=3)
+    result = guard.check(state, "", [make_call("some_tool")])
+    assert result.passed
+
+
+def test_consecutive_at_limit_with_tool_calls_nudges():
+    config = Config(max_consecutive_tool_calls=5)
+    guard = ConsecutiveToolGuard(config)
+    state = make_state(consecutive_tool_count=6)
+    result = guard.check(state, "", [make_call("some_tool")])
+    assert not result.passed
+    assert not result.hard_stop
+
+
+def test_consecutive_at_limit_no_tool_calls_passes():
+    config = Config(max_consecutive_tool_calls=5)
+    guard = ConsecutiveToolGuard(config)
+    state = make_state(consecutive_tool_count=6)
+    result = guard.check(state, "Here is the answer.", [])
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
+# ToolClaimGuard
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "I ran the tests and they passed.",
+    "I executed the script already.",
+    "I called the API to check the results.",
+    "I used the tool to process the file.",
+    "I've already run the linter.",
+    "I've just executed the command.",
+    "Done editing the file.",
+    "Completed the test run.",
+    "I've written the output file.",
+])
+def test_tool_claim_detects_claim(text: str):
+    guard = ToolClaimGuard()
+    state = make_state()
+    result = guard.check(state, text, [])
+    assert not result.passed
+    assert "tool" in result.nudge.lower()
+
+
+def test_tool_claim_no_claim_passes():
+    guard = ToolClaimGuard()
+    state = make_state()
+    result = guard.check(state, "Here is a summary of the results.", [])
+    assert result.passed
+
+
+def test_tool_claim_with_tool_calls_always_passes():
+    guard = ToolClaimGuard()
+    state = make_state()
+    result = guard.check(state, "I ran the tests.", [make_call("run_pytest")])
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
+# VerificationGuard
+# ---------------------------------------------------------------------------
+
+def test_verification_no_files_written_passes():
+    guard = VerificationGuard()
+    state = make_state()
+    result = guard.check(state, "Done.", [])
+    assert result.passed
+
+
+def test_verification_files_written_no_verification_nudges():
+    guard = VerificationGuard()
+    state = make_state(files_written=["/tmp/foo.py"])
+    result = guard.check(state, "Done.", [])
+    assert not result.passed
+    assert "verified" in result.nudge.lower() or "test" in result.nudge.lower()
+
+
+def test_verification_files_written_verification_tool_after_write_passes():
+    guard = VerificationGuard()
+    state = make_state(files_written=["/tmp/foo.py"])
+    # Simulate write call followed by pytest call in tool_calls
+    write_call = make_call("write_file", {"path": "/tmp/foo.py"})
+    verify_call = make_call("run_pytest", {"path": "test/"})
+    state.tool_calls = [write_call, verify_call]
+    result = guard.check(state, "Done.", [])
+    assert result.passed
+
+
+def test_verification_files_written_only_write_in_history_nudges():
+    guard = VerificationGuard()
+    state = make_state(files_written=["/tmp/foo.py"])
+    write_call = make_call("write_file", {"path": "/tmp/foo.py"})
+    state.tool_calls = [write_call]
+    result = guard.check(state, "Done.", [])
+    assert not result.passed
+
+
+def test_verification_with_current_tool_calls_passes():
+    guard = VerificationGuard()
+    state = make_state(files_written=["/tmp/foo.py"])
+    result = guard.check(state, "", [make_call("run_ruff")])
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
+# StallGuard
+# ---------------------------------------------------------------------------
+
+def test_stall_under_limit_passes():
+    guard = StallGuard()
+    state = make_state(guardrail_nudges={"stall": 1})
+    result = guard.check(state, "Same response.", [])
+    assert result.passed
+
+
+def test_stall_at_limit_no_tool_hard_stops():
+    guard = StallGuard()
+    state = make_state(guardrail_nudges={"stall": 2})
+    result = guard.check(state, "Same response again.", [])
+    assert not result.passed
+    assert result.hard_stop
+
+
+def test_stall_at_limit_with_tool_passes():
+    guard = StallGuard()
+    state = make_state(guardrail_nudges={"stall": 2})
+    result = guard.check(state, "Same response again.", [make_call("some_tool")])
+    assert result.passed
+
+
+def test_stall_no_nudge_count_passes():
+    guard = StallGuard()
+    state = make_state()
+    result = guard.check(state, "Some response.", [])
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
+# InspectionGuard
+# ---------------------------------------------------------------------------
+
+def test_inspection_always_passes():
+    guard = InspectionGuard()
+    state = make_state()
+    result = guard.check(state, "Anything.", [make_call("some_tool")])
+    assert result.passed
+    assert result.guard_name == "inspection"
+
+
+def test_inspection_passes_with_no_tools():
+    guard = InspectionGuard()
+    state = make_state()
+    result = guard.check(state, "I ran the tests already.", [])
+    assert result.passed
