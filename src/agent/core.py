@@ -184,6 +184,38 @@ class Agent:
         self.tools = ToolRegistry(auto_load_from_skills=False)
         self.tools.install_context(self.ctx)
         self.tools.load_tools_from_skills()
+
+        # Register Phase B core tools as always-on (never routed away).
+        # These are plain Python callables; we reuse the registry's internal
+        # machinery to derive parameters from type annotations and docstrings.
+        from ..tools.core import (
+            apply_edit_block,
+            bash,
+            edit_file,
+            glob_files,
+            grep_files,
+            read_file,
+            think,
+            todo,
+            write_file,
+        )
+        _core_fns = [
+            read_file, write_file, edit_file, apply_edit_block,
+            bash, glob_files, grep_files, think, todo,
+        ]
+        _core_entries = [
+            (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_fns
+        ]
+        from pathlib import Path as _Path
+        _core_src = _Path(__file__).resolve().parent.parent / "tools" / "core"
+        self.tools._register_collected_python_tools(
+            tool_entries=_core_entries,
+            module_path=_core_src / "files.py",  # representative path for skill_id
+            skill_id="core",
+            legacy_meta={},
+            skill_meta={"always_on": True},
+        )
+
         self._mcp_clients: list[Any] = []
         self._mcp_loaded = False
         if not bool(getattr(self.config, "lazy_mcp_init", True)):
@@ -3223,8 +3255,15 @@ Return a corrected tool call in the same format.
         guards = default_guards(self.config)
         prompt_builder = default_prompt_builder(
             tool_schema_fn=lambda: self.tools.tools_schema_prompt(),
-            domain_schema_fn=lambda groups: "",  # Phase B: domain tools stub
-            routing_fn=lambda query: "",         # Phase B: routing stub
+            # TODO(Phase B): domain tools require the skill bootstrap machinery to
+            # load skill-script functions as standalone schemas. The domain
+            # classification and state tracking in TurnState still work correctly;
+            # this just means no additional tool schemas are injected for domain
+            # activations yet.
+            domain_schema_fn=lambda groups: "",
+            # Wire real BM25/fuzzy skill routing: returns the playbook text for
+            # the top-1 matched skill given the turn's classified query.
+            routing_fn=lambda query: self.tools.skill_routing_prompt(query, top_k=1)[0],
         )
         dispatcher = ToolDispatcher(self.tools)
         return AgentLoop(
