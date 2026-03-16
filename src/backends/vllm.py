@@ -65,6 +65,7 @@ class VLLMClient:
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
         tools: list[dict[str, Any]] | None = None,  # accepted but ignored
+        grammar: str | None = None,  # accepted but ignored (no constrained decoding in vllm path)
     ) -> str:
         prompt = format_messages_for_template(messages, self.template)
         sampling_params = SamplingParams(

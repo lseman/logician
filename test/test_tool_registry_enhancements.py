@@ -191,6 +191,7 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
 
     def test_create_sample_data_signature_infers_numeric_types(self) -> None:
         registry = self._registry()
+        registry.activate_lazy_skill_group("lazy_timeseries")
         registry.load_tools_from_skills()
         tool = registry.get("create_sample_data")
         self.assertIsNotNone(tool)
@@ -213,8 +214,25 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertEqual(payload.get("status"), "ok")
         self.assertEqual(payload.get("n"), 120)
 
+    def test_skill_catalog_fuzzy_similarity_coerces_non_string_profiles(self) -> None:
+        registry = self._registry()
+        catalog = SkillCatalog(
+            skills_md_path=registry.skills_md_path,
+            skills_dir_path=registry.skills_dir_path,
+            log=registry._log,
+        )
+        score_list = catalog._fuzzy_similarity("review rust cli", ["rust", "cli"])
+        score_int = catalog._fuzzy_similarity("review rust cli", 12345)
+        self.assertIsInstance(score_list, float)
+        self.assertIsInstance(score_int, float)
+        self.assertGreaterEqual(score_list, 0.0)
+        self.assertLessEqual(score_list, 1.0)
+        self.assertGreaterEqual(score_int, 0.0)
+        self.assertLessEqual(score_int, 1.0)
+
     def test_argument_aliases_reduce_schema_loops(self) -> None:
         registry = self._registry()
+        registry.activate_lazy_skill_group("lazy_timeseries")
         registry.load_tools_from_skills()
         out = registry.execute(
             ToolCall(
@@ -312,13 +330,106 @@ def hello(name: str = "world") -> str:
         registry = self._registry()
         registry.load_tools_from_skills()
 
-        tool = registry.get("read_file")
+        tool = registry.get("list_directory")
         self.assertIsNotNone(tool)
         assert tool is not None
         doc = str(getattr(tool.function, "__doc__", "") or "")
         self.assertIn("Skill context:", doc)
         self.assertIn("Skill: File Ops", doc)
         self.assertIn("Preferred tools in this skill: read_file, write_file, list_directory", doc)
+
+    def test_core_tools_remain_canonical_when_coding_skills_overlap(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+
+        from src.tools.core import apply_edit_block, read_file, write_file
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (read_file, getattr(read_file, "__llm_tool_meta__", {})),
+                (write_file, getattr(write_file, "__llm_tool_meta__", {})),
+                (apply_edit_block, getattr(apply_edit_block, "__llm_tool_meta__", {})),
+            ],
+            module_path=Path("src/tools/core/files.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        read_tool = registry.get("read_file")
+        write_tool = registry.get("write_file")
+        edit_block_tool = registry.get("apply_edit_block")
+        list_directory_tool = registry.get("list_directory")
+        edit_replace_tool = registry.get("edit_file_replace")
+
+        self.assertIsNotNone(read_tool)
+        self.assertIsNotNone(write_tool)
+        self.assertIsNotNone(edit_block_tool)
+        self.assertIsNotNone(list_directory_tool)
+        self.assertIsNotNone(edit_replace_tool)
+        assert read_tool is not None
+        assert write_tool is not None
+        assert edit_block_tool is not None
+        assert list_directory_tool is not None
+        assert edit_replace_tool is not None
+
+        self.assertEqual(read_tool.skill_id, "core")
+        self.assertEqual(write_tool.skill_id, "core")
+        self.assertEqual(edit_block_tool.skill_id, "core")
+        self.assertEqual(list_directory_tool.skill_id, "file_ops")
+        self.assertEqual(edit_replace_tool.skill_id, "file_ops")
+
+    def test_python_skill_explicit_exports_are_authoritative(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            scripts_dir = root / "coding" / "toy" / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "toy.py"
+            module_path.write_text(
+                """
+from skills.coding.bootstrap.runtime_access import tool
+
+@tool
+def exported() -> str:
+    return _safe_json({"status": "ok", "name": "exported"})
+
+@tool
+def hidden() -> str:
+    return _safe_json({"status": "ok", "name": "hidden"})
+
+__tools__ = [exported]
+""".strip()
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root.parent / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            self.assertIsNotNone(registry.get("exported"))
+            self.assertIsNone(registry.get("hidden"))
+
+    def test_metadata_only_python_skill_still_routes_after_dedup(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+
+        from src.tools.core import apply_edit_block
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (apply_edit_block, getattr(apply_edit_block, "__llm_tool_meta__", {})),
+            ],
+            module_path=Path("src/tools/core/files.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        skills = {skill.id: skill for skill in registry.list_skills()}
+        self.assertIn("edit_block", skills)
+        card = skills["edit_block"]
+        self.assertEqual(card.name, "Edit Block")
+        self.assertIn("apply_edit_block", card.preferred_tools)
+        self.assertIn("apply_edit_block", card.tool_names)
 
     def test_python_skill_modules_can_use_lazy_numpy_and_pandas_globals(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -463,6 +574,7 @@ print(json.dumps({{
 
     def test_real_skill_enums_are_exported_and_enforced(self) -> None:
         registry = self._registry()
+        registry.activate_lazy_skill_group("lazy_timeseries")
         registry.load_tools_from_skills()
 
         expected = {
@@ -474,7 +586,6 @@ print(json.dumps({{
                 "stationary",
                 "cyclic_trend",
             ],
-            ("write_file", "mode"): ["w", "a"],
             ("smart_quality_gate", "mode"): ["fast", "balanced", "full"],
             ("fd_find", "file_type"): ["f", "d", ""],
             ("detect_anomalies", "method"): [
@@ -605,6 +716,22 @@ print(json.dumps({{
             [],
             msg=f"Unexpected suspicious string-typed params: {suspicious}",
         )
+
+    def test_editing_tools_register_grammars(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+
+        for tool_name in (
+            "write_file",
+            "edit_file_replace",
+            "multi_edit",
+            "apply_edit_block",
+        ):
+            grammar = registry.get_grammar(tool_name)
+            self.assertIsNotNone(grammar, msg=f"missing grammar for {tool_name}")
+            assert grammar is not None
+            self.assertGreater(len(grammar), 50)
+            self.assertIn(tool_name, grammar)
 
     def test_tool_parameter_model_validation(self) -> None:
         with self.assertRaises(Exception):

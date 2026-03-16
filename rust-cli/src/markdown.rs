@@ -83,14 +83,12 @@ fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
         return String::new();
     }
     let mut out = String::new();
-    let mut count = 0usize;
-    for ch in text.chars() {
+    for (count, ch) in text.chars().enumerate() {
         if count >= max_chars.saturating_sub(1) {
             out.push('…');
             return out;
         }
         out.push(ch);
-        count += 1;
     }
     out
 }

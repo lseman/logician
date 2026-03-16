@@ -13,6 +13,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub enum BridgeEvent {
     Token(String),
+    ThinkingToken(String),
     Phase {
         state: String,
         note: String,
@@ -29,6 +30,7 @@ pub enum BridgeEvent {
         duration_ms: u64,
         cache_hit: bool,
         error: Option<String>,
+        result_preview: Option<String>,
     },
     Image {
         tool: String,
@@ -156,6 +158,9 @@ impl PythonBridge {
                         _ => {}
                     }
                 }
+                // Drain pending senders so all in-flight call()s unblock immediately
+                // with Err("bridge response channel closed") instead of hanging.
+                pending.lock().await.drain();
                 let _ = event_tx.send(BridgeEvent::Exit(None));
             });
         }
@@ -215,6 +220,9 @@ impl PythonBridge {
 
         let bridge_event = match ev {
             "token" => BridgeEvent::Token(v["token"].as_str().unwrap_or("").to_string()),
+            "thinking_token" => {
+                BridgeEvent::ThinkingToken(v["token"].as_str().unwrap_or("").to_string())
+            }
             "phase" => BridgeEvent::Phase {
                 state: v["state"].as_str().unwrap_or("ready").to_string(),
                 note: v
@@ -238,6 +246,11 @@ impl PythonBridge {
                     .get("error")
                     .and_then(|e| e.as_str())
                     .map(|e| e.to_string()),
+                result_preview: v
+                    .get("result_preview")
+                    .and_then(|p| p.as_str())
+                    .filter(|p| !p.is_empty())
+                    .map(|p| p.to_string()),
             },
             "tool" => BridgeEvent::ToolStart {
                 // Backward compatibility for older bridge event schema.

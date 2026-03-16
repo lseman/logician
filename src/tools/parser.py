@@ -9,12 +9,67 @@ from typing import List
 from .runtime import HAS_TOON, ToolCall, decode
 
 
+_DIRECT_TOOL_POSITIONAL_ARGS: dict[str, list[str]] = {
+    "bash": ["command"],
+    "fd_find": ["pattern"],
+    "rg_search": ["pattern"],
+    "read_file": ["path"],
+    "write_file": ["path", "content"],
+    "edit_file": ["path", "old_string", "new_string"],
+    "apply_edit_block": ["path", "blocks"],
+    "glob": ["pattern"],
+    "grep": ["pattern"],
+    "think": ["thought"],
+}
+
+# Aliases: map model-generated wrong/variant tool names to real canonical names.
+# Core tools (registered by Agent.__init__): bash, read_file, write_file, edit_file,
+#   glob_files, grep_files, apply_edit_block, think, todo.
+# These are the primary canonical names — do NOT alias them away from themselves.
+_TOOL_NAME_ALIASES: dict[str, str] = {
+    # shell execution variants → core bash
+    "shell": "bash",
+    "execute": "bash",
+    "execute_command": "bash",
+    "run_command": "bash",
+    "run_bash": "bash",
+    "terminal": "bash",
+    # file reading variants → core read_file
+    "cat_file": "read_file",
+    "file_read": "read_file",
+    "open_file": "read_file",
+    "view_file": "read_file",
+    "cat": "read_file",
+    # file search variants → core glob_files
+    "glob": "glob_files",
+    "find_files": "glob_files",
+    # text search variants → core grep_files
+    "grep": "grep_files",
+    "search_text": "grep_files",
+    "search_file": "grep_files",
+}
+
+
+def _normalize_tool_name(name: str) -> str:
+    """Resolve aliases and strip common noise from model-generated tool names."""
+    canonical = _TOOL_NAME_ALIASES.get(name.lower(), name)
+    return canonical
+
+
 def parse_tool_calls(text: str, use_toon: bool) -> list[ToolCall]:
     calls: list[ToolCall] = []
     if use_toon and HAS_TOON and decode is not None:
         calls.extend(_parse_toon_tool_calls(text))
+    calls.extend(_parse_inline_toon_tool_calls(text))
     calls.extend(_parse_jinja_tool_calls(text))
     calls.extend(_parse_json_tool_calls(text))
+    if not calls:
+        calls.extend(_parse_shell_fence_tool_calls(text))
+    # Normalize tool names through alias table
+    for call in calls:
+        normalized = _normalize_tool_name(call.name)
+        if normalized != call.name:
+            call.name = normalized
 
     out: list[ToolCall] = []
     seen: set[tuple[str, str]] = set()
@@ -60,6 +115,14 @@ def _parse_tool_calls_from_object(data: object) -> list[ToolCall]:
         if isinstance(name, str) and isinstance(args, dict):
             calls.append(_new_tool_call(name, args))
 
+    # Common plain JSON shape emitted by some prompts/backends:
+    # {"tool":"fd_find","arguments":{...}}
+    if "tool" in data and "arguments" in data:
+        name = data["tool"]
+        args = data["arguments"]
+        if isinstance(name, str) and isinstance(args, dict):
+            calls.append(_new_tool_call(name, args))
+
     # Anthropic-native tool block shape:
     # {"type":"tool_use","name":"...","input":{...}}
     if (
@@ -85,6 +148,60 @@ def _parse_tool_calls_from_object(data: object) -> list[ToolCall]:
     return calls
 
 
+def _parse_inline_toon_tool_calls(text: str) -> list[ToolCall]:
+    """Parse inline TOON-style tool calls, including batched multi-tool responses.
+
+    Handles single calls:
+        tool_call: name: bash arguments: command: ls -la
+
+    And batched calls under one header (model emits multiple reads in one block):
+        tool_call: name: read_file arguments: path: a.py
+                   name: read_file arguments: path: b.py
+
+    And block-indented batches:
+        tool_call:
+          name: read_file
+          arguments:
+            path: a.py
+          name: read_file
+          arguments:
+            path: b.py
+    """
+    calls: list[ToolCall] = []
+    # Split at every tool_call: anchor; each segment is one "batch scope".
+    anchor = re.compile(
+        r"(?:^|(?<=\s))tool_call:",
+        re.MULTILINE | re.IGNORECASE,
+    )
+    # Within each scope find every  name: X  arguments: Y  entry.
+    # DOTALL so arguments can span lines; stops at the next name: entry or end.
+    entry = re.compile(
+        r"name:\s+(\S+)\s+arguments:\s+(.+?)(?=\s+name:\s+\S|\Z)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for seg in anchor.split(text)[1:]:  # [0] is text before first tool_call:
+        for m in entry.finditer(seg):
+            name = m.group(1).strip().strip("\"'")
+            args_text = m.group(2).strip()
+            args: dict[str, str] = {}
+            for kv in re.finditer(r"(\w+):\s+(.+?)(?=\s+\w+:|$)", args_text, re.DOTALL):
+                val = kv.group(2).strip()
+                # Strip matching surrounding quotes (YAML/shell quoting convention)
+                if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                    val = val[1:-1]
+                args[kv.group(1)] = val
+            # If no key-value pairs found, use positional default for known tools
+            if not args and args_text:
+                positional_keys = _DIRECT_TOOL_POSITIONAL_ARGS.get(name.lower(), [])
+                if positional_keys:
+                    args = {positional_keys[0]: args_text}
+                else:
+                    args = {"input": args_text}
+            if name:
+                calls.append(_new_tool_call(name, args))
+    return calls
+
+
 def _parse_toon_tool_calls(text: str) -> list[ToolCall]:
     if decode is None:
         return []
@@ -107,20 +224,35 @@ def _parse_toon_tool_calls(text: str) -> list[ToolCall]:
             block_lines.append(lines[j])
             j += 1
 
-        toon_text = "\n".join(block_lines).strip()
-        try:
-            data = decode(toon_text)
-            if isinstance(data, dict) and "tool_call" in data:
-                call_data = data["tool_call"]
-                if isinstance(call_data, dict):
-                    name = call_data.get("name")
-                    args = call_data.get("arguments", {})
-                    if isinstance(name, str) and isinstance(args, dict):
-                        calls.append(
-                            _new_tool_call(name, args)
-                        )
-        except Exception:
-            pass
+        # Detect multiple tool specs in one block (model batched multiple
+        # name:/arguments: pairs under a single tool_call: header).
+        name_idxs = [
+            k for k, ln in enumerate(block_lines) if ln.strip().startswith("name:")
+        ]
+
+        def _try_decode_block(sub_lines: list[str]) -> None:
+            toon_text = "\n".join(sub_lines).strip()
+            try:
+                data = decode(toon_text)
+                if isinstance(data, dict) and "tool_call" in data:
+                    call_data = data["tool_call"]
+                    if isinstance(call_data, dict):
+                        name = call_data.get("name")
+                        args = call_data.get("arguments", {})
+                        if isinstance(name, str) and isinstance(args, dict):
+                            calls.append(_new_tool_call(name, args))
+            except Exception:
+                pass
+
+        if len(name_idxs) > 1:
+            # Split at each name: boundary; re-prefix with the tool_call: header
+            header = block_lines[0]
+            for idx, start in enumerate(name_idxs):
+                end = name_idxs[idx + 1] if idx + 1 < len(name_idxs) else len(block_lines)
+                _try_decode_block([header] + block_lines[start:end])
+        else:
+            _try_decode_block(block_lines)
+
         i = j
     return calls
 
@@ -332,6 +464,160 @@ def _parse_jinja_tool_call_args(args_text: str) -> tuple[str, dict] | None:
     if isinstance(name, str) and isinstance(arguments, dict):
         return name, arguments
     return None
+
+
+def _parse_direct_tool_args(name: str, args_text: str) -> dict | None:
+    if not str(name or "").strip() or not str(args_text or "").strip():
+        return None
+    try:
+        node = ast.parse(f"f({args_text})", mode="eval")
+    except Exception:
+        return None
+    call_node = node.body
+    if not isinstance(call_node, ast.Call):
+        return None
+
+    arguments: dict[str, object] = {}
+    for kw in call_node.keywords:
+        if kw.arg is None:
+            return None
+        try:
+            arguments[kw.arg] = ast.literal_eval(kw.value)
+        except Exception:
+            return None
+
+    positional_names = _DIRECT_TOOL_POSITIONAL_ARGS.get(str(name), [])
+    for idx, arg in enumerate(call_node.args):
+        if idx >= len(positional_names):
+            return None
+        try:
+            arguments[positional_names[idx]] = ast.literal_eval(arg)
+        except Exception:
+            return None
+
+    return arguments
+
+
+def _parse_direct_tool_invocation(text: str) -> ToolCall | None:
+    source = str(text or "").strip()
+    if not source:
+        return None
+
+    func_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)", source, re.DOTALL)
+    if func_match:
+        name = func_match.group(1)
+        arguments = _parse_direct_tool_args(name, func_match.group(2))
+        if isinstance(arguments, dict):
+            return _new_tool_call(name, arguments)
+
+    bare_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s+(.+)", source, re.DOTALL)
+    if bare_match:
+        name = bare_match.group(1)
+        if name in _DIRECT_TOOL_POSITIONAL_ARGS:
+            arguments = _parse_direct_tool_args(name, bare_match.group(2))
+            if isinstance(arguments, dict):
+                return _new_tool_call(name, arguments)
+
+    return None
+
+
+_SHELL_FENCE_RE = re.compile(r"(?is)```(?:bash|sh|shell|zsh)\s*\n(.*?)```")
+
+_SHELL_EXECUTION_CUES = (
+    "execution",
+    "i will now execute",
+    "i'll now execute",
+    "execute this plan",
+    "execute the command",
+    "execute the ",
+    "run this command",
+    "running command",
+    "action/output",
+    "i will run",
+    "i'll run",
+    "i will read",
+    "i'll read",
+    "i will inspect",
+    "i'll inspect",
+    "i will check",
+    "i'll check",
+    "i will list",
+    "i'll list",
+    "i will analyze",
+    "i'll analyze",
+    "i will explore",
+    "i'll explore",
+    "let me run",
+    "let me start",
+    "let me explore",
+    "let me inspect",
+    "let me analyze",
+    "i am going to run",
+    "i'm going to run",
+)
+
+_SHELL_NON_EXECUTION_CUES = (
+    "example command",
+    "example:",
+    "for example",
+    "for instance",
+    "e.g.",
+    "you can run",
+    "if you run",
+    "manually run",
+)
+
+
+def _normalize_shell_execution_context(text: str) -> str:
+    return " ".join(
+        str(text or "")
+        .lower()
+        .replace("\u2019", "'")
+        .replace("\u2018", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .split()
+    )
+
+
+def _parse_shell_fence_tool_calls(text: str) -> list[ToolCall]:
+    calls: list[ToolCall] = []
+    for match in _SHELL_FENCE_RE.finditer(text):
+        prelude = _normalize_shell_execution_context(
+            text[max(0, match.start() - 320):match.start()]
+        )
+        if any(cue in prelude for cue in _SHELL_NON_EXECUTION_CUES):
+            continue
+        if not any(cue in prelude for cue in _SHELL_EXECUTION_CUES):
+            continue
+        command = _normalize_shell_fence_command(match.group(1))
+        if not command:
+            continue
+        direct_call = _parse_direct_tool_invocation(command)
+        if direct_call is not None:
+            calls.append(direct_call)
+            continue
+        calls.append(_new_tool_call("bash", {"command": command}))
+    return calls
+
+
+def _normalize_shell_fence_command(body: str) -> str:
+    lines = str(body or "").splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return ""
+
+    normalized: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("$ "):
+            normalized.append(stripped[2:])
+        else:
+            normalized.append(line)
+    return "\n".join(normalized).strip()
 
 
 def _extract_json_objects(text: str) -> List[str]:

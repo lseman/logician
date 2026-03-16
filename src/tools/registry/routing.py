@@ -23,7 +23,9 @@ class RegistryRoutingMixin:
 
     def _sync_catalog_with_registered_tools(self) -> None:
         self._catalog.ensure_skill_catalog()
-        changed = self._catalog.hydrate_tool_backed_skills(self._tools.values())
+        changed = self._catalog.hydrate_metadata_only_python_skills(self._tools.values())
+        if self._catalog.hydrate_tool_backed_skills(self._tools.values()):
+            changed = True
         if changed:
             self._invalidate_skill_resolution_cache()
 

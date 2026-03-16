@@ -4,31 +4,24 @@ import asyncio
 import concurrent.futures
 import hashlib
 import json
-import re
 import uuid
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from ..config import Config
 from ..logging_utils import get_logger
 from ..memory import Memory
 from ..messages import Message, MessageRole
-from ..reasoners.reflexion import ReflexionReasoner
-from ..thinking import ThinkingStrategy
 from ..tools import (
     HAS_TOON,
     Context,
-    SkillSelection,
     ToolCall,
     ToolParameter,
     ToolRegistry,
-    parse_tool_calls,
 )
 from .trace import (
     AgentResponse,
-    _tool_call_signature,
-    _TraceCollector,
     _truncate_text,
 )
 
@@ -37,72 +30,6 @@ from .guardrails import GuardrailEngine, default_guards
 from .prompt import default_prompt_builder
 from .dispatcher import ToolDispatcher
 from .types import TurnResult
-
-if TYPE_CHECKING:
-    pass
-
-
-_FOLLOW_UP_PHRASES = (
-    "continue",
-    "go on",
-    "next step",
-    "what next",
-    "what now",
-    "carry on",
-    "keep going",
-    "proceed",
-)
-
-_THINK_BLOCK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
-_UNSET = object()
-_SOCIAL_MESSAGES = {
-    "hi",
-    "hello",
-    "hey",
-    "yo",
-    "sup",
-    "thanks",
-    "thank you",
-    "thx",
-    "good morning",
-    "good afternoon",
-    "good evening",
-    "morning",
-    "afternoon",
-    "evening",
-    "how are you",
-    "whats up",
-    "what's up",
-}
-_SOCIAL_GREETING_TOKENS = {"hi", "hello", "hey", "yo"}
-_LOAD_SKILLS_RE = re.compile(r"^\s*/load-skills(?:\s+(?P<args>.+?))?\s*$", re.IGNORECASE)
-_LIST_TOOLS_PATTERNS = (
-    re.compile(r"^\s*list\s+(?:the\s+)?(?:available\s+)?tools\s*$", re.IGNORECASE),
-    re.compile(r"^\s*show\s+(?:the\s+)?(?:available\s+)?tools\s*$", re.IGNORECASE),
-    re.compile(r"^\s*(?:what|which)\s+tools\s+(?:do\s+you\s+have|are\s+available)\s*\??\s*$", re.IGNORECASE),
-    re.compile(r"^\s*available\s+tools\s*$", re.IGNORECASE),
-)
-_TOOL_EXECUTION_CLAIM_PATTERNS = (
-    r"\b(?:i|we)\s+(?:have\s+|has\s+|had\s+|already\s+|just\s+)?"
-    r"(?:ran|run|executed|called|used|invoked|applied|checked|verified|searched|"
-    r"inspected|opened|read|edited|modified|updated|created|wrote|deleted)\b",
-    r"\b(?:i['’]?ve|we['’]?ve|it|data|dataset|sample)\s+"
-    r"(?:already\s+|just\s+)?"
-    r"(?:generated|created|loaded|saved|computed|prepared|produced|updated|applied)\b",
-    r"\b(?:has|have)\s+been\s+"
-    r"(?:generated|created|loaded|saved|computed|prepared|produced|updated|applied)\b",
-    r"\b(?:is|are)\s+now\s+(?:available|loaded|ready|saved)\b",
-    r"\b(?:tool|tools|command|commands)\b.{0,40}\b(?:ran|run|executed|called|used)\b",
-    r"\b(?:done|completed|finished)\b.{0,40}\b(?:tool|command|task|change|update|edit)\b",
-)
-_INVENTORY_REQUEST_PATTERNS = (
-    re.compile(r"\b(?:list|show|enumerate)\b", re.IGNORECASE),
-    re.compile(r"\b(?:what|which)\b.*\b(?:files|tools|functions|modules|directories)\b", re.IGNORECASE),
-)
-_GENERIC_FOLLOW_UP_RE = re.compile(
-    r"(?:\n\s*)?(?:would you like me to:?\s*|let me know how you'd like to proceed!?[\s:]*)$",
-    re.IGNORECASE,
-)
 
 
 class Agent:
@@ -166,10 +93,6 @@ class Agent:
                 retry_attempts=self.config.retry_attempts,
             )
 
-        self.thinking: ThinkingStrategy | None = None
-        if getattr(self.config, "thinking", None):
-            self.thinking = ThinkingStrategy(self.llm, self.config.thinking)
-
         self.system_prompt = system_prompt or self._load_soul_or_default()
 
         self.ctx = Context()
@@ -177,9 +100,7 @@ class Agent:
         self.tools.install_context(self.ctx)
         self.tools.load_tools_from_skills()
 
-        # Register Phase B core tools as always-on (never routed away).
-        # These are plain Python callables; we reuse the registry's internal
-        # machinery to derive parameters from type annotations and docstrings.
+        # Register the core tools as always-on runtime capabilities.
         from ..tools.core import (
             apply_edit_block,
             bash,
@@ -204,7 +125,6 @@ class Agent:
             tool_entries=_core_entries,
             module_path=_core_src / "files.py",  # representative path for skill_id
             skill_id="core",
-            legacy_meta={},
             skill_meta={"always_on": True},
         )
 
@@ -213,11 +133,6 @@ class Agent:
         if not bool(getattr(self.config, "lazy_mcp_init", True)):
             self._load_mcp_servers()
             self._mcp_loaded = True
-
-        self._cached_sys_tools_prompt: str = ""
-        self._cached_sys_prompt_base: str = ""
-        self._cached_use_toon: bool = bool(self.config.use_toon_for_tools)
-        self._cached_tools_version: int = -1
 
         self._embedding_model_name = embedding_model or (
             "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
@@ -232,70 +147,8 @@ class Agent:
         )
         self.current_session_id: str | None = None
         self._loaded_runtime_session_id: str | None = None
-        self._last_context_messages: list[Message] = []
-        # Per-agent in-memory tool result cache (persists across turns within the
-        # same Agent instance; cleared on reset()).
-        self._tool_result_cache: dict[str, tuple[float, str]] = {}
-        
-        self._export_available_tools()
 
-        # Build the new SOTA agent loop (Phase A refactor)
         self._agent_loop = self._build_agent_loop()
-
-    def _export_available_tools(self) -> None:
-        """Export a list of currently available tools to a JSON file."""
-        import json
-        from pathlib import Path
-
-        try:
-            out_path = Path.cwd() / "available_tools.json"
-            tools = []
-            for t in self.tools.list_tools():
-                tools.append({
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": [
-                        {
-                            "name": p.name,
-                            "type": p.type,
-                            "description": p.description,
-                            "required": p.required
-                        }
-                        for p in t.parameters
-                    ]
-                })
-            out_path.write_text(
-                json.dumps(tools, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception as e:
-            self._log.warning("Failed to export available_tools.json: %s", e)
-
-    def get_last_context_text(self) -> str:
-        """Return a human-readable Markdown dump of the last context window sent to the LLM."""
-        msgs = self._last_context_messages
-        if not msgs:
-            return "_No context captured yet — send at least one message first._"
-
-        role_labels: dict[str, str] = {
-            "system": "SYSTEM",
-            "user": "USER",
-            "assistant": "ASSISTANT",
-            "tool": "TOOL",
-        }
-        parts: list[str] = [f"## Last context window ({len(msgs)} messages)\n"]
-        for i, msg in enumerate(msgs, 1):
-            role = getattr(msg.role, "value", str(msg.role))
-            label = role_labels.get(role, role.upper())
-            name_tag = f" · `{msg.name}`" if getattr(msg, "name", None) else ""
-            content = str(msg.content or "")
-            # Truncate very large messages (e.g. full tool results)
-            if len(content) > 3000:
-                content = (
-                    content[:3000] + f"\n\n…_{len(content) - 3000} chars truncated_"
-                )
-            parts.append(f"### {i}. {label}{name_tag}\n\n```\n{content}\n```\n")
-        return "\n".join(parts)
 
     def _load_mcp_servers(self) -> None:
         """Initialise every enabled MCP server from config and register their tools."""
@@ -372,140 +225,6 @@ class Agent:
             "If no tool is needed, answer normally and clearly."
         )
 
-    def _tools_version(self) -> int:
-        v = getattr(self.tools, "_version", None)
-        if isinstance(v, int):
-            return v
-        v2 = getattr(self.tools, "version", None)
-        if isinstance(v2, int):
-            return v2
-        return 0
-
-    def _system_plus_tools_prompt(self) -> str:
-        tools_v = self._tools_version()
-        use_toon = bool(self.config.use_toon_for_tools)
-
-        if (
-            self._cached_sys_tools_prompt
-            and self._cached_sys_prompt_base == self.system_prompt
-            and self._cached_tools_version == tools_v
-            and self._cached_use_toon == use_toon
-        ):
-            return self._cached_sys_tools_prompt
-
-        schema_mode = str(getattr(self.config, "tool_schema_mode", "rich"))
-        schema = self.tools.tools_schema_prompt(use_toon, mode=schema_mode)
-        self._cached_sys_tools_prompt = self.system_prompt + schema
-        self._cached_sys_prompt_base = self.system_prompt
-        self._cached_tools_version = tools_v
-        self._cached_use_toon = use_toon
-        return self._cached_sys_tools_prompt
-
-    def _is_social_message(self, message: str) -> bool:
-        text = (message or "").strip().lower()
-        if not text:
-            return False
-        normalized = re.sub(r"[^a-z0-9\s']", " ", text)
-        normalized = " ".join(normalized.split())
-        if not normalized:
-            return False
-        if normalized in _SOCIAL_MESSAGES:
-            return True
-        tokens = normalized.split()
-        if len(tokens) <= 3 and tokens[0] in _SOCIAL_GREETING_TOKENS:
-            trailing = [tok for tok in tokens[1:] if tok not in {"there", "team", "all"}]
-            return not trailing
-        return False
-
-
-    def _is_follow_up_message(self, message: str) -> bool:
-        text = (message or "").strip().lower()
-        if not text:
-            return False
-        if self._is_social_message(text):
-            return False
-        if any(phrase in text for phrase in _FOLLOW_UP_PHRASES):
-            return True
-        if (
-            len(text.split()) <= 12
-            and re.search(r"\b(it|this|that|these|those|them)\b", text)
-        ):
-            return True
-        return len(text.split()) <= 4
-
-    def _is_editing_intent(self, message: str) -> bool:
-        text = (message or "").strip().lower()
-        if not text:
-            return False
-        edit_verbs = (
-            "edit",
-            "modify",
-            "change",
-            "update",
-            "refactor",
-            "fix",
-            "patch",
-            "implement",
-            "add",
-            "remove",
-            "rename",
-            "rewrite",
-            "create",
-            "write",
-        )
-        if not any(re.search(rf"\b{re.escape(verb)}\b", text) for verb in edit_verbs):
-            return False
-        # Explicit file path hint is a strong coding signal.
-        if re.search(
-            r"(?:^|[\s`\"'])[\w./\\-]+\.(?:py|rs|ts|tsx|js|jsx|go|java|c|cpp|h|hpp|md|json|toml|ya?ml)(?:$|[\s`\"'])",
-            text,
-        ):
-            return True
-        code_targets = (
-            "file",
-            "code",
-            "function",
-            "class",
-            "module",
-            "test",
-            ".py",
-            ".rs",
-            ".ts",
-            ".tsx",
-            ".js",
-            ".jsx",
-            ".go",
-            ".java",
-            ".c",
-            ".cpp",
-            ".md",
-            ".json",
-            ".toml",
-            ".yaml",
-            ".yml",
-        )
-        if any(token in text for token in code_targets):
-            return True
-        # Broader repository/implementation cues for feature requests.
-        project_targets = (
-            "feature",
-            "bug",
-            "issue",
-            "endpoint",
-            "command",
-            "workflow",
-            "pipeline",
-            "plugin",
-            "module",
-            "repo",
-            "repository",
-            "project",
-            "codebase",
-            "cli",
-            "agent",
-        )
-        return any(token in text for token in project_targets)
-
     def _reset_context_state(self) -> None:
         reset = getattr(self.ctx, "reset", None)
         if callable(reset):
@@ -572,600 +291,6 @@ class Agent:
 
         self.current_session_id = session_id
 
-    def _compose_skill_routing_query(
-        self,
-        message: str,
-        *,
-        tool_calls: list[ToolCall] | None = None,
-        tool_result_preview_by_sig: dict[tuple[str, str], str] | None = None,
-    ) -> str:
-        if not bool(getattr(self.config, "dynamic_skill_routing", True)):
-            return message
-        if self._is_social_message(message):
-            return message
-
-        state_lines: list[str] = []
-        if self.ctx.loaded:
-            row_count = len(self.ctx.data) if self.ctx.data is not None else 0
-            shape = "multivariate" if self.ctx.is_multivariate else "univariate"
-            columns = ", ".join(self.ctx.value_columns[:4]) or "none"
-            state_lines.append(
-                f"Data is already loaded ({shape}, rows={row_count}, value columns={columns})."
-            )
-            if self.ctx.data_name:
-                state_lines.append(f"Current dataset name: {self.ctx.data_name}.")
-            if self.ctx.freq_cache:
-                state_lines.append(f"Known series frequency: {self.ctx.freq_cache}.")
-            if self.ctx.anomaly_store:
-                state_lines.append("Anomaly detection results already exist in memory.")
-            if self.ctx.nf_cv_full is not None:
-                state_lines.append("Forecast cross-validation results already exist.")
-            if self.ctx.nf_best_model:
-                state_lines.append(
-                    f"Current best forecast model in memory: {self.ctx.nf_best_model}."
-                )
-        else:
-            state_lines.append("No dataset is loaded yet.")
-
-        def _recent_session_follow_up_lines() -> list[str]:
-            sid = self.current_session_id
-            if not sid or not self._is_follow_up_message(message):
-                return []
-            try:
-                recent_messages = self.memory.get_session_messages(sid)
-            except Exception:
-                return []
-            tool_messages = [
-                msg
-                for msg in recent_messages
-                if msg.role == MessageRole.TOOL and getattr(msg, "name", "")
-            ]
-            if not tool_messages:
-                return []
-
-            lines: list[str] = []
-            last_tool_msg = tool_messages[-1]
-            last_tool_name = str(last_tool_msg.name or "").strip()
-            if last_tool_name:
-                lines.append(f"Previous session tool executed: {last_tool_name}.")
-                last_tool = self.tools.get(last_tool_name)
-                last_skill_id = last_tool.skill_id if last_tool else None
-                if last_skill_id:
-                    lines.append(
-                        "The previous session tool came from the "
-                        f"{last_skill_id.replace('_', ' ')} skill."
-                    )
-                    skill_card = self.tools._catalog.skills.get(last_skill_id)
-                    next_skills = skill_card.next_skills if skill_card else []
-                    if next_skills:
-                        pretty = ", ".join(s.replace("_", " ") for s in next_skills)
-                        lines.append(
-                            f"For this follow-up, the likely next skills are: {pretty}."
-                        )
-
-            inspected_paths: list[str] = []
-            seen_paths: set[str] = set()
-            for msg in reversed(tool_messages[-8:]):
-                payload = self._parse_tool_result_payload(msg.content or "")
-                if not isinstance(payload, dict):
-                    continue
-                path = str(payload.get("path", "") or "").strip()
-                if not path or path in seen_paths:
-                    continue
-                seen_paths.add(path)
-                inspected_paths.append(path)
-                if len(inspected_paths) >= 4:
-                    break
-            if inspected_paths:
-                lines.append(
-                    "Recently inspected files: " + ", ".join(inspected_paths) + "."
-                )
-
-            preview = self._compact_preview(last_tool_msg.content or "", limit=240)
-            if preview:
-                lines.append(f"Latest prior tool result preview: {preview}")
-            return lines
-
-        recent_calls = tool_calls or []
-        preview_by_sig = tool_result_preview_by_sig or {}
-        if recent_calls:
-            last_call = recent_calls[-1]
-            state_lines.append(f"Most recent tool executed: {last_call.name}.")
-            last_tool = self.tools.get(last_call.name)
-            last_skill_id = last_tool.skill_id if last_tool else None
-            if last_skill_id:
-                state_lines.append(
-                    "The most recent tool came from the "
-                    f"{last_skill_id.replace('_', ' ')} skill."
-                )
-                if self._is_follow_up_message(message):
-                    skill_card = self.tools._catalog.skills.get(last_skill_id)
-                    next_skills = skill_card.next_skills if skill_card else []
-                    if next_skills:
-                        pretty = ", ".join(s.replace("_", " ") for s in next_skills)
-                        state_lines.append(
-                            f"For this follow-up, the likely next skills are: {pretty}."
-                        )
-                    elif self.ctx.loaded:
-                        state_lines.append(
-                            "For this follow-up, the likely next skills are: preprocessing, analysis, forecasting."
-                        )
-
-            preview = preview_by_sig.get(_tool_call_signature(last_call), "").strip()
-            if preview:
-                preview_line = preview.replace("\n", " ")
-                if len(preview_line) > 240:
-                    preview_line = preview_line[:240] + " ..."
-                state_lines.append(f"Latest tool result preview: {preview_line}")
-        elif self.ctx.loaded and self._is_follow_up_message(message):
-            state_lines.append(
-                "For this follow-up, the likely next skills are: preprocessing, analysis, forecasting."
-            )
-        else:
-            state_lines.extend(_recent_session_follow_up_lines())
-
-        if not state_lines:
-            return message
-
-        bullets = "\n".join(f"- {line}" for line in state_lines)
-        return f"{message.strip()}\n\nRuntime context:\n{bullets}"
-
-
-    def _resolve_system_prompt(
-        self,
-        message: str,
-        *,
-        tool_calls: list[ToolCall] | None = None,
-        tool_result_preview_by_sig: dict[tuple[str, str], str] | None = None,
-    ) -> tuple[str, SkillSelection | None, str]:
-        coding_hint = self._coding_workflow_hint(message)
-        if bool(getattr(self.config, "enable_skill_routing", True)):
-            schema_mode = str(getattr(self.config, "tool_schema_mode", "rich"))
-            # Social messages (greetings, thanks, etc.) must never trigger skill routing —
-            # injecting ACTIVE SKILLS playbooks into a greeting inflates the context window
-            # and confuses the model into thinking it needs to call tools.
-            if self._is_social_message(message):
-                prompt = self._system_plus_tools_prompt()
-                if coding_hint:
-                    prompt += coding_hint
-                empty_selection = SkillSelection(
-                    query=message,
-                    selected_skills=[],
-                    selected_tools=[],
-                    fallback_tools=[],
-                )
-                return prompt, empty_selection, message
-            routing_query = self._compose_skill_routing_query(
-                message,
-                tool_calls=tool_calls,
-                tool_result_preview_by_sig=tool_result_preview_by_sig,
-            )
-            routed_prompt, selection = self.tools.skill_routing_prompt(
-                routing_query,
-                use_toon=bool(self.config.use_toon_for_tools),
-                mode=schema_mode,
-                top_k=int(getattr(self.config, "skill_top_k", 3)),
-                include_playbooks=bool(
-                    getattr(self.config, "skill_include_playbooks", True)
-                ),
-                include_compact_fallback=bool(
-                    getattr(self.config, "skill_compact_fallback", True)
-                ),
-                include_on_demand_context=bool(
-                    getattr(self.config, "skill_include_on_demand_context", True)
-                ),
-                on_demand_context_max_chars=int(
-                    getattr(self.config, "skill_on_demand_context_max_chars", 2600)
-                ),
-                on_demand_context_max_skills=int(
-                    getattr(self.config, "skill_on_demand_context_max_skills", 2)
-                ),
-                on_demand_context_max_files_per_skill=int(
-                    getattr(
-                        self.config,
-                        "skill_on_demand_context_max_files_per_skill",
-                        5,
-                    )
-                ),
-            )
-            if selection.selected_skills:
-                prompt = self.system_prompt + routed_prompt
-                if coding_hint:
-                    prompt += coding_hint
-                return prompt, selection, routing_query
-            prompt = self._system_plus_tools_prompt()
-            if coding_hint:
-                prompt += coding_hint
-            return prompt, selection, routing_query
-        prompt = self._system_plus_tools_prompt()
-        if coding_hint:
-            prompt += coding_hint
-        return prompt, None, message
-
-    def _coding_workflow_hint(self, message: str) -> str:
-        text = (message or "").strip().lower()
-        if not text or self._is_social_message(text):
-            return ""
-        code_terms = (
-            r"\b(file|files|path|directory|repo|repository|code|function|class|module|"
-            r"symbol|regex|search|replace|edit|patch|read|lines?)\b"
-        )
-        file_hint = (
-            r"(?:^|[\s`\"'])[\w./\\-]+\.(?:py|rs|ts|tsx|js|jsx|go|java|c|cpp|h|hpp|md|json|toml|ya?ml)"
-        )
-        if not (
-            self._is_editing_intent(text)
-            or re.search(code_terms, text)
-            or re.search(file_hint, text)
-        ):
-            return ""
-        return (
-            "\n\nCODING WORKFLOW HINT:\n"
-            "- Prefer `find_path`/`fd_find` to locate files by name before guessing paths.\n"
-            "- Prefer `find_in_file` for single-file search and `rg_search` for workspace search.\n"
-            "- Prefer `sed_read` for exact line ranges and `read_file_smart` for large files or symbol-focused reads.\n"
-            "- Use `read_file` for small direct reads only.\n"
-            "- If multiple relevant file paths are already known, prefer one batched response with 2-4 independent read-only inspections.\n"
-            "- For repo/directory architecture, review, refactor, or improvement questions, inspect enough files before concluding; do not answer from a listing or a single file when more evidence is cheap.\n"
-            "- On follow-up improvement/review questions, ground recommendations in the files you inspected; if current evidence is thin, inspect more first.\n"
-            "- Use `run_shell` only when the dedicated file/search/edit tools are insufficient.\n"
-        )
-
-    def _is_codebase_analysis_request(
-        self,
-        message: str,
-        *,
-        tool_calls: list[ToolCall] | None = None,
-    ) -> bool:
-        text = (message or "").strip().lower()
-        if not text or self._is_social_message(text) or self._is_editing_intent(text):
-            return False
-        review_terms = (
-            r"\b(review|improve|improvement|refactor|cleanup|maintainability|"
-            r"architecture|architectural|design|trade[- ]?offs?|structure|performance)\b"
-        )
-        if not re.search(review_terms, text):
-            return False
-        code_terms = (
-            r"\b(file|files|path|directory|repo|repository|code|function|class|module|"
-            r"symbol|search|read|rust|python|javascript|typescript|go)\b"
-        )
-        file_hint = (
-            r"(?:^|[\s`\"'])[\w./\\-]+\.(?:py|rs|ts|tsx|js|jsx|go|java|c|cpp|h|hpp|md|json|toml|ya?ml)"
-        )
-        if re.search(code_terms, text) or re.search(file_hint, text):
-            return True
-        recent_calls = tool_calls or []
-        return bool(recent_calls) and any(
-            self._is_inspection_tool_name(call.name) for call in recent_calls
-        )
-
-    def _inspected_content_paths(self, tool_calls: list[ToolCall]) -> set[str]:
-        strong_read_tools = {
-            "read_file",
-            "read_file_smart",
-            "sed_read",
-            "get_file_outline",
-            "find_in_file",
-        }
-        out: set[str] = set()
-        for call in tool_calls:
-            if call.name not in strong_read_tools:
-                continue
-            for path in self._extract_paths_from_tool_call(call):
-                path_s = str(path or "").strip()
-                if not path_s or path_s.endswith("/"):
-                    continue
-                if self._lang_from_path(path_s) or re.search(
-                    r"\.[a-z0-9]{1,10}$", path_s.lower()
-                ):
-                    out.add(path_s)
-        return out
-
-
-    def _build_system_prompt_for_message(
-        self,
-        message: str,
-        *,
-        tool_calls: list[ToolCall] | None = None,
-        tool_result_preview_by_sig: dict[tuple[str, str], str] | None = None,
-    ) -> str:
-        prompt, _, _ = self._resolve_system_prompt(
-            message,
-            tool_calls=tool_calls,
-            tool_result_preview_by_sig=tool_result_preview_by_sig,
-        )
-        return prompt
-
-    def _ensure_doc_db(self) -> None:
-        self.memory._ensure_doc_db()
-
-    def _resolve_retrieval_settings(
-        self,
-        use_semantic_retrieval: bool | None,
-        retrieval_mode: str | None,
-    ) -> tuple[bool, str]:
-        use_semantic = (
-            bool(use_semantic_retrieval)
-            if use_semantic_retrieval is not None
-            else bool(getattr(self.config, "default_use_semantic_retrieval", False))
-        )
-        mode = str(
-            retrieval_mode
-            if retrieval_mode is not None
-            else getattr(self.config, "default_retrieval_mode", "vector")
-        ).strip().lower()
-        if mode not in {"vector", "keyword", "hybrid"}:
-            mode = "vector"
-        return use_semantic, mode
-
-    @staticmethod
-    def _strip_internal_reasoning_tags(text: str) -> str:
-        """Remove <think>...</think> blocks that some reasoning models emit.
-
-        These blocks are model-internal traces and can accidentally contain JSON-like
-        snippets that confuse tool-call parsing.
-        """
-        if not text:
-            return text
-        stripped = _THINK_BLOCK_RE.sub("", text)
-        return stripped.strip()
-
-
-    def _context7_tool_names(self) -> list[str]:
-        names: list[str] = []
-        for tool in self.tools.list_tools():
-            tname = str(getattr(tool, "name", "") or "")
-            if self._is_context7_tool_name(tname):
-                names.append(tname)
-        return list(dict.fromkeys(names))
-
-    def _is_context7_tool_name(self, tool_name: str) -> bool:
-        tname = str(tool_name or "").strip()
-        if not tname:
-            return False
-        lname = tname.lower()
-        if (
-            lname.startswith("context7__")
-            or "context7" in lname
-            or lname
-            in {
-                "resolve_library_id",
-                "get_library_docs",
-                "query_docs",
-            }
-        ):
-            return True
-        tool = self.tools.get(tname)
-        skill_id = str(getattr(tool, "skill_id", "") or "").lower() if tool else ""
-        return skill_id == "mcp__context7"
-
-
-    def _docs_intent(self, message: str) -> bool:
-        text = (message or "").strip().lower()
-        if not text:
-            return False
-        doc_terms = (
-            r"\b(docs?|documentation|api reference|reference docs?|library docs?|"
-            r"official docs?|latest docs?|how to use|usage guide)\b"
-        )
-        lib_terms = (
-            r"\b(react|next\.?js|vue|svelte|typescript|javascript|node|python|pydantic|"
-            r"langchain|openai|fastapi|django|flask|rust|tokio|axum|serde)\b"
-        )
-        asks_docs = bool(re.search(doc_terms, text))
-        asks_library = bool(re.search(lib_terms, text))
-        coding_with_lib = bool(
-            re.search(
-                r"\b(implement|integrate|migrate|upgrade|refactor|fix|build|rewrite)\b",
-                text,
-            )
-        )
-        return asks_docs or (
-            asks_library
-            and (
-                "api" in text
-                or "syntax" in text
-                or "latest" in text
-                or coding_with_lib
-            )
-        )
-
-    def _context7_docs_nudge(
-        self,
-        message: str,
-        *,
-        tool_calls: list[ToolCall],
-        selection: SkillSelection | None,
-    ) -> str:
-        if any(self._is_context7_tool_name(call.name) for call in tool_calls):
-            return ""
-        if not bool(getattr(self.config, "context7_docs_auto_nudge", True)):
-            return ""
-        if not self._docs_intent(message):
-            return ""
-        selected = list(selection.selected_tools) if selection else []
-        candidates = [name for name in selected if self._is_context7_tool_name(name)]
-        if not candidates:
-            candidates = self._context7_tool_names()
-        if not candidates:
-            return ""
-        preferred: list[str] = []
-        for name in candidates:
-            lname = name.lower()
-            if "resolve" in lname or "library" in lname:
-                preferred.append(name)
-        for name in candidates:
-            if name not in preferred:
-                preferred.append(name)
-        preview = ", ".join(preferred[:6])
-        return (
-            "Documentation request detected. Use Context7 MCP tools before coding from memory: "
-            "first resolve the library ID, then fetch targeted docs. "
-            f"Prefer tools such as: {preview}. Return exactly one tool_call now."
-        )
-
-    def _inspection_payload_summary(
-        tool_name: str,
-        payload: dict[str, Any],
-    ) -> str:
-        lname = str(tool_name or "").strip().lower()
-        if lname == "get_project_map":
-            root = str(payload.get("root", "") or "").strip()
-            files = payload.get("files", [])
-            sample: list[str] = []
-            if isinstance(files, list):
-                sample = [
-                    str(item.get("path", "")).strip()
-                    for item in files[:5]
-                    if isinstance(item, dict) and str(item.get("path", "")).strip()
-                ]
-            return (
-                f"root={root or '?'} file_count={int(payload.get('file_count', 0) or 0)}"
-                + (f" sample_files={sample}" if sample else "")
-            )
-        if lname == "list_directory":
-            path = str(payload.get("path", "") or "").strip()
-            entries = payload.get("entries", [])
-            sample = []
-            if isinstance(entries, list):
-                sample = [
-                    str(item.get("name", "")).strip()
-                    for item in entries[:5]
-                    if isinstance(item, dict) and str(item.get("name", "")).strip()
-                ]
-            return (
-                f"path={path or '?'} count={int(payload.get('count', 0) or 0)}"
-                + (f" sample_entries={sample}" if sample else "")
-            )
-        if lname in {"read_file", "read_file_smart"}:
-            path = str(payload.get("path", "") or "").strip()
-            total = int(payload.get("total_lines", 0) or 0)
-            returned = str(payload.get("returned_lines", "") or "").strip()
-            return (
-                f"path={path or '?'} total_lines={total} returned_lines={returned or '?'}"
-            )
-        if lname == "git_status":
-            repo = str(payload.get("repo", "") or "").strip()
-            staged = payload.get("staged", [])
-            unstaged = payload.get("unstaged", [])
-            untracked = payload.get("untracked", [])
-            return (
-                f"repo={repo or '?'} staged={len(staged) if isinstance(staged, list) else 0} "
-                f"unstaged={len(unstaged) if isinstance(unstaged, list) else 0} "
-                f"untracked={len(untracked) if isinstance(untracked, list) else 0}"
-            )
-        return f"tool={tool_name}"
-
-    def _inspection_result_contradiction(
-        self,
-        *,
-        response_text: str,
-        tool_name: str,
-        payload: dict[str, Any] | None,
-    ) -> str:
-        if not isinstance(payload, dict):
-            return ""
-        if str(payload.get("status", "ok")).strip().lower() != "ok":
-            return ""
-
-        cleaned = self._strip_internal_reasoning_tags(response_text or "").strip()
-        if not cleaned:
-            return ""
-        lower = cleaned.lower()
-        lname = str(tool_name or "").strip().lower()
-
-        def _mentions_empty() -> bool:
-            patterns = (
-                r"\b(?:is|was|looks)\s+empty\b",
-                r"\bno\s+files\b",
-                r"\b0\s+files\b",
-                r"\bcontains\s+no\s+files\b",
-                r"\bdirectory\s+is\s+empty\b",
-            )
-            return any(re.search(pattern, lower) for pattern in patterns)
-
-        if lname == "get_project_map":
-            count = int(payload.get("file_count", 0) or 0)
-            if count > 0 and _mentions_empty():
-                return "The draft says the directory is empty, but get_project_map found files."
-
-        if lname == "list_directory":
-            count = int(payload.get("count", 0) or 0)
-            if count > 0 and _mentions_empty():
-                return "The draft says the directory is empty, but list_directory returned entries."
-
-        if lname in {"read_file", "read_file_smart"}:
-            total = int(payload.get("total_lines", 0) or 0)
-            path = str(payload.get("path", "") or "").strip().lower()
-            if total > 0 and re.search(r"\b(?:file\s+is\s+empty|empty\s+file)\b", lower):
-                return "The draft says the file is empty, but read_file returned non-empty content."
-            if path and re.search(r"\bnot\s+a\s+file\b|\bfile\s+not\s+found\b", lower):
-                return "The draft says the file was missing/invalid, but read_file succeeded."
-
-        if lname == "git_status":
-            staged = payload.get("staged", [])
-            unstaged = payload.get("unstaged", [])
-            untracked = payload.get("untracked", [])
-            n_changed = 0
-            if isinstance(staged, list):
-                n_changed += len(staged)
-            if isinstance(unstaged, list):
-                n_changed += len(unstaged)
-            if isinstance(untracked, list):
-                n_changed += len(untracked)
-            if n_changed > 0 and re.search(
-                r"\b(?:clean\s+working\s+tree|no\s+changes|nothing\s+to\s+commit)\b",
-                lower,
-            ):
-                return "The draft says the working tree is clean, but git_status reported changes."
-
-        return ""
-
-
-    def _inspection_result_guard_nudge(
-        self,
-        *,
-        response_text: str,
-        tool_name: str,
-        payload: dict[str, Any] | None,
-    ) -> str:
-        contradiction = self._inspection_result_contradiction(
-            response_text=response_text,
-            tool_name=tool_name,
-            payload=payload,
-        )
-        if not contradiction:
-            return ""
-        summary = self._inspection_payload_summary(tool_name, payload or {})
-        return (
-            "[Tool-result consistency check] Your draft contradicts the latest inspection tool result. "
-            f"{contradiction}\n"
-            f"Latest `{tool_name}` summary: {summary}\n"
-            "Revise the answer so it matches the tool output exactly. "
-            "If you are unsure, call one more inspection tool instead of guessing."
-        )
-
-    def _inspection_result_runtime_note(
-        self,
-        *,
-        final_text: str,
-        tool_name: str,
-        payload: dict[str, Any] | None,
-    ) -> str:
-        contradiction = self._inspection_result_contradiction(
-            response_text=final_text,
-            tool_name=tool_name,
-            payload=payload,
-        )
-        if not contradiction:
-            return ""
-        summary = self._inspection_payload_summary(tool_name, payload or {})
-        return (
-            "[Runtime note] The final answer above conflicts with the latest inspection tool result. "
-            f"{contradiction} Latest `{tool_name}` summary: {summary}"
-        )
-
     def add_tool(
         self,
         name: str,
@@ -1174,7 +299,6 @@ class Agent:
         parameters: list[ToolParameter] | None = None,
     ) -> Agent:
         self.tools.register(name, description, parameters or [], function)
-        self._cached_sys_tools_prompt = ""
         return self
 
     def run_tool_direct(
@@ -1237,114 +361,17 @@ class Agent:
         self,
         message: str,
         session_id: str | None = None,
-        verbose: bool = False,
-        use_semantic_retrieval: bool | None = None,
-        retrieval_mode: str | None = None,
         stream: Callable[[str], None] | None = None,
         fresh_session: bool = False,
         tool_callback: Callable[..., None] | None = None,
-        skill_callback: Callable[[list[str], list[str]], None] | None = None,
     ) -> str:
-        use_semantic_retrieval, retrieval_mode = self._resolve_retrieval_settings(
-            use_semantic_retrieval, retrieval_mode
-        )
         return self.run(
             message,
             session_id=session_id,
-            verbose=verbose,
-            use_semantic_retrieval=use_semantic_retrieval,
-            retrieval_mode=retrieval_mode,
             stream_callback=stream,
             fresh_session=fresh_session,
             tool_callback=tool_callback,
-            skill_callback=skill_callback,
         ).final_response
-
-    def reset(self, session_id: str | None = None) -> Agent:
-        sid = session_id or self.current_session_id
-        if sid:
-            self.memory.clear_session(sid)
-        self._reset_context_state()
-        self._tool_result_cache.clear()
-        self.current_session_id = None
-        self._loaded_runtime_session_id = None
-        return self
-
-    # ── Tool result cache helpers ───────────────────────────────────────
-
-    def _looks_like_path(value: str) -> bool:
-        text = str(value or "").strip()
-        if not text:
-            return False
-        if "/" in text or "\\" in text:
-            return True
-        return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", text))
-
-    def _extract_paths_from_value(self, value: Any) -> set[str]:
-        out: set[str] = set()
-        if isinstance(value, dict):
-            for key, item in value.items():
-                key_l = str(key).lower()
-                if (
-                    key_l in {"path", "file", "filename", "filepath", "output_path"}
-                    and isinstance(item, str)
-                    and self._looks_like_path(item)
-                ):
-                    out.add(item.strip())
-                out.update(self._extract_paths_from_value(item))
-            return out
-        if isinstance(value, (list, tuple, set)):
-            for item in value:
-                out.update(self._extract_paths_from_value(item))
-            return out
-        if isinstance(value, str):
-            text = value.strip()
-            if self._looks_like_path(text):
-                out.add(text)
-            # Extract paths from unified diff headers.
-            for line in text.splitlines():
-                line_s = line.strip()
-                if line_s.startswith("+++ b/") or line_s.startswith("--- a/"):
-                    path = line_s[6:].strip()
-                    if path and path != "/dev/null":
-                        out.add(path)
-                elif line_s.startswith("+++ ") or line_s.startswith("--- "):
-                    path = line_s[4:].strip()
-                    if path and path != "/dev/null":
-                        out.add(path)
-            return out
-        return out
-
-    def _extract_paths_from_tool_call(self, call: ToolCall) -> set[str]:
-        return self._extract_paths_from_value(call.arguments or {})
-
-    def _lang_from_path(self, path: str) -> str | None:
-        p = str(path or "").strip().lower()
-        if not p:
-            return None
-        if p.endswith(".rs") or p.endswith("cargo.toml") or p.endswith("cargo.lock"):
-            return "rust"
-        if (
-            p.endswith(".js")
-            or p.endswith(".jsx")
-            or p.endswith(".ts")
-            or p.endswith(".tsx")
-            or p.endswith("package.json")
-            or p.endswith("pnpm-lock.yaml")
-            or p.endswith("yarn.lock")
-        ):
-            return "javascript"
-        if p.endswith(".go") or p.endswith("go.mod") or p.endswith("go.sum"):
-            return "go"
-        if (
-            p.endswith(".py")
-            or p.endswith(".pyi")
-            or p.endswith("pyproject.toml")
-            or p.endswith("requirements.txt")
-        ):
-            return "python"
-        return None
-
 
     def _parse_tool_result_payload(self, result_text: str) -> dict[str, Any] | None:
         text = str(result_text or "").strip()
@@ -1463,447 +490,6 @@ class Agent:
             return _truncate_text(compact_text, max_chars), False
         return _truncate_text(text, max_chars), False
 
-    def _is_write_tool_name(self, tool_name: str) -> bool:
-        patterns: list[str] = list(
-            getattr(self.config, "tool_cache_write_patterns", [])
-        )
-        name_lower = (tool_name or "").lower()
-        if name_lower in {
-            "write_file",
-            "edit_file_replace",
-            "multi_edit",
-            "apply_unified_diff",
-            "multi_patch",
-            "apply_edit_block",
-        }:
-            return True
-        if any(
-            token in name_lower
-            for token in ("edit_file", "multi_edit", "unified_diff", "multi_patch")
-        ):
-            return True
-        return any(str(p).lower() in name_lower for p in patterns)
-
-    @staticmethod
-    def _tool_result_is_error(self, result_text: str) -> bool:
-        text = str(result_text or "").strip()
-        if not text:
-            return False
-        if text.lower().startswith("error:"):
-            return True
-        payload = self._parse_tool_result_payload(text)
-        if isinstance(payload, dict):
-            status = str(payload.get("status", "")).strip().lower()
-            if status in {"error", "failed", "fail"}:
-                return True
-            if payload.get("ok") is False or payload.get("success") is False:
-                return True
-        return False
-
-
-    def _tool_call_applied_write(self, call: ToolCall, result_text: str) -> bool:
-        if not self._is_write_tool_name(call.name):
-            return False
-        text = str(result_text or "").strip()
-        if not text:
-            return False
-        if self._tool_result_is_error(text):
-            return False
-
-        payload = self._parse_tool_result_payload(text)
-        if isinstance(payload, dict):
-            status = str(payload.get("status", "")).strip().lower()
-            if status in {"error", "failed", "fail"}:
-                return False
-            if status == "partial":
-                applied = payload.get("applied")
-                if isinstance(applied, (int, float)) and applied > 0:
-                    return True
-                results = payload.get("results")
-                if isinstance(results, list):
-                    return any(
-                        isinstance(item, dict)
-                        and str(item.get("status", "")).lower() == "ok"
-                        for item in results
-                    )
-                return False
-
-            for key in (
-                "bytes_written",
-                "lines_added",
-                "lines_removed",
-                "applied",
-                "updated",
-                "modified",
-                "changes",
-            ):
-                val = payload.get(key)
-                if isinstance(val, (int, float)) and val > 0:
-                    return True
-            if status in {"ok", "success", "done"}:
-                return True
-
-        lower = text.lower()
-        if re.search(r"\b(no changes|not found|failed|error)\b", lower):
-            return False
-        return True
-
-    def _is_edit_tool_name(self, tool_name: str) -> bool:
-        name = str(tool_name or "").strip().lower()
-        if not name:
-            return False
-        if name in {
-            "write_file",
-            "edit_file_replace",
-            "multi_edit",
-            "apply_unified_diff",
-            "multi_patch",
-            "apply_edit_block",
-        }:
-            return True
-        return any(token in name for token in ("edit", "patch", "write_file"))
-
-
-    def _is_inspection_tool_name(self, tool_name: str) -> bool:
-        name = str(tool_name or "").strip().lower()
-        if not name:
-            return False
-        explicit = {
-            "read_file",
-            "get_file_outline",
-            "get_project_map",
-            "find_symbol",
-            "rg_search",
-            "fd_find",
-            "list_directory",
-            "git_status",
-            "git_diff",
-            "git_log",
-        }
-        if name in explicit:
-            return True
-        return any(
-            token in name
-            for token in (
-                "read",
-                "outline",
-                "search",
-                "find",
-                "list_dir",
-                "project_map",
-                "symbol",
-                "git_status",
-                "git_diff",
-            )
-        )
-
-    def _requires_prewrite_inspection(self, tool_name: str) -> bool:
-        name = str(tool_name or "").strip().lower()
-        if not name:
-            return False
-        # Allow write_file because it can be used for creating a new file.
-        # For patch/edit-style mutations, require at least one inspection step first.
-        if name in {
-            "edit_file_replace",
-            "multi_edit",
-            "apply_unified_diff",
-            "multi_patch",
-            "apply_edit_block",
-        }:
-            return True
-        return any(
-            token in name
-            for token in ("edit_file", "multi_edit", "unified_diff", "multi_patch", "apply_edit_block")
-        )
-
-    def _edit_tool_recovery_nudge(self, call: ToolCall, result_text: str) -> str:
-        if not self._is_edit_tool_name(call.name):
-            return ""
-        text = str(result_text or "").strip()
-        if not text:
-            return ""
-
-        payload = self._parse_tool_result_payload(text)
-        status = str(payload.get("status", "")).strip().lower() if payload else ""
-        partial = status == "partial"
-        failed = self._tool_result_is_error(text) or partial
-        if isinstance(payload, dict):
-            failed_count = payload.get("failed")
-            if isinstance(failed_count, (int, float)) and failed_count > 0:
-                failed = True
-                partial = partial or bool(payload.get("applied", 0))
-        if not failed:
-            return ""
-
-        partial = False
-        snippets: list[str] = []
-        payload = self._parse_tool_result_payload(text)
-        if isinstance(payload, dict):
-            for key in ("error", "message", "stderr"):
-                value = payload.get(key)
-                if isinstance(value, str) and value.strip():
-                    snippets.append(value.strip())
-            results = payload.get("results")
-            if isinstance(results, list):
-                total = len(results)
-                failed = 0
-                for item in results:
-                    if isinstance(item, dict) and item.get("status") != "ok":
-                        failed += 1
-                        err = item.get("error")
-                        if isinstance(err, str) and err.strip():
-                            snippets.append(err.strip())
-                        if len(snippets) >= 4:
-                            break
-                if 0 < failed < total:
-                    partial = True
-
-        if not snippets:
-            snippets.append(text)
-        err_summary = " | ".join(snippets)[:420]
-        lower = " ".join(snippets).lower()
-
-        if re.search(r"old_string not found|missing 'old_string'|not found in file", lower):
-            action = (
-                "Re-read the file and retry with `edit_file_replace` or `multi_edit`, "
-                "including 3-5 unchanged lines of context around `old_string`."
-            )
-        elif re.search(r"matches \d+ locations|be more specific|unique|ambiguous", lower):
-            action = (
-                "Your target is ambiguous. Include more unchanged surrounding lines so the "
-                "match is unique, then retry one precise edit call."
-            )
-        elif re.search(r"file not found|not a file|no such file", lower):
-            action = (
-                "Verify the path first (`find_path`, `fd_find`, `list_directory`, or `sed_read`), then "
-                "retry with the exact repository-relative path."
-            )
-        elif re.search(r"patch validation failed|hunk|diff has no hunks|failed to apply", lower):
-            action = (
-                "Refresh the file contents and regenerate a minimal diff against the current "
-                "state, then retry `apply_unified_diff` (or switch to `edit_file_replace`)."
-            )
-        elif re.search(r"permission denied|operation not permitted|read-only", lower):
-            action = (
-                "Filesystem permissions blocked the write. Report the blocker clearly and "
-                "request a writable path or permission change."
-            )
-        else:
-            action = (
-                "Diagnose from the latest file contents, then retry with one smaller targeted "
-                "edit call."
-            )
-
-        prefix = (
-            "Some edit hunks applied but at least one failed."
-            if partial
-            else "The last edit tool call failed."
-        )
-        return (
-            f"[Edit recovery] {prefix} Do not finalize yet.\n"
-            f"Recent error: {err_summary}\n"
-            f"Next step: {action}\n"
-            "Return exactly one repair tool_call now."
-        )
-
-    def _run_reflexion_repair(
-        self,
-        call: ToolCall,
-        result_text: str,
-        tracer: _TraceCollector,
-    ) -> str | None:
-        """Run SOTA reflexion pass to fix a failed tool call."""
-        if not bool(getattr(self.config, "enable_reflexion_repair", False)):
-            return None
-
-        # Only for certain failure-prone tools
-        if not (self._is_edit_tool_name(call.name) or "shell" in call.name):
-            return None
-
-        tracer.emit("reflexion_repair_begin", tool=call.name)
-        reasoner = ReflexionReasoner(self.llm)
-        
-        # Build mini-context for reflexion
-        payload = {
-            "tool": call.name,
-            "arguments": call.arguments,
-            "error": str(result_text)[:2000]
-        }
-        
-        prompt = f"""
-I attempted to run a tool and it failed. 
-{json.dumps(payload, indent=2)}
-
-Analyze the error and the original intent. 
-If this was a file edit, check for indentation, missing anchors, or typos.
-If this was a shell command, check for syntax or missing dependencies.
-
-Return a corrected tool call in the same format.
-"""
-        try:
-            # ReflexionReasoner expects a query and returns a trace
-            trace = reasoner.solve(prompt)
-            fix_text = trace.answer or trace.reasoning
-            
-            # Extract new tool call if possible
-            new_calls = parse_tool_calls(fix_text, use_toon=False)
-            if new_calls:
-                tracer.emit("reflexion_repair_success", tool=call.name, fix=fix_text[:200])
-                # We return the first suggested tool call as a nudge
-                call_json = json.dumps({
-                    "name": new_calls[0].name,
-                    "arguments": new_calls[0].arguments
-                })
-                return f"[Reflexion Repair] Based on analysis, retry with: {call_json}"
-        except Exception as e:
-            tracer.emit("reflexion_repair_error", error=str(e))
-        
-        return None
-
-    def _score_answer_confidence(
-        self,
-        question: str,
-        answer: str,
-        temperature: float,
-    ) -> float:
-        """Call the LLM as a lightweight judge to score the given answer (0–10).
-
-        Returns 5.0 on any failure so the gate is a no-op when the scoring
-        call itself is unavailable.
-
-        Designed to work with reasoning models that emit <think>…</think> blocks:
-        - The prompt requests the score inside <score>…</score> tags so it can be
-          extracted even when the model prepends a thinking section.
-        - Falls back to bare-number regex if no tag is present.
-        - Strips think blocks before both extraction attempts.
-        """
-        prompt = (
-            "[Question]\n"
-            f"{question[:600]}\n\n"
-            "[Answer]\n"
-            f"{answer[:1200]}\n\n"
-            "Rate the above answer on a scale from 0 to 10 for completeness, "
-            "accuracy, and confidence.\n"
-            "Output your score inside XML tags like this: <score>8.5</score>\n"
-            "Output ONLY the tag with the number — no explanation."
-        )
-        try:
-            raw = (
-                self._llm_generate(
-                    [Message(role=MessageRole.USER, content=prompt)],
-                    temperature=0.0,
-                    # Allow enough tokens for a think-block + score tag.
-                    max_tokens=96,
-                    stream=False,
-                    on_token=None,
-                )
-                or ""
-            ).strip()
-            # Strip reasoning-model think blocks before parsing.
-            cleaned = _THINK_BLOCK_RE.sub("", raw).strip()
-            # Primary: extract from <score> tag.
-            tag_m = re.search(r"<score>\s*(10(?:\.0+)?|[0-9](?:\.\d+)?)\s*</score>", cleaned)
-            if tag_m:
-                return float(tag_m.group(1))
-            # Fallback: bare number anywhere in the cleaned response.
-            m = re.search(r"\b(10(?:\.0+)?|[0-9](?:\.\d+)?)\b", cleaned)
-            return float(m.group(0)) if m else 5.0
-        except Exception:
-            return 5.0
-
-
-    def _llm_generate(
-        self,
-        messages: list[Message],
-        *,
-        temperature: float,
-        max_tokens: int,
-        stream: bool,
-        on_token: Callable[[str], None] | None,
-        tools: Any = _UNSET,
-        grammar: str | None = None,
-    ) -> str:
-        kwargs: dict[str, Any] = {
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": stream,
-            "on_token": on_token,
-        }
-        if tools is not _UNSET:
-            kwargs["tools"] = tools
-        if grammar is not None:
-            kwargs["grammar"] = grammar
-
-        try:
-            return self.llm.generate(messages, **kwargs)
-        except TypeError as exc:
-            # Compatibility fallback for test doubles or legacy backends that
-            # don't accept a "tools" or "grammar" keyword argument.
-            if "tools" in kwargs and "unexpected keyword argument 'tools'" in str(exc):
-                kwargs.pop("tools", None)
-                return self.llm.generate(messages, **kwargs)
-            if "grammar" in kwargs and "unexpected keyword argument 'grammar'" in str(exc):
-                kwargs.pop("grammar", None)
-                return self.llm.generate(messages, **kwargs)
-            raise
-
-    def _trim_convo_to_budget(
-        self,
-        convo: list[Message],
-        n_tok: int,
-    ) -> list[Message]:
-        """Trim *convo* so the total token count fits within
-        ``context_token_budget - n_tok - 128``.
-
-        A single ``llm.count_tokens()`` call is made per iteration; if the
-        endpoint is unavailable the conversation is returned unchanged.
-        ``context_token_budget == 0`` (default) disables trimming entirely.
-        """
-        budget = int(getattr(self.config, "context_token_budget", 0))
-        if budget <= 0 or not hasattr(self.llm, "count_tokens"):
-            return convo
-        max_ctx_tokens = (
-            budget - n_tok - 128
-        )  # reserve headroom for response + overhead
-        if max_ctx_tokens <= 64:
-            return convo
-        full_text = "\n".join(m.content or "" for m in convo)
-        try:
-            total = self.llm.count_tokens(full_text)
-        except Exception:
-            return convo  # tokenize endpoint unreachable — degrade gracefully
-        if total <= max_ctx_tokens:
-            return convo  # already fits; nothing to do
-        # Estimate chars-per-token for this specific prompt.
-        chars_per_token = max(1.0, len(full_text) / max(1, total))
-        chars_to_cut = int((total - max_ctx_tokens) * chars_per_token)
-        keep_tail = int(getattr(self.config, "history_recent_tail", 8))
-        trimmed = list(convo)
-        # Drop oldest tool/assistant turns, keeping the system header (index 0)
-        # and the most recent `keep_tail` messages.
-        trimmable = [
-            i
-            for i, m in enumerate(trimmed)
-            if i > 0
-            and i < len(trimmed) - keep_tail
-            and m.role in (MessageRole.TOOL, MessageRole.ASSISTANT)
-        ]
-        chars_cut = 0
-        to_remove: set[int] = set()
-        for idx in trimmable:
-            if chars_cut >= chars_to_cut:
-                break
-            chars_cut += len(trimmed[idx].content or "")
-            to_remove.add(idx)
-        result = [m for i, m in enumerate(trimmed) if i not in to_remove]
-        self._log.info(
-            "Token-budget trim: dropped %d messages (~%d chars) to fit %d-token budget",
-            len(to_remove),
-            chars_cut,
-            budget,
-        )
-        return result
-
     def reset_runtime_state(
         self,
         session_id: str | None = None,
@@ -1971,7 +557,7 @@ Return a corrected tool call in the same format.
             }
         else:
             runtime_snapshot = self._runtime_context_snapshot()
-        # NEW: Try to fetch todo list for SOTA TUI tracking
+        # Surface the current todo state for the CLI/runtime inspector.
         todo_summary = []
         try:
             todo_res = self.run_tool_direct("todo", {"command": "view"}, session_id=sid)
@@ -2159,90 +745,47 @@ Return a corrected tool call in the same format.
     def list_sessions(self) -> list[tuple[str, str]]:
         return self.memory.list_sessions()
 
-    def semantic_search(
-        self,
-        query: str,
-        session_id: str,
-        k: int = 8,
-        retrieval_mode: str = "vector",
-    ) -> list[Message]:
-        return self.memory.semantic_search(
-            query, session_id, k, retrieval_mode=retrieval_mode
-        )
-
-    def repl(self) -> None:
-        print(f"--- Agent REPL :: {self.current_session_id or 'new session'} ---")
-        print("Type 'exit' or 'quit' to stop.")
-
-        while True:
-            try:
-                user_input = input(">> ")
-                if user_input.lower() in ("exit", "quit"):
-                    break
-                if not user_input.strip():
-                    continue
-                resp = self.chat(user_input, verbose=True)
-                print(f"\n[Agent]: {resp}\n")
-            except KeyboardInterrupt:
-                print("\nInterrupted.")
-                break
-            except Exception as e:
-                print(f"\n[Error]: {e}")
-
     def _build_agent_loop(self) -> AgentLoop:
-        """Construct the SOTA AgentLoop with default components."""
+        """Construct the AgentLoop with the default runtime components."""
         guards = default_guards(self.config)
         prompt_builder = default_prompt_builder(
             tool_schema_fn=lambda: self.tools.tools_schema_prompt(),
-            # TODO(Phase B): domain tools require the skill bootstrap machinery to
-            # load skill-script functions as standalone schemas. The domain
-            # classification and state tracking in TurnState still work correctly;
-            # this just means no additional tool schemas are injected for domain
-            # activations yet.
-            domain_schema_fn=lambda groups: "",
-            # Wire real BM25/fuzzy skill routing: returns the playbook text for
-            # the top-1 matched skill given the turn's classified query.
             routing_fn=lambda query: self.tools.skill_routing_prompt(query, top_k=1)[0],
+            domain_schema_fn=lambda groups: self.tools.skill_routing_prompt(
+                " ".join(sorted(groups)), top_k=2
+            )[0],
         )
         dispatcher = ToolDispatcher(self.tools)
+        # guardrail_stall_nudge_limit: max corrective retries per guard (default 1).
+        # A value of 1 means one nudge is allowed; the second triggers hard-stop.
+        max_nudges = getattr(self.config, "guardrail_stall_nudge_limit", 1) + 1
+        from ..thinking import ThinkingStrategy
+
+        thinking = (
+            ThinkingStrategy(self.llm, self.config.thinking)
+            if getattr(self.config, "thinking", None)
+            else None
+        )
         return AgentLoop(
             llm=self.llm,
-            guardrails=GuardrailEngine(guards),
+            guardrails=GuardrailEngine(guards, max_nudges_per_guard=max_nudges),
             prompt_builder=prompt_builder,
             dispatcher=dispatcher,
             config=self.config,
             memory=self.memory,
             mcp_loader=self._ensure_mcp_servers_loaded,
+            thinking=thinking,
         )
-
-    async def run_loop(self, message: str) -> TurnResult:
-        """Run a turn using the new SOTA AgentLoop.
-
-        This is the new entry point for the refactored agent.
-        The existing run() method remains available for backwards compatibility.
-        """
-        messages = [Message(role=MessageRole.USER, content=message)]
-        self._agent_loop.llm = self.llm
-        self._agent_loop.memory = self.memory
-        return await self._agent_loop.run(messages)
 
     def run(
         self,
         message: str,
         session_id: str | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        verbose: bool = False,
-        use_semantic_retrieval: bool | None = None,
-        retrieval_mode: str | None = None,
         stream_callback: Callable[[str], None] | None = None,
+        thinking_callback: Callable[[str], None] | None = None,
         fresh_session: bool = False,
         tool_callback: Callable[..., None] | None = None,
-        skill_callback: Callable[[list[str], list[str]], None] | None = None,
     ) -> AgentResponse:
-        del temperature, max_tokens, verbose
-        del use_semantic_retrieval, retrieval_mode, skill_callback
-
         sid = session_id or str(uuid.uuid4())
         self.current_session_id = sid
 
@@ -2262,39 +805,40 @@ Return a corrected tool call in the same format.
         self._agent_loop.llm = self.llm
         self._agent_loop.memory = self.memory
 
+        token_emitted = False
+
+        def _emit_token(token: str) -> None:
+            nonlocal token_emitted
+            token_emitted = True
+            if stream_callback is not None:
+                stream_callback(token)
+
         async def _run_loop() -> TurnResult:
-            return await self._agent_loop.run(messages, session_id=sid)
+            return await self._agent_loop.run(
+                messages,
+                session_id=sid,
+                token_callback=_emit_token if stream_callback is not None else None,
+                thinking_callback=thinking_callback,
+                tool_callback=tool_callback,
+            )
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, _run_loop())
-                    result = future.result()
-            else:
-                result = loop.run_until_complete(_run_loop())
+            asyncio.get_running_loop()
         except RuntimeError:
             result = asyncio.run(_run_loop())
+        else:
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _run_loop())
+                result = future.result()
+
+        self._persist_runtime_state(sid)
 
         final_response = result.final_response or ""
-        if stream_callback is not None and final_response:
+        if stream_callback is not None and final_response and not token_emitted:
             try:
                 stream_callback(final_response)
             except Exception:
                 pass
-
-        if tool_callback is not None:
-            for call in result.tool_calls:
-                try:
-                    tool_callback(
-                        call.name,
-                        dict(call.arguments or {}),
-                        {"stage": "completed", "session_id": sid},
-                    )
-                except TypeError:
-                    tool_callback(call.name, dict(call.arguments or {}))
-                except Exception:
-                    pass
 
         response_messages = list(result.messages)
         if final_response and (
@@ -2323,6 +867,7 @@ Return a corrected tool call in the same format.
             final_response=final_response,
             debug=debug,
             trace_md="",
+            thinking_log=result.thinking_log,
         )
 
 __all__ = ["Agent"]

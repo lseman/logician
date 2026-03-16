@@ -198,13 +198,12 @@ def test_turn_context_returns_content_when_files_written():
     assert "## Turn Context" in result
 
 
-def test_turn_context_returns_content_when_iteration_nonzero():
+def test_turn_context_returns_none_when_no_files_regardless_of_iteration():
     comp = TurnContextComponent()
     state = make_state()
     state.iteration = 3
     result = comp.render(state, make_config())
-    assert result is not None
-    assert "Iteration: 3" in result
+    assert result is None
 
 
 def test_turn_context_includes_verify_reminder_when_files_written():
@@ -224,8 +223,7 @@ def test_turn_context_includes_verify_reminder_when_files_written():
 def test_default_prompt_builder_returns_prompt_builder():
     builder = default_prompt_builder(
         tool_schema_fn=lambda: "",
-        domain_schema_fn=lambda groups: "",
         routing_fn=lambda q: "",
     )
     assert isinstance(builder, PromptBuilder)
-    assert len(builder.components) == 5
+    assert len(builder.components) == 4

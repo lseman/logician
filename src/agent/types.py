@@ -29,6 +29,11 @@ class TurnResult:
         return self._state.tool_calls
 
     @property
+    def thinking_log(self) -> list[str]:
+        """All thinking/planning content collected during this turn."""
+        return self._state.thinking_log
+
+    @property
     def state(self) -> TurnState:
         return self._state
 

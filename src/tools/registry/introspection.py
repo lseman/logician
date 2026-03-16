@@ -27,9 +27,6 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
             "find_in_file",
             "read_file_smart",
             "sed_read",
-            "cc_glob",
-            "cc_grep",
-            "cc_read",
         ],
     },
     "editing": {
@@ -47,9 +44,6 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
             "sed_replace",
             "show_diff",
             "count_in_file",
-            "cc_edit",
-            "cc_write",
-            "cc_multi_edit",
         ],
     },
     "execution": {
@@ -82,7 +76,6 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
 }
 
 _CODING_SKILL_IDS = {
-    "cc_tools",
     "file_ops",
     "multi_edit",
     "web",
@@ -539,7 +532,7 @@ class RegistryIntrospectionMixin:
         """Return the GBNF grammar for a tool, or None if not registered.
 
         Used by Agent.run() to enable llama.cpp constrained decoding for
-        grammar-aware tools (e.g. cc_edit, cc_multi_edit).
+        grammar-aware tools (e.g. write_file, edit_file_replace, multi_edit).
         """
         return self._grammars.get(str(tool_name or "").strip())
 

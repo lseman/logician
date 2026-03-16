@@ -1339,7 +1339,9 @@ class BridgeServer:
 
         sid = self.sessions.setdefault(active, _new_session_id())
         token_seen = False
+        thinking_token_seen = False
         emitted_image_events: set[tuple[str, str]] = set()
+        turn_tool_errors: list[int] = [0]  # mutable counter accessible in nested fn
 
         def _token(tok: str):
             nonlocal token_seen
@@ -1351,6 +1353,16 @@ class BridgeServer:
                 )
             self._emit("token", {"token": tok})
 
+        def _thinking_token(tok: str):
+            nonlocal thinking_token_seen
+            if not thinking_token_seen:
+                thinking_token_seen = True
+                self._emit(
+                    "phase",
+                    {"state": "thinking", "note": "pre-turn plan"},
+                )
+            self._emit("thinking_token", {"token": tok})
+
         def _tool(
             name: str,
             tool_args: dict[str, Any],
@@ -1360,19 +1372,30 @@ class BridgeServer:
             stage = str(info.get("stage", "start") or "start").strip().lower()
             sequence = int(info.get("sequence", 0) or 0)
             if stage == "end":
+                status_val = str(info.get("status", "ok") or "ok")
+                if status_val.lower() in ("error", "failed"):
+                    turn_tool_errors[0] += 1
                 payload: dict[str, Any] = {
                     "name": name,
                     "sequence": sequence,
-                    "status": str(info.get("status", "ok") or "ok"),
+                    "status": status_val,
                     "duration_ms": int(info.get("duration_ms", 0) or 0),
                     "cache_hit": bool(info.get("cache_hit", False)),
                 }
                 error = str(info.get("error", "") or "").strip()
                 if error:
                     payload["error"] = error
+                result_preview = str(info.get("result_preview", "") or "").strip()
+                if result_preview:
+                    payload["result_preview"] = result_preview[:160]
                 self._emit("tool_end", payload)
                 return
 
+            # Update phase note so the status bar shows the active tool name
+            self._emit(
+                "phase",
+                {"state": "jambering", "note": f"tool#{sequence} {name}"},
+            )
             self._emit(
                 "tool_start",
                 {"name": name, "args": tool_args or {}, "sequence": sequence},
@@ -1386,12 +1409,6 @@ class BridgeServer:
                     "image",
                     {"tool": key[0] or "unknown_tool", "path": path, "source": "args"},
                 )
-
-        def _skill(skill_ids: list[str], selected_tools: list[str]):
-            self._emit(
-                "skill",
-                {"skill_ids": skill_ids or [], "selected_tools": selected_tools or []},
-            )
 
         if self.pipeline:
             pm = self.pipeline
@@ -1415,7 +1432,6 @@ class BridgeServer:
                         resp = cur.chat(
                             message,
                             session_id=sid_cur,
-                            verbose=False,
                         )
                     except Exception as exc:
                         resp = f"[error] {exc}"
@@ -1429,10 +1445,9 @@ class BridgeServer:
         run_resp = ag.run(
             raw,
             session_id=sid,
-            verbose=False,
             stream_callback=_token,
+            thinking_callback=_thinking_token,
             tool_callback=_tool,
-            skill_callback=_skill,
         )
         response_text = str(getattr(run_resp, "final_response", "") or "")
         tool_calls_payload: list[dict[str, Any]] = []
@@ -1491,9 +1506,12 @@ class BridgeServer:
         return {
             "pipeline": False,
             "assistant": response_text,
+            "final_response": response_text,
             "iterations": int(getattr(run_resp, "iterations", 0) or 0),
-            "tool_call_count": len(tool_calls_payload),
             "tool_calls": tool_calls_payload,
+            "tool_errors": turn_tool_errors[0],
+            "session_id": sid,
+            "message_count": len(list(getattr(run_resp, "messages", []) or [])),
             "state": self._state_snapshot(),
         }
 

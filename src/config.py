@@ -53,22 +53,17 @@ class Config:
     # The plan is injected as a system message that anchors the whole turn.
     # Inspired by R1/o1 extended thinking and LATS deliberation.
     pre_turn_thinking: bool = False
-    pre_turn_thinking_max_tokens: int = 512
     pre_turn_thinking_prompt: str = (
-        "Before taking any action, name your plan explicitly.\n\n"
-        "1. What is the exact task? (one sentence)\n"
-        "2. Which skill(s) will you use? Name them explicitly "
-        "(e.g. 'explore → edit_block → quality', or 'think → orchestrator → coding/parallel_dispatch').\n"
-        "3. What is your ordered step list? (max 5 steps — be concrete, not vague)\n"
-        "4. What could go wrong and what will you verify?\n\n"
-        "If this is a coding task: use fd_find/rg_search before guessing paths; "
-        "read before writing; run ruff/pytest after writes. "
-        "If multi-file: reads can parallelize, writes must serialize.\n"
-        "Be concise — you will execute this plan immediately after."
+        "One sentence: what is the task and what is the first tool call?\n\n"
+        "Rules:\n"
+        "- If the path is obvious, name only the first action. Do not list all steps.\n"
+        "- If multi-step and non-obvious, list up to 3 concrete steps max.\n"
+        "- No tool_call blocks, no JSON, no code fences — plain text only.\n"
+        "- Do NOT restate the user message. Do NOT explain what you are about to explain.\n"
+        "- Shorter is better. One line is ideal."
     )
     # Optional post-tool reflection after each tool result.
     post_tool_thinking: bool = False
-    post_tool_thinking_max_tokens: int = 256
     post_tool_thinking_prompt: str = (
         "Briefly: what did this tool result tell you, and what is your precise next step?"
     )
@@ -93,12 +88,21 @@ class Config:
     stop: tuple[str, ...] = ("<|im_end|>", "</s>", "[INST]", "USER:", "<|user|>")
     stream: bool = True
     max_consecutive_tool_calls: int = 5
+    allow_multi_tool_calls: bool = True
+    multi_tool_call_max_calls: int = 4
     # Edit-heavy requests often require more chained tool calls/iterations.
-    editing_min_iterations: int = 12
+    editing_min_iterations: int = 8
     editing_max_consecutive_tool_calls: int = 10
     editing_force_action_nudges: int = 2
     editing_require_inspection_nudges: int = 3
     editing_failure_repair_nudges: int = 3
+    # Allow one corrective retry for a given guardrail, then stop the turn with
+    # a blocker summary instead of repeating the same nudge indefinitely.
+    guardrail_stall_nudge_limit: int = 1
+    # If the model repeats materially the same no-tool draft after feedback,
+    # stop the turn instead of asking for another rewrite of the same text.
+    repeated_draft_stall_limit: int = 1
+    repeated_draft_similarity_threshold: float = 0.88
     retry_attempts: int = 2
     lazy_mcp_init: bool = True
     default_use_semantic_retrieval: bool = True
@@ -157,15 +161,6 @@ class Config:
     )
     # Max chars kept when persisting compacted tool payload summaries.
     tool_history_summary_max_chars: int = 2200
-
-    # Self-Reflection (light critique loop)
-    enable_reflection: bool = False
-    reflection_prompt: str = (
-        "You are critiquing your own response. Review the conversation and "
-        "final output: [FINAL]. If it's incomplete, unclear, or needs "
-        "tools/refinement, output a tool call or improved text. Otherwise, "
-        "say 'COMPLETE'."
-    )
 
     # Logging
     debug_trace: bool = True

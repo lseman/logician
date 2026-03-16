@@ -26,6 +26,7 @@ class AgentResponse:
     final_response: str
     debug: dict[str, Any] = field(default_factory=dict)
     trace_md: str = ""
+    thinking_log: list[str] = field(default_factory=list)
 
 
 def plot_tool_calls_by_iteration(

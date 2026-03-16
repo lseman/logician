@@ -38,6 +38,7 @@ rag_docs.vector/
 # Generated artifacts
 lightning_logs/
 plots/
+skills/.skills_catalog_cache.json
 
 # Temp scratch files
 Untitled-1

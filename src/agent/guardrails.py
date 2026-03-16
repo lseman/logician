@@ -31,8 +31,9 @@ class Guard(Protocol):
 
 
 class GuardrailEngine:
-    def __init__(self, guards: list[Guard]) -> None:
+    def __init__(self, guards: list[Guard], max_nudges_per_guard: int = 2) -> None:
         self.guards = guards
+        self._max_nudges = max_nudges_per_guard
 
     def run(
         self,
@@ -40,14 +41,27 @@ class GuardrailEngine:
         response: str,
         tool_calls: list[ToolCall],
     ) -> GuardrailResult:
-        """Run ALL guards. hard_stop > nudge > pass. First in list wins within tier."""
+        """Run ALL guards. hard_stop > nudge > pass. First in list wins within tier.
+
+        If the same guard has already nudged >= max_nudges_per_guard times this turn,
+        its next failure is escalated to a hard-stop to prevent infinite loops.
+        """
         results = [g.check(state, response, tool_calls) for g in self.guards]
         hard_stops = [r for r in results if r.hard_stop]
         if hard_stops:
             return hard_stops[0]
         failures = [r for r in results if not r.passed]
         if failures:
-            return failures[0]
+            f = failures[0]
+            prior = state.guardrail_nudges.get(f.guard_name, 0)
+            if prior >= self._max_nudges:
+                return GuardrailResult(
+                    passed=False,
+                    nudge=f.nudge,
+                    hard_stop=True,
+                    guard_name=f.guard_name,
+                )
+            return f
         return GuardrailResult(passed=True)
 
 
@@ -126,6 +140,19 @@ _TOOL_CLAIM_PATTERNS: list[re.Pattern[str]] = [
     ),
 ]
 
+# Patterns that indicate the model is fabricating tool output instead of calling tools.
+_HALLUCINATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bsimulated\s+output\b", re.IGNORECASE),
+    re.compile(r"\bhypothetical\s+(?:output|result|response)\b", re.IGNORECASE),
+    re.compile(r"\b(?:sample|mock|fake|dummy)\s+output\b", re.IGNORECASE),
+    re.compile(
+        r"\bi\s+(?:cannot|can't|am\s+unable\s+to)\s+(?:run|execute|call|access|use)"
+        r"\s+(?:shell|bash|tool|command)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsince\s+i\s+cannot\s+execute\b", re.IGNORECASE),
+]
+
 
 class ToolClaimGuard:
     name = "tool_claim"
@@ -143,6 +170,33 @@ class ToolClaimGuard:
                 return GuardrailResult(
                     passed=False,
                     nudge="Please use a tool instead of describing what you would do.",
+                    hard_stop=False,
+                    guard_name=self.name,
+                )
+        return GuardrailResult(passed=True, guard_name=self.name)
+
+
+class HallucinationGuard:
+    """Catches responses that contain fabricated tool output instead of real execution."""
+
+    name = "hallucination"
+
+    def check(
+        self,
+        state: TurnState,
+        response: str,
+        tool_calls: list[ToolCall],
+    ) -> GuardrailResult:
+        if tool_calls:
+            return GuardrailResult(passed=True, guard_name=self.name)
+        for pattern in _HALLUCINATION_PATTERNS:
+            if pattern.search(response):
+                return GuardrailResult(
+                    passed=False,
+                    nudge=(
+                        "You appear to be simulating tool output instead of calling real tools. "
+                        "Call the actual tool now — do NOT fabricate output."
+                    ),
                     hard_stop=False,
                     guard_name=self.name,
                 )
@@ -185,6 +239,9 @@ class VerificationGuard:
 class StallGuard:
     name = "stall"
 
+    def __init__(self, max_total_nudges: int = 5) -> None:
+        self._max = max_total_nudges
+
     def check(
         self,
         state: TurnState,
@@ -193,19 +250,60 @@ class StallGuard:
     ) -> GuardrailResult:
         if tool_calls:
             return GuardrailResult(passed=True, guard_name=self.name)
-        if state.guardrail_nudges.get("stall", 0) >= 2:
+        total_nudges = sum(state.guardrail_nudges.values())
+        if total_nudges >= self._max:
             return GuardrailResult(
                 passed=False,
-                nudge="The agent appears to be stalled. Stopping turn.",
+                nudge="Agent is stuck in a guardrail loop. Hard-stopping turn.",
                 hard_stop=True,
                 guard_name=self.name,
             )
         return GuardrailResult(passed=True, guard_name=self.name)
 
 
+_TOOL_ERROR_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r'"status"\s*:\s*"error"', re.IGNORECASE),
+    re.compile(r'\bno such file or directory\b', re.IGNORECASE),
+    re.compile(r'\bfile not found\b', re.IGNORECASE),
+    re.compile(r'\bno matches found\b', re.IGNORECASE),
+    re.compile(r'"count"\s*:\s*0\b'),
+    re.compile(r'"matches_found"\s*:\s*0\b'),
+    re.compile(r'\b0 matches\b', re.IGNORECASE),
+    re.compile(r'\berror\b.{0,40}\bnot found\b', re.IGNORECASE | re.DOTALL),
+]
+
+_SUCCESS_CLAIM_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r'\bthe file contains\b', re.IGNORECASE),
+    re.compile(r'\bfound\s+\d+\b', re.IGNORECASE),
+    re.compile(r'\bsuccessfully\s+(?:read|loaded|found|retrieved)\b', re.IGNORECASE),
+    re.compile(r'\bthe (?:result|output) shows\b', re.IGNORECASE),
+    re.compile(r'\bhere (?:is|are) the (?:content|results|output)\b', re.IGNORECASE),
+    re.compile(r'\bmatches were found\b', re.IGNORECASE),
+]
+
+_TOOL_SUCCESS_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r'"status"\s*:\s*"ok"', re.IGNORECASE),
+    re.compile(r'"content"\s*:\s*"[^"]{10}'),
+]
+
+_NOT_FOUND_CLAIM_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bthe file (?:does not|doesn't) exist\b", re.IGNORECASE),
+    re.compile(r"\bcouldn't find\b", re.IGNORECASE),
+    re.compile(r"\bno (?:file|result|match|content)\b.{0,40}\bfound\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\bdoes not exist\b", re.IGNORECASE),
+]
+
+
 class InspectionGuard:
-    """Disabled by default. Enable via config.enable_inspection_guard when
-    LLM-based contradiction detection is needed."""
+    """Heuristic check: detect when the agent's response contradicts the last tool output.
+
+    Two contradiction modes:
+    1. Tool returned an error / empty result → response claims success/content.
+    2. Tool returned content/success → response claims nothing was found.
+
+    Fires only on no-tool responses (candidate final answers) so it doesn't
+    interrupt mid-chain tool calls.
+    """
 
     name = "inspection"
 
@@ -215,16 +313,58 @@ class InspectionGuard:
         response: str,
         tool_calls: list[ToolCall],
     ) -> GuardrailResult:
-        return GuardrailResult(passed=True, guard_name="inspection")
+        # Only check when the agent is about to give a final answer
+        if tool_calls:
+            return GuardrailResult(passed=True, guard_name=self.name)
+        last_output = state.last_tool_output
+        if not last_output or not response:
+            return GuardrailResult(passed=True, guard_name=self.name)
+
+        tool_has_error = any(p.search(last_output) for p in _TOOL_ERROR_PATTERNS)
+        tool_has_success = any(p.search(last_output) for p in _TOOL_SUCCESS_PATTERNS)
+
+        # Mode 1: tool reported failure but response claims success
+        if tool_has_error and not tool_has_success:
+            if any(p.search(response) for p in _SUCCESS_CLAIM_PATTERNS):
+                return GuardrailResult(
+                    passed=False,
+                    nudge=(
+                        "Your response claims to have found/read content, but the last "
+                        "tool result indicates an error or no results. "
+                        "Base your answer on what the tools actually returned."
+                    ),
+                    hard_stop=False,
+                    guard_name=self.name,
+                )
+
+        # Mode 2: tool returned content but response claims nothing was found
+        if tool_has_success and not tool_has_error:
+            if any(p.search(response) for p in _NOT_FOUND_CLAIM_PATTERNS):
+                return GuardrailResult(
+                    passed=False,
+                    nudge=(
+                        "Your response says content was not found, but the last tool "
+                        "result returned actual content. "
+                        "Re-read the tool output and answer based on what it returned."
+                    ),
+                    hard_stop=False,
+                    guard_name=self.name,
+                )
+
+        return GuardrailResult(passed=True, guard_name=self.name)
 
 
 def default_guards(config: Config) -> list[Guard]:
     """Build the default guard list for a standard agent."""
-    return [
+    guards: list[Guard] = [
         DuplicateToolGuard(),
         ConsecutiveToolGuard(config),
-        ToolClaimGuard(),
-        VerificationGuard(),
-        StallGuard(),
-        InspectionGuard(),
+        HallucinationGuard(),
     ]
+    if getattr(config, "tool_claim_guard_enabled", True):
+        guards.append(ToolClaimGuard())
+    guards.append(VerificationGuard())
+    guards.append(StallGuard(max_total_nudges=getattr(config, "max_guardrail_nudges", 5)))
+    if getattr(config, "inspection_result_guard_enabled", True):
+        guards.append(InspectionGuard())
+    return guards

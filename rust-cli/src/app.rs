@@ -17,6 +17,7 @@ use crate::markdown::{render_markdown, render_streaming};
 pub enum Role {
     User,
     Assistant,
+    Thinking,
     System,
     Trace,
     Tool,
@@ -109,12 +110,17 @@ impl DefaultRenderer {
 
 impl MessageRenderer for DefaultRenderer {
     fn render_header(&self, role: Role, streaming: bool) -> Line<'static> {
-        if role == Role::Assistant && streaming {
+        if streaming {
+            let (label, label_color) = match role {
+                Role::Assistant => ("assistant    ", Color::Green),
+                Role::Thinking => ("thinking     ", Color::Yellow),
+                _ => ("stream       ", Color::Cyan),
+            };
             return Line::from(vec![
                 Span::styled(
-                    "assistant    ",
+                    label,
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(label_color)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -127,6 +133,7 @@ impl MessageRenderer for DefaultRenderer {
         let (label, color) = match role {
             Role::User => ("you          ", Color::Yellow),
             Role::Assistant => ("assistant    ", Color::Green),
+            Role::Thinking => ("thinking     ", Color::Yellow),
             Role::System => ("system       ", Color::Blue),
             Role::Trace => ("trace        ", Color::DarkGray),
             Role::Tool => ("tool ⚙       ", Color::Cyan),
@@ -150,6 +157,18 @@ impl MessageRenderer for DefaultRenderer {
         match role {
             Role::Assistant if streaming => render_streaming(text),
             Role::Assistant => render_markdown(text),
+            Role::Thinking if streaming => render_streaming(text),
+            Role::Thinking => text
+                .lines()
+                .map(|l| {
+                    Line::from(Span::styled(
+                        l.to_string(),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::DIM),
+                    ))
+                })
+                .collect(),
             Role::System => render_markdown(text),
             Role::User => text
                 .lines()
@@ -454,6 +473,8 @@ pub struct App {
     current_turn_tool_names: Vec<String>,
     last_turn_tool_names: Vec<String>,
     last_turn_iterations: u64,
+    current_turn_tool_errors: u64,
+    total_tool_errors: u64,
     // Optional inline image preview for image-producing tools.
     image_renderer: Option<ImageRenderer>,
     image_path: Option<String>,
@@ -505,6 +526,8 @@ impl App {
             current_turn_tool_names: Vec::new(),
             last_turn_tool_names: Vec::new(),
             last_turn_iterations: 0,
+            current_turn_tool_errors: 0,
+            total_tool_errors: 0,
             image_renderer: ImageRenderer::new().ok(),
             image_path: None,
             input: String::new(),
@@ -706,14 +729,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             return String::new();
         }
         let mut out = String::new();
-        let mut count = 0usize;
-        for ch in text.chars() {
+        for (count, ch) in text.chars().enumerate() {
             if count >= max_chars {
                 out.push('…');
                 return out;
             }
             out.push(ch);
-            count += 1;
         }
         out
     }
@@ -794,6 +815,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         duration_ms: u64,
         cache_hit: bool,
         error: Option<&str>,
+        result_preview: Option<&str>,
     ) -> String {
         let normalized = status.trim().to_lowercase();
         let label = if normalized == "ok" {
@@ -810,6 +832,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             let short = Self::truncate_inline(err.trim(), 220);
             if !short.is_empty() {
                 lines.push(format!("error: {short}"));
+            }
+        }
+        if let Some(preview) = result_preview {
+            let short = Self::truncate_inline(preview.trim(), 160);
+            if !short.is_empty() {
+                lines.push(format!("→ {short}"));
             }
         }
         lines.join("\n")
@@ -841,7 +869,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
     }
 
     fn extract_tool_names_from_chat_result(v: &Value) -> Vec<String> {
-        let mut out: Vec<String> = v["tool_calls"]
+        let out: Vec<String> = v["tool_calls"]
             .as_array()
             .map(|arr| {
                 arr.iter()
@@ -852,12 +880,6 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                     .collect::<Vec<String>>()
             })
             .unwrap_or_default();
-        if out.is_empty() {
-            let count = v["tool_call_count"].as_u64().unwrap_or(0);
-            if count > 0 {
-                out = vec!["(reported by runtime)".to_string(); count as usize];
-            }
-        }
         out
     }
 
@@ -924,11 +946,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
 
     fn finalize_turn_receipt(&mut self, v: &Value, assistant_text: &str) {
         let reported_tool_names = Self::extract_tool_names_from_chat_result(v);
-        let reported_count = if reported_tool_names.is_empty() {
-            v["tool_call_count"].as_u64().unwrap_or(0) as usize
-        } else {
-            reported_tool_names.len()
-        };
+        let reported_count = reported_tool_names.len();
         let observed_count = self.current_turn_tool_names.len();
         let runtime_tools = if !reported_tool_names.is_empty() {
             reported_tool_names
@@ -937,6 +955,13 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         };
         self.last_turn_tool_names = runtime_tools.clone();
         self.last_turn_iterations = v["iterations"].as_u64().unwrap_or(0);
+        // Use reported tool_errors from Python; fall back to events tracked here
+        let reported_errors = v["tool_errors"].as_u64().unwrap_or(self.current_turn_tool_errors);
+        self.total_tool_errors = self.total_tool_errors
+            .saturating_sub(self.current_turn_tool_errors)
+            .saturating_add(reported_errors);
+        let session_id = v["session_id"].as_str().unwrap_or("").trim();
+        let message_count = v["message_count"].as_u64().unwrap_or(0);
 
         if !runtime_tools.is_empty() {
             let mut uniq = Vec::<String>::new();
@@ -946,15 +971,31 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 }
             }
             let preview = uniq.iter().take(6).cloned().collect::<Vec<_>>().join(", ");
-            self.add_system_message(format!(
+            let mut receipt = format!(
                 "Turn receipt: tools={} · iterations={} · {}",
                 runtime_tools.len(),
                 self.last_turn_iterations,
                 preview
-            ));
+            );
+            if reported_errors > 0 {
+                receipt.push_str(&format!(" · errors={reported_errors}"));
+            }
+            if !session_id.is_empty() || message_count > 0 {
+                receipt.push_str(" · ");
+                if !session_id.is_empty() {
+                    receipt.push_str(&format!("session={}", Self::truncate_inline(session_id, 16)));
+                }
+                if message_count > 0 {
+                    if !session_id.is_empty() {
+                        receipt.push(' ');
+                    }
+                    receipt.push_str(&format!("messages={message_count}"));
+                }
+            }
+            self.add_system_message(receipt);
         }
 
-        if reported_count != observed_count && (reported_count > 0 || observed_count > 0) {
+        if observed_count > reported_count && (reported_count > 0 || observed_count > 0) {
             self.add_system_message(format!(
                 "Runtime note: tool event mismatch (observed events={observed_count}, runtime reported={reported_count})."
             ));
@@ -968,6 +1009,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         }
 
         self.current_turn_tool_names.clear();
+        self.current_turn_tool_errors = 0;
     }
 
     fn trace(&mut self, text: impl Into<String>) {
@@ -997,6 +1039,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         self.current_turn_tool_names.clear();
         self.last_turn_tool_names.clear();
         self.last_turn_iterations = 0;
+        self.current_turn_tool_errors = 0;
+        self.total_tool_errors = 0;
         self.clear_image_preview();
         self.scroll_top = 0;
         self.at_bottom = true;
@@ -1125,7 +1169,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         }
 
         live.finalize_streaming();
-        live.raw_stream = Some(std::mem::take(&mut self.raw_buf));
+        if live.role == Role::Assistant {
+            live.raw_stream = Some(std::mem::take(&mut self.raw_buf));
+        }
         self.push_message(live);
         if self.at_bottom {
             self.scroll_to_bottom();
@@ -1147,6 +1193,29 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                     Some(lm) => lm.append_stream_chunk(&tok),
                     None => {
                         let mut lm = Message::new_streaming(Role::Assistant);
+                        lm.append_stream_chunk(&tok);
+                        self.live = Some(lm);
+                    }
+                }
+                if self.at_bottom {
+                    self.scroll_to_bottom();
+                }
+            }
+
+            BridgeEvent::ThinkingToken(tok) => {
+                self.busy = true;
+                self.phase = Phase::Thinking;
+                self.phase_note = "pre-turn plan".into();
+                match &mut self.live {
+                    Some(lm) if lm.role == Role::Thinking => lm.append_stream_chunk(&tok),
+                    Some(_) => {
+                        self.stop_live_message();
+                        let mut lm = Message::new_streaming(Role::Thinking);
+                        lm.append_stream_chunk(&tok);
+                        self.live = Some(lm);
+                    }
+                    None => {
+                        let mut lm = Message::new_streaming(Role::Thinking);
                         lm.append_stream_chunk(&tok);
                         self.live = Some(lm);
                     }
@@ -1193,6 +1262,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 duration_ms,
                 cache_hit,
                 error,
+                result_preview,
             } => {
                 self.stop_live_message();
                 let call_number = if sequence == 0 {
@@ -1213,6 +1283,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                         duration_ms,
                         cache_hit,
                         error.as_deref(),
+                        result_preview.as_deref(),
                     ),
                 );
                 if status_l == "error" || status_l == "failed" {
@@ -1223,6 +1294,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                         .map(|value| Self::truncate_inline(value, 220))
                         .unwrap_or_else(|| "tool execution failed".to_string());
                     self.last_tool_error = Some(format!("{name}: {detail}"));
+                    self.current_turn_tool_errors += 1;
+                    self.total_tool_errors += 1;
                 }
             }
 
@@ -1262,6 +1335,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             BridgeEvent::Stderr(text) => {
                 let short = &text[..text.len().min(220)];
                 self.trace(format!("stderr={short}"));
+                // Surface bridge warnings/errors so they're visible without trace mode.
+                let lower = text.to_ascii_lowercase();
+                if lower.contains("error") || lower.contains("warning") || lower.contains("traceback") || lower.contains("exception") {
+                    self.add_system_message(format!("[bridge] {}", &text[..text.len().min(300)]));
+                }
             }
 
             BridgeEvent::Exit(code) => {
@@ -1282,8 +1360,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         // Finalize live message
         match result {
             Ok(v) => {
-                let assistant_text = v["assistant"].as_str().unwrap_or("").to_string();
-                let fallback = v["assistant"].as_str().map(|s| s.to_string());
+                let assistant_text = v["final_response"]
+                    .as_str()
+                    .or_else(|| v["assistant"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let fallback = (!assistant_text.is_empty()).then_some(assistant_text.clone());
                 self.flush_live_message(fallback);
 
                 // Pipeline turns
@@ -1306,6 +1388,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                 self.live = None;
                 self.raw_buf.clear();
                 self.current_turn_tool_names.clear();
+                self.current_turn_tool_errors = 0;
                 self.phase = Phase::Error;
                 self.phase_note = "chat failed".into();
                 self.add_system_message(format!("Chat failed: {e}"));
@@ -1645,6 +1728,14 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
         } else {
             String::new()
         };
+        let tools_chip = if self.total_tool_errors > 0 {
+            format!(
+                "{} ({}x err)",
+                self.bridge_state.tool_count, self.total_tool_errors
+            )
+        } else {
+            self.bridge_state.tool_count.to_string()
+        };
         format!(
             "{}{} · {} · agent:{} · msgs:{} · tools:{} · skills:{} · last_turn_tools:{} · image:{} · trace:{} · raw:{} · Ctrl+O/P",
             spin,
@@ -1652,7 +1743,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
             self.phase_note,
             self.bridge_state.active,
             self.bridge_state.msg_count,
-            self.bridge_state.tool_count,
+            tools_chip,
             self.bridge_state.skill_count,
             self.last_turn_tool_names.len(),
             if self.has_image_preview() { "on" } else { "off" },
@@ -1748,6 +1839,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace · Ctrl+P raw stream · Ctrl+C qui
                     return KeyAction::None;
                 }
                 self.current_turn_tool_names.clear();
+                self.current_turn_tool_errors = 0;
                 self.add_message(Role::User, text.clone());
                 self.busy = true;
                 self.phase = Phase::Thinking;

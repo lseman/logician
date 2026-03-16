@@ -269,15 +269,11 @@ Use when: the user wants semantic retrieval over indexed content.
                     encoding="utf-8",
                 )
                 (scripts_dir / "lookup.py").write_text(
-                    '''if "llm" not in globals():
-    class _NoOpLLM:
-        def tool(self, func=None, *, name=None, description=None):
-            return func if func is not None else (lambda f: f)
-    llm = _NoOpLLM()
-
-@llm.tool(description="Search indexed content.")
-def demo_lookup(query: str) -> str:
+                    '''def demo_lookup(query: str) -> str:
+    """Search indexed content."""
     return query
+
+__tools__ = [demo_lookup]
 ''',
                     encoding="utf-8",
                 )
@@ -457,7 +453,6 @@ Walk backward from the symptom through each caller until the first invalid value
 
         self.assertTrue(selection.selected_skills)
         self.assertIn("routed subset", prompt)
-        self.assertIn("available_tools.json", prompt)
         self.assertIn("describe_tool", prompt)
 
     def test_anti_triggers_reduce_incorrect_skill_matches(self) -> None:

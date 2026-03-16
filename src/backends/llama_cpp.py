@@ -88,6 +88,28 @@ class LlamaCppClient:
             return None
         return data if isinstance(data, dict) else None
 
+    @staticmethod
+    def _chat_payload_messages(messages: list[Message]) -> list[dict[str, str]]:
+        payload_messages: list[dict[str, str]] = []
+        for msg in messages:
+            if msg.role == "tool" or getattr(msg.role, "value", None) == "tool":
+                label = str(msg.name or "tool").strip() or "tool"
+                content = str(msg.content or "").strip()
+                payload_messages.append(
+                    {
+                        "role": "user",
+                        "content": f"[Tool result: {label}]\n{content or '<empty>'}",
+                    }
+                )
+                continue
+            payload_messages.append(
+                {
+                    "role": msg.role.value,
+                    "content": str(msg.content or ""),
+                }
+            )
+        return payload_messages
+
     def generate(
         self,
         messages: list[Message],
@@ -96,6 +118,7 @@ class LlamaCppClient:
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
         tools: list[dict[str, Any]] | None = None,
+        grammar: str | None = None,
     ) -> str:
         if httpx is None:
             raise ImportError(
@@ -119,10 +142,7 @@ class LlamaCppClient:
                 # (llama.cpp tool_calls delta handling differs; we keep it simple).
                 _use_stream = bool(stream) and not bool(tools)
                 payload = {
-                    "messages": [
-                        {"role": m.role.value, "content": m.content}
-                        for m in chat_messages
-                    ],
+                    "messages": self._chat_payload_messages(chat_messages),
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stop": self.stop,
@@ -131,13 +151,16 @@ class LlamaCppClient:
                 if tools:
                     payload["tools"] = tools
                     payload["tool_choice"] = "auto"
+                elif grammar:
+                    payload["grammar"] = grammar
                 url = f"{self.base_url}/v1/chat/completions"
                 self._log.info(
-                    "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d",
+                    "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d grammar=%s",
                     temperature,
                     max_tokens,
                     _use_stream,
                     len(tools) if tools else 0,
+                    bool(grammar) and not bool(tools),
                 )
                 if _use_stream:
                     with client.stream("POST", url, json=payload) as r:
@@ -196,12 +219,15 @@ class LlamaCppClient:
                     "stop": self.stop,
                     "stream": bool(stream),
                 }
+                if grammar:
+                    payload["grammar"] = grammar
                 url = f"{self.base_url}/completion"
                 self._log.info(
-                    "POST /completion temp=%s n_predict=%s stream=%s",
+                    "POST /completion temp=%s n_predict=%s stream=%s grammar=%s",
                     temperature,
                     max_tokens,
                     stream,
+                    bool(grammar),
                 )
                 if stream:
                     with client.stream("POST", url, json=payload) as r:

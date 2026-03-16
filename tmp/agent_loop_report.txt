@@ -1,0 +1,12 @@
+Scenario: rust-cli-review
+Runs: 1
+Model URL: http://localhost:8080
+
+Run 1: session=diag-1-430bd8c2
+  turns=2 iterations=12 tools=10 guardrails=4 multi_call_turns=1 duplicate_tool_turns=0
+    Turn 1: iterations=6 tools=4 batches=[1, 1, 1, 1] guardrails=2
+      tool_names=list_directory, read_file, read_file, read_file
+      final=
+    Turn 2: iterations=6 tools=6 batches=[1, 4, 1] guardrails=2
+      tool_names=rag_add_file, cc_read, cc_read, cc_read, cc_read, cc_read
+      final=Based on the evidence gathered, here are the highest-leverage improvements for the `rust-cli/src` architecture, prioritized by impact and risk:  ### 1. **Replace `fd | fzf` with Na ...

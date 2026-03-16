@@ -103,10 +103,6 @@ class ToolRegistry(
         }
         self._execution_globals["call_tool"] = self.call_tool
         self._execution_globals["_safe_json"] = _safe_json_fallback
-        self._legacy_py_tool_metadata_by_module: dict[
-            str, dict[str, dict[str, Any]]
-        ] | None = None
-
         self._bootstrapped: bool = False
         self._active_lazy_skill_groups: set[str] = set()
         self._version: int = 0

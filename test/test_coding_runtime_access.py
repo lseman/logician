@@ -1,5 +1,6 @@
 import builtins
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -89,6 +90,26 @@ class CodingRuntimeAccessTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_legacy_runtime_auto_detects_local_dot_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            project = root / "project"
+            workdir = project / "nested"
+            activate = project / ".venv" / "bin" / "activate"
+            activate.parent.mkdir(parents=True, exist_ok=True)
+            activate.write_text("# mock activate\n", encoding="utf-8")
+            workdir.mkdir(parents=True, exist_ok=True)
+
+            builtins._coding_config = {
+                "default_cwd": str(workdir),
+                "venv_path": None,
+            }
+            runtime = get_coding_runtime({})
+
+            self.assertEqual(runtime.venv_path(), str((project / ".venv").resolve()))
+            prefix = runtime.build_shell_prefix(None)
+            self.assertIn(str(activate.resolve()), prefix)
 
 
 if __name__ == "__main__":

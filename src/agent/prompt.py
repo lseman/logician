@@ -27,7 +27,8 @@ class PromptBuilder:
 
 
 class IdentityComponent:
-    _cached: str | None = None
+    def __init__(self) -> None:
+        self._cached: str | None = None
 
     def render(self, state: TurnState, config: Config) -> str | None:
         if self._cached is None:
@@ -71,36 +72,44 @@ class DomainToolsComponent:
 class SkillPlaybookComponent:
     def __init__(self, routing_fn: Callable[[str], str]) -> None:
         self._fn = routing_fn
+        self._cache_key: tuple[str, str] | None = None
+        self._cached: str = ""
 
     def render(self, state: TurnState, config: Config) -> str | None:
         if not getattr(config, "enable_skill_routing", False):
             return None
-        playbook = self._fn(state.classified_as)
-        if not playbook.strip():
+        query = state.user_query or state.classified_as
+        # Cache routing result for the duration of a turn — the query doesn't
+        # change between iterations and routing involves an index scan.
+        cache_key = (state.turn_id, query)
+        if self._cache_key != cache_key:
+            self._cache_key = cache_key
+            self._cached = self._fn(query)
+        if not self._cached.strip():
             return None
-        return f"## Active Skill\n\n{playbook}"
+        return f"## Active Skill\n\n{self._cached}"
 
 
 class TurnContextComponent:
     def render(self, state: TurnState, config: Config) -> str | None:
-        if state.iteration == 0 and not state.files_written:
+        if not state.files_written:
             return None
-        lines = [f"Iteration: {state.iteration}"]
-        if state.files_written:
-            lines.append(f"Files written this turn: {', '.join(state.files_written)}")
-            lines.append("Remember to verify your changes with tests or a linter.")
+        lines = [f"Files written this turn: {', '.join(state.files_written)}"]
+        lines.append("Verify with tests or a linter before finishing.")
         return "## Turn Context\n\n" + "\n".join(lines)
 
 
 def default_prompt_builder(
     tool_schema_fn: Callable[[], str],
-    domain_schema_fn: Callable[[set[str]], str],
     routing_fn: Callable[[str], str],
+    domain_schema_fn: Callable[[set[str]], str] | None = None,
 ) -> PromptBuilder:
-    return PromptBuilder([
+    components: list[PromptComponent] = [
         IdentityComponent(),
         CoreToolSchemasComponent(tool_schema_fn),
-        DomainToolsComponent(domain_schema_fn),
-        SkillPlaybookComponent(routing_fn),
-        TurnContextComponent(),
-    ])
+    ]
+    if domain_schema_fn is not None:
+        components.append(DomainToolsComponent(domain_schema_fn))
+    components.append(SkillPlaybookComponent(routing_fn))
+    components.append(TurnContextComponent())
+    return PromptBuilder(components)

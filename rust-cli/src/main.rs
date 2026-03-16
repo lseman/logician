@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
-    let result = run(&mut terminal, &bridge_cmd, &[bridge_script.clone()]).await;
+    let result = run(&mut terminal, &bridge_cmd, std::slice::from_ref(&bridge_script)).await;
 
     // Restore terminal
     disable_raw_mode()?;

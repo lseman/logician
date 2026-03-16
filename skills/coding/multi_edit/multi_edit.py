@@ -260,3 +260,18 @@ def multi_edit(replacements: list) -> str:
 
 
 __tools__ = [multi_edit]
+
+
+_MULTI_EDIT_GRAMMAR = r"""root          ::= tool-call
+tool-call     ::= "{\"tool_call\": {\"name\": \"multi_edit\", \"arguments\": " args "}}"
+args          ::= "{\"replacements\": [" replacement ("," replacement)* "]}"
+replacement   ::= "{\"file\": " string ", \"old_string\": " string ", \"new_string\": " string opt-explanation "}"
+opt-explanation ::= "" | ", \"explanation\": " string
+string        ::= "\"" char* "\""
+char          ::= [^"\\] | "\\" escape
+escape        ::= ["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]
+"""
+
+__grammars__: dict[str, str] = {
+    "multi_edit": _MULTI_EDIT_GRAMMAR,
+}

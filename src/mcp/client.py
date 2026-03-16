@@ -21,7 +21,7 @@ from typing import Any
 
 from ..logging_utils import get_logger
 
-_MCP_PROTOCOL_VERSION = "2024-11-05"
+_MCP_PROTOCOL_VERSION = "2025-03-26"
 
 
 @dataclass
@@ -124,16 +124,33 @@ class MCPClient:
         return result
 
     def list_tools(self) -> list[MCPToolDef]:
-        """Discover all tools advertised by the MCP server."""
+        """Discover all tools advertised by the MCP server.
+
+        Follows cursor-based pagination: keeps requesting the next page until
+        the server returns no ``nextCursor``.
+        """
         if not self._initialized:
             self.initialize()
-        result = self._rpc(
-            {"jsonrpc": "2.0", "id": self._next_id(), "method": "tools/list"}
-        )
-        raw_tools: list[dict] = result.get("tools") or []
         defs: list[MCPToolDef] = []
-        for raw in raw_tools:
-            defs.append(self._parse_tool_def(raw))
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {}
+            if cursor:
+                params["cursor"] = cursor
+            result = self._rpc(
+                {
+                    "jsonrpc": "2.0",
+                    "id": self._next_id(),
+                    "method": "tools/list",
+                    **({"params": params} if params else {}),
+                }
+            )
+            raw_tools: list[dict] = result.get("tools") or []
+            for raw in raw_tools:
+                defs.append(self._parse_tool_def(raw))
+            cursor = result.get("nextCursor") or None
+            if not cursor:
+                break
         self._log.info(
             "MCP server '%s' advertises %d tool(s): %s",
             self.name,

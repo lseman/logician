@@ -235,23 +235,26 @@ def test_verification_with_current_tool_calls_passes():
 # ---------------------------------------------------------------------------
 
 def test_stall_under_limit_passes():
+    # StallGuard triggers on total nudges across all guards; 4 < 5 (default max)
     guard = StallGuard()
-    state = make_state(guardrail_nudges={"stall": 1})
+    state = make_state(guardrail_nudges={"tool_claim": 2, "hallucination": 2})
     result = guard.check(state, "Same response.", [])
     assert result.passed
 
 
 def test_stall_at_limit_no_tool_hard_stops():
-    guard = StallGuard()
-    state = make_state(guardrail_nudges={"stall": 2})
+    # 5 total nudges == max_total_nudges (5) → hard-stop
+    guard = StallGuard(max_total_nudges=5)
+    state = make_state(guardrail_nudges={"tool_claim": 3, "hallucination": 2})
     result = guard.check(state, "Same response again.", [])
     assert not result.passed
     assert result.hard_stop
 
 
 def test_stall_at_limit_with_tool_passes():
-    guard = StallGuard()
-    state = make_state(guardrail_nudges={"stall": 2})
+    # Tools bypass stall guard
+    guard = StallGuard(max_total_nudges=5)
+    state = make_state(guardrail_nudges={"tool_claim": 3, "hallucination": 2})
     result = guard.check(state, "Same response again.", [make_call("some_tool")])
     assert result.passed
 

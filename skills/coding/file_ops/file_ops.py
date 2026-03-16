@@ -204,4 +204,36 @@ def list_directory(path: str = ".", glob_pattern: str = "*") -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-__tools__ = [read_file, write_file, edit_file_replace, list_directory]
+# Keep the file-ops skill card and grammars, but let the always-on core tools
+# own the canonical read/write implementations.
+__tools__ = [edit_file_replace, list_directory]
+
+
+_JSON_STRING_RULES = r"""
+string    ::= "\"" char* "\""
+char      ::= [^"\\] | "\\" escape
+escape    ::= ["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]
+"""
+
+_WRITE_FILE_GRAMMAR = (
+    r"""root      ::= tool-call
+tool-call ::= "{\"tool_call\": {\"name\": \"write_file\", \"arguments\": " args "}}"
+args      ::= "{\"path\": " string ", \"content\": " string opt-mode "}"
+opt-mode  ::= "" | ", \"mode\": " mode
+mode      ::= "\"w\"" | "\"a\""
+"""
+    + _JSON_STRING_RULES
+)
+
+_EDIT_FILE_REPLACE_GRAMMAR = (
+    r"""root      ::= tool-call
+tool-call ::= "{\"tool_call\": {\"name\": \"edit_file_replace\", \"arguments\": " args "}}"
+args      ::= "{\"path\": " string ", \"old_string\": " string ", \"new_string\": " string "}"
+"""
+    + _JSON_STRING_RULES
+)
+
+__grammars__: dict[str, str] = {
+    "write_file": _WRITE_FILE_GRAMMAR,
+    "edit_file_replace": _EDIT_FILE_REPLACE_GRAMMAR,
+}

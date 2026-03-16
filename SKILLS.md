@@ -17,7 +17,7 @@ Conventions:
 - `bootstrap` folders may omit `SKILL.md` because they only provide shared runtime helpers.
 - `scripts/` is the canonical location for executable tool modules.
 - Python tool modules should export their public tools through `__tools__ = [...]`.
-- Decorator-based `@llm.tool(...)` registration is retained only as a compatibility path for older modules.
+- Python skill loading no longer supports legacy `@llm.tool(...)` registration.
 
 Active groups:
 

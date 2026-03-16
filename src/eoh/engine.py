@@ -82,10 +82,6 @@ class EoHEngine:
             resp = self.agent.run(
                 user_prompt,
                 session_id=session_id,
-                temperature=self.cfg.temperature,
-                max_tokens=self.cfg.max_tokens,
-                verbose=self.cfg.agent_verbose,
-                use_semantic_retrieval=self.cfg.agent_use_semantic,
                 stream_callback=None,
             )
             return resp.final_response
@@ -93,8 +89,6 @@ class EoHEngine:
         return self.agent.chat(
             user_prompt,
             session_id=session_id,
-            verbose=self.cfg.agent_verbose,
-            use_semantic_retrieval=self.cfg.agent_use_semantic,
         )
 
     def _llm_cached(self, prompt: str) -> str:

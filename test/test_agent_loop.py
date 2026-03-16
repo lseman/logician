@@ -42,7 +42,8 @@ class FakeDispatcher:
     def __init__(self) -> None:
         self.dispatched: list[ToolCall] = []
 
-    async def dispatch(self, calls, state, config=None):
+    async def dispatch(self, calls, state, config=None, tool_callback=None):
+        del tool_callback
         self.dispatched.extend(calls)
         state.consecutive_tool_count += len(calls)
         return []
@@ -67,7 +68,7 @@ def _make_loop(
     use_toon: bool = False,
 ) -> tuple[AgentLoop, FakeDispatcher]:
     fake_dispatcher = dispatcher or FakeDispatcher()
-    config = Config(max_iterations=max_iterations)
+    config = Config(max_iterations=max_iterations, pre_turn_thinking=False)
     loop = AgentLoop(
         llm=FakeLLM(responses),
         guardrails=guardrails or FakeGuardrails(),
@@ -104,7 +105,7 @@ def test_social_turn_fast_path():
     """Social turn → fast_path called (only 1 LLM call, dispatcher never called)."""
     llm = FakeLLM(["Hey there! How can I help?"])
     fake_dispatcher = FakeDispatcher()
-    config = Config(max_iterations=8)
+    config = Config(max_iterations=8, pre_turn_thinking=False)
     agent_loop = AgentLoop(
         llm=llm,
         guardrails=FakeGuardrails(),

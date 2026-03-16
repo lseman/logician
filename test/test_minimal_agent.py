@@ -37,7 +37,7 @@ def main() -> None:
     print("Testing simple chat (no tools)...")
     print("=" * 60)
 
-    response = agent.chat("Say hello (no tools).", fresh_session=True, verbose=True)
+    response = agent.chat("Say hello (no tools).", fresh_session=True)
 
     print("\n" + "=" * 60)
     print("RESPONSE:")

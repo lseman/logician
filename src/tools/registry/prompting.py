@@ -117,14 +117,17 @@ class RegistryPromptingMixin:
         availability_note = (
             "The listed tools may be a routed subset, not the entire runtime. "
             "If the user names a different tool, verify with search_tools/describe_tool "
-            "or available_tools.json before claiming it is unavailable."
+            "before claiming it is unavailable."
         )
         if use_toon:
             header = [
                 "\n\nTOOLS (compact): use only if needed.",
                 availability_note,
                 "Tool call format (TOON):",
-                "Return exactly one tool_call per response.",
+                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.",
+                "Never batch writes, edits, or verification commands.",
+                "Prefer batching when the relevant read-only targets are already known.",
+                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.",
                 "tool_call:",
                 "  name: <tool_name>",
                 "  arguments:",
@@ -136,7 +139,10 @@ class RegistryPromptingMixin:
                 "\n\nTOOLS (compact): use only if needed.",
                 availability_note,
                 "Tool call format (JSON):",
-                "Return exactly one tool_call per response.",
+                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.",
+                "Never batch writes, edits, or verification commands.",
+                "Prefer batching when the relevant read-only targets are already known.",
+                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.",
                 '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',
                 "",
             ]
@@ -155,9 +161,13 @@ class RegistryPromptingMixin:
             header = [
                 "\n\nTOOLS AVAILABLE (use only if needed):",
                 "This may be a routed subset, not the full runtime tool list.",
-                "If the user names another tool, verify with search_tools/describe_tool or available_tools.json before saying it does not exist.",
+                "If the user names another tool, verify with search_tools/describe_tool before saying it does not exist.",
                 "Return EXACT TOON format when calling:",
-                "Return exactly one tool_call per response.",
+                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.",
+                "Never batch writes, edits, or verification commands.",
+                "Prefer batching when the relevant read-only targets are already known.",
+                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.",
+                "Example: after listing src/ and identifying main.rs, app.rs, and ui.rs as relevant, batch those reads instead of serializing them across separate turns.",
                 "tool_call:",
                 "  name: <tool_name>",
                 "  arguments:",
@@ -169,9 +179,13 @@ class RegistryPromptingMixin:
             header = [
                 "\n\nTOOLS AVAILABLE (use only if needed):",
                 "This may be a routed subset, not the full runtime tool list.",
-                "If the user names another tool, verify with search_tools/describe_tool or available_tools.json before saying it does not exist.",
+                "If the user names another tool, verify with search_tools/describe_tool before saying it does not exist.",
                 "Return EXACT JSON when calling:",
-                "Return exactly one tool_call per response.",
+                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.",
+                "Never batch writes, edits, or verification commands.",
+                "Prefer batching when the relevant read-only targets are already known.",
+                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.",
+                "Example: after listing src/ and identifying main.rs, app.rs, and ui.rs as relevant, batch those reads instead of serializing them across separate turns.",
                 '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',
                 "",
             ]

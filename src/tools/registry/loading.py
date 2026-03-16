@@ -341,7 +341,6 @@ class RegistryLoadingMixin:
         tool_entries: Sequence[tuple[Callable[..., Any], dict[str, Any]]],
         module_path: Path,
         skill_id: str,
-        legacy_meta: dict[str, dict[str, Any]],
         skill_meta: dict[str, Any] | None,
     ) -> int:
         registered = 0
@@ -357,22 +356,16 @@ class RegistryLoadingMixin:
                 )
                 continue
 
-            legacy_info = legacy_meta.get(tool_name, {})
             description = str(
-                legacy_info.get("description")
-                or meta.get("description")
+                meta.get("description")
                 or self._python_tool_doc_summary(tool_fn)
                 or ""
             ).strip()
             tool_fn.__doc__ = self._compose_tool_docstring(
                 tool_fn,
                 base_description=description,
-                legacy_info=legacy_info,
             )
-            params = self._parameters_from_signature(
-                tool_fn,
-                legacy_params=legacy_info.get("parameters"),
-            )
+            params = self._parameters_from_signature(tool_fn)
             wrapped = self._wrap_tool_function(tool_fn, tool_name)
             self._tools[tool_name] = Tool(
                 name=tool_name,
@@ -403,71 +396,66 @@ class RegistryLoadingMixin:
         self,
         *,
         execution_globals: dict[str, Any],
-        collector: Any,
         module_path: Path,
     ) -> list[tuple[Callable[..., Any], dict[str, Any]]]:
-        """Resolve exported tools for a Python skill module.
-
-        `__tools__` is the preferred authoring contract. The collector remains
-        only as a compatibility path for older decorator-based modules and tests.
-        """
+        """Resolve exported tools for a Python skill module."""
         entries: list[tuple[Callable[..., Any], dict[str, Any]]] = []
         seen: set[int] = set()
-
-        for tool_fn in collector.tools:
-            entries.append((tool_fn, getattr(tool_fn, "__llm_tool_meta__", {})))
-            seen.add(id(tool_fn))
-
-        for candidate in execution_globals.values():
-            if not callable(candidate):
-                continue
-            if not bool(getattr(candidate, "__tool__", False)):
-                continue
-            if id(candidate) in seen:
-                continue
-            entries.append((candidate, getattr(candidate, "__llm_tool_meta__", {})))
-            seen.add(id(candidate))
-
-        exports = execution_globals.get("__tools__", ())
+        exports = execution_globals.get("__tools__")
         tool_meta_raw = execution_globals.get("__tool_meta__", {})
         tool_meta = tool_meta_raw if isinstance(tool_meta_raw, dict) else {}
-        if exports:
-            if isinstance(exports, (str, bytes)) or not isinstance(exports, Sequence):
+
+        if exports is None:
+            # Fallback: collect @tool-decorated functions defined IN this module.
+            # We use __globals__ identity to exclude functions imported from other
+            # modules (e.g. bootstrap helpers), which would have a different globals dict.
+            for candidate in execution_globals.values():
+                if (
+                    callable(candidate)
+                    and bool(getattr(candidate, "__tool__", False))
+                    and getattr(candidate, "__globals__", None) is execution_globals
+                ):
+                    if id(candidate) not in seen:
+                        entries.append((candidate, getattr(candidate, "__llm_tool_meta__", {})))
+                        seen.add(id(candidate))
+            return entries
+
+        if isinstance(exports, (str, bytes)) or not isinstance(exports, Sequence):
+            self._log.warning(
+                "Ignoring invalid __tools__ export in %s; expected a sequence of callables or function names",
+                module_path,
+            )
+            return entries
+
+        for export in exports:
+            tool_fn: Callable[..., Any] | None = None
+            if callable(export):
+                tool_fn = export
+            elif isinstance(export, str):
+                candidate = execution_globals.get(export)
+                if callable(candidate):
+                    tool_fn = candidate
+            if tool_fn is None:
                 self._log.warning(
-                    "Ignoring invalid __tools__ export in %s; expected a sequence of callables or function names",
+                    "Ignoring invalid __tools__ entry %r in %s",
+                    export,
                     module_path,
                 )
-                return entries
-
-            for export in exports:
-                tool_fn: Callable[..., Any] | None = None
-                if callable(export):
-                    tool_fn = export
-                elif isinstance(export, str):
-                    candidate = execution_globals.get(export)
-                    if callable(candidate):
-                        tool_fn = candidate
-                if tool_fn is None:
-                    self._log.warning(
-                        "Ignoring invalid __tools__ entry %r in %s",
-                        export,
-                        module_path,
-                    )
-                    continue
-                if id(tool_fn) in seen:
-                    continue
-                meta = getattr(tool_fn, "__llm_tool_meta__", {})
-                explicit_meta = tool_meta.get(getattr(tool_fn, "__name__", ""), {})
-                if isinstance(explicit_meta, dict):
-                    meta = {**meta, **explicit_meta}
-                entries.append((tool_fn, meta))
-                seen.add(id(tool_fn))
+                continue
+            if id(tool_fn) in seen:
+                continue
+            meta = getattr(tool_fn, "__llm_tool_meta__", {})
+            explicit_meta = tool_meta.get(getattr(tool_fn, "__name__", ""), {})
+            if isinstance(explicit_meta, dict):
+                meta = {**meta, **explicit_meta}
+            entries.append((tool_fn, meta))
+            seen.add(id(tool_fn))
 
         return entries
 
     def _merge_python_module_globals(self, execution_globals: dict[str, Any]) -> None:
         for key, value in execution_globals.items():
-            if key in {"__name__", "__file__", "llm", "__skill__", "__tools__", "__tool_meta__"}:
+            if key in {"__name__", "__file__", "__skill__", "__tools__", "__tool_meta__"}:
                 continue
             self._execution_globals[key] = value
         self._execution_globals["call_tool"] = self.call_tool
@@ -478,15 +466,10 @@ class RegistryLoadingMixin:
 
     def _register_tools_from_python_module(self, module_path: Path) -> int:
         code = module_path.read_text(encoding="utf-8")
-        collector = self._LLMToolCollector()
-        legacy_meta = self._legacy_md_tool_metadata_for_module(module_path)
         execution_globals = dict(self._execution_globals)
         execution_globals.pop("__skill__", None)
         execution_globals.pop("__tools__", None)
         execution_globals.pop("__tool_meta__", None)
-        # New-style modules register through `__tools__`. Keep `llm` injected only
-        # so older decorator-based modules continue to load during migration.
-        execution_globals["llm"] = collector
         raw_parts, safe_parts, package_name, module_name = self._python_module_import_names(
             module_path
         )
@@ -517,16 +500,20 @@ class RegistryLoadingMixin:
         skill_id = self._catalog._skill_id_from_source(module_path)
         skill_meta_raw = execution_globals.get("__skill__", {})
         skill_meta = dict(skill_meta_raw) if isinstance(skill_meta_raw, dict) else None
+        if skill_meta:
+            self._catalog.register_python_skill_metadata(
+                skill_id=skill_id,
+                source_path=str(module_path),
+                skill_meta=skill_meta,
+            )
         tool_entries = self._python_tool_entries_from_module(
             execution_globals=execution_globals,
-            collector=collector,
             module_path=module_path,
         )
         registered = self._register_collected_python_tools(
             tool_entries=tool_entries,
             module_path=module_path,
             skill_id=skill_id,
-            legacy_meta=legacy_meta,
             skill_meta=skill_meta,
         )
         self._merge_python_module_globals(execution_globals)
@@ -539,39 +526,6 @@ class RegistryLoadingMixin:
         if registered > 0:
             self._invalidate_skill_resolution_cache()
         return registered
-
-    @staticmethod
-    def _legacy_parameter_map(
-        legacy_params: Sequence[Any] | None,
-    ) -> dict[str, dict[str, Any]]:
-        out: dict[str, dict[str, Any]] = {}
-        for param in legacy_params or []:
-            if isinstance(param, dict):
-                name = str(param.get("name", "")).strip()
-                ptype = str(param.get("type", "")).strip()
-                required = (
-                    bool(param.get("required"))
-                    if "required" in param
-                    else None
-                )
-                description = str(param.get("description", "")).strip()
-                enum_values = param.get("enum")
-            else:
-                name = str(getattr(param, "name", "")).strip()
-                ptype = str(getattr(param, "type", "")).strip()
-                raw_required = getattr(param, "required", None)
-                required = bool(raw_required) if raw_required is not None else None
-                description = str(getattr(param, "description", "")).strip()
-                enum_values = getattr(param, "enum", None)
-            if not name:
-                continue
-            out[name] = {
-                "type": ptype,
-                "required": required,
-                "description": description,
-                "enum": enum_values,
-            }
-        return out
 
     def _default_parameter_description(
         self,
@@ -594,10 +548,8 @@ class RegistryLoadingMixin:
     def _parameters_from_signature(
         self,
         func: Callable[..., Any],
-        legacy_params: Sequence[Any] | None = None,
     ) -> list[ToolParameter]:
         sig = inspect.signature(func)
-        legacy_map = self._legacy_parameter_map(legacy_params)
         out: list[ToolParameter] = []
         for p in sig.parameters.values():
             if p.kind in (
@@ -605,30 +557,21 @@ class RegistryLoadingMixin:
                 inspect.Parameter.VAR_KEYWORD,
             ):
                 continue
-            legacy = legacy_map.get(p.name, {})
             ann = p.annotation
             ptype = "string"
             enum_values: list[Any] | None = None
             if ann is not inspect._empty:
                 ptype = self._annotation_to_type_name(ann)
                 enum_values = self._annotation_literal_values(ann)
-            elif legacy.get("type"):
-                ptype = self._annotation_to_type_name(legacy.get("type"))
             elif p.default is not inspect._empty and p.default is not None:
                 ptype = self._annotation_to_type_name(type(p.default))
             required = p.default is inspect._empty
-            if legacy.get("required") is not None:
-                required = bool(legacy.get("required"))
-            if enum_values is None:
-                enum_values = self._normalize_enum_values(legacy.get("enum"))
-            description = str(legacy.get("description") or "").strip()
-            if not description:
-                description = self._default_parameter_description(
-                    name=p.name,
-                    ptype=ptype,
-                    required=required,
-                    default=p.default,
-                )
+            description = self._default_parameter_description(
+                name=p.name,
+                ptype=ptype,
+                required=required,
+                default=p.default,
+            )
             out.append(
                 ToolParameter(
                     name=p.name,
@@ -770,156 +713,19 @@ class RegistryLoadingMixin:
             return "string"
         return "string"
 
-    def _legacy_md_tool_metadata_for_module(
-        self, module_path: Path
-    ) -> dict[str, dict[str, Any]]:
-        rel_module = str(module_path.relative_to(self.skills_dir_path)).replace(
-            "\\", "/"
-        )
-        py_snapshot = self._load_python_legacy_tool_metadata_map()
-        out: dict[str, dict[str, Any]] = dict(py_snapshot.get(rel_module, {}))
-
-        md_path = module_path.with_suffix(".md")
-        if not md_path.is_file():
-            return out
-        try:
-            raw = md_path.read_text(encoding="utf-8")
-            manifest, content = self._catalog._split_frontmatter(raw)
-            sections = self._catalog.parse_tool_sections(content, md_path)
-            skill_summary = manifest.get("summary") or self._catalog._skill_summary(
-                content
-            )
-            triggers = self._catalog._manifest_list(manifest, "triggers")
-            when_not_to_use = self._catalog._manifest_list(manifest, "when_not_to_use")
-            anti_triggers = self._catalog._manifest_list(manifest, "anti_triggers")
-
-            for sec in sections:
-                section_content = sec.get("content", "")
-                out[sec["name"]] = {
-                    "description": sec.get("description", ""),
-                    "parameters": sec.get("parameters", []),
-                    "returns": self._extract_markdown_field(section_content, "Returns"),
-                    "side_effects": self._extract_markdown_field(
-                        section_content, "Side effects"
-                    ),
-                    "triggers": triggers,
-                    "when_not_to_use": when_not_to_use,
-                    "anti_triggers": anti_triggers,
-                    "skill_summary": str(skill_summary or "").strip(),
-                }
-            return out
-        except Exception as exc:
-            self._log.warning(
-                "Failed to parse legacy markdown metadata for %s: %s",
-                module_path,
-                exc,
-            )
-            return out
-
-    def _load_python_legacy_tool_metadata_map(
-        self,
-    ) -> dict[str, dict[str, dict[str, Any]]]:
-        if self._legacy_py_tool_metadata_by_module is not None:
-            return self._legacy_py_tool_metadata_by_module
-
-        metadata_path = self.skills_dir_path / "_legacy_tool_metadata.py"
-        if not metadata_path.is_file():
-            self._legacy_py_tool_metadata_by_module = {}
-            return self._legacy_py_tool_metadata_by_module
-
-        try:
-            namespace: dict[str, Any] = {}
-            exec(metadata_path.read_text(encoding="utf-8"), namespace, namespace)
-            raw = namespace.get("TOOL_METADATA_BY_MODULE", {})
-            if not isinstance(raw, dict):
-                raw = {}
-            self._legacy_py_tool_metadata_by_module = {
-                str(k): v for k, v in raw.items() if isinstance(v, dict)
-            }
-            return self._legacy_py_tool_metadata_by_module
-        except Exception as exc:
-            self._log.warning(
-                "Failed to load Python legacy tool metadata from %s: %s",
-                metadata_path,
-                exc,
-            )
-            self._legacy_py_tool_metadata_by_module = {}
-            return self._legacy_py_tool_metadata_by_module
-
-    def _extract_markdown_field(self, section_content: str, field_name: str) -> str:
-        match = re.search(
-            rf"\*\*{re.escape(field_name)}:\*\*\s*(.+?)(?:\n\n\*\*|$)",
-            section_content,
-            flags=re.DOTALL,
-        )
-        if not match:
-            return ""
-        return " ".join(match.group(1).split())
-
     @staticmethod
-    def _docstring_triggers(
-        tool_fn: Callable[..., Any], legacy_info: dict[str, Any]
-    ) -> list[str]:
-        triggers = [
-            str(t).strip() for t in legacy_info.get("triggers", []) if str(t).strip()
-        ]
-        if triggers:
-            return triggers
+    def _docstring_triggers(tool_fn: Callable[..., Any]) -> list[str]:
         return [f"user asks to {getattr(tool_fn, '__name__', 'run this tool').replace('_', ' ')}"]
 
     @staticmethod
-    def _docstring_avoid_when(legacy_info: dict[str, Any]) -> str:
-        avoid_candidates: list[str] = []
-        avoid_candidates.extend(
-            str(item).strip()
-            for item in legacy_info.get("when_not_to_use", [])
-            if str(item).strip()
-        )
-        avoid_candidates.extend(
-            str(item).strip()
-            for item in legacy_info.get("anti_triggers", [])
-            if str(item).strip()
-        )
-        if avoid_candidates:
-            return avoid_candidates[0]
+    def _docstring_avoid_when() -> str:
         return "another specialized tool is a clearer match"
-
-    @staticmethod
-    def _docstring_legacy_param_fields(param: Any) -> tuple[str, str, bool, str]:
-        if isinstance(param, dict):
-            return (
-                str(param.get("name", "")).strip(),
-                str(param.get("type", "string")).strip(),
-                bool(param.get("required", False)),
-                str(param.get("description", "")).strip(),
-            )
-        return (
-            str(getattr(param, "name", "")).strip(),
-            str(getattr(param, "type", "string")).strip(),
-            bool(getattr(param, "required", False)),
-            str(getattr(param, "description", "")).strip(),
-        )
 
     def _docstring_inputs_text(
         self,
         *,
         tool_fn: Callable[..., Any],
-        legacy_info: dict[str, Any],
     ) -> str:
-        legacy_params = legacy_info.get("parameters", [])
-        if legacy_params:
-            parts: list[str] = []
-            for param in legacy_params:
-                pname, ptype, prequired, pdesc = self._docstring_legacy_param_fields(
-                    param
-                )
-                if not pname:
-                    continue
-                parts.append(
-                    f"{pname} ({ptype}, {'required' if prequired else 'optional'}): {pdesc}"
-                )
-            return "; ".join(parts) if parts else "none"
-
         sig = inspect.signature(tool_fn)
         args: list[str] = []
         for p in sig.parameters.values():
@@ -935,17 +741,11 @@ class RegistryLoadingMixin:
         return ", ".join(args) if args else "none"
 
     @staticmethod
-    def _docstring_returns_text(legacy_info: dict[str, Any]) -> str:
-        returns_text = str(legacy_info.get("returns") or "").strip()
-        if returns_text:
-            return returns_text
+    def _docstring_returns_text() -> str:
         return "JSON string payload with status, results, and/or error details."
 
     @staticmethod
-    def _docstring_side_effects_text(legacy_info: dict[str, Any]) -> str:
-        side_effects = str(legacy_info.get("side_effects") or "").strip()
-        if side_effects:
-            return side_effects
+    def _docstring_side_effects_text() -> str:
         return "May read/update shared tool context depending on implementation."
 
     def _compose_tool_docstring(
@@ -953,24 +753,22 @@ class RegistryLoadingMixin:
         tool_fn: Callable[..., Any],
         *,
         base_description: str,
-        legacy_info: dict[str, Any],
     ) -> str:
         existing_doc = inspect.getdoc(tool_fn) or ""
-        if existing_doc and not legacy_info:
+        if existing_doc:
             return existing_doc
 
         description = (
             base_description.strip()
             or "Run this tool when it best fits the user request."
         )
-        triggers = self._docstring_triggers(tool_fn, legacy_info)
-        avoid_when = self._docstring_avoid_when(legacy_info)
+        triggers = self._docstring_triggers(tool_fn)
+        avoid_when = self._docstring_avoid_when()
         inputs_text = self._docstring_inputs_text(
             tool_fn=tool_fn,
-            legacy_info=legacy_info,
         )
-        returns_text = self._docstring_returns_text(legacy_info)
-        side_effects = self._docstring_side_effects_text(legacy_info)
+        returns_text = self._docstring_returns_text()
+        side_effects = self._docstring_side_effects_text()
 
         return (
             f"Use when: {description}\n\n"
@@ -980,35 +778,6 @@ class RegistryLoadingMixin:
             f"Returns: {returns_text}.\n"
             f"Side effects: {side_effects}"
         )
-
-    class _LLMToolCollector:
-        """Compatibility shim for older `@llm.tool(...)` Python skill modules."""
-
-        def __init__(self) -> None:
-            self.tools: list[Callable[..., Any]] = []
-
-        def tool(
-            self,
-            func: Callable[..., Any] | None = None,
-            *,
-            name: str | None = None,
-            description: str | None = None,
-        ) -> Callable[..., Any]:
-            def decorator(inner: Callable[..., Any]) -> Callable[..., Any]:
-                setattr(
-                    inner,
-                    "__llm_tool_meta__",
-                    {
-                        "name": name or getattr(inner, "__name__", ""),
-                        "description": description,
-                    },
-                )
-                self.tools.append(inner)
-                return inner
-
-            if func is None:
-                return decorator
-            return decorator(func)
 
     def reload_skills(self) -> int:
         """Reload all skill files from disk, re-registering every tool.

@@ -2,6 +2,7 @@
 
 BINARY := logician
 RUST_CLI_DIR := rust-cli
+PYTHON ?= $(shell if [ -x .venv/bin/python ]; then printf '%s' .venv/bin/python; elif command -v python3 >/dev/null 2>&1; then command -v python3; else command -v python; fi)
 
 # Build Rust CLI in release mode and copy binary to repo root
 binary:
@@ -28,4 +29,4 @@ clean:
 
 # Validate SOUL tool references against registered skills
 check-soul:
-	python scripts/check_soul_tools.py
+	$(PYTHON) scripts/check_soul_tools.py

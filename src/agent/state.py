@@ -34,10 +34,21 @@ class TurnState:
     classified_as: Literal["social", "informational", "execution", "design"] = (
         "execution"
     )
+    # Raw user message for this turn — used by SkillPlaybookComponent for routing
+    user_query: str = ""
 
     # Output
     final_response: str | None = None
+    # All thinking/planning content collected this turn (pre-turn plan + <think> blocks)
+    thinking_log: list[str] = field(default_factory=list)
     trace: list[dict[str, Any]] = field(default_factory=list)
+
+    # Last raw tool output text — set by AgentLoop after each dispatch batch.
+    # Used by InspectionGuard to detect response contradictions.
+    last_tool_output: str | None = None
+
+    # Confidence gate retry count for the current turn.
+    confidence_retries: int = 0
 
     def tool_signature(self, call: ToolCall) -> str:
         """Stable hash for a tool call — used by DuplicateToolGuard."""
@@ -63,7 +74,12 @@ class TurnState:
 
     def last_write_index(self) -> int:
         """Index in tool_calls of the most recent write tool call. -1 if none."""
-        write_names = {"write_file", "edit_file", "apply_edit_block"}
+        write_names = {
+            "write_file", "edit_file", "apply_edit_block",
+            "edit_file_replace", "sed_replace", "regex_replace",
+            "multi_edit", "multi_patch", "apply_unified_diff",
+            "scratch_write", "scratch_delete",
+        }
         for i in range(len(self.tool_calls) - 1, -1, -1):
             if self.tool_calls[i].name in write_names:
                 return i

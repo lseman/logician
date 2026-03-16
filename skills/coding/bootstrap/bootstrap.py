@@ -23,6 +23,32 @@ _coding_config: dict[str, Any] = {
 }
 
 
+def _find_local_venv(start: str | None) -> str | None:
+    roots: list[Path] = []
+    if start:
+        roots.append(Path(start).expanduser().resolve())
+    else:
+        roots.append(Path.cwd().resolve())
+
+    seen: set[str] = set()
+    for root in roots:
+        for base in (root, *root.parents):
+            key = str(base)
+            if key in seen:
+                continue
+            seen.add(key)
+            for candidate_name in (".venv", "venv"):
+                candidate = base / candidate_name
+                if not candidate.is_dir():
+                    continue
+                posix_python = candidate / "bin" / "python"
+                posix_activate = candidate / "bin" / "activate"
+                windows_python = candidate / "Scripts" / "python.exe"
+                if posix_python.exists() or posix_activate.exists() or windows_python.exists():
+                    return str(candidate.resolve())
+    return None
+
+
 class CodingRuntime:
     """Shared runtime state and helpers for coding skills."""
 
@@ -38,7 +64,9 @@ class CodingRuntime:
 
     def venv_path(self) -> str | None:
         value = self._config.get("venv_path")
-        return str(value) if value else None
+        if value:
+            return str(value)
+        return _find_local_venv(self.cwd() or os.getcwd())
 
     def set_cwd(self, path: str | None) -> str | None:
         resolved = str(Path(path).expanduser().resolve()) if path else None

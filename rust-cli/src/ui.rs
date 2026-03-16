@@ -380,7 +380,7 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     push_chip(
         &mut spans,
-        if app.connected { "net" } else { "net" },
+        "net",
         if app.connected { "online" } else { "offline" },
         if app.connected {
             Color::Green

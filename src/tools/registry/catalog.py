@@ -537,7 +537,7 @@ class CodeBlockExtractor:
 
 class SkillCatalog:
     # Bump when cache schema changes to force invalidation.
-    _CACHE_VERSION = 10
+    _CACHE_VERSION = 11
 
     def __init__(
         self, *, skills_md_path: Path, skills_dir_path: Path, log: Any
@@ -587,6 +587,7 @@ class SkillCatalog:
         self._skill_usage_stats: dict[str, dict[str, float]] = {}
         # Last per-skill score breakdown for debugging/tuning.
         self._last_skill_score_breakdown: dict[str, dict[str, Any]] = {}
+        self._python_skill_metadata: dict[str, dict[str, Any]] = {}
 
     @property
     def skills(self) -> dict[str, SkillCard]:
@@ -858,6 +859,68 @@ class SkillCatalog:
         contents = self.read_skill_source_contents(sources)
         if contents:
             self.build_skill_catalog(contents, _fingerprint=fingerprint)
+
+    def register_python_skill_metadata(
+        self,
+        *,
+        skill_id: str,
+        source_path: str,
+        skill_meta: dict[str, Any],
+    ) -> None:
+        sid = str(skill_id or "").strip()
+        if not sid or not isinstance(skill_meta, dict) or not skill_meta:
+            return
+        self._python_skill_metadata[sid] = {
+            "source_path": str(source_path or ""),
+            "skill_meta": dict(skill_meta),
+        }
+
+    def hydrate_metadata_only_python_skills(
+        self, tools: Sequence[Any]
+    ) -> bool:
+        if not self._python_skill_metadata:
+            return False
+
+        changed = False
+        cards = self._skills
+        available_tool_names = {
+            str(getattr(tool, "name", "") or "").strip()
+            for tool in tools
+            if str(getattr(tool, "name", "") or "").strip()
+        }
+
+        for skill_id, payload in self._python_skill_metadata.items():
+            meta_raw = payload.get("skill_meta", {})
+            meta = meta_raw if isinstance(meta_raw, dict) else {}
+            source_path = str(payload.get("source_path") or "")
+            card = cards.get(skill_id)
+            if card is None:
+                card = self._new_tool_backed_skill_card(
+                    skill_id=skill_id,
+                    source_path=source_path,
+                    tool_desc="",
+                    skill_meta=meta,
+                )
+                cards[skill_id] = card
+                changed = True
+
+            if self._apply_tool_backed_skill_meta(
+                card=card,
+                skill_id=skill_id,
+                skill_meta=meta,
+            ):
+                changed = True
+
+            preferred = [
+                name for name in card.preferred_tools if name in available_tool_names
+            ]
+            if preferred and card.tool_names != preferred:
+                card.tool_names = list(preferred)
+                changed = True
+
+        if changed:
+            self._build_routing_index(cards)
+        return changed
 
     def _parse_superpowers_card(
         self, source_path: Path, raw_content: str
@@ -1554,7 +1617,9 @@ class SkillCatalog:
         context-aware score, falling back to max(token_set_ratio, partial_ratio)
         if WRatio is unavailable, then to SequenceMatcher.
         """
-        if not query or not profile:
+        query_text = str(query or "")
+        profile_text = str(profile or "")
+        if not query_text or not profile_text:
             return 0.0
         if HAS_RAPIDFUZZ and _rf_fuzz is not None:
             # WRatio picks the best of token_sort, token_set, partial, and full
@@ -1562,12 +1627,12 @@ class SkillCatalog:
             # the query is short and profiles are long, multi-word strings.
             wr = getattr(_rf_fuzz, "WRatio", None)
             if wr is not None:
-                return float(wr(query, profile)) / 100.0
+                return float(wr(query_text, profile_text)) / 100.0
             # Fallback within rapidfuzz if WRatio is somehow absent
-            ts = _rf_fuzz.token_set_ratio(query, profile)
-            pr = _rf_fuzz.partial_ratio(query, profile)
+            ts = _rf_fuzz.token_set_ratio(query_text, profile_text)
+            pr = _rf_fuzz.partial_ratio(query_text, profile_text)
             return max(float(ts), float(pr)) / 100.0
-        return SequenceMatcher(None, query, profile).ratio()
+        return SequenceMatcher(None, query_text, profile_text).ratio()
 
     def _build_query_score_context(self, query: str) -> dict[str, Any]:
         query_l = (query or "").lower()
