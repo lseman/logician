@@ -64,4 +64,4 @@ rust-cli/target/
 .claudeignore
 .codex
 node_modules
-web_ui/dist/
+webui/dist/
