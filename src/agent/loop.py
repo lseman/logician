@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import uuid
 from typing import Any, Callable
@@ -29,6 +30,7 @@ def format_tool_results(results: list[DispatchResult]) -> list[Message]:
             role=MessageRole.TOOL,
             content=content,
             tool_call_id=r.call_id,
+            name=r.tool_name,
         ))
     return messages
 
@@ -100,6 +102,40 @@ def _response_similarity(a: str, b: str) -> float:
 
 
 class AgentLoop:
+    @staticmethod
+    def _tool_call_summary(tool_calls: list[ToolCall]) -> str:
+        names = [
+            str(getattr(call, "name", "") or "").strip()
+            for call in tool_calls
+            if str(getattr(call, "name", "") or "").strip()
+        ]
+        if not names:
+            return "a pending tool call"
+        unique: list[str] = []
+        for name in names:
+            if name not in unique:
+                unique.append(name)
+        if len(unique) == 1:
+            return f"`{unique[0]}`"
+        if len(unique) == 2:
+            return f"`{unique[0]}` and `{unique[1]}`"
+        head = ", ".join(f"`{name}`" for name in unique[:2])
+        return f"{head}, and {len(unique) - 2} more"
+
+    @staticmethod
+    def _tool_calls_match_tail(
+        executed_calls: list[ToolCall],
+        pending_calls: list[ToolCall],
+    ) -> bool:
+        if not pending_calls or len(executed_calls) < len(pending_calls):
+            return False
+        tail = executed_calls[-len(pending_calls):]
+        return all(
+            str(lhs.name or "") == str(rhs.name or "")
+            and dict(lhs.arguments or {}) == dict(rhs.arguments or {})
+            for lhs, rhs in zip(tail, pending_calls)
+        )
+
     def __init__(
         self,
         llm: LLMBackend,
@@ -108,6 +144,7 @@ class AgentLoop:
         dispatcher: ToolDispatcher,
         config: Config,
         use_toon: bool = False,
+        tool_schemas_fn: Callable[[], list[dict[str, Any]]] | None = None,
         memory: Any | None = None,
         mcp_loader: Callable[[], None] | None = None,
         thinking: ThinkingStrategy | None = None,
@@ -118,6 +155,7 @@ class AgentLoop:
         self.dispatcher = dispatcher
         self.config = config
         self.use_toon = use_toon
+        self._tool_schemas_fn = tool_schemas_fn
         self.memory = memory
         self._mcp_loader = mcp_loader
         self.thinking = thinking
@@ -308,6 +346,228 @@ class AgentLoop:
     # Main loop
     # ------------------------------------------------------------------
 
+    def _generation_tools(self) -> list[dict[str, Any]] | None:
+        if not bool(getattr(self.config, "constrained_decoding", False)):
+            return None
+        if self._tool_schemas_fn is None:
+            return None
+        try:
+            tools = self._tool_schemas_fn() or []
+        except Exception:
+            return None
+        return tools or None
+
+    @staticmethod
+    def _tool_error_payload(text: str) -> dict[str, Any] | None:
+        raw = str(text or "").strip()
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _repairable_tool_error(payload: dict[str, Any] | None) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        return str(payload.get("error_type", "")).strip().lower() in {
+            "schema_validation_failed",
+            "schema_type_validation_failed",
+            "invalid_arguments",
+            "tool_not_found",
+        }
+
+    def _preflight_tool_calls(
+        self,
+        tool_calls: list[ToolCall],
+    ) -> tuple[list[ToolCall] | None, dict[str, Any] | None]:
+        prepared: list[ToolCall] = []
+        for call in tool_calls:
+            prepared_call, error_text = self.dispatcher.prepare_call(call)
+            if error_text is not None:
+                return None, {
+                    "call": {
+                        "name": call.name,
+                        "arguments": dict(call.arguments or {}),
+                    },
+                    "error": self._tool_error_payload(error_text)
+                    or {
+                        "status": "error",
+                        "tool": call.name,
+                        "error": error_text,
+                    },
+                }
+            assert prepared_call is not None
+            prepared.append(prepared_call)
+        return prepared, None
+
+    def _tool_repair_feedback(self, failure: dict[str, Any] | None) -> str:
+        if not isinstance(failure, dict):
+            return (
+                "Your tool call could not be validated. "
+                "Return only a corrected JSON tool_call object."
+            )
+        payload = failure.get("error")
+        if not isinstance(payload, dict):
+            return (
+                "Your tool call could not be validated. "
+                "Return only a corrected JSON tool_call object."
+            )
+        hint = str(payload.get("usage_hint") or "").strip()
+        error = str(payload.get("error") or "Tool call validation failed.").strip()
+        missing = payload.get("missing_required")
+        unknown = payload.get("unknown_arguments")
+        parts = [error]
+        if isinstance(missing, list) and missing:
+            parts.append("Missing: " + ", ".join(str(item) for item in missing))
+        if isinstance(unknown, list) and unknown:
+            parts.append("Unknown: " + ", ".join(str(item) for item in unknown))
+        if hint:
+            parts.append(hint)
+        parts.append("Return only corrected JSON tool_call output.")
+        return " ".join(part for part in parts if part)
+
+    async def _attempt_tool_call_repair(
+        self,
+        *,
+        state: TurnState,
+        system_prompt: str,
+        user_query: str,
+        response: str,
+        tool_calls: list[ToolCall],
+        failure: dict[str, Any],
+        repair_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> tuple[str, list[ToolCall]] | None:
+        if not bool(getattr(self.config, "tool_call_repair_enabled", False)):
+            return None
+        max_attempts = max(
+            0, int(getattr(self.config, "tool_call_repair_max_attempts", 1))
+        )
+        if state.tool_repair_attempts >= max_attempts:
+            return None
+
+        payload = failure.get("error")
+        if not self._repairable_tool_error(payload):
+            return None
+        failing_call = failure.get("call", {})
+        tool_name = str(
+            getattr(tool_calls[0], "name", "")
+            or failing_call.get("name")
+            or payload.get("tool")
+            or "unknown"
+        ).strip() or "unknown"
+        error_type = str(payload.get("error_type", "") or "").strip()
+        attempt_no = state.tool_repair_attempts + 1
+        if repair_callback is not None:
+            try:
+                repair_callback(
+                    {
+                        "stage": "attempt",
+                        "attempt": attempt_no,
+                        "tool": tool_name,
+                        "error_type": error_type,
+                        "message": self._tool_repair_feedback(failure),
+                    }
+                )
+            except Exception:
+                pass
+
+        repair_prompt = "\n\n".join(
+            [
+                "You are repairing a malformed tool call.",
+                "Return only corrected tool call JSON.",
+                "Do not explain your reasoning.",
+                "Do not answer the user directly.",
+                "Preserve the user's intent and keep valid arguments when possible.",
+                "If there were multiple tool calls, return the corrected full tool-call response only.",
+            ]
+        )
+        parsed_calls = [
+            {"name": call.name, "arguments": dict(call.arguments or {})}
+            for call in tool_calls
+        ]
+        repair_messages = [
+            Message(role=MessageRole.SYSTEM, content=system_prompt),
+            Message(role=MessageRole.SYSTEM, content=repair_prompt),
+            Message(
+                role=MessageRole.USER,
+                content=(
+                    f"Original user request:\n{user_query}\n\n"
+                    f"Previous tool-call response:\n{response}\n\n"
+                    f"Parsed tool calls:\n{json.dumps(parsed_calls, ensure_ascii=False)}\n\n"
+                    f"Failing tool call:\n{json.dumps(failing_call, ensure_ascii=False)}\n\n"
+                    f"Validation error:\n{json.dumps(payload, ensure_ascii=False)}"
+                ),
+            ),
+        ]
+
+        loop = asyncio.get_running_loop()
+        try:
+            repaired_response = await loop.run_in_executor(
+                None,
+                lambda: self.llm.generate(
+                    repair_messages,
+                    temperature=0.0,
+                    max_tokens=min(1200, self.config.max_tokens),
+                    tools=self._generation_tools(),
+                    stream=False,
+                ),
+            )
+        except Exception:
+            if repair_callback is not None:
+                try:
+                    repair_callback(
+                        {
+                            "stage": "failed",
+                            "attempt": attempt_no,
+                            "tool": tool_name,
+                            "error_type": error_type or "repair_generation_failed",
+                            "message": "tool-call repair generation failed",
+                        }
+                    )
+                except Exception:
+                    pass
+            return None
+        _, repaired_clean = _extract_think_blocks(repaired_response)
+        repaired_text = (repaired_clean or repaired_response).strip()
+        repaired_calls = parse_tool_calls(
+            repaired_text,
+            use_toon=self.use_toon,
+            strict=bool(getattr(self.config, "strict_tool_call_parsing", False)),
+        )
+        if not repaired_calls:
+            if repair_callback is not None:
+                try:
+                    repair_callback(
+                        {
+                            "stage": "failed",
+                            "attempt": attempt_no,
+                            "tool": tool_name,
+                            "error_type": error_type or "repair_parse_failed",
+                            "message": "tool-call repair did not yield a valid tool call",
+                        }
+                    )
+                except Exception:
+                    pass
+            return None
+        state.tool_repair_attempts += 1
+        if repair_callback is not None:
+            try:
+                repair_callback(
+                    {
+                        "stage": "repaired",
+                        "attempt": attempt_no,
+                        "tool": tool_name,
+                        "error_type": error_type,
+                        "message": "tool call repaired successfully",
+                    }
+                )
+            except Exception:
+                pass
+        return repaired_text, repaired_calls
+
     async def run(
         self,
         messages: list[Message],
@@ -315,6 +575,7 @@ class AgentLoop:
         token_callback: Callable[[str], None] | None = None,
         thinking_callback: Callable[[str], None] | None = None,
         tool_callback: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None,
+        repair_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> TurnResult:
         """Run one agent turn. Returns when the LLM produces a final response."""
         # Ensure MCP servers are loaded (idempotent)
@@ -329,6 +590,7 @@ class AgentLoop:
             domain_groups_activated=classification.domain_groups,
             user_query=last_content,
         )
+        state.available_tool_names = self.dispatcher.available_tool_names()
 
         # Persist user message before loading history so it's available for
         # subsequent sessions and doesn't vanish from the DB record.
@@ -402,14 +664,15 @@ class AgentLoop:
                 and bool(getattr(self.config, "stream", False))
             )
 
-            # 4. LLM call (sync backend wrapped in executor)
             loop = asyncio.get_running_loop()
+            # 4. LLM call (sync backend wrapped in executor)
             response = await loop.run_in_executor(
                 None,
                 lambda: self.llm.generate(
                     llm_messages,
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
+                    tools=self._generation_tools(),
                     stream=stream_enabled,
                     on_token=token_callback if stream_enabled else None,
                 ),
@@ -426,11 +689,82 @@ class AgentLoop:
                     thinking_callback(think_content)
 
             # 5. Parse tool calls from response
-            tool_calls: list[ToolCall] = parse_tool_calls(response, use_toon=self.use_toon)
+            tool_calls: list[ToolCall] = parse_tool_calls(
+                response,
+                use_toon=self.use_toon,
+                strict=bool(getattr(self.config, "strict_tool_call_parsing", False)),
+            )
 
             # 6. Reset consecutive count when LLM produces no tool calls
             if not tool_calls:
                 state.consecutive_tool_count = 0
+
+            if tool_calls:
+                prepared_calls, failure = self._preflight_tool_calls(tool_calls)
+                if failure is not None:
+                    if repair_callback is not None:
+                        payload = failure.get("error") if isinstance(failure, dict) else None
+                        call_info = failure.get("call") if isinstance(failure, dict) else {}
+                        try:
+                            repair_callback(
+                                {
+                                    "stage": "invalid",
+                                    "attempt": state.tool_repair_attempts + 1,
+                                    "tool": str(
+                                        (call_info or {}).get("name")
+                                        or (payload or {}).get("tool")
+                                        or "unknown"
+                                    ),
+                                    "error_type": str((payload or {}).get("error_type", "") or ""),
+                                    "message": self._tool_repair_feedback(failure),
+                                }
+                            )
+                        except Exception:
+                            pass
+                    repair = await self._attempt_tool_call_repair(
+                        state=state,
+                        system_prompt=system,
+                        user_query=last_content,
+                        response=response,
+                        tool_calls=tool_calls,
+                        failure=failure,
+                        repair_callback=repair_callback,
+                    )
+                    if repair is not None:
+                        response, tool_calls = repair
+                        prepared_calls, failure = self._preflight_tool_calls(tool_calls)
+
+                if failure is not None:
+                    if repair_callback is not None:
+                        payload = failure.get("error") if isinstance(failure, dict) else None
+                        call_info = failure.get("call") if isinstance(failure, dict) else {}
+                        try:
+                            repair_callback(
+                                {
+                                    "stage": "nudge",
+                                    "attempt": state.tool_repair_attempts,
+                                    "tool": str(
+                                        (call_info or {}).get("name")
+                                        or (payload or {}).get("tool")
+                                        or "unknown"
+                                    ),
+                                    "error_type": str((payload or {}).get("error_type", "") or ""),
+                                    "message": self._tool_repair_feedback(failure),
+                                }
+                            )
+                        except Exception:
+                            pass
+                    convo.append(
+                        Message(
+                            role=MessageRole.USER,
+                            content=self._tool_repair_feedback(failure),
+                        )
+                    )
+                    state.iteration += 1
+                    continue
+
+                assert prepared_calls is not None
+                tool_calls = prepared_calls
 
             # 7. Run guardrails (before executing tools)
             guard_result = self.guardrails.run(state, response, tool_calls)
@@ -481,13 +815,21 @@ class AgentLoop:
                 state.final_response = response
                 # Persist the final assistant message
                 self._save_message(
-                    Message(role=MessageRole.ASSISTANT, content=response),
+                    Message(
+                        role=MessageRole.ASSISTANT,
+                        content=response,
+                        thinking_log=list(state.thinking_log or []),
+                    ),
                     session_id,
                 )
                 break
 
             # 9. Execute tools (parallel reads, serial writes)
-            assistant_msg = Message(role=MessageRole.ASSISTANT, content=response)
+            assistant_msg = Message(
+                role=MessageRole.ASSISTANT,
+                content=response,
+                thinking_log=list(state.thinking_log or []),
+            )
             convo.append(assistant_msg)
             self._save_message(assistant_msg, session_id)
 
@@ -510,17 +852,39 @@ class AgentLoop:
             if getattr(self.config, "post_tool_thinking", False):
                 observation = await self._post_tool_think(convo)
                 if observation:
+                    # Use USER role instead of SYSTEM to maintain proper message ordering
+                    # (system messages must always be first)
                     convo.append(Message(
-                        role=MessageRole.SYSTEM,
-                        content=f"[Post-tool observation]\n{observation}",
+                        role=MessageRole.USER,
+                        content=f"[Post-tool observation]\n{observation}\n\nProceed with your next step.",
                     ))
                     state.thinking_log.append(observation)
+                    if thinking_callback is not None:
+                        thinking_callback(observation)
 
             state.iteration += 1
 
         # If we exhausted iterations without a final response
         if state.final_response is None:
-            state.final_response = response
+            final_tool_calls = parse_tool_calls(
+                response,
+                use_toon=self.use_toon,
+                strict=bool(getattr(self.config, "strict_tool_call_parsing", False)),
+            )
+            if final_tool_calls:
+                summary = self._tool_call_summary(final_tool_calls)
+                if self._tool_calls_match_tail(state.tool_calls, final_tool_calls):
+                    state.final_response = (
+                        "I reached the turn iteration limit after executing "
+                        f"{summary}, before I could write the final answer."
+                    )
+                else:
+                    state.final_response = (
+                        "I reached the turn iteration limit before I could execute "
+                        f"{summary}."
+                    )
+            else:
+                state.final_response = response
 
         # Post-synthesis refinement: apply ThinkingStrategy when configured.
         # Runs after the tool loop so the reasoner can refine the gathered evidence
@@ -584,7 +948,14 @@ class AgentLoop:
             if thinking_callback is not None:
                 thinking_callback(think_content)
         state.final_response = response
-        self._save_message(Message(role=MessageRole.ASSISTANT, content=response), session_id)
+        self._save_message(
+            Message(
+                role=MessageRole.ASSISTANT,
+                content=response,
+                thinking_log=list(state.thinking_log or []),
+            ),
+            session_id,
+        )
         return TurnResult(state=state, messages=list(messages))
 
     def _with_system(self, messages: list[Message], system: str) -> list[Message]:

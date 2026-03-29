@@ -75,6 +75,17 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
     },
 }
 
+_CAPABILITY_TOOL_EQUIVALENTS: dict[str, tuple[str, ...]] = {
+    "list_directory": ("list_dir",),
+    "rg_search": ("grep_files",),
+    "fd_find": ("glob_files",),
+    "read_file_smart": ("read_file",),
+    "run_shell": ("bash",),
+    "edit_file_replace": ("edit_file",),
+    "git_status": ("get_git_status",),
+    "git_diff": ("get_git_diff",),
+}
+
 _CODING_SKILL_IDS = {
     "file_ops",
     "multi_edit",
@@ -99,6 +110,43 @@ _CODING_SKILL_IDS = {
 
 class RegistryIntrospectionMixin:
     """ToolRegistry mixin."""
+
+    @staticmethod
+    def _matching_capability_tool_name(
+        required_name: str,
+        available_names: set[str],
+    ) -> str | None:
+        name = str(required_name or "").strip()
+        if not name:
+            return None
+        candidates = (name, *_CAPABILITY_TOOL_EQUIVALENTS.get(name, ()))
+        for candidate in candidates:
+            if candidate in available_names:
+                return candidate
+        return None
+
+    @staticmethod
+    def _schema_validation_hint(tool_name: str) -> str | None:
+        normalized = str(tool_name or "").strip()
+        if normalized == "write_file":
+            return (
+                "write_file expects arguments like "
+                "{\"path\":\"/tmp/file.py\",\"content\":\"full file text here\"}. "
+                "Pass all code in the single `content` field and do not add extra keys."
+            )
+        if normalized == "edit_file":
+            return (
+                "edit_file expects arguments like "
+                "{\"path\":\"src/app.py\",\"old_string\":\"exact old text\",\"new_string\":\"replacement text\"}. "
+                "Put the full match in `old_string` and the full replacement in `new_string`."
+            )
+        if normalized == "run_python":
+            return (
+                "run_python expects arguments like "
+                "{\"code\":\"print('hello')\\n\"}. "
+                "Pass Python source code in the single `code` field, using real newlines or escaped `\\n`."
+            )
+        return None
 
     def _tool_error_payload(
         self,
@@ -404,6 +452,7 @@ class RegistryIntrospectionMixin:
         unknown_suggestions = {
             name: self._suggest_parameter_names(name, allowed_names) for name in unknown
         }
+        hint = self._schema_validation_hint(tool.name)
         return self._tool_error_payload(
             tool.name,
             "Tool arguments failed schema validation.",
@@ -413,6 +462,7 @@ class RegistryIntrospectionMixin:
             unknown_argument_suggestions=unknown_suggestions,
             allowed_arguments=list(allowed_names),
             remapped_arguments=remapped_arguments,
+            usage_hint=hint,
         )
 
     def _coerce_and_validate_tool_argument_values(
@@ -532,7 +582,7 @@ class RegistryIntrospectionMixin:
         """Return the GBNF grammar for a tool, or None if not registered.
 
         Used by Agent.run() to enable llama.cpp constrained decoding for
-        grammar-aware tools (e.g. write_file, edit_file_replace, multi_edit).
+        grammar-aware tools (e.g. write_file, edit_file, multi_edit).
         """
         return self._grammars.get(str(tool_name or "").strip())
 
@@ -552,6 +602,7 @@ class RegistryIntrospectionMixin:
                 }
                 for p in tool.parameters
             ],
+            "runtime": tool.runtime.model_dump(),
             "stats": dict(self._tool_exec_stats.get(tool.name, {})),
         }
 
@@ -725,8 +776,17 @@ class RegistryIntrospectionMixin:
         for group_name, spec in _CODING_CAPABILITY_GROUPS.items():
             required = list(dict.fromkeys(spec.get("required", [])))
             optional = list(dict.fromkeys(spec.get("nice_to_have", [])))
-            required_present = [name for name in required if name in tool_names]
-            required_missing = [name for name in required if name not in tool_names]
+            required_present: list[str] = []
+            required_missing: list[str] = []
+            alias_resolutions: dict[str, str] = {}
+            for name in required:
+                matched = self._matching_capability_tool_name(name, tool_names)
+                if matched is None:
+                    required_missing.append(name)
+                    continue
+                required_present.append(name)
+                if matched != name:
+                    alias_resolutions[name] = matched
             optional_present = [name for name in optional if name in tool_names]
 
             required_total += len(required)
@@ -742,6 +802,7 @@ class RegistryIntrospectionMixin:
                 "required_missing_count": len(required_missing),
                 "required_coverage_pct": round(coverage, 2),
                 "required_missing_tools": required_missing,
+                "required_alias_resolutions": alias_resolutions,
                 "optional_total": len(optional),
                 "optional_present": len(optional_present),
             }

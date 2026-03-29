@@ -34,10 +34,32 @@ __skill__ = {
         "direct edit tools or block replacement would be simpler than diff-based editing"
     ],
     "next_skills": ["quality", "git"],
+    "preferred_sequence": ["diff_preview", "apply_unified_diff", "quality", "git"],
+    "entry_criteria": [
+        "The intended edit is already described naturally as a diff or patch.",
+        "Auditability matters and you want to review exact additions/removals.",
+    ],
+    "decision_rules": [
+        "Preview diffs before applying when the patch is non-trivial.",
+        "Use patch workflows when preserving surrounding file context matters.",
+        "If the desired change is easier to describe as an exact block replacement, prefer edit_block or edit_file.",
+    ],
     "workflow": [
         "Prefer diff-oriented editing when the intended change is already clear.",
         "Preview before applying when risk is non-trivial.",
         "Validate touched files after patch application.",
+    ],
+    "failure_recovery": [
+        "If a hunk no longer matches, regenerate the diff from current file contents instead of forcing it.",
+        "If the patch is too large to reason about, split it into smaller file- or feature-level diffs.",
+    ],
+    "exit_criteria": [
+        "The applied diff matches the intended reviewable change.",
+        "Touched files are ready for validation or git inspection.",
+    ],
+    "anti_patterns": [
+        "Applying a stale diff after the target file has drifted.",
+        "Using patch mode for tiny local edits that are clearer with direct edit tools.",
     ],
 }
 

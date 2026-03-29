@@ -89,6 +89,119 @@ class LlamaCppClient:
         return data if isinstance(data, dict) else None
 
     @staticmethod
+    def _tool_call_response_text(tool_calls: list[dict[str, Any]]) -> str:
+        normalized: list[dict[str, Any]] = []
+        for item in tool_calls:
+            if not isinstance(item, dict):
+                continue
+            fn = item.get("function")
+            if not isinstance(fn, dict):
+                continue
+            name = str(fn.get("name") or "").strip()
+            raw_args = fn.get("arguments")
+            if not name:
+                continue
+            try:
+                arguments = json.loads(raw_args or "{}")
+            except Exception:
+                arguments = {}
+            if not isinstance(arguments, dict):
+                arguments = {}
+            normalized.append({"name": name, "arguments": arguments})
+
+        if not normalized:
+            return ""
+        if len(normalized) == 1:
+            return json.dumps({"tool_call": normalized[0]})
+        return json.dumps({"tool_calls": normalized})
+
+    def _handle_chat_stream(
+        self,
+        client: Any,
+        url: str,
+        payload: dict[str, Any],
+        on_token: Callable[[str], None] | None = None,
+    ) -> str:
+        full: list[str] = []
+        streamed_tool_calls: list[dict[str, Any]] = []
+
+        with client.stream("POST", url, json=payload) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                data = self._parse_stream_json_line(line)
+                if not data:
+                    continue
+
+                choice = data.get("choices", [{}])[0]
+                delta = choice.get("delta", {})
+
+                if isinstance(delta, dict):
+                    content_delta = delta.get("content")
+                    if content_delta:
+                        full.append(content_delta)
+                        if on_token:
+                            on_token(content_delta)
+                    self._merge_tool_call_delta(
+                        streamed_tool_calls,
+                        delta.get("tool_calls"),
+                    )
+
+                if choice.get("finish_reason"):
+                    finish = choice["finish_reason"]
+                    if finish == "length":
+                        self._log.warning(
+                            "Response truncated (finish_reason=length)"
+                        )
+
+        if streamed_tool_calls:
+            return self._tool_call_response_text(streamed_tool_calls)
+        return "".join(full).strip()
+
+    @staticmethod
+    def _merge_tool_call_delta(
+        tool_calls: list[dict[str, Any]],
+        delta_calls: Any,
+    ) -> None:
+        if not isinstance(delta_calls, list):
+            return
+        for raw_item in delta_calls:
+            if not isinstance(raw_item, dict):
+                continue
+            try:
+                idx = int(raw_item.get("index", len(tool_calls)))
+            except Exception:
+                idx = len(tool_calls)
+            while len(tool_calls) <= idx:
+                tool_calls.append({"id": "", "type": "function", "function": {}})
+
+            current = tool_calls[idx]
+            if not isinstance(current, dict):
+                current = {"id": "", "type": "function", "function": {}}
+                tool_calls[idx] = current
+
+            if raw_item.get("id"):
+                current["id"] = str(raw_item["id"])
+            if raw_item.get("type"):
+                current["type"] = str(raw_item["type"])
+
+            fn_delta = raw_item.get("function")
+            if not isinstance(fn_delta, dict):
+                continue
+            fn = current.setdefault("function", {})
+            if not isinstance(fn, dict):
+                fn = {}
+                current["function"] = fn
+
+            if fn_delta.get("name"):
+                fn["name"] = str(fn_delta["name"])
+            if fn_delta.get("arguments") is not None:
+                fn["arguments"] = str(fn.get("arguments") or "") + str(
+                    fn_delta.get("arguments") or ""
+                )
+
+    @staticmethod
     def _chat_payload_messages(messages: list[Message]) -> list[dict[str, str]]:
         payload_messages: list[dict[str, str]] = []
         for msg in messages:
@@ -119,6 +232,7 @@ class LlamaCppClient:
         on_token: Callable[[str], None] | None = None,
         tools: list[dict[str, Any]] | None = None,
         grammar: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> str:
         if httpx is None:
             raise ImportError(
@@ -138,9 +252,7 @@ class LlamaCppClient:
                         len(messages),
                         len(chat_messages),
                     )
-                # Constrained decoding via native function-calling disables streaming
-                # (llama.cpp tool_calls delta handling differs; we keep it simple).
-                _use_stream = bool(stream) and not bool(tools)
+                _use_stream = bool(stream)
                 payload = {
                     "messages": self._chat_payload_messages(chat_messages),
                     "temperature": temperature,
@@ -150,43 +262,47 @@ class LlamaCppClient:
                 }
                 if tools:
                     payload["tools"] = tools
-                    payload["tool_choice"] = "auto"
+                    payload["tool_choice"] = (
+                        tool_choice if tool_choice is not None else "auto"
+                    )
+                    self._log.info(
+                        "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d tool_choice=%s grammar=%s mode=native_constrained",
+                        temperature,
+                        max_tokens,
+                        _use_stream,
+                        len(tools),
+                        payload["tool_choice"],
+                        False,
+                    )
                 elif grammar:
                     payload["grammar"] = grammar
+                    self._log.info(
+                        "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d tool_choice=%s grammar=%s mode=manual_grammar",
+                        temperature,
+                        max_tokens,
+                        _use_stream,
+                        0,
+                        None,
+                        True,
+                    )
+                else:
+                    self._log.info(
+                        "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d tool_choice=%s grammar=%s mode=plain_chat",
+                        temperature,
+                        max_tokens,
+                        _use_stream,
+                        0,
+                        None,
+                        False,
+                    )
                 url = f"{self.base_url}/v1/chat/completions"
-                self._log.info(
-                    "POST /v1/chat/completions temp=%s max_tokens=%s stream=%s tools=%d grammar=%s",
-                    temperature,
-                    max_tokens,
-                    _use_stream,
-                    len(tools) if tools else 0,
-                    bool(grammar) and not bool(tools),
-                )
                 if _use_stream:
-                    with client.stream("POST", url, json=payload) as r:
-                        r.raise_for_status()
-                        full: list[str] = []
-                        _stream_finish_reason: str | None = None
-                        for line in r.iter_lines():
-                            if not line:
-                                continue
-                            data = self._parse_stream_json_line(line)
-                            if not data:
-                                continue
-                            _choice = data.get("choices", [{}])[0]
-                            delta = _choice.get("delta", {}).get("content")
-                            if delta:
-                                full.append(delta)
-                                if on_token:
-                                    on_token(delta)
-                            if _choice.get("finish_reason"):
-                                _stream_finish_reason = _choice["finish_reason"]
-                    if _stream_finish_reason == "length":
-                        self._log.warning(
-                            "Response truncated (finish_reason=length): "
-                            "max_tokens limit reached mid-generation"
-                        )
-                    return "".join(full).strip()
+                    return self._handle_chat_stream(
+                        client,
+                        url,
+                        payload,
+                        on_token=on_token,
+                    )
                 else:
                     r = self._request(client, "POST", url, json=payload)
                     data = r.json()
@@ -199,16 +315,7 @@ class LlamaCppClient:
                     # Native function-call response -> reformat to existing tool_call JSON
                     # so the existing parser handles it without modification.
                     if msg.get("tool_calls"):
-                        tc = msg["tool_calls"][0]
-                        fn = tc.get("function", {})
-                        name = fn.get("name", "")
-                        try:
-                            args = json.loads(fn.get("arguments") or "{}")
-                        except Exception:
-                            args = {}
-                        return json.dumps(
-                            {"tool_call": {"name": name, "arguments": args}}
-                        )
+                        return self._tool_call_response_text(msg.get("tool_calls") or [])
                     return (msg.get("content") or "").strip()
             else:
                 prompt = format_messages_for_template(messages, self.template)

@@ -199,10 +199,28 @@ def test_max_iterations_exits_loop():
     messages = [_user_msg("do an infinite task")]
     result = asyncio.run(agent_loop.run(messages))
 
-    # Loop should have terminated; final_response set to last LLM response
-    assert result.final_response == tool_response
+    # Loop should have terminated without surfacing raw tool JSON
+    assert result.final_response == (
+        "I reached the turn iteration limit after executing "
+        "`read_file`, before I could write the final answer."
+    )
     # Dispatcher called exactly max_iterations times
     assert len(fake_dispatcher.dispatched) == 3
+
+
+def test_hybrid_direct_answer_tool_call_is_executed():
+    """Hybrid direct-answer pass is reparsed if the model emits a tool call anyway."""
+    tool_response = _tool_call_json("read_file", {"path": "/tmp/x.txt"})
+    final_response = "Verified the file contents."
+
+    agent_loop, fake_dispatcher = _make_loop(
+        ["NO_TOOL", tool_response, "NO_TOOL", final_response],
+    )
+    messages = [_user_msg("write a file and then verify it")]
+    result = asyncio.run(agent_loop.run(messages, token_callback=lambda _token: None))
+
+    assert result.final_response == final_response
+    assert [call.name for call in fake_dispatcher.dispatched] == ["read_file"]
 
 
 def test_caller_messages_not_mutated():

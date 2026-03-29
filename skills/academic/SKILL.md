@@ -32,6 +32,27 @@ next_skills:
   - rag
   - global/think
   - qol/docling_context
+preferred_sequence:
+  - s2_search
+  - s2_get_paper
+  - openalex_search
+  - unpaywall_resolve
+entry_criteria:
+  - the task requires papers, citations, or evidence synthesis rather than code or docs
+  - the answer should be grounded in academic literature, not just web search
+decision_rules:
+  - start broad, then narrow to the papers that actually match the claim or method
+  - prefer multiple databases when completeness matters
+  - verify relevance from abstracts or methods before citing
+failure_recovery:
+  - if one database is sparse, cross-check another before concluding there is little literature
+  - if full text is unavailable, fall back to abstract plus open-access resolution instead of stopping early
+exit_criteria:
+  - the shortlist of papers is relevant, deduplicated, and sufficient for the user's question
+  - evidence is labeled clearly enough to support a grounded synthesis
+anti_patterns:
+  - citing papers from titles alone without checking relevance
+  - treating citation count as proof of correctness
 ---
 
 ## Database Quick Reference
@@ -107,6 +128,12 @@ After collecting full-text PDFs:
 1. Convert with `docling_context` skill (layout-aware PDF extraction)
 2. Ingest into local RAG index via `rag` skill
 3. Query during analysis turns for grounded retrieval
+
+## Exit Criteria
+
+- A focused set of relevant papers has been identified.
+- Each cited paper has been checked at least at the abstract level, and preferably methods/results when needed.
+- The synthesis is grounded in direct or clearly labeled proxy evidence.
 
 ## Evidence Quality Signals
 

@@ -10,8 +10,8 @@ from typing import Any, Callable
 
 from ..config import Config
 from ..tools import ToolRegistry
-from ..tools.runtime import ToolCall
-from .state import TurnState
+from ..tools.runtime import Tool, ToolCall
+from .state import ToolResultRecord, TurnState
 
 
 @dataclass
@@ -22,6 +22,11 @@ class DispatchResult:
     error: str | None = None
     duration_ms: int = 0
     cache_hit: bool = False
+    status: str = "ok"
+    read_only: bool = False
+    writes_files: bool = False
+    verifier: bool = False
+    has_content: bool = False
 
 
 # Read-only tools — safe to run in parallel. Hardcoded; not configurable.
@@ -50,6 +55,26 @@ _WRITE_TOOLS: frozenset[str] = frozenset({
     "scratch_write", "scratch_delete",
 })
 
+_VERIFICATION_NAME_PARTS: tuple[str, ...] = (
+    "test",
+    "pytest",
+    "ruff",
+    "lint",
+    "check",
+    "verify",
+    "mypy",
+)
+
+_CONTENT_READ_TOOLS: frozenset[str] = frozenset({
+    "read_file",
+    "read_line",
+    "read_file_smart",
+    "find_function_by_name",
+    "find_class_by_name",
+    "get_symbol_info",
+    "find_imports",
+})
+
 
 class ToolDispatcher:
     def __init__(self, registry: ToolRegistry) -> None:
@@ -65,6 +90,83 @@ class ToolDispatcher:
         for k in expired:
             del self._cache[k]
         self._cache_writes_since_evict = 0
+
+    def _tool_def(self, name: str) -> Tool | None:
+        try:
+            return self._registry.get(name)
+        except Exception:
+            return None
+
+    def _is_read_only_tool(self, name: str) -> bool:
+        tool = self._tool_def(name)
+        if tool is not None:
+            if tool.runtime.read_only is not None:
+                return bool(tool.runtime.read_only)
+            if tool.runtime.writes_files:
+                return False
+        return name in _READ_ONLY_TOOLS
+
+    def _writes_files_tool(self, name: str) -> bool:
+        tool = self._tool_def(name)
+        if tool is not None and tool.runtime.writes_files is not None:
+            return bool(tool.runtime.writes_files)
+        return name in _WRITE_TOOLS
+
+    def _is_verifier_tool(self, name: str) -> bool:
+        tool = self._tool_def(name)
+        if tool is not None and tool.runtime.verifier is not None:
+            return bool(tool.runtime.verifier)
+        lower = name.lower()
+        return any(part in lower for part in _VERIFICATION_NAME_PARTS)
+
+    def _is_cacheable_tool(self, name: str) -> bool:
+        tool = self._tool_def(name)
+        if tool is not None and tool.runtime.cacheable is not None:
+            return bool(tool.runtime.cacheable)
+        return self._is_read_only_tool(name)
+
+    def _result_has_content(self, output: str, error: str | None) -> bool:
+        if error or not str(output or "").strip():
+            return False
+        text = str(output).strip()
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return bool(text)
+
+        if isinstance(payload, list):
+            return len(payload) > 0
+
+        if not isinstance(payload, dict):
+            return bool(payload)
+
+        status = str(payload.get("status", "")).strip().lower()
+        if status in {"error", "failed", "fail"}:
+            return False
+        if payload.get("ok") is False or payload.get("success") is False:
+            return False
+        if payload.get("count") == 0 or payload.get("matches_found") == 0:
+            return False
+
+        meaningful_keys = (
+            "content",
+            "contents",
+            "result",
+            "results",
+            "matches",
+            "items",
+            "files",
+            "paths",
+            "stdout",
+            "diff",
+            "value",
+        )
+        for key in meaningful_keys:
+            value = payload.get(key)
+            if value not in (None, "", [], {}, False):
+                return True
+
+        return len(payload) > 1 or status == "ok"
 
     async def dispatch(
         self,
@@ -82,8 +184,8 @@ class ToolDispatcher:
         (no conflicting writes). Falls back to serial execution if unsafe.
         """
         indexed_calls = list(enumerate(calls, start=1))
-        reads = [(idx, c) for idx, c in indexed_calls if c.name in _READ_ONLY_TOOLS]
-        writes = [(idx, c) for idx, c in indexed_calls if c.name not in _READ_ONLY_TOOLS]
+        reads = [(idx, c) for idx, c in indexed_calls if self._is_read_only_tool(c.name)]
+        writes = [(idx, c) for idx, c in indexed_calls if not self._is_read_only_tool(c.name)]
 
         results: list[DispatchResult] = []
 
@@ -98,12 +200,7 @@ class ToolDispatcher:
                     sequence=idx,
                 )
                 results.append(result)
-                if call.name not in _READ_ONLY_TOOLS:
-                    path = self._extract_write_path(call)
-                    if path:
-                        state.record_write(path)
-                state.record_call(call)
-                state.consecutive_tool_count += 1
+            self._update_state_from_dispatch(state, indexed_calls, results)
             return results
 
         # Parallel reads
@@ -131,16 +228,55 @@ class ToolDispatcher:
             )
             results.append(result)
             # Track file writes for VerificationGuard
-            path = self._extract_write_path(call)
-            if path:
-                state.record_write(path)
-
-        # Update state
-        for call in calls:
-            state.record_call(call)
-        state.consecutive_tool_count += len(calls)
+        self._update_state_from_dispatch(state, indexed_calls, results)
 
         return results
+
+    def _update_state_from_dispatch(
+        self,
+        state: TurnState,
+        indexed_calls: list[tuple[int, ToolCall]],
+        results: list[DispatchResult],
+    ) -> None:
+        result_by_call_id = {result.call_id: result for result in results}
+        for _, call in indexed_calls:
+            state.record_call(call)
+            if self._writes_files_tool(call.name):
+                path = self._extract_write_path(call)
+                if path:
+                    state.record_write(path)
+            if self._is_content_read_tool(call):
+                path = self._extract_read_path(call)
+                if path:
+                    state.record_read(path)
+            result = result_by_call_id.get(call.id)
+            if result is not None:
+                state.record_tool_result(
+                    ToolResultRecord(
+                        call_id=result.call_id,
+                        tool_name=result.tool_name,
+                        status=result.status,
+                        output=result.output,
+                        error=result.error,
+                        read_only=result.read_only,
+                        writes_files=result.writes_files,
+                        verifier=result.verifier,
+                        cache_hit=result.cache_hit,
+                        has_content=result.has_content,
+                    )
+                )
+        state.consecutive_tool_count += len(indexed_calls)
+
+    def _is_content_read_tool(self, call: ToolCall) -> bool:
+        return str(call.name or "").strip() in _CONTENT_READ_TOOLS
+
+    def _extract_read_path(self, call: ToolCall) -> str | None:
+        args = dict(call.arguments or {})
+        for key in ("path", "file_path", "filename"):
+            value = str(args.get(key, "") or "").strip()
+            if value:
+                return value
+        return None
 
     def _cache_key(self, call: ToolCall) -> str:
         """Compute a stable cache key for a tool call."""
@@ -152,6 +288,25 @@ class ToolDispatcher:
         )
         digest = hashlib.sha256(raw.encode()).hexdigest()[:16]
         return f"{call.name}:{digest}"
+
+    def prepare_call(self, call: ToolCall) -> tuple[ToolCall | None, str | None]:
+        prepare = getattr(self._registry, "prepare_call", None)
+        if not callable(prepare):
+            return call, None
+        return prepare(call)
+
+    def available_tool_names(self) -> set[str]:
+        list_tools = getattr(self._registry, "list_tools", None)
+        if not callable(list_tools):
+            return set()
+        try:
+            return {
+                str(getattr(tool, "name", "") or "").strip()
+                for tool in list_tools()
+                if str(getattr(tool, "name", "") or "").strip()
+            }
+        except Exception:
+            return set()
 
     async def _execute_one(
         self,
@@ -182,19 +337,34 @@ class ToolDispatcher:
         _emit("start")
 
         # Check cache for read-only tools
-        if call.name in _READ_ONLY_TOOLS and config is not None:
+        is_read_only = self._is_read_only_tool(call.name)
+        writes_files = self._writes_files_tool(call.name)
+        verifier = self._is_verifier_tool(call.name)
+
+        if is_read_only and config is not None and self._is_cacheable_tool(call.name):
             if getattr(config, "tool_cache_enabled", True):
                 key = self._cache_key(call)
                 ttl = getattr(config, "tool_cache_ttl", 3600)
                 cached = self._cache.get(key)
                 if cached and (time.time() - cached[0]) < ttl:
-                    _emit("end", status="ok", duration_ms=0, cache_hit=True)
+                    _emit(
+                        "end",
+                        status="ok",
+                        duration_ms=0,
+                        cache_hit=True,
+                        result_output=cached[1] if writes_files else "",
+                    )
                     return DispatchResult(
                         tool_name=call.name,
                         call_id=call.id,
                         output=cached[1],
                         duration_ms=0,
                         cache_hit=True,
+                        status="ok",
+                        read_only=is_read_only,
+                        writes_files=writes_files,
+                        verifier=verifier,
+                        has_content=self._result_has_content(cached[1], None),
                     )
 
         t0 = time.monotonic()
@@ -216,7 +386,7 @@ class ToolDispatcher:
                 )
 
             # Store in cache if read-only and succeeded
-            if call.name in _READ_ONLY_TOOLS and config is not None:
+            if is_read_only and config is not None and self._is_cacheable_tool(call.name):
                 if getattr(config, "tool_cache_enabled", True):
                     key = self._cache_key(call)
                     self._cache[key] = (time.time(), output_str)
@@ -227,18 +397,32 @@ class ToolDispatcher:
 
             # First 160 chars of output for display in the TUI tool_end event
             result_preview = output_str[:160].replace("\n", " ").strip()
+            status = (
+                "error"
+                if getattr(self._registry, "_result_indicates_error", lambda _v: False)(output_str)
+                else "ok"
+            )
             _emit(
                 "end",
-                status="ok",
+                status=status,
                 duration_ms=duration_ms,
                 cache_hit=False,
                 result_preview=result_preview,
+                result_output=output_str if writes_files else "",
             )
             return DispatchResult(
                 tool_name=call.name,
                 call_id=call.id,
                 output=output_str,
                 duration_ms=duration_ms,
+                status=status,
+                read_only=is_read_only,
+                writes_files=writes_files,
+                verifier=verifier,
+                has_content=self._result_has_content(
+                    output_str,
+                    "tool_result_error" if status == "error" else None,
+                ),
             )
         except Exception as exc:
             duration_ms = int((time.monotonic() - t0) * 1000)
@@ -255,6 +439,11 @@ class ToolDispatcher:
                 output="",
                 error=str(exc),
                 duration_ms=duration_ms,
+                status="error",
+                read_only=is_read_only,
+                writes_files=writes_files,
+                verifier=verifier,
+                has_content=False,
             )
 
     def _is_safe_batch(self, calls: list[ToolCall]) -> bool:
@@ -268,7 +457,7 @@ class ToolDispatcher:
         if len(calls) <= 1:
             return True
 
-        writes = [c for c in calls if c.name not in _READ_ONLY_TOOLS]
+        writes = [c for c in calls if not self._is_read_only_tool(c.name)]
         if not writes:
             return True  # all reads, safe
 
@@ -288,6 +477,6 @@ class ToolDispatcher:
         Only returns a path for tools that actually write to disk so that
         VerificationGuard is not triggered by read or shell operations.
         """
-        if call.name not in _WRITE_TOOLS:
+        if not self._writes_files_tool(call.name):
             return None
         return call.arguments.get("path") or call.arguments.get("file_path")

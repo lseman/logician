@@ -158,6 +158,52 @@ def _collect_matching_files(
     return files
 
 
+def _file_kind_for_path(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in {
+        ".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".java", ".go", ".rb",
+        ".php", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".kt", ".swift",
+        ".sh", ".sql",
+    }:
+        return "code"
+    if ext in {".md", ".rst", ".txt", ".adoc"}:
+        return "doc"
+    if ext in {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg"}:
+        return "config"
+    return "file"
+
+
+def _repo_metadata(
+    path: Path,
+    *,
+    repo_id: str = "",
+    repo_name: str = "",
+    repo_root: str = "",
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "file_kind": _file_kind_for_path(path),
+        "ext": path.suffix.lower(),
+    }
+    repo_id = str(repo_id or "").strip()
+    repo_name = str(repo_name or "").strip()
+    repo_root_text = str(repo_root or "").strip()
+    if repo_id:
+        metadata["repo_id"] = repo_id
+    if repo_name:
+        metadata["repo_name"] = repo_name
+    if repo_root_text:
+        try:
+            repo_root_path = Path(repo_root_text).expanduser().resolve()
+            metadata["repo_root"] = str(repo_root_path)
+            try:
+                metadata["repo_rel_path"] = str(path.relative_to(repo_root_path))
+            except Exception:
+                pass
+        except Exception:
+            metadata["repo_root"] = repo_root_text
+    return metadata
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -168,6 +214,9 @@ def rag_add_file(
     source_label: str = "",
     chunk_size: int = 400,
     overlap: float = 0.2,
+    repo_id: str = "",
+    repo_name: str = "",
+    repo_root: str = "",
 ) -> str:
     """Use when: Add a document, source file, or notes file to the agent's long-term RAG memory.
 
@@ -194,7 +243,18 @@ def rag_add_file(
         doc_db = _doc_db_from_agent()
         ids = doc_db.add_documents(
             texts=[text],
-            metadatas=[{"source": label, "path": str(p)}],
+            metadatas=[
+                {
+                    "source": label,
+                    "path": str(p),
+                    **_repo_metadata(
+                        p,
+                        repo_id=repo_id,
+                        repo_name=repo_name,
+                        repo_root=repo_root,
+                    ),
+                }
+            ],
             chunk_size_tokens=chunk_size,
             chunk_overlap_ratio=overlap,
         )
@@ -261,6 +321,9 @@ def rag_add_dir(
     overlap: float = 0.2,
     max_files: int = 50,
     exclude: str = "",
+    repo_id: str = "",
+    repo_name: str = "",
+    repo_root: str = "",
 ) -> str:
     """Use when: Index an entire codebase, docs folder, or set of notes in one shot.
 
@@ -316,7 +379,18 @@ def rag_add_dir(
 
                 ids = doc_db.add_documents(
                     texts=[text],
-                    metadatas=[{"source": fp.name, "path": str(fp)}],
+                    metadatas=[
+                        {
+                            "source": fp.name,
+                            "path": str(fp),
+                            **_repo_metadata(
+                                fp,
+                                repo_id=repo_id,
+                                repo_name=repo_name,
+                                repo_root=repo_root or str(root),
+                            ),
+                        }
+                    ],
                     chunk_size_tokens=chunk_size,
                     chunk_overlap_ratio=overlap,
                 )
@@ -345,6 +419,9 @@ def rag_promote_paths(
     overlap: float = 0.2,
     max_files: int = 80,
     exclude: str = "",
+    repo_id: str = "",
+    repo_name: str = "",
+    repo_root: str = "",
 ) -> str:
     """Use when: You want explicit control over which repo paths become retrievable context.
 
@@ -399,6 +476,9 @@ def rag_promote_paths(
                         source_label=p.name,
                         chunk_size=chunk_size,
                         overlap=overlap,
+                        repo_id=repo_id,
+                        repo_name=repo_name,
+                        repo_root=repo_root or str(p.parent),
                     )
                 )
                 chunks_added = int(out.get("chunks_added", 0) or 0)
@@ -438,6 +518,9 @@ def rag_promote_paths(
                         overlap=overlap,
                         max_files=remaining,
                         exclude=exclude,
+                        repo_id=repo_id,
+                        repo_name=repo_name,
+                        repo_root=repo_root or str(p),
                     )
                 )
                 files_processed = int(out.get("files_processed", 0) or 0)

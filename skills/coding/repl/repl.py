@@ -25,10 +25,32 @@ __skill__ = {
         "a normal shell or standalone Python command is clearer and stateless execution is fine"
     ],
     "next_skills": ["shell", "quality"],
+    "preferred_sequence": ["repl_exec", "repl_eval", "repl_state"],
+    "entry_criteria": [
+        "You need a fast, stateful Python experiment inside the current session.",
+        "The cost of spawning a fresh subprocess repeatedly would slow iteration.",
+    ],
+    "decision_rules": [
+        "Use repl_exec for statements and repl_eval for single expressions.",
+        "Keep experiments small and promote validated logic into code or tests once it proves useful.",
+        "Use run_python instead when environment isolation matters more than retained state.",
+    ],
     "workflow": [
         "Use REPL for tight feedback loops and stateful experimentation.",
         "Keep experiments small and explicit.",
         "Promote validated logic into real code or tests rather than leaving it only in REPL state.",
+    ],
+    "failure_recovery": [
+        "If the namespace gets messy or misleading, use repl_reset and rerun only the needed setup.",
+        "If imports or environment assumptions matter, move the experiment to run_python or shell instead.",
+    ],
+    "exit_criteria": [
+        "The experiment has answered the runtime question clearly.",
+        "Any useful result is ready to be translated into a real code change, test, or command.",
+    ],
+    "anti_patterns": [
+        "Leaving important logic only in REPL state with no follow-up code or test.",
+        "Using the REPL when a clean subprocess would be safer and easier to reproduce.",
     ],
 }
 

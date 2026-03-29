@@ -10,17 +10,23 @@ from ..runtime import HAS_TOON, Tool, ToolCall, encode
 class RegistryExecutionMixin:
     """ToolRegistry mixin."""
 
-    def _prepare_execute_tool(self, call: ToolCall) -> tuple[Tool | None, str | None]:
+    def _prepare_execute_tool(
+        self,
+        call: ToolCall,
+        *,
+        record_stats: bool = True,
+    ) -> tuple[Tool | None, str | None]:
         tool = self.get(call.name)
         if not tool:
             self._log.error("Tool not found: %s", call.name)
             suggestions = self._suggest_tool_names(call.name, max_items=5)
-            self._record_tool_execution(
-                tool_name=call.name,
-                duration_s=0.0,
-                ok=False,
-                error="tool not found",
-            )
+            if record_stats:
+                self._record_tool_execution(
+                    tool_name=call.name,
+                    duration_s=0.0,
+                    ok=False,
+                    error="tool not found",
+                )
             return None, self._tool_error_payload(
                 call.name,
                 f"Tool '{call.name}' is not registered.",
@@ -29,18 +35,40 @@ class RegistryExecutionMixin:
             )
 
         if self._execution_globals.get("ctx", None) is None:
-            self._record_tool_execution(
-                tool_name=call.name,
-                duration_s=0.0,
-                ok=False,
-                error="context missing",
-            )
+            if record_stats:
+                self._record_tool_execution(
+                    tool_name=call.name,
+                    duration_s=0.0,
+                    ok=False,
+                    error="context missing",
+                )
             return None, self._tool_error_payload(
                 call.name,
                 "ctx is None (Context not injected into ToolRegistry._execution_globals).",
                 error_type="missing_context",
             )
         return tool, None
+
+    def prepare_call(self, call: ToolCall) -> tuple[ToolCall | None, str | None]:
+        tool, preflight_error = self._prepare_execute_tool(call, record_stats=False)
+        if preflight_error is not None:
+            return None, preflight_error
+        assert tool is not None
+
+        prepared_args, validation_error = self._prepare_tool_arguments(
+            tool, call.arguments
+        )
+        if validation_error is not None:
+            return None, validation_error
+
+        return (
+            ToolCall(
+                id=call.id,
+                name=call.name,
+                arguments=dict(prepared_args or {}),
+            ),
+            None,
+        )
 
     def _run_tool_execution(
         self,

@@ -88,6 +88,11 @@ class Context:
 
     anomaly_store: dict[str, list[int]] = field(default_factory=dict)
     anomaly_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
+    todo_items: list[dict[str, Any]] = field(default_factory=list)
+    mounted_paths: list[dict[str, Any]] = field(default_factory=list)
+    rag_docs: list[dict[str, Any]] = field(default_factory=list)
+    active_repos: list[dict[str, Any]] = field(default_factory=list)
+    retrieval_insights: list[dict[str, Any]] = field(default_factory=list)
 
     nf_best_model: str | None = None
     nf_cv_full: pd.DataFrame | None = None
@@ -114,6 +119,11 @@ class Context:
         self.freq_cache = None
         self.anomaly_store.clear()
         self.anomaly_meta.clear()
+        self.todo_items.clear()
+        self.mounted_paths.clear()
+        self.rag_docs.clear()
+        self.active_repos.clear()
+        self.retrieval_insights.clear()
         self.nf_best_model = None
         self.nf_cv_full = None
         self.nf_pred_col = None
@@ -166,6 +176,11 @@ class Context:
             "freq_cache": self.freq_cache,
             "anomaly_store": self._normalize_json_value(self.anomaly_store),
             "anomaly_meta": self._normalize_json_value(self.anomaly_meta),
+            "todo_items": self._normalize_json_value(self.todo_items),
+            "mounted_paths": self._normalize_json_value(self.mounted_paths),
+            "rag_docs": self._normalize_json_value(self.rag_docs),
+            "active_repos": self._normalize_json_value(self.active_repos),
+            "retrieval_insights": self._normalize_json_value(self.retrieval_insights),
             "nf_best_model": self.nf_best_model,
             "nf_cv_full": self._serialize_frame(self.nf_cv_full),
             "nf_pred_col": self.nf_pred_col,
@@ -187,6 +202,31 @@ class Context:
             for key, values in dict(state.get("anomaly_store") or {}).items()
         }
         self.anomaly_meta = dict(state.get("anomaly_meta") or {})
+        self.todo_items = [
+            dict(item)
+            for item in list(state.get("todo_items") or [])
+            if isinstance(item, dict)
+        ]
+        self.mounted_paths = [
+            dict(item)
+            for item in list(state.get("mounted_paths") or [])
+            if isinstance(item, dict)
+        ]
+        self.rag_docs = [
+            dict(item)
+            for item in list(state.get("rag_docs") or [])
+            if isinstance(item, dict)
+        ]
+        self.active_repos = [
+            dict(item)
+            for item in list(state.get("active_repos") or [])
+            if isinstance(item, dict)
+        ]
+        self.retrieval_insights = [
+            dict(item)
+            for item in list(state.get("retrieval_insights") or [])
+            if isinstance(item, dict)
+        ]
         self.nf_best_model = (
             str(state["nf_best_model"])
             if state.get("nf_best_model") is not None
@@ -290,6 +330,28 @@ class ToolParameter(BaseModel):
         return out or None
 
 
+class ToolRuntimeMetadata(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    read_only: bool | None = None
+    writes_files: bool | None = None
+    verifier: bool | None = None
+    cacheable: bool | None = None
+
+    @classmethod
+    def from_tool_meta(cls, meta: dict[str, Any] | None) -> ToolRuntimeMetadata:
+        payload = dict(meta or {})
+        runtime_raw = payload.get("runtime")
+        runtime = dict(runtime_raw) if isinstance(runtime_raw, dict) else {}
+        for key in ("read_only", "writes_files", "verifier", "cacheable"):
+            if key in payload and key not in runtime:
+                runtime[key] = payload[key]
+        return cls(**runtime)
+
+
 class Tool(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -305,6 +367,7 @@ class Tool(BaseModel):
     skill_id: str | None = None
     source_path: str | None = None
     skill_meta: dict[str, Any] | None = None
+    runtime: ToolRuntimeMetadata = Field(default_factory=lambda: ToolRuntimeMetadata())
 
     def __init__(self, *args: Any, **data: Any) -> None:
         if args:
@@ -316,6 +379,7 @@ class Tool(BaseModel):
                 "skill_id",
                 "source_path",
                 "skill_meta",
+                "runtime",
             )
             if len(args) > len(fields):
                 raise TypeError("Tool() received too many positional arguments")
@@ -345,6 +409,15 @@ class Tool(BaseModel):
         if not callable(value):
             raise TypeError("Tool function must be callable")
         return value
+
+    @field_validator("runtime", mode="before")
+    @classmethod
+    def _normalize_runtime(cls, value: Any) -> ToolRuntimeMetadata:
+        if isinstance(value, ToolRuntimeMetadata):
+            return value
+        if isinstance(value, dict):
+            return ToolRuntimeMetadata(**value)
+        return ToolRuntimeMetadata()
 
     def __repr__(self) -> str:
         return (
@@ -397,6 +470,7 @@ __all__ = [
     "SkillSelection",
     "Tool",
     "ToolCall",
+    "ToolRuntimeMetadata",
     "ToolParameter",
     "_safe_json_fallback",
     "check_optional_deps",

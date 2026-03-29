@@ -14,7 +14,7 @@ from typing import Any, Callable, Literal, Sequence, get_args, get_origin
 from ...mcp.client import MCPClient, MCPToolDef
 from .catalog import ToolSection
 from .types import _BuiltinToolDefinition
-from ..runtime import Tool, ToolParameter, _safe_json_fallback
+from ..runtime import Tool, ToolParameter, ToolRuntimeMetadata, _safe_json_fallback
 
 
 class RegistryLoadingMixin:
@@ -365,7 +365,10 @@ class RegistryLoadingMixin:
                 tool_fn,
                 base_description=description,
             )
-            params = self._parameters_from_signature(tool_fn)
+            params = self._parameters_from_signature(
+                tool_fn,
+                parameter_overrides=meta.get("parameters"),
+            )
             wrapped = self._wrap_tool_function(tool_fn, tool_name)
             self._tools[tool_name] = Tool(
                 name=tool_name,
@@ -375,8 +378,14 @@ class RegistryLoadingMixin:
                 skill_id=skill_id,
                 source_path=str(module_path),
                 skill_meta=dict(skill_meta or {}),
+                runtime=ToolRuntimeMetadata.from_tool_meta(meta),
             )
-            self._catalog.tool_docs[tool_name] = inspect.getdoc(tool_fn) or description
+            doc_override = str(meta.get("doc") or "").strip()
+            self._catalog.tool_docs[tool_name] = (
+                doc_override
+                or inspect.getdoc(tool_fn)
+                or description
+            )
             self._log.info("✓ Loaded Python tool: %s (%s)", tool_name, module_path)
             registered += 1
         return registered
@@ -548,9 +557,12 @@ class RegistryLoadingMixin:
     def _parameters_from_signature(
         self,
         func: Callable[..., Any],
+        *,
+        parameter_overrides: dict[str, Any] | None = None,
     ) -> list[ToolParameter]:
         sig = inspect.signature(func)
         out: list[ToolParameter] = []
+        overrides = parameter_overrides if isinstance(parameter_overrides, dict) else {}
         for p in sig.parameters.values():
             if p.kind in (
                 inspect.Parameter.VAR_POSITIONAL,
@@ -566,12 +578,18 @@ class RegistryLoadingMixin:
             elif p.default is not inspect._empty and p.default is not None:
                 ptype = self._annotation_to_type_name(type(p.default))
             required = p.default is inspect._empty
-            description = self._default_parameter_description(
-                name=p.name,
-                ptype=ptype,
-                required=required,
-                default=p.default,
-            )
+            override = overrides.get(p.name)
+            if isinstance(override, dict) and str(override.get("description", "")).strip():
+                description = str(override.get("description")).strip()
+            elif isinstance(override, str) and override.strip():
+                description = override.strip()
+            else:
+                description = self._default_parameter_description(
+                    name=p.name,
+                    ptype=ptype,
+                    required=required,
+                    default=p.default,
+                )
             out.append(
                 ToolParameter(
                     name=p.name,

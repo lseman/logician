@@ -10,6 +10,20 @@ from ..tools.runtime import ToolCall
 
 
 @dataclass
+class ToolResultRecord:
+    call_id: str
+    tool_name: str
+    status: str
+    output: str = ""
+    error: str | None = None
+    read_only: bool = False
+    writes_files: bool = False
+    verifier: bool = False
+    cache_hit: bool = False
+    has_content: bool = False
+
+
+@dataclass
 class TurnState:
     turn_id: str
 
@@ -24,8 +38,14 @@ class TurnState:
     seen_signatures: dict[str, int] = field(default_factory=dict)
     # Paths of files written/edited this turn
     files_written: list[str] = field(default_factory=list)
+    # Paths whose contents were inspected this turn via file/symbol reads.
+    files_read: list[str] = field(default_factory=list)
+    # Structured results for executed tools this turn.
+    tool_results: list[ToolResultRecord] = field(default_factory=list)
     # Domain groups activated for this turn
     domain_groups_activated: set[str] = field(default_factory=set)
+    # Tool names available to the current turn (used by prompt components / guards).
+    available_tool_names: set[str] = field(default_factory=set)
 
     # Guardrail state: guard_name → nudge count
     guardrail_nudges: dict[str, int] = field(default_factory=dict)
@@ -49,6 +69,7 @@ class TurnState:
 
     # Confidence gate retry count for the current turn.
     confidence_retries: int = 0
+    tool_repair_attempts: int = 0
 
     def tool_signature(self, call: ToolCall) -> str:
         """Stable hash for a tool call — used by DuplicateToolGuard."""
@@ -72,6 +93,14 @@ class TurnState:
         if path not in self.files_written:
             self.files_written.append(path)
 
+    def record_read(self, path: str) -> None:
+        """Record that a file was inspected/read."""
+        if path not in self.files_read:
+            self.files_read.append(path)
+
+    def record_tool_result(self, result: ToolResultRecord) -> None:
+        self.tool_results.append(result)
+
     def last_write_index(self) -> int:
         """Index in tool_calls of the most recent write tool call. -1 if none."""
         write_names = {
@@ -82,5 +111,11 @@ class TurnState:
         }
         for i in range(len(self.tool_calls) - 1, -1, -1):
             if self.tool_calls[i].name in write_names:
+                return i
+        return -1
+
+    def last_write_result_index(self) -> int:
+        for i in range(len(self.tool_results) - 1, -1, -1):
+            if self.tool_results[i].writes_files:
                 return i
         return -1

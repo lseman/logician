@@ -8,7 +8,7 @@ import pytest
 
 from src.agent.dispatcher import DispatchResult, ToolDispatcher, _READ_ONLY_TOOLS
 from src.agent.state import TurnState
-from src.tools.runtime import ToolCall
+from src.tools.runtime import Tool, ToolCall
 
 
 # ---------------------------------------------------------------------------
@@ -18,16 +18,25 @@ from src.tools.runtime import ToolCall
 class FakeRegistry:
     """Minimal ToolRegistry substitute that returns a fixed string."""
 
-    def __init__(self, return_value: str = "ok", raise_on: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        return_value: str = "ok",
+        raise_on: set[str] | None = None,
+        tools: dict[str, Tool] | None = None,
+    ) -> None:
         self._return_value = return_value
         self._raise_on: set[str] = raise_on or set()
         self.calls: list[ToolCall] = []
+        self._tools = tools or {}
 
     def execute(self, call: ToolCall, use_toon: bool = True) -> str:
         self.calls.append(call)
         if call.name in self._raise_on:
             raise RuntimeError(f"simulated failure for {call.name}")
         return self._return_value
+
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
 
 
 def make_state(turn_id: str = "test-turn") -> TurnState:
@@ -182,3 +191,42 @@ def test_mixed_read_and_write_calls():
     assert state.consecutive_tool_count == 2
     assert "/w.py" in state.files_written
     assert "/r.py" not in state.files_written
+
+
+def test_metadata_can_mark_unknown_tool_as_read_only_and_cacheable():
+    tool = Tool(
+        name="custom_lookup",
+        description="Lookup metadata-backed content",
+        parameters=[],
+        function=lambda: "ok",
+        runtime={"read_only": True, "cacheable": True},
+    )
+    reg = FakeRegistry(return_value='{"status":"ok","content":"value"}', tools={"custom_lookup": tool})
+    dispatcher = ToolDispatcher(reg)
+    state = make_state()
+    call = make_call("custom_lookup", {"query": "abc"})
+
+    first = asyncio.run(dispatcher.dispatch([call], state))
+    second = asyncio.run(dispatcher.dispatch([call], make_state("test-turn-2")))
+
+    assert first[0].read_only
+    assert second[0].cache_hit
+
+
+def test_metadata_marks_verifier_in_state_results():
+    tool = Tool(
+        name="quality_gate",
+        description="Run checks",
+        parameters=[],
+        function=lambda: "ok",
+        runtime={"verifier": True, "read_only": True, "cacheable": False},
+    )
+    reg = FakeRegistry(return_value='{"status":"ok","content":"passed"}', tools={"quality_gate": tool})
+    dispatcher = ToolDispatcher(reg)
+    state = make_state()
+
+    asyncio.run(dispatcher.dispatch([make_call("quality_gate")], state))
+
+    assert state.tool_results
+    assert state.tool_results[0].verifier is True
+    assert state.tool_results[0].has_content is True

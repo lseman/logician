@@ -35,10 +35,32 @@ __skill__ = {
         "the task is only one file or is primarily search-driven pattern replacement"
     ],
     "next_skills": ["quality", "git"],
+    "preferred_sequence": ["explore", "multi_edit", "quality", "git"],
+    "entry_criteria": [
+        "Several files or several exact replacements must change together.",
+        "The edit set is already known well enough to batch safely.",
+    ],
+    "decision_rules": [
+        "Use multi_edit when consistency across files matters more than interactive one-by-one editing.",
+        "Keep each replacement exact and unique inside its file.",
+        "If the change is pattern-driven across an uncertain file set, prefer search_replace first.",
+    ],
     "workflow": [
         "Identify the full file set before editing.",
         "Apply consistent edits in one batch when possible.",
         "Run quality or targeted checks immediately after the multi-file change.",
+    ],
+    "failure_recovery": [
+        "If one replacement is not unique, re-read that file and add more surrounding context to old_string.",
+        "If the file set is still changing as you inspect the repo, stop batching and switch back to exploration.",
+    ],
+    "exit_criteria": [
+        "All coordinated replacements are applied or the remaining failures are clearly isolated.",
+        "A targeted verification step has been selected for the touched files.",
+    ],
+    "anti_patterns": [
+        "Using multi_edit before confirming the full affected file set.",
+        "Batching broad regex-style refactors that would be safer with scoped search_replace tools.",
     ],
 }
 

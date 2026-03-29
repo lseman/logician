@@ -7,7 +7,7 @@ use clap::Parser;
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, EventStream, MouseEventKind,
+        Event, EventStream, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -85,16 +85,18 @@ enum CmdResult {
 async fn main() -> Result<()> {
     // Parse CLI arguments with clap
     let args = Args::parse();
-    
+
     // Resolve bridge command and script
-    let bridge_cmd = args.python_cmd
+    let bridge_cmd = args
+        .python_cmd
         .or_else(|| std::env::var("PYTHON").ok())
         .unwrap_or_else(|| "python3".into());
-    
-    let bridge_script = args.bridge_script
+
+    let bridge_script = args
+        .bridge_script
         .or_else(|| std::env::var("LOGICIAN_BRIDGE_SCRIPT").ok())
         .unwrap_or_else(resolve_default_bridge_script);
-    
+
     // Terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -108,7 +110,12 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
-    let result = run(&mut terminal, &bridge_cmd, std::slice::from_ref(&bridge_script)).await;
+    let result = run(
+        &mut terminal,
+        &bridge_cmd,
+        std::slice::from_ref(&bridge_script),
+    )
+    .await;
 
     // Restore terminal
     disable_raw_mode()?;
@@ -200,6 +207,7 @@ async fn run_loop(
 ) -> Result<()> {
     let mut crossterm_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
+    let mut active_task: Option<tokio::task::AbortHandle> = None;
 
     loop {
         // Draw
@@ -220,6 +228,8 @@ async fn run_loop(
 
             // ── Command results ───────────────────────────────────────────────
             Some(cr) = cmd_rx.recv() => {
+                // Task completed — clear the abort handle
+                active_task = None;
                 match cr {
                     CmdResult::Chat(r)  => app.handle_chat_result(r),
                     CmdResult::Slash(r) => app.handle_slash_result(r),
@@ -238,6 +248,18 @@ async fn run_loop(
                     Event::Key(key) => {
                         match app.handle_key(key) {
                             KeyAction::Quit => break,
+                            KeyAction::Interrupt => {
+                                // Abort the in-flight tokio task (drops the oneshot receiver)
+                                if let Some(handle) = active_task.take() {
+                                    handle.abort();
+                                }
+                                // Best-effort cancel notification to Python bridge
+                                if let Some(b) = &bridge {
+                                    let b = b.clone();
+                                    tokio::spawn(async move { b.send_cancel().await });
+                                }
+                                app.handle_interrupt();
+                            }
                             KeyAction::Submit(mut text) => {
                                 let trimmed = text.trim();
                                 if trimmed == "/mount" || trimmed == "/mount-code" {
@@ -297,7 +319,7 @@ async fn run_loop(
                                 }
 
                                 if let Some(b) = &bridge {
-                                    dispatch_command(b.clone(), text, cmd_tx.clone());
+                                    active_task = dispatch_command(b.clone(), text, cmd_tx.clone());
                                 } else {
                                     app.add_system_message("No bridge connected.");
                                     app.handle_chat_result(Err(anyhow::anyhow!("no bridge")));
@@ -306,6 +328,8 @@ async fn run_loop(
                             KeyAction::ToggleTrace => app.toggle_trace(),
                             KeyAction::ToggleRawStream => app.toggle_raw_stream(),
                             KeyAction::ToggleTasks => app.toggle_todo(),
+                            KeyAction::ToggleContextExplorer => app.toggle_context_explorer(),
+                            KeyAction::ToggleToolOutput => app.toggle_tool_output(),
                             KeyAction::None => {}
                         }
                     }
@@ -313,8 +337,15 @@ async fn run_loop(
                         app.handle_paste(&text);
                     }
                     Event::Mouse(mouse) => match mouse.kind {
-                        MouseEventKind::ScrollUp => app.scroll_up(3),
-                        MouseEventKind::ScrollDown => app.scroll_down(3),
+                        MouseEventKind::ScrollUp => {
+                            app.handle_mouse_scroll(mouse.column, mouse.row, true)
+                        }
+                        MouseEventKind::ScrollDown => {
+                            app.handle_mouse_scroll(mouse.column, mouse.row, false)
+                        }
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            app.handle_mouse_click(mouse.column, mouse.row)
+                        }
                         _ => {}
                     }
                     Event::Resize(_, _) => {
@@ -335,15 +366,19 @@ async fn run_loop(
 
 // ── Dispatch a submit to the bridge ──────────────────────────────────────────
 
-fn dispatch_command(bridge: PythonBridge, text: String, tx: mpsc::UnboundedSender<CmdResult>) {
+/// Returns an AbortHandle for long-running bridge calls, or None for immediate
+/// local dispatches (/quit, /status) that don't spawn a background task.
+fn dispatch_command(
+    bridge: PythonBridge,
+    text: String,
+    tx: mpsc::UnboundedSender<CmdResult>,
+) -> Option<tokio::task::AbortHandle> {
     if text.starts_with('/') {
         let lower = text.to_lowercase();
-        // These are handled locally in app.handle_key → app.handle_local_slash
-        // but /status and bridge commands reach here.
         let cmd = lower.trim();
 
         if cmd == "/status" {
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let result = bridge.call("state", serde_json::json!({})).await;
                 let _ = tx.send(CmdResult::Slash(result.map(|v| {
                     serde_json::json!({
@@ -352,7 +387,7 @@ fn dispatch_command(bridge: PythonBridge, text: String, tx: mpsc::UnboundedSende
                     })
                 })));
             });
-            return;
+            return Some(handle.abort_handle());
         }
 
         if cmd == "/quit" || cmd == "/exit" {
@@ -361,10 +396,10 @@ fn dispatch_command(bridge: PythonBridge, text: String, tx: mpsc::UnboundedSende
                 "state": {},
                 "exit": true,
             }))));
-            return;
+            return None;
         }
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let result = bridge
                 .call(
                     "slash",
@@ -376,12 +411,14 @@ fn dispatch_command(bridge: PythonBridge, text: String, tx: mpsc::UnboundedSende
                 .await;
             let _ = tx.send(CmdResult::Slash(result));
         });
+        Some(handle.abort_handle())
     } else {
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let result = bridge
                 .call("chat", serde_json::json!({"message": text}))
                 .await;
             let _ = tx.send(CmdResult::Chat(result));
         });
+        Some(handle.abort_handle())
     }
 }

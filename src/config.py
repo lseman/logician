@@ -38,7 +38,13 @@ class ThinkingConfig:
 @dataclass
 class Config:
     # Core
-    llama_cpp_url: str = "http://localhost:8080"
+    llama_cpp_url: str = field(
+        default_factory=lambda: (
+            os.getenv("LOGICIAN_LLM_URL")
+            or os.getenv("LLAMA_CPP_URL")
+            or "http://localhost:8080"
+        )
+    )
     timeout: float = 120.0
     temperature: float = 0.7
     max_tokens: int = 1024
@@ -134,15 +140,22 @@ class Config:
     rag_query_cache_enabled: bool = True
     rag_query_cache_ttl_sec: int = 90
     rag_query_cache_max_entries: int = 256
+    prompt_rag_context_enabled: bool = True
+    prompt_rag_context_max_results: int = 4
+    prompt_rag_context_neighbor_results: int = 2
+    prompt_rag_context_max_chars: int = 2200
     # HNSW query/index knobs (affect speed/quality trade-off).
     rag_hnsw_ef_search: int = 128
     rag_hnsw_m: int = 16
     rag_hnsw_ef_construction: int = 200
+    # When False, persist chat history immediately but defer vector indexing
+    # until semantic retrieval is actually requested.
+    message_vector_index_on_write: bool = False
 
     # Conversation context
     history_limit: int = 18
     history_recent_tail: int = 8
-    tool_result_max_chars: int = 6000
+    tool_result_max_chars: int = 0
     assistant_ctx_max_chars: int = 12000
     trace_context_max_messages: int = 8
     trace_context_max_chars: int = 500
@@ -174,8 +187,9 @@ class Config:
     )
 
     # Tools
-    use_toon_for_tools: bool = True
+    use_toon_for_tools: bool = False
     tool_schema_mode: Literal["rich", "compact", "json_schema"] = "rich"
+    strict_tool_call_parsing: bool = True
     enable_skill_routing: bool = True
     dynamic_skill_routing: bool = True
     skill_top_k: int = 3
@@ -205,7 +219,11 @@ class Config:
 
     # Constrained decoding: use OpenAI function-calling protocol (use_chat_api=True only)
     # llama.cpp will enforce the grammar server-side, eliminating malformed tool-call parses.
-    constrained_decoding: bool = False
+    constrained_decoding: bool = True
+    tool_call_repair_enabled: bool = True
+    tool_call_repair_max_attempts: int = 1
+    workflow_guard_enabled: bool = True
+    python_structural_editing_preference: bool = True
 
     # Tool result cache: per-Agent in-memory cache of read-only tool results across turns.
     # Tools whose names contain any entry in tool_cache_write_patterns are never cached.

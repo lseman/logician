@@ -1,4 +1,4 @@
-"""Advanced search, chunked reading, and safe multi-file replace tools.
+"""Advanced search, chunked reading, and safe multi-file replace tools with intelligent capabilities.
 
 Complements the existing rg_search / fd_find / edit_file_replace with:
   find_path         -- find-like path discovery wrapper over fd_find
@@ -10,6 +10,8 @@ Complements the existing rg_search / fd_find / edit_file_replace with:
   regex_replace     -- safe Python regex replace in a file, with preview
   show_diff         -- diff two files or a file vs proposed string
   count_in_file     -- count lines / bytes / matches in files quickly
+  smart_multi_edit  -- intelligent multi-file editing with conflict detection and preview
+  rg_multiline      -- multiline pattern search across files
 """
 from __future__ import annotations
 
@@ -32,6 +34,7 @@ from ._search_replace_helpers import (
     resolve_path as _resolve_path,
     run_subprocess as _run_subprocess,
     unified_diff_text as _unified_diff_text,
+    smart_multi_edit,
 )
 
 __skill__ = {
@@ -53,10 +56,32 @@ __skill__ = {
         "the change is one file, one block, or needs semantic symbol inspection first"
     ],
     "next_skills": ["quality", "git"],
+    "preferred_sequence": ["find_path", "find_in_file", "rg_replace", "quality"],
+    "entry_criteria": [
+        "The change is pattern-driven, repeated, or scoped by filename/path rules.",
+        "You know the transform shape better than the exact concrete file list.",
+    ],
+    "decision_rules": [
+        "Define file scope before changing text.",
+        "Prefer preview-capable tools when the pattern is broad, regex-based, or touches many files.",
+        "For Python symbol-aware refactors, prefer structural tools before regex or textual rewrites.",
+    ],
     "workflow": [
         "Define the file scope before replacing.",
         "Preview replacements when the pattern is broad or regex-based.",
         "Validate the result with targeted checks.",
+    ],
+    "failure_recovery": [
+        "If results are too broad, narrow by directory, extension, or additional search constraints before writing.",
+        "If replacements look ambiguous, preview diffs and fall back to local exact edits for risky files.",
+    ],
+    "exit_criteria": [
+        "The replacement scope is explicit and the changed files are reviewable.",
+        "Follow-up validation is ready for the files or call sites affected.",
+    ],
+    "anti_patterns": [
+        "Running repo-wide replacement before proving the match scope.",
+        "Using regex replacement for a one-off local edit that exact tools can handle more safely.",
     ],
 }
 
@@ -930,4 +955,4 @@ def rg_multiline(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-__tools__ = [find_path, find_in_file, sed_read, read_file_smart, regex_replace, sed_replace, rg_replace, show_diff, count_in_file, rg_multiline]
+__tools__ = [find_path, find_in_file, sed_read, read_file_smart, regex_replace, sed_replace, rg_replace, show_diff, count_in_file, rg_multiline, smart_multi_edit]

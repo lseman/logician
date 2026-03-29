@@ -6,6 +6,25 @@ from typing import Any, Literal, Sequence
 from .types import _OpenAIToolSchema
 from ..runtime import Tool
 
+_DEFAULT_PROMPT_TOOL_NAMES: tuple[str, ...] = (
+    "invoke_skill",
+    "describe_tool",
+    "search_tools",
+    "think",
+    "todo",
+    "list_dir",
+    "read_file",
+    "rg_search",
+    "write_file",
+    "edit_file",
+    "multi_edit",
+    "apply_edit_block",
+    "run_shell",
+    "run_python",
+    "git_status",
+    "git_diff",
+)
+
 
 class RegistryPromptingMixin:
     """ToolRegistry mixin."""
@@ -22,6 +41,17 @@ class RegistryPromptingMixin:
             if tool is None or tool.name in seen:
                 continue
             out.append(tool)
+            seen.add(tool.name)
+        return out
+
+    def default_prompt_tool_names(self) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for tool_name in _DEFAULT_PROMPT_TOOL_NAMES:
+            tool = self._tools.get(tool_name)
+            if tool is None or tool.name in seen:
+                continue
+            out.append(tool.name)
             seen.add(tool.name)
         return out
 

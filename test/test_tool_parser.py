@@ -196,6 +196,28 @@ cat rust-cli/src/main.rs
         self.assertIn("a.py", paths)
         self.assertIn("b.py", paths)
 
+    def test_strict_mode_parses_json_tool_call(self) -> None:
+        text = '{"tool_call":{"name":"read_file","arguments":{"path":"src/app.py"}}}'
+        calls = parse_tool_calls(text, use_toon=False, strict=True)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].name, "read_file")
+        self.assertEqual(calls[0].arguments, {"path": "src/app.py"})
+
+    def test_strict_mode_rejects_inline_toon_when_json_is_required(self) -> None:
+        text = "tool_call: name: read_file arguments: path: src/app.py"
+        calls = parse_tool_calls(text, use_toon=False, strict=True)
+        self.assertEqual(calls, [])
+
+    def test_strict_mode_rejects_shell_fence_tool_salvage(self) -> None:
+        text = """I will execute this now.
+
+```bash
+ls -la src
+```
+"""
+        calls = parse_tool_calls(text, use_toon=False, strict=True)
+        self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

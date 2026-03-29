@@ -2,9 +2,163 @@ use pulldown_cmark::{CodeBlockKind, Event as MdEvent, Options, Parser, Tag, TagE
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value as JsonValue;
+use std::{path::Path, sync::OnceLock};
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Color as SyntectColor, FontStyle, Style as SyntectStyle, Theme, ThemeSet},
+    parsing::{SyntaxReference, SyntaxSet},
+};
 
 const MAX_RENDER_CODE_LINES: usize = 160;
 const MAX_RENDER_CODE_CHARS: usize = 12_000;
+const DEFAULT_SYNTAX_THEME: &str = "base16-ocean.dark";
+const SYNTAX_THEME_ENV: &str = "LOGICIAN_SYNTAX_THEME";
+
+struct SyntaxAssets {
+    syntax_set: SyntaxSet,
+    theme_set: ThemeSet,
+}
+
+static SYNTAX_ASSETS: OnceLock<SyntaxAssets> = OnceLock::new();
+
+fn syntax_assets() -> &'static SyntaxAssets {
+    SYNTAX_ASSETS.get_or_init(|| SyntaxAssets {
+        syntax_set: SyntaxSet::load_defaults_newlines(),
+        theme_set: ThemeSet::load_defaults(),
+    })
+}
+
+fn active_theme() -> &'static Theme {
+    let assets = syntax_assets();
+
+    if let Ok(requested) = std::env::var(SYNTAX_THEME_ENV) {
+        if let Some(theme) = assets.theme_set.themes.get(&requested) {
+            return theme;
+        }
+        if let Some((_, theme)) = assets
+            .theme_set
+            .themes
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&requested))
+        {
+            return theme;
+        }
+    }
+
+    assets
+        .theme_set
+        .themes
+        .get(DEFAULT_SYNTAX_THEME)
+        .or_else(|| assets.theme_set.themes.values().next())
+        .expect("syntect theme set should not be empty")
+}
+
+fn syntect_color_to_ratatui(color: SyntectColor) -> Color {
+    Color::Rgb(color.r, color.g, color.b)
+}
+
+fn ratatui_style_from_syntect(style: SyntectStyle) -> Style {
+    let mut out = Style::default().fg(syntect_color_to_ratatui(style.foreground));
+
+    if style.font_style.contains(FontStyle::BOLD) {
+        out = out.add_modifier(Modifier::BOLD);
+    }
+    if style.font_style.contains(FontStyle::ITALIC) {
+        out = out.add_modifier(Modifier::ITALIC);
+    }
+    if style.font_style.contains(FontStyle::UNDERLINE) {
+        out = out.add_modifier(Modifier::UNDERLINED);
+    }
+
+    out
+}
+
+fn code_theme_background() -> Option<Color> {
+    None
+}
+
+fn code_fence_token(lang: &str) -> &str {
+    lang.trim()
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | '{' | '(' | '['))
+        .next()
+        .unwrap_or("")
+        .trim_matches('.')
+}
+
+fn syntax_for_code_fence<'a>(lang: &str, assets: &'a SyntaxAssets) -> &'a SyntaxReference {
+    let token = code_fence_token(lang);
+    if token.is_empty() {
+        return assets.syntax_set.find_syntax_plain_text();
+    }
+
+    assets
+        .syntax_set
+        .find_syntax_by_token(token)
+        .or_else(|| assets.syntax_set.find_syntax_by_name(token))
+        .unwrap_or_else(|| assets.syntax_set.find_syntax_plain_text())
+}
+
+fn syntax_for_path<'a>(path: &str, assets: &'a SyntaxAssets) -> &'a SyntaxReference {
+    let path = Path::new(path);
+
+    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+        if let Some(syntax) = assets.syntax_set.find_syntax_by_name(file_name) {
+            return syntax;
+        }
+        if let Some(syntax) = assets.syntax_set.find_syntax_by_extension(file_name) {
+            return syntax;
+        }
+        if let Some((_, ext)) = file_name.rsplit_once('.') {
+            if let Some(syntax) = assets.syntax_set.find_syntax_by_extension(ext) {
+                return syntax;
+            }
+        }
+    }
+
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        if let Some(syntax) = assets.syntax_set.find_syntax_by_extension(ext) {
+            return syntax;
+        }
+    }
+
+    assets.syntax_set.find_syntax_plain_text()
+}
+
+fn highlight_spans_for_line(
+    highlighter: &mut HighlightLines<'_>,
+    line: &str,
+    line_bg: Option<Color>,
+) -> Vec<Span<'static>> {
+    if line.is_empty() {
+        return match line_bg {
+            Some(bg) => vec![Span::styled(" ".to_string(), Style::default().bg(bg))],
+            None => vec![Span::raw("")],
+        };
+    }
+
+    let assets = syntax_assets();
+    let ranges = match highlighter.highlight_line(line, &assets.syntax_set) {
+        Ok(ranges) => ranges,
+        Err(_) => {
+            let mut fallback = Style::default().fg(Color::White);
+            if let Some(bg) = line_bg {
+                fallback = fallback.bg(bg);
+            }
+            return vec![Span::styled(line.to_string(), fallback)];
+        }
+    };
+
+    ranges
+        .into_iter()
+        .map(|(style, text)| {
+            let mut style = ratatui_style_from_syntect(style);
+            if let Some(bg) = line_bg {
+                style = style.bg(bg);
+            }
+            Span::styled(text.to_string(), style)
+        })
+        .collect()
+}
 
 // ── think-tag pre-processing ──────────────────────────────────────────────────
 
@@ -64,6 +218,20 @@ fn split_think(text: &str) -> Vec<Segment> {
         });
     }
     segs
+}
+
+pub fn strip_think_blocks(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    for seg in split_think(text) {
+        if !seg.in_think {
+            out.push_str(&seg.text);
+        }
+    }
+    out.trim().to_string()
 }
 
 fn maybe_pretty_json_payload(text: &str) -> Option<String> {
@@ -136,6 +304,60 @@ fn normalize_raw_json_blocks(text: &str) -> String {
                 out.push("```".to_string());
                 continue;
             }
+        }
+
+        out.push(line.to_string());
+    }
+
+    let mut rendered = out.join("\n");
+    if text.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered
+}
+
+fn split_backtick_fence(line: &str) -> Option<(&str, &str, &str)> {
+    let trimmed = line.trim_start();
+    let indent_len = line.len().saturating_sub(trimmed.len());
+    let indent = &line[..indent_len];
+    let tick_count = trimmed.chars().take_while(|&ch| ch == '`').count();
+    if tick_count < 3 {
+        return None;
+    }
+    let fence = &trimmed[..tick_count];
+    let suffix = &trimmed[tick_count..];
+    Some((indent, fence, suffix))
+}
+
+fn normalize_broken_code_fences(text: &str) -> String {
+    if text.trim().is_empty() {
+        return text.to_string();
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut in_code_fence = false;
+
+    for line in text.lines() {
+        if let Some((indent, fence, suffix)) = split_backtick_fence(line) {
+            if in_code_fence {
+                if suffix.trim().is_empty() {
+                    out.push(line.to_string());
+                } else {
+                    // Repair malformed closing fences like:
+                    // ```The user asked...
+                    // into:
+                    // ```
+                    // The user asked...
+                    out.push(format!("{indent}{fence}"));
+                    out.push(format!("{indent}{}", suffix.trim_start()));
+                }
+                in_code_fence = false;
+                continue;
+            }
+
+            out.push(line.to_string());
+            in_code_fence = true;
+            continue;
         }
 
         out.push(line.to_string());
@@ -318,6 +540,15 @@ impl MdRenderer {
     fn render_code_block(&mut self) {
         let lang = std::mem::take(&mut self.code_lang);
         let lines: Vec<String> = std::mem::take(&mut self.code_buf);
+        let assets = syntax_assets();
+        let theme = active_theme();
+        let syntax = syntax_for_code_fence(&lang, assets);
+        let mut highlighter = HighlightLines::new(syntax, theme);
+        let code_bg = code_theme_background();
+        let gutter_style = match code_bg {
+            Some(bg) => Style::default().fg(Color::DarkGray).bg(bg),
+            None => Style::default().fg(Color::DarkGray),
+        };
         // Remove trailing empty lines from the last "\n" in fence content
         let content_lines: Vec<&str> = {
             let all: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
@@ -331,12 +562,12 @@ impl MdRenderer {
         if !lang.is_empty() {
             self.out.push(Line::from(vec![Span::styled(
                 format!("  ╭─ {} ", lang),
-                Style::default().fg(Color::DarkGray),
+                gutter_style,
             )]));
         } else {
             self.out.push(Line::from(vec![Span::styled(
                 "  ╭──────────────────",
-                Style::default().fg(Color::DarkGray),
+                gutter_style,
             )]));
         }
 
@@ -365,14 +596,21 @@ impl MdRenderer {
         }
 
         for cl in &visible_lines {
-            self.out.push(Line::from(vec![
-                Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(cl.to_string(), Style::default().fg(Color::Cyan)),
-            ]));
+            let mut spans = vec![Span::styled("  │ ", gutter_style)];
+            if cl == "… [expand on demand]" {
+                let style = match code_bg {
+                    Some(bg) => Style::default().fg(Color::Yellow).bg(bg),
+                    None => Style::default().fg(Color::Yellow),
+                };
+                spans.push(Span::styled(cl.to_string(), style));
+            } else {
+                spans.extend(highlight_spans_for_line(&mut highlighter, cl, code_bg));
+            }
+            self.out.push(Line::from(spans));
         }
         self.out.push(Line::from(vec![Span::styled(
             "  ╰──────────────────",
-            Style::default().fg(Color::DarkGray),
+            gutter_style,
         )]));
     }
 
@@ -701,59 +939,203 @@ impl MdRenderer {
     }
 }
 
+fn diff_content_background(raw_line: &str) -> Option<Color> {
+    if raw_line.starts_with('+') {
+        Some(Color::Rgb(18, 48, 28))
+    } else if raw_line.starts_with('-') {
+        Some(Color::Rgb(56, 24, 24))
+    } else {
+        code_theme_background()
+    }
+}
+
+/// Render a unified diff with colored additions, deletions, and hunk headers.
+pub fn render_diff(path: &str, diff_text: &str) -> Vec<Line<'static>> {
+    use ratatui::style::Style;
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let assets = syntax_assets();
+    let theme = active_theme();
+    let syntax = syntax_for_path(path, assets);
+    let mut highlighter = HighlightLines::new(syntax, theme);
+
+    // Header
+    out.push(Line::from(vec![
+        Span::styled("diff: ", Style::default().fg(Color::White)),
+        Span::styled(path.to_string(), Style::default().fg(Color::Cyan)),
+    ]));
+    out.push(Line::from(Span::styled(
+        "─".repeat(60),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    if diff_text.trim().is_empty() {
+        out.push(Line::from(Span::styled(
+            "No textual diff available.",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+        out.push(Line::from(Span::styled(
+            "─".repeat(60),
+            Style::default().fg(Color::DarkGray),
+        )));
+        return out;
+    }
+
+    let all_lines: Vec<&str> = diff_text.lines().collect();
+
+    // Render lines (max 80 lines to avoid overcrowding)
+    const MAX_DIFF_LINES: usize = 80;
+    let total_lines = all_lines.len();
+    let render_limit = total_lines.min(MAX_DIFF_LINES);
+
+    for (idx, raw_line) in all_lines.into_iter().enumerate() {
+        if idx >= render_limit && idx < total_lines {
+            out.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "… [diff truncated in panel]",
+                    Style::default().fg(Color::Yellow),
+                ),
+            ]));
+            break;
+        }
+
+        if raw_line.starts_with("@@") {
+            out.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            continue;
+        }
+
+        if raw_line.starts_with("diff --git")
+            || raw_line.starts_with("index ")
+            || raw_line.starts_with("--- ")
+            || raw_line.starts_with("+++ ")
+        {
+            out.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+            continue;
+        }
+
+        if raw_line.starts_with("\\ No newline at end of file") {
+            out.push(Line::from(Span::styled(
+                raw_line.to_string(),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            continue;
+        }
+
+        let mut line_spans: Vec<Span<'static>> =
+            vec![Span::styled("  ", Style::default().fg(Color::DarkGray))];
+        let content_bg = diff_content_background(raw_line);
+
+        if let Some(content) = raw_line.strip_prefix('+') {
+            let mut style = Style::default().fg(Color::Green);
+            if let Some(bg) = content_bg {
+                style = style.bg(bg);
+            }
+            line_spans.push(Span::styled("+", style));
+            line_spans.extend(highlight_spans_for_line(
+                &mut highlighter,
+                content,
+                content_bg,
+            ));
+        } else if let Some(content) = raw_line.strip_prefix('-') {
+            let mut style = Style::default().fg(Color::Red);
+            if let Some(bg) = content_bg {
+                style = style.bg(bg);
+            }
+            line_spans.push(Span::styled("-", style));
+            line_spans.extend(highlight_spans_for_line(
+                &mut highlighter,
+                content,
+                content_bg,
+            ));
+        } else {
+            let mut style = Style::default().fg(Color::DarkGray);
+            if let Some(bg) = content_bg {
+                style = style.bg(bg);
+            }
+            line_spans.push(Span::styled(" ", style));
+            line_spans.extend(highlight_spans_for_line(
+                &mut highlighter,
+                raw_line,
+                content_bg,
+            ));
+        }
+
+        out.push(Line::from(line_spans));
+    }
+
+    // Footer
+    out.push(Line::from(Span::styled(
+        "─".repeat(60),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    out
+}
+
 /// Render finalized markdown to styled terminal lines.
-/// Think-tag content is rendered as italic magenta before the rest.
+/// Embedded think-tag content is omitted here and should be surfaced through the
+/// dedicated thinking stream instead.
 pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
-    if text.is_empty() {
+    let visible_text = strip_think_blocks(text);
+    if visible_text.is_empty() {
         return vec![];
     }
 
-    if let Some(pretty) = maybe_pretty_json_payload(text) {
+    if let Some(pretty) = maybe_pretty_json_payload(&visible_text) {
         let mut r = MdRenderer::new();
         r.process(&format!("```json\n{pretty}\n```"));
         return r.out;
     }
 
-    let segs = split_think(text);
     let mut all: Vec<Line<'static>> = Vec::new();
-
-    for seg in segs {
-        if seg.text.trim().is_empty() {
-            continue;
-        }
-
-        if seg.in_think {
-            // think sections: italic magenta, no markdown parsing
-            all.push(Line::from(vec![Span::styled(
-                "  ⟨thinking⟩",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::DIM),
-            )]));
-            for raw_line in seg.text.trim_matches('\n').split('\n') {
-                all.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(
-                        raw_line.to_string(),
-                        Style::default()
-                            .fg(Color::Magenta)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                ]));
-            }
-            all.push(Line::from(vec![Span::styled(
-                "  ⟨/thinking⟩",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::DIM),
-            )]));
-        } else {
-            let normalized = normalize_raw_json_blocks(&seg.text);
-            let mut r = MdRenderer::new();
-            r.process(&normalized);
-            all.extend(r.out);
-        }
-    }
+    let normalized = normalize_broken_code_fences(&normalize_raw_json_blocks(&visible_text));
+    let mut r = MdRenderer::new();
+    r.process(&normalized);
+    all.extend(r.out);
 
     all
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{code_fence_token, normalize_broken_code_fences, strip_think_blocks};
+
+    #[test]
+    fn repairs_trailing_prose_after_closing_fence() {
+        let input = "```\nHello\n```The user asked me to summarize.\n";
+        let expected = "```\nHello\n```\nThe user asked me to summarize.\n";
+        assert_eq!(normalize_broken_code_fences(input), expected);
+    }
+
+    #[test]
+    fn preserves_opening_fence_info_string() {
+        let input = "```python\nprint('hi')\n```\n";
+        assert_eq!(normalize_broken_code_fences(input), input);
+    }
+
+    #[test]
+    fn extracts_primary_fence_language_token() {
+        assert_eq!(code_fence_token("rust,no_run"), "rust");
+        assert_eq!(code_fence_token("python title=demo"), "python");
+        assert_eq!(code_fence_token(""), "");
+    }
+
+    #[test]
+    fn strips_think_blocks_from_visible_markdown() {
+        let input = "<think>plan\nhere</think>\n\nFinal answer.";
+        assert_eq!(strip_think_blocks(input), "Final answer.");
+    }
 }

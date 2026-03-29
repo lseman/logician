@@ -53,10 +53,32 @@ __skill__ = {
     ],
     "when_not_to_use": ["the exact file and edit location are already known"],
     "next_skills": ["file_ops", "edit_block", "multi_edit", "search_replace"],
+    "preferred_sequence": ["get_project_map", "find_symbol", "get_file_outline", "read_file"],
+    "entry_criteria": [
+        "The repo is unfamiliar or the edit target is still unclear.",
+        "The user names a symbol, behavior, or error, but not the exact file and line.",
+    ],
+    "decision_rules": [
+        "Start with a cheap map or search before opening long files.",
+        "Use structural inspection before deep reads when the file is large.",
+        "Once the target is clear, hand off quickly to the editing skill that fits the change.",
+    ],
     "workflow": [
         "Start here when the task touches unfamiliar code.",
         "Prefer narrow search first, broader map second.",
         "Hand off to file_ops, edit_block, or multi_edit once the target is clear.",
+    ],
+    "failure_recovery": [
+        "If search results are noisy, narrow by directory, extension, or symbol name.",
+        "If a file is too large to read directly, use outlines and focused search to reduce context first.",
+    ],
+    "exit_criteria": [
+        "A concrete target file, symbol, or call site has been identified.",
+        "The next editing or verification step is unambiguous.",
+    ],
+    "anti_patterns": [
+        "Reading large files end-to-end before trying outlines or symbol search.",
+        "Staying in exploration after the edit target is already known.",
     ],
 }
 

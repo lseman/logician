@@ -46,7 +46,6 @@ _TOOL_NAME_ALIASES: dict[str, str] = {
     # text search variants → core grep_files
     "grep": "grep_files",
     "search_text": "grep_files",
-    "search_file": "grep_files",
 }
 
 
@@ -56,14 +55,23 @@ def _normalize_tool_name(name: str) -> str:
     return canonical
 
 
-def parse_tool_calls(text: str, use_toon: bool) -> list[ToolCall]:
+def parse_tool_calls(
+    text: str,
+    use_toon: bool,
+    *,
+    strict: bool = False,
+) -> list[ToolCall]:
     calls: list[ToolCall] = []
+    calls.extend(_parse_json_tool_calls(text))
+
     if use_toon and HAS_TOON and decode is not None:
         calls.extend(_parse_toon_tool_calls(text))
-    calls.extend(_parse_inline_toon_tool_calls(text))
-    calls.extend(_parse_jinja_tool_calls(text))
-    calls.extend(_parse_json_tool_calls(text))
-    if not calls:
+
+    if not strict:
+        calls.extend(_parse_inline_toon_tool_calls(text))
+        calls.extend(_parse_jinja_tool_calls(text))
+
+    if not calls and not strict:
         calls.extend(_parse_shell_fence_tool_calls(text))
     # Normalize tool names through alias table
     for call in calls:
@@ -83,7 +91,7 @@ def parse_tool_calls(text: str, use_toon: bool) -> list[ToolCall]:
 
 
 def parse_tool_call_strict(text: str, use_toon: bool) -> ToolCall | None:
-    calls = parse_tool_calls(text, use_toon=use_toon)
+    calls = parse_tool_calls(text, use_toon=use_toon, strict=True)
     return calls[0] if calls else None
 
 
@@ -108,6 +116,17 @@ def _parse_tool_calls_from_object(data: object) -> list[ToolCall]:
             if isinstance(name, str) and isinstance(args, dict):
                 calls.append(_new_tool_call(name, args))
                 return calls
+
+    if "tool_calls" in data and isinstance(data["tool_calls"], list):
+        for call_data in data["tool_calls"]:
+            if not isinstance(call_data, dict):
+                continue
+            name = call_data.get("name")
+            args = call_data.get("arguments", {})
+            if isinstance(name, str) and isinstance(args, dict):
+                calls.append(_new_tool_call(name, args))
+        if calls:
+            return calls
 
     if "name" in data and "arguments" in data:
         name = data["name"]

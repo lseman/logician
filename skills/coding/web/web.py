@@ -25,10 +25,32 @@ __skill__ = {
         "the answer is already available in the repo or only local files need to be inspected"
     ],
     "next_skills": ["file_ops", "shell", "explore"],
+    "preferred_sequence": ["web_search", "fetch_url", "file_ops"],
+    "entry_criteria": [
+        "The task depends on external documentation, an exact URL, or current package reference material.",
+        "Local repo inspection is insufficient to answer the implementation question.",
+    ],
+    "decision_rules": [
+        "Prefer exact URLs when the source is already known.",
+        "Search first when the problem is broad and source selection matters.",
+        "Bring back only the technical facts needed for the next local edit or command.",
+    ],
     "workflow": [
         "Prefer exact URLs when the source is known.",
         "Use search when the problem is broad or source selection matters.",
         "Bring back only the relevant technical facts, then continue locally.",
+    ],
+    "failure_recovery": [
+        "If a page is noisy or badly rendered, switch to a better source or a richer web skill instead of over-trusting the extracted text.",
+        "If external docs conflict with the repo, verify the local code path before editing.",
+    ],
+    "exit_criteria": [
+        "The needed external fact has been reduced to a short actionable takeaway.",
+        "The task is ready to continue locally in file_ops, shell, or explore.",
+    ],
+    "anti_patterns": [
+        "Copying large chunks of documentation into context.",
+        "Using external docs when the repo already contains the answer.",
     ],
 }
 

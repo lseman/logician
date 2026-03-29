@@ -32,6 +32,8 @@ dependencies = [
 [project.scripts]
 logician-bridge = "logician_bridge:main"
 logician-messaging = "logician_messaging:main"
+logician-repo-ingest = "src.repo_ingest:main"
+logician-web = "apps.runners.web_ui:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,6 +44,10 @@ dev = [
     "ruff>=0.1.0",
     "black>=24.1.0",
     "pre-commit>=3.6.0",
+]
+web = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.30.0",
 ]
 
 [project.urls]

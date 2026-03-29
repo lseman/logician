@@ -159,6 +159,13 @@ class DocumentDB:
             return {"ids": [], "documents": [], "metadatas": []}
         return self.collection.peek(limit=limit, include=include)
 
+    def delete(self, *, where: dict[str, Any] | None = None) -> None:
+        """Delete indexed chunks matching an optional metadata filter."""
+        if not self.vector_enabled:
+            return
+        self.collection.delete(where=where)
+        self._query_cache.clear()
+
     @staticmethod
     def _tokenize_for_chunking(text: str) -> list[str]:
         return re.findall(r"\S+", text)

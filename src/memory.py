@@ -33,6 +33,9 @@ class Memory:
             vector_path=self.config.vector_path,
             embedding_model_name=self._embedding_model_name,
             vector_backend=str(getattr(self.config, "vector_backend", "usearch")),
+            index_on_write=bool(
+                getattr(self.config, "message_vector_index_on_write", False)
+            ),
             # Reranking on short chat turns is expensive and yields no benefit;
             # cross-encoder reranking is reserved for document RAG (DocumentDB).
             rerank_enabled=False,
@@ -91,33 +94,74 @@ class Memory:
         )
 
     def get_rag_context(
-        self, message: str, event_cb: Callable[..., None]
+        self,
+        message: str,
+        event_cb: Callable[..., None],
+        *,
+        where: dict[str, Any] | None = None,
+        n_results: int | None = None,
     ) -> Optional[str]:
         """Retrieves relevant RAG context for the message."""
         if not self.config.rag_enabled:
             return None
 
-        if self.lazy_rag:
-            self._ensure_doc_db()
-
-        if self._doc_db is None:
-            return None
-
-        rag_results = self._doc_db.query(message, n_results=self.config.rag_top_k)
-        if not rag_results:
+        rows = self.search_rag(
+            message,
+            where=where,
+            n_results=n_results,
+            event_cb=event_cb,
+        )
+        if not rows:
             return None
 
         rag_context = "\n\n".join(
             f"[Doc: {r['metadata'].get('source', 'unknown')}] {r['content']}"
-            for r in rag_results
-        )
-
-        event_cb(
-            "rag_retrieval",
-            n_results=len(rag_results),
-            preview=rag_context[:200],
+            for r in rows
         )
         return rag_context
+
+    def search_rag(
+        self,
+        message: str,
+        *,
+        where: dict[str, Any] | None = None,
+        n_results: int | None = None,
+        ef_search: int | None = None,
+        event_cb: Callable[..., None] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return raw RAG rows with optional metadata filtering."""
+        if not self.config.rag_enabled:
+            return []
+
+        if self.lazy_rag:
+            self._ensure_doc_db()
+
+        if self._doc_db is None:
+            return []
+
+        rag_results = self._doc_db.query(
+            message,
+            n_results=int(n_results or self.config.rag_top_k),
+            where=where,
+            ef_search=ef_search,
+        )
+        if not rag_results:
+            return []
+
+        if event_cb is not None:
+            try:
+                preview = "\n\n".join(
+                    f"[Doc: {r['metadata'].get('source', 'unknown')}] {r['content']}"
+                    for r in rag_results[:2]
+                )
+                event_cb(
+                    "rag_retrieval",
+                    n_results=len(rag_results),
+                    preview=preview[:200],
+                )
+            except Exception:
+                pass
+        return rag_results
 
     def save_message(self, sid: str, message: Message) -> None:
         """Persists a message to the database."""

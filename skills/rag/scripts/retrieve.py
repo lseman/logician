@@ -14,6 +14,9 @@ import json
 from collections import defaultdict
 from typing import Any
 
+from src.repo_graph import related_repo_context
+from src.repo_registry import load_repo_index
+
 if "_safe_json" not in globals():
 
     def _safe_json(obj: Any) -> str:  # type: ignore[misc]
@@ -126,7 +129,88 @@ if "_doc_db_from_agent" not in globals():
         return _get_doc_db()
 
 
-def rag_search(query: str, top_k: int = 5, ef_search: int = 0) -> str:
+def _ctx_active_repo_ids() -> list[str]:
+    try:
+        active_repos = getattr(globals().get("ctx"), "active_repos", []) or []
+    except Exception:
+        active_repos = []
+    repo_ids: list[str] = []
+    for item in active_repos:
+        if not isinstance(item, dict):
+            continue
+        repo_id = str(item.get("id") or "").strip()
+        if repo_id and repo_id not in repo_ids:
+            repo_ids.append(repo_id)
+    return repo_ids
+
+
+def _parse_repo_ids(repo_id: str = "", repo_ids: str = "") -> list[str]:
+    selected: list[str] = []
+    single = str(repo_id or "").strip()
+    if single:
+        selected.append(single)
+
+    raw = str(repo_ids or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            for item in parsed:
+                value = str(item or "").strip()
+                if value and value not in selected:
+                    selected.append(value)
+        else:
+            for chunk in raw.replace("\n", ",").split(","):
+                value = str(chunk or "").strip()
+                if value and value not in selected:
+                    selected.append(value)
+
+    if not selected:
+        selected.extend(_ctx_active_repo_ids())
+    return selected
+
+
+def _repo_where(repo_id: str = "", repo_ids: str = "") -> dict[str, Any] | None:
+    selected = _parse_repo_ids(repo_id=repo_id, repo_ids=repo_ids)
+    if not selected:
+        return None
+    if len(selected) == 1:
+        return {"repo_id": selected[0]}
+    return {"$or": [{"repo_id": item} for item in selected]}
+
+
+def _repo_lookup() -> dict[str, dict[str, Any]]:
+    return {
+        str(item.get("id") or "").strip(): dict(item)
+        for item in load_repo_index()
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+
+
+def _paths_where(paths: list[str]) -> dict[str, Any] | None:
+    clean = [str(path or "").strip() for path in paths if str(path or "").strip()]
+    if not clean:
+        return None
+    if len(clean) == 1:
+        return {"repo_rel_path": clean[0]}
+    return {"$or": [{"repo_rel_path": path} for path in clean]}
+
+
+def _merge_where(lhs: dict[str, Any] | None, rhs: dict[str, Any] | None) -> dict[str, Any] | None:
+    if lhs and rhs:
+        return {"$and": [lhs, rhs]}
+    return lhs or rhs
+
+
+def rag_search(
+    query: str,
+    top_k: int = 5,
+    ef_search: int = 0,
+    repo_id: str = "",
+    repo_ids: str = "",
+) -> str:
     """Use when: Inspect what RAG context the agent would retrieve for a given query.
 
     Triggers: what's in rag, search memory, check rag, debug retrieval, what do you know about.
@@ -140,9 +224,11 @@ def rag_search(query: str, top_k: int = 5, ef_search: int = 0) -> str:
     # try:
     doc_db = _doc_db_from_agent()
     query_ef = int(ef_search) if int(ef_search) > 0 else None
+    where = _repo_where(repo_id=repo_id, repo_ids=repo_ids)
     results = doc_db.query(
         query,
         n_results=min(int(top_k), 50),
+        where=where,
         ef_search=query_ef,
     )
 
@@ -164,6 +250,9 @@ def rag_search(query: str, top_k: int = 5, ef_search: int = 0) -> str:
         {
             "source": (r.get("metadata") or {}).get("source", "unknown"),
             "path": (r.get("metadata") or {}).get("path", ""),
+            "repo_id": (r.get("metadata") or {}).get("repo_id", ""),
+            "repo_name": (r.get("metadata") or {}).get("repo_name", ""),
+            "repo_rel_path": (r.get("metadata") or {}).get("repo_rel_path", ""),
             "distance": round(float(r.get("distance", 0.0)), 4),
             "chunk": (r.get("metadata") or {}).get("chunk", 0),
             "preview": str(r.get("content", ""))[:300]
@@ -171,12 +260,116 @@ def rag_search(query: str, top_k: int = 5, ef_search: int = 0) -> str:
         }
         for r in rows
     ]
-    return _safe_json({"status": "ok", "query": query, "count": len(hits), "results": hits})
+    repo_filter = _parse_repo_ids(repo_id=repo_id, repo_ids=repo_ids)
+
+    graph_expansion: list[dict[str, Any]] = []
+    expanded_hits: list[dict[str, Any]] = []
+    if repo_filter:
+        repo_map = _repo_lookup()
+        doc_db = _doc_db_from_agent()
+        for active_repo_id in repo_filter[:4]:
+            repo = repo_map.get(active_repo_id)
+            if repo is None:
+                continue
+            seed_paths = [
+                str((row.get("metadata") or {}).get("repo_rel_path", "")).strip()
+                for row in rows
+                if str((row.get("metadata") or {}).get("repo_id", "")).strip()
+                == active_repo_id
+                and str((row.get("metadata") or {}).get("repo_rel_path", "")).strip()
+            ]
+            if not seed_paths:
+                continue
+            related = related_repo_context(
+                repo,
+                rel_paths=seed_paths,
+                query=query,
+                limit=6,
+            )
+            related_files = [
+                str(item.get("rel_path") or "").strip()
+                for item in list(related.get("related_files") or [])
+                if str(item.get("rel_path") or "").strip()
+            ]
+            graph_expansion.append(
+                {
+                    "repo_id": active_repo_id,
+                    "seed_paths": seed_paths[:6],
+                    "related_files": list(related.get("related_files") or []),
+                    "related_symbols": list(related.get("related_symbols") or []),
+                }
+            )
+            extra_where = _merge_where(
+                {"repo_id": active_repo_id},
+                _paths_where(related_files[:6]),
+            )
+            if extra_where is None:
+                continue
+            extra_rows = doc_db.query(
+                query,
+                n_results=min(max(int(top_k), 2), 6),
+                where=extra_where,
+                ef_search=query_ef,
+            )
+            for extra in _normalize_query_rows(extra_rows):
+                meta = extra.get("metadata") or {}
+                expanded_hits.append(
+                    {
+                        "source": meta.get("source", "unknown"),
+                        "path": meta.get("path", ""),
+                        "repo_id": meta.get("repo_id", ""),
+                        "repo_name": meta.get("repo_name", ""),
+                        "repo_rel_path": meta.get("repo_rel_path", ""),
+                        "distance": round(float(extra.get("distance", 0.0)), 4),
+                        "chunk": meta.get("chunk", 0),
+                        "preview": str(extra.get("content", ""))[:220]
+                        + ("…" if len(str(extra.get("content", ""))) > 220 else ""),
+                    }
+                )
+
+    seen_expanded: set[tuple[str, str, int]] = set()
+    dedup_expanded: list[dict[str, Any]] = []
+    primary_keys = {
+        (
+            str(item.get("repo_id") or ""),
+            str(item.get("repo_rel_path") or ""),
+            int(item.get("chunk", 0) or 0),
+        )
+        for item in hits
+    }
+    for item in expanded_hits:
+        key = (
+            str(item.get("repo_id") or ""),
+            str(item.get("repo_rel_path") or ""),
+            int(item.get("chunk", 0) or 0),
+        )
+        if key in primary_keys or key in seen_expanded:
+            continue
+        seen_expanded.add(key)
+        dedup_expanded.append(item)
+        if len(dedup_expanded) >= 8:
+            break
+    return _safe_json(
+        {
+            "status": "ok",
+            "query": query,
+            "count": len(hits),
+            "repo_filter": repo_filter,
+            "results": hits,
+            "graph_expansion": graph_expansion,
+            "expanded_results": dedup_expanded,
+        }
+    )
     # except Exception as exc:
     # return _safe_json({"status": "error", "error": str(exc)})
 
 
-def rag_list(max_sources: int = 40, include_paths: bool = True) -> str:
+def rag_list(
+    max_sources: int = 40,
+    include_paths: bool = True,
+    repo_id: str = "",
+    repo_ids: str = "",
+) -> str:
     """Use when: You need to verify what has already been indexed into RAG.
 
     Triggers: list rag, show indexed docs, what files are in rag, rag inventory.
@@ -191,10 +384,15 @@ def rag_list(max_sources: int = 40, include_paths: bool = True) -> str:
         doc_db = _doc_db_from_agent()
         collection = doc_db.collection
         grouped: dict[tuple[str, str], int] = defaultdict(int)
-        total_chunks = int(collection.count())
-        total_with_deleted = int(collection.count(include_deleted=True))
+        where = _repo_where(repo_id=repo_id, repo_ids=repo_ids)
+        total_chunks = int(collection.count(where=where))
+        total_with_deleted = int(collection.count(where=where, include_deleted=True))
         deleted_chunks = max(0, total_with_deleted - total_chunks)
-        records = collection.get(include=["metadatas"], include_deleted=False)
+        records = collection.get(
+            include=["metadatas"],
+            include_deleted=False,
+            where=where,
+        )
         metadatas = records.get("metadatas", [])
 
         for meta in metadatas:
@@ -218,6 +416,7 @@ def rag_list(max_sources: int = 40, include_paths: bool = True) -> str:
                 "deleted_chunks": deleted_chunks,
                 "unique_sources": len(grouped),
                 "returned_sources": len(sources),
+                "repo_filter": _parse_repo_ids(repo_id=repo_id, repo_ids=repo_ids),
                 "sources": sources,
             }
         )

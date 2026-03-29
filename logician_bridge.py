@@ -37,11 +37,21 @@ if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from src.runtime_paths import state_path
+from src.repo_registry import (
+    load_repo_index,
+    register_repo,
+    remove_repo,
+    update_repo,
+)
+from src.repo_graph import build_repo_graph
 
 
 DB_PATH = state_path("agent_sessions.db")
 VECTOR_PATH = state_path("message_history.vector")
 RAG_VECTOR_PATH = state_path("rag_docs.vector")
+
+# Project-scoped cross-session memory directory (relative to CWD at launch).
+MEMORY_DIR = Path.cwd() / ".logician" / "memory"
 
 
 @lru_cache(maxsize=1)
@@ -77,7 +87,7 @@ _BRIDGE_COMMAND_SPECS: list[tuple[str, str]] = [
     ("/agents", "List loaded agents"),
     ("/agent", "Switch active agent (`/agent <name>`)"),
     ("/pipeline", "Set/stop inter-agent pipeline (`/pipeline <a> <b> [rounds]`)"),
-    ("/context", "Show session/data context"),
+    ("/context", "Show runtime context or prompt preview (`/context preview [query]`)"),
     ("/compact [keep_last]", "Summarize old history"),
     ("/reset", "Reset runtime tool state"),
     ("/sessions", "List stored sessions"),
@@ -90,6 +100,10 @@ _BRIDGE_COMMAND_SPECS: list[tuple[str, str]] = [
     ("/mount-code", "Alias for /mount"),
     ("/upload", "Ingest one doc (`/upload <file> [label]`)"),
     ("/upload-dir", "Bulk ingest docs (`/upload-dir <dir> [glob] [max]`)"),
+    (
+        "/repo",
+        "Manage repo memory (`/repo add|list|use|ingest|remove ...`)",
+    ),
     ("/docs", "Fetch Context7 docs (`/docs <library> [query]`)"),
     ("/changes", "Show git status + diff preview (`/changes [path] [--staged]`)"),
     ("/new", "Start new session"),
@@ -196,6 +210,148 @@ def _parse_mount_args(args: list[str]) -> dict[str, Any]:
         "exclude": ",".join(excludes),
         "exclude_display": excludes,
     }
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except Exception:
+        return 0
+
+
+def _estimate_token_count(payload: Any) -> int:
+    if isinstance(payload, dict):
+        for key in (
+            "token_count",
+            "tokens",
+            "estimated_tokens",
+            "context_tokens",
+            "prompt_tokens",
+        ):
+            if key in payload:
+                count = _safe_int(payload.get(key))
+                if count > 0:
+                    return count
+
+        for key in ("project_map", "tree", "map", "content", "preview"):
+            text = payload.get(key)
+            if isinstance(text, str) and text.strip():
+                return max(1, len(text) // 4)
+
+    try:
+        rendered = json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        rendered = str(payload or "")
+    return max(0, len(rendered) // 4)
+
+
+def _upsert_runtime_record(records: list[dict[str, Any]], item: dict[str, Any], *, key: str) -> None:
+    identity = str(item.get(key) or "").strip()
+    if not identity:
+        return
+    for idx, existing in enumerate(records):
+        if str(existing.get(key) or "").strip() == identity:
+            records[idx] = item
+            return
+    records.append(item)
+
+
+def _remember_mount_context(
+    agent: Any,
+    *,
+    path: str,
+    glob: str,
+    file_count: int,
+    token_count: int,
+    map_depth: int,
+) -> None:
+    ctx = getattr(agent, "ctx", None)
+    if ctx is None:
+        return
+    mounts = getattr(ctx, "mounted_paths", None)
+    if not isinstance(mounts, list):
+        mounts = []
+        setattr(ctx, "mounted_paths", mounts)
+    _upsert_runtime_record(
+        mounts,
+        {
+            "path": path,
+            "glob": glob,
+            "file_count": max(0, file_count),
+            "token_count": max(0, token_count),
+            "map_depth": max(0, map_depth),
+        },
+        key="path",
+    )
+
+
+def _remember_rag_doc(
+    agent: Any,
+    *,
+    path: str,
+    source_label: str,
+    chunks: int,
+    token_count: int,
+    kind: str,
+) -> None:
+    ctx = getattr(agent, "ctx", None)
+    if ctx is None:
+        return
+    docs = getattr(ctx, "rag_docs", None)
+    if not isinstance(docs, list):
+        docs = []
+        setattr(ctx, "rag_docs", docs)
+    _upsert_runtime_record(
+        docs,
+        {
+            "path": path,
+            "label": source_label,
+            "chunks": max(0, chunks),
+            "token_count": max(0, token_count),
+            "kind": kind,
+        },
+        key="path",
+    )
+
+
+def _repo_runtime_record(repo: dict[str, Any]) -> dict[str, Any]:
+    git = dict(repo.get("git") or {})
+    return {
+        "id": str(repo.get("id") or "").strip(),
+        "name": str(repo.get("name") or "").strip(),
+        "path": str(repo.get("path") or "").strip(),
+        "last_ingested_at": str(repo.get("last_ingested_at") or "").strip(),
+        "files_processed": _safe_int(repo.get("files_processed")),
+        "chunks_added": _safe_int(repo.get("chunks_added")),
+        "graph_nodes": _safe_int(repo.get("graph_nodes")),
+        "graph_edges": _safe_int(repo.get("graph_edges")),
+        "graph_symbols": _safe_int(repo.get("graph_symbols")),
+        "branch": str(git.get("branch") or "").strip(),
+        "commit": str(git.get("commit") or "").strip(),
+        "last_graph_built_at": str(repo.get("last_graph_built_at") or "").strip(),
+    }
+
+
+def _active_repo_records(agent: Any) -> list[dict[str, Any]]:
+    ctx = getattr(agent, "ctx", None)
+    if ctx is None:
+        return []
+    active = getattr(ctx, "active_repos", None)
+    if not isinstance(active, list):
+        active = []
+        setattr(ctx, "active_repos", active)
+    return [dict(item) for item in active if isinstance(item, dict)]
+
+
+def _set_active_repo_records(agent: Any, repos: list[dict[str, Any]]) -> None:
+    ctx = getattr(agent, "ctx", None)
+    if ctx is None:
+        return
+    setattr(
+        ctx,
+        "active_repos",
+        [_repo_runtime_record(repo) for repo in repos if isinstance(repo, dict)],
+    )
 _IMAGE_KEY_HINTS = ("image", "plot", "chart", "figure", "output", "path", "file")
 _IMAGE_PATH_RE = re.compile(
     r"(?i)(?:https?://|file://|[a-z]:)?[a-z0-9_./\\-]+\.(?:png|jpe?g|webp|bmp|gif|svg)"
@@ -409,6 +565,10 @@ class BridgeServer:
             # Keep vector store local to this bridge workspace.
             ov["vector_path"] = str(VECTOR_PATH)
             ov["rag_vector_path"] = str(RAG_VECTOR_PATH)
+            if "rag_vector_backend" not in ov:
+                ov["rag_vector_backend"] = "hnsw"
+            if "rag_rerank_enabled" not in ov:
+                ov["rag_rerank_enabled"] = False
             # Backward-compat alias used by agent_config.json.
             if "mcp_servers" not in ov and (mcp := merged.get("mcp")):
                 ov["mcp_servers"] = mcp
@@ -455,6 +615,103 @@ class BridgeServer:
                 agents[cfg.get("agent_name", "main")] = make_agent(cfg)
         return cfg, agents
 
+    def _parse_memory_summary(self) -> dict[str, Any]:
+        """Parse .logician/memory/MEMORY.md into a summary for TUI display.
+
+        Handles both the new session-table format (generated by mem_record) and the
+        legacy heading + bullet-list format.
+
+        Returns:
+          {
+            "has_memories": bool,
+            "total_entries": int,   # observation rows + fact entries
+            "obs_count": int,       # dynamic observations
+            "facts_count": int,     # legacy static facts
+            "sections": [{"heading": str, "entries": [str, ...]}, ...]
+          }
+        """
+        memory_index = MEMORY_DIR / "MEMORY.md"
+        if not memory_index.exists():
+            return {"has_memories": False, "total_entries": 0, "obs_count": 0,
+                    "facts_count": 0, "sections": []}
+
+        content = memory_index.read_text(encoding="utf-8", errors="replace")
+
+        # Count observations from obs/index.json (authoritative, fast)
+        obs_count = 0
+        obs_index = MEMORY_DIR / "obs" / "index.json"
+        if obs_index.exists():
+            try:
+                import json as _json
+                obs_count = len(_json.loads(obs_index.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+
+        # Parse sections from MEMORY.md for TUI display
+        sections: list[dict[str, Any]] = []
+        current_heading: str | None = None
+        current_entries: list[str] = []
+        facts_count = 0
+
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("<!--") or stripped.startswith("# "):
+                continue
+            # New format: **#S001** (date) — session header
+            if stripped.startswith("**#S") and stripped.endswith(")"):
+                if current_heading is not None and current_entries:
+                    sections.append({"heading": current_heading, "entries": current_entries})
+                current_heading = stripped.strip("*")
+                current_entries = []
+            # Legacy format: ## Heading
+            elif stripped.startswith("## "):
+                if current_heading is not None and current_entries:
+                    sections.append({"heading": current_heading, "entries": current_entries})
+                current_heading = stripped[3:].strip()
+                current_entries = []
+            # Table row (new format): | #001 | ... | title |
+            elif stripped.startswith("| #") and current_heading is not None:
+                parts = [p.strip() for p in stripped.split("|") if p.strip()]
+                if len(parts) >= 3:
+                    current_entries.append(" ".join(parts[-2:]))  # emoji + title
+            # Legacy bullet entry
+            elif stripped.startswith("- ") and current_heading is not None:
+                entry = stripped[2:].strip()
+                current_entries.append(entry)
+                if current_heading == "Facts":
+                    facts_count += 1
+
+        if current_heading is not None and current_entries:
+            sections.append({"heading": current_heading, "entries": current_entries})
+
+        total = obs_count + facts_count
+        return {
+            "has_memories": total > 0,
+            "total_entries": total,
+            "obs_count": obs_count,
+            "facts_count": facts_count,
+            "sections": sections,
+        }
+
+    def _inject_project_memory(self) -> None:
+        """Read .logician/memory/MEMORY.md and prepend it to every agent's system prompt.
+
+        The MEMORY.md index is a lightweight (~150-300 token) table of contents that
+        bootstraps cross-session context without loading full observation blobs.  The
+        agent reads individual observation files on demand via read_file().
+        """
+        memory_index = MEMORY_DIR / "MEMORY.md"
+        if not memory_index.exists():
+            return
+        content = memory_index.read_text(encoding="utf-8", errors="replace").strip()
+        if not content:
+            return
+        # Prepend as a <session-memory> block so the agent recognises it.
+        block = f"<session-memory>\n{content}\n</session-memory>"
+        for agent in self.agents.values():
+            sp = getattr(agent, "system_prompt", None) or ""
+            agent.system_prompt = f"{sp}\n\n{block}" if sp else block
+
     def _active_agent(self):
         if self.active is None:
             raise RuntimeError("No active agent")
@@ -475,19 +732,217 @@ class BridgeServer:
         except Exception:
             return []
 
+    def _persist_active_runtime_state(self) -> None:
+        active = self.active or ""
+        if not active or active not in self.agents:
+            return
+        sid = self.sessions.get(active, "")
+        if not sid:
+            return
+        persist = getattr(self.agents[active], "_persist_runtime_state", None)
+        if callable(persist):
+            try:
+                persist(sid)
+            except Exception:
+                pass
+
+    def _repo_library(self) -> list[dict[str, Any]]:
+        try:
+            repos = load_repo_index()
+        except Exception:
+            return []
+        return [
+            dict(item)
+            for item in repos
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        ]
+
+    def _resolve_repo_ref(self, raw: str) -> dict[str, Any] | None:
+        target = str(raw or "").strip()
+        if not target:
+            return None
+        target_lower = target.lower()
+        for repo in self._repo_library():
+            repo_id = str(repo.get("id") or "").strip()
+            repo_name = str(repo.get("name") or "").strip()
+            repo_path = str(repo.get("path") or "").strip()
+            if (
+                target == repo_id
+                or target == repo_name
+                or target == repo_path
+                or target_lower == repo_id.lower()
+                or target_lower == repo_name.lower()
+                or target_lower == repo_path.lower()
+            ):
+                return repo
+        return None
+
+    def _preview_skill_selection(
+        self,
+        agent: Any,
+        query: str,
+    ) -> tuple[list[str], list[str]]:
+        tool_registry = getattr(agent, "tools", None)
+        if tool_registry is None:
+            return [], []
+        try:
+            sync_fn = getattr(tool_registry, "_sync_catalog_with_registered_tools", None)
+            if callable(sync_fn):
+                sync_fn()
+            catalog = getattr(tool_registry, "_catalog", None)
+            iter_tools = getattr(tool_registry, "_iter_tools_for_prompt", None)
+            augment = getattr(tool_registry, "_augment_selection_tool_visibility", None)
+            if catalog is None or not callable(iter_tools):
+                return [], []
+            available_tool_names = [
+                str(getattr(tool, "name", "") or "").strip()
+                for tool in iter_tools()
+                if str(getattr(tool, "name", "") or "").strip()
+            ]
+            forced_ids = list(
+                dict.fromkeys(getattr(tool_registry, "_forced_skill_ids", []) or [])
+            )
+            selection = catalog.route_query_to_skills(
+                query,
+                available_tool_names,
+                top_k=3,
+                forced_skill_ids=forced_ids,
+            )
+            if callable(augment):
+                selection = augment(query, selection)
+            skill_ids = [
+                str(getattr(card, "id", "") or "").strip()
+                for card in list(getattr(selection, "selected_skills", []) or [])
+                if str(getattr(card, "id", "") or "").strip()
+            ]
+            selected_tools = [
+                str(name).strip()
+                for name in list(getattr(selection, "selected_tools", []) or [])
+                if str(name).strip()
+            ]
+            return skill_ids, selected_tools
+        except Exception:
+            return [], []
+
+    def _infer_observation_type(
+        self,
+        query: str,
+        response: str,
+        wrote_files: bool,
+    ) -> str:
+        text = f"{query}\n{response}".lower()
+        if any(token in text for token in ("bug", "fix", "error", "failing", "broken", "regression", "wrong")):
+            return "bugfix"
+        if any(token in text for token in ("refactor", "cleanup", "restructure", "rename", "simplif")):
+            return "refactor"
+        if any(token in text for token in ("feature", "implement", "add support", "new capability", "introduc")):
+            return "feature"
+        if any(token in text for token in ("decision", "trade-off", "tradeoff", "rationale", "why we")):
+            return "decision"
+        if not wrote_files:
+            return "discovery"
+        return "change"
+
+    def _derive_observation_title(
+        self,
+        query: str,
+        response: str,
+        paths: list[str],
+    ) -> str:
+        candidates: list[str] = []
+        for raw_line in str(response or "").splitlines():
+            line = re.sub(r"`+", "", raw_line).strip(" #-*>\t")
+            if len(line) < 12:
+                continue
+            line = re.sub(r"^(implemented|updated|fixed|added|changed)\s+", "", line, flags=re.I)
+            if line:
+                candidates.append(line.rstrip("."))
+        if candidates:
+            return candidates[0][:100].rstrip()
+
+        cleaned_query = re.sub(
+            r"^(please|can you|could you|let'?s|lets|now[, ]+|we need to)\s+",
+            "",
+            str(query or "").strip(),
+            flags=re.I,
+        ).rstrip("?.! ")
+        if cleaned_query:
+            return cleaned_query[:100]
+
+        if paths:
+            short = ", ".join(Path(path).name for path in paths[:2])
+            if len(paths) > 2:
+                short += " and more"
+            return f"{short} updated"
+        return "Project memory update"
+
+    def _record_turn_observation(
+        self,
+        *,
+        query: str,
+        response: str,
+        session_id: str,
+        tool_calls: list[dict[str, Any]],
+        written_paths: list[str],
+    ) -> None:
+        if not written_paths:
+            return
+        try:
+            from src.project_memory import compact_text, record_observation
+
+            tool_names = [
+                str(call.get("name", "") or "").strip()
+                for call in tool_calls
+                if str(call.get("name", "") or "").strip()
+            ]
+            unique_paths = list(dict.fromkeys(path for path in written_paths if path))
+            obs_type = self._infer_observation_type(query, response, wrote_files=bool(unique_paths))
+            title = self._derive_observation_title(query, response, unique_paths)
+            body_lines = [
+                f"**Request:** {compact_text(query, 500)}",
+                f"**Outcome:** {compact_text(response, 1200)}",
+                f"**Files:** {', '.join(unique_paths)}",
+            ]
+            if tool_names:
+                body_lines.append(f"**Tools:** {', '.join(tool_names)}")
+            record_observation(
+                obs_type=obs_type,
+                title=title,
+                content="\n".join(body_lines),
+                files=unique_paths,
+                session_key=session_id,
+            )
+        except Exception:
+            pass
+
     def _state_snapshot(self) -> dict[str, Any]:
         active = self.active or ""
         sid = self.sessions.get(active, "")
         msgs = 0
         todo = []
+        mounted_paths = []
+        rag_docs = []
+        active_repos = []
+        retrieval_insights = []
+        loaded_tools: list[str] = []
+        loaded_skills: list[str] = []
         if active and sid and active in self.agents:
             try:
                 ctx = self.agents[active].describe_runtime_context(sid)
                 msgs = ctx.get("persisted_messages", 0)
                 todo = ctx.get("todo", [])
+                runtime = ctx.get("runtime", {}) if isinstance(ctx, dict) else {}
+                mounted_paths = list(runtime.get("mounted_paths") or [])
+                rag_docs = list(runtime.get("rag_docs") or [])
+                active_repos = list(runtime.get("active_repos") or [])
+                retrieval_insights = list(runtime.get("retrieval_insights") or [])
             except Exception:
                 msgs = 0
                 todo = []
+                mounted_paths = []
+                rag_docs = []
+                active_repos = []
+                retrieval_insights = []
 
         tool_count = 0
         skill_count = 0
@@ -507,6 +962,13 @@ class BridgeServer:
                     # ToolRegistry stores tools in ._tools dict
                     tool_dict = getattr(tool_registry, "_tools", None) or {}
                     tool_count = len(tool_dict)
+                    loaded_tools = sorted(
+                        dict.fromkeys(
+                            str(getattr(tool, "name", "") or "").strip()
+                            for tool in tool_dict.values()
+                            if str(getattr(tool, "name", "") or "").strip()
+                        )
+                    )
                     # Skills are in ._catalog._skills dict
                     catalog = getattr(tool_registry, "_catalog", None)
                     if catalog is not None:
@@ -516,8 +978,24 @@ class BridgeServer:
                             ensure_fn()
                         skill_dict = getattr(catalog, "_skills", None) or {}
                         skill_count = len(skill_dict)
+                        loaded_skills = sorted(
+                            dict.fromkeys(
+                                str(
+                                    getattr(card, "name", None)
+                                    or getattr(card, "id", "")
+                                    or ""
+                                ).strip()
+                                for card in skill_dict.values()
+                                if str(
+                                    getattr(card, "name", None)
+                                    or getattr(card, "id", "")
+                                    or ""
+                                ).strip()
+                            )
+                        )
             except Exception:
                 pass
+        repo_library = self._repo_library()
         return {
             "active": active,
             "session": sid,
@@ -529,7 +1007,14 @@ class BridgeServer:
             "tiktoken": _has_tiktoken(),
             "tool_count": tool_count,
             "skill_count": skill_count,
+            "loaded_tools": loaded_tools,
+            "loaded_skills": loaded_skills,
             "todo": todo,
+            "active_repos": active_repos,
+            "retrieval_insights": retrieval_insights,
+            "repo_library": repo_library,
+            "mounted_paths": mounted_paths,
+            "rag_docs": rag_docs,
         }
 
     def init(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -543,11 +1028,13 @@ class BridgeServer:
         self.active = first
         self.sessions = {first: _new_session_id()}
         self.pipeline = None
+        self._inject_project_memory()
 
         return {
             "config_path": str(config_path),
             "state": self._state_snapshot(),
             "commands": _bridge_commands_manifest(),
+            "memory_summary": self._parse_memory_summary(),
         }
 
     def slash(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -660,6 +1147,8 @@ class BridgeServer:
                     f"pipeline: {ptxt}",
                     f"rapidfuzz: {'enabled' if snap.get('rapidfuzz') else 'disabled'}",
                     f"tiktoken: {'enabled' if snap.get('tiktoken') else 'disabled'}",
+                    f"repos: {len(snap.get('repo_library', []) or [])}",
+                    f"active_repos: {len(snap.get('active_repos', []) or [])}",
                 ]
             )
 
@@ -806,19 +1295,73 @@ class BridgeServer:
         elif cmd == "/context":
             ag = self._active_agent()
             sid = self.sessions.get(self.active or "", "")
-            info = ag.describe_runtime_context(sid)
-            out.append(f"session: {sid}")
-            out.append(
-                f"messages: {info.get('persisted_messages', 0)} / limit {info.get('history_limit', 0)}"
-            )
-            rt = info.get("runtime", {})
-            if rt.get("loaded"):
-                cols = ", ".join(rt.get("value_columns", [])[:6]) or "none"
+            mode = (args[0].lower() if args else "").strip()
+            if mode in {"preview", "prompt"}:
+                query = " ".join(args[1:]).strip()
+                preview = ag.preview_prompt_context(query, sid)
+                out.append(f"session: {preview.get('session_id', sid)}")
                 out.append(
-                    f"dataset: {rt.get('data_name', 'unnamed')} rows={rt.get('row_count', 0)} cols={cols}"
+                    "classification: "
+                    f"{preview.get('classified_as', 'execution')}"
                 )
+                domains = preview.get("domain_groups") or []
+                if domains:
+                    out.append(f"domain tools: {', '.join(str(item) for item in domains)}")
+                out.append(
+                    "messages in prompt: "
+                    f"{preview.get('trimmed_message_count', 0)}"
+                    f" (loaded={preview.get('history_loaded_count', 0)}, "
+                    f"pre-trim={preview.get('untrimmed_message_count', 0)}, "
+                    f"limit={preview.get('history_limit', 0)})"
+                )
+                out.append(
+                    "context token budget: "
+                    f"{preview.get('context_token_budget', 0)}"
+                )
+                out.append("")
+                out.append("## System Prompt")
+                out.append("")
+                out.append("```md")
+                out.append(str(preview.get("system_prompt", "")).rstrip())
+                out.append("```")
+                out.append("")
+                out.append("## Message Window")
+                out.append("")
+                for idx, msg in enumerate(preview.get("messages", []) or [], start=1):
+                    role = str(msg.get("role", "unknown"))
+                    name = str(msg.get("name", "") or "").strip()
+                    label = f"{idx}. {role}"
+                    if name:
+                        label += f" ({name})"
+                    out.append(f"### {label}")
+                    out.append("")
+                    out.append("```text")
+                    out.append(str(msg.get("content", "")).rstrip())
+                    out.append("```")
+                    out.append("")
             else:
-                out.append("dataset: none")
+                info = ag.describe_runtime_context(sid)
+                out.append(f"session: {sid}")
+                out.append(
+                    f"messages: {info.get('persisted_messages', 0)} / limit {info.get('history_limit', 0)}"
+                )
+                rt = info.get("runtime", {})
+                if rt.get("loaded"):
+                    cols = ", ".join(rt.get("value_columns", [])[:6]) or "none"
+                    out.append(
+                        f"dataset: {rt.get('data_name', 'unnamed')} rows={rt.get('row_count', 0)} cols={cols}"
+                    )
+                else:
+                    out.append("dataset: none")
+                active_repos = list(rt.get("active_repos") or [])
+                if active_repos:
+                    preview = ", ".join(
+                        str(item.get("id") or item.get("name") or "").strip()
+                        for item in active_repos[:8]
+                        if str(item.get("id") or item.get("name") or "").strip()
+                    )
+                    if preview:
+                        out.append(f"active_repos: {preview}")
 
         elif cmd == "/compact":
             ag = self._active_agent()
@@ -852,6 +1395,7 @@ class BridgeServer:
             self.active = next(iter(self.agents.keys()))
             self.sessions = {self.active: _new_session_id()}
             self.pipeline = None
+            self._inject_project_memory()
             out.append(f"reloaded · {len(self.agents)} agent(s)")
 
         elif cmd == "/sessions":
@@ -1009,9 +1553,19 @@ class BridgeServer:
                 out.append(f"session: {sid_text}")
 
                 if str(project_map_payload.get("status", "")).lower() == "ok":
+                    file_count = _safe_int(project_map_payload.get("file_count"))
+                    token_count = _estimate_token_count(project_map_payload)
+                    _remember_mount_context(
+                        ag,
+                        path=directory,
+                        glob=glob_pattern,
+                        file_count=file_count,
+                        token_count=token_count,
+                        map_depth=map_depth,
+                    )
                     out.append(
                         "context persisted: yes "
-                        f"(project map: {project_map_payload.get('file_count', 0)} files, depth={map_depth})"
+                        f"(project map: {file_count} files, depth={map_depth})"
                     )
                 else:
                     out.append(
@@ -1025,6 +1579,14 @@ class BridgeServer:
                     files_processed = int(promote_payload.get("files_processed", 0) or 0)
                     chunks_added = int(promote_payload.get("total_chunks_added", 0) or 0)
                     fallback_note = " (fallback=docling_add_dir)" if used_fallback else ""
+                    _remember_rag_doc(
+                        ag,
+                        path=directory,
+                        source_label="mounted codebase",
+                        chunks=chunks_added,
+                        token_count=_estimate_token_count(promote_payload),
+                        kind="mount",
+                    )
                     out.append(
                         "rag persisted: yes "
                         f"({files_processed} files, {chunks_added} chunks{fallback_note})"
@@ -1068,6 +1630,14 @@ class BridgeServer:
                     else raw_result
                 )
                 if parsed.get("status") == "ok":
+                    _remember_rag_doc(
+                        ag,
+                        path=str(parsed.get("path", file_path)),
+                        source_label=source_label,
+                        chunks=_safe_int(parsed.get("chunks_added")),
+                        token_count=_estimate_token_count(parsed),
+                        kind="file",
+                    )
                     out.append(
                         f"uploaded {parsed.get('path', file_path)} ({parsed.get('chunks_added', 0)} chunks)"
                     )
@@ -1094,6 +1664,14 @@ class BridgeServer:
                     else raw_result
                 )
                 if parsed.get("status") == "ok":
+                    _remember_rag_doc(
+                        ag,
+                        path=directory,
+                        source_label="bulk upload",
+                        chunks=_safe_int(parsed.get("total_chunks_added")),
+                        token_count=_estimate_token_count(parsed),
+                        kind="directory",
+                    )
                     out.append(
                         "upload-dir done "
                         f"({parsed.get('files_processed', 0)} files, {parsed.get('total_chunks_added', 0)} chunks)"
@@ -1102,6 +1680,299 @@ class BridgeServer:
                     out.append(
                         f"upload-dir failed: {parsed.get('error', 'unknown error')}"
                     )
+
+        elif cmd == "/repo":
+            ag = self._active_agent()
+            sid = self.sessions.get(self.active or "", "") or None
+            subcmd = args[0].lower() if args else "list"
+            repo_library = self._repo_library()
+            active_runtime = _active_repo_records(ag)
+            active_ids = {
+                str(item.get("id") or "").strip()
+                for item in active_runtime
+                if str(item.get("id") or "").strip()
+            }
+
+            if subcmd == "list":
+                if not repo_library:
+                    out.append("no repos registered yet")
+                    out.append("usage: /repo add <path> [name]")
+                else:
+                    out.append(f"repos ({len(repo_library)}):")
+                    for repo in repo_library:
+                        repo_id = str(repo.get("id") or "").strip()
+                        name = str(repo.get("name") or repo_id or "repo").strip()
+                        path = str(repo.get("path") or "").strip()
+                        files_processed = _safe_int(repo.get("files_processed"))
+                        chunks_added = _safe_int(repo.get("chunks_added"))
+                        mark = " *active" if repo_id in active_ids else ""
+                        out.append(f"  {repo_id} · {name}{mark}")
+                        out.append(f"    path: {path}")
+                        details = []
+                        if files_processed > 0:
+                            details.append(f"files={files_processed}")
+                        if chunks_added > 0:
+                            details.append(f"chunks={chunks_added}")
+                        graph_nodes = _safe_int(repo.get("graph_nodes"))
+                        graph_edges = _safe_int(repo.get("graph_edges"))
+                        if graph_nodes > 0:
+                            details.append(f"graph_nodes={graph_nodes}")
+                        if graph_edges > 0:
+                            details.append(f"graph_edges={graph_edges}")
+                        git = dict(repo.get("git") or {})
+                        branch = str(git.get("branch") or "").strip()
+                        commit = str(git.get("commit") or "").strip()
+                        if branch:
+                            details.append(f"branch={branch}")
+                        if commit:
+                            details.append(f"commit={commit}")
+                        if details:
+                            out.append(f"    {'  '.join(details)}")
+                if active_runtime:
+                    preview = ", ".join(
+                        str(item.get("id") or item.get("name") or "").strip()
+                        for item in active_runtime[:8]
+                        if str(item.get("id") or item.get("name") or "").strip()
+                    )
+                    if preview:
+                        out.append(f"active now: {preview}")
+
+            elif subcmd == "add":
+                if len(args) < 2:
+                    out.append("usage: /repo add <path> [name]")
+                else:
+                    repo_path = args[1]
+                    repo_name = " ".join(args[2:]).strip()
+                    try:
+                        repo = register_repo(repo_path, name=repo_name)
+                        repo = update_repo(
+                            str(repo.get("id") or ""),
+                            last_used_at=datetime.datetime.now(datetime.timezone.utc)
+                            .replace(microsecond=0)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
+                        ) or repo
+                        merged = [repo]
+                        merged.extend(
+                            item
+                            for item in active_runtime
+                            if str(item.get("id") or "").strip()
+                            != str(repo.get("id") or "").strip()
+                        )
+                        _set_active_repo_records(ag, merged)
+                        self._persist_active_runtime_state()
+                        out.append(
+                            f"repo added: {repo.get('id', '?')} · {repo.get('name', '?')}"
+                        )
+                        out.append(f"path: {repo.get('path', '-')}")
+                        out.append("active for this session: yes")
+                        out.append("next: /repo ingest <repo_id>")
+                    except Exception as exc:
+                        out.append(f"repo add failed: {exc}")
+
+            elif subcmd == "use":
+                if len(args) < 2:
+                    if not active_runtime:
+                        out.append("no active repos in this session")
+                    else:
+                        out.append("active repos:")
+                        for repo in active_runtime:
+                            out.append(
+                                f"  {repo.get('id', '?')} · {repo.get('name', '?')} · {repo.get('path', '-')}"
+                            )
+                else:
+                    refs = args[1:]
+                    if len(refs) == 1 and refs[0].lower() in {"none", "clear", "off"}:
+                        _set_active_repo_records(ag, [])
+                        self._persist_active_runtime_state()
+                        out.append("active repos cleared for this session")
+                    else:
+                        resolved: list[dict[str, Any]] = []
+                        missing: list[str] = []
+                        for ref in refs:
+                            repo = self._resolve_repo_ref(ref)
+                            if repo is None:
+                                missing.append(ref)
+                                continue
+                            if not any(
+                                str(item.get("id") or "").strip()
+                                == str(repo.get("id") or "").strip()
+                                for item in resolved
+                            ):
+                                resolved.append(repo)
+                                update_repo(
+                                    str(repo.get("id") or ""),
+                                    last_used_at=datetime.datetime.now(
+                                        datetime.timezone.utc
+                                    )
+                                    .replace(microsecond=0)
+                                    .isoformat()
+                                    .replace("+00:00", "Z"),
+                                )
+                        if missing:
+                            out.append("missing repos: " + ", ".join(missing))
+                        if resolved:
+                            _set_active_repo_records(ag, resolved)
+                            self._persist_active_runtime_state()
+                            out.append(
+                                "active repos set: "
+                                + ", ".join(
+                                    str(item.get("id") or item.get("name") or "?")
+                                    for item in resolved
+                                )
+                            )
+                        elif not missing:
+                            out.append("no repos resolved")
+
+            elif subcmd == "ingest":
+                if len(args) < 2:
+                    out.append("usage: /repo ingest <repo_id> [glob] [max_files]")
+                else:
+                    repo = self._resolve_repo_ref(args[1])
+                    if repo is None:
+                        out.append(f"unknown repo: {args[1]}")
+                    else:
+                        glob_pattern = (
+                            args[2]
+                            if len(args) > 2
+                            else "**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}"
+                        )
+                        try:
+                            max_files = max(1, min(400, int(args[3]))) if len(args) > 3 else 120
+                        except Exception:
+                            max_files = 120
+                            out.append(f"invalid max_files '{args[3]}', using 120")
+
+                        try:
+                            promote_raw = ag.run_tool_direct(
+                                "rag_promote_paths",
+                                {
+                                    "paths": json.dumps(
+                                        [str(repo.get("path") or "")], ensure_ascii=False
+                                    ),
+                                    "recursive": True,
+                                    "glob": glob_pattern,
+                                    "chunk_size": 400,
+                                    "overlap": 0.2,
+                                    "max_files": max_files,
+                                    "repo_id": str(repo.get("id") or ""),
+                                    "repo_name": str(repo.get("name") or ""),
+                                    "repo_root": str(repo.get("path") or ""),
+                                },
+                                session_id=sid,
+                                persist_to_history=True,
+                            )
+                            parsed = _parse_tool_payload(promote_raw)
+                        except Exception as exc:
+                            parsed = {"status": "error", "error": str(exc)}
+
+                        if str(parsed.get("status", "")).lower() == "ok":
+                            files_processed = _safe_int(parsed.get("files_processed"))
+                            chunks_added = _safe_int(parsed.get("total_chunks_added"))
+                            graph_payload: dict[str, Any]
+                            try:
+                                graph_payload = build_repo_graph(
+                                    repo,
+                                    glob_pattern=glob_pattern,
+                                    max_files=max_files,
+                                    exclude="",
+                                )
+                            except Exception as exc:
+                                graph_payload = {"status": "error", "error": str(exc)}
+                            updated = update_repo(
+                                str(repo.get("id") or ""),
+                                last_ingested_at=datetime.datetime.now(
+                                    datetime.timezone.utc
+                                )
+                                .replace(microsecond=0)
+                                .isoformat()
+                                .replace("+00:00", "Z"),
+                                last_used_at=datetime.datetime.now(
+                                    datetime.timezone.utc
+                                )
+                                .replace(microsecond=0)
+                                .isoformat()
+                                .replace("+00:00", "Z"),
+                                files_processed=files_processed,
+                                chunks_added=chunks_added,
+                                glob=glob_pattern,
+                                last_graph_built_at=datetime.datetime.now(
+                                    datetime.timezone.utc
+                                )
+                                .replace(microsecond=0)
+                                .isoformat()
+                                .replace("+00:00", "Z")
+                                if str(graph_payload.get("status", "")).lower() == "ok"
+                                else "",
+                                graph_nodes=_safe_int(graph_payload.get("nodes")),
+                                graph_edges=_safe_int(graph_payload.get("edges")),
+                                graph_symbols=_safe_int(graph_payload.get("symbols")),
+                            ) or repo
+                            merged = [updated]
+                            merged.extend(
+                                item
+                                for item in active_runtime
+                                if str(item.get("id") or "").strip()
+                                != str(updated.get("id") or "").strip()
+                            )
+                            _set_active_repo_records(ag, merged)
+                            _remember_rag_doc(
+                                ag,
+                                path=str(updated.get("path") or ""),
+                                source_label=f"repo {updated.get('name', updated.get('id', ''))}",
+                                chunks=chunks_added,
+                                token_count=_estimate_token_count(parsed),
+                                kind="repo",
+                            )
+                            self._persist_active_runtime_state()
+                            out.append(
+                                f"repo ingested: {updated.get('id', '?')} · {files_processed} files · {chunks_added} chunks"
+                            )
+                            if str(graph_payload.get("status", "")).lower() == "ok":
+                                out.append(
+                                    "graph built: "
+                                    f"{_safe_int(graph_payload.get('nodes'))} nodes · "
+                                    f"{_safe_int(graph_payload.get('edges'))} edges · "
+                                    f"{_safe_int(graph_payload.get('symbols'))} symbols"
+                                )
+                            else:
+                                out.append(
+                                    "graph build failed: "
+                                    f"{graph_payload.get('error', 'unknown error')}"
+                                )
+                            out.append("active for this session: yes")
+                        else:
+                            out.append(
+                                f"repo ingest failed: {parsed.get('error', 'unknown error')}"
+                            )
+
+            elif subcmd == "remove":
+                if len(args) < 2:
+                    out.append("usage: /repo remove <repo_id>")
+                else:
+                    repo = self._resolve_repo_ref(args[1])
+                    if repo is None:
+                        out.append(f"unknown repo: {args[1]}")
+                    else:
+                        removed = remove_repo(str(repo.get("id") or ""))
+                        if removed is None:
+                            out.append(f"repo not found: {args[1]}")
+                        else:
+                            kept_active = [
+                                item
+                                for item in active_runtime
+                                if str(item.get("id") or "").strip()
+                                != str(removed.get("id") or "").strip()
+                            ]
+                            _set_active_repo_records(ag, kept_active)
+                            self._persist_active_runtime_state()
+                            out.append(
+                                f"repo removed from library: {removed.get('id', '?')}"
+                            )
+                            out.append("note: existing indexed RAG chunks were left intact")
+
+            else:
+                out.append("usage: /repo add|list|use|ingest|remove ...")
 
         elif cmd == "/docs":
             if not args:
@@ -1342,6 +2213,18 @@ class BridgeServer:
         thinking_token_seen = False
         emitted_image_events: set[tuple[str, str]] = set()
         turn_tool_errors: list[int] = [0]  # mutable counter accessible in nested fn
+        written_paths: list[str] = []
+
+        def _parse_result_payload(payload: Any) -> dict[str, Any] | None:
+            if isinstance(payload, dict):
+                return payload
+            if not isinstance(payload, str):
+                return None
+            try:
+                parsed = json.loads(payload)
+            except Exception:
+                return None
+            return parsed if isinstance(parsed, dict) else None
 
         def _token(tok: str):
             nonlocal token_seen
@@ -1363,6 +2246,41 @@ class BridgeServer:
                 )
             self._emit("thinking_token", {"token": tok})
 
+        def _emit_file_diff(name: str, tool_args: dict[str, Any], info: dict[str, Any]):
+            """Emit an exact file_diff event based on the tool's real result payload."""
+            status_val = str(info.get("status", "ok") or "ok").strip().lower()
+            if status_val != "ok":
+                return
+
+            payload = _parse_result_payload(info.get("result_output"))
+            if not isinstance(payload, dict):
+                return
+
+            diff_text = str(payload.get("diff", "") or "").strip()
+            if not diff_text:
+                return
+
+            path = str(
+                payload.get("path")
+                or tool_args.get("path")
+                or tool_args.get("file_path")
+                or ""
+            ).strip()
+            if not path:
+                return
+
+            if path not in written_paths:
+                written_paths.append(path)
+
+            self._emit(
+                "file_diff",
+                {
+                    "tool": name,
+                    "path": path,
+                    "diff": diff_text,
+                },
+            )
+
         def _tool(
             name: str,
             tool_args: dict[str, Any],
@@ -1381,6 +2299,7 @@ class BridgeServer:
                     "status": status_val,
                     "duration_ms": int(info.get("duration_ms", 0) or 0),
                     "cache_hit": bool(info.get("cache_hit", False)),
+                    "args": tool_args,  # Include args for consistency with tool_start
                 }
                 error = str(info.get("error", "") or "").strip()
                 if error:
@@ -1388,6 +2307,32 @@ class BridgeServer:
                 result_preview = str(info.get("result_preview", "") or "").strip()
                 if result_preview:
                     payload["result_preview"] = result_preview[:160]
+
+                # Emit exact file diffs for write tools when their payload includes one.
+                _emit_file_diff(name, tool_args, info)
+                if (
+                    not written_paths
+                    and name in {
+                        "write_file",
+                        "edit_file",
+                        "apply_edit_block",
+                        "smart_edit",
+                        "edit_file_libcst",
+                        "replace_function_body",
+                        "replace_docstring",
+                        "replace_decorators",
+                        "replace_argument",
+                        "insert_after_function",
+                        "delete_function",
+                    }
+                    and str(info.get("status", "ok") or "").lower() == "ok"
+                ):
+                    fallback_path = str(
+                        tool_args.get("path") or tool_args.get("file_path") or ""
+                    ).strip()
+                    if fallback_path:
+                        written_paths.append(fallback_path)
+
                 self._emit("tool_end", payload)
                 return
 
@@ -1409,6 +2354,42 @@ class BridgeServer:
                     "image",
                     {"tool": key[0] or "unknown_tool", "path": path, "source": "args"},
                 )
+
+        def _repair(meta: dict[str, Any] | None = None):
+            info = meta if isinstance(meta, dict) else {}
+            stage = str(info.get("stage", "") or "").strip().lower()
+            if not stage:
+                return
+            payload = {
+                "stage": stage,
+                "attempt": int(info.get("attempt", 0) or 0),
+                "tool": str(info.get("tool", "") or "unknown"),
+                "error_type": str(info.get("error_type", "") or ""),
+                "message": str(info.get("message", "") or ""),
+            }
+            if stage == "attempt":
+                self._emit(
+                    "phase",
+                    {"state": "thinking", "note": f"repairing {payload['tool']}"},
+                )
+            self._emit("tool_repair", payload)
+
+        def _decision(meta: dict[str, Any] | None = None):
+            info = meta if isinstance(meta, dict) else {}
+            stage = str(info.get("stage", "") or "").strip().lower()
+            if not stage:
+                return
+            payload = {
+                "mode": str(info.get("mode", "") or "hybrid_decision"),
+                "stage": stage,
+                "message": str(info.get("message", "") or ""),
+            }
+            if stage == "stream_answer":
+                self._emit(
+                    "phase",
+                    {"state": "streaming", "note": "streamed answer mode"},
+                )
+            self._emit("decision", payload)
 
         if self.pipeline:
             pm = self.pipeline
@@ -1441,6 +2422,15 @@ class BridgeServer:
             return {"pipeline": True, "turns": turns, "state": state}
 
         ag = self._active_agent()
+        skill_ids, selected_tools = self._preview_skill_selection(ag, raw)
+        if skill_ids or selected_tools:
+            self._emit(
+                "skill",
+                {
+                    "skill_ids": skill_ids,
+                    "selected_tools": selected_tools,
+                },
+            )
         self._emit("phase", {"state": "thinking", "note": "running agent"})
         run_resp = ag.run(
             raw,
@@ -1448,6 +2438,8 @@ class BridgeServer:
             stream_callback=_token,
             thinking_callback=_thinking_token,
             tool_callback=_tool,
+            repair_callback=_repair,
+            decision_callback=_decision,
         )
         response_text = str(getattr(run_resp, "final_response", "") or "")
         tool_calls_payload: list[dict[str, Any]] = []
@@ -1503,6 +2495,13 @@ class BridgeServer:
             chunk_size = 96
             for i in range(0, len(text), chunk_size):
                 self._emit("token", {"token": text[i : i + chunk_size]})
+        self._record_turn_observation(
+            query=raw,
+            response=response_text,
+            session_id=sid,
+            tool_calls=tool_calls_payload,
+            written_paths=written_paths,
+        )
         return {
             "pipeline": False,
             "assistant": response_text,

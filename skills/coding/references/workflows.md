@@ -8,6 +8,7 @@ The default coding loop is:
 
 1. `explore`
 2. `file_ops` or `edit_block` or `multi_edit` or `search_replace`
+   For Python symbol-level changes, prefer structural tools such as `find_function_by_name`, `replace_function_body`, or `edit_file_libcst` when available.
 3. `quality`
 4. `git`
 
@@ -34,6 +35,13 @@ Start with `file_ops` when:
 - the exact file is already known
 - the task is a direct read or small write
 - there is no real discovery step
+
+Within `file_ops`, prefer this order:
+
+1. `search_file` or `read_file` to capture the exact target text
+2. `edit_file` for unique local replacements
+3. `write_file` only for new files or intentional full rewrites
+4. structural Python tools instead of raw text replacement when the change is symbol-oriented
 
 Start with `shell` when:
 
@@ -77,6 +85,12 @@ Prefer:
 
 1. targeted tests or linters for touched files
 2. broader checks only when the narrow checks pass or are insufficient
+3. language-appropriate validation, for example Python quality tools for Python and `cargo` checks via shell for Rust
+
+Do not finish an editing turn without either:
+
+- running a verification step, or
+- stating clearly why verification could not run
 
 If execution problems are unclear, hand off to `shell`.
 
@@ -96,6 +110,10 @@ Do not start with `git` when the task is purely local file inspection.
 `explore -> edit_block -> quality`
 
 Use for a small localized fix in unfamiliar code.
+
+`explore -> find_function_by_name -> replace_function_body -> quality`
+
+Use for Python changes where symbol-aware editing is safer than raw text replacement.
 
 `explore -> multi_edit -> quality -> git`
 

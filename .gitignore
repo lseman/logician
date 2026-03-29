@@ -59,3 +59,9 @@ rust-cli/target/
 *.png
 .agent_history
 .local/
+.logician/
+
+.claudeignore
+.codex
+node_modules
+web_ui/dist/

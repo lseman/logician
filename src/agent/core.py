@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import json
+import re
 import uuid
 from collections import Counter
 from pathlib import Path
@@ -13,6 +14,8 @@ from ..config import Config
 from ..logging_utils import get_logger
 from ..memory import Memory
 from ..messages import Message, MessageRole
+from ..repo_graph import related_repo_context
+from ..repo_registry import load_repo_index
 from ..tools import (
     HAS_TOON,
     Context,
@@ -26,10 +29,115 @@ from .trace import (
 )
 
 from .loop import AgentLoop
+from .classify import classify_turn
 from .guardrails import GuardrailEngine, default_guards
 from .prompt import default_prompt_builder
 from .dispatcher import ToolDispatcher
+from .state import TurnState
 from .types import TurnResult
+
+
+_OPEN_THINK_TAGS = ("<thinking>", "<think>")
+_CLOSE_THINK_TAGS = ("</thinking>", "</think>")
+
+
+def _find_tag(text: str, tags: tuple[str, ...]) -> tuple[int, str] | None:
+    lowered = text.lower()
+    matches = [(lowered.find(tag), tag) for tag in tags if lowered.find(tag) >= 0]
+    if not matches:
+        return None
+    pos, tag = min(matches, key=lambda item: item[0])
+    return pos, tag
+
+
+def _partial_tag_suffix_length(text: str, tags: tuple[str, ...]) -> int:
+    lowered = text.lower()
+    max_len = 0
+    upper = min(len(text), max(len(tag) for tag in tags) - 1)
+    for size in range(1, upper + 1):
+        suffix = lowered[-size:]
+        if any(tag.startswith(suffix) for tag in tags):
+            max_len = size
+    return max_len
+
+
+class _ThinkingStreamRouter:
+    def __init__(
+        self,
+        stream_callback: Callable[[str], None] | None,
+        thinking_callback: Callable[[str], None] | None,
+    ) -> None:
+        self._stream_callback = stream_callback
+        self._thinking_callback = thinking_callback
+        self._buffer = ""
+        self._in_think = False
+        self._think_parts: list[str] = []
+        self.visible_emitted = False
+
+    def _emit_visible(self, text: str) -> None:
+        if not text:
+            return
+        self.visible_emitted = True
+        if self._stream_callback is not None:
+            self._stream_callback(text)
+
+    def _emit_thinking(self, text: str) -> None:
+        content = str(text or "").strip()
+        if not content:
+            return
+        if self._thinking_callback is not None:
+            self._thinking_callback(content)
+
+    def feed(self, chunk: str) -> None:
+        if not chunk:
+            return
+        self._buffer += chunk
+        while self._buffer:
+            if self._in_think:
+                match = _find_tag(self._buffer, _CLOSE_THINK_TAGS)
+                if match is None:
+                    keep = _partial_tag_suffix_length(self._buffer, _CLOSE_THINK_TAGS)
+                    if keep:
+                        self._think_parts.append(self._buffer[:-keep])
+                        self._buffer = self._buffer[-keep:]
+                    else:
+                        self._think_parts.append(self._buffer)
+                        self._buffer = ""
+                    break
+                pos, tag = match
+                self._think_parts.append(self._buffer[:pos])
+                self._emit_thinking("".join(self._think_parts))
+                self._think_parts.clear()
+                self._buffer = self._buffer[pos + len(tag):]
+                self._in_think = False
+                continue
+
+            match = _find_tag(self._buffer, _OPEN_THINK_TAGS)
+            if match is None:
+                keep = _partial_tag_suffix_length(self._buffer, _OPEN_THINK_TAGS)
+                if keep:
+                    self._emit_visible(self._buffer[:-keep])
+                    self._buffer = self._buffer[-keep:]
+                else:
+                    self._emit_visible(self._buffer)
+                    self._buffer = ""
+                break
+
+            pos, tag = match
+            self._emit_visible(self._buffer[:pos])
+            self._buffer = self._buffer[pos + len(tag):]
+            self._in_think = True
+
+    def flush(self) -> None:
+        if self._in_think:
+            self._think_parts.append(self._buffer)
+            self._emit_thinking("".join(self._think_parts))
+            self._think_parts.clear()
+            self._buffer = ""
+            self._in_think = False
+            return
+        self._emit_visible(self._buffer)
+        self._buffer = ""
 
 
 class Agent:
@@ -101,29 +209,17 @@ class Agent:
         self.tools.load_tools_from_skills()
 
         # Register the core tools as always-on runtime capabilities.
-        from ..tools.core import (
-            apply_edit_block,
-            bash,
-            edit_file,
-            glob_files,
-            grep_files,
-            read_file,
-            think,
-            todo,
-            write_file,
-        )
-        _core_fns = [
-            read_file, write_file, edit_file, apply_edit_block,
-            bash, glob_files, grep_files, think, todo,
-        ]
+        from ..tools import core as _core_tools
+
         _core_entries = [
-            (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_fns
+            (fn, getattr(fn, "__llm_tool_meta__", {}))
+            for fn in _core_tools.CORE_TOOL_FUNCTIONS
         ]
         from pathlib import Path as _Path
         _core_src = _Path(__file__).resolve().parent.parent / "tools" / "core"
         self.tools._register_collected_python_tools(
             tool_entries=_core_entries,
-            module_path=_core_src / "files.py",  # representative path for skill_id
+            module_path=_core_src / "__init__.py",
             skill_id="core",
             skill_meta={"always_on": True},
         )
@@ -364,6 +460,7 @@ class Agent:
         stream: Callable[[str], None] | None = None,
         fresh_session: bool = False,
         tool_callback: Callable[..., None] | None = None,
+        repair_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         return self.run(
             message,
@@ -371,6 +468,7 @@ class Agent:
             stream_callback=stream,
             fresh_session=fresh_session,
             tool_callback=tool_callback,
+            repair_callback=repair_callback,
         ).final_response
 
     def _parse_tool_result_payload(self, result_text: str) -> dict[str, Any] | None:
@@ -522,6 +620,27 @@ class Agent:
             "freq": self.ctx.freq_cache,
             "anomaly_series": len(self.ctx.anomaly_store),
             "anomaly_points": anomaly_points,
+            "todo_items": [dict(item) for item in getattr(self.ctx, "todo_items", []) if isinstance(item, dict)],
+            "mounted_paths": [
+                dict(item)
+                for item in getattr(self.ctx, "mounted_paths", [])
+                if isinstance(item, dict)
+            ],
+            "active_repos": [
+                dict(item)
+                for item in getattr(self.ctx, "active_repos", [])
+                if isinstance(item, dict)
+            ],
+            "retrieval_insights": [
+                dict(item)
+                for item in getattr(self.ctx, "retrieval_insights", [])
+                if isinstance(item, dict)
+            ],
+            "rag_docs": [
+                dict(item)
+                for item in getattr(self.ctx, "rag_docs", [])
+                if isinstance(item, dict)
+            ],
             "forecast_model": self.ctx.nf_best_model,
             "has_forecast_cv": self.ctx.nf_cv_full is not None,
             "forecast_prediction_column": self.ctx.nf_pred_col,
@@ -551,22 +670,38 @@ class Agent:
                 "freq": persisted_ctx.freq_cache,
                 "anomaly_series": len(persisted_ctx.anomaly_store),
                 "anomaly_points": anomaly_points,
+                "todo_items": [
+                    dict(item)
+                    for item in getattr(persisted_ctx, "todo_items", [])
+                    if isinstance(item, dict)
+                ],
+                "mounted_paths": [
+                    dict(item)
+                    for item in getattr(persisted_ctx, "mounted_paths", [])
+                    if isinstance(item, dict)
+                ],
+                "active_repos": [
+                    dict(item)
+                    for item in getattr(persisted_ctx, "active_repos", [])
+                    if isinstance(item, dict)
+                ],
+                "retrieval_insights": [
+                    dict(item)
+                    for item in getattr(persisted_ctx, "retrieval_insights", [])
+                    if isinstance(item, dict)
+                ],
+                "rag_docs": [
+                    dict(item)
+                    for item in getattr(persisted_ctx, "rag_docs", [])
+                    if isinstance(item, dict)
+                ],
                 "forecast_model": persisted_ctx.nf_best_model,
                 "has_forecast_cv": persisted_ctx.nf_cv_full is not None,
                 "forecast_prediction_column": persisted_ctx.nf_pred_col,
             }
         else:
             runtime_snapshot = self._runtime_context_snapshot()
-        # Surface the current todo state for the CLI/runtime inspector.
-        todo_summary = []
-        try:
-            todo_res = self.run_tool_direct("todo", {"command": "view"}, session_id=sid)
-            payload = json.loads(todo_res)
-            if isinstance(payload, dict) and "todos" in payload:
-                # [{id, title, status, note}, ...]
-                todo_summary = payload["todos"]
-        except Exception:
-            pass
+        todo_summary = list(runtime_snapshot.get("todo_items") or [])
 
         return {
             "session_id": sid,
@@ -745,15 +880,362 @@ class Agent:
     def list_sessions(self) -> list[tuple[str, str]]:
         return self.memory.list_sessions()
 
+    def preview_prompt_context(
+        self,
+        message: str,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        sid = session_id or self.current_session_id
+        query = str(message or "")
+        if sid and self._loaded_runtime_session_id != sid:
+            self._load_runtime_state(sid)
+
+        classification = classify_turn(query)
+        state = TurnState(
+            turn_id=str(uuid.uuid4()),
+            classified_as=classification.intent,
+            domain_groups_activated=classification.domain_groups,
+            user_query=query,
+        )
+        state.available_tool_names = self._agent_loop.dispatcher.available_tool_names()
+
+        history: list[Message] = []
+        if sid:
+            try:
+                history = self.memory.load_history(
+                    sid,
+                    message=query,
+                    use_semantic_retrieval=bool(query)
+                    and getattr(self.config, "default_use_semantic_retrieval", False),
+                    retrieval_mode=getattr(
+                        self.config, "default_retrieval_mode", "hybrid"
+                    ),
+                ) or []
+            except Exception:
+                history = []
+
+        convo = list(history)
+        if query.strip():
+            convo.append(Message(role=MessageRole.USER, content=query))
+
+        system = self._agent_loop.prompt_builder.build(state, self.config)
+        untrimmed = self._agent_loop._with_system(convo, system)
+        trimmed = self._agent_loop._trim_to_budget(untrimmed)
+
+        return {
+            "session_id": sid,
+            "classified_as": classification.intent,
+            "domain_groups": sorted(classification.domain_groups),
+            "history_loaded_count": len(history),
+            "untrimmed_message_count": len(untrimmed),
+            "trimmed_message_count": len(trimmed),
+            "history_limit": int(self.config.history_limit),
+            "context_token_budget": int(getattr(self.config, "context_token_budget", 0)),
+            "system_prompt": system,
+            "messages": [
+                {
+                    "role": msg.role.value,
+                    "name": msg.name,
+                    "content": msg.content,
+                }
+                for msg in trimmed
+            ],
+        }
+
+    def _prompt_runtime_context(self) -> str:
+        runtime = self._runtime_context_snapshot()
+        lines: list[str] = []
+
+        mounted_paths = list(runtime.get("mounted_paths") or [])
+        if mounted_paths:
+            lines.append("Mounted paths available to the session:")
+            for item in mounted_paths[:6]:
+                path = str(item.get("path", "")).strip() or "(unknown path)"
+                file_count = int(item.get("file_count", 0) or 0)
+                token_count = int(item.get("token_count", 0) or 0)
+                detail_parts = []
+                if file_count > 0:
+                    detail_parts.append(f"files={file_count}")
+                if token_count > 0:
+                    detail_parts.append(f"tokens≈{token_count}")
+                details = f" ({', '.join(detail_parts)})" if detail_parts else ""
+                lines.append(f"- {path}{details}")
+            if len(mounted_paths) > 6:
+                lines.append(f"- … {len(mounted_paths) - 6} more mounted path(s)")
+
+        active_repos = list(runtime.get("active_repos") or [])
+        if active_repos:
+            lines.append("Active repos selected for this session:")
+            for item in active_repos[:6]:
+                name = str(item.get("name", "")).strip() or str(item.get("id", "")).strip() or "(unknown repo)"
+                repo_id = str(item.get("id", "")).strip()
+                chunks = int(item.get("chunks_added", 0) or 0)
+                files_processed = int(item.get("files_processed", 0) or 0)
+                detail_parts = []
+                if repo_id:
+                    detail_parts.append(f"id={repo_id}")
+                if files_processed > 0:
+                    detail_parts.append(f"files={files_processed}")
+                if chunks > 0:
+                    detail_parts.append(f"chunks={chunks}")
+                details = f" ({', '.join(detail_parts)})" if detail_parts else ""
+                lines.append(f"- {name}{details}")
+            if len(active_repos) > 6:
+                lines.append(f"- … {len(active_repos) - 6} more active repo(s)")
+
+        rag_docs = list(runtime.get("rag_docs") or [])
+        if rag_docs:
+            lines.append("Active RAG docs available for retrieval:")
+            for item in rag_docs[:6]:
+                path = str(item.get("path", "")).strip() or "(unknown doc)"
+                kind = str(item.get("kind", "")).strip()
+                chunks = int(item.get("chunks", 0) or 0)
+                label = str(item.get("label", "")).strip()
+                detail_parts = []
+                if kind:
+                    detail_parts.append(kind)
+                if chunks > 0:
+                    detail_parts.append(f"chunks={chunks}")
+                if label:
+                    detail_parts.append(f"label={label}")
+                details = f" ({', '.join(detail_parts)})" if detail_parts else ""
+                lines.append(f"- {path}{details}")
+            if len(rag_docs) > 6:
+                lines.append(f"- … {len(rag_docs) - 6} more RAG doc(s)")
+
+        todo_items = list(runtime.get("todo_items") or [])
+        if todo_items:
+            active_todos = []
+            for item in todo_items:
+                title = str(item.get("title", "")).strip()
+                if not title:
+                    continue
+                status = str(item.get("status", "")).strip() or "pending"
+                active_todos.append(f"- [{status}] {title}")
+            if active_todos:
+                lines.append("Current task checklist:")
+                lines.extend(active_todos[:8])
+
+        if runtime.get("loaded"):
+            dataset = str(runtime.get("data_name", "")).strip() or "unnamed dataset"
+            row_count = int(runtime.get("row_count", 0) or 0)
+            cols = list(runtime.get("value_columns") or [])
+            col_preview = ", ".join(str(col) for col in cols[:6]) or "none"
+            shape = "multivariate" if runtime.get("is_multivariate") else "univariate"
+            lines.append(
+                f"Loaded dataset: {dataset} ({shape}, rows={row_count}, value_columns={col_preview})."
+            )
+            if runtime.get("freq"):
+                lines.append(f"Known frequency: {runtime['freq']}.")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _merge_where(
+        lhs: dict[str, Any] | None,
+        rhs: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if lhs and rhs:
+            return {"$and": [lhs, rhs]}
+        return lhs or rhs
+
+    @staticmethod
+    def _paths_where(paths: list[str]) -> dict[str, Any] | None:
+        clean = [str(path or "").strip() for path in paths if str(path or "").strip()]
+        if not clean:
+            return None
+        if len(clean) == 1:
+            return {"repo_rel_path": clean[0]}
+        return {"$or": [{"repo_rel_path": path} for path in clean]}
+
+    def _prompt_retrieval_context(self, state: TurnState) -> str:
+        query = str(state.user_query or "").strip()
+        self.ctx.retrieval_insights = []
+        if not query or not getattr(self.config, "prompt_rag_context_enabled", True):
+            return ""
+        runtime = self._runtime_context_snapshot()
+        active_repos = list(runtime.get("active_repos") or [])
+        rag_docs = list(runtime.get("rag_docs") or [])
+        repo_library = [
+            dict(item)
+            for item in load_repo_index()
+            if isinstance(item, dict)
+        ]
+        if not active_repos and repo_library:
+            active_repos = [
+                item
+                for item in repo_library
+                if int(item.get("chunks_added", 0) or 0) > 0
+            ][:3]
+        repo_ids = [
+            str(item.get("id") or "").strip()
+            for item in active_repos
+            if str(item.get("id") or "").strip()
+        ]
+        if not repo_ids and not rag_docs:
+            return ""
+
+        where: dict[str, Any] | None = None
+        if repo_ids:
+            if len(repo_ids) == 1:
+                where = {"repo_id": repo_ids[0]}
+            else:
+                where = {"$or": [{"repo_id": repo_id} for repo_id in repo_ids]}
+
+        rows = self.memory.search_rag(
+            query,
+            where=where,
+            n_results=int(getattr(self.config, "prompt_rag_context_max_results", 4)),
+            event_cb=None,
+        )
+        if not rows:
+            return ""
+
+        repo_lookup = {
+            str(item.get("id") or "").strip(): dict(item)
+            for item in load_repo_index()
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
+
+        lines = ["Use this retrieved project context if it helps answer the request:"]
+        retrieval_insights: list[dict[str, Any]] = []
+        for row in rows[: int(getattr(self.config, "prompt_rag_context_max_results", 4))]:
+            meta = dict(row.get("metadata") or {})
+            repo_id = str(meta.get("repo_id") or "").strip()
+            repo_rel_path = str(meta.get("repo_rel_path") or "").strip()
+            path = repo_rel_path or str(meta.get("path") or "").strip() or "(unknown path)"
+            label = f"{repo_id}:{path}" if repo_id else path
+            lines.append(
+                f"- {label} — {self._compact_preview(str(row.get('content') or ''), 220)}"
+            )
+
+        if repo_ids:
+            neighbor_limit = int(getattr(self.config, "prompt_rag_context_neighbor_results", 2))
+            for repo_id in repo_ids[:3]:
+                repo = repo_lookup.get(repo_id)
+                if repo is None:
+                    continue
+                seed_paths = [
+                    str((row.get("metadata") or {}).get("repo_rel_path") or "").strip()
+                    for row in rows
+                    if str((row.get("metadata") or {}).get("repo_id") or "").strip() == repo_id
+                    and str((row.get("metadata") or {}).get("repo_rel_path") or "").strip()
+                ]
+                if not seed_paths:
+                    continue
+                related = related_repo_context(
+                    repo,
+                    rel_paths=seed_paths,
+                    query=query,
+                    limit=6,
+                )
+                related_file_rows = [
+                    {
+                        "rel_path": str(item.get("rel_path") or "").strip(),
+                        "score": int(item.get("score", 0) or 0),
+                    }
+                    for item in list(related.get("related_files") or [])
+                    if str(item.get("rel_path") or "").strip()
+                ]
+                related_files = [
+                    str(item.get("rel_path") or "").strip()
+                    for item in related_file_rows
+                ][: max(0, neighbor_limit + 1)]
+                if related_files:
+                    lines.append(
+                        f"Related files in repo {repo_id}: " + ", ".join(related_files[:6])
+                    )
+                    extra_rows = self.memory.search_rag(
+                        query,
+                        where=self._merge_where(
+                            {"repo_id": repo_id},
+                            self._paths_where(related_files[: max(0, neighbor_limit)]),
+                        ),
+                        n_results=max(1, neighbor_limit),
+                        event_cb=None,
+                    )
+                    for extra in extra_rows[:neighbor_limit]:
+                        meta = dict(extra.get("metadata") or {})
+                        extra_path = (
+                            str(meta.get("repo_rel_path") or "").strip()
+                            or str(meta.get("path") or "").strip()
+                            or "(unknown path)"
+                        )
+                        lines.append(
+                            f"- neighbor {repo_id}:{extra_path} — "
+                            f"{self._compact_preview(str(extra.get('content') or ''), 180)}"
+                        )
+
+                related_symbols = list(related.get("related_symbols") or [])[:4]
+                if related_symbols:
+                    symbol_preview = ", ".join(
+                        (
+                            f"{str(item.get('name') or '').strip()}@"
+                            f"{str(item.get('rel_path') or '').strip()}"
+                        )
+                        for item in related_symbols
+                        if str(item.get("name") or "").strip()
+                    )
+                    if symbol_preview:
+                        lines.append(f"Related symbols in repo {repo_id}: {symbol_preview}")
+                retrieval_insights.append(
+                    {
+                        "query": self._compact_preview(query, 140),
+                        "repo_id": repo_id,
+                        "repo_name": str(repo.get("name") or repo_id or "").strip(),
+                        "seed_paths": seed_paths[:4],
+                        "retrieved_paths": [
+                            str((row.get("metadata") or {}).get("repo_rel_path") or "").strip()
+                            for row in rows[:6]
+                            if str((row.get("metadata") or {}).get("repo_id") or "").strip()
+                            == repo_id
+                            and str((row.get("metadata") or {}).get("repo_rel_path") or "").strip()
+                        ][:4],
+                        "related_files": related_file_rows[:4],
+                        "related_symbols": [
+                            {
+                                "name": str(item.get("name") or "").strip(),
+                                "symbol_kind": str(item.get("symbol_kind") or "").strip(),
+                                "rel_path": str(item.get("rel_path") or "").strip(),
+                                "line": int(item.get("line", 0) or 0),
+                            }
+                            for item in related_symbols
+                            if str(item.get("name") or "").strip()
+                        ][:4],
+                    }
+                )
+
+        self.ctx.retrieval_insights = retrieval_insights[:4]
+
+        return _truncate_text(
+            "\n".join(lines),
+            int(getattr(self.config, "prompt_rag_context_max_chars", 2200)),
+        )
+
     def _build_agent_loop(self) -> AgentLoop:
         """Construct the AgentLoop with the default runtime components."""
         guards = default_guards(self.config)
         prompt_builder = default_prompt_builder(
-            tool_schema_fn=lambda: self.tools.tools_schema_prompt(),
-            routing_fn=lambda query: self.tools.skill_routing_prompt(query, top_k=1)[0],
-            domain_schema_fn=lambda groups: self.tools.skill_routing_prompt(
-                " ".join(sorted(groups)), top_k=2
+            base_prompt_fn=lambda: self.system_prompt,
+            tool_schema_fn=lambda: self.tools.tools_schema_prompt(
+                use_toon=self.config.use_toon_for_tools,
+                mode=self.config.tool_schema_mode,
+                include_tool_names=self.tools.default_prompt_tool_names(),
+            ),
+            routing_fn=lambda query: self.tools.skill_routing_prompt(
+                query,
+                use_toon=self.config.use_toon_for_tools,
+                mode=self.config.tool_schema_mode,
+                top_k=1,
             )[0],
+            domain_schema_fn=lambda groups: self.tools.skill_routing_prompt(
+                " ".join(sorted(groups)),
+                use_toon=self.config.use_toon_for_tools,
+                mode=self.config.tool_schema_mode,
+                top_k=2,
+            )[0],
+            retrieval_context_fn=self._prompt_retrieval_context,
+            runtime_context_fn=self._prompt_runtime_context,
         )
         dispatcher = ToolDispatcher(self.tools)
         # guardrail_stall_nudge_limit: max corrective retries per guard (default 1).
@@ -772,6 +1254,8 @@ class Agent:
             prompt_builder=prompt_builder,
             dispatcher=dispatcher,
             config=self.config,
+            use_toon=self.config.use_toon_for_tools,
+            tool_schemas_fn=lambda: self.tools.openai_tool_schemas(),
             memory=self.memory,
             mcp_loader=self._ensure_mcp_servers_loaded,
             thinking=thinking,
@@ -785,6 +1269,7 @@ class Agent:
         thinking_callback: Callable[[str], None] | None = None,
         fresh_session: bool = False,
         tool_callback: Callable[..., None] | None = None,
+        repair_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentResponse:
         sid = session_id or str(uuid.uuid4())
         self.current_session_id = sid
@@ -806,9 +1291,28 @@ class Agent:
         self._agent_loop.memory = self.memory
 
         token_emitted = False
+        seen_thinking: set[str] = set()
+
+        def _emit_thinking(content: str) -> None:
+            normalized = re.sub(r"\s+", " ", str(content or "")).strip()
+            if not normalized or normalized in seen_thinking:
+                return
+            seen_thinking.add(normalized)
+            if thinking_callback is not None:
+                thinking_callback(str(content or "").strip())
+
+        stream_router = (
+            _ThinkingStreamRouter(stream_callback=stream_callback, thinking_callback=_emit_thinking)
+            if stream_callback is not None
+            else None
+        )
 
         def _emit_token(token: str) -> None:
             nonlocal token_emitted
+            if stream_router is not None:
+                stream_router.feed(token)
+                token_emitted = token_emitted or stream_router.visible_emitted
+                return
             token_emitted = True
             if stream_callback is not None:
                 stream_callback(token)
@@ -818,8 +1322,9 @@ class Agent:
                 messages,
                 session_id=sid,
                 token_callback=_emit_token if stream_callback is not None else None,
-                thinking_callback=thinking_callback,
+                thinking_callback=_emit_thinking,
                 tool_callback=tool_callback,
+                repair_callback=repair_callback,
             )
 
         try:
@@ -832,6 +1337,10 @@ class Agent:
                 result = future.result()
 
         self._persist_runtime_state(sid)
+
+        if stream_router is not None:
+            stream_router.flush()
+            token_emitted = token_emitted or stream_router.visible_emitted
 
         final_response = result.final_response or ""
         if stream_callback is not None and final_response and not token_emitted:
@@ -847,7 +1356,11 @@ class Agent:
             or response_messages[-1].content != final_response
         ):
             response_messages.append(
-                Message(role=MessageRole.ASSISTANT, content=final_response)
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content=final_response,
+                    thinking_log=list(result.thinking_log or []),
+                )
             )
 
         debug = {

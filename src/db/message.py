@@ -54,6 +54,19 @@ def _first_batch(value: Any) -> list[Any]:
     return seq
 
 
+def _decode_thinking_log(raw: Any) -> list[str] | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(payload, list):
+        return None
+    return [str(item) for item in payload if str(item or "").strip()]
+
+
 @dataclass
 class MessageDB:
     db_path: str = "agent_sessions.db"
@@ -69,6 +82,7 @@ class MessageDB:
     lazy_vector: bool = True
     vector_collection_name: str = "messages"
     vector_backend: str = "usearch"
+    index_on_write: bool = False
     rerank_enabled: bool = True
     reranker_model_name: str = (
         "BAAI/bge-reranker-v2.5-gemma2-lightweight|BAAI/bge-reranker-v2-m3|"
@@ -109,6 +123,8 @@ class MessageDB:
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 tool_call_id TEXT,
                 name TEXT,
+                thinking_log TEXT,
+                vectorize INTEGER NOT NULL DEFAULT 1,
                 vector_id TEXT UNIQUE
             );
             """
@@ -124,6 +140,16 @@ class MessageDB:
         )
         try:
             self._conn.execute("ALTER TABLE messages ADD COLUMN vector_id TEXT;")
+        except Exception:
+            pass
+        try:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN vectorize INTEGER NOT NULL DEFAULT 1;"
+            )
+        except Exception:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN thinking_log TEXT;")
         except Exception:
             pass
         self._conn.execute(
@@ -208,6 +234,66 @@ class MessageDB:
             self._collection = None
             self._log.warning("Disabling vector memory: %s", e)
 
+    def _backfill_pending_vectors(
+        self,
+        *,
+        session_filter: str | None = None,
+        batch_size: int = 128,
+    ) -> int:
+        if self._conn is None or (not self.vector_enabled):
+            return 0
+
+        self._ensure_vector()
+        if not self.vector_enabled or self._collection is None:
+            return 0
+
+        where = ["vectorize=1", "vector_id IS NULL"]
+        params: list[Any] = []
+        if session_filter:
+            where.append("session_id=?")
+            params.append(session_filter)
+
+        rows = self._conn.execute(
+            f"""
+            SELECT id, session_id, role, content, name, tool_call_id
+            FROM messages
+            WHERE {" AND ".join(where)}
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (*params, max(1, int(batch_size))),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        ids = [f"msg-{int(row_id)}" for (row_id, *_rest) in rows]
+        documents = [
+            str(content)
+            for (_row_id, _sid, _role, content, _name, _tool_id) in rows
+        ]
+        metadatas = [
+            {
+                "session_id": str(session_id),
+                "role": str(role),
+                "name": str(name or ""),
+                "tool_call_id": str(tool_call_id or ""),
+            }
+            for (_row_id, session_id, role, _content, name, tool_call_id) in rows
+        ]
+
+        self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+
+        with self._lock:
+            self._conn.executemany(
+                "UPDATE messages SET vector_id=? WHERE id=?",
+                [
+                    (vector_id, int(row_id))
+                    for vector_id, (row_id, *_rest) in zip(ids, rows)
+                ],
+            )
+            self._conn.commit()
+        return len(rows)
+
     @staticmethod
     def _hybrid_doc_key(row: dict[str, Any]) -> str:
         row_id = row.get("row_id")
@@ -243,7 +329,7 @@ class MessageDB:
         if session_filter:
             rows = self._conn.execute(
                 """
-                SELECT m.id, m.role, m.content, m.name, m.tool_call_id, m.vector_id,
+                SELECT m.id, m.role, m.content, m.name, m.tool_call_id, m.thinking_log, m.vector_id,
                        bm25(messages_fts) AS kw_score
                 FROM messages_fts
                 JOIN messages m ON m.id = messages_fts.rowid
@@ -256,7 +342,7 @@ class MessageDB:
         else:
             rows = self._conn.execute(
                 """
-                SELECT m.id, m.role, m.content, m.name, m.tool_call_id, m.vector_id,
+                SELECT m.id, m.role, m.content, m.name, m.tool_call_id, m.thinking_log, m.vector_id,
                        bm25(messages_fts) AS kw_score
                 FROM messages_fts
                 JOIN messages m ON m.id = messages_fts.rowid
@@ -274,10 +360,11 @@ class MessageDB:
                 "content": str(content),
                 "name": name,
                 "tool_call_id": tool_call_id,
+                "thinking_log": thinking_log,
                 "vector_id": vector_id,
                 "kw_score": float(score),
             }
-            for (mid, role, content, name, tool_call_id, vector_id, score) in rows
+            for (mid, role, content, name, tool_call_id, thinking_log, vector_id, score) in rows
         ]
 
     def _vector_search_rows(
@@ -289,6 +376,13 @@ class MessageDB:
     ) -> list[dict[str, Any]]:
         if self._conn is None or (not self.vector_enabled):
             return []
+        try:
+            while self._backfill_pending_vectors(session_filter=session_filter) > 0:
+                pass
+        except ImportError:
+            raise
+        except Exception as e:
+            self._log.warning("Pending vector backfill failed: %s", e)
         where: dict[str, Any] = {"session_id": session_filter} if session_filter else {}
         results = self.collection.query(
             query_texts=[query],
@@ -310,6 +404,7 @@ class MessageDB:
                     "content": str(doc),
                     "name": (meta.get("name") or None),
                     "tool_call_id": (meta.get("tool_call_id") or None),
+                    "thinking_log": (meta.get("thinking_log") or None),
                     "vector_id": str(vector_id),
                     "distance": float(dist),
                 }
@@ -322,15 +417,22 @@ class MessageDB:
         placeholders = ",".join("?" for _ in vector_ids)
         db_rows = self._conn.execute(
             f"""
-            SELECT id, vector_id, role, content, name, tool_call_id
+            SELECT id, vector_id, role, content, name, tool_call_id, thinking_log
             FROM messages
             WHERE vector_id IN ({placeholders})
             """,
             tuple(vector_ids),
         ).fetchall()
-        by_vector_id: dict[str, tuple[int, str, str, str | None, str | None]] = {
-            str(vector_id): (int(row_id), str(role), str(content), name, tool_call_id)
-            for (row_id, vector_id, role, content, name, tool_call_id) in db_rows
+        by_vector_id: dict[str, tuple[int, str, str, str | None, str | None, str | None]] = {
+            str(vector_id): (
+                int(row_id),
+                str(role),
+                str(content),
+                name,
+                tool_call_id,
+                thinking_log,
+            )
+            for (row_id, vector_id, role, content, name, tool_call_id, thinking_log) in db_rows
         }
         for row in rows:
             v_id = str(row.get("vector_id", ""))
@@ -342,6 +444,7 @@ class MessageDB:
             row["content"] = mapped[2]
             row["name"] = mapped[3]
             row["tool_call_id"] = mapped[4]
+            row["thinking_log"] = mapped[5]
         return rows
 
     def _hybrid_search_rows(
@@ -406,15 +509,27 @@ class MessageDB:
             raise RuntimeError("SQLite connection is not initialized.")
 
         vectorize = bool(getattr(msg, "vectorize", True))
-        vector_id = (
-            str(uuid.uuid4()) if (self.vector_enabled and vectorize) else None
+        should_index_now = bool(
+            self.vector_enabled and vectorize and self.index_on_write
         )
+        vector_id = str(uuid.uuid4()) if should_index_now else None
 
         with self._lock:
+            thinking_payload = None
+            if getattr(msg, "thinking_log", None):
+                try:
+                    thinking_payload = json.dumps(
+                        list(msg.thinking_log or []),
+                        ensure_ascii=False,
+                    )
+                except Exception:
+                    thinking_payload = None
             cur = self._conn.execute(
                 """
-                INSERT INTO messages (session_id, role, content, tool_call_id, name, vector_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (
+                    session_id, role, content, tool_call_id, name, thinking_log, vectorize, vector_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -422,13 +537,15 @@ class MessageDB:
                     msg.content,
                     msg.tool_call_id,
                     msg.name,
+                    thinking_payload,
+                    int(vectorize),
                     vector_id,
                 ),
             )
             rowid = int(cur.lastrowid)
             self._conn.commit()
 
-        if self.vector_enabled and vectorize and vector_id is not None:
+        if should_index_now and vector_id is not None:
             try:
                 self._ensure_vector()
                 if not self.vector_enabled or self._collection is None:
@@ -469,14 +586,15 @@ class MessageDB:
                     content=content,
                     name=name,
                     tool_call_id=tool_call_id,
+                    thinking_log=_decode_thinking_log(thinking_log),
                 )
-                for (_, role, content, name, tool_call_id) in rows
+                for (_, role, content, name, tool_call_id, thinking_log) in rows
             ]
 
         def summary_checkpoint_row() -> tuple[Any, ...] | None:
             return self._conn.execute(
                 """
-                SELECT id, role, content, name, tool_call_id
+                SELECT id, role, content, name, tool_call_id, thinking_log
                 FROM messages
                 WHERE session_id=? AND role=? AND content LIKE ?
                 ORDER BY id ASC
@@ -538,7 +656,7 @@ class MessageDB:
                     placeholders = ",".join("?" for _ in chosen_ids)
                     selected_rows = self._conn.execute(
                         f"""
-                        SELECT id, role, content, name, tool_call_id
+                        SELECT id, role, content, name, tool_call_id, thinking_log
                         FROM messages
                         WHERE id IN ({placeholders})
                         ORDER BY id ASC
@@ -556,7 +674,7 @@ class MessageDB:
 
         rows = self._conn.execute(
             """
-            SELECT id, role, content, name, tool_call_id
+            SELECT id, role, content, name, tool_call_id, thinking_log
             FROM messages
             WHERE session_id=?
             ORDER BY id DESC
@@ -580,7 +698,7 @@ class MessageDB:
 
         rows = self._conn.execute(
             """
-            SELECT role, content, name, tool_call_id
+            SELECT role, content, name, tool_call_id, thinking_log
             FROM messages
             WHERE session_id=?
             ORDER BY id ASC
@@ -593,8 +711,9 @@ class MessageDB:
                 content=content,
                 name=name,
                 tool_call_id=tool_call_id,
+                thinking_log=_decode_thinking_log(thinking_log),
             )
-            for (role, content, name, tool_call_id) in rows
+            for (role, content, name, tool_call_id, thinking_log) in rows
         ]
 
     def count_session_messages(self, session_id: str) -> int:
@@ -724,6 +843,7 @@ class MessageDB:
                 tool_call_id=(
                     str(r["tool_call_id"]) if r.get("tool_call_id") else None
                 ),
+                thinking_log=_decode_thinking_log(r.get("thinking_log")),
             )
             for r in rows
         ]

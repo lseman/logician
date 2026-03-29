@@ -8,6 +8,8 @@ from src.agent.prompt import (
     DomainToolsComponent,
     IdentityComponent,
     PromptBuilder,
+    RetrievalContextComponent,
+    RuntimeContextComponent,
     SkillPlaybookComponent,
     TurnContextComponent,
     default_prompt_builder,
@@ -102,6 +104,12 @@ def test_identity_fallback_when_soul_missing(monkeypatch):
     assert result == "You are a capable coding agent."
 
 
+def test_identity_prefers_supplied_base_prompt():
+    comp = IdentityComponent(lambda: "Custom system prompt")
+    result = comp.render(make_state(), make_config())
+    assert result == "Custom system prompt"
+
+
 # ---------------------------------------------------------------------------
 # CoreToolSchemasComponent
 # ---------------------------------------------------------------------------
@@ -177,6 +185,57 @@ def test_skill_playbook_returns_none_when_fn_returns_empty():
 
 
 # ---------------------------------------------------------------------------
+# RetrievalContextComponent
+# ---------------------------------------------------------------------------
+
+def test_retrieval_context_returns_none_when_disabled():
+    comp = RetrievalContextComponent(lambda state: "retrieved context")
+    config = make_config(prompt_rag_context_enabled=False)
+    assert comp.render(make_state(user_query="find foo"), config) is None
+
+
+def test_retrieval_context_wraps_summary():
+    comp = RetrievalContextComponent(lambda state: "repo:file.py - context")
+    result = comp.render(make_state(user_query="find foo"), make_config())
+    assert result is not None
+    assert result.startswith("## Retrieval Context")
+    assert "file.py" in result
+
+
+def test_retrieval_context_caches_per_turn():
+    calls = {"count": 0}
+
+    def _render(state):
+        calls["count"] += 1
+        return f"context for {state.user_query}"
+
+    comp = RetrievalContextComponent(_render)
+    state = make_state(user_query="find foo")
+    config = make_config()
+    first = comp.render(state, config)
+    second = comp.render(state, config)
+    assert first == second
+    assert calls["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# RuntimeContextComponent
+# ---------------------------------------------------------------------------
+
+def test_runtime_context_returns_none_when_empty():
+    comp = RuntimeContextComponent(lambda: "")
+    assert comp.render(make_state(), make_config()) is None
+
+
+def test_runtime_context_wraps_summary():
+    comp = RuntimeContextComponent(lambda: "Mounted paths available:\n- /repo")
+    result = comp.render(make_state(), make_config())
+    assert result is not None
+    assert result.startswith("## Runtime Context")
+    assert "/repo" in result
+
+
+# ---------------------------------------------------------------------------
 # TurnContextComponent
 # ---------------------------------------------------------------------------
 
@@ -222,8 +281,21 @@ def test_turn_context_includes_verify_reminder_when_files_written():
 
 def test_default_prompt_builder_returns_prompt_builder():
     builder = default_prompt_builder(
+        base_prompt_fn=lambda: "base",
         tool_schema_fn=lambda: "",
         routing_fn=lambda q: "",
     )
     assert isinstance(builder, PromptBuilder)
-    assert len(builder.components) == 4
+    assert len(builder.components) == 5
+
+
+def test_default_prompt_builder_includes_retrieval_component_when_supplied():
+    builder = default_prompt_builder(
+        base_prompt_fn=lambda: "base",
+        tool_schema_fn=lambda: "",
+        routing_fn=lambda q: "",
+        retrieval_context_fn=lambda state: "retrieved context",
+        runtime_context_fn=lambda: "runtime context",
+    )
+    assert isinstance(builder, PromptBuilder)
+    assert len(builder.components) == 7

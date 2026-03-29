@@ -205,6 +205,47 @@ class HallucinationGuard:
 
 _VERIFICATION_NAMES = {"test", "pytest", "ruff", "lint", "check", "verify", "mypy"}
 
+_EDIT_TOOL_NAMES = {
+    "edit_file",
+    "apply_edit_block",
+    "smart_edit",
+    "edit_file_libcst",
+    "replace_function_body",
+    "replace_docstring",
+    "replace_decorators",
+    "replace_argument",
+    "insert_after_function",
+    "delete_function",
+}
+
+_STRUCTURAL_PYTHON_TOOLS = {
+    "edit_file_libcst",
+    "replace_function_body",
+    "replace_docstring",
+    "replace_decorators",
+    "replace_argument",
+    "insert_after_function",
+    "delete_function",
+    "find_function_by_name",
+    "find_class_by_name",
+}
+
+
+def _call_path(call: ToolCall) -> str:
+    args = dict(call.arguments or {})
+    return str(
+        args.get("path") or args.get("file_path") or args.get("filename") or ""
+    ).strip()
+
+
+def _is_python_path(path: str) -> bool:
+    return str(path or "").strip().lower().endswith(".py")
+
+
+def _tool_name_is_verifier(name: str) -> bool:
+    lower = str(name or "").lower()
+    return any(part in lower for part in _VERIFICATION_NAMES)
+
 
 class VerificationGuard:
     name = "verification"
@@ -218,13 +259,26 @@ class VerificationGuard:
         if not state.files_written:
             return GuardrailResult(passed=True, guard_name=self.name)
         if tool_calls:
-            return GuardrailResult(passed=True, guard_name=self.name)
-        # Check calls after last write for any verification tool
-        last_write = state.last_write_index()
-        calls_after = state.tool_calls[last_write + 1 :]
-        for call in calls_after:
-            if any(pat in call.name.lower() for pat in _VERIFICATION_NAMES):
+            if any(_tool_name_is_verifier(call.name) for call in tool_calls):
                 return GuardrailResult(passed=True, guard_name=self.name)
+            return GuardrailResult(passed=False, guard_name=self.name, nudge=(
+                "You've modified files but haven't verified. "
+                "Please run tests or a linter."
+            ))
+
+        # Prefer structured execution results when available.
+        last_write_result = state.last_write_result_index()
+        if last_write_result >= 0:
+            for result in state.tool_results[last_write_result + 1 :]:
+                if result.verifier:
+                    return GuardrailResult(passed=True, guard_name=self.name)
+        else:
+            last_write = state.last_write_index()
+            calls_after = state.tool_calls[last_write + 1 :]
+            for call in calls_after:
+                if _tool_name_is_verifier(call.name):
+                    return GuardrailResult(passed=True, guard_name=self.name)
+
         return GuardrailResult(
             passed=False,
             nudge=(
@@ -234,6 +288,74 @@ class VerificationGuard:
             hard_stop=False,
             guard_name=self.name,
         )
+
+
+class ReadBeforeEditGuard:
+    name = "read_before_edit"
+
+    def check(
+        self,
+        state: TurnState,
+        response: str,
+        tool_calls: list[ToolCall],
+    ) -> GuardrailResult:
+        for call in tool_calls:
+            if call.name not in _EDIT_TOOL_NAMES:
+                continue
+            path = _call_path(call)
+            if not path:
+                continue
+            if path in state.files_read:
+                continue
+            return GuardrailResult(
+                passed=False,
+                nudge=(
+                    f"You are editing `{path}` with `{call.name}` before inspecting it. "
+                    "Read the file or target symbol first, then apply the edit."
+                ),
+                hard_stop=False,
+                guard_name=self.name,
+            )
+        return GuardrailResult(passed=True, guard_name=self.name)
+
+
+class PythonStructuralEditGuard:
+    name = "python_structural_edit"
+
+    def __init__(self, config: Config) -> None:
+        self._enabled = bool(
+            getattr(config, "python_structural_editing_preference", True)
+        )
+
+    def check(
+        self,
+        state: TurnState,
+        response: str,
+        tool_calls: list[ToolCall],
+    ) -> GuardrailResult:
+        if not self._enabled or not tool_calls:
+            return GuardrailResult(passed=True, guard_name=self.name)
+        if not state.available_tool_names.intersection(_STRUCTURAL_PYTHON_TOOLS):
+            return GuardrailResult(passed=True, guard_name=self.name)
+
+        for call in tool_calls:
+            if call.name != "edit_file":
+                continue
+            path = _call_path(call)
+            if not _is_python_path(path):
+                continue
+            return GuardrailResult(
+                passed=False,
+                nudge=(
+                    f"For Python file `{path}`, prefer structural tools first. "
+                    "Use `find_function_by_name` / `find_class_by_name` to inspect symbols, "
+                    "then prefer `replace_function_body`, `replace_docstring`, or `edit_file_libcst` "
+                    "instead of raw `edit_file` when possible."
+                ),
+                hard_stop=False,
+                guard_name=self.name,
+            )
+        return GuardrailResult(passed=True, guard_name=self.name)
 
 
 class StallGuard:
@@ -316,12 +438,19 @@ class InspectionGuard:
         # Only check when the agent is about to give a final answer
         if tool_calls:
             return GuardrailResult(passed=True, guard_name=self.name)
-        last_output = state.last_tool_output
-        if not last_output or not response:
+        if not response:
             return GuardrailResult(passed=True, guard_name=self.name)
 
-        tool_has_error = any(p.search(last_output) for p in _TOOL_ERROR_PATTERNS)
-        tool_has_success = any(p.search(last_output) for p in _TOOL_SUCCESS_PATTERNS)
+        if state.tool_results:
+            last_result = state.tool_results[-1]
+            tool_has_error = last_result.status in {"error", "failed", "fail"}
+            tool_has_success = last_result.has_content and not tool_has_error
+        else:
+            last_output = state.last_tool_output
+            if not last_output:
+                return GuardrailResult(passed=True, guard_name=self.name)
+            tool_has_error = any(p.search(last_output) for p in _TOOL_ERROR_PATTERNS)
+            tool_has_success = any(p.search(last_output) for p in _TOOL_SUCCESS_PATTERNS)
 
         # Mode 1: tool reported failure but response claims success
         if tool_has_error and not tool_has_success:
@@ -363,6 +492,9 @@ def default_guards(config: Config) -> list[Guard]:
     ]
     if getattr(config, "tool_claim_guard_enabled", True):
         guards.append(ToolClaimGuard())
+    if getattr(config, "workflow_guard_enabled", True):
+        guards.append(ReadBeforeEditGuard())
+        guards.append(PythonStructuralEditGuard(config))
     guards.append(VerificationGuard())
     guards.append(StallGuard(max_total_nudges=getattr(config, "max_guardrail_nudges", 5)))
     if getattr(config, "inspection_result_guard_enabled", True):

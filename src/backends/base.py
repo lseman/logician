@@ -16,6 +16,7 @@ class LLMBackend(Protocol):
         max_tokens: int = 1024,
         tools: list[dict[str, Any]] | None = None,
         grammar: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
         stream: bool = True,
         on_token: Callable[[str], None] | None = None,
     ) -> str: ...

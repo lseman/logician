@@ -33,6 +33,12 @@ python apps/runners/demo.py
 
 # Or start a REPL
 python apps/runners/repl_demo.py
+
+# Or ingest a repo without the TUI
+python apps/runners/repo_ingest.py /path/to/repo
+
+# Or clone + ingest a git URL into .logician/repos/_checkouts
+python apps/runners/repo_ingest.py https://github.com/org/repo.git --base-dir /path/to/workspace
 ```
 
 ### Basic Usage

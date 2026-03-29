@@ -20,7 +20,7 @@ pub enum BridgeEvent {
     },
     ToolStart {
         name: String,
-        args: Value,
+        args: Option<Value>,
         sequence: u64,
     },
     ToolEnd {
@@ -31,6 +31,7 @@ pub enum BridgeEvent {
         cache_hit: bool,
         error: Option<String>,
         result_preview: Option<String>,
+        args: Option<Value>, // Include args for consistency with tool_start
     },
     Image {
         tool: String,
@@ -40,8 +41,28 @@ pub enum BridgeEvent {
         skill_ids: Vec<String>,
         selected_tools: Vec<String>,
     },
+    Decision {
+        mode: String,
+        stage: String,
+        message: String,
+    },
+    ToolRepair {
+        stage: String,
+        attempt: u64,
+        tool: String,
+        error_type: String,
+        message: String,
+    },
     Stderr(String),
     Exit(Option<i32>),
+    FileDiff {
+        /// Debugging field: tracks which tool generated the diff (e.g., "edit_file", "write_file").
+        /// Currently unused in rendering but preserved for future debugging.
+        #[allow(dead_code)]
+        tool: String,
+        path: String,
+        diff: String,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,6 +70,65 @@ pub struct TodoItem {
     pub title: String,
     pub status: String,
     pub note: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ContextMount {
+    pub path: String,
+    pub glob: String,
+    pub file_count: u64,
+    pub token_count: u64,
+    pub map_depth: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RagDoc {
+    pub path: String,
+    pub label: String,
+    pub chunks: u64,
+    pub token_count: u64,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RepoRecord {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub files_processed: u64,
+    pub chunks_added: u64,
+    pub graph_nodes: u64,
+    pub graph_edges: u64,
+    pub graph_symbols: u64,
+    pub branch: String,
+    pub commit: String,
+    pub last_ingested_at: String,
+    pub last_graph_built_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RetrievalFileRecord {
+    pub rel_path: String,
+    pub score: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RetrievalSymbolRecord {
+    pub name: String,
+    pub symbol_kind: String,
+    pub rel_path: String,
+    pub line: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RetrievalInsight {
+    pub query: String,
+    pub repo_id: String,
+    pub repo_name: String,
+    pub seed_paths: Vec<String>,
+    pub retrieved_paths: Vec<String>,
+    pub related_files: Vec<RetrievalFileRecord>,
+    pub related_symbols: Vec<RetrievalSymbolRecord>,
 }
 
 // ── Bridge state returned by the Python process ───────────────────────────────
@@ -65,7 +145,14 @@ pub struct BridgeState {
     pub tiktoken: bool,
     pub tool_count: u64,
     pub skill_count: u64,
+    pub loaded_tools: Vec<String>,
+    pub loaded_skills: Vec<String>,
     pub todo: Vec<TodoItem>,
+    pub active_repos: Vec<RepoRecord>,
+    pub retrieval_insights: Vec<RetrievalInsight>,
+    pub repo_library: Vec<RepoRecord>,
+    pub mounted_paths: Vec<ContextMount>,
+    pub rag_docs: Vec<RagDoc>,
 }
 
 impl BridgeState {
@@ -95,15 +182,205 @@ impl BridgeState {
             tiktoken: v["tiktoken"].as_bool().unwrap_or(false),
             tool_count: v["tool_count"].as_u64().unwrap_or(0),
             skill_count: v["skill_count"].as_u64().unwrap_or(0),
+            loaded_tools: v["loaded_tools"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            loaded_skills: v["loaded_skills"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
             todo: v["todo"]
                 .as_array()
                 .map(|a| {
                     a.iter()
                         .map(|x| TodoItem {
-                            title: x["title"].as_str().unwrap_or("").to_string(),
+                            title: x["title"]
+                                .as_str()
+                                .or_else(|| x["content"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
                             status: x["status"].as_str().unwrap_or("not-started").to_string(),
-                            note: x["note"].as_str().unwrap_or("").to_string(),
+                            note: x["note"]
+                                .as_str()
+                                .or_else(|| x["activeForm"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
                         })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            active_repos: v["active_repos"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| RepoRecord {
+                            id: x["id"].as_str().unwrap_or("").to_string(),
+                            name: x["name"].as_str().unwrap_or("").to_string(),
+                            path: x["path"].as_str().unwrap_or("").to_string(),
+                            files_processed: x["files_processed"].as_u64().unwrap_or(0),
+                            chunks_added: x["chunks_added"].as_u64().unwrap_or(0),
+                            graph_nodes: x["graph_nodes"].as_u64().unwrap_or(0),
+                            graph_edges: x["graph_edges"].as_u64().unwrap_or(0),
+                            graph_symbols: x["graph_symbols"].as_u64().unwrap_or(0),
+                            branch: x["branch"]
+                                .as_str()
+                                .or_else(|| x["git"]["branch"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            commit: x["commit"]
+                                .as_str()
+                                .or_else(|| x["git"]["commit"].as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            last_ingested_at: x["last_ingested_at"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            last_graph_built_at: x["last_graph_built_at"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                        })
+                        .filter(|item| !item.id.trim().is_empty() || !item.path.trim().is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            retrieval_insights: v["retrieval_insights"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| RetrievalInsight {
+                            query: x["query"].as_str().unwrap_or("").to_string(),
+                            repo_id: x["repo_id"].as_str().unwrap_or("").to_string(),
+                            repo_name: x["repo_name"].as_str().unwrap_or("").to_string(),
+                            seed_paths: x["seed_paths"]
+                                .as_array()
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            retrieved_paths: x["retrieved_paths"]
+                                .as_array()
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            related_files: x["related_files"]
+                                .as_array()
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .map(|item| RetrievalFileRecord {
+                                            rel_path: item["rel_path"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            score: item["score"].as_u64().unwrap_or(0),
+                                        })
+                                        .filter(|item| !item.rel_path.trim().is_empty())
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            related_symbols: x["related_symbols"]
+                                .as_array()
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .map(|item| RetrievalSymbolRecord {
+                                            name: item["name"].as_str().unwrap_or("").to_string(),
+                                            symbol_kind: item["symbol_kind"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            rel_path: item["rel_path"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            line: item["line"].as_u64().unwrap_or(0),
+                                        })
+                                        .filter(|item| !item.name.trim().is_empty())
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                        .filter(|item| {
+                            !item.repo_id.trim().is_empty()
+                                || !item.repo_name.trim().is_empty()
+                                || !item.query.trim().is_empty()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            repo_library: v["repo_library"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| RepoRecord {
+                            id: x["id"].as_str().unwrap_or("").to_string(),
+                            name: x["name"].as_str().unwrap_or("").to_string(),
+                            path: x["path"].as_str().unwrap_or("").to_string(),
+                            files_processed: x["files_processed"].as_u64().unwrap_or(0),
+                            chunks_added: x["chunks_added"].as_u64().unwrap_or(0),
+                            graph_nodes: x["graph_nodes"].as_u64().unwrap_or(0),
+                            graph_edges: x["graph_edges"].as_u64().unwrap_or(0),
+                            graph_symbols: x["graph_symbols"].as_u64().unwrap_or(0),
+                            branch: x["git"]["branch"].as_str().unwrap_or("").to_string(),
+                            commit: x["git"]["commit"].as_str().unwrap_or("").to_string(),
+                            last_ingested_at: x["last_ingested_at"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            last_graph_built_at: x["last_graph_built_at"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                        })
+                        .filter(|item| !item.id.trim().is_empty() || !item.path.trim().is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            mounted_paths: v["mounted_paths"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| ContextMount {
+                            path: x["path"].as_str().unwrap_or("").to_string(),
+                            glob: x["glob"].as_str().unwrap_or("").to_string(),
+                            file_count: x["file_count"].as_u64().unwrap_or(0),
+                            token_count: x["token_count"].as_u64().unwrap_or(0),
+                            map_depth: x["map_depth"].as_u64().unwrap_or(0),
+                        })
+                        .filter(|item| !item.path.trim().is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            rag_docs: v["rag_docs"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| RagDoc {
+                            path: x["path"].as_str().unwrap_or("").to_string(),
+                            label: x["label"].as_str().unwrap_or("").to_string(),
+                            chunks: x["chunks"].as_u64().unwrap_or(0),
+                            token_count: x["token_count"].as_u64().unwrap_or(0),
+                            kind: x["kind"].as_str().unwrap_or("").to_string(),
+                        })
+                        .filter(|item| !item.path.trim().is_empty())
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -184,6 +461,16 @@ impl PythonBridge {
         ))
     }
 
+    /// Send a fire-and-forget cancel notification to the Python process.
+    /// The bridge is single-threaded so cancellation is best-effort — the Rust
+    /// side drops the in-flight oneshot receiver, making the UI responsive
+    /// immediately while the Python agent finishes its current turn in background.
+    pub async fn send_cancel(&self) {
+        let msg = json!({"method": "cancel"});
+        let line = format!("{}\n", serde_json::to_string(&msg).unwrap_or_default());
+        let _ = self.stdin.lock().await.write_all(line.as_bytes()).await;
+    }
+
     /// Send a JSON-RPC call and await the result.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         let id = Uuid::new_v4().to_string();
@@ -233,7 +520,7 @@ impl PythonBridge {
             },
             "tool_start" => BridgeEvent::ToolStart {
                 name: v["name"].as_str().unwrap_or("unknown").to_string(),
-                args: v.get("args").cloned().unwrap_or_default(),
+                args: Some(v.get("args").cloned().unwrap_or_default()),
                 sequence: v["sequence"].as_u64().unwrap_or(0),
             },
             "tool_end" => BridgeEvent::ToolEnd {
@@ -251,16 +538,22 @@ impl PythonBridge {
                     .and_then(|p| p.as_str())
                     .filter(|p| !p.is_empty())
                     .map(|p| p.to_string()),
+                args: Some(v.get("args").cloned().unwrap_or_default()),
             },
             "tool" => BridgeEvent::ToolStart {
                 // Backward compatibility for older bridge event schema.
                 name: v["name"].as_str().unwrap_or("unknown").to_string(),
-                args: v.get("args").cloned().unwrap_or_default(),
+                args: Some(v.get("args").cloned().unwrap_or_default()),
                 sequence: v["sequence"].as_u64().unwrap_or(0),
             },
             "image" => BridgeEvent::Image {
                 tool: v["tool"].as_str().unwrap_or("unknown").to_string(),
                 path: v["path"].as_str().unwrap_or("").to_string(),
+            },
+            "file_diff" => BridgeEvent::FileDiff {
+                tool: v["tool"].as_str().unwrap_or("unknown").to_string(),
+                path: v["path"].as_str().unwrap_or("").to_string(),
+                diff: v["diff"].as_str().unwrap_or("").to_string(),
             },
             "skill" => BridgeEvent::Skill {
                 skill_ids: v["skill_ids"]
@@ -279,6 +572,18 @@ impl PythonBridge {
                             .collect()
                     })
                     .unwrap_or_default(),
+            },
+            "decision" => BridgeEvent::Decision {
+                mode: v["mode"].as_str().unwrap_or("").to_string(),
+                stage: v["stage"].as_str().unwrap_or("").to_string(),
+                message: v["message"].as_str().unwrap_or("").to_string(),
+            },
+            "tool_repair" => BridgeEvent::ToolRepair {
+                stage: v["stage"].as_str().unwrap_or("").to_string(),
+                attempt: v["attempt"].as_u64().unwrap_or(0),
+                tool: v["tool"].as_str().unwrap_or("unknown").to_string(),
+                error_type: v["error_type"].as_str().unwrap_or("").to_string(),
+                message: v["message"].as_str().unwrap_or("").to_string(),
             },
             "bridge_stderr" => BridgeEvent::Stderr(v["text"].as_str().unwrap_or("").to_string()),
             "bridge_exit" => {

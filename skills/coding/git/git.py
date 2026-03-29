@@ -24,10 +24,32 @@ __skill__ = {
         "the task does not involve repo state, history, or change management"
     ],
     "next_skills": ["explore", "quality"],
+    "preferred_sequence": ["git_status", "git_diff", "git_log"],
+    "entry_criteria": [
+        "Repo state or change history matters to the task.",
+        "You want a checkpoint, reviewable diff, or commit after editing.",
+    ],
+    "decision_rules": [
+        "Check status before risky edits or commits.",
+        "Use diff to review current changes and log to recover prior intent.",
+        "Prefer small, non-interactive checkpoints over broad history rewrites.",
+    ],
     "workflow": [
         "Check status before destructive or broad operations.",
         "Use diff and log to recover intent before editing.",
         "Prefer non-interactive flows and small checkpoints.",
+    ],
+    "failure_recovery": [
+        "If the current directory is not inside a repo, locate the repo root before retrying git commands.",
+        "If the diff is too large, narrow it to the touched path before summarizing.",
+    ],
+    "exit_criteria": [
+        "The repo state is understood well enough to continue safely.",
+        "A checkpoint, diff, or history fact has been captured in a reviewable form.",
+    ],
+    "anti_patterns": [
+        "Committing without first checking the changed files and diff.",
+        "Using git as the first step when the task is still basic code exploration.",
     ],
 }
 

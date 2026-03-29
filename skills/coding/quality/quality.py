@@ -19,10 +19,32 @@ __skill__ = {
     ],
     "when_not_to_use": ["no validation step is needed and the task is purely exploratory"],
     "next_skills": ["git", "shell"],
+    "preferred_sequence": ["run targeted checks", "inspect failures", "broaden coverage if needed"],
+    "entry_criteria": [
+        "A meaningful code change was made and needs validation.",
+        "A failure report or regression needs to be reproduced and summarized.",
+    ],
+    "decision_rules": [
+        "Start with the narrowest check that matches the touched files or language.",
+        "Use Python-native tools for Python changes; use shell-driven project checks for other ecosystems such as Rust or Node.",
+        "Escalate from targeted checks to broader suites only when the narrow pass is insufficient.",
+    ],
     "workflow": [
         "Prefer targeted checks before full-suite runs.",
         "Match the checks to the files and languages touched.",
         "Return failures with the shortest actionable summary.",
+    ],
+    "failure_recovery": [
+        "If a tool is unavailable, fall back to the closest project-native check through the shell skill.",
+        "If failures are noisy, summarize the first actionable error and identify the file or test to inspect next.",
+    ],
+    "exit_criteria": [
+        "At least one meaningful verification step has run for the changed behavior.",
+        "Failures are reduced to a short actionable summary or the checks pass cleanly.",
+    ],
+    "anti_patterns": [
+        "Jumping straight to a full test suite when a targeted check would do.",
+        "Treating Python quality tools as the only validation path in a multi-language repo.",
     ],
 }
 

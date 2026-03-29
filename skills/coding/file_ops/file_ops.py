@@ -1,213 +1,77 @@
-from __future__ import annotations
+"""File Ops skill — routing metadata and grammar hints.
 
-import fnmatch
-from pathlib import Path
-from typing import Literal
-from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
+All tool implementations live in src/tools/core/files.py and are registered
+as always-on core tools. This module provides only:
+  - __skill__  : routing/trigger metadata for skill selection
+  - __grammars__: constrained-decoding hints for write_file / edit_file
+"""
+from __future__ import annotations
 
 __skill__ = {
     "name": "File Ops",
-    "description": "Use for local filesystem reads, writes, path listing, and single-file edits.",
-    "aliases": ["files", "file editing", "file reads", "single file edit"],
-    "triggers": ["read this file", "write this file", "create a new file", "list this directory"],
-    "preferred_tools": ["read_file", "write_file", "list_directory"],
+    "description": (
+        "Use for local filesystem reads, writes, path listing, "
+        "single-file edits, and git-aware operations."
+    ),
+    "aliases": ["files", "file editing", "file reads", "single file edit", "git status", "git diff"],
+    "triggers": [
+        "read this file", "write this file", "create a new file", "list this directory",
+        "edit this file", "patch this file", "fix this function",
+        "git status", "git diff", "show git changes", "what did I change",
+        "find in file", "search file", "where is function",
+    ],
+    "preferred_tools": [
+        "search_file", "read_file", "write_file", "edit_file",
+        "list_dir", "get_git_status", "get_git_diff",
+    ],
     "example_queries": [
         "open the config file and inspect it",
         "create a new module with this content",
         "list the files in src/db",
+        "find the definition of process_batch in agent.py",
+        "what's the git status?",
+        "show the diff between my changes and HEAD",
+        "edit the function foo to return 42 instead of 0",
     ],
     "when_not_to_use": [
-        "the task needs coordinated edits across several files or structural code search"
+        "the task needs coordinated edits across several files — use search_replace or multi_edit instead",
     ],
     "next_skills": ["explore", "multi_edit", "quality"],
+    "preferred_sequence": ["search_file", "read_file", "edit_file", "quality"],
+    "entry_criteria": [
+        "The exact file is known or the user gave a specific path.",
+        "The job is a one-file read, write, or tightly scoped edit.",
+    ],
+    "decision_rules": [
+        "Use read_file or search_file before edit_file when the exact block is not already known.",
+        "Use write_file for new files or intentional full-file rewrites.",
+        "For Python symbol-level edits, prefer structural tools when they are available.",
+    ],
     "workflow": [
-        "Read before editing unless the user already gave exact contents.",
-        "Prefer the smallest possible file change.",
-        "Escalate to explore, search_replace, or multi_edit when the task stops being single-file.",
+        "1. search_file(path, pattern) to find the exact text including indentation.",
+        "2. edit_file(path, old_string, new_string) to apply the change.",
+        "   - On failure: read closest_matches in the error and retry with corrected old_string.",
+        "   - For full rewrites: write_file(path, content) instead.",
+    ],
+    "failure_recovery": [
+        "If edit_file says the block was not found or was not unique, re-read the file and include more surrounding context.",
+        "If quoting or newline formatting looks wrong, keep the entire payload in one string field instead of splitting it across extra keys.",
+    ],
+    "exit_criteria": [
+        "The intended one-file change is applied without unrelated edits.",
+        "A follow-up verification step is chosen when the change affects behavior.",
+    ],
+    "anti_patterns": [
+        "Rewriting an existing file with write_file for a tiny local change.",
+        "Splitting code across extra argument keys instead of using content, old_string, or new_string.",
     ],
 }
 
-
-def _runtime():
-    return get_coding_runtime(globals())
-
-
-def _resolve_path(path: str) -> Path:
-    """Resolve path against default_cwd (if set) so relative paths work correctly."""
-    return _runtime().resolve_path(path)
-
-
-@tool
-def read_file(path: str, start_line: int = 1, end_line: int = 0) -> str:
-    """Use when: Read a source file or text file to inspect its contents.
-
-    Triggers: read file, show file, view code, open file, print file, cat file, inspect source.
-    Avoid when: You need to execute the file or modify it.
-    Inputs:
-      path (str, required): Absolute or relative path to the file.
-      start_line (int, optional): First line to return, 1-based (default 1).
-      end_line (int, optional): Last line to return, inclusive (0 = until EOF).
-    Returns: JSON with file content and metadata.
-    Side effects: Reads from filesystem; no writes.
-    """
-    try:
-        p = _resolve_path(path)
-        if not p.exists():
-            return _safe_json({"status": "error", "error": f"File not found: {path}"})
-        if not p.is_file():
-            return _safe_json({"status": "error", "error": f"Not a file: {path}"})
-
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines(
-            keepends=True
-        )
-        total = len(lines)
-        s = max(1, start_line) - 1  # convert to 0-based
-        e = total if end_line <= 0 else min(end_line, total)
-        selected = lines[s:e]
-        content = "".join(selected)
-        _MAX = 16_000
-        truncated = False
-        if len(content) > _MAX:
-            content = content[:_MAX] + "\n...[truncated]"
-            truncated = True
-        return _safe_json(
-            {
-                "status": "ok",
-                "path": str(p),
-                "total_lines": total,
-                "returned_lines": f"{s + 1}-{s + len(selected)}",
-                "content": content,
-                "truncated": truncated,
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
-
-
-@tool
-def write_file(path: str, content: str, mode: Literal["w", "a"] = "w") -> str:
-    """Use when: Create a new file or overwrite/append an existing one.
-
-    Triggers: write file, create file, save file, overwrite file, append to file.
-    Avoid when: You only need to patch a specific string — use edit_file_replace instead.
-    Inputs:
-      path (str, required): Absolute or relative path to the destination file.
-      content (str, required): Text content to write.
-      mode (str, optional): "w" to overwrite (default), "a" to append.
-    Returns: JSON with status and bytes written.
-    Side effects: Creates or modifies a file on disk.
-    """
-    if mode not in ("w", "a"):
-        return _safe_json({"status": "error", "error": "mode must be 'w' or 'a'"})
-    try:
-        p = _resolve_path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open(mode, encoding="utf-8") as fh:
-            fh.write(content)
-        return _safe_json(
-            {
-                "status": "ok",
-                "path": str(p),
-                "bytes_written": len(content.encode("utf-8")),
-                "mode": mode,
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
-
-
-@tool
-def edit_file_replace(path: str, old_string: str, new_string: str) -> str:
-    """Use when: Apply a targeted patch to a source file by replacing a specific code block.
-
-    Triggers: edit file, patch file, fix code, replace in file, change line, update function.
-    Avoid when: You need to rewrite the entire file — use write_file instead.
-    Inputs:
-      path (str, required): Path to the file to edit.
-      old_string (str, required): Exact text to find (must be unique in the file).
-      new_string (str, required): Replacement text.
-    Returns: JSON with status; includes diff summary.
-    Side effects: Modifies the file in-place; no backup is created.
-    """
-    try:
-        p = _resolve_path(path)
-        if not p.is_file():
-            return _safe_json({"status": "error", "error": f"File not found: {path}"})
-
-        original = p.read_text(encoding="utf-8")
-        count = original.count(old_string)
-        if count == 0:
-            return _safe_json(
-                {"status": "error", "error": "old_string not found in file"}
-            )
-        if count > 1:
-            return _safe_json(
-                {
-                    "status": "error",
-                    "error": f"old_string matches {count} locations — be more specific",
-                }
-            )
-
-        patched = original.replace(old_string, new_string, 1)
-        p.write_text(patched, encoding="utf-8")
-        old_lines = len(old_string.splitlines())
-        new_lines = len(new_string.splitlines())
-        return _safe_json(
-            {
-                "status": "ok",
-                "path": str(p),
-                "lines_removed": old_lines,
-                "lines_added": new_lines,
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
-
-
-@tool
-def list_directory(path: str = ".", glob_pattern: str = "*") -> str:
-    """Use when: Explore a directory structure to understand project layout.
-
-    Triggers: list files, show directory, ls, what files, directory contents, explore folder.
-    Avoid when: You need to search file contents — use search_in_files instead.
-    Inputs:
-      path (str, optional): Directory to list (default ".").
-      glob_pattern (str, optional): Glob filter (default "*", e.g. "*.py").
-    Returns: JSON with sorted list of entries (files and directories).
-    Side effects: Read-only.
-    """
-    try:
-        p = _resolve_path(path)
-        if not p.is_dir():
-            return _safe_json({"status": "error", "error": f"Not a directory: {path}"})
-        entries = []
-        for child in sorted(p.iterdir()):
-            if not fnmatch.fnmatch(child.name, glob_pattern):
-                continue
-            entry = {
-                "name": child.name,
-                "type": "dir" if child.is_dir() else "file",
-            }
-            if child.is_file():
-                entry["size_bytes"] = child.stat().st_size
-            entries.append(entry)
-
-        return _safe_json(
-            {
-                "status": "ok",
-                "path": str(p),
-                "count": len(entries),
-                "entries": entries,
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
-
-
-# Keep the file-ops skill card and grammars, but let the always-on core tools
-# own the canonical read/write implementations.
-__tools__ = [edit_file_replace, list_directory]
-
+# ---------------------------------------------------------------------------
+# Constrained-decoding grammar hints
+# ---------------------------------------------------------------------------
+# These help local LLM backends (llama.cpp, vllm) generate well-formed
+# JSON tool calls for the two most commonly mis-formatted tools.
 
 _JSON_STRING_RULES = r"""
 string    ::= "\"" char* "\""
@@ -225,9 +89,9 @@ mode      ::= "\"w\"" | "\"a\""
     + _JSON_STRING_RULES
 )
 
-_EDIT_FILE_REPLACE_GRAMMAR = (
+_EDIT_FILE_GRAMMAR = (
     r"""root      ::= tool-call
-tool-call ::= "{\"tool_call\": {\"name\": \"edit_file_replace\", \"arguments\": " args "}}"
+tool-call ::= "{\"tool_call\": {\"name\": \"edit_file\", \"arguments\": " args "}}"
 args      ::= "{\"path\": " string ", \"old_string\": " string ", \"new_string\": " string "}"
 """
     + _JSON_STRING_RULES
@@ -235,5 +99,5 @@ args      ::= "{\"path\": " string ", \"old_string\": " string ", \"new_string\"
 
 __grammars__: dict[str, str] = {
     "write_file": _WRITE_FILE_GRAMMAR,
-    "edit_file_replace": _EDIT_FILE_REPLACE_GRAMMAR,
+    "edit_file": _EDIT_FILE_GRAMMAR,
 }

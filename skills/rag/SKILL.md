@@ -26,6 +26,26 @@ when_not_to_use:
   - the user only needs a one-off file read and does not want to persist it in RAG
 next_skills:
   - docling_context
+preferred_sequence:
+  - rag_add_file
+  - rag_list
+  - rag_search
+entry_criteria:
+  - the user wants retrieval memory, not just a one-off file read
+  - document scale or repeated querying makes persistence worthwhile
+decision_rules:
+  - ingest first, then confirm the corpus view before trusting retrieval
+  - use direct retrieval inspection when search quality feels weak
+  - tune retrieval only after confirming the source documents are actually indexed
+failure_recovery:
+  - if search misses expected content, verify ingestion and corpus coverage before retuning
+  - if results are noisy, narrow the query or adjust retrieval settings before adding more data
+exit_criteria:
+  - the needed sources are indexed and retrievable with acceptable relevance
+  - the next analysis step can use retrieval instead of raw file reads
+anti_patterns:
+  - indexing large folders without checking whether the content is actually needed
+  - treating retrieval tuning as the first fix when ingestion may have failed
 ---
 
 ## Scope
@@ -49,3 +69,9 @@ Use `rag_search` and `rag_list` to verify what the agent can currently retrieve 
 Use `rag_tuning_status`, `rag_apply_profile`, and `rag_benchmark` when the user asks for faster retrieval, better relevance, or benchmarking.
 
 Avoid when: the request is just to read a file once without adding it to RAG.
+
+## Exit Criteria
+
+- The required documents are present in the index.
+- `rag_search` returns relevant chunks for the actual downstream question.
+- The next step can proceed with retrieval instead of repeated manual file reads.

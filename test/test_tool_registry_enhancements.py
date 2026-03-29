@@ -82,6 +82,59 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertEqual(unknown_payload.get("error_type"), "schema_validation_failed")
         self.assertIn("extra", unknown_payload.get("unknown_arguments", []))
 
+    def test_prepare_call_normalizes_arguments_without_executing(self) -> None:
+        registry = self._registry()
+        registry.register(
+            name="add_numbers",
+            description="Add two numbers.",
+            parameters=[
+                ToolParameter(name="a", type="integer", description="", required=True),
+                ToolParameter(name="b", type="integer", description="", required=True),
+            ],
+            function=lambda a, b: {"status": "ok", "sum": a + b},
+        )
+
+        prepared, error = registry.prepare_call(
+            ToolCall(
+                id="prepare_ok",
+                name="add_numbers",
+                arguments={"a": "2", "b": "3"},
+            )
+        )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(prepared)
+        assert prepared is not None
+        self.assertEqual(prepared.arguments, {"a": 2, "b": 3})
+        self.assertEqual(registry.tool_execution_stats(), {})
+
+    def test_prepare_call_returns_structured_schema_error(self) -> None:
+        registry = self._registry()
+        registry.register(
+            name="echo_pair",
+            description="Echo two fields.",
+            parameters=[
+                ToolParameter(name="left", type="string", description="", required=True),
+                ToolParameter(name="right", type="string", description="", required=True),
+            ],
+            function=lambda left, right: {"status": "ok", "pair": [left, right]},
+        )
+
+        prepared, error = registry.prepare_call(
+            ToolCall(
+                id="prepare_bad",
+                name="echo_pair",
+                arguments={"left": "A", "extra": "C"},
+            )
+        )
+
+        self.assertIsNone(prepared)
+        self.assertIsNotNone(error)
+        payload = json.loads(error or "{}")
+        self.assertEqual(payload.get("error_type"), "schema_validation_failed")
+        self.assertIn("right", payload.get("missing_required", []))
+        self.assertIn("extra", payload.get("unknown_arguments", []))
+
     def test_describe_and_search_builtin_tools(self) -> None:
         registry = self._registry()
         registry._register_builtin_tools()
@@ -116,6 +169,33 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertEqual(search_payload.get("status"), "ok")
         names = [item.get("name") for item in search_payload.get("matches", [])]
         self.assertIn("run_tests", names)
+
+    def test_default_prompt_tool_names_prefers_core_subset(self) -> None:
+        registry = self._registry()
+        registry.register(
+            name="read_file",
+            description="Read a file.",
+            parameters=[],
+            function=lambda: {"status": "ok"},
+        )
+        registry.register(
+            name="run_python",
+            description="Run python.",
+            parameters=[],
+            function=lambda: {"status": "ok"},
+        )
+        registry.register(
+            name="svg_render",
+            description="Render SVG output.",
+            parameters=[],
+            function=lambda: {"status": "ok"},
+        )
+
+        selected = registry.default_prompt_tool_names()
+
+        self.assertIn("read_file", selected)
+        self.assertIn("run_python", selected)
+        self.assertNotIn("svg_render", selected)
 
     def test_skills_health_builtin_reports_catalog_diagnostics(self) -> None:
         registry = self._registry()
@@ -330,13 +410,14 @@ def hello(name: str = "world") -> str:
         registry = self._registry()
         registry.load_tools_from_skills()
 
-        tool = registry.get("list_directory")
+        tool = registry.get("get_file_outline")
         self.assertIsNotNone(tool)
         assert tool is not None
         doc = str(getattr(tool.function, "__doc__", "") or "")
         self.assertIn("Skill context:", doc)
-        self.assertIn("Skill: File Ops", doc)
-        self.assertIn("Preferred tools in this skill: read_file, write_file, list_directory", doc)
+        self.assertIn("Skill: Explore", doc)
+        self.assertIn("Preferred tools in this skill: get_file_outline, rg_search, fd_find", doc)
+        self.assertIn("Skill failure recovery:", doc)
 
     def test_core_tools_remain_canonical_when_coding_skills_overlap(self) -> None:
         registry = self._registry()
@@ -358,25 +439,49 @@ def hello(name: str = "world") -> str:
         read_tool = registry.get("read_file")
         write_tool = registry.get("write_file")
         edit_block_tool = registry.get("apply_edit_block")
-        list_directory_tool = registry.get("list_directory")
-        edit_replace_tool = registry.get("edit_file_replace")
+        explore_tool = registry.get("get_file_outline")
+        multi_edit_tool = registry.get("multi_edit")
 
         self.assertIsNotNone(read_tool)
         self.assertIsNotNone(write_tool)
         self.assertIsNotNone(edit_block_tool)
-        self.assertIsNotNone(list_directory_tool)
-        self.assertIsNotNone(edit_replace_tool)
+        self.assertIsNotNone(explore_tool)
+        self.assertIsNotNone(multi_edit_tool)
         assert read_tool is not None
         assert write_tool is not None
         assert edit_block_tool is not None
-        assert list_directory_tool is not None
-        assert edit_replace_tool is not None
+        assert explore_tool is not None
+        assert multi_edit_tool is not None
 
         self.assertEqual(read_tool.skill_id, "core")
         self.assertEqual(write_tool.skill_id, "core")
         self.assertEqual(edit_block_tool.skill_id, "core")
-        self.assertEqual(list_directory_tool.skill_id, "file_ops")
-        self.assertEqual(edit_replace_tool.skill_id, "file_ops")
+        self.assertEqual(explore_tool.skill_id, "explore")
+        self.assertEqual(multi_edit_tool.skill_id, "multi_edit")
+
+    def test_capability_audit_normalizes_legacy_required_tool_names(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+
+        from src.tools.core import apply_edit_block, edit_file, list_dir, read_file, write_file
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (read_file, getattr(read_file, "__llm_tool_meta__", {})),
+                (write_file, getattr(write_file, "__llm_tool_meta__", {})),
+                (edit_file, getattr(edit_file, "__llm_tool_meta__", {})),
+                (list_dir, getattr(list_dir, "__llm_tool_meta__", {})),
+                (apply_edit_block, getattr(apply_edit_block, "__llm_tool_meta__", {})),
+            ],
+            module_path=Path("src/tools/core/files.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        audit = registry._coding_capability_audit(registry.list_skills())
+        missing = set(audit.get("missing_required_tools", []))
+        self.assertNotIn("list_directory", missing)
+        self.assertNotIn("edit_file_replace", missing)
 
     def test_python_skill_explicit_exports_are_authoritative(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -723,7 +828,7 @@ print(json.dumps({{
 
         for tool_name in (
             "write_file",
-            "edit_file_replace",
+            "edit_file",
             "multi_edit",
             "apply_edit_block",
         ):

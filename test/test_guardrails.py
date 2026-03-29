@@ -9,11 +9,13 @@ from src.agent.guardrails import (
     GuardrailEngine,
     GuardrailResult,
     InspectionGuard,
+    PythonStructuralEditGuard,
+    ReadBeforeEditGuard,
     StallGuard,
     ToolClaimGuard,
     VerificationGuard,
 )
-from src.agent.state import TurnState
+from src.agent.state import ToolResultRecord, TurnState
 from src.config import Config
 from src.tools.runtime import ToolCall
 
@@ -230,6 +232,58 @@ def test_verification_with_current_tool_calls_passes():
     assert result.passed
 
 
+def test_verification_passes_with_structured_verifier_result_after_write():
+    guard = VerificationGuard()
+    state = make_state(files_written=["/tmp/foo.py"])
+    state.tool_results = [
+        ToolResultRecord(
+            call_id="c1",
+            tool_name="write_file",
+            status="ok",
+            writes_files=True,
+        ),
+        ToolResultRecord(
+            call_id="c2",
+            tool_name="quality_gate",
+            status="ok",
+            verifier=True,
+            has_content=True,
+        ),
+    ]
+    result = guard.check(state, "Done.", [])
+    assert result.passed
+
+
+def test_read_before_edit_guard_nudges_when_editing_unread_file():
+    guard = ReadBeforeEditGuard()
+    state = make_state(files_read=[])
+    result = guard.check(state, "", [make_call("edit_file", {"path": "src/app.py"})])
+    assert not result.passed
+    assert "Read the file" in result.nudge
+
+
+def test_read_before_edit_guard_passes_after_file_was_read():
+    guard = ReadBeforeEditGuard()
+    state = make_state(files_read=["src/app.py"])
+    result = guard.check(state, "", [make_call("edit_file", {"path": "src/app.py"})])
+    assert result.passed
+
+
+def test_python_structural_edit_guard_prefers_libcst_tools_for_python():
+    guard = PythonStructuralEditGuard(Config())
+    state = make_state(available_tool_names={"edit_file_libcst", "replace_function_body"})
+    result = guard.check(state, "", [make_call("edit_file", {"path": "src/app.py"})])
+    assert not result.passed
+    assert "edit_file_libcst" in result.nudge
+
+
+def test_python_structural_edit_guard_passes_for_non_python_paths():
+    guard = PythonStructuralEditGuard(Config())
+    state = make_state(available_tool_names={"edit_file_libcst", "replace_function_body"})
+    result = guard.check(state, "", [make_call("edit_file", {"path": "README.md"})])
+    assert result.passed
+
+
 # ---------------------------------------------------------------------------
 # StallGuard
 # ---------------------------------------------------------------------------
@@ -283,3 +337,36 @@ def test_inspection_passes_with_no_tools():
     state = make_state()
     result = guard.check(state, "I ran the tests already.", [])
     assert result.passed
+
+
+def test_inspection_structured_error_blocks_false_success_claim():
+    guard = InspectionGuard()
+    state = make_state(
+        tool_results=[
+            ToolResultRecord(
+                call_id="c1",
+                tool_name="read_file",
+                status="error",
+                error="file not found",
+            )
+        ]
+    )
+    result = guard.check(state, "Here is the content of the file.", [])
+    assert not result.passed
+
+
+def test_inspection_structured_success_blocks_false_not_found_claim():
+    guard = InspectionGuard()
+    state = make_state(
+        tool_results=[
+            ToolResultRecord(
+                call_id="c1",
+                tool_name="read_file",
+                status="ok",
+                has_content=True,
+                output='{"status":"ok","content":"hello"}',
+            )
+        ]
+    )
+    result = guard.check(state, "I couldn't find the file.", [])
+    assert not result.passed

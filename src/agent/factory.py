@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 from ..config import Config, ThinkingConfig
@@ -9,7 +10,7 @@ if TYPE_CHECKING:
 
 
 def create_agent(
-    llm_url: str = "http://localhost:8080",
+    llm_url: str | None = None,
     system_prompt: str | None = None,
     use_chat_api: bool = True,
     chat_template: str = "chatml",
@@ -24,11 +25,18 @@ def create_agent(
 ) -> Agent:
     from .core import Agent
 
+    resolved_llm_url = (
+        str(llm_url or "").strip()
+        or str(os.getenv("LOGICIAN_LLM_URL") or "").strip()
+        or str(os.getenv("LLAMA_CPP_URL") or "").strip()
+        or "http://localhost:8080"
+    )
+
     cfg = Config(
-        llama_cpp_url=llm_url,
+        llama_cpp_url=resolved_llm_url,
         use_chat_api=use_chat_api,
         chat_template=chat_template,
-        use_toon_for_tools=True,
+        use_toon_for_tools=False,
     )
 
     if config_overrides:

@@ -1,148 +1,56 @@
 from __future__ import annotations
 
 import builtins
-import os
-import shlex
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, Mapping
 
-
-def _find_local_venv(start: str | None) -> str | None:
-    roots: list[Path] = []
-    if start:
-        roots.append(Path(start).expanduser().resolve())
-    else:
-        roots.append(Path.cwd().resolve())
-
-    seen: set[str] = set()
-    for root in roots:
-        for base in (root, *root.parents):
-            key = str(base)
-            if key in seen:
-                continue
-            seen.add(key)
-            for candidate_name in (".venv", "venv"):
-                candidate = base / candidate_name
-                if not candidate.is_dir():
-                    continue
-                posix_python = candidate / "bin" / "python"
-                posix_activate = candidate / "bin" / "activate"
-                windows_python = candidate / "Scripts" / "python.exe"
-                if posix_python.exists() or posix_activate.exists() or windows_python.exists():
-                    return str(candidate.resolve())
-    return None
-
-
-class LegacyCodingRuntime:
-    """Compatibility runtime for direct imports outside the registry loader."""
-
-    def __init__(self, globalns: Mapping[str, Any] | None = None) -> None:
-        namespace = dict(globalns or {})
-        self._config = getattr(
-            builtins,
-            "_coding_config",
-            namespace.get("_coding_config", {}),
-        )
-        self._run_cmd = getattr(
-            builtins,
-            "_run_cmd",
-            namespace.get("_run_cmd"),
-        )
-
-    def cwd(self) -> str | None:
-        value = self._config.get("default_cwd")
-        return str(value) if value else None
-
-    def venv_path(self) -> str | None:
-        value = self._config.get("venv_path")
-        if value:
-            return str(value)
-        return _find_local_venv(self.cwd() or os.getcwd())
-
-    def set_cwd(self, path: str | None) -> str | None:
-        resolved = str(Path(path).expanduser().resolve()) if path else None
-        self._config["default_cwd"] = resolved
-        return resolved
-
-    def set_venv_path(self, path: str | None) -> str | None:
-        resolved = str(Path(path).expanduser().resolve()) if path else None
-        self._config["venv_path"] = resolved
-        return resolved
-
-    def resolve_cwd(self, cwd: str | None) -> str | None:
-        if cwd:
-            return str(Path(cwd).expanduser().resolve())
-        return self.cwd()
-
-    def resolve_path(self, path: str) -> Path:
-        p = Path(path).expanduser()
-        base = self.cwd()
-        if not p.is_absolute() and base:
-            p = Path(base) / p
-        return p.resolve()
-
-    def build_shell_prefix(self, venv_path: str | None) -> str:
-        venv = venv_path or self.venv_path()
-        if not venv:
-            return ""
-        activate = Path(venv).expanduser() / "bin" / "activate"
-        if not activate.exists():
-            return ""
-        return f". {shlex.quote(str(activate))} && "
-
-    def run_cmd(
-        self,
-        command: str,
-        cwd: str | None = None,
-        timeout: int = 60,
-        venv_path: str | None = None,
-        shell: bool = True,
-    ) -> dict[str, Any]:
-        del shell
-        if callable(self._run_cmd):
-            return self._run_cmd(
-                command,
-                cwd=cwd,
-                timeout=timeout,
-                venv_path=venv_path,
-            )
-        raise RuntimeError("coding runtime is not available")
+from .bootstrap import _find_local_venv  # noqa: F401 (re-exported for skills that import it here)
 
 
 def get_coding_runtime(globalns: Mapping[str, Any] | None = None) -> Any:
     namespace = dict(globalns or {})
-    return (
+    rt = (
         namespace.get("coding_runtime")
         or namespace.get("_coding_runtime")
         or getattr(builtins, "coding_runtime", None)
         or getattr(builtins, "_coding_runtime", None)
-        or LegacyCodingRuntime(namespace)
     )
+    if rt is None:
+        raise RuntimeError(
+            "coding_runtime is not available — skill must be loaded via the registry"
+        )
+    return rt
 
 
 def _format_skill_doc_context(meta: Mapping[str, Any] | None) -> str:
     if not isinstance(meta, Mapping):
         return ""
 
+    def _normalize_items(key: str, *, limit: int = 4) -> list[str]:
+        raw = meta.get(key, [])
+        if isinstance(raw, (str, bytes)):
+            raw_items = [raw]
+        else:
+            raw_items = list(raw or [])
+        items = [str(item).strip() for item in raw_items if str(item).strip()]
+        return items[:limit]
+
     lines: list[str] = []
     name = str(meta.get("name") or "").strip()
     description = str(meta.get("description") or "").strip()
-    aliases = [str(item).strip() for item in meta.get("aliases", []) if str(item).strip()]
-    triggers = [str(item).strip() for item in meta.get("triggers", []) if str(item).strip()]
-    preferred_tools = [
-        str(item).strip() for item in meta.get("preferred_tools", []) if str(item).strip()
-    ]
-    example_queries = [
-        str(item).strip() for item in meta.get("example_queries", []) if str(item).strip()
-    ]
-    when_not_to_use = [
-        str(item).strip() for item in meta.get("when_not_to_use", []) if str(item).strip()
-    ]
-    next_skills = [
-        str(item).strip() for item in meta.get("next_skills", []) if str(item).strip()
-    ]
-    workflow = [str(item).strip() for item in meta.get("workflow", []) if str(item).strip()]
+    aliases = _normalize_items("aliases", limit=8)
+    triggers = _normalize_items("triggers", limit=8)
+    preferred_tools = _normalize_items("preferred_tools", limit=8)
+    example_queries = _normalize_items("example_queries", limit=4)
+    when_not_to_use = _normalize_items("when_not_to_use", limit=4)
+    next_skills = _normalize_items("next_skills", limit=6)
+    workflow = _normalize_items("workflow", limit=5)
+    entry_criteria = _normalize_items("entry_criteria", limit=4)
+    decision_rules = _normalize_items("decision_rules", limit=4)
+    failure_recovery = _normalize_items("failure_recovery", limit=4)
+    exit_criteria = _normalize_items("exit_criteria", limit=4)
+    anti_patterns = _normalize_items("anti_patterns", limit=4)
+    preferred_sequence = _normalize_items("preferred_sequence", limit=6)
 
     if name:
         lines.append(f"Skill: {name}")
@@ -157,12 +65,30 @@ def _format_skill_doc_context(meta: Mapping[str, Any] | None) -> str:
     if example_queries:
         lines.append(f"Example queries: {'; '.join(example_queries)}")
     if when_not_to_use:
-        lines.append(f"Skill avoid when: {when_not_to_use[0]}")
+        lines.append("Skill avoid when:")
+        lines.extend(f"- {item}" for item in when_not_to_use)
     if next_skills:
         lines.append(f"Typical next skills: {', '.join(next_skills)}")
+    if preferred_sequence:
+        lines.append(f"Typical sequence: {' -> '.join(preferred_sequence)}")
+    if entry_criteria:
+        lines.append("Enter this skill when:")
+        lines.extend(f"- {item}" for item in entry_criteria)
+    if decision_rules:
+        lines.append("Skill decision rules:")
+        lines.extend(f"- {item}" for item in decision_rules)
     if workflow:
         lines.append("Skill workflow:")
         lines.extend(f"- {step}" for step in workflow)
+    if failure_recovery:
+        lines.append("Skill failure recovery:")
+        lines.extend(f"- {item}" for item in failure_recovery)
+    if exit_criteria:
+        lines.append("Skill exit criteria:")
+        lines.extend(f"- {item}" for item in exit_criteria)
+    if anti_patterns:
+        lines.append("Skill anti-patterns:")
+        lines.extend(f"- {item}" for item in anti_patterns)
 
     if not lines:
         return ""
