@@ -65,3 +65,6 @@ rust-cli/target/
 .codex
 node_modules
 webui/dist/
+logician.egg-info/
+.vscode/
+docs/superpowers/specs/

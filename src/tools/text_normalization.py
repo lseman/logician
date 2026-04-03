@@ -82,12 +82,30 @@ def strip_outer_code_fences(content: str) -> tuple[str, dict[str, Any]]:
     }
 
 
+# Maps curly/fancy Unicode quotes to their ASCII equivalents so that
+# old_string matching in edit_file works even when an LLM produces smart quotes.
+_CURLY_QUOTE_TABLE = str.maketrans(
+    {
+        "\u2018": "'",  # LEFT SINGLE QUOTATION MARK
+        "\u2019": "'",  # RIGHT SINGLE QUOTATION MARK
+        "\u201a": "'",  # SINGLE LOW-9 QUOTATION MARK
+        "\u201b": "'",  # SINGLE HIGH-REVERSED-9 QUOTATION MARK
+        "\u201c": '"',  # LEFT DOUBLE QUOTATION MARK
+        "\u201d": '"',  # RIGHT DOUBLE QUOTATION MARK
+        "\u201e": '"',  # DOUBLE LOW-9 QUOTATION MARK
+        "\u2032": "'",  # PRIME
+        "\u2033": '"',  # DOUBLE PRIME
+    }
+)
+
+
 def normalize_text_for_matching(text: str) -> str:
     if not isinstance(text, str):
         return text
     if text.startswith("\ufeff"):
         text = text[1:]
-    return text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.translate(_CURLY_QUOTE_TABLE)
 
 
 def _unwrap_outer_string_literal(text: str) -> str | None:

@@ -58,13 +58,14 @@ function updateRunEvents(
   next: RunEvent,
   matcher?: (event: RunEvent) => boolean,
 ): RunEvent[] {
+  const maxEvents = 40;
   const nextEvents = [...events];
   const matchIndex = matcher ? nextEvents.findIndex(matcher) : -1;
   if (matchIndex >= 0) {
     nextEvents[matchIndex] = { ...nextEvents[matchIndex], ...next, id: nextEvents[matchIndex].id };
-    return nextEvents.slice(0, 18);
+    return nextEvents.slice(-maxEvents);
   }
-  return [next, ...nextEvents].slice(0, 18);
+  return [...nextEvents, next].slice(-maxEvents);
 }
 
 export default function App() {
@@ -124,13 +125,7 @@ export default function App() {
     return sessions.filter((s) => s.title.toLowerCase().includes(q) || s.preview.toLowerCase().includes(q));
   }, [sessions, sessionFilter]);
   const groupedSessions = useMemo(() => groupSessionsByAge(filteredSessions), [filteredSessions]);
-  const liveTimeline = useMemo(() => activity.slice(0, 8), [activity]);
-  const hasLiveRunPanel = sending && Boolean(
-    streamingAssistant ||
-    streamingThinking.length > 0 ||
-    streamingTools.length > 0 ||
-    activity.length > 0,
-  );
+  const liveTimeline = useMemo(() => activity, [activity]);
   const graphStats = useMemo(() => {
     const highlighted = graph.nodes.filter((node) => node.highlight).length;
     return {
@@ -160,13 +155,17 @@ export default function App() {
 
   useEffect(() => {
     if (messagesAtBottom.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
   }, [messages, streamingAssistant, streamingThinking, streamingTools, activity]);
 
   const handleScrollContainer = useCallback((event: UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
-    messagesAtBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    messagesAtBottom.current = distanceToBottom < 10;
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -239,6 +238,15 @@ export default function App() {
     clearAttachments();
     window.setTimeout(() => textareaRef.current?.focus(), 30);
   }, [clearAttachments]);
+
+  const ensureScrollToBottom = useCallback(() => {
+    if (messagesAtBottom.current && scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, []);
 
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
@@ -447,8 +455,9 @@ export default function App() {
     if (detail.todos.length > 0) {
       setTodos(detail.todos);
     }
+    ensureScrollToBottom();
     window.setTimeout(() => textareaRef.current?.focus(), 50);
-  }, []);
+  }, [ensureScrollToBottom]);
 
   const handleSend = useCallback(async (event?: FormEvent, messageOverride?: string) => {
     if (event) event.preventDefault();
@@ -475,14 +484,18 @@ export default function App() {
     setStreamingThinking([]);
     setStreamingTools([]);
     setActivity([]);
-    setMessages((current) => [
-      ...current,
-      {
-        role: "user",
-        content: message,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+    setMessages((current) => {
+      const newMessages = [
+        ...current,
+        {
+          role: "user",
+          content: message,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      ensureScrollToBottom();
+      return newMessages;
+    });
 
     streamRef.current?.abort();
     const controller = new AbortController();
@@ -593,14 +606,11 @@ export default function App() {
                   break;
                 }
               }
-              const response = compactText(
-                String(
-                  payload.meta?.error ||
-                  payload.meta?.result_output ||
-                  payload.meta?.result_preview ||
-                  "",
-                ),
-                220,
+              const response = String(
+                payload.meta?.error ||
+                payload.meta?.result_output ||
+                payload.meta?.result_preview ||
+                "",
               );
               if (lastIdx >= 0) {
                 streamedToolCalls = streamedToolCalls.map((item, idx) =>
@@ -621,7 +631,7 @@ export default function App() {
                   id: `tool-finish-${toolName}`,
                   kind: "tool",
                   label: toolName,
-                  detail: response || "Completed",
+                  detail: compactText(response || "Completed", 220),
                   meta: [
                     payload.meta?.cache_hit ? "cached" : "",
                     payload.meta?.duration_ms !== undefined ? `${payload.meta.duration_ms}ms` : "",
@@ -701,6 +711,7 @@ export default function App() {
               },
               (item) => item.kind === "status" && item.label === "Answer",
             );
+            ensureScrollToBottom();
             void refreshSessions();
           }
         },
@@ -828,8 +839,8 @@ export default function App() {
 
       <div
         className={`grid flex-1 gap-4 ${sidebarCollapsed
-            ? "xl:grid-cols-[64px_minmax(0,1fr)_390px]"
-            : "xl:grid-cols-[280px_minmax(0,1fr)_390px]"
+          ? "xl:grid-cols-[64px_minmax(0,1fr)_390px]"
+          : "xl:grid-cols-[280px_minmax(0,1fr)_390px]"
           }`}
       >
         <SessionSidebar
@@ -863,14 +874,12 @@ export default function App() {
           streamingAssistant={streamingAssistant}
           streamingThinking={streamingThinking}
           streamingTools={streamingTools}
-          activity={activity}
+          liveTimeline={liveTimeline}
           artifacts={artifacts}
           activeArtifact={activeArtifact}
           atBottom={messagesAtBottom.current}
           sending={sending}
           waitingFirstToken={waitingFirstToken}
-          hasLiveRunPanel={hasLiveRunPanel}
-          liveTimeline={liveTimeline}
           editTarget={editTarget}
           setEditTarget={setEditTarget}
           attachments={attachments}

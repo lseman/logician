@@ -1,4 +1,5 @@
 """AgentLoop: thin ReAct-style main loop for the refactored agent."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,18 +8,18 @@ import re
 import uuid
 from typing import Any, Callable
 
-from ..messages import Message, MessageRole
+from ..backends.base import LLMBackend
 from ..config import Config
-from ..tools.runtime import ToolCall
+from ..messages import Message, MessageRole
+from ..thinking import ThinkingStrategy
 from ..tools.parser import parse_tool_calls
-from .state import TurnState
-from .types import TurnResult
+from ..tools.runtime import ToolCall
 from .classify import classify_turn
+from .dispatcher import DispatchResult, ToolDispatcher
 from .guardrails import GuardrailEngine
 from .prompt import PromptBuilder
-from .dispatcher import ToolDispatcher, DispatchResult
-from ..backends.base import LLMBackend
-from ..thinking import ThinkingStrategy
+from .state import TurnState
+from .types import TurnResult
 
 
 def format_tool_results(results: list[DispatchResult]) -> list[Message]:
@@ -26,12 +27,14 @@ def format_tool_results(results: list[DispatchResult]) -> list[Message]:
     messages = []
     for r in results:
         content = r.error if r.error else r.output
-        messages.append(Message(
-            role=MessageRole.TOOL,
-            content=content,
-            tool_call_id=r.call_id,
-            name=r.tool_name,
-        ))
+        messages.append(
+            Message(
+                role=MessageRole.TOOL,
+                content=content,
+                tool_call_id=r.call_id,
+                name=r.tool_name,
+            )
+        )
     return messages
 
 
@@ -129,7 +132,7 @@ class AgentLoop:
     ) -> bool:
         if not pending_calls or len(executed_calls) < len(pending_calls):
             return False
-        tail = executed_calls[-len(pending_calls):]
+        tail = executed_calls[-len(pending_calls) :]
         return all(
             str(lhs.name or "") == str(rhs.name or "")
             and dict(lhs.arguments or {}) == dict(rhs.arguments or {})
@@ -319,9 +322,7 @@ class AgentLoop:
         )
         planning_convo = list(convo) + [Message(role=MessageRole.USER, content=prompt)]
         loop = asyncio.get_running_loop()
-        stream_enabled = token_callback is not None and bool(
-            getattr(self.config, "stream", False)
-        )
+        stream_enabled = token_callback is not None and bool(getattr(self.config, "stream", False))
         try:
             plan = await loop.run_in_executor(
                 None,
@@ -442,9 +443,7 @@ class AgentLoop:
     ) -> tuple[str, list[ToolCall]] | None:
         if not bool(getattr(self.config, "tool_call_repair_enabled", False)):
             return None
-        max_attempts = max(
-            0, int(getattr(self.config, "tool_call_repair_max_attempts", 1))
-        )
+        max_attempts = max(0, int(getattr(self.config, "tool_call_repair_max_attempts", 1)))
         if state.tool_repair_attempts >= max_attempts:
             return None
 
@@ -452,12 +451,15 @@ class AgentLoop:
         if not self._repairable_tool_error(payload):
             return None
         failing_call = failure.get("call", {})
-        tool_name = str(
-            getattr(tool_calls[0], "name", "")
-            or failing_call.get("name")
-            or payload.get("tool")
+        tool_name = (
+            str(
+                getattr(tool_calls[0], "name", "")
+                or failing_call.get("name")
+                or payload.get("tool")
+                or "unknown"
+            ).strip()
             or "unknown"
-        ).strip() or "unknown"
+        )
         error_type = str(payload.get("error_type", "") or "").strip()
         attempt_no = state.tool_repair_attempts + 1
         if repair_callback is not None:
@@ -485,8 +487,7 @@ class AgentLoop:
             ]
         )
         parsed_calls = [
-            {"name": call.name, "arguments": dict(call.arguments or {})}
-            for call in tool_calls
+            {"name": call.name, "arguments": dict(call.arguments or {})} for call in tool_calls
         ]
         repair_messages = [
             Message(role=MessageRole.SYSTEM, content=system_prompt),
@@ -578,10 +579,6 @@ class AgentLoop:
         repair_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> TurnResult:
         """Run one agent turn. Returns when the LLM produces a final response."""
-        # Ensure MCP servers are loaded (idempotent)
-        if self._mcp_loader is not None and callable(self._mcp_loader):
-            self._mcp_loader()
-
         last_content = messages[-1].content or ""
         classification = classify_turn(last_content)
         state = TurnState(
@@ -602,11 +599,7 @@ class AgentLoop:
         # Avoid double-counting: history already contains the user message we
         # just saved, so strip the last message from `messages` if history ends
         # with a matching user turn.
-        if (
-            history
-            and history[-1].role == MessageRole.USER
-            and history[-1].content == last_content
-        ):
+        if history and history[-1].role == MessageRole.USER and history[-1].content == last_content:
             convo = history
         else:
             convo = history + list(messages)
@@ -620,6 +613,10 @@ class AgentLoop:
                 thinking_callback=thinking_callback,
                 session_id=session_id,
             )
+
+        # Defer MCP startup until the turn actually needs the full tool loop.
+        if self._mcp_loader is not None and callable(self._mcp_loader):
+            self._mcp_loader()
 
         pre_turn_enabled = getattr(self.config, "pre_turn_thinking", False)
 
@@ -636,16 +633,16 @@ class AgentLoop:
             # Only inject if the plan ends on a sentence boundary — a truncated
             # mid-sentence plan confuses the LLM more than no plan at all.
             if sanitized and (sanitized[-1] in ".!?\n" or "\n" in sanitized):
-                convo.append(Message(
-                    role=MessageRole.SYSTEM,
-                    content=f"[Pre-turn plan]\n{sanitized}",
-                ))
+                convo.append(
+                    Message(
+                        role=MessageRole.SYSTEM,
+                        content=f"[Pre-turn plan]\n{sanitized}",
+                    )
+                )
 
         response = ""
         _draft_stall_limit = getattr(self.config, "repeated_draft_stall_limit", 1)
-        _draft_sim_threshold = getattr(
-            self.config, "repeated_draft_similarity_threshold", 0.88
-        )
+        _draft_sim_threshold = getattr(self.config, "repeated_draft_similarity_threshold", 0.88)
         _last_no_tool_response: str = ""
         _repeated_draft_count: int = 0
 
@@ -659,9 +656,8 @@ class AgentLoop:
             # 3. Apply context budget trimming
             llm_messages = self._trim_to_budget(llm_messages)
 
-            stream_enabled = (
-                token_callback is not None
-                and bool(getattr(self.config, "stream", False))
+            stream_enabled = token_callback is not None and bool(
+                getattr(self.config, "stream", False)
             )
 
             loop = asyncio.get_running_loop()
@@ -789,13 +785,15 @@ class AgentLoop:
                         score = await self._score_response(last_content, response)
                         if score < _gate_threshold:
                             state.confidence_retries += 1
-                            convo.append(Message(
-                                role=MessageRole.USER,
-                                content=(
-                                    f"Your answer scored {score:.1f}/10 for completeness. "
-                                    "Please expand or correct it."
-                                ),
-                            ))
+                            convo.append(
+                                Message(
+                                    role=MessageRole.USER,
+                                    content=(
+                                        f"Your answer scored {score:.1f}/10 for completeness. "
+                                        "Please expand or correct it."
+                                    ),
+                                )
+                            )
                             state.iteration += 1
                             continue
 
@@ -854,10 +852,12 @@ class AgentLoop:
                 if observation:
                     # Use USER role instead of SYSTEM to maintain proper message ordering
                     # (system messages must always be first)
-                    convo.append(Message(
-                        role=MessageRole.USER,
-                        content=f"[Post-tool observation]\n{observation}\n\nProceed with your next step.",
-                    ))
+                    convo.append(
+                        Message(
+                            role=MessageRole.USER,
+                            content=f"[Post-tool observation]\n{observation}\n\nProceed with your next step.",
+                        )
+                    )
                     state.thinking_log.append(observation)
                     if thinking_callback is not None:
                         thinking_callback(observation)
@@ -880,8 +880,7 @@ class AgentLoop:
                     )
                 else:
                     state.final_response = (
-                        "I reached the turn iteration limit before I could execute "
-                        f"{summary}."
+                        f"I reached the turn iteration limit before I could execute {summary}."
                     )
             else:
                 state.final_response = response
@@ -927,9 +926,7 @@ class AgentLoop:
         """Single LLM call for social/informational turns — no tools."""
         system = self.prompt_builder.build(state, self.config)
         llm_messages = self._with_system(messages, system)
-        stream_enabled = token_callback is not None and bool(
-            getattr(self.config, "stream", False)
-        )
+        stream_enabled = token_callback is not None and bool(getattr(self.config, "stream", False))
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,

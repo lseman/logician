@@ -1,14 +1,15 @@
 """Tests for libcst-based file editing functions."""
+
 import tempfile
 import unittest
 from pathlib import Path
 
-from src.tools.core.files_libcst import (
+from src.tools.core.FileEditTool.libcst import (
     edit_file_libcst,
-    replace_docstring,
-    replace_decorators,
-    find_function_by_name,
     find_class_by_name,
+    find_function_by_name,
+    replace_decorators,
+    replace_docstring,
 )
 
 
@@ -20,6 +21,8 @@ class TestEditFileLibcst(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write("def foo():\n    return x + y\n")
             f.flush()
+            inspected = find_function_by_name(f.name, "foo")
+            self.assertEqual(inspected["status"], "ok")
             result = edit_file_libcst(f.name, "x + y", "x * 2")
 
         self.assertEqual(result["status"], "ok")
@@ -35,6 +38,8 @@ class TestEditFileLibcst(unittest.TestCase):
             # Create file with specific indentation
             f.write("def foo():\n    # This is a comment\n    return x\n")
             f.flush()
+            inspected = find_function_by_name(f.name, "foo")
+            self.assertEqual(inspected["status"], "ok")
             result = edit_file_libcst(f.name, "return x", "return x + 1")
 
         self.assertEqual(result["status"], "ok")
@@ -49,6 +54,8 @@ class TestEditFileLibcst(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write("def foo():\n    return x\n")
             f.flush()
+            inspected = find_function_by_name(f.name, "foo")
+            self.assertEqual(inspected["status"], "ok")
             result = edit_file_libcst(f.name, "return y", "return z")
 
         self.assertEqual(result["status"], "error")
@@ -60,6 +67,8 @@ class TestEditFileLibcst(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write("def old_func():\n    pass\n")
             f.flush()
+            inspected = find_function_by_name(f.name, "old_func")
+            self.assertEqual(inspected["status"], "ok")
             result = edit_file_libcst(
                 f.name,
                 "def old_func():",
@@ -86,18 +95,24 @@ class TestReplaceDocstring(unittest.TestCase):
 '''
             )
             f.flush()
+            inspected = find_function_by_name(f.name, "foo")
+            self.assertEqual(inspected["status"], "ok")
             result = replace_docstring(
-                f.name, "foo", """
+                f.name,
+                "foo",
+                """
         New docstring.
         Args:
             x: The input value
-    """
+    """,
             )
 
         self.assertEqual(result["status"], "ok")
         with open(f.name) as f:
             content = f.read()
-        self.assertIn('"""New docstring."""', content)
+        self.assertIn('"""New docstring.', content)
+        self.assertIn("Args:", content)
+        self.assertIn("x: The input value", content)
         Path(f.name).unlink()
 
     def test_replace_class_docstring(self):
@@ -110,16 +125,20 @@ class TestReplaceDocstring(unittest.TestCase):
 '''
             )
             f.flush()
+            inspected = find_class_by_name(f.name, "MyClass")
+            self.assertEqual(inspected["status"], "ok")
             result = replace_docstring(
-                f.name, "MyClass", """
+                f.name,
+                "MyClass",
+                """
         New class docstring.
-    """
+    """,
             )
 
         self.assertEqual(result["status"], "ok")
         with open(f.name) as f:
             content = f.read()
-        self.assertIn('"""New class docstring."""', content)
+        self.assertIn('"""New class docstring.', content)
         Path(f.name).unlink()
 
 
@@ -130,15 +149,15 @@ class TestReplaceDecorators(unittest.TestCase):
         """Test replacing function decorators."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(
-                '''@old_decorator
+                """@old_decorator
 def foo():
     pass
-'''
+"""
             )
             f.flush()
-            result = replace_decorators(
-                f.name, "foo", ["@property", "@staticmethod"]
-            )
+            inspected = find_function_by_name(f.name, "foo")
+            self.assertEqual(inspected["status"], "ok")
+            result = replace_decorators(f.name, "foo", ["@property", "@staticmethod"])
 
         self.assertEqual(result["status"], "ok")
         with open(f.name) as f:

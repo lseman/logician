@@ -4,7 +4,9 @@ import json
 import mimetypes
 import uuid
 from pathlib import Path
+
 from skills.coding.bootstrap.runtime_access import tool
+from src.rag_runtime import rag_runtime_settings
 
 __skill__ = {
     "name": "Docling Context",
@@ -56,7 +58,13 @@ if "_try_parse_json" not in globals():
 def _get_doc_db():
     from src.db.document import DocumentDB
 
-    return DocumentDB()
+    settings = rag_runtime_settings()
+
+    return DocumentDB(
+        vector_path=settings["vector_path"],
+        embedding_model_name=settings["embedding_model_name"],
+        vector_backend=settings["vector_backend"],
+    )
 
 
 def _parse_exclude_paths(raw: str) -> list[str]:
@@ -103,9 +111,7 @@ def _read_with_docling(path: Path) -> str:
     try:
         from docling.document_converter import DocumentConverter
     except Exception as exc:
-        raise RuntimeError(
-            "docling is not available. Install with: pip install docling"
-        ) from exc
+        raise RuntimeError("docling is not available. Install with: pip install docling") from exc
 
     converter = DocumentConverter()
     result = converter.convert(str(path))
@@ -218,9 +224,7 @@ def docling_add_dir(
     try:
         root = Path(directory).expanduser().resolve()
         if not root.is_dir():
-            return _safe_json(
-                {"status": "error", "error": f"Not a directory: {directory}"}
-            )
+            return _safe_json({"status": "error", "error": f"Not a directory: {directory}"})
 
         max_files = max(1, min(int(max_files), 100))
         exclude_paths = _parse_exclude_paths(exclude)

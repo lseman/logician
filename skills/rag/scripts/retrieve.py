@@ -14,6 +14,7 @@ import json
 from collections import defaultdict
 from typing import Any
 
+from src.rag_runtime import legacy_rag_vector_paths, rag_runtime_settings
 from src.repo_graph import related_repo_context
 from src.repo_registry import load_repo_index
 
@@ -106,7 +107,13 @@ if "_get_doc_db" not in globals():
         try:
             from src.db.document import DocumentDB
 
-            return DocumentDB()
+            settings = rag_runtime_settings()
+
+            return DocumentDB(
+                vector_path=settings["vector_path"],
+                embedding_model_name=settings["embedding_model_name"],
+                vector_backend=settings["vector_backend"],
+            )
         except Exception as exc:
             raise RuntimeError(f"Cannot initialise DocumentDB: {exc}") from exc
 
@@ -274,8 +281,7 @@ def rag_search(
             seed_paths = [
                 str((row.get("metadata") or {}).get("repo_rel_path", "")).strip()
                 for row in rows
-                if str((row.get("metadata") or {}).get("repo_id", "")).strip()
-                == active_repo_id
+                if str((row.get("metadata") or {}).get("repo_id", "")).strip() == active_repo_id
                 and str((row.get("metadata") or {}).get("repo_rel_path", "")).strip()
             ]
             if not seed_paths:
@@ -376,14 +382,30 @@ def rag_list(
     Inputs:
       max_sources (int, optional): Maximum source rows to return (default 40, max 300).
       include_paths (bool, optional): Include source file paths when available (default True).
-    Returns: JSON summary of indexed sources and chunk totals.
+    Returns: JSON summary of indexed repositories first, then non-repo sources.
     Side effects: Read-only.
     """
     try:
+
+        def _is_artifact_path(raw_path: str) -> bool:
+            normalized = str(raw_path or "").replace("\\", "/").lower()
+            return any(
+                marker in normalized
+                for marker in (
+                    "/target/",
+                    "/node_modules/",
+                    "/dist/",
+                    "/build/",
+                    "/.fingerprint/",
+                    "__pycache__/",
+                )
+            )
+
         limit = max(1, min(int(max_sources), 300))
         doc_db = _doc_db_from_agent()
         collection = doc_db.collection
         grouped: dict[tuple[str, str], int] = defaultdict(int)
+        repo_grouped: dict[str, dict[str, Any]] = {}
         where = _repo_where(repo_id=repo_id, repo_ids=repo_ids)
         total_chunks = int(collection.count(where=where))
         total_with_deleted = int(collection.count(where=where, include_deleted=True))
@@ -395,11 +417,83 @@ def rag_list(
         )
         metadatas = records.get("metadatas", [])
 
+        build_artifact_chunks = 0
+        build_artifact_paths: set[str] = set()
+        non_artifact_chunks = 0
         for meta in metadatas:
             source = str(meta.get("source", "unknown") or "unknown")
             path = str(meta.get("path", "") or "")
+            repo_key = str(meta.get("repo_id", "") or "").strip()
+            repo_name = str(meta.get("repo_name", "") or repo_key or "").strip()
+            repo_rel_path = str(meta.get("repo_rel_path", "") or "").strip()
+
+            resolved_path = repo_rel_path or path
+            is_artifact = _is_artifact_path(resolved_path)
+            if is_artifact:
+                build_artifact_chunks += 1
+                if resolved_path:
+                    build_artifact_paths.add(resolved_path)
+            else:
+                non_artifact_chunks += 1
+
+            if repo_key:
+                repo_entry = repo_grouped.setdefault(
+                    repo_key,
+                    {
+                        "repo_id": repo_key,
+                        "repo_name": repo_name or repo_key,
+                        "chunks": 0,
+                        "artifact_free_chunks": 0,
+                        "sources": set(),
+                        "paths": set(),
+                        "sample_paths": [],
+                        "build_artifact_chunks": 0,
+                    },
+                )
+                repo_entry["chunks"] += 1
+                if not is_artifact and source:
+                    repo_entry["sources"].add(source)
+                if not is_artifact:
+                    repo_entry["artifact_free_chunks"] += 1
+                if not is_artifact and repo_rel_path:
+                    repo_entry["paths"].add(repo_rel_path)
+                    if (
+                        len(repo_entry["sample_paths"]) < 5
+                        and repo_rel_path not in repo_entry["sample_paths"]
+                    ):
+                        repo_entry["sample_paths"].append(repo_rel_path)
+                if is_artifact:
+                    repo_entry["build_artifact_chunks"] += 1
+                continue
+
+            if is_artifact:
+                continue
+
             key = (source, path if include_paths else "")
             grouped[key] += 1
+
+        repo_ranked = sorted(
+            repo_grouped.values(),
+            key=lambda item: (
+                -int(item.get("artifact_free_chunks", 0) or 0),
+                -int(item.get("chunks", 0) or 0),
+                str(item.get("repo_name") or ""),
+            ),
+        )
+        repos: list[dict[str, Any]] = []
+        for item in repo_ranked[:limit]:
+            repos.append(
+                {
+                    "repo_id": str(item.get("repo_id") or ""),
+                    "repo_name": str(item.get("repo_name") or item.get("repo_id") or ""),
+                    "chunks": int(item.get("chunks", 0) or 0),
+                    "artifact_free_chunks": int(item.get("artifact_free_chunks", 0) or 0),
+                    "unique_sources": len(item.get("sources") or []),
+                    "unique_paths": len(item.get("paths") or []),
+                    "sample_paths": list(item.get("sample_paths") or []),
+                    "build_artifact_chunks": int(item.get("build_artifact_chunks", 0) or 0),
+                }
+            )
 
         ranked = sorted(grouped.items(), key=lambda item: item[1], reverse=True)
         sources: list[dict[str, Any]] = []
@@ -412,12 +506,21 @@ def rag_list(
         return _safe_json(
             {
                 "status": "ok",
+                "vector_path": str(getattr(doc_db, "vector_path", "") or ""),
+                "vector_backend": str(getattr(doc_db, "vector_backend", "") or ""),
                 "total_chunks": total_chunks,
+                "non_artifact_chunks": non_artifact_chunks,
                 "deleted_chunks": deleted_chunks,
+                "unique_repos": len(repo_grouped),
+                "returned_repos": len(repos),
                 "unique_sources": len(grouped),
                 "returned_sources": len(sources),
                 "repo_filter": _parse_repo_ids(repo_id=repo_id, repo_ids=repo_ids),
+                "repos": repos,
+                "build_artifact_chunks": build_artifact_chunks,
+                "build_artifact_paths": sorted(build_artifact_paths)[:20],
                 "sources": sources,
+                "legacy_paths": [str(path) for path in legacy_rag_vector_paths() if path.exists()],
             }
         )
     except Exception as exc:

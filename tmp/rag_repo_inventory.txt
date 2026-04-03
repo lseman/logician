@@ -1,0 +1,24 @@
+ROOT .local/state/rag_docs.vector
+REPO openclaude 1273
+  SAMPLE atomic_chat_provider.py
+  SAMPLE ollama_provider.py
+  SAMPLE smart_router.py
+REPO deepagents 458
+  SAMPLE aggregate_evals.py
+  SAMPLE check_extras_sync.py
+  SAMPLE check_version_equality.py
+REPO claude-mem 285
+  SAMPLE extract-all-xml.py
+  SAMPLE filter-actual-xml.py
+  SAMPLE agent-sdk-v2-examples.ts
+REPO repo 25
+  SAMPLE a.py
+  SAMPLE summary.md
+  SAMPLE README.md
+REPO smoke 1
+  SAMPLE smoke
+ROOT rag_docs.vector
+REPO <none> 3197
+  SAMPLE app.rs
+  SAMPLE bridge.rs
+  SAMPLE image.rs

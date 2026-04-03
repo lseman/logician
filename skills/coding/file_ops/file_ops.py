@@ -1,11 +1,14 @@
 """File Ops skill — routing metadata and grammar hints.
 
-All tool implementations live in src/tools/core/files.py and are registered
+All tool implementations live under src/tools/core/*Tool/ and are registered
 as always-on core tools. This module provides only:
   - __skill__  : routing/trigger metadata for skill selection
   - __grammars__: constrained-decoding hints for write_file / edit_file
 """
+
 from __future__ import annotations
+
+_CODING_METADATA_ONLY = True
 
 __skill__ = {
     "name": "File Ops",
@@ -13,16 +16,38 @@ __skill__ = {
         "Use for local filesystem reads, writes, path listing, "
         "single-file edits, and git-aware operations."
     ),
-    "aliases": ["files", "file editing", "file reads", "single file edit", "git status", "git diff"],
+    "aliases": [
+        "files",
+        "file editing",
+        "file reads",
+        "single file edit",
+        "git status",
+        "git diff",
+    ],
     "triggers": [
-        "read this file", "write this file", "create a new file", "list this directory",
-        "edit this file", "patch this file", "fix this function",
-        "git status", "git diff", "show git changes", "what did I change",
-        "find in file", "search file", "where is function",
+        "read this file",
+        "write this file",
+        "create a new file",
+        "list this directory",
+        "edit this file",
+        "patch this file",
+        "fix this function",
+        "git status",
+        "git diff",
+        "show git changes",
+        "what did I change",
+        "find in file",
+        "search file",
+        "where is function",
     ],
     "preferred_tools": [
-        "search_file", "read_file", "write_file", "edit_file",
-        "list_dir", "get_git_status", "get_git_diff",
+        "search_file",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_dir",
+        "get_git_status",
+        "get_git_diff",
     ],
     "example_queries": [
         "open the config file and inspect it",

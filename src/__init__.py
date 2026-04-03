@@ -16,6 +16,7 @@ _SYMBOL_TO_MODULE = {
     "ToolRegistry": "tools",
     "ToolParameter": "tools",
     "ToolCall": "tools",
+    "AppState": "tools",
     "Context": "tools",
     "SSRReasoner": "reasoners",
     "SocraticStep": "reasoners",
@@ -32,8 +33,8 @@ if TYPE_CHECKING:
     from .db import DocumentDB, MessageDB
     from .eoh import EoHConfig, run_eoh
     from .messages import Message, MessageRole
-    from .reasoners import SSRReasoner, SocraticStep
-    from .tools import Context, ToolCall, ToolParameter, ToolRegistry
+    from .reasoners import SocraticStep, SSRReasoner
+    from .tools import AppState, Context, ToolCall, ToolParameter, ToolRegistry
 
 
 def __getattr__(name: str) -> Any:

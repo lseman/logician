@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.tools.core.tasks import load_persisted_todos, todo
+from src.tools.core.TaskTool import load_persisted_todos, todo
 from src.webui.app import ChatRequest, create_app
 from src.webui.data import (
     extract_repo_focus_paths,

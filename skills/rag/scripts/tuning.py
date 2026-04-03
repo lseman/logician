@@ -16,6 +16,8 @@ import time
 from statistics import mean
 from typing import Any
 
+from src.rag_runtime import rag_runtime_settings
+
 if "_safe_json" not in globals():
 
     def _safe_json(obj: Any) -> str:  # type: ignore[misc]
@@ -24,15 +26,23 @@ if "_safe_json" not in globals():
         except Exception:
             return json.dumps({"status": "error", "error": repr(obj)})
 
+
 if "_get_doc_db" not in globals():
 
     def _get_doc_db():
         try:
             from src.db.document import DocumentDB
 
-            return DocumentDB()
+            settings = rag_runtime_settings()
+
+            return DocumentDB(
+                vector_path=settings["vector_path"],
+                embedding_model_name=settings["embedding_model_name"],
+                vector_backend=settings["vector_backend"],
+            )
         except Exception as exc:
             raise RuntimeError(f"Cannot initialise DocumentDB: {exc}") from exc
+
 
 if "_doc_db_from_agent" not in globals():
 
@@ -102,13 +112,11 @@ def _tuning_snapshot(doc_db: Any) -> dict[str, Any]:
             getattr(reranker, "enabled", getattr(doc_db, "rerank_enabled", False))
         ),
         "reranker_model": str(
-            getattr(reranker, "model_name", "")
-            or getattr(doc_db, "reranker_model_name", "")
+            getattr(reranker, "model_name", "") or getattr(doc_db, "reranker_model_name", "")
         ),
         "rerank_fetch_k": int(getattr(doc_db, "rerank_fetch_k", 0) or 0),
         "min_similarity": float(
-            getattr(collection, "_min_similarity", getattr(doc_db, "min_similarity", 0.0))
-            or 0.0
+            getattr(collection, "_min_similarity", getattr(doc_db, "min_similarity", 0.0)) or 0.0
         ),
         "hnsw_ef_search": int(getattr(collection, "_ef_search", 0) or 0),
         "hnsw_m": int(getattr(collection, "_m", 0) or 0),

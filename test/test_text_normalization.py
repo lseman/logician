@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
-from skills.coding.shell import shell as shell_tools
-from src.tools.core.files import edit_file, write_file
+from src.tools.core import run_python
+from src.tools.core.FileEditTool import edit_file, write_file
+from src.tools.core.FileReadTool import read_file
 from src.tools.text_normalization import normalize_text_payload
 
 
@@ -49,6 +49,8 @@ class TextNormalizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "append.txt"
             path.write_text("alpha\n", encoding="utf-8")
+            read_result = read_file(str(path))
+            self.assertEqual(read_result["status"], "ok")
 
             result = write_file(str(path), "beta\n", mode="a")
 
@@ -59,6 +61,8 @@ class TextNormalizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "windows.py"
             path.write_bytes(b"def demo():\r\n    return 1\r\n")
+            read_result = read_file(str(path))
+            self.assertEqual(read_result["status"], "ok")
 
             result = edit_file(
                 str(path),
@@ -80,7 +84,7 @@ class TextNormalizationTests(unittest.TestCase):
                 return cwd
 
         with patch("builtins.coding_runtime", _Runtime(), create=True):
-            result = json.loads(shell_tools.run_python(payload))
+            result = run_python(payload)
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["stdout"], "line1\\nline2\nok\n")

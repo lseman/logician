@@ -1,4 +1,5 @@
 """Tests for AgentLoop — thin ReAct-style main loop."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,19 +11,18 @@ AGENT_ROOT = Path(__file__).resolve().parents[1]
 if str(AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_ROOT))
 
-import pytest
 
-from src.messages import Message, MessageRole
-from src.config import Config
-from src.agent.loop import AgentLoop, format_tool_results
-from src.agent.guardrails import GuardrailResult
 from src.agent.dispatcher import DispatchResult
+from src.agent.guardrails import GuardrailResult
+from src.agent.loop import AgentLoop, format_tool_results
+from src.config import Config
+from src.messages import Message, MessageRole
 from src.tools.runtime import ToolCall
-
 
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
+
 
 class FakeLLM:
     def __init__(self, responses: list[str]) -> None:
@@ -93,6 +93,7 @@ def _tool_call_json(name: str, arguments: dict) -> str:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_simple_turn_plain_text():
     """FakeLLM returns plain text → TurnResult.final_response is that text."""
     agent_loop, _ = _make_loop(["Hello, I can help you with that."])
@@ -119,6 +120,56 @@ def test_social_turn_fast_path():
     assert result.final_response == "Hey there! How can I help?"
     assert fake_dispatcher.dispatched == [], "dispatcher must not be called on social turns"
     assert llm._idx == 1, "only one LLM call for social fast path"
+
+
+def test_social_turn_skips_mcp_loader():
+    """Social turn should not pay MCP startup before the fast path."""
+    llm = FakeLLM(["Hello"])
+    fake_dispatcher = FakeDispatcher()
+    config = Config(max_iterations=8, pre_turn_thinking=False)
+    mcp_calls = {"count": 0}
+
+    def _load_mcp() -> None:
+        mcp_calls["count"] += 1
+
+    agent_loop = AgentLoop(
+        llm=llm,
+        guardrails=FakeGuardrails(),
+        prompt_builder=FakePromptBuilder(),
+        dispatcher=fake_dispatcher,
+        config=config,
+        mcp_loader=_load_mcp,
+    )
+
+    result = asyncio.run(agent_loop.run([_user_msg("hello there")]))
+
+    assert result.final_response == "Hello"
+    assert mcp_calls["count"] == 0
+
+
+def test_execution_turn_loads_mcp_before_loop():
+    """Execution turns still initialise MCP before entering the tool loop."""
+    llm = FakeLLM(["Done"])
+    fake_dispatcher = FakeDispatcher()
+    config = Config(max_iterations=8, pre_turn_thinking=False)
+    mcp_calls = {"count": 0}
+
+    def _load_mcp() -> None:
+        mcp_calls["count"] += 1
+
+    agent_loop = AgentLoop(
+        llm=llm,
+        guardrails=FakeGuardrails(),
+        prompt_builder=FakePromptBuilder(),
+        dispatcher=fake_dispatcher,
+        config=config,
+        mcp_loader=_load_mcp,
+    )
+
+    result = asyncio.run(agent_loop.run([_user_msg("list the files")]))
+
+    assert result.final_response == "Done"
+    assert mcp_calls["count"] == 1
 
 
 def test_guardrail_nudge_increments_iteration():

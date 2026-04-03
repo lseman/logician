@@ -18,6 +18,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from src.rag_runtime import rag_runtime_settings
+
 if "_safe_json" not in globals():
 
     def _safe_json(obj: Any) -> str:  # type: ignore[misc]
@@ -37,7 +39,13 @@ def _get_doc_db():
     try:
         from src.db.document import DocumentDB
 
-        return DocumentDB()
+        settings = rag_runtime_settings()
+
+        return DocumentDB(
+            vector_path=settings["vector_path"],
+            embedding_model_name=settings["embedding_model_name"],
+            vector_backend=settings["vector_backend"],
+        )
     except Exception as exc:
         raise RuntimeError(f"Cannot initialise DocumentDB: {exc}") from exc
 
@@ -161,9 +169,26 @@ def _collect_matching_files(
 def _file_kind_for_path(path: Path) -> str:
     ext = path.suffix.lower()
     if ext in {
-        ".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".java", ".go", ".rb",
-        ".php", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".kt", ".swift",
-        ".sh", ".sql",
+        ".py",
+        ".rs",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".java",
+        ".go",
+        ".rb",
+        ".php",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".kt",
+        ".swift",
+        ".sh",
+        ".sql",
     }:
         return "code"
     if ext in {".md", ".rst", ".txt", ".adoc"}:
@@ -342,9 +367,7 @@ def rag_add_dir(
     try:
         root = Path(directory).expanduser().resolve()
         if not root.is_dir():
-            return _safe_json(
-                {"status": "error", "error": f"Not a directory: {directory}"}
-            )
+            return _safe_json({"status": "error", "error": f"Not a directory: {directory}"})
 
         max_files = min(max(1, int(max_files)), 200)
         files = _collect_matching_files(
@@ -441,9 +464,7 @@ def rag_promote_paths(
     try:
         parsed_paths = _parse_promote_paths(paths)
         if not parsed_paths:
-            return _safe_json(
-                {"status": "error", "error": "No paths provided in 'paths'."}
-            )
+            return _safe_json({"status": "error", "error": "No paths provided in 'paths'."})
 
         budget = max(1, min(int(max_files or 80), 300))
         remaining = budget
@@ -454,9 +475,7 @@ def rag_promote_paths(
         for raw in parsed_paths:
             p = Path(raw).expanduser().resolve()
             if not p.exists():
-                results.append(
-                    {"path": str(raw), "status": "error", "error": "Path not found"}
-                )
+                results.append({"path": str(raw), "status": "error", "error": "Path not found"})
                 continue
 
             if p.is_file():

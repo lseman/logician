@@ -9,7 +9,11 @@ use uuid::Uuid;
 
 use crate::bridge::{BridgeEvent, BridgeState};
 use crate::image::ImageRenderer;
-use crate::markdown::{render_diff, render_markdown, render_streaming, strip_think_blocks};
+use crate::markdown::{
+    render_markdown, render_streaming,
+    sanitize_assistant_text as sanitize_assistant_markdown_text,
+    sanitize_thinking_text as sanitize_thinking_stream_text,
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,6 +25,7 @@ pub enum PanelFocus {
     Todo,
     ToolOutput,
     Context,
+    Rag,
     SlashPopup,
 }
 
@@ -82,6 +87,84 @@ impl fmt::Display for Phase {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressState {
+    Pending,
+    Active,
+    Complete,
+    Error,
+}
+
+impl ProgressState {
+    pub fn color(self) -> Color {
+        match self {
+            ProgressState::Pending => Color::Gray,
+            ProgressState::Active => Color::Cyan,
+            ProgressState::Complete => Color::Green,
+            ProgressState::Error => Color::Red,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgressEntry {
+    pub label: String,
+    pub meta: Option<String>,
+    pub detail: Option<String>,
+    pub state: ProgressState,
+    pub is_last: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveStepSummary {
+    pub text: String,
+    pub state: ProgressState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityState {
+    Running,
+    Complete,
+    Error,
+}
+
+impl ActivityState {
+    pub fn color(self) -> Color {
+        match self {
+            ActivityState::Running => Color::Cyan,
+            ActivityState::Complete => Color::Green,
+            ActivityState::Error => Color::Red,
+        }
+    }
+}
+
+impl From<ActivityState> for ProgressState {
+    fn from(value: ActivityState) -> Self {
+        match value {
+            ActivityState::Running => ProgressState::Active,
+            ActivityState::Complete => ProgressState::Complete,
+            ActivityState::Error => ProgressState::Error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityEntry {
+    pub sequence: usize,
+    pub name: String,
+    pub summary: Option<String>,
+    pub detail: Option<String>,
+    pub status: ActivityState,
+    pub duration_ms: Option<u64>,
+    pub cache_hit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CachedLineMeta {
+    message_idx: usize,
+    thinking_toggle: bool,
+}
+
 // ── Message ───────────────────────────────────────────────────────────────────
 
 pub struct Message {
@@ -92,17 +175,24 @@ pub struct Message {
     #[allow(dead_code)]
     pub text: String,
     pub raw_stream: Option<String>,
+    pub collapsed: bool,
     /// Pre-rendered lines (updated on text change)
     pub rendered: Vec<Line<'static>>,
 }
 
 trait MessageRenderer {
-    fn render_header(&self, role: Role, streaming: bool) -> Line<'static>;
-    fn render_body(&self, role: Role, text: &str, streaming: bool) -> Vec<Line<'static>>;
+    fn render_header(&self, role: Role, streaming: bool, collapsed: bool) -> Line<'static>;
+    fn render_body(
+        &self,
+        role: Role,
+        text: &str,
+        streaming: bool,
+        collapsed: bool,
+    ) -> Vec<Line<'static>>;
 
-    fn render(&self, role: Role, text: &str, streaming: bool) -> Vec<Line<'static>> {
-        let mut lines = vec![self.render_header(role, streaming)];
-        lines.extend(self.render_body(role, text, streaming));
+    fn render(&self, role: Role, text: &str, streaming: bool, collapsed: bool) -> Vec<Line<'static>> {
+        let mut lines = vec![self.render_header(role, streaming, collapsed)];
+        lines.extend(self.render_body(role, text, streaming, collapsed));
         lines.push(Line::raw(""));
         lines
     }
@@ -111,6 +201,39 @@ trait MessageRenderer {
 struct DefaultRenderer;
 
 impl DefaultRenderer {
+    fn role_style(role: Role) -> (Color, &'static str, &'static str) {
+        match role {
+            Role::User => (Color::Yellow, "●", "you"),
+            Role::Assistant => (Color::Green, "●", "assistant"),
+            Role::Thinking => (Color::Yellow, "◌", "thinking"),
+            Role::System => (Color::Blue, "●", "system"),
+            Role::Tool => (Color::Cyan, "●", "tool"),
+            Role::Decision => (Color::LightBlue, "◆", "decision"),
+            Role::Repair => (Color::LightYellow, "↺", "repair"),
+            Role::Skill => (Color::Magenta, "◆", "skill"),
+        }
+    }
+
+    fn prefix_lines(
+        lines: Vec<Line<'static>>,
+        prefix: &'static str,
+        prefix_style: Style,
+    ) -> Vec<Line<'static>> {
+        lines
+            .into_iter()
+            .map(|line| {
+                if line.spans.is_empty() {
+                    return line;
+                }
+
+                let mut spans = Vec::with_capacity(line.spans.len() + 1);
+                spans.push(Span::styled(prefix.to_string(), prefix_style));
+                spans.extend(line.spans);
+                Line::from(spans)
+            })
+            .collect()
+    }
+
     fn tool_message_is_error(text: &str) -> bool {
         let lower = text.trim().to_lowercase();
         lower.starts_with("failed ")
@@ -118,44 +241,89 @@ impl DefaultRenderer {
             || lower.contains("\nerror:")
             || lower.contains(" status=error")
     }
+
+    fn collapsed_thinking_body(text: &str) -> Vec<Line<'static>> {
+        let sanitized = sanitize_thinking_stream_text(text);
+        let line_count = sanitized.lines().filter(|line| !line.trim().is_empty()).count();
+        let preview = sanitized
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(|line| App::truncate_inline(line, 88))
+            .unwrap_or_else(|| "reasoning hidden".to_string());
+
+        vec![Line::from(vec![
+            Span::styled(
+                "⋮ ",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                format!(
+                    "{} hidden{}",
+                    line_count.max(1),
+                    if line_count == 1 { " line" } else { " lines" }
+                ),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                "  ",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+            Span::styled(
+                preview,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::DIM),
+            ),
+            ])]
+    }
 }
 
 impl MessageRenderer for DefaultRenderer {
-    fn render_header(&self, role: Role, streaming: bool) -> Line<'static> {
+    fn render_header(&self, role: Role, streaming: bool, collapsed: bool) -> Line<'static> {
+        let (color, icon, label) = Self::role_style(role);
         if streaming {
-            let (label, label_color) = match role {
-                Role::Assistant => ("assistant    ", Color::Green),
-                Role::Thinking => ("thinking     ", Color::Yellow),
-                _ => ("stream       ", Color::Cyan),
-            };
             return Line::from(vec![
                 Span::styled(
-                    label,
+                    format!("{icon} {label}"),
                     Style::default()
-                        .fg(label_color)
+                        .fg(color)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "▸ streaming",
+                    "  live",
                     Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
                 ),
             ]);
         }
         let now = Local::now().format("%H:%M:%S").to_string();
-        let (label, color) = match role {
-            Role::User => ("you          ", Color::Yellow),
-            Role::Assistant => ("assistant    ", Color::Green),
-            Role::Thinking => ("thinking     ", Color::Yellow),
-            Role::System => ("system       ", Color::Blue),
-            Role::Tool => ("tool ⚙       ", Color::Cyan),
-            Role::Decision => ("decision ⎇   ", Color::LightBlue),
-            Role::Repair => ("repair ⟳     ", Color::LightYellow),
-            Role::Skill => ("skill 🧠     ", Color::Magenta),
-        };
         Line::from(vec![
             Span::styled(
-                label,
+                format!("{icon} {label}"),
                 Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            if role == Role::Thinking && collapsed {
+                Span::styled(
+                    "  collapsed",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )
+            } else {
+                Span::styled(
+                    "  ",
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                )
+            },
+            Span::styled(
+                if role == Role::Thinking && collapsed { "  " } else { "" },
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 now,
@@ -166,32 +334,56 @@ impl MessageRenderer for DefaultRenderer {
         ])
     }
 
-    fn render_body(&self, role: Role, text: &str, streaming: bool) -> Vec<Line<'static>> {
+    fn render_body(&self, role: Role, text: &str, streaming: bool, collapsed: bool) -> Vec<Line<'static>> {
         match role {
-            Role::Assistant if streaming => render_streaming(text),
-            Role::Assistant => render_markdown(text),
-            Role::Thinking if streaming => render_streaming(text),
-            Role::Thinking => text
-                .lines()
-                .map(|l| {
-                    Line::from(Span::styled(
-                        l.to_string(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::DIM),
-                    ))
-                })
-                .collect(),
-            Role::System => render_markdown(text),
-            Role::User => text
-                .lines()
-                .map(|l| {
-                    Line::from(Span::styled(
-                        l.to_string(),
-                        Style::default().fg(Color::White),
-                    ))
-                })
-                .collect(),
+            Role::Assistant if streaming => Self::prefix_lines(
+                render_streaming(text),
+                "│ ",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+            Role::Assistant => Self::prefix_lines(
+                render_markdown(text),
+                "│ ",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+            Role::Thinking if streaming => Self::prefix_lines(
+                render_streaming(&sanitize_thinking_stream_text(text)),
+                "⋮ ",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+            ),
+            Role::Thinking if collapsed => Self::collapsed_thinking_body(text),
+            Role::Thinking => Self::prefix_lines(
+                sanitize_thinking_stream_text(text)
+                    .lines()
+                    .map(|l| {
+                        Line::from(Span::styled(
+                            l.to_string(),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::DIM),
+                        ))
+                    })
+                    .collect(),
+                "⋮ ",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+            ),
+            Role::System => Self::prefix_lines(
+                render_markdown(text),
+                "│ ",
+                Style::default().fg(Color::Blue).add_modifier(Modifier::DIM),
+            ),
+            Role::User => Self::prefix_lines(
+                text.lines()
+                    .map(|l| {
+                        Line::from(Span::styled(
+                            l.to_string(),
+                            Style::default().fg(Color::White),
+                        ))
+                    })
+                    .collect(),
+                "> ",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
             Role::Tool => {
                 let mut tool_lines = Vec::new();
                 let is_error = Self::tool_message_is_error(text);
@@ -301,7 +493,7 @@ impl Message {
     fn new_pre_rendered(role: Role, text: impl Into<String>, body: Vec<Line<'static>>) -> Self {
         let text = text.into();
         let renderer = DefaultRenderer;
-        let mut rendered = vec![renderer.render_header(role, false)];
+        let mut rendered = vec![renderer.render_header(role, false, false)];
         rendered.extend(body);
         rendered.push(Line::raw(""));
         Self {
@@ -310,6 +502,7 @@ impl Message {
             is_streaming: false,
             text,
             raw_stream: None,
+            collapsed: false,
             rendered,
         }
     }
@@ -321,13 +514,15 @@ impl Message {
     fn new_with_streaming(role: Role, text: impl Into<String>, is_streaming: bool) -> Self {
         let text = text.into();
         let renderer = DefaultRenderer;
-        let rendered = renderer.render(role, &text, is_streaming);
+        let collapsed = role == Role::Thinking && !is_streaming;
+        let rendered = renderer.render(role, &text, is_streaming, collapsed);
         Self {
             id: Uuid::new_v4().to_string(),
             role,
             is_streaming,
             text,
             raw_stream: None,
+            collapsed,
             rendered,
         }
     }
@@ -335,21 +530,43 @@ impl Message {
     fn append_stream_chunk(&mut self, chunk: &str) {
         self.text.push_str(chunk);
         self.is_streaming = true;
+        self.collapsed = false;
         let renderer = DefaultRenderer;
-        self.rendered = renderer.render(self.role, &self.text, true);
+        self.rendered = renderer.render(self.role, &self.text, true, false);
     }
 
     fn finalize_streaming(&mut self) {
         self.is_streaming = false;
+        if self.role == Role::Thinking {
+            self.collapsed = true;
+        }
         let renderer = DefaultRenderer;
-        self.rendered = renderer.render(self.role, &self.text, false);
+        self.rendered = renderer.render(self.role, &self.text, false, self.collapsed);
+    }
+
+    fn toggle_collapsed(&mut self) {
+        if self.role != Role::Thinking || self.is_streaming {
+            return;
+        }
+        self.collapsed = !self.collapsed;
+        let renderer = DefaultRenderer;
+        self.rendered = renderer.render(self.role, &self.text, false, self.collapsed);
+    }
+
+    fn line_meta(&self, message_idx: usize, line_count: usize) -> Vec<CachedLineMeta> {
+        (0..line_count)
+            .map(|idx| CachedLineMeta {
+                message_idx,
+                thinking_toggle: self.role == Role::Thinking && !self.is_streaming && idx == 0,
+            })
+            .collect()
     }
 
     fn rendered_for_raw_mode(&self) -> Vec<Line<'static>> {
         if self.role == Role::Assistant {
             if let Some(raw) = &self.raw_stream {
                 let renderer = DefaultRenderer;
-                return renderer.render(self.role, raw, true);
+                return renderer.render(self.role, raw, true, false);
             }
         }
         self.rendered.clone()
@@ -373,8 +590,18 @@ pub enum KeyAction {
     ToggleTasks,
     /// Toggle context explorer panel
     ToggleContextExplorer,
+    /// Toggle dedicated RAG panel
+    ToggleRagPanel,
     /// Toggle tool output expansion (Ctrl+R)
     ToggleToolOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlashDispatch {
+    Local,
+    Bridge,
+    State,
+    Quit,
 }
 
 #[derive(Clone, Copy)]
@@ -386,19 +613,161 @@ pub struct ShortcutHint {
 #[derive(Clone)]
 pub struct SlashPopupEntry {
     pub command: String,
+    pub usage: String,
     pub description: String,
+}
+
+#[derive(Clone, Copy)]
+struct SlashArgumentSpec {
+    name: &'static str,
+    required: bool,
+    repeats: bool,
+    help: &'static str,
+    choices: &'static [&'static str],
 }
 
 #[derive(Clone, Copy)]
 struct SlashCommandSpec {
     command: &'static str,
+    usage: &'static str,
     description: &'static str,
+    dispatch: SlashDispatch,
+    args: &'static [SlashArgumentSpec],
 }
+
+#[derive(Clone)]
+struct SlashCommand {
+    command: String,
+    usage: String,
+    description: String,
+    dispatch: SlashDispatch,
+    args: Vec<SlashArgumentSpec>,
+    strict_schema: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedSlashCommand {
+    command: String,
+    usage: String,
+    dispatch: SlashDispatch,
+    pub positionals: Vec<String>,
+    pub named_args: Map<String, Value>,
+}
+
+impl ParsedSlashCommand {
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    pub fn usage(&self) -> &str {
+        &self.usage
+    }
+
+    pub fn dispatch(&self) -> SlashDispatch {
+        self.dispatch
+    }
+
+    pub fn arg(&self, name: &str) -> Option<&str> {
+        self.named_args.get(name).and_then(Value::as_str)
+    }
+}
+
+const NO_SLASH_ARGS: &[SlashArgumentSpec] = &[];
+const TRACE_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
+    name: "mode",
+    required: false,
+    repeats: false,
+    help: "Optional trace mode",
+    choices: &["on", "off", "1", "0", "true", "false", "yes", "no"],
+}];
+const CLOSE_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
+    name: "target",
+    required: false,
+    repeats: false,
+    help: "Optional panel target",
+    choices: &["all", "image", "todo", "tasks", "context", "rag", "inspector"],
+}];
+const SINGLE_WORD_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
+    name: "value",
+    required: true,
+    repeats: false,
+    help: "Required value",
+    choices: &[],
+}];
+const OPTIONAL_WORD_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
+    name: "value",
+    required: false,
+    repeats: false,
+    help: "Optional value",
+    choices: &[],
+}];
+const PATH_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
+    name: "path",
+    required: true,
+    repeats: false,
+    help: "Path argument",
+    choices: &[],
+}];
+const PATH_AND_GLOB_SLASH_ARGS: &[SlashArgumentSpec] = &[
+    SlashArgumentSpec {
+        name: "path",
+        required: true,
+        repeats: false,
+        help: "Path argument",
+        choices: &[],
+    },
+    SlashArgumentSpec {
+        name: "glob",
+        required: false,
+        repeats: true,
+        help: "Optional glob override",
+        choices: &[],
+    },
+];
+const DOCS_SLASH_ARGS: &[SlashArgumentSpec] = &[
+    SlashArgumentSpec {
+        name: "library",
+        required: true,
+        repeats: false,
+        help: "Context7 library id or package name",
+        choices: &[],
+    },
+    SlashArgumentSpec {
+        name: "topic",
+        required: false,
+        repeats: true,
+        help: "Optional topic terms",
+        choices: &[],
+    },
+];
+const PIPELINE_SLASH_ARGS: &[SlashArgumentSpec] = &[
+    SlashArgumentSpec {
+        name: "from",
+        required: true,
+        repeats: false,
+        help: "Source agent",
+        choices: &[],
+    },
+    SlashArgumentSpec {
+        name: "to",
+        required: true,
+        repeats: false,
+        help: "Target agent",
+        choices: &[],
+    },
+    SlashArgumentSpec {
+        name: "rounds",
+        required: false,
+        repeats: false,
+        help: "Optional round count",
+        choices: &[],
+    },
+];
 
 const SLASH_POPUP_LIMIT: usize = 8;
 const INPUT_HISTORY_LIMIT: usize = 200;
 
-pub const SHORTCUT_HINTS: [ShortcutHint; 14] = [
+pub const SHORTCUT_HINTS: [ShortcutHint; 15] = [
     ShortcutHint {
         chord: "Ctrl+O",
         description: "trace in inspector",
@@ -414,6 +783,10 @@ pub const SHORTCUT_HINTS: [ShortcutHint; 14] = [
     ShortcutHint {
         chord: "Ctrl+E",
         description: "toggle context panel",
+    },
+    ShortcutHint {
+        chord: "Ctrl+G",
+        description: "toggle RAG panel",
     },
     ShortcutHint {
         chord: "Ctrl+R",
@@ -460,142 +833,232 @@ pub const SHORTCUT_HINTS: [ShortcutHint; 14] = [
 const LOCAL_ONLY_SLASH_COMMANDS: [SlashCommandSpec; 4] = [
     SlashCommandSpec {
         command: "/?",
+        usage: "/?",
         description: "Alias for /help",
+        dispatch: SlashDispatch::Local,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/trace",
+        usage: "/trace [on|off]",
         description: "Toggle trace messages",
+        dispatch: SlashDispatch::Local,
+        args: TRACE_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/clear",
+        usage: "/clear",
         description: "Clear visible transcript only",
+        dispatch: SlashDispatch::Local,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/close",
+        usage: "/close [all|image|todo|context|rag|inspector]",
         description: "Close image side panel",
+        dispatch: SlashDispatch::Local,
+        args: CLOSE_SLASH_ARGS,
     },
 ];
 
 const SLASH_COMMANDS: [SlashCommandSpec; 28] = [
     SlashCommandSpec {
         command: "/help",
+        usage: "/help",
         description: "Show command list",
+        dispatch: SlashDispatch::Local,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/?",
+        usage: "/?",
         description: "Alias for /help",
+        dispatch: SlashDispatch::Local,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/version",
+        usage: "/version",
         description: "Show CLI and bridge version info",
+        dispatch: SlashDispatch::Local,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/status",
+        usage: "/status",
         description: "Show runtime state snapshot",
+        dispatch: SlashDispatch::State,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/skills-health",
+        usage: "/skills-health",
         description: "Show skill loader diagnostics",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/changes",
+        usage: "/changes",
         description: "Show git status and diff preview",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/trace",
+        usage: "/trace [on|off]",
         description: "Toggle trace messages",
+        dispatch: SlashDispatch::Local,
+        args: TRACE_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/clear",
+        usage: "/clear",
         description: "Clear visible transcript only",
+        dispatch: SlashDispatch::Local,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/close",
+        usage: "/close [all|image|todo|context|rag|inspector]",
         description: "Close image side panel",
+        dispatch: SlashDispatch::Local,
+        args: CLOSE_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/agents",
+        usage: "/agents",
         description: "List loaded agents",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/agent",
+        usage: "/agent <name>",
         description: "Switch active agent",
+        dispatch: SlashDispatch::Bridge,
+        args: SINGLE_WORD_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/pipeline",
+        usage: "/pipeline <from> <to> [rounds]",
         description: "Set or stop inter-agent pipeline",
+        dispatch: SlashDispatch::Bridge,
+        args: PIPELINE_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/context",
+        usage: "/context",
         description: "Show session/data context",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/compact",
+        usage: "/compact",
         description: "Summarize older conversation history",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/reset",
+        usage: "/reset",
         description: "Reset runtime tool state for session",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/sessions",
+        usage: "/sessions [query]",
         description: "List previous sessions",
+        dispatch: SlashDispatch::Bridge,
+        args: OPTIONAL_WORD_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/load",
+        usage: "/load <session_id>",
         description: "Load a previous session",
+        dispatch: SlashDispatch::Bridge,
+        args: SINGLE_WORD_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/export",
+        usage: "/export <path>",
         description: "Export chat history",
+        dispatch: SlashDispatch::Bridge,
+        args: PATH_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/upload",
+        usage: "/upload <path>",
         description: "Ingest one document into RAG",
+        dispatch: SlashDispatch::Bridge,
+        args: PATH_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/mount",
+        usage: "/mount <path> [glob]",
         description: "Mount codebase (context + RAG)",
+        dispatch: SlashDispatch::Bridge,
+        args: PATH_AND_GLOB_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/mount-code",
+        usage: "/mount-code <path> [glob]",
         description: "Alias for /mount",
+        dispatch: SlashDispatch::Bridge,
+        args: PATH_AND_GLOB_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/upload-dir",
+        usage: "/upload-dir <path>",
         description: "Bulk ingest docs into RAG",
+        dispatch: SlashDispatch::Bridge,
+        args: PATH_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/docs",
+        usage: "/docs <library> [topic]",
         description: "Fetch Context7 library docs",
+        dispatch: SlashDispatch::Bridge,
+        args: DOCS_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/new",
+        usage: "/new",
         description: "Start a new session",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/reload",
+        usage: "/reload",
         description: "Reload config and agents",
+        dispatch: SlashDispatch::Bridge,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/quit",
+        usage: "/quit",
         description: "Exit CLI",
+        dispatch: SlashDispatch::Quit,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/exit",
+        usage: "/exit",
         description: "Alias for /quit",
+        dispatch: SlashDispatch::Quit,
+        args: NO_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/q",
+        usage: "/q",
         description: "Alias for /quit",
+        dispatch: SlashDispatch::Quit,
+        args: NO_SLASH_ARGS,
     },
 ];
-
-#[derive(Clone)]
-struct SlashCommand {
-    command: String,
-    description: String,
-}
 
 #[derive(Clone)]
 pub struct ChangedFile {
@@ -608,11 +1071,13 @@ pub struct ChangedFile {
 #[derive(Clone, Default)]
 struct UiHitboxes {
     messages: Option<Rect>,
+    thinking_headers: Vec<(usize, Rect)>,
     input: Option<Rect>,
     image: Option<Rect>,
     todo: Option<Rect>,
     tool_output: Option<Rect>,
     context: Option<Rect>,
+    rag: Option<Rect>,
     slash_popup: Option<Rect>,
     slash_popup_items: Vec<Rect>,
     change_headers: Vec<(usize, Rect)>,
@@ -622,6 +1087,8 @@ struct UiHitboxes {
     tool_output_content_h: u16,
     context_viewport_h: u16,
     context_content_h: u16,
+    rag_viewport_h: u16,
+    rag_content_h: u16,
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -632,6 +1099,8 @@ pub struct App {
     // Cached flattened transcript lines (normal view / raw view).
     cached_lines: Vec<Line<'static>>,
     cached_lines_raw: Vec<Line<'static>>,
+    cached_meta: Vec<CachedLineMeta>,
+    cached_meta_raw: Vec<CachedLineMeta>,
     // Live streaming assistant message
     pub live: Option<Message>,
     // Raw stream buffer (for Ctrl+P view)
@@ -640,6 +1109,8 @@ pub struct App {
     current_turn_tool_names: Vec<String>,
     // Store tool arguments for expanded output
     current_turn_tool_args: Vec<Value>,
+    current_turn_activity: Vec<ActivityEntry>,
+    last_turn_activity: Vec<ActivityEntry>,
     last_turn_tool_names: Vec<String>,
     last_turn_iterations: u64,
     current_turn_tool_errors: u64,
@@ -676,6 +1147,7 @@ pub struct App {
     pub raw_on: bool,         // show raw stream
     pub tool_output_on: bool, // show expanded tool output panel
     pub context_on: bool,     // show context explorer panel
+    pub rag_on: bool,         // show dedicated rag panel
 
     // Bridge state
     pub bridge_state: BridgeState,
@@ -697,12 +1169,28 @@ pub struct App {
     todo_scroll: u16,
     tool_output_scroll: u16,
     context_scroll: u16,
+    rag_scroll: u16,
     ui_hitboxes: UiHitboxes,
 }
 
 impl App {
+    fn slash_command_from_spec(spec: SlashCommandSpec) -> SlashCommand {
+        SlashCommand {
+            command: spec.command.to_string(),
+            usage: spec.usage.to_string(),
+            description: spec.description.to_string(),
+            dispatch: spec.dispatch,
+            args: spec.args.to_vec(),
+            strict_schema: true,
+        }
+    }
+
     fn sanitize_assistant_text(text: &str) -> String {
-        strip_think_blocks(text)
+        sanitize_assistant_markdown_text(text)
+    }
+
+    fn sanitize_thinking_text(text: &str) -> String {
+        sanitize_thinking_stream_text(text)
     }
 
     pub fn new() -> Self {
@@ -710,10 +1198,14 @@ impl App {
             messages: Vec::new(),
             cached_lines: Vec::new(),
             cached_lines_raw: Vec::new(),
+            cached_meta: Vec::new(),
+            cached_meta_raw: Vec::new(),
             live: None,
             raw_buf: String::new(),
             current_turn_tool_names: Vec::new(),
             current_turn_tool_args: Vec::new(),
+            current_turn_activity: Vec::new(),
+            last_turn_activity: Vec::new(),
             last_turn_tool_names: Vec::new(),
             last_turn_iterations: 0,
             current_turn_tool_errors: 0,
@@ -741,6 +1233,7 @@ impl App {
             raw_on: false,
             tool_output_on: false,
             context_on: false,
+            rag_on: false,
             bridge_state: BridgeState::default(),
             connected: false,
             should_quit: false,
@@ -755,43 +1248,64 @@ impl App {
             todo_scroll: 0,
             tool_output_scroll: 0,
             context_scroll: 0,
+            rag_scroll: 0,
             ui_hitboxes: UiHitboxes::default(),
         }
     }
 
-    fn append_slash_command(
-        commands: &mut Vec<SlashCommand>,
-        command: impl Into<String>,
-        description: impl Into<String>,
-    ) {
-        let raw = command.into();
-        let command = raw
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if command.is_empty() || !command.starts_with('/') {
+    fn upsert_slash_command(commands: &mut Vec<SlashCommand>, command: SlashCommand) {
+        if command.command.trim().is_empty() || !command.command.starts_with('/') {
             return;
         }
-        if commands
-            .iter()
-            .any(|item| item.command.eq_ignore_ascii_case(&command))
+        if let Some(existing) = commands
+            .iter_mut()
+            .find(|item| item.command.eq_ignore_ascii_case(&command.command))
         {
+            if !command.description.trim().is_empty() {
+                existing.description = command.description;
+            }
+            if !command.usage.trim().is_empty() {
+                existing.usage = command.usage;
+            }
+            if command.strict_schema {
+                existing.dispatch = command.dispatch;
+                existing.args = command.args;
+                existing.strict_schema = true;
+            }
             return;
         }
-        let description = description.into().trim().to_string();
-        commands.push(SlashCommand {
-            command,
-            description,
-        });
+        commands.push(command);
     }
 
     fn default_slash_commands() -> Vec<SlashCommand> {
         let mut out: Vec<SlashCommand> = Vec::new();
         for spec in SLASH_COMMANDS {
-            Self::append_slash_command(&mut out, spec.command, spec.description);
+            Self::upsert_slash_command(&mut out, Self::slash_command_from_spec(spec));
         }
+        Self::upsert_slash_command(
+            &mut out,
+            SlashCommand {
+                command: "/repo".to_string(),
+                usage: "/repo add|list|use|ingest|remove ...".to_string(),
+                description: "Manage repo memory and active repo selection".to_string(),
+                dispatch: SlashDispatch::Bridge,
+                args: Vec::new(),
+                strict_schema: false,
+            },
+        );
+        Self::upsert_slash_command(
+            &mut out,
+            SlashCommand {
+                command: "/rag".to_string(),
+                usage: "/rag list [repo] | /rag search <query> [top_k] | /rag clear"
+                    .to_string(),
+                description: "Inspect the live RAG store and run direct RAG searches"
+                    .to_string(),
+                dispatch: SlashDispatch::Bridge,
+                args: Vec::new(),
+                strict_schema: false,
+            },
+        );
         out
     }
 
@@ -799,7 +1313,7 @@ impl App {
         let Some(items) = v.get("commands").and_then(|value| value.as_array()) else {
             return;
         };
-        let mut merged: Vec<SlashCommand> = Vec::new();
+        let mut merged = Self::default_slash_commands();
         for item in items {
             let command = item
                 .get("command")
@@ -816,7 +1330,17 @@ impl App {
                 .unwrap_or("")
                 .trim()
                 .to_string();
-            Self::append_slash_command(&mut merged, command, description);
+            Self::upsert_slash_command(
+                &mut merged,
+                SlashCommand {
+                    usage: command.clone(),
+                    command,
+                    description,
+                    dispatch: SlashDispatch::Bridge,
+                    args: Vec::new(),
+                    strict_schema: false,
+                },
+            );
         }
 
         if merged.is_empty() {
@@ -824,10 +1348,105 @@ impl App {
         }
 
         for spec in LOCAL_ONLY_SLASH_COMMANDS {
-            Self::append_slash_command(&mut merged, spec.command, spec.description);
+            Self::upsert_slash_command(&mut merged, Self::slash_command_from_spec(spec));
         }
         self.slash_commands = merged;
         self.normalize_slash_selection();
+    }
+
+    fn slash_usage_error(spec: &SlashCommand, reason: &str) -> String {
+        format!("{reason}\nUsage: {}", spec.usage)
+    }
+
+    pub fn parse_slash_command(&self, input: &str) -> Result<ParsedSlashCommand, String> {
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') {
+            return Err("Slash commands must start with '/'".to_string());
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let token = parts
+            .next()
+            .ok_or_else(|| "Slash command is empty".to_string())?
+            .to_lowercase();
+        let spec = self
+            .slash_commands
+            .iter()
+            .find(|item| item.command.eq_ignore_ascii_case(&token))
+            .ok_or_else(|| format!("Unknown slash command `{token}`. Use /help for the full list."))?;
+        let positionals = parts.map(|item| item.to_string()).collect::<Vec<_>>();
+        let mut named_args = Map::new();
+
+        if spec.strict_schema {
+            let mut index = 0usize;
+            for arg in &spec.args {
+                if arg.repeats {
+                    let remaining = positionals[index..]
+                        .iter()
+                        .map(|item| Value::String(item.clone()))
+                        .collect::<Vec<_>>();
+                    if arg.required && remaining.is_empty() {
+                        return Err(Self::slash_usage_error(
+                            spec,
+                            &format!("Missing required argument `{}`.", arg.name),
+                        ));
+                    }
+                    if !remaining.is_empty() {
+                        named_args.insert(arg.name.to_string(), Value::Array(remaining));
+                    }
+                    index = positionals.len();
+                    break;
+                }
+
+                let Some(value) = positionals.get(index) else {
+                    if arg.required {
+                        return Err(Self::slash_usage_error(
+                            spec,
+                            &format!("Missing required argument `{}`.", arg.name),
+                        ));
+                    }
+                    continue;
+                };
+
+                if !arg.choices.is_empty()
+                    && !arg
+                        .choices
+                        .iter()
+                        .any(|choice| choice.eq_ignore_ascii_case(value))
+                {
+                    return Err(Self::slash_usage_error(
+                        spec,
+                        &format!(
+                            "Invalid value `{value}` for `{}`. Expected one of: {}.",
+                            arg.name,
+                            arg.choices.join(", ")
+                        ),
+                    ));
+                }
+
+                named_args.insert(arg.name.to_string(), Value::String(value.clone()));
+                index += 1;
+            }
+
+            if index < positionals.len() {
+                return Err(Self::slash_usage_error(
+                    spec,
+                    "Too many arguments provided.",
+                ));
+            }
+        } else {
+            for (index, value) in positionals.iter().enumerate() {
+                named_args.insert(format!("arg{}", index + 1), Value::String(value.clone()));
+            }
+        }
+
+        Ok(ParsedSlashCommand {
+            command: spec.command.clone(),
+            usage: spec.usage.clone(),
+            dispatch: spec.dispatch,
+            positionals,
+            named_args,
+        })
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -853,7 +1472,7 @@ impl App {
 **MCPs**: {mcps}  \n\
 **Rapidfuzz**: {}  \n\
 **Tiktoken**: {}  \n\n\
-Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream · Ctrl+E context · Ctrl+C quit",
+Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream · Ctrl+E context · Ctrl+G RAG · Ctrl+C quit",
             if self.bridge_state.rapidfuzz {
                 "enabled"
             } else {
@@ -1088,6 +1707,26 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         out.join(", ")
     }
 
+    fn summarize_progress_args(args: &Value) -> Option<String> {
+        match args {
+            Value::Object(map) if !map.is_empty() => {
+                let mut parts = Vec::new();
+                for (key, value) in map.iter().take(2) {
+                    parts.push(format!(
+                        "{key}={}",
+                        Self::truncate_inline(&Self::summarize_json_value(value), 28)
+                    ));
+                }
+                if map.len() > 2 {
+                    parts.push(format!("+{} more", map.len() - 2));
+                }
+                Some(parts.join(" · "))
+            }
+            Value::Null => None,
+            other => Some(Self::truncate_inline(&Self::summarize_json_value(other), 48)),
+        }
+    }
+
     fn compact_inline_text(text: &str, max_chars: usize) -> String {
         let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
         Self::truncate_inline(&compact, max_chars)
@@ -1144,63 +1783,6 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         !trimmed.is_empty()
             && trimmed.contains("## System Prompt")
             && trimmed.contains("## Message Window")
-    }
-
-    fn format_tool_event_text(name: &str, args: &Value, sequence: usize) -> String {
-        let mut lines = vec![format!("call #{sequence} `{name}`")];
-
-        match args {
-            Value::Object(map) => {
-                lines.push(format!("arguments: {} key(s)", map.len()));
-                if map.is_empty() {
-                    lines.push("• none".to_string());
-                } else {
-                    for (key, value) in map.iter().take(4) {
-                        lines.push(format!("• {key} = {}", Self::summarize_json_value(value)));
-                    }
-                    if map.len() > 4 {
-                        lines.push(format!("• ... +{} more key(s)", map.len() - 4));
-                    }
-                }
-            }
-            _ => lines.push(format!("arguments: {}", Self::summarize_json_value(args))),
-        }
-
-        lines.join("\n")
-    }
-
-    fn format_tool_completion_text(
-        name: &str,
-        sequence: usize,
-        status: &str,
-        duration_ms: u64,
-        cache_hit: bool,
-        error: Option<&str>,
-        result_preview: Option<&str>,
-    ) -> String {
-        let normalized = status.trim().to_lowercase();
-        let label = if normalized == "ok" {
-            "completed"
-        } else {
-            "failed"
-        };
-        let mut lines = vec![format!(
-            "{label} #{sequence} `{name}` in {} ms{}",
-            duration_ms,
-            if cache_hit { " (cache hit)" } else { "" },
-        )];
-        if normalized == "ok" {
-            if let Some(summary) = Self::summarize_result_preview(result_preview, 120) {
-                lines.push(format!("result: {summary}"));
-            }
-        }
-        if let Some(err) = error {
-            let short = Self::truncate_inline(err.trim(), 220);
-            if !short.is_empty() {
-                lines.push(format!("error: {short}"));
-            }
-        }
-        lines.join("\n")
     }
 
     fn truncate_json_strings(value: &Value, max_chars: usize) -> Value {
@@ -1379,6 +1961,177 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.focused_panel = PanelFocus::ToolOutput;
     }
 
+    fn begin_tool_activity(&mut self, sequence: usize, name: &str, args: &Value) {
+        let summary = Self::summarize_progress_args(args);
+        self.current_turn_activity.push(ActivityEntry {
+            sequence,
+            name: name.to_string(),
+            summary,
+            detail: None,
+            status: ActivityState::Running,
+            duration_ms: None,
+            cache_hit: false,
+        });
+    }
+
+    fn complete_tool_activity(
+        &mut self,
+        sequence: usize,
+        name: &str,
+        status: &str,
+        duration_ms: u64,
+        cache_hit: bool,
+        error: Option<&str>,
+        result_preview: Option<&str>,
+        args: &Value,
+    ) {
+        let status_l = status.trim().to_lowercase();
+        let detail = if status_l == "error" || status_l == "failed" {
+            error
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| Self::truncate_inline(value, 120))
+        } else {
+            Self::summarize_result_preview(result_preview, 96)
+        };
+
+        if let Some(entry) = self
+            .current_turn_activity
+            .iter_mut()
+            .find(|entry| entry.sequence == sequence)
+        {
+            entry.status = if status_l == "error" || status_l == "failed" {
+                ActivityState::Error
+            } else {
+                ActivityState::Complete
+            };
+            entry.duration_ms = Some(duration_ms);
+            entry.cache_hit = cache_hit;
+            entry.detail = detail;
+            if entry.summary.is_none() {
+                entry.summary = Self::summarize_progress_args(args);
+            }
+            return;
+        }
+
+        self.current_turn_activity.push(ActivityEntry {
+            sequence,
+            name: name.to_string(),
+            summary: Self::summarize_progress_args(args),
+            detail,
+            status: if status_l == "error" || status_l == "failed" {
+                ActivityState::Error
+            } else {
+                ActivityState::Complete
+            },
+            duration_ms: Some(duration_ms),
+            cache_hit,
+        });
+    }
+
+    fn live_step_text_for_entry(entry: &ActivityEntry, max_chars: usize) -> String {
+        let mut parts = vec![format!("#{} {}", entry.sequence, entry.name)];
+
+        if let Some(detail) = entry.detail.as_deref().or(entry.summary.as_deref()) {
+            let trimmed = detail.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+
+        if entry.cache_hit {
+            parts.push("cached".to_string());
+        }
+
+        if let Some(duration_ms) = entry.duration_ms {
+            parts.push(format!("{}ms", duration_ms));
+        }
+
+        let joined = parts.join(" · ");
+        Self::truncate_inline(&joined, max_chars.max(16))
+    }
+
+    fn format_turn_receipt_text(
+        entries: &[ActivityEntry],
+        iterations: u64,
+        error_count: u64,
+    ) -> String {
+        if entries.is_empty() {
+            return "step receipt · no tool activity recorded".to_string();
+        }
+
+        let mut lines = Vec::new();
+        let step_count = entries.len();
+        let error_entries: Vec<&ActivityEntry> = entries
+            .iter()
+            .filter(|entry| matches!(entry.status, ActivityState::Error))
+            .collect();
+        let completed = step_count.saturating_sub(error_entries.len());
+
+        let mut summary = format!(
+            "step receipt · {} step{}",
+            step_count,
+            if step_count == 1 { "" } else { "s" }
+        );
+        if iterations > 1 {
+            summary.push_str(&format!(" · {} iterations", iterations));
+        }
+        if error_count > 0 {
+            summary.push_str(&format!(
+                " · {} error{}",
+                error_count,
+                if error_count == 1 { "" } else { "s" }
+            ));
+        } else {
+            summary.push_str(&format!(
+                " · {} complete",
+                completed
+            ));
+        }
+        lines.push(summary);
+
+        if let Some(first_error) = error_entries.first() {
+            lines.push(format!(
+                "error: {}",
+                Self::live_step_text_for_entry(first_error, 140)
+            ));
+        }
+
+        let success_entries: Vec<&ActivityEntry> = entries
+            .iter()
+            .filter(|entry| !matches!(entry.status, ActivityState::Error))
+            .collect();
+        if !success_entries.is_empty() {
+            let preview = success_entries
+                .iter()
+                .take(2)
+                .map(|entry| Self::live_step_text_for_entry(entry, 72))
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let remainder = success_entries.len().saturating_sub(2);
+            if remainder > 0 {
+                lines.push(format!("ok: {} · +{} more", preview, remainder));
+            } else {
+                lines.push(format!("ok: {}", preview));
+            }
+        }
+
+        // List all unique tool names used, in first-call order.
+        let mut seen: std::collections::HashSet<&str> = Default::default();
+        let mut unique_tools: Vec<&str> = Vec::new();
+        for entry in entries.iter() {
+            let name = entry.name.trim();
+            if !name.is_empty() && seen.insert(name) {
+                unique_tools.push(name);
+            }
+        }
+        if !unique_tools.is_empty() {
+            lines.push(format!("tools: {}", unique_tools.join(", ")));
+        }
+
+        lines.join("\n")
+    }
+
     fn extract_tool_names_from_chat_result(v: &Value) -> Vec<String> {
         let out: Vec<String> = v["tool_calls"]
             .as_array()
@@ -1464,6 +2217,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         } else {
             self.current_turn_tool_names.clone()
         };
+        self.last_turn_activity = self.current_turn_activity.clone();
         self.last_turn_tool_names = runtime_tools.clone();
         self.last_turn_iterations = v["iterations"].as_u64().unwrap_or(0);
         // Use reported tool_errors from Python; fall back to events tracked here
@@ -1474,31 +2228,15 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             .total_tool_errors
             .saturating_sub(self.current_turn_tool_errors)
             .saturating_add(reported_errors);
-        if !runtime_tools.is_empty()
-            && (runtime_tools.len() > 1 || self.last_turn_iterations > 1 || reported_errors > 0)
-        {
-            let mut uniq = Vec::<String>::new();
-            for name in &runtime_tools {
-                if !uniq.iter().any(|existing| existing == name) {
-                    uniq.push(name.clone());
-                }
-            }
-            let preview = Self::summarize_name_list(&uniq, 6);
-            let mut receipt = format!(
-                "Activity summary: {} tool{}",
-                runtime_tools.len(),
-                if runtime_tools.len() == 1 { "" } else { "s" }
+        if !self.last_turn_activity.is_empty() {
+            self.add_message(
+                Role::Tool,
+                Self::format_turn_receipt_text(
+                    &self.last_turn_activity,
+                    self.last_turn_iterations,
+                    reported_errors,
+                ),
             );
-            if self.last_turn_iterations > 1 {
-                receipt.push_str(&format!(" across {} iterations", self.last_turn_iterations));
-            }
-            if preview != "none" {
-                receipt.push_str(&format!(" · {preview}"));
-            }
-            if reported_errors > 0 {
-                receipt.push_str(&format!(" · errors={reported_errors}"));
-            }
-            self.add_system_message(receipt);
         }
 
         if observed_count > reported_count && (reported_count > 0 || observed_count > 0) {
@@ -1516,6 +2254,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
         self.current_turn_tool_names.clear();
         self.current_turn_tool_args.clear();
+        self.current_turn_activity.clear();
         self.current_turn_tool_errors = 0;
     }
 
@@ -1530,19 +2269,45 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
     }
 
     fn push_message(&mut self, message: Message) {
+        let message_idx = self.messages.len();
         self.cached_lines.extend(message.rendered.iter().cloned());
-        self.cached_lines_raw
-            .extend(message.rendered_for_raw_mode());
+        self.cached_meta
+            .extend(message.line_meta(message_idx, message.rendered.len()));
+        let raw_lines = message.rendered_for_raw_mode();
+        self.cached_meta_raw
+            .extend(message.line_meta(message_idx, raw_lines.len()));
+        self.cached_lines_raw.extend(raw_lines);
         self.messages.push(message);
+    }
+
+    fn rebuild_cached_transcript(&mut self) {
+        self.cached_lines.clear();
+        self.cached_lines_raw.clear();
+        self.cached_meta.clear();
+        self.cached_meta_raw.clear();
+
+        for (message_idx, message) in self.messages.iter().enumerate() {
+            self.cached_lines.extend(message.rendered.iter().cloned());
+            self.cached_meta
+                .extend(message.line_meta(message_idx, message.rendered.len()));
+            let raw_lines = message.rendered_for_raw_mode();
+            self.cached_meta_raw
+                .extend(message.line_meta(message_idx, raw_lines.len()));
+            self.cached_lines_raw.extend(raw_lines);
+        }
     }
 
     fn clear_transcript(&mut self) {
         self.messages.clear();
         self.cached_lines.clear();
         self.cached_lines_raw.clear();
+        self.cached_meta.clear();
+        self.cached_meta_raw.clear();
         self.live = None;
         self.raw_buf.clear();
         self.current_turn_tool_names.clear();
+        self.current_turn_activity.clear();
+        self.last_turn_activity.clear();
         self.last_turn_tool_names.clear();
         self.last_turn_iterations = 0;
         self.current_turn_tool_errors = 0;
@@ -1559,6 +2324,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.todo_scroll = 0;
         self.tool_output_scroll = 0;
         self.context_scroll = 0;
+        self.rag_on = false;
+        self.rag_scroll = 0;
         self.decision_mode.clear();
         self.decision_stage.clear();
         self.focused_panel = PanelFocus::Input;
@@ -1595,16 +2362,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.context_scroll
     }
 
-    pub fn has_change_records(&self) -> bool {
-        !self.changed_files.is_empty()
+    pub fn rag_scroll(&self) -> u16 {
+        self.rag_scroll
     }
 
-    pub fn has_context_records(&self) -> bool {
-        !self.bridge_state.active_repos.is_empty()
-            || !self.bridge_state.retrieval_insights.is_empty()
-            || !self.bridge_state.repo_library.is_empty()
-            || !self.bridge_state.mounted_paths.is_empty()
-            || !self.bridge_state.rag_docs.is_empty()
+    pub fn has_change_records(&self) -> bool {
+        !self.changed_files.is_empty()
     }
 
     pub fn context_token_estimate_total(&self) -> u64 {
@@ -1632,8 +2395,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.ui_hitboxes = UiHitboxes::default();
     }
 
-    pub fn register_messages_area(&mut self, area: Rect) {
+    pub fn register_messages_area(&mut self, area: Rect, thinking_headers: Vec<(usize, Rect)>) {
         self.ui_hitboxes.messages = Some(area);
+        self.ui_hitboxes.thinking_headers = thinking_headers;
     }
 
     pub fn register_input_area(&mut self, area: Rect) {
@@ -1672,6 +2436,13 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.clamp_aux_scroll();
     }
 
+    pub fn register_rag_area(&mut self, area: Rect, viewport_h: u16, content_h: u16) {
+        self.ui_hitboxes.rag = Some(area);
+        self.ui_hitboxes.rag_viewport_h = viewport_h;
+        self.ui_hitboxes.rag_content_h = content_h;
+        self.clamp_aux_scroll();
+    }
+
     pub fn register_slash_popup(&mut self, area: Rect, item_rects: Vec<Rect>) {
         self.ui_hitboxes.slash_popup = Some(area);
         self.ui_hitboxes.slash_popup_items = item_rects;
@@ -1682,6 +2453,14 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             self.cached_lines_raw.as_slice()
         } else {
             self.cached_lines.as_slice()
+        }
+    }
+
+    fn active_cached_meta(&self) -> &[CachedLineMeta] {
+        if self.raw_on {
+            self.cached_meta_raw.as_slice()
+        } else {
+            self.cached_meta.as_slice()
         }
     }
 
@@ -1710,6 +2489,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 .context_content_h
                 .saturating_sub(self.ui_hitboxes.context_viewport_h),
         );
+        self.rag_scroll = self.rag_scroll.min(
+            self.ui_hitboxes
+                .rag_content_h
+                .saturating_sub(self.ui_hitboxes.rag_viewport_h),
+        );
     }
 
     // ── Scroll helpers ────────────────────────────────────────────────────────
@@ -1724,12 +2508,13 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         message_lines.saturating_add(live_lines)
     }
 
-    pub fn visible_lines(&self, height: u16) -> Vec<Line<'static>> {
+    pub fn visible_transcript(&self, height: u16) -> (Vec<Line<'static>>, Vec<(usize, u16)>) {
         if height == 0 {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
 
         let cached = self.active_cached_lines();
+        let cached_meta = self.active_cached_meta();
         let cached_len = cached.len();
         let live_slice: &[Line<'static>] = self
             .live
@@ -1739,17 +2524,29 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         let live_len = live_slice.len();
         let total = cached_len.saturating_add(live_len);
         if total == 0 {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
 
         let max_start = total.saturating_sub(height as usize);
         let start = (self.scroll_top as usize).min(max_start);
         let end = start.saturating_add(height as usize).min(total);
         let mut out = Vec::with_capacity(end.saturating_sub(start));
+        let mut thinking_headers = Vec::new();
 
         if start < cached_len {
             let cached_end = end.min(cached_len);
-            out.extend(cached[start..cached_end].iter().cloned());
+            for idx in start..cached_end {
+                if cached_meta
+                    .get(idx)
+                    .is_some_and(|meta| meta.thinking_toggle)
+                {
+                    thinking_headers.push((
+                        cached_meta[idx].message_idx,
+                        out.len().min(u16::MAX as usize) as u16,
+                    ));
+                }
+                out.push(cached[idx].clone());
+            }
         }
         if end > cached_len {
             let live_start = start.saturating_sub(cached_len);
@@ -1757,7 +2554,63 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             out.extend(live_slice[live_start..live_end].iter().cloned());
         }
 
-        out
+        (out, thinking_headers)
+    }
+
+    pub fn activity_entries(&self) -> &[ActivityEntry] {
+        if self.busy && !self.current_turn_activity.is_empty() {
+            &self.current_turn_activity
+        } else {
+            &self.last_turn_activity
+        }
+    }
+
+    pub fn live_step_summary(&self, max_chars: usize) -> LiveStepSummary {
+        if let Some(entry) = self.activity_entries().last() {
+            return LiveStepSummary {
+                text: Self::live_step_text_for_entry(entry, max_chars),
+                state: entry.status.into(),
+            };
+        }
+
+        if self.busy {
+            let text = if !self.phase_note.trim().is_empty() {
+                Self::truncate_inline(&self.phase_note, max_chars.max(12))
+            } else {
+                self.phase.to_string()
+            };
+            return LiveStepSummary {
+                text,
+                state: match self.phase {
+                    Phase::Error => ProgressState::Error,
+                    _ => ProgressState::Active,
+                },
+            };
+        }
+
+        if !self.phase_note.trim().is_empty() && self.phase_note != "ready" {
+            return LiveStepSummary {
+                text: Self::truncate_inline(&self.phase_note, max_chars.max(12)),
+                state: if matches!(self.phase, Phase::Error) {
+                    ProgressState::Error
+                } else {
+                    ProgressState::Pending
+                },
+            };
+        }
+
+        LiveStepSummary {
+            text: if self.connected {
+                "waiting for input".to_string()
+            } else {
+                "offline".to_string()
+            },
+            state: if self.connected {
+                ProgressState::Pending
+            } else {
+                ProgressState::Error
+            },
+        }
     }
 
     pub fn scroll_to_bottom(&mut self) {
@@ -1848,6 +2701,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             Some(PanelFocus::Context)
         } else if self
             .ui_hitboxes
+            .rag
+            .is_some_and(|rect| Self::rect_contains(rect, column, row))
+        {
+            Some(PanelFocus::Rag)
+        } else if self
+            .ui_hitboxes
             .messages
             .is_some_and(|rect| Self::rect_contains(rect, column, row))
         {
@@ -1873,6 +2732,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             self.slash_selected = idx;
             let _ = self.apply_selected_slash_command();
             self.focused_panel = PanelFocus::Input;
+            return;
+        }
+
+        if let Some(message_idx) = self
+            .ui_hitboxes
+            .thinking_headers
+            .iter()
+            .find(|(_, rect)| Self::rect_contains(*rect, column, row))
+            .map(|(message_idx, _)| *message_idx)
+        {
+            self.focused_panel = PanelFocus::Messages;
+            self.toggle_thinking_message(message_idx);
             return;
         }
 
@@ -1905,6 +2776,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             PanelFocus::Context if self.ui_hitboxes.context_viewport_h > 0 => {
                 self.scroll_aux_panel(PanelFocus::Context, amount, up);
             }
+            PanelFocus::Rag if self.ui_hitboxes.rag_viewport_h > 0 => {
+                self.scroll_aux_panel(PanelFocus::Rag, amount, up);
+            }
             PanelFocus::SlashPopup if self.slash_popup_visible() => {
                 self.move_slash_selection(if up { -1 } else { 1 });
             }
@@ -1935,6 +2809,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 self.ui_hitboxes.context_content_h,
                 self.ui_hitboxes.context_viewport_h,
             ),
+            PanelFocus::Rag => (
+                &mut self.rag_scroll,
+                self.ui_hitboxes.rag_content_h,
+                self.ui_hitboxes.rag_viewport_h,
+            ),
             _ => return,
         };
 
@@ -1950,6 +2829,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         if let Some(item) = self.changed_files.get_mut(idx) {
             self.current_change_idx = idx;
             item.expanded = !item.expanded;
+        }
+    }
+
+    fn toggle_thinking_message(&mut self, message_idx: usize) {
+        if let Some(message) = self.messages.get_mut(message_idx) {
+            message.toggle_collapsed();
+            self.rebuild_cached_transcript();
+            if self.at_bottom {
+                self.scroll_to_bottom();
+            } else {
+                self.clamp_scroll();
+            }
         }
     }
 
@@ -1978,6 +2869,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         }
         if live.role == Role::Assistant {
             live.text = Self::sanitize_assistant_text(&live.text);
+        } else if live.role == Role::Thinking {
+            live.text = Self::sanitize_thinking_text(&live.text);
         }
         if live.text.is_empty() {
             return;
@@ -2005,7 +2898,13 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 self.phase = Phase::Streaming;
                 self.phase_note = "streaming".into();
                 match &mut self.live {
-                    Some(lm) => lm.append_stream_chunk(&tok),
+                    Some(lm) if lm.role == Role::Assistant => lm.append_stream_chunk(&tok),
+                    Some(_) => {
+                        self.stop_live_message();
+                        let mut lm = Message::new_streaming(Role::Assistant);
+                        lm.append_stream_chunk(&tok);
+                        self.live = Some(lm);
+                    }
                     None => {
                         let mut lm = Message::new_streaming(Role::Assistant);
                         lm.append_stream_chunk(&tok);
@@ -2064,12 +2963,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 };
                 self.trace(format!("tool#{call_number}={name}"));
                 self.current_turn_tool_names.push(name.clone());
-                self.current_turn_tool_args
-                    .push(args.clone().unwrap_or_default());
-                self.add_message(
-                    Role::Tool,
-                    Self::format_tool_event_text(&name, &args.unwrap_or_default(), call_number),
-                );
+                let activity_args = args.clone().unwrap_or_default();
+                self.current_turn_tool_args.push(activity_args.clone());
+                self.begin_tool_activity(call_number, &name, &activity_args);
                 self.phase = Phase::Jambering;
                 self.phase_note = format!("running {name}");
             }
@@ -2094,17 +2990,16 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 self.trace(format!(
                     "tool_end#{call_number}={name} status={status_l} duration_ms={duration_ms}"
                 ));
-                self.add_message(
-                    Role::Tool,
-                    Self::format_tool_completion_text(
-                        &name,
-                        call_number,
-                        &status,
-                        duration_ms,
-                        cache_hit,
-                        error.as_deref(),
-                        result_preview.as_deref(),
-                    ),
+                self.complete_tool_activity(
+                    call_number,
+                    &name,
+                    &status,
+                    duration_ms,
+                    cache_hit,
+                    error.as_deref(),
+                    result_preview.as_deref(),
+                    args.as_ref()
+                        .unwrap_or(&Value::Object(serde_json::Map::new())),
                 );
                 // Add expanded output to toggle panel - use args from event
                 let expanded = Self::format_tool_expanded_text(
@@ -2221,25 +3116,6 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 self.stop_live_message();
                 self.trace(format!("file_diff tool={tool} path={path}"));
                 self.remember_changed_file(tool.clone(), path.clone(), diff);
-                let mut lines = Vec::new();
-                lines.push(Line::from(vec![
-                    Span::styled("  ▸ ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        format!("changed via `{tool}`"),
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]));
-                lines.push(Line::raw(""));
-                lines.extend(render_diff(
-                    &path,
-                    &self
-                        .current_changed_file()
-                        .map(|item| item.diff.clone())
-                        .unwrap_or_default(),
-                ));
-                self.add_rendered_message(Role::Tool, format!("inline diff for {path}"), lines);
             }
             BridgeEvent::Exit(code) => {
                 self.phase = Phase::Error;
@@ -2351,9 +3227,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
     /// Returns true if command was handled locally, false if it should go to bridge.
     #[allow(dead_code)]
-    pub fn handle_local_slash(&mut self, cmd: &str) -> bool {
-        let lower = cmd.trim().to_lowercase();
-        let lower = lower.as_str();
+    pub fn handle_local_slash(&mut self, cmd: &ParsedSlashCommand) -> bool {
+        let lower = cmd.command();
 
         if lower == "/help" || lower == "/?" {
             self.add_system_message(self.help_text());
@@ -2367,15 +3242,31 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         }
 
         if lower == "/close" {
+            let target = cmd.arg("target").unwrap_or("all");
             let mut closed_any = false;
-            if self.has_image_preview() {
+            if matches!(target, "all" | "image") && self.has_image_preview() {
                 self.clear_image_preview();
                 self.add_system_message("Image side panel closed.");
                 closed_any = true;
             }
-            if self.todo_on {
+            if matches!(target, "all" | "todo" | "tasks") && self.todo_on {
                 self.todo_on = false;
                 self.add_system_message("Task side panel closed.");
+                closed_any = true;
+            }
+            if matches!(target, "all" | "context") && self.context_on {
+                self.context_on = false;
+                self.add_system_message("Context panel closed.");
+                closed_any = true;
+            }
+            if matches!(target, "all" | "rag") && self.rag_on {
+                self.rag_on = false;
+                self.add_system_message("RAG panel closed.");
+                closed_any = true;
+            }
+            if matches!(target, "all" | "inspector") && self.tool_output_on {
+                self.tool_output_on = false;
+                self.add_system_message("Inspector closed.");
                 closed_any = true;
             }
 
@@ -2385,8 +3276,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             return true;
         }
 
-        if lower == "/trace" || lower.starts_with("/trace ") {
-            let arg = lower.strip_prefix("/trace").unwrap_or("").trim();
+        if lower == "/trace" {
+            let arg = cmd.arg("mode").unwrap_or("");
             let next = match arg {
                 "on" | "1" | "true" | "yes" => true,
                 "off" | "0" | "false" | "no" => false,
@@ -2407,11 +3298,6 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 if next { " in Inspector" } else { "" }
             ));
             return true;
-        }
-
-        if lower == "/status" {
-            // Status will be handled in main loop (needs bridge call)
-            return false;
         }
 
         if lower == "/version" {
@@ -2438,7 +3324,25 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             } else {
                 item.description.as_str()
             };
-            lines.push(format!("- `{}`  {}", item.command, description));
+            lines.push(format!("- `{}`  {}", item.usage, description));
+            for arg in &item.args {
+                let choice_suffix = if arg.choices.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", arg.choices.join("|"))
+                };
+                let cardinality = if arg.repeats {
+                    "repeatable"
+                } else if arg.required {
+                    "required"
+                } else {
+                    "optional"
+                };
+                lines.push(format!(
+                    "  `{}`  {}{} · {}",
+                    arg.name, arg.help, choice_suffix, cardinality
+                ));
+            }
         }
         lines.push("".to_string());
         lines.push("## Keyboard Shortcuts".to_string());
@@ -2487,7 +3391,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             "off".to_string()
         };
         self.add_system_message(format!(
-            "active: {}\nsession: {}\nmessages: {}\nagents: {}\nmcp: {}\npipeline: {}\nrapidfuzz: {}\ntiktoken: {}\ntrace: {}\nactive_repos: {}\nretrievals: {}\nrepo_library: {}\nmounts: {}\nrag_docs: {}\nskills: {}\ncontext_tokens≈{}",
+            "active: {}\nsession: {}\nmessages: {}\nagents: {}\nmcp: {}\npipeline: {}\nrapidfuzz: {}\ntiktoken: {}\ntrace: {}\nactive_repos: {}\nretrievals: {}\nrepo_library: {}\nmounts: {}\nrag_docs: {}\nrag_chunks: {}\nrecent_rag_queries: {}\nskills: {}\ncontext_tokens≈{}",
             s.active, session, s.msg_count, agents, mcps, pipeline,
             if s.rapidfuzz { "enabled" } else { "disabled" },
             if s.tiktoken { "enabled" } else { "disabled" },
@@ -2497,6 +3401,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             s.repo_library.len(),
             s.mounted_paths.len(),
             s.rag_docs.len(),
+            s.rag_inventory.repo_chunks,
+            s.recent_rag_queries.len(),
             Self::summarize_name_list(&s.loaded_skills, 8),
             self.context_token_estimate_total(),
         ));
@@ -2504,17 +3410,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
     fn apply_bridge_state(&mut self, v: &Value) {
         let previous_todo_count = self.bridge_state.todo.len();
-        let previous_context_count = self.bridge_state.active_repos.len()
-            + self.bridge_state.retrieval_insights.len()
-            + self.bridge_state.repo_library.len()
-            + self.bridge_state.mounted_paths.len()
-            + self.bridge_state.rag_docs.len();
         self.bridge_state = BridgeState::from_value(v);
         if previous_todo_count == 0 && !self.bridge_state.todo.is_empty() {
             self.todo_on = true;
-        }
-        if previous_context_count == 0 && self.has_context_records() {
-            self.context_on = true;
         }
     }
 
@@ -2557,6 +3455,14 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             self.focused_panel = PanelFocus::Context;
         }
         self.trace(format!("context_panel={}", self.context_on));
+    }
+
+    pub fn toggle_rag_panel(&mut self) {
+        self.rag_on = !self.rag_on;
+        if self.rag_on {
+            self.focused_panel = PanelFocus::Rag;
+        }
+        self.trace(format!("rag_panel={}", self.rag_on));
     }
 
     pub fn toggle_tool_output(&mut self) {
@@ -2608,6 +3514,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                         order,
                         SlashPopupEntry {
                             command: spec.command.clone(),
+                            usage: spec.usage.clone(),
                             description: spec.description.clone(),
                         },
                     )
@@ -2789,6 +3696,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         } else {
             String::new()
         };
+        let live_step = self.live_step_summary(72);
         let tools_chip = if self.total_tool_errors > 0 {
             format!(
                 "{} ({}x err)",
@@ -2798,10 +3706,10 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             self.bridge_state.tool_count.to_string()
         };
         format!(
-            "{}{} · {} · agent:{} · msgs:{} · tools:{} · skills:{} · last_turn_tools:{} · route:{} · image:{} · trace:{} · raw:{} · Ctrl+O trace · Ctrl+P raw · Ctrl+T tasks · Ctrl+R inspector",
+            "{}{} · {} · agent:{} · msgs:{} · tools:{} · skills:{} · last_turn_tools:{} · route:{} · image:{} · trace:{} · raw:{} · rag:{} · Ctrl+O trace · Ctrl+P raw · Ctrl+T tasks · Ctrl+G rag · Ctrl+R inspector",
             spin,
             self.phase,
-            self.phase_note,
+            live_step.text,
             self.bridge_state.active,
             self.bridge_state.msg_count,
             tools_chip,
@@ -2811,11 +3719,102 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             if self.has_image_preview() { "on" } else { "off" },
             if self.trace_on { "on" } else { "off" },
             if self.raw_on { "on" } else { "off" },
+            if self.rag_on { "on" } else { "off" },
         )
     }
 
     pub fn last_turn_tool_count(&self) -> usize {
         self.last_turn_tool_names.len()
+    }
+
+    pub fn progress_entries(&self) -> Vec<ProgressEntry> {
+        let mut entries = Vec::new();
+
+        let live_step = self.live_step_summary(72);
+        entries.push(ProgressEntry {
+            label: "step".to_string(),
+            meta: Some(match live_step.state {
+                ProgressState::Active => "live".to_string(),
+                ProgressState::Complete => "done".to_string(),
+                ProgressState::Error => "error".to_string(),
+                ProgressState::Pending => {
+                    if self.connected {
+                        "idle".to_string()
+                    } else {
+                        "offline".to_string()
+                    }
+                }
+            }),
+            detail: Some(live_step.text),
+            state: live_step.state,
+            is_last: false,
+        });
+
+        if !self.active_skill_ids.is_empty() {
+            let detail = if self.active_selected_tools.is_empty() {
+                Some(Self::summarize_name_list(&self.active_skill_ids, 3))
+            } else {
+                Some(format!(
+                    "{} → {}",
+                    Self::summarize_name_list(&self.active_skill_ids, 2),
+                    Self::summarize_name_list(&self.active_selected_tools, 3)
+                ))
+            };
+            entries.push(ProgressEntry {
+                label: "route".to_string(),
+                meta: Some(format!("{} skill(s)", self.active_skill_ids.len())),
+                detail,
+                state: if self.busy {
+                    ProgressState::Active
+                } else {
+                    ProgressState::Complete
+                },
+                is_last: false,
+            });
+        }
+
+        let live_role = self.live.as_ref().map(|message| message.role);
+        if matches!(self.phase, Phase::Streaming) || matches!(live_role, Some(Role::Assistant)) {
+            entries.push(ProgressEntry {
+                label: "response".to_string(),
+                meta: Some("streaming".to_string()),
+                detail: Some(Self::truncate_inline(&self.phase_note, 56)),
+                state: ProgressState::Active,
+                is_last: false,
+            });
+        }
+
+        if let Some(error) = self.last_tool_error.as_deref() {
+            if self.busy || self.current_turn_tool_errors > 0 {
+                entries.push(ProgressEntry {
+                    label: "issue".to_string(),
+                    meta: Some("tool error".to_string()),
+                    detail: Some(Self::truncate_inline(error, 64)),
+                    state: ProgressState::Error,
+                    is_last: false,
+                });
+            }
+        }
+
+        if !self.busy && !self.last_turn_tool_names.is_empty() {
+            entries.push(ProgressEntry {
+                label: "last turn".to_string(),
+                meta: Some(format!("{} tool(s)", self.last_turn_tool_names.len())),
+                detail: Some(Self::summarize_name_list(&self.last_turn_tool_names, 4)),
+                state: if self.total_tool_errors > 0 {
+                    ProgressState::Error
+                } else {
+                    ProgressState::Complete
+                },
+                is_last: false,
+            });
+        }
+
+        if let Some(last) = entries.last_mut() {
+            last.is_last = true;
+        }
+
+        entries
     }
 
     // ── Interrupt / cancel ────────────────────────────────────────────────────
@@ -2939,6 +3938,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 KeyCode::Char('e') => {
                     return KeyAction::ToggleContextExplorer;
                 }
+                KeyCode::Char('g') => {
+                    return KeyAction::ToggleRagPanel;
+                }
                 KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return KeyAction::ToggleToolOutput;
                 }
@@ -3048,8 +4050,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 self.push_input_history(&submit_text);
                 self.reset_input();
                 self.last_tool_error = None;
-                if submit_text.starts_with('/') && self.handle_local_slash(&submit_text) {
-                    return KeyAction::None;
+                if submit_text.starts_with('/') {
+                    match self.parse_slash_command(&submit_text) {
+                        Ok(parsed) => {
+                            if self.handle_local_slash(&parsed) {
+                                return KeyAction::None;
+                            }
+                        }
+                        Err(message) => {
+                            self.add_system_message(message);
+                            return KeyAction::None;
+                        }
+                    }
                 }
                 self.current_turn_tool_names.clear();
                 self.current_turn_tool_errors = 0;
@@ -3145,6 +4157,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             }
             KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return KeyAction::ToggleContextExplorer;
+            }
+            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return KeyAction::ToggleRagPanel;
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.has_panel_content() {
@@ -3378,5 +4393,158 @@ mod tests {
             app.active_selected_tools(),
             &["read_file".to_string(), "rg_search".to_string()]
         );
+    }
+
+    #[test]
+    fn assistant_tokens_do_not_continue_thinking_message() {
+        let mut app = App::new();
+
+        app.handle_bridge_event(BridgeEvent::ThinkingToken(
+            "I should inspect the renderer first.".to_string(),
+        ));
+        app.handle_bridge_event(BridgeEvent::Token(
+            "Here is the actual answer.".to_string(),
+        ));
+
+        assert_eq!(app.messages.len(), 1);
+        assert_eq!(app.messages[0].role, Role::Thinking);
+        assert_eq!(app.messages[0].text, "I should inspect the renderer first.");
+
+        let live = app.live.as_ref().expect("assistant message should be live");
+        assert_eq!(live.role, Role::Assistant);
+        assert_eq!(live.text, "Here is the actual answer.");
+    }
+
+    #[test]
+    fn finalized_thinking_is_collapsed_and_toggleable() {
+        let mut app = App::new();
+
+        app.handle_bridge_event(BridgeEvent::ThinkingToken(
+            "First line of reasoning\nSecond line of reasoning".to_string(),
+        ));
+        app.stop_live_message();
+
+        assert_eq!(app.messages.len(), 1);
+        assert_eq!(app.messages[0].role, Role::Thinking);
+        assert!(app.messages[0].collapsed);
+
+        let (collapsed_lines, headers) = app.visible_transcript(8);
+        assert_eq!(headers.len(), 1);
+        assert!(collapsed_lines.iter().any(|line| line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("hidden line") || span.content.contains("hidden lines"))));
+
+        app.toggle_thinking_message(0);
+
+        assert!(!app.messages[0].collapsed);
+        let (expanded_lines, _) = app.visible_transcript(8);
+        assert!(expanded_lines.iter().any(|line| line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("Second line of reasoning"))));
+    }
+
+    #[test]
+    fn tool_events_are_grouped_into_single_transcript_summary() {
+        let mut app = App::new();
+
+        app.handle_bridge_event(BridgeEvent::ToolStart {
+            name: "read_file".to_string(),
+            args: Some(json!({"path": "src/main.rs"})),
+            sequence: 1,
+        });
+        app.handle_bridge_event(BridgeEvent::ToolEnd {
+            name: "read_file".to_string(),
+            sequence: 1,
+            status: "ok".to_string(),
+            duration_ms: 12,
+            cache_hit: false,
+            error: None,
+            result_preview: Some("path=src/main.rs · lines=120".to_string()),
+            args: Some(json!({"path": "src/main.rs"})),
+        });
+
+        assert!(app.messages.is_empty());
+
+        app.handle_chat_result(Ok(json!({
+            "final_response": "",
+            "tool_calls": [{"name": "read_file"}],
+            "iterations": 1,
+            "tool_errors": 0,
+        })));
+
+        assert_eq!(app.messages.len(), 1);
+        assert_eq!(app.messages[0].role, Role::Tool);
+        assert!(app.messages[0].text.contains("step receipt"));
+        assert!(app.messages[0].text.contains("ok: #1 read_file"));
+        assert_eq!(app.activity_entries().len(), 1);
+    }
+
+    #[test]
+    fn live_step_summary_matches_current_activity_wording() {
+        let mut app = App::new();
+
+        app.handle_bridge_event(BridgeEvent::ToolStart {
+            name: "read_file".to_string(),
+            args: Some(json!({"path": "src/main.rs"})),
+            sequence: 1,
+        });
+
+        let summary = app.live_step_summary(80);
+        assert_eq!(summary.state, ProgressState::Active);
+        assert!(summary.text.contains("#1 read_file"));
+        assert!(summary.text.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn transcript_receipt_is_error_first_and_compact() {
+        let mut app = App::new();
+
+        app.handle_bridge_event(BridgeEvent::ToolStart {
+            name: "read_file".to_string(),
+            args: Some(json!({"path": "src/main.rs"})),
+            sequence: 1,
+        });
+        app.handle_bridge_event(BridgeEvent::ToolEnd {
+            name: "read_file".to_string(),
+            sequence: 1,
+            status: "ok".to_string(),
+            duration_ms: 12,
+            cache_hit: false,
+            error: None,
+            result_preview: Some("path=src/main.rs · lines=120".to_string()),
+            args: Some(json!({"path": "src/main.rs"})),
+        });
+        app.handle_bridge_event(BridgeEvent::ToolStart {
+            name: "write_file".to_string(),
+            args: Some(json!({"path": "src/main.rs"})),
+            sequence: 2,
+        });
+        app.handle_bridge_event(BridgeEvent::ToolEnd {
+            name: "write_file".to_string(),
+            sequence: 2,
+            status: "error".to_string(),
+            duration_ms: 33,
+            cache_hit: false,
+            error: Some("permission denied".to_string()),
+            result_preview: None,
+            args: Some(json!({"path": "src/main.rs"})),
+        });
+
+        app.handle_chat_result(Ok(json!({
+            "final_response": "",
+            "tool_calls": [{"name": "read_file"}, {"name": "write_file"}],
+            "iterations": 1,
+            "tool_errors": 1,
+        })));
+
+        let receipt = &app.messages[0].text;
+        assert!(receipt.contains("step receipt · 2 steps · 1 error"));
+        let error_idx = receipt.find("error:").expect("receipt should include error line");
+        let ok_idx = receipt.find("ok:").expect("receipt should include ok line");
+        assert!(error_idx < ok_idx);
+        assert!(!receipt.contains("activity stack"));
+        assert!(!receipt.contains("├─"));
     }
 }

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import fnmatch
 import json
-import re
 import time
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Sequence
 
-from .types import ToolExecutionStats, _COMMON_PARAM_ALIASES
 from ..runtime import SkillCard, Tool, ToolParameter, _safe_json_fallback
+from .types import _COMMON_PARAM_ALIASES, ToolExecutionStats
 
 _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
     "discovery": {
@@ -75,6 +75,60 @@ _CODING_CAPABILITY_GROUPS: dict[str, dict[str, list[str]]] = {
     },
 }
 
+_DOCS_CONTEXT_CANONICAL_TOOL_NAMES = (
+    "fetch_url",
+    "web_search",
+    "pypi_info",
+    "github_read_file",
+)
+
+_SHELL_GIT_REVIEW_SPECS: dict[str, dict[str, Any]] = {
+    "shell": {
+        "skill_tools": ("run_shell",),
+        "core_aliases": {
+            "run_shell": ("bash",),
+        },
+        "promoted_to_core": (
+            "set_venv",
+            "set_working_directory",
+            "install_packages",
+            "show_coding_config",
+            "start_background_process",
+            "send_input_to_process",
+            "get_process_output",
+            "kill_process",
+            "list_processes",
+            "run_python",
+            "check_imports",
+            "list_installed_packages",
+        ),
+        "requires_shared_core_state": (),
+        "promotion_note": (
+            "Shell execution state now lives in a shared core runtime, so the environment/config/background-process helpers are always-on core tools. The coding shell skill is reduced to the higher-level run_shell workflow wrapper plus routing guidance."
+        ),
+    },
+    "git": {
+        "skill_tools": (
+            "git_status",
+            "git_diff",
+            "git_log",
+            "git_commit",
+            "git_checkpoint",
+            "git_restore_checkpoint",
+            "git_blame",
+        ),
+        "core_aliases": {
+            "git_status": ("get_git_status",),
+            "git_diff": ("get_git_diff",),
+        },
+        "core_candidates_now": (),
+        "requires_shared_core_state": (),
+        "promotion_note": (
+            "Keep git skill-owned for now: there are useful read-only overlaps with core, but the current git family is still mostly a higher-level workflow layer rather than a missing always-on primitive set."
+        ),
+    },
+}
+
 _CAPABILITY_TOOL_EQUIVALENTS: dict[str, tuple[str, ...]] = {
     "list_directory": ("list_dir",),
     "rg_search": ("grep_files",),
@@ -131,19 +185,19 @@ class RegistryIntrospectionMixin:
         if normalized == "write_file":
             return (
                 "write_file expects arguments like "
-                "{\"path\":\"/tmp/file.py\",\"content\":\"full file text here\"}. "
+                '{"path":"/tmp/file.py","content":"full file text here"}. '
                 "Pass all code in the single `content` field and do not add extra keys."
             )
         if normalized == "edit_file":
             return (
                 "edit_file expects arguments like "
-                "{\"path\":\"src/app.py\",\"old_string\":\"exact old text\",\"new_string\":\"replacement text\"}. "
+                '{"path":"src/app.py","old_string":"exact old text","new_string":"replacement text"}. '
                 "Put the full match in `old_string` and the full replacement in `new_string`."
             )
         if normalized == "run_python":
             return (
                 "run_python expects arguments like "
-                "{\"code\":\"print('hello')\\n\"}. "
+                '{"code":"print(\'hello\')\\n"}. '
                 "Pass Python source code in the single `code` field, using real newlines or escaped `\\n`."
             )
         return None
@@ -710,6 +764,135 @@ class RegistryIntrospectionMixin:
         )
         return json.dumps(payload, ensure_ascii=False)
 
+    def _tool_permissions_tool(
+        self,
+        command: str = "view",
+        pattern: str = "",
+        mode: str = "",
+        tool_name: str = "",
+    ) -> str:
+        ctx = self._execution_globals.get("ctx")
+        if ctx is None:
+            return self._tool_error_payload(
+                "tool_permissions",
+                "ctx is None (AppState not injected into ToolRegistry).",
+                error_type="missing_context",
+            )
+
+        cmd = str(command or "view").strip().lower() or "view"
+        if cmd not in {"view", "set", "remove", "clear"}:
+            return self._tool_error_payload(
+                "tool_permissions",
+                "Invalid command. Use one of: view, set, remove, clear.",
+                error_type="invalid_arguments",
+            )
+
+        current_rules = list(getattr(ctx, "permission_rules", []) or [])
+
+        def _dump_rules() -> list[dict[str, Any]]:
+            rows: list[dict[str, Any]] = []
+            for item in list(getattr(ctx, "permission_rules", []) or []):
+                if isinstance(item, dict):
+                    row = {
+                        "pattern": str(item.get("pattern") or "").strip(),
+                        "mode": str(item.get("mode") or "").strip().lower(),
+                    }
+                else:
+                    row = {
+                        "pattern": str(getattr(item, "pattern", "") or "").strip(),
+                        "mode": str(getattr(item, "mode", "") or "").strip().lower(),
+                    }
+                if row["pattern"] and row["mode"]:
+                    rows.append(row)
+            return rows
+
+        if cmd == "set":
+            rule_pattern = str(pattern or "").strip()
+            rule_mode = str(mode or "").strip().lower()
+            if not rule_pattern or rule_mode not in {"plan", "auto", "bypass"}:
+                return self._tool_error_payload(
+                    "tool_permissions",
+                    "`set` requires both `pattern` and `mode` (plan|auto|bypass).",
+                    error_type="invalid_arguments",
+                )
+            updated = []
+            replaced = False
+            for item in current_rules:
+                item_pattern = (
+                    str(item.get("pattern") or "").strip()
+                    if isinstance(item, dict)
+                    else str(getattr(item, "pattern", "") or "").strip()
+                )
+                if item_pattern == rule_pattern:
+                    updated.append({"pattern": rule_pattern, "mode": rule_mode})
+                    replaced = True
+                else:
+                    updated.append(item)
+            if not replaced:
+                updated.append({"pattern": rule_pattern, "mode": rule_mode})
+            ctx.permission_rules = updated
+
+        elif cmd == "remove":
+            rule_pattern = str(pattern or "").strip()
+            if not rule_pattern:
+                return self._tool_error_payload(
+                    "tool_permissions",
+                    "`remove` requires `pattern`.",
+                    error_type="invalid_arguments",
+                )
+            ctx.permission_rules = [
+                item
+                for item in current_rules
+                if (
+                    str(item.get("pattern") or "").strip()
+                    if isinstance(item, dict)
+                    else str(getattr(item, "pattern", "") or "").strip()
+                )
+                != rule_pattern
+            ]
+
+        elif cmd == "clear":
+            ctx.permission_rules = []
+
+        payload: dict[str, Any] = {
+            "status": "ok",
+            "command": cmd,
+            "default_mode": str(getattr(ctx, "permission_default_mode", "auto") or "auto"),
+            "rules": _dump_rules(),
+        }
+        preview_name = str(tool_name or "").strip()
+        if preview_name:
+            tool = self.get(preview_name)
+            if tool is None:
+                payload["tool_preview"] = {
+                    "name": preview_name,
+                    "status": "missing",
+                    "suggestions": self._suggest_tool_names(preview_name, max_items=5),
+                }
+            else:
+                runtime_mode = (
+                    str(getattr(tool.runtime, "permission_mode", "") or "").strip().lower()
+                )
+                effective_mode = (
+                    runtime_mode
+                    if runtime_mode in {"plan", "auto", "bypass"}
+                    else ("plan" if bool(getattr(tool.runtime, "writes_files", False)) else "auto")
+                )
+                matched_rule = None
+                for row in payload["rules"]:
+                    pattern_value = str(row.get("pattern") or "")
+                    if pattern_value and (
+                        fnmatch.fnmatchcase(preview_name, pattern_value)
+                        or fnmatch.fnmatch(preview_name.lower(), pattern_value.lower())
+                    ):
+                        matched_rule = row
+                payload["tool_preview"] = {
+                    "name": preview_name,
+                    "matched_rule": matched_rule,
+                    "effective_mode": matched_rule.get("mode") if matched_rule else effective_mode,
+                }
+        return json.dumps(payload, ensure_ascii=False)
+
     @staticmethod
     def _scan_readable_skill_sources(
         sources: Sequence[Path],
@@ -746,8 +929,7 @@ class RegistryIntrospectionMixin:
         return [
             str(src)
             for src in sources
-            if src.name.upper() == "SKILL.MD"
-            and "10_superpowers" in str(src).replace("\\", "/")
+            if src.name.upper() == "SKILL.MD" and "10_superpowers" in str(src).replace("\\", "/")
         ]
 
     @staticmethod
@@ -764,6 +946,73 @@ class RegistryIntrospectionMixin:
         except Exception:
             return False
         return "_CODING_BOOTSTRAP_ONLY = True" in text or "BOOTSTRAP_ONLY = True" in text
+
+    @staticmethod
+    def _is_metadata_only_module(module_path: Path) -> bool:
+        try:
+            text = module_path.read_text(encoding="utf-8")
+        except Exception:
+            return False
+        markers = (
+            "_CODING_METADATA_ONLY = True",
+            "_QOL_METADATA_ONLY = True",
+            "metadata-only",
+            "routing metadata",
+        )
+        return any(marker in text for marker in markers)
+
+    def _tool_provider_info(self, tool_name: str) -> dict[str, Any] | None:
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            return None
+        skill_id = str(tool.skill_id or "").strip().lower()
+        source_path = str(tool.source_path or "")
+        provider = "builtin" if source_path == "<builtin>" else skill_id or "unknown"
+        return {
+            "tool_name": tool.name,
+            "skill_id": skill_id or None,
+            "source_path": source_path or None,
+            "provider": provider,
+        }
+
+    def _shell_git_overlap_review(self) -> dict[str, Any]:
+        core_tool_names = {
+            tool.name
+            for tool in self._tools.values()
+            if str(tool.skill_id or "").strip().lower() == "core"
+        }
+        review: dict[str, Any] = {}
+        for family, spec in _SHELL_GIT_REVIEW_SPECS.items():
+            skill_tools = [name for name in spec.get("skill_tools", ()) if name in self._tools]
+            promoted_to_core = [
+                name
+                for name in spec.get("promoted_to_core", ())
+                if (self._tool_provider_info(name) or {}).get("skill_id") == "core"
+            ]
+            requires_shared_core_state = [
+                name for name in spec.get("requires_shared_core_state", ()) if name in self._tools
+            ]
+            exact_conflicts = sorted(set(skill_tools).intersection(core_tool_names))
+            semantic_alias_overlaps = {
+                name: [alias for alias in aliases if alias in core_tool_names]
+                for name, aliases in dict(spec.get("core_aliases", {}) or {}).items()
+                if any(alias in core_tool_names for alias in aliases)
+            }
+            distinct_skill_only_tools = sorted(
+                name
+                for name in skill_tools
+                if name not in semantic_alias_overlaps and name not in exact_conflicts
+            )
+            review[family] = {
+                "should_promote_to_core": False,
+                "promoted_to_core": promoted_to_core,
+                "requires_shared_core_state": requires_shared_core_state,
+                "exact_core_name_conflicts": exact_conflicts,
+                "semantic_alias_overlaps": semantic_alias_overlaps,
+                "distinct_skill_only_tools": distinct_skill_only_tools,
+                "promotion_note": str(spec.get("promotion_note") or "").strip(),
+            }
+        return review
 
     def _coding_capability_audit(self, cards: Sequence[SkillCard]) -> dict[str, Any]:
         tool_names = set(self._tools.keys())
@@ -806,6 +1055,24 @@ class RegistryIntrospectionMixin:
                 "optional_total": len(optional),
                 "optional_present": len(optional_present),
             }
+
+            if group_name == "docs_context":
+                provider_details = {
+                    name: self._tool_provider_info(name)
+                    for name in _DOCS_CONTEXT_CANONICAL_TOOL_NAMES
+                    if self._tool_provider_info(name) is not None
+                }
+                canonical_core = all(
+                    (provider_details.get(name) or {}).get("skill_id") == "core"
+                    for name in ("fetch_url", "web_search")
+                    if name in provider_details
+                )
+                groups[group_name].update(
+                    {
+                        "canonical_provider": "core" if canonical_core else "mixed",
+                        "provider_details": provider_details,
+                    }
+                )
 
         coding_tools = [
             tool
@@ -858,6 +1125,7 @@ class RegistryIntrospectionMixin:
             "coding_skill_ids": coding_skill_ids,
             "coding_cards_total": len(coding_cards),
             "groups": groups,
+            "overlap_review": self._shell_git_overlap_review(),
             "recommendations": recommendations,
         }
 
@@ -881,9 +1149,7 @@ class RegistryIntrospectionMixin:
             and not p.name.startswith("_")
             and "__pycache__" not in p.parts
         )
-        module_names = [
-            str(p.relative_to(coding_dir)).replace("\\", "/") for p in modules
-        ]
+        module_names = [str(p.relative_to(coding_dir)).replace("\\", "/") for p in modules]
 
         no_prefix: list[str] = []
         duplicate_prefixes: list[int] = []
@@ -902,6 +1168,7 @@ class RegistryIntrospectionMixin:
 
         modules_without_registered_tools: list[str] = []
         bootstrap_only_modules: list[str] = []
+        metadata_only_modules: list[str] = []
         for module in modules:
             raw = self._normalized_path_text(module)
             resolved = self._normalized_path_text(module.resolve())
@@ -909,6 +1176,9 @@ class RegistryIntrospectionMixin:
                 continue
             if self._is_bootstrap_only_module(module):
                 bootstrap_only_modules.append(module.name)
+                continue
+            if self._is_metadata_only_module(module):
+                metadata_only_modules.append(module.name)
                 continue
             modules_without_registered_tools.append(module.name)
 
@@ -927,6 +1197,7 @@ class RegistryIntrospectionMixin:
             "coding_modules_count": len(module_names),
             "coding_modules": module_names,
             "bootstrap_only_modules": bootstrap_only_modules,
+            "metadata_only_modules": metadata_only_modules,
             "modules_without_numeric_prefix": no_prefix,
             "duplicate_numeric_prefixes": duplicate_prefixes,
             "large_numeric_gaps": large_prefix_gaps,
@@ -970,24 +1241,14 @@ class RegistryIntrospectionMixin:
                 "tool_backed_skills": len(tool_backed_cards),
                 "superpowers_skills": len(superpower_cards),
                 "routing": {
-                    "min_score": float(
-                        getattr(self._catalog, "_routing_min_score", 0.0) or 0.0
-                    ),
-                    "recall_k": int(
-                        getattr(self._catalog, "_routing_recall_k", 0) or 0
-                    ),
-                    "dense_enabled": bool(
-                        getattr(self._catalog, "_dense_enabled", False)
-                    ),
-                    "dense_model": str(
-                        getattr(self._catalog, "_dense_model_name", "") or ""
-                    ),
+                    "min_score": float(getattr(self._catalog, "_routing_min_score", 0.0) or 0.0),
+                    "recall_k": int(getattr(self._catalog, "_routing_recall_k", 0) or 0),
+                    "dense_enabled": bool(getattr(self._catalog, "_dense_enabled", False)),
+                    "dense_model": str(getattr(self._catalog, "_dense_model_name", "") or ""),
                     "dense_available": bool(
                         getattr(self._catalog, "_dense_model", None) is not None
                     ),
-                    "weights": dict(
-                        getattr(self._catalog, "_routing_weights", {}) or {}
-                    ),
+                    "weights": dict(getattr(self._catalog, "_routing_weights", {}) or {}),
                 },
             },
             "coding": coding,
@@ -1010,23 +1271,15 @@ class RegistryIntrospectionMixin:
                 ),
             },
             "checks": {
-                "brainstorming_present": any(
-                    card.id == "sp__brainstorming" for card in cards
-                ),
+                "brainstorming_present": any(card.id == "sp__brainstorming" for card in cards),
                 "missing_tools_by_skill_count": len(missing_tools_by_skill),
                 "coding_required_coverage_pct": float(
                     coding.get("required_coverage_pct", 0.0) or 0.0
                 ),
-                "coding_missing_required_count": int(
-                    coding.get("missing_required_count", 0) or 0
-                ),
+                "coding_missing_required_count": int(coding.get("missing_required_count", 0) or 0),
                 "coding_maturity": str(coding.get("maturity", "unknown") or "unknown"),
-                "organization_issues_count": int(
-                    organization.get("issues_count", 0) or 0
-                ),
-                "organization_status": str(
-                    organization.get("status", "unknown") or "unknown"
-                ),
+                "organization_issues_count": int(organization.get("issues_count", 0) or 0),
+                "organization_status": str(organization.get("status", "unknown") or "unknown"),
             },
         }
 
@@ -1055,21 +1308,15 @@ class RegistryIntrospectionMixin:
                 group_payload["required_missing_tools"] = list(missing_tools)[:limit]
 
         organization = payload.get("organization", {}) or {}
-        modules_without_tools = (
-            organization.get("modules_without_registered_tools", []) or []
-        )
+        modules_without_tools = organization.get("modules_without_registered_tools", []) or []
         if modules_without_tools:
-            organization["modules_without_registered_tools"] = list(modules_without_tools)[
-                :limit
-            ]
+            organization["modules_without_registered_tools"] = list(modules_without_tools)[:limit]
         issues = organization.get("issues", []) or []
         if issues:
             organization["issues"] = list(issues)[:limit]
 
         if missing_tools_by_skill:
-            payload["checks"]["missing_tools_by_skill"] = list(missing_tools_by_skill)[
-                :limit
-            ]
+            payload["checks"]["missing_tools_by_skill"] = list(missing_tools_by_skill)[:limit]
         if unreadable:
             payload["discovery"]["unreadable"] = list(unreadable)[:limit]
         if not include_sources:
@@ -1077,6 +1324,4 @@ class RegistryIntrospectionMixin:
 
         payload["discovery"]["sources"] = [str(src) for src in list(sources)[:limit]]
         payload["discovery"]["readable_sources"] = list(readable)[:limit]
-        payload["discovery"]["superpowers_skill_md"] = list(discovered_superpowers)[
-            :limit
-        ]
+        payload["discovery"]["superpowers_skill_md"] = list(discovered_superpowers)[:limit]

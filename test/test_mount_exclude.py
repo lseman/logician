@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.tools.core.ProjectTool.tool import _PROJECT_MAP_CACHE, get_project_map
+
 
 class _StubDocDB:
     def __init__(self) -> None:
@@ -24,12 +26,7 @@ class _StubDocDB:
 class MountExcludeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.ingest_mod = importlib.import_module("skills.rag.scripts.ingest")
-        self.docling_mod = importlib.import_module(
-            "skills.qol.docling_context.docling_context"
-        )
-        self.explore_mod = importlib.import_module(
-            "skills.coding.explore.explore"
-        )
+        self.docling_mod = importlib.import_module("skills.qol.docling_context.docling_context")
         self.bridge_mod = importlib.import_module("logician_bridge")
 
         self.original_doc_db_from_agent = self.ingest_mod._doc_db_from_agent
@@ -38,7 +35,7 @@ class MountExcludeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.ingest_mod._doc_db_from_agent = self.original_doc_db_from_agent
         self.docling_mod.docling_add_file = self.original_docling_add_file
-        self.explore_mod._PROJECT_MAP_CACHE.clear()
+        _PROJECT_MAP_CACHE.clear()
 
     def test_mount_arg_parser_accepts_exclude_flag(self) -> None:
         parsed = self.bridge_mod._parse_mount_args(
@@ -123,16 +120,12 @@ class MountExcludeTests(unittest.TestCase):
             keep_dir.mkdir()
             skip_dir.mkdir()
             (keep_dir / "main.py").write_text("def keep():\n    return 1\n", encoding="utf-8")
-            (skip_dir / "vendored.py").write_text(
-                "def skip():\n    return 2\n", encoding="utf-8"
-            )
+            (skip_dir / "vendored.py").write_text("def skip():\n    return 2\n", encoding="utf-8")
 
-            payload = json.loads(
-                self.explore_mod.get_project_map(
-                    directory=str(root),
-                    max_depth=3,
-                    exclude="vendor",
-                )
+            payload = get_project_map(
+                directory=str(root),
+                max_depth=3,
+                exclude="vendor",
             )
 
         self.assertEqual(payload["status"], "ok")
@@ -157,11 +150,9 @@ class MountExcludeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            payload = json.loads(
-                self.explore_mod.get_project_map(
-                    directory=str(root),
-                    max_depth=3,
-                )
+            payload = get_project_map(
+                directory=str(root),
+                max_depth=3,
             )
 
         self.assertEqual(payload["status"], "ok")
@@ -190,11 +181,9 @@ class MountExcludeTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            payload = json.loads(
-                self.explore_mod.get_project_map(
-                    directory=str(root),
-                    max_depth=3,
-                )
+            payload = get_project_map(
+                directory=str(root),
+                max_depth=3,
             )
 
         self.assertEqual(payload["status"], "ok")

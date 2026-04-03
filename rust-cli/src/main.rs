@@ -15,6 +15,7 @@ use crossterm::{
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
+use tokio::process::Child;
 
 mod app;
 mod bridge;
@@ -22,7 +23,7 @@ mod image;
 mod markdown;
 mod ui;
 
-use app::{App, KeyAction};
+use app::{App, KeyAction, ParsedSlashCommand, SlashDispatch};
 use bridge::{BridgeEvent, PythonBridge};
 
 fn resolve_default_bridge_script() -> String {
@@ -74,6 +75,7 @@ struct Args {
 // ── Command results sent back to the main loop from spawned tasks ──────────────
 
 enum CmdResult {
+    Bootstrap(Result<(PythonBridge, Child), anyhow::Error>),
     Chat(Result<serde_json::Value, anyhow::Error>),
     Slash(Result<serde_json::Value, anyhow::Error>),
     State(Result<serde_json::Value, anyhow::Error>),
@@ -143,53 +145,32 @@ async fn run(
 ) -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<BridgeEvent>();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<CmdResult>();
-
-    // Attempt to spawn bridge
     let bridge_args_refs: Vec<&str> = bridge_args.iter().map(|s| s.as_str()).collect();
-    let (bridge, _child) = match PythonBridge::spawn(bridge_cmd, &bridge_args_refs, event_tx).await
-    {
-        Ok(pair) => pair,
-        Err(e) => {
-            // Non-fatal: run in disconnected mode
-            // Create a placeholder — we'll show an error on init
-            let mut app = App::new();
-            app.add_system_message(format!(
-                "⚠ Could not start bridge `{bridge_cmd}`: {e}\n\n\
-                 Running in **offline mode** — commands will error.\n\n\
-                 Set `LOGICIAN_BRIDGE_CMD` / `LOGICIAN_BRIDGE_SCRIPT` or pass `<cmd> [args]`."
-            ));
-            return run_loop(terminal, app, None, &mut event_rx, &mut cmd_rx, cmd_tx).await;
-        }
-    };
 
-    let app = App::new();
+    let mut app = App::new();
+    app.phase = app::Phase::Thinking;
+    app.phase_note = "starting bridge".into();
+    app.add_system_message(format!(
+        "Starting bridge `{bridge_cmd}` using {}",
+        bridge_args.join(" ")
+    ));
 
-    // Initialize bridge
     {
-        let b = bridge.clone();
         let tx = cmd_tx.clone();
+        let event_tx = event_tx.clone();
+        let bridge_cmd = bridge_cmd.to_string();
+        let bridge_args_owned = bridge_args_refs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         tokio::spawn(async move {
-            let result = b
-                .call(
-                    "init",
-                    serde_json::json!({"config_path": "agent_config.json"}),
-                )
-                .await;
-            match result {
-                Ok(v) => {
-                    let _ = tx.send(CmdResult::State(Ok(v)));
-                }
-                Err(e) => {
-                    let _ = tx.send(CmdResult::State(Err(e)));
-                }
-            }
+            let arg_refs = bridge_args_owned.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+            let result = PythonBridge::spawn(&bridge_cmd, &arg_refs, event_tx).await;
+            let _ = tx.send(CmdResult::Bootstrap(result));
         });
     }
 
     run_loop(
         terminal,
         app,
-        Some(bridge),
+        None,
         &mut event_rx,
         &mut cmd_rx,
         cmd_tx,
@@ -200,7 +181,7 @@ async fn run(
 async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     mut app: App,
-    bridge: Option<PythonBridge>,
+    mut bridge: Option<PythonBridge>,
     event_rx: &mut mpsc::UnboundedReceiver<BridgeEvent>,
     cmd_rx: &mut mpsc::UnboundedReceiver<CmdResult>,
     cmd_tx: mpsc::UnboundedSender<CmdResult>,
@@ -208,6 +189,7 @@ async fn run_loop(
     let mut crossterm_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     let mut active_task: Option<tokio::task::AbortHandle> = None;
+    let mut _bridge_child: Option<Child> = None;
 
     loop {
         // Draw
@@ -231,6 +213,35 @@ async fn run_loop(
                 // Task completed — clear the abort handle
                 active_task = None;
                 match cr {
+                    CmdResult::Bootstrap(r) => match r {
+                        Ok((spawned_bridge, child)) => {
+                            bridge = Some(spawned_bridge.clone());
+                            _bridge_child = Some(child);
+                            app.connected = true;
+                            app.phase = app::Phase::Thinking;
+                            app.phase_note = "initializing bridge".into();
+                            app.add_system_message("Bridge connected. Initializing session state...");
+
+                            let tx = cmd_tx.clone();
+                            tokio::spawn(async move {
+                                let result = spawned_bridge
+                                    .call(
+                                        "init",
+                                        serde_json::json!({"config_path": "agent_config.json"}),
+                                    )
+                                    .await;
+                                let _ = tx.send(CmdResult::State(result));
+                            });
+                        }
+                        Err(e) => {
+                            app.connected = false;
+                            app.phase = app::Phase::Error;
+                            app.phase_note = "bridge offline".into();
+                            app.add_system_message(format!(
+                                "Could not start bridge: {e}\n\nRunning in offline mode. Commands that require the bridge will fail."
+                            ));
+                        }
+                    },
                     CmdResult::Chat(r)  => app.handle_chat_result(r),
                     CmdResult::Slash(r) => app.handle_slash_result(r),
                     CmdResult::State(r) => {
@@ -261,6 +272,11 @@ async fn run_loop(
                                 app.handle_interrupt();
                             }
                             KeyAction::Submit(mut text) => {
+                                let mut parsed_slash = if text.starts_with('/') {
+                                    app.parse_slash_command(&text).ok()
+                                } else {
+                                    None
+                                };
                                 let trimmed = text.trim();
                                 if trimmed == "/mount" || trimmed == "/mount-code" {
                                     // 1. Suspend UI
@@ -300,6 +316,7 @@ async fn run_loop(
                                                 let dir = dir.trim();
                                                 if !dir.is_empty() {
                                                     text = format!("{} {} **/*.{{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}}", trimmed, dir);
+                                                    parsed_slash = app.parse_slash_command(&text).ok();
                                                 } else {
                                                     continue;
                                                 }
@@ -319,7 +336,12 @@ async fn run_loop(
                                 }
 
                                 if let Some(b) = &bridge {
-                                    active_task = dispatch_command(b.clone(), text, cmd_tx.clone());
+                                    active_task = dispatch_command(
+                                        b.clone(),
+                                        text,
+                                        parsed_slash,
+                                        cmd_tx.clone(),
+                                    );
                                 } else {
                                     app.add_system_message("No bridge connected.");
                                     app.handle_chat_result(Err(anyhow::anyhow!("no bridge")));
@@ -329,6 +351,7 @@ async fn run_loop(
                             KeyAction::ToggleRawStream => app.toggle_raw_stream(),
                             KeyAction::ToggleTasks => app.toggle_todo(),
                             KeyAction::ToggleContextExplorer => app.toggle_context_explorer(),
+                            KeyAction::ToggleRagPanel => app.toggle_rag_panel(),
                             KeyAction::ToggleToolOutput => app.toggle_tool_output(),
                             KeyAction::None => {}
                         }
@@ -371,32 +394,32 @@ async fn run_loop(
 fn dispatch_command(
     bridge: PythonBridge,
     text: String,
+    parsed_slash: Option<ParsedSlashCommand>,
     tx: mpsc::UnboundedSender<CmdResult>,
 ) -> Option<tokio::task::AbortHandle> {
-    if text.starts_with('/') {
-        let lower = text.to_lowercase();
-        let cmd = lower.trim();
-
-        if cmd == "/status" {
-            let handle = tokio::spawn(async move {
-                let result = bridge.call("state", serde_json::json!({})).await;
-                let _ = tx.send(CmdResult::Slash(result.map(|v| {
-                    serde_json::json!({
-                        "messages": [],
-                        "state": v,
-                    })
-                })));
-            });
-            return Some(handle.abort_handle());
-        }
-
-        if cmd == "/quit" || cmd == "/exit" {
-            let _ = tx.send(CmdResult::Slash(Ok(serde_json::json!({
-                "messages": ["Goodbye."],
-                "state": {},
-                "exit": true,
-            }))));
-            return None;
+    if let Some(parsed) = parsed_slash {
+        match parsed.dispatch() {
+            SlashDispatch::State => {
+                let handle = tokio::spawn(async move {
+                    let result = bridge.call("state", serde_json::json!({})).await;
+                    let _ = tx.send(CmdResult::Slash(result.map(|v| {
+                        serde_json::json!({
+                            "messages": [],
+                            "state": v,
+                        })
+                    })));
+                });
+                return Some(handle.abort_handle());
+            }
+            SlashDispatch::Quit => {
+                let _ = tx.send(CmdResult::Slash(Ok(serde_json::json!({
+                    "messages": ["Goodbye."],
+                    "state": {},
+                    "exit": true,
+                }))));
+                return None;
+            }
+            SlashDispatch::Bridge | SlashDispatch::Local => {}
         }
 
         let handle = tokio::spawn(async move {
@@ -405,6 +428,10 @@ fn dispatch_command(
                     "slash",
                     serde_json::json!({
                         "raw": text,
+                        "command": parsed.command(),
+                        "usage": parsed.usage(),
+                        "positionals": parsed.positionals,
+                        "named_args": parsed.named_args,
                         "config_path": "agent_config.json"
                     }),
                 )
@@ -412,7 +439,9 @@ fn dispatch_command(
             let _ = tx.send(CmdResult::Slash(result));
         });
         Some(handle.abort_handle())
-    } else {
+    }
+
+    else {
         let handle = tokio::spawn(async move {
             let result = bridge
                 .call("chat", serde_json::json!({"message": text}))

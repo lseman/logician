@@ -5,8 +5,8 @@ Unified tools package with skill-aware loading and prompt rendering.
 
 from __future__ import annotations
 
-import json
 import importlib
+import json
 import os
 import sys
 import time
@@ -32,14 +32,17 @@ from .registry import (
 )
 from .runtime import (
     HAS_TOON,
+    AppState,
     Context,
     SkillCard,
     SkillSelection,
     Tool,
     ToolCall,
     ToolParameter,
+    ToolPermissionRule,
     _safe_json_fallback,
     check_optional_deps,
+    materialize_tool,
 )
 
 
@@ -231,9 +234,7 @@ class ToolRegistry(
 
     def __str__(self) -> str:
         names = ", ".join(sorted(self._tools.keys()))
-        return (
-            f"ToolRegistry[{len(self._tools)}]: {names}" if names else "ToolRegistry[0]"
-        )
+        return f"ToolRegistry[{len(self._tools)}]: {names}" if names else "ToolRegistry[0]"
 
     @property
     def version(self) -> int:
@@ -243,9 +244,7 @@ class ToolRegistry(
     def registry(self) -> dict[str, Tool]:
         return self._tools
 
-    def install_context(
-        self, ctx: Context, extra_globals: ExecutionGlobals | None = None
-    ) -> None:
+    def install_context(self, ctx: Context, extra_globals: ExecutionGlobals | None = None) -> None:
         self._execution_globals["ctx"] = ctx
         if extra_globals:
             self._execution_globals.update(extra_globals)
@@ -256,9 +255,25 @@ class ToolRegistry(
         description: str,
         parameters: list[ToolParameter],
         function: Callable[..., Any],
+        *,
+        runtime: dict[str, Any] | None = None,
+        doc: str | None = None,
+        skill_id: str | None = None,
+        source_path: str | None = None,
+        skill_meta: dict[str, Any] | None = None,
     ) -> Self:
         self._log.info("Manually registering tool: %s", name)
-        self._tools[name] = Tool(name, description, parameters, function)
+        self._tools[name] = materialize_tool(
+            function,
+            name=name,
+            description=description,
+            parameters=parameters,
+            runtime=runtime,
+            doc=doc,
+            skill_id=skill_id,
+            source_path=source_path,
+            skill_meta=skill_meta,
+        )
         self._version += 1
         self._invalidate_skill_resolution_cache()
         return self
@@ -280,6 +295,7 @@ class ToolRegistry(
 __version__ = "4.0.0"
 __all__ = [
     "HAS_TOON",
+    "AppState",
     "Tool",
     "ToolCall",
     "ToolParameter",
@@ -289,5 +305,6 @@ __all__ = [
     "parse_tool_calls",
     "parse_tool_call_strict",
     "Context",
+    "ToolPermissionRule",
     "check_optional_deps",
 ]

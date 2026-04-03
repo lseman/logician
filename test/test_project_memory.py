@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import tempfile
 import unittest
-import importlib.util
 from pathlib import Path
 
 from src.project_memory import load_index, record_observation
@@ -42,9 +42,9 @@ class ProjectMemoryTests(unittest.TestCase):
     def test_record_observation_reuses_session_label_for_same_session_key(self) -> None:
         first = record_observation(
             obs_type="change",
-            title="files.py updated",
+            title="FileReadTool updated",
             content="Updated write behavior for Python files.",
-            files=["src/tools/core/files.py"],
+            files=["src/tools/core/FileReadTool/tool.py"],
             session_key="cli_abc123",
         )
         second = record_observation(

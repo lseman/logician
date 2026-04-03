@@ -234,6 +234,160 @@ pub fn strip_think_blocks(text: &str) -> String {
     out.trim().to_string()
 }
 
+fn is_tool_call_tag_line(line: &str) -> bool {
+    matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "<tool_call>" | "</tool_call>" | "<tool_call/>" | "<tool_call />"
+    )
+}
+
+fn strip_tool_call_tag_lines(text: &str) -> String {
+    text.lines()
+        .filter(|line| !is_tool_call_tag_line(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn assistant_paragraph_is_tool_call_artifact(paragraph: &str) -> bool {
+    let trimmed = paragraph.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if is_tool_call_tag_line(trimmed) || is_tool_call_payload_json(trimmed) {
+        return true;
+    }
+
+    let without_tags = strip_tool_call_tag_lines(trimmed);
+    let normalized = without_tags.trim();
+    if normalized.is_empty() {
+        return true;
+    }
+
+    if is_tool_call_payload_json(normalized) {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    lower.contains("<tool_call>") || lower.contains("</tool_call>")
+}
+
+pub fn sanitize_assistant_text(text: &str) -> String {
+    if text.trim().is_empty() {
+        return String::new();
+    }
+
+    let visible = strip_think_blocks(text);
+    if visible.trim().is_empty() {
+        return String::new();
+    }
+
+    let normalized = normalize_inline_tool_call_json(&visible);
+    let mut kept: Vec<String> = Vec::new();
+
+    for paragraph in normalized.split("\n\n") {
+        if assistant_paragraph_is_tool_call_artifact(paragraph) {
+            continue;
+        }
+        let cleaned = strip_tool_call_tag_lines(paragraph).trim().to_string();
+        if !cleaned.is_empty() {
+            kept.push(cleaned);
+        }
+    }
+
+    kept.join("\n\n")
+}
+
+fn is_tool_call_payload_json(text: &str) -> bool {
+    let trimmed = text.trim();
+    let Some(end) = tool_call_json_prefix_end(trimmed) else {
+        return false;
+    };
+    trimmed[end..].trim().is_empty()
+}
+
+fn thinking_paragraph_is_execution_chatter(paragraph: &str) -> bool {
+    let trimmed = paragraph.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    if is_tool_call_payload_json(trimmed) {
+        return true;
+    }
+
+    let lower = trimmed.to_lowercase();
+
+    let hard_markers = [
+        "\"tool_call\"",
+        "\"tool_calls\"",
+        "\"arguments\"",
+        "tool_call",
+        "tool_calls",
+        "arguments:",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "run_ruff",
+        "apply_patch",
+        "run_in_terminal",
+    ];
+    if hard_markers.iter().any(|marker| lower.contains(marker)) {
+        return true;
+    }
+
+    let meta_starts = [
+        "the user asked me",
+        "i should",
+        "i need to",
+        "now i need to",
+        "let me verify",
+        "the linter",
+        "the file",
+        "the write_file tool",
+        "the read_file tool",
+    ];
+    let bookkeeping_terms = [
+        " tool ",
+        "verify",
+        "linter",
+        "ruff",
+        "violations",
+        "reading it back",
+        "read it back",
+        "file was written",
+        "full content was written",
+        "worked successfully",
+        "successfully wrote",
+        "created with ",
+    ];
+    meta_starts.iter().any(|prefix| lower.starts_with(prefix))
+        && bookkeeping_terms
+            .iter()
+            .any(|term| lower.contains(term))
+}
+
+pub fn sanitize_thinking_text(text: &str) -> String {
+    if text.trim().is_empty() {
+        return String::new();
+    }
+
+    let normalized = normalize_inline_tool_call_json(text);
+    let mut kept: Vec<String> = Vec::new();
+
+    for paragraph in normalized.split("\n\n") {
+        if thinking_paragraph_is_execution_chatter(paragraph) {
+            continue;
+        }
+        let cleaned = paragraph.trim();
+        if !cleaned.is_empty() {
+            kept.push(cleaned.to_string());
+        }
+    }
+
+    kept.join("\n\n")
+}
+
 fn maybe_pretty_json_payload(text: &str) -> Option<String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -242,7 +396,7 @@ fn maybe_pretty_json_payload(text: &str) -> Option<String> {
     if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
         return None;
     }
-    let parsed: JsonValue = serde_json::from_str(trimmed).ok()?;
+    let parsed: JsonValue = serde_json::from_str(&normalize_jsonish_quotes(trimmed)).ok()?;
     serde_json::to_string_pretty(&parsed).ok()
 }
 
@@ -271,6 +425,115 @@ fn maybe_labeled_json_payload(line: &str) -> Option<(String, String)> {
     }
     let pretty = maybe_pretty_json_payload(payload)?;
     Some((format!("{label}:"), pretty))
+}
+
+fn normalize_jsonish_quotes(text: &str) -> String {
+    text.chars()
+        .map(|ch| match ch {
+            '“' | '”' => '"',
+            '‘' | '’' => '\'',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn is_json_string_quote(ch: char) -> bool {
+    matches!(ch, '"' | '“' | '”')
+}
+
+fn tool_call_json_prefix_end(text: &str) -> Option<usize> {
+    let first = text.chars().next()?;
+    let closer = match first {
+        '{' => '}',
+        '[' => ']',
+        _ => return None,
+    };
+
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for (idx, ch) in text.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match ch {
+                '\\' => escaped = true,
+                quote if is_json_string_quote(quote) => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            quote if is_json_string_quote(quote) => in_string = true,
+            '{' if first == '{' => depth += 1,
+            '[' if first == '[' => depth += 1,
+            ch if ch == closer => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = idx + ch.len_utf8();
+                    let prefix = normalize_jsonish_quotes(&text[..end]);
+                    let parsed: JsonValue = serde_json::from_str(&prefix).ok()?;
+                    let is_tool_call_payload = match parsed {
+                        JsonValue::Object(ref obj) => {
+                            obj.contains_key("tool_call") || obj.contains_key("tool_calls")
+                        }
+                        _ => false,
+                    };
+                    if is_tool_call_payload {
+                        return Some(end);
+                    }
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn normalize_inline_tool_call_json(text: &str) -> String {
+    if text.trim().is_empty() {
+        return text.to_string();
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut in_code_fence = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_fence = !in_code_fence;
+            out.push(line.to_string());
+            continue;
+        }
+
+        if !in_code_fence {
+            let indent_len = line.len().saturating_sub(trimmed.len());
+            let indent = &line[..indent_len];
+            if let Some(end) = tool_call_json_prefix_end(trimmed) {
+                let suffix = trimmed[end..].trim_start();
+                if !suffix.is_empty() {
+                    out.push(format!("{indent}{}", &trimmed[..end]));
+                    out.push(String::new());
+                    out.push(format!("{indent}{suffix}"));
+                    continue;
+                }
+            }
+        }
+
+        out.push(line.to_string());
+    }
+
+    let mut rendered = out.join("\n");
+    if text.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered
 }
 
 fn normalize_raw_json_blocks(text: &str) -> String {
@@ -378,7 +641,10 @@ pub fn render_streaming(text: &str) -> Vec<Line<'static>> {
     }
 
     let mut out: Vec<Line<'static>> = Vec::new();
-    let segs = split_think(text);
+    let normalized = normalize_broken_code_fences(&normalize_raw_json_blocks(
+        &normalize_inline_tool_call_json(text),
+    ));
+    let segs = split_think(&normalized);
 
     for seg in segs {
         let style = if seg.in_think {
@@ -1101,7 +1367,9 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     }
 
     let mut all: Vec<Line<'static>> = Vec::new();
-    let normalized = normalize_broken_code_fences(&normalize_raw_json_blocks(&visible_text));
+    let normalized = normalize_broken_code_fences(&normalize_raw_json_blocks(
+        &normalize_inline_tool_call_json(&visible_text),
+    ));
     let mut r = MdRenderer::new();
     r.process(&normalized);
     all.extend(r.out);
@@ -1111,7 +1379,10 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{code_fence_token, normalize_broken_code_fences, strip_think_blocks};
+    use super::{
+        code_fence_token, normalize_broken_code_fences, normalize_inline_tool_call_json,
+        sanitize_assistant_text, sanitize_thinking_text, strip_think_blocks,
+    };
 
     #[test]
     fn repairs_trailing_prose_after_closing_fence() {
@@ -1124,6 +1395,43 @@ mod tests {
     fn preserves_opening_fence_info_string() {
         let input = "```python\nprint('hi')\n```\n";
         assert_eq!(normalize_broken_code_fences(input), input);
+    }
+
+    #[test]
+    fn splits_inline_tool_call_json_from_following_prose() {
+        let input = "{\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}The linter ran clean.";
+        let expected = "{\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}\n\nThe linter ran clean.";
+        assert_eq!(normalize_inline_tool_call_json(input), expected);
+    }
+
+    #[test]
+    fn leaves_non_tool_call_json_inline_text_unchanged() {
+        let input = "{\"message\": \"hello\"}still inline";
+        assert_eq!(normalize_inline_tool_call_json(input), input);
+    }
+
+    #[test]
+    fn preserves_normal_planning_text_in_thinking() {
+        let input = "I am narrowing the issue to the streaming renderer and status composition.";
+        assert_eq!(sanitize_thinking_text(input), input);
+    }
+
+    #[test]
+    fn strips_wrapped_tool_call_block_from_assistant_text() {
+        let input = "Before\n\n<tool_call>\n{\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}\n</tool_call>\n\nAfter";
+        assert_eq!(sanitize_assistant_text(input), "Before\n\nAfter");
+    }
+
+    #[test]
+    fn strips_bare_tool_call_json_from_assistant_text() {
+        let input = "{\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}";
+        assert_eq!(sanitize_assistant_text(input), "");
+    }
+
+    #[test]
+    fn strips_smart_quoted_multiline_tool_call_json_from_assistant_text() {
+        let input = "{“tool_call”: {\n  “name”: “run_python”,\n  “arguments”: {“code”: “print(1)”}\n}}";
+        assert_eq!(sanitize_assistant_text(input), "");
     }
 
     #[test]

@@ -107,12 +107,14 @@ pub struct RepoRecord {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct RetrievalFileRecord {
     pub rel_path: String,
     pub score: u64,
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct RetrievalSymbolRecord {
     pub name: String,
     pub symbol_kind: String,
@@ -121,6 +123,7 @@ pub struct RetrievalSymbolRecord {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct RetrievalInsight {
     pub query: String,
     pub repo_id: String,
@@ -129,6 +132,47 @@ pub struct RetrievalInsight {
     pub retrieved_paths: Vec<String>,
     pub related_files: Vec<RetrievalFileRecord>,
     pub related_symbols: Vec<RetrievalSymbolRecord>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RagInventoryRepo {
+    pub repo_id: String,
+    pub repo_name: String,
+    pub chunks: u64,
+    pub files: u64,
+    pub last_ingested_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RagInventory {
+    pub vector_path: String,
+    pub vector_backend: String,
+    pub active_doc_count: u64,
+    pub active_doc_chunks: u64,
+    pub repo_count: u64,
+    pub active_repo_count: u64,
+    pub repo_chunks: u64,
+    pub retrieval_count: u64,
+    pub legacy_paths: Vec<String>,
+    pub top_repos: Vec<RagInventoryRepo>,
+}
+
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct RagQueryHit {
+    pub repo_name: String,
+    pub repo_id: String,
+    pub path: String,
+    pub distance: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RecentRagQuery {
+    pub query: String,
+    pub top_k: u64,
+    pub count: u64,
+    pub repo_filter: Vec<String>,
+    pub hits: Vec<RagQueryHit>,
 }
 
 // ── Bridge state returned by the Python process ───────────────────────────────
@@ -144,6 +188,7 @@ pub struct BridgeState {
     pub rapidfuzz: bool,
     pub tiktoken: bool,
     pub tool_count: u64,
+    #[allow(dead_code)]
     pub skill_count: u64,
     pub loaded_tools: Vec<String>,
     pub loaded_skills: Vec<String>,
@@ -153,6 +198,10 @@ pub struct BridgeState {
     pub repo_library: Vec<RepoRecord>,
     pub mounted_paths: Vec<ContextMount>,
     pub rag_docs: Vec<RagDoc>,
+    pub rag_inventory: RagInventory,
+    pub recent_rag_queries: Vec<RecentRagQuery>,
+    pub tool_call_count: u64,
+    pub plan_mode: bool,
 }
 
 impl BridgeState {
@@ -384,6 +433,119 @@ impl BridgeState {
                         .collect()
                 })
                 .unwrap_or_default(),
+            rag_inventory: RagInventory {
+                vector_path: v["rag_inventory"]["vector_path"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                vector_backend: v["rag_inventory"]["vector_backend"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                active_doc_count: v["rag_inventory"]["active_doc_count"]
+                    .as_u64()
+                    .unwrap_or(0),
+                active_doc_chunks: v["rag_inventory"]["active_doc_chunks"]
+                    .as_u64()
+                    .unwrap_or(0),
+                repo_count: v["rag_inventory"]["repo_count"].as_u64().unwrap_or(0),
+                active_repo_count: v["rag_inventory"]["active_repo_count"]
+                    .as_u64()
+                    .unwrap_or(0),
+                repo_chunks: v["rag_inventory"]["repo_chunks"].as_u64().unwrap_or(0),
+                retrieval_count: v["rag_inventory"]["retrieval_count"]
+                    .as_u64()
+                    .unwrap_or(0),
+                legacy_paths: v["rag_inventory"]["legacy_paths"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                top_repos: v["rag_inventory"]["top_repos"]
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .map(|item| RagInventoryRepo {
+                                repo_id: item["repo_id"].as_str().unwrap_or("").to_string(),
+                                repo_name: item["repo_name"].as_str().unwrap_or("").to_string(),
+                                chunks: item["chunks"].as_u64().unwrap_or(0),
+                                files: item["files"].as_u64().unwrap_or(0),
+                                last_ingested_at: item["last_ingested_at"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string(),
+                            })
+                            .filter(|item| {
+                                !item.repo_id.trim().is_empty()
+                                    || !item.repo_name.trim().is_empty()
+                                    || item.chunks > 0
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            },
+            recent_rag_queries: v["recent_rag_queries"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|item| RecentRagQuery {
+                            query: item["query"].as_str().unwrap_or("").to_string(),
+                            top_k: item["top_k"].as_u64().unwrap_or(0),
+                            count: item["count"].as_u64().unwrap_or(0),
+                            repo_filter: item["repo_filter"]
+                                .as_array()
+                                .map(|values| {
+                                    values
+                                        .iter()
+                                        .filter_map(|value| value.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                            hits: item["hits"]
+                                .as_array()
+                                .map(|values| {
+                                    values
+                                        .iter()
+                                        .map(|value| RagQueryHit {
+                                            repo_name: value["repo_name"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            repo_id: value["repo_id"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            path: value["path"]
+                                                .as_str()
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            distance: match value.get("distance") {
+                                                Some(Value::String(text)) => text.clone(),
+                                                Some(other) => other.to_string(),
+                                                None => String::new(),
+                                            },
+                                        })
+                                        .filter(|value| {
+                                            !value.path.trim().is_empty()
+                                                || !value.repo_name.trim().is_empty()
+                                                || !value.repo_id.trim().is_empty()
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                        .filter(|item| !item.query.trim().is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            tool_call_count: v["tool_call_count"].as_u64().unwrap_or(0),
+            plan_mode: v["plan_mode"].as_bool().unwrap_or(false),
         }
     }
 }

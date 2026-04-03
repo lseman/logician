@@ -6,10 +6,13 @@ robust for LLMs than unified diffs.
 
 from __future__ import annotations
 
+_CODING_METADATA_ONLY = True
+
+import json as _json_mod
 import re
 from pathlib import Path
 from typing import Any
-import json as _json_mod
+
 from skills.coding.bootstrap.runtime_access import tool
 
 __skill__ = {
@@ -61,26 +64,28 @@ __skill__ = {
 }
 
 if "_safe_json" not in globals():
+
     def _safe_json(obj: Any) -> str:
         try:
             return _json_mod.dumps(obj)
         except Exception as e:
             return _json_mod.dumps({"status": "error", "error": f"JSON encode error: {e}"})
 
+
 def _parse_blocks(text: str) -> list[tuple[str, str]]:
     """Parse multiple <<<< SEARCH ==== >>>> REPLACE blocks."""
     blocks = []
-    pattern = re.compile(
-        r"<{4,}\s*SEARCH\s*\n(.*?)\n?={4,}\s*\n(.*?)\n?>{4,}\s*REPLACE",
-        re.DOTALL
-    )
+    pattern = re.compile(r"<{4,}\s*SEARCH\s*\n(.*?)\n?={4,}\s*\n(.*?)\n?>{4,}\s*REPLACE", re.DOTALL)
     for match in pattern.finditer(text):
         search_text = match.group(1)
         replace_text = match.group(2)
         blocks.append((search_text, replace_text))
     return blocks
 
-def _fuzzy_find_and_replace(content: str, search_text: str, replace_text: str) -> tuple[bool, str, str]:
+
+def _fuzzy_find_and_replace(
+    content: str, search_text: str, replace_text: str
+) -> tuple[bool, str, str]:
     """Returns (Success, NewContent, ErrorMessage)."""
     # 1. Exact match
     if content.count(search_text) == 1:
@@ -138,7 +143,14 @@ def _fuzzy_find_and_replace(content: str, search_text: str, replace_text: str) -
         replace_lines = [(prefix + line if line.strip() else line) for line in replace_lines]
     elif indent_diff < 0:
         prefix_len = -indent_diff
-        replace_lines = [(line[prefix_len:] if len(line) - len(line.lstrip()) >= prefix_len else line.lstrip("\t ")) for line in replace_lines]
+        replace_lines = [
+            (
+                line[prefix_len:]
+                if len(line) - len(line.lstrip()) >= prefix_len
+                else line.lstrip("\t ")
+            )
+            for line in replace_lines
+        ]
 
     # Ensure the last line of replace_lines has a newline if it originally didn't, but the replaced block did
     if replace_lines and not replace_lines[-1].endswith("\n"):
@@ -147,7 +159,9 @@ def _fuzzy_find_and_replace(content: str, search_text: str, replace_text: str) -
             replace_lines[-1] = replace_lines[-1] + "\n"
 
     # Reconstruct content
-    new_content_lines = content_lines[:match_idx] + replace_lines + content_lines[match_idx + len(search_lines):]
+    new_content_lines = (
+        content_lines[:match_idx] + replace_lines + content_lines[match_idx + len(search_lines) :]
+    )
     return True, "".join(new_content_lines), ""
 
 
@@ -174,7 +188,12 @@ def apply_edit_block(path: str, blocks: str) -> str:
 
         parsed = _parse_blocks(blocks)
         if not parsed:
-            return _safe_json({"status": "error", "error": "No valid SEARCH/REPLACE blocks found in the input. Remember to use <<<< SEARCH, ====, and >>>> REPLACE lines."})
+            return _safe_json(
+                {
+                    "status": "error",
+                    "error": "No valid SEARCH/REPLACE blocks found in the input. Remember to use <<<< SEARCH, ====, and >>>> REPLACE lines.",
+                }
+            )
 
         content = p.read_text(encoding="utf-8", errors="replace")
 
@@ -185,12 +204,7 @@ def apply_edit_block(path: str, blocks: str) -> str:
 
             ok, content, err = _fuzzy_find_and_replace(content, search_text, replace_text)
             if not ok:
-                return _safe_json(
-                    {
-                        "status": "error",
-                        "error": f"Block {i+1} failed: {err}"
-                    }
-                )
+                return _safe_json({"status": "error", "error": f"Block {i + 1} failed: {err}"})
             applied += 1
 
         p.write_text(content, encoding="utf-8")

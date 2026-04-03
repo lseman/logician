@@ -79,8 +79,35 @@ def check_optional_deps() -> dict[str, bool]:
     return deps
 
 
+class ToolPermissionRule(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        str_strip_whitespace=True,
+    )
+
+    pattern: str
+    mode: str = "auto"
+
+    @field_validator("pattern")
+    @classmethod
+    def _validate_pattern(cls, value: str) -> str:
+        pattern = str(value or "").strip()
+        if not pattern:
+            raise ValueError("Permission rule pattern must be non-empty")
+        return pattern
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalize_mode(cls, value: Any) -> str:
+        mode = str(value or "auto").strip().lower()
+        if mode not in {"plan", "auto", "bypass"}:
+            raise ValueError("Permission rule mode must be one of: plan, auto, bypass")
+        return mode
+
+
 @dataclass
-class Context:
+class AppState:
     data: pd.DataFrame | None = None
     original_data: pd.DataFrame | None = None
     data_name: str = ""
@@ -89,10 +116,16 @@ class Context:
     anomaly_store: dict[str, list[int]] = field(default_factory=dict)
     anomaly_meta: dict[str, dict[str, Any]] = field(default_factory=dict)
     todo_items: list[dict[str, Any]] = field(default_factory=list)
+    file_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
     mounted_paths: list[dict[str, Any]] = field(default_factory=list)
     rag_docs: list[dict[str, Any]] = field(default_factory=list)
     active_repos: list[dict[str, Any]] = field(default_factory=list)
     retrieval_insights: list[dict[str, Any]] = field(default_factory=list)
+    permission_rules: list[ToolPermissionRule] = field(default_factory=list)
+    permission_default_mode: str = "auto"
+
+    plan_mode: bool = False
+    tool_call_count: int = 0
 
     nf_best_model: str | None = None
     nf_cv_full: pd.DataFrame | None = None
@@ -120,10 +153,15 @@ class Context:
         self.anomaly_store.clear()
         self.anomaly_meta.clear()
         self.todo_items.clear()
+        self.file_snapshots.clear()
         self.mounted_paths.clear()
         self.rag_docs.clear()
         self.active_repos.clear()
         self.retrieval_insights.clear()
+        self.permission_rules.clear()
+        self.permission_default_mode = "auto"
+        self.plan_mode = False
+        self.tool_call_count = 0
         self.nf_best_model = None
         self.nf_cv_full = None
         self.nf_pred_col = None
@@ -132,13 +170,12 @@ class Context:
     def _normalize_json_value(value: Any) -> Any:
         np = _numpy()
         pd = _pandas()
+        if isinstance(value, BaseModel):
+            return value.model_dump(exclude_none=True)
         if isinstance(value, dict):
-            return {
-                str(key): Context._normalize_json_value(item)
-                for key, item in value.items()
-            }
+            return {str(key): AppState._normalize_json_value(item) for key, item in value.items()}
         if isinstance(value, (list, tuple)):
-            return [Context._normalize_json_value(item) for item in value]
+            return [AppState._normalize_json_value(item) for item in value]
         if isinstance(value, np.generic):
             return value.item()
         if isinstance(value, np.ndarray):
@@ -177,10 +214,15 @@ class Context:
             "anomaly_store": self._normalize_json_value(self.anomaly_store),
             "anomaly_meta": self._normalize_json_value(self.anomaly_meta),
             "todo_items": self._normalize_json_value(self.todo_items),
+            "file_snapshots": self._normalize_json_value(self.file_snapshots),
             "mounted_paths": self._normalize_json_value(self.mounted_paths),
             "rag_docs": self._normalize_json_value(self.rag_docs),
             "active_repos": self._normalize_json_value(self.active_repos),
             "retrieval_insights": self._normalize_json_value(self.retrieval_insights),
+            "permission_rules": self._normalize_json_value(self.permission_rules),
+            "permission_default_mode": self.permission_default_mode,
+            "plan_mode": self.plan_mode,
+            "tool_call_count": self.tool_call_count,
             "nf_best_model": self.nf_best_model,
             "nf_cv_full": self._serialize_frame(self.nf_cv_full),
             "nf_pred_col": self.nf_pred_col,
@@ -194,43 +236,51 @@ class Context:
         self.data = self._deserialize_frame(state.get("data"))
         self.original_data = self._deserialize_frame(state.get("original_data"))
         self.data_name = str(state.get("data_name") or "")
-        self.freq_cache = (
-            str(state["freq_cache"]) if state.get("freq_cache") is not None else None
-        )
+        self.freq_cache = str(state["freq_cache"]) if state.get("freq_cache") is not None else None
         self.anomaly_store = {
             str(key): [int(v) for v in (values or [])]
             for key, values in dict(state.get("anomaly_store") or {}).items()
         }
         self.anomaly_meta = dict(state.get("anomaly_meta") or {})
         self.todo_items = [
-            dict(item)
-            for item in list(state.get("todo_items") or [])
-            if isinstance(item, dict)
+            dict(item) for item in list(state.get("todo_items") or []) if isinstance(item, dict)
         ]
+        self.file_snapshots = {
+            str(path): dict(snapshot)
+            for path, snapshot in dict(state.get("file_snapshots") or {}).items()
+            if isinstance(snapshot, dict)
+        }
         self.mounted_paths = [
-            dict(item)
-            for item in list(state.get("mounted_paths") or [])
-            if isinstance(item, dict)
+            dict(item) for item in list(state.get("mounted_paths") or []) if isinstance(item, dict)
         ]
         self.rag_docs = [
-            dict(item)
-            for item in list(state.get("rag_docs") or [])
-            if isinstance(item, dict)
+            dict(item) for item in list(state.get("rag_docs") or []) if isinstance(item, dict)
         ]
         self.active_repos = [
-            dict(item)
-            for item in list(state.get("active_repos") or [])
-            if isinstance(item, dict)
+            dict(item) for item in list(state.get("active_repos") or []) if isinstance(item, dict)
         ]
         self.retrieval_insights = [
             dict(item)
             for item in list(state.get("retrieval_insights") or [])
             if isinstance(item, dict)
         ]
+        self.permission_rules = []
+        for item in list(state.get("permission_rules") or []):
+            if isinstance(item, ToolPermissionRule):
+                self.permission_rules.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            try:
+                self.permission_rules.append(ToolPermissionRule(**item))
+            except Exception:
+                continue
+        mode = str(state.get("permission_default_mode") or "auto").strip().lower()
+        self.permission_default_mode = mode if mode in {"plan", "auto", "bypass"} else "auto"
+        self.plan_mode = bool(state.get("plan_mode", False))
+        self.tool_call_count = int(state.get("tool_call_count", 0))
         self.nf_best_model = (
-            str(state["nf_best_model"])
-            if state.get("nf_best_model") is not None
-            else None
+            str(state["nf_best_model"]) if state.get("nf_best_model") is not None else None
         )
         self.nf_cv_full = self._deserialize_frame(state.get("nf_cv_full"))
         self.nf_pred_col = (
@@ -238,13 +288,14 @@ class Context:
         )
 
 
+Context = AppState
+
+
 def _safe_json_fallback(obj: Any) -> str:
     try:
         return json.dumps(obj, indent=2, ensure_ascii=False, default=str)
     except Exception as e:
-        return json.dumps(
-            {"status": "error", "error": f"json failed: {e}"}, ensure_ascii=False
-        )
+        return json.dumps({"status": "error", "error": f"json failed: {e}"}, ensure_ascii=False)
 
 
 class ToolParameter(BaseModel):
@@ -268,9 +319,7 @@ class ToolParameter(BaseModel):
             for idx, value in enumerate(args):
                 key = fields[idx]
                 if key in data:
-                    raise TypeError(
-                        f"ToolParameter() got multiple values for argument '{key}'"
-                    )
+                    raise TypeError(f"ToolParameter() got multiple values for argument '{key}'")
                 data[key] = value
         super().__init__(**data)
 
@@ -340,16 +389,104 @@ class ToolRuntimeMetadata(BaseModel):
     writes_files: bool | None = None
     verifier: bool | None = None
     cacheable: bool | None = None
+    content_reader: bool | None = None
+    concurrency_safe: bool | None = None
+    permission_mode: str | None = None
 
     @classmethod
     def from_tool_meta(cls, meta: dict[str, Any] | None) -> ToolRuntimeMetadata:
         payload = dict(meta or {})
         runtime_raw = payload.get("runtime")
         runtime = dict(runtime_raw) if isinstance(runtime_raw, dict) else {}
-        for key in ("read_only", "writes_files", "verifier", "cacheable"):
+        for key in (
+            "read_only",
+            "writes_files",
+            "verifier",
+            "cacheable",
+            "content_reader",
+            "concurrency_safe",
+            "permission_mode",
+        ):
             if key in payload and key not in runtime:
                 runtime[key] = payload[key]
         return cls(**runtime)
+
+
+def build_tool(
+    function: Any,
+    *,
+    description: str | None = None,
+    parameters: Any | None = None,
+    doc: str | None = None,
+    runtime: dict[str, Any] | ToolRuntimeMetadata | None = None,
+    **extra_meta: Any,
+) -> Any:
+    """Attach normalized tool metadata to a callable.
+
+    This is a lightweight builder for the current registry model. It does not
+    wrap execution; it only centralizes metadata authoring so dispatcher and
+    registration can consume one consistent source of truth.
+    """
+    target = getattr(function, "__func__", function)
+    meta = dict(getattr(target, "__llm_tool_meta__", {}) or {})
+
+    if description is not None:
+        meta["description"] = description
+    if parameters is not None:
+        meta["parameters"] = parameters
+    if doc is not None:
+        meta["doc"] = doc
+
+    if runtime is not None:
+        runtime_payload = (
+            runtime.model_dump(exclude_none=True)
+            if isinstance(runtime, ToolRuntimeMetadata)
+            else dict(runtime)
+        )
+        merged_runtime = dict(meta.get("runtime") or {})
+        merged_runtime.update(runtime_payload)
+        meta["runtime"] = merged_runtime
+
+    for key, value in extra_meta.items():
+        meta[key] = value
+
+    setattr(target, "__llm_tool_meta__", meta)
+    return function
+
+
+def materialize_tool(
+    function: Any,
+    *,
+    name: str,
+    description: str,
+    parameters: list["ToolParameter"] | None = None,
+    runtime: dict[str, Any] | ToolRuntimeMetadata | None = None,
+    doc: str | None = None,
+    skill_id: str | None = None,
+    source_path: str | None = None,
+    skill_meta: dict[str, Any] | None = None,
+    **extra_meta: Any,
+) -> "Tool":
+    """Build normalized callable metadata and return a Tool model instance."""
+    target = getattr(function, "__func__", function)
+    build_tool(
+        function,
+        description=description,
+        doc=doc,
+        runtime=runtime,
+        **extra_meta,
+    )
+    meta = dict(getattr(target, "__llm_tool_meta__", {}) or {})
+    return Tool(
+        name=name,
+        description=str(meta.get("description") or description or "").strip(),
+        parameters=list(parameters or []),
+        function=function,
+        skill_id=skill_id,
+        source_path=source_path,
+        skill_meta=dict(skill_meta) if isinstance(skill_meta, dict) else skill_meta,
+        runtime=ToolRuntimeMetadata.from_tool_meta(meta),
+    )
 
 
 class Tool(BaseModel):
@@ -453,6 +590,7 @@ class SkillCard:
     example_queries: list[str] = field(default_factory=list)
     when_not_to_use: list[str] = field(default_factory=list)
     next_skills: list[str] = field(default_factory=list)
+    paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -465,13 +603,17 @@ class SkillSelection:
 
 __all__ = [
     "HAS_TOON",
+    "AppState",
     "Context",
     "SkillCard",
     "SkillSelection",
     "Tool",
     "ToolCall",
+    "ToolPermissionRule",
     "ToolRuntimeMetadata",
     "ToolParameter",
+    "build_tool",
+    "materialize_tool",
     "_safe_json_fallback",
     "check_optional_deps",
     "decode",

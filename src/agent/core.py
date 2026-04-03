@@ -23,19 +23,17 @@ from ..tools import (
     ToolParameter,
     ToolRegistry,
 )
+from .classify import classify_turn
+from .dispatcher import ToolDispatcher
+from .guardrails import GuardrailEngine, default_guards
+from .loop import AgentLoop
+from .prompt import default_prompt_builder
+from .state import TurnState
 from .trace import (
     AgentResponse,
     _truncate_text,
 )
-
-from .loop import AgentLoop
-from .classify import classify_turn
-from .guardrails import GuardrailEngine, default_guards
-from .prompt import default_prompt_builder
-from .dispatcher import ToolDispatcher
-from .state import TurnState
 from .types import TurnResult
-
 
 _OPEN_THINK_TAGS = ("<thinking>", "<think>")
 _CLOSE_THINK_TAGS = ("</thinking>", "</think>")
@@ -108,7 +106,7 @@ class _ThinkingStreamRouter:
                 self._think_parts.append(self._buffer[:pos])
                 self._emit_thinking("".join(self._think_parts))
                 self._think_parts.clear()
-                self._buffer = self._buffer[pos + len(tag):]
+                self._buffer = self._buffer[pos + len(tag) :]
                 self._in_think = False
                 continue
 
@@ -125,7 +123,7 @@ class _ThinkingStreamRouter:
 
             pos, tag = match
             self._emit_visible(self._buffer[:pos])
-            self._buffer = self._buffer[pos + len(tag):]
+            self._buffer = self._buffer[pos + len(tag) :]
             self._in_think = True
 
     def flush(self) -> None:
@@ -169,18 +167,14 @@ class Agent:
         )
 
         if self.config.use_toon_for_tools and not HAS_TOON:
-            self._log.warning(
-                "TOON enabled but toon_format not installed. Falling back to JSON."
-            )
+            self._log.warning("TOON enabled but toon_format not installed. Falling back to JSON.")
             self.config.use_toon_for_tools = False
 
         if self.config.backend == "vllm":
             from ..backends import VLLMClient
 
             if not self.config.vllm_model:
-                raise ValueError(
-                    "Config.vllm_model must be set when backend == 'vllm'."
-                )
+                raise ValueError("Config.vllm_model must be set when backend == 'vllm'.")
             self.llm = VLLMClient(
                 model=self.config.vllm_model,
                 chat_template=self.config.chat_template,
@@ -212,10 +206,10 @@ class Agent:
         from ..tools import core as _core_tools
 
         _core_entries = [
-            (fn, getattr(fn, "__llm_tool_meta__", {}))
-            for fn in _core_tools.CORE_TOOL_FUNCTIONS
+            (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
         ]
         from pathlib import Path as _Path
+
         _core_src = _Path(__file__).resolve().parent.parent / "tools" / "core"
         self.tools._register_collected_python_tools(
             tool_entries=_core_entries,
@@ -279,9 +273,7 @@ class Agent:
                 self._mcp_clients.append(client)
                 self._log.info("MCP '%s' connected — %d tool(s) registered", name, n)
             except Exception as exc:
-                self._log.warning(
-                    "MCP '%s' failed to initialise: %s — skipping", name, exc
-                )
+                self._log.warning("MCP '%s' failed to initialise: %s — skipping", name, exc)
 
     def _ensure_mcp_servers_loaded(self) -> None:
         if self._mcp_loaded:
@@ -337,9 +329,7 @@ class Agent:
             self.memory.save_runtime_state(sid, self.ctx.to_state())
             self._loaded_runtime_session_id = sid
         except Exception:
-            self._log.exception(
-                "Failed to persist runtime state for session=%s", sid[:8]
-            )
+            self._log.exception("Failed to persist runtime state for session=%s", sid[:8])
 
     def _load_runtime_state(self, session_id: str | None) -> None:
         sid = session_id
@@ -363,9 +353,7 @@ class Agent:
         try:
             self.memory.clear_runtime_state(sid)
         except Exception:
-            self._log.exception(
-                "Failed to clear persisted runtime state for session=%s", sid[:8]
-            )
+            self._log.exception("Failed to clear persisted runtime state for session=%s", sid[:8])
 
     def _activate_session_runtime(
         self,
@@ -417,9 +405,7 @@ class Agent:
         )
         result_full = self.tools.execute(
             call,
-            use_toon=self.config.use_toon_for_tools
-            if use_toon is None
-            else bool(use_toon),
+            use_toon=self.config.use_toon_for_tools if use_toon is None else bool(use_toon),
         )
 
         sid_for_persistence = sid
@@ -434,9 +420,7 @@ class Agent:
                     content=f"[direct_tool_call] {tool_name} {json.dumps(args, ensure_ascii=False)}",
                 ),
             )
-            persisted_result, vectorize = self._tool_result_for_persistence(
-                call, result_full
-            )
+            persisted_result, vectorize = self._tool_result_for_persistence(call, result_full)
             self.memory.save_message(
                 sid_for_persistence,
                 Message(
@@ -485,9 +469,7 @@ class Agent:
         lname = str(tool_name or "").strip().lower()
         if not lname:
             return False
-        patterns = list(
-            getattr(self.config, "tool_history_vector_exclude_patterns", [])
-        )
+        patterns = list(getattr(self.config, "tool_history_vector_exclude_patterns", []))
         for raw in patterns:
             token = str(raw or "").strip().lower()
             if token and token in lname:
@@ -620,7 +602,9 @@ class Agent:
             "freq": self.ctx.freq_cache,
             "anomaly_series": len(self.ctx.anomaly_store),
             "anomaly_points": anomaly_points,
-            "todo_items": [dict(item) for item in getattr(self.ctx, "todo_items", []) if isinstance(item, dict)],
+            "todo_items": [
+                dict(item) for item in getattr(self.ctx, "todo_items", []) if isinstance(item, dict)
+            ],
             "mounted_paths": [
                 dict(item)
                 for item in getattr(self.ctx, "mounted_paths", [])
@@ -637,9 +621,7 @@ class Agent:
                 if isinstance(item, dict)
             ],
             "rag_docs": [
-                dict(item)
-                for item in getattr(self.ctx, "rag_docs", [])
-                if isinstance(item, dict)
+                dict(item) for item in getattr(self.ctx, "rag_docs", []) if isinstance(item, dict)
             ],
             "forecast_model": self.ctx.nf_best_model,
             "has_forecast_cv": self.ctx.nf_cv_full is not None,
@@ -658,9 +640,7 @@ class Agent:
             persisted_ctx = Context()
             persisted_ctx.load_state(persisted_state)
             row_count = len(persisted_ctx.data) if persisted_ctx.data is not None else 0
-            anomaly_points = sum(
-                len(points) for points in persisted_ctx.anomaly_store.values()
-            )
+            anomaly_points = sum(len(points) for points in persisted_ctx.anomaly_store.values())
             runtime_snapshot = {
                 "loaded": bool(persisted_ctx.loaded),
                 "data_name": persisted_ctx.data_name,
@@ -797,15 +777,45 @@ class Agent:
                 f"{runtime['anomaly_series']} series / {runtime['anomaly_points']} points."
             )
         if runtime["forecast_model"]:
-            lines.append(
-                f"Forecast memory snapshot: best model={runtime['forecast_model']}."
-            )
+            lines.append(f"Forecast memory snapshot: best model={runtime['forecast_model']}.")
         if runtime["has_forecast_cv"]:
-            lines.append(
-                "Forecast cross-validation results are present in runtime memory."
-            )
+            lines.append("Forecast cross-validation results are present in runtime memory.")
 
         return _truncate_text("\n".join(lines), max_chars)
+
+    @staticmethod
+    def _microcompact_messages(
+        messages: list[Message],
+        *,
+        tool_output_cap: int = 1200,
+    ) -> list[Message]:
+        """Strip oversized tool outputs from a message list before full compaction.
+
+        Each TOOL message whose content exceeds *tool_output_cap* chars is
+        truncated to a short header + tail so that the downstream
+        ``_build_compaction_summary`` call works over a much smaller text budget.
+        Assistant content is left intact; only TOOL results are trimmed.
+        """
+        result: list[Message] = []
+        for msg in messages:
+            if msg.role == MessageRole.TOOL:
+                content = str(msg.content or "")
+                if len(content) > tool_output_cap:
+                    head = content[: tool_output_cap // 2]
+                    tail = content[-(tool_output_cap // 4) :]
+                    trimmed = f"{head}\n… [microcompact: {len(content)} → {tool_output_cap} chars] …\n{tail}"
+                    result.append(
+                        Message(
+                            role=msg.role,
+                            name=msg.name,
+                            tool_call_id=msg.tool_call_id,
+                            content=trimmed,
+                            vectorize=False,
+                        )
+                    )
+                    continue
+            result.append(msg)
+        return result
 
     def compact_session(
         self,
@@ -853,8 +863,10 @@ class Agent:
 
         older_messages = messages[:-keep_last]
         kept_tail = messages[-keep_last:]
+        # Microcompact: strip bulky tool payloads before building the text summary.
+        older_messages_mc = self._microcompact_messages(older_messages)
         summary = self._build_compaction_summary(
-            older_messages,
+            older_messages_mc,
             kept_tail_count=len(kept_tail),
             max_chars=max_chars,
         )
@@ -902,15 +914,16 @@ class Agent:
         history: list[Message] = []
         if sid:
             try:
-                history = self.memory.load_history(
-                    sid,
-                    message=query,
-                    use_semantic_retrieval=bool(query)
-                    and getattr(self.config, "default_use_semantic_retrieval", False),
-                    retrieval_mode=getattr(
-                        self.config, "default_retrieval_mode", "hybrid"
-                    ),
-                ) or []
+                history = (
+                    self.memory.load_history(
+                        sid,
+                        message=query,
+                        use_semantic_retrieval=bool(query)
+                        and getattr(self.config, "default_use_semantic_retrieval", False),
+                        retrieval_mode=getattr(self.config, "default_retrieval_mode", "hybrid"),
+                    )
+                    or []
+                )
             except Exception:
                 history = []
 
@@ -967,7 +980,11 @@ class Agent:
         if active_repos:
             lines.append("Active repos selected for this session:")
             for item in active_repos[:6]:
-                name = str(item.get("name", "")).strip() or str(item.get("id", "")).strip() or "(unknown repo)"
+                name = (
+                    str(item.get("name", "")).strip()
+                    or str(item.get("id", "")).strip()
+                    or "(unknown repo)"
+                )
                 repo_id = str(item.get("id", "")).strip()
                 chunks = int(item.get("chunks_added", 0) or 0)
                 files_processed = int(item.get("files_processed", 0) or 0)
@@ -1056,16 +1073,10 @@ class Agent:
         runtime = self._runtime_context_snapshot()
         active_repos = list(runtime.get("active_repos") or [])
         rag_docs = list(runtime.get("rag_docs") or [])
-        repo_library = [
-            dict(item)
-            for item in load_repo_index()
-            if isinstance(item, dict)
-        ]
+        repo_library = [dict(item) for item in load_repo_index() if isinstance(item, dict)]
         if not active_repos and repo_library:
             active_repos = [
-                item
-                for item in repo_library
-                if int(item.get("chunks_added", 0) or 0) > 0
+                item for item in repo_library if int(item.get("chunks_added", 0) or 0) > 0
             ][:3]
         repo_ids = [
             str(item.get("id") or "").strip()
@@ -1105,9 +1116,7 @@ class Agent:
             repo_rel_path = str(meta.get("repo_rel_path") or "").strip()
             path = repo_rel_path or str(meta.get("path") or "").strip() or "(unknown path)"
             label = f"{repo_id}:{path}" if repo_id else path
-            lines.append(
-                f"- {label} — {self._compact_preview(str(row.get('content') or ''), 220)}"
-            )
+            lines.append(f"- {label} — {self._compact_preview(str(row.get('content') or ''), 220)}")
 
         if repo_ids:
             neighbor_limit = int(getattr(self.config, "prompt_rag_context_neighbor_results", 2))
@@ -1138,8 +1147,7 @@ class Agent:
                     if str(item.get("rel_path") or "").strip()
                 ]
                 related_files = [
-                    str(item.get("rel_path") or "").strip()
-                    for item in related_file_rows
+                    str(item.get("rel_path") or "").strip() for item in related_file_rows
                 ][: max(0, neighbor_limit + 1)]
                 if related_files:
                     lines.append(
@@ -1282,8 +1290,6 @@ class Agent:
             self._load_runtime_state(sid)
         self._loaded_runtime_session_id = sid
 
-        self._ensure_mcp_servers_loaded()
-
         messages = [Message(role=MessageRole.USER, content=message)]
 
         # Keep the loop aligned with mutable Agent dependencies.
@@ -1367,8 +1373,7 @@ class Agent:
             "session_id": sid,
             "iterations": result.state.iteration,
             "tool_calls": [
-                {"name": call.name, "arguments": call.arguments}
-                for call in result.tool_calls
+                {"name": call.name, "arguments": call.arguments} for call in result.tool_calls
             ],
             "events": [],
         }
@@ -1382,5 +1387,6 @@ class Agent:
             trace_md="",
             thinking_log=result.thinking_log,
         )
+
 
 __all__ = ["Agent"]

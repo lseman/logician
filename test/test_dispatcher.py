@@ -1,19 +1,18 @@
 """Tests for ToolDispatcher."""
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-import pytest
-
-from src.agent.dispatcher import DispatchResult, ToolDispatcher, _READ_ONLY_TOOLS
+from src.agent.dispatcher import _READ_ONLY_TOOLS, DispatchResult, ToolDispatcher
 from src.agent.state import TurnState
-from src.tools.runtime import Tool, ToolCall
-
+from src.tools.runtime import Tool, ToolCall, build_tool
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class FakeRegistry:
     """Minimal ToolRegistry substitute that returns a fixed string."""
@@ -58,6 +57,7 @@ def make_call(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_read_only_tool_returns_dispatch_result():
     reg = FakeRegistry(return_value="file contents")
@@ -201,7 +201,9 @@ def test_metadata_can_mark_unknown_tool_as_read_only_and_cacheable():
         function=lambda: "ok",
         runtime={"read_only": True, "cacheable": True},
     )
-    reg = FakeRegistry(return_value='{"status":"ok","content":"value"}', tools={"custom_lookup": tool})
+    reg = FakeRegistry(
+        return_value='{"status":"ok","content":"value"}', tools={"custom_lookup": tool}
+    )
     dispatcher = ToolDispatcher(reg)
     state = make_state()
     call = make_call("custom_lookup", {"query": "abc"})
@@ -221,7 +223,9 @@ def test_metadata_marks_verifier_in_state_results():
         function=lambda: "ok",
         runtime={"verifier": True, "read_only": True, "cacheable": False},
     )
-    reg = FakeRegistry(return_value='{"status":"ok","content":"passed"}', tools={"quality_gate": tool})
+    reg = FakeRegistry(
+        return_value='{"status":"ok","content":"passed"}', tools={"quality_gate": tool}
+    )
     dispatcher = ToolDispatcher(reg)
     state = make_state()
 
@@ -230,3 +234,63 @@ def test_metadata_marks_verifier_in_state_results():
     assert state.tool_results
     assert state.tool_results[0].verifier is True
     assert state.tool_results[0].has_content is True
+
+
+def test_metadata_marks_content_reader_and_records_files_read():
+    tool = Tool(
+        name="custom_reader",
+        description="Read a single file",
+        parameters=[],
+        function=lambda: "ok",
+        runtime={"read_only": True, "cacheable": True, "content_reader": True},
+    )
+    reg = FakeRegistry(
+        return_value='{"status":"ok","content":"value"}',
+        tools={"custom_reader": tool},
+    )
+    dispatcher = ToolDispatcher(reg)
+    state = make_state()
+
+    asyncio.run(dispatcher.dispatch([make_call("custom_reader", {"path": "/tmp/demo.py"})], state))
+
+    assert "/tmp/demo.py" in state.files_read
+
+
+def test_build_tool_merges_runtime_metadata_on_function():
+    def sample_tool(path: str) -> str:
+        return path
+
+    build_tool(
+        sample_tool,
+        description="Sample read tool",
+        runtime={"read_only": True, "content_reader": True},
+    )
+
+    meta = getattr(sample_tool, "__llm_tool_meta__", {})
+    assert meta["description"] == "Sample read tool"
+    assert meta["runtime"]["read_only"] is True
+    assert meta["runtime"]["content_reader"] is True
+
+
+def test_dispatcher_uses_callable_metadata_when_tool_runtime_is_empty():
+    def sample_reader() -> str:
+        return '{"status":"ok","content":"value"}'
+
+    build_tool(
+        sample_reader,
+        description="Sample read tool",
+        runtime={"read_only": True, "cacheable": True, "content_reader": True},
+    )
+    tool = Tool(
+        name="sample_reader",
+        description="Sample read tool",
+        parameters=[],
+        function=sample_reader,
+    )
+    reg = FakeRegistry(tools={"sample_reader": tool})
+    dispatcher = ToolDispatcher(reg)
+    state = make_state()
+
+    asyncio.run(dispatcher.dispatch([make_call("sample_reader", {"path": "/tmp/demo.py"})], state))
+
+    assert "/tmp/demo.py" in state.files_read

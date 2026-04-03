@@ -1,7 +1,7 @@
 """ToolDispatcher: parallel read tools, serial write tools."""
+
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import time
@@ -29,31 +29,63 @@ class DispatchResult:
     has_content: bool = False
 
 
-# Read-only tools — safe to run in parallel. Hardcoded; not configurable.
-# Includes both core names and common skill-based aliases.
-_READ_ONLY_TOOLS: frozenset[str] = frozenset({
-    # Core tools (registered by Agent.__init__)
-    "read_file", "glob_files", "grep_files", "think",
-    # Short/alias names that may appear after normalization
-    "glob", "grep",
-    # Common skill-based read tools
-    "fd_find", "rg_search", "read_file_smart", "list_directory",
-    "rg_multiline", "rg_replace",  # rg_replace is content-only, no disk writes
-    "get_file_outline", "find_in_file", "count_in_file",
-    "find_symbol", "find_references", "find_path",
-    "git_diff", "git_log", "git_blame", "git_status",
-    "scratch_read", "scratch_list",
-    "search_tools", "describe_tool",
-    "think_recall",
-})
+# Read-only tool-name fallbacks for legacy aliases or tests that construct
+# bare Tool objects without runtime metadata. Prefer declared runtime metadata.
+_READ_ONLY_TOOLS: frozenset[str] = frozenset(
+    {
+        # Core tools retained as fallback for bare dispatch/tests without registry metadata
+        "read_file",
+        "read_edit_context",
+        "search_file",
+        "glob_files",
+        "grep_files",
+        "search_code",
+        "think",
+        # Short/alias names that may appear after normalization
+        "glob",
+        "grep",
+        # Common skill-based read tools
+        "fd_find",
+        "rg_search",
+        "read_file_smart",
+        "list_directory",
+        "rg_multiline",
+        "rg_replace",  # rg_replace is content-only, no disk writes
+        "get_file_outline",
+        "find_in_file",
+        "count_in_file",
+        "find_symbol",
+        "find_references",
+        "find_path",
+        "git_diff",
+        "git_log",
+        "git_blame",
+        "git_status",
+        "scratch_read",
+        "scratch_list",
+        "search_tools",
+        "describe_tool",
+        "think_recall",
+    }
+)
 
 # Tools that actually write to disk — only these trigger VerificationGuard.
-_WRITE_TOOLS: frozenset[str] = frozenset({
-    "write_file", "edit_file", "apply_edit_block",
-    "edit_file_replace", "sed_replace", "regex_replace",
-    "multi_edit", "multi_patch", "apply_unified_diff",
-    "scratch_write", "scratch_delete",
-})
+_WRITE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Core tools retained as fallback for bare dispatch/tests without registry metadata
+        "write_file",
+        "edit_file",
+        "apply_edit_block",
+        "edit_file_replace",
+        "sed_replace",
+        "regex_replace",
+        "multi_edit",
+        "multi_patch",
+        "apply_unified_diff",
+        "scratch_write",
+        "scratch_delete",
+    }
+)
 
 _VERIFICATION_NAME_PARTS: tuple[str, ...] = (
     "test",
@@ -65,15 +97,20 @@ _VERIFICATION_NAME_PARTS: tuple[str, ...] = (
     "mypy",
 )
 
-_CONTENT_READ_TOOLS: frozenset[str] = frozenset({
-    "read_file",
-    "read_line",
-    "read_file_smart",
-    "find_function_by_name",
-    "find_class_by_name",
-    "get_symbol_info",
-    "find_imports",
-})
+_CONTENT_READ_TOOLS: frozenset[str] = frozenset(
+    {
+        # Core tools retained as fallback for bare dispatch/tests without registry metadata
+        "read_file",
+        "read_edit_context",
+        "search_file",
+        "read_line",
+        "read_file_smart",
+        "find_function_by_name",
+        "find_class_by_name",
+        "get_symbol_info",
+        "find_imports",
+    }
+)
 
 
 class ToolDispatcher:
@@ -97,32 +134,49 @@ class ToolDispatcher:
         except Exception:
             return None
 
-    def _is_read_only_tool(self, name: str) -> bool:
+    def _tool_runtime_value(self, name: str, field: str) -> Any | None:
         tool = self._tool_def(name)
-        if tool is not None:
-            if tool.runtime.read_only is not None:
-                return bool(tool.runtime.read_only)
-            if tool.runtime.writes_files:
-                return False
+        if tool is None:
+            return None
+
+        runtime_value = getattr(tool.runtime, field, None)
+        if runtime_value is not None:
+            return runtime_value
+
+        meta = dict(getattr(getattr(tool, "function", None), "__llm_tool_meta__", {}) or {})
+        runtime_meta = (
+            dict(meta.get("runtime") or {}) if isinstance(meta.get("runtime"), dict) else {}
+        )
+        if field in runtime_meta:
+            return runtime_meta.get(field)
+        return meta.get(field)
+
+    def _is_read_only_tool(self, name: str) -> bool:
+        read_only = self._tool_runtime_value(name, "read_only")
+        if read_only is not None:
+            return bool(read_only)
+        writes_files = self._tool_runtime_value(name, "writes_files")
+        if writes_files is not None:
+            return not bool(writes_files)
         return name in _READ_ONLY_TOOLS
 
     def _writes_files_tool(self, name: str) -> bool:
-        tool = self._tool_def(name)
-        if tool is not None and tool.runtime.writes_files is not None:
-            return bool(tool.runtime.writes_files)
+        writes_files = self._tool_runtime_value(name, "writes_files")
+        if writes_files is not None:
+            return bool(writes_files)
         return name in _WRITE_TOOLS
 
     def _is_verifier_tool(self, name: str) -> bool:
-        tool = self._tool_def(name)
-        if tool is not None and tool.runtime.verifier is not None:
-            return bool(tool.runtime.verifier)
+        verifier = self._tool_runtime_value(name, "verifier")
+        if verifier is not None:
+            return bool(verifier)
         lower = name.lower()
         return any(part in lower for part in _VERIFICATION_NAME_PARTS)
 
     def _is_cacheable_tool(self, name: str) -> bool:
-        tool = self._tool_def(name)
-        if tool is not None and tool.runtime.cacheable is not None:
-            return bool(tool.runtime.cacheable)
+        cacheable = self._tool_runtime_value(name, "cacheable")
+        if cacheable is not None:
+            return bool(cacheable)
         return self._is_read_only_tool(name)
 
     def _result_has_content(self, output: str, error: str | None) -> bool:
@@ -159,6 +213,8 @@ class ToolDispatcher:
             "paths",
             "stdout",
             "diff",
+            "preview",
+            "structured_patch",
             "value",
         )
         for key in meaningful_keys:
@@ -203,19 +259,19 @@ class ToolDispatcher:
             self._update_state_from_dispatch(state, indexed_calls, results)
             return results
 
-        # Parallel reads
+        # Read tools currently run serially here. Wrapping executor-backed tool
+        # calls in gathered tasks can hang loop shutdown under Python 3.13.
         if reads:
-            read_results = await asyncio.gather(
-                *[
-                    self._execute_one(
+            read_results: list[DispatchResult] = []
+            for idx, call in reads:
+                read_results.append(
+                    await self._execute_one(
                         call,
                         config,
                         tool_callback=tool_callback,
                         sequence=idx,
                     )
-                    for idx, call in reads
-                ]
-            )
+                )
             results.extend(read_results)
 
         # Serial writes
@@ -241,15 +297,15 @@ class ToolDispatcher:
         result_by_call_id = {result.call_id: result for result in results}
         for _, call in indexed_calls:
             state.record_call(call)
-            if self._writes_files_tool(call.name):
+            result = result_by_call_id.get(call.id)
+            if result is not None and result.status == "ok" and self._writes_files_tool(call.name):
                 path = self._extract_write_path(call)
                 if path:
                     state.record_write(path)
-            if self._is_content_read_tool(call):
+            if result is not None and result.status == "ok" and self._is_content_read_tool(call):
                 path = self._extract_read_path(call)
                 if path:
                     state.record_read(path)
-            result = result_by_call_id.get(call.id)
             if result is not None:
                 state.record_tool_result(
                     ToolResultRecord(
@@ -268,6 +324,9 @@ class ToolDispatcher:
         state.consecutive_tool_count += len(indexed_calls)
 
     def _is_content_read_tool(self, call: ToolCall) -> bool:
+        content_reader = self._tool_runtime_value(call.name, "content_reader")
+        if content_reader is not None:
+            return bool(content_reader)
         return str(call.name or "").strip() in _CONTENT_READ_TOOLS
 
     def _extract_read_path(self, call: ToolCall) -> str | None:
@@ -340,60 +399,53 @@ class ToolDispatcher:
         is_read_only = self._is_read_only_tool(call.name)
         writes_files = self._writes_files_tool(call.name)
         verifier = self._is_verifier_tool(call.name)
+        cache_enabled = getattr(config, "tool_cache_enabled", True) if config else True
+        cache_ttl = getattr(config, "tool_cache_ttl", 3600) if config else 3600
+        max_chars = getattr(config, "tool_result_max_chars", 0) if config else 0
 
-        if is_read_only and config is not None and self._is_cacheable_tool(call.name):
-            if getattr(config, "tool_cache_enabled", True):
-                key = self._cache_key(call)
-                ttl = getattr(config, "tool_cache_ttl", 3600)
-                cached = self._cache.get(key)
-                if cached and (time.time() - cached[0]) < ttl:
-                    _emit(
-                        "end",
-                        status="ok",
-                        duration_ms=0,
-                        cache_hit=True,
-                        result_output=cached[1] if writes_files else "",
-                    )
-                    return DispatchResult(
-                        tool_name=call.name,
-                        call_id=call.id,
-                        output=cached[1],
-                        duration_ms=0,
-                        cache_hit=True,
-                        status="ok",
-                        read_only=is_read_only,
-                        writes_files=writes_files,
-                        verifier=verifier,
-                        has_content=self._result_has_content(cached[1], None),
-                    )
+        if is_read_only and cache_enabled and self._is_cacheable_tool(call.name):
+            key = self._cache_key(call)
+            cached = self._cache.get(key)
+            if cached and (time.time() - cached[0]) < cache_ttl:
+                _emit(
+                    "end",
+                    status="ok",
+                    duration_ms=0,
+                    cache_hit=True,
+                    result_output=cached[1] if writes_files else "",
+                )
+                return DispatchResult(
+                    tool_name=call.name,
+                    call_id=call.id,
+                    output=cached[1],
+                    duration_ms=0,
+                    cache_hit=True,
+                    status="ok",
+                    read_only=is_read_only,
+                    writes_files=writes_files,
+                    verifier=verifier,
+                    has_content=self._result_has_content(cached[1], None),
+                )
 
         t0 = time.monotonic()
         try:
-            loop = asyncio.get_running_loop()
-            output = await loop.run_in_executor(
-                None,
-                lambda: self._registry.execute(call),
-            )
+            output = self._registry.execute(call)
             output_str = str(output)
             duration_ms = int((time.monotonic() - t0) * 1000)
 
             # Truncate long outputs before caching or returning
-            max_chars = getattr(config, "tool_result_max_chars", 0) if config else 0
             if max_chars and len(output_str) > max_chars:
                 output_str = (
-                    output_str[:max_chars]
-                    + f"\n\n[...output truncated at {max_chars} chars]"
+                    output_str[:max_chars] + f"\n\n[...output truncated at {max_chars} chars]"
                 )
 
             # Store in cache if read-only and succeeded
-            if is_read_only and config is not None and self._is_cacheable_tool(call.name):
-                if getattr(config, "tool_cache_enabled", True):
-                    key = self._cache_key(call)
-                    self._cache[key] = (time.time(), output_str)
-                    self._cache_writes_since_evict += 1
-                    ttl = getattr(config, "tool_cache_ttl", 3600)
-                    if self._cache_writes_since_evict >= 50:
-                        self._evict_expired(ttl)
+            if is_read_only and cache_enabled and self._is_cacheable_tool(call.name):
+                key = self._cache_key(call)
+                self._cache[key] = (time.time(), output_str)
+                self._cache_writes_since_evict += 1
+                if self._cache_writes_since_evict >= 50:
+                    self._evict_expired(cache_ttl)
 
             # First 160 chars of output for display in the TUI tool_end event
             result_preview = output_str[:160].replace("\n", " ").strip()
@@ -463,10 +515,7 @@ class ToolDispatcher:
 
         if len(writes) > 1:
             # Multiple writes — only safe if they target different paths
-            paths = {
-                c.arguments.get("path") or c.arguments.get("file_path", "")
-                for c in writes
-            }
+            paths = {c.arguments.get("path") or c.arguments.get("file_path", "") for c in writes}
             return len(paths) == len(writes) and "" not in paths
 
         return True  # single write with some reads

@@ -1,7 +1,6 @@
 """Tests for PromptBuilder and its components."""
-from __future__ import annotations
 
-import pytest
+from __future__ import annotations
 
 from src.agent.prompt import (
     CoreToolSchemasComponent,
@@ -34,6 +33,7 @@ def make_config(**kwargs) -> Config:
 # ---------------------------------------------------------------------------
 # PromptBuilder core behaviour
 # ---------------------------------------------------------------------------
+
 
 def test_empty_builder_returns_empty_string():
     builder = PromptBuilder([])
@@ -73,6 +73,7 @@ def test_components_joined_with_double_newline():
 # IdentityComponent
 # ---------------------------------------------------------------------------
 
+
 def test_identity_returns_non_empty():
     comp = IdentityComponent()
     # Reset cache to avoid cross-test pollution
@@ -83,7 +84,6 @@ def test_identity_returns_non_empty():
 
 
 def test_identity_fallback_when_soul_missing(monkeypatch):
-    import src.agent.prompt as prompt_mod
     from pathlib import Path
 
     comp = IdentityComponent()
@@ -114,6 +114,7 @@ def test_identity_prefers_supplied_base_prompt():
 # CoreToolSchemasComponent
 # ---------------------------------------------------------------------------
 
+
 def test_core_tools_returns_none_when_empty():
     comp = CoreToolSchemasComponent(lambda: "")
     assert comp.render(make_state(), make_config()) is None
@@ -135,6 +136,7 @@ def test_core_tools_returns_none_for_whitespace_only():
 # ---------------------------------------------------------------------------
 # DomainToolsComponent
 # ---------------------------------------------------------------------------
+
 
 def test_domain_tools_returns_none_when_no_groups():
     comp = DomainToolsComponent(lambda groups: "domain schema")
@@ -163,6 +165,7 @@ def test_domain_tools_returns_none_when_fn_returns_empty():
 # SkillPlaybookComponent
 # ---------------------------------------------------------------------------
 
+
 def test_skill_playbook_returns_none_when_routing_disabled():
     comp = SkillPlaybookComponent(lambda q: "some playbook")
     config = make_config(enable_skill_routing=False)
@@ -184,9 +187,25 @@ def test_skill_playbook_returns_none_when_fn_returns_empty():
     assert comp.render(make_state(), config) is None
 
 
+def test_skill_playbook_skips_social_turns():
+    calls = {"count": 0}
+
+    def _render(_query: str) -> str:
+        calls["count"] += 1
+        return "some playbook"
+
+    comp = SkillPlaybookComponent(_render)
+    config = make_config(enable_skill_routing=True)
+    result = comp.render(make_state(user_query="hi", classified_as="social"), config)
+
+    assert result is None
+    assert calls["count"] == 0
+
+
 # ---------------------------------------------------------------------------
 # RetrievalContextComponent
 # ---------------------------------------------------------------------------
+
 
 def test_retrieval_context_returns_none_when_disabled():
     comp = RetrievalContextComponent(lambda state: "retrieved context")
@@ -218,9 +237,27 @@ def test_retrieval_context_caches_per_turn():
     assert calls["count"] == 1
 
 
+def test_retrieval_context_skips_social_turns():
+    calls = {"count": 0}
+
+    def _render(_state):
+        calls["count"] += 1
+        return "retrieved context"
+
+    comp = RetrievalContextComponent(_render)
+    result = comp.render(
+        make_state(user_query="hi", classified_as="social"),
+        make_config(),
+    )
+
+    assert result is None
+    assert calls["count"] == 0
+
+
 # ---------------------------------------------------------------------------
 # RuntimeContextComponent
 # ---------------------------------------------------------------------------
+
 
 def test_runtime_context_returns_none_when_empty():
     comp = RuntimeContextComponent(lambda: "")
@@ -238,6 +275,7 @@ def test_runtime_context_wraps_summary():
 # ---------------------------------------------------------------------------
 # TurnContextComponent
 # ---------------------------------------------------------------------------
+
 
 def test_turn_context_returns_none_at_iteration_zero_no_files():
     comp = TurnContextComponent()
@@ -278,6 +316,7 @@ def test_turn_context_includes_verify_reminder_when_files_written():
 # ---------------------------------------------------------------------------
 # default_prompt_builder factory
 # ---------------------------------------------------------------------------
+
 
 def test_default_prompt_builder_returns_prompt_builder():
     builder = default_prompt_builder(

@@ -86,6 +86,118 @@ export type ToolCallItem = {
   cache_hit?: boolean;
 };
 
+function fileOperationPayload(
+  toolName: string,
+  payload: unknown,
+): { summary: string[]; diff?: string; raw: unknown } | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const normalizedTool = toolName.trim();
+  const isFileTool = new Set([
+    "read_file",
+    "write_file",
+    "edit_file",
+    "apply_edit_block",
+    "smart_edit",
+    "edit_file_libcst",
+    "replace_function_body",
+    "replace_docstring",
+    "replace_decorators",
+    "replace_argument",
+    "insert_after_function",
+    "delete_function",
+  ]).has(normalizedTool);
+  const diff = typeof record.diff === "string"
+    ? record.diff
+    : typeof record.preview === "string"
+      ? record.preview
+      : undefined;
+  if (!isFileTool && !diff) {
+    return null;
+  }
+
+  const summary: string[] = [];
+  if (typeof record.path === "string" && record.path.trim()) {
+    summary.push(record.path.trim());
+  }
+  if (typeof record.status === "string" && record.status.trim()) {
+    summary.push(record.status.trim());
+  }
+  if (typeof record.matches_replaced === "number") {
+    summary.push(`${record.matches_replaced} matches`);
+  }
+  if (typeof record.blocks_applied === "number") {
+    summary.push(`${record.blocks_applied} blocks`);
+  }
+  if (typeof record.edits_applied === "number") {
+    summary.push(`${record.edits_applied} edits`);
+  }
+  if (typeof record.newline === "string" && record.newline.trim()) {
+    summary.push(record.newline.trim());
+  }
+  return { summary, diff, raw: payload };
+}
+
+function runtimeOperationPayload(
+  toolName: string,
+  payload: unknown,
+): { summary: string[]; details?: string[]; raw: unknown } | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const normalizedTool = toolName.trim();
+  const runtimeTools = new Set([
+    "set_venv",
+    "set_working_directory",
+    "install_packages",
+    "show_coding_config",
+    "start_background_process",
+    "send_input_to_process",
+    "get_process_output",
+    "kill_process",
+    "list_processes",
+  ]);
+  if (!runtimeTools.has(normalizedTool)) {
+    return null;
+  }
+
+  const summary: string[] = [];
+  const details: string[] = [];
+  for (const key of ["status", "name", "cwd", "venv_path", "python", "python_bin"]) {
+    if (typeof record[key] === "string" && record[key]?.trim()) {
+      summary.push(String(record[key]).trim());
+    }
+  }
+  if (typeof record.pid === "number") {
+    summary.push(`pid ${record.pid}`);
+  }
+  if (typeof record.running === "boolean") {
+    summary.push(record.running ? "running" : "stopped");
+  }
+  if (typeof record.exit_code === "number") {
+    summary.push(`exit ${record.exit_code}`);
+  }
+  if (typeof record.bytes_written === "number") {
+    summary.push(`${record.bytes_written} bytes`);
+  }
+  if (Array.isArray(record.processes)) {
+    summary.push(`${record.processes.length} tracked process${record.processes.length === 1 ? "" : "es"}`);
+  }
+  if (typeof record.message === "string" && record.message.trim()) {
+    details.push(record.message.trim());
+  }
+  if (typeof record.output === "string" && record.output.trim()) {
+    details.push(compactPreview(record.output, 220));
+  }
+  if (typeof record.command_preview === "string" && record.command_preview.trim()) {
+    details.push(compactPreview(record.command_preview, 220));
+  }
+  return { summary, details, raw: payload };
+}
+
 function compactPreview(value: string | undefined, limit = 180): string {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) {
@@ -141,6 +253,8 @@ export function ToolCallCard({
   const preview = compactPreview(item.response);
   const parsedResponse = tryParseJson(String(item.response || ""));
   const responseText = String(item.response || "");
+  const filePayload = fileOperationPayload(toolLabel, parsedResponse);
+  const runtimePayload = runtimeOperationPayload(toolLabel, parsedResponse);
   const meta: string[] = [];
 
   if (item.cache_hit) {
@@ -205,7 +319,28 @@ export function ToolCallCard({
 
       {hasResponse ? (
         <SectionToggle label="tool_response">
-          {parsedResponse !== null ? (
+          {filePayload ? (
+            <div className="space-y-3">
+              {filePayload.summary.length > 0 ? (
+                <div className="tool-card-preview">{filePayload.summary.join(" · ")}</div>
+              ) : null}
+              {filePayload.diff ? (
+                <DiffViewer diff={filePayload.diff} label="file diff" />
+              ) : (
+                <JsonViewer value={filePayload.raw} raw={responseText} label="tool response" />
+              )}
+            </div>
+          ) : runtimePayload ? (
+            <div className="space-y-3">
+              {runtimePayload.summary.length > 0 ? (
+                <div className="tool-card-preview">{runtimePayload.summary.join(" · ")}</div>
+              ) : null}
+              {runtimePayload.details?.map((detail) => (
+                <div key={detail} className="tool-card-preview">{detail}</div>
+              ))}
+              <JsonViewer value={runtimePayload.raw} raw={responseText} label="tool response" />
+            </div>
+          ) : parsedResponse !== null ? (
             <JsonViewer value={parsedResponse} raw={responseText} label="tool response" />
           ) : isUnifiedDiffText(responseText) ? (
             <DiffViewer diff={responseText} label="tool response diff" />

@@ -4,7 +4,6 @@ import ast
 import importlib.machinery
 import inspect
 import json
-import os
 import re
 import sys
 import types
@@ -12,9 +11,14 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Sequence, get_args, get_origin
 
 from ...mcp.client import MCPClient, MCPToolDef
+from ..runtime import (
+    ToolParameter,
+    ToolRuntimeMetadata,
+    _safe_json_fallback,
+    materialize_tool,
+)
 from .catalog import ToolSection
 from .types import _BuiltinToolDefinition
-from ..runtime import Tool, ToolParameter, ToolRuntimeMetadata, _safe_json_fallback
 
 
 class RegistryLoadingMixin:
@@ -158,17 +162,61 @@ class RegistryLoadingMixin:
                     "- max_items (integer, optional): Max items per source list."
                 ),
             },
+            {
+                "name": "tool_permissions",
+                "description": (
+                    "View or update wildcard-based tool permission rules with modes plan, auto, and bypass."
+                ),
+                "parameters": [
+                    ToolParameter(
+                        name="command",
+                        type="string",
+                        description="Command: view, set, remove, or clear.",
+                        required=False,
+                        enum=["view", "set", "remove", "clear"],
+                    ),
+                    ToolParameter(
+                        name="pattern",
+                        type="string",
+                        description="Wildcard tool-name pattern such as `write_*`, `*git*`, or `bash`.",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="mode",
+                        type="string",
+                        description="Permission mode for `set`: plan, auto, or bypass.",
+                        required=False,
+                        enum=["plan", "auto", "bypass"],
+                    ),
+                    ToolParameter(
+                        name="tool_name",
+                        type="string",
+                        description="Optional tool name to preview its effective mode in `view` output.",
+                        required=False,
+                    ),
+                ],
+                "function": self._tool_permissions_tool,
+                "doc": (
+                    "**Description:** Inspect or change wildcard-based tool permission rules.\n\n"
+                    "**Parameters:**\n"
+                    "- command (string, optional): `view`, `set`, `remove`, or `clear`. Defaults to `view`.\n"
+                    "- pattern (string, optional): Wildcard pattern for tool names.\n"
+                    "- mode (string, optional): `plan`, `auto`, or `bypass` for `set`.\n"
+                    "- tool_name (string, optional): Show the effective permission mode for a specific tool when viewing."
+                ),
+            },
         ]
 
     def _register_builtin_tool(self, definition: _BuiltinToolDefinition) -> bool:
         name = definition["name"]
         if name in self._tools:
             return False
-        self._tools[name] = Tool(
+        self._tools[name] = materialize_tool(
+            definition["function"],
             name=name,
             description=definition["description"],
             parameters=definition["parameters"],
-            function=definition["function"],
+            doc=definition["doc"],
             skill_id="meta_skills",
             source_path="<builtin>",
         )
@@ -193,7 +241,9 @@ class RegistryLoadingMixin:
 
             if rel_parts:
                 top_level = rel_parts[0]
-                if self._is_lazy_skill_group_dir_name(top_level) and not self._is_lazy_skill_group_active(top_level):
+                if self._is_lazy_skill_group_dir_name(
+                    top_level
+                ) and not self._is_lazy_skill_group_active(top_level):
                     dirs[:] = []
                     continue
             else:
@@ -221,11 +271,7 @@ class RegistryLoadingMixin:
                 continue
 
             for fname in files:
-                if (
-                    not fname.endswith(".py")
-                    or fname == "__init__.py"
-                    or fname.startswith("_")
-                ):
+                if not fname.endswith(".py") or fname == "__init__.py" or fname.startswith("_"):
                     continue
                 module_path = root_path / fname
                 key = str(module_path.resolve())
@@ -357,9 +403,7 @@ class RegistryLoadingMixin:
                 continue
 
             description = str(
-                meta.get("description")
-                or self._python_tool_doc_summary(tool_fn)
-                or ""
+                meta.get("description") or self._python_tool_doc_summary(tool_fn) or ""
             ).strip()
             tool_fn.__doc__ = self._compose_tool_docstring(
                 tool_fn,
@@ -370,21 +414,20 @@ class RegistryLoadingMixin:
                 parameter_overrides=meta.get("parameters"),
             )
             wrapped = self._wrap_tool_function(tool_fn, tool_name)
-            self._tools[tool_name] = Tool(
+            self._tools[tool_name] = materialize_tool(
+                wrapped,
                 name=tool_name,
                 description=description,
                 parameters=params,
-                function=wrapped,
+                runtime=ToolRuntimeMetadata.from_tool_meta(meta),
+                doc=str(meta.get("doc") or "").strip() or None,
                 skill_id=skill_id,
                 source_path=str(module_path),
                 skill_meta=dict(skill_meta or {}),
-                runtime=ToolRuntimeMetadata.from_tool_meta(meta),
             )
             doc_override = str(meta.get("doc") or "").strip()
             self._catalog.tool_docs[tool_name] = (
-                doc_override
-                or inspect.getdoc(tool_fn)
-                or description
+                doc_override or inspect.getdoc(tool_fn) or description
             )
             self._log.info("✓ Loaded Python tool: %s (%s)", tool_name, module_path)
             registered += 1
@@ -777,8 +820,7 @@ class RegistryLoadingMixin:
             return existing_doc
 
         description = (
-            base_description.strip()
-            or "Run this tool when it best fits the user request."
+            base_description.strip() or "Run this tool when it best fits the user request."
         )
         triggers = self._docstring_triggers(tool_fn)
         avoid_when = self._docstring_avoid_when()
@@ -860,11 +902,11 @@ class RegistryLoadingMixin:
             client_name=client.name,
             safe_name=tdef.safe_name,
         )
-        self._tools[reg_name] = Tool(
+        self._tools[reg_name] = materialize_tool(
+            self._mcp_tool_caller(client, tdef.name),
             name=reg_name,
             description=tdef.description,
             parameters=self._mcp_tool_parameters(tdef),
-            function=self._mcp_tool_caller(client, tdef.name),
             skill_id=f"mcp__{client.name}",
             source_path=client.url,
         )
@@ -968,11 +1010,12 @@ class RegistryLoadingMixin:
         source_path: str,
         doc_content: str,
     ) -> None:
-        self._tools[name] = Tool(
+        self._tools[name] = materialize_tool(
+            wrapped,
             name=name,
             description=description,
             parameters=parameters,
-            function=wrapped,
+            doc=doc_content,
             skill_id=skill_id or None,
             source_path=source_path or None,
         )

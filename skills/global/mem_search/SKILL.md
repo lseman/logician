@@ -97,7 +97,7 @@ mem_record(
 **Fix:** Added _normalize_agent_content() stripping \\r before write.
 **How to apply:** No action needed — normalization is automatic.
     """,
-    files=["src/tools/core/files.py"],
+  files=["src/tools/core/FileReadTool/tool.py", "src/tools/core/FileEditTool/tool.py"],
 )
 ```
 

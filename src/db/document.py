@@ -8,8 +8,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .core import _HNSWCollection, create_vector_collection
 from ..logging_utils import get_logger
+from ..runtime_paths import state_path
+from .core import _HNSWCollection, create_vector_collection
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -54,7 +55,7 @@ def _first_batch(value: Any) -> list[Any]:
 
 @dataclass
 class DocumentDB:
-    vector_path: str = "rag_docs.vector"
+    vector_path: str = field(default_factory=lambda: str(state_path("rag_docs.vector")))
     embedding_model_name: str = (
         "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
         "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"
@@ -115,9 +116,7 @@ class DocumentDB:
     def collection(self) -> _HNSWCollection:
         self._ensure()
         if self._collection is None:
-            raise RuntimeError(
-                "Vector store is disabled but a semantic operation was requested."
-            )
+            raise RuntimeError("Vector store is disabled but a semantic operation was requested.")
         return self._collection
 
     def count(
@@ -200,9 +199,7 @@ class DocumentDB:
             return [text]
         units: list[str] = []
         for p in paras:
-            sents = [
-                s.strip() for s in re.split(r"(?<=[.!?])\s+", p) if s and s.strip()
-            ]
+            sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", p) if s and s.strip()]
             if len(sents) > 1:
                 units.extend(sents)
             else:
@@ -389,9 +386,7 @@ class DocumentDB:
         if len(self._query_cache) <= cap:
             return
         overflow = len(self._query_cache) - cap
-        stale_keys = sorted(self._query_cache.items(), key=lambda item: item[1][0])[
-            :overflow
-        ]
+        stale_keys = sorted(self._query_cache.items(), key=lambda item: item[1][0])[:overflow]
         for stale_key, _ in stale_keys:
             self._query_cache.pop(stale_key, None)
 

@@ -197,6 +197,46 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertIn("run_python", selected)
         self.assertNotIn("svg_render", selected)
 
+    def test_manual_register_can_declare_runtime_metadata(self) -> None:
+        registry = self._registry()
+        registry.register(
+            name="custom_reader",
+            description="Read a file.",
+            parameters=[
+                ToolParameter(name="path", type="string", description="File path.", required=True)
+            ],
+            function=lambda path: {"status": "ok", "path": path},
+            runtime={"read_only": True, "cacheable": True, "content_reader": True},
+        )
+
+        tool = registry.get("custom_reader")
+        assert tool is not None
+        self.assertTrue(tool.runtime.read_only)
+        self.assertTrue(tool.runtime.cacheable)
+        self.assertTrue(tool.runtime.content_reader)
+
+    def test_builtin_tool_registration_uses_materialized_runtime_defaults(self) -> None:
+        registry = self._registry()
+
+        registered = registry._register_builtin_tool(
+            {
+                "name": "builtin_echo",
+                "description": "Echo text.",
+                "parameters": [
+                    ToolParameter(name="text", type="string", description="Text.", required=True)
+                ],
+                "function": lambda text: {"status": "ok", "text": text},
+                "doc": "Echo text.",
+            }
+        )
+
+        self.assertTrue(registered)
+        tool = registry.get("builtin_echo")
+        assert tool is not None
+        self.assertEqual(tool.description, "Echo text.")
+        self.assertEqual(tool.source_path, "<builtin>")
+        self.assertEqual(tool.skill_id, "meta_skills")
+
     def test_skills_health_builtin_reports_catalog_diagnostics(self) -> None:
         registry = self._registry()
         registry.load_tools_from_skills()
@@ -410,28 +450,29 @@ def hello(name: str = "world") -> str:
         registry = self._registry()
         registry.load_tools_from_skills()
 
-        tool = registry.get("get_file_outline")
+        tool = registry.get("rg_search")
         self.assertIsNotNone(tool)
         assert tool is not None
         doc = str(getattr(tool.function, "__doc__", "") or "")
         self.assertIn("Skill context:", doc)
         self.assertIn("Skill: Explore", doc)
-        self.assertIn("Preferred tools in this skill: get_file_outline, rg_search, fd_find", doc)
+        self.assertIn(
+            "Preferred tools in this skill: get_project_map, find_symbol, get_file_outline, rg_search, fd_find",
+            doc,
+        )
         self.assertIn("Skill failure recovery:", doc)
 
     def test_core_tools_remain_canonical_when_coding_skills_overlap(self) -> None:
         registry = self._registry()
         registry.load_tools_from_skills()
 
-        from src.tools.core import apply_edit_block, read_file, write_file
+        from src.tools import core as _core_tools
 
         registry._register_collected_python_tools(
             tool_entries=[
-                (read_file, getattr(read_file, "__llm_tool_meta__", {})),
-                (write_file, getattr(write_file, "__llm_tool_meta__", {})),
-                (apply_edit_block, getattr(apply_edit_block, "__llm_tool_meta__", {})),
+                (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
             ],
-            module_path=Path("src/tools/core/files.py"),
+            module_path=Path("src/tools/core/__init__.py"),
             skill_id="core",
             skill_meta={"always_on": True},
         )
@@ -456,8 +497,165 @@ def hello(name: str = "world") -> str:
         self.assertEqual(read_tool.skill_id, "core")
         self.assertEqual(write_tool.skill_id, "core")
         self.assertEqual(edit_block_tool.skill_id, "core")
-        self.assertEqual(explore_tool.skill_id, "explore")
+        self.assertEqual(explore_tool.skill_id, "core")
         self.assertEqual(multi_edit_tool.skill_id, "multi_edit")
+
+    def test_fetch_url_comes_from_core_web_tools(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+        from src.tools import core as _core_tools
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
+            ],
+            module_path=Path("src/tools/core/__init__.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        fetch_tool = registry.get("fetch_url")
+        web_search_tool = registry.get("web_search")
+
+        self.assertIsNotNone(fetch_tool)
+        self.assertIsNotNone(web_search_tool)
+        assert fetch_tool is not None
+        assert web_search_tool is not None
+
+        self.assertEqual(fetch_tool.skill_id, "core")
+        self.assertEqual(web_search_tool.skill_id, "core")
+        self.assertTrue(str(fetch_tool.source_path or "").endswith("src/tools/core/__init__.py"))
+        self.assertTrue(
+            str(web_search_tool.source_path or "").endswith("src/tools/core/__init__.py")
+        )
+
+    def test_docs_context_audit_recognizes_core_web_provider(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+        from src.tools import core as _core_tools
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
+            ],
+            module_path=Path("src/tools/core/__init__.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        audit = registry._coding_capability_audit(registry.list_skills())
+        docs_group = audit.get("groups", {}).get("docs_context", {})
+        providers = docs_group.get("provider_details", {})
+
+        self.assertEqual(docs_group.get("canonical_provider"), "core")
+        self.assertEqual(providers.get("fetch_url", {}).get("skill_id"), "core")
+        self.assertEqual(providers.get("web_search", {}).get("skill_id"), "core")
+
+    def test_coding_organization_audit_allows_metadata_only_modules(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+
+        organization = registry._coding_organization_audit()
+
+        self.assertIn("web.py", organization.get("metadata_only_modules", []))
+        self.assertIn("file_ops.py", organization.get("metadata_only_modules", []))
+        self.assertNotIn("web.py", organization.get("modules_without_registered_tools", []))
+
+    def test_shell_and_git_overlap_review_shows_no_exact_core_conflicts(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+        from src.tools import core as _core_tools
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
+            ],
+            module_path=Path("src/tools/core/__init__.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        audit = registry._coding_capability_audit(registry.list_skills())
+        overlap_review = audit.get("overlap_review", {})
+        shell_review = overlap_review.get("shell", {})
+        git_review = overlap_review.get("git", {})
+
+        self.assertEqual(shell_review.get("exact_core_name_conflicts"), [])
+        self.assertEqual(git_review.get("exact_core_name_conflicts"), [])
+        self.assertEqual(
+            shell_review.get("promoted_to_core"),
+            [
+                "set_venv",
+                "set_working_directory",
+                "install_packages",
+                "show_coding_config",
+                "start_background_process",
+                "send_input_to_process",
+                "get_process_output",
+                "kill_process",
+                "list_processes",
+                "run_python",
+                "check_imports",
+                "list_installed_packages",
+            ],
+        )
+        self.assertEqual(shell_review.get("semantic_alias_overlaps", {}).get("run_shell"), ["bash"])
+        self.assertEqual(shell_review.get("requires_shared_core_state"), [])
+        self.assertEqual(
+            git_review.get("semantic_alias_overlaps", {}).get("git_status"),
+            ["get_git_status"],
+        )
+        self.assertEqual(
+            git_review.get("semantic_alias_overlaps", {}).get("git_diff"),
+            ["get_git_diff"],
+        )
+        self.assertFalse(shell_review.get("should_promote_to_core"))
+        self.assertFalse(git_review.get("should_promote_to_core"))
+
+    def test_run_python_helpers_are_registered_from_core(self) -> None:
+        registry = self._registry()
+        registry.load_tools_from_skills()
+        from src.tools import core as _core_tools
+
+        registry._register_collected_python_tools(
+            tool_entries=[
+                (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
+            ],
+            module_path=Path("src/tools/core/__init__.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
+        )
+
+        run_python_tool = registry.get("run_python")
+        check_imports_tool = registry.get("check_imports")
+        list_packages_tool = registry.get("list_installed_packages")
+
+        self.assertIsNotNone(run_python_tool)
+        self.assertIsNotNone(check_imports_tool)
+        self.assertIsNotNone(list_packages_tool)
+        assert run_python_tool is not None
+        assert check_imports_tool is not None
+        assert list_packages_tool is not None
+
+        self.assertEqual(run_python_tool.skill_id, "core")
+        self.assertEqual(check_imports_tool.skill_id, "core")
+        self.assertEqual(list_packages_tool.skill_id, "core")
+
+        for tool_name in (
+            "set_venv",
+            "set_working_directory",
+            "install_packages",
+            "show_coding_config",
+            "start_background_process",
+            "send_input_to_process",
+            "get_process_output",
+            "kill_process",
+            "list_processes",
+        ):
+            tool = registry.get(tool_name)
+            self.assertIsNotNone(tool)
+            assert tool is not None
+            self.assertEqual(tool.skill_id, "core")
 
     def test_capability_audit_normalizes_legacy_required_tool_names(self) -> None:
         registry = self._registry()
@@ -473,7 +671,7 @@ def hello(name: str = "world") -> str:
                 (list_dir, getattr(list_dir, "__llm_tool_meta__", {})),
                 (apply_edit_block, getattr(apply_edit_block, "__llm_tool_meta__", {})),
             ],
-            module_path=Path("src/tools/core/files.py"),
+            module_path=Path("src/tools/core/__init__.py"),
             skill_id="core",
             skill_meta={"always_on": True},
         )
@@ -524,7 +722,7 @@ __tools__ = [exported]
             tool_entries=[
                 (apply_edit_block, getattr(apply_edit_block, "__llm_tool_meta__", {})),
             ],
-            module_path=Path("src/tools/core/files.py"),
+            module_path=Path("src/tools/core/__init__.py"),
             skill_id="core",
             skill_meta={"always_on": True},
         )
@@ -774,21 +972,26 @@ print(json.dumps({{
                 seen_param_names.add(param.name)
 
                 n = param.name.lower()
-                looks_numeric = n.startswith(("n_", "num_", "max_", "min_", "top_")) or n.endswith(
-                    ("_count", "_idx", "_index", "_points", "_steps", "_window", "_k")
-                ) or n in {
-                    "k",
-                    "n",
-                    "count",
-                    "limit",
-                    "window",
-                    "horizon",
-                    "steps",
-                    "epochs",
-                    "batch_size",
-                    "seed",
-                    "period",
-                }
+                looks_numeric = (
+                    n.startswith(("n_", "num_", "max_", "min_", "top_"))
+                    or n.endswith(
+                        ("_count", "_idx", "_index", "_points", "_steps", "_window", "_k")
+                    )
+                    or n
+                    in {
+                        "k",
+                        "n",
+                        "count",
+                        "limit",
+                        "window",
+                        "horizon",
+                        "steps",
+                        "epochs",
+                        "batch_size",
+                        "seed",
+                        "period",
+                    }
+                )
                 looks_bool = n.startswith(("is_", "has_", "use_", "with_", "enable_")) or n in {
                     "recursive",
                     "overwrite",
@@ -811,11 +1014,7 @@ print(json.dumps({{
                     msg=f"{fn['name']} marks '{req_name}' required but it is missing from properties",
                 )
 
-        suspicious = [
-            item
-            for item in suspicious
-            if (item[0], item[1]) not in suspicious_allowlist
-        ]
+        suspicious = [item for item in suspicious if (item[0], item[1]) not in suspicious_allowlist]
         self.assertEqual(
             suspicious,
             [],

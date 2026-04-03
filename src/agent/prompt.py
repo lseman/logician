@@ -1,4 +1,5 @@
 """PromptBuilder: composable system prompt assembly pipeline."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,11 +19,7 @@ class PromptBuilder:
         self.components = components
 
     def build(self, state: TurnState, config: Config) -> str:
-        parts = [
-            rendered
-            for comp in self.components
-            if (rendered := comp.render(state, config))
-        ]
+        parts = [rendered for comp in self.components if (rendered := comp.render(state, config))]
         return "\n\n".join(parts)
 
 
@@ -83,6 +80,8 @@ class SkillPlaybookComponent:
     def render(self, state: TurnState, config: Config) -> str | None:
         if not getattr(config, "enable_skill_routing", False):
             return None
+        if state.classified_as in {"social", "informational"}:
+            return None
         query = state.user_query or state.classified_as
         # Cache routing result for the duration of a turn — the query doesn't
         # change between iterations and routing involves an index scan.
@@ -123,6 +122,8 @@ class RetrievalContextComponent:
 
     def render(self, state: TurnState, config: Config) -> str | None:
         if not getattr(config, "prompt_rag_context_enabled", True):
+            return None
+        if state.classified_as in {"social", "informational"}:
             return None
         query = str(state.user_query or "").strip()
         if not query:

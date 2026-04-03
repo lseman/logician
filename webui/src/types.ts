@@ -130,6 +130,9 @@ export type ToolCallItem = {
   tool: string;
   args?: Record<string, unknown>;
   response?: string;
+  status?: "running" | "ok" | "error";
+  duration_ms?: number;
+  cache_hit?: boolean;
 };
 
 export type Pane = "chat" | "agents" | "tools" | "memory";

@@ -36,15 +36,15 @@ SRC_DIR = ROOT_DIR / "src"
 if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from src.runtime_paths import state_path
+from src.agent.classify import classify_turn
+from src.repo_ingest import ingest_repo
 from src.repo_registry import (
     load_repo_index,
     register_repo,
     remove_repo,
     update_repo,
 )
-from src.repo_graph import build_repo_graph
-
+from src.runtime_paths import state_path
 
 DB_PATH = state_path("agent_sessions.db")
 VECTOR_PATH = state_path("message_history.vector")
@@ -103,6 +103,10 @@ _BRIDGE_COMMAND_SPECS: list[tuple[str, str]] = [
     (
         "/repo",
         "Manage repo memory (`/repo add|list|use|ingest|remove ...`)",
+    ),
+    (
+        "/rag",
+        "Inspect RAG store (`/rag list [repo]`, `/rag search <query> [top_k]`, `/rag clear`)",
     ),
     ("/docs", "Fetch Context7 docs (`/docs <library> [query]`)"),
     ("/changes", "Show git status + diff preview (`/changes [path] [--staged]`)"),
@@ -176,7 +180,10 @@ def _parse_exclude_args(raw: str) -> list[str]:
 
 def _parse_mount_args(args: list[str]) -> dict[str, Any]:
     if not args:
-        return {"status": "error", "error": "usage: /mount <directory> [glob] [max_files] [map_depth] [-exclude subdir]"}
+        return {
+            "status": "error",
+            "error": "usage: /mount <directory> [glob] [max_files] [map_depth] [-exclude subdir]",
+        }
 
     directory = args[0]
     positional: list[str] = []
@@ -245,7 +252,9 @@ def _estimate_token_count(payload: Any) -> int:
     return max(0, len(rendered) // 4)
 
 
-def _upsert_runtime_record(records: list[dict[str, Any]], item: dict[str, Any], *, key: str) -> None:
+def _upsert_runtime_record(
+    records: list[dict[str, Any]], item: dict[str, Any], *, key: str
+) -> None:
     identity = str(item.get(key) or "").strip()
     if not identity:
         return
@@ -352,6 +361,8 @@ def _set_active_repo_records(agent: Any, repos: list[dict[str, Any]]) -> None:
         "active_repos",
         [_repo_runtime_record(repo) for repo in repos if isinstance(repo, dict)],
     )
+
+
 _IMAGE_KEY_HINTS = ("image", "plot", "chart", "figure", "output", "path", "file")
 _IMAGE_PATH_RE = re.compile(
     r"(?i)(?:https?://|file://|[a-z]:)?[a-z0-9_./\\-]+\.(?:png|jpe?g|webp|bmp|gif|svg)"
@@ -531,15 +542,14 @@ class BridgeServer:
         self.active: str | None = None
         self.sessions: dict[str, str] = {}
         self.pipeline: dict[str, Any] | None = None
+        self._recent_rag_queries: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
     def _emit(self, event: str, payload: dict[str, Any]) -> None:
         msg = {"event": event, **payload}
         sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
         sys.stdout.flush()
 
-    def _response(
-        self, rid: Any, ok: bool, result: Any = None, error: str = ""
-    ) -> None:
+    def _response(self, rid: Any, ok: bool, result: Any = None, error: str = "") -> None:
         msg = {"id": rid, "ok": ok}
         if ok:
             msg["result"] = result
@@ -558,9 +568,7 @@ class BridgeServer:
             merged = {**cfg, **block}
             allowed = set(getattr(AgentConfig, "__dataclass_fields__", {}).keys())
             ov = {
-                key: value
-                for key, value in merged.items()
-                if key in allowed and value is not None
+                key: value for key, value in merged.items() if key in allowed and value is not None
             }
             # Keep vector store local to this bridge workspace.
             ov["vector_path"] = str(VECTOR_PATH)
@@ -632,8 +640,13 @@ class BridgeServer:
         """
         memory_index = MEMORY_DIR / "MEMORY.md"
         if not memory_index.exists():
-            return {"has_memories": False, "total_entries": 0, "obs_count": 0,
-                    "facts_count": 0, "sections": []}
+            return {
+                "has_memories": False,
+                "total_entries": 0,
+                "obs_count": 0,
+                "facts_count": 0,
+                "sections": [],
+            }
 
         content = memory_index.read_text(encoding="utf-8", errors="replace")
 
@@ -643,6 +656,7 @@ class BridgeServer:
         if obs_index.exists():
             try:
                 import json as _json
+
                 obs_count = len(_json.loads(obs_index.read_text(encoding="utf-8")))
             except Exception:
                 pass
@@ -732,6 +746,24 @@ class BridgeServer:
         except Exception:
             return []
 
+    def _session_tool_call_count(self, active: str, sid: str) -> int:
+        if not active or active not in self.agents:
+            return 0
+        try:
+            ctx = getattr(self.agents[active], "ctx", None)
+            return int(getattr(ctx, "tool_call_count", 0))
+        except Exception:
+            return 0
+
+    def _session_plan_mode(self, active: str, sid: str) -> bool:
+        if not active or active not in self.agents:
+            return False
+        try:
+            ctx = getattr(self.agents[active], "ctx", None)
+            return bool(getattr(ctx, "plan_mode", False))
+        except Exception:
+            return False
+
     def _persist_active_runtime_state(self) -> None:
         active = self.active or ""
         if not active or active not in self.agents:
@@ -745,6 +777,51 @@ class BridgeServer:
                 persist(sid)
             except Exception:
                 pass
+
+    def _session_key(self, active: str, sid: str) -> tuple[str, str] | None:
+        if not active or not sid:
+            return None
+        return (active, sid)
+
+    def _recent_rag_query_items(self, active: str, sid: str) -> list[dict[str, Any]]:
+        key = self._session_key(active, sid)
+        if key is None:
+            return []
+        return [dict(item) for item in self._recent_rag_queries.get(key, [])]
+
+    def _remember_rag_query(self, active: str, sid: str, item: dict[str, Any]) -> None:
+        key = self._session_key(active, sid)
+        if key is None:
+            return
+        query = str(item.get("query") or "").strip()
+        if not query:
+            return
+        payload = dict(item)
+        hits = payload.get("hits")
+        if isinstance(hits, list):
+            payload["hits"] = [dict(entry) for entry in hits[:8] if isinstance(entry, dict)]
+        history = self._recent_rag_queries.setdefault(key, [])
+        history.insert(0, payload)
+        deduped: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for existing in history:
+            dedupe_key = (
+                str(existing.get("query") or "").strip().lower(),
+                json.dumps(existing.get("repo_filter") or [], ensure_ascii=False),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            deduped.append(existing)
+            if len(deduped) >= 6:
+                break
+        self._recent_rag_queries[key] = deduped
+
+    def _clear_recent_rag_queries(self, active: str, sid: str) -> None:
+        key = self._session_key(active, sid)
+        if key is None:
+            return
+        self._recent_rag_queries.pop(key, None)
 
     def _repo_library(self) -> list[dict[str, Any]]:
         try:
@@ -777,6 +854,151 @@ class BridgeServer:
                 return repo
         return None
 
+    def _repo_chunk_count(self, agent: Any, repo_id: str) -> int | None:
+        clean_repo_id = str(repo_id or "").strip()
+        if not clean_repo_id:
+            return None
+        try:
+            memory = getattr(agent, "memory", None)
+            if memory is None:
+                return None
+            ensure_doc_db = getattr(memory, "_ensure_doc_db", None)
+            if callable(ensure_doc_db):
+                ensure_doc_db()
+            doc_db = getattr(memory, "_doc_db", None)
+            if doc_db is None:
+                return None
+            return int(doc_db.count(where={"repo_id": clean_repo_id}) or 0)
+        except Exception:
+            return None
+
+    def _repo_ingest_settings(self, agent: Any) -> dict[str, Any]:
+        config = getattr(agent, "config", None)
+        memory = getattr(agent, "memory", None)
+        embedding_model_name = str(
+            getattr(memory, "_embedding_model_name", "")
+            or getattr(config, "embedding_model", "")
+            or ""
+        ).strip()
+        vector_backend = str(getattr(config, "rag_vector_backend", "") or "").strip()
+        return {
+            "vector_path": str(RAG_VECTOR_PATH),
+            "embedding_model_name": embedding_model_name or None,
+            "vector_backend": vector_backend or None,
+        }
+
+    def _rag_inventory_snapshot(
+        self,
+        agent: Any,
+        active_repos: list[dict[str, Any]],
+        repo_library: list[dict[str, Any]],
+        retrieval_insights: list[dict[str, Any]],
+        rag_docs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        settings = self._repo_ingest_settings(agent)
+        repo_entries = sorted(
+            [
+                {
+                    "repo_id": str(item.get("id") or "").strip(),
+                    "repo_name": str(item.get("name") or item.get("id") or "").strip(),
+                    "chunks": _safe_int(item.get("chunks_added")),
+                    "files": _safe_int(item.get("files_processed")),
+                    "last_ingested_at": str(item.get("last_ingested_at") or "").strip(),
+                }
+                for item in repo_library
+                if isinstance(item, dict)
+                and (
+                    str(item.get("id") or "").strip()
+                    or str(item.get("name") or "").strip()
+                    or _safe_int(item.get("chunks_added")) > 0
+                )
+            ],
+            key=lambda item: (-int(item.get("chunks") or 0), str(item.get("repo_name") or "")),
+        )
+        active_repo_ids = {
+            str(item.get("id") or "").strip()
+            for item in active_repos
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
+        return {
+            "vector_path": settings.get("vector_path") or str(RAG_VECTOR_PATH),
+            "vector_backend": settings.get("vector_backend") or "unknown",
+            "active_doc_count": len(rag_docs),
+            "active_doc_chunks": sum(_safe_int(item.get("chunks")) for item in rag_docs),
+            "repo_count": len(repo_entries),
+            "active_repo_count": len(active_repo_ids),
+            "repo_chunks": sum(int(item.get("chunks") or 0) for item in repo_entries),
+            "retrieval_count": len(retrieval_insights),
+            "legacy_paths": [
+                str(path)
+                for path in ((ROOT_DIR / "rag_docs.vector"),)
+                if path.exists() and path.resolve() != RAG_VECTOR_PATH.resolve()
+            ],
+            "top_repos": repo_entries[:6],
+        }
+
+    def _repo_needs_ingest(self, agent: Any, repo: dict[str, Any]) -> bool:
+        actual_chunk_count = self._repo_chunk_count(agent, str(repo.get("id") or ""))
+        if actual_chunk_count is not None:
+            return actual_chunk_count <= 0
+        return int(repo.get("chunks_added", 0) or 0) <= 0
+
+    def _ingest_repo_record(
+        self,
+        agent: Any,
+        repo: dict[str, Any],
+        *,
+        glob_pattern: str,
+        max_files: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        payload = ingest_repo(
+            str(repo.get("path") or ""),
+            name=str(repo.get("name") or ""),
+            base_dir=ROOT_DIR,
+            glob_pattern=glob_pattern,
+            max_files=max_files,
+            vector_path=self._repo_ingest_settings(agent)["vector_path"],
+            embedding_model_name=self._repo_ingest_settings(agent)["embedding_model_name"],
+            vector_backend=self._repo_ingest_settings(agent)["vector_backend"],
+        )
+        updated_repo = dict(payload.get("repo") or repo)
+        if str(payload.get("status") or "").lower() in {"ok", "partial"}:
+            _remember_rag_doc(
+                agent,
+                path=str(updated_repo.get("path") or ""),
+                source_label=f"repo {updated_repo.get('name', updated_repo.get('id', ''))}",
+                chunks=_safe_int((payload.get("ingest") or {}).get("total_chunks_added")),
+                token_count=_estimate_token_count(payload.get("ingest") or {}),
+                kind="repo",
+            )
+        return payload, updated_repo
+
+    def _auto_ingest_repos(
+        self,
+        agent: Any,
+        repos: list[dict[str, Any]],
+        *,
+        glob_pattern: str,
+        max_files: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        updated_repos: list[dict[str, Any]] = []
+        reports: list[dict[str, Any]] = []
+        for repo in repos:
+            if not isinstance(repo, dict):
+                continue
+            if not self._repo_needs_ingest(agent, repo):
+                updated_repos.append(repo)
+                continue
+            payload, updated_repo = self._ingest_repo_record(
+                agent,
+                repo,
+                glob_pattern=glob_pattern,
+                max_files=max_files,
+            )
+            updated_repos.append(updated_repo)
+            reports.append({"repo": updated_repo, "payload": payload})
+        return updated_repos, reports
+
     def _preview_skill_selection(
         self,
         agent: Any,
@@ -799,9 +1021,7 @@ class BridgeServer:
                 for tool in iter_tools()
                 if str(getattr(tool, "name", "") or "").strip()
             ]
-            forced_ids = list(
-                dict.fromkeys(getattr(tool_registry, "_forced_skill_ids", []) or [])
-            )
+            forced_ids = list(dict.fromkeys(getattr(tool_registry, "_forced_skill_ids", []) or []))
             selection = catalog.route_query_to_skills(
                 query,
                 available_tool_names,
@@ -831,13 +1051,23 @@ class BridgeServer:
         wrote_files: bool,
     ) -> str:
         text = f"{query}\n{response}".lower()
-        if any(token in text for token in ("bug", "fix", "error", "failing", "broken", "regression", "wrong")):
+        if any(
+            token in text
+            for token in ("bug", "fix", "error", "failing", "broken", "regression", "wrong")
+        ):
             return "bugfix"
-        if any(token in text for token in ("refactor", "cleanup", "restructure", "rename", "simplif")):
+        if any(
+            token in text for token in ("refactor", "cleanup", "restructure", "rename", "simplif")
+        ):
             return "refactor"
-        if any(token in text for token in ("feature", "implement", "add support", "new capability", "introduc")):
+        if any(
+            token in text
+            for token in ("feature", "implement", "add support", "new capability", "introduc")
+        ):
             return "feature"
-        if any(token in text for token in ("decision", "trade-off", "tradeoff", "rationale", "why we")):
+        if any(
+            token in text for token in ("decision", "trade-off", "tradeoff", "rationale", "why we")
+        ):
             return "decision"
         if not wrote_files:
             return "discovery"
@@ -951,14 +1181,6 @@ class BridgeServer:
                 ag = self.agents[active]
                 tool_registry = getattr(ag, "tools", None)
                 if tool_registry is not None:
-                    # Keep counts stable by fully syncing the catalog before
-                    # reading counters. Without this, lazy-hydrated skills can
-                    # make the displayed number jump across turns.
-                    sync_fn = getattr(
-                        tool_registry, "_sync_catalog_with_registered_tools", None
-                    )
-                    if callable(sync_fn):
-                        sync_fn()
                     # ToolRegistry stores tools in ._tools dict
                     tool_dict = getattr(tool_registry, "_tools", None) or {}
                     tool_count = len(tool_dict)
@@ -972,30 +1194,29 @@ class BridgeServer:
                     # Skills are in ._catalog._skills dict
                     catalog = getattr(tool_registry, "_catalog", None)
                     if catalog is not None:
-                        # Fallback path when sync helper is unavailable.
-                        ensure_fn = getattr(catalog, "ensure_skill_catalog", None)
-                        if callable(ensure_fn) and not callable(sync_fn):
-                            ensure_fn()
                         skill_dict = getattr(catalog, "_skills", None) or {}
                         skill_count = len(skill_dict)
                         loaded_skills = sorted(
                             dict.fromkeys(
                                 str(
-                                    getattr(card, "name", None)
-                                    or getattr(card, "id", "")
-                                    or ""
+                                    getattr(card, "name", None) or getattr(card, "id", "") or ""
                                 ).strip()
                                 for card in skill_dict.values()
                                 if str(
-                                    getattr(card, "name", None)
-                                    or getattr(card, "id", "")
-                                    or ""
+                                    getattr(card, "name", None) or getattr(card, "id", "") or ""
                                 ).strip()
                             )
                         )
             except Exception:
                 pass
         repo_library = self._repo_library()
+        rag_inventory = self._rag_inventory_snapshot(
+            self.agents.get(active),
+            active_repos,
+            repo_library,
+            retrieval_insights,
+            rag_docs,
+        )
         return {
             "active": active,
             "session": sid,
@@ -1015,6 +1236,10 @@ class BridgeServer:
             "repo_library": repo_library,
             "mounted_paths": mounted_paths,
             "rag_docs": rag_docs,
+            "rag_inventory": rag_inventory,
+            "recent_rag_queries": self._recent_rag_query_items(active, sid),
+            "tool_call_count": self._session_tool_call_count(active, sid),
+            "plan_mode": self._session_plan_mode(active, sid),
         }
 
     def init(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -1129,6 +1354,7 @@ class BridgeServer:
             snap = self._state_snapshot()
             agents = ", ".join(snap.get("agents", []) or []) or "-"
             mcps = ", ".join(snap.get("mcp_servers", []) or []) or "-"
+            rag = dict(snap.get("rag_inventory") or {})
             pipeline = snap.get("pipeline")
             if pipeline:
                 ptxt = (
@@ -1149,8 +1375,162 @@ class BridgeServer:
                     f"tiktoken: {'enabled' if snap.get('tiktoken') else 'disabled'}",
                     f"repos: {len(snap.get('repo_library', []) or [])}",
                     f"active_repos: {len(snap.get('active_repos', []) or [])}",
+                    f"rag_backend: {rag.get('vector_backend', 'unknown')}",
+                    f"rag_chunks: {rag.get('repo_chunks', 0)}",
                 ]
             )
+
+        elif cmd == "/rag":
+            ag = self._active_agent()
+            active_name = self.active or ""
+            sid_text = self.sessions.get(active_name, "")
+            subcmd = args[0].lower() if args else "list"
+
+            if subcmd == "clear":
+                self._clear_recent_rag_queries(active_name, sid_text)
+                out.append("cleared recent RAG searches for this session")
+
+            elif subcmd == "list":
+                repo_ref = args[1] if len(args) > 1 else ""
+                repo = self._resolve_repo_ref(repo_ref) if repo_ref else None
+                raw_payload = ag.tools.call_tool(
+                    "rag_list",
+                    max_sources=10,
+                    include_paths=False,
+                    repo_id=str(repo.get("id") or "") if repo else "",
+                )
+                payload = _parse_tool_payload(raw_payload)
+                if str(payload.get("status") or "").lower() != "ok":
+                    out.append(f"rag list failed: {payload.get('error', 'unknown error')}")
+                else:
+                    out.append(
+                        "store: "
+                        f"{payload.get('vector_backend', 'unknown')} @ {payload.get('vector_path', str(RAG_VECTOR_PATH))}"
+                    )
+                    out.append(
+                        "chunks: "
+                        f"{payload.get('total_chunks', 0)} total · "
+                        f"{payload.get('non_artifact_chunks', 0)} source · "
+                        f"{payload.get('deleted_chunks', 0)} deleted"
+                    )
+                    out.append(
+                        "repos: "
+                        f"{payload.get('unique_repos', 0)} indexed · "
+                        f"{payload.get('returned_repos', 0)} shown"
+                    )
+                    for repo_row in list(payload.get("repos") or [])[:8]:
+                        name = str(
+                            repo_row.get("repo_name") or repo_row.get("repo_id") or "repo"
+                        ).strip()
+                        repo_id = str(repo_row.get("repo_id") or "").strip()
+                        label = name if not repo_id or repo_id == name else f"{name} ({repo_id})"
+                        out.append(
+                            f"  {label} · chunks={repo_row.get('artifact_free_chunks', repo_row.get('chunks', 0))} · paths={repo_row.get('unique_paths', 0)}"
+                        )
+                        sample_paths = list(repo_row.get("sample_paths") or [])
+                        if sample_paths:
+                            out.append(f"    sample: {', '.join(sample_paths[:3])}")
+                    sources = list(payload.get("sources") or [])
+                    if sources:
+                        source_preview = ", ".join(
+                            str(item.get("source") or "unknown") for item in sources[:5]
+                        )
+                        out.append(f"sources: {source_preview}")
+                    legacy_paths = list(payload.get("legacy_paths") or [])
+                    if legacy_paths:
+                        out.append("legacy paths: " + ", ".join(str(item) for item in legacy_paths))
+
+            elif subcmd == "search":
+                if len(args) < 2:
+                    out.append("usage: /rag search <query> [top_k]")
+                else:
+                    top_k = 5
+                    query_tokens = args[1:]
+                    if len(query_tokens) > 1:
+                        try:
+                            candidate = int(query_tokens[-1])
+                        except Exception:
+                            candidate = 0
+                        if candidate > 0:
+                            top_k = max(1, min(candidate, 12))
+                            query_tokens = query_tokens[:-1]
+                    query_text = " ".join(query_tokens).strip()
+                    if not query_text:
+                        out.append("usage: /rag search <query> [top_k]")
+                    else:
+                        raw_payload = ag.tools.call_tool(
+                            "rag_search",
+                            query=query_text,
+                            top_k=top_k,
+                        )
+                        payload = _parse_tool_payload(raw_payload)
+                        if str(payload.get("status") or "").lower() != "ok":
+                            out.append(
+                                f"rag search failed: {payload.get('error', 'unknown error')}"
+                            )
+                        else:
+                            hits = list(payload.get("results") or [])
+                            out.append(
+                                f"rag search: {query_text} · {payload.get('count', len(hits))} hit(s)"
+                            )
+                            hit_preview: list[dict[str, Any]] = []
+                            for index, row in enumerate(hits[:6], start=1):
+                                repo_name = str(
+                                    row.get("repo_name") or row.get("repo_id") or "global"
+                                ).strip()
+                                rel_path = str(
+                                    row.get("repo_rel_path")
+                                    or row.get("path")
+                                    or row.get("source")
+                                    or ""
+                                ).strip()
+                                distance = row.get("distance", 0)
+                                preview = str(row.get("preview") or "").strip().replace("\n", " ")
+                                out.append(
+                                    f"  {index}. {repo_name} · {rel_path or 'chunk'} · d={distance}"
+                                )
+                                if preview:
+                                    out.append(f"     {preview[:180]}")
+                                hit_preview.append(
+                                    {
+                                        "repo_name": repo_name,
+                                        "repo_id": str(row.get("repo_id") or "").strip(),
+                                        "path": rel_path,
+                                        "distance": distance,
+                                    }
+                                )
+                            if not hits:
+                                message = str(payload.get("message") or "no matches found").strip()
+                                out.append(message)
+                            graph_expansion = list(payload.get("graph_expansion") or [])
+                            if graph_expansion:
+                                summary = []
+                                for item in graph_expansion[:3]:
+                                    repo_id = str(item.get("repo_id") or "repo").strip()
+                                    related_files = list(item.get("related_files") or [])
+                                    summary.append(f"{repo_id}:{len(related_files)} graph file(s)")
+                                if summary:
+                                    out.append("graph expansion: " + " · ".join(summary))
+                            self._remember_rag_query(
+                                active_name,
+                                sid_text,
+                                {
+                                    "query": query_text,
+                                    "top_k": top_k,
+                                    "count": int(payload.get("count", len(hits)) or 0),
+                                    "repo_filter": list(payload.get("repo_filter") or []),
+                                    "hits": hit_preview,
+                                },
+                            )
+
+            else:
+                out.extend(
+                    [
+                        "usage: /rag list [repo_ref]",
+                        "       /rag search <query> [top_k]",
+                        "       /rag clear",
+                    ]
+                )
 
         elif cmd == "/skills-health":
             ag = self._active_agent()
@@ -1172,9 +1552,7 @@ class BridgeServer:
             )
             payload = _parse_tool_payload(raw)
             if str(payload.get("status", "")).lower() != "ok":
-                out.append(
-                    f"skills_health failed: {payload.get('error', 'unknown error')}"
-                )
+                out.append(f"skills_health failed: {payload.get('error', 'unknown error')}")
             else:
                 paths = payload.get("paths", {}) or {}
                 discovery = payload.get("discovery", {}) or {}
@@ -1255,9 +1633,7 @@ class BridgeServer:
                 out.append("agents:")
                 for name in self.agents:
                     mark = " ◀" if name == self.active else ""
-                    mcp = [
-                        c.name for c in getattr(self.agents[name], "_mcp_clients", [])
-                    ]
+                    mcp = [c.name for c in getattr(self.agents[name], "_mcp_clients", [])]
                     mcp_tag = f"  mcp: {', '.join(mcp)}" if mcp else ""
                     out.append(f"  {name}{mark}{mcp_tag}")
 
@@ -1271,9 +1647,7 @@ class BridgeServer:
             else:
                 self.active = args[0]
                 self.sessions.setdefault(self.active, _new_session_id())
-                out.append(
-                    f"switched to '{self.active}' · {self.sessions[self.active]}"
-                )
+                out.append(f"switched to '{self.active}' · {self.sessions[self.active]}")
 
         elif cmd == "/pipeline":
             if args and args[0].lower() == "stop":
@@ -1288,9 +1662,7 @@ class BridgeServer:
                 if len(args) >= 3:
                     rounds = max(1, int(args[2]))
                 self.pipeline = {"a": args[0], "b": args[1], "rounds": rounds}
-                out.append(
-                    f"pipeline: {args[0]} -> {args[1]} x{rounds} (send message to run)"
-                )
+                out.append(f"pipeline: {args[0]} -> {args[1]} x{rounds} (send message to run)")
 
         elif cmd == "/context":
             ag = self._active_agent()
@@ -1300,10 +1672,7 @@ class BridgeServer:
                 query = " ".join(args[1:]).strip()
                 preview = ag.preview_prompt_context(query, sid)
                 out.append(f"session: {preview.get('session_id', sid)}")
-                out.append(
-                    "classification: "
-                    f"{preview.get('classified_as', 'execution')}"
-                )
+                out.append(f"classification: {preview.get('classified_as', 'execution')}")
                 domains = preview.get("domain_groups") or []
                 if domains:
                     out.append(f"domain tools: {', '.join(str(item) for item in domains)}")
@@ -1314,10 +1683,7 @@ class BridgeServer:
                     f"pre-trim={preview.get('untrimmed_message_count', 0)}, "
                     f"limit={preview.get('history_limit', 0)})"
                 )
-                out.append(
-                    "context token budget: "
-                    f"{preview.get('context_token_budget', 0)}"
-                )
+                out.append(f"context token budget: {preview.get('context_token_budget', 0)}")
                 out.append("")
                 out.append("## System Prompt")
                 out.append("")
@@ -1406,9 +1772,7 @@ class BridgeServer:
             else:
                 out.append(f"sessions ({len(sess_list)}):")
                 for sid, ts in sess_list:
-                    mark = (
-                        " ◀" if sid == self.sessions.get(self.active or "", "") else ""
-                    )
+                    mark = " ◀" if sid == self.sessions.get(self.active or "", "") else ""
                     short = sid[:24] + ("…" if len(sid) > 24 else "")
                     out.append(f"  {short}  {ts}{mark}")
 
@@ -1418,9 +1782,7 @@ class BridgeServer:
             else:
                 ag = self._active_agent()
                 sess_list = ag.list_sessions()
-                matched = [
-                    s for s, _ in sess_list if s == args[0] or s.startswith(args[0])
-                ]
+                matched = [s for s, _ in sess_list if s == args[0] or s.startswith(args[0])]
                 if not matched:
                     out.append(f"no match for '{args[0]}'")
                 elif len(matched) > 1:
@@ -1624,11 +1986,7 @@ class BridgeServer:
                 raw_result = ag.tools.call_tool(
                     "docling_add_file", path=file_path, source_label=source_label
                 )
-                parsed = (
-                    json.loads(raw_result)
-                    if isinstance(raw_result, str)
-                    else raw_result
-                )
+                parsed = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
                 if parsed.get("status") == "ok":
                     _remember_rag_doc(
                         ag,
@@ -1658,11 +2016,7 @@ class BridgeServer:
                     glob=glob_pattern,
                     max_files=max_files,
                 )
-                parsed = (
-                    json.loads(raw_result)
-                    if isinstance(raw_result, str)
-                    else raw_result
-                )
+                parsed = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
                 if parsed.get("status") == "ok":
                     _remember_rag_doc(
                         ag,
@@ -1677,9 +2031,7 @@ class BridgeServer:
                         f"({parsed.get('files_processed', 0)} files, {parsed.get('total_chunks_added', 0)} chunks)"
                     )
                 else:
-                    out.append(
-                        f"upload-dir failed: {parsed.get('error', 'unknown error')}"
-                    )
+                    out.append(f"upload-dir failed: {parsed.get('error', 'unknown error')}")
 
         elif cmd == "/repo":
             ag = self._active_agent()
@@ -1745,13 +2097,16 @@ class BridgeServer:
                     repo_name = " ".join(args[2:]).strip()
                     try:
                         repo = register_repo(repo_path, name=repo_name)
-                        repo = update_repo(
-                            str(repo.get("id") or ""),
-                            last_used_at=datetime.datetime.now(datetime.timezone.utc)
-                            .replace(microsecond=0)
-                            .isoformat()
-                            .replace("+00:00", "Z"),
-                        ) or repo
+                        repo = (
+                            update_repo(
+                                str(repo.get("id") or ""),
+                                last_used_at=datetime.datetime.now(datetime.timezone.utc)
+                                .replace(microsecond=0)
+                                .isoformat()
+                                .replace("+00:00", "Z"),
+                            )
+                            or repo
+                        )
                         merged = [repo]
                         merged.extend(
                             item
@@ -1760,13 +2115,28 @@ class BridgeServer:
                             != str(repo.get("id") or "").strip()
                         )
                         _set_active_repo_records(ag, merged)
-                        self._persist_active_runtime_state()
-                        out.append(
-                            f"repo added: {repo.get('id', '?')} · {repo.get('name', '?')}"
+                        merged, auto_reports = self._auto_ingest_repos(
+                            ag,
+                            merged,
+                            glob_pattern="**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}",
+                            max_files=120,
                         )
+                        _set_active_repo_records(ag, merged)
+                        self._persist_active_runtime_state()
+                        out.append(f"repo added: {repo.get('id', '?')} · {repo.get('name', '?')}")
                         out.append(f"path: {repo.get('path', '-')}")
                         out.append("active for this session: yes")
-                        out.append("next: /repo ingest <repo_id>")
+                        if auto_reports:
+                            report = auto_reports[0]
+                            payload = dict(report.get("payload") or {})
+                            ingest = dict(payload.get("ingest") or {})
+                            out.append(
+                                "auto-ingested: "
+                                f"{_safe_int(ingest.get('files_processed'))} files · "
+                                f"{_safe_int(ingest.get('total_chunks_added'))} chunks"
+                            )
+                        else:
+                            out.append("next: /repo ingest <repo_id>")
                     except Exception as exc:
                         out.append(f"repo add failed: {exc}")
 
@@ -1802,9 +2172,7 @@ class BridgeServer:
                                 resolved.append(repo)
                                 update_repo(
                                     str(repo.get("id") or ""),
-                                    last_used_at=datetime.datetime.now(
-                                        datetime.timezone.utc
-                                    )
+                                    last_used_at=datetime.datetime.now(datetime.timezone.utc)
                                     .replace(microsecond=0)
                                     .isoformat()
                                     .replace("+00:00", "Z"),
@@ -1812,6 +2180,12 @@ class BridgeServer:
                         if missing:
                             out.append("missing repos: " + ", ".join(missing))
                         if resolved:
+                            resolved, auto_reports = self._auto_ingest_repos(
+                                ag,
+                                resolved,
+                                glob_pattern="**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,md,toml,yaml,yml,json,sql,sh}",
+                                max_files=120,
+                            )
                             _set_active_repo_records(ag, resolved)
                             self._persist_active_runtime_state()
                             out.append(
@@ -1821,6 +2195,24 @@ class BridgeServer:
                                     for item in resolved
                                 )
                             )
+                            for report in auto_reports:
+                                payload = dict(report.get("payload") or {})
+                                ingest = dict(payload.get("ingest") or {})
+                                repo_report = dict(report.get("repo") or {})
+                                status = str(payload.get("status") or "").lower()
+                                if status in {"ok", "partial"}:
+                                    out.append(
+                                        "auto-ingested: "
+                                        f"{repo_report.get('id', '?')} · "
+                                        f"{_safe_int(ingest.get('files_processed'))} files · "
+                                        f"{_safe_int(ingest.get('total_chunks_added'))} chunks"
+                                    )
+                                else:
+                                    out.append(
+                                        "auto-ingest failed: "
+                                        f"{repo_report.get('id', '?')} · "
+                                        f"{payload.get('errors', [payload.get('error', 'unknown error')])[0]}"
+                                    )
                         elif not missing:
                             out.append("no repos resolved")
 
@@ -1844,70 +2236,21 @@ class BridgeServer:
                             out.append(f"invalid max_files '{args[3]}', using 120")
 
                         try:
-                            promote_raw = ag.run_tool_direct(
-                                "rag_promote_paths",
-                                {
-                                    "paths": json.dumps(
-                                        [str(repo.get("path") or "")], ensure_ascii=False
-                                    ),
-                                    "recursive": True,
-                                    "glob": glob_pattern,
-                                    "chunk_size": 400,
-                                    "overlap": 0.2,
-                                    "max_files": max_files,
-                                    "repo_id": str(repo.get("id") or ""),
-                                    "repo_name": str(repo.get("name") or ""),
-                                    "repo_root": str(repo.get("path") or ""),
-                                },
-                                session_id=sid,
-                                persist_to_history=True,
+                            parsed, updated = self._ingest_repo_record(
+                                ag,
+                                repo,
+                                glob_pattern=glob_pattern,
+                                max_files=max_files,
                             )
-                            parsed = _parse_tool_payload(promote_raw)
                         except Exception as exc:
                             parsed = {"status": "error", "error": str(exc)}
+                            updated = repo
 
-                        if str(parsed.get("status", "")).lower() == "ok":
-                            files_processed = _safe_int(parsed.get("files_processed"))
-                            chunks_added = _safe_int(parsed.get("total_chunks_added"))
-                            graph_payload: dict[str, Any]
-                            try:
-                                graph_payload = build_repo_graph(
-                                    repo,
-                                    glob_pattern=glob_pattern,
-                                    max_files=max_files,
-                                    exclude="",
-                                )
-                            except Exception as exc:
-                                graph_payload = {"status": "error", "error": str(exc)}
-                            updated = update_repo(
-                                str(repo.get("id") or ""),
-                                last_ingested_at=datetime.datetime.now(
-                                    datetime.timezone.utc
-                                )
-                                .replace(microsecond=0)
-                                .isoformat()
-                                .replace("+00:00", "Z"),
-                                last_used_at=datetime.datetime.now(
-                                    datetime.timezone.utc
-                                )
-                                .replace(microsecond=0)
-                                .isoformat()
-                                .replace("+00:00", "Z"),
-                                files_processed=files_processed,
-                                chunks_added=chunks_added,
-                                glob=glob_pattern,
-                                last_graph_built_at=datetime.datetime.now(
-                                    datetime.timezone.utc
-                                )
-                                .replace(microsecond=0)
-                                .isoformat()
-                                .replace("+00:00", "Z")
-                                if str(graph_payload.get("status", "")).lower() == "ok"
-                                else "",
-                                graph_nodes=_safe_int(graph_payload.get("nodes")),
-                                graph_edges=_safe_int(graph_payload.get("edges")),
-                                graph_symbols=_safe_int(graph_payload.get("symbols")),
-                            ) or repo
+                        if str(parsed.get("status", "")).lower() in {"ok", "partial"}:
+                            ingest_payload = dict(parsed.get("ingest") or {})
+                            graph_payload = dict(parsed.get("graph") or {})
+                            files_processed = _safe_int(ingest_payload.get("files_processed"))
+                            chunks_added = _safe_int(ingest_payload.get("total_chunks_added"))
                             merged = [updated]
                             merged.extend(
                                 item
@@ -1966,9 +2309,7 @@ class BridgeServer:
                             ]
                             _set_active_repo_records(ag, kept_active)
                             self._persist_active_runtime_state()
-                            out.append(
-                                f"repo removed from library: {removed.get('id', '?')}"
-                            )
+                            out.append(f"repo removed from library: {removed.get('id', '?')}")
                             out.append("note: existing indexed RAG chunks were left intact")
 
             else:
@@ -1991,8 +2332,7 @@ class BridgeServer:
                         (
                             tool
                             for tool in ctx7_tools
-                            if "resolve" in tool.name.lower()
-                            and "library" in tool.name.lower()
+                            if "resolve" in tool.name.lower() and "library" in tool.name.lower()
                         ),
                         None,
                     )
@@ -2024,10 +2364,7 @@ class BridgeServer:
                         resolve_args: dict[str, Any] = {}
                         for pname in resolve_params:
                             lname = pname.lower()
-                            if any(
-                                token in lname
-                                for token in ("query", "library", "name", "id")
-                            ):
+                            if any(token in lname for token in ("query", "library", "name", "id")):
                                 resolve_args[pname] = library
                         if not resolve_args:
                             if resolve_params:
@@ -2092,8 +2429,7 @@ class BridgeServer:
                                     docs_payload = _parse_json_dict(docs_raw)
                                     if (
                                         isinstance(docs_payload, dict)
-                                        and str(docs_payload.get("status", "")).lower()
-                                        == "error"
+                                        and str(docs_payload.get("status", "")).lower() == "error"
                                     ):
                                         out.append(
                                             "context7 docs failed: "
@@ -2111,8 +2447,7 @@ class BridgeServer:
                                         )
                                         if len(docs_text) > 12000:
                                             docs_text = (
-                                                docs_text[:12000].rstrip()
-                                                + "\n...[truncated]"
+                                                docs_text[:12000].rstrip() + "\n...[truncated]"
                                             )
                                         out.append(f"context7 library: {library_id}")
                                         out.append(
@@ -2158,9 +2493,7 @@ class BridgeServer:
                     for item in unstaged_items
                     if isinstance(item, dict)
                 )
-                files.extend(
-                    str(item).strip() for item in untracked_items if str(item).strip()
-                )
+                files.extend(str(item).strip() for item in untracked_items if str(item).strip())
                 uniq_files = [f for f in dict.fromkeys(files) if f]
                 if uniq_files:
                     preview = ", ".join(uniq_files[:20])
@@ -2168,9 +2501,7 @@ class BridgeServer:
                         preview += f" … (+{len(uniq_files) - 20} more)"
                     out.append(f"files: {preview}")
             else:
-                out.append(
-                    f"git_status failed: {status.get('error', 'unknown error')}"
-                )
+                out.append(f"git_status failed: {status.get('error', 'unknown error')}")
 
             diff_raw = ag.tools.call_tool(
                 "git_diff",
@@ -2261,10 +2592,7 @@ class BridgeServer:
                 return
 
             path = str(
-                payload.get("path")
-                or tool_args.get("path")
-                or tool_args.get("file_path")
-                or ""
+                payload.get("path") or tool_args.get("path") or tool_args.get("file_path") or ""
             ).strip()
             if not path:
                 return
@@ -2312,7 +2640,8 @@ class BridgeServer:
                 _emit_file_diff(name, tool_args, info)
                 if (
                     not written_paths
-                    and name in {
+                    and name
+                    in {
                         "write_file",
                         "edit_file",
                         "apply_edit_block",
@@ -2422,15 +2751,17 @@ class BridgeServer:
             return {"pipeline": True, "turns": turns, "state": state}
 
         ag = self._active_agent()
-        skill_ids, selected_tools = self._preview_skill_selection(ag, raw)
-        if skill_ids or selected_tools:
-            self._emit(
-                "skill",
-                {
-                    "skill_ids": skill_ids,
-                    "selected_tools": selected_tools,
-                },
-            )
+        classification = classify_turn(raw)
+        if classification.intent not in {"social", "informational"}:
+            skill_ids, selected_tools = self._preview_skill_selection(ag, raw)
+            if skill_ids or selected_tools:
+                self._emit(
+                    "skill",
+                    {
+                        "skill_ids": skill_ids,
+                        "selected_tools": selected_tools,
+                    },
+                )
         self._emit("phase", {"state": "thinking", "note": "running agent"})
         run_resp = ag.run(
             raw,
@@ -2439,7 +2770,6 @@ class BridgeServer:
             thinking_callback=_thinking_token,
             tool_callback=_tool,
             repair_callback=_repair,
-            decision_callback=_decision,
         )
         response_text = str(getattr(run_resp, "final_response", "") or "")
         tool_calls_payload: list[dict[str, Any]] = []

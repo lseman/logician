@@ -144,7 +144,7 @@ mem_record(
     obs_type="bugfix",
     title="write_file now normalises CRLF line endings",
     content="Problem: …\nFix: …\nHow to apply: …",
-    files=["src/tools/core/files.py"],
+   files=["src/tools/core/FileReadTool/tool.py", "src/tools/core/FileEditTool/tool.py"],
 )
 ```
 

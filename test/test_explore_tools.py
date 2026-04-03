@@ -4,12 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.tools.core import find_symbol, get_file_outline
+
 
 class ExploreToolTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.explore_mod = importlib.import_module(
-            "skills.coding.explore.explore"
-        )
+        self.explore_mod = importlib.import_module("skills.coding.explore.explore")
 
     def test_get_file_outline_for_typescript_includes_imports_and_symbols(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -28,7 +28,7 @@ class ExploreToolTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            payload = json.loads(self.explore_mod.get_file_outline(str(target)))
+            payload = get_file_outline(str(target))
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["language"], "ts")
@@ -53,7 +53,7 @@ class ExploreToolTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            payload = json.loads(self.explore_mod.get_file_outline(str(target)))
+            payload = get_file_outline(str(target))
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["language"], "rs")
@@ -69,23 +69,16 @@ class ExploreToolTests(unittest.TestCase):
             web_dir.mkdir()
             rust_dir.mkdir()
             (web_dir / "app.ts").write_text(
-                "export function renderApp() {\n"
-                "  return 'ok'\n"
-                "}\n",
+                "export function renderApp() {\n  return 'ok'\n}\n",
                 encoding="utf-8",
             )
             (rust_dir / "lib.rs").write_text(
-                "pub struct Server;\n\n"
-                "pub fn run() {}\n",
+                "pub struct Server;\n\npub fn run() {}\n",
                 encoding="utf-8",
             )
 
-            ts_payload = json.loads(
-                self.explore_mod.find_symbol("renderApp", directory=str(root))
-            )
-            rust_payload = json.loads(
-                self.explore_mod.find_symbol("Server", directory=str(root))
-            )
+            ts_payload = find_symbol("renderApp", directory=str(root))
+            rust_payload = find_symbol("Server", directory=str(root))
 
         self.assertEqual(ts_payload["status"], "ok")
         self.assertEqual(ts_payload["count"], 1)
@@ -112,7 +105,7 @@ class ExploreToolTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            payload = json.loads(self.explore_mod.find_symbol("Server", directory=str(root)))
+            payload = find_symbol("Server", directory=str(root))
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["matches"][0]["file"], "src/server.py")
@@ -127,9 +120,7 @@ class ExploreToolTests(unittest.TestCase):
             src_dir.mkdir()
             doc_dir.mkdir()
             (src_dir / "server.py").write_text(
-                "ServerConfig = {}\n"
-                "def load_server_config():\n"
-                "    return ServerConfig\n",
+                "ServerConfig = {}\ndef load_server_config():\n    return ServerConfig\n",
                 encoding="utf-8",
             )
             (doc_dir / "notes.md").write_text(

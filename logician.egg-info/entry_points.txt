@@ -1,5 +1,0 @@
-[console_scripts]
-logician-bridge = logician_bridge:main
-logician-messaging = logician_messaging:main
-logician-repo-ingest = src.repo_ingest:main
-logician-web = apps.runners.web_ui:main

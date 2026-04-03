@@ -77,7 +77,12 @@ def test_ingest_repo_still_builds_graph_when_rag_ingest_fails(
     repo_path = _make_repo(tmp_path)
     monkeypatch.setattr(
         "src.repo_ingest._ingest_repo_documents",
-        lambda **_kwargs: {"status": "error", "error": "boom", "files_processed": 0, "total_chunks_added": 0},
+        lambda **_kwargs: {
+            "status": "error",
+            "error": "boom",
+            "files_processed": 0,
+            "total_chunks_added": 0,
+        },
     )
 
     payload = ingest_repo(repo_path, name="Demo Repo")
@@ -124,3 +129,56 @@ def test_ingest_repo_clones_git_url_into_managed_checkout(
     assert repo_path.exists()
     assert repo_path.parent == tmp_path / ".logician" / "repos" / "_checkouts"
     assert (repo_path / ".git").exists()
+
+
+def test_ingest_repo_uses_workspace_agent_config_for_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_path = _make_repo(tmp_path)
+    (tmp_path / "agent_config.json").write_text(
+        json.dumps(
+            {
+                "embedding_model": "demo-embedding-model",
+                "rag_vector_backend": "chromadb",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, str] = {}
+
+    def fake_delete_existing_repo_chunks(**kwargs):
+        captured["delete_embedding_model_name"] = kwargs["embedding_model_name"]
+        captured["delete_vector_backend"] = kwargs["vector_backend"]
+        return 0
+
+    def fake_ingest_repo_documents(**kwargs):
+        captured["ingest_embedding_model_name"] = kwargs["embedding_model_name"]
+        captured["ingest_vector_backend"] = kwargs["vector_backend"]
+        return {
+            "status": "ok",
+            "files_processed": 2,
+            "total_chunks_added": 5,
+            "results": [],
+        }
+
+    monkeypatch.setattr(
+        "src.repo_ingest._delete_existing_repo_chunks",
+        fake_delete_existing_repo_chunks,
+    )
+    monkeypatch.setattr(
+        "src.repo_ingest._ingest_repo_documents",
+        fake_ingest_repo_documents,
+    )
+
+    payload = ingest_repo(repo_path, name="Demo Repo", base_dir=tmp_path)
+
+    assert payload["status"] == "ok"
+    assert payload["vector_backend"] == "chromadb"
+    assert payload["embedding_model_name"] == "demo-embedding-model"
+    assert captured["delete_vector_backend"] == "chromadb"
+    assert captured["ingest_vector_backend"] == "chromadb"
+    assert captured["delete_embedding_model_name"] == "demo-embedding-model"
+    assert captured["ingest_embedding_model_name"] == "demo-embedding-model"

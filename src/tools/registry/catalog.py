@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
-import contextlib
 import math
 import os
 import re
@@ -295,9 +295,7 @@ class TriggerSubstringFeature(SkillScoreFeature):
         if not query_l:
             ctx["trigger_phrase_hits_count"] = 0
             return 0.0
-        hits = sum(
-            1 for trigger in skill.triggers if trigger and trigger.lower() in query_l
-        )
+        hits = sum(1 for trigger in skill.triggers if trigger and trigger.lower() in query_l)
         ctx["trigger_phrase_hits_count"] = hits
         return float(hits)
 
@@ -478,9 +476,7 @@ class CompositeSkillScorer:
             if not delta:
                 continue
             total += delta
-            contributions[feature.name] = contributions.get(feature.name, 0.0) + float(
-                delta
-            )
+            contributions[feature.name] = contributions.get(feature.name, 0.0) + float(delta)
         return SkillScoreBreakdown(total=total, contributions=contributions)
 
 
@@ -515,6 +511,7 @@ class SkillManifest(TypedDict, total=False):
     example_queries: list[str]
     when_not_to_use: list[str]
     next_skills: list[str]
+    paths: list[str]
 
 
 class CodeBlockExtractor:
@@ -539,9 +536,7 @@ class SkillCatalog:
     # Bump when cache schema changes to force invalidation.
     _CACHE_VERSION = 11
 
-    def __init__(
-        self, *, skills_md_path: Path, skills_dir_path: Path, log: Any
-    ) -> None:
+    def __init__(self, *, skills_md_path: Path, skills_dir_path: Path, log: Any) -> None:
         self.skills_md_path = skills_md_path
         self.skills_dir_path = skills_dir_path
         self._log = log
@@ -692,9 +687,7 @@ class SkillCatalog:
     def set_active_lazy_skill_groups(self, groups: Sequence[str] | set[str]) -> None:
         self._active_lazy_skill_groups = {
             group
-            for group in (
-                self._normalize_lazy_skill_group_name(item) for item in (groups or [])
-            )
+            for group in (self._normalize_lazy_skill_group_name(item) for item in (groups or []))
             if group
         }
 
@@ -794,7 +787,9 @@ class SkillCatalog:
 
                 if rel_parts:
                     top_level = rel_parts[0]
-                    if self._is_lazy_skill_group_dir_name(top_level) and not self._is_lazy_skill_group_active(top_level):
+                    if self._is_lazy_skill_group_dir_name(
+                        top_level
+                    ) and not self._is_lazy_skill_group_active(top_level):
                         dirs[:] = []
                         continue
                 else:
@@ -875,9 +870,7 @@ class SkillCatalog:
             "skill_meta": dict(skill_meta),
         }
 
-    def hydrate_metadata_only_python_skills(
-        self, tools: Sequence[Any]
-    ) -> bool:
+    def hydrate_metadata_only_python_skills(self, tools: Sequence[Any]) -> bool:
         if not self._python_skill_metadata:
             return False
 
@@ -911,9 +904,7 @@ class SkillCatalog:
             ):
                 changed = True
 
-            preferred = [
-                name for name in card.preferred_tools if name in available_tool_names
-            ]
+            preferred = [name for name in card.preferred_tools if name in available_tool_names]
             if preferred and card.tool_names != preferred:
                 card.tool_names = list(preferred)
                 changed = True
@@ -922,9 +913,7 @@ class SkillCatalog:
             self._build_routing_index(cards)
         return changed
 
-    def _parse_superpowers_card(
-        self, source_path: Path, raw_content: str
-    ) -> SkillCard | None:
+    def _parse_superpowers_card(self, source_path: Path, raw_content: str) -> SkillCard | None:
         """Parse a Superpowers-format SKILL.md into a guidance-only SkillCard.
 
         These files:
@@ -1036,9 +1025,7 @@ class SkillCatalog:
             return False
         return False
 
-    def _parse_tool_backed_skill_card(
-        self, source_path: Path, raw_content: str
-    ) -> SkillCard:
+    def _parse_tool_backed_skill_card(self, source_path: Path, raw_content: str) -> SkillCard:
         manifest, body = self._split_frontmatter(raw_content)
         skill_id = self._skill_id_from_source(source_path)
         display_name = (
@@ -1048,9 +1035,7 @@ class SkillCatalog:
         description = str(manifest.get("description") or "").strip()
         summary = description or self._skill_summary(body)
         playbooks = [
-            sec["heading"]
-            for sec in self.parse_markdown_h2_sections(body)
-            if sec["heading"]
+            sec["heading"] for sec in self.parse_markdown_h2_sections(body) if sec["heading"]
         ]
         aliases = self._skill_aliases(skill_id, manifest)
         triggers = self._manifest_list(manifest, "triggers")
@@ -1063,6 +1048,7 @@ class SkillCatalog:
         example_queries = self._manifest_list(manifest, "example_queries")
         when_not_to_use = self._manifest_list(manifest, "when_not_to_use")
         next_skills = self._manifest_list(manifest, "next_skills")
+        paths = self._manifest_list(manifest, "paths")
         related_context = self._guidance_related_markdown_content(source_path)
         keywords = self._skill_keywords(
             summary,
@@ -1090,6 +1076,7 @@ class SkillCatalog:
             example_queries=example_queries,
             when_not_to_use=when_not_to_use,
             next_skills=next_skills,
+            paths=paths,
         )
 
     def _guidance_related_markdown_content(self, source_path: Path) -> str:
@@ -1212,9 +1199,7 @@ class SkillCatalog:
     ) -> SkillCard:
         meta = skill_meta if isinstance(skill_meta, dict) else {}
         display_name = str(meta.get("name") or "").strip() or skill_id.replace("_", " ").title()
-        default_summary = (
-            f"Tool-backed skill group '{display_name}' loaded from Python modules."
-        )
+        default_summary = f"Tool-backed skill group '{display_name}' loaded from Python modules."
         description = str(meta.get("description") or "").strip() or tool_desc or default_summary
         aliases = [skill_id.replace("_", " ")]
         aliases.extend(str(item).strip() for item in meta.get("aliases", []) if str(item).strip())
@@ -1604,9 +1589,7 @@ class SkillCatalog:
         self._routing_doc_lengths = doc_lengths
         self._bm25_doc_freq = dict(doc_freq)
         self._bm25_avg_doc_len = (
-            float(total_doc_len) / max(1, len(doc_lengths))
-            if doc_lengths
-            else 1.0
+            float(total_doc_len) / max(1, len(doc_lengths)) if doc_lengths else 1.0
         )
         self._dense_embedding_cache.clear()
 
@@ -1721,9 +1704,7 @@ class SkillCatalog:
             self._dense_model_disabled_reason = "sentence_transformers_missing"
             if _SENTENCE_TRANSFORMER_IMPORT_ERROR:
                 self._dense_model_disabled_reason = _SENTENCE_TRANSFORMER_IMPORT_ERROR
-            self._log.info(
-                "Dense routing disabled: sentence-transformers is not installed."
-            )
+            self._log.info("Dense routing disabled: sentence-transformers is not installed.")
             return None
         try:
             # Keep bridge trace clean when the model is materialized lazily
@@ -1783,9 +1764,7 @@ class SkillCatalog:
             return 0.0
         return float(sum(float(left[i]) * float(right[i]) for i in range(n)))
 
-    def _dense_similarity_map(
-        self, query: str, candidate_ids: Sequence[str]
-    ) -> dict[str, float]:
+    def _dense_similarity_map(self, query: str, candidate_ids: Sequence[str]) -> dict[str, float]:
         out = {sid: 0.0 for sid in candidate_ids}
         if not candidate_ids or not str(query or "").strip():
             return out
@@ -1869,9 +1848,11 @@ class SkillCatalog:
 
         recall_scores: dict[str, float] = {}
         for sid, skill in self._skills.items():
-            exact = 1.0 if (
-                skill.id.replace("_", " ") in query_l or skill.name.lower() in query_l
-            ) else 0.0
+            exact = (
+                1.0
+                if (skill.id.replace("_", " ") in query_l or skill.name.lower() in query_l)
+                else 0.0
+            )
             alias_hit = 0.0
             for alias in skill.aliases:
                 if not alias:
@@ -1884,9 +1865,11 @@ class SkillCatalog:
                 if alias_tokens and query_token_set.intersection(alias_tokens):
                     alias_hit = 1.0
                     break
-            tool_hit = 1.0 if any(
-                tool_name and tool_name.lower() in query_l for tool_name in skill.tool_names
-            ) else 0.0
+            tool_hit = (
+                1.0
+                if any(tool_name and tool_name.lower() in query_l for tool_name in skill.tool_names)
+                else 0.0
+            )
             fuzzy = self._fuzzy_similarity(query_l, self._routing_profiles.get(sid, ""))
             recall_scores[sid] = (
                 (bm25_norm.get(sid, 0.0) * 0.70)
@@ -1961,20 +1944,22 @@ class SkillCatalog:
                 alias_match = True
                 break
 
-        name_or_alias = 1.0 if (
-            skill.id.replace("_", " ") in query_l
-            or skill.name.lower() in query_l
-            or alias_match
-        ) else 0.0
+        name_or_alias = (
+            1.0
+            if (
+                skill.id.replace("_", " ") in query_l
+                or skill.name.lower() in query_l
+                or alias_match
+            )
+            else 0.0
+        )
         trigger_hits = sum(
             1 for trigger in skill.triggers if trigger and trigger.lower() in query_l
         )
         trigger_score = min(1.0, float(trigger_hits))
         if negated_text:
             negated_trigger_hits = sum(
-                1
-                for trigger in skill.triggers
-                if trigger and trigger.lower() in negated_text
+                1 for trigger in skill.triggers if trigger and trigger.lower() in negated_text
             )
             if negated_trigger_hits > 0:
                 trigger_score = 0.0
@@ -1986,11 +1971,7 @@ class SkillCatalog:
             1.0,
             self._example_query_score(query_tokens, query_l, skill) / 6.0,
         )
-        anti_hits = sum(
-            1
-            for anti in skill.anti_triggers
-            if anti and anti.lower() in query_l
-        )
+        anti_hits = sum(1 for anti in skill.anti_triggers if anti and anti.lower() in query_l)
         anti_penalty = min(1.0, float(anti_hits))
 
         negated_penalty = 0.0
@@ -2096,6 +2077,32 @@ class SkillCatalog:
     def get_last_skill_score_breakdown(self) -> dict[str, dict[str, Any]]:
         return {k: dict(v) for k, v in self._last_skill_score_breakdown.items()}
 
+    def _skill_paths_match_cwd(self, card: SkillCard) -> bool:
+        """Return True if the skill is active in the current working directory.
+
+        A skill with no ``paths:`` frontmatter key is always active.  When
+        ``paths:`` is set each entry is treated as a glob pattern and matched
+        against the absolute CWD string (and its parent directory names), so
+        entries like ``timeseries/``, ``**/*.csv``, or ``src/`` work as expected.
+        """
+        if not card.paths:
+            return True
+        import fnmatch
+
+        cwd = os.getcwd()
+        for pattern in card.paths:
+            pat = str(pattern or "").strip()
+            if not pat:
+                continue
+            # Match against full cwd, its base name, or any trailing component.
+            if (
+                fnmatch.fnmatch(cwd, f"*{pat}*")
+                or fnmatch.fnmatch(os.path.basename(cwd), pat.rstrip("/"))
+                or fnmatch.fnmatch(cwd, pat)
+            ):
+                return True
+        return False
+
     def route_query_to_skills(
         self,
         query: str,
@@ -2116,9 +2123,7 @@ class SkillCatalog:
             )
 
         threshold = (
-            self._routing_min_score
-            if min_score is None
-            else max(0.0, min(1.0, float(min_score)))
+            self._routing_min_score if min_score is None else max(0.0, min(1.0, float(min_score)))
         )
         query_ctx = self._build_query_score_context(query)
         available = set(available_tool_names)
@@ -2154,6 +2159,9 @@ class SkillCatalog:
         for sid in candidate_ids:
             skill = self._skills.get(sid)
             if skill is None:
+                continue
+            # Skip skills whose paths: filter doesn't match the current CWD.
+            if not self._skill_paths_match_cwd(skill):
                 continue
             usage_score, recency_score = usage_map.get(sid, (0.0, 0.0))
             score, contributions = self._score_candidate(
@@ -2198,9 +2206,7 @@ class SkillCatalog:
                     seen_tools.add(tool_name)
 
         fallback_tools = [
-            tool_name
-            for tool_name in available_tool_names
-            if tool_name not in seen_tools
+            tool_name for tool_name in available_tool_names if tool_name not in seen_tools
         ]
 
         return SkillSelection(
@@ -2310,13 +2316,13 @@ class SkillCatalog:
 
             added_for_skill = 0
             for rel_path, heading, excerpt in excerpts:
-                entry = f'  [{rel_path} :: {heading}] {excerpt}'
+                entry = f"  [{rel_path} :: {heading}] {excerpt}"
                 if len(entry) + 1 > remaining:
                     if added_for_skill == 0:
                         trim_budget = max(80, remaining - len(rel_path) - len(heading) - 12)
                         trimmed = excerpt[:trim_budget].rstrip()
                         if trimmed:
-                            entry = f'  [{rel_path} :: {heading}] {trimmed}'
+                            entry = f"  [{rel_path} :: {heading}] {trimmed}"
                         else:
                             break
                     else:
@@ -2370,9 +2376,7 @@ class SkillCatalog:
                 snippet = self._compact_markdown_excerpt(sec.get("body", ""), max_chars=520)
                 if not snippet:
                     continue
-                candidate_text = (
-                    f"{md_path.name} {heading} {snippet[:220]}".strip().lower()
-                )
+                candidate_text = f"{md_path.name} {heading} {snippet[:220]}".strip().lower()
                 ratio = self._fuzzy_similarity(query_l, candidate_text)
                 candidate_tokens = set(_skill_tokens(candidate_text))
                 overlap = 0.0
@@ -2434,9 +2438,7 @@ class SkillCatalog:
             rel_tokens = set(_skill_tokens(rel_text))
             overlap = 0.0
             if query_tokens and rel_tokens:
-                overlap = len(query_tokens.intersection(rel_tokens)) / max(
-                    1, len(query_tokens)
-                )
+                overlap = len(query_tokens.intersection(rel_tokens)) / max(1, len(query_tokens))
             score = (ratio * 0.7) + (overlap * 0.3)
             if path == source_path:
                 score += 0.4
@@ -2491,9 +2493,7 @@ class SkillCatalog:
             sections.append({"heading": heading, "body": body})
         return sections
 
-    def _parse_markdown_h2_sections_fallback(
-        self, content: str
-    ) -> list[MarkdownSection]:
+    def _parse_markdown_h2_sections_fallback(self, content: str) -> list[MarkdownSection]:
         sections: list[MarkdownSection] = []
         current_heading: str | None = None
         current_lines: list[str] = []
@@ -2778,9 +2778,7 @@ class SkillCatalog:
                 if isinstance(parsed, dict):
                     return {str(k): v for k, v in parsed.items()}  # type: ignore[return-value]
             except Exception as exc:
-                self._log.warning(
-                    "YAML frontmatter parse failed, using fallback: %s", exc
-                )
+                self._log.warning("YAML frontmatter parse failed, using fallback: %s", exc)
         return self._parse_frontmatter_lines_fallback(raw_yaml.splitlines())
 
     def _parse_frontmatter_lines_fallback(self, lines: list[str]) -> SkillManifest:
@@ -2836,9 +2834,7 @@ class SkillCatalog:
 
     def _extract_metadata(self, section: ToolSection) -> None:
         content = section["content"]
-        desc_match = re.search(
-            r"\*\*Description:\*\*\s*(.+?)(?:\n\n|\*\*|$)", content, re.DOTALL
-        )
+        desc_match = re.search(r"\*\*Description:\*\*\s*(.+?)(?:\n\n|\*\*|$)", content, re.DOTALL)
         section["description"] = desc_match.group(1).strip() if desc_match else ""
         section["parameters"] = self._parse_parameters(content)
 
@@ -2851,9 +2847,7 @@ class SkillCatalog:
             return params
 
         param_text = param_section.group(1)
-        param_pattern = re.compile(
-            r"[-*]\s+(\w+)\s+\(([^,]+),\s*(required|optional)\):\s*(.+)"
-        )
+        param_pattern = re.compile(r"[-*]\s+(\w+)\s+\(([^,]+),\s*(required|optional)\):\s*(.+)")
         for match in param_pattern.finditer(param_text):
             params.append(
                 ToolParameter(

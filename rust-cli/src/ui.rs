@@ -1,4 +1,7 @@
-use crate::app::{App, PanelFocus, ShortcutHint, SlashPopupEntry};
+use crate::app::{
+    ActivityEntry, ActivityState, App, PanelFocus, ProgressEntry, ShortcutHint,
+    SlashPopupEntry,
+};
 use crate::markdown::render_diff;
 use ratatui::{
     layout::{Constraint, Layout, Position, Rect},
@@ -14,10 +17,61 @@ use std::path::Path;
 
 const POPUP_BORDER_H: u16 = 2;
 const INPUT_BORDER_H: u16 = 2;
-const INPUT_MIN_H: u16 = INPUT_BORDER_H + 1;
+const INPUT_MIN_H: u16 = INPUT_BORDER_H + 2;
 const STATUS_BORDER_H: u16 = 1;
-const STATUS_TEXT_H: u16 = 1;
+const STATUS_TEXT_H: u16 = 4;
 const STATUS_TOTAL_H: u16 = STATUS_BORDER_H + STATUS_TEXT_H;
+
+// ── Color palette (One Dark-inspired) ────────────────────────────────────────
+const C_ACCENT: Color = Color::Rgb(97, 175, 239);  // soft blue  – focus rings, tools
+const C_PURPLE: Color = Color::Rgb(198, 120, 221); // soft purple – skills, booleans
+const C_GREEN:  Color = Color::Rgb(152, 195, 121); // soft green  – success, rag docs
+const C_GOLD:   Color = Color::Rgb(229, 192, 123); // warm gold   – prompt, warnings
+const C_ORANGE: Color = Color::Rgb(209, 154, 102); // copper      – numbers, repos
+const C_TEAL:   Color = Color::Rgb(86, 182, 194);  // teal        – retrieval accents
+const C_RED:    Color = Color::Rgb(224, 108, 117); // soft red    – errors, blocked
+const C_MUTED:  Color = Color::Rgb(130, 137, 145); // mid-gray    – labels, secondary
+const C_SUBTLE: Color = Color::Rgb(76, 82, 99);    // dark muted  – separators, branches
+const C_BORDER: Color = Color::Rgb(58, 64, 80);    // very dark   – panel border unfocused
+
+struct PanelSpec {
+    title: String,
+    focus: PanelFocus,
+    min_width: u16,
+    min_height: u16,
+    borders: Borders,
+}
+
+impl PanelSpec {
+    fn new(title: impl Into<String>, focus: PanelFocus) -> Self {
+        Self {
+            title: title.into(),
+            focus,
+            min_width: 4,
+            min_height: 4,
+            borders: Borders::ALL,
+        }
+    }
+}
+
+fn begin_panel(f: &mut Frame, app: &App, area: Rect, spec: PanelSpec) -> Option<Rect> {
+    if area.width < spec.min_width || area.height < spec.min_height {
+        return None;
+    }
+
+    let block = Block::default()
+        .title(spec.title)
+        .borders(spec.borders)
+        .border_style(panel_border_style(app, spec.focus));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+
+    Some(inner)
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -28,6 +82,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let popup_items = app.slash_popup_entries(8);
     let show_popup = !app.busy && app.slash_popup_visible() && !popup_items.is_empty();
     let requested_input_h = (app.input_line_count() as u16)
+        .saturating_add(1)
         .saturating_add(INPUT_BORDER_H)
         .max(INPUT_MIN_H);
 
@@ -39,13 +94,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.todo_on,
         app.tool_output_on,
         app.context_on,
+        app.rag_on,
     );
-    let (image_area, todo_area, tool_output_area, context_area) = split_panels(
+    let (image_area, todo_area, tool_output_area, context_area, rag_area) = split_panels(
         panels_area,
         app.has_image_preview(),
         app.todo_on,
         app.tool_output_on,
         app.context_on,
+        app.rag_on,
     );
 
     // Side-effect kept here but isolated — feeds scroll logic for this frame.
@@ -63,6 +120,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     if let Some(cx_area) = context_area {
         draw_context_panel(f, app, cx_area);
+    }
+    if let Some(rag_area) = rag_area {
+        draw_rag_panel(f, app, rag_area);
     }
     if show_popup {
         draw_slash_popup(f, app, popup_area, &popup_items);
@@ -115,8 +175,9 @@ fn split_chat_and_panels(
     show_todo: bool,
     show_tool_output: bool,
     show_context: bool,
+    show_rag: bool,
 ) -> (Rect, Option<Rect>) {
-    let panel_count = [show_image, show_todo, show_tool_output, show_context]
+    let panel_count = [show_image, show_todo, show_tool_output, show_context, show_rag]
         .into_iter()
         .filter(|enabled| *enabled)
         .count();
@@ -155,9 +216,10 @@ fn split_panels(
     show_todo: bool,
     show_tool_output: bool,
     show_context: bool,
-) -> (Option<Rect>, Option<Rect>, Option<Rect>, Option<Rect>) {
+    show_rag: bool,
+) -> (Option<Rect>, Option<Rect>, Option<Rect>, Option<Rect>, Option<Rect>) {
     let Some(area) = area else {
-        return (None, None, None, None);
+        return (None, None, None, None, None);
     };
 
     #[derive(Clone, Copy)]
@@ -166,6 +228,7 @@ fn split_panels(
         Todo,
         ToolOutput,
         Context,
+        Rag,
     }
 
     let mut kinds = Vec::new();
@@ -181,9 +244,12 @@ fn split_panels(
     if show_context {
         kinds.push(PanelKind::Context);
     }
+    if show_rag {
+        kinds.push(PanelKind::Rag);
+    }
 
     if kinds.is_empty() {
-        return (None, None, None, None);
+        return (None, None, None, None, None);
     }
 
     let count = kinds.len() as u32;
@@ -200,6 +266,7 @@ fn split_panels(
     let mut todo_area = None;
     let mut tool_output_area = None;
     let mut context_area = None;
+    let mut rag_area = None;
 
     for (idx, kind) in kinds.into_iter().enumerate() {
         match kind {
@@ -207,10 +274,11 @@ fn split_panels(
             PanelKind::Todo => todo_area = Some(chunks[idx]),
             PanelKind::ToolOutput => tool_output_area = Some(chunks[idx]),
             PanelKind::Context => context_area = Some(chunks[idx]),
+            PanelKind::Rag => rag_area = Some(chunks[idx]),
         }
     }
 
-    (image_area, todo_area, tool_output_area, context_area)
+    (image_area, todo_area, tool_output_area, context_area, rag_area)
 }
 
 // ── Messages panel ────────────────────────────────────────────────────────────
@@ -219,16 +287,99 @@ fn draw_messages(f: &mut Frame, app: &mut App, area: Rect) {
     if area.height == 0 {
         return;
     }
-    app.register_messages_area(area);
-    let para = Paragraph::new(app.visible_lines(area.height)).wrap(Wrap { trim: false });
+    let (lines, thinking_headers) = app.visible_transcript(area.height);
+    let header_rects = thinking_headers
+        .into_iter()
+        .map(|(message_idx, row)| {
+            (
+                message_idx,
+                Rect {
+                    x: area.x,
+                    y: area.y.saturating_add(row),
+                    width: area.width,
+                    height: 1,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    app.register_messages_area(area, header_rects);
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(para, area);
 }
 
-fn draw_image_panel(f: &mut Frame, app: &mut App, area: Rect) {
-    if area.width < 4 || area.height < 4 {
-        return;
+fn render_activity_stack(entries: &[ActivityEntry]) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if entries.is_empty() {
+        return lines;
     }
 
+    lines.push(Line::from(Span::styled(
+        "activity stack",
+        Style::default()
+            .fg(C_ACCENT)
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    for (idx, entry) in entries.iter().enumerate() {
+        let branch = if idx + 1 == entries.len() { "└─ " } else { "├─ " };
+        let mut spans = vec![
+            Span::styled(
+                branch.to_string(),
+                Style::default().fg(C_SUBTLE),
+            ),
+            Span::styled(
+                format!("#{} {}", entry.sequence, entry.name),
+                Style::default()
+                    .fg(entry.status.color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" · {}", match entry.status {
+                    ActivityState::Running => "running",
+                    ActivityState::Complete => "ok",
+                    ActivityState::Error => "error",
+                }),
+                Style::default().fg(Color::White),
+            ),
+        ];
+        if let Some(duration_ms) = entry.duration_ms {
+            spans.push(Span::styled(
+                format!(" · {}ms", duration_ms),
+                Style::default().fg(Color::Gray),
+            ));
+        }
+        if entry.cache_hit {
+            spans.push(Span::styled(
+                " · cached",
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        lines.push(Line::from(spans));
+
+        if let Some(summary) = entry.summary.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(summary.to_string(), Style::default().fg(Color::Gray)),
+            ]));
+        }
+        if let Some(detail) = entry.detail.as_deref() {
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(
+                    detail.to_string(),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM),
+                ),
+            ]));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines
+}
+
+fn draw_image_panel(f: &mut Frame, app: &mut App, area: Rect) {
     app.register_image_area(area);
 
     let path = app.image_preview_path().unwrap_or("").to_string();
@@ -236,17 +387,14 @@ fn draw_image_panel(f: &mut Frame, app: &mut App, area: Rect) {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("image");
-    let title = format!(" Image: {file_name} ");
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(panel_border_style(app, PanelFocus::Image));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    if inner.width < 2 || inner.height < 2 {
+    let Some(inner) = begin_panel(
+        f,
+        app,
+        area,
+        PanelSpec::new(format!(" Image: {file_name} "), PanelFocus::Image),
+    ) else {
         return;
-    }
+    };
 
     if let Err(err) = app.render_image_preview(f, inner) {
         let fallback = if path.is_empty() {
@@ -264,23 +412,21 @@ fn draw_image_panel(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_todo_panel(f: &mut Frame, app: &mut App, area: Rect) {
-    if area.width < 4 || area.height < 4 {
+    let Some(inner) = begin_panel(
+        f,
+        app,
+        area,
+        PanelSpec::new(" Task Checklist ", PanelFocus::Todo),
+    ) else {
         return;
-    }
-
-    let block = Block::default()
-        .title(" Task Checklist ")
-        .borders(Borders::ALL)
-        .border_style(panel_border_style(app, PanelFocus::Todo));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     if app.bridge_state.todo.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "  No active tasks.",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::ITALIC),
         )]));
     } else {
@@ -292,10 +438,10 @@ fn draw_todo_panel(f: &mut Frame, app: &mut App, area: Rect) {
                 _ => " [ ] ",
             };
             let color = match item.status.as_str() {
-                "completed" | "done" => Color::Green,
-                "in-progress" | "in_progress" | "doing" => Color::Yellow,
-                "blocked" => Color::Red,
-                _ => Color::Gray,
+                "completed" | "done" => C_GREEN,
+                "in-progress" | "in_progress" | "doing" => C_GOLD,
+                "blocked" => C_RED,
+                _ => C_MUTED,
             };
 
             lines.push(Line::from(vec![
@@ -333,10 +479,6 @@ fn draw_todo_panel(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
-    if area.width < 4 || area.height < 4 {
-        return;
-    }
-
     let title = if app.has_change_records() {
         format!(
             " Inspector (changes: {}) (Ctrl+R) ",
@@ -345,12 +487,14 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         " Inspector (Ctrl+R) ".to_string()
     };
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(panel_border_style(app, PanelFocus::ToolOutput));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let Some(inner) = begin_panel(
+        f,
+        app,
+        area,
+        PanelSpec::new(title, PanelFocus::ToolOutput),
+    ) else {
+        return;
+    };
 
     if app.has_change_records() {
         let (lines, change_headers) = render_changes_panel(app, inner);
@@ -372,26 +516,31 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
 
     let mut styled_lines: Vec<Line<'static>> = Vec::new();
 
+    let activity_entries = app.activity_entries();
+    if !activity_entries.is_empty() {
+        styled_lines.extend(render_activity_stack(activity_entries));
+    }
+
     if !app.active_skill_ids().is_empty() {
         styled_lines.push(Line::from(Span::styled(
             "request skills",
             Style::default()
-                .fg(Color::Magenta)
+                .fg(C_PURPLE)
                 .add_modifier(Modifier::BOLD),
         )));
         styled_lines.push(Line::from(vec![
-            Span::styled("  active ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  active ", Style::default().fg(C_SUBTLE)),
             Span::styled(
                 app.active_skill_ids().join(", "),
-                Style::default().fg(Color::Magenta),
+                Style::default().fg(C_PURPLE),
             ),
         ]));
         if !app.active_selected_tools().is_empty() {
             styled_lines.push(Line::from(vec![
-                Span::styled("  tools  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  tools  ", Style::default().fg(C_SUBTLE)),
                 Span::styled(
                     app.active_selected_tools().join(", "),
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(C_TEAL),
                 ),
             ]));
         }
@@ -402,7 +551,7 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
         styled_lines.push(Line::from(Span::styled(
             "recent trace",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(C_GOLD)
                 .add_modifier(Modifier::BOLD),
         )));
         let trace_entries = app.trace_entries();
@@ -426,7 +575,7 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
         styled_lines.push(Line::from(Span::styled(
             "tool details",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(C_ACCENT)
                 .add_modifier(Modifier::BOLD),
         )));
         styled_lines.push(Line::raw(""));
@@ -441,7 +590,7 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(
             Paragraph::new(fallback)
                 .wrap(Wrap { trim: false })
-                .style(Style::default().fg(Color::DarkGray)),
+                .style(Style::default().fg(C_SUBTLE)),
             inner,
         );
         return;
@@ -462,10 +611,6 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
-    if area.width < 4 || area.height < 4 {
-        return;
-    }
-
     let title = format!(
         " Context Explorer (Ctrl+E) · {} tool(s) · {} skill(s) · {} active repo(s) · {} retrieval(s) · {} repo(s) · {} mount(s) · {} doc(s) ",
         app.bridge_state.loaded_tools.len(),
@@ -476,31 +621,33 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
         app.bridge_state.mounted_paths.len(),
         app.bridge_state.rag_docs.len()
     );
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(panel_border_style(app, PanelFocus::Context));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let Some(inner) = begin_panel(
+        f,
+        app,
+        area,
+        PanelSpec::new(title, PanelFocus::Context),
+    ) else {
+        return;
+    };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![
         Span::styled(
             "session ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::DIM),
         ),
         Span::styled(
             app.bridge_state.session.clone(),
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(C_TEAL),
         ),
     ]));
     lines.push(Line::from(vec![
         Span::styled(
             "messages ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::DIM),
         ),
         Span::styled(
@@ -510,33 +657,33 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(
             "  total tokens≈ ",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::DIM),
         ),
         Span::styled(
             app.context_token_estimate_total().to_string(),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(C_GOLD),
         ),
     ]));
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "loaded tools",
         Style::default()
-            .fg(Color::Cyan)
+            .fg(C_TEAL)
             .add_modifier(Modifier::BOLD),
     )));
     if app.bridge_state.loaded_tools.is_empty() {
         lines.push(Line::from(Span::styled(
             "  none",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
         for tool in &app.bridge_state.loaded_tools {
             lines.push(Line::from(vec![
-                Span::styled("└─ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(tool.clone(), Style::default().fg(Color::Cyan)),
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(tool.clone(), Style::default().fg(C_TEAL)),
             ]));
         }
     }
@@ -545,21 +692,21 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
     lines.push(Line::from(Span::styled(
         "loaded skills",
         Style::default()
-            .fg(Color::Magenta)
+            .fg(C_PURPLE)
             .add_modifier(Modifier::BOLD),
     )));
     if app.bridge_state.loaded_skills.is_empty() {
         lines.push(Line::from(Span::styled(
             "  none",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::ITALIC),
         )));
     } else {
         for skill in &app.bridge_state.loaded_skills {
             lines.push(Line::from(vec![
-                Span::styled("└─ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(skill.clone(), Style::default().fg(Color::Magenta)),
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(skill.clone(), Style::default().fg(C_PURPLE)),
             ]));
         }
     }
@@ -568,7 +715,7 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
     lines.push(Line::from(Span::styled(
         "active repos",
         Style::default()
-            .fg(Color::Yellow)
+            .fg(C_GOLD)
             .add_modifier(Modifier::BOLD),
     )));
     if app.bridge_state.active_repos.is_empty() {
@@ -670,118 +817,9 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
 
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
-        "recent retrieval",
-        Style::default()
-            .fg(Color::LightCyan)
-            .add_modifier(Modifier::BOLD),
-    )));
-    if app.bridge_state.retrieval_insights.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  none",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        )));
-    } else {
-        for insight in &app.bridge_state.retrieval_insights {
-            let label = if !insight.repo_name.trim().is_empty() {
-                if insight.repo_id.trim().is_empty() || insight.repo_name == insight.repo_id {
-                    insight.repo_name.clone()
-                } else {
-                    format!("{} ({})", insight.repo_name, insight.repo_id)
-                }
-            } else if !insight.repo_id.trim().is_empty() {
-                insight.repo_id.clone()
-            } else {
-                "retrieval".to_string()
-            };
-            lines.push(Line::from(vec![
-                Span::styled("└─ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(label, Style::default().fg(Color::LightCyan)),
-            ]));
-            if !insight.query.trim().is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled("query ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(insight.query.clone(), Style::default().fg(Color::White)),
-                ]));
-            }
-            if !insight.seed_paths.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled("seeds ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        insight.seed_paths.join(", "),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                ]));
-            }
-            if !insight.retrieved_paths.is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled("hits  ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        insight.retrieved_paths.join(", "),
-                        Style::default().fg(Color::Cyan),
-                    ),
-                ]));
-            }
-            if !insight.related_files.is_empty() {
-                let related = insight
-                    .related_files
-                    .iter()
-                    .map(|item| {
-                        if item.score > 0 {
-                            format!("{} ({})", item.rel_path, item.score)
-                        } else {
-                            item.rel_path.clone()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                lines.push(Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled("graph ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(related, Style::default().fg(Color::LightGreen)),
-                ]));
-            }
-            if !insight.related_symbols.is_empty() {
-                let symbols = insight
-                    .related_symbols
-                    .iter()
-                    .map(|item| {
-                        let mut label = item.name.clone();
-                        if !item.rel_path.trim().is_empty() {
-                            label.push('@');
-                            label.push_str(&item.rel_path);
-                        }
-                        if item.line > 0 {
-                            label.push(':');
-                            label.push_str(&item.line.to_string());
-                        }
-                        if !item.symbol_kind.trim().is_empty() {
-                            label.push_str(" [");
-                            label.push_str(&item.symbol_kind);
-                            label.push(']');
-                        }
-                        label
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                lines.push(Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled("why   ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(symbols, Style::default().fg(Color::Magenta)),
-                ]));
-            }
-        }
-    }
-
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
         "repo library",
         Style::default()
-            .fg(Color::LightYellow)
+            .fg(C_ORANGE)
             .add_modifier(Modifier::BOLD),
     )));
     if app.bridge_state.repo_library.is_empty() {
@@ -897,7 +935,7 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
     lines.push(Line::from(Span::styled(
         "mounted paths",
         Style::default()
-            .fg(Color::LightBlue)
+            .fg(C_ACCENT)
             .add_modifier(Modifier::BOLD),
     )));
     if app.bridge_state.mounted_paths.is_empty() {
@@ -944,61 +982,6 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "active rag docs",
-        Style::default()
-            .fg(Color::LightGreen)
-            .add_modifier(Modifier::BOLD),
-    )));
-    if app.bridge_state.rag_docs.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  none",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        )));
-    } else {
-        for item in &app.bridge_state.rag_docs {
-            lines.push(Line::from(vec![
-                Span::styled("└─ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(item.path.clone(), Style::default().fg(Color::White)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("   ", Style::default()),
-                Span::styled(
-                    if item.kind.trim().is_empty() {
-                        "doc".to_string()
-                    } else {
-                        item.kind.clone()
-                    },
-                    Style::default().fg(Color::Green),
-                ),
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("chunks {}", item.chunks),
-                    Style::default().fg(Color::Cyan),
-                ),
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("tokens≈ {}", item.token_count),
-                    Style::default().fg(Color::Yellow),
-                ),
-            ]));
-            if !item.label.trim().is_empty() {
-                lines.push(Line::from(vec![
-                    Span::styled("   ", Style::default()),
-                    Span::styled(
-                        item.label.clone(),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::DIM),
-                    ),
-                ]));
-            }
-        }
-    }
-
     app.register_context_area(
         area,
         inner.height,
@@ -1012,6 +995,283 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
     );
 }
 
+fn draw_rag_panel(f: &mut Frame, app: &mut App, area: Rect) {
+    let inventory = &app.bridge_state.rag_inventory;
+    let title = format!(
+        " RAG Explorer (Ctrl+G) · {} chunk(s) · {} repo(s) · {} retrieval(s) · {} search(es) ",
+        inventory.repo_chunks.max(inventory.active_doc_chunks),
+        inventory.repo_count.max(inventory.active_repo_count),
+        inventory.retrieval_count,
+        app.bridge_state.recent_rag_queries.len()
+    );
+    let Some(inner) = begin_panel(f, app, area, PanelSpec::new(title, PanelFocus::Rag)) else {
+        return;
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled(
+            "store ",
+            Style::default()
+                .fg(C_SUBTLE)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            if inventory.vector_backend.trim().is_empty() {
+                "unknown".to_string()
+            } else {
+                inventory.vector_backend.clone()
+            },
+            Style::default().fg(C_GREEN).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            inventory.vector_path.clone(),
+            Style::default().fg(C_MUTED),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(
+            "chunks ",
+            Style::default()
+                .fg(C_SUBTLE)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled(inventory.repo_chunks.to_string(), Style::default().fg(C_GOLD)),
+        Span::styled("  active docs ", Style::default().fg(C_SUBTLE)),
+        Span::styled(
+            format!("{} / {} chunks", inventory.active_doc_count, inventory.active_doc_chunks),
+            Style::default().fg(C_TEAL),
+        ),
+        Span::styled("  retrievals ", Style::default().fg(C_SUBTLE)),
+        Span::styled(inventory.retrieval_count.to_string(), Style::default().fg(C_ACCENT)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled(
+            "hint ",
+            Style::default()
+                .fg(C_SUBTLE)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            "/rag list · /rag search <query> [top_k] · /rag clear",
+            Style::default().fg(C_ORANGE),
+        ),
+    ]));
+
+    if !inventory.legacy_paths.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "legacy paths",
+            Style::default().fg(C_RED).add_modifier(Modifier::BOLD),
+        )));
+        for path in &inventory.legacy_paths {
+            lines.push(Line::from(vec![
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(path.clone(), Style::default().fg(C_RED)),
+            ]));
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "recent searches",
+        Style::default().fg(C_GOLD).add_modifier(Modifier::BOLD),
+    )));
+    if app.bridge_state.recent_rag_queries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  none yet",
+            Style::default().fg(C_SUBTLE).add_modifier(Modifier::ITALIC),
+        )));
+    } else {
+        for query in &app.bridge_state.recent_rag_queries {
+            lines.push(Line::from(vec![
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(query.query.clone(), Style::default().fg(Color::White)),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("{} hit(s)", query.count),
+                    Style::default().fg(C_GREEN),
+                ),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("top_k {}", query.top_k),
+                    Style::default().fg(C_TEAL),
+                ),
+            ]));
+            if !query.repo_filter.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled("repos ", Style::default().fg(C_SUBTLE)),
+                    Span::styled(query.repo_filter.join(", "), Style::default().fg(C_ORANGE)),
+                ]));
+            }
+            if !query.hits.is_empty() {
+                let hit_preview = query
+                    .hits
+                    .iter()
+                    .take(3)
+                    .map(|item| {
+                        let repo = if item.repo_name.trim().is_empty() {
+                            item.repo_id.clone()
+                        } else {
+                            item.repo_name.clone()
+                        };
+                        let path = if item.path.trim().is_empty() {
+                            "chunk".to_string()
+                        } else {
+                            item.path.clone()
+                        };
+                        if item.distance.trim().is_empty() {
+                            format!("{} · {}", repo, path)
+                        } else {
+                            format!("{} · {} · d={}", repo, path, item.distance)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  |  ");
+                lines.push(Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled(hit_preview, Style::default().fg(C_MUTED)),
+                ]));
+            }
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "recent retrieval",
+        Style::default().fg(C_TEAL).add_modifier(Modifier::BOLD),
+    )));
+    if app.bridge_state.retrieval_insights.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  none",
+            Style::default().fg(C_SUBTLE).add_modifier(Modifier::ITALIC),
+        )));
+    } else {
+        for insight in &app.bridge_state.retrieval_insights {
+            let label = if !insight.repo_name.trim().is_empty() {
+                insight.repo_name.clone()
+            } else if !insight.repo_id.trim().is_empty() {
+                insight.repo_id.clone()
+            } else {
+                "retrieval".to_string()
+            };
+            lines.push(Line::from(vec![
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(label, Style::default().fg(C_TEAL)),
+            ]));
+            if !insight.query.trim().is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled("query ", Style::default().fg(C_SUBTLE)),
+                    Span::styled(insight.query.clone(), Style::default().fg(Color::White)),
+                ]));
+            }
+            if !insight.retrieved_paths.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled("hits  ", Style::default().fg(C_SUBTLE)),
+                    Span::styled(
+                        insight.retrieved_paths.join(", "),
+                        Style::default().fg(C_ACCENT),
+                    ),
+                ]));
+            }
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "top indexed repos",
+        Style::default().fg(C_ORANGE).add_modifier(Modifier::BOLD),
+    )));
+    if inventory.top_repos.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  none",
+            Style::default().fg(C_SUBTLE).add_modifier(Modifier::ITALIC),
+        )));
+    } else {
+        for repo in &inventory.top_repos {
+            let label = if repo.repo_name.trim().is_empty() {
+                repo.repo_id.clone()
+            } else if repo.repo_id.trim().is_empty() || repo.repo_name == repo.repo_id {
+                repo.repo_name.clone()
+            } else {
+                format!("{} ({})", repo.repo_name, repo.repo_id)
+            };
+            lines.push(Line::from(vec![
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(label, Style::default().fg(C_ORANGE)),
+                Span::styled("  ", Style::default()),
+                Span::styled(format!("{} chunks", repo.chunks), Style::default().fg(C_GOLD)),
+                Span::styled("  ", Style::default()),
+                Span::styled(format!("{} files", repo.files), Style::default().fg(C_TEAL)),
+            ]));
+            if !repo.last_ingested_at.trim().is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled(
+                        format!("last ingested {}", repo.last_ingested_at),
+                        Style::default().fg(C_MUTED).add_modifier(Modifier::DIM),
+                    ),
+                ]));
+            }
+        }
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "active rag docs",
+        Style::default().fg(C_GREEN).add_modifier(Modifier::BOLD),
+    )));
+    if app.bridge_state.rag_docs.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  none",
+            Style::default().fg(C_SUBTLE).add_modifier(Modifier::ITALIC),
+        )));
+    } else {
+        for item in &app.bridge_state.rag_docs {
+            lines.push(Line::from(vec![
+                Span::styled("└─ ", Style::default().fg(C_SUBTLE)),
+                Span::styled(item.path.clone(), Style::default().fg(Color::White)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(
+                    if item.kind.trim().is_empty() {
+                        "doc".to_string()
+                    } else {
+                        item.kind.clone()
+                    },
+                    Style::default().fg(C_GREEN),
+                ),
+                Span::styled("  ", Style::default()),
+                Span::styled(format!("chunks {}", item.chunks), Style::default().fg(C_TEAL)),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("tokens≈ {}", item.token_count),
+                    Style::default().fg(C_GOLD),
+                ),
+            ]));
+            if !item.label.trim().is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("   ", Style::default()),
+                    Span::styled(item.label.clone(), Style::default().fg(C_MUTED)),
+                ]));
+            }
+        }
+    }
+
+    app.register_rag_area(area, inner.height, lines.len().min(u16::MAX as usize) as u16);
+    f.render_widget(
+        Paragraph::new(lines)
+            .scroll((app.rag_scroll(), 0))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
 fn render_changes_panel(app: &App, inner: Rect) -> (Vec<Line<'static>>, Vec<(usize, Rect)>) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut change_headers = Vec::new();
@@ -1020,12 +1280,12 @@ fn render_changes_panel(app: &App, inner: Rect) -> (Vec<Line<'static>>, Vec<(usi
         Span::styled(
             "recent files",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(C_GOLD)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!(" ({})", app.changed_files().len()),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(C_SUBTLE),
         ),
     ]));
 
@@ -1053,15 +1313,11 @@ fn render_changes_panel(app: &App, inner: Rect) -> (Vec<Line<'static>>, Vec<(usi
             lines.push(Line::from(vec![
                 Span::styled(
                     if item.expanded { "▼ " } else { "▶ " },
-                    Style::default().fg(if active {
-                        Color::Yellow
-                    } else {
-                        Color::DarkGray
-                    }),
+                    Style::default().fg(if active { C_GOLD } else { C_SUBTLE }),
                 ),
                 Span::styled(
                     file_name.to_string(),
-                    Style::default().fg(if active { Color::Cyan } else { Color::White }),
+                    Style::default().fg(if active { C_ACCENT } else { Color::White }),
                 ),
                 Span::styled("  ", Style::default()),
                 Span::styled(
@@ -1100,22 +1356,14 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
     app.register_input_area(area);
 
     let border_color = if app.busy {
-        Color::DarkGray
+        C_SUBTLE
     } else if app.is_panel_focused(PanelFocus::Input) {
-        Color::Cyan
+        C_ACCENT
     } else {
-        Color::Yellow
+        C_GOLD
     };
     let block = Block::default()
-        .title(" Compose ")
-        .title_bottom(Line::from(vec![
-            Span::styled(" Enter ", Style::default().fg(Color::Yellow)),
-            Span::styled("send", Style::default().fg(Color::DarkGray)),
-            Span::styled("  ", Style::default()),
-            Span::styled("Shift+Enter", Style::default().fg(Color::Yellow)),
-            Span::styled(" newline", Style::default().fg(Color::DarkGray)),
-        ]))
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::BOTTOM)
         .border_style(Style::default().fg(border_color));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1124,13 +1372,24 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    let [body_area, footer_area] = if inner.height > 1 {
+        let chunks = Layout::vertical([
+            Constraint::Length(inner.height.saturating_sub(1)),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+        [chunks[0], chunks[1]]
+    } else {
+        [inner, Rect::default()]
+    };
+
     let raw_lines: Vec<&str> = if app.input.is_empty() {
         vec![""]
     } else {
         app.input.split('\n').collect()
     };
     let (cursor_row, cursor_col) = app.input_cursor_line_col();
-    let viewport_h = inner.height as usize;
+    let viewport_h = body_area.height.max(1) as usize;
     let viewport_start = cursor_row.saturating_sub(viewport_h.saturating_sub(1));
     let visible_lines: Vec<Line<'static>> = raw_lines
         .iter()
@@ -1140,13 +1399,17 @@ fn draw_input(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|(row, line)| composer_line(app, row, line, cursor_row, cursor_col))
         .collect();
 
-    f.render_widget(Paragraph::new(visible_lines), inner);
+    f.render_widget(Paragraph::new(visible_lines), body_area);
+
+    if footer_area.height > 0 && footer_area.width > 0 {
+        f.render_widget(Paragraph::new(vec![composer_footer_line(app, footer_area.width as usize)]), footer_area);
+    }
 
     if !app.busy {
         let prefix_w = 2u16;
-        let cursor_x = inner.x + prefix_w + cursor_col as u16;
-        let cursor_y = inner.y + (cursor_row.saturating_sub(viewport_start)) as u16;
-        if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
+        let cursor_x = body_area.x + prefix_w + cursor_col as u16;
+        let cursor_y = body_area.y + (cursor_row.saturating_sub(viewport_start)) as u16;
+        if cursor_x < body_area.x + body_area.width && cursor_y < body_area.y + body_area.height {
             f.set_cursor_position(Position::new(cursor_x, cursor_y));
         }
     }
@@ -1161,16 +1424,16 @@ fn composer_line(
 ) -> Line<'static> {
     let prefix = if row == 0 { "❯ " } else { "  " };
     let prefix_style = if app.busy {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(C_SUBTLE)
     } else if row == 0 {
         Style::default()
-            .fg(Color::Yellow)
+            .fg(C_GOLD)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(C_SUBTLE)
     };
     let text_style = if app.busy {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(C_SUBTLE)
     } else {
         Style::default().fg(Color::White)
     };
@@ -1181,7 +1444,7 @@ fn composer_line(
         spans.push(Span::styled(
             "Type a message or paste code…".to_string(),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(C_SUBTLE)
                 .add_modifier(Modifier::ITALIC),
         ));
         return Line::from(spans);
@@ -1214,31 +1477,84 @@ fn composer_line(
     Line::from(spans)
 }
 
-// ── Slash-command popup ───────────────────────────────────────────────────────
+fn composer_footer_line(app: &App, max_width: usize) -> Line<'static> {
+    let mut left: Vec<Span<'static>> = Vec::new();
+    let hints = if app.busy {
+        [
+            ("Esc", "interrupt"),
+            ("Ctrl+O", "trace"),
+            ("Ctrl+R", "inspector"),
+        ]
+    } else {
+        [
+            ("Enter", "send"),
+            ("Shift+Enter", "newline"),
+            ("Ctrl+O", "trace"),
+        ]
+    };
 
-fn draw_slash_popup(f: &mut Frame, app: &mut App, area: Rect, items: &[SlashPopupEntry]) {
-    if area.height < POPUP_BORDER_H || items.is_empty() {
-        return;
+    for (idx, (chord, label)) in hints.iter().enumerate() {
+        if idx > 0 {
+            push_sep(&mut left);
+        }
+        left.push(Span::styled(
+            (*chord).to_string(),
+            Style::default().fg(C_MUTED),
+        ));
+        left.push(Span::raw(" "));
+        left.push(Span::styled(
+            (*label).to_string(),
+            Style::default().fg(C_SUBTLE),
+        ));
     }
 
-    let block = Block::default()
-        .title(" Commands ")
-        .borders(Borders::ALL)
-        .border_style(panel_border_style(app, PanelFocus::SlashPopup));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let live_step = app.live_step_summary(max_width / 2);
+    let mut right = Vec::new();
+    push_chip(&mut right, "step", &live_step.text, live_step.state.color());
+
+    if spans_width(&left) + 2 + spans_width(&right) <= max_width {
+        let gap = max_width.saturating_sub(spans_width(&left) + spans_width(&right));
+        left.push(Span::raw(" ".repeat(gap.max(2))));
+        left.extend(right);
+        return Line::from(left);
+    }
+
+    let compact = format!(
+        "{}  [{}]",
+        if app.busy {
+            "Esc interrupt · Ctrl+O trace"
+        } else {
+            "Enter send · Shift+Enter newline"
+        },
+        live_step.text
+    );
+    Line::from(Span::styled(
+        clip_to_width(&compact, max_width.saturating_sub(1)),
+        Style::default().fg(Color::Gray),
+    ))
+}
+
+fn draw_slash_popup(f: &mut Frame, app: &mut App, area: Rect, items: &[SlashPopupEntry]) {
+    let Some(inner) = begin_panel(
+        f,
+        app,
+        area,
+        PanelSpec::new(" Commands ", PanelFocus::SlashPopup),
+    ) else {
+        return;
+    };
+
+    let selected = app.slash_popup_selected().min(items.len().saturating_sub(1));
     let item_rects = (0..items.len())
+        .take(inner.height as usize)
         .map(|idx| Rect {
             x: inner.x,
-            y: inner.y.saturating_add(idx as u16),
+            y: inner.y + idx as u16,
             width: inner.width,
             height: 1,
         })
         .collect::<Vec<_>>();
     app.register_slash_popup(area, item_rects);
-
-    // Selection clamping belongs in App; we only render what we're given.
-    let selected = app.slash_popup_selected();
 
     let list_items: Vec<ListItem> = items
         .iter()
@@ -1246,39 +1562,49 @@ fn draw_slash_popup(f: &mut Frame, app: &mut App, area: Rect, items: &[SlashPopu
         .map(|(idx, item)| {
             let active = idx == selected;
             let marker = if active { "▶ " } else { "  " };
-            let marker_style = Style::default().fg(Color::Yellow).add_modifier(if active {
+            let marker_style = Style::default().fg(C_GOLD).add_modifier(if active {
                 Modifier::BOLD
             } else {
                 Modifier::empty()
             });
-            let cmd_style = Style::default().fg(Color::Cyan).add_modifier(if active {
+            let cmd_style = Style::default().fg(C_TEAL).add_modifier(if active {
                 Modifier::BOLD
             } else {
                 Modifier::empty()
             });
-            let desc_style = Style::default().fg(if active { Color::White } else { Color::Gray });
+            let desc_style = Style::default().fg(if active { Color::White } else { C_MUTED });
+            let usage_style = Style::default()
+                .fg(if active { C_GOLD } else { C_SUBTLE })
+                .add_modifier(Modifier::DIM);
+
+            let summary = if item.usage.trim().is_empty() || item.usage == item.command {
+                item.description.clone()
+            } else {
+                format!("{}  {}", item.usage, item.description)
+            };
 
             ListItem::new(Line::from(vec![
                 Span::styled(marker.to_string(), marker_style),
                 Span::styled(format!("{:<12}", item.command), cmd_style),
-                Span::styled(item.description.to_string(), desc_style),
+                Span::styled(summary, desc_style),
+                Span::raw(" "),
+                Span::styled(item.usage.to_string(), usage_style),
             ]))
         })
         .collect();
 
     let mut list_state = ListState::default();
     list_state.select(Some(selected));
-
     f.render_stateful_widget(List::new(list_items), inner, &mut list_state);
 }
 
 fn panel_border_style(app: &App, panel: PanelFocus) -> Style {
     if app.is_panel_focused(panel) {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(C_ACCENT)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(C_BORDER)
     }
 }
 
@@ -1304,8 +1630,8 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         border_area,
     );
 
-    let line = status_line(app, area.width as usize);
-    f.render_widget(Paragraph::new(line), text_area);
+    let lines = status_lines(app, area.width as usize, text_area.height as usize);
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), text_area);
 }
 
 fn status_border_line(width: u16, phase_color: Color) -> Line<'static> {
@@ -1317,25 +1643,24 @@ fn status_border_line(width: u16, phase_color: Color) -> Line<'static> {
     if w <= label.len() {
         return Line::from(Span::styled(
             "─".repeat(w),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(C_BORDER),
         ));
     }
-    let mut text = String::with_capacity(w);
-    text.push_str(label);
-    text.push_str(&"─".repeat(w - label.len()));
-    Line::from(Span::styled(
-        text,
-        Style::default().fg(phase_color).add_modifier(Modifier::DIM),
-    ))
+    let dash_fill = "─".repeat(w - label.len());
+    Line::from(vec![
+        Span::styled(label.to_string(), Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
+        Span::styled(dash_fill, Style::default().fg(C_SUBTLE)),
+    ])
 }
 
 fn status_line(app: &App, max_width: usize) -> Line<'static> {
+    let live_step = app.live_step_summary((max_width / 3).max(18));
     if max_width < 52 {
         let compact = format!(
             "{} {} · {} · {}",
             if app.connected { "online" } else { "offline" },
             app.phase,
-            app.phase_note,
+            live_step.text,
             app.bridge_state.active
         );
         return Line::from(Span::styled(compact, Style::default().fg(Color::Gray)));
@@ -1360,10 +1685,8 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
         app.phase.to_string()
     };
     push_chip(&mut spans, "phase", &phase_label, app.phase.color());
-    if !app.phase_note.trim().is_empty() {
-        push_sep(&mut spans);
-        push_kv(&mut spans, "note", &app.phase_note, Color::Gray);
-    }
+    push_sep(&mut spans);
+    push_chip(&mut spans, "step", &live_step.text, live_step.state.color());
     push_gap(&mut spans);
 
     push_kv(
@@ -1400,6 +1723,17 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
         &app.last_turn_tool_count().to_string(),
         Color::Gray,
     );
+    push_sep(&mut spans);
+    push_kv(
+        &mut spans,
+        "calls",
+        &app.bridge_state.tool_call_count.to_string(),
+        Color::DarkGray,
+    );
+    if app.bridge_state.plan_mode {
+        push_sep(&mut spans);
+        push_chip(&mut spans, "mode", "plan", Color::Yellow);
+    }
     let route_label = app.route_label();
     if route_label != "-" {
         push_sep(&mut spans);
@@ -1414,6 +1748,8 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
     push_toggle(&mut spans, "task", app.todo_on);
     push_sep(&mut spans);
     push_toggle(&mut spans, "context", app.context_on);
+    push_sep(&mut spans);
+    push_toggle(&mut spans, "rag", app.rag_on);
     push_sep(&mut spans);
     push_toggle(&mut spans, "panel", app.tool_output_on);
 
@@ -1433,44 +1769,119 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+fn status_lines(app: &App, max_width: usize, max_lines: usize) -> Vec<Line<'static>> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+
+    let mut lines = vec![status_line(app, max_width)];
+    if max_lines == 1 {
+        return lines;
+    }
+
+    let progress = app.progress_entries();
+    for entry in progress.into_iter().take(max_lines.saturating_sub(1)) {
+        lines.push(progress_entry_line(&entry, max_width));
+    }
+
+    while lines.len() < max_lines {
+        lines.push(Line::raw(""));
+    }
+
+    lines
+}
+
+fn progress_entry_line(entry: &ProgressEntry, max_width: usize) -> Line<'static> {
+    if max_width < 24 {
+        let prefix = if entry.is_last { "└─" } else { "├─" };
+        let text = clip_to_width(
+            &format!("{prefix} {}", entry.label),
+            max_width.saturating_sub(1),
+        );
+        return Line::from(Span::styled(text, Style::default().fg(Color::Gray)));
+    }
+
+    let mut spans = Vec::new();
+    spans.push(Span::styled(
+        if entry.is_last { "└─ " } else { "├─ " },
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    ));
+    spans.push(Span::styled(
+        entry.label.clone(),
+        Style::default()
+            .fg(entry.state.color())
+            .add_modifier(Modifier::BOLD),
+    ));
+    if let Some(meta) = entry.meta.as_deref() {
+        spans.push(Span::styled(
+            " · ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ));
+        spans.push(Span::styled(
+            meta.to_string(),
+            Style::default().fg(Color::White),
+        ));
+    }
+    if let Some(detail) = entry.detail.as_deref() {
+        spans.push(Span::styled(
+            "  ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ));
+        spans.push(Span::styled(
+            detail.to_string(),
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
+
+    if spans_width(&spans) > max_width {
+        let mut compact = format!(
+            "{}{}",
+            if entry.is_last { "└─ " } else { "├─ " },
+            entry.label
+        );
+        if let Some(meta) = entry.meta.as_deref() {
+            compact.push_str(&format!(" · {meta}"));
+        }
+        if let Some(detail) = entry.detail.as_deref() {
+            compact.push_str(&format!("  {detail}"));
+        }
+        return Line::from(Span::styled(
+            clip_to_width(&compact, max_width.saturating_sub(1)),
+            Style::default().fg(Color::Gray),
+        ));
+    }
+
+    Line::from(spans)
+}
+
 fn spinner_char(tick: usize) -> &'static str {
     const SPINNERS: [&str; 10] = ["|", "/", "-", "\\", "|", "/", "-", "\\", "|", "/"];
     SPINNERS[tick % SPINNERS.len()]
 }
 
 fn push_chip(spans: &mut Vec<Span<'static>>, label: &str, value: &str, color: Color) {
-    spans.push(Span::styled(
-        "[",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    ));
-    spans.push(Span::styled(
-        label.to_string(),
-        Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
-    ));
-    spans.push(Span::styled(
-        ":",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    ));
+    spans.push(Span::styled("[", Style::default().fg(C_SUBTLE)));
+    spans.push(Span::styled(label.to_string(), Style::default().fg(C_MUTED)));
+    spans.push(Span::styled(":", Style::default().fg(C_SUBTLE)));
     spans.push(Span::styled(
         value.to_string(),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
     ));
-    spans.push(Span::styled(
-        "]",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    ));
+    spans.push(Span::styled("]", Style::default().fg(C_SUBTLE)));
 }
 
 fn push_kv(spans: &mut Vec<Span<'static>>, key: &str, value: &str, color: Color) {
     spans.push(Span::styled(
         format!("{}:", key),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(C_MUTED),
     ));
     spans.push(Span::styled(
         value.to_string(),
@@ -1479,11 +1890,7 @@ fn push_kv(spans: &mut Vec<Span<'static>>, key: &str, value: &str, color: Color)
 }
 
 fn push_toggle(spans: &mut Vec<Span<'static>>, key: &str, enabled: bool) {
-    let color = if enabled {
-        Color::Green
-    } else {
-        Color::DarkGray
-    };
+    let color = if enabled { C_GREEN } else { C_SUBTLE };
     let value = if enabled { "on" } else { "off" };
     push_kv(spans, key, value, color);
 }
@@ -1495,9 +1902,7 @@ fn push_gap(spans: &mut Vec<Span<'static>>) {
 fn push_sep(spans: &mut Vec<Span<'static>>) {
     spans.push(Span::styled(
         " · ",
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
+        Style::default().fg(C_SUBTLE),
     ));
 }
 
@@ -1507,14 +1912,12 @@ fn push_shortcut_hint(spans: &mut Vec<Span<'static>>, item: &ShortcutHint) {
     }
     spans.push(Span::styled(
         item.chord.to_string(),
-        Style::default().fg(Color::Gray),
+        Style::default().fg(C_MUTED),
     ));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(
         item.description.to_string(),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
+        Style::default().fg(C_SUBTLE),
     ));
 }
 
@@ -1570,9 +1973,7 @@ fn parse_tool_output_blocks(text: &str, _max_width: usize) -> Vec<Line<'static>>
             lines.push(Line::raw(""));
             lines.push(Line::from(Span::styled(
                 "─".repeat(24),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(C_SUBTLE),
             )));
             lines.push(Line::raw(""));
         }
@@ -1608,7 +2009,7 @@ fn render_json_line(line: &str) -> Line<'static> {
         spans.push(Span::styled(
             key.to_string(),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(C_GOLD)
                 .add_modifier(Modifier::BOLD),
         ));
         spans.extend(tokenize_json_tail(tail_with_colon));
@@ -1639,9 +2040,7 @@ fn tokenize_json_tail(text: &str) -> Vec<Span<'static>> {
         if matches!(ch, '{' | '}' | '[' | ']' | ':' | ',') {
             spans.push(Span::styled(
                 ch.to_string(),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(C_SUBTLE),
             ));
             idx += 1;
             continue;
@@ -1664,7 +2063,7 @@ fn tokenize_json_tail(text: &str) -> Vec<Span<'static>> {
             }
             spans.push(Span::styled(
                 chars[start..idx].iter().collect::<String>(),
-                Style::default().fg(Color::Green),
+                Style::default().fg(C_GREEN),
             ));
             continue;
         }
@@ -1678,7 +2077,7 @@ fn tokenize_json_tail(text: &str) -> Vec<Span<'static>> {
             }
             spans.push(Span::styled(
                 chars[start..idx].iter().collect::<String>(),
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(C_ORANGE),
             ));
             continue;
         }
@@ -1691,9 +2090,9 @@ fn tokenize_json_tail(text: &str) -> Vec<Span<'static>> {
             }
             let token = chars[start..idx].iter().collect::<String>();
             let style = match token.as_str() {
-                "true" | "false" => Style::default().fg(Color::Magenta),
+                "true" | "false" => Style::default().fg(C_PURPLE),
                 "null" => Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(C_SUBTLE)
                     .add_modifier(Modifier::ITALIC),
                 _ => Style::default().fg(Color::White),
             };

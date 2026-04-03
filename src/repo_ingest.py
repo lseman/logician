@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .config import Config
 from .db.document import DocumentDB
 from .repo_graph import _collect_matching_files, build_repo_graph
 from .repo_registry import (
@@ -29,20 +30,77 @@ DEFAULT_REPO_GLOB = (
 )
 DEFAULT_REPO_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_REPO_VECTOR_BACKEND = "hnsw"
+DEFAULT_AGENT_CONFIG_NAME = "agent_config.json"
 
 
 def _utc_now() -> str:
-    return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _default_vector_path(base_dir: Path) -> Path:
     del base_dir
     return state_path("rag_docs.vector")
+
+
+def _load_workspace_agent_config(base_dir: Path) -> dict[str, Any]:
+    candidates = [
+        base_dir / DEFAULT_AGENT_CONFIG_NAME,
+        Path.cwd().resolve() / DEFAULT_AGENT_CONFIG_NAME,
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
+def _resolve_repo_ingest_settings(
+    *,
+    workspace_root: Path,
+    embedding_model_name: str | None,
+    vector_backend: str | None,
+) -> tuple[str, str]:
+    config_defaults = Config()
+    config_payload = _load_workspace_agent_config(workspace_root)
+    default_embedding_model = getattr(config_defaults, "embedding_model", None)
+    default_rag_vector_backend = getattr(config_defaults, "rag_vector_backend", None)
+    default_vector_backend = getattr(config_defaults, "vector_backend", None)
+
+    resolved_embedding_model = str(
+        embedding_model_name
+        or config_payload.get("embedding_model")
+        or default_embedding_model
+        or DEFAULT_REPO_EMBEDDING_MODEL
+    ).strip()
+    if not resolved_embedding_model:
+        resolved_embedding_model = DEFAULT_REPO_EMBEDDING_MODEL
+
+    resolved_vector_backend = (
+        str(
+            vector_backend
+            or config_payload.get("rag_vector_backend")
+            or config_payload.get("vector_backend")
+            or default_rag_vector_backend
+            or default_vector_backend
+            or DEFAULT_REPO_VECTOR_BACKEND
+        )
+        .strip()
+        .lower()
+    )
+    if not resolved_vector_backend:
+        resolved_vector_backend = DEFAULT_REPO_VECTOR_BACKEND
+
+    return resolved_embedding_model, resolved_vector_backend
 
 
 def _looks_like_git_url(raw: str) -> bool:
@@ -213,16 +271,12 @@ def _resolve_repo_input(
         if not resolved_repo_path.exists() or not resolved_repo_path.is_dir():
             raise FileNotFoundError(f"Repository path not found: {repo_source}")
         workspace_root = (
-            Path(base_dir).expanduser().resolve()
-            if base_dir is not None
-            else resolved_repo_path
+            Path(base_dir).expanduser().resolve() if base_dir is not None else resolved_repo_path
         )
         return resolved_repo_path, workspace_root, ""
 
     workspace_root = (
-        Path(base_dir).expanduser().resolve()
-        if base_dir is not None
-        else Path.cwd().resolve()
+        Path(base_dir).expanduser().resolve() if base_dir is not None else Path.cwd().resolve()
     )
     existing = _existing_repo_for_source_url(source_text, base_dir=workspace_root)
     if existing is not None:
@@ -244,9 +298,26 @@ def _resolve_repo_input(
 def _file_kind_for_path(path: Path) -> str:
     ext = path.suffix.lower()
     if ext in {
-        ".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".java", ".go", ".rb",
-        ".php", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".kt", ".swift",
-        ".sh", ".sql",
+        ".py",
+        ".rs",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".java",
+        ".go",
+        ".rb",
+        ".php",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".kt",
+        ".swift",
+        ".sh",
+        ".sql",
     }:
         return "code"
     if ext in {".md", ".rst", ".txt", ".adoc"}:
@@ -284,6 +355,8 @@ def _ingest_repo_documents(
     repo: dict[str, Any],
     repo_path: Path,
     vector_path: Path,
+    embedding_model_name: str,
+    vector_backend: str,
     glob_pattern: str,
     max_files: int,
     chunk_size: int,
@@ -327,8 +400,8 @@ def _ingest_repo_documents(
         try:
             doc_db = DocumentDB(
                 vector_path=str(vector_path),
-                embedding_model_name=DEFAULT_REPO_EMBEDDING_MODEL,
-                vector_backend=DEFAULT_REPO_VECTOR_BACKEND,
+                embedding_model_name=embedding_model_name,
+                vector_backend=vector_backend,
                 rerank_enabled=False,
             )
             chunk_ids = doc_db.add_documents(
@@ -379,15 +452,21 @@ def _ingest_repo_documents(
     }
 
 
-def _delete_existing_repo_chunks(*, vector_path: Path, repo_id: str) -> int:
+def _delete_existing_repo_chunks(
+    *,
+    vector_path: Path,
+    repo_id: str,
+    embedding_model_name: str,
+    vector_backend: str,
+) -> int:
     clean_repo_id = str(repo_id or "").strip()
     if not clean_repo_id:
         return 0
 
     db = DocumentDB(
         vector_path=str(vector_path),
-        embedding_model_name=DEFAULT_REPO_EMBEDDING_MODEL,
-        vector_backend=DEFAULT_REPO_VECTOR_BACKEND,
+        embedding_model_name=embedding_model_name,
+        vector_backend=vector_backend,
         rerank_enabled=False,
     )
     existing = int(db.count(where={"repo_id": clean_repo_id}) or 0)
@@ -407,6 +486,8 @@ def ingest_repo(
     overlap: float = 0.2,
     exclude: str = "",
     vector_path: str | Path | None = None,
+    embedding_model_name: str | None = None,
+    vector_backend: str | None = None,
     purge_existing: bool = True,
 ) -> dict[str, Any]:
     resolved_repo_path, workspace_root, source_url = _resolve_repo_input(
@@ -425,16 +506,25 @@ def ingest_repo(
         if vector_path is not None
         else _default_vector_path(workspace_root).resolve()
     )
+    resolved_embedding_model, resolved_vector_backend = _resolve_repo_ingest_settings(
+        workspace_root=workspace_root,
+        embedding_model_name=embedding_model_name,
+        vector_backend=vector_backend,
+    )
     deleted_chunks = 0
     if purge_existing:
         deleted_chunks = _delete_existing_repo_chunks(
             vector_path=resolved_vector_path,
             repo_id=str(repo.get("id") or ""),
+            embedding_model_name=resolved_embedding_model,
+            vector_backend=resolved_vector_backend,
         )
     promote_payload = _ingest_repo_documents(
         repo=repo,
         repo_path=resolved_repo_path,
         vector_path=resolved_vector_path,
+        embedding_model_name=resolved_embedding_model,
+        vector_backend=resolved_vector_backend,
         glob_pattern=glob_pattern,
         max_files=max_files,
         chunk_size=chunk_size,
@@ -463,9 +553,7 @@ def ingest_repo(
             {
                 "last_ingested_at": now,
                 "files_processed": int(promote_payload.get("files_processed", 0) or 0),
-                "chunks_added": int(
-                    promote_payload.get("total_chunks_added", 0) or 0
-                ),
+                "chunks_added": int(promote_payload.get("total_chunks_added", 0) or 0),
             }
         )
     if str(graph_payload.get("status") or "").lower() == "ok":
@@ -478,11 +566,14 @@ def ingest_repo(
             }
         )
 
-    updated_repo = update_repo(
-        str(repo.get("id") or ""),
-        base_dir=workspace_root,
-        **repo_updates,
-    ) or repo
+    updated_repo = (
+        update_repo(
+            str(repo.get("id") or ""),
+            base_dir=workspace_root,
+            **repo_updates,
+        )
+        or repo
+    )
 
     ingest_ok = ingest_status in {"ok", "partial"}
     graph_ok = str(graph_payload.get("status") or "").lower() == "ok"
@@ -495,13 +586,9 @@ def ingest_repo(
 
     errors: list[str] = []
     if not ingest_ok:
-        errors.append(
-            f"RAG ingest failed: {promote_payload.get('error', 'unknown error')}"
-        )
+        errors.append(f"RAG ingest failed: {promote_payload.get('error', 'unknown error')}")
     if not graph_ok:
-        errors.append(
-            f"Graph build failed: {graph_payload.get('error', 'unknown error')}"
-        )
+        errors.append(f"Graph build failed: {graph_payload.get('error', 'unknown error')}")
 
     return {
         "status": status,
@@ -509,6 +596,8 @@ def ingest_repo(
         "source_url": source_url,
         "workspace_root": str(workspace_root),
         "vector_path": str(resolved_vector_path),
+        "vector_backend": resolved_vector_backend,
+        "embedding_model_name": resolved_embedding_model,
         "deleted_chunks": deleted_chunks,
         "ingest": promote_payload,
         "graph": graph_payload,
@@ -520,12 +609,12 @@ def migrate_registered_repos(
     *,
     base_dir: str | Path | None = None,
     vector_path: str | Path | None = None,
+    embedding_model_name: str | None = None,
+    vector_backend: str | None = None,
     max_files: int | None = None,
 ) -> dict[str, Any]:
     workspace_root = (
-        Path(base_dir).expanduser().resolve()
-        if base_dir is not None
-        else Path.cwd().resolve()
+        Path(base_dir).expanduser().resolve() if base_dir is not None else Path.cwd().resolve()
     )
     repos = load_repo_index(workspace_root)
     results: list[dict[str, Any]] = []
@@ -553,6 +642,10 @@ def migrate_registered_repos(
         ]
         if vector_path is not None:
             cmd.extend(["--vector-path", str(Path(vector_path).expanduser().resolve())])
+        if embedding_model_name is not None:
+            cmd.extend(["--embedding-model", str(embedding_model_name)])
+        if vector_backend is not None:
+            cmd.extend(["--vector-backend", str(vector_backend)])
         proc = subprocess.run(
             cmd,
             check=False,
@@ -568,7 +661,7 @@ def migrate_registered_repos(
                     "status": "error",
                     "errors": [f"Could not parse migration payload: {exc}"],
                     "ingest": {},
-                    "repo": {"id": str(item.get('id') or "")},
+                    "repo": {"id": str(item.get("id") or "")},
                 }
         else:
             detail = str(proc.stderr or "").strip() or str(proc.stdout or "").strip()
@@ -604,6 +697,8 @@ def migrate_registered_repos(
             if vector_path is not None
             else _default_vector_path(workspace_root).resolve()
         ),
+        "vector_backend": str(vector_backend or "").strip(),
+        "embedding_model_name": str(embedding_model_name or "").strip(),
         "results": results,
     }
 
@@ -627,9 +722,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-dir",
         default=None,
-        help=(
-            "Workspace root for .logician artifacts. Defaults to the target repo path."
-        ),
+        help=("Workspace root for .logician artifacts. Defaults to the target repo path."),
     )
     parser.add_argument(
         "--glob",
@@ -666,6 +759,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional explicit path for the RAG vector store.",
     )
     parser.add_argument(
+        "--vector-backend",
+        default=None,
+        help="Optional vector backend override for repo ingestion.",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Optional embedding model override for repo ingestion.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print the full result payload as JSON.",
@@ -697,9 +800,7 @@ def _print_human_summary(payload: dict[str, Any]) -> None:
     artifacts = dict(repo.get("artifacts") or {})
 
     print(f"status: {payload.get('status', 'unknown')}")
-    print(
-        f"repo: {repo.get('id', '?')} · {repo.get('name', '?')} · {repo.get('path', '-')}"
-    )
+    print(f"repo: {repo.get('id', '?')} · {repo.get('name', '?')} · {repo.get('path', '-')}")
     if payload.get("source_url"):
         print(f"source_url: {payload.get('source_url')}")
     print(f"workspace_root: {payload.get('workspace_root', '-')}")
@@ -742,8 +843,8 @@ def main(argv: list[str] | None = None) -> int:
         text = file_path.read_text(encoding="utf-8", errors="replace")
         doc_db = DocumentDB(
             vector_path=str(Path(str(args.internal_vector_path)).expanduser().resolve()),
-            embedding_model_name=DEFAULT_REPO_EMBEDDING_MODEL,
-            vector_backend=DEFAULT_REPO_VECTOR_BACKEND,
+            embedding_model_name=str(args.embedding_model or DEFAULT_REPO_EMBEDDING_MODEL),
+            vector_backend=str(args.vector_backend or DEFAULT_REPO_VECTOR_BACKEND),
             rerank_enabled=False,
         )
         chunk_ids = doc_db.add_documents(
@@ -775,6 +876,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = migrate_registered_repos(
             base_dir=args.base_dir,
             vector_path=args.vector_path,
+            embedding_model_name=args.embedding_model,
+            vector_backend=args.vector_backend,
             max_files=args.max_files,
         )
     else:
@@ -790,6 +893,8 @@ def main(argv: list[str] | None = None) -> int:
             overlap=args.overlap,
             exclude=args.exclude,
             vector_path=args.vector_path,
+            embedding_model_name=args.embedding_model,
+            vector_backend=args.vector_backend,
             purge_existing=not bool(args.no_purge_existing),
         )
 

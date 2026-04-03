@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   type ChatMessage,
-  type RunEvent,
   type Artifact,
   type Attachment,
+  type RunEvent,
 } from "./types";
 import {
+  compactText,
   messageRowLayout,
   messageBubbleShape,
   roleTone,
@@ -14,7 +15,6 @@ import {
 } from "./utils/messageFormatting";
 import { MarkdownMessage } from "./components/MarkdownMessage";
 import { ThinkingDisclosure } from "./components/ThinkingDisclosure";
-import { RunTimeline } from "./components/RunTimeline";
 import { ArtifactViewer } from "./components/ArtifactViewer";
 import { ToolCallRenderer, type ToolCallItem } from "./components/ToolCallRenderer";
 
@@ -23,14 +23,12 @@ type Props = {
   streamingAssistant: string;
   streamingThinking: string[];
   streamingTools: ToolCallItem[];
-  activity: RunEvent[];
+  liveTimeline: RunEvent[];
   artifacts: Artifact[];
   activeArtifact: Artifact | null;
   atBottom: boolean;
   sending: boolean;
   waitingFirstToken: boolean;
-  hasLiveRunPanel: boolean;
-  liveTimeline: RunEvent[];
   editTarget: { index: number; content: string } | null;
   setEditTarget: React.Dispatch<React.SetStateAction<{ index: number; content: string } | null>>;
   attachments: Attachment[];
@@ -116,22 +114,103 @@ function EmptyState({
   );
 }
 
-function LiveRunPanel({
-  activity,
+function LiveStatusStrip({
+  streamingAssistant,
+  streamingThinking,
+  streamingTools,
+  liveTimeline,
+  sending,
+  waitingFirstToken,
 }: {
-  activity: RunEvent[];
+  streamingAssistant: string;
+  streamingThinking: string[];
+  streamingTools: ToolCallItem[];
+  liveTimeline: RunEvent[];
+  sending: boolean;
+  waitingFirstToken: boolean;
 }) {
-  return (
-    <div className="utility-block">
-      <div className="mb-4 border-b border-white/10 pb-3">
-        <h3 className="text-sm font-semibold text-sand/80">Action history</h3>
-      </div>
+  const latestEvent = liveTimeline[liveTimeline.length - 1] ?? null;
+  const runningTools = streamingTools.filter((item) => item.status === "running").length;
+  const completedTools = streamingTools.filter((item) => item.status === "ok").length;
+  const erroredTools = streamingTools.filter((item) => item.status === "error").length;
 
-      {activity.length > 0 && (
-        <div>
-          <RunTimeline items={activity} />
+  const detail = waitingFirstToken
+    ? "Waiting for the first token or tool event..."
+    : latestEvent?.detail
+      ? compactText(latestEvent.detail, 140)
+      : sending
+        ? "Preparing the next step..."
+        : "Idle";
+
+  const latestLabel = latestEvent?.label
+    ? compactText(latestEvent.label, 28)
+    : waitingFirstToken
+      ? "boot"
+      : sending
+        ? "live"
+        : "idle";
+
+  return (
+    <div className="live-status-strip">
+      <div className="live-status-strip-row">
+        <div className="flex items-center gap-2">
+          {sending ? <span className="thinking-live-dot" aria-hidden="true" /> : null}
+          <span className="live-status-strip-title">{latestLabel}</span>
         </div>
-      )}
+        <div className="live-status-strip-pills">
+          {streamingThinking.length > 0 ? (
+            <span className="live-status-pill">thinking {streamingThinking.length}</span>
+          ) : null}
+          {runningTools > 0 ? (
+            <span className="live-status-pill live-status-pill-active">running {runningTools}</span>
+          ) : null}
+          {completedTools > 0 ? (
+            <span className="live-status-pill">done {completedTools}</span>
+          ) : null}
+          {erroredTools > 0 ? (
+            <span className="live-status-pill live-status-pill-error">error {erroredTools}</span>
+          ) : null}
+          {streamingAssistant ? (
+            <span className="live-status-pill">answer</span>
+          ) : null}
+        </div>
+      </div>
+      <div className="live-status-strip-detail">{detail}</div>
+    </div>
+  );
+}
+
+function ComposerMetaRow({
+  sending,
+  waitingFirstToken,
+  liveTimeline,
+}: {
+  sending: boolean;
+  waitingFirstToken: boolean;
+  liveTimeline: RunEvent[];
+}) {
+  const latestEvent = liveTimeline[liveTimeline.length - 1] ?? null;
+  const statusText = waitingFirstToken
+    ? "Waiting for first event"
+    : latestEvent?.label
+      ? latestEvent.detail
+        ? `${latestEvent.label} · ${compactText(latestEvent.detail, 84)}`
+        : latestEvent.label
+      : sending
+        ? "Streaming"
+        : "Idle";
+
+  return (
+    <div className="composer-meta-row">
+      <div className="composer-meta-hints">
+        <span>Enter send</span>
+        <span>Shift+Enter newline</span>
+        <span>Drag files to attach</span>
+      </div>
+      <div className={`composer-meta-status ${sending ? "composer-meta-status-live" : ""}`}>
+        {sending ? <span className="thinking-live-dot" aria-hidden="true" /> : null}
+        <span>{statusText}</span>
+      </div>
     </div>
   );
 }
@@ -141,14 +220,12 @@ export function ChatInterface({
   streamingAssistant,
   streamingThinking,
   streamingTools,
-  activity,
+  liveTimeline,
   artifacts,
   activeArtifact,
   atBottom,
   sending,
   waitingFirstToken,
-  hasLiveRunPanel,
-  liveTimeline,
   editTarget,
   setEditTarget,
   attachments,
@@ -207,7 +284,7 @@ export function ChatInterface({
     <div className="conversation-shell glass-card flex h-full flex-col overflow-hidden">
       {activeArtifact && (
         <div className="border-b border-white/10 bg-white/5 px-4 py-3">
-          <ArtifactViewer artifact={activeArtifact} onClose={() => {}} />
+          <ArtifactViewer artifact={activeArtifact} onClose={() => { }} />
         </div>
       )}
 
@@ -246,9 +323,8 @@ export function ChatInterface({
                   <div className="flex items-start gap-4">
                     <div className="shrink-0">
                       <div
-                        className={`msg-avatar ${
-                          message.role === "user" ? "msg-avatar-user" : "msg-avatar-assistant"
-                        }`}
+                        className={`msg-avatar ${message.role === "user" ? "msg-avatar-user" : "msg-avatar-assistant"
+                          }`}
                       >
                         {messageRoleLabel(message.role).charAt(0).toUpperCase()}
                       </div>
@@ -291,6 +367,14 @@ export function ChatInterface({
                           {formatTimestamp(new Date().toISOString())}
                         </span>
                       </div>
+                      <LiveStatusStrip
+                        streamingAssistant={streamingAssistant}
+                        streamingThinking={streamingThinking}
+                        streamingTools={streamingTools}
+                        liveTimeline={liveTimeline}
+                        sending={sending}
+                        waitingFirstToken={waitingFirstToken}
+                      />
                       {streamingThinking.length > 0 && (
                         <ThinkingDisclosure entries={streamingThinking} streaming />
                       )}
@@ -322,23 +406,16 @@ export function ChatInterface({
 
       <div className="border-t border-white/10 bg-white/5 px-4 py-4">
         <div className="mx-auto max-w-3xl">
-          {hasLiveRunPanel && liveTimeline.length > 0 && (
-            <LiveRunPanel
-              activity={liveTimeline}
-            />
-          )}
-
           <form
             ref={composerFormRef}
             onSubmit={(e) => handleSend(e)}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`composer-shell mt-4 flex flex-col gap-3 rounded-[24px] border p-3 transition ${
-              isDragging
+            className={`composer-shell mt-4 flex flex-col gap-3 rounded-[24px] border p-3 transition ${isDragging
                 ? "border-tide/50 bg-tide/10"
                 : ""
-            }`}
+              }`}
           >
             {attachments.length > 0 && (
               <div className="flex flex-wrap gap-2">
@@ -365,6 +442,12 @@ export function ChatInterface({
                 Processing attachments...
               </div>
             ) : null}
+
+            <ComposerMetaRow
+              sending={sending}
+              waitingFirstToken={waitingFirstToken}
+              liveTimeline={liveTimeline}
+            />
 
             <div className="flex items-end gap-3">
               <label

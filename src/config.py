@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
+from .runtime_paths import state_path
+
 
 # ---------------------------------------------------------------------
 # ThinkingConfig: controls prompt + reasoner combinations
@@ -40,9 +42,7 @@ class Config:
     # Core
     llama_cpp_url: str = field(
         default_factory=lambda: (
-            os.getenv("LOGICIAN_LLM_URL")
-            or os.getenv("LLAMA_CPP_URL")
-            or "http://localhost:8080"
+            os.getenv("LOGICIAN_LLM_URL") or os.getenv("LLAMA_CPP_URL") or "http://localhost:8080"
         )
     )
     timeout: float = 120.0
@@ -127,7 +127,7 @@ class Config:
     rag_enabled: bool = True
     rag_top_k: int = 20
     vector_path: str = "message_history.vector"
-    rag_vector_path: str = "rag_docs.vector"
+    rag_vector_path: str = field(default_factory=lambda: str(state_path("rag_docs.vector")))
     # Vector index backend selector: "usearch" (default), "hnsw", or "chromadb".
     vector_backend: str = "usearch"
     rag_vector_backend: str = "usearch"
@@ -177,13 +177,9 @@ class Config:
 
     # Logging
     debug_trace: bool = True
-    log_level: str | int = field(
-        default_factory=lambda: os.getenv("AGENT_LOG_LEVEL", "ERROR")
-    )
+    log_level: str | int = field(default_factory=lambda: os.getenv("AGENT_LOG_LEVEL", "ERROR"))
     log_json: bool = field(
-        default_factory=lambda: (
-            os.getenv("AGENT_LOG_JSON", "0").lower() in ("1", "true", "yes")
-        )
+        default_factory=lambda: os.getenv("AGENT_LOG_JSON", "0").lower() in ("1", "true", "yes")
     )
 
     # Tools

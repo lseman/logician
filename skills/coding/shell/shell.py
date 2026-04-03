@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import io
 import json
-import os
-import subprocess
-import sys
-import tempfile
-import threading
-import time
-from pathlib import Path
 from typing import Any
 
 from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
+from src.tools.core.ProcessTool import get_process_output as core_get_process_output
+from src.tools.core.ProcessTool import install_packages as core_install_packages
+from src.tools.core.ProcessTool import kill_process as core_kill_process
+from src.tools.core.ProcessTool import list_processes as core_list_processes
+from src.tools.core.ProcessTool import send_input_to_process as core_send_input_to_process
+from src.tools.core.ProcessTool import set_venv as core_set_venv
+from src.tools.core.ProcessTool import set_working_directory as core_set_working_directory
+from src.tools.core.ProcessTool import show_coding_config as core_show_coding_config
+from src.tools.core.ProcessTool import start_background_process as core_start_background_process
+from src.tools.core.PythonTool import check_imports as core_check_imports
+from src.tools.core.PythonTool import list_installed_packages as core_list_installed_packages
+from src.tools.core.PythonTool import run_python as core_run_python
 from src.tools.text_normalization import normalize_text_payload as shared_normalize_text_payload
 
 __skill__ = {
@@ -30,9 +34,7 @@ __skill__ = {
         "start the app locally and capture logs",
         "execute a short Python snippet against the project",
     ],
-    "when_not_to_use": [
-        "the task is just reading or editing files and does not need execution"
-    ],
+    "when_not_to_use": ["the task is just reading or editing files and does not need execution"],
     "next_skills": ["quality", "git", "explore"],
     "preferred_sequence": ["set_working_directory", "set_venv", "run_shell", "quality"],
     "entry_criteria": [
@@ -64,9 +66,6 @@ __skill__ = {
     ],
 }
 
-# Background process registry: name -> {proc, buf, lock, cmd, thread, cwd, started_at}
-_bg_procs: dict[str, dict[str, Any]] = {}
-
 
 def _runtime():
     """Return the shared coding runtime for this session."""
@@ -95,63 +94,11 @@ def _normalize_text_payload(
     return normalized
 
 
-def _resolve_python_executable(venv_path: str = "") -> str:
-    """Resolve the Python executable to use.
-
-    Priority:
-    1. explicit venv_path argument
-    2. configured runtime venv
-    3. current interpreter
-    """
-    venv = venv_path or _runtime().venv_path()
-    if venv:
-        python_bin = Path(venv).expanduser().resolve() / "bin" / "python"
-        if python_bin.exists():
-            return str(python_bin)
-    return sys.executable
-
-
-def _resolve_effective_cwd(cwd: str = "") -> str | None:
-    """Resolve the working directory using explicit cwd or runtime default."""
-    return _runtime().resolve_cwd(cwd or None)
-
-
 def _preview_text(text: str, limit: int = 300) -> str:
     """Return a safe short preview for logs and tool output."""
     if len(text) <= limit:
         return text
     return text[:limit] + "..."
-
-
-def _detect_python_truncation_warning(code: str) -> str | None:
-    """Return a warning when Python code looks incomplete."""
-    import ast
-    import re
-
-    tail = code.rstrip()[-400:]
-
-    placeholder_rx = re.compile(
-        r"(#\s*\.{2,}"
-        r"|#\s*\[?\.\.\.\]?"
-        r"|#\s*(rest|remainder)\s+of"
-        r"|#\s*more\s+(code|logic|impl)"
-        r"|#\s*implementation\s+continues)",
-        re.IGNORECASE | re.MULTILINE,
-    )
-    if placeholder_rx.search(tail):
-        return (
-            "Code may be incomplete because it ends with a placeholder-style comment."
-        )
-
-    if code.strip():
-        try:
-            ast.parse(code)
-        except SyntaxError as exc:
-            msg = str(exc).lower()
-            if any(token in msg for token in ("unexpected eof", "eof while", "was never closed")):
-                return f"Code may be truncated or incomplete: {exc}"
-
-    return None
 
 
 @tool
@@ -219,26 +166,7 @@ def set_venv(venv_path: str) -> str:
     Returns:
         JSON string confirming the configured venv and Python binary.
     """
-    p = Path(venv_path).expanduser().resolve()
-    activate = p / "bin" / "activate"
-    python_bin = p / "bin" / "python"
-
-    if not p.is_dir():
-        return _safe_json({"status": "error", "error": f"Directory not found: {p}"})
-    if not activate.exists():
-        return _safe_json(
-            {"status": "error", "error": f"bin/activate not found in: {p}"}
-        )
-
-    _runtime().set_venv_path(str(p))
-    return _safe_json(
-        {
-            "status": "ok",
-            "venv_path": str(p),
-            "python": str(python_bin) if python_bin.exists() else "not found",
-            "message": "venv configured; all run_shell / run_python calls will use it",
-        }
-    )
+    return _safe_json(core_set_venv(venv_path))
 
 
 @tool
@@ -256,12 +184,7 @@ def set_working_directory(path: str) -> str:
     Returns:
         JSON string with the resolved cwd.
     """
-    p = Path(path).expanduser().resolve()
-    if not p.is_dir():
-        return _safe_json({"status": "error", "error": f"Not a directory: {p}"})
-
-    _runtime().set_cwd(str(p))
-    return _safe_json({"status": "ok", "cwd": str(p)})
+    return _safe_json(core_set_working_directory(path))
 
 
 @tool
@@ -272,138 +195,16 @@ def run_python(
     venv_path: str = "",
     normalize_output: bool = True,
 ) -> str:
-    """Execute a Python snippet in a fresh subprocess.
-
-    Use when
-    --------
-    Run a short Python program to test imports, validate logic, inspect runtime
-    behavior, or execute project code without creating a persistent session.
-
-    Agent guidance
-    --------------
-    This tool is multiline-robust. It normalizes common agent formatting issues:
-    - strips outer markdown fences
-    - decodes obvious outer JSON-string wrapping
-    - decodes escaped newlines when the payload is clearly a literal string
-    - normalizes CRLF/LF safely
-
-    Best practices
-    --------------
-    - Pass real Python source code, not a shell command.
-    - Prefer actual newlines over literal "\\n".
-    - This is stateless per call; nothing persists between invocations except any
-      side effects caused by the script itself.
-
-    Args:
-        code: Python source code to execute.
-        cwd: Working directory for the subprocess.
-        timeout: Max seconds before the process is killed.
-        venv_path: Virtualenv to use. Overrides configured default.
-        normalize_output: If True (default), normalizes stdout/stderr newlines to LF
-        only for consistent output format. If False, preserves original line endings.
-
-    Returns:
-        JSON string with:
-        - status
-        - exit_code
-        - stdout
-        - stderr
-        - python
-        - cwd
-        - code_preview
-        Optional:
-        - warning
-        - temp_file
-    """
-    normalized_code = _normalize_text_payload(code, language_hint="python")
-    warning = _detect_python_truncation_warning(normalized_code)
-
-    python_exe = _resolve_python_executable(venv_path)
-    resolved_cwd = _resolve_effective_cwd(cwd)
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".py",
-            delete=False,
-            encoding="utf-8",
-            newline="\n",
-        ) as tmp:
-            tmp.write(normalized_code)
-            tmp.flush()
-            tmp_path = tmp.name
-
-        cmd = [python_exe, tmp_path]
-        proc = subprocess.run(
-            cmd,
-            cwd=resolved_cwd,
-            capture_output=True,
-            text=True,
+    """Execute a Python snippet in a fresh subprocess."""
+    return _safe_json(
+        core_run_python(
+            code,
+            cwd=cwd,
             timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-            env=os.environ.copy(),
+            venv_path=venv_path,
+            normalize_output=normalize_output,
         )
-
-        result: dict[str, Any] = {
-            "status": "ok" if proc.returncode == 0 else "error",
-            "exit_code": proc.returncode,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "python": python_exe,
-            "cwd": resolved_cwd or os.getcwd(),
-            "temp_file": tmp_path,
-            "code_preview": _preview_text(normalized_code, 500),
-        }
-        # Apply newline normalization to output
-        if normalize_output:
-            result["stdout"] = result["stdout"].replace("\r\n", "\n").replace("\r", "\n")
-            result["stderr"] = result["stderr"].replace("\r\n", "\n").replace("\r", "\n")
-        if warning:
-            result["warning"] = warning
-        return _safe_json(result)
-
-    except subprocess.TimeoutExpired as exc:
-        result = {
-            "status": "error",
-            "error": f"Python execution timed out after {timeout}s",
-            "exit_code": None,
-            "stdout": exc.stdout if isinstance(exc.stdout, str) else "",
-            "stderr": exc.stderr if isinstance(exc.stderr, str) else "",
-            "python": python_exe,
-            "cwd": resolved_cwd or os.getcwd(),
-            "code_preview": _preview_text(normalized_code, 500),
-        }
-        # Apply newline normalization to output
-        if normalize_output:
-            result["stdout"] = result["stdout"].replace("\r\n", "\n").replace("\r", "\n")
-            result["stderr"] = result["stderr"].replace("\r\n", "\n").replace("\r", "\n")
-        if warning:
-            result["warning"] = warning
-        return _safe_json(result)
-
-    except Exception as exc:
-        result = {
-            "status": "error",
-            "error": str(exc),
-            "python": python_exe,
-            "cwd": resolved_cwd or os.getcwd(),
-            "code_preview": _preview_text(normalized_code, 500),
-        }
-        # Apply newline normalization to output
-        if normalize_output:
-            result["stdout"] = result["stdout"].replace("\r\n", "\n").replace("\r", "\n")
-            result["stderr"] = result["stderr"].replace("\r\n", "\n").replace("\r", "\n")
-        if warning:
-            result["warning"] = warning
-        return _safe_json(result)
-
-    finally:
-        try:
-            if "tmp_path" in locals():
-                Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+    )
 
 
 @tool
@@ -422,19 +223,7 @@ def install_packages(packages: str, venv_path: str = "", upgrade: bool = False) 
     Returns:
         JSON string with pip command output.
     """
-    packages = _normalize_text_payload(packages).strip()
-    if not packages:
-        return _safe_json({"status": "error", "error": "No packages provided"})
-
-    upgrade_flag = "--upgrade " if upgrade else ""
-    cmd = f"pip install {upgrade_flag}{packages}"
-    result = _runtime().run_cmd(
-        cmd,
-        timeout=180,
-        venv_path=venv_path or None,
-    )
-    result["command_preview"] = _preview_text(cmd)
-    return _safe_json(result)
+    return _safe_json(core_install_packages(packages, venv_path=venv_path, upgrade=upgrade))
 
 
 @tool
@@ -444,22 +233,7 @@ def show_coding_config() -> str:
     Returns:
         JSON string with active execution configuration.
     """
-    venv = _runtime().venv_path()
-    cwd = _runtime().cwd()
-
-    python_bin = None
-    if venv:
-        pb = Path(venv) / "bin" / "python"
-        python_bin = str(pb) if pb.exists() else f"{venv}/bin/python (not found)"
-
-    return _safe_json(
-        {
-            "status": "ok",
-            "venv_path": venv or "(not set)",
-            "python_bin": python_bin or "(not set)",
-            "default_cwd": cwd or "(not set — uses process cwd)",
-        }
-    )
+    return _safe_json(core_show_coding_config())
 
 
 @tool
@@ -491,80 +265,7 @@ def start_background_process(
     Returns:
         JSON string with pid and process metadata.
     """
-    global _bg_procs
-
-    command = _normalize_text_payload(command)
-
-    if name in _bg_procs and _bg_procs[name]["proc"].poll() is None:
-        return _safe_json(
-            {"status": "error", "error": f"Process '{name}' is already running"}
-        )
-
-    prefix = _runtime().build_shell_prefix(venv_path or None)
-    full_cmd = prefix + command if prefix else command
-    resolved_cwd = _resolve_effective_cwd(cwd)
-
-    try:
-        proc = subprocess.Popen(
-            full_cmd,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE,
-            text=True,
-            cwd=resolved_cwd,
-            env=os.environ.copy(),
-            bufsize=1,
-            universal_newlines=True,
-        )
-        buf = io.StringIO()
-        lock = threading.Lock()
-
-        def _reader() -> None:
-            stdout = proc.stdout
-            if stdout is None:
-                return
-            for line in stdout:
-                with lock:
-                    buf.write(line)
-
-        thread = threading.Thread(target=_reader, daemon=True)
-        thread.start()
-
-        _bg_procs[name] = {
-            "proc": proc,
-            "buf": buf,
-            "lock": lock,
-            "cmd": command,
-            "thread": thread,
-            "cwd": resolved_cwd or os.getcwd(),
-            "started_at": time.time(),
-        }
-
-        time.sleep(0.3)
-        if proc.poll() is not None:
-            with lock:
-                out = buf.getvalue()
-            del _bg_procs[name]
-            return _safe_json(
-                {
-                    "status": "error",
-                    "error": f"Process exited immediately (code {proc.returncode})",
-                    "output": out[:4000],
-                }
-            )
-
-        return _safe_json(
-            {
-                "status": "ok",
-                "name": name,
-                "pid": proc.pid,
-                "command": command,
-                "cwd": resolved_cwd or os.getcwd(),
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
+    return _safe_json(core_start_background_process(command, name, cwd=cwd, venv_path=venv_path))
 
 
 @tool
@@ -587,43 +288,7 @@ def send_input_to_process(name: str, input_text: str) -> str:
     Returns:
         JSON string with write status and byte count.
     """
-    global _bg_procs
-
-    if name not in _bg_procs:
-        return _safe_json({"status": "error", "error": f"No process named '{name}'"})
-
-    entry = _bg_procs[name]
-    proc = entry["proc"]
-
-    if proc.poll() is not None:
-        return _safe_json(
-            {
-                "status": "error",
-                "error": f"Process '{name}' is not running (exit code {proc.returncode})",
-            }
-        )
-
-    if proc.stdin is None:
-        return _safe_json(
-            {"status": "error", "error": f"Process '{name}' has no stdin pipe"}
-        )
-
-    normalized_input = _normalize_text_payload(input_text)
-    normalized_input = normalized_input.replace("\r\n", "\n").replace("\r", "\n")
-
-    try:
-        proc.stdin.write(normalized_input)
-        proc.stdin.flush()
-        return _safe_json(
-            {
-                "status": "ok",
-                "name": name,
-                "bytes_written": len(normalized_input.encode("utf-8")),
-                "input_preview": _preview_text(normalized_input, 200),
-            }
-        )
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc)})
+    return _safe_json(core_send_input_to_process(name, input_text))
 
 
 @tool
@@ -641,31 +306,7 @@ def get_process_output(name: str, tail_lines: int = 50) -> str:
     Returns:
         JSON string with process status and captured output.
     """
-    global _bg_procs
-
-    if name not in _bg_procs:
-        return _safe_json({"status": "error", "error": f"No process named '{name}'"})
-
-    entry = _bg_procs[name]
-    proc = entry["proc"]
-
-    with entry["lock"]:
-        output = entry["buf"].getvalue()
-
-    if tail_lines > 0:
-        lines = output.splitlines()
-        output = "\n".join(lines[-tail_lines:])
-
-    return _safe_json(
-        {
-            "status": "ok",
-            "name": name,
-            "pid": proc.pid,
-            "running": proc.poll() is None,
-            "exit_code": proc.poll(),
-            "output": output,
-        }
-    )
+    return _safe_json(core_get_process_output(name, tail_lines=tail_lines))
 
 
 @tool
@@ -683,38 +324,7 @@ def kill_process(name: str, force: bool = False) -> str:
     Returns:
         JSON string with exit metadata.
     """
-    global _bg_procs
-
-    if name not in _bg_procs:
-        return _safe_json({"status": "error", "error": f"No process named '{name}'"})
-
-    entry = _bg_procs[name]
-    proc = entry["proc"]
-
-    if proc.poll() is not None:
-        del _bg_procs[name]
-        return _safe_json(
-            {
-                "status": "ok",
-                "name": name,
-                "already_exited": True,
-                "exit_code": proc.returncode,
-            }
-        )
-
-    if force:
-        proc.kill()
-    else:
-        proc.terminate()
-
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-
-    del _bg_procs[name]
-    return _safe_json({"status": "ok", "name": name, "exit_code": proc.returncode})
+    return _safe_json(core_kill_process(name, force=force))
 
 
 @tool
@@ -725,186 +335,21 @@ def list_processes() -> str:
         JSON string describing all known background processes and whether each is
         still running.
     """
-    global _bg_procs
-
-    result = []
-    for name, entry in list(_bg_procs.items()):
-        proc = entry["proc"]
-        result.append(
-            {
-                "name": name,
-                "pid": proc.pid,
-                "command": entry["cmd"],
-                "cwd": entry.get("cwd"),
-                "running": proc.poll() is None,
-                "exit_code": proc.poll(),
-                "started_at": entry.get("started_at"),
-            }
-        )
-    return _safe_json({"status": "ok", "processes": result})
+    return _safe_json(core_list_processes())
 
 
 @tool
 def list_installed_packages(venv_path: str = "") -> str:
-    """List installed pip packages as structured JSON.
-
-    Use when
-    --------
-    Inspect environment contents before installing dependencies or checking imports.
-
-    Args:
-        venv_path: Virtualenv path overriding the configured default.
-
-    Returns:
-        JSON string with package list.
-    """
-    cmd = "pip list --format=json"
-    r = _runtime().run_cmd(cmd, timeout=30, venv_path=venv_path or None)
-
-    packages = []
-    parse_error = None
-    try:
-        raw = (r.get("stdout") or "").strip()
-        packages = json.loads(raw) if raw else []
-    except Exception as exc:
-        parse_error = str(exc)
-
-    return _safe_json(
-        {
-            "status": "ok" if r.get("exit_code") == 0 else "error",
-            "count": len(packages),
-            "packages": packages,
-            "parse_error": parse_error,
-            "stdout": r.get("stdout", ""),
-            "stderr": r.get("stderr", ""),
-        }
-    )
+    """List installed pip packages as structured JSON."""
+    return _safe_json(core_list_installed_packages(venv_path=venv_path))
 
 
 @tool
 def check_imports(modules: str, venv_path: str = "") -> str:
-    """Check whether one or more Python modules can be imported.
-
-    Use when
-    --------
-    Verify dependencies before running larger code.
-
-    Agent guidance
-    --------------
-    - Pass space-separated top-level module names, such as:
-      "numpy pandas torch"
-    - This uses run_python-like normalization so escaped newlines and fenced text
-      do not break execution if the module list came from a noisy payload.
-
-    Args:
-        modules: Space-separated module names.
-        venv_path: Virtualenv to use.
-
-    Returns:
-        JSON string mapping each module to true/false plus raw execution output.
-    """
-    modules = _normalize_text_payload(modules)
-    names = [m.strip() for m in modules.split() if m.strip()]
-    if not names:
-        return _safe_json({"status": "error", "error": "No module names provided"})
-
-    python_exe = _resolve_python_executable(venv_path)
-
-    code_lines = [
-        "import importlib",
-        "import json",
-        "results = {}",
-    ]
-    for name in names:
-        code_lines.extend(
-            [
-                f"try:",
-                f"    importlib.import_module({name!r})",
-                f"    results[{name!r}] = True",
-                f"except Exception:",
-                f"    results[{name!r}] = False",
-            ]
-        )
-    code_lines.append("print(json.dumps(results, ensure_ascii=False))")
-    code = "\n".join(code_lines)
-
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".py",
-            delete=False,
-            encoding="utf-8",
-            newline="\n",
-        ) as tmp:
-            tmp.write(code)
-            tmp.flush()
-            tmp_path = tmp.name
-
-        proc = subprocess.run(
-            [python_exe, tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            encoding="utf-8",
-            errors="replace",
-            env=os.environ.copy(),
-        )
-
-        results: dict[str, bool] = {}
-        try:
-            results = json.loads((proc.stdout or "").strip())
-        except Exception:
-            for name in names:
-                results[name] = False
-
-        for name in names:
-            results.setdefault(name, False)
-
-        return _safe_json(
-            {
-                "status": "ok" if proc.returncode == 0 else "error",
-                "importable": results,
-                "stdout": proc.stdout,
-                "stderr": proc.stderr,
-                "exit_code": proc.returncode,
-                "python": python_exe,
-            }
-        )
-
-    except subprocess.TimeoutExpired as exc:
-        return _safe_json(
-            {
-                "status": "error",
-                "error": "Import check timed out after 20s",
-                "stdout": exc.stdout if isinstance(exc.stdout, str) else "",
-                "stderr": exc.stderr if isinstance(exc.stderr, str) else "",
-                "python": python_exe,
-            }
-        )
-
-    except Exception as exc:
-        return _safe_json({"status": "error", "error": str(exc), "python": python_exe})
-
-    finally:
-        try:
-            if "tmp_path" in locals():
-                Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+    """Check whether one or more Python modules can be imported."""
+    return _safe_json(core_check_imports(modules, venv_path=venv_path))
 
 
 __tools__ = [
     run_shell,
-    set_venv,
-    set_working_directory,
-    run_python,
-    install_packages,
-    show_coding_config,
-    start_background_process,
-    send_input_to_process,
-    get_process_output,
-    kill_process,
-    list_processes,
-    list_installed_packages,
-    check_imports,
 ]
