@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+
 jobs:
   deploy:
     name: Deploy GitHub Pages
@@ -20,11 +24,10 @@ jobs:
         with:
           publish_dir: ./site
           publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           user_name: github-actions[bot]
           user_email: github-actions[bot]@users.noreply.github.com
           commit_message: "Deploy site to GitHub Pages from main"
           allow_empty_commit: true
           keep_files: false
           cname: logician.laioseman.com
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
