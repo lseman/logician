@@ -18,6 +18,24 @@ class RegistryExecutionMixin:
         record_stats: bool = True,
     ) -> tuple[Tool | None, str | None]:
         tool = self.get(call.name)
+        if not tool and hasattr(self, "_find_skill_ids_by_tool_name"):
+            self._log.info(
+                "Tool '%s' not found; searching skills for matching tool definitions", call.name
+            )
+            for skill_id in self._find_skill_ids_by_tool_name(call.name):
+                if hasattr(self, "_load_tool_modules_for_skill_id"):
+                    self._load_tool_modules_for_skill_id(skill_id)
+                    tool = self.get(call.name)
+                    if tool:
+                        break
+
+        if not tool and hasattr(self, "_load_python_skill_modules"):
+            self._log.info(
+                "Tool '%s' still not found; lazily loading all Python skill modules", call.name
+            )
+            self._load_python_skill_modules()
+            tool = self.get(call.name)
+
         if not tool:
             self._log.error("Tool not found: %s", call.name)
             suggestions = self._suggest_tool_names(call.name, max_items=5)
@@ -214,6 +232,7 @@ class RegistryExecutionMixin:
             prepared_args=prepared_args,
         )
         if execution_error is not None:
+            # If the result is already a JSON-formatted string, return it.
             return execution_error
 
         is_error_result = self._result_indicates_error(result)

@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from skills.wiki.wiki_skills.scripts import wiki_ops
+from skills.wiki.scripts import wiki_ops
 
 
 class _WikiHelpFormatter(
@@ -276,8 +276,12 @@ def _build_parser() -> argparse.ArgumentParser:
             """
         ),
     )
-    add_raw_paper_parser.add_argument("paper", help="Paper PDF URL, arXiv URL/id, or local PDF path.")
-    add_raw_paper_parser.add_argument("--paper-title", help="Override the generated paper note title.")
+    add_raw_paper_parser.add_argument(
+        "paper", help="Paper PDF URL, arXiv URL/id, or local PDF path."
+    )
+    add_raw_paper_parser.add_argument(
+        "--paper-title", help="Override the generated paper note title."
+    )
     add_raw_paper_parser.add_argument(
         "--source-note-path", help="Override the destination note path under source/."
     )

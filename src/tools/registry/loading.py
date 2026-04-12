@@ -25,12 +25,13 @@ class RegistryLoadingMixin:
     """ToolRegistry mixin."""
 
     def load_tools_from_skills(self) -> None:
-        python_count = self._load_python_skill_modules()
+        # Historically this auto-loaded every Python module under `skills/`.
+        # Now we only register core tools and builtin meta-tools eagerly.
+        # Skill modules are lazy: their SKILL.md metadata is used to resolve
+        # skill ids, and script tools are imported only when the tool name is
+        # actually called or when invoke_skill forces the skill to load.
+        python_count = self._load_core_tool_modules()
         builtin_count = self._register_builtin_tools()
-        # Defer skill catalog building (SKILL.md parsing + routing index) to first
-        # routing query via ensure_skill_catalog(). Building it here at startup adds
-        # ~100-200ms of YAML parsing and tokenization with no benefit — the catalog
-        # is only needed when the agent routes a query for the first time.
         if python_count > 0 or builtin_count > 0:
             self._version += 1
             self._invalidate_skill_resolution_cache()
@@ -51,8 +52,8 @@ class RegistryLoadingMixin:
             {
                 "name": "invoke_skill",
                 "description": (
-                    "Force a specific skill into the next routing pass, or optionally execute its primary tool directly. "
-                    "Use when user asks to explicitly apply a named skill, or when you know exactly what arguments to pass."
+                    "Load a specific skill's metadata and tooling, or optionally execute its primary tool directly. "
+                    "Use invoke_skill to force a skill into routing or to bootstrap a SKILL.md-backed skill when you know the skill name or tool name."
                 ),
                 "parameters": [
                     ToolParameter(
@@ -82,9 +83,9 @@ class RegistryLoadingMixin:
                 ],
                 "function": self._invoke_skill_tool,
                 "doc": (
-                    "**Description:** Force a skill into the next routing pass or execute it immediately.\n\n"
+                    "**Description:** Load the selected skill's SKILL.md metadata and tooling, or execute its primary tool immediately if arguments are provided.\n\n"
                     "**Parameters:**\n"
-                    "- skill (string, required): Skill id, name, alias, or intent text.\n"
+                    "- skill (string, required): Skill id, name, alias, tool name, or intent text.\n"
                     "- reason (string, optional): Why the skill is being forced.\n"
                     "- top_k (integer, optional): Number of matched skills to force.\n"
                     "- args (string, optional): JSON string of arguments to execute the primary tool directly."
@@ -284,6 +285,101 @@ class RegistryLoadingMixin:
         )
         return total_registered
 
+    def _load_core_tool_modules(self) -> int:
+        """Load Python modules from `src/tools/core` and register any exported tools.
+
+        This keeps the runtime lean and ensures only the curated core toolset is
+        imported eagerly at startup (no scanning of user skills/ plugins).
+        """
+        core_root = Path(__file__).resolve().parents[2] / "tools" / "core"
+        if not core_root.is_dir():
+            return 0
+
+        py_files: list[Path] = []
+        seen: set[str] = set()
+        for root, dirs, files in __import__("os").walk(str(core_root), followlinks=True):
+            root_path = Path(root)
+            for fname in files:
+                if not fname.endswith(".py") or fname == "__init__.py" or fname.startswith("_"):
+                    continue
+                module_path = root_path / fname
+                key = str(module_path.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                py_files.append(module_path)
+        py_files = sorted(py_files)
+        if not py_files:
+            return 0
+
+        total_registered = 0
+        for module_path in py_files:
+            total_registered += self._register_tools_from_python_module(module_path)
+
+        self._log.info(
+            "Loaded %d tool(s) from core tool modules under %s",
+            total_registered,
+            str(core_root),
+        )
+        return total_registered
+
+    def _skill_root_for_skill_id(self, skill_id: str) -> Path | None:
+        skill_id_norm = str(skill_id or "").strip().lower()
+        if not skill_id_norm or not self.skills_dir_path.is_dir():
+            return None
+
+        self._catalog.ensure_skill_catalog()
+        for source in self._catalog.iter_skills_sources():
+            if self._catalog._skill_id_from_source(source) == skill_id_norm:
+                return self._catalog._skill_root_for_source(source)
+        return None
+
+    def _load_tool_modules_for_skill_id(self, skill_id: str) -> int:
+        skill_root = self._skill_root_for_skill_id(skill_id)
+        if skill_root is None or not skill_root.is_dir():
+            return 0
+
+        scripts_root = skill_root / "scripts"
+        py_files: list[Path] = []
+        seen: set[str] = set()
+
+        if scripts_root.is_dir():
+            for root, dirs, files in __import__("os").walk(str(scripts_root), followlinks=True):
+                root_path = Path(root)
+                for fname in files:
+                    if not fname.endswith(".py") or fname == "__init__.py" or fname.startswith("_"):
+                        continue
+                    module_path = root_path / fname
+                    key = str(module_path.resolve())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    py_files.append(module_path)
+        else:
+            for module_path in sorted(skill_root.glob("*.py")):
+                if (module_path.name == "__init__.py") or module_path.name.startswith("_"):
+                    continue
+                py_files.append(module_path)
+
+        if not py_files:
+            return 0
+
+        total_registered = 0
+        for module_path in sorted(py_files):
+            total_registered += self._register_tools_from_python_module(module_path)
+
+        if total_registered > 0:
+            self._version += 1
+            self._invalidate_skill_resolution_cache()
+            self._log.info(
+                "Lazy-loaded %d tool(s) for skill %s from %s",
+                total_registered,
+                skill_id,
+                str(skill_root),
+            )
+
+        return total_registered
+
     @staticmethod
     def _safe_module_segment(name: str) -> str:
         segment = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name or "")).strip("_")
@@ -313,13 +409,27 @@ class RegistryLoadingMixin:
     def _python_module_import_names(
         self, module_path: Path
     ) -> tuple[list[str], list[str], str, str]:
-        rel_module_path = module_path.relative_to(self.skills_dir_path).with_suffix("")
-        raw_parts = list(rel_module_path.parts)
+        # Primary case: module lives under the skills/ tree. Keep existing behavior.
+        try:
+            rel_module_path = module_path.relative_to(self.skills_dir_path).with_suffix("")
+            raw_parts = list(rel_module_path.parts)
+            root_package = "skills_runtime"
+        except Exception:
+            # Module is not under skills/. It may be a core tool under src/tools/core
+            core_root = Path(__file__).resolve().parents[2] / "tools" / "core"
+            try:
+                rel_module_path = module_path.relative_to(core_root).with_suffix("")
+                raw_parts = list(rel_module_path.parts)
+                root_package = "core_tools_runtime"
+            except Exception:
+                # Fallback: use the filename only to avoid relative_to errors
+                raw_parts = [module_path.with_suffix("").name]
+                root_package = "core_tools_runtime"
+
         safe_parts = [self._safe_module_segment(part) for part in raw_parts]
         if not safe_parts:
             safe_parts = ["module"]
 
-        root_package = "skills_runtime"
         package_parts = [root_package, *safe_parts[:-1]]
         package_name = ".".join(package_parts)
         module_name = ".".join([*package_parts, safe_parts[-1]])
@@ -895,10 +1005,10 @@ class RegistryLoadingMixin:
 
     @staticmethod
     def _mcp_tool_parameters(tdef: MCPToolDef) -> list[ToolParameter]:
-        from ..runtime import ToolParameter as _TP
+        from ..runtime import ToolParameter
 
         return [
-            _TP(
+            ToolParameter(
                 name=p.name,
                 type=p.type,
                 description=p.description,

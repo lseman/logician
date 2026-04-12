@@ -9,9 +9,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from .core import _HNSWCollection, _SQLITE_PRAGMAS, create_vector_collection
 from ..logging_utils import get_logger
 from ..messages import Message, MessageRole
+from .core import _SQLITE_PRAGMAS, _HNSWCollection, create_vector_collection
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -98,9 +98,7 @@ class MessageDB:
     _fts_enabled: bool = field(default=False, init=False, repr=False)
 
     _collection: _HNSWCollection | None = field(default=None, init=False, repr=False)
-    _lock: threading.RLock = field(
-        default_factory=threading.RLock, init=False, repr=False
-    )
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._log = get_logger("agent.db")
@@ -155,9 +153,7 @@ class MessageDB:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);"
         )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(timestamp);"
-        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(timestamp);")
         try:
             self._conn.execute(
                 """
@@ -197,9 +193,7 @@ class MessageDB:
                 END;
                 """
             )
-            self._conn.execute(
-                "INSERT INTO messages_fts(messages_fts) VALUES('rebuild');"
-            )
+            self._conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild');")
             self._fts_enabled = True
         except Exception as e:
             self._log.warning("FTS5 unavailable, keyword/hybrid search disabled: %s", e)
@@ -229,7 +223,7 @@ class MessageDB:
                 reranker_model_name=self.reranker_model_name,
                 min_similarity=self.min_similarity,
             )
-        except ImportError as e:
+        except (ImportError, ValueError) as e:
             self.vector_enabled = False
             self._collection = None
             self._log.warning("Disabling vector memory: %s", e)
@@ -267,10 +261,7 @@ class MessageDB:
             return 0
 
         ids = [f"msg-{int(row_id)}" for (row_id, *_rest) in rows]
-        documents = [
-            str(content)
-            for (_row_id, _sid, _role, content, _name, _tool_id) in rows
-        ]
+        documents = [str(content) for (_row_id, _sid, _role, content, _name, _tool_id) in rows]
         metadatas = [
             {
                 "session_id": str(session_id),
@@ -286,10 +277,7 @@ class MessageDB:
         with self._lock:
             self._conn.executemany(
                 "UPDATE messages SET vector_id=? WHERE id=?",
-                [
-                    (vector_id, int(row_id))
-                    for vector_id, (row_id, *_rest) in zip(ids, rows)
-                ],
+                [(vector_id, int(row_id)) for vector_id, (row_id, *_rest) in zip(ids, rows)],
             )
             self._conn.commit()
         return len(rows)
@@ -499,9 +487,7 @@ class MessageDB:
     def collection(self) -> _HNSWCollection:
         self._ensure_vector()
         if self._collection is None:
-            raise RuntimeError(
-                "Vector store is disabled but semantic operation was requested."
-            )
+            raise RuntimeError("Vector store is disabled but semantic operation was requested.")
         return self._collection
 
     def save_message(self, session_id: str, msg: Message) -> int:
@@ -509,9 +495,7 @@ class MessageDB:
             raise RuntimeError("SQLite connection is not initialized.")
 
         vectorize = bool(getattr(msg, "vectorize", True))
-        should_index_now = bool(
-            self.vector_enabled and vectorize and self.index_on_write
-        )
+        should_index_now = bool(self.vector_enabled and vectorize and self.index_on_write)
         vector_id = str(uuid.uuid4()) if should_index_now else None
 
         with self._lock:
@@ -640,9 +624,7 @@ class MessageDB:
                     session_filter=session_id,
                     mode=mode_norm,
                 )
-                semantic_ids = [
-                    int(r["row_id"]) for r in rows if r.get("row_id") is not None
-                ]
+                semantic_ids = [int(r["row_id"]) for r in rows if r.get("row_id") is not None]
                 chosen_ids: list[int] = list(reversed(recent_ids))
                 for msg_id in semantic_ids:
                     if msg_id not in recent_id_set and msg_id not in chosen_ids:
@@ -730,9 +712,7 @@ class MessageDB:
         ).fetchone()
         return int(row[0]) if row else 0
 
-    def save_session_runtime_state(
-        self, session_id: str, state: dict[str, Any] | None
-    ) -> None:
+    def save_session_runtime_state(self, session_id: str, state: dict[str, Any] | None) -> None:
         if self._conn is None:
             raise RuntimeError("SQLite connection is not initialized.")
 
@@ -767,9 +747,7 @@ class MessageDB:
         try:
             return json.loads(str(row[0]))
         except Exception:
-            self._log.exception(
-                "Failed to decode runtime state for session=%s", session_id[:8]
-            )
+            self._log.exception("Failed to decode runtime state for session=%s", session_id[:8])
             return None
 
     def clear_session_messages(self, session_id: str) -> None:
@@ -785,9 +763,7 @@ class MessageDB:
             try:
                 self.collection.delete(where={"session_id": session_id})
             except Exception as e:
-                self._log.warning(
-                    "Vector delete failed for session=%s: %s", session_id[:8], e
-                )
+                self._log.warning("Vector delete failed for session=%s: %s", session_id[:8], e)
 
     def clear_session_runtime_state(self, session_id: str) -> None:
         if self._conn is None:
@@ -832,17 +808,13 @@ class MessageDB:
                 return []
             mode_norm = "vector"
 
-        rows = self._search_messages(
-            query, k=k, session_filter=session_filter, mode=mode_norm
-        )
+        rows = self._search_messages(query, k=k, session_filter=session_filter, mode=mode_norm)
         return [
             Message(
                 role=MessageRole(str(r["role"])),
                 content=str(r["content"]),
                 name=(str(r["name"]) if r.get("name") else None),
-                tool_call_id=(
-                    str(r["tool_call_id"]) if r.get("tool_call_id") else None
-                ),
+                tool_call_id=(str(r["tool_call_id"]) if r.get("tool_call_id") else None),
                 thinking_log=_decode_thinking_log(r.get("thinking_log")),
             )
             for r in rows

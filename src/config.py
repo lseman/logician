@@ -128,9 +128,10 @@ class Config:
     rag_top_k: int = 20
     vector_path: str = "message_history.vector"
     rag_vector_path: str = field(default_factory=lambda: str(state_path("rag_docs.vector")))
-    # Vector index backend selector: "usearch" (default), "hnsw", or "chromadb".
-    vector_backend: str = "usearch"
-    rag_vector_backend: str = "usearch"
+    # Vector index backend selector: empty string means no default ("raw").
+    # Set per-workspace via agent_config.json to enable a specific backend.
+    vector_backend: str = ""
+    rag_vector_backend: str = ""
     rag_rerank_enabled: bool = True
     rag_rerank_fetch_k: int = 30
     rag_min_similarity: float = 0.20

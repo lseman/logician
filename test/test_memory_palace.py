@@ -104,3 +104,20 @@ def test_load_history_includes_cross_session_palace_context(tmp_path: Path) -> N
     assert "session-a" in history[0].content
     assert "Postgres" in history[0].content
     assert any(msg.content == "Current task is unrelated." for msg in history[1:])
+
+
+def test_search_rag_skips_vector_store_when_backend_is_unset(tmp_path: Path) -> None:
+    config = Config()
+    config.rag_enabled = True
+    config.rag_vector_backend = ""
+    config.memory_palace_enabled = False
+
+    memory = Memory(
+        config=config,
+        db_path=str(tmp_path / "agent_sessions.db"),
+        embedding_model=None,
+    )
+
+    results = memory.search_rag("query")
+    assert results == []
+    assert memory._doc_db is None

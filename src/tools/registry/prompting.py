@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any, Literal, Sequence
 
-from .types import _OpenAIToolSchema
 from ..runtime import Tool
+from .types import _OpenAIToolSchema
 
 _DEFAULT_PROMPT_TOOL_NAMES: tuple[str, ...] = (
-    "invoke_skill",
     "describe_tool",
     "search_tools",
     "think",
@@ -29,9 +28,7 @@ _DEFAULT_PROMPT_TOOL_NAMES: tuple[str, ...] = (
 class RegistryPromptingMixin:
     """ToolRegistry mixin."""
 
-    def _iter_tools_for_prompt(
-        self, include_tool_names: Sequence[str] | None = None
-    ) -> list[Tool]:
+    def _iter_tools_for_prompt(self, include_tool_names: Sequence[str] | None = None) -> list[Tool]:
         if not include_tool_names:
             return sorted(self._tools.values(), key=lambda t: t.name)
         out: list[Tool] = []
@@ -131,9 +128,7 @@ class RegistryPromptingMixin:
             return f"- {tool.name}({params})"
         return f"- {tool.name}()"
 
-    def _json_schema_tools_prompt(
-        self, include_tool_names: Sequence[str] | None = None
-    ) -> str:
+    def _json_schema_tools_prompt(self, include_tool_names: Sequence[str] | None = None) -> str:
         payload = {
             "tool_call_contract": (
                 "When using tools, return exactly one tool call object. "

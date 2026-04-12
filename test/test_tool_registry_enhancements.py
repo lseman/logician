@@ -905,7 +905,7 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
         "raw_dir": raw_dir or "default",
     })
 
-# Note: No __tools__ export - should still be auto-discovered
+# Note: No __tools__ export; skill tools are lazily registered as proxies by load_tools_from_skills
 """.strip()
                 + "\n",
                 encoding="utf-8",
@@ -917,30 +917,108 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
             registry.install_context(Context())
             registry.load_tools_from_skills()
 
-            # Both tools should be auto-discovered without __tools__ export
-            wiki_list_tool = registry.get("wiki_list")
-            wiki_list_raw_tool = registry.get("wiki_list_raw")
-
-            self.assertIsNotNone(wiki_list_tool, "wiki_list should be auto-discovered")
-            self.assertIsNotNone(wiki_list_raw_tool, "wiki_list_raw should be auto-discovered")
-
-            assert wiki_list_tool is not None
-            assert wiki_list_raw_tool is not None
-            self.assertEqual(
-                wiki_list_tool.description, "List wiki source documents available for compilation."
-            )
-            self.assertEqual(
-                wiki_list_raw_tool.description, "List artifacts collected in the raw directory."
+            # Skill tools under skills/ should not be eagerly auto-loaded.
+            self.assertIsNone(registry.get("wiki_list"), "wiki_list should not be auto-discovered")
+            self.assertIsNone(
+                registry.get("wiki_list_raw"), "wiki_list_raw should not be auto-discovered"
             )
 
-            # Execute the tool
-            result = registry.execute(
-                ToolCall(id="test_auto", name="wiki_list", arguments={}),
-                use_toon=False,
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="wiki_ops",
+                args='{"path": null}',
             )
             payload = json.loads(result)
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["path"], "default")
+
+    def test_invoke_skill_executes_skill_tool_directly_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "wiki" / "wiki_ops"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: wiki ops\ndescription: Wiki operations skill.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "wiki_ops.py"
+            module_path.write_text(
+                "def wiki_list():\n    return {'status': 'ok', 'value': 'done'}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="wiki_ops",
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["value"], "done")
+
+    def test_invoke_skill_accepts_direct_tool_name_for_skill_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "wiki" / "wiki_skills"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: wiki skills\ndescription: Wiki skill group.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "wiki_ops.py"
+            module_path.write_text(
+                "def wiki_list():\n    return {'status': 'ok', 'value': 'done'}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="wiki_list",
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["value"], "done")
+
+    def test_direct_tool_name_lazy_loads_skill_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "wiki" / "wiki_skills"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: wiki skills\ndescription: Wiki skill group.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "wiki_ops.py"
+            module_path.write_text(
+                "def wiki_list():\n    return {'status': 'ok', 'value': 'done'}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            self.assertIsNone(registry.get("wiki_list"))
+            result = registry.call_tool("wiki_list")
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["data"]["value"], "done")
 
     def test_root_level_python_modules_ignored_when_scripts_subdir_exists(self) -> None:
         """Tools under root skill directories should be loaded only from scripts/."""
@@ -981,7 +1059,7 @@ def wiki_list() -> dict:
             registry.install_context(Context())
             registry.load_tools_from_skills()
 
-            self.assertIsNotNone(registry.get("wiki_list"))
+            self.assertIsNone(registry.get("wiki_list"))
             self.assertIsNone(registry.get("legacy_tool"))
 
     def test_auto_discovery_excludes_private_and_internal_names(self) -> None:

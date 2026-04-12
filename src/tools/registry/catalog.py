@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Literal, Optional, Sequence, TypedDict
 
 from ..runtime import SkillCard, SkillSelection, ToolParameter
+from src.skills.skill_manifest import split_frontmatter
 
 try:
     from markdown_it import MarkdownIt
@@ -22,14 +23,6 @@ try:
 except ImportError:
     MarkdownIt = None  # type: ignore
     HAS_MARKDOWN_IT = False
-
-try:
-    import yaml as _yaml
-
-    HAS_YAML = True
-except ImportError:
-    _yaml = None  # type: ignore
-    HAS_YAML = False
 
 try:
     from rapidfuzz import fuzz as _rf_fuzz
@@ -2737,62 +2730,9 @@ class SkillCatalog:
                 score += 5.0
         return score
 
-    def _strip_skill_fence(self, content: str) -> str:
-        """Strip the outer ```skill … ``` wrapper used by Superpowers SKILL.md files."""
-        lines = content.splitlines()
-        if lines and re.match(r"^```skill\s*$", lines[0].strip()):
-            # Drop opening fence
-            lines = lines[1:]
-            # Drop closing fence if present
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-        return "\n".join(lines)
-
     def _split_frontmatter(self, content: str) -> tuple[SkillManifest, str]:
-        # Superpowers files wrap everything in a ```skill fence — strip it first.
-        stripped = self._strip_skill_fence(content)
-        if not stripped.startswith("---\n"):
-            return SkillManifest(), stripped
-        content = stripped
-
-        lines = content.splitlines()
-        end_idx: int | None = None
-        for idx in range(1, len(lines)):
-            if lines[idx].strip() == "---":
-                end_idx = idx
-                break
-        if end_idx is None:
-            return SkillManifest(), content
-
-        raw_yaml = "\n".join(lines[1:end_idx])
-        body = "\n".join(lines[end_idx + 1 :]).lstrip("\n")
-        manifest = self._parse_frontmatter(raw_yaml)
+        manifest, body = split_frontmatter(content)
         return manifest, body
-
-    def _parse_frontmatter(self, raw_yaml: str) -> SkillManifest:
-        """Parse YAML frontmatter using PyYAML when available, falling back to a simple
-        line-by-line parser for environments without the dependency."""
-        if HAS_YAML and _yaml is not None:
-            try:
-                parsed = _yaml.safe_load(raw_yaml)
-                if isinstance(parsed, dict):
-                    return {str(k): v for k, v in parsed.items()}  # type: ignore[return-value]
-            except Exception as exc:
-                self._log.warning("YAML frontmatter parse failed, using fallback: %s", exc)
-        return self._parse_frontmatter_lines_fallback(raw_yaml.splitlines())
-
-    def _parse_frontmatter_lines_fallback(self, lines: list[str]) -> SkillManifest:
-        """Minimal YAML-subset parser used when PyYAML is not installed."""
-        manifest: SkillManifest = {}
-        current_key: str | None = None
-
-        for raw_line in lines:
-            line = raw_line.rstrip()
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-
-            if re.match(r"^[A-Za-z0-9_]+:\s*", stripped):
                 key, value = stripped.split(":", 1)
                 key = key.strip()
                 value = value.strip()

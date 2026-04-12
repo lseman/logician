@@ -4115,7 +4115,28 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
     fn apply_bridge_state(&mut self, v: &Value) {
         let previous_todo_count = self.bridge_state.todo.len();
+        let previous_session = self.bridge_state.session.clone();
         self.bridge_state = BridgeState::from_value(v);
+
+        if !previous_session.is_empty()
+            && previous_session != self.bridge_state.session
+            && !self.bridge_state.session.trim().is_empty()
+            && self.bridge_state.session != "-"
+        {
+            self.add_system_message(format!(
+                "Resumed session `{}`.",
+                self.bridge_state.session
+            ));
+            self.current_turn_tool_names.clear();
+            self.current_turn_tool_args.clear();
+            self.current_turn_activity.clear();
+            self.current_turn_tool_errors = 0;
+            self.last_turn_activity.clear();
+            self.last_turn_tool_names.clear();
+            self.last_turn_iterations = 0;
+            self.last_tool_error = None;
+        }
+
         if previous_todo_count == 0 && !self.bridge_state.todo.is_empty() {
             self.todo_on = true;
         }
@@ -4457,6 +4478,21 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             state: live_step.state,
             is_last: false,
         });
+
+        let session_label = self.bridge_state.session.trim();
+        if !session_label.is_empty() && session_label != "-" {
+            entries.push(ProgressEntry {
+                label: "session".to_string(),
+                meta: Some("active".to_string()),
+                detail: Some(session_label.to_string()),
+                state: if self.busy {
+                    ProgressState::Active
+                } else {
+                    ProgressState::Complete
+                },
+                is_last: false,
+            });
+        }
 
         if !self.active_skill_ids.is_empty() {
             let detail = if self.active_selected_tools.is_empty() {
@@ -5079,6 +5115,38 @@ mod tests {
             app.bridge_state.loaded_skills,
             vec!["explore".to_string(), "patch".to_string()]
         );
+    }
+
+    #[test]
+    fn apply_bridge_state_announces_session_resume() {
+        let mut app = App::new();
+        app.bridge_state.session = "sess-1".to_string();
+
+        app.apply_bridge_state(&json!({
+            "session": "sess-2",
+            "active": "main",
+            "loaded_tools": [],
+            "loaded_skills": [],
+            "todo": []
+        }));
+
+        assert_eq!(app.bridge_state.session, "sess-2");
+        assert!(app.messages.iter().any(|message| {
+            message.role == Role::System
+                && message.text.contains("Resumed session `sess-2`.")
+        }));
+        assert!(app.current_turn_activity.is_empty());
+    }
+
+    #[test]
+    fn progress_entries_include_active_session_label() {
+        let mut app = App::new();
+        app.bridge_state.session = "sess-1".to_string();
+        let entries = app.progress_entries();
+
+        assert!(entries.iter().any(|entry| {
+            entry.label == "session" && entry.detail.as_deref() == Some("sess-1")
+        }));
     }
 
     #[test]

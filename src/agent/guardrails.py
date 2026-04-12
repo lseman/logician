@@ -1,4 +1,5 @@
 """GuardrailEngine: all guards run on every response; hard_stop beats nudge."""
+
 from __future__ import annotations
 
 import re
@@ -93,6 +94,70 @@ class DuplicateToolGuard:
                     nudge=(
                         f"You already called {call.name} with the same arguments. "
                         "Try a different approach."
+                    ),
+                    hard_stop=False,
+                    guard_name=self.name,
+                )
+        return GuardrailResult(passed=True, guard_name=self.name)
+
+
+class UnsupportedToolGuard:
+    name = "unsupported_tool"
+
+    def check(
+        self,
+        state: TurnState,
+        response: str,
+        tool_calls: list[ToolCall],
+    ) -> GuardrailResult:
+        if not tool_calls or not state.available_tool_names:
+            return GuardrailResult(passed=True, guard_name=self.name)
+
+        missing = [
+            call.name
+            for call in tool_calls
+            if str(call.name or "").strip() not in state.available_tool_names
+        ]
+        if not missing:
+            return GuardrailResult(passed=True, guard_name=self.name)
+
+        available = sorted(state.available_tool_names)
+        fallback = ", ".join(available[:12])
+        if len(available) > 12:
+            fallback += ", ..."
+        return GuardrailResult(
+            passed=False,
+            nudge=(
+                f"Tool '{missing[0]}' is not available for this turn. "
+                f"Use one of the available tools instead: {fallback}."
+            ),
+            hard_stop=False,
+            guard_name=self.name,
+        )
+
+
+class ToolResultAcknowledgementGuard:
+    name = "tool_result_acknowledgement"
+
+    def __init__(self, min_response_length: int = 40) -> None:
+        self._min_response_length = min_response_length
+
+    def check(
+        self,
+        state: TurnState,
+        response: str,
+        tool_calls: list[ToolCall],
+    ) -> GuardrailResult:
+        if tool_calls or not state.tool_results:
+            return GuardrailResult(passed=True, guard_name=self.name)
+
+        if not response or len(response.strip()) < self._min_response_length:
+            if state.last_tool_output or any(r.has_content for r in state.tool_results):
+                return GuardrailResult(
+                    passed=False,
+                    nudge=(
+                        "You just received tool results. Summarize or incorporate "
+                        "those results in your answer instead of replying with a short response."
                     ),
                     hard_stop=False,
                     guard_name=self.name,
@@ -233,9 +298,7 @@ _STRUCTURAL_PYTHON_TOOLS = {
 
 def _call_path(call: ToolCall) -> str:
     args = dict(call.arguments or {})
-    return str(
-        args.get("path") or args.get("file_path") or args.get("filename") or ""
-    ).strip()
+    return str(args.get("path") or args.get("file_path") or args.get("filename") or "").strip()
 
 
 def _is_python_path(path: str) -> bool:
@@ -261,10 +324,11 @@ class VerificationGuard:
         if tool_calls:
             if any(_tool_name_is_verifier(call.name) for call in tool_calls):
                 return GuardrailResult(passed=True, guard_name=self.name)
-            return GuardrailResult(passed=False, guard_name=self.name, nudge=(
-                "You've modified files but haven't verified. "
-                "Please run tests or a linter."
-            ))
+            return GuardrailResult(
+                passed=False,
+                guard_name=self.name,
+                nudge=("You've modified files but haven't verified. Please run tests or a linter."),
+            )
 
         # Prefer structured execution results when available.
         last_write_result = state.last_write_result_index()
@@ -281,10 +345,7 @@ class VerificationGuard:
 
         return GuardrailResult(
             passed=False,
-            nudge=(
-                "You've modified files but haven't verified. "
-                "Please run tests or a linter."
-            ),
+            nudge=("You've modified files but haven't verified. Please run tests or a linter."),
             hard_stop=False,
             guard_name=self.name,
         )
@@ -323,9 +384,7 @@ class PythonStructuralEditGuard:
     name = "python_structural_edit"
 
     def __init__(self, config: Config) -> None:
-        self._enabled = bool(
-            getattr(config, "python_structural_editing_preference", True)
-        )
+        self._enabled = bool(getattr(config, "python_structural_editing_preference", True))
 
     def check(
         self,
@@ -385,22 +444,22 @@ class StallGuard:
 
 _TOOL_ERROR_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r'"status"\s*:\s*"error"', re.IGNORECASE),
-    re.compile(r'\bno such file or directory\b', re.IGNORECASE),
-    re.compile(r'\bfile not found\b', re.IGNORECASE),
-    re.compile(r'\bno matches found\b', re.IGNORECASE),
+    re.compile(r"\bno such file or directory\b", re.IGNORECASE),
+    re.compile(r"\bfile not found\b", re.IGNORECASE),
+    re.compile(r"\bno matches found\b", re.IGNORECASE),
     re.compile(r'"count"\s*:\s*0\b'),
     re.compile(r'"matches_found"\s*:\s*0\b'),
-    re.compile(r'\b0 matches\b', re.IGNORECASE),
-    re.compile(r'\berror\b.{0,40}\bnot found\b', re.IGNORECASE | re.DOTALL),
+    re.compile(r"\b0 matches\b", re.IGNORECASE),
+    re.compile(r"\berror\b.{0,40}\bnot found\b", re.IGNORECASE | re.DOTALL),
 ]
 
 _SUCCESS_CLAIM_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r'\bthe file contains\b', re.IGNORECASE),
-    re.compile(r'\bfound\s+\d+\b', re.IGNORECASE),
-    re.compile(r'\bsuccessfully\s+(?:read|loaded|found|retrieved)\b', re.IGNORECASE),
-    re.compile(r'\bthe (?:result|output) shows\b', re.IGNORECASE),
-    re.compile(r'\bhere (?:is|are) the (?:content|results|output)\b', re.IGNORECASE),
-    re.compile(r'\bmatches were found\b', re.IGNORECASE),
+    re.compile(r"\bthe file contains\b", re.IGNORECASE),
+    re.compile(r"\bfound\s+\d+\b", re.IGNORECASE),
+    re.compile(r"\bsuccessfully\s+(?:read|loaded|found|retrieved)\b", re.IGNORECASE),
+    re.compile(r"\bthe (?:result|output) shows\b", re.IGNORECASE),
+    re.compile(r"\bhere (?:is|are) the (?:content|results|output)\b", re.IGNORECASE),
+    re.compile(r"\bmatches were found\b", re.IGNORECASE),
 ]
 
 _TOOL_SUCCESS_PATTERNS: list[re.Pattern[str]] = [
@@ -487,8 +546,10 @@ def default_guards(config: Config) -> list[Guard]:
     """Build the default guard list for a standard agent."""
     guards: list[Guard] = [
         DuplicateToolGuard(),
+        UnsupportedToolGuard(),
         ConsecutiveToolGuard(config),
         HallucinationGuard(),
+        ToolResultAcknowledgementGuard(),
     ]
     if getattr(config, "tool_claim_guard_enabled", True):
         guards.append(ToolClaimGuard())

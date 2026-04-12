@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import src.db.core as core
 import src.db.backends.factory as factory
+import src.db.core as core
 from src.db.backends.chromadb import _ChromaDBCollection
 from src.db.backends.hnsw import _HNSWCollection
 from src.db.backends.usearch import _USEARCHCollection
@@ -122,11 +122,31 @@ def test_factory_rejects_unknown_backend() -> None:
         assert True
 
 
+def test_factory_defaults_to_hnsw_when_backend_is_empty() -> None:
+    old_c = factory._ChromaDBCollection
+    old_h = factory._HNSWCollection
+    old_u = factory._USEARCHCollection
+    try:
+        factory._ChromaDBCollection = _DummyChromaDB  # type: ignore[assignment]
+        factory._HNSWCollection = _DummyHNSW  # type: ignore[assignment]
+        factory._USEARCHCollection = _DummyUSEARCH  # type: ignore[assignment]
+        try:
+            core.create_vector_collection(backend="", **_factory_kwargs())
+            assert False, "Expected ValueError when backend is empty"
+        except ValueError:
+            assert True
+    finally:
+        factory._ChromaDBCollection = old_c  # type: ignore[assignment]
+        factory._HNSWCollection = old_h  # type: ignore[assignment]
+        factory._USEARCHCollection = old_u  # type: ignore[assignment]
+
+
 def test_hnsw_collection_init_defers_backend_import(tmp_path) -> None:
     import src.db.backends.hnsw as hnsw_mod
 
     old_lazy_import = hnsw_mod._lazy_import_hnswlib
     try:
+
         def _boom() -> Any:
             raise AssertionError("hnswlib should not load during collection init")
 
@@ -148,6 +168,7 @@ def test_usearch_collection_init_defers_backend_import(tmp_path) -> None:
 
     old_lazy_import = usearch_mod._lazy_import_usearch_index
     try:
+
         def _boom() -> Any:
             raise AssertionError("usearch should not load during collection init")
 
@@ -169,6 +190,7 @@ def test_chromadb_collection_init_defers_backend_import(tmp_path) -> None:
 
     old_lazy_import = chroma_mod._lazy_import_chromadb
     try:
+
         def _boom() -> Any:
             raise AssertionError("chromadb should not load during collection init")
 

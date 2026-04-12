@@ -35,32 +35,6 @@ __skill__ = {
     ],
     "next_skills": ["quality"],
     "preferred_sequence": ["read_file", "apply_edit_block", "quality"],
-    "entry_criteria": [
-        "The target file is known and the intended local change can be anchored with exact surrounding code.",
-        "You want a minimal change with lower collateral-edit risk than a full rewrite.",
-    ],
-    "decision_rules": [
-        "Use exact SEARCH anchors when possible and keep the replacement block small.",
-        "Prefer edit_block over diff patches when you can describe the before-and-after code directly.",
-        "If the surrounding text is unstable or repeated many times, re-read the file before applying blocks.",
-    ],
-    "workflow": [
-        "Use exact surrounding anchors to avoid collateral edits.",
-        "Keep replacements minimal and local.",
-        "Re-read the file if anchors may have drifted.",
-    ],
-    "failure_recovery": [
-        "If SEARCH is not unique, include more surrounding context lines.",
-        "If fuzzy whitespace matching still fails, refresh the file contents and rebuild the block from the current source.",
-    ],
-    "exit_criteria": [
-        "The local block change is applied without unrelated edits nearby.",
-        "A verification step is chosen if the block affects behavior.",
-    ],
-    "anti_patterns": [
-        "Using tiny or generic SEARCH anchors that match several places.",
-        "Trying to express a broad repo-wide refactor with a single edit block.",
-    ],
 }
 
 if "_safe_json" not in globals():
@@ -219,9 +193,9 @@ __tools__: list = []
 
 
 _APPLY_EDIT_BLOCK_GRAMMAR = r"""root      ::= tool-call
-tool-call ::= "{\"tool_call\": {\"name\": \"apply_edit_block\", \"arguments\": " args "}}"
-args      ::= "{\"path\": " string ", \"blocks\": " string "}"
-string    ::= "\"" char* "\""
+tool-call ::= '{"tool_call": {"name": "apply_edit_block", "arguments": ' args '}}'
+args      ::= '{"path": ' string ', "blocks": ' string '}'
+string    ::= '"' char* '"'
 char      ::= [^"\\] | "\\" escape
 escape    ::= ["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]
 """

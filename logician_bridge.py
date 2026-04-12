@@ -573,8 +573,9 @@ class BridgeServer:
             # Keep vector store local to this bridge workspace.
             ov["vector_path"] = str(VECTOR_PATH)
             ov["rag_vector_path"] = str(RAG_VECTOR_PATH)
-            if "rag_vector_backend" not in ov:
-                ov["rag_vector_backend"] = "hnsw"
+            # Do not force a default RAG vector backend here – leave it
+            # unset so the agent/workspace can opt into a backend explicitly
+            # (empty string == raw/no backend by default).
             if "rag_rerank_enabled" not in ov:
                 ov["rag_rerank_enabled"] = False
             # Backward-compat alias used by agent_config.json.

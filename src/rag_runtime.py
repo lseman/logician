@@ -35,8 +35,9 @@ def managed_rag_vector_path() -> Path:
 
 def rag_runtime_settings(workspace_root: str | Path | None = None) -> dict[str, str]:
     payload = load_workspace_agent_config(workspace_root)
+    # Default to empty (raw/no backend) unless explicitly configured.
     vector_backend = (
-        str(payload.get("rag_vector_backend") or payload.get("vector_backend") or "usearch")
+        str(payload.get("rag_vector_backend") or payload.get("vector_backend") or "")
         .strip()
         .lower()
     )
@@ -45,7 +46,7 @@ def rag_runtime_settings(workspace_root: str | Path | None = None) -> dict[str, 
     ).strip()
     return {
         "vector_path": str(managed_rag_vector_path()),
-        "vector_backend": vector_backend or "usearch",
+        "vector_backend": vector_backend or None,
         "embedding_model_name": embedding_model_name or DEFAULT_RAG_EMBEDDING_MODEL,
     }
 

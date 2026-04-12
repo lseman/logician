@@ -7,7 +7,7 @@ from .usearch import _USEARCHCollection
 
 def create_vector_collection(
     *,
-    backend: str = "usearch",
+    backend: str = "",
     root_path: str,
     collection_name: str,
     embedding_model_name: str,
@@ -19,7 +19,11 @@ def create_vector_collection(
     ef_search: int = 128,
     min_similarity: float = 0.18,
 ) -> _HNSWCollection:
-    backend_norm = str(backend or "usearch").strip().lower()
+    backend_norm = str(backend or "").strip().lower()
+    if not backend_norm:
+        raise ValueError(
+            "No vector backend configured. Set Config.vector_backend or pass a backend explicitly."
+        )
     if backend_norm not in ("chromadb", "hnsw", "usearch"):
         raise ValueError(
             f"Unsupported vector backend '{backend}'. Expected one of: chromadb, hnsw, usearch."

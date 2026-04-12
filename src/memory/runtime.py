@@ -41,7 +41,7 @@ class Memory:
             vector_path=self.config.vector_path,
             embedding_model_name=self._embedding_model_name or _DEFAULT_EMBEDDING_MODEL_NAME,
             vector_enabled=message_vectors_enabled,
-            vector_backend=str(getattr(self.config, "vector_backend", "usearch")),
+            vector_backend=str(getattr(self.config, "vector_backend", "")),
             index_on_write=bool(getattr(self.config, "message_vector_index_on_write", False)),
             rerank_enabled=False,
         )
@@ -53,10 +53,15 @@ class Memory:
             return
         if not self.config.rag_enabled:
             return
+
+        rag_backend = str(getattr(self.config, "rag_vector_backend", "") or "").strip()
+        if not rag_backend:
+            return
+
         self._doc_db = DocumentDB(
             vector_path=self.config.rag_vector_path,
             embedding_model_name=self._embedding_model_name or _DEFAULT_EMBEDDING_MODEL_NAME,
-            vector_backend=str(getattr(self.config, "rag_vector_backend", "usearch")),
+            vector_backend=rag_backend,
             rerank_enabled=bool(getattr(self.config, "rag_rerank_enabled", True)),
             rerank_fetch_k=int(getattr(self.config, "rag_rerank_fetch_k", 30)),
             min_similarity=float(getattr(self.config, "rag_min_similarity", 0.20)),
@@ -220,7 +225,7 @@ class Memory:
             if str(row.get("session_id") or "") != str(sid)
             and str(row.get("role") or "") in {"system", "user", "assistant"}
             and str(row.get("content") or "").strip()
-        ][: max_results]
+        ][:max_results]
         if not filtered:
             return ""
 

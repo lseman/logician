@@ -1,4 +1,5 @@
 """Tests for GuardrailEngine and all 6 built-in guards."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,16 +14,18 @@ from src.agent.guardrails import (
     ReadBeforeEditGuard,
     StallGuard,
     ToolClaimGuard,
+    ToolResultAcknowledgementGuard,
+    UnsupportedToolGuard,
     VerificationGuard,
 )
 from src.agent.state import ToolResultRecord, TurnState
 from src.config import Config
 from src.tools.runtime import ToolCall
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_state(**kwargs) -> TurnState:
     state = TurnState(turn_id="test-turn")
@@ -38,6 +41,7 @@ def make_call(name: str, args: dict | None = None) -> ToolCall:
 # ---------------------------------------------------------------------------
 # GuardrailEngine
 # ---------------------------------------------------------------------------
+
 
 class AlwaysPassGuard:
     name = "always_pass"
@@ -57,9 +61,7 @@ class HardStopGuard:
     name = "hard_stop"
 
     def check(self, state, response, tool_calls):
-        return GuardrailResult(
-            passed=False, nudge="stop msg", hard_stop=True, guard_name=self.name
-        )
+        return GuardrailResult(passed=False, nudge="stop msg", hard_stop=True, guard_name=self.name)
 
 
 def test_engine_all_pass():
@@ -87,6 +89,7 @@ def test_engine_hard_stop_beats_nudge_even_when_later():
 # ---------------------------------------------------------------------------
 # DuplicateToolGuard
 # ---------------------------------------------------------------------------
+
 
 def test_duplicate_first_call_passes():
     guard = DuplicateToolGuard()
@@ -124,6 +127,7 @@ def test_duplicate_third_call_hard_stops():
 # ConsecutiveToolGuard
 # ---------------------------------------------------------------------------
 
+
 def test_consecutive_under_limit_passes():
     config = Config(max_consecutive_tool_calls=5)
     guard = ConsecutiveToolGuard(config)
@@ -153,17 +157,21 @@ def test_consecutive_at_limit_no_tool_calls_passes():
 # ToolClaimGuard
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("text", [
-    "I ran the tests and they passed.",
-    "I executed the script already.",
-    "I called the API to check the results.",
-    "I used the tool to process the file.",
-    "I've already run the linter.",
-    "I've just executed the command.",
-    "Done editing the file.",
-    "Completed the test run.",
-    "I've written the output file.",
-])
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I ran the tests and they passed.",
+        "I executed the script already.",
+        "I called the API to check the results.",
+        "I used the tool to process the file.",
+        "I've already run the linter.",
+        "I've just executed the command.",
+        "Done editing the file.",
+        "Completed the test run.",
+        "I've written the output file.",
+    ],
+)
 def test_tool_claim_detects_claim(text: str):
     guard = ToolClaimGuard()
     state = make_state()
@@ -189,6 +197,7 @@ def test_tool_claim_with_tool_calls_always_passes():
 # ---------------------------------------------------------------------------
 # VerificationGuard
 # ---------------------------------------------------------------------------
+
 
 def test_verification_no_files_written_passes():
     guard = VerificationGuard()
@@ -285,8 +294,77 @@ def test_python_structural_edit_guard_passes_for_non_python_paths():
 
 
 # ---------------------------------------------------------------------------
+# UnsupportedToolGuard
+
+
+def test_unsupported_tool_guard_nudges_when_tool_not_available():
+    guard = UnsupportedToolGuard()
+    state = make_state(available_tool_names={"read_file", "write_file"})
+    result = guard.check(state, "", [make_call("foo_tool", {})])
+    assert not result.passed
+    assert "foo_tool" in result.nudge
+    assert "read_file" in result.nudge
+
+
+def test_unsupported_tool_guard_passes_when_tool_available():
+    guard = UnsupportedToolGuard()
+    state = make_state(available_tool_names={"read_file", "write_file"})
+    result = guard.check(state, "", [make_call("read_file", {"path": "src/app.py"})])
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
+# ToolResultAcknowledgementGuard
+
+
+def test_tool_result_acknowledgement_guard_nudges_short_response_after_tool_results():
+    guard = ToolResultAcknowledgementGuard(min_response_length=20)
+    state = make_state(
+        tool_results=[
+            ToolResultRecord(
+                call_id="c1",
+                tool_name="read_file",
+                status="ok",
+                output="hello",
+                has_content=True,
+            )
+        ],
+        last_tool_output="hello",
+    )
+    result = guard.check(state, "OK.", [])
+    assert not result.passed
+    assert "tool results" in result.nudge
+
+
+def test_tool_result_acknowledgement_guard_passes_for_long_response_after_tool_results():
+    guard = ToolResultAcknowledgementGuard(min_response_length=20)
+    state = make_state(
+        tool_results=[
+            ToolResultRecord(
+                call_id="c1",
+                tool_name="read_file",
+                status="ok",
+                output="hello",
+                has_content=True,
+            )
+        ],
+        last_tool_output="hello",
+    )
+    result = guard.check(state, "The file contains hello and we should use it.", [])
+    assert result.passed
+
+
+def test_tool_result_acknowledgement_guard_passes_without_tool_results():
+    guard = ToolResultAcknowledgementGuard(min_response_length=20)
+    state = make_state()
+    result = guard.check(state, "OK.", [])
+    assert result.passed
+
+
+# ---------------------------------------------------------------------------
 # StallGuard
 # ---------------------------------------------------------------------------
+
 
 def test_stall_under_limit_passes():
     # StallGuard triggers on total nudges across all guards; 4 < 5 (default max)
@@ -323,6 +401,7 @@ def test_stall_no_nudge_count_passes():
 # ---------------------------------------------------------------------------
 # InspectionGuard
 # ---------------------------------------------------------------------------
+
 
 def test_inspection_always_passes():
     guard = InspectionGuard()

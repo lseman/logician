@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+
 @contextlib.contextmanager
 def _suppress_fd_output() -> Any:
     """Temporarily silence low-level stdout/stderr from noisy native loaders."""
@@ -236,9 +237,13 @@ def _resolve_vector_collection_dir(
 ) -> Path:
     root = Path(root_path)
     stable_name = _stable_collection_name(collection_name, embedding_model_name)
-    backend_norm = str(backend or "").strip().lower() or "usearch"
+    backend_norm = str(backend or "").strip().lower()
 
-    preferred = root / backend_norm / stable_name
+    if not backend_norm:
+        # No backend configured: prefer legacy flat collection layout
+        preferred = root / stable_name
+    else:
+        preferred = root / backend_norm / stable_name
     if preferred.exists():
         return preferred
 
@@ -353,11 +358,7 @@ class _EmbeddingRuntime:
                             self._log.warning(
                                 "Embedding quantization kwargs unsupported; retrying without quantization."
                             )
-                            kwargs = {
-                                k: v
-                                for k, v in kwargs.items()
-                                if k != "quantization_config"
-                            }
+                            kwargs = {k: v for k, v in kwargs.items() if k != "quantization_config"}
                         with _suppress_fd_output():
                             enc = SentenceTransformer(candidate, **kwargs)
                     self._GLOBAL_ENCODERS[candidate] = enc
@@ -376,9 +377,7 @@ class _EmbeddingRuntime:
     def dim(self) -> int:
         with self._lock:
             enc = self._ensure_encoder()
-            sample = _prepare_embedding_input(
-                self.resolved_model_name, "hello", for_query=False
-            )
+            sample = _prepare_embedding_input(self.resolved_model_name, "hello", for_query=False)
             vec = enc.encode([sample], normalize_embeddings=True)[0]
             return int(np.asarray(vec).shape[0])
 
@@ -397,9 +396,7 @@ class _EmbeddingRuntime:
     def embed_query(self, query: str) -> np.ndarray:
         with self._lock:
             enc = self._ensure_encoder()
-            q = _prepare_embedding_input(
-                self.resolved_model_name, query, for_query=True
-            )
+            q = _prepare_embedding_input(self.resolved_model_name, query, for_query=True)
             vec = np.asarray(enc.encode([q], normalize_embeddings=True)[0])
             if vec.dtype != np.float32:
                 vec = vec.astype(np.float32, copy=False)
@@ -464,17 +461,13 @@ class _RerankerRuntime:
                         self._log.warning(
                             "Reranker quantization kwargs unsupported; retrying without quantization."
                         )
-                        kwargs = {
-                            k: v for k, v in kwargs.items() if k != "quantization_config"
-                        }
+                        kwargs = {k: v for k, v in kwargs.items() if k != "quantization_config"}
                     try:
                         with _suppress_fd_output():
                             model = CrossEncoder(candidate, **kwargs)
                     except Exception as exc:
                         last_err = exc
-                        self._log.warning(
-                            "Reranker model failed %s: %s", candidate, exc
-                        )
+                        self._log.warning("Reranker model failed %s: %s", candidate, exc)
                         continue
                 except Exception as exc:
                     last_err = exc
@@ -507,9 +500,7 @@ class _RerankerRuntime:
         scores = model.predict(pairs)
         ranked = [
             {**row, "rerank_score": float(score)}
-            for score, row in sorted(
-                zip(scores, rows), key=lambda item: item[0], reverse=True
-            )
+            for score, row in sorted(zip(scores, rows), key=lambda item: item[0], reverse=True)
         ]
         return ranked[:top_k]
 
