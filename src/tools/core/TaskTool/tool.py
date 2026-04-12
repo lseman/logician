@@ -31,6 +31,30 @@ _STATUS_ICONS = {
 _TODO_PATH_ENV = "LOGICIAN_TODO_STATE_PATH"
 
 
+def _todo_warnings(items: list[dict[str, Any]]) -> list[str]:
+    warnings: list[str] = []
+    for item in items:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            warnings.append("Task item is missing a title.")
+        status = str(item.get("status") or "").strip().lower()
+        if status and status not in _STATUS_ALIASES:
+            warnings.append(
+                f"Task '{title or '<untitled>'}' has an unrecognized status '{status}'. "
+                "It will be normalized to 'not-started'."
+            )
+    return list(dict.fromkeys(warnings))
+
+
+def _build_verification_hint(warnings: list[str]) -> str:
+    if warnings:
+        return (
+            "Review the task list carefully before proceeding. "
+            "The current items contain validation warnings."
+        )
+    return "The task list is valid. Confirm that task priorities and statuses are correct."
+
+
 def think(thought: str) -> dict[str, Any]:
     """Record an internal thought or reasoning step."""
     return {
@@ -61,7 +85,7 @@ def todo(
        todo(command="set", items=[{"title": "Fix bug", "status": "in-progress"}])
 
     Returns:
-        dict with structured task state and a rendered markdown view.
+        dict with structured task state, validation metadata, and a rendered markdown view.
     """
     if command:
         return _todo_command(
@@ -94,18 +118,39 @@ def _todo_command(
 
     if normalized_command == "view":
         current = _get_items()
-        return {"status": "ok", "todos": current, "view": _render_markdown(current)}
+        warnings = _todo_warnings(current)
+        return {
+            "status": "ok",
+            "todos": current,
+            "view": _render_markdown(current),
+            "warnings": warnings,
+            "verification_hint": _build_verification_hint(warnings),
+        }
+
+    if normalized_command == "validate":
+        normalized = _get_items() if items is None else _normalize_items(items)
+        warnings = _todo_warnings(normalized)
+        return {
+            "status": "ok",
+            "todos": normalized,
+            "view": _render_markdown(normalized),
+            "warnings": warnings,
+            "verification_hint": _build_verification_hint(warnings),
+        }
 
     if normalized_command in {"set", "update"}:
         if not isinstance(items, list):
             return {"status": "error", "error": "items must be a list of todo dicts"}
         normalized = _normalize_items(items)
+        warnings = _todo_warnings(normalized)
         _set_items(normalized)
         return {
             "status": "ok",
             "count": len(normalized),
             "todos": normalized,
             "view": _render_markdown(normalized),
+            "warnings": warnings,
+            "verification_hint": _build_verification_hint(warnings),
         }
 
     if normalized_command == "add":
@@ -121,12 +166,15 @@ def _todo_command(
             "note": str(note or "").strip(),
         }
         updated = [*existing, new_item]
+        warnings = _todo_warnings(updated)
         _set_items(updated)
         return {
             "status": "ok",
             "added": new_item,
             "todos": updated,
             "view": _render_markdown(updated),
+            "warnings": warnings,
+            "verification_hint": _build_verification_hint(warnings),
         }
 
     if normalized_command == "mark":
@@ -146,12 +194,15 @@ def _todo_command(
             updated.append(current)
         if found is None:
             return {"status": "error", "error": f"No item with id={id}"}
+        warnings = _todo_warnings(updated)
         _set_items(updated)
         return {
             "status": "ok",
             "updated": found,
             "todos": updated,
             "view": _render_markdown(updated),
+            "warnings": warnings,
+            "verification_hint": _build_verification_hint(warnings),
         }
 
     if normalized_command == "note":
@@ -167,23 +218,32 @@ def _todo_command(
             updated.append(current)
         if found is None:
             return {"status": "error", "error": f"No item with id={id}"}
+        warnings = _todo_warnings(updated)
         _set_items(updated)
         return {
             "status": "ok",
             "updated": found,
             "todos": updated,
             "view": _render_markdown(updated),
+            "warnings": warnings,
+            "verification_hint": _build_verification_hint(warnings),
         }
 
     if normalized_command == "clear":
         _set_items([])
-        return {"status": "ok", "todos": [], "view": "(empty todo list)"}
+        return {
+            "status": "ok",
+            "todos": [],
+            "view": "(empty todo list)",
+            "warnings": [],
+            "verification_hint": _build_verification_hint([]),
+        }
 
     return {
         "status": "error",
         "error": (
             f"Unknown command '{normalized_command}'. "
-            "Valid commands: view, set, update, add, mark, note, clear"
+            "Valid commands: view, set, update, add, mark, note, clear, validate"
         ),
     }
 

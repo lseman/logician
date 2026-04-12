@@ -256,17 +256,7 @@ class RegistryLoadingMixin:
 
             # When a skill folder defines scripts/, only modules inside that tree
             # should be auto-loaded as executable tools.
-            has_child_skill_dirs = any(
-                (root_path / d).is_dir()
-                and d not in {"scripts", "__pycache__"}
-                and not d.startswith(".")
-                for d in dirs
-            )
-            if (
-                "scripts" not in rel_parts
-                and (root_path / "scripts").is_dir()
-                and ((root_path / "SKILL.md").is_file() or not has_child_skill_dirs)
-            ):
+            if "scripts" not in rel_parts and (root_path / "scripts").is_dir():
                 dirs[:] = [d for d in dirs if d == "scripts"]
                 continue
 
@@ -405,10 +395,18 @@ class RegistryLoadingMixin:
             description = str(
                 meta.get("description") or self._python_tool_doc_summary(tool_fn) or ""
             ).strip()
-            tool_fn.__doc__ = self._compose_tool_docstring(
-                tool_fn,
-                base_description=description,
-            )
+            try:
+                tool_fn.__doc__ = self._compose_tool_docstring(
+                    tool_fn,
+                    base_description=description,
+                )
+            except (AttributeError, TypeError):
+                self._log.warning(
+                    "Unable to set __doc__ for tool %s from %s: %s",
+                    tool_name,
+                    module_path,
+                    type(tool_fn).__name__,
+                )
             params = self._parameters_from_signature(
                 tool_fn,
                 parameter_overrides=meta.get("parameters"),
@@ -449,59 +447,88 @@ class RegistryLoadingMixin:
         *,
         execution_globals: dict[str, Any],
         module_path: Path,
+        module_name: str,
     ) -> list[tuple[Callable[..., Any], dict[str, Any]]]:
-        """Resolve exported tools for a Python skill module."""
+        """Resolve exported tools for a Python skill module.
+
+        First checks for __tools__ export. If not present, automatically discovers
+        all public callable functions in the module (excluding special/internal names).
+        """
         entries: list[tuple[Callable[..., Any], dict[str, Any]]] = []
         seen: set[int] = set()
         exports = execution_globals.get("__tools__")
         tool_meta_raw = execution_globals.get("__tool_meta__", {})
         tool_meta = tool_meta_raw if isinstance(tool_meta_raw, dict) else {}
 
-        if exports is None:
-            # Fallback: collect @tool-decorated functions defined IN this module.
-            # We use __globals__ identity to exclude functions imported from other
-            # modules (e.g. bootstrap helpers), which would have a different globals dict.
-            for candidate in execution_globals.values():
-                if (
-                    callable(candidate)
-                    and bool(getattr(candidate, "__tool__", False))
-                    and getattr(candidate, "__globals__", None) is execution_globals
-                ):
-                    if id(candidate) not in seen:
-                        entries.append((candidate, getattr(candidate, "__llm_tool_meta__", {})))
-                        seen.add(id(candidate))
-            return entries
-
-        if isinstance(exports, (str, bytes)) or not isinstance(exports, Sequence):
-            self._log.warning(
-                "Ignoring invalid __tools__ export in %s; expected a sequence of callables or function names",
-                module_path,
-            )
-            return entries
-
-        for export in exports:
-            tool_fn: Callable[..., Any] | None = None
-            if callable(export):
-                tool_fn = export
-            elif isinstance(export, str):
-                candidate = execution_globals.get(export)
-                if callable(candidate):
-                    tool_fn = candidate
-            if tool_fn is None:
+        if exports is not None:
+            # __tools__ export is present - use it
+            if isinstance(exports, (str, bytes)) or not isinstance(exports, Sequence):
                 self._log.warning(
-                    "Ignoring invalid __tools__ entry %r in %s",
-                    export,
+                    "Ignoring invalid __tools__ export in %s; expected a sequence of callables or function names",
                     module_path,
                 )
-                continue
-            if id(tool_fn) in seen:
-                continue
-            meta = getattr(tool_fn, "__llm_tool_meta__", {})
-            explicit_meta = tool_meta.get(getattr(tool_fn, "__name__", ""), {})
-            if isinstance(explicit_meta, dict):
-                meta = {**meta, **explicit_meta}
-            entries.append((tool_fn, meta))
-            seen.add(id(tool_fn))
+                return exports
+
+            for export in exports:
+                tool_fn: Callable[..., Any] | None = None
+                if callable(export):
+                    tool_fn = export
+                elif isinstance(export, str):
+                    candidate = execution_globals.get(export)
+                    if callable(candidate):
+                        tool_fn = candidate
+                if tool_fn is None:
+                    self._log.warning(
+                        "Ignoring invalid __tools__ entry %r in %s",
+                        export,
+                        module_path,
+                    )
+                    continue
+                if id(tool_fn) in seen:
+                    continue
+                meta = getattr(tool_fn, "__llm_tool_meta__", {})
+                explicit_meta = tool_meta.get(getattr(tool_fn, "__name__", ""), {})
+                if isinstance(explicit_meta, dict):
+                    meta = {**meta, **explicit_meta}
+                entries.append((tool_fn, meta))
+                seen.add(id(tool_fn))
+        else:
+            # No __tools__ export: automatically discover all public callable functions
+            self._log.debug(
+                "No __tools__ export found in %s; auto-discovering public callables",
+                module_path,
+            )
+            for name, obj in execution_globals.items():
+                # Skip internal/protected names and non-callables
+                if name.startswith("_"):
+                    continue
+                if not inspect.isfunction(obj):
+                    continue
+                if getattr(obj, "__module__", None) != module_name:
+                    continue
+                # Skip common non-tool objects
+                if name in {
+                    "__name__",
+                    "__file__",
+                    "__package__",
+                    "__spec__",
+                    "__builtins__",
+                    "json",
+                    "np",
+                    "pd",
+                    "ctx",
+                    "call_tool",
+                    "_safe_json",
+                }:
+                    continue
+                if id(obj) in seen:
+                    continue
+                meta = getattr(obj, "__llm_tool_meta__", {})
+                explicit_meta = tool_meta.get(name, {})
+                if isinstance(explicit_meta, dict):
+                    meta = {**meta, **explicit_meta}
+                entries.append((obj, meta))
+                seen.add(id(obj))
 
         return entries
 
@@ -561,6 +588,7 @@ class RegistryLoadingMixin:
         tool_entries = self._python_tool_entries_from_module(
             execution_globals=execution_globals,
             module_path=module_path,
+            module_name=module_name,
         )
         registered = self._register_collected_python_tools(
             tool_entries=tool_entries,

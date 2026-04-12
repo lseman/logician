@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+
 from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
 
 __skill__ = {
@@ -20,9 +21,7 @@ __skill__ = {
         "inspect recent commits touching this area",
         "create a checkpoint before the refactor",
     ],
-    "when_not_to_use": [
-        "the task does not involve repo state, history, or change management"
-    ],
+    "when_not_to_use": ["the task does not involve repo state, history, or change management"],
     "next_skills": ["explore", "quality"],
     "preferred_sequence": ["git_status", "git_diff", "git_log"],
     "entry_criteria": [
@@ -60,18 +59,12 @@ def _runtime():
 
 def _git(args: str, cwd: str | None = None, timeout: int = 30) -> dict:
     """Run a git subcommand and return a structured result."""
-    return _runtime().run_cmd(
-        f"git {args}", cwd=cwd or _runtime().cwd(), timeout=timeout
-    )
+    return _runtime().run_cmd(f"git {args}", cwd=cwd or _runtime().cwd(), timeout=timeout)
 
 
 def _find_repo_root(path: str | None = None) -> str | None:
     """Walk up from path (or cwd) to find the git repo root."""
-    start = (
-        Path(path).expanduser().resolve()
-        if path
-        else Path(_runtime().cwd() or ".").resolve()
-    )
+    start = Path(path).expanduser().resolve() if path else Path(_runtime().cwd() or ".").resolve()
     for p in [start, *start.parents]:
         if (p / ".git").exists():
             return str(p)
@@ -97,9 +90,7 @@ def git_status(repo_path: str = "") -> str:
     try:
         root = _find_repo_root(repo_path or None)
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         r = _git("status --porcelain=v1", cwd=root)
         if r["exit_code"] != 0:
@@ -151,9 +142,7 @@ def git_diff(path: str = "", ref: str = "", staged: bool = False) -> str:
     try:
         root = _find_repo_root(path or None)
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         parts = ["diff"]
         if staged:
@@ -199,9 +188,7 @@ def git_log(n: int = 10, repo_path: str = "", oneline: bool = True) -> str:
     try:
         root = _find_repo_root(repo_path or None)
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         fmt = "--oneline" if oneline else '--format="%H|%an|%ae|%ai|%s"'
         r = _git(f"log -{n} {fmt}", cwd=root)
@@ -215,9 +202,7 @@ def git_log(n: int = 10, repo_path: str = "", oneline: bool = True) -> str:
                 continue
             if oneline:
                 parts = line.split(" ", 1)
-                commits.append(
-                    {"hash": parts[0], "message": parts[1] if len(parts) > 1 else ""}
-                )
+                commits.append({"hash": parts[0], "message": parts[1] if len(parts) > 1 else ""})
             else:
                 line = line.strip('"')
                 parts = line.split("|", 4)
@@ -238,9 +223,7 @@ def git_log(n: int = 10, repo_path: str = "", oneline: bool = True) -> str:
 
 
 @tool
-def git_commit(
-    message: str, files: str = "", repo_path: str = "", add_all: bool = False
-) -> str:
+def git_commit(message: str, files: str = "", repo_path: str = "", add_all: bool = False) -> str:
     """Use when: Save a set of changes as a git commit after verifying correctness.
 
     Triggers: git commit, commit changes, save progress, checkpoint, commit files.
@@ -256,16 +239,12 @@ def git_commit(
     try:
         root = _find_repo_root(repo_path or None)
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         if add_all:
             r = _git("add -A", cwd=root)
             if r["exit_code"] != 0:
-                return _safe_json(
-                    {"status": "error", "error": f"git add -A failed: {r['stderr']}"}
-                )
+                return _safe_json({"status": "error", "error": f"git add -A failed: {r['stderr']}"})
         elif files.strip():
             for f in files.split():
                 r = _git(f"add -- {f}", cwd=root)
@@ -314,9 +293,7 @@ def git_checkpoint(label: str = "agent-checkpoint", repo_path: str = "") -> str:
     try:
         root = _find_repo_root(repo_path or None)
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         # include untracked files too
         safe = label.replace('"', '\\"')
@@ -351,9 +328,7 @@ def git_restore_checkpoint(repo_path: str = "") -> str:
     try:
         root = _find_repo_root(repo_path or None)
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         r = _git("stash pop", cwd=root)
         if r["exit_code"] != 0:
@@ -380,9 +355,7 @@ def git_blame(path: str, start_line: int = 1, end_line: int = 0) -> str:
         p = Path(path).expanduser().resolve()
         root = _find_repo_root(str(p))
         if not root:
-            return _safe_json(
-                {"status": "error", "error": "Not inside a git repository"}
-            )
+            return _safe_json({"status": "error", "error": "Not inside a git repository"})
 
         rel = str(p.relative_to(root))
         line_flag = (
@@ -409,9 +382,7 @@ def git_blame(path: str, start_line: int = 1, end_line: int = 0) -> str:
             elif line.startswith("author-time "):
                 import datetime
 
-                current["date"] = (
-                    datetime.datetime.fromtimestamp(int(line[12:])).date().isoformat()
-                )
+                current["date"] = datetime.datetime.fromtimestamp(int(line[12:])).date().isoformat()
             elif line.startswith("\t"):
                 current["code"] = line[1:]
                 entries.append(current)

@@ -52,20 +52,61 @@ def _html_to_text(raw_html: str) -> str:
     return text.strip()
 
 
+def _normalize_domain(domain: str) -> str:
+    domain = domain or ""
+    domain = domain.strip().lower()
+    if domain.startswith("www."):
+        return domain[4:]
+    return domain
+
+
+def _domain_from_url(url: str) -> str:
+    try:
+        return _normalize_domain(urllib.parse.urlparse(url).hostname or "")
+    except Exception:
+        return ""
+
+
+class _RedirectTrackerHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.redirect_chain: list[str] = []
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        self.redirect_chain.append(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _http_get(
     url: str,
     *,
     timeout: int = 15,
     headers: dict[str, str] | None = None,
-) -> tuple[int, str]:
+) -> tuple[int, str, str, list[str]]:
     req = urllib.request.Request(url, headers=headers or {})
     req.add_header(
         "User-Agent",
         "Mozilla/5.0 (compatible; LogicianCore/1.0; +https://github.com/lseman/logician)",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    opener = urllib.request.build_opener(_RedirectTrackerHandler())
+    with opener.open(req, timeout=timeout) as resp:
         charset = resp.headers.get_content_charset() or "utf-8"
-        return resp.status, resp.read().decode(charset, errors="replace")
+        body = resp.read().decode(charset, errors="replace")
+        final_url = resp.geturl()
+        redirect_chain = []
+        for handler in opener.handlers:
+            if isinstance(handler, _RedirectTrackerHandler):
+                redirect_chain = handler.redirect_chain
+                break
+        return resp.status, body, final_url, redirect_chain
 
 
 def fetch_url(url: str, timeout: int = 15, max_chars: int = 12000) -> dict[str, Any]:
@@ -73,12 +114,14 @@ def fetch_url(url: str, timeout: int = 15, max_chars: int = 12000) -> dict[str, 
     if max_chars <= 0:
         return {"status": "error", "error": "max_chars must be >= 1", "url": url}
     try:
-        status, body = _http_get(url, timeout=timeout)
+        status, body, final_url, redirect_chain = _http_get(url, timeout=timeout)
         text = _html_to_text(body)
         truncated = len(text) > max_chars
         return {
             "status": "ok",
             "url": url,
+            "final_url": final_url,
+            "redirect_chain": redirect_chain,
             "status_code": status,
             "text": text[:max_chars],
             "truncated": truncated,
@@ -88,13 +131,68 @@ def fetch_url(url: str, timeout: int = 15, max_chars: int = 12000) -> dict[str, 
         return {"status": "error", "url": url, "error": str(exc)}
 
 
-def web_search(query: str, n: int = 6) -> dict[str, Any]:
+def _filter_web_search_results(
+    results: list[dict[str, str]],
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+) -> list[dict[str, str]]:
+    allowed = {
+        _normalize_domain(domain)
+        for domain in (allowed_domains or [])
+        if domain and isinstance(domain, str)
+    }
+    blocked = {
+        _normalize_domain(domain)
+        for domain in (blocked_domains or [])
+        if domain and isinstance(domain, str)
+    }
+
+    def is_allowed(url: str) -> bool:
+        if not allowed:
+            return True
+        domain = _domain_from_url(url)
+        if not domain:
+            return False
+        return any(
+            domain == allowed_domain or domain.endswith(f".{allowed_domain}")
+            for allowed_domain in allowed
+        )
+
+    def is_blocked(url: str) -> bool:
+        if not blocked:
+            return False
+        domain = _domain_from_url(url)
+        if not domain:
+            return False
+        return any(
+            domain == blocked_domain or domain.endswith(f".{blocked_domain}")
+            for blocked_domain in blocked
+        )
+
+    filtered: list[dict[str, str]] = []
+    for item in results:
+        url = item.get("url", "")
+        if is_blocked(url):
+            continue
+        if not is_allowed(url):
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def web_search(
+    query: str,
+    n: int = 6,
+    *,
+    allowed_domains: list[str] | None = None,
+    blocked_domains: list[str] | None = None,
+) -> dict[str, Any]:
     """Search the web for up-to-date documentation or errors."""
     limit = min(max(1, n), 20)
     encoded = urllib.parse.quote_plus(query)
     ddg_url = f"https://lite.duckduckgo.com/lite/?q={encoded}"
     try:
-        _, body = _http_get(ddg_url, timeout=15)
+        _, body, _, _ = _http_get(ddg_url, timeout=15)
     except Exception as exc:
         return {"status": "error", "query": query, "error": str(exc)}
 
@@ -146,14 +244,23 @@ def web_search(query: str, n: int = 6) -> dict[str, Any]:
             if len(results) >= limit:
                 break
 
-    return {"status": "ok", "query": query, "count": len(results), "results": results}
+    filtered_results = _filter_web_search_results(results, allowed_domains, blocked_domains)
+
+    return {
+        "status": "ok",
+        "query": query,
+        "count": len(filtered_results),
+        "results": filtered_results,
+        "allowed_domains": allowed_domains,
+        "blocked_domains": blocked_domains,
+    }
 
 
 def pypi_info(package_name: str) -> dict[str, Any]:
     """Fetch package metadata from PyPI."""
     url = f"https://pypi.org/pypi/{urllib.parse.quote(package_name)}/json"
     try:
-        _, body = _http_get(url, timeout=10)
+        _, body, _, _ = _http_get(url, timeout=10)
         data = json.loads(body)
         info = data.get("info", {})
         return {
@@ -186,10 +293,10 @@ def github_read_file(
         f"{urllib.parse.quote(ref)}/{path}"
     )
     try:
-        status, content = _http_get(url, timeout=15)
+        status, content, _, _ = _http_get(url, timeout=15)
         if status == 404 and ref == "main":
             fallback_url = url.replace("/main/", "/master/")
-            status, content = _http_get(fallback_url, timeout=15)
+            status, content, _, _ = _http_get(fallback_url, timeout=15)
             if status == 200:
                 url = fallback_url
             else:

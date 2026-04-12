@@ -410,7 +410,9 @@ __tools__ = [hello]
             self.assertEqual(payload.get("status"), "ok")
             self.assertEqual(payload.get("message"), "hello codex")
 
-    def test_python_skill_module_can_register_tools_via_tool_decorator(self) -> None:
+    def test_legacy_tool_decorator_no_longer_registers_tools_without_explicit_exports(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             scripts_dir = root / "coding" / "toy" / "scripts"
@@ -442,9 +444,7 @@ def hello(name: str = "world") -> str:
             registry.load_tools_from_skills()
 
             tool = registry.get("hello")
-            self.assertIsNotNone(tool)
-            assert tool is not None
-            self.assertEqual(tool.description, "Return a greeting string.")
+            self.assertIsNone(tool)
 
     def test_tool_decorator_injects_module_skill_context_into_docstring(self) -> None:
         registry = self._registry()
@@ -874,6 +874,265 @@ print(json.dumps({{
         first_error = (bad_payload.get("type_errors") or [{}])[0]
         self.assertEqual(first_error.get("allowed_values"), ["fast", "safe"])
         self.assertIn("expected one of", str(first_error.get("error", "")))
+
+    def test_auto_discovery_of_scripts_tools_without_explicit_exports(self) -> None:
+        """Test that tools in scripts/ folders are auto-discovered without __tools__ export."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            # Create skill structure with scripts/ subfolder
+            skill_dir = root / "wiki" / "wiki_ops"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("# Wiki Ops Skill\n", encoding="utf-8")
+
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create tool module WITHOUT __tools__ export
+            module_path = scripts_dir / "wiki_ops.py"
+            module_path.write_text(
+                """
+def wiki_list(path: str | None = None) -> dict:
+    '''List wiki source documents available for compilation.'''
+    return _safe_json({
+        "status": "ok",
+        "path": path or "default",
+    })
+
+def wiki_list_raw(raw_dir: str | None = None) -> dict:
+    '''List artifacts collected in the raw directory.'''
+    return _safe_json({
+        "status": "ok",
+        "raw_dir": raw_dir or "default",
+    })
+
+# Note: No __tools__ export - should still be auto-discovered
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            # Both tools should be auto-discovered without __tools__ export
+            wiki_list_tool = registry.get("wiki_list")
+            wiki_list_raw_tool = registry.get("wiki_list_raw")
+
+            self.assertIsNotNone(wiki_list_tool, "wiki_list should be auto-discovered")
+            self.assertIsNotNone(wiki_list_raw_tool, "wiki_list_raw should be auto-discovered")
+
+            assert wiki_list_tool is not None
+            assert wiki_list_raw_tool is not None
+            self.assertEqual(
+                wiki_list_tool.description, "List wiki source documents available for compilation."
+            )
+            self.assertEqual(
+                wiki_list_raw_tool.description, "List artifacts collected in the raw directory."
+            )
+
+            # Execute the tool
+            result = registry.execute(
+                ToolCall(id="test_auto", name="wiki_list", arguments={}),
+                use_toon=False,
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["path"], "default")
+
+    def test_root_level_python_modules_ignored_when_scripts_subdir_exists(self) -> None:
+        """Tools under root skill directories should be loaded only from scripts/."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "wiki" / "wiki_ops"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("# Wiki Ops Skill\n", encoding="utf-8")
+
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+
+            root_module = skill_dir / "legacy_tool.py"
+            root_module.write_text(
+                """
+def legacy_tool() -> dict:
+    '''Legacy tool should be ignored.'''
+    return _safe_json({"status": "ignored"})
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            script_module = scripts_dir / "wiki_ops.py"
+            script_module.write_text(
+                """
+def wiki_list() -> dict:
+    '''List wiki source documents available for compilation.'''
+    return _safe_json({"status": "ok"})
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            self.assertIsNotNone(registry.get("wiki_list"))
+            self.assertIsNone(registry.get("legacy_tool"))
+
+    def test_auto_discovery_excludes_private_and_internal_names(self) -> None:
+        """Test that auto-discovery excludes private (starting with _) and internal names."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "test_skill"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("# Test Skill\n", encoding="utf-8")
+
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+
+            module_path = scripts_dir / "test.py"
+            module_path.write_text(
+                """
+def public_tool() -> dict:
+    '''A public tool.'''
+    return _safe_json({"status": "ok"})
+
+def _private_tool() -> dict:
+    '''A private tool.'''
+    return _safe_json({"status": "private"})
+
+def __dunder_tool() -> dict:
+    '''A dunder tool.'''
+    return _safe_json({"status": "dunder"})
+
+# Note: No __tools__ export
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            # Only public_tool should be discovered
+            self.assertIsNotNone(registry.get("public_tool"))
+            self.assertIsNone(registry.get("_private_tool"))
+            self.assertIsNone(registry.get("__dunder_tool"))
+
+    def test_auto_discovery_with_explicit_metadata(self) -> None:
+        """Test that auto-discovery respects explicit __llm_tool_meta__ metadata."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "test_skill"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("# Test Skill\n", encoding="utf-8")
+
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+
+            module_path = scripts_dir / "test.py"
+            module_path.write_text(
+                """
+def public_tool() -> dict:
+    '''A public tool.'''
+    # Add custom metadata
+    __llm_tool_meta__ = {"description": "Custom description for public tool"}
+    return _safe_json({"status": "ok"})
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            tool = registry.get("public_tool")
+            self.assertIsNotNone(tool)
+            self.assertEqual(tool.description, "Custom description for public tool")
+
+    def test_auto_discovery_excludes_common_non_tool_objects(self) -> None:
+        """Test that auto-discovery excludes common non-tool globals like json, np, pd, etc."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "test_skill"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("# Test Skill\n", encoding="utf-8")
+
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+
+            module_path = scripts_dir / "test.py"
+            module_path.write_text(
+                """
+import json
+import numpy as np
+import pandas as pd
+
+def my_tool() -> dict:
+    '''A real tool.'''
+    return _safe_json({"status": "ok"})
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            # Only my_tool should be discovered
+            self.assertIsNotNone(registry.get("my_tool"))
+            self.assertIsNone(registry.get("json"))
+            self.assertIsNone(registry.get("np"))
+            self.assertIsNone(registry.get("pd"))
+            self.assertIsNone(registry.get("__name__"))
+            self.assertIsNone(registry.get("__file__"))
+
+    def test_auto_discovery_excludes_imported_builtin_classes(self) -> None:
+        """Test that imported builtin callable classes are not auto-discovered as tools."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "test_skill"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("# Test Skill\n", encoding="utf-8")
+
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+
+            module_path = scripts_dir / "test.py"
+            module_path.write_text(
+                """
+from datetime import datetime
+
+def my_tool() -> dict:
+    '''A real tool.'''
+    return _safe_json({"status": "ok"})
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+            registry.load_tools_from_skills()
+
+            self.assertIsNotNone(registry.get("my_tool"))
+            self.assertIsNone(registry.get("datetime"))
 
     def test_real_skill_enums_are_exported_and_enforced(self) -> None:
         registry = self._registry()

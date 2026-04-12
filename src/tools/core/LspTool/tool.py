@@ -28,14 +28,23 @@ _OPERATION_ALIASES = {
     "gotodefinition": "go_to_definition",
     "goToDefinition": "go_to_definition",
     "definition": "go_to_definition",
-    "go_to_implementation": "go_to_definition",
-    "gotoimplementation": "go_to_definition",
-    "goToImplementation": "go_to_definition",
+    "go_to_implementation": "go_to_implementation",
+    "gotoimplementation": "go_to_implementation",
+    "goToImplementation": "go_to_implementation",
     "find_references": "find_references",
     "findreferences": "find_references",
     "findReferences": "find_references",
     "references": "find_references",
     "hover": "hover",
+    "prepare_call_hierarchy": "prepare_call_hierarchy",
+    "preparecallhierarchy": "prepare_call_hierarchy",
+    "prepareCallHierarchy": "prepare_call_hierarchy",
+    "incoming_calls": "incoming_calls",
+    "incomingcalls": "incoming_calls",
+    "incomingCalls": "incoming_calls",
+    "outgoing_calls": "outgoing_calls",
+    "outgoingcalls": "outgoing_calls",
+    "outgoingCalls": "outgoing_calls",
 }
 
 
@@ -195,6 +204,42 @@ def lsp_tool(
             "results": results,
         }
 
+    if normalized == "go_to_implementation":
+        results = _implementation_results(
+            symbol_name,
+            current_file_symbols=symbols,
+            workspace_root=resolved.parent,
+            glob=glob,
+            include_hidden=include_hidden,
+            max_results=max_results,
+        )
+        return {
+            "status": "ok",
+            "operation": normalized,
+            "symbol": symbol_name,
+            "path": str(resolved),
+            "result_count": len(results),
+            "results": results,
+        }
+
+    if normalized == "prepare_call_hierarchy":
+        results = _prepare_call_hierarchy(
+            symbol_name,
+            current_file_symbols=symbols,
+            workspace_root=resolved.parent,
+            glob=glob,
+            include_hidden=include_hidden,
+            max_results=max_results,
+        )
+        return {
+            "status": "ok",
+            "operation": normalized,
+            "symbol": symbol_name,
+            "path": str(resolved),
+            "result_count": len(results),
+            "results": results,
+        }
+
     if normalized == "hover":
         results = _definition_results(
             symbol_name,
@@ -222,6 +267,41 @@ def lsp_tool(
             "path": str(resolved),
             "result_count": 1 if hover else 0,
             "results": [hover] if hover else [],
+        }
+
+    if normalized == "incoming_calls":
+        results = _incoming_call_hierarchy_results(
+            symbol_name,
+            root=resolved.parent,
+            glob=glob,
+            include_hidden=include_hidden,
+            max_results=max_results,
+        )
+        return {
+            "status": "ok",
+            "operation": normalized,
+            "symbol": symbol_name,
+            "path": str(resolved),
+            "result_count": len(results),
+            "results": results,
+        }
+
+    if normalized == "outgoing_calls":
+        results = _outgoing_call_hierarchy_results(
+            symbol_name,
+            current_file_symbols=symbols,
+            workspace_root=resolved.parent,
+            glob=glob,
+            include_hidden=include_hidden,
+            max_results=max_results,
+        )
+        return {
+            "status": "ok",
+            "operation": normalized,
+            "symbol": symbol_name,
+            "path": str(resolved),
+            "result_count": len(results),
+            "results": results,
         }
 
     references = _find_references(
@@ -419,6 +499,119 @@ def _find_references(
                 {
                     "name": symbol_name,
                     "path": str(candidate),
+                    "line": token.start[0],
+                    "end_line": token.end[0],
+                    "column": token.start[1] + 1,
+                    "end_column": token.end[1],
+                    "line_content": line_text,
+                }
+            )
+            if len(results) >= max_results:
+                return results
+    return results
+
+
+def _implementation_results(
+    symbol_name: str,
+    *,
+    current_file_symbols: list[dict[str, Any]],
+    workspace_root: Path,
+    glob: str,
+    include_hidden: bool,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    return _definition_results(
+        symbol_name,
+        current_file_symbols=current_file_symbols,
+        workspace_root=workspace_root,
+        glob=glob,
+        include_hidden=include_hidden,
+        max_results=max_results,
+    )
+
+
+def _prepare_call_hierarchy(
+    symbol_name: str,
+    *,
+    current_file_symbols: list[dict[str, Any]],
+    workspace_root: Path,
+    glob: str,
+    include_hidden: bool,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    return _definition_results(
+        symbol_name,
+        current_file_symbols=current_file_symbols,
+        workspace_root=workspace_root,
+        glob=glob,
+        include_hidden=include_hidden,
+        max_results=max_results,
+    )
+
+
+def _incoming_call_hierarchy_results(
+    symbol_name: str,
+    *,
+    root: Path,
+    glob: str,
+    include_hidden: bool,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    return _find_references(
+        symbol_name,
+        root=root,
+        glob=glob,
+        include_hidden=include_hidden,
+        max_results=max_results,
+    )
+
+
+def _outgoing_call_hierarchy_results(
+    symbol_name: str,
+    *,
+    current_file_symbols: list[dict[str, Any]],
+    workspace_root: Path,
+    glob: str,
+    include_hidden: bool,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    symbol_names = {
+        symbol.get("name")
+        for symbol in _workspace_symbols(
+            "", root=workspace_root, glob=glob, include_hidden=include_hidden, max_results=10000
+        )
+    }
+    results: list[dict[str, Any]] = []
+
+    for symbol in current_file_symbols:
+        if symbol.get("name") != symbol_name:
+            continue
+        if len(results) >= max_results:
+            break
+
+        current_path = Path(symbol.get("path") or "")
+        source = _read_python_source(current_path, source="lsp_tool.outgoing")
+        if isinstance(source, dict):
+            continue
+        content, _, lines = source
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(content).readline)
+        except tokenize.TokenError:
+            continue
+
+        for token in tokens:
+            if token.type != tokenize.NAME:
+                continue
+            if token.string == symbol_name:
+                continue
+            if token.string not in symbol_names:
+                continue
+            line_text = lines[token.start[0] - 1] if 0 < token.start[0] <= len(lines) else ""
+            results.append(
+                {
+                    "symbol": symbol_name,
+                    "target": token.string,
+                    "path": str(current_path),
                     "line": token.start[0],
                     "end_line": token.end[0],
                     "column": token.start[1] + 1,

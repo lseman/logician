@@ -31,6 +31,7 @@ from src.tools.core import (
     todo,
     write_file,
 )
+from src.tools.core.WebTool import _filter_web_search_results
 
 
 def test_read_file_returns_structured_text_payload() -> None:
@@ -255,6 +256,47 @@ def test_bash_rejects_find_exec_as_dangerous() -> None:
     assert result["reason"] == "dangerous_command"
 
 
+def test_bash_background_mode_starts_process_and_returns_handle() -> None:
+    result = bash("sleep 10", background=True)
+
+    assert result["status"] == "ok"
+    assert result["background"] is True
+    assert "process_name" in result
+
+    kill_result = kill_process(result["process_name"])
+    assert kill_result["status"] == "ok"
+
+
+def test_web_search_filters_allowed_and_blocked_domains() -> None:
+    results = [
+        {"title": "Example", "url": "https://example.com/page", "snippet": ""},
+        {"title": "Subdomain", "url": "https://sub.example.org/page", "snippet": ""},
+        {"title": "Other", "url": "https://other.com/page", "snippet": ""},
+    ]
+
+    filtered = _filter_web_search_results(
+        results,
+        allowed_domains=["example.com"],
+        blocked_domains=["sub.example.org"],
+    )
+
+    assert filtered == [
+        {"title": "Example", "url": "https://example.com/page", "snippet": ""},
+    ]
+
+
+def test_todo_validate_command_returns_warnings() -> None:
+    result = todo(
+        command="validate",
+        items=[{"title": "", "status": "mystery"}],
+    )
+
+    assert result["status"] == "ok"
+    assert isinstance(result["warnings"], list)
+    assert any("unrecognized status" in warning for warning in result["warnings"])
+    assert "verification_hint" in result
+
+
 def test_set_working_directory_affects_core_python_execution(tmp_path: Path) -> None:
     original_cwd = os.getcwd()
     try:
@@ -466,6 +508,50 @@ def test_lsp_tool_definition_and_references_follow_symbol(tmp_path: Path) -> Non
     assert definition["results"][0]["line"] == 1
     assert references["status"] == "ok"
     assert len(references["results"]) >= 2
+
+
+def test_lsp_tool_implementation_and_call_hierarchy(tmp_path: Path) -> None:
+    path = tmp_path / "demo.py"
+    path.write_text(
+        "def helper():\n    return 1\n\n"
+        "def render_view():\n    return helper()\n\n"
+        "value = render_view()\n",
+        encoding="utf-8",
+    )
+
+    implementation = lsp_tool(
+        "go_to_implementation",
+        str(path),
+        line=4,
+        character=10,
+    )
+    assert implementation["status"] == "ok"
+    assert implementation["result_count"] >= 1
+    assert implementation["results"][0]["line"] == 4
+
+    prepare = lsp_tool(
+        "prepare_call_hierarchy",
+        str(path),
+        line=4,
+        character=10,
+    )
+    assert prepare["status"] == "ok"
+    assert prepare["result_count"] >= 1
+
+    incoming = lsp_tool(
+        "incoming_calls",
+        str(path),
+        query="render_view",
+    )
+    assert incoming["status"] == "ok"
+    assert incoming["result_count"] >= 1
+
+    outgoing = lsp_tool(
+        "outgoing_calls",
+        str(path),
+        query="render_view",
+    )
+    assert outgoing["status"] == "ok"
 
 
 def test_think_returns_structured_payload() -> None:

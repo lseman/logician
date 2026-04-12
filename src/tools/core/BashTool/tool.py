@@ -33,7 +33,10 @@ import json
 import re
 import shlex
 import subprocess
+import uuid
 from typing import Any
+
+from ..ProcessTool import start_background_process
 
 _DEFAULT_TIMEOUT = 30  # seconds
 
@@ -902,6 +905,10 @@ def bash(
     timeout: int = _DEFAULT_TIMEOUT,
     normalize_output: bool = True,
     require_read_only: bool = False,
+    background: bool = False,
+    background_name: str | None = None,
+    cwd: str = "",
+    venv_path: str = "",
 ) -> dict[str, Any]:
     """Execute a bash command and return structured output.
 
@@ -917,9 +924,14 @@ def bash(
         command: Bash command string to execute.
         timeout: Timeout in seconds (default 30).
         normalize_output: If True (default), normalizes stdout/stderr newlines to LF
-        only for consistent output format. If False, preserves original line endings.
+          only for consistent output format. If False, preserves original line endings.
         require_read_only: If True, reject commands that are not classified as
-        read-only inspection commands.
+          read-only inspection commands.
+        background: If True, start the command in a background process and return
+          a process handle instead of waiting for completion.
+        background_name: Optional label for the background process.
+        cwd: Optional working directory for a background process.
+        venv_path: Optional virtualenv path for a background process.
 
     Returns:
         dict with:
@@ -928,6 +940,7 @@ def bash(
             - stdout: Standard output
             - stderr: Standard error
             - parsed: Auto-detected structured data
+            - process_name: Background process name when background=True
     """
     # Sanitize the command
     sanitized = _sanitize_command(command)
@@ -963,6 +976,22 @@ def bash(
             "sanitized": sanitized,
             "validation": validation,
         }
+
+    if background:
+        process_name = background_name or f"bash-background-{uuid.uuid4().hex[:8]}"
+        background_result = start_background_process(
+            sanitized,
+            process_name,
+            cwd=cwd,
+            venv_path=venv_path,
+        )
+        background_result["status"] = background_result.get("status", "error")
+        background_result["command"] = command
+        background_result["sanitized"] = sanitized
+        background_result["validation"] = validation
+        background_result["background"] = True
+        background_result["process_name"] = process_name
+        return background_result
 
     try:
         result = subprocess.run(

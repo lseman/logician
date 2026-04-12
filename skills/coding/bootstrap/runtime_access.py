@@ -159,7 +159,11 @@ def tool(
     name: str | None = None,
     description: str | None = None,
 ) -> Callable[..., Any]:
-    """Mark a coding skill function as an exported tool."""
+    """Legacy compatibility decorator.
+
+    This decorator no longer exports tools automatically. Use __tools__ in skill
+    modules to explicitly declare exported tool callables.
+    """
 
     def decorator(inner: Callable[..., Any]) -> Callable[..., Any]:
         meta = dict(getattr(inner, "__llm_tool_meta__", {}) or {})
@@ -168,7 +172,6 @@ def tool(
         if description is not None:
             meta["description"] = description
         setattr(inner, "__llm_tool_meta__", meta)
-        setattr(inner, "__tool__", True)
         skill_context = _format_skill_doc_context(inner.__globals__.get("__skill__"))
         marker = "Skill context:"
         base_doc = str(getattr(inner, "__doc__", "") or "").rstrip()
