@@ -73,6 +73,44 @@ class TextNormalizationTests(unittest.TestCase):
             self.assertEqual(result["status"], "ok")
             self.assertEqual(path.read_bytes(), b"def demo():\r\n    return 2\r\n")
 
+    def test_edit_file_preserves_curly_quote_style(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "quotes.py"
+            path.write_text(
+                'title = “Hello”\nbody = “World”\n',
+                encoding="utf-8",
+            )
+            read_result = read_file(str(path))
+            self.assertEqual(read_result["status"], "ok")
+
+            result = edit_file(
+                str(path),
+                'body = "World"\n',
+                'body = "Universe"\n',
+            )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                'title = “Hello”\nbody = “Universe”\n',
+            )
+
+    def test_edit_file_can_create_new_file_with_empty_old_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "created.py"
+
+            result = edit_file(
+                str(path),
+                "",
+                "def created():\n    return True\n",
+            )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "def created():\n    return True\n",
+            )
+
     def test_run_python_normalizes_outer_newlines_without_breaking_inner_strings(self) -> None:
         payload = 'print("line1\\\\nline2")\\nprint("ok")\\n'
 

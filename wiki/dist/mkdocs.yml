@@ -1,0 +1,21 @@
+site_name: Logician Wiki
+docs_dir: site_docs
+site_dir: site
+theme:
+  name: readthedocs
+plugins:
+  - search
+nav:
+  - Home: Home.md
+  - Index: index.md
+  - Schema: schema.md
+  - Log: log.md
+  - Indexes:
+      - Documents: indexes/Documents.md
+      - Concepts: indexes/Concepts.md
+      - Backlinks: indexes/Backlinks.md
+      - Raw Sources: indexes/Raw Sources.md
+  - Reports:
+      - Health: reports/Health.md
+      - Lint: reports/Lint.md
+  - Outputs: outputs/README.md

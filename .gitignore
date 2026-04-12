@@ -68,3 +68,7 @@ webui/dist/
 logician.egg-info/
 .vscode/
 docs/superpowers/specs/
+repos/
+CLAUDE.md
+.claude/
+skills/40_feynman/

@@ -1,0 +1,32 @@
+{
+  "arxiv_id": "2604.04921",
+  "doi": "10.48550/arXiv.2604.04921",
+  "extraction_error": "",
+  "imported_at": "2026-04-09T16:23:32Z",
+  "input_reference": "https://arxiv.org/pdf/2604.04921",
+  "materialization": {
+    "bytes": 3989117,
+    "mode": "download",
+    "source": "https://arxiv.org/pdf/2604.04921"
+  },
+  "metadata": {
+    "arxivid": "https://arxiv.org/abs/2604.04921v1",
+    "author": "Weian Mao; Xi Lin; Wei Huang; Yuxin Xie; Tianfu Fu; Bohan Zhuang; Song Han; Yukang Chen",
+    "creator": "arXiv GenPDF (tex2pdf:a6404ea)",
+    "doi": "https://doi.org/10.48550/arXiv.2604.04921",
+    "license": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/",
+    "producer": "pikepdf 8.15.1",
+    "ptex.fullbanner": "This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) kpathsea version 6.4.1",
+    "title": "TriAttention: Efficient Long Reasoning with Trigonometric KV Compression",
+    "trapped": "/False"
+  },
+  "normalized_reference": "https://arxiv.org/pdf/2604.04921",
+  "page_count": 19,
+  "raw_metadata_relative_path": "papers/2604.json",
+  "raw_pdf_relative_path": "papers/2604.pdf",
+  "raw_text_relative_path": "papers/2604.txt",
+  "sha256": "9c14b75a7cc792d450d5571ec74e12db9a01f44fcb918e5b082bc4a8f51c1350",
+  "source_path": "",
+  "source_url": "https://arxiv.org/pdf/2604.04921",
+  "title": "TriAttention: Efficient Long Reasoning with Trigonometric KV Compression"
+}

@@ -365,6 +365,7 @@ _TOOL_META = {
             "context_lines": "Optional number of surrounding lines for literal/regex matches.",
             "max_results": "Optional maximum number of results to return.",
             "include_hidden": "Optional boolean. When true, include dotfiles and files under hidden directories.",
+            "offset": "Optional result offset for pagination.",
         },
     },
     "think": {
@@ -479,6 +480,7 @@ _TOOL_META = {
             "- Put the full replacement block in `new_string`.\n"
             "- Do not split the edit across extra keys like `before`, `after`, or `snippet`.\n"
             "- Both fields may use real multiline text or escaped `\\n`.\n"
+            "- If the file does not exist yet, `old_string` may be empty to create it through this tool.\n"
             "- Read the file first. Edits are rejected when the file was not read, was only partially read, or changed since it was read.\n"
             "- If the search text appears multiple times, either add more context or set `replace_all=true`."
         ),

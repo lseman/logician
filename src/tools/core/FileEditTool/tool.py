@@ -121,7 +121,20 @@ def edit_file(
         p = resolve_tool_path(path)
     except ValueError as exc:
         return _err(str(exc))
-    if not p.exists() or not p.is_file():
+    if not p.exists():
+        if old_string == "":
+            return write_file(
+                path,
+                new_string,
+                mode="w",
+                normalize_newlines=normalize_newlines,
+            )
+        error = _err(f"File not found: {path}")
+        suggestions = DEFAULT_FILESYSTEM._find_similar_paths(p)
+        if suggestions:
+            error["did_you_mean"] = suggestions
+        return error
+    if not p.is_file():
         return _err(f"File not found: {path}")
 
     prepared = ensure_snapshot_allows_existing_file_write(
@@ -134,21 +147,16 @@ def edit_file(
     _, snapshot, original, _ = prepared
 
     file_newline = _detect_newline_style(original)
-    working = normalize_text_for_matching(original)
+    view, boundaries = _normalized_view_boundaries(original)
 
     language_hint = _language_hint_from_path(path)
     old_normalized, _ = _normalize_agent_content(old_string, language_hint=language_hint)
     new_normalized, _ = _normalize_agent_content(new_string, language_hint=language_hint)
-    if normalize_newlines:
-        old_normalized = _coerce_to_newline_style(old_normalized, file_newline)
-        new_normalized = _coerce_to_newline_style(new_normalized, file_newline)
-
     old_norm = normalize_text_for_matching(old_normalized)
-    new_norm = normalize_text_for_matching(new_normalized)
     if not old_norm:
         return _err("old_string is empty after normalization")
 
-    occurrences = _find_all_occurrences(working, old_norm)
+    occurrences = _find_all_occurrences(view, old_norm)
     count = len(occurrences)
     if count == 0:
         return {
@@ -158,14 +166,25 @@ def edit_file(
                 "Re-read the file and copy the exact block including indentation "
                 "and blank lines. See closest_matches for bounded line-aware hints, or use read_edit_context()."
             ),
-            "closest_matches": _find_closest_blocks(working, old_norm),
+            "closest_matches": _find_closest_blocks(view, old_norm),
             "suggested_tool": "read_edit_context",
         }
     if count > 1:
-        occurrence_lines = [_offset_to_line_number(working, idx) for idx in occurrences]
+        occurrence_lines = [_offset_to_line_number(view, idx) for idx in occurrences]
         if replace_all:
-            patched_norm = working.replace(old_norm, new_norm)
-            patched = _coerce_to_newline_style(patched_norm, file_newline)
+            patched = original
+            for idx in reversed(occurrences):
+                start_offset = boundaries[idx]
+                end_offset = boundaries[idx + len(old_norm)]
+                actual_old = patched[start_offset:end_offset]
+                replacement = _preserve_quote_style(
+                    old_normalized,
+                    actual_old,
+                    new_normalized,
+                )
+                if normalize_newlines:
+                    replacement = _coerce_to_newline_style(replacement, file_newline)
+                patched = patched[:start_offset] + replacement + patched[end_offset:]
             try:
                 _atomic_write_text(p, patched)
             except OSError as exc:
@@ -175,7 +194,8 @@ def edit_file(
                 "status": "ok",
                 "path": str(p),
                 "lines_removed": old_norm.count("\n") + (1 if old_norm else 0),
-                "lines_added": new_norm.count("\n") + (1 if new_norm else 0),
+                "lines_added": normalize_text_for_matching(new_normalized).count("\n")
+                + (1 if new_normalized else 0),
                 "newline": _newline_name(file_newline),
                 "diff": _unified_diff(original, patched, str(p)),
                 "replace_all": True,
@@ -208,8 +228,17 @@ def edit_file(
         }
 
     idx = occurrences[0]
-    patched_norm = working[:idx] + new_norm + working[idx + len(old_norm) :]
-    patched = _coerce_to_newline_style(patched_norm, file_newline)
+    start_offset = boundaries[idx]
+    end_offset = boundaries[idx + len(old_norm)]
+    actual_old = original[start_offset:end_offset]
+    replacement = _preserve_quote_style(
+        old_normalized,
+        actual_old,
+        new_normalized,
+    )
+    if normalize_newlines:
+        replacement = _coerce_to_newline_style(replacement, file_newline)
+    patched = original[:start_offset] + replacement + original[end_offset:]
     try:
         _atomic_write_text(p, patched)
     except OSError as exc:
@@ -219,7 +248,8 @@ def edit_file(
         "status": "ok",
         "path": str(p),
         "lines_removed": old_norm.count("\n") + (1 if old_norm else 0),
-        "lines_added": new_norm.count("\n") + (1 if new_norm else 0),
+        "lines_added": normalize_text_for_matching(new_normalized).count("\n")
+        + (1 if new_normalized else 0),
         "newline": _newline_name(file_newline),
         "diff": _unified_diff(original, patched, str(p)),
         "replace_all": False,
@@ -260,19 +290,18 @@ def apply_edit_block(path: str, blocks: str) -> dict[str, Any]:
     _, _, original, _ = prepared
 
     file_newline = _detect_newline_style(original)
-    working = normalize_text_for_matching(original)
     parsed_blocks = _parse_edit_blocks(blocks)
     if isinstance(parsed_blocks, dict) and parsed_blocks.get("status") == "error":
         return parsed_blocks
 
     assert isinstance(parsed_blocks, list)
-    result = working
+    result = original
     applied = 0
     errors: list[dict[str, Any]] = []
     for index, block in enumerate(parsed_blocks):
         search_text = normalize_text_for_matching(block["search"])
-        replace_text = normalize_text_for_matching(block["replace"])
-        occurrences = _find_all_occurrences(result, search_text)
+        view, boundaries = _normalized_view_boundaries(result)
+        occurrences = _find_all_occurrences(view, search_text)
         count = len(occurrences)
         if count == 0:
             errors.append(
@@ -280,13 +309,13 @@ def apply_edit_block(path: str, blocks: str) -> dict[str, Any]:
                     "block": index,
                     "error": "SEARCH text not found in file",
                     "search_preview": search_text[:200],
-                    "closest_matches": _find_closest_blocks(result, search_text),
+                    "closest_matches": _find_closest_blocks(view, search_text),
                     "suggested_tool": "read_edit_context",
                 }
             )
             continue
         if count > 1:
-            lines = [_offset_to_line_number(result, idx) for idx in occurrences]
+            lines = [_offset_to_line_number(view, idx) for idx in occurrences]
             errors.append(
                 {
                     "block": index,
@@ -299,7 +328,16 @@ def apply_edit_block(path: str, blocks: str) -> dict[str, Any]:
             )
             continue
         idx = occurrences[0]
-        result = result[:idx] + replace_text + result[idx + len(search_text) :]
+        start_offset = boundaries[idx]
+        end_offset = boundaries[idx + len(search_text)]
+        actual_old = result[start_offset:end_offset]
+        replacement = _preserve_quote_style(
+            block["search"],
+            actual_old,
+            block["replace"],
+        )
+        replacement = _coerce_to_newline_style(replacement, file_newline)
+        result = result[:start_offset] + replacement + result[end_offset:]
         applied += 1
 
     if applied == 0 and errors:
@@ -348,13 +386,14 @@ def preview_edit(path: str, blocks: str) -> dict[str, Any]:
         return parsed_blocks
 
     assert isinstance(parsed_blocks, list)
-    simulated = normalize_text_for_matching(original)
+    file_newline = _detect_newline_style(original)
+    simulated = original
     conflicts: list[dict[str, Any]] = []
     line_ranges: list[tuple[int, int]] = []
     for index, block in enumerate(parsed_blocks):
         search_text = normalize_text_for_matching(block["search"])
-        replace_text = normalize_text_for_matching(block["replace"])
-        occurrences = _find_all_occurrences(simulated, search_text)
+        view, boundaries = _normalized_view_boundaries(simulated)
+        occurrences = _find_all_occurrences(view, search_text)
         count = len(occurrences)
         if count == 0:
             conflicts.append(
@@ -375,10 +414,19 @@ def preview_edit(path: str, blocks: str) -> dict[str, Any]:
             )
             continue
         idx = occurrences[0]
-        start_line = _offset_to_line_number(simulated, idx)
+        start_line = _offset_to_line_number(view, idx)
         end_line = start_line + search_text.count("\n")
         line_ranges.append((start_line, end_line))
-        simulated = simulated[:idx] + replace_text + simulated[idx + len(search_text) :]
+        start_offset = boundaries[idx]
+        end_offset = boundaries[idx + len(search_text)]
+        actual_old = simulated[start_offset:end_offset]
+        replacement = _preserve_quote_style(
+            block["search"],
+            actual_old,
+            block["replace"],
+        )
+        replacement = _coerce_to_newline_style(replacement, file_newline)
+        simulated = simulated[:start_offset] + replacement + simulated[end_offset:]
 
     return {
         "status": "ok" if not conflicts else "conflict",
@@ -411,8 +459,7 @@ def smart_edit(path: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
     _, _, original, _ = prepared
 
     file_newline = _detect_newline_style(original)
-    original_norm = normalize_text_for_matching(original)
-    original_lines = original_norm.splitlines(keepends=True)
+    original_lines = original.splitlines(keepends=True)
 
     parsed: list[dict[str, Any]] = []
     for index, edit in enumerate(edits):
@@ -441,11 +488,9 @@ def smart_edit(path: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
                         edit.get("old_text", ""), language_hint=_language_hint_from_path(path)
                     )[0]
                 ),
-                "new_text": normalize_text_for_matching(
-                    _normalize_agent_content(
-                        edit.get("new_text", ""), language_hint=_language_hint_from_path(path)
-                    )[0]
-                ),
+                "new_text": _normalize_agent_content(
+                    edit.get("new_text", ""), language_hint=_language_hint_from_path(path)
+                )[0],
             }
         )
 
@@ -464,11 +509,12 @@ def smart_edit(path: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         start = edit["start_line"] - 1
         end = edit["end_line"]
-        actual = "".join(original_lines[start:end]).rstrip("\n")
+        actual = "".join(original_lines[start:end]).rstrip("\r\n")
         expected = edit["old_text"].rstrip("\n")
-        if actual == expected:
+        actual_normalized = normalize_text_for_matching(actual)
+        if actual_normalized == expected:
             continue
-        ratio = difflib.SequenceMatcher(None, actual, expected).ratio()
+        ratio = difflib.SequenceMatcher(None, actual_normalized, expected).ratio()
         mismatch_errors.append(
             {
                 "edit_index": edit["index"],
@@ -482,7 +528,11 @@ def smart_edit(path: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
                     edit["start_line"],
                     edit["end_line"],
                 ),
-                "closest_matches": _find_closest_blocks(original_norm, expected, n=3),
+                "closest_matches": _find_closest_blocks(
+                    normalize_text_for_matching(original),
+                    expected,
+                    n=3,
+                ),
                 "hint": (
                     "old_text does not match the file contents at the specified "
                     "line range. Re-read the file, use read_edit_context(), or correct the range/old_text."
@@ -508,9 +558,11 @@ def smart_edit(path: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
         if action == "delete":
             result_lines = result_lines[:start] + result_lines[end:]
         elif action == "replace":
-            result_lines = result_lines[:start] + _string_to_lines(new_text) + result_lines[end:]
+            replacement = _coerce_to_newline_style(new_text, file_newline)
+            result_lines = result_lines[:start] + _string_to_lines(replacement) + result_lines[end:]
         else:
-            result_lines = result_lines[:start] + _string_to_lines(new_text) + result_lines[start:]
+            insertion = _coerce_to_newline_style(new_text, file_newline)
+            result_lines = result_lines[:start] + _string_to_lines(insertion) + result_lines[start:]
         applied += 1
 
     result = "".join(result_lines)
@@ -622,6 +674,97 @@ def _detect_truncation(content: str, path: str) -> str | None:
     if stripped.endswith(("...", "…")):
         return f"Content for {path} may be truncated; verify the full file body before writing."
     return None
+
+
+def _normalized_view_boundaries(text: str) -> tuple[str, list[int]]:
+    i = 1 if text.startswith("\ufeff") else 0
+    out: list[str] = []
+    boundaries = [i]
+    while i < len(text):
+        if text.startswith("\r\n", i):
+            out.append("\n")
+            i += 2
+            boundaries.append(i)
+            continue
+        ch = text[i]
+        if ch == "\r":
+            out.append("\n")
+        else:
+            out.append(normalize_text_for_matching(ch))
+        i += 1
+        boundaries.append(i)
+    return "".join(out), boundaries
+
+
+_LEFT_SINGLE_CURLY_QUOTE = "\u2018"
+_RIGHT_SINGLE_CURLY_QUOTE = "\u2019"
+_LEFT_DOUBLE_CURLY_QUOTE = "\u201c"
+_RIGHT_DOUBLE_CURLY_QUOTE = "\u201d"
+
+
+def _preserve_quote_style(old_string: str, actual_old_string: str, new_string: str) -> str:
+    if old_string == actual_old_string:
+        return new_string
+
+    has_double_quotes = (
+        _LEFT_DOUBLE_CURLY_QUOTE in actual_old_string
+        or _RIGHT_DOUBLE_CURLY_QUOTE in actual_old_string
+    )
+    has_single_quotes = (
+        _LEFT_SINGLE_CURLY_QUOTE in actual_old_string
+        or _RIGHT_SINGLE_CURLY_QUOTE in actual_old_string
+    )
+    if not has_double_quotes and not has_single_quotes:
+        return new_string
+
+    result = new_string
+    if has_double_quotes:
+        result = _apply_curly_double_quotes(result)
+    if has_single_quotes:
+        result = _apply_curly_single_quotes(result)
+    return result
+
+
+def _is_opening_quote_context(chars: list[str], index: int) -> bool:
+    if index == 0:
+        return True
+    prev = chars[index - 1]
+    return prev in {" ", "\t", "\n", "\r", "(", "[", "{", "\u2014", "\u2013"}
+
+
+def _apply_curly_double_quotes(text: str) -> str:
+    chars = list(text)
+    out: list[str] = []
+    for index, ch in enumerate(chars):
+        if ch != '"':
+            out.append(ch)
+            continue
+        out.append(
+            _LEFT_DOUBLE_CURLY_QUOTE
+            if _is_opening_quote_context(chars, index)
+            else _RIGHT_DOUBLE_CURLY_QUOTE
+        )
+    return "".join(out)
+
+
+def _apply_curly_single_quotes(text: str) -> str:
+    chars = list(text)
+    out: list[str] = []
+    for index, ch in enumerate(chars):
+        if ch != "'":
+            out.append(ch)
+            continue
+        prev = chars[index - 1] if index > 0 else None
+        nxt = chars[index + 1] if index + 1 < len(chars) else None
+        if prev and nxt and prev.isalpha() and nxt.isalpha():
+            out.append(_RIGHT_SINGLE_CURLY_QUOTE)
+            continue
+        out.append(
+            _LEFT_SINGLE_CURLY_QUOTE
+            if _is_opening_quote_context(chars, index)
+            else _RIGHT_SINGLE_CURLY_QUOTE
+        )
+    return "".join(out)
 
 
 def _find_all_occurrences(haystack: str, needle: str) -> list[int]:

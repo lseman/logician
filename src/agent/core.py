@@ -14,8 +14,8 @@ from ..config import Config
 from ..logging_utils import get_logger
 from ..memory import Memory
 from ..messages import Message, MessageRole
-from ..repo_graph import related_repo_context
-from ..repo_registry import load_repo_index
+from ..repo.graph import related_repo_context
+from ..repo.registry import load_repo_index
 from ..tools import (
     HAS_TOON,
     Context,
@@ -80,11 +80,11 @@ class _ThinkingStreamRouter:
             self._stream_callback(text)
 
     def _emit_thinking(self, text: str) -> None:
-        content = str(text or "").strip()
-        if not content:
+        raw = str(text or "")
+        if not raw.strip():
             return
         if self._thinking_callback is not None:
-            self._thinking_callback(content)
+            self._thinking_callback(raw)
 
     def feed(self, chunk: str) -> None:
         if not chunk:
@@ -224,11 +224,7 @@ class Agent:
             self._load_mcp_servers()
             self._mcp_loaded = True
 
-        self._embedding_model_name = embedding_model or (
-            "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
-            "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"
-            "intfloat/e5-mistral-7b-instruct|BAAI/bge-small-en-v1.5"
-        )
+        self._embedding_model_name = str(embedding_model or "").strip() or None
         self.memory = Memory(
             config=self.config,
             db_path=db_path,
@@ -1300,12 +1296,13 @@ class Agent:
         seen_thinking: set[str] = set()
 
         def _emit_thinking(content: str) -> None:
-            normalized = re.sub(r"\s+", " ", str(content or "")).strip()
+            raw = str(content or "")
+            normalized = re.sub(r"\s+", " ", raw).strip()
             if not normalized or normalized in seen_thinking:
                 return
             seen_thinking.add(normalized)
             if thinking_callback is not None:
-                thinking_callback(str(content or "").strip())
+                thinking_callback(raw)
 
         stream_router = (
             _ThinkingStreamRouter(stream_callback=stream_callback, thinking_callback=_emit_thinking)

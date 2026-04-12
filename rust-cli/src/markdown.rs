@@ -168,6 +168,26 @@ struct Segment {
     in_think: bool,
 }
 
+const THINK_OPEN_TAGS: &[&str] = &[
+    "<think>",
+    "<Think>",
+    "<thinking>",
+    "<Thinking>",
+];
+
+const THINK_CLOSE_TAGS: &[&str] = &[
+    "</think>",
+    "</Think>",
+    "</thinking>",
+    "</Thinking>",
+];
+
+fn starts_with_any_tag<'a>(text: &'a str, tags: &'a [&'a str]) -> Option<&'a str> {
+    tags.iter()
+        .copied()
+        .find(|tag| text.len() >= tag.len() && text[..tag.len()].eq_ignore_ascii_case(tag))
+}
+
 fn split_think(text: &str) -> Vec<Segment> {
     let mut segs: Vec<Segment> = Vec::new();
     let mut depth = 0usize;
@@ -183,8 +203,7 @@ fn split_think(text: &str) -> Vec<Segment> {
             continue;
         }
 
-        // try </think>
-        if text[i..].starts_with("</think>") || text[i..].starts_with("</Think>") {
+        if let Some(tag) = starts_with_any_tag(&text[i..], THINK_CLOSE_TAGS) {
             if i > last {
                 segs.push(Segment {
                     text: text[last..i].to_string(),
@@ -192,12 +211,11 @@ fn split_think(text: &str) -> Vec<Segment> {
                 });
             }
             depth = depth.saturating_sub(1);
-            last = i + 8;
+            last = i + tag.len();
             i = last;
             continue;
         }
-        // try <think>
-        if text[i..].starts_with("<think>") || text[i..].starts_with("<Think>") {
+        if let Some(tag) = starts_with_any_tag(&text[i..], THINK_OPEN_TAGS) {
             if i > last {
                 segs.push(Segment {
                     text: text[last..i].to_string(),
@@ -205,7 +223,7 @@ fn split_think(text: &str) -> Vec<Segment> {
                 });
             }
             depth += 1;
-            last = i + 7;
+            last = i + tag.len();
             i = last;
             continue;
         }
@@ -441,6 +459,48 @@ fn is_json_string_quote(ch: char) -> bool {
     matches!(ch, '"' | '“' | '”')
 }
 
+fn json_contains_tool_call_payload(value: &JsonValue) -> bool {
+    match value {
+        JsonValue::Object(obj) => {
+            if obj.contains_key("tool_call") || obj.contains_key("tool_calls") {
+                return true;
+            }
+            if obj.contains_key("name") && obj.contains_key("arguments") {
+                return true;
+            }
+            if obj.contains_key("tool") && obj.contains_key("arguments") {
+                return true;
+            }
+            if obj.get("type") == Some(&JsonValue::String("tool_use".to_string()))
+                && obj.get("name").is_some()
+                && obj.get("input").map(|v| v.is_object()).unwrap_or(false)
+            {
+                return true;
+            }
+            if let Some(content) = obj.get("content").and_then(JsonValue::as_array) {
+                if content.iter().any(|block| {
+                    block
+                        .as_object()
+                        .map(|block_obj| {
+                            block_obj.get("type") == Some(&JsonValue::String("tool_use".to_string()))
+                                && block_obj.get("name").is_some()
+                                && block_obj
+                                    .get("input")
+                                    .map(|v| v.is_object())
+                                    .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
+                }) {
+                    return true;
+                }
+            }
+            obj.values().any(json_contains_tool_call_payload)
+        }
+        JsonValue::Array(arr) => arr.iter().any(json_contains_tool_call_payload),
+        _ => false,
+    }
+}
+
 fn tool_call_json_prefix_end(text: &str) -> Option<usize> {
     let first = text.chars().next()?;
     let closer = match first {
@@ -477,13 +537,7 @@ fn tool_call_json_prefix_end(text: &str) -> Option<usize> {
                     let end = idx + ch.len_utf8();
                     let prefix = normalize_jsonish_quotes(&text[..end]);
                     let parsed: JsonValue = serde_json::from_str(&prefix).ok()?;
-                    let is_tool_call_payload = match parsed {
-                        JsonValue::Object(ref obj) => {
-                            obj.contains_key("tool_call") || obj.contains_key("tool_calls")
-                        }
-                        _ => false,
-                    };
-                    if is_tool_call_payload {
+                    if json_contains_tool_call_payload(&parsed) {
                         return Some(end);
                     }
                     return None;
@@ -1429,9 +1483,16 @@ mod tests {
     }
 
     #[test]
-    fn strips_smart_quoted_multiline_tool_call_json_from_assistant_text() {
-        let input = "{“tool_call”: {\n  “name”: “run_python”,\n  “arguments”: {“code”: “print(1)”}\n}}";
+    fn strips_nested_tool_call_json_from_assistant_text() {
+        let input = "{\"response\": {\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}}";
         assert_eq!(sanitize_assistant_text(input), "");
+    }
+
+    #[test]
+    fn splits_nested_tool_call_json_from_following_prose() {
+        let input = "{\"response\": {\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}}Final answer.";
+        let expected = "{\"response\": {\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}}\n\nFinal answer.";
+        assert_eq!(normalize_inline_tool_call_json(input), expected);
     }
 
     #[test]

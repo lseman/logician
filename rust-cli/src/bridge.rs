@@ -31,6 +31,7 @@ pub enum BridgeEvent {
         cache_hit: bool,
         error: Option<String>,
         result_preview: Option<String>,
+        result_output: Option<String>,
         args: Option<Value>, // Include args for consistency with tool_start
     },
     Image {
@@ -62,6 +63,19 @@ pub enum BridgeEvent {
         tool: String,
         path: String,
         diff: String,
+    },
+    /// Lifecycle state update for a subsystem (mcp or plugin)
+    Lifecycle {
+        subsystem: String,
+        payload: Value,
+    },
+    /// Compact session memory (compaction event)
+    Compaction {
+        payload: Value,
+    },
+    /// Session summary event
+    Summary {
+        payload: Value,
     },
 }
 
@@ -202,6 +216,7 @@ pub struct BridgeState {
     pub recent_rag_queries: Vec<RecentRagQuery>,
     pub tool_call_count: u64,
     pub plan_mode: bool,
+    pub lifecycle: Option<Value>,
 }
 
 impl BridgeState {
@@ -546,6 +561,7 @@ impl BridgeState {
                 .unwrap_or_default(),
             tool_call_count: v["tool_call_count"].as_u64().unwrap_or(0),
             plan_mode: v["plan_mode"].as_bool().unwrap_or(false),
+            lifecycle: v.get("lifecycle").filter(|p| !p.is_null()).cloned(),
         }
     }
 }
@@ -699,6 +715,10 @@ impl PythonBridge {
                     .get("result_preview")
                     .and_then(|p| p.as_str())
                     .filter(|p| !p.is_empty())
+                    .map(|p| p.to_string()),
+                result_output: v
+                    .get("result_output")
+                    .and_then(|p| p.as_str())
                     .map(|p| p.to_string()),
                 args: Some(v.get("args").cloned().unwrap_or_default()),
             },

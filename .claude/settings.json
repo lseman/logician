@@ -15,5 +15,31 @@
       "Bash(python -m pytest test/ --no-header -q)",
       "Bash(python -m pytest test/test_agent_runtime_public.py::AgentRuntimePublicTests::test_thinking_callback_streams_before_fast_path_response test/test_tool_registry_enhancements.py::ToolRegistryEnhancementsTests::test_python_skill_module_can_register_tools_via_tool_decorator -v --no-header --no-cov)"
     ]
-  }
+  },
+    "hooks": {
+      "PostToolUse": [
+        {
+          "matcher": "Edit|Write|Bash",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "code-review-graph update",
+              "timeout": 5000
+            }
+          ]
+        }
+      ],
+      "SessionStart": [
+        {
+          "matcher": "",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "code-review-graph status --json",
+              "timeout": 3000
+            }
+          ]
+        }
+      ]
+    }
 }

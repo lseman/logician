@@ -15,8 +15,8 @@ from collections import defaultdict
 from typing import Any
 
 from src.rag_runtime import legacy_rag_vector_paths, rag_runtime_settings
-from src.repo_graph import related_repo_context
-from src.repo_registry import load_repo_index
+from src.repo.graph import related_repo_context
+from src.repo.registry import load_repo_index
 
 if "_safe_json" not in globals():
 

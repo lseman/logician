@@ -121,6 +121,7 @@ class LlamaCppClient:
         url: str,
         payload: dict[str, Any],
         on_token: Callable[[str], None] | None = None,
+        on_reasoning_token: Callable[[str], None] | None = None,
     ) -> str:
         full: list[str] = []
         streamed_tool_calls: list[dict[str, Any]] = []
@@ -143,6 +144,9 @@ class LlamaCppClient:
                         full.append(content_delta)
                         if on_token:
                             on_token(content_delta)
+                    reasoning_delta = delta.get("reasoning_content")
+                    if reasoning_delta and on_reasoning_token:
+                        on_reasoning_token(str(reasoning_delta))
                     self._merge_tool_call_delta(
                         streamed_tool_calls,
                         delta.get("tool_calls"),
@@ -230,6 +234,7 @@ class LlamaCppClient:
         max_tokens: int,
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
+        on_reasoning_token: Callable[[str], None] | None = None,
         tools: list[dict[str, Any]] | None = None,
         grammar: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
@@ -296,12 +301,14 @@ class LlamaCppClient:
                         False,
                     )
                 url = f"{self.base_url}/v1/chat/completions"
+                reasoning_via_message = self.template.strip().lower() == "deepseek"
                 if _use_stream:
                     return self._handle_chat_stream(
                         client,
                         url,
                         payload,
                         on_token=on_token,
+                        on_reasoning_token=on_reasoning_token if reasoning_via_message else None,
                     )
                 else:
                     r = self._request(client, "POST", url, json=payload)
@@ -312,6 +319,10 @@ class LlamaCppClient:
                             "max_tokens limit reached mid-generation"
                         )
                     msg = data["choices"][0]["message"]
+                    if reasoning_via_message:
+                        reasoning = msg.get("reasoning_content")
+                        if reasoning and on_reasoning_token is not None:
+                            on_reasoning_token(str(reasoning))
                     # Native function-call response -> reformat to existing tool_call JSON
                     # so the existing parser handles it without modification.
                     if msg.get("tool_calls"):

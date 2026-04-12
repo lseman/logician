@@ -6,15 +6,15 @@ from typing import Any, Optional
 from .config import ThinkingConfig
 
 # FIXED: import prompt utilities from prompt.py
-from .prompt import get_prompt, Prompt
+from .prompt import Prompt, get_prompt
 
 # FIXED: import reasoner utilities from the reasoners package
 from .reasoners import Reasoner, get_reasoner
 
-
 # ==============================================================================
 # ThinkingStrategy — orchestrates (Prompt, Reasoner) pipelines
 # ==============================================================================
+
 
 class ThinkingStrategy:
     """

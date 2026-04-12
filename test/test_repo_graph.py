@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.repo_graph import build_repo_graph, related_repo_context
-from src.repo_registry import register_repo, update_repo
+from src.repo.graph import build_repo_graph, related_repo_context
+from src.repo.registry import register_repo, update_repo
 
 
 class RepoGraphTests(unittest.TestCase):
@@ -257,7 +257,7 @@ class RepoGraphTests(unittest.TestCase):
                         "use crate::service::setup_repo;",
                         "",
                         "pub fn run() -> String {",
-                        "    setup_repo(\"demo\")",
+                        '    setup_repo("demo")',
                         "}",
                         "",
                     ]
@@ -321,7 +321,7 @@ class RepoGraphTests(unittest.TestCase):
                         "use crate::service::{RepoStore, Repository};",
                         "",
                         "pub fn run(repo: &Repository) -> String {",
-                        "    RepoStore::save(repo, \"demo\")",
+                        '    RepoStore::save(repo, "demo")',
                         "}",
                         "",
                     ]
@@ -334,7 +334,7 @@ class RepoGraphTests(unittest.TestCase):
                         "use crate::service::Repository as Repo;",
                         "",
                         "pub fn run(repo: &Repo) -> String {",
-                        "    Repo::save(repo, \"demo\")",
+                        '    Repo::save(repo, "demo")',
                         "}",
                         "",
                     ]

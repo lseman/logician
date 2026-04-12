@@ -64,11 +64,12 @@ class VLLMClient:
         max_tokens: int,
         stream: bool = False,
         on_token: Callable[[str], None] | None = None,
+        on_reasoning_token: Callable[[str], None] | None = None,
         tools: list[dict[str, Any]] | None = None,  # accepted but ignored
         grammar: str | None = None,  # accepted but ignored (no constrained decoding in vllm path)
         tool_choice: str | dict[str, Any] | None = None,  # accepted but ignored
     ) -> str:
-        del tools, grammar, tool_choice
+        del on_reasoning_token, tools, grammar, tool_choice
         prompt = format_messages_for_template(messages, self.template)
         sampling_params = SamplingParams(
             temperature=temperature,

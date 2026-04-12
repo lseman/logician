@@ -19,6 +19,7 @@ class LLMBackend(Protocol):
         tool_choice: str | dict[str, Any] | None = None,
         stream: bool = True,
         on_token: Callable[[str], None] | None = None,
+        on_reasoning_token: Callable[[str], None] | None = None,
     ) -> str: ...
 
     def count_tokens(self, text: str) -> int: ...

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 import uuid
@@ -105,6 +106,45 @@ def _response_similarity(a: str, b: str) -> float:
 
 
 class AgentLoop:
+    def _llm_generate(
+        self,
+        messages: list[Message],
+        *,
+        temperature: float,
+        max_tokens: int,
+        stream: bool = False,
+        on_token: Callable[[str], None] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        grammar: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        on_reasoning_token: Callable[[str], None] | None = None,
+    ) -> str:
+        kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": stream,
+            "on_token": on_token,
+            "tools": tools,
+            "grammar": grammar,
+            "tool_choice": tool_choice,
+        }
+        if on_reasoning_token is not None:
+            try:
+                signature = inspect.signature(self.llm.generate)
+            except (TypeError, ValueError):
+                signature = None
+            if signature is None:
+                kwargs["on_reasoning_token"] = on_reasoning_token
+            else:
+                params = signature.parameters.values()
+                supports_reasoning = (
+                    "on_reasoning_token" in signature.parameters
+                    or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params)
+                )
+                if supports_reasoning:
+                    kwargs["on_reasoning_token"] = on_reasoning_token
+        return self.llm.generate(messages, **kwargs)
+
     @staticmethod
     def _tool_call_summary(tool_calls: list[ToolCall]) -> str:
         names = [
@@ -256,7 +296,7 @@ class AgentLoop:
         try:
             raw = await loop.run_in_executor(
                 None,
-                lambda: self.llm.generate(
+                lambda: self._llm_generate(
                     reflection_convo,
                     temperature=0.3,
                     max_tokens=256,
@@ -285,7 +325,7 @@ class AgentLoop:
         try:
             raw = await loop.run_in_executor(
                 None,
-                lambda: self.llm.generate(
+                lambda: self._llm_generate(
                     [Message(role=MessageRole.USER, content=scoring_prompt)],
                     temperature=0.0,
                     max_tokens=8,
@@ -326,7 +366,7 @@ class AgentLoop:
         try:
             plan = await loop.run_in_executor(
                 None,
-                lambda: self.llm.generate(
+                lambda: self._llm_generate(
                     planning_convo,
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
@@ -508,7 +548,7 @@ class AgentLoop:
         try:
             repaired_response = await loop.run_in_executor(
                 None,
-                lambda: self.llm.generate(
+                lambda: self._llm_generate(
                     repair_messages,
                     temperature=0.0,
                     max_tokens=min(1200, self.config.max_tokens),
@@ -664,13 +704,14 @@ class AgentLoop:
             # 4. LLM call (sync backend wrapped in executor)
             response = await loop.run_in_executor(
                 None,
-                lambda: self.llm.generate(
+                lambda: self._llm_generate(
                     llm_messages,
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
                     tools=self._generation_tools(),
                     stream=stream_enabled,
                     on_token=token_callback if stream_enabled else None,
+                    on_reasoning_token=thinking_callback,
                 ),
             )
 
@@ -930,12 +971,13 @@ class AgentLoop:
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: self.llm.generate(
+            lambda: self._llm_generate(
                 llm_messages,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
                 stream=stream_enabled,
                 on_token=token_callback if stream_enabled else None,
+                on_reasoning_token=thinking_callback,
             ),
         )
         # Extract <think> blocks, log them, and route to thinking_callback

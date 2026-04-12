@@ -70,6 +70,7 @@ def search_code(
     context_lines: int = 2,
     max_results: int = 50,
     include_hidden: bool = False,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Search code using multiline text or Python symbol matching."""
     return inspection_search_code(
@@ -81,4 +82,5 @@ def search_code(
         context_lines=context_lines,
         max_results=max_results,
         include_hidden=include_hidden,
+        offset=offset,
     )

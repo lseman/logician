@@ -151,6 +151,20 @@ class Config:
     # When False, persist chat history immediately but defer vector indexing
     # until semantic retrieval is actually requested.
     message_vector_index_on_write: bool = False
+    # Conversation history is stored raw in SQLite by default. Embedding-based
+    # message retrieval is opt-in so startup never has to load an embedding
+    # model just to persist normal chat transcripts.
+    message_history_vector_enabled: bool = False
+    # Persistent cross-session raw transcript store.
+    memory_palace_enabled: bool = True
+    memory_palace_db_path: str = field(default_factory=lambda: str(state_path("memory_palace.db")))
+    # Store raw text exactly as written; leave AAAK compression opt-in.
+    memory_palace_apply_aaak: bool = False
+    # When enabled, inject a concise cross-session memory summary from the
+    # Palace into the loaded history for better continuity.
+    memory_palace_context_enabled: bool = True
+    memory_palace_context_max_results: int = 4
+    memory_palace_context_max_chars: int = 1600
 
     # Conversation context
     history_limit: int = 18

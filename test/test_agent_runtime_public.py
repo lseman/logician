@@ -57,6 +57,28 @@ class _SequenceLLM:
         return response
 
 
+class _ReasoningChunkLLM:
+    def __init__(self, response: str, reasoning_chunks: list[str]) -> None:
+        self.response = response
+        self.reasoning_chunks = reasoning_chunks
+
+    def generate(
+        self,
+        messages,
+        temperature,
+        max_tokens,
+        stream=False,
+        on_token=None,
+        on_reasoning_token=None,
+        **kwargs,
+    ):
+        del messages, temperature, max_tokens, stream, on_token, kwargs
+        if on_reasoning_token is not None:
+            for chunk in self.reasoning_chunks:
+                on_reasoning_token(chunk)
+        return self.response
+
+
 class AgentRuntimePublicTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -158,6 +180,26 @@ class AgentRuntimePublicTests(unittest.TestCase):
         self.assertEqual(response.final_response, "Hello after thinking")
         self.assertEqual(thinking_streamed, ["Plan ", "first"])
         self.assertEqual(assistant_streamed, ["Hello ", "after ", "thinking"])
+
+    def test_thinking_callback_preserves_reasoning_chunk_spacing(self) -> None:
+        self.agent.config.chat_template = "deepseek"
+        self.agent.llm = _ReasoningChunkLLM(
+            "Hello from reasoning",
+            [' The user', ' said "hi".', " This is social."],
+        )
+        thinking_streamed: list[str] = []
+
+        response = self.agent.run(
+            "hi",
+            session_id="reasoning_spacing_case",
+            thinking_callback=thinking_streamed.append,
+        )
+
+        self.assertEqual(response.final_response, "Hello from reasoning")
+        self.assertEqual(
+            thinking_streamed,
+            [' The user', ' said "hi".', " This is social."],
+        )
 
     def test_tool_callback_reports_live_start_and_end_events(self) -> None:
         # Two-step sequence: tool call → final answer (pre_turn_thinking is off by default).

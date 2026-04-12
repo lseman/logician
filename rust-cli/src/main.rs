@@ -353,6 +353,7 @@ async fn run_loop(
                             KeyAction::ToggleContextExplorer => app.toggle_context_explorer(),
                             KeyAction::ToggleRagPanel => app.toggle_rag_panel(),
                             KeyAction::ToggleToolOutput => app.toggle_tool_output(),
+                            KeyAction::ExpandThinking => app.expand_all_thinking_messages(),
                             KeyAction::None => {}
                         }
                     }

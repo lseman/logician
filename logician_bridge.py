@@ -37,8 +37,8 @@ if SRC_DIR.is_dir() and str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from src.agent.classify import classify_turn
-from src.repo_ingest import ingest_repo
-from src.repo_registry import (
+from src.repo.ingest import ingest_repo
+from src.repo.registry import (
     load_repo_index,
     register_repo,
     remove_repo,
@@ -1118,7 +1118,7 @@ class BridgeServer:
         if not written_paths:
             return
         try:
-            from src.project_memory import compact_text, record_observation
+            from src.memory.project import compact_text, record_observation
 
             tool_names = [
                 str(call.get("name", "") or "").strip()

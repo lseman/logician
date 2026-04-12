@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent
+SRC_ROOT = ROOT
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+_repo_module = importlib.import_module("src.repo")
+load_repo_index = _repo_module.load_repo_index
+register_repo = _repo_module.register_repo
+remove_repo = _repo_module.remove_repo
+run_repo_postprocess = _repo_module.run_repo_postprocess
+search_repo_db = _repo_module.search_repo_db
+
+
+def _import_ingest_repo():
+    module = importlib.import_module("src.repo.ingest")
+    return getattr(module, "ingest_repo")
+
+
+DEFAULT_REPO_GLOB = (
+    "**/*.{py,rs,ts,tsx,js,jsx,java,go,rb,php,c,cc,cpp,h,hpp,cs,kt,swift,"
+    "md,toml,yaml,yml,json,sql,sh}"
+)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="graph",
+        description="Build, update, or search repository ingestion and graph artifacts.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "repo_path",
+        nargs="?",
+        help="Path to the repository to ingest. Defaults to current directory.",
+    )
+    common.add_argument(
+        "--base-dir",
+        default=None,
+        help="Workspace root for .logician artifacts. Defaults to the target repo path.",
+    )
+    common.add_argument(
+        "--glob",
+        dest="glob_pattern",
+        default=None,
+        help="Glob pattern used for graph building and repo ingestion.",
+    )
+    common.add_argument(
+        "--max-files",
+        type=int,
+        default=120,
+        help="Maximum number of files to ingest and graph. Use 0 for no limit.",
+    )
+    common.add_argument(
+        "--exclude",
+        default=None,
+        help="Comma-separated list of relative paths to exclude from ingestion and graph build.",
+    )
+    common.add_argument(
+        "--vector-backend",
+        default=None,
+        help="Optional vector backend override for repo ingestion.",
+    )
+    common.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Optional embedding model override for repo ingestion.",
+    )
+    common.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full ingestion payload as JSON.",
+    )
+
+    search_parent = argparse.ArgumentParser(add_help=False)
+    search_parent.add_argument(
+        "--base-dir",
+        default=None,
+        help="Workspace root for .logician artifacts. Defaults to the current directory.",
+    )
+    search_parent.add_argument(
+        "--json",
+        action="store_true",
+        help="Print search results as JSON.",
+    )
+
+    subparsers.add_parser(
+        "build",
+        parents=[common],
+        help="Build ingestion and graph artifacts for the repository.",
+    )
+    register_parser = subparsers.add_parser(
+        "register",
+        parents=[common],
+        help="Register a repository path in the workspace index.",
+    )
+    register_parser.add_argument(
+        "--name",
+        default=None,
+        help="Optional friendly name for the repository.",
+    )
+    subparsers.add_parser(
+        "list",
+        parents=[search_parent],
+        help="List registered repositories.",
+    )
+    info_parser = subparsers.add_parser(
+        "info",
+        parents=[search_parent],
+        help="Show repository registry and artifact information.",
+    )
+    info_parser.add_argument(
+        "--repo",
+        default=None,
+        help="Repository id, name, or path to inspect.",
+    )
+    remove_parser = subparsers.add_parser(
+        "remove",
+        parents=[search_parent],
+        help="Remove a repository from the workspace index.",
+    )
+    remove_parser.add_argument(
+        "repo",
+        help="Repository id, name, or path to remove.",
+    )
+    update_parser = subparsers.add_parser(
+        "update",
+        parents=[common],
+        help="Update ingestion for the repository without deleting existing chunks.",
+    )
+    update_parser.add_argument(
+        "--no-purge-existing",
+        action="store_true",
+        help="Keep existing chunks instead of purging them during update.",
+    )
+
+    search_parser = subparsers.add_parser(
+        "search",
+        parents=[search_parent],
+        help="Search within an ingested repo graph.",
+    )
+    search_parser.add_argument(
+        "--repo",
+        default=None,
+        help="Repository id, name, or path to search.",
+    )
+    search_parser.add_argument(
+        "--kind",
+        default=None,
+        help="Optional node kind filter when searching the repo graph.",
+    )
+    search_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of search results to return.",
+    )
+    search_parser.add_argument(
+        "query",
+        nargs=argparse.REMAINDER,
+        help="Search query terms.",
+    )
+
+    postprocess_parser = subparsers.add_parser(
+        "postprocess",
+        parents=[search_parent],
+        help="Run post-processing on an existing graph (FTS, flows, communities).",
+    )
+    postprocess_parser.add_argument(
+        "--repo",
+        default=None,
+        help="Repository id, name, or path to postprocess.",
+    )
+    postprocess_parser.add_argument(
+        "--no-flows",
+        action="store_true",
+        help="Skip flow detection.",
+    )
+    postprocess_parser.add_argument(
+        "--no-communities",
+        action="store_true",
+        help="Skip community detection.",
+    )
+    postprocess_parser.add_argument(
+        "--no-fts",
+        action="store_true",
+        help="Skip FTS index rebuild.",
+    )
+
+    return parser
+
+
+def _print_summary(payload: dict[str, Any]) -> None:
+    repo = dict(payload.get("repo") or {})
+    ingest = dict(payload.get("ingest") or {})
+    graph = dict(payload.get("graph") or {})
+    artifacts = dict(repo.get("artifacts") or {})
+
+    print(f"status: {payload.get('status', 'unknown')}")
+    print(f"repo: {repo.get('id', '?')} · {repo.get('name', '?')} · {repo.get('path', '-')}")
+    print(f"workspace_root: {payload.get('workspace_root', '-')}")
+    print(f"vector_path: {payload.get('vector_path', '-')}")
+    print(
+        "ingest: "
+        f"{ingest.get('status', 'unknown')} · "
+        f"files={int(ingest.get('files_processed', 0) or 0)} · "
+        f"chunks={int(ingest.get('total_chunks_added', 0) or 0)}"
+    )
+    print(
+        "graph: "
+        f"{graph.get('status', 'unknown')} · "
+        f"files={int(graph.get('files_indexed', 0) or 0)} · "
+        f"nodes={int(graph.get('nodes', 0) or 0)} · "
+        f"edges={int(graph.get('edges', 0) or 0)}"
+    )
+    if artifacts:
+        print(f"repo_dir: {artifacts.get('repo_dir', '-')}")
+        print(f"summary: {artifacts.get('summary_path', '-')}")
+        print(f"graph_file: {artifacts.get('graph_path', '-')}")
+
+
+def _print_repo_list(repos: list[dict[str, Any]]) -> None:
+    if not repos:
+        print("No registered repositories found.")
+        return
+    print("Registered repositories:")
+    for repo in repos:
+        print(
+            f"- {repo.get('id') or '?'} | {repo.get('name') or '?'} | "
+            f"{repo.get('path') or '?'} | nodes={repo.get('graph_nodes', 0)} "
+            f"edges={repo.get('graph_edges', 0)} last_used={repo.get('last_used_at', '-')}"
+        )
+
+
+def _print_postprocess(postprocess: dict[str, Any]) -> None:
+    if not postprocess:
+        print("postprocess: none")
+        return
+
+    print("\npostprocess:")
+    print(f"  repo_id: {postprocess.get('repo_id') or '-'}")
+    if postprocess.get('error'):
+        print(f"  error: {postprocess.get('error')}")
+        return
+
+    print(
+        f"  fts_indexed: {postprocess.get('fts_indexed', 0)} · "
+        f"flows_detected: {postprocess.get('flows_detected', 0)} · "
+        f"communities_detected: {postprocess.get('communities_detected', 0)}"
+    )
+    if summary := postprocess.get('summary'):
+        print(f"  summary: {summary}")
+    if warnings := postprocess.get('warnings'):
+        print("  warnings:")
+        for warning in warnings:
+            print(f"    - {warning}")
+    if flows := postprocess.get('flows'):
+        print("  top flows:")
+        for flow in flows[:3]:
+            print(
+                f"    - {flow.get('name') or flow.get('id')} "
+                f"(count={flow.get('file_count', 0)})"
+            )
+    if communities := postprocess.get('communities'):
+        print("  top communities:")
+        for community in communities[:3]:
+            print(
+                f"    - {community.get('name') or community.get('id')} "
+                f"(size={community.get('size', 0)})"
+            )
+
+
+def _print_repo_info(repo: dict[str, Any]) -> None:
+    git = dict(repo.get("git") or {})
+    artifacts = dict(repo.get("artifacts") or {})
+    print(f"id: {repo.get('id') or '?'}")
+    print(f"name: {repo.get('name') or '?'}")
+    print(f"path: {repo.get('path') or '?'}")
+    print(f"source_url: {repo.get('source_url') or '-'}")
+    print(f"last_used_at: {repo.get('last_used_at') or '-'}")
+    print(f"last_ingested_at: {repo.get('last_ingested_at') or '-'}")
+    print(f"last_graph_built_at: {repo.get('last_graph_built_at') or '-'}")
+    print(f"files_processed: {repo.get('files_processed', 0)}")
+    print(f"chunks_added: {repo.get('chunks_added', 0)}")
+    print(f"graph_nodes: {repo.get('graph_nodes', 0)}")
+    print(f"graph_edges: {repo.get('graph_edges', 0)}")
+    print(f"graph_symbols: {repo.get('graph_symbols', 0)}")
+    print(f"git.branch: {git.get('branch', '-')}")
+    print(f"git.commit: {git.get('commit', '-')}")
+    print(f"git.remote: {git.get('remote', '-')}")
+    if artifacts:
+        print(f"repo_dir: {artifacts.get('repo_dir', '-')}")
+        print(f"summary_path: {artifacts.get('summary_path', '-')}")
+        print(f"graph_path: {artifacts.get('graph_path', '-')}")
+        print(f"db_path: {artifacts.get('db_path', '-')}")
+
+
+def _resolve_repo_ref(repo_ref: str | None, base_dir: str | None = None) -> dict[str, Any] | None:
+    repos = load_repo_index(base_dir)
+    if not repos:
+        return None
+
+    if repo_ref:
+        normalized_ref = str(repo_ref).strip()
+        if normalized_ref:
+            for repo in repos:
+                if normalized_ref == str(repo.get("id") or ""):
+                    return repo
+                if normalized_ref == str(repo.get("name") or ""):
+                    return repo
+                if normalized_ref == str(repo.get("path") or ""):
+                    return repo
+                try:
+                    candidate = Path(normalized_ref).expanduser().resolve()
+                    repo_path = Path(str(repo.get("path") or "")).expanduser().resolve()
+                    if candidate == repo_path:
+                        return repo
+                except Exception:
+                    continue
+        return None
+
+    cwd = Path.cwd().resolve()
+    for repo in repos:
+        try:
+            repo_path = Path(str(repo.get("path") or "")).expanduser().resolve()
+            if cwd == repo_path or cwd.is_relative_to(repo_path):
+                return repo
+        except Exception:
+            continue
+
+    if len(repos) == 1:
+        return repos[0]
+
+    with_last_used = [r for r in repos if str(r.get("last_used_at") or "").strip()]
+    if with_last_used:
+        return sorted(
+            with_last_used,
+            key=lambda item: str(item.get("last_used_at") or ""),
+            reverse=True,
+        )[0]
+
+    return repos[0]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command in {"build", "update"}:
+        repo_path = Path(args.repo_path or Path.cwd()).expanduser().resolve()
+        if not repo_path.exists():
+            parser.error(f"repository path not found: {repo_path}")
+        if not repo_path.is_dir():
+            parser.error(f"repository path is not a directory: {repo_path}")
+
+        ingest_repo = _import_ingest_repo()
+        payload = ingest_repo(
+            str(repo_path),
+            base_dir=args.base_dir,
+            glob_pattern=args.glob_pattern or DEFAULT_REPO_GLOB,
+            max_files=args.max_files,
+            exclude=args.exclude or "",
+            vector_backend=args.vector_backend,
+            embedding_model_name=args.embedding_model,
+            purge_existing=(args.command == "build")
+            or not getattr(args, "no_purge_existing", False),
+        )
+
+        if args.command == "build":
+            payload["postprocess"] = run_repo_postprocess(payload.get("repo") or {})
+
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            _print_summary(payload)
+            if args.command == "build":
+                _print_postprocess(payload.get("postprocess") or {})
+
+        return 0 if str(payload.get("status") or "").lower() == "ok" else 1
+
+    if args.command == "register":
+        repo_path = Path(args.repo_path or Path.cwd()).expanduser().resolve()
+        if not repo_path.exists():
+            parser.error(f"repository path not found: {repo_path}")
+        if not repo_path.is_dir():
+            parser.error(f"repository path is not a directory: {repo_path}")
+
+        repo = register_repo(str(repo_path), name=args.name or "", base_dir=args.base_dir)
+        if args.json:
+            print(json.dumps(repo, ensure_ascii=False, indent=2))
+            return 0
+        print(f"registered repo: {repo.get('id')} ({repo.get('name')})")
+        print(f"path: {repo.get('path')}")
+        return 0
+
+    if args.command == "list":
+        repos = load_repo_index(base_dir=args.base_dir)
+        if args.json:
+            print(json.dumps(repos, ensure_ascii=False, indent=2))
+            return 0
+        _print_repo_list(repos)
+        return 0
+
+    if args.command == "info":
+        repo = _resolve_repo_ref(args.repo, base_dir=args.base_dir)
+        if repo is None:
+            parser.error(
+                "No repository selected. Register a repo with .logician/repos or pass --repo <id|name|path>."
+            )
+        if args.json:
+            print(json.dumps(repo, ensure_ascii=False, indent=2))
+            return 0
+        _print_repo_info(repo)
+        return 0
+
+    if args.command == "remove":
+        removed = remove_repo(args.repo, base_dir=args.base_dir)
+        if removed is None:
+            parser.error(f"Repository not found: {args.repo}")
+        if args.json:
+            print(json.dumps(removed, ensure_ascii=False, indent=2))
+            return 0
+        print(f"removed repo: {removed.get('id')} ({removed.get('name')})")
+        return 0
+
+    if args.command == "search":
+        query_parts = list(args.query or [])
+        if not query_parts:
+            parser.error("search requires a query string")
+
+        repo = _resolve_repo_ref(args.repo, base_dir=args.base_dir)
+        if repo is None:
+            parser.error(
+                "No repository selected. Register a repo with .logician/repos or pass --repo <id|name|path>."
+            )
+
+        results = search_repo_db(
+            repo,
+            query=" ".join(query_parts).strip(),
+            kind=args.kind,
+            limit=args.limit,
+        )
+
+        if args.json:
+            print(json.dumps(results, ensure_ascii=False, indent=2))
+            return 0
+
+        if not results:
+            print("No matches found.")
+            return 0
+
+        print(f"repo: {repo.get('name') or repo.get('id')}\n")
+        for item in results:
+            print(
+                f"- {item.get('name') or '<unnamed>'} [{item.get('kind') or 'unknown'}] "
+                f"{item.get('rel_path') or item.get('path') or ''}:{item.get('line') or 0}"
+            )
+        return 0
+
+    if args.command == "postprocess":
+        repo = _resolve_repo_ref(args.repo, base_dir=args.base_dir)
+        if repo is None:
+            parser.error(
+                "No repository selected. Register a repo with .logician/repos or pass --repo <id|name|path>."
+            )
+
+        result = run_repo_postprocess(
+            repo,
+            flows=not getattr(args, "no_flows", False),
+            communities=not getattr(args, "no_communities", False),
+            fts=not getattr(args, "no_fts", False),
+        )
+
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+
+        if result.get("fts_indexed") is not None:
+            print(f"fts_indexed: {result['fts_indexed']}")
+        if result.get("flows_detected") is not None:
+            print(f"flows_detected: {result['flows_detected']}")
+        if result.get("communities_detected") is not None:
+            print(f"communities_detected: {result['communities_detected']}")
+        if result.get("summary"):
+            print(result["summary"])
+
+        if flows := result.get("flows"):
+            print("\nTop flows:")
+            for flow in flows[:5]:
+                files = flow.get("files") or []
+                print(
+                    f"- {flow.get('name') or flow.get('id')} "
+                    f"(count={flow.get('file_count', 0)}) files={len(files)}"
+                )
+        if communities := result.get("communities"):
+            print("\nTop communities:")
+            for community in communities[:5]:
+                files = community.get("files") or []
+                languages = community.get("languages") or []
+                print(
+                    f"- {community.get('name') or community.get('id')} "
+                    f"(size={community.get('size', 0)}) languages={','.join(languages)}"
+                )
+        if warnings := result.get("warnings"):
+            print("\nWarnings:")
+            for warning in warnings:
+                print(f"- {warning}")
+        return 0
+
+    parser.error(f"Unknown command: {args.command}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

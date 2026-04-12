@@ -79,6 +79,17 @@ def test_read_file_streams_requested_range_for_large_text(
     assert result["content"] == "line 50\nline 51\nline 52\n"
 
 
+def test_read_file_accepts_offset_limit_aliases(tmp_path: Path) -> None:
+    path = tmp_path / "aliases.txt"
+    path.write_text("".join(f"line {i}\n" for i in range(1, 8)), encoding="utf-8")
+
+    result = read_file(str(path), offset=3, limit=2)
+
+    assert result["status"] == "ok"
+    assert result["returned_lines"] == "3-4"
+    assert result["content"] == "line 3\nline 4\n"
+
+
 def test_read_edit_context_reports_truncated_scan_when_match_not_found_within_cap(
     tmp_path: Path,
 ) -> None:
@@ -197,3 +208,26 @@ def test_search_code_regex_mode_matches_across_lines(tmp_path: Path) -> None:
     assert result["status"] == "ok"
     assert result["total_matches"] == 1
     assert result["matches"][0]["match_end_line"] == 3
+
+
+def test_search_code_supports_offset_pagination(tmp_path: Path) -> None:
+    path = tmp_path / "multi.py"
+    path.write_text(
+        "alpha = 1\nbeta = 2\nalpha = 3\nalpha = 4\n",
+        encoding="utf-8",
+    )
+
+    result = search_code(
+        "alpha",
+        path=str(tmp_path),
+        glob="**/*.py",
+        mode="literal",
+        max_results=1,
+        offset=1,
+    )
+
+    assert result["status"] == "ok"
+    assert result["returned_count"] == 1
+    assert result["truncated"] is True
+    assert result["next_offset"] == 2
+    assert result["matches"][0]["match_start_line"] == 3

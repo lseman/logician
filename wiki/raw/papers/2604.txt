@@ -1,0 +1,225 @@
+TriAttention: Efficient Long Reasoning with Trigonometric KV Compression
+Weian Mao1∗ Xi Lin 3∗ Wei Huang2∗ Yuxin Xie1 Tianfu Fu 1
+Bohan Zhuang 3 Song Han 1 2 Yukang Chen2
+Abstract
+Extended reasoning in large language models
+(LLMs) creates severe KV cache memory bottle-
+necks. Leading KV cache compression methods
+estimate KV importance using attention scores
+from recent post-RoPE queries. However, queries
+rotate with position during RoPE, making repre-
+sentative queries very few, leading to poor top-
+key selection and unstable reasoning. To avoid
+this issue, we turn to the pre-RoPE space, where
+we observe that Q and K vectors are highly con-
+centrated around fixed non-zero centers and re-
+main stable across positions—Q/K concentration.
+We show that this concentration causes queries to
+preferentially attend to keys at specific distances
+(e.g., nearest keys), with the centers determining
+which distances are preferred via a trigonometric
+series. Based on this, we propose TriAttention
+to estimate key importance by leveraging these
+centers. Via the trigonometric series, we use the
+distance preference characterized by these centers
+to score keys according to their positions, and also
+leverage Q/K norms as an additional signal for
+importance estimation. On AIME25 with 32K-
+token generation, TriAttention matches Full At-
+tention reasoning accuracy while achieving 2.5×
+higher throughput or 10.7× KV memory reduc-
+tion, whereas leading baselines achieve only about
+half the accuracy at the same efficiency. TriAtten-
+tion enables OpenClaw deployment on a single
+consumer GPU, where long context would other-
+wise cause out-of-memory with Full Attention.
+Our code is available at https://github.
+com/WeianMao/triattention.
+1. Introduction
+Long reasoning in LLMs produces chain-of-thought se-
+quences spanning tens of thousands of tokens (Wei et al.,
+2022; DeepSeek-AI, 2025; Shao et al., 2024; Chen et al.,
+1MIT 2NVIDIA 3ZJU ∗Equal contribution.
+Figure 1.Performance trade-offs on AIME25 (Qwen3-8B).(A)At
+equivalent accuracy (40.8%), TriAttention achieves 2.5× higher
+throughput than Full Attention.(B)TriAttention reduces KV cache
+memory by 10.7×while matching Full Attention accuracy.
+2025). KV cache grows proportionally, creating severe
+memory bottlenecks. KV cache compression addresses this
+by retaining only the most important tokens, with impor-
+tance estimated from attention scores computed over recent
+queries (Li et al., 2024b; Zhang et al., 2023; Devoto et al.,
+2025; Zhou et al., 2024; Tang et al., 2024; Shi et al., 2024).
+However, these methods are inherently unstable: only a
+few queries are usable for importance estimation. They
+operate on post-RoPE queries, which rotate with position
+as illustrated in Figure 2(B); consequently, only the most
+recent queries retain up-to-date orientations, forming a tiny
+observation window. With so few representative queries, im-
+portant keys go undetected—a token receiving low attention
+during this short window may be permanently evicted, even
+if it becomes critical later. This is particularly challenging
+for retrieval heads (Wu et al., 2025; Xiao et al., 2025), where
+relevant tokens can remain dormant for long periods before
+becoming essential. In reasoning, such loss breaks the chain
+of thought. Prior work confirms this limitation: increasing
+the observation window does not help—performance peaks
+at around 25 queries, a tiny fraction of typical long contexts,
+and declines thereafter (Zhang et al., 2025).
+We therefore turn to the pre-RoPE space, where we observe
+a notable phenomenon: across a large fraction of attention
+heads, Q and K vectors are highly concentrated around a
+fixed non-zero center, as shown in Figure 2(A)—a property
+1
+arXiv:2604.04921v1  [cs.CL]  6 Apr 2026
+
+TriAttention: Efficient Long Reasoning with Trigonometric KV Compression
+Figure 2.Q/K concentration and its implications for attention.(A)Pre-RoPE Q/K vectors at the dominant frequency band are highly
+concentrated (high Mean Resultant Length R).(B)RoPE rotation disperses these vectors into arc patterns. In (A-B), three distinct input
+sequences are overlayed, showing this structure is stable across content.(C)This concentration holds across nearly all heads.(D)When
+Q/K are concentrated, attention logits can be accurately reconstructed using a trigonometric series (Pearsonr= 0.72).
+we termQ/K concentration. This concentration remains sta-
+ble across positions and contexts,i.e., Figure 2(C). Because
+pre-RoPE vectors—before positional encoding is applied—
+are unaffected by positional rotation, this stability is intrinsic
+rather than coincidental. Moreover, pre-RoPE vectors are di-
+rectly linked to attention through the RoPE formula, making
+these centers meaningful for assessing KV importance.
+To leverage these properties, we first demonstrate these cen-
+ters relate to attention behavior via a trigonometric series.
+When Q/K are highly concentrated, they can be approxi-
+mated by their centers; substituting these centers into the
+RoPE formula, the attention logit reduces to a function that
+depends only on Q-K distance—a trigonometric series—
+forming an attention-vs-distance curve. This curve usually
+exhibits peaks at specific Q-K distances, and verify that keys
+at those distances indeed receive higher attention in prac-
+tice, as demonstrated in Figure 2(D). This demonstrates that
+Q/K concentration causes attention to favor keys at specific
+distances, with the centers determining which distances are
+preferred. Furthermore, this preference can be predicted
+using trigonometric series computed from centers.
+We apply this understanding to design TriAttention, a KV
+cache compression method. TriAttention scores keys and
+retains only the top-scoring ones to address the memory
+bottleneck. The key idea of our scoring function is to use the
+Q center together with the trigonometric series to evaluate
+importance differences among keys arising from distance
+preferences. For the minority of heads where Q is less
+concentrated, we incorporate Q/K norms as complementary
+signals (Guo et al., 2024; Kobayashi et al., 2020; Li et al.,
+2024a). We automatically balance these two components
+using a Q/K concentration metric.
+We evaluate TriAttention on mathematical reasoning bench-
+marks. On AIME25, at equivalent accuracy to Full Atten-
+tion, TriAttention achieves 2.5× higher throughput or 10.7×
+KV memory reduction (Figure 1), while R-KV achieves
+only about half the accuracy at the same efficiency. At fixed
+memory budget, the advantage is equally pronounced: Tri-
+Attention nearly doubles the accuracy of R-KV on AIME25
+(32.9% vs. 17.5%) and AIME24 (42.1% vs. 25.4%). On
+MATH 500, with only 1,024 out of 32k tokens in the KV
+cache, TriAttention closely matches Full Attention (68.4%
+vs. 69.6%). These results demonstrate that leveraging Q/K
+centers via the trigonometric series provides a more reliable
+signal for KV importance than observation-based methods.
+2. Background and Related Work
+KV cache compression retains only a subset of KV pairs
+under a fixed memory budget. The core challenge isim-
+portance estimation: determining which tokens will receive
+high attention from future queries. Existing methods ap-
+proach this problem by analyzing post-RoPE representa-
+tions, as we discuss in §2.2. To understand why post-RoPE
+analysis is limiting, we first review how RoPE works.
+2.1. Rotary Position Embedding
+Rotary Position Embedding (RoPE) (Su et al., 2024; Hong
+et al., 2024; Barbero et al., 2025) encodes positional infor-
+mation as rotations in vector space and has become the dom-
+inant positional encoding in modern LLMs (Dubey et al.,
+2024; Jiang et al., 2023; Qwen Team, 2025; Peng et al.,
+2023; Team et al., 2025). For a d-dimensional vector, RoPE
+divides it into d/2 two-dimensional subspaces indexed by
+f∈ {0, . . . , d/2−1} . The f-th subspace rotates at fre-
+quency ωf =θ −2f /d (θ= 10000 typically); we refer to it
+as frequency band f. For frequency band f, RoPE applies a
+rotation by angleω f pat positionp:
+ x′
+2f
+x′
+2f+1
+
+=
+cos(ωf p)−sin(ω f p)
+sin(ωf p) cos(ω f p)
+ x2f
+x2f+1
+
+(1)
+We call the Q/K vectors before this rotationpre-RoPE, and
+after rotationpost-RoPE.
+2
+
+TriAttention: Efficient Long Reasoning with Trigonometric KV Compression
+Figure 3.Attention reconstruction correlation across three DeepSeek-R1 distilled LLMs, including Qwen3 (Qwen Team, 2025),
+Qwen2.5 (Qwen Team, 2024), and Llama3 (Dubey et al., 2024). Distribution of per-head reconstruction Pearson correlation (¯r) across all
+attention heads. The red dashed line indicates the mean. All models show right-skewed distributions with means above 0.5.
+2.2. Post-RoPE Compression Methods
+KV cache compression methods (Cai et al., 2025; Ge et al.,
+2024; Feng et al., 2025; Behnam et al., 2025) estimate token
+importance from post-RoPE representations. We categorize
+them into heuristic, attention-based, and norm-based types.
+Heuristic methods.Early compression methods use heuris-
+tic rule-based attention patterns. StreamingLLM (Xiao et al.,
+2024; Gu et al., 2025) enables infinite-length streaming in-
+put by retaining only a small fixed-size cache: a few ini-
+tial “sink” tokens plus a sliding window of recent tokens.
+The sink tokens exploit the observation that initial posi-
+tions receive disproportionate attention regardless of their
+content—discarding them causes attention scores to lose a
+stable “sink” and degrades performance. While simple, such
+fixed rules cannot adapt to content-dependent importance,
+motivating more sophisticated approaches.
+Attention-based methods.These methods use attention
+scores—computed on post-RoPE Q/K—to identify impor-
+tant tokens. H2O (Zhang et al., 2023) accumulates attention
+scores across decoding steps to identify “heavy-hitter” to-
+kens that consistently receive high attention. SnapKV (Li
+et al., 2024b) computes attention within a local window
+and aggregates scores to predict which tokens will matter
+for generation. Scissorhands (Liu et al., 2023) exploits the
+“persistence of importance” hypothesis, using historical at-
+tention to guide eviction. R-KV (Cai et al., 2025) scores
+tokens by attention from the most recent queries, combined
+with redundancy detection for reasoning models. LazyEvic-
+tion (Zhang et al., 2025) tracks token importance recurrence
+within an observation window to delay eviction decisions.
+Norm-based methods.V ATP (Guo et al., 2024) observes
+that attention scores alone are insufficient: attention sinks
+receive high attention but have near-zero value norms, con-
+tributing little to the output. By incorporating value vector
+norms, V ATP provides a more nuanced importance measure.
+2.3. Limitations of Post-RoPE Methods
+Both attention-based and norm-based methods can be
+viewed as operating in the post-RoPE space, where po-
+sitional rotations have already been applied. This shared
+foundation leads to distinct but related limitations.
+For attention-based methods, the key constraint is that
+queries rotate with position, limiting useful observations
+to a tiny window and causing important keys undetected.
+For norm-based methods, the limitation is different: they
+leverage only vector magnitudes while ignoring directional
+information. Ideally, incorporating Q/K directions would
+improve importance estimation—attention depends on both
+norms and the angle between Q and K. However, in post-
+RoPE space, directions are entangled with positional rota-
+tions: a vector’s direction changes continuously with posi-
+tion, making directional information difficult to exploit.
+3. Pre-RoPE and Trigonometric Series
+As outlined in the Introduction, we observe that Q and K vec-
+tors in pre-RoPE space are highly concentrated around non-
+zero centers, and this concentration remains stable across
+positions and contexts. This is not a property of specific
+head types, but a prevalent phenomenon across models, as
+shown in Figure 2(A, C). In this section, we first charac-
+terize this concentration (§3.1), then show how it enables
+attention patterns to

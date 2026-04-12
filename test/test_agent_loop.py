@@ -38,6 +38,19 @@ class FakeLLM:
         return len(text) // 4
 
 
+class FakeDeepSeekLLM(FakeLLM):
+    def __init__(self, responses: list[str], reasoning: list[str]) -> None:
+        super().__init__(responses)
+        self._reasoning = reasoning
+
+    def generate(self, messages, **kwargs) -> str:
+        on_reasoning_token = kwargs.get("on_reasoning_token")
+        idx = self._idx % len(self._responses)
+        if on_reasoning_token is not None:
+            on_reasoning_token(self._reasoning[idx])
+        return super().generate(messages, **kwargs)
+
+
 class FakeDispatcher:
     def __init__(self) -> None:
         self.dispatched: list[ToolCall] = []
@@ -120,6 +133,30 @@ def test_social_turn_fast_path():
     assert result.final_response == "Hey there! How can I help?"
     assert fake_dispatcher.dispatched == [], "dispatcher must not be called on social turns"
     assert llm._idx == 1, "only one LLM call for social fast path"
+
+
+def test_deepseek_reasoning_callback_uses_reasoning_content_channel():
+    llm = FakeDeepSeekLLM(["Visible answer"], ["step one\nstep two"])
+    fake_dispatcher = FakeDispatcher()
+    config = Config(max_iterations=8, pre_turn_thinking=False, chat_template="deepseek")
+    agent_loop = AgentLoop(
+        llm=llm,
+        guardrails=FakeGuardrails(),
+        prompt_builder=FakePromptBuilder(),
+        dispatcher=fake_dispatcher,
+        config=config,
+    )
+    thinking: list[str] = []
+
+    result = asyncio.run(
+        agent_loop.run(
+            [_user_msg("hello there")],
+            thinking_callback=thinking.append,
+        )
+    )
+
+    assert result.final_response == "Visible answer"
+    assert thinking == ["step one\nstep two"]
 
 
 def test_social_turn_skips_mcp_loader():

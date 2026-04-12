@@ -97,6 +97,7 @@ def search_code(
     context_lines: int = 2,
     max_results: int = DEFAULT_CODE_SEARCH_MAX_RESULTS,
     include_hidden: bool = False,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Search code across a tree using multiline text or Python symbol matching."""
     if not query:
@@ -105,6 +106,8 @@ def search_code(
         return _err("context_lines must be >= 0")
     if max_results <= 0:
         return _err("max_results must be >= 1")
+    if offset < 0:
+        return _err("offset must be >= 0")
 
     normalized_mode = mode.strip().lower()
     if normalized_mode not in {"literal", "regex", "symbol"}:
@@ -125,6 +128,7 @@ def search_code(
             case_sensitive=case_sensitive,
             max_results=max_results,
             include_hidden=include_hidden,
+            offset=offset,
         )
 
     return _search_multiline_code(
@@ -136,6 +140,7 @@ def search_code(
         context_lines=context_lines,
         max_results=max_results,
         include_hidden=include_hidden,
+        offset=offset,
     )
 
 
@@ -310,6 +315,7 @@ def _search_multiline_code(
     context_lines: int,
     max_results: int,
     include_hidden: bool,
+    offset: int,
 ) -> dict[str, Any]:
     flags = re.MULTILINE | re.DOTALL
     if not case_sensitive:
@@ -319,6 +325,8 @@ def _search_multiline_code(
     except re.error as exc:
         return _err(f"Invalid regex: {exc}")
 
+    page_limit = max_results
+    raw_limit = offset + page_limit
     matches: list[dict[str, Any]] = []
     files_with_matches: set[str] = set()
     files_searched = 0
@@ -362,26 +370,13 @@ def _search_multiline_code(
                     **window,
                 }
             )
-            if len(matches) >= max_results:
-                return {
-                    "status": "ok",
-                    "mode": "literal" if literal else "regex",
-                    "query": query,
-                    "path": str(root),
-                    "glob": glob,
-                    "case_sensitive": case_sensitive,
-                    "context_lines": context_lines,
-                    "include_hidden": include_hidden,
-                    "file_count": files_searched,
-                    "files_with_matches": len(files_with_matches),
-                    "files_skipped_binary": skipped_binary,
-                    "files_skipped_too_large": skipped_large,
-                    "max_results": max_results,
-                    "total_matches": len(matches),
-                    "truncated": True,
-                    "matches": matches,
-                }
+            if len(matches) >= raw_limit:
+                break
+        if len(matches) >= raw_limit:
+            break
 
+    page = matches[offset : offset + page_limit]
+    truncated = len(matches) >= raw_limit
     return {
         "status": "ok",
         "mode": "literal" if literal else "regex",
@@ -396,9 +391,12 @@ def _search_multiline_code(
         "files_skipped_binary": skipped_binary,
         "files_skipped_too_large": skipped_large,
         "max_results": max_results,
+        "offset": offset,
+        "returned_count": len(page),
         "total_matches": len(matches),
-        "truncated": False,
-        "matches": matches,
+        "truncated": truncated,
+        "next_offset": (offset + len(page)) if truncated else None,
+        "matches": page,
     }
 
 
@@ -410,8 +408,11 @@ def _search_python_symbols(
     case_sensitive: bool,
     max_results: int,
     include_hidden: bool,
+    offset: int,
 ) -> dict[str, Any]:
     needle = query if case_sensitive else query.lower()
+    page_limit = max_results
+    raw_limit = offset + page_limit
     matches: list[dict[str, Any]] = []
     files_with_matches: set[str] = set()
     files_searched = 0
@@ -458,23 +459,13 @@ def _search_python_symbols(
                 }
             )
             files_with_matches.add(file_rel)
-            if len(matches) >= max_results:
-                return {
-                    "status": "ok",
-                    "mode": "symbol",
-                    "query": query,
-                    "path": str(root),
-                    "glob": glob,
-                    "case_sensitive": case_sensitive,
-                    "include_hidden": include_hidden,
-                    "file_count": files_searched,
-                    "files_with_matches": len(files_with_matches),
-                    "max_results": max_results,
-                    "total_matches": len(matches),
-                    "truncated": True,
-                    "matches": matches,
-                }
+            if len(matches) >= raw_limit:
+                break
+        if len(matches) >= raw_limit:
+            break
 
+    page = matches[offset : offset + page_limit]
+    truncated = len(matches) >= raw_limit
     return {
         "status": "ok",
         "mode": "symbol",
@@ -486,9 +477,12 @@ def _search_python_symbols(
         "file_count": files_searched,
         "files_with_matches": len(files_with_matches),
         "max_results": max_results,
+        "offset": offset,
+        "returned_count": len(page),
         "total_matches": len(matches),
-        "truncated": False,
-        "matches": matches,
+        "truncated": truncated,
+        "next_offset": (offset + len(page)) if truncated else None,
+        "matches": page,
     }
 
 

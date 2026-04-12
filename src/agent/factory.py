@@ -15,11 +15,7 @@ def create_agent(
     use_chat_api: bool = True,
     chat_template: str = "chatml",
     db_path: str = "agent_sessions.db",
-    embedding_model: str | None = (
-        "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
-        "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"
-        "intfloat/e5-mistral-7b-instruct|BAAI/bge-small-en-v1.5"
-    ),
+    embedding_model: str | None = None,
     *,
     config_overrides: dict[str, Any] | None = None,
 ) -> Agent:
