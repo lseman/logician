@@ -91,6 +91,14 @@ class ToolRegistry(
                 self.skills_dir_path,
                 default_skills_dir,
             )
+        if self.skills_dir_path.is_dir():
+            skills_package_root = str(self.skills_dir_path.parent)
+            if skills_package_root not in sys.path:
+                sys.path.insert(0, skills_package_root)
+                self._log.debug(
+                    "Added skills package root to sys.path: %s",
+                    skills_package_root,
+                )
         self._catalog = SkillCatalog(
             skills_md_path=self.skills_md_path,
             skills_dir_path=self.skills_dir_path,
@@ -119,9 +127,14 @@ class ToolRegistry(
 
         if auto_load_from_skills:
             _sources = self._catalog.iter_skills_sources()
-            if _sources or self.skills_dir_path.is_dir():
-                self._log.info("Auto-loading tools from %d source(s)", len(_sources))
-                self.load_tools_from_skills()
+            if _sources:
+                self._log.info(
+                    "Auto-loading core tools and skill metadata from %d source(s)",
+                    len(_sources),
+                )
+            else:
+                self._log.info("Auto-loading core tools only; no skill sources detected.")
+            self.load_tools_from_skills()
 
     @staticmethod
     def _normalize_lazy_skill_group_name(value: str) -> str:

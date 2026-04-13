@@ -13,8 +13,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, List, Literal, Optional, Sequence, TypedDict
 
-from ..runtime import SkillCard, SkillSelection, ToolParameter
 from src.skills.skill_manifest import split_frontmatter
+
+from ..runtime import SkillCard, SkillSelection, ToolParameter
 
 try:
     from markdown_it import MarkdownIt
@@ -2733,24 +2734,6 @@ class SkillCatalog:
     def _split_frontmatter(self, content: str) -> tuple[SkillManifest, str]:
         manifest, body = split_frontmatter(content)
         return manifest, body
-                key, value = stripped.split(":", 1)
-                key = key.strip()
-                value = value.strip()
-                current_key = key
-                if value:
-                    manifest[key] = value
-                else:
-                    manifest[key] = []
-                continue
-
-            if stripped.startswith("- ") and current_key:
-                existing = manifest.get(current_key)
-                if not isinstance(existing, list):
-                    existing = [] if existing in (None, "") else [str(existing)]
-                existing.append(stripped[2:].strip())
-                manifest[current_key] = existing
-
-        return manifest
 
     def _extract_bootstrap_name_from_heading(self, heading: str) -> Optional[str]:
         normalized = heading.strip()

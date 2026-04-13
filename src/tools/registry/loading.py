@@ -225,66 +225,6 @@ class RegistryLoadingMixin:
         self._log.info("✓ Loaded builtin tool: %s", name)
         return True
 
-    def _load_python_skill_modules(self) -> int:
-        if not self.skills_dir_path.is_dir():
-            return 0
-
-        import os as _os
-
-        py_skill_files: list[Path] = []
-        seen: set[str] = set()
-        for root, dirs, files in _os.walk(str(self.skills_dir_path), followlinks=True):
-            root_path = Path(root)
-            try:
-                rel_parts = root_path.relative_to(self.skills_dir_path).parts
-            except Exception:
-                rel_parts = ()
-
-            if rel_parts:
-                top_level = rel_parts[0]
-                if self._is_lazy_skill_group_dir_name(
-                    top_level
-                ) and not self._is_lazy_skill_group_active(top_level):
-                    dirs[:] = []
-                    continue
-            else:
-                dirs[:] = [
-                    d
-                    for d in dirs
-                    if not self._is_lazy_skill_group_dir_name(d)
-                    or self._is_lazy_skill_group_active(d)
-                ]
-
-            # When a skill folder defines scripts/, only modules inside that tree
-            # should be auto-loaded as executable tools.
-            if "scripts" not in rel_parts and (root_path / "scripts").is_dir():
-                dirs[:] = [d for d in dirs if d == "scripts"]
-                continue
-
-            for fname in files:
-                if not fname.endswith(".py") or fname == "__init__.py" or fname.startswith("_"):
-                    continue
-                module_path = root_path / fname
-                key = str(module_path.resolve())
-                if key in seen:
-                    continue
-                seen.add(key)
-                py_skill_files.append(module_path)
-        py_skill_files = sorted(py_skill_files)
-        if not py_skill_files:
-            return 0
-
-        total_registered = 0
-        for module_path in py_skill_files:
-            total_registered += self._register_tools_from_python_module(module_path)
-
-        self._log.info(
-            "Loaded %d tool(s) from %d Python skill module(s)",
-            total_registered,
-            len(py_skill_files),
-        )
-        return total_registered
-
     def _load_core_tool_modules(self) -> int:
         """Load Python modules from `src/tools/core` and register any exported tools.
 

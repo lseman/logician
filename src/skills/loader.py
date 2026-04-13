@@ -5,7 +5,6 @@ import importlib.util
 import os
 import re
 import subprocess
-import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -24,10 +23,10 @@ class Skill:
     paths: Optional[List[str]] = None
 
     def is_callable(self) -> bool:
-        """True when the skill is declared as call-able (implementation exists in scripts).
+        """True when the skill is declared as callable (implementation exists in scripts).
 
-        The loader will not import or execute implementation on discovery; callers
-        must opt-in to execution via `call_skill(..., allow_exec=True)`.
+        The loader will not import or execute implementation on discovery; callable
+        skills are loaded by their `scripts` metadata when execution is requested.
         """
         fm = self.frontmatter or {}
         if isinstance(fm.get("callable"), bool):
@@ -49,10 +48,28 @@ class Skill:
                 content = content.replace(f"${{{k}}}", str(v))
         # placeholders
         if self.base_dir:
-            content = content.replace("${CLAUDE_SKILL_DIR}", self.base_dir)
+            base_dir = self.base_dir
+            if os.name == "nt":
+                base_dir = base_dir.replace("\\", "/")
+            content = content.replace("${CLAUDE_SKILL_DIR}", base_dir)
         if session_id:
             content = content.replace("${CLAUDE_SESSION_ID}", session_id)
         return content
+
+    def render_prompt(
+        self,
+        args: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+        *,
+        executor: Optional[callable] = None,
+    ) -> str:
+        prompt = self.get_prompt_for_command(args=args, session_id=session_id)
+        return execute_embedded_shell_commands(
+            prompt,
+            base_dir=self.base_dir,
+            allow_shell=True,
+            executor=executor,
+        )
 
 
 # --- Dynamic discovery / caching / conditional activation ---
@@ -94,6 +111,28 @@ def load_skills_from_dir(base_path: str) -> Tuple[Skill, ...]:
         )
     # return tuple for caching
     return tuple(skills)
+
+
+def load_skill_from_path(path: str) -> Skill:
+    txt = Path(path).read_text(encoding="utf-8")
+    manifest, body = split_frontmatter(txt)
+    name = manifest.get("name") or Path(path).parent.name
+    desc = manifest.get("description") or ""
+    paths = manifest.get("paths") if isinstance(manifest.get("paths"), list) else None
+    if manifest.get("script") and not manifest.get("scripts"):
+        if isinstance(manifest.get("script"), str):
+            manifest["scripts"] = [manifest.get("script")]
+    if manifest.get("scripts") and isinstance(manifest.get("scripts"), str):
+        manifest["scripts"] = [manifest.get("scripts")]
+    return Skill(
+        name=name,
+        description=desc,
+        frontmatter=manifest,
+        body=body,
+        file_path=path,
+        base_dir=str(Path(path).parent),
+        paths=paths,
+    )
 
 
 def load_all_skill_dirs(base_dirs: List[str]) -> List[Skill]:
@@ -178,17 +217,19 @@ __all__ = [
     "Skill",
     "find_skill_markdown_files",
     "load_skills_from_dir",
+    "load_skill_from_path",
     "load_all_skill_dirs",
     "add_skill_directories",
     "get_dynamic_skills",
     "activate_conditional_skills_for_paths",
+    "execute_embedded_shell_commands",
 ]
 
 
 # --- Embedded shell execution helper (minimal, opt-in) ---
 
 BLOCK_PATTERN = re.compile(r"```!\s*\n?([\s\S]*?)\n?```")
-INLINE_PATTERN = re.compile(r"(?<=^|\s)!`([^`]+)`")
+INLINE_PATTERN = re.compile(r"(^|\s)!`([^`]+)`")
 
 
 def execute_embedded_shell_commands(
@@ -221,7 +262,11 @@ def execute_embedded_shell_commands(
         start, end = m.span()
         # append text before match
         out.append(result[last_end:start])
-        cmd = m.group(1).strip()
+        prefix = ""
+        cmd = m.group(1).strip() if m.lastindex == 1 else ""
+        if len(m.groups()) > 1:
+            prefix = m.group(1) or ""
+            cmd = m.group(2).strip()
         output = ""
         try:
             if executor is not None:
@@ -245,14 +290,14 @@ def execute_embedded_shell_commands(
                     output = stdout
         except Exception as e:
             output = f"[Error executing command: {e}]"
-        out.append(output)
+        out.append(prefix + output)
         last_end = end
 
     out.append(result[last_end:])
     return "".join(out)
 
 
-# --- Callable skill invocation (opt-in) ---
+# --- Import helpers for callable skill modules ---
 def _import_module_from_path(path: str):
     path = str(path)
     try:
@@ -266,67 +311,3 @@ def _import_module_from_path(path: str):
         return mod
     except Exception:
         raise
-
-
-def call_skill(
-    skill: Skill,
-    args: Optional[Dict[str, Any]] = None,
-    *,
-    allow_exec: bool = False,
-    executor: Optional[callable] = None,
-):
-    """Invoke a callable skill implementation discovered via SKILL.md.
-
-    Safety: The loader will never call implementations unless `allow_exec` is True.
-    Execution strategy: Attempt to import the first script listed under `scripts` in
-    the skill's frontmatter and call an exported entrypoint.
-
-    Entrypoint resolution order:
-      1. frontmatter['entrypoint'] (string)
-      2. `run` function in module
-      3. skill name lowercased with non-alnum -> underscore
-
-    Returns the (success, result_str) tuple. On error returns (False, error_message).
-    """
-    if not allow_exec:
-        return (False, "Execution disabled: pass allow_exec=True to run skill implementations")
-
-    fm = skill.frontmatter or {}
-    scripts = fm.get("scripts") or []
-    if not scripts:
-        return (False, "No scripts listed for this skill")
-
-    script_rel = scripts[0]
-    script_path = Path(skill.base_dir or "") / script_rel
-    if not script_path.exists():
-        return (False, f"Script not found: {script_path}")
-
-    try:
-        if executor is not None:
-            return True, str(executor(str(script_path), args or {}))
-
-        mod = _import_module_from_path(script_path)
-        entry = fm.get("entrypoint")
-        candidates = []
-        if entry:
-            candidates.append(entry)
-        candidates.extend(["run", "main"])  # common names
-        # fallback: sanitized skill name
-        sanitized = "".join([c if c.isalnum() else "_" for c in skill.name.lower()])
-        candidates.append(sanitized)
-
-        for cand in candidates:
-            if hasattr(mod, cand):
-                func = getattr(mod, cand)
-                try:
-                    res = func(**(args or {})) if callable(func) else func
-                    return True, str(res or "")
-                except TypeError:
-                    # try without kwargs
-                    res = func(*(args or {}).values()) if callable(func) else func
-                    return True, str(res or "")
-
-        return False, "No callable entrypoint found in script"
-    except Exception as exc:
-        tb = traceback.format_exc()
-        return False, f"Exception executing skill: {exc}\n{tb}"

@@ -29,13 +29,6 @@ class RegistryExecutionMixin:
                     if tool:
                         break
 
-        if not tool and hasattr(self, "_load_python_skill_modules"):
-            self._log.info(
-                "Tool '%s' still not found; lazily loading all Python skill modules", call.name
-            )
-            self._load_python_skill_modules()
-            tool = self.get(call.name)
-
         if not tool:
             self._log.error("Tool not found: %s", call.name)
             suggestions = self._suggest_tool_names(call.name, max_items=5)

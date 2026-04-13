@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
+from src.skills.loader import load_skill_from_path
+
 from ..runtime import SkillCard, SkillSelection
 from .types import _SKILL_PREFIX_SEPARATORS
 
@@ -510,26 +512,48 @@ class RegistryRoutingMixin:
                             parsed_args = {k: v for k, v in parsed_args.items() if k != hint_key}
                             break
 
-            if hasattr(self, "call_tool"):
-                try:
-                    if parsed_args:
-                        execution_result = getattr(self, "call_tool")(selected_tool, **parsed_args)
-                    else:
-                        execution_result = getattr(self, "call_tool")(selected_tool)
-                    if not isinstance(execution_result, str):
-                        execution_result = json.dumps(execution_result, ensure_ascii=False)
-                    return execution_result
-                except Exception as e:
-                    return json.dumps(
-                        {
-                            "status": "error",
-                            "error": f"Execution of {selected_tool} failed: {e}",
-                            "forced_skill_ids": self._forced_skill_ids,
-                        },
-                        ensure_ascii=False,
-                    )
+            try:
+                if parsed_args:
+                    execution_result = self.call_tool(selected_tool, **parsed_args)
+                else:
+                    execution_result = self.call_tool(selected_tool)
+                if not isinstance(execution_result, str):
+                    execution_result = json.dumps(execution_result, ensure_ascii=False)
+                return execution_result
+            except Exception as e:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"Execution of {selected_tool} failed: {e}",
+                        "forced_skill_ids": self._forced_skill_ids,
+                    },
+                    ensure_ascii=False,
+                )
 
         if args_str:
+            if target_skill.source_path is not None:
+                skill_path = Path(target_skill.source_path)
+                if skill_path.is_file() and skill_path.name.upper() == "SKILL.MD":
+                    try:
+                        skill = load_skill_from_path(str(skill_path))
+                        rendered_prompt = skill.render_prompt(parsed_args or {})
+                        return json.dumps(
+                            {
+                                "status": "ok",
+                                "prompt": rendered_prompt,
+                                "forced_skill_ids": self._forced_skill_ids,
+                            },
+                            ensure_ascii=False,
+                        )
+                    except Exception as e:
+                        return json.dumps(
+                            {
+                                "status": "error",
+                                "error": f"Skill prompt execution failed: {e}",
+                                "forced_skill_ids": self._forced_skill_ids,
+                            },
+                            ensure_ascii=False,
+                        )
             return json.dumps(
                 {
                     "status": "error",

@@ -2285,7 +2285,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         {
             payload.insert(
                 "result".to_string(),
-                Self::parse_tool_preview_value(result, 300),
+                Self::parse_tool_preview_value(result, 1200),
             );
         }
 

@@ -10,4 +10,4 @@ scripts:
 
 See `scripts/edit_block.py` for implementation and usage details. This skill is marked as
 callable: the loader will not import the implementation at discovery time. To run the
-implementation, use the loader's `call_skill()` API with `allow_exec=True`.
+implementation, use the skill's `scripts` metadata and the standard tool-loading path.

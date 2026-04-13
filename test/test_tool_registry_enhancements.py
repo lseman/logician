@@ -962,6 +962,33 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["value"], "done")
 
+    def test_invoke_skill_renders_skill_prompt_with_embedded_shell_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "wiki" / "wiki_ops"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: wiki ops\ndescription: Wiki operations skill.\n---\n"
+                "Run this skill for path `${path}`.\n"
+                "!`echo hello ${path}`\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="wiki_ops",
+                args='{"path": "test-path"}',
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertIn("Run this skill for path test-path", payload["prompt"])
+            self.assertIn("hello test-path", payload["prompt"])
+
     def test_invoke_skill_accepts_direct_tool_name_for_skill_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
