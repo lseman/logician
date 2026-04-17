@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Literal, Optional
 
-from .runtime_paths import state_path
+from .runtime_paths import memory_palace_db_path, message_history_vector_path, rag_vector_path
 
 
 # ---------------------------------------------------------------------
@@ -126,8 +126,8 @@ class Config:
     # RAG
     rag_enabled: bool = True
     rag_top_k: int = 20
-    vector_path: str = "message_history.vector"
-    rag_vector_path: str = field(default_factory=lambda: str(state_path("rag_docs.vector")))
+    vector_path: str = field(default_factory=lambda: str(message_history_vector_path()))
+    rag_vector_path: str = field(default_factory=lambda: str(rag_vector_path()))
     # Vector index backend selector: empty string means no default ("raw").
     # Set per-workspace via agent_config.json to enable a specific backend.
     vector_backend: str = ""
@@ -158,7 +158,9 @@ class Config:
     message_history_vector_enabled: bool = False
     # Persistent cross-session raw transcript store.
     memory_palace_enabled: bool = True
-    memory_palace_db_path: str = field(default_factory=lambda: str(state_path("memory_palace.db")))
+    # When enabled, inject project/team MEMORY.md files into agent system prompts.
+    project_memory_enabled: bool = True
+    memory_palace_db_path: str = field(default_factory=lambda: str(memory_palace_db_path()))
     # Store raw text exactly as written; leave AAAK compression opt-in.
     memory_palace_apply_aaak: bool = False
     # When enabled, inject a concise cross-session memory summary from the

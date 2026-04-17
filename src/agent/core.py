@@ -16,6 +16,7 @@ from ..memory import Memory
 from ..messages import Message, MessageRole
 from ..repo.graph import related_repo_context
 from ..repo.registry import load_repo_index
+from ..runtime_paths import session_db_path
 from ..tools import (
     HAS_TOON,
     Context,
@@ -23,6 +24,7 @@ from ..tools import (
     ToolParameter,
     ToolRegistry,
 )
+from ..startup_profiler import profile_checkpoint
 from .classify import classify_turn
 from .dispatcher import ToolDispatcher
 from .guardrails import GuardrailEngine, default_guards
@@ -146,11 +148,12 @@ class Agent:
         config: Config | None = None,
         use_chat_api: bool = True,
         chat_template: str = "chatml",
-        db_path: str = "agent_sessions.db",
+        db_path: str | None = None,
         embedding_model: str | None = None,
         *,
         lazy_rag: bool = True,
     ) -> None:
+        profile_checkpoint("agent.init.start")
         self.config = config or Config(
             llama_cpp_url=llm_url,
             use_chat_api=use_chat_api,
@@ -194,13 +197,29 @@ class Agent:
                 stop=self.config.stop,
                 retry_attempts=self.config.retry_attempts,
             )
+        profile_checkpoint("agent.init.llm_ready")
 
         self.system_prompt = system_prompt or self._load_soul_or_default()
+        profile_checkpoint("agent.init.system_prompt_ready")
 
         self.ctx = Context()
         self.tools = ToolRegistry(auto_load_from_skills=False)
+        profile_checkpoint("agent.init.tool_registry_ready")
+        try:
+            from ..plugin_manager.manager import PluginManager
+
+            plugin_paths = PluginManager().skills_paths()
+            if plugin_paths:
+                self.tools.add_skills_dir_paths(plugin_paths)
+        except Exception as exc:  # pragma: no cover
+            self._log.warning(
+                "PluginManager integration failed; plugin skills will not be loaded: %s",
+                exc,
+            )
+        profile_checkpoint("agent.init.plugin_skill_paths_ready")
         self.tools.install_context(self.ctx)
         self.tools.load_tools_from_skills()
+        profile_checkpoint("agent.init.skill_tools_loaded")
 
         # Register the core tools as always-on runtime capabilities.
         from ..tools import core as _core_tools
@@ -227,14 +246,16 @@ class Agent:
         self._embedding_model_name = str(embedding_model or "").strip() or None
         self.memory = Memory(
             config=self.config,
-            db_path=db_path,
+            db_path=str(db_path or session_db_path()),
             embedding_model=self._embedding_model_name,
             lazy_rag=lazy_rag,
         )
+        profile_checkpoint("agent.init.memory_ready")
         self.current_session_id: str | None = None
         self._loaded_runtime_session_id: str | None = None
 
         self._agent_loop = self._build_agent_loop()
+        profile_checkpoint("agent.init.complete")
 
     def _load_mcp_servers(self) -> None:
         """Initialise every enabled MCP server from config and register their tools."""

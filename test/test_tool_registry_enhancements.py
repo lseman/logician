@@ -410,6 +410,56 @@ __tools__ = [hello]
             self.assertEqual(payload.get("status"), "ok")
             self.assertEqual(payload.get("message"), "hello codex")
 
+    def test_additional_skill_dirs_load_external_plugin_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plugin_skill = root / "claude-mem" / "skills" / "memory"
+            plugin_skill.mkdir(parents=True, exist_ok=True)
+            (plugin_skill / "MEMORY.md").write_text(
+                """
+---
+name: Memory
+description: External plugin memory skill
+---
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = self._registry()
+            registry.add_skills_dir_paths([root / "claude-mem" / "skills"])
+            registry.load_tools_from_skills()
+
+            self.assertTrue(
+                any("memory" in skill_id for skill_id in registry._catalog.skills),
+                "External plugin skill should be discovered from additional skill directories",
+            )
+
+    def test_additional_command_dirs_load_external_plugin_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            plugin_command = root / "claude-mem" / "commands" / "memory"
+            plugin_command.mkdir(parents=True, exist_ok=True)
+            (plugin_command / "MEMORY.md").write_text(
+                """
+---
+name: Memory
+summary: External plugin memory command
+---
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry = self._registry()
+            registry.add_skills_dir_paths([root / "claude-mem" / "commands"])
+            registry.load_tools_from_skills()
+
+            self.assertTrue(
+                any("memory" in skill_id for skill_id in registry._catalog.skills),
+                "External plugin command directory should be discovered from additional skill directories",
+            )
+
     def test_legacy_tool_decorator_no_longer_registers_tools_without_explicit_exports(
         self,
     ) -> None:

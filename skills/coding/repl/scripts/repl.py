@@ -4,7 +4,6 @@ import contextlib
 import io
 import traceback
 from typing import Any
-from skills.coding.bootstrap.runtime_access import tool
 
 __skill__ = {
     "name": "REPL",
@@ -67,7 +66,6 @@ _repl_ns: dict[str, Any] = {}
 # ---------------------------------------------------------------------------
 
 
-@tool
 def repl_exec(code: str) -> str:
     """Use when: Run multi-line Python code, define functions/classes, or perform stateful computations.
 
@@ -116,7 +114,6 @@ def repl_exec(code: str) -> str:
     )
 
 
-@tool
 def repl_eval(expr: str) -> str:
     """Use when: Inspect the value of a variable or evaluate a simple expression after repl_exec.
 
@@ -154,7 +151,6 @@ def repl_eval(expr: str) -> str:
         )
 
 
-@tool
 def repl_reset() -> str:
     """Use when: Start fresh in the REPL (e.g. after a messy experiment or namespace pollution).
 
@@ -170,7 +166,6 @@ def repl_reset() -> str:
     return _safe_json({"status": "ok", "cleared_names": cleared, "count": len(cleared)})
 
 
-@tool
 def repl_state() -> str:
     """Use when: Inspect what's currently in the REPL before running more code.
 
@@ -198,4 +193,3 @@ def repl_state() -> str:
     return _safe_json({"status": "ok", "count": len(items), "variables": items})
 
 
-__tools__ = [repl_exec, repl_eval, repl_reset, repl_state]

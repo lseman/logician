@@ -6,6 +6,7 @@ from typing import Any, Callable, List, Optional
 from ..config import Config
 from ..db import DocumentDB, MessageDB
 from ..messages import Message, MessageRole
+from ..runtime_paths import session_db_path
 from .palace import MemoryPalace
 
 _DEFAULT_EMBEDDING_MODEL_NAME = (
@@ -22,7 +23,7 @@ class Memory:
     """
 
     config: Config
-    db_path: str = "agent_sessions.db"
+    db_path: str = field(default_factory=lambda: str(session_db_path()))
     embedding_model: Optional[str] = None
     lazy_rag: bool = True
 

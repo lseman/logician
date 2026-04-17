@@ -1,0 +1,40 @@
+warning: variant `ExpandThinking` is never constructed
+   --> src/app.rs:975:5
+    |
+955 | pub enum KeyAction {
+    |          --------- variant in this enum
+...
+975 |     ExpandThinking,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `KeyAction` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variants `Lifecycle`, `Compaction`, and `Summary` are never constructed
+  --> src/bridge.rs:68:5
+   |
+14 | pub enum BridgeEvent {
+   |          ----------- variants in this enum
+...
+68 |     Lifecycle {
+   |     ^^^^^^^^^
+...
+73 |     Compaction {
+   |     ^^^^^^^^^^
+...
+77 |     Summary {
+   |     ^^^^^^^
+   |
+   = note: `BridgeEvent` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: constant `C_BG` is never used
+  --> src/ui.rs:36:7
+   |
+36 | const C_BG: Color = Color::Reset;                    // terminal background
+   |       ^^^^
+
+
+running 14 tests
+_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\[c[16t[5n_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\[c[16t[5n_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\[c[16t[5n..............
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.00s
+

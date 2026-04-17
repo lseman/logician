@@ -168,19 +168,9 @@ struct Segment {
     in_think: bool,
 }
 
-const THINK_OPEN_TAGS: &[&str] = &[
-    "<think>",
-    "<Think>",
-    "<thinking>",
-    "<Thinking>",
-];
+const THINK_OPEN_TAGS: &[&str] = &["<think>", "<Think>", "<thinking>", "<Thinking>"];
 
-const THINK_CLOSE_TAGS: &[&str] = &[
-    "</think>",
-    "</Think>",
-    "</thinking>",
-    "</Thinking>",
-];
+const THINK_CLOSE_TAGS: &[&str] = &["</think>", "</Think>", "</thinking>", "</Thinking>"];
 
 fn starts_with_any_tag<'a>(text: &'a str, tags: &'a [&'a str]) -> Option<&'a str> {
     tags.iter()
@@ -324,6 +314,7 @@ fn is_tool_call_payload_json(text: &str) -> bool {
     trimmed[end..].trim().is_empty()
 }
 
+#[allow(dead_code)]
 fn thinking_paragraph_is_execution_chatter(paragraph: &str) -> bool {
     let trimmed = paragraph.trim();
     if trimmed.is_empty() {
@@ -380,11 +371,10 @@ fn thinking_paragraph_is_execution_chatter(paragraph: &str) -> bool {
         "created with ",
     ];
     meta_starts.iter().any(|prefix| lower.starts_with(prefix))
-        && bookkeeping_terms
-            .iter()
-            .any(|term| lower.contains(term))
+        && bookkeeping_terms.iter().any(|term| lower.contains(term))
 }
 
+#[allow(dead_code)]
 pub fn sanitize_thinking_text(text: &str) -> String {
     if text.trim().is_empty() {
         return String::new();
@@ -482,7 +472,8 @@ fn json_contains_tool_call_payload(value: &JsonValue) -> bool {
                     block
                         .as_object()
                         .map(|block_obj| {
-                            block_obj.get("type") == Some(&JsonValue::String("tool_use".to_string()))
+                            block_obj.get("type")
+                                == Some(&JsonValue::String("tool_use".to_string()))
                                 && block_obj.get("name").is_some()
                                 && block_obj
                                     .get("input")
@@ -952,6 +943,12 @@ impl MdRenderer {
 
         let header_n = normalize(&header);
         let rows_n: Vec<Vec<String>> = rows.iter().map(|r| normalize(r)).collect();
+
+        if Self::is_invisible_table_candidate(&header_n, &rows_n) {
+            self.render_invisible_table(&rows_n);
+            return;
+        }
+
         let all_rows: Vec<&Vec<String>> = std::iter::once(&header_n).chain(rows_n.iter()).collect();
 
         let col_widths: Vec<usize> = (0..cols)
@@ -1027,11 +1024,97 @@ impl MdRenderer {
             bot,
             Style::default().fg(Color::DarkGray),
         )));
+        self.blank_line();
+    }
+
+    fn is_invisible_table_candidate(header: &[String], rows: &[Vec<String>]) -> bool {
+        if rows.is_empty() {
+            return false;
+        }
+
+        if !header.is_empty() && header.iter().all(|cell| cell.trim().is_empty()) {
+            return rows.iter().map(|row| row.len()).max().unwrap_or(0) >= 4;
+        }
+
+        let normalized: Vec<String> = header
+            .iter()
+            .map(|cell| cell.trim().to_ascii_lowercase())
+            .collect();
+        let known = ["id", "time", "t", "title", "read", "work", "status"];
+        let match_count = normalized
+            .iter()
+            .filter(|cell| known.contains(&cell.as_str()))
+            .count();
+
+        match_count >= 3 && normalized.iter().any(|cell| cell == "title")
+    }
+
+    fn render_invisible_table(&mut self, rows: &[Vec<String>]) {
+        if rows.is_empty() {
+            return;
+        }
+
+        let cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+        if cols == 0 {
+            return;
+        }
+
+        let visible_cols: Vec<usize> = (0..cols)
+            .filter(|&idx| {
+                rows.iter()
+                    .any(|row| !row.get(idx).map(|cell| cell.trim()).unwrap_or("").is_empty())
+            })
+            .collect();
+        if visible_cols.is_empty() {
+            return;
+        }
+
+        let last_visible = *visible_cols.last().unwrap_or(&0);
+        let fixed_cols: Vec<usize> = visible_cols
+            .iter()
+            .copied()
+            .filter(|idx| *idx != last_visible)
+            .collect();
+        let col_widths: Vec<usize> = fixed_cols
+            .iter()
+            .map(|&idx| {
+                rows.iter()
+                    .map(|row| row.get(idx).map(|cell| cell.trim().len()).unwrap_or(0))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+
+        for row in rows {
+            let mut line = String::from("    ");
+            for (pos, idx) in fixed_cols.iter().enumerate() {
+                if pos > 0 {
+                    line.push_str("  ");
+                }
+                let cell = row.get(*idx).map(|cell| cell.trim()).unwrap_or("");
+                let width = col_widths.get(pos).copied().unwrap_or(0);
+                line.push_str(&format!("{cell:<width$}", width = width));
+            }
+
+            let tail = row.get(last_visible).map(|cell| cell.trim()).unwrap_or("");
+            if !tail.is_empty() {
+                if !fixed_cols.is_empty() {
+                    line.push_str("  ");
+                }
+                line.push_str(tail);
+            }
+
+            self.out.push(Line::from(Span::styled(
+                line,
+                Style::default().fg(Color::White),
+            )));
+        }
+        self.blank_line();
     }
 
     fn process(&mut self, text: &str) {
-        let opts = Options::ENABLE_TABLES
-            | Options::ENABLE_STRIKETHROUGH
+        let opts = Options::ENABLE_STRIKETHROUGH
+            | Options::ENABLE_TABLES
             | Options::ENABLE_TASKLISTS
             | Options::ENABLE_SMART_PUNCTUATION;
         let parser = Parser::new_ext(text, opts);
@@ -1435,7 +1518,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
 mod tests {
     use super::{
         code_fence_token, normalize_broken_code_fences, normalize_inline_tool_call_json,
-        sanitize_assistant_text, sanitize_thinking_text, strip_think_blocks,
+        render_markdown, sanitize_assistant_text, sanitize_thinking_text, strip_think_blocks,
     };
 
     #[test]
@@ -1456,6 +1539,25 @@ mod tests {
         let input = "{\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}The linter ran clean.";
         let expected = "{\"tool_call\": {\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp/test.py\"}}}\n\nThe linter ran clean.";
         assert_eq!(normalize_inline_tool_call_json(input), expected);
+    }
+
+    #[test]
+    fn render_table_outputs_trailing_blank_line() {
+        let input = "| A | B |\n|---|---|\n| 1 | 2 |\n\n| C | D |\n|---|---|\n| 3 | 4 |\n";
+        let lines: Vec<String> = render_markdown(input).iter().map(|l| l.to_string()).collect();
+        let table_end_index = lines.iter().position(|l| l.contains("└") && l.contains("┘")).expect("first table bottom border");
+        assert!(lines.get(table_end_index + 1).map_or(false, |l| l.trim().is_empty()));
+    }
+
+    #[test]
+    fn renders_metadata_tables_as_invisible_rows() {
+        let input = "| ID | Time | T | Title | Read | Work |\n|---|---|---|---|---|---|\n| #1084 |  | 🔵 | Plugin loading implementation analyzed |  |  |\n| #1085 | 12:10 PM | 🔵 | Plugin loading pipeline analyzed |  |  |\n";
+        let lines: Vec<String> = render_markdown(input).iter().map(|l| l.to_string()).collect();
+        assert!(!lines.iter().any(|l| l.contains("┌") || l.contains("└")));
+        assert!(!lines.iter().any(|l| l.contains(" ID ")));
+        assert!(lines.iter().any(|l| l.contains("#1084")));
+        assert!(lines.iter().any(|l| l.contains("12:10 PM")));
+        assert!(lines.iter().any(|l| l.contains("Plugin loading pipeline analyzed")));
     }
 
     #[test]

@@ -1,30 +1,37 @@
 from __future__ import annotations
 
+from typing import Any
+
 from ..messages import Message, MessageRole
 
 try:
     import tiktoken as _tiktoken
-
-    # cl100k_base is used by GPT-4 / ChatGPT — a good universal proxy for
-    # modern transformer models when the exact tokenizer is unavailable.
-    _TK_ENC = _tiktoken.get_encoding("cl100k_base")
     HAS_TIKTOKEN = True
 except Exception:
     _tiktoken = None  # type: ignore
-    _TK_ENC = None
     HAS_TIKTOKEN = False
+
+_TK_ENC = None  # loaded on first use
+
+
+def _get_tk_enc() -> Any | None:
+    global _TK_ENC
+    if _TK_ENC is not None:
+        return _TK_ENC
+    if not HAS_TIKTOKEN or _tiktoken is None:
+        return None
+    try:
+        _TK_ENC = _tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        _TK_ENC = None
+    return _TK_ENC
 
 
 def count_tokens_local(text: str) -> int:
-    """Count tokens using tiktoken (cl100k_base) when available.
-
-    This gives an accurate-enough local estimate without an HTTP round-trip to
-    the server's /tokenize endpoint.  Falls back to the traditional char//4
-    heuristic when tiktoken is not installed.
-    """
-    if HAS_TIKTOKEN and _TK_ENC is not None:
+    enc = _get_tk_enc()
+    if enc is not None:
         try:
-            return max(1, len(_TK_ENC.encode(text, disallowed_special=())))
+            return max(1, len(enc.encode(text, disallowed_special=())))
         except Exception:
             pass
     return max(1, len(text) // 4)

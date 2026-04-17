@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Literal
-from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
+from skills.coding.bootstrap.runtime_access import get_coding_runtime
 
 __skill__ = {
     "name": "Quality",
@@ -66,7 +66,6 @@ def _resolve_target(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool
 def run_pytest(
     path: str = "",
     flags: str = "",
@@ -135,7 +134,6 @@ def run_pytest(
     )
 
 
-@tool
 def run_ruff(
     path: str = "",
     fix: bool = False,
@@ -208,7 +206,6 @@ def run_ruff(
     )
 
 
-@tool
 def auto_format(path: str = "", venv_path: str = "") -> str:
     """Use when: You want to automatically format a file or directory to meet style guidelines.
 
@@ -250,7 +247,6 @@ def auto_format(path: str = "", venv_path: str = "") -> str:
     })
 
 
-@tool
 def run_mypy(
     path: str = "",
     strict: bool = False,
@@ -309,7 +305,6 @@ def run_mypy(
     )
 
 
-@tool
 def run_quality_check(
     path: str = "",
     skip_tests: bool = False,
@@ -373,7 +368,6 @@ def run_quality_check(
     )
 
 
-@tool
 def parse_traceback(text: str) -> str:
     """Use when: Analyse an error message or stack trace to find the root cause and relevant files.
 
@@ -454,7 +448,6 @@ def parse_traceback(text: str) -> str:
     return _safe_json(result)
 
 
-@tool
 def detect_project(path: str = ".") -> str:
     """Use when: Starting work on an unfamiliar codebase or after switching directories.
 
@@ -645,7 +638,6 @@ def detect_project(path: str = ".") -> str:
     )
 
 
-@tool
 def smart_quality_gate(
     path: str = ".",
     mode: Literal["fast", "balanced", "full"] = "balanced",
@@ -775,13 +767,3 @@ def smart_quality_gate(
     )
 
 
-__tools__ = [
-    run_pytest,
-    run_ruff,
-    auto_format,
-    run_mypy,
-    run_quality_check,
-    parse_traceback,
-    detect_project,
-    smart_quality_gate,
-]

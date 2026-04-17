@@ -19,6 +19,8 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
     Self = Any  # type: ignore[assignment,misc]
 
 from ..logging_utils import get_logger
+from ..skills.path_resolution import SkillSourceRoot, infer_skill_root_kind, resolve_local_skill_paths
+from ..startup_profiler import profile_checkpoint
 from .parser import parse_tool_call_strict, parse_tool_calls
 from .registry import (
     ExecutionGlobals,
@@ -80,11 +82,26 @@ class ToolRegistry(
     """
 
     def __init__(self, auto_load_from_skills: bool = True) -> None:
+        profile_checkpoint("tool_registry.init.start")
         self._tools: dict[str, Tool] = {}
         self._log = get_logger("agent.tools")
         default_root = Path(__file__).resolve().parents[2]
         default_skills_dir = default_root / "skills"
         self.skills_md_path, self.skills_dir_path = self._resolve_skills_paths()
+        self.additional_skills_dir_paths: list[Path] = []
+        self.additional_skill_source_roots: list[SkillSourceRoot] = []
+        extra_skills_dirs = (
+            os.getenv("AGENT_SKILLS_DIRS") or os.getenv("AGENT_SKILLS_EXTRA_DIRS") or ""
+        )
+        for raw_path in [p.strip() for p in extra_skills_dirs.split(os.pathsep) if p.strip()]:
+            path = Path(raw_path).expanduser().resolve()
+            if path.is_dir() and path not in self.additional_skills_dir_paths:
+                self.additional_skills_dir_paths.append(path)
+                self.additional_skill_source_roots.append(
+                    SkillSourceRoot(path=path, kind=infer_skill_root_kind(path))
+                )
+                self._log.info("Registered extra skills directory: %s", path)
+
         if self.skills_dir_path != default_skills_dir and self.skills_dir_path.is_dir():
             self._log.info(
                 "Resolved skills path override: %s (default was %s)",
@@ -102,8 +119,11 @@ class ToolRegistry(
         self._catalog = SkillCatalog(
             skills_md_path=self.skills_md_path,
             skills_dir_path=self.skills_dir_path,
+            additional_skills_dir_paths=self.additional_skills_dir_paths,
+            additional_skill_source_roots=self.additional_skill_source_roots,
             log=self._log,
         )
+        profile_checkpoint("tool_registry.init.catalog_ready")
 
         self._execution_globals: ExecutionGlobals = {
             "__builtins__": __builtins__,
@@ -135,6 +155,7 @@ class ToolRegistry(
             else:
                 self._log.info("Auto-loading core tools only; no skill sources detected.")
             self.load_tools_from_skills()
+        profile_checkpoint("tool_registry.init.complete")
 
     @staticmethod
     def _normalize_lazy_skill_group_name(value: str) -> str:
@@ -185,65 +206,66 @@ class ToolRegistry(
 
     @staticmethod
     def _resolve_skills_paths() -> tuple[Path, Path]:
-        default_root = Path(__file__).resolve().parents[2]
-
-        env_skills_dir = (
-            os.getenv("AGENT_SKILLS_DIR")
-            or os.getenv("SKILLS_DIR")
-            or os.getenv("CODEX_SKILLS_DIR")
-        )
-        env_skills_md = (
-            os.getenv("AGENT_SKILLS_MD_PATH")
-            or os.getenv("SKILLS_MD_PATH")
-            or os.getenv("CODEX_SKILLS_MD_PATH")
-        )
-
-        if env_skills_dir:
-            skills_dir = Path(env_skills_dir).expanduser().resolve()
-            if skills_dir.is_dir():
-                if env_skills_md:
-                    return Path(env_skills_md).expanduser().resolve(), skills_dir
-                return skills_dir.parent / "SKILLS.md", skills_dir
-
-        if env_skills_md:
-            md_path = Path(env_skills_md).expanduser().resolve()
-            if md_path.is_dir():
-                return md_path / "SKILLS.md", md_path
-            return md_path, md_path.parent / "skills"
-
-        candidates: list[Path] = [default_root]
-        try:
-            cwd = Path.cwd().resolve()
-            candidates.append(cwd)
-            candidates.extend(cwd.parents)
-        except Exception:
-            pass
-        try:
-            argv_root = Path(sys.argv[0]).expanduser().resolve().parent
-            candidates.append(argv_root)
-            candidates.extend(argv_root.parents)
-        except Exception:
-            pass
-
-        seen: set[str] = set()
-        for root in candidates:
-            key = str(root)
-            if key in seen:
-                continue
-            seen.add(key)
-            skills_dir = root / "skills"
-            if skills_dir.is_dir():
-                return root / "SKILLS.md", skills_dir
-
-        return default_root / "SKILLS.md", default_root / "skills"
+        return resolve_local_skill_paths()
 
     def __repr__(self) -> str:
         return (
             f"ToolRegistry(tools={len(self._tools)}, "
             f"skills_md_path={str(self.skills_md_path)!r}, "
             f"skills_dir_path={str(self.skills_dir_path)!r}, "
+            f"extra_skills={len(self.additional_skills_dir_paths)}, "
             f"bootstrapped={self._bootstrapped})"
         )
+
+    def add_skills_dir_paths(self, paths: list[Path]) -> None:
+        added = False
+        for p in paths:
+            if not p.is_dir():
+                continue
+            if p in self.additional_skills_dir_paths:
+                continue
+            self.additional_skills_dir_paths.append(p)
+            self.additional_skill_source_roots.append(
+                SkillSourceRoot(path=p, kind=infer_skill_root_kind(p))
+            )
+            added = True
+            self._log.info("Added extra skills path: %s", p)
+        if not added:
+            return
+        self._catalog = SkillCatalog(
+            skills_md_path=self.skills_md_path,
+            skills_dir_path=self.skills_dir_path,
+            additional_skills_dir_paths=self.additional_skills_dir_paths,
+            additional_skill_source_roots=self.additional_skill_source_roots,
+            log=self._log,
+        )
+        self._version += 1
+        self._invalidate_skill_resolution_cache()
+
+    def set_additional_skills_dir_paths(self, paths: list[Path]) -> None:
+        normalized: list[Path] = []
+        normalized_roots: list[SkillSourceRoot] = []
+        for p in paths:
+            if not p.is_dir():
+                continue
+            if p not in normalized:
+                normalized.append(p)
+                normalized_roots.append(
+                    SkillSourceRoot(path=p, kind=infer_skill_root_kind(p))
+                )
+        if normalized == self.additional_skills_dir_paths:
+            return
+        self.additional_skills_dir_paths = normalized
+        self.additional_skill_source_roots = normalized_roots
+        self._catalog = SkillCatalog(
+            skills_md_path=self.skills_md_path,
+            skills_dir_path=self.skills_dir_path,
+            additional_skills_dir_paths=self.additional_skills_dir_paths,
+            additional_skill_source_roots=self.additional_skill_source_roots,
+            log=self._log,
+        )
+        self._version += 1
+        self._invalidate_skill_resolution_cache()
 
     def __str__(self) -> str:
         names = ", ".join(sorted(self._tools.keys()))

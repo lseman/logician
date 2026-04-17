@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+Skill loading utilities — parse SKILL.md files and return SkillDefinition instances.
+
+This module handles the low-level parsing of skill markdown files into
+SkillDefinition objects. Conditional activation and skill catalog management
+are handled by ``SkillCatalog`` in ``src.tools.registry.catalog``.
+"""
+
 from __future__ import annotations
 
 import functools
@@ -5,84 +14,28 @@ import importlib.util
 import os
 import re
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from src.skills.skill_manifest import find_skill_markdown_files, split_frontmatter
+from src.skills.skill_manifest import split_frontmatter
 
+from ..tools.runtime import SkillDefinition
 
-@dataclass
-class Skill:
-    name: str
-    description: str
-    frontmatter: Dict[str, Any]
-    body: str
-    file_path: str
-    base_dir: Optional[str] = None
-    paths: Optional[List[str]] = None
-
-    def is_callable(self) -> bool:
-        """True when the skill is declared as callable (implementation exists in scripts).
-
-        The loader will not import or execute implementation on discovery; callable
-        skills are loaded by their `scripts` metadata when execution is requested.
-        """
-        fm = self.frontmatter or {}
-        if isinstance(fm.get("callable"), bool):
-            return fm.get("callable")
-        # consider presence of `scripts` key as a hint
-        return bool(fm.get("scripts") or fm.get("script"))
-
-    def user_facing_name(self) -> str:
-        return self.frontmatter.get("name") or self.name
-
-    def get_prompt_for_command(
-        self,
-        args: Optional[Dict[str, str]] = None,
-        session_id: Optional[str] = None,
-    ) -> str:
-        content = self.body
-        if args:
-            for k, v in args.items():
-                content = content.replace(f"${{{k}}}", str(v))
-        # placeholders
-        if self.base_dir:
-            base_dir = self.base_dir
-            if os.name == "nt":
-                base_dir = base_dir.replace("\\", "/")
-            content = content.replace("${CLAUDE_SKILL_DIR}", base_dir)
-        if session_id:
-            content = content.replace("${CLAUDE_SESSION_ID}", session_id)
-        return content
-
-    def render_prompt(
-        self,
-        args: Optional[Dict[str, Any]] = None,
-        session_id: Optional[str] = None,
-        *,
-        executor: Optional[callable] = None,
-    ) -> str:
-        prompt = self.get_prompt_for_command(args=args, session_id=session_id)
-        return execute_embedded_shell_commands(
-            prompt,
-            base_dir=self.base_dir,
-            allow_shell=True,
-            executor=executor,
-        )
-
-
-# --- Dynamic discovery / caching / conditional activation ---
-_dynamic_skill_dirs: Set[str] = set()
-_dynamic_skills: Dict[str, Skill] = {}
-_conditional_skills: Dict[str, Skill] = {}
-_activated_conditional_skill_names: Set[str] = set()
+# --- Skill loading (returns SkillDefinition instances) ---
 
 
 @functools.lru_cache(maxsize=32)
-def load_skills_from_dir(base_path: str) -> Tuple[Skill, ...]:
+def load_skills_from_dir(base_path: str) -> Tuple[SkillDefinition, ...]:
+    """
+    Load all skills from a directory of SKILL.md files.
+
+    Returns a tuple of SkillDefinition instances (cached with LRU).
+    """
+    from .skill_manifest import find_skill_markdown_files
+
     files = find_skill_markdown_files(base_path)
-    skills: List[Skill] = []
+    skills: List[SkillDefinition] = []
+
     for fp in files:
         try:
             txt = Path(fp).read_text(encoding="utf-8")
@@ -92,137 +45,82 @@ def load_skills_from_dir(base_path: str) -> Tuple[Skill, ...]:
         name = manifest.get("name") or Path(fp).parent.name
         desc = manifest.get("description") or ""
         paths = manifest.get("paths") if isinstance(manifest.get("paths"), list) else None
-        # normalize scripts key to a list for convenience
-        if manifest.get("script") and not manifest.get("scripts"):
-            if isinstance(manifest.get("script"), str):
-                manifest["scripts"] = [manifest.get("script")]
-        if manifest.get("scripts") and isinstance(manifest.get("scripts"), str):
-            manifest["scripts"] = [manifest.get("scripts")]
+        source_path = str(Path(fp).resolve())
+        base_dir = str(Path(fp).parent)
+
         skills.append(
-            Skill(
+            SkillDefinition(
+                id=manifest.get("name") or Path(fp).parent.name,
                 name=name,
+                summary=desc,
+                source_path=source_path,
                 description=desc,
                 frontmatter=manifest,
                 body=body,
-                file_path=fp,
-                base_dir=str(Path(fp).parent),
-                paths=paths,
+                base_dir=base_dir,
+                paths=paths or [],
             )
         )
-    # return tuple for caching
     return tuple(skills)
 
 
-def load_skill_from_path(path: str) -> Skill:
+def load_skill_from_path(path: str) -> SkillDefinition:
+    """
+    Load a single skill from a SKILL.md file path.
+
+    Returns a SkillDefinition with body/frontmatter for prompt rendering.
+    """
     txt = Path(path).read_text(encoding="utf-8")
     manifest, body = split_frontmatter(txt)
     name = manifest.get("name") or Path(path).parent.name
     desc = manifest.get("description") or ""
     paths = manifest.get("paths") if isinstance(manifest.get("paths"), list) else None
-    if manifest.get("script") and not manifest.get("scripts"):
-        if isinstance(manifest.get("script"), str):
-            manifest["scripts"] = [manifest.get("script")]
-    if manifest.get("scripts") and isinstance(manifest.get("scripts"), str):
-        manifest["scripts"] = [manifest.get("scripts")]
-    return Skill(
+    source_path = str(Path(path).resolve())
+    base_dir = str(Path(path).parent)
+
+    return SkillDefinition(
+        id=manifest.get("name") or Path(path).parent.name,
         name=name,
+        summary=desc,
+        source_path=source_path,
         description=desc,
         frontmatter=manifest,
         body=body,
-        file_path=path,
-        base_dir=str(Path(path).parent),
-        paths=paths,
+        base_dir=base_dir,
+        paths=paths or [],
     )
 
 
-def load_all_skill_dirs(base_dirs: List[str]) -> List[Skill]:
+def load_all_skill_dirs(base_dirs: List[str]) -> List[SkillDefinition]:
     """Load skills from multiple base dirs and deduplicate by realpath (first-win)."""
-    all_with_paths: List[Skill] = []
+    all_with_paths: List[SkillDefinition] = []
     for d in base_dirs:
-        for s in load_skills_from_dir(d):
-            all_with_paths.append(s)
+        try:
+            for s in load_skills_from_dir(d):
+                all_with_paths.append(s)
+        except Exception:
+            continue
 
     seen: Dict[str, str] = {}
-    deduped: List[Skill] = []
+    deduped: List[SkillDefinition] = []
     for s in all_with_paths:
         try:
-            rid = os.path.realpath(s.file_path)
+            rid = os.path.realpath(s.source_path)
         except Exception:
-            rid = s.file_path
+            rid = s.source_path
         if rid in seen:
             continue
-        seen[rid] = s.file_path
+        seen[rid] = s.source_path
         deduped.append(s)
     return deduped
 
 
-def add_skill_directories(dirs: List[str]) -> None:
-    """Dynamically load skills from directories and merge into dynamic skills map."""
-    new_dirs = [d for d in dirs if d not in _dynamic_skill_dirs]
-    if not new_dirs:
-        return
-    for d in new_dirs:
-        _dynamic_skill_dirs.add(d)
-    loaded: List[Skill] = []
-    for d in dirs:
-        loaded.extend(list(load_skills_from_dir(d)))
-    # deeper directories should override shallower ones externally; here we do first-win
-    for skill in loaded:
-        if skill.name:
-            if skill.paths:
-                _conditional_skills[skill.name] = skill
-            else:
-                _dynamic_skills[skill.name] = skill
-
-
-def get_dynamic_skills() -> List[Skill]:
-    return list(_dynamic_skills.values())
-
-
-def activate_conditional_skills_for_paths(file_paths: List[str], cwd: str) -> List[str]:
-    if not _conditional_skills:
-        return []
-    activated: List[str] = []
-    rel_cwd = cwd.rstrip(os.path.sep)
-    for name, skill in list(_conditional_skills.items()):
-        if not skill.paths:
-            continue
-        for fp in file_paths:
-            try:
-                rel = os.path.relpath(fp, rel_cwd)
-            except Exception:
-                rel = fp
-            for pattern in skill.paths:
-                # simple prefix match for now and glob-like ** behavior
-                if pattern.endswith("/**"):
-                    base = pattern[:-3]
-                    if rel.startswith(base):
-                        _dynamic_skills[name] = skill
-                        del _conditional_skills[name]
-                        _activated_conditional_skill_names.add(name)
-                        activated.append(name)
-                        break
-                elif rel == pattern or rel.startswith(pattern + os.path.sep):
-                    _dynamic_skills[name] = skill
-                    del _conditional_skills[name]
-                    _activated_conditional_skill_names.add(name)
-                    activated.append(name)
-                    break
-            if name in _dynamic_skills:
-                break
-    return activated
-
-
 __all__ = [
-    "Skill",
-    "find_skill_markdown_files",
     "load_skills_from_dir",
     "load_skill_from_path",
     "load_all_skill_dirs",
-    "add_skill_directories",
-    "get_dynamic_skills",
-    "activate_conditional_skills_for_paths",
     "execute_embedded_shell_commands",
+    "_import_module_from_path",
 ]
 
 
@@ -301,7 +199,9 @@ def execute_embedded_shell_commands(
 def _import_module_from_path(path: str):
     path = str(path)
     try:
-        spec = importlib.util.spec_from_file_location(f"skill_{os.path.basename(path)}", path)
+        spec = importlib.util.spec_from_file_location(
+            f"skill_{os.path.basename(path)}", path
+        )
         if spec is None or spec.loader is None:
             raise ImportError(f"Cannot load spec for {path}")
         mod = importlib.util.module_from_spec(spec)

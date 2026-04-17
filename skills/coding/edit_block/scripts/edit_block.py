@@ -13,7 +13,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from skills.coding.bootstrap.runtime_access import tool
 
 __skill__ = {
     "name": "Edit Block",
@@ -139,7 +138,6 @@ def _fuzzy_find_and_replace(
     return True, "".join(new_content_lines), ""
 
 
-@tool
 def apply_edit_block(path: str, blocks: str) -> str:
     """Use when: You need to modify a file using SEARCH/REPLACE blocks (SOTA coding approach).
 
@@ -189,7 +187,6 @@ def apply_edit_block(path: str, blocks: str) -> str:
 
 # Keep the skill metadata/grammar export, but avoid registering a second
 # implementation for the canonical core apply_edit_block tool.
-__tools__: list = []
 
 
 _APPLY_EDIT_BLOCK_GRAMMAR = r"""root      ::= tool-call

@@ -1,5 +1,6 @@
 """Always-on core tools for the SOTA agent."""
 
+import importlib as _importlib
 from typing import Any
 
 from ..runtime import build_tool
@@ -31,13 +32,17 @@ from .ProcessTool import (
 from .ProjectTool import find_symbol, get_file_outline, get_project_map
 from .PythonTool import check_imports, list_installed_packages, run_python
 from .SearchTool import (
+    fd_find,
     find_imports,
+    find_references,
     get_symbol_info,
     glob_files,
     grep_files,
     read_line,
+    rg_search,
     search_code,
     search_file,
+    search_symbols,
 )
 from .TaskTool import think, todo
 from .WebTool import fetch_url, github_read_file, pypi_info, web_search
@@ -48,51 +53,62 @@ from .WebTool import fetch_url, github_read_file, pypi_info, web_search
 _LIBCST_AVAILABLE = False
 _LIBCST_TOOLS: list[str] = []
 
-try:
-    import libcst  # noqa: F401  # just to check availability
+_LIBCST_MODULE: Any = None  # loaded on first use
+_LIBCST_CHECKED = False
 
-    from .FileEditTool.libcst import (
-        delete_function,
-        edit_file_libcst,
-        find_class_by_name,
-        find_function_by_name,
-        insert_after_function,
-        replace_argument,
-        replace_decorators,
-        replace_docstring,
-        replace_function_body,
-    )
 
-    _LIBCST_AVAILABLE = True
-    _LIBCST_TOOLS = [
-        "edit_file_libcst",
-        "replace_function_body",
-        "replace_docstring",
-        "replace_decorators",
-        "replace_argument",
-        "insert_after_function",
-        "delete_function",
-        "find_function_by_name",
-        "find_class_by_name",
-    ]
-except ImportError:
-    # LibCST is optional — define no-op placeholders so the runtime meta loop
-    # doesn't fail and __all__ stays consistent.
-    def _libcst_not_available(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "status": "error",
-            "error": "libcst is not installed. Install it with: pip install libcst",
-        }
+def _check_libcst() -> bool:
+    global _LIBCST_CHECKED, _LIBCST_MODULE, _LIBCST_AVAILABLE
+    if _LIBCST_CHECKED:
+        return _LIBCST_AVAILABLE
+    _LIBCST_CHECKED = True
+    try:
+        import libcst  # noqa: F401
+        _LIBCST_MODULE = _importlib.import_module(".FileEditTool.libcst", package=__name__.rsplit(".", 1)[0])
+        _LIBCST_AVAILABLE = True
+    except ImportError:
+        _LIBCST_AVAILABLE = False
+    return _LIBCST_AVAILABLE
 
-    edit_file_libcst = _libcst_not_available
-    replace_function_body = _libcst_not_available
-    replace_docstring = _libcst_not_available
-    replace_decorators = _libcst_not_available
-    replace_argument = _libcst_not_available
-    insert_after_function = _libcst_not_available
-    delete_function = _libcst_not_available
-    find_function_by_name = _libcst_not_available
-    find_class_by_name = _libcst_not_available
+
+def _libcst_not_available(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "error": "libcst is not installed. Install it with: pip install libcst",
+    }
+
+
+def _make_libcst_proxy(name: str):
+    def _proxy(*args: Any, **kwargs: Any) -> Any:
+        if _check_libcst() and _LIBCST_MODULE is not None:
+            return getattr(_LIBCST_MODULE, name)(*args, **kwargs)
+        return _libcst_not_available(*args, **kwargs)
+    _proxy.__name__ = name
+    return _proxy
+
+
+edit_file_libcst = _make_libcst_proxy("edit_file_libcst")
+replace_function_body = _make_libcst_proxy("replace_function_body")
+replace_docstring = _make_libcst_proxy("replace_docstring")
+replace_decorators = _make_libcst_proxy("replace_decorators")
+replace_argument = _make_libcst_proxy("replace_argument")
+insert_after_function = _make_libcst_proxy("insert_after_function")
+delete_function = _make_libcst_proxy("delete_function")
+find_function_by_name = _make_libcst_proxy("find_function_by_name")
+find_class_by_name = _make_libcst_proxy("find_class_by_name")
+
+_LIBCST_AVAILABLE = False
+_LIBCST_TOOLS = [
+    "edit_file_libcst",
+    "replace_function_body",
+    "replace_docstring",
+    "replace_decorators",
+    "replace_argument",
+    "insert_after_function",
+    "delete_function",
+    "find_function_by_name",
+    "find_class_by_name",
+]
 
 
 _RUNTIME_META = {
@@ -619,6 +635,10 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("glob_files", glob_files),
     ("grep_files", grep_files),
     ("search_code", search_code),
+    ("rg_search", rg_search),
+    ("fd_find", fd_find),
+    ("find_references", find_references),
+    ("search_symbols", search_symbols),
     ("think", think),
     ("todo", todo),
 )

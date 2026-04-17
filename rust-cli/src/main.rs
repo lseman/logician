@@ -14,8 +14,8 @@ use crossterm::{
 };
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tokio::sync::mpsc;
 use tokio::process::Child;
+use tokio::sync::mpsc;
 
 mod app;
 mod bridge;
@@ -79,6 +79,8 @@ enum CmdResult {
     Chat(Result<serde_json::Value, anyhow::Error>),
     Slash(Result<serde_json::Value, anyhow::Error>),
     State(Result<serde_json::Value, anyhow::Error>),
+    WarmState(Result<serde_json::Value, anyhow::Error>),
+    StartupContext(Result<serde_json::Value, anyhow::Error>),
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -150,6 +152,39 @@ async fn run(
     let mut app = App::new();
     app.phase = app::Phase::Thinking;
     app.phase_note = "starting bridge".into();
+
+    let endpoint = std::env::var("OPENROUTER_URL")
+        .or_else(|_| std::env::var("OPENROUTER_API_URL"))
+        .or_else(|_| std::env::var("LLAMA_CPP_URL"))
+        .unwrap_or_else(|_| "local".to_string());
+    let provider = if endpoint.contains("openrouter") {
+        "OpenRouter"
+    } else if endpoint.contains("openai") {
+        "OpenAI"
+    } else if endpoint.contains("anthropic") {
+        "Anthropic"
+    } else {
+        "Local"
+    };
+    let model = std::env::var("MODEL")
+        .or_else(|_| std::env::var("AGENT_MODEL"))
+        .unwrap_or_else(|_| "logician/bridge".to_string());
+    let _version = env!("CARGO_PKG_VERSION");
+    let startup_banner = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "  _                 _      _           ",
+        " | |    ___   __ _(_) ___(_) __ _ _ __ ",
+        " | |   / _ \\ / _` | |/ __| |/ _` | '_ \\",
+        " | |__| (_) | (_| | | (__| | (_| | | | |",
+        " |_____\\___/ \\__, |_|\\___|_|\\__,_|_| |_|",
+        "             |___/                      ",
+        "",
+        format!("Provider: {provider}"),
+        format!("Model:    {model}"),
+        format!("Endpoint: {endpoint}"),
+        // format!("logician v{version}")
+    );
+    app.add_preformatted_system_message(startup_banner);
     app.add_system_message(format!(
         "Starting bridge `{bridge_cmd}` using {}",
         bridge_args.join(" ")
@@ -159,23 +194,21 @@ async fn run(
         let tx = cmd_tx.clone();
         let event_tx = event_tx.clone();
         let bridge_cmd = bridge_cmd.to_string();
-        let bridge_args_owned = bridge_args_refs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let bridge_args_owned = bridge_args_refs
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
         tokio::spawn(async move {
-            let arg_refs = bridge_args_owned.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+            let arg_refs = bridge_args_owned
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>();
             let result = PythonBridge::spawn(&bridge_cmd, &arg_refs, event_tx).await;
             let _ = tx.send(CmdResult::Bootstrap(result));
         });
     }
 
-    run_loop(
-        terminal,
-        app,
-        None,
-        &mut event_rx,
-        &mut cmd_rx,
-        cmd_tx,
-    )
-    .await
+    run_loop(terminal, app, None, &mut event_rx, &mut cmd_rx, cmd_tx).await
 }
 
 async fn run_loop(
@@ -210,8 +243,15 @@ async fn run_loop(
 
             // ── Command results ───────────────────────────────────────────────
             Some(cr) = cmd_rx.recv() => {
-                // Task completed — clear the abort handle
-                active_task = None;
+                if matches!(
+                    cr,
+                    CmdResult::Bootstrap(_)
+                        | CmdResult::Chat(_)
+                        | CmdResult::Slash(_)
+                        | CmdResult::State(_)
+                ) {
+                    active_task = None;
+                }
                 match cr {
                     CmdResult::Bootstrap(r) => match r {
                         Ok((spawned_bridge, child)) => {
@@ -227,7 +267,10 @@ async fn run_loop(
                                 let result = spawned_bridge
                                     .call(
                                         "init",
-                                        serde_json::json!({"config_path": "agent_config.json"}),
+                                        serde_json::json!({
+                                            "config_path": "agent_config.json",
+                                            "fast": true
+                                        }),
                                     )
                                     .await;
                                 let _ = tx.send(CmdResult::State(result));
@@ -246,8 +289,57 @@ async fn run_loop(
                     CmdResult::Slash(r) => app.handle_slash_result(r),
                     CmdResult::State(r) => {
                         match r {
-                            Ok(v) => app.handle_init(v),
+                            Ok(v) => {
+                                let needs_startup_context = !v
+                                    .get("hook_context_complete")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
+                                app.handle_init(v);
+                                if let Some(b) = &bridge {
+                                    if needs_startup_context {
+                                        let context_bridge = b.clone();
+                                        let context_tx = cmd_tx.clone();
+                                        tokio::spawn(async move {
+                                            let result = context_bridge
+                                                .call(
+                                                    "startup_context",
+                                                    serde_json::json!({
+                                                        "include_memory_summary": false,
+                                                        "include_hooks": true,
+                                                        "fast_hooks": false
+                                                    }),
+                                                )
+                                                .await;
+                                            let _ = context_tx.send(CmdResult::StartupContext(result));
+                                        });
+                                    }
+                                    let warm_bridge = b.clone();
+                                    let warm_tx = cmd_tx.clone();
+                                    tokio::spawn(async move {
+                                        let result = warm_bridge
+                                            .call(
+                                                "state",
+                                                serde_json::json!({
+                                                    "include_repo_library": true,
+                                                    "include_rag_inventory": true
+                                                }),
+                                            )
+                                            .await;
+                                        let _ = warm_tx.send(CmdResult::WarmState(result));
+                                    });
+                                }
+                            }
                             Err(e) => app.add_system_message(format!("Bridge init failed: {e}")),
+                        }
+                    },
+                    CmdResult::WarmState(r) => {
+                        if let Ok(v) = r {
+                            app.apply_bridge_state(&v);
+                        }
+                    }
+                    CmdResult::StartupContext(r) => {
+                        if let Ok(v) = r {
+                            app.handle_startup_context(v);
                         }
                     }
                 }
@@ -440,9 +532,7 @@ fn dispatch_command(
             let _ = tx.send(CmdResult::Slash(result));
         });
         Some(handle.abort_handle())
-    }
-
-    else {
+    } else {
         let handle = tokio::spawn(async move {
             let result = bridge
                 .call("chat", serde_json::json!({"message": text}))

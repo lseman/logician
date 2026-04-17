@@ -4,15 +4,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::{layout::Rect, Frame};
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 use std::fmt;
 use uuid::Uuid;
 
 use crate::bridge::{BridgeEvent, BridgeState};
 use crate::image::ImageRenderer;
 use crate::markdown::{
-    render_markdown, render_streaming,
-    sanitize_assistant_text as sanitize_assistant_markdown_text,
-    sanitize_thinking_text as sanitize_thinking_stream_text,
+    render_markdown, render_streaming, sanitize_assistant_text as sanitize_assistant_markdown_text,
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -222,6 +221,22 @@ impl DefaultRenderer {
             Role::Repair => (Color::LightYellow, "↺", "repair"),
             Role::Skill => (Color::Magenta, "◆", "skill"),
         }
+    }
+
+    fn text_to_preserved_lines(text: &str, style: Style) -> Vec<Line<'static>> {
+        if text.is_empty() {
+            return vec![Line::from(vec![Span::styled(String::new(), style)])];
+        }
+
+        let trimmed = text.trim_matches(|c| c == '\n' || c == '\r');
+        if trimmed.is_empty() {
+            return vec![Line::from(vec![Span::styled(String::new(), style)])];
+        }
+
+        trimmed
+            .split('\n')
+            .map(|s| Line::from(vec![Span::styled(s.to_string(), style)]))
+            .collect()
     }
 
     fn prefix_lines(
@@ -459,39 +474,21 @@ impl DefaultRenderer {
         Self::THINKING_VERBS[index].to_string()
     }
 
-    fn thinking_streaming_body(text: &str, label_index: Option<usize>) -> Vec<Line<'static>> {
-        let label = Self::thinking_category_label(text, label_index);
-        vec![Line::from(vec![
-            Span::styled(
-                "⋮ ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
-            ),
-            Span::styled(
-                label,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::DIM),
-            ),
-        ])]
-    }
-
     fn thinking_summary_text(text: &str, max_chars: usize, label_index: Option<usize>) -> String {
         let label = Self::thinking_category_label(text, label_index);
         App::truncate_inline(&label, max_chars)
     }
 
-    fn collapsed_thinking_body(
-        text: &str,
-        label_index: Option<usize>,
-    ) -> Vec<Line<'static>> {
-        let sanitized = sanitize_thinking_stream_text(text);
-        let line_count = sanitized.lines().filter(|line| !line.trim().is_empty()).count();
-        let preview = Self::thinking_summary_text(&sanitized, 88, label_index);
+    fn collapsed_thinking_body(text: &str, label_index: Option<usize>) -> Vec<Line<'static>> {
+        let line_count = text.lines().filter(|line| !line.trim().is_empty()).count();
+        let preview = Self::thinking_summary_text(text, 88, label_index);
 
         vec![Line::from(vec![
             Span::styled(
                 "⋮ ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 format!(
@@ -505,7 +502,9 @@ impl DefaultRenderer {
             ),
             Span::styled(
                 "  ",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
             Span::styled(
                 preview,
@@ -524,9 +523,7 @@ impl MessageRenderer for DefaultRenderer {
             return Line::from(vec![
                 Span::styled(
                     format!("{icon} {label}"),
-                    Style::default()
-                        .fg(color)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     "  live",
@@ -556,7 +553,11 @@ impl MessageRenderer for DefaultRenderer {
                 )
             },
             Span::styled(
-                if role == Role::Thinking && collapsed { "  " } else { "" },
+                if role == Role::Thinking && collapsed {
+                    "  "
+                } else {
+                    ""
+                },
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
@@ -582,29 +583,43 @@ impl MessageRenderer for DefaultRenderer {
             Role::Assistant if streaming => Self::prefix_lines(
                 render_streaming(text),
                 "│ ",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
             Role::Assistant => Self::prefix_lines(
                 render_markdown(text),
                 "│ ",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
             ),
-            Role::Thinking if streaming => Self::thinking_streaming_body(text, thinking_label_index),
-            Role::Thinking if collapsed => Self::collapsed_thinking_body(text, thinking_label_index),
-            Role::Thinking => Self::prefix_lines(
-                sanitize_thinking_stream_text(text)
-                    .lines()
-                    .map(|l| {
-                        Line::from(Span::styled(
-                            l.to_string(),
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::DIM),
-                        ))
-                    })
-                    .collect(),
+            Role::Thinking if streaming => Self::prefix_lines(
+                Self::text_to_preserved_lines(
+                    text,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::DIM),
+                ),
                 "⋮ ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::DIM),
+            ),
+            Role::Thinking if collapsed => {
+                Self::collapsed_thinking_body(text, thinking_label_index)
+            }
+            Role::Thinking => Self::prefix_lines(
+                Self::text_to_preserved_lines(
+                    text,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::DIM),
+                ),
+                "⋮ ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::DIM),
             ),
             Role::System => Self::prefix_lines(
                 render_markdown(text),
@@ -621,7 +636,9 @@ impl MessageRenderer for DefaultRenderer {
                     })
                     .collect(),
                 "> ",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Role::Tool => {
                 let mut tool_lines = Vec::new();
@@ -741,7 +758,7 @@ impl Message {
             is_streaming: false,
             text,
             raw_stream: None,
-            collapsed: false,
+            collapsed: role == Role::Thinking,
             thinking_label_index: None,
             thinking_label_ticks: 0,
             rendered,
@@ -805,13 +822,7 @@ impl Message {
         };
         let renderer = DefaultRenderer;
         let collapsed = role == Role::Thinking && !is_streaming;
-        let rendered = renderer.render(
-            role,
-            &text,
-            is_streaming,
-            collapsed,
-            thinking_label_index,
-        );
+        let rendered = renderer.render(role, &text, is_streaming, collapsed, thinking_label_index);
         Self {
             id: Uuid::new_v4().to_string(),
             role,
@@ -887,7 +898,7 @@ impl Message {
         (0..line_count)
             .map(|idx| CachedLineMeta {
                 message_idx,
-                thinking_toggle: self.role == Role::Thinking && !self.is_streaming && idx == 0,
+                thinking_toggle: self.role == Role::Thinking && self.collapsed && idx == 0,
             })
             .collect()
     }
@@ -905,6 +916,7 @@ impl Message {
 
 // ── Key action returned to main loop ─────────────────────────────────────────
 
+#[derive(Debug, PartialEq)]
 pub enum KeyAction {
     None,
     Quit,
@@ -1017,7 +1029,15 @@ const CLOSE_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
     required: false,
     repeats: false,
     help: "Optional panel target",
-    choices: &["all", "image", "todo", "tasks", "context", "rag", "inspector"],
+    choices: &[
+        "all",
+        "image",
+        "todo",
+        "tasks",
+        "context",
+        "rag",
+        "inspector",
+    ],
 }];
 const SINGLE_WORD_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
     name: "value",
@@ -1033,6 +1053,22 @@ const OPTIONAL_WORD_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
     help: "Optional value",
     choices: &[],
 }];
+const OPTIONAL_REPEATED_WORD_SLASH_ARGS: &[SlashArgumentSpec] = &[
+    SlashArgumentSpec {
+        name: "value",
+        required: false,
+        repeats: false,
+        help: "Optional command fragment",
+        choices: &[],
+    },
+    SlashArgumentSpec {
+        name: "extra",
+        required: false,
+        repeats: true,
+        help: "Optional additional arguments",
+        choices: &[],
+    },
+];
 const PATH_SLASH_ARGS: &[SlashArgumentSpec] = &[SlashArgumentSpec {
     name: "path",
     required: true,
@@ -1125,10 +1161,6 @@ pub const SHORTCUT_HINTS: [ShortcutHint; 16] = [
         description: "toggle inspector",
     },
     ShortcutHint {
-        chord: "Ctrl+Y",
-        description: "expand thinking details",
-    },
-    ShortcutHint {
         chord: "Ctrl+L",
         description: "clear transcript",
     },
@@ -1155,6 +1187,10 @@ pub const SHORTCUT_HINTS: [ShortcutHint; 16] = [
     ShortcutHint {
         chord: "Ctrl+→",
         description: "next word",
+    },
+    ShortcutHint {
+        chord: "Ctrl+Y",
+        description: "expand hidden thinking",
     },
     ShortcutHint {
         chord: "Shift+Enter",
@@ -1197,7 +1233,7 @@ const LOCAL_ONLY_SLASH_COMMANDS: [SlashCommandSpec; 4] = [
     },
 ];
 
-const SLASH_COMMANDS: [SlashCommandSpec; 29] = [
+const SLASH_COMMANDS: [SlashCommandSpec; 30] = [
     SlashCommandSpec {
         command: "/help",
         usage: "/help",
@@ -1239,6 +1275,13 @@ const SLASH_COMMANDS: [SlashCommandSpec; 29] = [
         description: "Show skill loader diagnostics",
         dispatch: SlashDispatch::Bridge,
         args: NO_SLASH_ARGS,
+    },
+    SlashCommandSpec {
+        command: "/plugins",
+        usage: "/plugins [list|enable|disable] <plugin>",
+        description: "Manage installed plugins and enable/disable plugin state",
+        dispatch: SlashDispatch::Bridge,
+        args: OPTIONAL_REPEATED_WORD_SLASH_ARGS,
     },
     SlashCommandSpec {
         command: "/changes",
@@ -1444,10 +1487,12 @@ pub struct App {
     cached_lines_raw: Vec<Line<'static>>,
     cached_meta: Vec<CachedLineMeta>,
     cached_meta_raw: Vec<CachedLineMeta>,
-    // Live streaming assistant message
+    // Live streaming assistant or thinking message
     pub live: Option<Message>,
     // Raw stream buffer (for Ctrl+P view)
     pub raw_buf: String,
+    // When thinking phase boundaries occur, avoid merging the next finalized thinking message
+    skip_thinking_merge: bool,
     // Per-turn tool execution tracking (receipt-style UX).
     current_turn_tool_names: Vec<String>,
     // Store tool arguments for expanded output
@@ -1514,6 +1559,7 @@ pub struct App {
     context_scroll: u16,
     rag_scroll: u16,
     ui_hitboxes: UiHitboxes,
+    rendered_startup_hook_contexts: HashSet<String>,
 }
 
 impl App {
@@ -1533,92 +1579,7 @@ impl App {
     }
 
     fn sanitize_thinking_text(text: &str) -> String {
-        sanitize_thinking_stream_text(text)
-    }
-
-    fn normalize_reasoning_char(ch: char) -> char {
-        match ch {
-            '“' | '”' => '"',
-            '‘' | '’' => '\'',
-            _ => ch,
-        }
-    }
-
-    fn strip_duplicate_thinking_prefix(candidate: &str, thinking: &str) -> Option<String> {
-        let candidate = candidate.trim_start();
-        let thinking = thinking.trim();
-        if candidate.is_empty() || thinking.is_empty() {
-            return None;
-        }
-
-        let mut candidate_iter = candidate.char_indices().peekable();
-        let mut thinking_iter = thinking.chars().peekable();
-        let mut consumed = 0usize;
-
-        while let Some(tch) = thinking_iter.next() {
-            let Some((idx, cch)) = candidate_iter.next() else {
-                return None;
-            };
-            if Self::normalize_reasoning_char(cch) != Self::normalize_reasoning_char(tch) {
-                return None;
-            }
-            consumed = idx + cch.len_utf8();
-        }
-
-        let stripped = candidate[consumed..].trim_start().to_string();
-        if stripped.is_empty() {
-            None
-        } else {
-            Some(stripped)
-        }
-    }
-
-    fn sanitize_assistant_text_with_context(&self, text: &str) -> String {
-        let visible = Self::sanitize_assistant_text(text);
-        let Some(last_message) = self.messages.last() else {
-            return visible;
-        };
-        if last_message.role != Role::Thinking {
-            return visible;
-        }
-        let thinking = Self::sanitize_thinking_text(&last_message.text);
-        Self::strip_duplicate_thinking_prefix(&visible, &thinking).unwrap_or(visible)
-    }
-
-    fn repair_previous_assistant_from_thinking(&mut self, thinking_text: &str) {
-        let thinking = Self::sanitize_thinking_text(thinking_text);
-        if thinking.is_empty() {
-            return;
-        }
-        let Some(previous) = self.messages.last_mut() else {
-            return;
-        };
-        if previous.role != Role::Assistant {
-            return;
-        }
-
-        let visible = Self::sanitize_assistant_text(&previous.text);
-        match Self::strip_duplicate_thinking_prefix(&visible, &thinking) {
-            Some(stripped) => {
-                previous.text = stripped;
-                if previous.is_streaming {
-                    previous.replace_stream_text(previous.text.clone());
-                } else {
-                    let renderer = DefaultRenderer;
-                    previous.rendered = renderer.render(
-                        previous.role,
-                        &previous.text,
-                        false,
-                        false,
-                        previous.thinking_label_index,
-                    );
-                }
-            }
-            None if !visible.is_empty() && Self::strip_duplicate_thinking_prefix(&(visible.clone() + " "), &thinking).is_none() => {}
-            None => {
-                self.messages.pop();
-            }
-        }
+        text.to_string()
     }
 
     pub fn new() -> Self {
@@ -1630,6 +1591,7 @@ impl App {
             cached_meta_raw: Vec::new(),
             live: None,
             raw_buf: String::new(),
+            skip_thinking_merge: false,
             current_turn_tool_names: Vec::new(),
             current_turn_tool_args: Vec::new(),
             current_turn_activity: Vec::new(),
@@ -1678,6 +1640,7 @@ impl App {
             context_scroll: 0,
             rag_scroll: 0,
             ui_hitboxes: UiHitboxes::default(),
+            rendered_startup_hook_contexts: HashSet::new(),
         }
     }
 
@@ -1725,10 +1688,8 @@ impl App {
             &mut out,
             SlashCommand {
                 command: "/rag".to_string(),
-                usage: "/rag list [repo] | /rag search <query> [top_k] | /rag clear"
-                    .to_string(),
-                description: "Inspect the live RAG store and run direct RAG searches"
-                    .to_string(),
+                usage: "/rag list [repo] | /rag search <query> [top_k] | /rag clear".to_string(),
+                description: "Inspect the live RAG store and run direct RAG searches".to_string(),
                 dispatch: SlashDispatch::Bridge,
                 args: Vec::new(),
                 strict_schema: false,
@@ -1801,7 +1762,9 @@ impl App {
             .slash_commands
             .iter()
             .find(|item| item.command.eq_ignore_ascii_case(&token))
-            .ok_or_else(|| format!("Unknown slash command `{token}`. Use /help for the full list."))?;
+            .ok_or_else(|| {
+                format!("Unknown slash command `{token}`. Use /help for the full list.")
+            })?;
         let positionals = parts.map(|item| item.to_string()).collect::<Vec<_>>();
         let mut named_args = Map::new();
 
@@ -1897,10 +1860,20 @@ impl App {
         } else {
             self.bridge_state.mcp_servers.join(", ")
         };
-        let mcp_state = self.bridge_state.lifecycle.as_ref()
-            .map_or("unknown".to_string(), |lifecycle| Self::bridge_lifecycle_state(lifecycle, "mcp"));
-        let plugin_state = self.bridge_state.lifecycle.as_ref()
-            .map_or("unknown".to_string(), |lifecycle| Self::bridge_lifecycle_state(lifecycle, "plugin"));
+        let mcp_state = self
+            .bridge_state
+            .lifecycle
+            .as_ref()
+            .map_or("unknown".to_string(), |lifecycle| {
+                Self::bridge_lifecycle_state(lifecycle, "mcp")
+            });
+        let plugin_state = self
+            .bridge_state
+            .lifecycle
+            .as_ref()
+            .map_or("unknown".to_string(), |lifecycle| {
+                Self::bridge_lifecycle_state(lifecycle, "plugin")
+            });
         let mut text = format!(
             "# Logician\n\n\
 **Agents**: {agents}  \n\
@@ -1923,8 +1896,33 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             &self.bridge_state.session[..self.bridge_state.session.len().min(24)],
         );
 
-        // ── Project memory summary ────────────────────────────────────────────
+        Self::append_memory_summary_section(&mut text, &v, true);
+
+        self.add_message(Role::System, text);
+        Self::render_startup_hook_contexts(self, &v);
+    }
+
+    pub fn handle_startup_context(&mut self, v: Value) {
+        Self::render_startup_hook_contexts(self, &v);
+    }
+
+    fn render_startup_hook_contexts(&mut self, v: &Value) {
+        let hook_contexts = Self::startup_hook_contexts(v);
+        for context in hook_contexts {
+            let key = context.trim().to_string();
+            if !key.is_empty() && self.rendered_startup_hook_contexts.insert(key) {
+                self.add_message(Role::System, context);
+            }
+        }
+    }
+
+    fn append_memory_summary_section(text: &mut String, v: &Value, include_empty_memory_notice: bool) {
         if let Some(mem) = v.get("memory_summary") {
+            let memory_enabled = mem
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .or_else(|| v.get("project_memory_enabled").and_then(|v| v.as_bool()))
+                .unwrap_or(true);
             let has_memories = mem
                 .get("has_memories")
                 .and_then(|v| v.as_bool())
@@ -1934,7 +1932,8 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                     .get("total_entries")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
-                text.push_str(&format!("\n\n---\n\n**Memory** ({total} observations)"));
+                text.push_str("\n\n---\n\n**Memory** (");
+                text.push_str(&format!("{} observations)", total));
                 if let Some(sections) = mem.get("sections").and_then(|v| v.as_array()) {
                     for section in sections {
                         let heading = section
@@ -1943,24 +1942,45 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                             .unwrap_or("Other");
                         if let Some(entries) = section.get("entries").and_then(|e| e.as_array()) {
                             if !entries.is_empty() {
-                                text.push_str(&format!("\n\n**{heading}**"));
+                                text.push_str("\n\n**");
+                                text.push_str(heading);
+                                text.push_str("**");
                                 for entry in entries {
                                     if let Some(s) = entry.as_str() {
-                                        // Strip markdown link syntax [name](file): desc → name: desc
-                                        let display = Self::format_memory_entry(s);
-                                        text.push_str(&format!("\n- {display}"));
+                                        if s.trim().starts_with('|') {
+                                            text.push_str("\n");
+                                            text.push_str(
+                                                &Self::normalize_memory_table_entry(s.trim()),
+                                            );
+                                        } else {
+                                            let display = Self::format_memory_entry(s);
+                                            text.push_str(&format!("\n- {display}"));
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            } else {
-                text.push_str("\n\n---\n\n*No project memories yet — use `write_file` to save observations to `.logician/memory/`.*");
+            } else if include_empty_memory_notice && memory_enabled {
+                text.push_str(
+                    "\n\n---\n\n*No project memories yet — use `write_file` to save observations to `.logician/memory/`.*",
+                );
             }
         }
+    }
 
-        self.add_message(Role::System, text);
+    fn startup_hook_contexts(v: &Value) -> Vec<String> {
+        if let Some(ctx) = v.get("hook_context") {
+            if let Some(contexts) = ctx.as_array() {
+                return contexts
+                    .iter()
+                    .filter_map(|context| context.as_str().map(|s| s.trim().to_string()))
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+        Vec::new()
     }
 
     fn format_memory_entry(entry: &str) -> String {
@@ -1981,6 +2001,14 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             }
         }
         entry.to_string()
+    }
+
+    fn normalize_memory_table_entry(entry: &str) -> String {
+        entry
+            .replace('–', "-")
+            .replace('—', "-")
+            .replace('―', "-")
+            .replace('‑', "-")
     }
 
     // ── Message helpers ───────────────────────────────────────────────────────
@@ -2159,7 +2187,10 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 Some(parts.join(" · "))
             }
             Value::Null => None,
-            other => Some(Self::truncate_inline(&Self::summarize_json_value(other), 48)),
+            other => Some(Self::truncate_inline(
+                &Self::summarize_json_value(other),
+                48,
+            )),
         }
     }
 
@@ -2656,10 +2687,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 if error_count == 1 { "" } else { "s" }
             ));
         } else {
-            summary.push_str(&format!(
-                " · {} complete",
-                completed
-            ));
+            summary.push_str(&format!(" · {} complete", completed));
         }
         lines.push(summary);
 
@@ -2841,9 +2869,61 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         }
     }
 
-    fn push_message(&mut self, message: Message) {
+    fn push_message(&mut self, mut message: Message) {
         if message.role == Role::Thinking {
-            self.repair_previous_assistant_from_thinking(&message.text);
+            // Finalize streaming for thinking messages
+            message.finalize_streaming();
+            // Do not repair or crop previous assistant text based on thinking.
+
+            // If this thinking message is a strict update snapshot of the previous
+            // thinking entry, replace it. Otherwise preserve separate thinking
+            // streams as distinct transcript entries.
+            if let Some(last) = self.messages.last_mut() {
+                if last.role == Role::Thinking {
+                    if !self.skip_thinking_merge {
+                        if message.text.starts_with(&last.text) {
+                            // New text is a longer version of the same stream — replace.
+                            last.text = message.text;
+                            last.is_streaming = false;
+                            let renderer = DefaultRenderer;
+                            last.rendered = renderer.render(
+                                last.role,
+                                &last.text,
+                                false,
+                                last.collapsed,
+                                last.thinking_label_index,
+                            );
+                            self.rebuild_cached_transcript();
+                            self.skip_thinking_merge = false;
+                            return;
+                        }
+                        // Stale shorter snapshot: only discard the new message when it
+                        // is within 20 bytes of the stored one.  A much shorter new text
+                        // is the opening of a fresh episode — not a re-send of the old one.
+                        if last.text.starts_with(&message.text)
+                            && !message.text.is_empty()
+                            && last.text.len().saturating_sub(message.text.len()) <= 20
+                        {
+                            last.is_streaming = false;
+                            let renderer = DefaultRenderer;
+                            last.rendered = renderer.render(
+                                last.role,
+                                &last.text,
+                                false,
+                                last.collapsed,
+                                last.thinking_label_index,
+                            );
+                            self.rebuild_cached_transcript();
+                            self.skip_thinking_merge = false;
+                            return;
+                        }
+                    }
+                    // Continuation merge removed: it was too broad and was silently
+                    // concatenating unrelated thinking episodes, cropping their content.
+                }
+            }
+            self.skip_thinking_merge = false;
+
             self.messages.push(message);
             self.rebuild_cached_transcript();
             return;
@@ -2884,6 +2964,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.cached_meta_raw.clear();
         self.live = None;
         self.raw_buf.clear();
+        self.skip_thinking_merge = false;
         self.current_turn_tool_names.clear();
         self.current_turn_activity.clear();
         self.last_turn_activity.clear();
@@ -3496,7 +3577,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             Some(m) => m,
             None => {
                 if let Some(text) = fallback_text {
-                    let text = self.sanitize_assistant_text_with_context(&text);
+                    let text = App::sanitize_assistant_text(&text);
                     if text.len() > 2
                         && text.chars().any(|c| c.is_alphanumeric())
                         && !self.last_transcript_message_matches(Role::Assistant, &text)
@@ -3508,13 +3589,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             }
         };
 
-        if live.text.is_empty() {
-            if let Some(text) = fallback_text {
-                live.text = text;
+        if let Some(text) = fallback_text {
+            if live.role == Role::Assistant {
+                let visible = App::sanitize_assistant_text(&text);
+                if !visible.is_empty() && visible != live.text {
+                    if live.text.is_empty() || visible.starts_with(&live.text) {
+                        live.text = visible;
+                    }
+                }
             }
         }
         if live.role == Role::Assistant {
-            live.text = self.sanitize_assistant_text_with_context(&live.text);
+            live.text = App::sanitize_assistant_text(&live.text);
         } else if live.role == Role::Thinking {
             live.text = Self::sanitize_thinking_text(&live.text);
         }
@@ -3550,11 +3636,16 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 self.busy = true;
                 self.phase = Phase::Streaming;
                 self.phase_note = "streaming".into();
-                let visible = self.sanitize_assistant_text_with_context(&self.raw_buf);
+                let visible = App::sanitize_assistant_text(&self.raw_buf);
+                // Finalize any pending thinking message before starting assistant stream
+                if let Some(lm) = self.live.take() {
+                    if lm.role == Role::Thinking && !lm.text.is_empty() {
+                        self.push_message(lm);
+                    }
+                }
                 match &mut self.live {
                     Some(lm) if lm.role == Role::Assistant => lm.replace_stream_text(visible),
                     Some(_) => {
-                        self.stop_live_message();
                         let mut lm = Message::new_streaming(Role::Assistant);
                         lm.replace_stream_text(visible);
                         self.live = Some(lm);
@@ -3594,8 +3685,24 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             }
 
             BridgeEvent::Phase { state, note } => {
-                self.stop_live_message();
-                self.phase = Phase::from_str(&state);
+                let new_phase = Phase::from_str(&state);
+                let mut should_flush_live = true;
+                if new_phase == Phase::Thinking
+                    && self
+                        .live
+                        .as_ref()
+                        .map(|lm| lm.role == Role::Thinking)
+                        .unwrap_or(false)
+                {
+                    if !note.is_empty() && note != self.phase_note {
+                        self.skip_thinking_merge = true;
+                    }
+                    should_flush_live = false;
+                }
+                if should_flush_live {
+                    self.stop_live_message();
+                }
+                self.phase = new_phase;
                 self.phase_note = if note.is_empty() {
                     state.clone()
                 } else {
@@ -3839,10 +3946,25 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                     .or_else(|| v["assistant"].as_str())
                     .unwrap_or("")
                     .to_string();
-                let visible_assistant_text = self.sanitize_assistant_text_with_context(&assistant_text);
-                let fallback =
-                    (!visible_assistant_text.is_empty()).then_some(visible_assistant_text.clone());
+                let visible_assistant_text = App::sanitize_assistant_text(&assistant_text);
+                let had_thinking_live = self
+                    .live
+                    .as_ref()
+                    .map(|lm| lm.role == Role::Thinking)
+                    .unwrap_or(false);
+                let fallback = if had_thinking_live {
+                    None
+                } else {
+                    Some(assistant_text.clone())
+                };
                 self.flush_live_message(fallback);
+                if had_thinking_live && !visible_assistant_text.is_empty() {
+                    if !self
+                        .last_transcript_message_matches(Role::Assistant, &visible_assistant_text)
+                    {
+                        self.add_message(Role::Assistant, visible_assistant_text.clone());
+                    }
+                }
 
                 // Pipeline turns
                 if v["pipeline"].as_bool().unwrap_or(false) {
@@ -4080,10 +4202,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         } else {
             s.mcp_servers.join(", ")
         };
-        let mcp_state = s.lifecycle.as_ref()
-            .map_or("unknown".to_string(), |lifecycle| Self::bridge_lifecycle_state(lifecycle, "mcp"));
-        let plugin_state = s.lifecycle.as_ref()
-            .map_or("unknown".to_string(), |lifecycle| Self::bridge_lifecycle_state(lifecycle, "plugin"));
+        let mcp_state = s
+            .lifecycle
+            .as_ref()
+            .map_or("unknown".to_string(), |lifecycle| {
+                Self::bridge_lifecycle_state(lifecycle, "mcp")
+            });
+        let plugin_state = s
+            .lifecycle
+            .as_ref()
+            .map_or("unknown".to_string(), |lifecycle| {
+                Self::bridge_lifecycle_state(lifecycle, "plugin")
+            });
         let session = &s.session[..s.session.len().min(24)];
         let pipeline = if let Some(p) = &s.pipeline {
             format!(
@@ -4113,7 +4243,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         ));
     }
 
-    fn apply_bridge_state(&mut self, v: &Value) {
+    pub fn apply_bridge_state(&mut self, v: &Value) {
         let previous_todo_count = self.bridge_state.todo.len();
         let previous_session = self.bridge_state.session.clone();
         self.bridge_state = BridgeState::from_value(v);
@@ -4123,10 +4253,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             && !self.bridge_state.session.trim().is_empty()
             && self.bridge_state.session != "-"
         {
-            self.add_system_message(format!(
-                "Resumed session `{}`.",
-                self.bridge_state.session
-            ));
+            self.add_system_message(format!("Resumed session `{}`.", self.bridge_state.session));
             self.current_turn_tool_names.clear();
             self.current_turn_tool_args.clear();
             self.current_turn_activity.clear();
@@ -5077,503 +5204,85 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
-    fn slash_result_keeps_multiline_output_together() {
+    fn distinct_thinking_messages_remain_separate() {
         let mut app = App::new();
-        app.handle_slash_result(Ok(json!({
-            "messages": ["alpha", "beta", "gamma"],
-            "state": {},
-        })));
+        app.push_message(Message::new(Role::Thinking, "First thought."));
+        app.push_message(Message::new(Role::Thinking, "Second thought."));
+
+        assert_eq!(app.messages.len(), 2);
+        assert_eq!(app.messages[0].text, "First thought.");
+        assert_eq!(app.messages[1].text, "Second thought.");
+    }
+
+    #[test]
+    fn thinking_snapshot_updates_last_message() {
+        let mut app = App::new();
+        app.push_message(Message::new(Role::Thinking, "First"));
+        app.push_message(Message::new(Role::Thinking, "First extended"));
 
         assert_eq!(app.messages.len(), 1);
-        assert_eq!(app.messages[0].role, Role::System);
-        assert_eq!(app.messages[0].text, "alpha\nbeta\ngamma");
+        assert_eq!(app.messages[0].text, "First extended");
     }
 
     #[test]
-    fn slash_result_applies_loaded_skills_from_state() {
+    fn thinking_phase_boundary_creates_separate_message() {
         let mut app = App::new();
-        app.handle_slash_result(Ok(json!({
-            "messages": [],
-            "state": {
-                "active": "main",
-                "session": "sess-1",
-                "loaded_tools": ["read_file", "edit_file"],
-                "skill_count": 2,
-                "loaded_skills": ["explore", "patch"],
-            },
-        })));
-
-        assert_eq!(app.bridge_state.skill_count, 2);
-        assert_eq!(
-            app.bridge_state.loaded_tools,
-            vec!["read_file".to_string(), "edit_file".to_string()]
-        );
-        assert_eq!(
-            app.bridge_state.loaded_skills,
-            vec!["explore".to_string(), "patch".to_string()]
-        );
-    }
-
-    #[test]
-    fn apply_bridge_state_announces_session_resume() {
-        let mut app = App::new();
-        app.bridge_state.session = "sess-1".to_string();
-
-        app.apply_bridge_state(&json!({
-            "session": "sess-2",
-            "active": "main",
-            "loaded_tools": [],
-            "loaded_skills": [],
-            "todo": []
-        }));
-
-        assert_eq!(app.bridge_state.session, "sess-2");
-        assert!(app.messages.iter().any(|message| {
-            message.role == Role::System
-                && message.text.contains("Resumed session `sess-2`.")
-        }));
-        assert!(app.current_turn_activity.is_empty());
-    }
-
-    #[test]
-    fn progress_entries_include_active_session_label() {
-        let mut app = App::new();
-        app.bridge_state.session = "sess-1".to_string();
-        let entries = app.progress_entries();
-
-        assert!(entries.iter().any(|entry| {
-            entry.label == "session" && entry.detail.as_deref() == Some("sess-1")
-        }));
-    }
-
-    #[test]
-    fn trace_stays_out_of_transcript() {
-        let mut app = App::new();
-        app.trace("phase=thinking");
-        assert!(app.messages.is_empty());
-        assert_eq!(app.trace_entries().len(), 1);
-    }
-
-    #[test]
-    fn skill_event_updates_inspector_state_without_transcript_noise() {
-        let mut app = App::new();
-        app.handle_bridge_event(BridgeEvent::Skill {
-            skill_ids: vec!["explore".to_string()],
-            selected_tools: vec!["read_file".to_string(), "rg_search".to_string()],
-        });
-
-        assert_eq!(app.messages.len(), 1);
-        assert_eq!(app.messages[0].role, Role::Skill);
-        assert_eq!(app.active_skill_ids(), &["explore".to_string()]);
-        assert_eq!(
-            app.active_selected_tools(),
-            &["read_file".to_string(), "rg_search".to_string()]
-        );
-    }
-
-    #[test]
-    fn assistant_tokens_do_not_continue_thinking_message() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ThinkingToken(
-            "I should inspect the renderer first.".to_string(),
+        app.push_message(Message::new(
+            Role::Thinking,
+            "The user wants to see a list of available tools.",
         ));
-        app.handle_bridge_event(BridgeEvent::Token(
-            "Here is the actual answer.".to_string(),
+        app.skip_thinking_merge = true;
+        app.push_message(Message::new(
+            Role::Thinking,
+            " already ran_tools which returned 10 matches but they want ALL should describe the tool schema show them what are",
         ));
 
-        assert_eq!(app.messages.len(), 1);
-        assert_eq!(app.messages[0].role, Role::Thinking);
-        assert_eq!(app.messages[0].text, "I should inspect the renderer first.");
-
-        let live = app.live.as_ref().expect("assistant message should be live");
-        assert_eq!(live.role, Role::Assistant);
-        assert_eq!(live.text, "Here is the actual answer.");
+        assert_eq!(
+            app.messages.len(),
+            2,
+            "phase boundary must create a new entry"
+        );
+        assert_eq!(
+            app.messages[0].text,
+            "The user wants to see a list of available tools."
+        );
+        assert_eq!(app.messages[1].text,
+            " already ran_tools which returned 10 matches but they want ALL should describe the tool schema show them what are"
+        );
     }
 
     #[test]
-    fn phase_event_sets_busy_state_and_updates_phase_note() {
+    fn thinking_messages_auto_collapse_when_finalized() {
         let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::Phase {
-            state: "thinking".to_string(),
-            note: "planning next step".to_string(),
-        });
-
-        assert!(app.busy);
-        assert_eq!(app.phase, Phase::Thinking);
-        assert_eq!(app.phase_note, "planning next step");
-    }
-
-    #[test]
-    fn error_phase_survives_set_idle_after_failed_result() {
-        let mut app = App::new();
-
-        app.handle_chat_result(Err(anyhow::anyhow!("network failure")));
-
-        assert!(!app.busy);
-        assert_eq!(app.phase, Phase::Error);
-        assert_eq!(app.phase_note, "chat failed");
-    }
-
-    #[test]
-    fn finalized_thinking_is_collapsed_and_toggleable() {
-        let mut app = App::new();
-
         app.handle_bridge_event(BridgeEvent::ThinkingToken(
-            "First line of reasoning\nSecond line of reasoning".to_string(),
+            "The model is planning the next step.".to_string(),
         ));
         app.stop_live_message();
 
         assert_eq!(app.messages.len(), 1);
         assert_eq!(app.messages[0].role, Role::Thinking);
         assert!(app.messages[0].collapsed);
-
-        let (collapsed_lines, headers) = app.visible_transcript(8);
-        assert_eq!(headers.len(), 1);
-        assert!(collapsed_lines.iter().any(|line| line
-            .spans
-            .iter()
-            .any(|span| span.content.contains("hidden line") || span.content.contains("hidden lines"))));
-
-        app.toggle_thinking_message(0);
-
-        assert!(!app.messages[0].collapsed);
-        let (expanded_lines, _) = app.visible_transcript(8);
-        assert!(expanded_lines.iter().any(|line| line
-            .spans
-            .iter()
-            .any(|span| span.content.contains("Second line of reasoning"))));
     }
 
     #[test]
-    fn ctrl_y_action_expands_all_finalized_thinking_messages() {
+    fn ctrl_y_expands_finalized_thinking_messages() {
         let mut app = App::new();
+        app.push_message(Message::new(Role::Thinking, "First thought."));
+        app.push_message(Message::new(Role::Thinking, "Second thought."));
 
-        app.add_message(Role::Thinking, "First reasoning\nfirst detail");
-        app.add_message(Role::Assistant, "Visible answer");
-        app.add_message(Role::Thinking, "Second reasoning\nsecond detail");
+        assert!(app.messages.iter().all(|message| message.collapsed));
+        let action = app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
 
-        assert!(app.messages[0].collapsed);
-        assert!(app.messages[2].collapsed);
-
-        app.expand_all_thinking_messages();
-
-        assert!(!app.messages[0].collapsed);
-        assert!(!app.messages[2].collapsed);
-
-        let (expanded_lines, _) = app.visible_transcript(16);
-        assert!(expanded_lines.iter().any(|line| line
-            .spans
-            .iter()
-            .any(|span| span.content.contains("first detail"))));
-        assert!(expanded_lines.iter().any(|line| line
-            .spans
-            .iter()
-            .any(|span| span.content.contains("second detail"))));
+        assert_eq!(action, KeyAction::ExpandThinking);
     }
 
     #[test]
-    fn thinking_verb_label_has_no_numeric_prefix() {
-        let label = DefaultRenderer::thinking_category_label("some reasoning", Some(0));
-
-        assert_eq!(label, "Accomplishing");
-        assert!(!label.chars().next().is_some_and(|ch| ch.is_ascii_digit()));
-    }
-
-    #[test]
-    fn collapsed_thinking_preview_has_no_numeric_prefix() {
-        let lines = DefaultRenderer::collapsed_thinking_body("some reasoning", Some(0));
-        let spans = &lines[0].spans;
-
-        assert_eq!(spans[1].content.as_ref(), "1 hidden line");
-        assert_eq!(spans[3].content.as_ref(), "Accomplishing");
-        assert!(!spans[3]
-            .content
-            .chars()
-            .next()
-            .is_some_and(|ch| ch.is_ascii_digit()));
-    }
-
-    #[test]
-    fn tool_end_write_file_result_output_populates_changed_files() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ToolEnd {
-            name: "write_file".to_string(),
-            sequence: 1,
-            status: "ok".to_string(),
-            duration_ms: 12,
-            cache_hit: false,
-            error: None,
-            result_preview: Some("wrote file".to_string()),
-            result_output: Some(
-                json!({
-                    "status": "ok",
-                    "path": "src/demo.py",
-                    "diff": "--- src/demo.py\n+++ src/demo.py\n@@ -0,0 +1 @@\n+print(\"hello\")\n"
-                })
-                .to_string(),
-            ),
-            args: Some(json!({ "path": "src/demo.py" })),
-        });
-
-        assert_eq!(app.changed_files().len(), 1);
-        assert_eq!(app.changed_files()[0].tool, "write_file");
-        assert_eq!(app.changed_files()[0].path, "src/demo.py");
-        assert!(app.changed_files()[0].diff.contains("+print(\"hello\")"));
-    }
-
-    #[test]
-    fn runtime_events_stay_in_trace_not_transcript() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::Lifecycle {
-            subsystem: "mcp".to_string(),
-            payload: json!({
-                "subsystem": "mcp",
-                "state": "ready",
-                "total": 1,
-                "healthy": 1,
-                "degraded": 0,
-                "failed": 0,
-                "names": ["context7"],
-            }),
-        });
-        app.handle_bridge_event(BridgeEvent::Compaction {
-            payload: json!({
-                "kept_messages": 6,
-                "removed_messages": 12,
-                "summary_chars": 480,
-            }),
-        });
-        app.handle_bridge_event(BridgeEvent::Summary {
-            payload: json!({
-                "kind": "turn_outcome",
-                "summary": "turn finished cleanly",
-            }),
-        });
-
-        assert!(app.messages.is_empty());
-        assert_eq!(app.trace_entries().len(), 3);
-        assert!(app.trace_entries()[0].contains("lifecycle subsystem=mcp state=ready"));
-        assert!(app.trace_entries()[1].contains("compaction event detail=session compaction recorded"));
-        assert!(app.trace_entries()[2].contains("summary event kind=turn_outcome"));
-    }
-
-    #[test]
-    fn final_chat_result_does_not_duplicate_streamed_assistant_message() {
-        let mut app = App::new();
-        let text = "Hello! I'm Logician, your engineering and analysis agent. How can I help you today?";
-
-        app.handle_bridge_event(BridgeEvent::Token(text.to_string()));
-        app.stop_live_message();
-
-        assert_eq!(app.messages.len(), 1);
-        assert_eq!(app.messages[0].role, Role::Assistant);
-        assert_eq!(app.messages[0].text, text);
-        app.handle_chat_result(Ok(json!({
-            "final_response": text,
-            "tool_calls": [],
-            "iterations": 1,
-            "tool_errors": 0,
-        })));
-
-        assert_eq!(app.messages.len(), 1);
-        assert_eq!(app.messages[0].role, Role::Assistant);
-        assert_eq!(app.messages[0].text, text);
-    }
-
-    #[test]
-    fn assistant_live_stream_drops_prefix_matching_previous_thinking_message() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ThinkingToken(
-            "The user said hi.".to_string(),
-        ));
-        app.stop_live_message();
-
-        app.handle_bridge_event(BridgeEvent::Token(
-            "The user said hi.Hello!".to_string(),
-        ));
-
-        let live = app.live.as_ref().expect("assistant message should be live");
-        assert_eq!(live.role, Role::Assistant);
-        assert_eq!(live.text, "Hello!");
-
-        app.stop_live_message();
-
-        assert_eq!(app.messages.len(), 2);
-        assert_eq!(app.messages[1].role, Role::Assistant);
-        assert_eq!(app.messages[1].text, "Hello!");
-    }
-
-    #[test]
-    fn assistant_stream_drops_prefix_matching_previous_thinking_message() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ThinkingToken(
-            "The user has sent a simple greeting (\"hi\"). This is a social interaction.".to_string(),
-        ));
-        app.stop_live_message();
-
-        app.handle_bridge_event(BridgeEvent::Token(
-            "The user has sent a simple greeting (\"hi\"). This is a social interaction.Hello!"
-                .to_string(),
-        ));
-
-        let live = app.live.as_ref().expect("assistant message should be live");
-        assert_eq!(live.text, "Hello!");
-    }
-
-    #[test]
-    fn thinking_message_repairs_previous_assistant_prefix() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::Token(
-            "The user has sent a simple greeting (\"hi\"). This is a social interaction.Hello!"
-                .to_string(),
-        ));
-        app.stop_live_message();
-
-        app.handle_bridge_event(BridgeEvent::ThinkingToken(
-            "The user has sent a simple greeting (\"hi\"). This is a social interaction."
-                .to_string(),
-        ));
-        app.stop_live_message();
-
-        assert_eq!(app.messages.len(), 2);
-        assert_eq!(app.messages[0].role, Role::Assistant);
-        assert_eq!(app.messages[0].text, "Hello!");
-        assert_eq!(app.messages[1].role, Role::Thinking);
-    }
-
-    #[test]
-    fn final_chat_result_dedupes_assistant_even_with_trailing_thinking_message() {
-        let mut app = App::new();
-
-        app.add_message(Role::Assistant, "Hello!");
-        app.add_message(Role::Thinking, "Reasoning");
-
-        app.handle_chat_result(Ok(json!({
-            "final_response": "Hello!",
-            "tool_calls": [],
-            "iterations": 1,
-            "tool_errors": 0,
-        })));
-
-        assert_eq!(app.messages.len(), 2);
-        assert_eq!(app.messages[0].role, Role::Assistant);
-        assert_eq!(app.messages[0].text, "Hello!");
-        assert_eq!(app.messages[1].role, Role::Thinking);
-    }
-
-    #[test]
-    fn tool_events_are_grouped_into_single_transcript_summary() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ToolStart {
-            name: "read_file".to_string(),
-            args: Some(json!({"path": "src/main.rs"})),
-            sequence: 1,
-        });
-        app.handle_bridge_event(BridgeEvent::ToolEnd {
-            name: "read_file".to_string(),
-            sequence: 1,
-            status: "ok".to_string(),
-            duration_ms: 12,
-            cache_hit: false,
-            error: None,
-            result_preview: Some("path=src/main.rs · lines=120".to_string()),
-            result_output: None,
-            args: Some(json!({"path": "src/main.rs"})),
-        });
-
-        assert!(app.messages.is_empty());
-
-        app.handle_chat_result(Ok(json!({
-            "final_response": "",
-            "tool_calls": [{"name": "read_file"}],
-            "iterations": 1,
-            "tool_errors": 0,
-        })));
-
-        assert_eq!(app.messages.len(), 1);
-        assert_eq!(app.messages[0].role, Role::Tool);
-        assert!(app.messages[0].text.contains("step receipt"));
-        assert!(app.messages[0].text.contains("ok: #1 read_file"));
-        assert_eq!(app.activity_entries().len(), 1);
-    }
-
-    #[test]
-    fn live_step_summary_matches_current_activity_wording() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ToolStart {
-            name: "read_file".to_string(),
-            args: Some(json!({"path": "src/main.rs"})),
-            sequence: 1,
-        });
-
-        let summary = app.live_step_summary(80);
-        assert_eq!(summary.state, ProgressState::Active);
-        assert!(summary.text.contains("#1 read_file"));
-        assert!(summary.text.contains("src/main.rs"));
-    }
-
-    #[test]
-    fn transcript_receipt_is_error_first_and_compact() {
-        let mut app = App::new();
-
-        app.handle_bridge_event(BridgeEvent::ToolStart {
-            name: "read_file".to_string(),
-            args: Some(json!({"path": "src/main.rs"})),
-            sequence: 1,
-        });
-        app.handle_bridge_event(BridgeEvent::ToolEnd {
-            name: "read_file".to_string(),
-            sequence: 1,
-            status: "ok".to_string(),
-            duration_ms: 12,
-            cache_hit: false,
-            error: None,
-            result_preview: Some("path=src/main.rs · lines=120".to_string()),
-            result_output: None,
-            args: Some(json!({"path": "src/main.rs"})),
-        });
-        app.handle_bridge_event(BridgeEvent::ToolStart {
-            name: "write_file".to_string(),
-            args: Some(json!({"path": "src/main.rs"})),
-            sequence: 2,
-        });
-        app.handle_bridge_event(BridgeEvent::ToolEnd {
-            name: "write_file".to_string(),
-            sequence: 2,
-            status: "error".to_string(),
-            duration_ms: 33,
-            cache_hit: false,
-            error: Some("permission denied".to_string()),
-            result_preview: None,
-            result_output: None,
-            args: Some(json!({"path": "src/main.rs"})),
-        });
-
-        app.handle_chat_result(Ok(json!({
-            "final_response": "",
-            "tool_calls": [{"name": "read_file"}, {"name": "write_file"}],
-            "iterations": 1,
-            "tool_errors": 1,
-        })));
-
-        let receipt = &app.messages[0].text;
-        assert!(receipt.contains("step receipt · 2 steps · 1 error"));
-        let error_idx = receipt.find("error:").expect("receipt should include error line");
-        let ok_idx = receipt.find("ok:").expect("receipt should include ok line");
-        assert!(error_idx < ok_idx);
-        assert!(!receipt.contains("activity stack"));
-        assert!(!receipt.contains("├─"));
+    fn thinking_rendering_trims_surrounding_newlines() {
+        let mut message = Message::new_streaming(Role::Thinking);
+        message.append_stream_chunk("\nThe user wants to see a list of available tools, so I'll use the search_tools function with a broad query to get a comprehensive list.\n");
+        assert_eq!(message.rendered.len(), 3);
+        assert_eq!(message.rendered[1].spans[0].content.as_ref(), "⋮ The user wants to see a list of available tools, so I'll use the search_tools function with a broad query to get a comprehensive list.");
     }
 }

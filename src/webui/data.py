@@ -14,13 +14,20 @@ from ..project_memory import (
     load_index,
     parse_frontmatter,
 )
+from ..runtime_paths import legacy_state_root, session_db_path
 from ..repo_graph import load_repo_graph
 from ..repo_registry import load_repo_index
 from ..tools.core.tasks import load_persisted_todos
 
 
 def get_db_path() -> Path:
-    return (Path.cwd() / "agent_sessions.db").resolve()
+    managed = session_db_path()
+    if managed.exists():
+        return managed
+    legacy = legacy_state_root() / "agent_sessions.db"
+    if legacy.exists():
+        return legacy.resolve()
+    return managed
 
 
 def _connect_db() -> sqlite3.Connection:

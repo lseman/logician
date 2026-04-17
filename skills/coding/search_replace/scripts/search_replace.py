@@ -29,7 +29,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
+from skills.coding.bootstrap.runtime_access import get_coding_runtime
 from ._search_replace_helpers import (
     resolve_path as _resolve_path,
     run_subprocess as _run_subprocess,
@@ -237,7 +237,6 @@ def _regex_flags_from_sed(flags: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 
-@tool
 def find_path(
     pattern: str,
     directory: str = ".",
@@ -268,7 +267,6 @@ def find_path(
     )
 
 
-@tool
 def find_in_file(
     path: str,
     pattern: str,
@@ -346,7 +344,6 @@ def find_in_file(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def sed_read(
     path: str,
     line_spec: str = "",
@@ -396,7 +393,6 @@ def sed_read(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def read_file_smart(
     path: str,
     start_line: int = 1,
@@ -479,7 +475,6 @@ def read_file_smart(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def regex_replace(
     path: str,
     pattern: str,
@@ -567,7 +562,6 @@ def regex_replace(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def sed_replace(
     path: str,
     script: str,
@@ -635,7 +629,6 @@ def sed_replace(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def rg_replace(
     pattern: str,
     replacement: str,
@@ -754,7 +747,6 @@ def rg_replace(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def show_diff(
     path_a: str,
     path_b: str = "",
@@ -812,7 +804,6 @@ def show_diff(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def count_in_file(
     path: str,
     pattern: str = "",
@@ -861,7 +852,6 @@ def count_in_file(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def rg_multiline(
     pattern: str,
     directory: str = ".",
@@ -955,4 +945,3 @@ def rg_multiline(
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-__tools__ = [find_path, find_in_file, sed_read, read_file_smart, regex_replace, sed_replace, rg_replace, show_diff, count_in_file, rg_multiline, smart_multi_edit]

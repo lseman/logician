@@ -4,6 +4,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from ..config import Config, ThinkingConfig
+from ..runtime_paths import session_db_path
 
 if TYPE_CHECKING:
     from .core import Agent
@@ -14,7 +15,7 @@ def create_agent(
     system_prompt: str | None = None,
     use_chat_api: bool = True,
     chat_template: str = "chatml",
-    db_path: str = "agent_sessions.db",
+    db_path: str | None = None,
     embedding_model: str | None = None,
     *,
     config_overrides: dict[str, Any] | None = None,
@@ -58,7 +59,7 @@ def create_agent(
         config=cfg,
         use_chat_api=cfg.use_chat_api,
         chat_template=cfg.chat_template,
-        db_path=db_path,
+        db_path=str(db_path or session_db_path()),
         embedding_model=embedding_model,
         lazy_rag=True,
     )

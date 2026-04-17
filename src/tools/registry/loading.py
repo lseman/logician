@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Sequence, get_args, get_origin
 
 from ...mcp.client import MCPClient, MCPToolDef
+from ...startup_profiler import profile_checkpoint
 from ..runtime import (
     ToolParameter,
     ToolRuntimeMetadata,
@@ -25,6 +26,7 @@ class RegistryLoadingMixin:
     """ToolRegistry mixin."""
 
     def load_tools_from_skills(self) -> None:
+        profile_checkpoint("tool_registry.load_tools.start")
         # Historically this auto-loaded every Python module under `skills/`.
         # Now we only register core tools and builtin meta-tools eagerly.
         # Skill modules are lazy: their SKILL.md metadata is used to resolve
@@ -35,6 +37,7 @@ class RegistryLoadingMixin:
         if python_count > 0 or builtin_count > 0:
             self._version += 1
             self._invalidate_skill_resolution_cache()
+        profile_checkpoint("tool_registry.load_tools.complete")
 
     def _register_builtin_tools(self) -> int:
         """Register internal meta-tools that are always available."""

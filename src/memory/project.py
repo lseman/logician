@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import os
+
 from ..aaak_dialect import compress_text_to_aaak
 
 OBS_TYPE_EMOJI: dict[str, str] = {
@@ -17,6 +19,11 @@ OBS_TYPE_EMOJI: dict[str, str] = {
     "decision": "⚖️",
 }
 VALID_TYPES = set(OBS_TYPE_EMOJI)
+
+
+def project_memory_enabled() -> bool:
+    raw = str(os.getenv("LOGICIAN_PROJECT_MEMORY_ENABLED", "1") or "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def get_memory_dir(base_dir: str | Path | None = None) -> Path:
@@ -33,6 +40,8 @@ def get_index_path(base_dir: str | Path | None = None) -> Path:
 
 
 def load_index(base_dir: str | Path | None = None) -> list[dict[str, Any]]:
+    if not project_memory_enabled():
+        return []
     index_path = get_index_path(base_dir)
     if not index_path.exists():
         return []
@@ -46,6 +55,8 @@ def load_index(base_dir: str | Path | None = None) -> list[dict[str, Any]]:
 
 
 def save_index(index: list[dict[str, Any]], base_dir: str | Path | None = None) -> None:
+    if not project_memory_enabled():
+        return
     obs_dir = get_obs_dir(base_dir)
     obs_dir.mkdir(parents=True, exist_ok=True)
     get_index_path(base_dir).write_text(
@@ -55,6 +66,8 @@ def save_index(index: list[dict[str, Any]], base_dir: str | Path | None = None) 
 
 
 def get_observation_content(obs_id: int, base_dir: str | Path | None = None) -> str:
+    if not project_memory_enabled():
+        return ""
     obs_path = get_obs_dir(base_dir) / f"{obs_id:04d}.md"
     if not obs_path.exists():
         return ""
@@ -145,6 +158,8 @@ def _memory_fact_files(base_dir: str | Path | None = None) -> list[Path]:
 
 
 def list_fact_notes(base_dir: str | Path | None = None) -> list[dict[str, Any]]:
+    if not project_memory_enabled():
+        return []
     rows: list[dict[str, Any]] = []
     for file_path in _memory_fact_files(base_dir):
         raw = file_path.read_text(encoding="utf-8", errors="replace")
@@ -192,6 +207,8 @@ def search_project_memory(
     fact_limit: int = 4,
     observation_limit: int = 4,
 ) -> dict[str, list[dict[str, Any]]]:
+    if not project_memory_enabled():
+        return {"facts": [], "observations": []}
     normalized_query = str(query or "").strip().lower()
     facts: list[dict[str, Any]] = []
     for note in list_fact_notes(base_dir):
@@ -255,6 +272,8 @@ def build_memory_context(
     fact_limit: int = 3,
     observation_limit: int = 3,
 ) -> str:
+    if not project_memory_enabled():
+        return ""
     recalled = search_project_memory(
         query,
         base_dir=base_dir,
@@ -309,6 +328,17 @@ def record_observation(
     session_key: str | None = None,
     base_dir: str | Path | None = None,
 ) -> dict[str, Any]:
+    if not project_memory_enabled():
+        return {
+            "disabled": True,
+            "id": 0,
+            "formatted_id": "",
+            "session": str(session_label or ""),
+            "path": "",
+            "timestamp": "",
+            "preview": "",
+            "memory_dir": str(get_memory_dir(base_dir)),
+        }
     normalized_type = str(obs_type or "").strip().lower()
     if normalized_type not in VALID_TYPES:
         raise ValueError(f"Unknown observation type {obs_type!r}. Valid: {sorted(VALID_TYPES)}")
@@ -384,6 +414,8 @@ def record_observation(
 
 
 def rebuild_memory_md(base_dir: str | Path | None = None) -> None:
+    if not project_memory_enabled():
+        return
     memory_dir = get_memory_dir(base_dir)
     memory_dir.mkdir(parents=True, exist_ok=True)
     index = load_index(base_dir)

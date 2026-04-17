@@ -13,9 +13,17 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, List, Literal, Optional, Sequence, TypedDict
 
+from src.runtime_paths import state_path
+from src.skills.path_resolution import (
+    SkillSourceRoot,
+    infer_skill_root_kind,
+    iter_entrypoint_markdown_files,
+    plugin_index_entrypoints_for_root,
+)
 from src.skills.skill_manifest import split_frontmatter
+from src.startup_profiler import profile_checkpoint
 
-from ..runtime import SkillCard, SkillSelection, ToolParameter
+from ..runtime import SkillCard, SkillDefinition, SkillSelection, ToolParameter
 
 try:
     from markdown_it import MarkdownIt
@@ -528,11 +536,26 @@ class CodeBlockExtractor:
 
 class SkillCatalog:
     # Bump when cache schema changes to force invalidation.
-    _CACHE_VERSION = 11
+    _CACHE_VERSION = 12
 
-    def __init__(self, *, skills_md_path: Path, skills_dir_path: Path, log: Any) -> None:
+    def __init__(
+        self,
+        *,
+        skills_md_path: Path,
+        skills_dir_path: Path,
+        additional_skills_dir_paths: list[Path] | None = None,
+        additional_skill_source_roots: list[SkillSourceRoot] | None = None,
+        log: Any,
+    ) -> None:
         self.skills_md_path = skills_md_path
         self.skills_dir_path = skills_dir_path
+        self.additional_skills_dir_paths = [
+            p for p in (additional_skills_dir_paths or []) if p.is_dir()
+        ]
+        self.additional_skill_source_roots = self._normalize_additional_skill_source_roots(
+            additional_skill_source_roots,
+            self.additional_skills_dir_paths,
+        )
         self._log = log
         self._active_lazy_skill_groups: set[str] = set()
         self._skills: dict[str, SkillCard] = {}
@@ -577,6 +600,8 @@ class SkillCatalog:
         # Last per-skill score breakdown for debugging/tuning.
         self._last_skill_score_breakdown: dict[str, dict[str, Any]] = {}
         self._python_skill_metadata: dict[str, dict[str, Any]] = {}
+        # Conditional skills: only activated when file paths match their `paths` filter.
+        self._conditional_skills: dict[str, SkillCard] = {}
 
     @property
     def skills(self) -> dict[str, SkillCard]:
@@ -667,7 +692,55 @@ class SkillCatalog:
         return weights
 
     def _cache_path(self) -> Path:
-        return self.skills_dir_path / ".skills_catalog_cache.json"
+        cache_key_parts = [
+            f"v{self._CACHE_VERSION}",
+            f"skills_md={self.skills_md_path}",
+            f"skills_dir={self.skills_dir_path}",
+            *(
+                f"root:{root.kind}:{root.path}"
+                for root in sorted(
+                    self.additional_skill_source_roots,
+                    key=lambda item: (item.kind, str(item.path)),
+                )
+            ),
+            *sorted(self._active_lazy_skill_groups),
+        ]
+        cache_key = hashlib.sha1("\n".join(cache_key_parts).encode()).hexdigest()
+        cache_path = state_path(f"skill_catalogs/{cache_key}.json")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        return cache_path
+
+    @staticmethod
+    def _normalize_additional_skill_source_roots(
+        roots: Sequence[SkillSourceRoot] | None,
+        fallback_dirs: Sequence[Path],
+    ) -> list[SkillSourceRoot]:
+        normalized: list[SkillSourceRoot] = []
+        seen: set[tuple[str, str]] = set()
+        for item in roots or ():
+            if not item.path.is_dir():
+                continue
+            try:
+                key = (str(item.path.resolve()), item.kind)
+            except Exception:
+                key = (str(item.path), item.kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(item)
+        for path in fallback_dirs:
+            if not path.is_dir():
+                continue
+            kind = infer_skill_root_kind(path)
+            try:
+                key = (str(path.resolve()), kind)
+            except Exception:
+                key = (str(path), kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(SkillSourceRoot(path=path, kind=kind))
+        return normalized
 
     @staticmethod
     def _normalize_lazy_skill_group_name(value: str) -> str:
@@ -693,8 +766,19 @@ class SkillCatalog:
         return bool(group) and group in self._active_lazy_skill_groups
 
     def _catalog_fingerprint(self, skill_md_paths: list[Path]) -> str:
-        """SHA1 over sorted (path, mtime) pairs + cache version."""
-        parts = [f"v{self._CACHE_VERSION}"]
+        """SHA1 over sorted (path, mtime) pairs + cache version + source roots."""
+        parts = [
+            f"v{self._CACHE_VERSION}",
+            f"skills_md={self.skills_md_path}",
+            f"skills_dir={self.skills_dir_path}",
+            *(
+                f"root:{root.kind}:{root.path}"
+                for root in sorted(
+                    self.additional_skill_source_roots,
+                    key=lambda item: (item.kind, str(item.path)),
+                )
+            ),
+        ]
         for p in sorted(skill_md_paths):
             try:
                 parts.append(f"{p}:{p.stat().st_mtime_ns}")
@@ -758,62 +842,66 @@ class SkillCatalog:
             self._log.warning("Failed to write skill catalog cache: %s", exc)
 
     def iter_skills_sources(self) -> list[Path]:
-        """Return all skill .md files, scanning subdirectories recursively.
+        """Return startup entrypoints only: SKILL.md plus explicit command markdown files."""
 
-        Search order:
-        1. skills_md_path if it is a directory (e.g. the ``skills/`` folder).
-        2. A ``skills/`` sibling of the SKILLS.md file.
-        3. skills_md_path itself if it is a single file (backward-compat).
-        4. skills_dir_path as a final fallback.
-        """
+        sources: list[Path] = []
+        seen: set[str] = set()
 
-        def _collect(directory: Path) -> list[Path]:
-            # Use os.walk with followlinks=True to traverse symlinked dirs like
-            # 10_superpowers and 20_ralph (rglob follow_symlinks needs Python 3.13+).
-
-            results: list[Path] = []
-            for root, dirs, files in os.walk(str(directory), followlinks=True):
-                root_path = Path(root)
+        def _append(paths: Sequence[Path]) -> None:
+            for path in paths:
                 try:
-                    rel_parts = root_path.relative_to(directory).parts
+                    key = str(path.resolve())
                 except Exception:
-                    rel_parts = ()
+                    key = str(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                sources.append(path)
 
-                if rel_parts:
-                    top_level = rel_parts[0]
-                    if self._is_lazy_skill_group_dir_name(
-                        top_level
-                    ) and not self._is_lazy_skill_group_active(top_level):
-                        dirs[:] = []
-                        continue
-                else:
-                    dirs[:] = [
-                        d
-                        for d in dirs
-                        if not self._is_lazy_skill_group_dir_name(d)
-                        or self._is_lazy_skill_group_active(d)
-                    ]
-                for fname in files:
-                    if fname.lower().endswith(".md"):
-                        results.append(root_path / fname)
-            return sorted(results)
-
-        if self.skills_md_path.is_dir():
-            return _collect(self.skills_md_path)
+        if self.skills_md_path.is_file():
+            _append([self.skills_md_path])
+        elif self.skills_md_path.is_dir():
+            _append(
+                iter_entrypoint_markdown_files(
+                    self.skills_md_path,
+                    kind=infer_skill_root_kind(self.skills_md_path),
+                    active_lazy_skill_groups=self._active_lazy_skill_groups,
+                )
+            )
 
         sibling_dir = self.skills_md_path.parent / "skills"
         if sibling_dir.is_dir():
-            files = _collect(sibling_dir)
-            if files:
-                return files
-
-        if self.skills_md_path.is_file():
-            return [self.skills_md_path]
+            _append(
+                iter_entrypoint_markdown_files(
+                    sibling_dir,
+                    kind="skills",
+                    active_lazy_skill_groups=self._active_lazy_skill_groups,
+                )
+            )
 
         if self.skills_dir_path.is_dir():
-            return _collect(self.skills_dir_path)
+            _append(
+                iter_entrypoint_markdown_files(
+                    self.skills_dir_path,
+                    kind="skills",
+                    active_lazy_skill_groups=self._active_lazy_skill_groups,
+                )
+            )
 
-        return []
+        for root in self.additional_skill_source_roots:
+            indexed = plugin_index_entrypoints_for_root(root.path, kind=root.kind)
+            if indexed:
+                _append(indexed)
+                continue
+            _append(
+                iter_entrypoint_markdown_files(
+                    root.path,
+                    kind=root.kind,
+                    active_lazy_skill_groups=self._active_lazy_skill_groups,
+                )
+            )
+
+        return sorted(sources)
 
     def read_skill_source_contents(
         self, sources: Sequence[Path] | None = None
@@ -837,17 +925,19 @@ class SkillCatalog:
     def ensure_skill_catalog(self) -> None:
         if self._skills:
             return
+        profile_checkpoint("skill_catalog.ensure.start")
         sources = self.iter_skills_sources()
         if not sources:
+            profile_checkpoint("skill_catalog.ensure.empty")
             return
-        # Fingerprint all markdown sources, because guidance cards may derive
-        # routing keywords from sibling markdown references in the same folder.
         fingerprint = self._catalog_fingerprint(sources)
         if self._load_from_cache(fingerprint):
+            profile_checkpoint("skill_catalog.ensure.cache_hit")
             return
         contents = self.read_skill_source_contents(sources)
         if contents:
             self.build_skill_catalog(contents, _fingerprint=fingerprint)
+            profile_checkpoint("skill_catalog.ensure.rebuilt")
 
     def register_python_skill_metadata(
         self,
@@ -907,7 +997,9 @@ class SkillCatalog:
             self._build_routing_index(cards)
         return changed
 
-    def _parse_superpowers_card(self, source_path: Path, raw_content: str) -> SkillCard | None:
+    def _parse_superpowers_card(
+        self, source_path: Path, raw_content: str
+    ) -> SkillCard | None:
         """Parse a Superpowers-format SKILL.md into a guidance-only SkillCard.
 
         These files:
@@ -954,7 +1046,29 @@ class SkillCatalog:
         # Playbooks: H2 section headings from the body.
         sections = self.parse_markdown_h2_sections(body)
         playbooks = [sec["heading"] for sec in sections if sec["heading"]]
-        related_context = self._guidance_related_markdown_content(source_path)
+        # OpenClaude-compatible fields
+        version = str(manifest.get("version") or "")
+        model = str(manifest.get("model") or "")
+        agent = str(manifest.get("agent") or "")
+        context_val = str(manifest.get("context") or "")
+        effort = str(manifest.get("effort") or "")
+        allowed_tools = self._manifest_list(manifest, "allowed-tools")
+        argument_hint = str(manifest.get("argument-hint") or "")
+        argument_names = self._manifest_list(manifest, "arguments")
+        metadata: dict[str, Any] = {}
+        user_invocable = manifest.get("user-invocable")
+        if user_invocable is not None:
+            metadata["user-invocable"] = user_invocable
+        hooks = manifest.get("hooks")
+        if hooks is not None:
+            if isinstance(hooks, dict):
+                metadata["hooks"] = hooks
+            elif isinstance(hooks, str):
+                metadata["hooks"] = hooks
+        shell = manifest.get("shell")
+        if shell is not None:
+            metadata["shell"] = shell
+        paths = self._manifest_list(manifest, "paths")
         keywords = self._skill_keywords(
             summary,
             playbooks,
@@ -962,7 +1076,7 @@ class SkillCatalog:
             triggers=triggers,
             example_queries=[],
             aliases=aliases,
-            content=f"{body}\n{related_context}",
+            content=body,
             content_max_chars=12000,
         )
         return SkillCard(
@@ -981,12 +1095,32 @@ class SkillCatalog:
             example_queries=[],
             when_not_to_use=when_not_to_use,
             next_skills=[],
+            paths=paths,
+            version=version,
+            model=model,
+            agent=agent,
+            context=context_val,
+            effort=effort,
+            allowed_tools=allowed_tools,
+            argument_hint=argument_hint,
+            argument_names=argument_names,
+            metadata=metadata,
         )
 
     def _normalize_skill_slug(self, raw: str) -> str:
         text = re.sub(r"^\d+[_-]*", "", str(raw or ""))
         text = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
         return text or "skill"
+
+    def _is_extra_skill_source(self, source_path: Path) -> bool:
+        try:
+            for root in self.additional_skill_source_roots:
+                extra_dir = root.path
+                if extra_dir == source_path or extra_dir in source_path.parents:
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _skill_root_for_source(self, source_path: Path) -> Path | None:
         start = source_path if source_path.is_dir() else source_path.parent
@@ -1043,7 +1177,29 @@ class SkillCatalog:
         when_not_to_use = self._manifest_list(manifest, "when_not_to_use")
         next_skills = self._manifest_list(manifest, "next_skills")
         paths = self._manifest_list(manifest, "paths")
-        related_context = self._guidance_related_markdown_content(source_path)
+        # OpenClaude-compatible fields
+        version = str(manifest.get("version") or "")
+        model = str(manifest.get("model") or "")
+        agent = str(manifest.get("agent") or "")
+        context_val = str(manifest.get("context") or "")
+        effort = str(manifest.get("effort") or "")
+        allowed_tools = self._manifest_list(manifest, "allowed-tools")
+        argument_hint = str(manifest.get("argument-hint") or "")
+        argument_names = self._manifest_list(manifest, "arguments")
+        # Build metadata dict for non-standard fields
+        metadata: dict[str, Any] = {}
+        user_invocable = manifest.get("user-invocable")
+        if user_invocable is not None:
+            metadata["user-invocable"] = user_invocable
+        hooks = manifest.get("hooks")
+        if hooks is not None:
+            if isinstance(hooks, dict):
+                metadata["hooks"] = hooks
+            elif isinstance(hooks, str):
+                metadata["hooks"] = hooks
+        shell = manifest.get("shell")
+        if shell is not None:
+            metadata["shell"] = shell
         keywords = self._skill_keywords(
             summary,
             playbooks,
@@ -1051,7 +1207,7 @@ class SkillCatalog:
             triggers=triggers,
             example_queries=example_queries,
             aliases=aliases,
-            content=f"{body}\n{related_context}",
+            content=body,
             content_max_chars=12000,
         )
         return SkillCard(
@@ -1071,72 +1227,16 @@ class SkillCatalog:
             when_not_to_use=when_not_to_use,
             next_skills=next_skills,
             paths=paths,
+            version=version,
+            model=model,
+            agent=agent,
+            context=context_val,
+            effort=effort,
+            allowed_tools=allowed_tools,
+            argument_hint=argument_hint,
+            argument_names=argument_names,
+            metadata=metadata,
         )
-
-    def _guidance_related_markdown_content(self, source_path: Path) -> str:
-        """Collect bounded routing text from all markdown files in a guidance skill.
-
-        We index file names, section headings, and compact body snippets so fuzzy
-        matching can use the full skill folder (not only SKILL.md description),
-        while keeping strict byte limits to avoid over-matching.
-        """
-        root = source_path.parent
-        try:
-            md_files = sorted(p for p in root.rglob("*.md") if p.is_file())
-        except Exception:
-            return ""
-
-        if not md_files:
-            return ""
-
-        # Keep SKILL.md first so canonical metadata remains dominant.
-        ordered: list[Path] = [source_path]
-        ordered.extend(p for p in md_files if p != source_path)
-
-        parts: list[str] = []
-        total_chars = 0
-        max_files = 32
-        max_total_chars = 14000
-        max_snippet_chars = 700
-
-        for idx, md_path in enumerate(ordered):
-            if idx >= max_files:
-                break
-            try:
-                raw = md_path.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            _, body = self._split_frontmatter(raw)
-            body = body.strip()
-            if not body:
-                continue
-
-            try:
-                rel = str(md_path.relative_to(root))
-            except Exception:
-                rel = md_path.name
-
-            headings = [
-                sec["heading"].strip()
-                for sec in self.parse_markdown_h2_sections(body)
-                if sec["heading"].strip()
-            ]
-            headings_text = " | ".join(headings[:20])
-            snippet = self._compact_markdown_excerpt(body, max_chars=max_snippet_chars)
-            chunk = f"{rel}\n{headings_text}\n{snippet}\n"
-
-            if total_chars + len(chunk) > max_total_chars:
-                remaining = max_total_chars - total_chars
-                if remaining <= 200:
-                    break
-                chunk = chunk[:remaining].rstrip()
-            parts.append(chunk)
-            total_chars += len(chunk)
-            if total_chars >= max_total_chars:
-                break
-
-        return "\n".join(parts)
 
     def hydrate_tool_backed_skills(self, tools: Sequence[Any]) -> bool:
         """Ensure the catalog has routable skill cards for Python tool groups.
@@ -1461,6 +1561,14 @@ class SkillCatalog:
                 source_content=source_content,
             )
             if card is None:
+                # Allow plugin-provided markdown docs in extra skill dirs / commands
+                # to be treated as guidance-only skills even when they do not
+                # define explicit Tool sections.
+                if self._is_extra_skill_source(source_path):
+                    card = self._parse_superpowers_card(source_path, source_content)
+                else:
+                    continue
+            if card is None:
                 continue
             cards[card.id] = card
             all_sections.extend(tool_sections)
@@ -1536,17 +1644,165 @@ class SkillCatalog:
         all_sections: list[ToolSection],
         fingerprint: str | None,
     ) -> None:
-        self._skills = cards
+        # Separate conditional skills (those with `paths` filter) from unconditional ones.
+        self._conditional_skills = {}
+        unconditional: dict[str, SkillCard] = {}
+        for sid, card in cards.items():
+            if card.paths:
+                self._conditional_skills[sid] = card
+            else:
+                unconditional[sid] = card
+        self._skills = unconditional
         self._all_tool_sections = all_sections
-        self._build_routing_index(cards)
+        self._build_routing_index(unconditional)
         self._log.info(
-            "Skill routing catalog ready: skills=%d profiles=%d rapidfuzz=%s",
+            "Skill routing catalog ready: skills=%d conditional=%d profiles=%d rapidfuzz=%s",
             len(self._skills),
+            len(self._conditional_skills),
             len(self._routing_profiles),
             "enabled" if HAS_RAPIDFUZZ else "disabled",
         )
         if fingerprint:
             self._save_to_cache(fingerprint)
+
+    def activate_conditional_skills(
+        self, file_paths: list[str], cwd: str = ""
+    ) -> list[str]:
+        """Activate conditional skills whose `paths` filter matches any of the given file paths.
+
+        Follows the openclaude pattern: walk up from file paths looking for skills
+        in `.claude/skills` directories is handled separately (dynamic discovery).
+        This method only handles skills that were loaded at startup with `paths` filters.
+
+        Returns the list of skill IDs that were newly activated.
+        """
+        if not self._conditional_skills or not file_paths:
+            return []
+
+        import fnmatch as _fnmatch
+
+        cwd = str(cwd or "").rstrip("/")
+        activated: list[str] = []
+
+        for sid, card in list(self._conditional_skills.items()):
+            if not card.paths:
+                continue
+            for file_path in file_paths:
+                rel_path = str(file_path or "")
+                if cwd and file_path.startswith(cwd):
+                    rel_path = str(file_path)[len(cwd) + 1 :]
+                for pattern in card.paths:
+                    if _fnmatch.fnmatch(rel_path, pattern):
+                        # Move from conditional to active
+                        self._skills[sid] = card
+                        del self._conditional_skills[sid]
+                        activated.append(sid)
+                        self._log.debug(
+                            "Activated conditional skill '%s' (matched %s in %s)",
+                            sid,
+                            pattern,
+                            rel_path,
+                        )
+                        break
+                if sid in self._skills:
+                    break
+
+        return activated
+
+    def get_conditional_skill_ids(self) -> list[str]:
+        """Return IDs of currently unactivated conditional skills."""
+        return list(self._conditional_skills.keys())
+
+    # --- Dynamic skill discovery (openclaude pattern) ---
+
+    def discover_skill_dirs(
+        self, file_paths: list[str], cwd: str = ""
+    ) -> list[Path]:
+        """Discover `.claude/skills` directories by walking up from file paths.
+
+        Follows the openclaude pattern: walk up from each file path toward cwd,
+        only discovering directories BELOW cwd (cwd-level skills are loaded at
+        startup). Returns newly discovered dirs sorted deepest first.
+        """
+        import os as _os
+
+        resolved_cwd = str(cwd or "").rstrip("/")
+        new_dirs: list[Path] = []
+        discovered = set()
+
+        for file_path in file_paths:
+            current_dir = str(Path(file_path).parent)
+            # Walk up to cwd but NOT including cwd itself
+            while current_dir.startswith(resolved_cwd + "/") if resolved_cwd else True:
+                skill_dir = Path(current_dir) / ".claude" / "skills"
+                if str(skill_dir) not in discovered and skill_dir.is_dir():
+                    discovered.add(str(skill_dir))
+                    new_dirs.append(skill_dir)
+                parent = _os.path.dirname(current_dir)
+                if parent == current_dir:
+                    break
+                current_dir = parent
+
+        # Sort by path depth (deepest first) so skills closer to files take precedence
+        new_dirs.sort(key=lambda p: len(str(p).split("/")), reverse=True)
+        return new_dirs
+
+    def load_discovered_skills(self, dirs: list[Path]) -> int:
+        """Load skills from discovered directories and merge into catalog.
+
+        Skills from deeper directories override shallower ones (last write wins).
+        Returns the number of skills loaded.
+        """
+        if not dirs:
+            return 0
+
+        all_skills: list[tuple[Path, str]] = []
+        for skill_dir in dirs:
+            try:
+                for md_file in sorted(skill_dir.rglob("*.md")):
+                    if md_file.name.lower() != "skill.md":
+                        continue
+                    all_skills.append((md_file, md_file.read_text(encoding="utf-8")))
+            except Exception:
+                continue
+
+        if not all_skills:
+            return 0
+
+        # Process in reverse order (shallower first) so deeper paths override
+        new_count = 0
+        for source_path, source_content in reversed(all_skills):
+            card = self._parse_tool_backed_skill_card(source_path, source_content)
+            if card is None:
+                card = self._parse_superpowers_card(source_path, source_content)
+            if card:
+                old_card = self._skills.get(card.id)
+                self._skills[card.id] = card
+                # Remove from conditional if it was there
+                self._conditional_skills.pop(card.id, None)
+                if old_card is None:
+                    new_count += 1
+                # Merge tool sections if any
+                if card.tool_names:
+                    for sec in self._all_tool_sections:
+                        if sec["name"] not in {
+                            s["name"] for s in self._all_tool_sections
+                        }:
+                            pass  # tool sections are per-file, not per-card
+                self._log.debug(
+                    "Loaded discovered skill '%s' from %s",
+                    card.id,
+                    source_path,
+                )
+
+        if new_count > 0:
+            self._build_routing_index(self._skills)
+            self._log.info(
+                "Discovered %d new skills from %d directory(ies)",
+                new_count,
+                len(dirs),
+            )
+        return new_count
 
     def _build_routing_index(self, cards: dict[str, SkillCard]) -> None:
         profiles: dict[str, str] = {}
@@ -2067,6 +2323,34 @@ class SkillCatalog:
             if not explicit_think:
                 return min(score, min_score - 0.01)
         return score
+
+    def activate_conditional_skills(
+        self, file_paths: Sequence[str], cwd: str
+    ) -> list[str]:
+        """Activate skills whose ``paths`` filters match the given file paths.
+
+        Uses gitignore-style glob matching (via ``src.skills.path_matching``).
+        Activated skills are moved from ``_conditional_skills`` to ``_skills``.
+
+        Returns the list of skill IDs that were activated.
+        """
+        from ..skills.path_matching import matches_path_filters
+
+        activated: list[str] = []
+        remaining: dict[str, SkillCard] = {}
+
+        for sid, card in self._conditional_skills.items():
+            if matches_path_filters(file_paths, cwd, card.paths):
+                card._activated = True
+                self._skills[sid] = card
+                # Also add to _conditional_skills as a copy so it stays
+                # available for subsequent routing passes.
+                activated.append(sid)
+            else:
+                remaining[sid] = card
+
+        self._conditional_skills = remaining
+        return activated
 
     def get_last_skill_score_breakdown(self) -> dict[str, dict[str, Any]]:
         return {k: dict(v) for k, v in self._last_skill_score_breakdown.items()}

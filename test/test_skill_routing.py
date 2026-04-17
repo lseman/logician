@@ -114,7 +114,7 @@ Generate options first.
 
             self.assertIn("sp__brainstorming", catalog.skills)
 
-    def test_guidance_routing_uses_related_markdown_files(self) -> None:
+    def test_reference_markdown_stays_lazy_until_skill_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             skill_dir = root / "design-discovery"
@@ -145,14 +145,17 @@ Use blue-sky ideation to explore novel concepts and divergent options.""",
             )
             catalog.ensure_skill_catalog()
 
-            selection = catalog.route_query_to_skills(
-                "let's do blue sky ideation for this product",
-                available_tool_names=[],
+            prompt, selection = catalog.skill_routing_prompt(
+                "Clarify requirements before implementation and use blue sky ideation for this product.",
+                [],
+                lambda **_: "",
                 top_k=1,
             )
 
             self.assertTrue(selection.selected_skills)
             self.assertEqual(selection.selected_skills[0].id, "sp__design_discovery")
+            self.assertIn("ideation-glossary.md", prompt)
+            self.assertIn("Blue Sky Ideation", prompt)
 
     def test_brainstorm_token_routes_to_brainstorming_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -243,6 +246,40 @@ Walk backwards from the failure site until you find the first bad input.""",
             catalog.ensure_skill_catalog()
 
             self.assertEqual(set(catalog.skills.keys()), {"sp__debugging"})
+
+    def test_catalog_startup_scans_entrypoints_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "debugging"
+            refs = skill_dir / "references"
+            refs.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                """```skill
+---
+name: Debugging
+description: Use when debugging flaky tests.
+---
+
+## Steps
+1. Reproduce.
+2. Trace root cause.
+```""",
+                encoding="utf-8",
+            )
+            (skill_dir / "README.md").write_text("# Debugging helpers", encoding="utf-8")
+            (refs / "root-cause-tracing.md").write_text(
+                "## Root Cause Tracing\nStart from the symptom and walk backward.",
+                encoding="utf-8",
+            )
+
+            catalog = SkillCatalog(
+                skills_md_path=root,
+                skills_dir_path=root,
+                log=logging.getLogger("test.skill_routing"),
+            )
+
+            sources = catalog.iter_skills_sources()
+            self.assertEqual(sources, [skill_dir / "SKILL.md"])
 
     def test_folder_skill_with_scripts_dir_hydrates_tool_backed_card(self) -> None:
         prev_skills_dir = os.environ.get("AGENT_SKILLS_DIR")

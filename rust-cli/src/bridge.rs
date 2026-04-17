@@ -65,15 +65,18 @@ pub enum BridgeEvent {
         diff: String,
     },
     /// Lifecycle state update for a subsystem (mcp or plugin)
+    #[allow(dead_code)]
     Lifecycle {
         subsystem: String,
         payload: Value,
     },
     /// Compact session memory (compaction event)
+    #[allow(dead_code)]
     Compaction {
         payload: Value,
     },
     /// Session summary event
+    #[allow(dead_code)]
     Summary {
         payload: Value,
     },

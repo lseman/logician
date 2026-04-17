@@ -574,7 +574,26 @@ class ToolCall:
 
 
 @dataclass
-class SkillCard:
+class SkillDefinition:
+    """
+    Unified skill definition combining routing/metadata (SkillCard) and
+    rendering capabilities (Skill) into a single dataclass.
+
+    Replaces the previous dual-type system (SkillCard + Skill) with one
+    type that supports both skill routing and prompt rendering.
+
+    Fields from SkillCard (routing/metadata):
+        id, name, summary, source_path, description, tool_names, playbooks,
+        keywords, aliases, triggers, anti_triggers, preferred_tools,
+        example_queries, when_not_to_use, next_skills, paths, and all
+        OpenClaude-compatible fields (version, model, agent, context,
+        effort, allowed_tools, argument_hint, argument_names, metadata).
+
+    Fields from Skill (rendering):
+        body, frontmatter, base_dir, _activated.
+    """
+
+    # Routing / metadata fields
     id: str
     name: str
     summary: str
@@ -592,13 +611,95 @@ class SkillCard:
     next_skills: list[str] = field(default_factory=list)
     paths: list[str] = field(default_factory=list)
 
+    # OpenClaude-compatible fields
+    version: str = ""
+    model: str = ""
+    agent: str = ""
+    context: str = ""
+    effort: str = ""
+    allowed_tools: list[str] = field(default_factory=list)
+    argument_hint: str = ""
+    argument_names: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    # Rendering fields (from legacy Skill dataclass)
+    body: str = ""
+    frontmatter: dict[str, Any] = field(default_factory=dict)
+    base_dir: str = ""
+    _activated: bool = False
+
+    # ------------------------------------------------------------------
+    # Rendering helpers (moved from legacy Skill dataclass)
+    # ------------------------------------------------------------------
+
+    def is_callable(self) -> bool:
+        """Whether this skill has executable scripts or tools."""
+        fm = self.frontmatter
+        if fm.get("callable"):
+            return True
+        if "scripts" in fm or "script" in fm:
+            return True
+        return bool(self.tool_names)
+
+    def user_facing_name(self) -> str:
+        """Display name for user-facing output."""
+        fm_name = self.frontmatter.get("name")
+        if fm_name:
+            return str(fm_name)
+        # Fall back to name field (usually slug-cased)
+        return self.name
+
+    def render_prompt(self, args: dict[str, Any], session_id: str = "") -> str:
+        """
+        Render the skill prompt with template substitution.
+
+        Replaces patterns like ``${key}``, ``${CLAUDE_SKILL_DIR}``,
+        ``${CLAUDE_SESSION_ID}`` with their values.
+        """
+        prompt = self.body
+        if not prompt:
+            return self.description
+
+        # Build substitution map
+        substitutions: dict[str, str] = {}
+        substitutions["CLAUDE_SKILL_DIR"] = self.base_dir or str(Path(self.source_path).parent)
+        substitutions["CLAUDE_SESSION_ID"] = session_id or ""
+
+        # User-provided args
+        substitutions.update(str(v) for v in args.values() if isinstance(v, str))
+
+        # First pass: user args (most specific)
+        for key, val in args.items():
+            substitutions[key] = str(val)
+
+        # Second pass: built-in substitutions (lower priority)
+        substitutions.update(
+            {
+                "CLAUDE_SKILL_DIR": substitutions["CLAUDE_SKILL_DIR"],
+                "CLAUDE_SESSION_ID": substitutions["CLAUDE_SESSION_ID"],
+            }
+        )
+
+        # Apply substitutions using regex for multi-keyword patterns
+        import re
+
+        for key, val in substitutions.items():
+            pattern = re.compile(re.escape(key))
+            prompt = pattern.sub(val, prompt)
+
+        return prompt
+
 
 @dataclass
 class SkillSelection:
     query: str
-    selected_skills: list[SkillCard]
+    selected_skills: list[SkillDefinition]
     selected_tools: list[str]
     fallback_tools: list[str]
+
+
+# Backward-compatibility alias
+SkillCard = SkillDefinition
 
 
 __all__ = [
@@ -606,6 +707,7 @@ __all__ = [
     "AppState",
     "Context",
     "SkillCard",
+    "SkillDefinition",
     "SkillSelection",
     "Tool",
     "ToolCall",

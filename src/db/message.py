@@ -11,6 +11,7 @@ from typing import Any
 
 from ..logging_utils import get_logger
 from ..messages import Message, MessageRole
+from ..runtime_paths import message_history_vector_path, session_db_path
 from .core import _SQLITE_PRAGMAS, _HNSWCollection, create_vector_collection
 
 
@@ -69,8 +70,8 @@ def _decode_thinking_log(raw: Any) -> list[str] | None:
 
 @dataclass
 class MessageDB:
-    db_path: str = "agent_sessions.db"
-    vector_path: str = "message_history.vector"
+    db_path: str = field(default_factory=lambda: str(session_db_path()))
+    vector_path: str = field(default_factory=lambda: str(message_history_vector_path()))
     embedding_model_name: str = (
         "BAAI/bge-m3|Snowflake/snowflake-arctic-embed-l-v2.0|"
         "Qwen/Qwen3-Embedding-0.6B|nomic-ai/nomic-embed-text-v1.5|"

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json as _json_mod
 from pathlib import Path
 from typing import Any
-from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
+from skills.coding.bootstrap.runtime_access import get_coding_runtime
 
 __skill__ = {
     "name": "Multi Edit",
@@ -83,7 +83,6 @@ def _resolve_path(path: str) -> Path:
     return _runtime().resolve_path(path)
 
 
-@tool
 def multi_edit(replacements: list) -> str:
     """Use when: Make several targeted edits across one or more files in a single turn.
 
@@ -281,7 +280,6 @@ def multi_edit(replacements: list) -> str:
     )
 
 
-__tools__ = [multi_edit]
 
 
 _MULTI_EDIT_GRAMMAR = r"""root          ::= tool-call

@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import logician_bridge
@@ -100,6 +101,81 @@ class BridgeMultiAgentTests(unittest.TestCase):
         self.assertEqual(server.sessions["reviewer"], reviewer_session)
         self.assertIn("switched to 'reviewer'", reply["messages"][0])
         self.assertEqual(reply["state"]["session"], reviewer_session)
+
+    def test_plugins_command_can_enable_and_disable_plugins(self) -> None:
+        class FakeTools:
+            def __init__(self) -> None:
+                self.paths: list[Path] = []
+
+            def set_additional_skills_dir_paths(self, paths: list[Path]) -> None:
+                self.paths = list(paths)
+
+        class FakeAgentWithTools(_FakeAgent):
+            def __init__(self, **kwargs: Any) -> None:
+                super().__init__(**kwargs)
+                self.tools = FakeTools()
+
+        class FakeManager:
+            def __init__(self) -> None:
+                self.enabled = False
+
+            def list_plugins(self) -> dict[str, Any]:
+                return {
+                    "status": "ok",
+                    "plugins": [
+                        {
+                            "plugin_id": "test-plugin@local",
+                            "version": "1.0.0",
+                            "enabled": self.enabled,
+                            "scope": "user",
+                            "install_path": "/tmp/test-plugin",
+                        }
+                    ],
+                }
+
+            def enable(self, name: str) -> dict[str, Any]:
+                self.enabled = True
+                return {"status": "enabled", "message": f"Plugin '{name}' has been enabled."}
+
+            def disable(self, name: str) -> dict[str, Any]:
+                self.enabled = False
+                return {"status": "disabled", "message": f"Plugin '{name}' has been disabled."}
+
+            def skills_paths(self) -> list[Path]:
+                return [Path("/tmp/test-plugin/skills")] if self.enabled else []
+
+        def _fake_create_agent(**kwargs):
+            return FakeAgentWithTools(
+                name=str(kwargs.get("system_prompt") or "agent"),
+                system_prompt=kwargs.get("system_prompt"),
+            )
+
+        plugin_manager = FakeManager()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir))
+            server = logician_bridge.BridgeServer()
+            with (
+                patch("logician_bridge._agent_factory", return_value=_fake_create_agent),
+                patch("logician_bridge._silent_load", side_effect=lambda: contextlib.nullcontext()),
+                patch("src.plugin_manager.manager.PluginManager", return_value=plugin_manager),
+            ):
+                server.init({"config_path": str(config_path)})
+                reply = server.slash({"raw": "/plugins", "config_path": str(config_path)})
+                self.assertIn("Installed plugins", reply["messages"][0])
+
+                reply = server.slash(
+                    {"raw": "/plugins enable test-plugin", "config_path": str(config_path)}
+                )
+                self.assertIn("has been enabled", reply["messages"][0])
+                self.assertEqual(
+                    server._active_agent().tools.paths, [Path("/tmp/test-plugin/skills")]
+                )
+
+                reply = server.slash(
+                    {"raw": "/plugins disable test-plugin", "config_path": str(config_path)}
+                )
+                self.assertIn("has been disabled", reply["messages"][0])
+                self.assertEqual(server._active_agent().tools.paths, [])
 
     def test_reload_recreates_sessions_for_all_agents(self) -> None:
         def _fake_create_agent(**kwargs):

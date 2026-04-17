@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from skills.coding.bootstrap.runtime_access import get_coding_runtime, tool
+from skills.coding.bootstrap.runtime_access import get_coding_runtime
 
 __skill__ = {
     "name": "Git",
@@ -76,7 +76,6 @@ def _find_repo_root(path: str | None = None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-@tool
 def git_status(repo_path: str = "") -> str:
     """Use when: Check what files have changed before committing or reviewing work.
 
@@ -126,7 +125,6 @@ def git_status(repo_path: str = "") -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def git_diff(path: str = "", ref: str = "", staged: bool = False) -> str:
     """Use when: Inspect the actual line-level changes before committing or reviewing.
 
@@ -172,7 +170,6 @@ def git_diff(path: str = "", ref: str = "", staged: bool = False) -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def git_log(n: int = 10, repo_path: str = "", oneline: bool = True) -> str:
     """Use when: Review recent commits to understand codebase history or find a ref.
 
@@ -222,7 +219,6 @@ def git_log(n: int = 10, repo_path: str = "", oneline: bool = True) -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def git_commit(message: str, files: str = "", repo_path: str = "", add_all: bool = False) -> str:
     """Use when: Save a set of changes as a git commit after verifying correctness.
 
@@ -278,7 +274,6 @@ def git_commit(message: str, files: str = "", repo_path: str = "", add_all: bool
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def git_checkpoint(label: str = "agent-checkpoint", repo_path: str = "") -> str:
     """Use when: Save work in progress before making risky changes so they can be undone.
 
@@ -314,7 +309,6 @@ def git_checkpoint(label: str = "agent-checkpoint", repo_path: str = "") -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def git_restore_checkpoint(repo_path: str = "") -> str:
     """Use when: Undo changes since the last git_checkpoint by popping the stash.
 
@@ -338,7 +332,6 @@ def git_restore_checkpoint(repo_path: str = "") -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def git_blame(path: str, start_line: int = 1, end_line: int = 0) -> str:
     """Use when: Trace the origin of specific lines — find who introduced a bug or feature.
 
@@ -394,12 +387,3 @@ def git_blame(path: str, start_line: int = 1, end_line: int = 0) -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-__tools__ = [
-    git_status,
-    git_diff,
-    git_log,
-    git_commit,
-    git_checkpoint,
-    git_restore_checkpoint,
-    git_blame,
-]

@@ -5,11 +5,6 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
-try:
-    import httpx
-except Exception:  # pragma: no cover
-    httpx = None  # type: ignore
-
 from ..logging_utils import get_logger
 from ..messages import Message
 from .common import (
@@ -17,6 +12,22 @@ from .common import (
     format_messages_for_template,
     normalize_chat_api_messages,
 )
+
+_httpx_mod: Any = None
+_httpx_checked = False
+
+
+def _get_httpx() -> Any:
+    global _httpx_mod, _httpx_checked
+    if _httpx_checked:
+        return _httpx_mod
+    _httpx_checked = True
+    try:
+        import httpx as _mod
+        _httpx_mod = _mod
+    except Exception:
+        _httpx_mod = None
+    return _httpx_mod
 
 
 class LlamaCppClient:
@@ -239,6 +250,7 @@ class LlamaCppClient:
         grammar: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> str:
+        httpx = _get_httpx()
         if httpx is None:
             raise ImportError(
                 "httpx is required for the HTTP llama.cpp backend. "
@@ -396,6 +408,7 @@ class LlamaCppClient:
             return count_tokens_local(text)
 
         # Slower-but-exact server path when tiktoken is not installed.
+        httpx = _get_httpx()
         if httpx is None:
             return count_tokens_local(text)
         try:

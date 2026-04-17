@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from src.skills.loader import load_skill_from_path
-
-from ..runtime import SkillCard, SkillSelection
+from ..runtime import SkillCard, SkillDefinition, SkillSelection
 from .types import _SKILL_PREFIX_SEPARATORS
 
 _ROUTING_META_TOOL_NAMES = (
@@ -485,6 +484,19 @@ class RegistryRoutingMixin:
 
         args_str = str(args or "").strip()
         target_skill = matches[0]
+
+        # Activate conditional skills matching current context files
+        cwd = os.getcwd()
+        if hasattr(self, "_catalog") and hasattr(self._catalog, "activate_conditional_skills"):
+            try:
+                context_files = [
+                    str(p)
+                    for p in Path(cwd).rglob("*")
+                    if p.is_file()
+                ][:50]  # limit to avoid excessive calls
+                self._catalog.activate_conditional_skills(context_files, cwd)
+            except Exception:
+                pass  # best-effort activation
         if not target_skill.tool_names and hasattr(self, "_load_tool_modules_for_skill_id"):
             self._load_tool_modules_for_skill_id(target_skill.id)
             self._sync_catalog_with_registered_tools()
@@ -531,29 +543,26 @@ class RegistryRoutingMixin:
                 )
 
         if args_str:
-            if target_skill.source_path is not None:
-                skill_path = Path(target_skill.source_path)
-                if skill_path.is_file() and skill_path.name.upper() == "SKILL.MD":
-                    try:
-                        skill = load_skill_from_path(str(skill_path))
-                        rendered_prompt = skill.render_prompt(parsed_args or {})
-                        return json.dumps(
-                            {
-                                "status": "ok",
-                                "prompt": rendered_prompt,
-                                "forced_skill_ids": self._forced_skill_ids,
-                            },
-                            ensure_ascii=False,
-                        )
-                    except Exception as e:
-                        return json.dumps(
-                            {
-                                "status": "error",
-                                "error": f"Skill prompt execution failed: {e}",
-                                "forced_skill_ids": self._forced_skill_ids,
-                            },
-                            ensure_ascii=False,
-                        )
+            # SkillDefinition has render_prompt() directly — no need to load separately
+            try:
+                rendered_prompt = target_skill.render_prompt(parsed_args or {})
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "prompt": rendered_prompt,
+                        "forced_skill_ids": self._forced_skill_ids,
+                    },
+                    ensure_ascii=False,
+                )
+            except Exception as e:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"Skill prompt execution failed: {e}",
+                        "forced_skill_ids": self._forced_skill_ids,
+                    },
+                    ensure_ascii=False,
+                )
             return json.dumps(
                 {
                     "status": "error",

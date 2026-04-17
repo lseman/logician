@@ -17,7 +17,6 @@ from __future__ import annotations
 import difflib
 import re
 from pathlib import Path
-from skills.coding.bootstrap.runtime_access import tool
 
 __skill__ = {
     "name": "Patch",
@@ -174,7 +173,6 @@ def _apply_patch(original: str, diff_text: str) -> tuple[bool, str, str]:
 # ---------------------------------------------------------------------------
 
 
-@tool
 def diff_preview(path: str, new_content: str, context: int = 3) -> str:
     """Use when: You want to review what would change before patching a file.
 
@@ -229,7 +227,6 @@ def diff_preview(path: str, new_content: str, context: int = 3) -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def diff_two_files(path_a: str, path_b: str, context: int = 3) -> str:
     """Use when: Compare two versions of a file (e.g. original vs modified copy).
 
@@ -288,7 +285,6 @@ def diff_two_files(path_a: str, path_b: str, context: int = 3) -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def apply_unified_diff(path: str, diff: str) -> str:
     """Use when: Apply a targeted patch to an existing file using a unified diff.
 
@@ -351,7 +347,6 @@ def apply_unified_diff(path: str, diff: str) -> str:
         return _safe_json({"status": "error", "error": str(exc)})
 
 
-@tool
 def multi_patch(patches: list[dict]) -> str:
     """Use when: Edit several files at once as part of a single logical change.
 
@@ -461,4 +456,3 @@ def multi_patch(patches: list[dict]) -> str:
     )
 
 
-__tools__ = [diff_preview, diff_two_files, apply_unified_diff, multi_patch]
