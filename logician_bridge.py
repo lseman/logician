@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import sys
+import threading
 import uuid
 import warnings
 from functools import lru_cache
@@ -553,6 +554,14 @@ class BridgeServer:
         self.pipeline: dict[str, Any] | None = None
         self._recent_rag_queries: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._session_start_hook_plugin_ids_cache: set[str] | None = None
+        self._startup_hook_lock = threading.Lock()
+        self._startup_hook_thread: threading.Thread | None = None
+        self._startup_hook_generation = 0
+        self._startup_hook_started = False
+        self._startup_hook_complete = True
+        self._startup_hook_contexts: list[str] = []
+        self._startup_hook_count = 0
+        self._startup_hook_errors: list[str] = []
 
     def _emit(self, event: str, payload: dict[str, Any]) -> None:
         msg = {"event": event, **payload}
@@ -568,7 +577,12 @@ class BridgeServer:
         sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
         sys.stdout.flush()
 
-    def _load_agents(self, config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _load_agents(
+        self,
+        config_path: Path,
+        *,
+        fast_init: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         with config_path.open("r", encoding="utf-8") as f:
             cfg = json.load(f)
 
@@ -591,6 +605,8 @@ class BridgeServer:
             # Backward-compat alias used by agent_config.json.
             if "mcp_servers" not in ov and (mcp := merged.get("mcp")):
                 ov["mcp_servers"] = mcp
+            if fast_init:
+                ov["lazy_mcp_init"] = True
             return ov
 
         def make_agent(block: dict[str, Any]):
@@ -639,6 +655,14 @@ class BridgeServer:
 
     def _invalidate_startup_hook_cache(self) -> None:
         self._session_start_hook_plugin_ids_cache = None
+        with self._startup_hook_lock:
+            self._startup_hook_generation += 1
+            self._startup_hook_thread = None
+            self._startup_hook_started = False
+            self._startup_hook_complete = True
+            self._startup_hook_contexts = []
+            self._startup_hook_count = 0
+            self._startup_hook_errors = []
 
     def _session_start_hook_plugin_ids(self) -> set[str]:
         if self._session_start_hook_plugin_ids_cache is not None:
@@ -659,26 +683,196 @@ class BridgeServer:
         self._session_start_hook_plugin_ids_cache = set(plugin_ids)
         return plugin_ids
 
+    def _startup_hook_snapshot(self) -> tuple[list[str], int, bool, list[str]]:
+        with self._startup_hook_lock:
+            return (
+                list(self._startup_hook_contexts),
+                int(self._startup_hook_count or 0),
+                bool(self._startup_hook_complete),
+                list(self._startup_hook_errors),
+            )
+
+    def _warm_mcp_servers_async(self) -> None:
+        def _worker() -> None:
+            for agent in list(self.agents.values()):
+                try:
+                    ensure_loaded = getattr(agent, "_ensure_mcp_servers_loaded", None)
+                    if callable(ensure_loaded):
+                        ensure_loaded()
+                except Exception:
+                    continue
+
+        thread = threading.Thread(target=_worker, name="bridge-mcp-warmup", daemon=True)
+        thread.start()
+
+    def _start_startup_hooks_async(self, source: str = "startup") -> None:
+        with self._startup_hook_lock:
+            if self._startup_hook_started:
+                thread = self._startup_hook_thread
+                if thread is not None and thread.is_alive():
+                    return
+                if self._startup_hook_complete:
+                    return
+            generation = self._startup_hook_generation
+            self._startup_hook_started = True
+            self._startup_hook_complete = False
+            self._startup_hook_contexts = []
+            self._startup_hook_count = 0
+            self._startup_hook_errors = []
+
+        def _worker() -> None:
+            def _progress(kind: str, payload: dict[str, Any]) -> None:
+                self._handle_startup_hook_progress(generation, kind, payload)
+
+            try:
+                from src.hooks import HookEngine
+
+                engine = HookEngine(progress_callback=_progress)
+                result = engine.execute_session_start_hooks(source)
+            except Exception as exc:
+                with self._startup_hook_lock:
+                    if generation != self._startup_hook_generation:
+                        return
+                    self._startup_hook_complete = True
+                    self._startup_hook_errors.append(str(exc))
+                self._emit(
+                    "lifecycle",
+                    {
+                        "subsystem": "startup_hook",
+                        "payload": {"state": "failed", "error": str(exc)},
+                    },
+                )
+                return
+
+            with self._startup_hook_lock:
+                if generation != self._startup_hook_generation:
+                    return
+                self._startup_hook_contexts = list(result.additional_contexts)
+                self._startup_hook_count = int(result.hook_count or 0)
+                self._startup_hook_errors = list(result.errors or [])
+                self._startup_hook_complete = True
+
+        thread = threading.Thread(
+            target=_worker,
+            name=f"bridge-startup-hooks-{generation}",
+            daemon=True,
+        )
+        with self._startup_hook_lock:
+            self._startup_hook_thread = thread
+        thread.start()
+
+    def _wait_for_startup_hooks(self) -> None:
+        thread: threading.Thread | None = None
+        with self._startup_hook_lock:
+            thread = self._startup_hook_thread
+        if thread is not None and thread.is_alive():
+            thread.join()
+
+    def _handle_startup_hook_progress(
+        self,
+        generation: int,
+        kind: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if generation != self._startup_hook_generation:
+            return
+
+        if kind == "discovered":
+            hook_count = int(payload.get("hook_count") or 0)
+            with self._startup_hook_lock:
+                if generation != self._startup_hook_generation:
+                    return
+                self._startup_hook_count = hook_count
+            self._emit(
+                "lifecycle",
+                {
+                    "subsystem": "startup_hook",
+                    "payload": {"state": "running", "hook_count": hook_count},
+                },
+            )
+            return
+
+        if kind == "context":
+            context = str(payload.get("context") or "").strip()
+            if not context:
+                return
+            with self._startup_hook_lock:
+                if generation != self._startup_hook_generation:
+                    return
+                self._startup_hook_contexts.append(context)
+            self._emit(
+                "lifecycle",
+                {
+                    "subsystem": "startup_hook",
+                    "payload": {
+                        "state": "context",
+                        "context": context,
+                        "plugin_id": str(payload.get("plugin_id") or ""),
+                        "plugin_name": str(payload.get("plugin_name") or ""),
+                    },
+                },
+            )
+            return
+
+        if kind in {"hook_started", "hook_finished"}:
+            self._emit(
+                "lifecycle",
+                {
+                    "subsystem": "startup_hook",
+                    "payload": {
+                        "state": "running" if kind == "hook_started" else "hook_finished",
+                        "plugin_id": str(payload.get("plugin_id") or ""),
+                        "plugin_name": str(payload.get("plugin_name") or ""),
+                        "ordinal": int(payload.get("ordinal") or 0),
+                    },
+                },
+            )
+            return
+
+        if kind == "error":
+            error = str(payload.get("error") or "").strip()
+            if not error:
+                return
+            with self._startup_hook_lock:
+                if generation != self._startup_hook_generation:
+                    return
+                self._startup_hook_errors.append(error)
+            self._emit(
+                "lifecycle",
+                {
+                    "subsystem": "startup_hook",
+                    "payload": {"state": "error", "error": error},
+                },
+            )
+            return
+
+        if kind == "completed":
+            self._emit(
+                "lifecycle",
+                {
+                    "subsystem": "startup_hook",
+                    "payload": {
+                        "state": "complete",
+                        "hook_count": int(payload.get("hook_count") or 0),
+                        "context_count": int(payload.get("context_count") or 0),
+                        "errors": list(payload.get("errors") or []),
+                    },
+                },
+            )
+
     def _plugin_memory_sources(
         self, *, exclude_plugin_ids: set[str] | None = None
     ) -> list[tuple[str, Path]]:
         try:
-            from src.plugin_manager.manager import PluginManager
-            from src.plugin_manager.state import _openclaude_repo_plugins_dir
+            from src.plugin_manager.state import iter_enabled_plugin_install_paths
 
-            manager = PluginManager()
             excluded = {str(pid or "").strip() for pid in (exclude_plugin_ids or set())}
             sources: list[tuple[str, Path]] = []
             seen: set[str] = set()
 
-            for plugin_id, inst in manager.registry.all_installs():
+            for plugin_id, cache in iter_enabled_plugin_install_paths():
                 plugin_id = str(plugin_id or "").strip()
                 if not plugin_id or plugin_id in excluded:
-                    continue
-                if not inst.enabled:
-                    continue
-                cache = Path(inst.install_path)
-                if not cache.is_dir():
                     continue
                 candidates = [
                     cache / "memory",
@@ -694,13 +888,6 @@ class BridgeServer:
                         continue
                     seen.add(key)
                     sources.append((plugin_id, candidate))
-
-            # Also check openclaude repo plugins directly
-            repo_plugins = _openclaude_repo_plugins_dir()
-            if repo_plugins is not None:
-                key = str(repo_plugins.resolve())
-                if key not in seen:
-                    sources.append(("openclaude_repo", repo_plugins))
             return sources
         except Exception:
             return []
@@ -1092,11 +1279,7 @@ class BridgeServer:
             "active_repo_count": len(active_repo_ids),
             "repo_chunks": sum(int(item.get("chunks") or 0) for item in repo_entries),
             "retrieval_count": len(retrieval_insights),
-            "legacy_paths": [
-                str(path)
-                for path in ((ROOT_DIR / "rag_docs.vector"),)
-                if path.exists() and path.resolve() != _rag_vector_path().resolve()
-            ],
+            "legacy_paths": self._legacy_rag_paths(),
             "top_repos": repo_entries[:6],
         }
 
@@ -1105,6 +1288,18 @@ class BridgeServer:
         if actual_chunk_count is not None:
             return actual_chunk_count <= 0
         return int(repo.get("chunks_added", 0) or 0) <= 0
+
+    def _legacy_rag_paths(self) -> list[str]:
+        try:
+            from src.rag_runtime import legacy_rag_vector_paths
+
+            return [
+                str(path)
+                for path in legacy_rag_vector_paths(ROOT_DIR)
+                if path.exists()
+            ]
+        except Exception:
+            return []
 
     def _ingest_repo_record(
         self,
@@ -1423,31 +1618,14 @@ class BridgeServer:
         include_hooks: bool = True,
         fast_hooks: bool = False,
     ) -> dict[str, Any]:
-        hook_context: list[str] = []
-        hook_count = 0
-        hook_context_complete = True
         if include_hooks:
-            try:
-                from src.hooks import HookEngine
+            if fast_hooks:
+                self._start_startup_hooks_async("startup")
+            else:
+                self._start_startup_hooks_async("startup")
+                self._wait_for_startup_hooks()
 
-                engine = HookEngine()
-                if fast_hooks:
-                    hook_result = engine.execute_session_start_hooks("startup")
-                else:
-                    original_timeout = engine.startup_command_timeout_seconds
-                    original_budget = engine.startup_total_budget_seconds
-                    engine.startup_command_timeout_seconds = float(engine.timeout_seconds)
-                    engine.startup_total_budget_seconds = float(engine.timeout_seconds) * 8.0
-                    hook_result = engine.execute_session_start_hooks("startup")
-                    engine.startup_command_timeout_seconds = original_timeout
-                    engine.startup_total_budget_seconds = original_budget
-                hook_context = hook_result.additional_contexts
-                hook_count = int(hook_result.hook_count or 0)
-                hook_context_complete = not (
-                    fast_hooks and hook_count > 0 and (hook_result.errors or not hook_context)
-                )
-            except Exception:
-                pass
+        hook_context, hook_count, hook_context_complete, _hook_errors = self._startup_hook_snapshot()
 
         memory_summary = (
             self._parse_memory_summary(exclude_session_start_hook_plugins=True)
@@ -1475,15 +1653,18 @@ class BridgeServer:
         if not config_path.exists():
             raise FileNotFoundError(f"config not found: {config_path}")
 
-        self.cfg, self.agents = self._load_agents(config_path)
+        fast_init = bool(params.get("fast", True))
+        self.cfg, self.agents = self._load_agents(config_path, fast_init=fast_init)
         first = next(iter(self.agents.keys()))
         self.active = first
-        self.sessions = {first: _new_session_id()}
+        self.sessions = {name: _new_session_id() for name in self.agents.keys()}
         self.pipeline = None
         self._invalidate_startup_hook_cache()
         if self.cfg.get("project_memory_enabled", True):
             self._inject_project_memory(exclude_session_start_hook_plugins=True)
-        fast_init = bool(params.get("fast", True))
+        if fast_init:
+            self._start_startup_hooks_async("startup")
+            self._warm_mcp_servers_async()
 
         return {
             "config_path": str(config_path),
@@ -1654,7 +1835,9 @@ class BridgeServer:
                                 plugin_paths = manager.skills_paths()
                                 preserved = [
                                     p
-                                    for p in agent.tools.additional_skills_dir_paths
+                                    for p in list(
+                                        getattr(agent.tools, "additional_skills_dir_paths", []) or []
+                                    )
                                     if p not in plugin_paths
                                 ]
                                 agent.tools.set_additional_skills_dir_paths(
@@ -1677,7 +1860,9 @@ class BridgeServer:
                                 plugin_paths = manager.skills_paths()
                                 preserved = [
                                     p
-                                    for p in agent.tools.additional_skills_dir_paths
+                                    for p in list(
+                                        getattr(agent.tools, "additional_skills_dir_paths", []) or []
+                                    )
                                     if p not in plugin_paths
                                 ]
                                 agent.tools.set_additional_skills_dir_paths(
@@ -2071,7 +2256,7 @@ class BridgeServer:
             cp = _resolve_config_path(params.get("config_path"))
             self.cfg, self.agents = self._load_agents(cp)
             self.active = next(iter(self.agents.keys()))
-            self.sessions = {self.active: _new_session_id()}
+            self.sessions = {name: _new_session_id() for name in self.agents.keys()}
             self.pipeline = None
             self._invalidate_startup_hook_cache()
             if self.cfg.get("project_memory_enabled", True):

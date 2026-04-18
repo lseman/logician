@@ -81,17 +81,6 @@ def _openclaude_plugins_dir() -> Path | None:
     return None
 
 
-def _openclaude_repo_plugins_dir() -> Path | None:
-    """Find plugins in the openclaude repo checked out under logician."""
-    root = Path(__file__).resolve().parent.parent.parent
-    openclaude_repo = root / "repos" / "openclaude"
-    if openclaude_repo.is_dir():
-        plugins_dir = openclaude_repo / "plugins"
-        if plugins_dir.is_dir():
-            return plugins_dir
-    return None
-
-
 def _plugins_base_dir() -> Path:
     """Resolve ~/.claude/plugins (respects CLAUDE_CODE_PLUGIN_CACHE_DIR env var).
 
@@ -109,6 +98,29 @@ def _plugins_base_dir() -> Path:
     if openclaude is not None:
         return openclaude
     return Path.home() / ".claude" / "plugins"
+
+
+def iter_enabled_plugin_install_paths(
+    plugins_dir: Path | None = None,
+) -> list[tuple[str, Path]]:
+    """Return enabled installed plugin roots from the shared registry.
+
+    Runtime callers should use this instead of reaching into ad-hoc dev-only
+    repo paths. It keeps plugin discovery aligned with the same installed
+    plugin state that Claude Code/OpenClaude use.
+    """
+
+    registry = InstalledPluginsRegistry(plugins_dir)
+    results: list[tuple[str, Path]] = []
+    for plugin_id, inst in registry.all_installs():
+        plugin_id = str(plugin_id or "").strip()
+        if not plugin_id or not inst.enabled:
+            continue
+        install_path = Path(inst.install_path).expanduser().resolve()
+        if not install_path.is_dir():
+            continue
+        results.append((plugin_id, install_path))
+    return results
 
 
 class InstalledPluginsRegistry:

@@ -774,6 +774,16 @@ impl PythonBridge {
             "bridge_exit" => {
                 BridgeEvent::Exit(v.get("code").and_then(|c| c.as_i64()).map(|c| c as i32))
             }
+            "lifecycle" => BridgeEvent::Lifecycle {
+                subsystem: v["subsystem"].as_str().unwrap_or("").to_string(),
+                payload: v.get("payload").cloned().unwrap_or_default(),
+            },
+            "compaction" => BridgeEvent::Compaction {
+                payload: v.get("payload").cloned().unwrap_or_default(),
+            },
+            "summary" => BridgeEvent::Summary {
+                payload: v.get("payload").cloned().unwrap_or_default(),
+            },
             _ => return,
         };
 

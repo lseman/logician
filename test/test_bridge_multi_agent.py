@@ -1,12 +1,14 @@
 import contextlib
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import logician_bridge
+from src.hooks import SessionStartResult
 
 
 class _FakeMcpClient:
@@ -73,11 +75,64 @@ class BridgeMultiAgentTests(unittest.TestCase):
         self.assertEqual(sorted(result["state"]["agents"]), ["coder", "reviewer"])
         self.assertEqual(len(created), 2)
         overrides = created[0]["config_overrides"]
-        self.assertFalse(overrides["prompt_rag_context_enabled"])
-        self.assertFalse(overrides["startup_warmup_llm"])
-        self.assertTrue(overrides["startup_background_warmup"])
-        self.assertTrue(overrides["startup_warmup_skills"])
-        self.assertTrue(str(overrides["memory_palace_db_path"]).endswith("memory_palace.db"))
+        self.assertTrue(str(overrides["vector_path"]).endswith("message_history.vector"))
+        self.assertTrue(str(overrides["rag_vector_path"]).endswith("rag_docs.vector"))
+        self.assertTrue(overrides["lazy_mcp_init"])
+
+    def test_fast_init_defers_startup_hooks(self) -> None:
+        created: list[dict[str, object]] = []
+
+        def _fake_create_agent(**kwargs):
+            created.append(kwargs)
+            return _FakeAgent(
+                name=str(kwargs.get("system_prompt") or "agent"),
+                system_prompt=kwargs.get("system_prompt"),
+            )
+
+        class SlowHookEngine:
+            def __init__(self, *args, progress_callback=None, **kwargs) -> None:
+                self._progress_callback = progress_callback
+
+            def execute_session_start_hooks(self, source: str = "startup") -> SessionStartResult:
+                if self._progress_callback is not None:
+                    self._progress_callback("discovered", {"source": source, "hook_count": 1})
+                time.sleep(0.2)
+                if self._progress_callback is not None:
+                    self._progress_callback(
+                        "context",
+                        {
+                            "source": source,
+                            "ordinal": 0,
+                            "plugin_id": "demo@test",
+                            "plugin_name": "demo",
+                            "context": "Deferred hook context",
+                        },
+                    )
+                    self._progress_callback(
+                        "completed",
+                        {"source": source, "hook_count": 1, "context_count": 1, "errors": []},
+                    )
+                return SessionStartResult(
+                    additional_contexts=["Deferred hook context"],
+                    hook_count=1,
+                )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = self._write_config(Path(tmpdir))
+            server = logician_bridge.BridgeServer()
+            with (
+                patch("logician_bridge._agent_factory", return_value=_fake_create_agent),
+                patch("logician_bridge._silent_load", side_effect=lambda: contextlib.nullcontext()),
+                patch("src.hooks.HookEngine", SlowHookEngine),
+            ):
+                start = time.perf_counter()
+                result = server.init({"config_path": str(config_path), "fast": True})
+                elapsed = time.perf_counter() - start
+
+        self.assertLess(elapsed, 0.15, f"expected fast init to return quickly, took {elapsed:.3f}s")
+        self.assertFalse(result["hook_context_complete"])
+        self.assertEqual(result["hook_context"], [])
+        self.assertTrue(created[0]["config_overrides"]["lazy_mcp_init"])
 
     def test_agent_command_switches_to_precreated_session(self) -> None:
         def _fake_create_agent(**kwargs):

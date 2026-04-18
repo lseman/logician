@@ -12,13 +12,14 @@ This module provides the HookEngine class that:
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import os
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .loader import HookLoader, LoadedHook
 from .types import (
@@ -47,8 +48,15 @@ class SessionStartResult:
 class HookEngine:
     """Executes hooks and collects their results."""
 
-    def __init__(self, timeout_seconds: int = 30) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int = 30,
+        *,
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        loader: HookLoader | None = None,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
+        self.progress_callback = progress_callback
         self.startup_command_timeout_seconds = self._env_float(
             "LOGICIAN_STARTUP_HOOK_TIMEOUT_MS",
             default=1200.0,
@@ -66,7 +74,7 @@ class HookEngine:
                 )
             ),
         )
-        self.loader = HookLoader()
+        self.loader = loader or HookLoader()
 
     def execute_session_start_hooks(
         self, source: str = "startup"
@@ -75,16 +83,43 @@ class HookEngine:
         result = SessionStartResult()
         hooks = self.loader.get_session_start_hooks()
         result.hook_count = len(hooks)
+        self._notify("discovered", source=source, hook_count=result.hook_count)
         deadline = None
         source_name = str(source or "").strip().lower()
         if source_name == "startup":
-            deadline = time.perf_counter() + max(0.0, self.startup_total_budget_seconds)
+            deadline = time.perf_counter() + max(
+                0.0,
+                self.startup_total_budget_seconds,
+                self._recommended_startup_budget_seconds(hooks),
+            )
             self._execute_startup_hooks_parallel(hooks, result, source, deadline)
+            self._notify(
+                "completed",
+                source=source,
+                hook_count=result.hook_count,
+                context_count=len(result.additional_contexts),
+                errors=list(result.errors),
+            )
             return result
 
-        for loaded_hook in hooks:
+        for ordinal, loaded_hook in enumerate(hooks):
+            self._notify(
+                "hook_started",
+                source=source,
+                ordinal=ordinal,
+                plugin_id=loaded_hook.plugin_id,
+                plugin_name=loaded_hook.plugin_name,
+            )
             if deadline is not None and time.perf_counter() >= deadline:
                 result.errors.append("startup hook budget exhausted")
+                self._notify(
+                    "error",
+                    source=source,
+                    ordinal=ordinal,
+                    plugin_id=loaded_hook.plugin_id,
+                    plugin_name=loaded_hook.plugin_name,
+                    error="startup hook budget exhausted",
+                )
                 break
             hook_result = self._execute_hook(loaded_hook, source, deadline=deadline)
             if hook_result:
@@ -92,7 +127,22 @@ class HookEngine:
                 if hook_result.initial_user_message and not result.initial_user_message:
                     result.initial_user_message = hook_result.initial_user_message
                 result.watch_paths.extend(hook_result.watch_paths)
+                self._notify_result(source, ordinal, loaded_hook, hook_result)
+                self._notify(
+                    "hook_finished",
+                    source=source,
+                    ordinal=ordinal,
+                    plugin_id=loaded_hook.plugin_id,
+                    plugin_name=loaded_hook.plugin_name,
+                )
 
+        self._notify(
+            "completed",
+            source=source,
+            hook_count=result.hook_count,
+            context_count=len(result.additional_contexts),
+            errors=list(result.errors),
+        )
         return result
 
     def _execute_startup_hooks_parallel(
@@ -108,7 +158,7 @@ class HookEngine:
             return
 
         max_workers = min(len(tasks), self.startup_max_parallelism)
-        collected: dict[int, HookExecutionResult] = {}
+        collected: dict[int, tuple[LoadedHook, HookExecutionResult]] = {}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
@@ -117,9 +167,17 @@ class HookEngine:
                     loaded_hook,
                     source,
                     deadline,
-                ): ordinal
+                ): (ordinal, loaded_hook)
                 for ordinal, loaded_hook in tasks
             }
+            for ordinal, loaded_hook in tasks:
+                self._notify(
+                    "hook_started",
+                    source=source,
+                    ordinal=ordinal,
+                    plugin_id=loaded_hook.plugin_id,
+                    plugin_name=loaded_hook.plugin_name,
+                )
 
             wait_timeout = None
             if deadline is not None:
@@ -127,21 +185,40 @@ class HookEngine:
 
             try:
                 for future in concurrent.futures.as_completed(future_map, timeout=wait_timeout):
-                    ordinal = future_map[future]
+                    ordinal, loaded_hook = future_map[future]
                     try:
                         cmd_result = future.result()
                     except _HookExecutionTimeout:
-                        result.errors.append("startup hook command timed out")
+                        err = "startup hook command timed out"
+                        result.errors.append(err)
+                        self._notify(
+                            "error",
+                            source=source,
+                            ordinal=ordinal,
+                            plugin_id=loaded_hook.plugin_id,
+                            plugin_name=loaded_hook.plugin_name,
+                            error=err,
+                        )
                         continue
                     except Exception:
                         continue
                     if cmd_result:
-                        collected[ordinal] = cmd_result
+                        collected[ordinal] = (loaded_hook, cmd_result)
+                        self._notify_result(source, ordinal, loaded_hook, cmd_result)
+                    self._notify(
+                        "hook_finished",
+                        source=source,
+                        ordinal=ordinal,
+                        plugin_id=loaded_hook.plugin_id,
+                        plugin_name=loaded_hook.plugin_name,
+                    )
             except concurrent.futures.TimeoutError:
-                result.errors.append("startup hook budget exhausted")
+                err = "startup hook budget exhausted"
+                result.errors.append(err)
+                self._notify("error", source=source, error=err)
 
         for ordinal in sorted(collected):
-            cmd_result = collected[ordinal]
+            _loaded_hook, cmd_result = collected[ordinal]
             result.additional_contexts.extend(cmd_result.additional_contexts)
             if cmd_result.initial_user_message and not result.initial_user_message:
                 result.initial_user_message = cmd_result.initial_user_message
@@ -183,7 +260,15 @@ class HookEngine:
                 continue
 
         # Return aggregated result if we collected any contexts, else None
-        return aggregated if aggregated.additional_contexts else None
+        return (
+            aggregated
+            if (
+                aggregated.additional_contexts
+                or aggregated.initial_user_message
+                or aggregated.watch_paths
+            )
+            else None
+        )
 
     def _execute_command(
         self,
@@ -194,13 +279,18 @@ class HookEngine:
         deadline: float | None = None,
     ) -> HookExecutionResult | None:
         """Execute a single hook command based on its type."""
-        timeout_seconds = self._command_timeout_seconds(source, deadline)
+        timeout_seconds = self._command_timeout_seconds(
+            source,
+            deadline,
+            command_timeout=command.timeout,
+        )
         if timeout_seconds is not None and timeout_seconds <= 0:
             return None
         if command.type == HookCommandType.COMMAND:
             return self._execute_bash_hook(
                 command.command,
                 loaded_hook,
+                source=source,
                 timeout_seconds=timeout_seconds,
             )
         elif command.type == HookCommandType.PROMPT:
@@ -216,6 +306,7 @@ class HookEngine:
         cmd: str | None,
         loaded_hook: LoadedHook,
         *,
+        source: str,
         timeout_seconds: float | None = None,
     ) -> HookExecutionResult | None:
         """Execute a bash command hook."""
@@ -228,6 +319,7 @@ class HookEngine:
             # Build environment with CLAUDE_PLUGIN_ROOT set to plugin root
             env = os.environ.copy()
             env["CLAUDE_PLUGIN_ROOT"] = str(loaded_hook.plugin_dir)
+            hook_input = self._hook_input_json(source)
 
             result = subprocess.run(
                 cmd,
@@ -235,6 +327,7 @@ class HookEngine:
                 capture_output=True,
                 text=True,
                 env=env,
+                input=hook_input,
                 timeout=timeout_seconds if timeout_seconds is not None else self.timeout_seconds,
             )
             output = result.stdout if result.returncode == 0 else result.stderr
@@ -301,10 +394,14 @@ class HookEngine:
             return float(default)
 
     def _command_timeout_seconds(
-        self, source: str, deadline: float | None = None
+        self,
+        source: str,
+        deadline: float | None = None,
+        *,
+        command_timeout: float | None = None,
     ) -> float | None:
-        timeout = float(self.timeout_seconds)
-        if str(source or "").strip().lower() == "startup":
+        timeout = float(command_timeout) if command_timeout is not None else float(self.timeout_seconds)
+        if str(source or "").strip().lower() == "startup" and command_timeout is None:
             timeout = min(timeout, max(0.0, float(self.startup_command_timeout_seconds)))
         if deadline is None:
             return timeout
@@ -312,6 +409,28 @@ class HookEngine:
         if remaining <= 0:
             return 0.0
         return min(timeout, remaining)
+
+    def _recommended_startup_budget_seconds(self, hooks: list[LoadedHook]) -> float:
+        budget = 0.0
+        for loaded_hook in hooks:
+            chain_budget = 0.0
+            for command in loaded_hook.definition.hooks:
+                timeout = command.timeout
+                if timeout is None:
+                    timeout = float(self.startup_command_timeout_seconds)
+                chain_budget += max(0.0, float(timeout))
+            budget = max(budget, chain_budget)
+        return budget
+
+    def _hook_input_json(self, source: str) -> str:
+        payload = {
+            "session_id": "",
+            "transcript_path": "",
+            "cwd": str(Path.cwd()),
+            "hook_event_name": "SessionStart",
+            "source": str(source or "").strip().lower() or "startup",
+        }
+        return json.dumps(payload)
 
     def execute_hook_by_path(
         self, hook_path: Path, source: str = "startup"
@@ -333,3 +452,38 @@ class HookEngine:
             return parse_hook_response(output.strip())
         except Exception:
             return None
+
+    def _notify(self, kind: str, **payload: Any) -> None:
+        cb = self.progress_callback
+        if cb is None:
+            return
+        try:
+            cb(kind, payload)
+        except Exception:
+            return
+
+    def _notify_result(
+        self,
+        source: str,
+        ordinal: int,
+        loaded_hook: LoadedHook,
+        hook_result: HookExecutionResult,
+    ) -> None:
+        for context in hook_result.additional_contexts:
+            self._notify(
+                "context",
+                source=source,
+                ordinal=ordinal,
+                plugin_id=loaded_hook.plugin_id,
+                plugin_name=loaded_hook.plugin_name,
+                context=context,
+            )
+        if hook_result.initial_user_message:
+            self._notify(
+                "initial_user_message",
+                source=source,
+                ordinal=ordinal,
+                plugin_id=loaded_hook.plugin_id,
+                plugin_name=loaded_hook.plugin_name,
+                message=hook_result.initial_user_message,
+            )

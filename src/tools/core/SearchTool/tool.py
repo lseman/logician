@@ -204,12 +204,12 @@ def _coerce_int(value: Any, *, name: str, default: int) -> tuple[int, str | None
     return 0, f"Invalid {name}: expected integer, got {type(value).__name__}"
 
 
-def _run_cmd(cmd: str, cwd: str | None = None, timeout: int = 30) -> dict:
+def _run_cmd(cmd: list[str] | tuple[str, ...] | str, cwd: str | None = None, timeout: int = 30) -> dict:
     """Run a shell command, return {status, exit_code, stdout, stderr}."""
     try:
         proc = subprocess.run(
             cmd,
-            shell=True,
+            shell=isinstance(cmd, str),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -361,8 +361,15 @@ def rg_search(
         parts.append(pattern)
         parts.append(str(root))
 
-        cmd = " ".join(p if re.match(r"^[\w./:@=+,-]+$", p) else f"'{p}'" for p in parts)
-        r = _run_cmd(cmd, timeout=30)
+        r = _run_cmd(parts, timeout=30)
+        if r["exit_code"] not in (0, 1):
+            message = str(r.get("stderr") or r.get("stdout") or "ripgrep search failed").strip()
+            return {
+                "status": "error",
+                "error": message,
+                "tool_used": "rg",
+                "pattern": pattern,
+            }
 
         raw_lines = r["stdout"].splitlines()
         matches: list[dict] = []
@@ -545,8 +552,15 @@ def fd_find(
         parts.append(pattern)
         parts.append(str(root))
 
-        cmd = " ".join(p if re.match(r"^[\w./:@=+,-]+$", p) else f"'{p}'" for p in parts)
-        r = _run_cmd(cmd, timeout=20)
+        r = _run_cmd(parts, timeout=20)
+        if r["exit_code"] != 0:
+            message = str(r.get("stderr") or r.get("stdout") or "fd search failed").strip()
+            return {
+                "status": "error",
+                "error": message,
+                "tool_used": "fd",
+                "pattern": pattern,
+            }
         raw_paths = [ln.strip() for ln in r["stdout"].splitlines() if ln.strip()]
 
         rel_paths_with_mtime: list[tuple[str, float]] = []

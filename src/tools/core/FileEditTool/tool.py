@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import ast
 import difflib
+import json
 import os
 import re
 import tempfile
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ImportError:  # pragma: no cover - Python <3.11 fallback
+    tomllib = None  # type: ignore[assignment]
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - optional dependency
+    yaml = None  # type: ignore[assignment]
 
 from ...text_normalization import normalize_text_for_matching, normalize_text_payload
 from ..FileReadTool.state import (
@@ -616,18 +627,53 @@ def _read_text_preserve_newlines(path: Path) -> str:
 
 
 def _validate_syntax(path: Path, content: str) -> dict[str, Any] | None:
-    if path.suffix.lower() != ".py" or not content.strip():
+    suffix = path.suffix.lower()
+    if not content.strip():
         return None
-    try:
-        ast.parse(content)
-        return None
-    except SyntaxError as exc:
-        return {
-            "line": exc.lineno,
-            "offset": exc.offset,
-            "message": str(exc),
-            "hint": "File was written but contains a Python syntax error. Read the reported line and repair it.",
-        }
+    if suffix == ".py":
+        try:
+            ast.parse(content)
+            return None
+        except SyntaxError as exc:
+            return {
+                "line": exc.lineno,
+                "offset": exc.offset,
+                "message": str(exc),
+                "hint": "File was written but contains a Python syntax error. Read the reported line and repair it.",
+            }
+    if suffix == ".json":
+        try:
+            json.loads(content)
+            return None
+        except json.JSONDecodeError as exc:
+            return {
+                "line": exc.lineno,
+                "offset": exc.colno,
+                "message": str(exc),
+                "hint": "File was written but contains invalid JSON. Check the reported line and column.",
+            }
+    if suffix == ".toml" and tomllib is not None:
+        try:
+            tomllib.loads(content)
+            return None
+        except Exception as exc:
+            return {
+                "message": str(exc),
+                "hint": "File was written but contains invalid TOML. Check the reported location and repair it.",
+            }
+    if suffix in {".yaml", ".yml"} and yaml is not None:
+        try:
+            yaml.safe_load(content)
+            return None
+        except Exception as exc:
+            problem_mark = getattr(exc, "problem_mark", None)
+            return {
+                "line": getattr(problem_mark, "line", 0) + 1 if problem_mark is not None else None,
+                "offset": getattr(problem_mark, "column", 0) + 1 if problem_mark is not None else None,
+                "message": str(exc),
+                "hint": "File was written but contains invalid YAML. Check the reported line and column.",
+            }
+    return None
 
 
 def _detect_newline_style(text: str) -> str:

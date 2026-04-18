@@ -14,6 +14,15 @@ import urllib.request
 from html.parser import HTMLParser
 from typing import Any
 
+_MAX_HTTP_BODY_BYTES = 1_500_000
+_TEXT_CONTENT_TYPES = (
+    "text/",
+    "application/json",
+    "application/javascript",
+    "application/xml",
+    "application/xhtml+xml",
+)
+
 
 class _TextExtractor(HTMLParser):
     """Strip HTML tags and collect visible text."""
@@ -90,7 +99,8 @@ def _http_get(
     *,
     timeout: int = 15,
     headers: dict[str, str] | None = None,
-) -> tuple[int, str, str, list[str]]:
+    max_bytes: int = _MAX_HTTP_BODY_BYTES,
+) -> tuple[int, str, str, list[str], str]:
     req = urllib.request.Request(url, headers=headers or {})
     req.add_header(
         "User-Agent",
@@ -99,22 +109,55 @@ def _http_get(
     opener = urllib.request.build_opener(_RedirectTrackerHandler())
     with opener.open(req, timeout=timeout) as resp:
         charset = resp.headers.get_content_charset() or "utf-8"
-        body = resp.read().decode(charset, errors="replace")
+        raw = resp.read(max_bytes + 1)
+        body = raw[:max_bytes].decode(charset, errors="replace")
         final_url = resp.geturl()
         redirect_chain = []
         for handler in opener.handlers:
             if isinstance(handler, _RedirectTrackerHandler):
                 redirect_chain = handler.redirect_chain
                 break
-        return resp.status, body, final_url, redirect_chain
+        return resp.status, body, final_url, redirect_chain, resp.headers.get_content_type() or ""
+
+
+def _validate_http_url(url: str) -> str | None:
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        return "url must use http or https"
+    if not parsed.netloc:
+        return "url must include a hostname"
+    return None
+
+
+def _is_text_content_type(content_type: str) -> bool:
+    normalized = str(content_type or "").strip().lower()
+    return any(
+        normalized == allowed or normalized.startswith(allowed)
+        for allowed in _TEXT_CONTENT_TYPES
+    )
 
 
 def fetch_url(url: str, timeout: int = 15, max_chars: int = 12000) -> dict[str, Any]:
     """Read the text content of a webpage."""
+    url_error = _validate_http_url(url)
+    if url_error:
+        return {"status": "error", "error": url_error, "url": url}
+    if timeout <= 0:
+        return {"status": "error", "error": "timeout must be >= 1", "url": url}
     if max_chars <= 0:
         return {"status": "error", "error": "max_chars must be >= 1", "url": url}
     try:
-        status, body, final_url, redirect_chain = _http_get(url, timeout=timeout)
+        status, body, final_url, redirect_chain, content_type = _http_get(
+            url,
+            timeout=timeout,
+        )
+        if not _is_text_content_type(content_type):
+            return {
+                "status": "error",
+                "url": url,
+                "final_url": final_url,
+                "error": f"Unsupported content type: {content_type or 'unknown'}",
+            }
         text = _html_to_text(body)
         truncated = len(text) > max_chars
         return {
@@ -123,6 +166,7 @@ def fetch_url(url: str, timeout: int = 15, max_chars: int = 12000) -> dict[str, 
             "final_url": final_url,
             "redirect_chain": redirect_chain,
             "status_code": status,
+            "content_type": content_type,
             "text": text[:max_chars],
             "truncated": truncated,
             "char_count": len(text),
@@ -188,11 +232,13 @@ def web_search(
     blocked_domains: list[str] | None = None,
 ) -> dict[str, Any]:
     """Search the web for up-to-date documentation or errors."""
+    if not str(query or "").strip():
+        return {"status": "error", "query": query, "error": "query must not be empty"}
     limit = min(max(1, n), 20)
     encoded = urllib.parse.quote_plus(query)
     ddg_url = f"https://lite.duckduckgo.com/lite/?q={encoded}"
     try:
-        _, body, _, _ = _http_get(ddg_url, timeout=15)
+        _, body, _, _, _ = _http_get(ddg_url, timeout=15)
     except Exception as exc:
         return {"status": "error", "query": query, "error": str(exc)}
 
@@ -258,9 +304,12 @@ def web_search(
 
 def pypi_info(package_name: str) -> dict[str, Any]:
     """Fetch package metadata from PyPI."""
+    package_name = str(package_name or "").strip()
+    if not package_name:
+        return {"status": "error", "error": "package_name must not be empty"}
     url = f"https://pypi.org/pypi/{urllib.parse.quote(package_name)}/json"
     try:
-        _, body, _, _ = _http_get(url, timeout=10)
+        _, body, _, _, _ = _http_get(url, timeout=10)
         data = json.loads(body)
         info = data.get("info", {})
         return {
@@ -287,16 +336,29 @@ def github_read_file(
     ref: str = "main",
 ) -> dict[str, Any]:
     """Read a text file from a public GitHub repository."""
+    owner = str(owner or "").strip()
+    repo = str(repo or "").strip()
+    path = str(path or "").strip().lstrip("/")
+    ref = str(ref or "main").strip()
+    if not owner or not repo or not path:
+        return {
+            "status": "error",
+            "owner": owner,
+            "repo": repo,
+            "path": path,
+            "error": "owner, repo, and path are required",
+        }
+    encoded_path = "/".join(urllib.parse.quote(part, safe="") for part in path.split("/") if part)
     url = (
         f"https://raw.githubusercontent.com/"
         f"{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/"
-        f"{urllib.parse.quote(ref)}/{path}"
+        f"{urllib.parse.quote(ref)}/{encoded_path}"
     )
     try:
-        status, content, _, _ = _http_get(url, timeout=15)
+        status, content, final_url, _, content_type = _http_get(url, timeout=15)
         if status == 404 and ref == "main":
             fallback_url = url.replace("/main/", "/master/")
-            status, content, _, _ = _http_get(fallback_url, timeout=15)
+            status, content, final_url, _, content_type = _http_get(fallback_url, timeout=15)
             if status == 200:
                 url = fallback_url
             else:
@@ -312,6 +374,8 @@ def github_read_file(
         return {
             "status": "ok",
             "url": url,
+            "final_url": final_url,
+            "content_type": content_type,
             "lines": content.count("\n"),
             "content": content[:max_chars],
             "truncated": truncated,

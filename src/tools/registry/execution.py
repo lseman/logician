@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
 import fnmatch
 import json
 import time
 from typing import Any
 
+from ..compaction import ContentReplacementState, compact_result
 from ..runtime import HAS_TOON, Tool, ToolCall, encode
+from .validation import ValidationResult
 
 
 class RegistryExecutionMixin:
@@ -110,6 +113,292 @@ class RegistryExecutionMixin:
                     error_type="tool_exception",
                 ),
             )
+
+    @staticmethod
+    def _hook_message(payload: Any, default: str) -> str:
+        if isinstance(payload, ValidationResult):
+            issues = payload.issues or []
+            if issues:
+                return issues[0].message
+            return default
+        if isinstance(payload, dict):
+            for key in ("message", "error", "reason", "detail"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        if isinstance(payload, str) and payload.strip():
+            return payload.strip()
+        return default
+
+    @staticmethod
+    def _invoke_tool_hook(
+        callback: Any,
+        *,
+        prepared_args: dict[str, Any],
+        ctx: Any | None,
+        tool: Tool,
+        call: ToolCall,
+    ) -> Any:
+        if not callable(callback):
+            return None
+
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            signature = None
+
+        if signature is None:
+            return callback(prepared_args)
+
+        params = list(signature.parameters.values())
+        if not params:
+            return callback()
+
+        has_var_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+        mapping = {
+            "input": prepared_args,
+            "arguments": prepared_args,
+            "args": prepared_args,
+            "payload": prepared_args,
+            "tool_input": prepared_args,
+            "context": ctx,
+            "ctx": ctx,
+            "runtime_ctx": ctx,
+            "tool": tool,
+            "call": call,
+            "tool_name": tool.name,
+        }
+
+        if has_var_kwargs:
+            filtered_kwargs = {k: v for k, v in mapping.items() if v is not None}
+            return callback(**filtered_kwargs)
+
+        positional_args: list[Any] = []
+        unresolved_named = False
+        for index, param in enumerate(params):
+            if param.kind not in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            ):
+                continue
+            if param.name in mapping:
+                positional_args.append(mapping[param.name])
+                continue
+            unresolved_named = True
+            break
+
+        if not unresolved_named:
+            return callback(*positional_args)
+
+        positional_count = len(
+            [
+                p
+                for p in params
+                if p.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+            ]
+        )
+        if positional_count <= 1:
+            return callback(prepared_args)
+        if positional_count == 2:
+            return callback(prepared_args, ctx)
+        return callback(prepared_args, ctx, tool)
+
+    def _validate_tool_input(
+        self,
+        *,
+        tool: Tool,
+        call: ToolCall,
+        prepared_args: dict[str, Any],
+        ctx: Any | None,
+    ) -> str | None:
+        if not callable(tool.validate_input):
+            return None
+
+        try:
+            result = self._invoke_tool_hook(
+                tool.validate_input,
+                prepared_args=prepared_args,
+                ctx=ctx,
+                tool=tool,
+                call=call,
+            )
+        except Exception as exc:
+            return self._tool_error_payload(
+                call.name,
+                f"validate_input hook failed: {exc}",
+                error_type="execution_error",
+            )
+
+        if isinstance(result, ValidationResult):
+            return None if result.ok else result.to_json()
+        if result in (None, True):
+            return None
+        if result is False:
+            return self._tool_error_payload(
+                call.name,
+                "Tool input was rejected by validate_input.",
+                error_type="invalid_arguments",
+            )
+        if isinstance(result, dict):
+            behavior = str(result.get("behavior") or "").strip().lower()
+            explicit_success = (
+                result.get("result") is True
+                or result.get("ok") is True
+                or result.get("valid") is True
+                or result.get("success") is True
+                or behavior in {"allow", "allowed", "approve", "approved", "passthrough", "ok"}
+            )
+            explicit_failure = (
+                result.get("result") is False
+                or result.get("ok") is False
+                or result.get("valid") is False
+                or result.get("success") is False
+                or behavior in {"deny", "block", "blocked", "reject", "rejected", "ask"}
+            )
+            if explicit_success and not explicit_failure:
+                return None
+            if explicit_failure or any(k in result for k in ("message", "error", "reason")):
+                return self._tool_error_payload(
+                    call.name,
+                    self._hook_message(result, "Tool input was rejected by validate_input."),
+                    error_type="invalid_arguments",
+                    validation_result=result,
+                )
+            return None
+        if isinstance(result, str):
+            return self._tool_error_payload(
+                call.name,
+                result,
+                error_type="invalid_arguments",
+            )
+        if not result:
+            return self._tool_error_payload(
+                call.name,
+                "Tool input was rejected by validate_input.",
+                error_type="invalid_arguments",
+            )
+        return None
+
+    def _check_tool_permissions(
+        self,
+        *,
+        tool: Tool,
+        call: ToolCall,
+        prepared_args: dict[str, Any],
+        ctx: Any | None,
+    ) -> str | None:
+        if not callable(tool.check_permissions):
+            return None
+
+        try:
+            result = self._invoke_tool_hook(
+                tool.check_permissions,
+                prepared_args=prepared_args,
+                ctx=ctx,
+                tool=tool,
+                call=call,
+            )
+        except Exception as exc:
+            return self._tool_error_payload(
+                call.name,
+                f"check_permissions hook failed: {exc}",
+                error_type="execution_error",
+            )
+
+        if isinstance(result, ValidationResult):
+            return None if result.ok else result.to_json()
+        if result in (None, True):
+            return None
+        if result is False:
+            return self._tool_error_payload(
+                call.name,
+                "Tool execution was blocked by check_permissions.",
+                error_type="permission_blocked",
+            )
+        if isinstance(result, dict):
+            behavior = str(result.get("behavior") or "").strip().lower()
+            explicit_allow = (
+                result.get("result") is True
+                or result.get("ok") is True
+                or result.get("allowed") is True
+                or result.get("success") is True
+                or behavior in {"allow", "allowed", "approve", "approved", "passthrough", "ok"}
+            )
+            explicit_block = (
+                result.get("result") is False
+                or result.get("ok") is False
+                or result.get("allowed") is False
+                or result.get("success") is False
+                or behavior in {"deny", "block", "blocked", "reject", "rejected", "ask"}
+            )
+            if explicit_allow and not explicit_block:
+                return None
+            if explicit_block or any(k in result for k in ("message", "error", "reason")):
+                return self._tool_error_payload(
+                    call.name,
+                    self._hook_message(result, "Tool execution was blocked by check_permissions."),
+                    error_type="permission_blocked",
+                    permission_result=result,
+                )
+            return None
+        if isinstance(result, str):
+            return self._tool_error_payload(
+                call.name,
+                result,
+                error_type="permission_blocked",
+            )
+        if not result:
+            return self._tool_error_payload(
+                call.name,
+                "Tool execution was blocked by check_permissions.",
+                error_type="permission_blocked",
+            )
+        return None
+
+    @staticmethod
+    def _get_content_replacement_state(ctx: Any | None) -> ContentReplacementState:
+        state = getattr(ctx, "content_replacement_state", None) if ctx is not None else None
+        if isinstance(state, ContentReplacementState):
+            return state
+        state = ContentReplacementState()
+        if ctx is not None:
+            setattr(ctx, "content_replacement_state", state)
+        return state
+
+    def _compact_execution_result(self, tool: Tool, result: Any, ctx: Any | None) -> Any:
+        max_chars = int(getattr(tool, "max_result_size_chars", 100_000) or 0)
+        if max_chars <= 0:
+            return result
+
+        compacted_result, metadata = compact_result(
+            result,
+            max_chars=max_chars,
+            state=self._get_content_replacement_state(ctx),
+        )
+        if metadata is None:
+            return result
+
+        payload: dict[str, Any] = {
+            "status": "error" if self._result_indicates_error(result) else "ok",
+            "tool": tool.name,
+            "compacted": True,
+            "message": f"Tool result exceeded {max_chars} chars and was compacted to disk.",
+            "result_path": metadata.get("file_path"),
+            "preview": metadata.get("preview", ""),
+            "original_size": metadata.get("original_size"),
+        }
+        if isinstance(result, dict):
+            error_type = result.get("error_type")
+            if error_type:
+                payload["error_type"] = error_type
+        if isinstance(compacted_result, str):
+            payload["reference"] = compacted_result
+        payload["original_result_type"] = type(result).__name__
+        return payload
 
     @staticmethod
     def _serialize_execution_result(result: Any, use_toon: bool) -> str:
@@ -219,6 +508,36 @@ class RegistryExecutionMixin:
             )
             return validation_error
 
+        input_validation_error = self._validate_tool_input(
+            tool=tool,
+            call=call,
+            prepared_args=dict(prepared_args or {}),
+            ctx=ctx,
+        )
+        if input_validation_error is not None:
+            self._record_tool_execution(
+                tool_name=call.name,
+                duration_s=0.0,
+                ok=False,
+                error="tool validate_input rejected arguments",
+            )
+            return input_validation_error
+
+        permission_check_error = self._check_tool_permissions(
+            tool=tool,
+            call=call,
+            prepared_args=dict(prepared_args or {}),
+            ctx=ctx,
+        )
+        if permission_check_error is not None:
+            self._record_tool_execution(
+                tool_name=call.name,
+                duration_s=0.0,
+                ok=False,
+                error="tool check_permissions blocked execution",
+            )
+            return permission_check_error
+
         result, exec_dur, execution_error = self._run_tool_execution(
             call=call,
             tool=tool,
@@ -249,4 +568,5 @@ class RegistryExecutionMixin:
                     _ctx.tool_call_count = getattr(_ctx, "tool_call_count", 0) + 1
                 except Exception:
                     pass
-        return self._serialize_execution_result(result, use_toon)
+        compacted_result = self._compact_execution_result(tool, result, ctx)
+        return self._serialize_execution_result(compacted_result, use_toon)

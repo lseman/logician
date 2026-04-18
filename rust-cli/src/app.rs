@@ -3872,6 +3872,50 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
             BridgeEvent::Lifecycle { subsystem, payload } => {
                 self.stop_live_message();
+                if subsystem == "startup_hook" {
+                    if let Some(context) = payload.get("context").and_then(Value::as_str) {
+                        let key = context.trim().to_string();
+                        if !key.is_empty() && self.rendered_startup_hook_contexts.insert(key) {
+                            self.add_message(Role::System, context.to_string());
+                        }
+                    }
+                    if let Some(plugin_name) = payload.get("plugin_name").and_then(Value::as_str) {
+                        let state = payload
+                            .get("state")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        if state == "running" && !plugin_name.is_empty() {
+                            self.add_message(
+                                Role::System,
+                                format!("Running startup hook: {plugin_name}"),
+                            );
+                        } else if state == "hook_finished" && !plugin_name.is_empty() {
+                            self.add_message(
+                                Role::System,
+                                format!("Completed startup hook: {plugin_name}"),
+                            );
+                        }
+                    }
+                    if let Some(state) = payload.get("state").and_then(Value::as_str) {
+                        if state == "running" {
+                            self.phase = Phase::Thinking;
+                            let hook_count = payload
+                                .get("hook_count")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(0);
+                            self.phase_note = if hook_count > 0 {
+                                format!("loading startup hooks ({hook_count})")
+                            } else {
+                                "loading startup hooks".into()
+                            };
+                            self.busy = true;
+                        } else if state == "complete" && self.phase_note.starts_with("loading startup hooks") {
+                            self.phase = Phase::Ready;
+                            self.phase_note = "ready".into();
+                            self.busy = false;
+                        }
+                    }
+                }
                 let state = payload
                     .get("state")
                     .and_then(Value::as_str)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -12,6 +13,9 @@ from src.tools.core import (
     apply_edit_block,
     bash,
     edit_file,
+    fetch_url,
+    find_symbol,
+    get_git_diff,
     get_process_output,
     glob_files,
     grep_files,
@@ -20,7 +24,9 @@ from src.tools.core import (
     lsp_tool,
     read_edit_context,
     read_file,
+    rg_search,
     run_python,
+    run_rust,
     search_code,
     send_input_to_process,
     set_venv,
@@ -70,6 +76,20 @@ def test_read_edit_context_returns_bounded_match_context(tmp_path: Path) -> None
     assert result["match_end_line"] == 4
     assert result["content"] == "line 2\ndef render():\n    return old_value\nline 5\n"
     assert result["snapshot"]["full_read"] is False
+
+
+def test_read_file_cached_range_respects_requested_window(tmp_path: Path) -> None:
+    path = tmp_path / "window.py"
+    path.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+
+    first = read_file(str(path))
+    assert first["status"] == "ok"
+
+    second = read_file(str(path), start_line=2, end_line=2)
+
+    assert second["status"] == "ok"
+    assert second["file_type"] == "file_unchanged"
+    assert second["content"] == "line 2\n"
 
 
 def test_write_file_returns_diff_and_persists_text(tmp_path: Path) -> None:
@@ -216,6 +236,31 @@ def test_bash_nonzero_exit_sets_error_status() -> None:
     assert result["returncode"] == 42
 
 
+def test_bash_grep_no_matches_is_informational_not_error(tmp_path: Path) -> None:
+    path = tmp_path / "demo.txt"
+    path.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    result = bash(f'grep "gamma" "{path}"')
+
+    assert result["status"] == "ok"
+    assert result["returncode"] == 1
+    assert result["message"] == "No matches found"
+
+
+def test_bash_diff_exit_one_is_informational_not_error(tmp_path: Path) -> None:
+    left = tmp_path / "left.txt"
+    right = tmp_path / "right.txt"
+    left.write_text("alpha\n", encoding="utf-8")
+    right.write_text("beta\n", encoding="utf-8")
+
+    result = bash(f'diff "{left}" "{right}"', require_read_only=True)
+
+    assert result["status"] == "ok"
+    assert result["returncode"] == 1
+    assert result["message"] == "Files differ"
+    assert result["validation"]["is_read_only"] is True
+
+
 def test_bash_rejects_dangerous_commands() -> None:
     result = bash("rm -rf /tmp/logician-test")
 
@@ -295,6 +340,135 @@ def test_todo_validate_command_returns_warnings() -> None:
     assert isinstance(result["warnings"], list)
     assert any("unrecognized status" in warning for warning in result["warnings"])
     assert "verification_hint" in result
+
+
+def test_todo_validate_warns_about_multiple_in_progress_items() -> None:
+    result = todo(
+        command="validate",
+        items=[
+            {"id": 1, "title": "Inspect logs", "status": "in-progress"},
+            {"id": 2, "title": "Patch search tool", "status": "in-progress"},
+        ],
+    )
+
+    assert result["status"] == "ok"
+    assert any("Multiple tasks are marked in-progress" in warning for warning in result["warnings"])
+
+
+def test_rg_search_treats_ripgrep_no_match_as_success(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _Proc:
+        returncode = 1
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr("src.tools.core.SearchTool.tool.shutil.which", lambda name: "/usr/bin/rg")
+    monkeypatch.setattr("src.tools.core.SearchTool.tool.subprocess.run", lambda *args, **kwargs: _Proc())
+
+    result = rg_search("needle", directory=str(tmp_path), fixed_string=True)
+
+    assert result["status"] == "ok"
+    assert result["tool_used"] == "rg"
+    assert result["count"] == 0
+    assert result["matches"] == []
+
+
+def test_core_search_and_task_tools_expose_openclaude_metadata(tmp_path: Path) -> None:
+    rg_meta = getattr(rg_search, "__llm_tool_meta__", {})
+    rg_validate = rg_meta["validate_input"]
+    rg_summary = rg_meta["get_tool_use_summary"]
+    rg_activity = rg_meta["get_activity_description"]
+    rg_flags = rg_meta["is_search_or_read_command"]
+
+    assert rg_validate({"directory": str(tmp_path)}) is True
+    rejected = rg_validate({"directory": str(tmp_path / "missing")})
+    assert rejected["result"] is False
+    assert "Directory does not exist" in rejected["message"]
+    assert rg_summary({"pattern": "ServerConfig", "directory": "src"}) == "ServerConfig in src"
+    assert rg_activity({"pattern": "ServerConfig"}) == "Searching for ServerConfig"
+    assert rg_flags({}) == {"isSearch": True, "isRead": False, "isList": False}
+    assert rg_meta["user_facing_name"]({}) == "Search"
+
+    todo_meta = getattr(todo, "__llm_tool_meta__", {})
+    todo_validate = todo_meta["validate_input"]
+    assert todo_validate({"command": "explode"})["result"] is False
+    assert todo_meta["get_tool_use_summary"]({"command": "mark", "id": 7}) == "mark task 7"
+    assert todo_meta["get_activity_description"]({"command": "view"}) == "Reviewing task list"
+    assert todo_meta["user_facing_name"]({}) == "Tasks"
+
+    read_meta = getattr(read_file, "__llm_tool_meta__", {})
+    assert read_meta["validate_input"]({"path": str(tmp_path / "missing.txt")})["result"] is False
+    assert read_meta["is_search_or_read_command"]({}) == {
+        "isSearch": False,
+        "isRead": True,
+        "isList": False,
+    }
+    assert read_meta["get_activity_description"]({}) == "Reading file"
+
+    bash_meta = getattr(bash, "__llm_tool_meta__", {})
+    assert bash_meta["validate_input"]({"command": "echo hi", "timeout": 5}) is True
+    assert bash_meta["user_facing_name"]({}) == "Terminal"
+
+    run_python_meta = getattr(run_python, "__llm_tool_meta__", {})
+    assert run_python_meta["validate_input"]({"code": "print('hi')", "timeout": 5}) is True
+    assert run_python_meta["user_facing_name"]({}) == "Python"
+
+
+def test_run_python_rejects_invalid_cwd(tmp_path: Path) -> None:
+    result = run_python("print('hi')", cwd=str(tmp_path / "missing"))
+
+    assert result["status"] == "error"
+    assert "Working directory not found" in result["error"]
+
+
+def test_fetch_url_rejects_non_http_scheme() -> None:
+    result = fetch_url("file:///tmp/example.txt")
+
+    assert result["status"] == "error"
+    assert "http or https" in result["error"]
+
+
+def test_get_git_diff_uses_repo_relative_paths_for_directories(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    nested = repo / "src"
+    nested.mkdir(parents=True)
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "Logician"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "logician@example.com"], cwd=repo, check=True, capture_output=True, text=True)
+    tracked = nested / "demo.py"
+    tracked.write_text("print('a')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+    tracked.write_text("print('b')\n", encoding="utf-8")
+
+    result = get_git_diff(str(nested))
+
+    assert result["status"] == "ok"
+    assert result["repo_root"] == str(repo.resolve())
+    assert "src/demo.py" in result["files_changed"]
+
+
+def test_find_symbol_include_calls_still_honors_match_limit(tmp_path: Path) -> None:
+    path = tmp_path / "demo.py"
+    body = ["def helper():\n    return 1\n"]
+    body.extend("helper()\n" for _ in range(80))
+    path.write_text("".join(body), encoding="utf-8")
+
+    result = find_symbol("helper", directory=str(tmp_path), include_calls=True)
+
+    assert result["status"] == "ok"
+    assert result["count"] <= 60
+    assert len(result["matches"]) <= 60
+
+
+def test_rust_tools_are_registered_in_core_surface() -> None:
+    from src.tools import core as core_mod
+
+    assert callable(run_rust)
+    assert "run_rust" in core_mod.CORE_TOOL_NAMES
 
 
 def test_set_working_directory_affects_core_python_execution(tmp_path: Path) -> None:

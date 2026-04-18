@@ -48,6 +48,7 @@ _READ_ONLY_COMMANDS = {
     "cd",
     "command",
     "date",
+    "diff",
     "dirname",
     "echo",
     "env",
@@ -437,6 +438,53 @@ def _sanitize_command(command: str) -> str | dict[str, str]:
         return {"error": "Command is empty"}
 
     return command
+
+
+def _extract_primary_command_for_exit_code(command: str) -> str | None:
+    try:
+        tokens = _tokenize_shell(command)
+    except ValueError:
+        return None
+    segments = _split_segments(tokens)
+    if not segments:
+        return None
+    command_token, command_index = _first_command_token(segments[-1])
+    if command_token is None:
+        return None
+    if command_token == "git":
+        subcommand = _git_subcommand(segments[-1], command_index)
+        if subcommand:
+            return f"git {subcommand}"
+    return command_token
+
+
+def _interpret_command_result(
+    command: str,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> dict[str, Any]:
+    primary = _extract_primary_command_for_exit_code(command)
+    if primary in {"grep", "rg"}:
+        if returncode == 1:
+            return {"is_error": False, "message": "No matches found"}
+        return {"is_error": returncode >= 2}
+    if primary == "find":
+        if returncode == 1:
+            return {"is_error": False, "message": "Some directories were inaccessible"}
+        return {"is_error": returncode >= 2}
+    if primary in {"diff", "git diff"}:
+        if returncode == 1:
+            return {"is_error": False, "message": "Files differ"}
+        return {"is_error": returncode >= 2}
+    if primary in {"test", "["}:
+        if returncode == 1:
+            return {"is_error": False, "message": "Condition is false"}
+        return {"is_error": returncode >= 2}
+    return {
+        "is_error": returncode != 0,
+        "message": f"Command failed with exit code {returncode}" if returncode != 0 else None,
+    }
 
 
 def _escape_shell_arg(arg: str) -> str:
@@ -1012,8 +1060,16 @@ def bash(
         if normalize_output:
             output["stdout"] = output["stdout"].replace("\r\n", "\n").replace("\r", "\n")
             output["stderr"] = output["stderr"].replace("\r\n", "\n").replace("\r", "\n")
-        if result.returncode != 0:
+        interpretation = _interpret_command_result(
+            sanitized,
+            result.returncode,
+            output["stdout"],
+            output["stderr"],
+        )
+        if interpretation["is_error"]:
             output["status"] = "error"
+        if interpretation.get("message"):
+            output["message"] = interpretation["message"]
         output["sanitized"] = sanitized
         output["validation"] = validation
         return output

@@ -4,9 +4,42 @@ import json
 from dataclasses import dataclass, field
 from functools import lru_cache
 from io import StringIO
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _numpy() -> Any:
+    try:
+        import numpy as np
+
+        return np
+    except ImportError:
+
+        class _NumpyFallback:
+            generic = type("NPGenericFallback", (), {})
+            ndarray = type("NPArrayFallback", (), {})
+
+        return _NumpyFallback()
+
+
+def _pandas() -> Any:
+    try:
+        import pandas as pd
+
+        return pd
+    except ImportError:
+
+        class _PandasFallback:
+            Timestamp = type("PDTimestampFallback", (), {})
+
+            @staticmethod
+            def isna(value: Any) -> bool:
+                return value is None
+
+        return _PandasFallback()
+
 
 try:
     from toon_format import decode, encode
@@ -17,18 +50,180 @@ except ImportError:
     HAS_TOON = False
 
 
-@lru_cache(maxsize=1)
-def _numpy() -> Any:
-    import numpy as np
-
-    return np
+# =============================================================================
+# Permission Context (OpenClaude-style)
+# =============================================================================
 
 
-@lru_cache(maxsize=1)
-def _pandas() -> Any:
-    import pandas as pd
+@dataclass
+class PermissionRule:
+    """Tool permission rule with pattern matching."""
 
-    return pd
+    pattern: str
+    mode: str = "auto"  # "auto", "plan", "bypass"
+
+    def matches(self, tool_name: str, pattern_value: str | None = None) -> bool:
+        """Check if this rule matches a tool/pattern."""
+        pattern = str(pattern or "").strip()
+        if not pattern:
+            return False
+
+        # Exact match
+        if pattern == tool_name:
+            return True
+
+        # Prefix match (e.g., "review:*" matches "review-pr")
+        if pattern.endswith(":*"):
+            prefix = pattern[:-2]
+            if tool_name.startswith(prefix):
+                return True
+
+        return False
+
+
+@dataclass
+class PermissionContext:
+    """Centralized permission context for tool execution."""
+
+    default_mode: str = "auto"
+    always_allow_rules: dict[str, list[str]] = field(default_factory=dict)
+    always_deny_rules: dict[str, list[str]] = field(default_factory=dict)
+    always_ask_rules: dict[str, list[str]] = field(default_factory=dict)
+    additional_working_dirs: dict[str, str] = field(default_factory=dict)
+    is_bypass_available: bool = False
+
+    def get_effective_mode(self, tool_name: str) -> str:
+        """Get the effective permission mode for a tool."""
+        if self.always_allow_rules.get(tool_name):
+            return "bypass"
+        if self.always_deny_rules.get(tool_name):
+            return "deny"
+        return self.default_mode
+
+
+# =============================================================================
+# Progress Tracking (OpenClaude-style)
+# =============================================================================
+
+
+@dataclass
+class ToolProgressData:
+    """Base type for tool progress data."""
+
+    type: str
+
+
+@dataclass
+class BashProgress(ToolProgressData):
+    """Progress data for bash tool."""
+
+    type: str = "bash_progress"
+    command: str = ""
+    output: str = ""
+    exit_code: int | None = None
+
+
+@dataclass
+class TaskOutputProgress(ToolProgressData):
+    """Progress data for task output tool."""
+
+    type: str = "task_output_progress"
+    task_id: str = ""
+    output: str = ""
+
+
+@dataclass
+class FileReadProgress(ToolProgressData):
+    """Progress data for file read operations."""
+
+    type: str = "file_read_progress"
+    path: str = ""
+    bytes_read: int = 0
+    total_bytes: int = 0
+
+
+# =============================================================================
+# Tool Type (Unified OpenClaude-style)
+# =============================================================================
+
+
+class Tool(BaseModel):
+    """
+    Unified Tool type with comprehensive metadata and behavior methods.
+
+    This replaces the simple function-based approach with a rich metadata system
+    that supports validation, permissions, progress tracking, and UI rendering.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        str_strip_whitespace=True,
+    )
+
+    name: str
+    description: str
+    function: Callable[..., Any]
+    skill_id: str | None = None
+    source_path: str | None = None
+    skill_meta: dict[str, Any] | None = None
+    runtime: ToolRuntimeMetadata = Field(default_factory=lambda: ToolRuntimeMetadata())
+
+    # Permission methods
+    validate_input: Callable[..., Any] | None = None
+    check_permissions: Callable[..., Any] | None = None
+    is_destructive: Callable[..., Any] | None = None
+
+    # Behavior methods
+    interrupt_behavior: Callable[..., Any] | None = None
+    is_search_or_read_command: Callable[..., Any] | None = None
+    is_concurrency_safe: Callable[..., Any] | None = None
+    is_read_only: Callable[..., Any] | None = None
+
+    # Metadata methods
+    get_tool_use_summary: Callable[..., Any] | None = None
+    get_activity_description: Callable[..., Any] | None = None
+    user_facing_name: Callable[..., Any] | None = None
+    to_auto_classifier_input: Callable[..., Any] | None = None
+
+    # UI rendering methods
+    render_tool_result_message: Callable[..., Any] | None = None
+    render_tool_use_message: Callable[..., Any] | None = None
+    render_tool_use_progress_message: Callable[..., Any] | None = None
+    render_tool_use_queued_message: Callable[..., Any] | None = None
+    render_tool_use_rejected_message: Callable[..., Any] | None = None
+    render_tool_use_error_message: Callable[..., Any] | None = None
+    render_grouped_tool_use: Callable[..., Any] | None = None
+
+    # Execution control
+    should_defer: bool = False
+    always_load: bool = False
+
+    # Result size limit
+    max_result_size_chars: int = 100_000
+
+    # Progress callback
+    on_progress: Callable[..., Any] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        name = str(value or "").strip()
+        if not name:
+            raise ValueError("Tool name must be non-empty")
+        return name
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value: Any) -> str:
+        return str(value or "").strip()
+
+    @field_validator("function")
+    @classmethod
+    def _validate_function(cls, value: Any) -> Any:
+        if not callable(value):
+            raise TypeError("Tool function must be callable")
+        return value
 
 
 @lru_cache(maxsize=1)
@@ -415,43 +610,205 @@ class ToolRuntimeMetadata(BaseModel):
 def build_tool(
     function: Any,
     *,
+    name: str | None = None,
     description: str | None = None,
-    parameters: Any | None = None,
+    parameters: list[ToolParameter] | None = None,
     doc: str | None = None,
     runtime: dict[str, Any] | ToolRuntimeMetadata | None = None,
+    skill_id: str | None = None,
+    source_path: str | None = None,
+    skill_meta: dict[str, Any] | None = None,
+    validate_input: Callable[..., Any] | None = None,
+    check_permissions: Callable[..., Any] | None = None,
+    is_destructive: Callable[..., Any] | None = None,
+    interrupt_behavior: Callable[..., Any] | None = None,
+    is_search_or_read_command: Callable[..., Any] | None = None,
+    is_concurrency_safe: Callable[..., Any] | None = None,
+    is_read_only: Callable[..., Any] | None = None,
+    get_tool_use_summary: Callable[..., Any] | None = None,
+    get_activity_description: Callable[..., Any] | None = None,
+    user_facing_name: Callable[..., Any] | None = None,
+    to_auto_classifier_input: Callable[..., Any] | None = None,
+    render_tool_result_message: Callable[..., Any] | None = None,
+    render_tool_use_message: Callable[..., Any] | None = None,
+    render_tool_use_progress_message: Callable[..., Any] | None = None,
+    render_tool_use_queued_message: Callable[..., Any] | None = None,
+    render_tool_use_rejected_message: Callable[..., Any] | None = None,
+    render_tool_use_error_message: Callable[..., Any] | None = None,
+    render_grouped_tool_use: Callable[..., Any] | None = None,
+    should_defer: bool = False,
+    always_load: bool = False,
+    max_result_size_chars: int = 100_000,
     **extra_meta: Any,
-) -> Any:
-    """Attach normalized tool metadata to a callable.
+) -> Tool:
+    """
+    Build a Tool instance with metadata and behavior methods.
 
-    This is a lightweight builder for the current registry model. It does not
-    wrap execution; it only centralizes metadata authoring so dispatcher and
-    registration can consume one consistent source of truth.
+    This is a factory that creates a fully-featured Tool instance from a function.
+    It merges runtime metadata with optional behavior methods for validation,
+    permissions, and UI rendering.
+
+    Args:
+        function: The tool function to wrap
+        name: Tool name (required if not found in function)
+        description: Tool description
+        parameters: List of ToolParameter for input schema
+        doc: Documentation string
+        runtime: Runtime metadata (read_only, cacheable, etc.)
+        skill_id: Associated skill ID
+        source_path: Source file path
+        skill_meta: Additional skill metadata
+        validate_input: Optional input validation function
+        check_permissions: Optional permission check function
+        is_destructive: Function returning True for destructive operations
+        interrupt_behavior: How tool handles user interruption
+        is_search_or_read_command: Returns {isSearch, isRead, isList}
+        is_concurrency_safe: Returns True for safe concurrent execution
+        is_read_only: Returns True for read-only operations
+        get_tool_use_summary: Returns short summary for compact views
+        get_activity_description: Returns spinner text for in-progress
+        user_facing_name: Returns display name
+        to_auto_classifier_input: Returns classifier input string
+        render_*_message: UI rendering methods for different states
+        should_defer: Whether to defer loading (for large schemas)
+        always_load: Whether to load immediately (for essential tools)
+        max_result_size_chars: Max result size before compaction
+
+    Returns:
+        A fully-configured Tool instance
     """
     target = getattr(function, "__func__", function)
-    meta = dict(getattr(target, "__llm_tool_meta__", {}) or {})
 
+    # Use existing metadata or create new
+    existing_meta = dict(getattr(target, "__llm_tool_meta__", {}) or {})
+    meta = dict(existing_meta) if existing_meta else {}
+
+    # Set required fields
+    if name is None:
+        name = getattr(function, "__name__", f"unnamed_{id(function)}")
+
+    meta["name"] = name
     if description is not None:
         meta["description"] = description
     if parameters is not None:
-        meta["parameters"] = parameters
+        if isinstance(parameters, dict):
+            parsed_parameters: list[ToolParameter] = []
+            for param_name, param_description in parameters.items():
+                desc_text = str(param_description or "").strip()
+                is_optional = desc_text.lower().startswith("optional")
+                parsed_parameters.append(
+                    ToolParameter(
+                        name=str(param_name),
+                        type="string",
+                        description=desc_text,
+                        required=not is_optional,
+                    )
+                )
+            meta["parameters"] = [p.model_dump() for p in parsed_parameters]
+        else:
+            normalized_parameters = []
+            for p in parameters:
+                if isinstance(p, ToolParameter):
+                    normalized_parameters.append(p.model_dump())
+                elif isinstance(p, dict):
+                    normalized_parameters.append(ToolParameter(**p).model_dump())
+                else:
+                    raise TypeError(
+                        "Tool parameters must be a ToolParameter, dict, or dict-like iterable"
+                    )
+            meta["parameters"] = normalized_parameters
     if doc is not None:
         meta["doc"] = doc
 
+    # Runtime metadata
     if runtime is not None:
         runtime_payload = (
             runtime.model_dump(exclude_none=True)
             if isinstance(runtime, ToolRuntimeMetadata)
             else dict(runtime)
         )
-        merged_runtime = dict(meta.get("runtime") or {})
-        merged_runtime.update(runtime_payload)
-        meta["runtime"] = merged_runtime
+        meta["runtime"] = runtime_payload
 
+    # Add optional behavior methods
+    if validate_input is not None:
+        meta["validate_input"] = validate_input
+    if check_permissions is not None:
+        meta["check_permissions"] = check_permissions
+    if is_destructive is not None:
+        meta["is_destructive"] = is_destructive
+    if interrupt_behavior is not None:
+        meta["interrupt_behavior"] = interrupt_behavior
+    if is_search_or_read_command is not None:
+        meta["is_search_or_read_command"] = is_search_or_read_command
+    if is_concurrency_safe is not None:
+        meta["is_concurrency_safe"] = is_concurrency_safe
+    if is_read_only is not None:
+        meta["is_read_only"] = is_read_only
+    if get_tool_use_summary is not None:
+        meta["get_tool_use_summary"] = get_tool_use_summary
+    if get_activity_description is not None:
+        meta["get_activity_description"] = get_activity_description
+    if user_facing_name is not None:
+        meta["user_facing_name"] = user_facing_name
+    if to_auto_classifier_input is not None:
+        meta["to_auto_classifier_input"] = to_auto_classifier_input
+    if render_tool_result_message is not None:
+        meta["render_tool_result_message"] = render_tool_result_message
+    if render_tool_use_message is not None:
+        meta["render_tool_use_message"] = render_tool_use_message
+    if render_tool_use_progress_message is not None:
+        meta["render_tool_use_progress_message"] = render_tool_use_progress_message
+    if render_tool_use_queued_message is not None:
+        meta["render_tool_use_queued_message"] = render_tool_use_queued_message
+    if render_tool_use_rejected_message is not None:
+        meta["render_tool_use_rejected_message"] = render_tool_use_rejected_message
+    if render_tool_use_error_message is not None:
+        meta["render_tool_use_error_message"] = render_tool_use_error_message
+    if render_grouped_tool_use is not None:
+        meta["render_grouped_tool_use"] = render_grouped_tool_use
+
+    # Execution control flags
+    meta["should_defer"] = should_defer
+    meta["always_load"] = always_load
+    meta["max_result_size_chars"] = max_result_size_chars
+
+    # Extra metadata
     for key, value in extra_meta.items():
         meta[key] = value
 
+    # Set metadata on function and return Tool instance
     setattr(target, "__llm_tool_meta__", meta)
-    return function
+
+    return Tool(
+        name=name,
+        description=str(meta.get("description") or ""),
+        function=function,
+        skill_id=skill_id,
+        source_path=source_path,
+        skill_meta=dict(skill_meta) if isinstance(skill_meta, dict) else skill_meta,
+        runtime=ToolRuntimeMetadata.from_tool_meta(meta.get("runtime")),
+        validate_input=meta.get("validate_input"),
+        check_permissions=meta.get("check_permissions"),
+        is_destructive=meta.get("is_destructive"),
+        interrupt_behavior=meta.get("interrupt_behavior"),
+        is_search_or_read_command=meta.get("is_search_or_read_command"),
+        is_concurrency_safe=meta.get("is_concurrency_safe"),
+        is_read_only=meta.get("is_read_only"),
+        get_tool_use_summary=meta.get("get_tool_use_summary"),
+        get_activity_description=meta.get("get_activity_description"),
+        user_facing_name=meta.get("user_facing_name"),
+        to_auto_classifier_input=meta.get("to_auto_classifier_input"),
+        render_tool_result_message=meta.get("render_tool_result_message"),
+        render_tool_use_message=meta.get("render_tool_use_message"),
+        render_tool_use_progress_message=meta.get("render_tool_use_progress_message"),
+        render_tool_use_queued_message=meta.get("render_tool_use_queued_message"),
+        render_tool_use_rejected_message=meta.get("render_tool_use_rejected_message"),
+        render_tool_use_error_message=meta.get("render_tool_use_error_message"),
+        render_grouped_tool_use=meta.get("render_grouped_tool_use"),
+        should_defer=bool(meta.get("should_defer", False)),
+        always_load=bool(meta.get("always_load", False)),
+        max_result_size_chars=int(meta.get("max_result_size_chars", 100_000)),
+    )
 
 
 def materialize_tool(
@@ -469,23 +826,73 @@ def materialize_tool(
 ) -> "Tool":
     """Build normalized callable metadata and return a Tool model instance."""
     target = getattr(function, "__func__", function)
-    build_tool(
+    existing_meta = dict(getattr(target, "__llm_tool_meta__", {}) or {})
+    merged_meta = dict(existing_meta)
+    merged_meta.update(extra_meta)
+    return build_tool(
         function,
-        description=description,
-        doc=doc,
-        runtime=runtime,
-        **extra_meta,
-    )
-    meta = dict(getattr(target, "__llm_tool_meta__", {}) or {})
-    return Tool(
         name=name,
-        description=str(meta.get("description") or description or "").strip(),
-        parameters=list(parameters or []),
-        function=function,
+        description=description,
+        parameters=parameters,
+        doc=doc if doc is not None else merged_meta.get("doc"),
+        runtime=runtime if runtime is not None else merged_meta.get("runtime"),
         skill_id=skill_id,
         source_path=source_path,
-        skill_meta=dict(skill_meta) if isinstance(skill_meta, dict) else skill_meta,
-        runtime=ToolRuntimeMetadata.from_tool_meta(meta),
+        skill_meta=skill_meta,
+        validate_input=merged_meta.get("validate_input"),
+        check_permissions=merged_meta.get("check_permissions"),
+        is_destructive=merged_meta.get("is_destructive"),
+        interrupt_behavior=merged_meta.get("interrupt_behavior"),
+        is_search_or_read_command=merged_meta.get("is_search_or_read_command"),
+        is_concurrency_safe=merged_meta.get("is_concurrency_safe"),
+        is_read_only=merged_meta.get("is_read_only"),
+        get_tool_use_summary=merged_meta.get("get_tool_use_summary"),
+        get_activity_description=merged_meta.get("get_activity_description"),
+        user_facing_name=merged_meta.get("user_facing_name"),
+        to_auto_classifier_input=merged_meta.get("to_auto_classifier_input"),
+        render_tool_result_message=merged_meta.get("render_tool_result_message"),
+        render_tool_use_message=merged_meta.get("render_tool_use_message"),
+        render_tool_use_progress_message=merged_meta.get("render_tool_use_progress_message"),
+        render_tool_use_queued_message=merged_meta.get("render_tool_use_queued_message"),
+        render_tool_use_rejected_message=merged_meta.get("render_tool_use_rejected_message"),
+        render_tool_use_error_message=merged_meta.get("render_tool_use_error_message"),
+        render_grouped_tool_use=merged_meta.get("render_grouped_tool_use"),
+        should_defer=bool(merged_meta.get("should_defer", False)),
+        always_load=bool(merged_meta.get("always_load", False)),
+        max_result_size_chars=int(merged_meta.get("max_result_size_chars", 100_000)),
+        **{
+            key: value
+            for key, value in merged_meta.items()
+            if key
+            not in {
+                "name",
+                "description",
+                "parameters",
+                "doc",
+                "runtime",
+                "validate_input",
+                "check_permissions",
+                "is_destructive",
+                "interrupt_behavior",
+                "is_search_or_read_command",
+                "is_concurrency_safe",
+                "is_read_only",
+                "get_tool_use_summary",
+                "get_activity_description",
+                "user_facing_name",
+                "to_auto_classifier_input",
+                "render_tool_result_message",
+                "render_tool_use_message",
+                "render_tool_use_progress_message",
+                "render_tool_use_queued_message",
+                "render_tool_use_rejected_message",
+                "render_tool_use_error_message",
+                "render_grouped_tool_use",
+                "should_defer",
+                "always_load",
+                "max_result_size_chars",
+            }
+        },
     )
 
 
@@ -505,6 +912,42 @@ class Tool(BaseModel):
     source_path: str | None = None
     skill_meta: dict[str, Any] | None = None
     runtime: ToolRuntimeMetadata = Field(default_factory=lambda: ToolRuntimeMetadata())
+
+    # Permission methods
+    validate_input: Callable[..., Any] | None = None
+    check_permissions: Callable[..., Any] | None = None
+    is_destructive: Callable[..., Any] | None = None
+
+    # Behavior methods
+    interrupt_behavior: Callable[..., Any] | None = None
+    is_search_or_read_command: Callable[..., Any] | None = None
+    is_concurrency_safe: Callable[..., Any] | None = None
+    is_read_only: Callable[..., Any] | None = None
+
+    # Metadata methods
+    get_tool_use_summary: Callable[..., Any] | None = None
+    get_activity_description: Callable[..., Any] | None = None
+    user_facing_name: Callable[..., Any] | None = None
+    to_auto_classifier_input: Callable[..., Any] | None = None
+
+    # UI rendering methods
+    render_tool_result_message: Callable[..., Any] | None = None
+    render_tool_use_message: Callable[..., Any] | None = None
+    render_tool_use_progress_message: Callable[..., Any] | None = None
+    render_tool_use_queued_message: Callable[..., Any] | None = None
+    render_tool_use_rejected_message: Callable[..., Any] | None = None
+    render_tool_use_error_message: Callable[..., Any] | None = None
+    render_grouped_tool_use: Callable[..., Any] | None = None
+
+    # Execution control
+    should_defer: bool = False
+    always_load: bool = False
+
+    # Result size limit
+    max_result_size_chars: int = 100_000
+
+    # Progress callback
+    on_progress: Callable[..., Any] | None = None
 
     def __init__(self, *args: Any, **data: Any) -> None:
         if args:
@@ -571,6 +1014,75 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+
+
+# =============================================================================
+# Lazy Loading Proxy Pattern (OpenClaude-style)
+# =============================================================================
+
+
+def make_lazy_proxy(
+    name: str,
+    module: str,
+    on_failure: Callable[..., Any] = None,
+) -> Callable[..., Any]:
+    """
+    Create a lazy-loading proxy for optional dependencies.
+
+    This prevents import errors from breaking tool registration when optional
+    dependencies are not installed.
+
+    Args:
+        name: Name for the proxy function
+        module: Module path to import (e.g., "libcst" or "package.submodule")
+        on_failure: Optional function to call when import fails
+
+    Returns:
+        A proxy function that lazily imports and delegates calls
+    """
+
+    import importlib
+
+    _instance: Callable[..., Any] | None = None
+    _imported = False
+
+    def _get_instance() -> Callable[..., Any]:
+        global _instance, _imported
+        if _instance is not None:
+            return _instance
+        if _imported:
+            raise RuntimeError(
+                f"Lazy proxy {name} was already attempted to be loaded. "
+                "Call reset_lazy_proxy() to retry."
+            )
+        try:
+            _instance = importlib.import_module(module)
+            _imported = True
+            return _instance
+        except ImportError as e:
+            if on_failure:
+                on_failure(name, str(e))
+            return None
+
+    def _reset() -> None:
+        global _instance, _imported
+        _instance = None
+        _imported = False
+
+    def proxy(*args: Any, **kwargs: Any) -> Any:
+        instance = _get_instance()
+        if instance is None:
+            raise ImportError(
+                f"{name} requires {module} which is not installed. "
+                "Install with: pip install {module}"
+            )
+        return instance(*args, **kwargs)
+
+    proxy.__name__ = name
+    proxy.__module__ = module
+    proxy.__doc__ = f"Lazy-loading proxy for {name} (module: {module})"
+
+    return proxy, _reset, _get_instance
 
 
 @dataclass
@@ -720,4 +1232,14 @@ __all__ = [
     "check_optional_deps",
     "decode",
     "encode",
+    # Permission context
+    "PermissionContext",
+    "PermissionRule",
+    # Progress types
+    "ToolProgressData",
+    "BashProgress",
+    "TaskOutputProgress",
+    "FileReadProgress",
+    # Lazy loading
+    "make_lazy_proxy",
 ]

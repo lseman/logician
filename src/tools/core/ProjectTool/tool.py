@@ -955,6 +955,8 @@ def find_symbol(
 
         if include_calls and call_re:
             for match in call_re.finditer(source):
+                if len(matches) >= max_matches:
+                    break
                 lineno = _line_number_at_offset(source, match.start())
                 matches.append(
                     {
@@ -966,6 +968,8 @@ def find_symbol(
                         "snippet": _snippet(lines, lineno, after=1),
                     }
                 )
+            if len(matches) >= max_matches:
+                break
 
         if len(matches) >= max_matches:
             break

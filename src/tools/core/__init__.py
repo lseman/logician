@@ -1,10 +1,17 @@
 """Always-on core tools for the SOTA agent."""
 
 import importlib as _importlib
+import json
+from pathlib import Path
 from typing import Any
 
 from ..runtime import build_tool
+from ..compaction import (
+    ContentReplacementState,
+    compact_result,
+)
 from .BashTool import bash
+from .BashTool.tool import _validate_command as _validate_bash_command
 from .FileEditTool import (
     apply_edit_block,
     edit_file,
@@ -31,6 +38,16 @@ from .ProcessTool import (
 )
 from .ProjectTool import find_symbol, get_file_outline, get_project_map
 from .PythonTool import check_imports, list_installed_packages, run_python
+from .RustTool import (
+    cargo_build,
+    cargo_check,
+    cargo_clippy,
+    cargo_fmt,
+    cargo_metadata,
+    cargo_run,
+    cargo_test,
+    run_rust,
+)
 from .SearchTool import (
     fd_find,
     find_imports,
@@ -151,6 +168,14 @@ _RUNTIME_META = {
     "run_python": {"cacheable": False},
     "list_installed_packages": {"read_only": True, "cacheable": False},
     "check_imports": {"read_only": True, "cacheable": False},
+    "run_rust": {"cacheable": False},
+    "cargo_check": {"cacheable": False},
+    "cargo_build": {"cacheable": False},
+    "cargo_test": {"cacheable": False},
+    "cargo_clippy": {"cacheable": False},
+    "cargo_run": {"cacheable": False},
+    "cargo_fmt": {"cacheable": False},
+    "cargo_metadata": {"read_only": True, "cacheable": False},
     "lsp_tool": {
         "read_only": True,
         "cacheable": True,
@@ -295,6 +320,107 @@ _TOOL_META = {
         "parameters": {
             "modules": "Space-separated top-level module names such as `numpy pandas torch`.",
             "venv_path": "Optional virtualenv path overriding the configured default.",
+        },
+    },
+    "run_rust": {
+        "description": "Compile or run a standalone Rust snippet with bounded output.",
+        "parameters": {
+            "code": "Rust source code to compile.",
+            "cwd": "Optional working directory.",
+            "timeout": "Optional timeout in seconds.",
+            "edition": "Rust edition such as `2021`.",
+            "mode": "One of `run`, `check`, or `compile`.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_check": {
+        "description": "Run `cargo check` with package and feature controls.",
+        "parameters": {
+            "cwd": "Optional Cargo workspace directory.",
+            "package": "Optional package name.",
+            "features": "Optional comma or space separated feature list.",
+            "all_features": "Optional boolean.",
+            "no_default_features": "Optional boolean.",
+            "extra_args": "Optional extra cargo arguments.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_build": {
+        "description": "Run `cargo build` with package, feature, and release controls.",
+        "parameters": {
+            "cwd": "Optional Cargo workspace directory.",
+            "package": "Optional package name.",
+            "features": "Optional feature list.",
+            "all_features": "Optional boolean.",
+            "no_default_features": "Optional boolean.",
+            "release": "Optional boolean.",
+            "extra_args": "Optional extra cargo arguments.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_test": {
+        "description": "Run `cargo test`, optionally filtered to a specific test name.",
+        "parameters": {
+            "test_name": "Optional test name filter.",
+            "cwd": "Optional Cargo workspace directory.",
+            "package": "Optional package name.",
+            "features": "Optional feature list.",
+            "all_features": "Optional boolean.",
+            "no_default_features": "Optional boolean.",
+            "extra_args": "Optional extra cargo arguments.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_clippy": {
+        "description": "Run `cargo clippy` with bounded output.",
+        "parameters": {
+            "cwd": "Optional Cargo workspace directory.",
+            "package": "Optional package name.",
+            "features": "Optional feature list.",
+            "all_features": "Optional boolean.",
+            "no_default_features": "Optional boolean.",
+            "extra_args": "Optional extra cargo arguments.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_run": {
+        "description": "Run `cargo run`, keeping cargo args and program args separate.",
+        "parameters": {
+            "cwd": "Optional Cargo workspace directory.",
+            "package": "Optional package name.",
+            "bin": "Optional binary target.",
+            "example": "Optional example target.",
+            "features": "Optional feature list.",
+            "all_features": "Optional boolean.",
+            "no_default_features": "Optional boolean.",
+            "release": "Optional boolean.",
+            "run_args": "Optional program arguments.",
+            "extra_args": "Optional extra cargo arguments.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_fmt": {
+        "description": "Run `cargo fmt`, defaulting to `--check` to avoid rewrites.",
+        "parameters": {
+            "cwd": "Optional Cargo workspace directory.",
+            "check": "Optional boolean. When false, format files in place.",
+            "extra_args": "Optional extra cargo fmt arguments.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
+        },
+    },
+    "cargo_metadata": {
+        "description": "Run `cargo metadata` and parse the JSON payload when possible.",
+        "parameters": {
+            "cwd": "Optional Cargo workspace directory.",
+            "no_deps": "Optional boolean.",
+            "timeout": "Optional timeout in seconds.",
+            "max_output_chars": "Optional maximum returned stdout/stderr characters.",
         },
     },
     "glob_files": {
@@ -596,6 +722,781 @@ _TOOL_META = {
     },
 }
 
+
+def _merge_tool_metadata(name: str, **extra: Any) -> None:
+    current = dict(_TOOL_META.get(name, {}) or {})
+    current.update(extra)
+    _TOOL_META[name] = current
+
+
+def _clip_summary(value: Any, *, limit: int = 80) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _scope_value(args: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = str(args.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _directory_validator(args: dict[str, Any], key: str = "directory") -> bool | dict[str, Any]:
+    directory = str(args.get(key) or ".").strip() or "."
+    path = Path(directory).expanduser()
+    if not path.exists():
+        return {"result": False, "message": f"Directory does not exist: {directory}"}
+    if not path.is_dir():
+        return {"result": False, "message": f"Path is not a directory: {directory}"}
+    return True
+
+
+def _path_validator(
+    args: dict[str, Any],
+    *,
+    key: str = "path",
+    require_file: bool = False,
+    default_value: str | None = None,
+) -> bool | dict[str, Any]:
+    path_text = str(args.get(key) or default_value or "").strip()
+    if not path_text:
+        return {"result": False, "message": f"{key} is required"}
+    path = Path(path_text).expanduser()
+    if not path.exists():
+        return {"result": False, "message": f"Path does not exist: {path_text}"}
+    if require_file and not path.is_file():
+        return {"result": False, "message": f"Path is not a file: {path_text}"}
+    return True
+
+
+def _summary_from_query(
+    query_key: str,
+    *,
+    scope_keys: tuple[str, ...] = ("path", "directory"),
+    prefix: str = "",
+) -> Any:
+    def _summary(args: dict[str, Any]) -> str:
+        query = _clip_summary(args.get(query_key))
+        scope = _scope_value(args, *scope_keys)
+        if query and scope and scope != ".":
+            body = f"{query} in {scope}"
+        else:
+            body = query or scope or ""
+        return f"{prefix}{body}".strip()
+
+    return _summary
+
+
+def _activity_from_query(prefix: str, query_key: str | None = None) -> Any:
+    def _activity(args: dict[str, Any]) -> str:
+        query = _clip_summary(args.get(query_key)) if query_key else ""
+        return f"{prefix} {query}".strip() if query else prefix
+
+    return _activity
+
+
+def _search_flags(*, is_read: bool = False, is_list: bool = False) -> Any:
+    def _flags(_args: dict[str, Any]) -> dict[str, bool]:
+        return {"isSearch": True, "isRead": is_read, "isList": is_list}
+
+    return _flags
+
+
+def _todo_validate_input(args: dict[str, Any]) -> bool | dict[str, Any]:
+    allowed_commands = {"view", "set", "update", "add", "mark", "note", "clear", "validate"}
+    command = str(args.get("command") or "").strip().lower()
+    if command:
+        if command not in allowed_commands:
+            return {
+                "result": False,
+                "message": (
+                    f"Unknown command '{command}'. "
+                    "Valid commands: view, set, update, add, mark, note, clear, validate"
+                ),
+            }
+        if command in {"set", "update", "validate"}:
+            items = args.get("items")
+            if items is not None and not isinstance(items, list):
+                return {"result": False, "message": "items must be a list of todo dicts"}
+        if command == "add" and not str(args.get("title") or "").strip():
+            return {"result": False, "message": "title is required for add"}
+        if command in {"mark", "note"} and args.get("id") is None:
+            return {"result": False, "message": f"id is required for {command}"}
+        return True
+
+    todos = args.get("todos")
+    if todos is None:
+        return True
+    if isinstance(todos, str):
+        try:
+            todos = json.loads(todos)
+        except json.JSONDecodeError as exc:
+            return {"result": False, "message": f"invalid todos JSON: {exc}"}
+    if not isinstance(todos, list):
+        return {"result": False, "message": "todos must be a list"}
+    if any(not isinstance(item, dict) for item in todos):
+        return {"result": False, "message": "todos must contain only todo dicts"}
+    return True
+
+
+def _todo_tool_summary(args: dict[str, Any]) -> str:
+    command = str(args.get("command") or "").strip().lower()
+    if command in {"set", "update", "validate"}:
+        count = len(args.get("items") or [])
+        return f"{command} {count} task{'s' if count != 1 else ''}"
+    if command == "add":
+        title = _clip_summary(args.get("title"))
+        return f"add {title}".strip()
+    if command in {"mark", "note"}:
+        item_id = args.get("id")
+        return f"{command} task {item_id}".strip()
+    if command:
+        return command
+    todos = args.get("todos")
+    if isinstance(todos, list):
+        count = len(todos)
+        return f"{count} task{'s' if count != 1 else ''}"
+    return "task list"
+
+
+def _todo_activity(args: dict[str, Any]) -> str:
+    command = str(args.get("command") or "").strip().lower()
+    if command in {"view", "validate"}:
+        return "Reviewing task list"
+    if command in {"clear", "set", "update", "add", "mark", "note"}:
+        return "Updating task list"
+    return "Managing task list"
+
+
+def _think_summary(args: dict[str, Any]) -> str:
+    return _clip_summary(args.get("thought"))
+
+
+def _required_text(args: dict[str, Any], key: str, *, message: str | None = None) -> bool | dict[str, Any]:
+    value = str(args.get(key) or "").strip()
+    if value:
+        return True
+    return {"result": False, "message": message or f"{key} is required"}
+
+
+def _optional_directory(args: dict[str, Any], key: str = "cwd") -> bool | dict[str, Any]:
+    value = str(args.get(key) or "").strip()
+    if not value:
+        return True
+    return _directory_validator(args, key=key)
+
+
+def _optional_file(args: dict[str, Any], key: str = "path") -> bool | dict[str, Any]:
+    value = str(args.get(key) or "").strip()
+    if not value:
+        return True
+    return _path_validator(args, key=key, require_file=True)
+
+
+def _optional_venv(args: dict[str, Any], key: str = "venv_path") -> bool | dict[str, Any]:
+    value = str(args.get(key) or "").strip()
+    if not value:
+        return True
+    return _directory_validator(args, key=key)
+
+
+def _positive_int_validator(
+    args: dict[str, Any],
+    key: str,
+    *,
+    minimum: int = 1,
+    maximum: int | None = None,
+) -> bool | dict[str, Any]:
+    value = args.get(key)
+    if value in (None, ""):
+        return True
+    try:
+        number = int(value)
+    except Exception:
+        return {"result": False, "message": f"{key} must be an integer"}
+    if number < minimum:
+        return {"result": False, "message": f"{key} must be >= {minimum}"}
+    if maximum is not None and number > maximum:
+        return {"result": False, "message": f"{key} must be <= {maximum}"}
+    return True
+
+
+def _non_negative_int_validator(args: dict[str, Any], key: str) -> bool | dict[str, Any]:
+    return _positive_int_validator(args, key, minimum=0)
+
+
+def _list_validator(args: dict[str, Any], key: str, *, required: bool = False) -> bool | dict[str, Any]:
+    value = args.get(key)
+    if value is None:
+        return {"result": False, "message": f"{key} is required"} if required else True
+    if not isinstance(value, list):
+        return {"result": False, "message": f"{key} must be a list"}
+    return True
+
+
+def _http_url_validator(args: dict[str, Any], key: str = "url") -> bool | dict[str, Any]:
+    from .WebTool.tool import _validate_http_url
+
+    url = str(args.get(key) or "").strip()
+    if not url:
+        return {"result": False, "message": f"{key} is required"}
+    error = _validate_http_url(url)
+    if error:
+        return {"result": False, "message": error}
+    return True
+
+
+def _combine_validators(*validators: Any) -> Any:
+    def _validator(args: dict[str, Any]) -> bool | dict[str, Any]:
+        for validator in validators:
+            result = validator(args)
+            if result is True or result is None:
+                continue
+            return result
+        return True
+
+    return _validator
+
+
+def _summary_from_path(
+    key: str = "path",
+    *,
+    prefix: str = "",
+    fallback: str = "",
+) -> Any:
+    def _summary(args: dict[str, Any]) -> str:
+        value = _clip_summary(args.get(key))
+        body = value or fallback
+        return f"{prefix}{body}".strip()
+
+    return _summary
+
+
+def _summary_from_name_and_path(name_key: str, path_key: str = "path", *, prefix: str = "") -> Any:
+    def _summary(args: dict[str, Any]) -> str:
+        name = _clip_summary(args.get(name_key))
+        path = _clip_summary(args.get(path_key))
+        if name and path:
+            return f"{prefix}{name} in {path}".strip()
+        return f"{prefix}{name or path}".strip()
+
+    return _summary
+
+
+def _activity(prefix: str) -> Any:
+    return lambda _args: prefix
+
+
+def _bash_summary(args: dict[str, Any]) -> str:
+    return _clip_summary(args.get("command"))
+
+
+def _bash_activity(_args: dict[str, Any]) -> str:
+    return "Running shell command"
+
+
+def _bash_flags(args: dict[str, Any]) -> dict[str, bool]:
+    validation = _validate_bash_command(str(args.get("command") or ""), require_read_only=False)
+    return {
+        "isSearch": bool(validation.get("is_read_only")),
+        "isRead": bool(validation.get("is_read_only")),
+        "isList": False,
+    }
+
+
+def _bash_validate_input(args: dict[str, Any]) -> bool | dict[str, Any]:
+    command = str(args.get("command") or "").strip()
+    if not command:
+        return {"result": False, "message": "command is required"}
+    return _positive_int_validator(args, "timeout", minimum=1, maximum=3600)
+
+
+_RUNTIME_META.update(
+    {
+        "read_file": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "read_edit_context": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "search_file": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "list_dir": {"read_only": True, "cacheable": True, "concurrency_safe": True},
+        "get_git_status": {"read_only": True, "cacheable": False, "concurrency_safe": True},
+        "get_git_diff": {"read_only": True, "cacheable": False, "content_reader": True, "concurrency_safe": True},
+        "get_symbol_info": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "read_line": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "find_imports": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "get_file_outline": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "find_symbol": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "get_project_map": {"read_only": True, "cacheable": True, "concurrency_safe": True},
+        "glob_files": {"read_only": True, "cacheable": True, "concurrency_safe": True},
+        "grep_files": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "search_code": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "rg_search": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "fd_find": {"read_only": True, "cacheable": True, "concurrency_safe": True},
+        "find_references": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "search_symbols": {"read_only": True, "cacheable": True, "content_reader": True, "concurrency_safe": True},
+        "check_imports": {"read_only": True, "cacheable": False, "concurrency_safe": True},
+        "list_installed_packages": {"read_only": True, "cacheable": False, "concurrency_safe": True},
+        "cargo_metadata": {"read_only": True, "cacheable": False, "concurrency_safe": True},
+        "todo": {"read_only": False, "cacheable": False},
+    }
+)
+
+_merge_tool_metadata(
+    "search_file",
+    description="Search a single file for literal text or regex matches and return structured line context.",
+    validate_input=lambda args: _path_validator(args, require_file=True),
+    is_search_or_read_command=_search_flags(is_read=True),
+    get_tool_use_summary=_summary_from_query("pattern", scope_keys=("path",)),
+    get_activity_description=_activity_from_query("Searching file for", "pattern"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "glob_files",
+    validate_input=lambda args: _directory_validator(args, key="path"),
+    is_search_or_read_command=_search_flags(is_list=True),
+    get_tool_use_summary=_summary_from_query("pattern", scope_keys=("path",)),
+    get_activity_description=_activity_from_query("Finding files matching", "pattern"),
+    user_facing_name=lambda _args: "Find Files",
+)
+_merge_tool_metadata(
+    "grep_files",
+    validate_input=lambda args: _directory_validator(args, key="path"),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("pattern", scope_keys=("path",)),
+    get_activity_description=_activity_from_query("Searching for", "pattern"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "search_code",
+    validate_input=lambda args: _path_validator(args, key="path", default_value="."),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("query", scope_keys=("path",)),
+    get_activity_description=_activity_from_query("Searching code for", "query"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "rg_search",
+    description="Search a directory tree with ripgrep semantics and ranked structured matches.",
+    validate_input=lambda args: _directory_validator(args, key="directory"),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("pattern", scope_keys=("directory",)),
+    get_activity_description=_activity_from_query("Searching for", "pattern"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "fd_find",
+    description="Find files or directories by name pattern and return the newest matches first.",
+    validate_input=lambda args: _directory_validator(args, key="directory"),
+    is_search_or_read_command=_search_flags(is_list=True),
+    get_tool_use_summary=_summary_from_query("pattern", scope_keys=("directory",)),
+    get_activity_description=_activity_from_query("Finding files matching", "pattern"),
+    user_facing_name=lambda _args: "Find Files",
+)
+_merge_tool_metadata(
+    "find_references",
+    description="Find likely symbol references with a word-boundary text search and ranked results.",
+    validate_input=lambda args: _directory_validator(args, key="directory"),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("name", scope_keys=("directory",), prefix="references for "),
+    get_activity_description=_activity_from_query("Finding references for", "name"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "search_symbols",
+    description="Search source trees for symbol definitions across supported languages using parsed syntax trees.",
+    validate_input=lambda args: _directory_validator(args, key="directory"),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("name", scope_keys=("directory",), prefix="symbols for "),
+    get_activity_description=_activity_from_query("Searching symbols for", "name"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "think",
+    get_tool_use_summary=_think_summary,
+    get_activity_description=lambda _args: "Thinking",
+    user_facing_name=lambda _args: "",
+)
+_merge_tool_metadata(
+    "todo",
+    validate_input=_todo_validate_input,
+    get_tool_use_summary=_todo_tool_summary,
+    get_activity_description=_todo_activity,
+    user_facing_name=lambda _args: "Tasks",
+)
+_merge_tool_metadata(
+    "read_file",
+    validate_input=lambda args: _path_validator(args, require_file=True),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Reading file"),
+    user_facing_name=lambda _args: "Read",
+)
+_merge_tool_metadata(
+    "read_edit_context",
+    validate_input=_combine_validators(
+        lambda args: _path_validator(args, require_file=True),
+        lambda args: _required_text(args, "needle"),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_query("needle", scope_keys=("path",)),
+    get_activity_description=_activity("Reading edit context"),
+    user_facing_name=lambda _args: "Read",
+)
+_merge_tool_metadata(
+    "list_dir",
+    validate_input=lambda args: _directory_validator(args, key="path"),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": True},
+    get_tool_use_summary=_summary_from_path(fallback="."),
+    get_activity_description=_activity("Listing directory"),
+    user_facing_name=lambda _args: "List Files",
+)
+_merge_tool_metadata(
+    "write_file",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "path"),
+        lambda args: _required_text(args, "content"),
+    ),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Writing file"),
+    user_facing_name=lambda _args: "Write",
+)
+_merge_tool_metadata(
+    "edit_file",
+    validate_input=lambda args: _required_text(args, "path"),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Editing file"),
+    user_facing_name=lambda _args: "Edit",
+)
+_merge_tool_metadata(
+    "apply_edit_block",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "path"),
+        lambda args: _required_text(args, "blocks"),
+    ),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Applying edit blocks"),
+    user_facing_name=lambda _args: "Edit",
+)
+_merge_tool_metadata(
+    "preview_edit",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "path"),
+        lambda args: _required_text(args, "blocks"),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Previewing edit"),
+    user_facing_name=lambda _args: "Edit",
+)
+_merge_tool_metadata(
+    "smart_edit",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "path"),
+        lambda args: _list_validator(args, "edits", required=True),
+    ),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Applying smart edits"),
+    user_facing_name=lambda _args: "Edit",
+)
+_merge_tool_metadata(
+    "get_git_status",
+    validate_input=lambda args: _path_validator(args, key="path", default_value="."),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": True},
+    get_tool_use_summary=_summary_from_path(fallback="."),
+    get_activity_description=_activity("Inspecting git status"),
+    user_facing_name=lambda _args: "Git",
+)
+_merge_tool_metadata(
+    "get_git_diff",
+    validate_input=lambda args: _path_validator(args, key="path", default_value="."),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_path(fallback="."),
+    get_activity_description=_activity("Reading git diff"),
+    user_facing_name=lambda _args: "Git",
+)
+_merge_tool_metadata(
+    "get_symbol_info",
+    validate_input=_combine_validators(
+        lambda args: _path_validator(args, require_file=True),
+        lambda args: _required_text(args, "symbol"),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_name_and_path("symbol"),
+    get_activity_description=_activity("Reading symbol info"),
+    user_facing_name=lambda _args: "Inspect",
+)
+_merge_tool_metadata(
+    "read_line",
+    validate_input=_combine_validators(
+        lambda args: _path_validator(args, require_file=True),
+        lambda args: _positive_int_validator(args, "line_number", minimum=1),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Reading line"),
+    user_facing_name=lambda _args: "Read",
+)
+_merge_tool_metadata(
+    "find_imports",
+    validate_input=lambda args: _path_validator(args, require_file=True),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": True},
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Finding imports"),
+    user_facing_name=lambda _args: "Inspect",
+)
+_merge_tool_metadata(
+    "get_file_outline",
+    validate_input=lambda args: _path_validator(args, require_file=True),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": True},
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Building file outline"),
+    user_facing_name=lambda _args: "Inspect",
+)
+_merge_tool_metadata(
+    "find_symbol",
+    validate_input=_combine_validators(
+        lambda args: _directory_validator(args, key="directory"),
+        lambda args: _required_text(args, "name"),
+    ),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("name", scope_keys=("directory",)),
+    get_activity_description=_activity_from_query("Finding symbol", "name"),
+    user_facing_name=lambda _args: "Search",
+)
+_merge_tool_metadata(
+    "get_project_map",
+    validate_input=_combine_validators(
+        lambda args: _directory_validator(args, key="directory"),
+        lambda args: _non_negative_int_validator(args, "max_depth"),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": True},
+    get_tool_use_summary=_summary_from_path("directory", fallback="."),
+    get_activity_description=_activity("Mapping project"),
+    user_facing_name=lambda _args: "Inspect",
+)
+_merge_tool_metadata(
+    "fetch_url",
+    validate_input=_combine_validators(
+        lambda args: _http_url_validator(args, key="url"),
+        lambda args: _positive_int_validator(args, "timeout", minimum=1, maximum=300),
+        lambda args: _positive_int_validator(args, "max_chars", minimum=1, maximum=200000),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=_summary_from_path("url"),
+    get_activity_description=_activity("Fetching URL"),
+    user_facing_name=lambda _args: "Web",
+)
+_merge_tool_metadata(
+    "web_search",
+    validate_input=lambda args: _required_text(args, "query"),
+    is_search_or_read_command=_search_flags(),
+    get_tool_use_summary=_summary_from_query("query", scope_keys=()),
+    get_activity_description=_activity_from_query("Searching web for", "query"),
+    user_facing_name=lambda _args: "Web",
+)
+_merge_tool_metadata(
+    "pypi_info",
+    validate_input=lambda args: _required_text(args, "package_name"),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": False},
+    get_tool_use_summary=lambda args: _clip_summary(args.get("package_name")),
+    get_activity_description=_activity("Fetching PyPI metadata"),
+    user_facing_name=lambda _args: "Web",
+)
+_merge_tool_metadata(
+    "github_read_file",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "owner"),
+        lambda args: _required_text(args, "repo"),
+        lambda args: _required_text(args, "path"),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=lambda args: _summary_from_name_and_path("repo", "path", prefix=f"{str(args.get('owner') or '').strip()}/")(args),
+    get_activity_description=_activity("Reading GitHub file"),
+    user_facing_name=lambda _args: "Web",
+)
+_merge_tool_metadata(
+    "set_venv",
+    validate_input=lambda args: _directory_validator(args, key="venv_path"),
+    get_tool_use_summary=_summary_from_path("venv_path"),
+    get_activity_description=_activity("Setting virtualenv"),
+    user_facing_name=lambda _args: "Python",
+)
+_merge_tool_metadata(
+    "set_working_directory",
+    validate_input=lambda args: _directory_validator(args, key="path"),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Setting working directory"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "install_packages",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "packages"),
+        lambda args: _optional_venv(args),
+    ),
+    get_tool_use_summary=lambda args: _clip_summary(args.get("packages")),
+    get_activity_description=_activity("Installing packages"),
+    user_facing_name=lambda _args: "Python",
+)
+_merge_tool_metadata(
+    "show_coding_config",
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=lambda _args: "execution config",
+    get_activity_description=_activity("Reading execution config"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "start_background_process",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "command"),
+        lambda args: _required_text(args, "name"),
+        lambda args: _optional_directory(args, "cwd"),
+        lambda args: _optional_venv(args),
+    ),
+    get_tool_use_summary=lambda args: _clip_summary(args.get("name") or args.get("command")),
+    get_activity_description=_activity("Starting background process"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "send_input_to_process",
+    validate_input=lambda args: _required_text(args, "name"),
+    get_tool_use_summary=lambda args: _clip_summary(args.get("name")),
+    get_activity_description=_activity("Sending process input"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "get_process_output",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "name"),
+        lambda args: _non_negative_int_validator(args, "tail_lines"),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=lambda args: _clip_summary(args.get("name")),
+    get_activity_description=_activity("Reading process output"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "kill_process",
+    validate_input=lambda args: _required_text(args, "name"),
+    get_tool_use_summary=lambda args: _clip_summary(args.get("name")),
+    get_activity_description=_activity("Stopping process"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "list_processes",
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": True},
+    get_tool_use_summary=lambda _args: "background processes",
+    get_activity_description=_activity("Listing processes"),
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "run_python",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "code"),
+        lambda args: _positive_int_validator(args, "timeout", minimum=1, maximum=3600),
+        lambda args: _optional_directory(args, "cwd"),
+        lambda args: _optional_venv(args),
+    ),
+    get_tool_use_summary=lambda args: _clip_summary(str(args.get("code") or "").splitlines()[0] if str(args.get("code") or "").splitlines() else ""),
+    get_activity_description=_activity("Running Python"),
+    user_facing_name=lambda _args: "Python",
+)
+_merge_tool_metadata(
+    "list_installed_packages",
+    validate_input=lambda args: _optional_venv(args),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": True},
+    get_tool_use_summary=lambda _args: "installed packages",
+    get_activity_description=_activity("Listing installed packages"),
+    user_facing_name=lambda _args: "Python",
+)
+_merge_tool_metadata(
+    "check_imports",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "modules"),
+        lambda args: _optional_venv(args),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": False},
+    get_tool_use_summary=lambda args: _clip_summary(args.get("modules")),
+    get_activity_description=_activity("Checking imports"),
+    user_facing_name=lambda _args: "Python",
+)
+_merge_tool_metadata(
+    "lsp_tool",
+    validate_input=_combine_validators(
+        lambda args: _path_validator(args, key="path"),
+        lambda args: _positive_int_validator(args, "max_results", minimum=1, maximum=500),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": False},
+    get_tool_use_summary=lambda args: f"{str(args.get('operation') or '').strip()} {_clip_summary(args.get('path'))}".strip(),
+    get_activity_description=_activity("Running source navigation"),
+    user_facing_name=lambda _args: "Inspect",
+)
+_merge_tool_metadata(
+    "bash",
+    validate_input=_bash_validate_input,
+    is_search_or_read_command=_bash_flags,
+    get_tool_use_summary=_bash_summary,
+    get_activity_description=_bash_activity,
+    user_facing_name=lambda _args: "Terminal",
+)
+_merge_tool_metadata(
+    "edit_file_libcst",
+    validate_input=_combine_validators(
+        lambda args: _path_validator(args, require_file=True),
+        lambda args: _required_text(args, "old_pattern"),
+        lambda args: _required_text(args, "new_code"),
+    ),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Editing Python structurally"),
+    user_facing_name=lambda _args: "Edit",
+)
+for _tool_name, _field_name in (
+    ("replace_function_body", "function_name"),
+    ("replace_docstring", "function_name"),
+    ("replace_decorators", "function_name"),
+    ("replace_argument", "function_name"),
+    ("insert_after_function", "function_name"),
+    ("delete_function", "function_name"),
+    ("find_function_by_name", "function_name"),
+    ("find_class_by_name", "class_name"),
+):
+        _merge_tool_metadata(
+            _tool_name,
+            validate_input=_combine_validators(
+                lambda args: _path_validator(args, require_file=True),
+                lambda args, field_name=_field_name: _required_text(args, field_name),
+        ),
+        is_search_or_read_command=(
+            (lambda _args: {"isSearch": True, "isRead": True, "isList": False})
+            if _tool_name in {"find_function_by_name", "find_class_by_name"}
+            else None
+            ),
+            get_tool_use_summary=_summary_from_name_and_path(_field_name),
+            get_activity_description=_activity("Updating Python symbol" if "find_" not in _tool_name else "Reading Python symbol"),
+            user_facing_name=lambda _args, tool_name=_tool_name: "Edit" if tool_name not in {"find_function_by_name", "find_class_by_name"} else "Inspect",
+        )
+for _tool_name in (
+    "run_rust",
+    "cargo_check",
+    "cargo_build",
+    "cargo_test",
+    "cargo_clippy",
+    "cargo_run",
+    "cargo_fmt",
+    "cargo_metadata",
+):
+    _merge_tool_metadata(
+        _tool_name,
+        validate_input=_combine_validators(
+            lambda args: _optional_directory(args, "cwd"),
+            lambda args: _positive_int_validator(args, "timeout", minimum=1, maximum=3600),
+        ),
+        get_tool_use_summary=lambda args, tool_name=_tool_name: _clip_summary(args.get("package") or args.get("test_name") or args.get("bin") or args.get("example") or args.get("cwd") or tool_name),
+        get_activity_description=_activity("Running Rust tool"),
+        user_facing_name=lambda _args: "Rust",
+    )
+
 _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("read_file", read_file),
     ("read_edit_context", read_edit_context),
@@ -630,6 +1531,14 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("run_python", run_python),
     ("list_installed_packages", list_installed_packages),
     ("check_imports", check_imports),
+    ("run_rust", run_rust),
+    ("cargo_check", cargo_check),
+    ("cargo_build", cargo_build),
+    ("cargo_test", cargo_test),
+    ("cargo_clippy", cargo_clippy),
+    ("cargo_run", cargo_run),
+    ("cargo_fmt", cargo_fmt),
+    ("cargo_metadata", cargo_metadata),
     ("lsp_tool", lsp_tool),
     ("bash", bash),
     ("glob_files", glob_files),
@@ -675,6 +1584,8 @@ __all__ = [
     *CORE_TOOL_NAMES,
     "CORE_TOOL_FUNCTIONS",
     "CORE_TOOL_NAMES",
+    "ContentReplacementState",
+    "compact_result",
 ]
 
 # Optional: expose availability flag for users who want to check

@@ -125,7 +125,7 @@ def lsp_tool(
     normalized = _normalize_operation(operation)
     if normalized is None:
         return _err(
-            "Unsupported operation. Use one of: document_symbols, workspace_symbols, go_to_definition, find_references, hover"
+            "Unsupported operation. Use one of: document_symbols, workspace_symbols, go_to_definition, go_to_implementation, find_references, hover, prepare_call_hierarchy, incoming_calls, outgoing_calls"
         )
     if max_results <= 0:
         return _err("max_results must be >= 1")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -55,14 +56,31 @@ def install_packages(packages: str, venv_path: str = "", upgrade: bool = False) 
     if not normalized:
         return {"status": "error", "error": "No packages provided"}
 
-    upgrade_flag = "--upgrade " if upgrade else ""
-    command = f"pip install {upgrade_flag}{normalized}"
-    result = _runtime().run_cmd(
+    try:
+        package_args = shlex.split(normalized)
+    except ValueError as exc:
+        return {"status": "error", "error": f"Could not parse package list: {exc}"}
+    if not package_args:
+        return {"status": "error", "error": "No packages provided"}
+
+    runtime = _runtime()
+    active_venv = venv_path or (runtime.venv_path() or "")
+    python_bin = Path(active_venv).expanduser().resolve() / "bin" / "python" if active_venv else None
+    if python_bin is not None and python_bin.exists():
+        command: list[str] = [str(python_bin), "-m", "pip", "install"]
+    else:
+        command = ["pip", "install"]
+    if upgrade:
+        command.append("--upgrade")
+    command.extend(package_args)
+
+    result = runtime.run_cmd(
         command,
         timeout=180,
-        venv_path=venv_path or None,
+        venv_path=active_venv or None,
+        shell=False,
     )
-    result["command_preview"] = _preview_text(command)
+    result["command_preview"] = _preview_text(" ".join(shlex.quote(part) for part in command))
     return result
 
 
@@ -91,6 +109,10 @@ def start_background_process(
     venv_path: str = "",
 ) -> dict[str, Any]:
     normalized = _normalize_text_payload(command)
+    if not normalized.strip():
+        return {"status": "error", "error": "command must not be empty"}
+    if not str(name or "").strip():
+        return {"status": "error", "error": "name must not be empty"}
     return _runtime().start_background_process(
         normalized,
         name,

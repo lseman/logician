@@ -51,6 +51,11 @@ def read_file(
                     )
                 )
                 if range_covered:
+                    cached_content = _slice_snapshot_content(
+                        snap,
+                        start_line=normalized_start,
+                        end_line=normalized_end,
+                    )
                     summary = {
                         "path": snap.get("path"),
                         "full_read": snap.get("full_read"),
@@ -65,7 +70,7 @@ def read_file(
                         "file_type": "file_unchanged",
                         "unchanged": True,
                         "message": "File unchanged since last read — returning cached content.",
-                        "content": snap.get("content", ""),
+                        "content": cached_content,
                         "total_lines": snap.get("total_lines"),
                         "snapshot": summary,
                     }
@@ -117,6 +122,37 @@ def read_file(
         "truncated": snapshot["truncated"],
     }
     return result
+
+
+def _slice_snapshot_content(
+    snapshot: dict[str, Any],
+    *,
+    start_line: int | None,
+    end_line: int | None,
+) -> str:
+    content = str(snapshot.get("content") or "")
+    if start_line is None and end_line is None:
+        return content
+
+    lines = content.splitlines(keepends=True)
+    if not lines:
+        return ""
+
+    snapshot_start = int(snapshot.get("start_line") or 1)
+    snapshot_end = snapshot.get("end_line")
+    if snapshot_end is None:
+        snapshot_end = snapshot_start + len(lines) - 1
+    else:
+        snapshot_end = int(snapshot_end)
+
+    effective_start = max(snapshot_start, start_line or snapshot_start)
+    effective_end = snapshot_end if end_line is None else min(snapshot_end, int(end_line))
+    if effective_start > effective_end:
+        return ""
+
+    relative_start = max(0, effective_start - snapshot_start)
+    relative_end = min(len(lines), effective_end - snapshot_start + 1)
+    return "".join(lines[relative_start:relative_end])
 
 
 def _resolve_line_window(

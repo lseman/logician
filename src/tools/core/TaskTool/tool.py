@@ -33,16 +33,37 @@ _TODO_PATH_ENV = "LOGICIAN_TODO_STATE_PATH"
 
 def _todo_warnings(items: list[dict[str, Any]]) -> list[str]:
     warnings: list[str] = []
+    in_progress_titles: list[str] = []
+    seen_ids: dict[int, str] = {}
     for item in items:
         title = str(item.get("title") or "").strip()
         if not title:
             warnings.append("Task item is missing a title.")
-        status = str(item.get("status") or "").strip().lower()
-        if status and status not in _STATUS_ALIASES:
+        raw_status = str(item.get("status") or "").strip().lower()
+        if raw_status and raw_status not in _STATUS_ALIASES:
             warnings.append(
-                f"Task '{title or '<untitled>'}' has an unrecognized status '{status}'. "
+                f"Task '{title or '<untitled>'}' has an unrecognized status '{raw_status}'. "
                 "It will be normalized to 'not-started'."
             )
+        normalized_status = _normalize_status(raw_status)
+        if normalized_status == "in-progress":
+            in_progress_titles.append(title or f"id={item.get('id', '?')}")
+        try:
+            item_id = int(item.get("id"))
+        except Exception:
+            item_id = None
+        if item_id is None:
+            continue
+        if item_id in seen_ids:
+            warnings.append(
+                f"Task id {item_id} is duplicated for '{seen_ids[item_id]}' and '{title or '<untitled>'}'."
+            )
+        else:
+            seen_ids[item_id] = title or "<untitled>"
+    if len(in_progress_titles) > 1:
+        warnings.append(
+            "Multiple tasks are marked in-progress. Keep a single active task unless parallel work is intentional."
+        )
     return list(dict.fromkeys(warnings))
 
 

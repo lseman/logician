@@ -105,27 +105,53 @@ class SharedExecutionRuntime:
             return ""
         return f". {shlex.quote(str(activate))} && "
 
+    def build_env(self, venv_path: Optional[str]) -> dict[str, str]:
+        env = os.environ.copy()
+        venv = venv_path or self.venv_path()
+        if not venv:
+            return env
+
+        root = Path(venv).expanduser().resolve()
+        bin_dir = root / "bin"
+        scripts_dir = root / "Scripts"
+        tool_dir = bin_dir if bin_dir.exists() else scripts_dir
+        env["VIRTUAL_ENV"] = str(root)
+        if tool_dir.exists():
+            current_path = env.get("PATH", "")
+            env["PATH"] = (
+                f"{tool_dir}{os.pathsep}{current_path}" if current_path else str(tool_dir)
+            )
+        return env
+
     def run_cmd(
         self,
-        command: str,
+        command: str | list[str] | tuple[str, ...],
         cwd: Optional[str] = None,
         timeout: int = 60,
         venv_path: Optional[str] = None,
-        shell: bool = True,
+        shell: bool | None = None,
     ) -> dict[str, Any]:
-        prefix = self.build_shell_prefix(venv_path)
-        full_cmd = prefix + command if prefix else command
+        effective_shell = isinstance(command, str) if shell is None else bool(shell)
+        run_command: str | list[str] | tuple[str, ...] = command
+        if effective_shell and isinstance(command, (list, tuple)):
+            run_command = " ".join(shlex.quote(str(part)) for part in command)
+        display_command = (
+            run_command
+            if isinstance(run_command, str)
+            else " ".join(shlex.quote(str(part)) for part in run_command)
+        )
         resolved_cwd = self.resolve_cwd(cwd)
+        env = self.build_env(venv_path)
 
         try:
             proc = subprocess.run(
-                full_cmd,
-                shell=shell,
+                run_command,
+                shell=effective_shell,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 cwd=resolved_cwd,
-                env=os.environ.copy(),
+                env=env,
                 stdin=subprocess.DEVNULL,
             )
             stdout = proc.stdout or ""
@@ -144,7 +170,7 @@ class SharedExecutionRuntime:
                 "exit_code": proc.returncode,
                 "stdout": stdout,
                 "stderr": stderr,
-                "command": full_cmd,
+                "command": display_command,
                 "cwd": resolved_cwd or os.getcwd(),
                 "truncated": truncated,
             }
@@ -154,7 +180,7 @@ class SharedExecutionRuntime:
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": f"Command timed out after {timeout}s",
-                "command": full_cmd,
+                "command": display_command,
                 "cwd": resolved_cwd or os.getcwd(),
                 "truncated": False,
             }
@@ -164,7 +190,7 @@ class SharedExecutionRuntime:
                 "exit_code": -1,
                 "stdout": "",
                 "stderr": str(exc),
-                "command": full_cmd,
+                "command": display_command,
                 "cwd": resolved_cwd or os.getcwd(),
                 "truncated": False,
             }
@@ -180,20 +206,19 @@ class SharedExecutionRuntime:
         if name in self._bg_procs and self._bg_procs[name]["proc"].poll() is None:
             return {"status": "error", "error": f"Process '{name}' is already running"}
 
-        prefix = self.build_shell_prefix(venv_path)
-        full_cmd = prefix + command if prefix else command
         resolved_cwd = self.resolve_cwd(cwd)
+        env = self.build_env(venv_path)
 
         try:
             proc = subprocess.Popen(
-                full_cmd,
+                command,
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.PIPE,
                 text=True,
                 cwd=resolved_cwd,
-                env=os.environ.copy(),
+                env=env,
                 bufsize=1,
                 universal_newlines=True,
             )

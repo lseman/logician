@@ -9,7 +9,7 @@ hooks from enabled plugins, following the OpenClaude hook loading pattern.
 from __future__ import annotations
 
 import json
-import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -41,6 +41,12 @@ class LoadedHook:
 class HookLoader:
     """Loads hooks from the plugin registry."""
 
+    _cache_lock = threading.Lock()
+    _event_cache: dict[
+        tuple[HookEventType, str],
+        tuple[tuple[Any, ...], tuple[LoadedHook, ...]],
+    ] = {}
+
     def __init__(self, plugin_manager: PluginManager | None = None) -> None:
         from src.plugin_manager.manager import PluginManager as PM
 
@@ -51,9 +57,16 @@ class HookLoader:
         return self._get_hooks_for_event(HookEventType.SESSION_START)
 
     def _get_hooks_for_event(
-        self, event_type: HookEventType
+        self, event_type: HookEventType, source: str = "startup"
     ) -> list[LoadedHook]:
         """Get all hooks for a specific event type from enabled plugins."""
+        cache_key = (event_type, str(source or "").strip().lower() or "startup")
+        signature = self._cache_signature()
+        with self._cache_lock:
+            cached = self._event_cache.get(cache_key)
+            if cached is not None and cached[0] == signature:
+                return list(cached[1])
+
         loaded: list[LoadedHook] = []
 
         for plugin_id, inst in self.plugin_manager.registry.all_installs():
@@ -71,7 +84,7 @@ class HookLoader:
             plugin_name = self._get_plugin_name(plugin_dir, plugin_id)
 
             for definition in definitions:
-                if self._matcher_matches(definition.matcher, "startup"):
+                if self._matcher_matches(definition.matcher, cache_key[1]):
                     loaded.append(
                         LoadedHook(
                             plugin_id=plugin_id,
@@ -82,7 +95,36 @@ class HookLoader:
                         )
                     )
 
+        with self._cache_lock:
+            self._event_cache[cache_key] = (signature, tuple(loaded))
         return loaded
+
+    def _cache_signature(self) -> tuple[Any, ...]:
+        registry_path = getattr(self.plugin_manager.registry, "_path", None)
+        registry_sig = self._path_signature(Path(registry_path)) if registry_path else None
+        plugin_sigs: list[tuple[Any, ...]] = []
+
+        for plugin_id, inst in self.plugin_manager.registry.all_installs():
+            plugin_dir = Path(inst.install_path)
+            plugin_sigs.append(
+                (
+                    str(plugin_id or "").strip(),
+                    bool(inst.enabled),
+                    str(plugin_dir),
+                    self._path_signature(plugin_dir / ".claude-plugin" / "plugin.json"),
+                    self._path_signature(plugin_dir / "hooks" / "hooks.json"),
+                )
+            )
+
+        return (registry_sig, tuple(plugin_sigs))
+
+    @staticmethod
+    def _path_signature(path: Path) -> tuple[bool, int | None, int | None]:
+        try:
+            stat = path.stat()
+        except Exception:
+            return (False, None, None)
+        return (True, int(getattr(stat, "st_mtime_ns", 0)), int(stat.st_size))
 
     def _get_plugin_name(self, plugin_dir: Path, plugin_id: str) -> str:
         """Get plugin name from plugin.json or fallback to plugin_id."""

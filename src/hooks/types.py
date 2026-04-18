@@ -55,6 +55,7 @@ class HookCommand:
     agent: str | None = None  # For agent type
     http_url: str | None = None  # For http type
     http_headers: dict[str, str] | None = None
+    timeout: float | None = None  # Optional per-hook timeout in seconds
 
 
 @dataclass
@@ -223,6 +224,11 @@ def _parse_hooks_dict(data: dict[str, Any]) -> dict[HookEventType, list[HookDefi
                     agent=hook_data.get("agent"),
                     http_url=hook_data.get("url"),
                     http_headers=hook_data.get("headers"),
+                    timeout=(
+                        float(hook_data.get("timeout"))
+                        if isinstance(hook_data.get("timeout"), (int, float))
+                        else None
+                    ),
                 )
                 hooks_list.append(hook_cmd)
 

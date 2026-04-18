@@ -50,6 +50,26 @@ def _resolve_effective_cwd(cwd: str = "") -> str | None:
     return None
 
 
+def _validate_runtime_paths(
+    *,
+    cwd: str = "",
+    venv_path: str = "",
+) -> dict[str, Any] | None:
+    if cwd:
+        resolved_cwd = Path(cwd).expanduser().resolve()
+        if not resolved_cwd.exists():
+            return {"status": "error", "error": f"Working directory not found: {cwd}"}
+        if not resolved_cwd.is_dir():
+            return {"status": "error", "error": f"Working directory is not a directory: {cwd}"}
+    if venv_path:
+        resolved_venv = Path(venv_path).expanduser().resolve()
+        if not resolved_venv.exists():
+            return {"status": "error", "error": f"Virtualenv path not found: {venv_path}"}
+        if not resolved_venv.is_dir():
+            return {"status": "error", "error": f"Virtualenv path is not a directory: {venv_path}"}
+    return None
+
+
 def _preview_text(text: str, limit: int = 300) -> str:
     if len(text) <= limit:
         return text
@@ -87,6 +107,14 @@ def run_python(
     normalize_output: bool = True,
 ) -> dict[str, Any]:
     """Execute a Python snippet in a fresh subprocess."""
+    if not str(code or "").strip():
+        return {"status": "error", "error": "code must not be empty"}
+    if timeout <= 0 or timeout > 3600:
+        return {"status": "error", "error": "timeout must be between 1 and 3600 seconds"}
+    path_error = _validate_runtime_paths(cwd=cwd, venv_path=venv_path)
+    if path_error is not None:
+        return path_error
+
     normalized_code = _normalize_text_payload(code, language_hint="python")
     warning = _detect_python_truncation_warning(normalized_code)
 
@@ -123,7 +151,6 @@ def run_python(
             "stderr": proc.stderr,
             "python": python_exe,
             "cwd": resolved_cwd or os.getcwd(),
-            "temp_file": tmp_path,
             "code_preview": _preview_text(normalized_code, 500),
         }
         if normalize_output:
@@ -170,6 +197,9 @@ def run_python(
 
 def list_installed_packages(venv_path: str = "") -> dict[str, Any]:
     """List installed pip packages as structured JSON."""
+    path_error = _validate_runtime_paths(venv_path=venv_path)
+    if path_error is not None:
+        return path_error
     python_exe = _resolve_python_executable(venv_path)
     try:
         proc = subprocess.run(
@@ -219,6 +249,9 @@ def list_installed_packages(venv_path: str = "") -> dict[str, Any]:
 
 def check_imports(modules: str, venv_path: str = "") -> dict[str, Any]:
     """Check whether one or more Python modules can be imported."""
+    path_error = _validate_runtime_paths(venv_path=venv_path)
+    if path_error is not None:
+        return path_error
     modules = _normalize_text_payload(modules)
     names = [item.strip() for item in modules.split() if item.strip()]
     if not names:
