@@ -169,6 +169,7 @@ def _extract_context7_library_id(raw: Any) -> str | None:
 
 
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")
+_STREAM_EVENT_CHAR_BATCH = 192
 
 
 def _parse_exclude_args(raw: str) -> list[str]:
@@ -3050,6 +3051,8 @@ class BridgeServer:
         emitted_image_events: set[tuple[str, str]] = set()
         turn_tool_errors: list[int] = [0]  # mutable counter accessible in nested fn
         written_paths: list[str] = []
+        token_buffer: list[str] = []
+        thinking_buffer: list[str] = []
 
         def _parse_result_payload(payload: Any) -> dict[str, Any] | None:
             if isinstance(payload, dict):
@@ -3062,15 +3065,40 @@ class BridgeServer:
                 return None
             return parsed if isinstance(parsed, dict) else None
 
+        def _flush_token_buffer() -> None:
+            if not token_buffer:
+                return
+            chunk = "".join(token_buffer)
+            token_buffer.clear()
+            if chunk:
+                self._emit("token", {"token": chunk})
+
+        def _flush_thinking_buffer() -> None:
+            if not thinking_buffer:
+                return
+            chunk = "".join(thinking_buffer)
+            thinking_buffer.clear()
+            if chunk:
+                self._emit("thinking_token", {"token": chunk})
+
+        def _flush_stream_buffers() -> None:
+            _flush_thinking_buffer()
+            _flush_token_buffer()
+
         def _token(tok: str):
             nonlocal token_seen
             if not token_seen:
                 token_seen = True
                 _phase("streaming", "model output")
-            self._emit("token", {"token": tok})
+                self._emit("token", {"token": tok})
+                return
+            token_buffer.append(tok)
+            if "\n" in tok or sum(len(part) for part in token_buffer) >= _STREAM_EVENT_CHAR_BATCH:
+                _flush_token_buffer()
 
         def _phase(state: str, note: str):
             nonlocal thinking_token_seen
+            _flush_stream_buffers()
             if state != "thinking":
                 thinking_token_seen = False
             self._emit("phase", {"state": state, "note": note})
@@ -3080,7 +3108,11 @@ class BridgeServer:
             if not thinking_token_seen:
                 thinking_token_seen = True
                 _phase("thinking", "pre-turn plan")
-            self._emit("thinking_token", {"token": tok})
+                self._emit("thinking_token", {"token": tok})
+                return
+            thinking_buffer.append(tok)
+            if "\n" in tok or sum(len(part) for part in thinking_buffer) >= _STREAM_EVENT_CHAR_BATCH:
+                _flush_thinking_buffer()
 
         def _emit_file_diff(name: str, tool_args: dict[str, Any], info: dict[str, Any]):
             """Emit an exact file_diff event based on the tool's real result payload."""
@@ -3122,6 +3154,7 @@ class BridgeServer:
             info = meta if isinstance(meta, dict) else {}
             stage = str(info.get("stage", "start") or "start").strip().lower()
             sequence = int(info.get("sequence", 0) or 0)
+            _flush_stream_buffers()
             if stage == "end":
                 status_val = str(info.get("status", "ok") or "ok")
                 if status_val.lower() in ("error", "failed"):
@@ -3194,6 +3227,7 @@ class BridgeServer:
             stage = str(info.get("stage", "") or "").strip().lower()
             if not stage:
                 return
+            _flush_stream_buffers()
             payload = {
                 "stage": stage,
                 "attempt": int(info.get("attempt", 0) or 0),
@@ -3213,6 +3247,7 @@ class BridgeServer:
             stage = str(info.get("stage", "") or "").strip().lower()
             if not stage:
                 return
+            _flush_stream_buffers()
             payload = {
                 "mode": str(info.get("mode", "") or "hybrid_decision"),
                 "stage": stage,
@@ -3320,6 +3355,7 @@ class BridgeServer:
                         "source": "tool_result",
                     },
                 )
+        _flush_stream_buffers()
         # Some backends/modes return a full answer without incremental token callbacks
         # (for example constrained decoding or non-streaming server paths). Emit a
         # synthetic token stream so the TUI still shows streaming output.

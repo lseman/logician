@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::{layout::Rect, Frame};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use uuid::Uuid;
 
@@ -162,6 +162,14 @@ pub struct ActivityEntry {
 struct CachedLineMeta {
     message_idx: usize,
     thinking_toggle: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct StartupHookPluginProgress {
+    display_name: String,
+    started: u64,
+    finished: u64,
+    running_announced: bool,
 }
 
 // ── Message ───────────────────────────────────────────────────────────────────
@@ -1560,6 +1568,7 @@ pub struct App {
     rag_scroll: u16,
     ui_hitboxes: UiHitboxes,
     rendered_startup_hook_contexts: HashSet<String>,
+    startup_hook_progress: HashMap<String, StartupHookPluginProgress>,
 }
 
 impl App {
@@ -1641,6 +1650,7 @@ impl App {
             rag_scroll: 0,
             ui_hitboxes: UiHitboxes::default(),
             rendered_startup_hook_contexts: HashSet::new(),
+            startup_hook_progress: HashMap::new(),
         }
     }
 
@@ -2489,6 +2499,103 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             }
         }
         lines.join("\n")
+    }
+
+    fn startup_hook_progress_key(payload: &Value) -> Option<String> {
+        payload
+            .get("plugin_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| {
+                payload
+                    .get("plugin_name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            })
+    }
+
+    fn startup_hook_display_name(payload: &Value) -> Option<String> {
+        payload
+            .get("plugin_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| {
+                payload
+                    .get("plugin_id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+            })
+    }
+
+    fn handle_startup_hook_status_event(&mut self, payload: &Value) {
+        let state = payload
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+
+        if matches!(state, "complete" | "failed") {
+            self.startup_hook_progress.clear();
+            return;
+        }
+
+        if !matches!(state, "running" | "hook_finished") {
+            return;
+        }
+
+        let Some(key) = Self::startup_hook_progress_key(payload) else {
+            return;
+        };
+        let Some(display_name) = Self::startup_hook_display_name(payload) else {
+            return;
+        };
+
+        let mut running_text: Option<String> = None;
+        let mut completion_text: Option<String> = None;
+        {
+            let entry = self
+                .startup_hook_progress
+                .entry(key.clone())
+                .or_insert_with(StartupHookPluginProgress::default);
+            entry.display_name = display_name.clone();
+
+            if state == "running" {
+                entry.started += 1;
+                if !entry.running_announced {
+                    entry.running_announced = true;
+                    running_text = Some(format!("Running startup hooks: {}", entry.display_name));
+                }
+            } else {
+                if entry.started == 0 {
+                    entry.started = 1;
+                }
+                entry.finished += 1;
+                if entry.finished >= entry.started {
+                    completion_text = Some(if entry.started <= 1 {
+                        format!("Completed startup hook: {}", entry.display_name)
+                    } else {
+                        format!("Completed startup hooks: {}", entry.display_name)
+                    });
+                }
+            }
+        }
+
+        if let Some(text) = running_text {
+            self.add_message(Role::System, text);
+            return;
+        }
+        if let Some(text) = completion_text {
+            self.startup_hook_progress.remove(&key);
+            self.add_message(Role::System, text);
+        }
     }
 
     fn format_compaction_event_text(payload: &Value) -> String {
@@ -3879,23 +3986,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                             self.add_message(Role::System, context.to_string());
                         }
                     }
-                    if let Some(plugin_name) = payload.get("plugin_name").and_then(Value::as_str) {
-                        let state = payload
-                            .get("state")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        if state == "running" && !plugin_name.is_empty() {
-                            self.add_message(
-                                Role::System,
-                                format!("Running startup hook: {plugin_name}"),
-                            );
-                        } else if state == "hook_finished" && !plugin_name.is_empty() {
-                            self.add_message(
-                                Role::System,
-                                format!("Completed startup hook: {plugin_name}"),
-                            );
-                        }
-                    }
+                    self.handle_startup_hook_status_event(&payload);
                     if let Some(state) = payload.get("state").and_then(Value::as_str) {
                         if state == "running" {
                             self.phase = Phase::Thinking;
@@ -5328,5 +5419,55 @@ mod tests {
         message.append_stream_chunk("\nThe user wants to see a list of available tools, so I'll use the search_tools function with a broad query to get a comprehensive list.\n");
         assert_eq!(message.rendered.len(), 3);
         assert_eq!(message.rendered[1].spans[0].content.as_ref(), "⋮ The user wants to see a list of available tools, so I'll use the search_tools function with a broad query to get a comprehensive list.");
+    }
+
+    #[test]
+    fn startup_hook_messages_are_grouped_per_plugin() {
+        let mut app = App::new();
+        app.handle_bridge_event(BridgeEvent::Lifecycle {
+            subsystem: "startup_hook".to_string(),
+            payload: serde_json::json!({
+                "state": "running",
+                "plugin_name": "claude-mem",
+                "ordinal": 0
+            }),
+        });
+        app.handle_bridge_event(BridgeEvent::Lifecycle {
+            subsystem: "startup_hook".to_string(),
+            payload: serde_json::json!({
+                "state": "running",
+                "plugin_name": "claude-mem",
+                "ordinal": 1
+            }),
+        });
+        app.handle_bridge_event(BridgeEvent::Lifecycle {
+            subsystem: "startup_hook".to_string(),
+            payload: serde_json::json!({
+                "state": "hook_finished",
+                "plugin_name": "claude-mem",
+                "ordinal": 0
+            }),
+        });
+        app.handle_bridge_event(BridgeEvent::Lifecycle {
+            subsystem: "startup_hook".to_string(),
+            payload: serde_json::json!({
+                "state": "hook_finished",
+                "plugin_name": "claude-mem",
+                "ordinal": 1
+            }),
+        });
+
+        let texts = app
+            .messages
+            .iter()
+            .map(|message| message.text.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "Running startup hooks: claude-mem".to_string(),
+                "Completed startup hooks: claude-mem".to_string(),
+            ]
+        );
     }
 }
