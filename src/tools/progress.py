@@ -6,9 +6,8 @@ during long-running operations (cargo build, web search, MCP operations, etc.).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol
-
+from dataclasses import dataclass
+from typing import Any
 
 # =============================================================================
 # PROGRESS TYPES (Typed hierarchy for type-safe progress tracking)

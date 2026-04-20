@@ -17,6 +17,7 @@ from ..messages import Message, MessageRole
 from ..repo.graph import related_repo_context
 from ..repo.registry import load_repo_index
 from ..runtime_paths import session_db_path
+from ..startup_profiler import profile_checkpoint
 from ..tools import (
     HAS_TOON,
     Context,
@@ -24,7 +25,6 @@ from ..tools import (
     ToolParameter,
     ToolRegistry,
 )
-from ..startup_profiler import profile_checkpoint
 from .classify import classify_turn
 from .dispatcher import ToolDispatcher
 from .guardrails import GuardrailEngine, default_guards

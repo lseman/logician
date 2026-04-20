@@ -1,5 +1,6 @@
-from pathlib import Path
 import importlib
+from pathlib import Path
+
 apply_edit_block = getattr(
     importlib.import_module("skills.coding.edit_block.edit_block"),
     "apply_edit_block",
@@ -8,7 +9,7 @@ apply_edit_block = getattr(
 def main():
     dummy = Path("dummy.py")
     dummy.write_text("def hello():\n    print('hello world')\n\n    # Some comment\n    return True\n")
-    
+
     # Try exact match
     b1 = '''<<<< SEARCH
     print('hello world')
@@ -19,7 +20,7 @@ def main():
 
     # Replaced comment
 >>>> REPLACE'''
-    
+
     r1 = apply_edit_block("dummy.py", b1)
     print("Exact match result:", r1)
     print("Content after r1:\n", dummy.read_text())
@@ -34,11 +35,11 @@ def hello():
 def hello():
     print('hello fuzzy 2')
 >>>> REPLACE'''
-    
+
     r2 = apply_edit_block("dummy.py", b2)
     print("Fuzzy match result:", r2)
     print("Content after r2:\n", dummy.read_text())
-    
+
     dummy.unlink()
 
 if __name__ == "__main__":

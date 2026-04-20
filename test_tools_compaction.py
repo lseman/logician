@@ -1,26 +1,21 @@
 """Tests for tool compaction and plugin cache modules."""
 
-import json
-import os
 import tempfile
-import time
 from pathlib import Path
 
 import pytest
 
 from src.tools.compaction import (
+    DEFAULT_MAX_INLINE_CHARS,
     ContentReplacementState,
     FileBasedContentReplacementState,
     compact_result,
-    DEFAULT_MAX_INLINE_CHARS,
 )
 from src.tools.plugin_cache import (
     PluginCacheManager,
-    PluginInstallationEntry,
     PluginInfo,
-    create_plugin_id,
+    PluginInstallationEntry,
     parse_plugin_id,
-    migrate_legacy_cache,
 )
 
 

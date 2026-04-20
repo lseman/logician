@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
-
-import pytest
 
 from src.agent.types import TurnResult
 from src.messages import Message, MessageRole

@@ -3,18 +3,18 @@ from __future__ import annotations
 from .core import (
     _SQLITE_PRAGMAS,
     _ChromaDBCollection,
+    _embedding_candidates,
     _EmbeddingRuntime,
     _HNSWCollection,
-    _USEARCHCollection,
-    _RerankerRuntime,
-    _embedding_candidates,
     _lazy_import_chromadb,
     _lazy_import_cross_encoder,
     _lazy_import_hnswlib,
-    _lazy_import_usearch_index,
     _lazy_import_sentence_transformers,
+    _lazy_import_usearch_index,
     _prepare_embedding_input,
+    _RerankerRuntime,
     _stable_collection_name,
+    _USEARCHCollection,
     create_vector_collection,
 )
 from .document import DocumentDB

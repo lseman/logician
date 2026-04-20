@@ -1,6 +1,5 @@
-import subprocess
 import os
-import sys
+import subprocess
 
 # Close fd 0 to simulate textual closing it
 os.close(0)

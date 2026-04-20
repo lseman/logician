@@ -19,19 +19,20 @@ except ImportError:  # pragma: no cover - Python 3.10 fallback
     Self = Any  # type: ignore[assignment,misc]
 
 from ..logging_utils import get_logger
-from ..skills.path_resolution import SkillSourceRoot, infer_skill_root_kind, resolve_local_skill_paths
+from ..skills.path_resolution import (
+    SkillSourceRoot,
+    infer_skill_root_kind,
+    resolve_local_skill_paths,
+)
 from ..startup_profiler import profile_checkpoint
 from .parser import parse_tool_call_strict, parse_tool_calls
-from .registry import (
-    ExecutionGlobals,
-    RegistryExecutionMixin,
-    RegistryIntrospectionMixin,
-    RegistryLoadingMixin,
-    RegistryPromptingMixin,
-    RegistryRoutingMixin,
-    SkillCatalog,
-    ToolExecutionStats,
-)
+from .registry.catalog import SkillCatalog
+from .registry.execution import RegistryExecutionMixin
+from .registry.introspection import RegistryIntrospectionMixin
+from .registry.loading import RegistryLoadingMixin
+from .registry.prompting import RegistryPromptingMixin
+from .registry.routing import RegistryRoutingMixin
+from .registry.types import ExecutionGlobals, ToolExecutionStats
 from .runtime import (
     HAS_TOON,
     AppState,
@@ -302,6 +303,11 @@ class ToolRegistry(
 
     def install_context(self, ctx: Context, extra_globals: ExecutionGlobals | None = None) -> None:
         self._execution_globals["ctx"] = ctx
+        self._execution_globals["tool_registry"] = self
+        try:
+            setattr(ctx, "_tool_registry", self)
+        except Exception:
+            pass
         if extra_globals:
             self._execution_globals.update(extra_globals)
 

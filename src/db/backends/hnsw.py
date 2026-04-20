@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 import json
 import threading
-from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -11,10 +10,9 @@ import numpy as np
 from ...logging_utils import get_logger
 from ..embeddings import (
     _EmbeddingRuntime,
-    _RerankerRuntime,
     _lazy_import_hnswlib,
+    _RerankerRuntime,
     _resolve_vector_collection_dir,
-    _stable_collection_name,
 )
 
 

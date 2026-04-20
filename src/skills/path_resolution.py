@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Mapping
 
-
 SkillRootKind = Literal["skills", "commands"]
 
 _PLUGIN_SKILL_INDEX_FILENAME = "skill_index.json"

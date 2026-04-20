@@ -16,7 +16,6 @@ from __future__ import annotations
 #   - Complementary to config-level `pre_turn_thinking` (automatic, fire-and-forget)
 #   - Inspired by Anthropic's recommended "think" tool pattern for extended thinking
 # =============================================================================
-
 import json
 from datetime import datetime
 from typing import Optional

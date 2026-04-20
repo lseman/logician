@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from src.skills.loader import execute_embedded_shell_commands, load_skill_from_path
 
-from ..runtime import SkillCard, SkillDefinition, SkillSelection
+from ..runtime import SkillCard, SkillSelection
 from .types import _SKILL_PREFIX_SEPARATORS
 
 _ROUTING_META_TOOL_NAMES = (

@@ -4,8 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.plugin_manager.state import InstalledPluginsRegistry, PluginInstall, _now_iso
-from src.plugin_manager.state import iter_enabled_plugin_install_paths
+from src.plugin_manager.state import (
+    InstalledPluginsRegistry,
+    PluginInstall,
+    _now_iso,
+    iter_enabled_plugin_install_paths,
+)
 
 
 class PluginManagerStateTests(unittest.TestCase):

@@ -19,8 +19,8 @@ from ..tools.core.tasks import todo
 from .data import (
     extract_repo_focus_paths,
     get_current_todos,
-    get_repo_focus_graph,
     get_memory_overview,
+    get_repo_focus_graph,
     get_repo_graph,
     get_session_detail,
     list_memory_facts,
@@ -176,6 +176,7 @@ def create_app() -> FastAPI:
             if filename.lower().endswith(".pdf"):
                 try:
                     import io
+
                     import pypdf  # type: ignore[import]
                     reader = pypdf.PdfReader(io.BytesIO(content))
                     pages = [page.extract_text() or "" for page in reader.pages]

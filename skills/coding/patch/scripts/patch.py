@@ -13,7 +13,6 @@ multi_patch        -- apply multiple {file, diff} pairs atomically (roll back on
 
 from __future__ import annotations
 
-
 import difflib
 import re
 from pathlib import Path

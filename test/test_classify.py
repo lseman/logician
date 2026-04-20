@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.agent.classify import TurnClassification, classify_turn
 
 

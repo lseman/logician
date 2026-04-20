@@ -10,12 +10,14 @@ except Exception:
     pass
 
 import asyncio
+
 from tqdm.asyncio import tqdm_asyncio
+
 
 async def main():
     async for i in tqdm_asyncio(range(10)):
         pass
-        
+
     # deliberately make an invalid object to test GC
     obj = tqdm_asyncio.__new__(tqdm_asyncio)
     # let it get garbage collected

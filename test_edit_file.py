@@ -3,11 +3,10 @@
 Test to reproduce the thinking message cropping issue.
 """
 
-import subprocess
-import time
-import threading
 import json
-from typing import List, Optional
+import subprocess
+import threading
+import time
 
 
 def start_bridge():
@@ -29,8 +28,8 @@ def start_bridge():
 
 def send_thinking_tokens(bridge_url: str, num_messages: int, tokens_per_message: int) -> None:
     """Send thinking tokens to the bridge."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     for msg_idx in range(num_messages):
         print(f"Sending thinking message {msg_idx + 1}/{num_messages}")

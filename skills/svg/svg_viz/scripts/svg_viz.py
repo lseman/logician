@@ -204,7 +204,7 @@ def _svg_node_rect(
     if badge:
         bx, by = x + w - 2, y + 2
         bw = max(20, len(badge) * 6 + 10)
-        lines.append(f'  <g class="badge">')
+        lines.append('  <g class="badge">')
         lines.append(
             f'  <rect x="{bx - bw}" y="{by}" width="{bw}" height="16" rx="8" fill="{_T["surface"]}" '
             f'stroke="{_T["border"]}" stroke-width="1.5" filter="url(#shadow)"/>'
@@ -1545,7 +1545,7 @@ def svg_feature_grid(
 
     parts = [
         _svg_header(W, H, "Feature Grid"),
-        f"""  <defs>
+        """  <defs>
     <linearGradient id="grid-bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0f1726"/>
       <stop offset="100%" stop-color="#1b2233"/>

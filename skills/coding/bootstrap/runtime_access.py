@@ -4,8 +4,6 @@ import builtins
 from collections.abc import Callable
 from typing import Any, Mapping
 
-from .bootstrap import _find_local_venv  # noqa: F401 (re-exported for skills that import it here)
-
 
 def get_coding_runtime(globalns: Mapping[str, Any] | None = None) -> Any:
     namespace = dict(globalns or {})

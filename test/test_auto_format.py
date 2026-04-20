@@ -1,8 +1,8 @@
-import importlib
 import builtins
+import importlib
+import json
 import subprocess
 
-import json
 builtins._coding_config = {"default_cwd": "."}
 builtins._safe_json = lambda x: json.dumps(x)
 def mock_run_cmd(cmd, cwd=None, timeout=None, venv_path=None):
@@ -16,6 +16,7 @@ auto_format = getattr(
 )
 
 from pathlib import Path
+
 dummy = Path("dummy.py")
 dummy.write_text("def   hello (   ):    \n    print(   'hello world'   )\n")
 

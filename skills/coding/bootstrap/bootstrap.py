@@ -7,7 +7,7 @@ from __future__ import annotations
 # =============================================================================
 from typing import Any, Optional
 
-from src.tools.core.execution_runtime import _find_local_venv, get_shared_execution_runtime
+from src.tools.core.execution_runtime import get_shared_execution_runtime
 
 # Marker consumed by skills_health organization audit.
 _CODING_BOOTSTRAP_ONLY = True

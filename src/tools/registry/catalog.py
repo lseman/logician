@@ -23,7 +23,7 @@ from src.skills.path_resolution import (
 from src.skills.skill_manifest import split_frontmatter
 from src.startup_profiler import profile_checkpoint
 
-from ..runtime import SkillCard, SkillDefinition, SkillSelection, ToolParameter
+from ..runtime import SkillCard, SkillSelection, ToolParameter
 
 try:
     from markdown_it import MarkdownIt
@@ -765,6 +765,35 @@ class SkillCatalog:
         group = self._normalize_lazy_skill_group_name(name)
         return bool(group) and group in self._active_lazy_skill_groups
 
+    def iter_skill_source_roots(self) -> list[SkillSourceRoot]:
+        roots: list[SkillSourceRoot] = []
+        seen: set[tuple[str, str]] = set()
+
+        def _append(path: Path, kind: str | None = None) -> None:
+            if not path.is_dir():
+                return
+            root_kind = infer_skill_root_kind(path) if kind is None else str(kind).strip().lower()
+            try:
+                key = (str(path.resolve()), root_kind)
+            except Exception:
+                key = (str(path), root_kind)
+            if key in seen:
+                return
+            seen.add(key)
+            roots.append(SkillSourceRoot(path=path, kind=root_kind))  # type: ignore[arg-type]
+
+        if self.skills_md_path.is_dir():
+            _append(self.skills_md_path)
+        elif self.skills_md_path.is_file():
+            _append(self.skills_md_path.parent / "skills", "skills")
+
+        _append(self.skills_dir_path, "skills")
+
+        for root in self.additional_skill_source_roots:
+            _append(root.path, root.kind)
+
+        return roots
+
     def _catalog_fingerprint(self, skill_md_paths: list[Path]) -> str:
         """SHA1 over sorted (path, mtime) pairs + cache version + source roots."""
         parts = [
@@ -860,35 +889,8 @@ class SkillCatalog:
 
         if self.skills_md_path.is_file():
             _append([self.skills_md_path])
-        elif self.skills_md_path.is_dir():
-            _append(
-                iter_entrypoint_markdown_files(
-                    self.skills_md_path,
-                    kind=infer_skill_root_kind(self.skills_md_path),
-                    active_lazy_skill_groups=self._active_lazy_skill_groups,
-                )
-            )
 
-        sibling_dir = self.skills_md_path.parent / "skills"
-        if sibling_dir.is_dir():
-            _append(
-                iter_entrypoint_markdown_files(
-                    sibling_dir,
-                    kind="skills",
-                    active_lazy_skill_groups=self._active_lazy_skill_groups,
-                )
-            )
-
-        if self.skills_dir_path.is_dir():
-            _append(
-                iter_entrypoint_markdown_files(
-                    self.skills_dir_path,
-                    kind="skills",
-                    active_lazy_skill_groups=self._active_lazy_skill_groups,
-                )
-            )
-
-        for root in self.additional_skill_source_roots:
+        for root in self.iter_skill_source_roots():
             indexed = plugin_index_entrypoints_for_root(root.path, kind=root.kind)
             if indexed:
                 _append(indexed)

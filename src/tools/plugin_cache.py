@@ -8,8 +8,7 @@ similar to OpenClaude's installed_plugins.json V2 format.
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any

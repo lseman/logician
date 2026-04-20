@@ -13,12 +13,13 @@ if str(AGENT_ROOT) not in sys.path:
 from src.backends import LlamaCppClient
 from src.messages import Message, MessageRole
 
+
 def test_raw_llm():
     """Test the LLM directly without any agent logic."""
     print("=" * 60)
     print("🔬 Testing Raw LLM Backend")
     print("=" * 60)
-    
+
     # Create a minimal LLM client
     llm = LlamaCppClient(
         base_url="http://localhost:8080",
@@ -28,16 +29,16 @@ def test_raw_llm():
         stop=[],  # Empty list instead of None
         retry_attempts=1,
     )
-    
+
     # Test 1: Simple prompt
     print("\n📝 Test 1: Simple Hello")
     print("-" * 60)
-    
+
     messages = [
         Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
         Message(role=MessageRole.USER, content="Say hello in one sentence."),
     ]
-    
+
     try:
         response = llm.generate(
             messages,
@@ -47,28 +48,28 @@ def test_raw_llm():
         )
         print(f"Response: {response}")
         print(f"Length: {len(response)} chars")
-        
+
         # Check if response is relevant
         if "hello" in response.lower() or "hi" in response.lower():
             print("✅ Response is relevant")
         else:
             print("❌ Response is IRRELEVANT")
-            print(f"   Expected: greeting")
+            print("   Expected: greeting")
             print(f"   Got: {response[:100]}...")
-            
+
     except Exception as e:
         print(f"❌ Error: {e}")
         return False
-    
+
     # Test 2: Math question
     print("\n📝 Test 2: Simple Math")
     print("-" * 60)
-    
+
     messages = [
         Message(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
         Message(role=MessageRole.USER, content="What is 2+2? Answer in one sentence."),
     ]
-    
+
     try:
         response = llm.generate(
             messages,
@@ -77,16 +78,16 @@ def test_raw_llm():
             stream=False,
         )
         print(f"Response: {response}")
-        
+
         if "4" in response or "four" in response.lower():
             print("✅ Response is correct")
         else:
             print("❌ Response is WRONG or IRRELEVANT")
-            
+
     except Exception as e:
         print(f"❌ Error: {e}")
         return False
-    
+
     print("\n" + "=" * 60)
     print("🎯 Diagnosis Complete")
     print("=" * 60)
@@ -94,7 +95,7 @@ def test_raw_llm():
 
 if __name__ == "__main__":
     success = test_raw_llm()
-    
+
     if not success:
         print("\n⚠️  LLM Backend Issue Detected!")
         print("\nPossible causes:")

@@ -1,6 +1,6 @@
+import importlib
 import os
 import sys
-import importlib
 
 # Mock API keys for testing (agent_config already has the real ones, but environment testing here)
 os.environ["S2_API_KEY"] = "smKWRu1X8H3t7IkQSAaTk4OIc6Yni3F58nOEJtC6"

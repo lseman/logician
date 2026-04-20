@@ -1,6 +1,7 @@
-import sys
 import subprocess
+
 from textual.app import App
+
 
 class TestApp(App):
     def on_mount(self):

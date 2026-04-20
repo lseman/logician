@@ -76,6 +76,7 @@ _WRITE_TOOLS: frozenset[str] = frozenset(
         "write_file",
         "edit_file",
         "apply_edit_block",
+        "notebook_edit",
         "edit_file_replace",
         "sed_replace",
         "regex_replace",

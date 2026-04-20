@@ -14,7 +14,7 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, Sequence
 
-from ..runtime import Tool, ToolParameter
+from ..runtime import Tool
 
 
 class ValidationErrorCode(str, Enum):

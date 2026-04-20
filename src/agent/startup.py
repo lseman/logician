@@ -8,15 +8,13 @@ This dramatically reduces cold-start time.
 
 from __future__ import annotations
 
-import importlib
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..tools.runtime import Tool, ToolRuntimeMetadata
-
+from ..tools.runtime import Tool
 
 # =============================================================================
 # STARTUP CONFIGURATION
@@ -88,7 +86,6 @@ class DeferredMCPServer:
 
         try:
             # Import MCP client here (deferred)
-            import httpx
 
             # Start server in background
             self.started = True
@@ -215,7 +212,7 @@ def _setup_deferred_loading(config: StartupConfig) -> None:
     """Set up deferred loading."""
     if config.deferred_loading:
         # Set up deferred tool loading
-        from ..tools.runtime import build_tool
+        pass
 
         # Tools are loaded on-demand via build_tool()
 

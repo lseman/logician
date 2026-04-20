@@ -4,7 +4,7 @@ avoid circular imports)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from ..messages import Message, MessageRole  # noqa: F401
 from ..tools.runtime import ToolCall

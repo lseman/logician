@@ -8,7 +8,6 @@ from typing import List
 
 from .runtime import HAS_TOON, ToolCall, decode
 
-
 _DIRECT_TOOL_POSITIONAL_ARGS: dict[str, list[str]] = {
     "bash": ["command"],
     "fd_find": ["pattern"],

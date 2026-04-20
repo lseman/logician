@@ -11,7 +11,8 @@ AGENT_ROOT = Path(__file__).resolve().parents[1]
 if str(AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_ROOT))
 
-from src import create_agent, ToolParameter
+from src import ToolParameter, create_agent
+
 
 def ping_tool(text: str) -> str:
     return f"PONG: {text}"

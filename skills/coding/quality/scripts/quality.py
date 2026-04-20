@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 from typing import Literal
+
 from skills.coding.bootstrap.runtime_access import get_coding_runtime
 
 __skill__ = {
@@ -224,7 +225,7 @@ def auto_format(path: str = "", venv_path: str = "") -> str:
     # First try ruff (fixes + formatting)
     fixed = _runtime().run_cmd(f"python -m ruff check --fix {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
     formatted = _runtime().run_cmd(f"python -m ruff format {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
-    
+
     if "No module named ruff" not in formatted["stdout"] and formatted["exit_code"] == 0:
         return _safe_json({
             "status": "ok",
@@ -238,7 +239,7 @@ def auto_format(path: str = "", venv_path: str = "") -> str:
     black_res = _runtime().run_cmd(f"python -m black {target} 2>&1", cwd=cwd, timeout=60, venv_path=v)
 
     overall_exit = black_res["exit_code"] if black_res["exit_code"] != 0 else isort_res["exit_code"]
-    
+
     return _safe_json({
         "status": "ok" if overall_exit == 0 else "error",
         "tool": "black+isort",

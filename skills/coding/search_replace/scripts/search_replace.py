@@ -15,7 +15,6 @@ Complements the existing rg_search / fd_find / edit_file_replace with:
 """
 from __future__ import annotations
 
-
 if "_safe_json" not in globals():
     import json as _j
 
@@ -25,16 +24,20 @@ if "_safe_json" not in globals():
 
 import difflib
 import importlib
-import os
 import re
 import shutil
 from pathlib import Path
+
 from skills.coding.bootstrap.runtime_access import get_coding_runtime
+
 from ._search_replace_helpers import (
     resolve_path as _resolve_path,
+)
+from ._search_replace_helpers import (
     run_subprocess as _run_subprocess,
+)
+from ._search_replace_helpers import (
     unified_diff_text as _unified_diff_text,
-    smart_multi_edit,
 )
 
 __skill__ = {

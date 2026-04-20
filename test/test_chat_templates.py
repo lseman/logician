@@ -26,7 +26,7 @@ def test_template(template_name):
     print(f"\n{'='*60}")
     print(f"Testing template: {template_name}")
     print('='*60)
-    
+
     try:
         llm = LlamaCppClient(
             base_url="http://localhost:8080",
@@ -36,15 +36,15 @@ def test_template(template_name):
             stop=[],
             retry_attempts=1,
         )
-        
+
         messages = [
             Message(role=MessageRole.SYSTEM, content="You are helpful."),
             Message(role=MessageRole.USER, content="Say 'OK' and nothing else."),
         ]
-        
+
         response = llm.generate(messages, temperature=0.1, max_tokens=10)
         print(f"Response: {response}")
-        
+
         # Check if response is sane
         if len(response) < 50 and "ok" in response.lower():
             print(f"✅ Template '{template_name}' works!")
@@ -52,7 +52,7 @@ def test_template(template_name):
         else:
             print(f"❌ Template '{template_name}' failed (irrelevant response)")
             return False
-            
+
     except Exception as e:
         print(f"❌ Template '{template_name}' error: {e}")
         return False
@@ -60,12 +60,12 @@ def test_template(template_name):
 if __name__ == "__main__":
     print("🔬 Testing Chat Templates")
     print("This will help identify the correct template for your model.")
-    
+
     working_templates = []
     for template in TEMPLATES:
         if test_template(template):
             working_templates.append(template)
-    
+
     print("\n" + "="*60)
     print("RESULTS:")
     print("="*60)

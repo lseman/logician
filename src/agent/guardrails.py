@@ -274,6 +274,7 @@ _EDIT_TOOL_NAMES = {
     "edit_file",
     "apply_edit_block",
     "smart_edit",
+    "notebook_edit",
     "edit_file_libcst",
     "replace_function_body",
     "replace_docstring",

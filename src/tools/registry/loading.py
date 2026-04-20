@@ -127,10 +127,8 @@ class RegistryLoadingMixin:
                 seen.add(key)
                 total_registered += self._register_tools_from_python_module(module_path)
 
-        roots: list[Path] = [self.skills_dir_path]
-        roots.extend(root.path for root in getattr(self._catalog, "additional_skill_source_roots", []))
-        for root in roots:
-            for module_path in self._iter_python_modules_from_scripts_dirs(root):
+        for root in self._catalog.iter_skill_source_roots():
+            for module_path in self._iter_python_modules_from_scripts_dirs(root.path):
                 key = str(module_path.resolve())
                 if key in seen:
                     continue
@@ -1448,6 +1446,7 @@ class RegistryLoadingMixin:
                 func_globals = getattr(func, "__globals__", None)
                 if isinstance(func_globals, dict):
                     func_globals["ctx"] = self._execution_globals.get("ctx")
+                    func_globals["tool_registry"] = self
                     func_globals["_safe_json"] = self._execution_globals.get(
                         "_safe_json", _safe_json_fallback
                     )

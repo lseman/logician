@@ -5,7 +5,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from src.repo_ingest import ingest_repo
 
 

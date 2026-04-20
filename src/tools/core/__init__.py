@@ -5,27 +5,30 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..runtime import build_tool
 from ..compaction import (
     ContentReplacementState,
     compact_result,
 )
-from .BashTool import bash
+from ..runtime import build_tool
+from .BashTool.tool import bash
 from .BashTool.tool import _validate_command as _validate_bash_command
-from .FileEditTool import (
+from .FileEditTool.tool import (
     apply_edit_block,
     edit_file,
     preview_edit,
     smart_edit,
     write_file,
 )
-from .FileReadTool import list_dir, read_edit_context, read_file
-from .GitTool import (
+from .FilesystemTool.tool import delete_path, mkdir, move_path
+from .FileReadTool.tool import list_dir, read_edit_context, read_file
+from .GitTool.tool import (
     get_git_diff,
     get_git_status,
 )
-from .LspTool import lsp_tool
-from .ProcessTool import (
+from .LspTool.tool import lsp_tool
+from .MetaTool.tool import tool_search
+from .NotebookTool.tool import notebook_edit
+from .ProcessTool.tool import (
     get_process_output,
     install_packages,
     kill_process,
@@ -36,9 +39,9 @@ from .ProcessTool import (
     show_coding_config,
     start_background_process,
 )
-from .ProjectTool import find_symbol, get_file_outline, get_project_map
-from .PythonTool import check_imports, list_installed_packages, run_python
-from .RustTool import (
+from .ProjectTool.tool import find_symbol, get_file_outline, get_project_map
+from .PythonTool.tool import check_imports, list_installed_packages, run_python
+from .RustTool.tool import (
     cargo_build,
     cargo_check,
     cargo_clippy,
@@ -48,27 +51,24 @@ from .RustTool import (
     cargo_test,
     run_rust,
 )
-from .SearchTool import (
+from .SearchTool.inspection import find_imports, get_symbol_info, read_line
+from .SearchTool.tool import (
     fd_find,
-    find_imports,
     find_references,
-    get_symbol_info,
     glob_files,
     grep_files,
-    read_line,
     rg_search,
     search_code,
     search_file,
     search_symbols,
 )
-from .TaskTool import think, todo
-from .WebTool import fetch_url, github_read_file, pypi_info, web_search
+from .TaskTool.tool import think, todo
+from .WebTool.tool import fetch_url, github_read_file, pypi_info, web_search
 
 # ---------------------------------------------------------------------
 # Optional LibCST support
 # ---------------------------------------------------------------------
 _LIBCST_AVAILABLE = False
-_LIBCST_TOOLS: list[str] = []
 
 _LIBCST_MODULE: Any = None  # loaded on first use
 _LIBCST_CHECKED = False
@@ -81,7 +81,7 @@ def _check_libcst() -> bool:
     _LIBCST_CHECKED = True
     try:
         import libcst  # noqa: F401
-        _LIBCST_MODULE = _importlib.import_module(".FileEditTool.libcst", package=__name__.rsplit(".", 1)[0])
+        _LIBCST_MODULE = _importlib.import_module(".FileEditTool.libcst", package=__name__)
         _LIBCST_AVAILABLE = True
     except ImportError:
         _LIBCST_AVAILABLE = False
@@ -113,19 +113,6 @@ insert_after_function = _make_libcst_proxy("insert_after_function")
 delete_function = _make_libcst_proxy("delete_function")
 find_function_by_name = _make_libcst_proxy("find_function_by_name")
 find_class_by_name = _make_libcst_proxy("find_class_by_name")
-
-_LIBCST_AVAILABLE = False
-_LIBCST_TOOLS = [
-    "edit_file_libcst",
-    "replace_function_body",
-    "replace_docstring",
-    "replace_decorators",
-    "replace_argument",
-    "insert_after_function",
-    "delete_function",
-    "find_function_by_name",
-    "find_class_by_name",
-]
 
 
 _RUNTIME_META = {
@@ -190,6 +177,10 @@ _RUNTIME_META = {
     "edit_file": {"writes_files": True, "cacheable": False},
     "apply_edit_block": {"writes_files": True, "cacheable": False},
     "smart_edit": {"writes_files": True, "cacheable": False},
+    "notebook_edit": {"writes_files": True, "cacheable": False},
+    "mkdir": {"writes_files": True, "cacheable": False},
+    "move_path": {"writes_files": True, "cacheable": False},
+    "delete_path": {"writes_files": True, "cacheable": False},
     "edit_file_libcst": {"writes_files": True, "cacheable": False},
     "replace_function_body": {"writes_files": True, "cacheable": False},
     "replace_docstring": {"writes_files": True, "cacheable": False},
@@ -199,6 +190,7 @@ _RUNTIME_META = {
     "delete_function": {"writes_files": True, "cacheable": False},
     "find_function_by_name": {"read_only": True, "cacheable": True, "content_reader": True},
     "find_class_by_name": {"read_only": True, "cacheable": True, "content_reader": True},
+    "tool_search": {"read_only": True, "cacheable": False, "concurrency_safe": True},
 }
 
 _TOOL_META = {
@@ -627,6 +619,46 @@ _TOOL_META = {
             "- If the search text appears multiple times, either add more context or set `replace_all=true`."
         ),
     },
+    "notebook_edit": {
+        "description": (
+            "Apply a structured cell edit to an existing Jupyter notebook (`.ipynb`) "
+            "without hand-editing raw notebook JSON."
+        ),
+        "parameters": {
+            "path": "Existing notebook path ending in `.ipynb`.",
+            "action": "One of `replace`, `insert`, `append`, `delete`, or `clear_outputs`.",
+            "cell_index": "0-based cell index for `replace`, `delete`, `clear_outputs`, or `insert`.",
+            "source": "Cell source text for `replace`, `insert`, or `append`.",
+            "cell_type": "Optional cell type: `code`, `markdown`, or `raw`.",
+            "new_index": "Optional alias for insert position.",
+            "strip_outputs": "Optional boolean. When true, clear notebook outputs before saving.",
+        },
+    },
+    "mkdir": {
+        "description": "Create a directory in a structured way instead of shelling out to `mkdir`.",
+        "parameters": {
+            "path": "Directory path to create.",
+            "parents": "Optional boolean. When true, create missing parent directories.",
+            "exist_ok": "Optional boolean. When true, succeed if the directory already exists.",
+        },
+    },
+    "move_path": {
+        "description": "Move or rename a file or directory with optional destination-parent creation.",
+        "parameters": {
+            "src": "Existing source file or directory path.",
+            "dst": "Destination file or directory path.",
+            "overwrite": "Optional boolean. When true, replace an existing destination file or empty directory.",
+            "create_parents": "Optional boolean. When true, create missing destination parent directories.",
+        },
+    },
+    "delete_path": {
+        "description": "Delete a file or directory with explicit recursion and safety guards.",
+        "parameters": {
+            "path": "File or directory path to delete.",
+            "recursive": "Optional boolean. Required to remove non-empty directories.",
+            "missing_ok": "Optional boolean. When true, missing paths return ok instead of error.",
+        },
+    },
     "edit_file_libcst": {
         "description": (
             "Replace Python code by structural AST matching. Use this for Python when "
@@ -718,6 +750,13 @@ _TOOL_META = {
         "parameters": {
             "path": "Python file path as a single string.",
             "class_name": "Exact class name to find.",
+        },
+    },
+    "tool_search": {
+        "description": "Search the currently registered tool surface by name, description, or parameter names.",
+        "parameters": {
+            "query": "Search query such as `python`, `git diff`, or `background process`.",
+            "top_k": "Optional maximum number of matches to return.",
         },
     },
 }
@@ -1200,6 +1239,40 @@ _merge_tool_metadata(
     user_facing_name=lambda _args: "Edit",
 )
 _merge_tool_metadata(
+    "notebook_edit",
+    validate_input=_combine_validators(
+        lambda args: _path_validator(args, require_file=True),
+        lambda args: _required_text(args, "action"),
+    ),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Editing notebook"),
+    user_facing_name=lambda _args: "Edit",
+)
+_merge_tool_metadata(
+    "mkdir",
+    validate_input=lambda args: _required_text(args, "path"),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Creating directory"),
+    user_facing_name=lambda _args: "Files",
+)
+_merge_tool_metadata(
+    "move_path",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "src"),
+        lambda args: _required_text(args, "dst"),
+    ),
+    get_tool_use_summary=lambda args: f"{_clip_summary(args.get('src'))} -> {_clip_summary(args.get('dst'))}",
+    get_activity_description=_activity("Moving path"),
+    user_facing_name=lambda _args: "Files",
+)
+_merge_tool_metadata(
+    "delete_path",
+    validate_input=lambda args: _required_text(args, "path"),
+    get_tool_use_summary=_summary_from_path(),
+    get_activity_description=_activity("Deleting path"),
+    user_facing_name=lambda _args: "Files",
+)
+_merge_tool_metadata(
     "get_git_status",
     validate_input=lambda args: _path_validator(args, key="path", default_value="."),
     is_search_or_read_command=lambda _args: {"isSearch": False, "isRead": True, "isList": True},
@@ -1441,6 +1514,17 @@ _merge_tool_metadata(
     user_facing_name=lambda _args: "Terminal",
 )
 _merge_tool_metadata(
+    "tool_search",
+    validate_input=_combine_validators(
+        lambda args: _required_text(args, "query"),
+        lambda args: _positive_int_validator(args, "top_k", minimum=1, maximum=20),
+    ),
+    is_search_or_read_command=lambda _args: {"isSearch": True, "isRead": True, "isList": True},
+    get_tool_use_summary=_summary_from_query("query", scope_keys=()),
+    get_activity_description=_activity_from_query("Searching tools for", "query"),
+    user_facing_name=lambda _args: "Inspect",
+)
+_merge_tool_metadata(
     "edit_file_libcst",
     validate_input=_combine_validators(
         lambda args: _path_validator(args, require_file=True),
@@ -1507,6 +1591,10 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("apply_edit_block", apply_edit_block),
     ("preview_edit", preview_edit),
     ("smart_edit", smart_edit),
+    ("notebook_edit", notebook_edit),
+    ("mkdir", mkdir),
+    ("move_path", move_path),
+    ("delete_path", delete_path),
     ("get_git_status", get_git_status),
     ("get_git_diff", get_git_diff),
     ("get_symbol_info", get_symbol_info),
@@ -1548,6 +1636,7 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("fd_find", fd_find),
     ("find_references", find_references),
     ("search_symbols", search_symbols),
+    ("tool_search", tool_search),
     ("think", think),
     ("todo", todo),
 )
@@ -1564,7 +1653,11 @@ _LIBCST_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("find_class_by_name", find_class_by_name),
 )
 
-CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = _BASE_CORE_TOOL_ITEMS + _LIBCST_TOOL_ITEMS
+_OPTIONAL_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
+    _LIBCST_TOOL_ITEMS if _check_libcst() else ()
+)
+
+CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = _BASE_CORE_TOOL_ITEMS + _OPTIONAL_CORE_TOOL_ITEMS
 CORE_TOOL_FUNCTIONS: tuple[Any, ...] = tuple(fn for _, fn in CORE_TOOL_ITEMS)
 CORE_TOOL_NAMES: tuple[str, ...] = tuple(name for name, _ in CORE_TOOL_ITEMS)
 

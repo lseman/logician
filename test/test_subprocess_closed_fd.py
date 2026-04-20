@@ -1,4 +1,6 @@
-import sys, os, subprocess
+import os
+import subprocess
+
 
 def test_closed_fd(fd_to_close):
     # duplicate the fd to restore later if needed, but here we just exit

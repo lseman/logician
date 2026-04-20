@@ -10,8 +10,8 @@ import unittest
 from pathlib import Path
 
 try:
+    from src.tools import Context, ToolCall, ToolRegistry
     from src.tools.registry.catalog import SkillCatalog
-    from src.tools import Context, ToolRegistry, ToolCall
 except ModuleNotFoundError:
     src_dir = Path(__file__).resolve().parents[1] / "src"
     src_pkg = types.ModuleType("src")
@@ -36,8 +36,8 @@ except ModuleNotFoundError:
     sys.modules["src.tools"] = tools_module
     tools_spec.loader.exec_module(tools_module)
 
+    from src.tools import Context, ToolCall, ToolRegistry
     from src.tools.registry.catalog import SkillCatalog
-    from src.tools import Context, ToolRegistry, ToolCall
 
 
 def _registry(*, load_lazy_skill_groups: tuple[str, ...] = ()) -> ToolRegistry:
@@ -280,6 +280,30 @@ description: Use when debugging flaky tests.
 
             sources = catalog.iter_skills_sources()
             self.assertEqual(sources, [skill_dir / "SKILL.md"])
+
+    def test_catalog_source_roots_dedupe_skills_dir_from_skills_md_sibling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skills_root = root / "skills"
+            skill_dir = skills_root / "debugging"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (root / "SKILLS.md").write_text("# Skills index\n", encoding="utf-8")
+            (skill_dir / "SKILL.md").write_text("# Debugging\n", encoding="utf-8")
+
+            catalog = SkillCatalog(
+                skills_md_path=root / "SKILLS.md",
+                skills_dir_path=skills_root,
+                log=logging.getLogger("test.skill_routing"),
+            )
+
+            roots = catalog.iter_skill_source_roots()
+            self.assertEqual(len(roots), 1)
+            self.assertEqual(roots[0].path, skills_root)
+            self.assertEqual(roots[0].kind, "skills")
+            self.assertEqual(
+                catalog.iter_skills_sources(),
+                [root / "SKILLS.md", skill_dir / "SKILL.md"],
+            )
 
     def test_folder_skill_with_scripts_dir_hydrates_tool_backed_card(self) -> None:
         prev_skills_dir = os.environ.get("AGENT_SKILLS_DIR")

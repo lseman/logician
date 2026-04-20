@@ -2,8 +2,8 @@
 Plot session message embeddings from Chroma without calling the agent.
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def _as_list(value):

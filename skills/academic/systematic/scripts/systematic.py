@@ -2739,7 +2739,7 @@ def run_systematic_review(query: str, limit_per_source: int = 20, from_year: Opt
         )
         res = sr.run(plan)
         metrics = sr.metrics(res.papers)
-        
+
         top = sr.sort(res.papers, by="citations")[:15]
         top_list = []
         for p in top:
@@ -2752,7 +2752,7 @@ def run_systematic_review(query: str, limit_per_source: int = 20, from_year: Opt
                 "url": p.url or p.pdf_url,
                 "source": p.source
             })
-            
+
         return json.dumps({
             "status": "ok",
             "added_new": res.added_new,

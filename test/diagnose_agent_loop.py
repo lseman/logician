@@ -18,7 +18,6 @@ if str(AGENT_ROOT) not in sys.path:
 
 from src import AgentResponse, create_agent
 
-
 DEFAULT_PROMPTS = [
     (
         "Inspect `rust-cli/src`. Read the most relevant files needed to understand "

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -9,9 +11,11 @@ import tempfile
 import time
 from pathlib import Path
 
+from src.tools import Context, ToolCall, ToolRegistry
 from src.tools.core import (
     apply_edit_block,
     bash,
+    delete_path,
     edit_file,
     fetch_url,
     find_symbol,
@@ -22,6 +26,9 @@ from src.tools.core import (
     kill_process,
     list_processes,
     lsp_tool,
+    mkdir,
+    move_path,
+    notebook_edit,
     read_edit_context,
     read_file,
     rg_search,
@@ -35,6 +42,7 @@ from src.tools.core import (
     start_background_process,
     think,
     todo,
+    tool_search,
     write_file,
 )
 from src.tools.core.WebTool import _filter_web_search_results
@@ -111,6 +119,91 @@ def test_edit_file_replaces_unique_string(tmp_path: Path) -> None:
 
     assert result["status"] == "ok"
     assert "def bar():" in path.read_text(encoding="utf-8")
+
+
+def test_notebook_edit_replaces_code_cell_and_clears_outputs(tmp_path: Path) -> None:
+    path = tmp_path / "demo.ipynb"
+    path.write_text(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "metadata": {},
+                        "execution_count": 7,
+                        "outputs": [{"output_type": "stream", "text": "old\n"}],
+                        "source": "print('old')\n",
+                    }
+                ],
+                "metadata": {},
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    read_result = read_file(str(path))
+    assert read_result["status"] == "ok"
+
+    result = notebook_edit(
+        str(path),
+        action="replace",
+        cell_index=0,
+        source="print('new')\n",
+    )
+
+    assert result["status"] == "ok"
+    assert result["edited_cell_index"] == 0
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["cells"][0]["source"] == "print('new')\n"
+    assert payload["cells"][0]["outputs"] == []
+    assert payload["cells"][0]["execution_count"] is None
+
+
+def test_structured_filesystem_tools_create_move_and_delete(tmp_path: Path) -> None:
+    created = mkdir(str(tmp_path / "nested" / "dir"))
+    assert created["status"] == "ok"
+    assert (tmp_path / "nested" / "dir").is_dir()
+
+    source = tmp_path / "nested" / "dir" / "demo.txt"
+    source.write_text("hello\n", encoding="utf-8")
+    moved = move_path(str(source), str(tmp_path / "moved.txt"))
+    assert moved["status"] == "ok"
+    assert not source.exists()
+    assert (tmp_path / "moved.txt").read_text(encoding="utf-8") == "hello\n"
+
+    deleted = delete_path(str(tmp_path / "moved.txt"))
+    assert deleted["status"] == "ok"
+    assert not (tmp_path / "moved.txt").exists()
+
+
+def test_tool_search_finds_registered_tools() -> None:
+    registry = ToolRegistry(auto_load_from_skills=False)
+    ctx = Context()
+    registry.install_context(ctx)
+    registry.register(
+        name="demo_python_helper",
+        description="Run a Python helper command.",
+        parameters=[],
+        function=lambda: {"status": "ok"},
+    )
+    registry._register_collected_python_tools(
+        tool_entries=[(tool_search, getattr(tool_search, "__llm_tool_meta__", {}))],
+        module_path=Path("src/tools/core/__init__.py"),
+        skill_id="core",
+        skill_meta={"always_on": True},
+    )
+
+    raw = registry.execute(
+        ToolCall(id="tool_search_1", name="tool_search", arguments={"query": "python helper"}),
+        use_toon=False,
+    )
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert any(match["name"] == "demo_python_helper" for match in payload["matches"])
 
 
 def test_apply_edit_block_applies_multiple_replacements(tmp_path: Path) -> None:
@@ -469,6 +562,15 @@ def test_rust_tools_are_registered_in_core_surface() -> None:
 
     assert callable(run_rust)
     assert "run_rust" in core_mod.CORE_TOOL_NAMES
+
+
+def test_libcst_tools_only_surface_when_dependency_is_available() -> None:
+    from src.tools import core as core_mod
+
+    libcst_available = importlib.util.find_spec("libcst") is not None
+
+    assert ("edit_file_libcst" in core_mod.CORE_TOOL_NAMES) is libcst_available
+    assert ("find_function_by_name" in core_mod.CORE_TOOL_NAMES) is libcst_available
 
 
 def test_set_working_directory_affects_core_python_execution(tmp_path: Path) -> None:

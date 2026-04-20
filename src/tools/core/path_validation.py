@@ -133,7 +133,7 @@ def validate_dir_path(
         return None, {
             "error": f"Directory not found: {path}",
             "error_type": "directory_not_found",
-            "suggestion": f"Try creating it first or check the path spelling",
+            "suggestion": "Try creating it first or check the path spelling",
         }
 
     if not path.is_dir():

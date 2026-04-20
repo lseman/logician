@@ -10,6 +10,5 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.repo_ingest import main
 
-
 if __name__ == "__main__":
     raise SystemExit(main())

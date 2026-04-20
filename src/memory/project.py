@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-import os
 
 from ..aaak_dialect import compress_text_to_aaak
 

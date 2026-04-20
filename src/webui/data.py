@@ -14,9 +14,9 @@ from ..project_memory import (
     load_index,
     parse_frontmatter,
 )
-from ..runtime_paths import session_db_path
 from ..repo_graph import load_repo_graph
 from ..repo_registry import load_repo_index
+from ..runtime_paths import session_db_path
 from ..tools.core.tasks import load_persisted_todos
 
 

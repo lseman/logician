@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import inspect
 import fnmatch
+import inspect
 import json
 import time
 from typing import Any

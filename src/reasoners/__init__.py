@@ -5,7 +5,7 @@ from .in_context_cot import InContextCoTReasoner
 from .reflexion import ReflexionReasoner
 from .registry import REASONER_REGISTRY, get_reasoner
 from .self_consistency import SelfConsistencyReasoner
-from .ssr import SSRReasoner, SocraticStep
+from .ssr import SocraticStep, SSRReasoner
 from .tot import ToTReasoner
 
 __all__ = [
