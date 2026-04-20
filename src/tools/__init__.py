@@ -174,17 +174,16 @@ class ToolRegistry(
         return bool(group) and group in self._active_lazy_skill_groups
 
     def available_lazy_skill_groups(self) -> list[str]:
-        if not self.skills_dir_path.is_dir():
-            return []
         groups: list[str] = []
-        for child in sorted(self.skills_dir_path.iterdir(), key=lambda p: p.name):
-            if not child.is_dir() or child.name.startswith("."):
-                continue
-            if not self._is_lazy_skill_group_dir_name(child.name):
-                continue
-            group = self._normalize_lazy_skill_group_name(child.name)
-            if group:
-                groups.append(group)
+        if self.skills_dir_path.is_dir():
+            for child in sorted(self.skills_dir_path.iterdir(), key=lambda p: p.name):
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                if not self._is_lazy_skill_group_dir_name(child.name):
+                    continue
+                group = self._normalize_lazy_skill_group_name(child.name)
+                if group:
+                    groups.append(group)
         return groups
 
     def active_lazy_skill_groups(self) -> list[str]:
@@ -267,6 +266,28 @@ class ToolRegistry(
         self._version += 1
         self._invalidate_skill_resolution_cache()
 
+    def _ensure_catalog_configuration(self) -> None:
+        desired_extra_paths = [p for p in self.additional_skills_dir_paths if p.is_dir()]
+        desired_extra_roots = list(self.additional_skill_source_roots)
+
+        current_extra_paths = list(getattr(self._catalog, "additional_skills_dir_paths", []))
+        current_extra_roots = list(getattr(self._catalog, "additional_skill_source_roots", []))
+        needs_refresh = (
+            getattr(self._catalog, "skills_md_path", None) != self.skills_md_path
+            or getattr(self._catalog, "skills_dir_path", None) != self.skills_dir_path
+            or current_extra_paths != desired_extra_paths
+            or current_extra_roots != desired_extra_roots
+        )
+        if needs_refresh:
+            self._catalog = SkillCatalog(
+                skills_md_path=self.skills_md_path,
+                skills_dir_path=self.skills_dir_path,
+                additional_skills_dir_paths=desired_extra_paths,
+                additional_skill_source_roots=desired_extra_roots,
+                log=self._log,
+            )
+        self._catalog.set_active_lazy_skill_groups(self._active_lazy_skill_groups)
+
     def __str__(self) -> str:
         names = ", ".join(sorted(self._tools.keys()))
         return f"ToolRegistry[{len(self._tools)}]: {names}" if names else "ToolRegistry[0]"
@@ -314,6 +335,7 @@ class ToolRegistry(
         return self
 
     def get(self, name: str) -> Tool | None:
+        self._ensure_catalog_configuration()
         return self._tools.get(name)
 
     def list_tools(self) -> list[Tool]:
@@ -323,6 +345,9 @@ class ToolRegistry(
         return self.list_tools()
 
     def call_tool(self, name: str, **kwargs: Any) -> str:
+        self._ensure_catalog_configuration()
+        if name not in self._tools and hasattr(self, "_register_builtin_tools"):
+            self._register_builtin_tools()
         call = ToolCall(id=f"internal_{time.time():.6f}", name=name, arguments=kwargs)
         return self.execute(call, use_toon=False)
 

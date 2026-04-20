@@ -8,6 +8,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
+from src.skills.loader import execute_embedded_shell_commands, load_skill_from_path
+
 from ..runtime import SkillCard, SkillDefinition, SkillSelection
 from .types import _SKILL_PREFIX_SEPARATORS
 
@@ -25,6 +27,8 @@ class RegistryRoutingMixin:
         self._resolve_skill_candidate_ids_cached.cache_clear()
 
     def _sync_catalog_with_registered_tools(self) -> None:
+        if hasattr(self, "_ensure_catalog_configuration"):
+            self._ensure_catalog_configuration()
         self._catalog.ensure_skill_catalog()
         changed = self._catalog.hydrate_metadata_only_python_skills(self._tools.values())
         if self._catalog.hydrate_tool_backed_skills(self._tools.values()):
@@ -346,6 +350,8 @@ class RegistryRoutingMixin:
         return out
 
     def _find_skill_ids_by_tool_name(self, tool_name: str) -> tuple[str, ...]:
+        if hasattr(self, "_ensure_catalog_configuration"):
+            self._ensure_catalog_configuration()
         if not tool_name or not self.skills_dir_path.is_dir():
             return tuple()
 
@@ -478,12 +484,17 @@ class RegistryRoutingMixin:
                 ensure_ascii=False,
             )
 
+        parsed_args: dict[str, Any] | None = None
         forced_ids = [card.id for card in matches]
         self._forced_skill_ids = list(dict.fromkeys(forced_ids))
         self._forced_skill_reason = str(reason or "").strip()
 
         args_str = str(args or "").strip()
         target_skill = matches[0]
+        if args_str:
+            parsed_args = json.loads(args_str)
+            if not isinstance(parsed_args, dict):
+                raise ValueError("Args must be a JSON dictionary.")
 
         # Activate conditional skills matching current context files
         cwd = os.getcwd()
@@ -504,11 +515,7 @@ class RegistryRoutingMixin:
 
         if target_skill.tool_names:
             selected_tool = target_skill.tool_names[0]
-            parsed_args: dict[str, Any] | None = None
             if args_str:
-                parsed_args = json.loads(args_str)
-                if not isinstance(parsed_args, dict):
-                    raise ValueError("Args must be a JSON dictionary.")
                 selected_tool = (
                     self._select_tool_from_skill(target_skill, parsed_args) or selected_tool
                 )
@@ -545,7 +552,19 @@ class RegistryRoutingMixin:
         if args_str:
             # SkillDefinition has render_prompt() directly — no need to load separately
             try:
-                rendered_prompt = target_skill.render_prompt(parsed_args or {})
+                skill_for_prompt = target_skill
+                source_path = str(getattr(target_skill, "source_path", "") or "").strip()
+                if source_path:
+                    try:
+                        skill_for_prompt = load_skill_from_path(source_path)
+                    except Exception:
+                        skill_for_prompt = target_skill
+                rendered_prompt = skill_for_prompt.render_prompt(parsed_args or {})
+                rendered_prompt = execute_embedded_shell_commands(
+                    rendered_prompt,
+                    base_dir=str(getattr(skill_for_prompt, "base_dir", "") or Path(source_path).parent),
+                    allow_shell=True,
+                )
                 return json.dumps(
                     {
                         "status": "ok",

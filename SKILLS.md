@@ -26,7 +26,6 @@ Active groups:
 - `skills/30_anthropics`: Anthropic-sourced patterns — frontend-design, MCP builder, webapp-testing, document coauthoring, canvas/theme design, and more.
 - `skills/global`: session utilities — `think` (deliberate reasoning), `scratch` (working memory), `todo` (persistent task list), `orchestrator` (multi-skill sequencing), `memory_management` (context budget and checkpoint management).
 - `skills/coding`: coding-focused leaf skills — `explore`, `file_ops`, `edit_block`, `multi_edit`, `search_replace`, `patch`, `quality`, `shell`, `git`, `repl`, `web`, `parallel_dispatch` (fan-out → consolidate → serialize).
-- `skills/timeseries`: data loading, preprocessing, analysis, forecasting, plotting, advanced mining, and pipeline workflows.
 - `skills/academic`: literature search, paper retrieval, citation mining, and systematic review across S2, OpenAlex, IEEE, Unpaywall.
 - `skills/svg`: SVG diagram and visual asset generation.
 - `skills/rag`: RAG ingestion, retrieval, reranking, and tuning.

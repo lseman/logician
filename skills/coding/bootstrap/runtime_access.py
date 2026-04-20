@@ -2,62 +2,9 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, Mapping
 
 from .bootstrap import _find_local_venv  # noqa: F401 (re-exported for skills that import it here)
-
-
-class _LegacyCodingRuntime:
-    def __init__(self, config: Mapping[str, Any], run_cmd: Callable[..., Any]) -> None:
-        self._config = dict(config)
-        self._run_cmd = run_cmd
-
-    def config(self) -> dict[str, Any]:
-        return self._config
-
-    def cwd(self) -> str | None:
-        value = self._config.get("default_cwd")
-        return str(value) if value else None
-
-    def venv_path(self) -> str | None:
-        value = self._config.get("venv_path")
-        if value:
-            return str(value)
-        return _find_local_venv(self.cwd())
-
-    def set_cwd(self, path: str | None) -> str | None:
-        resolved = str(Path(path).expanduser().resolve()) if path else None
-        self._config["default_cwd"] = resolved
-        return resolved
-
-    def set_venv_path(self, path: str | None) -> str | None:
-        resolved = str(Path(path).expanduser().resolve()) if path else None
-        self._config["venv_path"] = resolved
-        return resolved
-
-    def resolve_cwd(self, cwd: str | None) -> str | None:
-        if cwd:
-            return str(Path(cwd).expanduser().resolve())
-        return self.cwd()
-
-    def resolve_path(self, path: str) -> Path:
-        candidate = Path(path).expanduser()
-        if not candidate.is_absolute() and self.cwd():
-            candidate = Path(self.cwd() or ".") / candidate
-        return candidate.resolve()
-
-    def build_shell_prefix(self, venv_path: str | None) -> str:
-        venv = venv_path or self.venv_path()
-        if not venv:
-            return ""
-        activate = Path(venv).expanduser() / "bin" / "activate"
-        if not activate.exists():
-            return ""
-        return f". {activate} && "
-
-    def run_cmd(self, *args: Any, **kwargs: Any) -> Any:
-        return self._run_cmd(*args, **kwargs)
 
 
 def get_coding_runtime(globalns: Mapping[str, Any] | None = None) -> Any:
@@ -68,11 +15,6 @@ def get_coding_runtime(globalns: Mapping[str, Any] | None = None) -> Any:
         or getattr(builtins, "coding_runtime", None)
         or getattr(builtins, "_coding_runtime", None)
     )
-    if rt is None:
-        legacy_config = getattr(builtins, "_coding_config", None)
-        legacy_run_cmd = getattr(builtins, "_run_cmd", None)
-        if isinstance(legacy_config, Mapping) and callable(legacy_run_cmd):
-            return _LegacyCodingRuntime(legacy_config, legacy_run_cmd)
     if rt is None:
         raise RuntimeError(
             "coding_runtime is not available — skill must be loaded via the registry"
@@ -159,11 +101,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
 ) -> Callable[..., Any]:
-    """Legacy compatibility decorator.
-
-    This decorator no longer exports tools automatically. Use __tools__ in skill
-    modules to explicitly declare exported tool callables.
-    """
+    """Attach tool metadata and skill context to a callable."""
 
     def decorator(inner: Callable[..., Any]) -> Callable[..., Any]:
         meta = dict(getattr(inner, "__llm_tool_meta__", {}) or {})

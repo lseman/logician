@@ -86,7 +86,7 @@ Before a large fan-out (reading 10+ files), write a brief state summary so you c
 scratch_write("
 Before read phase:
   Goal: find all usages of class ForeForest
-  Files likely affected: src/eoh/, skills/lazy_timeseries/
+  Files likely affected: src/eoh/, skills/coding/
   Will ignore: tests/, rust-cli/
 ")
 ```

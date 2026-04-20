@@ -14,12 +14,30 @@ from .validation import ValidationResult
 class RegistryExecutionMixin:
     """ToolRegistry mixin."""
 
+    @staticmethod
+    def _is_validation_result_payload(payload: Any) -> bool:
+        if isinstance(payload, ValidationResult):
+            return True
+        return hasattr(payload, "to_json") and (
+            hasattr(payload, "ok") or hasattr(payload, "result")
+        )
+
+    @staticmethod
+    def _validation_result_ok(payload: Any) -> bool:
+        if hasattr(payload, "ok"):
+            return bool(getattr(payload, "ok"))
+        return bool(getattr(payload, "result", False))
+
     def _prepare_execute_tool(
         self,
         call: ToolCall,
         *,
         record_stats: bool = True,
     ) -> tuple[Tool | None, str | None]:
+        if hasattr(self, "_ensure_catalog_configuration"):
+            self._ensure_catalog_configuration()
+        if hasattr(self, "_register_builtin_tools") and call.name not in self._tools:
+            self._register_builtin_tools()
         tool = self.get(call.name)
         if not tool and hasattr(self, "_find_skill_ids_by_tool_name"):
             self._log.info(
@@ -121,6 +139,10 @@ class RegistryExecutionMixin:
             if issues:
                 return issues[0].message
             return default
+        if hasattr(payload, "message"):
+            value = getattr(payload, "message")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
         if isinstance(payload, dict):
             for key in ("message", "error", "reason", "detail"):
                 value = payload.get(key)
@@ -233,8 +255,8 @@ class RegistryExecutionMixin:
                 error_type="execution_error",
             )
 
-        if isinstance(result, ValidationResult):
-            return None if result.ok else result.to_json()
+        if self._is_validation_result_payload(result):
+            return None if self._validation_result_ok(result) else result.to_json()
         if result in (None, True):
             return None
         if result is False:
@@ -309,8 +331,8 @@ class RegistryExecutionMixin:
                 error_type="execution_error",
             )
 
-        if isinstance(result, ValidationResult):
-            return None if result.ok else result.to_json()
+        if self._is_validation_result_payload(result):
+            return None if self._validation_result_ok(result) else result.to_json()
         if result in (None, True):
             return None
         if result is False:

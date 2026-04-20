@@ -21,23 +21,126 @@ from ..runtime import (
 from .catalog import ToolSection
 from .types import _BuiltinToolDefinition
 
+_SYNTHETIC_TOOL_SKILL_META: dict[str, dict[str, Any]] = {
+    "get_project_map": {
+        "name": "Explore",
+        "preferred_tools": [
+            "get_project_map",
+            "find_symbol",
+            "get_file_outline",
+            "rg_search",
+            "fd_find",
+        ],
+        "failure_recovery": [
+            "If a project-wide map is too broad, narrow the search with rg_search or fd_find.",
+        ],
+    },
+    "find_symbol": {
+        "name": "Explore",
+        "preferred_tools": [
+            "get_project_map",
+            "find_symbol",
+            "get_file_outline",
+            "rg_search",
+            "fd_find",
+        ],
+        "failure_recovery": [
+            "If symbol lookup is ambiguous, fall back to rg_search or fd_find for candidate files.",
+        ],
+    },
+    "get_file_outline": {
+        "name": "Explore",
+        "preferred_tools": [
+            "get_project_map",
+            "find_symbol",
+            "get_file_outline",
+            "rg_search",
+            "fd_find",
+        ],
+        "failure_recovery": [
+            "If a file is too large or noisy, use rg_search first to target a smaller surface area.",
+        ],
+    },
+    "rg_search": {
+        "name": "Explore",
+        "preferred_tools": [
+            "get_project_map",
+            "find_symbol",
+            "get_file_outline",
+            "rg_search",
+            "fd_find",
+        ],
+        "failure_recovery": [
+            "If search results are too broad, narrow the query or switch to get_file_outline for structure.",
+        ],
+    },
+    "fd_find": {
+        "name": "Explore",
+        "preferred_tools": [
+            "get_project_map",
+            "find_symbol",
+            "get_file_outline",
+            "rg_search",
+            "fd_find",
+        ],
+        "failure_recovery": [
+            "If file discovery is too broad, pivot to rg_search or get_project_map for more context.",
+        ],
+    },
+}
+
 
 class RegistryLoadingMixin:
     """ToolRegistry mixin."""
 
     def load_tools_from_skills(self) -> None:
         profile_checkpoint("tool_registry.load_tools.start")
+        if hasattr(self, "_ensure_catalog_configuration"):
+            self._ensure_catalog_configuration()
+        self._catalog.ensure_skill_catalog()
+        self._run_bootstrap_blocks(self._catalog.read_skill_source_contents())
         # Historically this auto-loaded every Python module under `skills/`.
         # Now we only register core tools and builtin meta-tools eagerly.
         # Skill modules are lazy: their SKILL.md metadata is used to resolve
         # skill ids, and script tools are imported only when the tool name is
         # actually called or when invoke_skill forces the skill to load.
         python_count = self._load_core_tool_modules()
+        eager_skill_python_count = self._load_eager_skill_python_modules()
         builtin_count = self._register_builtin_tools()
-        if python_count > 0 or builtin_count > 0:
+        if python_count > 0 or eager_skill_python_count > 0 or builtin_count > 0:
             self._version += 1
             self._invalidate_skill_resolution_cache()
         profile_checkpoint("tool_registry.load_tools.complete")
+
+    def _load_eager_skill_python_modules(self) -> int:
+        seen: set[str] = set()
+        total_registered = 0
+
+        for source in self._catalog.iter_skills_sources():
+            skill_root = self._catalog._skill_root_for_source(source)
+            if skill_root is None or not skill_root.is_dir():
+                continue
+            for module_path in self._iter_python_modules_for_skill_root(skill_root):
+                key = str(module_path.resolve())
+                if key in seen or not self._should_eager_load_skill_module(module_path, skill_root):
+                    continue
+                seen.add(key)
+                total_registered += self._register_tools_from_python_module(module_path)
+
+        roots: list[Path] = [self.skills_dir_path]
+        roots.extend(root.path for root in getattr(self._catalog, "additional_skill_source_roots", []))
+        for root in roots:
+            for module_path in self._iter_python_modules_from_scripts_dirs(root):
+                key = str(module_path.resolve())
+                if key in seen:
+                    continue
+                skill_root = self._infer_skill_root_from_module_path(module_path)
+                if skill_root is None or not self._should_eager_load_skill_module(module_path, skill_root):
+                    continue
+                seen.add(key)
+                total_registered += self._register_tools_from_python_module(module_path)
+
+        return total_registered
 
     def _register_builtin_tools(self) -> int:
         """Register internal meta-tools that are always available."""
@@ -229,44 +332,27 @@ class RegistryLoadingMixin:
         return True
 
     def _load_core_tool_modules(self) -> int:
-        """Load Python modules from `src/tools/core` and register any exported tools.
+        """Register the curated core tool set from ``src.tools.core``."""
+        from src.tools import core as _core_tools
 
-        This keeps the runtime lean and ensures only the curated core toolset is
-        imported eagerly at startup (no scanning of user skills/ plugins).
-        """
-        core_root = Path(__file__).resolve().parents[2] / "tools" / "core"
-        if not core_root.is_dir():
-            return 0
-
-        py_files: list[Path] = []
-        seen: set[str] = set()
-        for root, dirs, files in __import__("os").walk(str(core_root), followlinks=True):
-            root_path = Path(root)
-            for fname in files:
-                if not fname.endswith(".py") or fname == "__init__.py" or fname.startswith("_"):
-                    continue
-                module_path = root_path / fname
-                key = str(module_path.resolve())
-                if key in seen:
-                    continue
-                seen.add(key)
-                py_files.append(module_path)
-        py_files = sorted(py_files)
-        if not py_files:
-            return 0
-
-        total_registered = 0
-        for module_path in py_files:
-            total_registered += self._register_tools_from_python_module(module_path)
-
-        self._log.info(
-            "Loaded %d tool(s) from core tool modules under %s",
-            total_registered,
-            str(core_root),
+        total_registered = self._register_collected_python_tools(
+            tool_entries=[
+                (fn, getattr(fn, "__llm_tool_meta__", {})) for fn in _core_tools.CORE_TOOL_FUNCTIONS
+            ],
+            module_path=Path("src/tools/core/__init__.py"),
+            skill_id="core",
+            skill_meta={"always_on": True},
         )
+        if total_registered > 0:
+            self._log.info(
+                "Loaded %d core tool(s) from curated core registry",
+                total_registered,
+            )
         return total_registered
 
     def _skill_root_for_skill_id(self, skill_id: str) -> Path | None:
+        if hasattr(self, "_ensure_catalog_configuration"):
+            self._ensure_catalog_configuration()
         skill_id_norm = str(skill_id or "").strip().lower()
         if not skill_id_norm or not self.skills_dir_path.is_dir():
             return None
@@ -278,6 +364,8 @@ class RegistryLoadingMixin:
         return None
 
     def _load_tool_modules_for_skill_id(self, skill_id: str) -> int:
+        if hasattr(self, "_ensure_catalog_configuration"):
+            self._ensure_catalog_configuration()
         skill_root = self._skill_root_for_skill_id(skill_id)
         if skill_root is None or not skill_root.is_dir():
             return 0
@@ -365,9 +453,15 @@ class RegistryLoadingMixin:
                 raw_parts = list(rel_module_path.parts)
                 root_package = "core_tools_runtime"
             except Exception:
-                # Fallback: use the filename only to avoid relative_to errors
-                raw_parts = [module_path.with_suffix("").name]
-                root_package = "core_tools_runtime"
+                project_root = self.skills_dir_path.parent
+                try:
+                    rel_module_path = module_path.relative_to(project_root).with_suffix("")
+                    raw_parts = list(rel_module_path.parts)
+                    root_package = "skills_runtime"
+                except Exception:
+                    # Fallback: use a few trailing path components to avoid collisions.
+                    raw_parts = list(module_path.with_suffix("").parts[-3:])
+                    root_package = "core_tools_runtime"
 
         safe_parts = [self._safe_module_segment(part) for part in raw_parts]
         if not safe_parts:
@@ -379,12 +473,20 @@ class RegistryLoadingMixin:
         return raw_parts, safe_parts, package_name, module_name
 
     def _ensure_transient_module_packages(
-        self, raw_parts: Sequence[str], safe_parts: Sequence[str]
+        self,
+        raw_parts: Sequence[str],
+        safe_parts: Sequence[str],
+        *,
+        root_package: str = "skills_runtime",
     ) -> None:
-        root_package = "skills_runtime"
-        self._ensure_transient_package(root_package, self.skills_dir_path)
+        package_root_path = (
+            self.skills_dir_path
+            if root_package == "skills_runtime"
+            else Path(__file__).resolve().parents[2] / "tools" / "core"
+        )
+        self._ensure_transient_package(root_package, package_root_path)
         current_package = root_package
-        current_path = self.skills_dir_path
+        current_path = package_root_path
         for raw_part, safe_part in zip(raw_parts[:-1], safe_parts[:-1]):
             current_path = current_path / raw_part
             current_package = f"{current_package}.{safe_part}"
@@ -448,10 +550,15 @@ class RegistryLoadingMixin:
             description = str(
                 meta.get("description") or self._python_tool_doc_summary(tool_fn) or ""
             ).strip()
+            combined_skill_meta = dict(skill_meta or {})
+            synthetic_skill_meta = _SYNTHETIC_TOOL_SKILL_META.get(tool_name, {})
+            for key, value in synthetic_skill_meta.items():
+                combined_skill_meta.setdefault(key, value)
             try:
                 tool_fn.__doc__ = self._compose_tool_docstring(
                     tool_fn,
                     base_description=description,
+                    skill_meta=combined_skill_meta,
                 )
             except (AttributeError, TypeError):
                 self._log.warning(
@@ -474,7 +581,7 @@ class RegistryLoadingMixin:
                 doc=str(meta.get("doc") or "").strip() or None,
                 skill_id=skill_id,
                 source_path=str(module_path),
-                skill_meta=dict(skill_meta or {}),
+                skill_meta=combined_skill_meta,
             )
             doc_override = str(meta.get("doc") or "").strip()
             self._catalog.tool_docs[tool_name] = (
@@ -512,6 +619,7 @@ class RegistryLoadingMixin:
         exports = execution_globals.get("__tools__")
         tool_meta_raw = execution_globals.get("__tool_meta__", {})
         tool_meta = tool_meta_raw if isinstance(tool_meta_raw, dict) else {}
+        inline_tool_meta = self._inline_tool_meta_from_source(module_path)
 
         if exports is not None:
             # __tools__ export is present - use it
@@ -520,7 +628,7 @@ class RegistryLoadingMixin:
                     "Ignoring invalid __tools__ export in %s; expected a sequence of callables or function names",
                     module_path,
                 )
-                return exports
+                return []
 
             for export in exports:
                 tool_fn: Callable[..., Any] | None = None
@@ -543,6 +651,9 @@ class RegistryLoadingMixin:
                 explicit_meta = tool_meta.get(getattr(tool_fn, "__name__", ""), {})
                 if isinstance(explicit_meta, dict):
                     meta = {**meta, **explicit_meta}
+                inline_meta = inline_tool_meta.get(getattr(tool_fn, "__name__", ""), {})
+                if isinstance(inline_meta, dict):
+                    meta = {**meta, **inline_meta}
                 entries.append((tool_fn, meta))
                 seen.add(id(tool_fn))
         else:
@@ -580,6 +691,9 @@ class RegistryLoadingMixin:
                 explicit_meta = tool_meta.get(name, {})
                 if isinstance(explicit_meta, dict):
                     meta = {**meta, **explicit_meta}
+                inline_meta = inline_tool_meta.get(name, {})
+                if isinstance(inline_meta, dict):
+                    meta = {**meta, **inline_meta}
                 entries.append((obj, meta))
                 seen.add(id(obj))
 
@@ -605,7 +719,11 @@ class RegistryLoadingMixin:
         raw_parts, safe_parts, package_name, module_name = self._python_module_import_names(
             module_path
         )
-        self._ensure_transient_module_packages(raw_parts, safe_parts)
+        self._ensure_transient_module_packages(
+            raw_parts,
+            safe_parts,
+            root_package=package_name.split(".", 1)[0],
+        )
         transient_module = self._create_transient_module(
             module_name=module_name,
             package_name=package_name,
@@ -629,7 +747,12 @@ class RegistryLoadingMixin:
             )
             return 0
         transient_module.__dict__.update(execution_globals)
-        skill_id = self._catalog._skill_id_from_source(module_path)
+        core_root = Path(__file__).resolve().parents[2] / "tools" / "core"
+        try:
+            module_path.relative_to(core_root)
+            skill_id = "core"
+        except Exception:
+            skill_id = self._catalog._skill_id_from_source(module_path)
         skill_meta_raw = execution_globals.get("__skill__", {})
         skill_meta = dict(skill_meta_raw) if isinstance(skill_meta_raw, dict) else None
         if skill_meta:
@@ -659,6 +782,161 @@ class RegistryLoadingMixin:
         if registered > 0:
             self._invalidate_skill_resolution_cache()
         return registered
+
+    @staticmethod
+    def _iter_python_modules_recursively(root: Path) -> list[Path]:
+        modules: list[Path] = []
+        for path in sorted(root.rglob("*.py")):
+            if path.name == "__init__.py" or path.name.startswith("_"):
+                continue
+            modules.append(path)
+        return modules
+
+    def _iter_python_modules_for_skill_root(self, skill_root: Path) -> list[Path]:
+        scripts_root = skill_root / "scripts"
+        if scripts_root.is_dir():
+            return self._iter_python_modules_recursively(scripts_root)
+        return [
+            path
+            for path in sorted(skill_root.glob("*.py"))
+            if path.name != "__init__.py" and not path.name.startswith("_")
+        ]
+
+    def _iter_python_modules_from_scripts_dirs(self, root: Path) -> list[Path]:
+        if not root.is_dir():
+            return []
+        modules: list[Path] = []
+        seen: set[str] = set()
+        for walk_root, dirs, files in __import__("os").walk(str(root), followlinks=True):
+            current_root = Path(walk_root)
+            try:
+                rel_parts = current_root.relative_to(root).parts
+            except Exception:
+                rel_parts = ()
+
+            if rel_parts:
+                top_level = rel_parts[0]
+                if self._is_lazy_skill_group_dir_name(
+                    top_level
+                ) and not self._is_lazy_skill_group_active(top_level):
+                    dirs[:] = []
+                    continue
+            else:
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not self._is_lazy_skill_group_dir_name(d)
+                    or self._is_lazy_skill_group_active(d)
+                ]
+
+            if current_root.name != "scripts":
+                continue
+            for fname in sorted(files):
+                if not fname.endswith(".py") or fname == "__init__.py" or fname.startswith("_"):
+                    continue
+                module_path = current_root / fname
+                key = str(module_path.resolve())
+                if key in seen:
+                    continue
+                seen.add(key)
+                modules.append(module_path)
+        return modules
+
+    @staticmethod
+    def _infer_skill_root_from_module_path(module_path: Path) -> Path | None:
+        if not module_path.is_file():
+            return None
+        parent = module_path.parent
+        if parent.name == "scripts":
+            return parent.parent
+        return parent
+
+    def _skill_family_for_root(self, skill_root: Path) -> str:
+        candidates: list[Path] = [self.skills_dir_path]
+        candidates.extend(root.path for root in getattr(self._catalog, "additional_skill_source_roots", []))
+        for base in candidates:
+            try:
+                rel = skill_root.relative_to(base)
+            except Exception:
+                continue
+            if rel.parts:
+                return str(rel.parts[0]).strip().lower()
+        return str(skill_root.name).strip().lower()
+
+    @staticmethod
+    def _ast_name(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        return None
+
+    @staticmethod
+    def _python_module_declares_tools_export(module_path: Path) -> bool:
+        try:
+            source = module_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(module_path))
+        except Exception:
+            return False
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == "__tools__":
+                        return True
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                if node.target.id == "__tools__":
+                    return True
+        return False
+
+    def _python_module_uses_legacy_tool_decorator(self, module_path: Path) -> bool:
+        try:
+            source = module_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(module_path))
+        except Exception:
+            return False
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if self._ast_name(decorator) == "tool":
+                    return True
+        return False
+
+    def _should_eager_load_skill_module(self, module_path: Path, skill_root: Path) -> bool:
+        if self._python_module_declares_tools_export(module_path):
+            return True
+        if self._python_module_uses_legacy_tool_decorator(module_path):
+            return False
+        return self._skill_family_for_root(skill_root) != "wiki"
+
+    @staticmethod
+    def _inline_tool_meta_from_source(module_path: Path) -> dict[str, dict[str, Any]]:
+        try:
+            source = module_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(module_path))
+        except Exception:
+            return {}
+
+        inline: dict[str, dict[str, Any]] = {}
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for stmt in node.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                if not any(
+                    isinstance(target, ast.Name) and target.id == "__llm_tool_meta__"
+                    for target in stmt.targets
+                ):
+                    continue
+                try:
+                    payload = ast.literal_eval(stmt.value)
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict):
+                    inline[node.name] = payload
+                break
+        return inline
 
     def _default_parameter_description(
         self,
@@ -895,9 +1173,13 @@ class RegistryLoadingMixin:
         tool_fn: Callable[..., Any],
         *,
         base_description: str,
+        skill_meta: dict[str, Any] | None = None,
     ) -> str:
         existing_doc = inspect.getdoc(tool_fn) or ""
+        skill_context = self._format_skill_doc_context(skill_meta)
         if existing_doc:
+            if skill_context and "Skill context:" not in existing_doc:
+                return f"{existing_doc}\n\n{skill_context}"
             return existing_doc
 
         description = (
@@ -911,7 +1193,7 @@ class RegistryLoadingMixin:
         returns_text = self._docstring_returns_text()
         side_effects = self._docstring_side_effects_text()
 
-        return (
+        doc = (
             f"Use when: {description}\n\n"
             f"Triggers: {', '.join(triggers)}.\n"
             f"Avoid when: {avoid_when}.\n"
@@ -919,6 +1201,29 @@ class RegistryLoadingMixin:
             f"Returns: {returns_text}.\n"
             f"Side effects: {side_effects}"
         )
+        if skill_context:
+            return f"{doc}\n\n{skill_context}"
+        return doc
+
+    @staticmethod
+    def _format_skill_doc_context(meta: dict[str, Any] | None) -> str:
+        if not isinstance(meta, dict):
+            return ""
+        name = str(meta.get("name") or "").strip()
+        preferred_tools = [str(item).strip() for item in list(meta.get("preferred_tools") or []) if str(item).strip()]
+        failure_recovery = [str(item).strip() for item in list(meta.get("failure_recovery") or []) if str(item).strip()]
+
+        lines: list[str] = []
+        if name:
+            lines.append(f"Skill: {name}")
+        if preferred_tools:
+            lines.append(f"Preferred tools in this skill: {', '.join(preferred_tools)}")
+        if failure_recovery:
+            lines.append("Skill failure recovery:")
+            lines.extend(f"- {item}" for item in failure_recovery[:4])
+        if not lines:
+            return ""
+        return "\n".join(["Skill context:", *lines])
 
     def reload_skills(self) -> int:
         """Reload all skill files from disk, re-registering every tool.

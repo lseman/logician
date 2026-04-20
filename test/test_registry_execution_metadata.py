@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from src.tools import Context, ToolCall, ToolParameter, ToolRegistry
-from src.tools.runtime import build_tool
+from src.tools.runtime import ValidationResult, build_tool
 
 
 def _registry() -> tuple[ToolRegistry, Context]:
@@ -133,3 +133,67 @@ def test_execute_compacts_large_results_and_tracks_state() -> None:
     assert hasattr(ctx, "content_replacement_state")
     state = ctx.content_replacement_state
     assert state.replacements
+
+
+def test_build_tool_preserves_parameters_defaults_and_advanced_hooks() -> None:
+    def path_tool(path: str) -> dict[str, str]:
+        return {"status": "ok", "path": path}
+
+    tool = build_tool(
+        path_tool,
+        name="path_tool",
+        description="Path tool.",
+        parameters=[ToolParameter(name="path", type="string", required=True)],
+        get_path=lambda input: input.get("path"),
+    )
+
+    assert [param.name for param in tool.parameters] == ["path"]
+    assert callable(tool.get_path)
+    assert tool.get_path({"path": "/tmp/example.txt"}) == "/tmp/example.txt"
+    assert callable(tool.check_permissions)
+    assert tool.check_permissions({"path": "ok"}) == {
+        "behavior": "allow",
+        "updatedInput": {"path": "ok"},
+    }
+
+
+def test_runtime_validation_result_is_accepted_by_execution_hooks() -> None:
+    calls: list[dict[str, str]] = []
+
+    def runtime_guarded(path: str) -> dict[str, str]:
+        calls.append({"path": path})
+        return {"status": "ok", "path": path}
+
+    build_tool(
+        runtime_guarded,
+        name="runtime_guarded",
+        description="Runtime guarded tool.",
+        parameters=[ToolParameter(name="path", type="string", required=True)],
+        validate_input=lambda input, ctx: ValidationResult(
+            result=input.get("path") != "blocked.txt",
+            message="blocked by runtime validation",
+            error_code=1001,
+        ),
+    )
+
+    registry, _ = _registry()
+    registry.register(
+        name="runtime_guarded",
+        description="Runtime guarded tool.",
+        parameters=[ToolParameter(name="path", type="string", required=True)],
+        function=runtime_guarded,
+    )
+
+    raw = registry.execute(
+        call=ToolCall(
+            id="runtime_validate_1",
+            name="runtime_guarded",
+            arguments={"path": "blocked.txt"},
+        ),
+        use_toon=False,
+    )
+    payload = json.loads(raw)
+
+    assert payload["status"] == "error"
+    assert "blocked by runtime validation" in payload["error"]
+    assert calls == []

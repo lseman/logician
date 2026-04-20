@@ -142,90 +142,6 @@ class FileReadProgress(ToolProgressData):
     total_bytes: int = 0
 
 
-# =============================================================================
-# Tool Type (Unified OpenClaude-style)
-# =============================================================================
-
-
-class Tool(BaseModel):
-    """
-    Unified Tool type with comprehensive metadata and behavior methods.
-
-    This replaces the simple function-based approach with a rich metadata system
-    that supports validation, permissions, progress tracking, and UI rendering.
-    """
-
-    model_config = ConfigDict(
-        extra="forbid",
-        validate_assignment=True,
-        str_strip_whitespace=True,
-    )
-
-    name: str
-    description: str
-    function: Callable[..., Any]
-    skill_id: str | None = None
-    source_path: str | None = None
-    skill_meta: dict[str, Any] | None = None
-    runtime: ToolRuntimeMetadata = Field(default_factory=lambda: ToolRuntimeMetadata())
-
-    # Permission methods
-    validate_input: Callable[..., Any] | None = None
-    check_permissions: Callable[..., Any] | None = None
-    is_destructive: Callable[..., Any] | None = None
-
-    # Behavior methods
-    interrupt_behavior: Callable[..., Any] | None = None
-    is_search_or_read_command: Callable[..., Any] | None = None
-    is_concurrency_safe: Callable[..., Any] | None = None
-    is_read_only: Callable[..., Any] | None = None
-
-    # Metadata methods
-    get_tool_use_summary: Callable[..., Any] | None = None
-    get_activity_description: Callable[..., Any] | None = None
-    user_facing_name: Callable[..., Any] | None = None
-    to_auto_classifier_input: Callable[..., Any] | None = None
-
-    # UI rendering methods
-    render_tool_result_message: Callable[..., Any] | None = None
-    render_tool_use_message: Callable[..., Any] | None = None
-    render_tool_use_progress_message: Callable[..., Any] | None = None
-    render_tool_use_queued_message: Callable[..., Any] | None = None
-    render_tool_use_rejected_message: Callable[..., Any] | None = None
-    render_tool_use_error_message: Callable[..., Any] | None = None
-    render_grouped_tool_use: Callable[..., Any] | None = None
-
-    # Execution control
-    should_defer: bool = False
-    always_load: bool = False
-
-    # Result size limit
-    max_result_size_chars: int = 100_000
-
-    # Progress callback
-    on_progress: Callable[..., Any] | None = None
-
-    @field_validator("name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        name = str(value or "").strip()
-        if not name:
-            raise ValueError("Tool name must be non-empty")
-        return name
-
-    @field_validator("description", mode="before")
-    @classmethod
-    def _normalize_description(cls, value: Any) -> str:
-        return str(value or "").strip()
-
-    @field_validator("function")
-    @classmethod
-    def _validate_function(cls, value: Any) -> Any:
-        if not callable(value):
-            raise TypeError("Tool function must be callable")
-        return value
-
-
 @lru_cache(maxsize=1)
 def check_optional_deps() -> dict[str, bool]:
     deps = {
@@ -607,6 +523,71 @@ class ToolRuntimeMetadata(BaseModel):
         return cls(**runtime)
 
 
+# =============================================================================
+# Helper Functions (OpenClaude-style)
+# =============================================================================
+
+
+def tool_matches_name(tool: dict[str, Any], name: str) -> bool:
+    """
+    Check if a tool matches the given name (primary name or alias).
+
+    Matches OpenClaude's toolMatchesName function.
+    """
+    return tool.get("name") == name or name in (tool.get("aliases") or [])
+
+
+def find_toolByName(tools: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    """
+    Find a tool by name or alias from a list of tools.
+
+    Matches OpenClaude's findToolByName function.
+    """
+    return next((t for t in tools if tool_matches_name(t, name)), None)
+
+
+# =============================================================================
+# Default Implementations (OpenClaude-style)
+# =============================================================================
+
+
+TOOL_DEFAULTS = {
+    "is_enabled": lambda: True,
+    "is_concurrency_safe": lambda _input=None: False,
+    "is_read_only": lambda _input=None: False,
+    "is_destructive": lambda _input=None: False,
+    "check_permissions": lambda input, _ctx=None: {"behavior": "allow", "updatedInput": input},
+    "to_auto_classifier_input": lambda _input=None: "",
+    "user_facing_name": lambda _input=None: "",
+    "map_tool_result_to_tool_result_block_param": lambda content, _tool_use_id: {
+        "content": str(content) if content is not None else "",
+    },
+    "backfill_observable_input": lambda input: None,
+    "extract_search_text": lambda out: "",
+    "is_result_truncated": lambda output: False,
+    "render_tool_use_tag": lambda _input=None: None,
+    "get_path": lambda _input=None: None,
+    "prepare_permission_matcher": lambda _input=None: lambda pattern: False,
+}
+
+
+def check_permissions_default(
+    input: dict[str, Any],
+    context: Any | None = None,
+) -> dict[str, Any]:
+    """
+    Default permission check that allows all operations.
+
+    Matches OpenClaude's default checkPermissions behavior.
+    """
+    return {"behavior": "allow", "updatedInput": input}
+
+
+# =============================================================================
+# Tool Building (OpenClaude-style)
+# =============================================================================
+
+
 def build_tool(
     function: Any,
     *,
@@ -639,6 +620,13 @@ def build_tool(
     should_defer: bool = False,
     always_load: bool = False,
     max_result_size_chars: int = 100_000,
+    map_tool_result_to_tool_result_block_param: Callable[..., Any] | None = None,
+    backfill_observable_input: Callable[..., Any] | None = None,
+    extract_search_text: Callable[..., Any] | None = None,
+    is_result_truncated: Callable[..., Any] | None = None,
+    render_tool_use_tag: Callable[..., Any] | None = None,
+    get_path: Callable[..., Any] | None = None,
+    prepare_permission_matcher: Callable[..., Any] | None = None,
     **extra_meta: Any,
 ) -> Tool:
     """
@@ -647,6 +635,8 @@ def build_tool(
     This is a factory that creates a fully-featured Tool instance from a function.
     It merges runtime metadata with optional behavior methods for validation,
     permissions, and UI rendering.
+
+    Matches OpenClaude's buildTool function for compatibility.
 
     Args:
         function: The tool function to wrap
@@ -673,9 +663,34 @@ def build_tool(
         should_defer: Whether to defer loading (for large schemas)
         always_load: Whether to load immediately (for essential tools)
         max_result_size_chars: Max result size before compaction
+        map_tool_result_to_tool_result_block_param: Result serialization method
+        backfill_observable_input: Adds derived fields to input
+        extract_search_text: Extracts text for transcript indexing
+        is_result_truncated: Checks if result is truncated
+        render_tool_use_tag: Renders metadata tag
+        get_path: Extracts file path from input
+        prepare_permission_matcher: Prepares expensive pattern matcher
 
     Returns:
         A fully-configured Tool instance
+
+    Examples:
+        ```python
+        @tool
+        def read_file(file_path: str) -> str:
+            with open(file_path) as f:
+                return f.read()
+
+        # OpenClaude-style defaults are applied automatically
+        tool = build_tool(
+            read_file,
+            name="read_file",
+            description="Read file contents",
+            is_read_only=True,  # Enables concurrency safety
+            is_concurrency_safe=True,
+            is_search_or_read_command=lambda input: {"isRead": True},
+        )
+        ```
     """
     target = getattr(function, "__func__", function)
 
@@ -772,16 +787,44 @@ def build_tool(
     meta["always_load"] = always_load
     meta["max_result_size_chars"] = max_result_size_chars
 
+    # OpenClaude-style advanced methods
+    if map_tool_result_to_tool_result_block_param is not None:
+        meta["map_tool_result_to_tool_result_block_param"] = map_tool_result_to_tool_result_block_param
+    if backfill_observable_input is not None:
+        meta["backfill_observable_input"] = backfill_observable_input
+    if extract_search_text is not None:
+        meta["extract_search_text"] = extract_search_text
+    if is_result_truncated is not None:
+        meta["is_result_truncated"] = is_result_truncated
+    if render_tool_use_tag is not None:
+        meta["render_tool_use_tag"] = render_tool_use_tag
+    if get_path is not None:
+        meta["get_path"] = get_path
+    if prepare_permission_matcher is not None:
+        meta["prepare_permission_matcher"] = prepare_permission_matcher
+
     # Extra metadata
     for key, value in extra_meta.items():
         meta[key] = value
 
+    for key, default in TOOL_DEFAULTS.items():
+        if key in Tool.model_fields and meta.get(key) is None:
+            meta[key] = default
+
     # Set metadata on function and return Tool instance
     setattr(target, "__llm_tool_meta__", meta)
+
+    normalized_parameters: list[ToolParameter] = []
+    for param in list(meta.get("parameters") or []):
+        if isinstance(param, ToolParameter):
+            normalized_parameters.append(param)
+        elif isinstance(param, dict):
+            normalized_parameters.append(ToolParameter(**param))
 
     return Tool(
         name=name,
         description=str(meta.get("description") or ""),
+        parameters=normalized_parameters,
         function=function,
         skill_id=skill_id,
         source_path=source_path,
@@ -790,6 +833,7 @@ def build_tool(
         validate_input=meta.get("validate_input"),
         check_permissions=meta.get("check_permissions"),
         is_destructive=meta.get("is_destructive"),
+        is_enabled=meta.get("is_enabled"),
         interrupt_behavior=meta.get("interrupt_behavior"),
         is_search_or_read_command=meta.get("is_search_or_read_command"),
         is_concurrency_safe=meta.get("is_concurrency_safe"),
@@ -808,6 +852,15 @@ def build_tool(
         should_defer=bool(meta.get("should_defer", False)),
         always_load=bool(meta.get("always_load", False)),
         max_result_size_chars=int(meta.get("max_result_size_chars", 100_000)),
+        map_tool_result_to_tool_result_block_param=meta.get(
+            "map_tool_result_to_tool_result_block_param"
+        ),
+        backfill_observable_input=meta.get("backfill_observable_input"),
+        extract_search_text=meta.get("extract_search_text"),
+        is_result_truncated=meta.get("is_result_truncated"),
+        render_tool_use_tag=meta.get("render_tool_use_tag"),
+        get_path=meta.get("get_path"),
+        prepare_permission_matcher=meta.get("prepare_permission_matcher"),
     )
 
 
@@ -860,43 +913,77 @@ def materialize_tool(
         should_defer=bool(merged_meta.get("should_defer", False)),
         always_load=bool(merged_meta.get("always_load", False)),
         max_result_size_chars=int(merged_meta.get("max_result_size_chars", 100_000)),
-        **{
-            key: value
-            for key, value in merged_meta.items()
-            if key
-            not in {
-                "name",
-                "description",
-                "parameters",
-                "doc",
-                "runtime",
-                "validate_input",
-                "check_permissions",
-                "is_destructive",
-                "interrupt_behavior",
-                "is_search_or_read_command",
-                "is_concurrency_safe",
-                "is_read_only",
-                "get_tool_use_summary",
-                "get_activity_description",
-                "user_facing_name",
-                "to_auto_classifier_input",
-                "render_tool_result_message",
-                "render_tool_use_message",
-                "render_tool_use_progress_message",
-                "render_tool_use_queued_message",
-                "render_tool_use_rejected_message",
-                "render_tool_use_error_message",
-                "render_grouped_tool_use",
-                "should_defer",
-                "always_load",
-                "max_result_size_chars",
-            }
-        },
+        map_tool_result_to_tool_result_block_param=merged_meta.get("map_tool_result_to_tool_result_block_param"),
+        backfill_observable_input=merged_meta.get("backfill_observable_input"),
+        extract_search_text=merged_meta.get("extract_search_text"),
+        is_result_truncated=merged_meta.get("is_result_truncated"),
+        render_tool_use_tag=merged_meta.get("render_tool_use_tag"),
+        get_path=merged_meta.get("get_path"),
+        prepare_permission_matcher=merged_meta.get("prepare_permission_matcher"),
     )
 
 
+# =============================================================================
+# Validation Result Type (OpenClaude-style)
+# =============================================================================
+
+
+class ValidationResult(BaseModel):
+    """
+    Result of tool input validation.
+
+    Matches OpenClaude's ValidationResult type for consistency.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+    )
+
+    result: bool
+    message: str | None = None
+    error_code: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.result)
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": "ok" if self.ok else "error",
+            "ok": self.ok,
+            "result": self.ok,
+        }
+        if self.message is not None:
+            payload["message"] = self.message
+            if not self.ok:
+                payload["error"] = self.message
+        if self.error_code is not None:
+            payload["error_code"] = self.error_code
+        return payload
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_payload(), ensure_ascii=False)
+
+
+# =============================================================================
+# Tool Type (Unified OpenClaude-style)
+# =============================================================================
+
+# Type alias for JSON Schema with string keys
+ToolInputJSONSchema = dict[str, Any]
+
+
 class Tool(BaseModel):
+    """
+    Unified Tool type with comprehensive metadata and behavior methods.
+
+    This replaces the simple function-based approach with a rich metadata system
+    that supports validation, permissions, progress tracking, and UI rendering.
+
+    Matches OpenClaude's Tool type for compatibility.
+    """
+
     model_config = ConfigDict(
         extra="forbid",
         arbitrary_types_allowed=True,
@@ -904,6 +991,7 @@ class Tool(BaseModel):
         str_strip_whitespace=True,
     )
 
+    # Core fields
     name: str
     description: str
     parameters: list[ToolParameter] = Field(default_factory=list)
@@ -919,6 +1007,7 @@ class Tool(BaseModel):
     is_destructive: Callable[..., Any] | None = None
 
     # Behavior methods
+    is_enabled: Callable[..., Any] | None = None
     interrupt_behavior: Callable[..., Any] | None = None
     is_search_or_read_command: Callable[..., Any] | None = None
     is_concurrency_safe: Callable[..., Any] | None = None
@@ -948,6 +1037,27 @@ class Tool(BaseModel):
 
     # Progress callback
     on_progress: Callable[..., Any] | None = None
+
+    # Result mapping (OpenClaude-style)
+    map_tool_result_to_tool_result_block_param: Callable[..., Any] | None = None
+
+    # Input augmentation (OpenClaude-style)
+    backfill_observable_input: Callable[..., Any] | None = None
+
+    # Search/text extraction (OpenClaude-style)
+    extract_search_text: Callable[..., Any] | None = None
+
+    # Truncation check (OpenClaude-style)
+    is_result_truncated: Callable[..., Any] | None = None
+
+    # Tag rendering (OpenClaude-style)
+    render_tool_use_tag: Callable[..., Any] | None = None
+
+    # Path extraction (OpenClaude-style)
+    get_path: Callable[..., Any] | None = None
+
+    # Permission matcher preparation (OpenClaude-style)
+    prepare_permission_matcher: Callable[..., Any] | None = None
 
     def __init__(self, *args: Any, **data: Any) -> None:
         if args:
@@ -1178,8 +1288,6 @@ class SkillDefinition:
         substitutions["CLAUDE_SESSION_ID"] = session_id or ""
 
         # User-provided args
-        substitutions.update(str(v) for v in args.values() if isinstance(v, str))
-
         # First pass: user args (most specific)
         for key, val in args.items():
             substitutions[key] = str(val)
@@ -1196,8 +1304,8 @@ class SkillDefinition:
         import re
 
         for key, val in substitutions.items():
-            pattern = re.compile(re.escape(key))
-            prompt = pattern.sub(val, prompt)
+            prompt = re.sub(r"`\$\{" + re.escape(key) + r"\}`", val, prompt)
+            prompt = re.sub(r"\$\{" + re.escape(key) + r"\}", val, prompt)
 
         return prompt
 
@@ -1226,6 +1334,7 @@ __all__ = [
     "ToolPermissionRule",
     "ToolRuntimeMetadata",
     "ToolParameter",
+    "ValidationResult",
     "build_tool",
     "materialize_tool",
     "_safe_json_fallback",
@@ -1240,6 +1349,11 @@ __all__ = [
     "BashProgress",
     "TaskOutputProgress",
     "FileReadProgress",
+    # Helper functions (OpenClaude-style)
+    "tool_matches_name",
+    "find_toolByName",
+    # Tool defaults
+    "TOOL_DEFAULTS",
     # Lazy loading
     "make_lazy_proxy",
 ]

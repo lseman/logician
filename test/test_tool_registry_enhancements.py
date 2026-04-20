@@ -309,31 +309,6 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertEqual(stats["flaky"].get("errors"), 1)
         self.assertEqual(stats["stable"].get("successes"), 1)
 
-    def test_create_sample_data_signature_infers_numeric_types(self) -> None:
-        registry = self._registry()
-        registry.activate_lazy_skill_group("lazy_timeseries")
-        registry.load_tools_from_skills()
-        tool = registry.get("create_sample_data")
-        self.assertIsNotNone(tool)
-        assert tool is not None
-
-        params = {p.name: p.type for p in tool.parameters}
-        self.assertEqual(params.get("pattern"), "string")
-        self.assertEqual(params.get("n_points"), "int")
-        self.assertEqual(params.get("noise_level"), "float")
-
-        out = registry.execute(
-            ToolCall(
-                id="sample_numeric_strings",
-                name="create_sample_data",
-                arguments={"pattern": "trend", "n_points": "120", "noise_level": "0.7"},
-            ),
-            use_toon=False,
-        )
-        payload = json.loads(out)
-        self.assertEqual(payload.get("status"), "ok")
-        self.assertEqual(payload.get("n"), 120)
-
     def test_skill_catalog_fuzzy_similarity_coerces_non_string_profiles(self) -> None:
         registry = self._registry()
         catalog = SkillCatalog(
@@ -349,23 +324,6 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertLessEqual(score_list, 1.0)
         self.assertGreaterEqual(score_int, 0.0)
         self.assertLessEqual(score_int, 1.0)
-
-    def test_argument_aliases_reduce_schema_loops(self) -> None:
-        registry = self._registry()
-        registry.activate_lazy_skill_group("lazy_timeseries")
-        registry.load_tools_from_skills()
-        out = registry.execute(
-            ToolCall(
-                id="sample_aliases",
-                name="create_sample_data",
-                arguments={"type": "seasonal", "points": 90, "noise": "1.0"},
-            ),
-            use_toon=False,
-        )
-        payload = json.loads(out)
-        self.assertEqual(payload.get("status"), "ok")
-        self.assertEqual(payload.get("pattern"), "seasonal")
-        self.assertEqual(payload.get("n"), 90)
 
     def test_python_skill_module_can_register_tools_via_explicit_exports(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1094,8 +1052,8 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
             self.assertIsNone(registry.get("wiki_list"))
             result = registry.call_tool("wiki_list")
             payload = json.loads(result)
-            self.assertEqual(payload["status"], "success")
-            self.assertEqual(payload["data"]["value"], "done")
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["value"], "done")
 
     def test_root_level_python_modules_ignored_when_scripts_subdir_exists(self) -> None:
         """Tools under root skill directories should be loaded only from scripts/."""
@@ -1291,27 +1249,11 @@ def my_tool() -> dict:
 
     def test_real_skill_enums_are_exported_and_enforced(self) -> None:
         registry = self._registry()
-        registry.activate_lazy_skill_group("lazy_timeseries")
         registry.load_tools_from_skills()
 
         expected = {
-            ("create_sample_data", "pattern"): [
-                "trend",
-                "seasonal",
-                "random",
-                "anomaly",
-                "stationary",
-                "cyclic_trend",
-            ],
             ("smart_quality_gate", "mode"): ["fast", "balanced", "full"],
             ("fd_find", "file_type"): ["f", "d", ""],
-            ("detect_anomalies", "method"): [
-                "zscore",
-                "iqr",
-                "hampel",
-                "stl_resid",
-                "iforest",
-            ],
         }
 
         for (tool_name, param_name), enum_values in expected.items():
@@ -1330,25 +1272,24 @@ def my_tool() -> dict:
             prop_schema = schema["function"]["parameters"]["properties"][param_name]
             self.assertEqual(prop_schema.get("enum"), enum_values)
 
-        bad_sample = json.loads(
+        bad_quality_gate = json.loads(
             registry.execute(
                 ToolCall(
-                    id="enum_bad_sample",
-                    name="create_sample_data",
-                    arguments={"pattern": "foo"},
+                    id="enum_bad_quality_gate",
+                    name="smart_quality_gate",
+                    arguments={"path": ".", "mode": "turbo"},
                 ),
                 use_toon=False,
             )
         )
-        self.assertEqual(bad_sample.get("status"), "error")
+        self.assertEqual(bad_quality_gate.get("status"), "error")
         self.assertEqual(
-            bad_sample.get("error_type"),
+            bad_quality_gate.get("error_type"),
             "schema_type_validation_failed",
         )
 
-    def test_coding_and_timeseries_schema_audit(self) -> None:
+    def test_coding_svg_and_rag_schema_audit(self) -> None:
         registry = self._registry()
-        registry.activate_lazy_skill_group("timeseries")
         registry.load_tools_from_skills()
 
         allowed_types = {"string", "int", "float", "bool", "list", "dict"}
@@ -1360,7 +1301,6 @@ def my_tool() -> dict:
             source_path = str(tool.source_path or "")
             if (
                 "/skills/coding/" not in source_path
-                and "/skills/lazy_timeseries/" not in source_path
                 and "/skills/svg/" not in source_path
                 and "/skills/rag/" not in source_path
             ):
