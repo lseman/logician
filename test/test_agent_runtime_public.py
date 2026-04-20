@@ -11,6 +11,11 @@ if str(AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_ROOT))
 
 from src import AgentResponse, Message, MessageRole, ToolParameter, create_agent
+from src.agent.dispatcher import DispatchResult
+from src.agent.state import TurnState
+from src.agent.types import TurnResult
+from src.hooks import HookExecutionResult
+from src.tools.runtime import ToolCall
 
 
 class _FakeLLM:
@@ -91,6 +96,8 @@ class AgentRuntimePublicTests(unittest.TestCase):
                 "rag_enabled": False,
                 "vector_path": str(self.vector_path),
                 "max_iterations": 2,
+                "enable_skill_routing": False,
+                "dynamic_skill_routing": False,
             },
         )
         self.agent.llm = _FakeLLM("Hello from test")
@@ -109,6 +116,8 @@ class AgentRuntimePublicTests(unittest.TestCase):
                 "rag_enabled": False,
                 "vector_path": str(self.vector_path),
                 "max_iterations": 2,
+                "enable_skill_routing": False,
+                "dynamic_skill_routing": False,
             },
         )
         agent.llm = _FakeLLM("Hello from test")
@@ -202,14 +211,43 @@ class AgentRuntimePublicTests(unittest.TestCase):
         )
 
     def test_tool_callback_reports_live_start_and_end_events(self) -> None:
-        # Two-step sequence: tool call → final answer (pre_turn_thinking is off by default).
-        self.agent.llm = _SequenceLLM(
-            [
-                json.dumps({"name": "think", "arguments": {"thought": "inspect runtime"}}),
-                "Tool completed",
-            ]
-        )
         tool_events: list[tuple[str, dict, dict]] = []
+        call = ToolCall(
+            id="tool_1",
+            name="think",
+            arguments={"thought": "inspect runtime"},
+        )
+
+        async def fake_run(
+            messages,
+            session_id=None,
+            token_callback=None,
+            thinking_callback=None,
+            tool_callback=None,
+            post_tool_callback=None,
+            repair_callback=None,
+        ):
+            del messages, session_id, token_callback, thinking_callback, post_tool_callback, repair_callback
+            if tool_callback is not None:
+                tool_callback(
+                    call.name,
+                    dict(call.arguments),
+                    {"stage": "start", "sequence": 1},
+                )
+                tool_callback(
+                    call.name,
+                    dict(call.arguments),
+                    {"stage": "end", "sequence": 1, "status": "ok"},
+                )
+            state = TurnState(turn_id="tool_callback_case")
+            state.record_call(call)
+            state.final_response = "Tool completed"
+            return TurnResult(
+                state=state,
+                messages=[Message(role=MessageRole.ASSISTANT, content="Tool completed")],
+            )
+
+        self.agent._agent_loop.run = fake_run  # type: ignore[method-assign]
 
         response = self.agent.run(
             "inspect the runtime and report back",
@@ -225,6 +263,152 @@ class AgentRuntimePublicTests(unittest.TestCase):
         self.assertEqual(tool_events[0][1], {"thought": "inspect runtime"})
         self.assertEqual(tool_events[0][2].get("sequence"), 1)
         self.assertEqual(tool_events[1][2].get("status"), "ok")
+
+    def test_user_prompt_submit_hook_injects_context_before_user_message(self) -> None:
+        self.agent.config.runtime_hooks_enabled = True
+        captured_messages: list[Message] = []
+
+        async def fake_run(
+            messages,
+            session_id=None,
+            token_callback=None,
+            thinking_callback=None,
+            tool_callback=None,
+            post_tool_callback=None,
+            repair_callback=None,
+        ):
+            del session_id, token_callback, thinking_callback, tool_callback, post_tool_callback, repair_callback
+            captured_messages[:] = list(messages)
+            state = TurnState(turn_id="hook_prompt_case")
+            state.final_response = "Hello from hook test"
+            return TurnResult(
+                state=state,
+                messages=[Message(role=MessageRole.ASSISTANT, content="Hello from hook test")],
+            )
+
+        self.agent._agent_loop.run = fake_run  # type: ignore[method-assign]
+
+        class FakeHookEngine:
+            def __init__(self) -> None:
+                self.sync_calls: list[tuple[object, dict[str, object]]] = []
+
+            def execute_hooks(self, event_type, **kwargs):
+                self.sync_calls.append((event_type, kwargs))
+                return HookExecutionResult(additional_contexts=["recent memory"])
+
+            def execute_hooks_async(self, event_type, **kwargs):
+                del event_type, kwargs
+
+        engine = FakeHookEngine()
+        self.agent._hook_engine_cache = engine
+
+        response = self.agent.run("Say hello.", session_id="hook_prompt_case")
+
+        self.assertEqual(response.final_response, "Hello from hook test")
+        self.assertEqual(len(engine.sync_calls), 1)
+        _event_type, kwargs = engine.sync_calls[0]
+        self.assertEqual(kwargs["session_id"], "hook_prompt_case")
+        self.assertEqual(kwargs["prompt"], "Say hello.")
+        self.assertEqual(kwargs["transcript_path"], str(self.db_path))
+        self.assertEqual(captured_messages[-1].content, "Say hello.")
+        self.assertEqual(captured_messages[-2].content, "[Hook context]\nrecent memory")
+
+    def test_post_tool_use_and_stop_hooks_fire_from_agent_run(self) -> None:
+        self.agent.config.runtime_hooks_enabled = True
+        call = ToolCall(
+            id="tool_1",
+            name="think",
+            arguments={"thought": "inspect runtime"},
+        )
+
+        async def fake_run(
+            messages,
+            session_id=None,
+            token_callback=None,
+            thinking_callback=None,
+            tool_callback=None,
+            post_tool_callback=None,
+            repair_callback=None,
+        ):
+            del messages, session_id, token_callback, thinking_callback, tool_callback, repair_callback
+            if post_tool_callback is not None:
+                post_tool_callback(
+                    call,
+                    DispatchResult(
+                        tool_name=call.name,
+                        call_id=call.id,
+                        output='{"status":"ok","thought":"inspect runtime"}',
+                        status="ok",
+                    ),
+                )
+            state = TurnState(turn_id="post_tool_hook_case")
+            state.record_call(call)
+            state.final_response = "Tool completed"
+            return TurnResult(
+                state=state,
+                messages=[Message(role=MessageRole.ASSISTANT, content="Tool completed")],
+            )
+
+        self.agent._agent_loop.run = fake_run  # type: ignore[method-assign]
+
+        class FakeHookEngine:
+            def __init__(self) -> None:
+                self.sync_calls: list[tuple[object, dict[str, object]]] = []
+                self.async_calls: list[tuple[object, dict[str, object]]] = []
+
+            def execute_hooks(self, event_type, **kwargs):
+                self.sync_calls.append((event_type, kwargs))
+                return HookExecutionResult()
+
+            def execute_hooks_async(self, event_type, **kwargs):
+                self.async_calls.append((event_type, kwargs))
+
+        engine = FakeHookEngine()
+        self.agent._hook_engine_cache = engine
+
+        response = self.agent.run(
+            "inspect the runtime and report back",
+            session_id="post_tool_hook_case",
+        )
+
+        self.assertEqual(response.final_response, "Tool completed")
+        event_names = [event_type.value for event_type, _ in engine.async_calls]
+        self.assertIn("PostToolUse", event_names)
+        self.assertIn("Stop", event_names)
+        post_tool_payload = next(
+            kwargs for event_type, kwargs in engine.async_calls if event_type.value == "PostToolUse"
+        )
+        self.assertEqual(post_tool_payload["session_id"], "post_tool_hook_case")
+        self.assertEqual(post_tool_payload["tool_name"], "think")
+        self.assertEqual(post_tool_payload["tool_input"], {"thought": "inspect runtime"})
+        self.assertIn("inspect runtime", str(post_tool_payload["tool_response"]))
+        stop_payload = next(
+            kwargs for event_type, kwargs in engine.async_calls if event_type.value == "Stop"
+        )
+        self.assertEqual(stop_payload["session_id"], "post_tool_hook_case")
+        self.assertFalse(stop_payload["stop_hook_active"])
+
+    def test_end_session_fires_session_end_hook_from_agent_core(self) -> None:
+        self.agent.config.runtime_hooks_enabled = True
+
+        class FakeHookEngine:
+            def __init__(self) -> None:
+                self.async_calls: list[tuple[object, dict[str, object]]] = []
+
+            def execute_hooks_async(self, event_type, **kwargs):
+                self.async_calls.append((event_type, kwargs))
+
+        engine = FakeHookEngine()
+        self.agent._hook_engine_cache = engine
+
+        self.agent.end_session(reason="clear", session_id="session_alpha")
+
+        self.assertEqual(len(engine.async_calls), 1)
+        event_type, kwargs = engine.async_calls[0]
+        self.assertEqual(event_type.value, "SessionEnd")
+        self.assertEqual(kwargs["session_id"], "session_alpha")
+        self.assertEqual(kwargs["reason"], "clear")
+        self.assertEqual(kwargs["transcript_path"], str(self.db_path))
 
     def test_fresh_session_clears_runtime_context_before_running(self) -> None:
         self._load_dummy_context()

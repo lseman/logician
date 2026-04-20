@@ -50,15 +50,32 @@ class HookLoader:
 
         self.plugin_manager = plugin_manager or PM()
 
-    def get_session_start_hooks(self) -> list[LoadedHook]:
+    def get_session_start_hooks(self, source: str = "startup") -> list[LoadedHook]:
         """Get all SessionStart hooks from enabled plugins."""
-        return self._get_hooks_for_event(HookEventType.SESSION_START)
+        return self.get_hooks_for(HookEventType.SESSION_START, matcher_value=source)
+
+    def get_hooks_for(
+        self,
+        event_type: HookEventType,
+        *,
+        matcher_value: str | None = None,
+    ) -> list[LoadedHook]:
+        """Get hooks for an event, filtered by matcher_value if provided.
+
+        `matcher_value` is:
+        - for SessionStart: the source ("startup"|"clear"|"compact"|...)
+        - for PreToolUse/PostToolUse: the tool name (e.g. "Read", "Edit")
+        - for others: unused; all hooks for the event type are returned
+
+        A hook with no matcher or matcher "*" always matches.
+        """
+        return self._get_hooks_for_event(event_type, matcher_value or "")
 
     def _get_hooks_for_event(
         self, event_type: HookEventType, source: str = "startup"
     ) -> list[LoadedHook]:
         """Get all hooks for a specific event type from enabled plugins."""
-        cache_key = (event_type, str(source or "").strip().lower() or "startup")
+        cache_key = (event_type, str(source or "").strip().lower())
         signature = self._cache_signature()
         with self._cache_lock:
             cached = self._event_cache.get(cache_key)
@@ -142,8 +159,11 @@ class HookLoader:
     def _matcher_matches(self, matcher: HookMatcher | None, source: str) -> bool:
         """Check if a hook matcher matches the given source.
 
-        Supports pipe-separated patterns like 'startup|clear|compact'.
-        Returns True if any of the pattern alternatives match the source.
+        Supports pipe-separated patterns like 'startup|clear|compact', the
+        wildcard "*" (matches anything), and an empty source (treated as
+        "matcher-irrelevant" — any non-wildcard pattern still matches so the
+        hook runs). Used for event types that don't pass a matcher value
+        (UserPromptSubmit, Stop, SessionEnd).
         """
         if matcher is None:
             return True  # No matcher = matches all
@@ -152,14 +172,25 @@ class HookLoader:
         if not pattern:
             return True
 
+        pattern_clean = pattern.strip().lower()
+        source_clean = source.strip().lower()
+
+        # Wildcard matcher matches everything
+        if pattern_clean == "*":
+            return True
+
+        # No matcher_value supplied (event doesn't use one) -> accept any pattern
+        if not source_clean:
+            return True
+
         # Handle pipe-separated alternatives (e.g., "startup|clear|compact")
         sources = [s.strip().lower() for s in source.split("|")]
         patterns = [p.strip().lower() for p in pattern.split("|")]
 
-        # True if any source matches any pattern alternative
+        # True if any source matches any pattern alternative (including "*")
         for s in sources:
             for p in patterns:
-                if s == p:
+                if p == "*" or s == p:
                     return True
 
         # Also support simple contains for backwards compatibility

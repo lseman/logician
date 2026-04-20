@@ -15,6 +15,7 @@ if str(AGENT_ROOT) not in sys.path:
 from src.agent.dispatcher import DispatchResult
 from src.agent.guardrails import GuardrailResult
 from src.agent.loop import AgentLoop, format_tool_results
+from src.agent.state import TurnState
 from src.config import Config
 from src.messages import Message, MessageRole
 from src.tools.runtime import ToolCall
@@ -54,12 +55,19 @@ class FakeDeepSeekLLM(FakeLLM):
 class FakeDispatcher:
     def __init__(self) -> None:
         self.dispatched: list[ToolCall] = []
+        self._available_tool_names: set[str] = set()
 
     async def dispatch(self, calls, state, config=None, tool_callback=None):
         del tool_callback
         self.dispatched.extend(calls)
         state.consecutive_tool_count += len(calls)
         return []
+
+    def available_tool_names(self) -> set[str]:
+        return set(self._available_tool_names)
+
+    def prepare_call(self, call):
+        return call, None
 
 
 class FakeGuardrails:
@@ -207,6 +215,47 @@ def test_execution_turn_loads_mcp_before_loop():
 
     assert result.final_response == "Done"
     assert mcp_calls["count"] == 1
+
+
+def test_available_tool_names_can_refresh_after_skill_load_dispatch():
+    class SkillLoadingDispatcher(FakeDispatcher):
+        def __init__(self) -> None:
+            super().__init__()
+            self._available_tool_names = {"invoke_skill"}
+
+        async def dispatch(self, calls, state, config=None, tool_callback=None):
+            del config, tool_callback
+            self.dispatched.extend(calls)
+            state.consecutive_tool_count += len(calls)
+            self._available_tool_names.add("wiki_list")
+            return [
+                DispatchResult(
+                    tool_name="invoke_skill",
+                    call_id="call-invoke-skill",
+                    output=json.dumps(
+                        {
+                            "status": "ok",
+                            "available_tools": ["wiki_list"],
+                            "newly_available_tools": ["wiki_list"],
+                        }
+                    ),
+                )
+            ]
+
+    dispatcher = SkillLoadingDispatcher()
+    state = TurnState(turn_id="turn-1")
+    state.available_tool_names = dispatcher.available_tool_names()
+
+    asyncio.run(
+        dispatcher.dispatch(
+            [ToolCall(id="call-invoke-skill", name="invoke_skill", arguments={"skill": "wiki"})],
+            state,
+        )
+    )
+    state.available_tool_names = dispatcher.available_tool_names()
+
+    assert "invoke_skill" in state.available_tool_names
+    assert "wiki_list" in state.available_tool_names
 
 
 def test_guardrail_nudge_increments_iteration():

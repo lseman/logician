@@ -495,11 +495,8 @@ fn draw_todo_panel(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    app.register_todo_area(
-        area,
-        inner.height,
-        lines.len().min(u16::MAX as usize) as u16,
-    );
+    let content_h = wrapped_lines_height(&lines, inner.width as usize);
+    app.register_todo_area(area, inner.height, content_h);
     f.render_widget(
         Paragraph::new(lines)
             .scroll((app.todo_scroll(), 0))
@@ -524,12 +521,8 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
 
     if app.has_change_records() {
         let (lines, change_headers) = render_changes_panel(app, inner);
-        app.register_tool_output_area(
-            area,
-            inner.height,
-            lines.len().min(u16::MAX as usize) as u16,
-            change_headers,
-        );
+        let content_h = wrapped_lines_height(&lines, inner.width as usize);
+        app.register_tool_output_area(area, inner.height, content_h, change_headers);
         f.render_widget(
             Paragraph::new(lines)
                 .scroll((app.tool_output_scroll(), 0))
@@ -616,12 +609,8 @@ fn draw_tool_output_panel(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    app.register_tool_output_area(
-        area,
-        inner.height,
-        styled_lines.len().min(u16::MAX as usize) as u16,
-        Vec::new(),
-    );
+    let content_h = wrapped_lines_height(&styled_lines, inner.width as usize);
+    app.register_tool_output_area(area, inner.height, content_h, Vec::new());
 
     let text = Paragraph::new(styled_lines)
         .scroll((app.tool_output_scroll(), 0))
@@ -977,11 +966,8 @@ fn draw_context_panel(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    app.register_context_area(
-        area,
-        inner.height,
-        lines.len().min(u16::MAX as usize) as u16,
-    );
+    let content_h = wrapped_lines_height(&lines, inner.width as usize);
+    app.register_context_area(area, inner.height, content_h);
     f.render_widget(
         Paragraph::new(lines)
             .scroll((app.context_scroll(), 0))
@@ -1264,11 +1250,8 @@ fn draw_rag_panel(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    app.register_rag_area(
-        area,
-        inner.height,
-        lines.len().min(u16::MAX as usize) as u16,
-    );
+    let content_h = wrapped_lines_height(&lines, inner.width as usize);
+    app.register_rag_area(area, inner.height, content_h);
     f.render_widget(
         Paragraph::new(lines)
             .scroll((app.rag_scroll(), 0))
@@ -1516,9 +1499,14 @@ fn composer_footer_line(app: &App, max_width: usize) -> Line<'static> {
         ));
     }
 
-    let live_step = app.live_step_summary(max_width / 2);
+    let live_step = app.live_step_summary(((max_width / 3).max(18)).min(32));
+    let context_label = app.context_size_label();
     let mut right = Vec::new();
     push_chip(&mut right, "step", &live_step.text, live_step.state.color());
+    try_push_chip(&mut right, &left, max_width, "ctx", &context_label, C_GOLD);
+    if app.bridge_state.plan_mode {
+        try_push_chip(&mut right, &left, max_width, "mode", "plan", Color::Yellow);
+    }
 
     if spans_width(&left) + 2 + spans_width(&right) <= max_width {
         let gap = max_width.saturating_sub(spans_width(&left) + spans_width(&right));
@@ -1528,13 +1516,19 @@ fn composer_footer_line(app: &App, max_width: usize) -> Line<'static> {
     }
 
     let compact = format!(
-        "{}  [{}]",
+        "{}  [{} · ctx {}{}]",
         if app.busy {
             "Esc interrupt · Ctrl+O trace"
         } else {
             "Enter send · Shift+Enter newline"
         },
-        live_step.text
+        live_step.text,
+        context_label,
+        if app.bridge_state.plan_mode {
+            " · plan"
+        } else {
+            ""
+        }
     );
     Line::from(Span::styled(
         clip_to_width(&compact, max_width.saturating_sub(1)),
@@ -1715,15 +1709,20 @@ fn status_border_line(width: u16, _phase_color: Color) -> Line<'static> {
 
 fn status_line(app: &App, max_width: usize) -> Line<'static> {
     let live_step = app.live_step_summary((max_width / 3).max(18));
+    let context_label = app.context_size_label();
     if max_width < 52 {
         let compact = format!(
-            "{} {} · {} · {}",
+            "{} {} · {} · ctx {} · {}",
             if app.connected { "online" } else { "offline" },
             app.phase,
             live_step.text,
+            context_label,
             app.bridge_state.active
         );
-        return Line::from(Span::styled(compact, Style::default().fg(Color::Gray)));
+        return Line::from(Span::styled(
+            clip_to_width(&compact, max_width.saturating_sub(1)),
+            Style::default().fg(Color::Gray),
+        ));
     }
 
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -1747,6 +1746,8 @@ fn status_line(app: &App, max_width: usize) -> Line<'static> {
     push_chip(&mut spans, "phase", &phase_label, app.phase.color());
     push_sep(&mut spans);
     push_chip(&mut spans, "step", &live_step.text, live_step.state.color());
+    push_sep(&mut spans);
+    push_chip(&mut spans, "ctx", &context_label, C_GOLD);
     push_gap(&mut spans);
 
     push_kv(
@@ -1939,6 +1940,25 @@ fn push_chip(spans: &mut Vec<Span<'static>>, label: &str, value: &str, color: Co
     spans.push(Span::styled("]", Style::default().fg(C_SUBTLE)));
 }
 
+fn try_push_chip(
+    spans: &mut Vec<Span<'static>>,
+    left: &[Span<'static>],
+    max_width: usize,
+    label: &str,
+    value: &str,
+    color: Color,
+) {
+    let mut candidate = spans.clone();
+    if !candidate.is_empty() {
+        push_sep(&mut candidate);
+    }
+    push_chip(&mut candidate, label, value, color);
+
+    if spans_width(left) + 2 + spans_width(&candidate) <= max_width {
+        *spans = candidate;
+    }
+}
+
 fn push_kv(spans: &mut Vec<Span<'static>>, key: &str, value: &str, color: Color) {
     spans.push(Span::styled(
         format!("{}:", key),
@@ -2000,6 +2020,30 @@ fn clip_to_width(text: &str, max_chars: usize) -> String {
     }
     out.push('…');
     out
+}
+
+fn wrapped_lines_height(lines: &[Line<'static>], max_width: usize) -> u16 {
+    if max_width == 0 {
+        return lines.len().min(u16::MAX as usize) as u16;
+    }
+    let mut total = 0usize;
+    for line in lines {
+        let line_len = line
+            .spans
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum::<usize>();
+        let rows = if line_len == 0 {
+            1
+        } else {
+            (line_len + max_width - 1) / max_width
+        };
+        total = total.saturating_add(rows);
+        if total >= u16::MAX as usize {
+            return u16::MAX;
+        }
+    }
+    total.min(u16::MAX as usize) as u16
 }
 
 // ── Tool output block parsing and rendering ──────────────────────────────────

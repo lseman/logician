@@ -95,6 +95,34 @@ class PluginManagerTests(unittest.TestCase):
                 [cache_root / "skills", cache_root / "commands"],
             )
 
+    def test_local_install_without_plugin_manifest_still_indexes_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_root = Path(tmpdir)
+            plugins_dir = tmp_root / "claude_plugins"
+            manager = PluginManager(plugins_dir=plugins_dir)
+
+            repo_src = tmp_root / "hermes_repo"
+            repo_src.mkdir(parents=True)
+            skills_dir = repo_src / "skills" / "sample"
+            skills_dir.mkdir(parents=True)
+            (skills_dir / "SKILL.md").write_text(
+                "```skill\n---\nname: sample\ndescription: plain skills repo\n---\n```",
+                encoding="utf-8",
+            )
+
+            result = manager.install(str(repo_src))
+            self.assertEqual(result["status"], "installed")
+            self.assertEqual(result["name"], "hermes_repo")
+            self.assertTrue(
+                result["install_path"].endswith("/cache/local/hermes_repo/" + result["version"])
+            )
+
+            cache_root = Path(result["install_path"])
+            self.assertTrue((cache_root / "skills" / "sample" / "SKILL.md").exists())
+            self.assertTrue((cache_root / "skill_index.json").is_file())
+            self.assertEqual(manager.list_plugins()["plugins"][0]["plugin_id"], "hermes_repo@local")
+            self.assertEqual(manager.skills_paths(), [cache_root / "skills"])
+
     def test_component_skill_roots_are_indexed_at_install_time(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_root = Path(tmpdir)

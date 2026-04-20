@@ -199,6 +199,7 @@ pub struct BridgeState {
     pub active: String,
     pub session: String,
     pub msg_count: u64,
+    pub context_size: u64,
     pub agents: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub pipeline: Option<Value>,
@@ -228,6 +229,10 @@ impl BridgeState {
             active: v["active"].as_str().unwrap_or("-").to_string(),
             session: v["session"].as_str().unwrap_or("-").to_string(),
             msg_count: v["msg_count"].as_u64().unwrap_or(0),
+            context_size: v["context_size"]
+                .as_u64()
+                .or_else(|| v["context_size"].as_str().and_then(|s| s.parse().ok()))
+                .unwrap_or(0),
             agents: v["agents"]
                 .as_array()
                 .map(|a| {
@@ -460,9 +465,7 @@ impl BridgeState {
                     .as_str()
                     .unwrap_or("")
                     .to_string(),
-                active_doc_count: v["rag_inventory"]["active_doc_count"]
-                    .as_u64()
-                    .unwrap_or(0),
+                active_doc_count: v["rag_inventory"]["active_doc_count"].as_u64().unwrap_or(0),
                 active_doc_chunks: v["rag_inventory"]["active_doc_chunks"]
                     .as_u64()
                     .unwrap_or(0),
@@ -471,9 +474,7 @@ impl BridgeState {
                     .as_u64()
                     .unwrap_or(0),
                 repo_chunks: v["rag_inventory"]["repo_chunks"].as_u64().unwrap_or(0),
-                retrieval_count: v["rag_inventory"]["retrieval_count"]
-                    .as_u64()
-                    .unwrap_or(0),
+                retrieval_count: v["rag_inventory"]["retrieval_count"].as_u64().unwrap_or(0),
                 legacy_paths: v["rag_inventory"]["legacy_paths"]
                     .as_array()
                     .map(|items| {
@@ -539,10 +540,7 @@ impl BridgeState {
                                                 .as_str()
                                                 .unwrap_or("")
                                                 .to_string(),
-                                            path: value["path"]
-                                                .as_str()
-                                                .unwrap_or("")
-                                                .to_string(),
+                                            path: value["path"].as_str().unwrap_or("").to_string(),
                                             distance: match value.get("distance") {
                                                 Some(Value::String(text)) => text.clone(),
                                                 Some(other) => other.to_string(),

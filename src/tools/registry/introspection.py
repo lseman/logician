@@ -1218,7 +1218,9 @@ class RegistryIntrospectionMixin:
         discovered_superpowers: Sequence[str],
     ) -> dict[str, Any]:
         guidance_only_cards = [card for card in cards if not card.tool_names]
-        superpower_cards = [card for card in cards if str(card.id).startswith("sp__")]
+        superpower_cards = [
+            card for card in cards if Path(card.source_path).name.upper() == "SKILL.MD"
+        ]
         coding = self._coding_capability_audit(cards)
         organization = self._coding_organization_audit()
         return {
@@ -1271,7 +1273,7 @@ class RegistryIntrospectionMixin:
                 ),
             },
             "checks": {
-                "brainstorming_present": any(card.id == "sp__brainstorming" for card in cards),
+                "brainstorming_present": any(card.id == "brainstorming" for card in cards),
                 "missing_tools_by_skill_count": len(missing_tools_by_skill),
                 "coding_required_coverage_pct": float(
                     coding.get("required_coverage_pct", 0.0) or 0.0

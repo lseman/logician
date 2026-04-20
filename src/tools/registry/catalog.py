@@ -751,6 +751,35 @@ class SkillCatalog:
         text = "".join(ch for ch in text if ch.isalnum() or ch == "_").strip("_")
         return text
 
+    @staticmethod
+    def _normalize_cached_skill_id(skill_id: str) -> str:
+        if not skill_id:
+            return ""
+        text = str(skill_id).strip()
+        if text.startswith("sp__"):
+            return text[4:]
+        return text
+
+    @staticmethod
+    def _normalize_cached_id_map(payload: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in (payload or {}).items():
+            normalized_key = SkillCatalog._normalize_cached_skill_id(str(key or ""))
+            if not normalized_key or normalized_key in normalized:
+                continue
+            normalized[normalized_key] = value
+        return normalized
+
+    @staticmethod
+    def _normalize_cached_id_set_map(payload: dict[str, Sequence[str]]) -> dict[str, set[str]]:
+        normalized: dict[str, set[str]] = {}
+        for key, values in (payload or {}).items():
+            normalized_key = SkillCatalog._normalize_cached_skill_id(str(key or ""))
+            if not normalized_key or normalized_key in normalized:
+                continue
+            normalized[normalized_key] = set(values or [])
+        return normalized
+
     def set_active_lazy_skill_groups(self, groups: Sequence[str] | set[str]) -> None:
         self._active_lazy_skill_groups = {
             group
@@ -826,11 +855,19 @@ class SkillCatalog:
                 return False
             cards: dict[str, SkillCard] = {}
             for skill_id, card_dict in raw.get("skills", {}).items():
-                cards[skill_id] = SkillCard(**card_dict)
-            profiles: dict[str, str] = raw.get("routing_profiles", {})
-            tokens: dict[str, set[str]] = {
-                k: set(v) for k, v in raw.get("routing_tokens", {}).items()
-            }
+                normalized_id = self._normalize_cached_skill_id(str(skill_id or ""))
+                if not normalized_id or normalized_id in cards:
+                    continue
+                card = SkillCard(**card_dict)
+                if isinstance(card.id, str) and card.id.startswith("sp__"):
+                    card.id = self._normalize_cached_skill_id(card.id)
+                cards[normalized_id] = card
+            profiles: dict[str, str] = self._normalize_cached_id_map(
+                raw.get("routing_profiles", {})
+            )
+            tokens: dict[str, set[str]] = self._normalize_cached_id_set_map(
+                raw.get("routing_tokens", {})
+            )
             self._skills = cards
             # Rebuild indexes to keep retrieval structures compatible with
             # the current scoring implementation even when cache schema grows.
@@ -999,9 +1036,7 @@ class SkillCatalog:
             self._build_routing_index(cards)
         return changed
 
-    def _parse_superpowers_card(
-        self, source_path: Path, raw_content: str
-    ) -> SkillCard | None:
+    def _parse_superpowers_card(self, source_path: Path, raw_content: str) -> SkillCard | None:
         """Parse a Superpowers-format SKILL.md into a guidance-only SkillCard.
 
         These files:
@@ -1667,9 +1702,7 @@ class SkillCatalog:
         if fingerprint:
             self._save_to_cache(fingerprint)
 
-    def activate_conditional_skills(
-        self, file_paths: list[str], cwd: str = ""
-    ) -> list[str]:
+    def activate_conditional_skills(self, file_paths: list[str], cwd: str = "") -> list[str]:
         """Activate conditional skills whose `paths` filter matches any of the given file paths.
 
         Follows the openclaude pattern: walk up from file paths looking for skills
@@ -1717,9 +1750,7 @@ class SkillCatalog:
 
     # --- Dynamic skill discovery (openclaude pattern) ---
 
-    def discover_skill_dirs(
-        self, file_paths: list[str], cwd: str = ""
-    ) -> list[Path]:
+    def discover_skill_dirs(self, file_paths: list[str], cwd: str = "") -> list[Path]:
         """Discover `.claude/skills` directories by walking up from file paths.
 
         Follows the openclaude pattern: walk up from each file path toward cwd,
@@ -1787,9 +1818,7 @@ class SkillCatalog:
                 # Merge tool sections if any
                 if card.tool_names:
                     for sec in self._all_tool_sections:
-                        if sec["name"] not in {
-                            s["name"] for s in self._all_tool_sections
-                        }:
+                        if sec["name"] not in {s["name"] for s in self._all_tool_sections}:
                             pass  # tool sections are per-file, not per-card
                 self._log.debug(
                     "Loaded discovered skill '%s' from %s",
@@ -2326,9 +2355,7 @@ class SkillCatalog:
                 return min(score, min_score - 0.01)
         return score
 
-    def activate_conditional_skills(
-        self, file_paths: Sequence[str], cwd: str
-    ) -> list[str]:
+    def activate_conditional_skills(self, file_paths: Sequence[str], cwd: str) -> list[str]:
         """Activate skills whose ``paths`` filters match the given file paths.
 
         Uses gitignore-style glob matching (via ``src.skills.path_matching``).
@@ -2858,11 +2885,11 @@ class SkillCatalog:
         if skill_root is not None and self._skill_root_has_python_tools(skill_root):
             return self._normalize_skill_slug(skill_root.name)
 
-        # SKILL.md files (Superpowers format) use their *parent directory* as the id.
+        # SKILL.md files use their parent directory as the id.
         if source_path.name.upper() == "SKILL.MD":
             raw = source_path.parent.name
             raw = self._normalize_skill_slug(raw)
-            return f"sp__{raw}" if raw else "sp__skill"
+            return raw or "skill"
         stem = source_path.stem
         stem = self._normalize_skill_slug(stem)
         return stem or "skill"

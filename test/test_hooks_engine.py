@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 import unittest
 from pathlib import Path
@@ -13,10 +14,50 @@ from src.hooks.types import (
     HookDefinition,
     HookEventType,
     HookExecutionResult,
+    PostToolUseHookInput,
+    SessionEndHookInput,
+    build_hook_input,
 )
 
 
 class HookEngineStartupTests(unittest.TestCase):
+    def test_build_hook_input_accepts_typed_payload_dataclasses(self) -> None:
+        payload = PostToolUseHookInput(
+            session_id="sess-1",
+            transcript_path="/tmp/session.db",
+            cwd="/repo",
+            tool_name="Read",
+            tool_input={"path": "README.md"},
+            tool_response={"status": "ok", "content_preview": "hello"},
+        )
+
+        parsed = json.loads(build_hook_input(HookEventType.POST_TOOL_USE, payload))
+
+        self.assertEqual(parsed["session_id"], "sess-1")
+        self.assertEqual(parsed["transcript_path"], "/tmp/session.db")
+        self.assertEqual(parsed["cwd"], "/repo")
+        self.assertEqual(parsed["hook_event_name"], "PostToolUse")
+        self.assertEqual(parsed["tool_name"], "Read")
+        self.assertEqual(parsed["tool_input"], {"path": "README.md"})
+        self.assertEqual(
+            parsed["tool_response"],
+            {"status": "ok", "content_preview": "hello"},
+        )
+
+    def test_build_hook_input_serializes_session_end_payload(self) -> None:
+        payload = SessionEndHookInput(
+            session_id="sess-9",
+            transcript_path="/tmp/runtime.db",
+            reason="reload",
+        )
+
+        parsed = json.loads(build_hook_input(HookEventType.SESSION_END, payload))
+
+        self.assertEqual(parsed["hook_event_name"], "SessionEnd")
+        self.assertEqual(parsed["session_id"], "sess-9")
+        self.assertEqual(parsed["transcript_path"], "/tmp/runtime.db")
+        self.assertEqual(parsed["reason"], "reload")
+
     def test_startup_commands_run_in_parallel_and_keep_result_order(self) -> None:
         engine = HookEngine()
         first_hook = LoadedHook(
@@ -39,7 +80,7 @@ class HookEngineStartupTests(unittest.TestCase):
         )
         engine.loader.get_session_start_hooks = lambda: [first_hook, second_hook]
 
-        def fake_execute(command, _loaded_hook, *, source, deadline=None):
+        def fake_execute(command, _loaded_hook, *, source, deadline=None, hook_input=None):
             self.assertEqual(source, "startup")
             self.assertIsNotNone(deadline)
             time.sleep(0.25)

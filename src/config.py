@@ -160,6 +160,8 @@ class Config:
     memory_palace_enabled: bool = True
     # When enabled, inject project/team MEMORY.md files into agent system prompts.
     project_memory_enabled: bool = True
+    # Runtime turn/session hooks are primarily intended for the CLI bridge flow.
+    runtime_hooks_enabled: bool = False
     memory_palace_db_path: str = field(default_factory=lambda: str(memory_palace_db_path()))
     # Store raw text exactly as written; leave AAAK compression opt-in.
     memory_palace_apply_aaak: bool = False

@@ -10,6 +10,8 @@ import types
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence, get_args, get_origin
 
+from src.skills.skill_manifest import split_frontmatter
+
 from ...mcp.client import MCPClient, MCPToolDef
 from ...startup_profiler import profile_checkpoint
 from ..runtime import (
@@ -133,7 +135,9 @@ class RegistryLoadingMixin:
                 if key in seen:
                     continue
                 skill_root = self._infer_skill_root_from_module_path(module_path)
-                if skill_root is None or not self._should_eager_load_skill_module(module_path, skill_root):
+                if skill_root is None or not self._should_eager_load_skill_module(
+                    module_path, skill_root
+                ):
                     continue
                 seen.add(key)
                 total_registered += self._register_tools_from_python_module(module_path)
@@ -156,7 +160,8 @@ class RegistryLoadingMixin:
             {
                 "name": "invoke_skill",
                 "description": (
-                    "Load a specific skill's metadata and tooling, or optionally execute its primary tool directly. "
+                    "Load a specific skill's metadata and tooling. "
+                    "If args are provided, invoke_skill will immediately execute the best matching tool from that skill. "
                     "Use invoke_skill to force a skill into routing or to bootstrap a SKILL.md-backed skill when you know the skill name or tool name."
                 ),
                 "parameters": [
@@ -187,12 +192,12 @@ class RegistryLoadingMixin:
                 ],
                 "function": self._invoke_skill_tool,
                 "doc": (
-                    "**Description:** Load the selected skill's SKILL.md metadata and tooling, or execute its primary tool immediately if arguments are provided.\n\n"
+                    "**Description:** Load the selected skill's SKILL.md metadata and tooling. If arguments are provided, execute the best matching skill tool immediately.\n\n"
                     "**Parameters:**\n"
                     "- skill (string, required): Skill id, name, alias, tool name, or intent text.\n"
                     "- reason (string, optional): Why the skill is being forced.\n"
                     "- top_k (integer, optional): Number of matched skills to force.\n"
-                    "- args (string, optional): JSON string of arguments to execute the primary tool directly."
+                    "- args (string, optional): JSON string of arguments to execute a matching skill tool directly."
                 ),
             },
             {
@@ -359,6 +364,24 @@ class RegistryLoadingMixin:
         for source in self._catalog.iter_skills_sources():
             if self._catalog._skill_id_from_source(source) == skill_id_norm:
                 return self._catalog._skill_root_for_source(source)
+
+            if source.is_file() and source.name.upper() == "SKILL.MD":
+                root = self._catalog._skill_root_for_source(source)
+                if root is None:
+                    continue
+                if self._catalog._normalize_skill_slug(root.name) == skill_id_norm:
+                    return root
+                try:
+                    text = source.read_text(encoding="utf-8")
+                    manifest, _ = split_frontmatter(text)
+                    manifest_name = str(manifest.get("name") or "").strip()
+                    if (
+                        manifest_name
+                        and self._catalog._normalize_skill_slug(manifest_name) == skill_id_norm
+                    ):
+                        return root
+                except Exception:
+                    pass
         return None
 
     def _load_tool_modules_for_skill_id(self, skill_id: str) -> int:
@@ -695,6 +718,33 @@ class RegistryLoadingMixin:
                 entries.append((obj, meta))
                 seen.add(id(obj))
 
+            # Provider-only modules may expose a class with a `name` attribute
+            # and a `search(...)` method instead of a top-level tool function.
+            if not entries:
+                for name, obj in execution_globals.items():
+                    if name.startswith("_") or not inspect.isclass(obj):
+                        continue
+                    if getattr(obj, "__module__", None) != module_name:
+                        continue
+                    provider_name = str(getattr(obj, "name", "") or "").strip()
+                    if not provider_name:
+                        continue
+                    try:
+                        provider = obj()
+                    except Exception:
+                        continue
+                    search_fn = getattr(provider, "search", None)
+                    if not callable(search_fn):
+                        continue
+                    tool_name = f"{provider_name}_search"
+                    meta = {
+                        "name": tool_name,
+                        "description": self._python_tool_doc_summary(search_fn)
+                        or f"Search via the {provider_name} provider.",
+                    }
+                    entries.append((search_fn, meta))
+                    break
+
         return entries
 
     def _merge_python_module_globals(self, execution_globals: dict[str, Any]) -> None:
@@ -851,7 +901,9 @@ class RegistryLoadingMixin:
 
     def _skill_family_for_root(self, skill_root: Path) -> str:
         candidates: list[Path] = [self.skills_dir_path]
-        candidates.extend(root.path for root in getattr(self._catalog, "additional_skill_source_roots", []))
+        candidates.extend(
+            root.path for root in getattr(self._catalog, "additional_skill_source_roots", [])
+        )
         for base in candidates:
             try:
                 rel = skill_root.relative_to(base)
@@ -1208,8 +1260,16 @@ class RegistryLoadingMixin:
         if not isinstance(meta, dict):
             return ""
         name = str(meta.get("name") or "").strip()
-        preferred_tools = [str(item).strip() for item in list(meta.get("preferred_tools") or []) if str(item).strip()]
-        failure_recovery = [str(item).strip() for item in list(meta.get("failure_recovery") or []) if str(item).strip()]
+        preferred_tools = [
+            str(item).strip()
+            for item in list(meta.get("preferred_tools") or [])
+            if str(item).strip()
+        ]
+        failure_recovery = [
+            str(item).strip()
+            for item in list(meta.get("failure_recovery") or [])
+            if str(item).strip()
+        ]
 
         lines: list[str] = []
         if name:

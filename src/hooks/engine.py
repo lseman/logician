@@ -12,7 +12,6 @@ This module provides the HookEngine class that:
 from __future__ import annotations
 
 import concurrent.futures
-import json
 import os
 import subprocess
 import time
@@ -24,7 +23,9 @@ from .loader import HookLoader, LoadedHook
 from .types import (
     HookCommand,
     HookCommandType,
+    HookEventType,
     HookExecutionResult,
+    build_hook_input,
     parse_hook_response,
 )
 
@@ -76,11 +77,21 @@ class HookEngine:
         self.loader = loader or HookLoader()
 
     def execute_session_start_hooks(
-        self, source: str = "startup"
+        self, source: str = "startup", **payload: Any
     ) -> SessionStartResult:
         """Execute all SessionStart hooks and aggregate their results."""
         result = SessionStartResult()
-        hooks = self.loader.get_session_start_hooks()
+        hook_input = build_hook_input(
+            HookEventType.SESSION_START,
+            session_id=payload.get("session_id", "") or "",
+            transcript_path=payload.get("transcript_path", "") or "",
+            source=source,
+        )
+        try:
+            hooks = self.loader.get_session_start_hooks(source)
+        except TypeError:
+            # Tests may monkeypatch with a zero-arg lambda; fall back gracefully.
+            hooks = self.loader.get_session_start_hooks()
         result.hook_count = len(hooks)
         self._notify("discovered", source=source, hook_count=result.hook_count)
         deadline = None
@@ -91,7 +102,9 @@ class HookEngine:
                 self.startup_total_budget_seconds,
                 self._recommended_startup_budget_seconds(hooks),
             )
-            self._execute_startup_hooks_parallel(hooks, result, source, deadline)
+            self._execute_startup_hooks_parallel(
+                hooks, result, source, deadline, hook_input
+            )
             self._notify(
                 "completed",
                 source=source,
@@ -120,7 +133,9 @@ class HookEngine:
                     error="startup hook budget exhausted",
                 )
                 break
-            hook_result = self._execute_hook(loaded_hook, source, deadline=deadline)
+            hook_result = self._execute_hook(
+                loaded_hook, source, deadline=deadline, hook_input=hook_input
+            )
             if hook_result:
                 result.additional_contexts.extend(hook_result.additional_contexts)
                 if hook_result.initial_user_message and not result.initial_user_message:
@@ -144,12 +159,110 @@ class HookEngine:
         )
         return result
 
+    # ── Generic hook dispatch ───────────────────────────────────────────────
+
+    def execute_hooks(
+        self,
+        event_type: HookEventType,
+        *,
+        matcher_value: str | None = None,
+        session_id: str = "",
+        transcript_path: str = "",
+        cwd: str | None = None,
+        prompt: str | None = None,
+        tool_name: str | None = None,
+        tool_input: Any = None,
+        tool_response: Any = None,
+        stop_hook_active: bool | None = None,
+        reason: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> HookExecutionResult:
+        """Run all hooks for a non-SessionStart event and aggregate results.
+
+        `matcher_value` is used to filter hook definitions: e.g. the tool name
+        for PreToolUse/PostToolUse, or "*" when undefined. Hook stdin receives
+        the event-specific JSON payload.
+        """
+        aggregated = HookExecutionResult()
+        hook_input = build_hook_input(
+            event_type,
+            session_id=session_id,
+            transcript_path=transcript_path,
+            cwd=cwd,
+            source=matcher_value,
+            prompt=prompt,
+            tool_name=tool_name or matcher_value,
+            tool_input=tool_input,
+            tool_response=tool_response,
+            stop_hook_active=stop_hook_active,
+            reason=reason,
+        )
+        hooks = self.loader.get_hooks_for(event_type, matcher_value=matcher_value)
+        if not hooks:
+            return aggregated
+
+        effective_timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else float(self.timeout_seconds)
+        )
+        deadline = time.perf_counter() + max(0.0, effective_timeout)
+
+        for ordinal, loaded_hook in enumerate(hooks):
+            if time.perf_counter() >= deadline:
+                break
+            try:
+                hook_result = self._execute_hook(
+                    loaded_hook,
+                    event_type.value,
+                    deadline=deadline,
+                    hook_input=hook_input,
+                )
+            except _HookExecutionTimeout:
+                aggregated.raw_output = "timeout"
+                continue
+            except Exception:
+                continue
+            if hook_result:
+                aggregated.additional_contexts.extend(hook_result.additional_contexts)
+                if hook_result.initial_user_message and not aggregated.initial_user_message:
+                    aggregated.initial_user_message = hook_result.initial_user_message
+                aggregated.watch_paths.extend(hook_result.watch_paths)
+                if hook_result.raw_output:
+                    aggregated.raw_output = hook_result.raw_output
+                self._notify_result(
+                    event_type.value, ordinal, loaded_hook, hook_result
+                )
+
+        return aggregated
+
+    def execute_hooks_async(
+        self,
+        event_type: HookEventType,
+        **kwargs: Any,
+    ) -> None:
+        """Fire-and-forget variant of execute_hooks. Returns immediately.
+
+        Used for events whose output the agent does not consume
+        (PostToolUse observations, SessionEnd finalization, etc.).
+        """
+        import threading
+
+        def _run() -> None:
+            try:
+                self.execute_hooks(event_type, **kwargs)
+            except Exception:
+                return
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _execute_startup_hooks_parallel(
         self,
         hooks: list[LoadedHook],
         result: SessionStartResult,
         source: str,
         deadline: float | None,
+        hook_input: str,
     ) -> None:
         tasks: list[tuple[int, LoadedHook]] = list(enumerate(hooks))
 
@@ -166,6 +279,7 @@ class HookEngine:
                     loaded_hook,
                     source,
                     deadline,
+                    hook_input,
                 ): (ordinal, loaded_hook)
                 for ordinal, loaded_hook in tasks
             }
@@ -224,7 +338,11 @@ class HookEngine:
             result.watch_paths.extend(cmd_result.watch_paths)
 
     def _execute_hook(
-        self, loaded_hook: LoadedHook, source: str, deadline: float | None = None
+        self,
+        loaded_hook: LoadedHook,
+        source: str,
+        deadline: float | None = None,
+        hook_input: str | None = None,
     ) -> HookExecutionResult | None:
         """Execute a single loaded hook and return its result.
 
@@ -244,6 +362,7 @@ class HookEngine:
                     loaded_hook,
                     source=source,
                     deadline=deadline,
+                    hook_input=hook_input,
                 )
                 if cmd_result:
                     aggregated.additional_contexts.extend(cmd_result.additional_contexts)
@@ -276,6 +395,7 @@ class HookEngine:
         *,
         source: str,
         deadline: float | None = None,
+        hook_input: str | None = None,
     ) -> HookExecutionResult | None:
         """Execute a single hook command based on its type."""
         timeout_seconds = self._command_timeout_seconds(
@@ -291,6 +411,7 @@ class HookEngine:
                 loaded_hook,
                 source=source,
                 timeout_seconds=timeout_seconds,
+                hook_input=hook_input,
             )
         elif command.type == HookCommandType.PROMPT:
             return self._execute_prompt_hook(command.prompt)
@@ -307,6 +428,7 @@ class HookEngine:
         *,
         source: str,
         timeout_seconds: float | None = None,
+        hook_input: str | None = None,
     ) -> HookExecutionResult | None:
         """Execute a bash command hook."""
         if not cmd:
@@ -318,7 +440,8 @@ class HookEngine:
             # Build environment with CLAUDE_PLUGIN_ROOT set to plugin root
             env = os.environ.copy()
             env["CLAUDE_PLUGIN_ROOT"] = str(loaded_hook.plugin_dir)
-            hook_input = self._hook_input_json(source)
+            if hook_input is None:
+                hook_input = self._hook_input_json(source)
 
             result = subprocess.run(
                 cmd,
@@ -422,14 +545,8 @@ class HookEngine:
         return budget
 
     def _hook_input_json(self, source: str) -> str:
-        payload = {
-            "session_id": "",
-            "transcript_path": "",
-            "cwd": str(Path.cwd()),
-            "hook_event_name": "SessionStart",
-            "source": str(source or "").strip().lower() or "startup",
-        }
-        return json.dumps(payload)
+        """Legacy fallback: build a SessionStart payload with the given source."""
+        return build_hook_input(HookEventType.SESSION_START, source=source)
 
     def execute_hook_by_path(
         self, hook_path: Path, source: str = "startup"

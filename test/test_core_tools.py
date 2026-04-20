@@ -35,6 +35,7 @@ from src.tools.core import (
     run_python,
     run_rust,
     search_code,
+    search_file,
     send_input_to_process,
     set_venv,
     set_working_directory,
@@ -564,6 +565,17 @@ def test_rust_tools_are_registered_in_core_surface() -> None:
     assert "run_rust" in core_mod.CORE_TOOL_NAMES
 
 
+def test_core_surface_prefers_fd_rg_and_search_code_over_legacy_search_tools() -> None:
+    from src.tools import core as core_mod
+
+    assert "fd_find" in core_mod.CORE_TOOL_NAMES
+    assert "rg_search" in core_mod.CORE_TOOL_NAMES
+    assert "search_code" in core_mod.CORE_TOOL_NAMES
+    assert "glob_files" not in core_mod.CORE_TOOL_NAMES
+    assert "grep_files" not in core_mod.CORE_TOOL_NAMES
+    assert "search_file" not in core_mod.CORE_TOOL_NAMES
+
+
 def test_libcst_tools_only_surface_when_dependency_is_available() -> None:
     from src.tools import core as core_mod
 
@@ -710,6 +722,18 @@ def test_grep_files_can_include_hidden_files(tmp_path: Path) -> None:
 
     assert hidden_default["total_matches"] == 0
     assert hidden_included["total_matches"] == 1
+
+
+def test_search_file_uses_rg_search_compat_wrapper(tmp_path: Path) -> None:
+    path = tmp_path / "demo.py"
+    path.write_text("alpha\nbeta\nalpha\n", encoding="utf-8")
+
+    result = search_file(str(path), "alpha", literal=True, case_sensitive=True, context_lines=1)
+
+    assert result["status"] == "ok"
+    assert result["compatibility_alias"] == "rg_search"
+    assert result["total_matches"] == 2
+    assert result["matches"][0]["line_number"] == 1
 
 
 def test_search_code_literal_supports_multiline_matches(tmp_path: Path) -> None:

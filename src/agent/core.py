@@ -253,6 +253,7 @@ class Agent:
         profile_checkpoint("agent.init.memory_ready")
         self.current_session_id: str | None = None
         self._loaded_runtime_session_id: str | None = None
+        self._hook_engine_cache: Any | None = None
 
         self._agent_loop = self._build_agent_loop()
         profile_checkpoint("agent.init.complete")
@@ -337,6 +338,89 @@ class Agent:
                 reset()
             except Exception:
                 self._log.exception("Failed to reset tool context")
+
+    def _hook_engine(self) -> Any | None:
+        if not bool(getattr(self.config, "runtime_hooks_enabled", False)):
+            return None
+        engine = self._hook_engine_cache
+        if engine is None:
+            try:
+                from ..hooks import HookEngine
+
+                engine = HookEngine()
+            except Exception:
+                engine = None
+            self._hook_engine_cache = engine
+        return engine
+
+    def _hook_transcript_path(self) -> str:
+        path = str(getattr(self.memory, "db_path", "") or "").strip()
+        if not path:
+            return ""
+        try:
+            return str(Path(path).expanduser())
+        except Exception:
+            return path
+
+    def _execute_hooks(
+        self,
+        event_type_name: str,
+        *,
+        session_id: str | None = None,
+        timeout_seconds: float | None = None,
+        **payload: Any,
+    ) -> Any | None:
+        try:
+            from ..hooks import HookEventType
+        except Exception:
+            return None
+        engine = self._hook_engine()
+        if engine is None:
+            return None
+        try:
+            event_type = HookEventType(event_type_name)
+        except Exception:
+            return None
+        sid = session_id or self.current_session_id or ""
+        kwargs = dict(payload)
+        kwargs.setdefault("session_id", sid)
+        kwargs.setdefault("transcript_path", self._hook_transcript_path())
+        if timeout_seconds is not None:
+            kwargs["timeout_seconds"] = timeout_seconds
+        try:
+            return engine.execute_hooks(event_type, **kwargs)
+        except Exception:
+            return None
+
+    def _execute_hooks_async(
+        self,
+        event_type_name: str,
+        *,
+        session_id: str | None = None,
+        timeout_seconds: float | None = None,
+        **payload: Any,
+    ) -> None:
+        try:
+            from ..hooks import HookEventType
+        except Exception:
+            return
+        engine = self._hook_engine()
+        if engine is None:
+            return
+        try:
+            event_type = HookEventType(event_type_name)
+        except Exception:
+            return
+        sid = session_id or self.current_session_id or ""
+        kwargs = dict(payload)
+        kwargs.setdefault("session_id", sid)
+        kwargs.setdefault("transcript_path", self._hook_transcript_path())
+        if timeout_seconds is not None:
+            kwargs["timeout_seconds"] = timeout_seconds
+        try:
+            engine.execute_hooks_async(event_type, **kwargs)
+        except Exception:
+            return
 
     def _persist_runtime_state(self, session_id: str | None = None) -> None:
         sid = session_id or self.current_session_id
@@ -592,8 +676,11 @@ class Agent:
         session_id: str | None = None,
         *,
         clear_persisted: bool = True,
+        reason: str | None = None,
     ) -> Agent:
         sid = session_id or self.current_session_id
+        if reason and sid:
+            self.end_session(reason=reason, session_id=sid)
         if clear_persisted and sid:
             self._clear_persisted_runtime_state(sid)
         self._reset_context_state()
@@ -601,11 +688,35 @@ class Agent:
         self._loaded_runtime_session_id = None
         return self
 
-    def detach_runtime_state(self) -> Agent:
+    def detach_runtime_state(
+        self,
+        session_id: str | None = None,
+        *,
+        reason: str | None = None,
+    ) -> Agent:
+        sid = session_id or self.current_session_id
+        if reason and sid:
+            self.end_session(reason=reason, session_id=sid)
         self._reset_context_state()
         self.current_session_id = None
         self._loaded_runtime_session_id = None
         return self
+
+    def end_session(
+        self,
+        *,
+        reason: str = "other",
+        session_id: str | None = None,
+    ) -> None:
+        sid = session_id or self.current_session_id
+        if not sid:
+            return
+        self._execute_hooks_async(
+            "SessionEnd",
+            session_id=sid,
+            reason=reason,
+            timeout_seconds=10.0,
+        )
 
     def _runtime_context_snapshot(self) -> dict[str, Any]:
         row_count = len(self.ctx.data) if self.ctx.data is not None else 0
@@ -1307,7 +1418,23 @@ class Agent:
             self._load_runtime_state(sid)
         self._loaded_runtime_session_id = sid
 
-        messages = [Message(role=MessageRole.USER, content=message)]
+        hook_messages: list[Message] = []
+        user_prompt_hook = self._execute_hooks(
+            "UserPromptSubmit",
+            session_id=sid,
+            prompt=message,
+            timeout_seconds=30.0,
+        )
+        additional_contexts = list(getattr(user_prompt_hook, "additional_contexts", []) or [])
+        injected_context = "\n\n".join(str(item) for item in additional_contexts if str(item).strip())
+        if injected_context:
+            hook_messages.append(
+                Message(
+                    role=MessageRole.USER,
+                    content=f"[Hook context]\n{injected_context}",
+                )
+            )
+        messages = [*hook_messages, Message(role=MessageRole.USER, content=message)]
 
         # Keep the loop aligned with mutable Agent dependencies.
         self._agent_loop.llm = self.llm
@@ -1348,6 +1475,7 @@ class Agent:
                 token_callback=_emit_token if stream_callback is not None else None,
                 thinking_callback=_emit_thinking,
                 tool_callback=tool_callback,
+                post_tool_callback=self._post_tool_use_hook_callback(sid),
                 repair_callback=repair_callback,
             )
 
@@ -1361,6 +1489,12 @@ class Agent:
                 result = future.result()
 
         self._persist_runtime_state(sid)
+        self._execute_hooks_async(
+            "Stop",
+            session_id=sid,
+            stop_hook_active=False,
+            timeout_seconds=10.0,
+        )
 
         if stream_router is not None:
             stream_router.flush()
@@ -1405,6 +1539,26 @@ class Agent:
             trace_md="",
             thinking_log=result.thinking_log,
         )
+
+    def _post_tool_use_hook_callback(
+        self,
+        session_id: str,
+    ) -> Callable[[ToolCall, Any], None]:
+        def _callback(call: ToolCall, dispatch_result: Any) -> None:
+            tool_response = getattr(dispatch_result, "error", None)
+            if tool_response in (None, ""):
+                tool_response = getattr(dispatch_result, "output", "")
+            self._execute_hooks_async(
+                "PostToolUse",
+                session_id=session_id,
+                matcher_value=call.name,
+                tool_name=call.name,
+                tool_input=dict(call.arguments or {}),
+                tool_response=tool_response,
+                timeout_seconds=10.0,
+            )
+
+        return _callback
 
 
 __all__ = ["Agent"]

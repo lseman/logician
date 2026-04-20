@@ -35,8 +35,7 @@ class IdentityComponent:
                 return prompt
         if self._cached is None:
             candidates = [
-                Path(__file__).parent.parent.parent / "SOUL.md",  # repo root
-                Path.cwd() / "SOUL.md",
+                Path(__file__).parent.parent.parent / "SOUL.md",
             ]
             for p in candidates:
                 if p.exists():

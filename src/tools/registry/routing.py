@@ -278,6 +278,14 @@ class RegistryRoutingMixin:
                 *card.aliases,
                 *card.tool_names,
             ]
+            source_path = str(getattr(card, "source_path", "") or "").strip()
+            if source_path:
+                source_path_obj = Path(source_path)
+                names.append(source_path)
+                names.append(str(source_path_obj.parent))
+                for i in range(len(source_path_obj.parent.parts)):
+                    names.append(Path(*source_path_obj.parent.parts[i:]).as_posix())
+
             norm_names = {
                 self._normalize_skill_lookup(str(name or ""))
                 for name in names
@@ -418,6 +426,29 @@ class RegistryRoutingMixin:
                         return True
         return False
 
+    def _registered_tool_names_for_skill(self, skill_id: str) -> list[str]:
+        normalized = str(skill_id or "").strip()
+        if not normalized:
+            return []
+        return sorted(
+            tool.name
+            for tool in self._tools.values()
+            if str(getattr(tool, "skill_id", "") or "").strip() == normalized
+        )
+
+    @staticmethod
+    def _unique_tool_names(*groups: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for group in groups:
+            for tool_name in group:
+                name = str(tool_name or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                out.append(name)
+        return out
+
     def _select_tool_from_skill(self, skill: SkillCard, args: dict[str, Any] | None) -> str | None:
         if not skill.tool_names:
             return None
@@ -473,6 +504,7 @@ class RegistryRoutingMixin:
                 {"status": "error", "error": "Parameter 'skill' is required."},
                 ensure_ascii=False,
             )
+        q_norm = self._normalize_skill_lookup(q)
         k = max(1, min(3, int(top_k or 1)))
         matches = self._resolve_skill_candidates(q, top_k=k)
         if not matches:
@@ -500,44 +532,83 @@ class RegistryRoutingMixin:
         cwd = os.getcwd()
         if hasattr(self, "_catalog") and hasattr(self._catalog, "activate_conditional_skills"):
             try:
-                context_files = [
-                    str(p)
-                    for p in Path(cwd).rglob("*")
-                    if p.is_file()
-                ][:50]  # limit to avoid excessive calls
+                context_files = [str(p) for p in Path(cwd).rglob("*") if p.is_file()][
+                    :50
+                ]  # limit to avoid excessive calls
                 self._catalog.activate_conditional_skills(context_files, cwd)
             except Exception:
                 pass  # best-effort activation
-        if not target_skill.tool_names and hasattr(self, "_load_tool_modules_for_skill_id"):
-            self._load_tool_modules_for_skill_id(target_skill.id)
+
+        tool_names_before = set(self._tools)
+        if hasattr(self, "_load_tool_modules_for_skill_id"):
+            for card in matches:
+                self._load_tool_modules_for_skill_id(card.id)
             self._sync_catalog_with_registered_tools()
             target_skill = self._catalog.skills.get(target_skill.id, target_skill)
+            matches = [self._catalog.skills.get(card.id, card) for card in matches]
 
-        if target_skill.tool_names:
+        newly_available_tools = sorted(set(self._tools) - tool_names_before)
+        loaded_skill_details: list[dict[str, Any]] = []
+        available_tools_for_matches: list[str] = []
+        for card in matches:
+            available_tools = self._registered_tool_names_for_skill(card.id)
+            available_tools_for_matches = self._unique_tool_names(
+                available_tools_for_matches,
+                available_tools,
+            )
+            loaded_skill_details.append(
+                {
+                    "id": card.id,
+                    "name": card.name,
+                    "available_tools": available_tools,
+                    "newly_available_tools": [
+                        tool_name
+                        for tool_name in available_tools
+                        if tool_name in newly_available_tools
+                    ],
+                }
+            )
+
+        target_skill_tools = self._unique_tool_names(
+            list(target_skill.tool_names),
+            self._registered_tool_names_for_skill(target_skill.id),
+        )
+        if target_skill_tools and target_skill.tool_names != target_skill_tools:
+            target_skill.tool_names = list(target_skill_tools)
+
+        if args_str and target_skill.tool_names:
             selected_tool = target_skill.tool_names[0]
-            if args_str:
-                selected_tool = (
-                    self._select_tool_from_skill(target_skill, parsed_args) or selected_tool
-                )
+            selected_tool = self._select_tool_from_skill(target_skill, parsed_args) or selected_tool
 
-                # Drop hint arguments once they are used to choose the tool.
-                for hint_key in ("command", "operation", "action", "task"):
-                    if hint_key in parsed_args and isinstance(parsed_args[hint_key], str):
-                        hint_value = str(parsed_args[hint_key] or "").strip()
-                        if hint_value and self._normalize_skill_lookup(hint_value) in {
-                            self._normalize_skill_lookup(selected_tool),
-                            self._normalize_skill_lookup(selected_tool).split("_")[-1],
-                        }:
-                            parsed_args = {k: v for k, v in parsed_args.items() if k != hint_key}
-                            break
+            # Drop hint arguments once they are used to choose the tool.
+            for hint_key in ("command", "operation", "action", "task"):
+                if hint_key in parsed_args and isinstance(parsed_args[hint_key], str):
+                    hint_value = str(parsed_args[hint_key] or "").strip()
+                    if hint_value and self._normalize_skill_lookup(hint_value) in {
+                        self._normalize_skill_lookup(selected_tool),
+                        self._normalize_skill_lookup(selected_tool).split("_")[-1],
+                    }:
+                        parsed_args = {k: v for k, v in parsed_args.items() if k != hint_key}
+                        break
 
             try:
-                if parsed_args:
-                    execution_result = self.call_tool(selected_tool, **parsed_args)
-                else:
-                    execution_result = self.call_tool(selected_tool)
+                execution_result = self.call_tool(selected_tool, **parsed_args)
                 if not isinstance(execution_result, str):
                     execution_result = json.dumps(execution_result, ensure_ascii=False)
+                try:
+                    payload = json.loads(execution_result)
+                except Exception:
+                    return execution_result
+                if isinstance(payload, dict):
+                    payload.setdefault("loaded_skill_id", target_skill.id)
+                    payload.setdefault("loaded_skill_name", target_skill.name)
+                    payload.setdefault("loaded_skills", loaded_skill_details)
+                    payload.setdefault("available_tools", list(target_skill.tool_names))
+                    payload.setdefault("newly_available_tools", newly_available_tools)
+                    payload.setdefault("forced_skill_ids", self._forced_skill_ids)
+                    if self._forced_skill_reason:
+                        payload.setdefault("reason", self._forced_skill_reason)
+                    return json.dumps(payload, ensure_ascii=False)
                 return execution_result
             except Exception as e:
                 return json.dumps(
@@ -550,6 +621,92 @@ class RegistryRoutingMixin:
                 )
 
         if args_str:
+            # If the skill query itself names a registered tool, call that directly.
+            direct_tool = self.get(q)
+            if direct_tool is None:
+                for tool_name in self._tools:
+                    normalized_tool = self._normalize_skill_lookup(tool_name)
+                    if normalized_tool == q_norm:
+                        direct_tool = self.get(tool_name)
+                        q = tool_name
+                        break
+                if direct_tool is None:
+                    for tool_name in self._tools:
+                        normalized_tool = self._normalize_skill_lookup(tool_name)
+                        if q_norm in normalized_tool or normalized_tool in q_norm:
+                            direct_tool = self.get(tool_name)
+                            q = tool_name
+                            break
+            if direct_tool is not None:
+                try:
+                    execution_result = self.call_tool(q, **parsed_args)
+                    if not isinstance(execution_result, str):
+                        execution_result = json.dumps(execution_result, ensure_ascii=False)
+                    return execution_result
+                except Exception as e:
+                    return json.dumps(
+                        {
+                            "status": "error",
+                            "error": f"Execution of {q} failed: {e}",
+                            "forced_skill_ids": self._forced_skill_ids,
+                        },
+                        ensure_ascii=False,
+                    )
+
+            # If we have a preferred or available tool name, load it and return an explicit instruction.
+            tool_instruction_name = None
+            if target_skill.tool_names:
+                tool_instruction_name = target_skill.tool_names[0]
+            elif getattr(target_skill, "preferred_tools", None):
+                tool_instruction_name = target_skill.preferred_tools[0]
+
+            if tool_instruction_name is not None:
+                if (
+                    hasattr(self, "_load_tool_modules_for_skill_id")
+                    and self.get(tool_instruction_name) is None
+                ):
+                    self._load_tool_modules_for_skill_id(target_skill.id)
+                    self._sync_catalog_with_registered_tools()
+                    target_skill = self._catalog.skills.get(target_skill.id, target_skill)
+
+                tool_available = self.get(tool_instruction_name) is not None
+                if tool_available and parsed_args:
+                    try:
+                        execution_result = self.call_tool(tool_instruction_name, **parsed_args)
+                        if not isinstance(execution_result, str):
+                            execution_result = json.dumps(execution_result, ensure_ascii=False)
+                        return execution_result
+                    except Exception as e:
+                        return json.dumps(
+                            {
+                                "status": "error",
+                                "error": f"Execution of {tool_instruction_name} failed: {e}",
+                                "forced_skill_ids": self._forced_skill_ids,
+                            },
+                            ensure_ascii=False,
+                        )
+
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "tool": tool_instruction_name,
+                        "arguments": parsed_args or {},
+                        "tool_available": tool_available,
+                        "available_tools": self._registered_tool_names_for_skill(target_skill.id),
+                        "newly_available_tools": [
+                            tool_name
+                            for tool_name in self._registered_tool_names_for_skill(target_skill.id)
+                            if tool_name in newly_available_tools
+                        ],
+                        "forced_skill_ids": self._forced_skill_ids,
+                        "reason": self._forced_skill_reason,
+                        "message": (
+                            f"Invoke the tool '{tool_instruction_name}' with the provided arguments."
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+
             # SkillDefinition has render_prompt() directly — no need to load separately
             try:
                 skill_for_prompt = target_skill
@@ -562,7 +719,9 @@ class RegistryRoutingMixin:
                 rendered_prompt = skill_for_prompt.render_prompt(parsed_args or {})
                 rendered_prompt = execute_embedded_shell_commands(
                     rendered_prompt,
-                    base_dir=str(getattr(skill_for_prompt, "base_dir", "") or Path(source_path).parent),
+                    base_dir=str(
+                        getattr(skill_for_prompt, "base_dir", "") or Path(source_path).parent
+                    ),
                     allow_shell=True,
                 )
                 return json.dumps(
@@ -596,7 +755,15 @@ class RegistryRoutingMixin:
                 "status": "ok",
                 "forced_skill_ids": self._forced_skill_ids,
                 "reason": self._forced_skill_reason,
-                "message": ("Forced skill(s) will be injected into the next routing pass."),
+                "loaded_skill_id": target_skill.id,
+                "loaded_skill_name": target_skill.name,
+                "tool": target_skill.tool_names[0] if target_skill.tool_names else None,
+                "available_tools": list(target_skill.tool_names),
+                "newly_available_tools": newly_available_tools,
+                "loaded_skills": loaded_skill_details,
+                "message": (
+                    "Skill loaded. The listed tools are now available for the next routing pass."
+                ),
                 "matches": [
                     {
                         "id": card.id,

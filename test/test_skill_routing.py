@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 try:
-    from src.tools import Context, ToolCall, ToolRegistry
+    from src.tools import Context, SkillCard, ToolCall, ToolRegistry
     from src.tools.registry.catalog import SkillCatalog
 except ModuleNotFoundError:
     src_dir = Path(__file__).resolve().parents[1] / "src"
@@ -36,7 +36,7 @@ except ModuleNotFoundError:
     sys.modules["src.tools"] = tools_module
     tools_spec.loader.exec_module(tools_module)
 
-    from src.tools import Context, ToolCall, ToolRegistry
+    from src.tools import Context, SkillCard, ToolCall, ToolRegistry
     from src.tools.registry.catalog import SkillCatalog
 
 
@@ -83,7 +83,7 @@ Generate options first.
             )
             catalog.ensure_skill_catalog()
 
-            self.assertIn("sp__brainstorming", catalog.skills)
+            self.assertIn("brainstorming", catalog.skills)
 
     def test_unreadable_markdown_source_does_not_abort_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -112,7 +112,52 @@ Generate options first.
             )
             catalog.ensure_skill_catalog()
 
-            self.assertIn("sp__brainstorming", catalog.skills)
+            self.assertIn("brainstorming", catalog.skills)
+
+    def test_cached_skill_ids_with_legacy_sp_prefix_are_normalized(self) -> None:
+        prev_state_dir = os.environ.get("LOGICIAN_STATE_DIR")
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                os.environ["LOGICIAN_STATE_DIR"] = tmpdir
+                root = Path(tmpdir) / "skills"
+                skill_dir = root / "llm-wiki"
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(
+                    "---\nname: llm-wiki\ndescription: Legacy cached llm wiki skill.\n---\n",
+                    encoding="utf-8",
+                )
+
+                catalog = SkillCatalog(
+                    skills_md_path=root,
+                    skills_dir_path=root,
+                    log=logging.getLogger("test.skill_routing"),
+                )
+                sources = catalog.iter_skills_sources()
+                fingerprint = catalog._catalog_fingerprint(sources)
+                cache_file = catalog._cache_path()
+                card = SkillCard(
+                    id="sp__llm_wiki",
+                    name="llm-wiki",
+                    summary="Legacy cached llm wiki skill.",
+                    source_path=str(skill_dir / "SKILL.md"),
+                )
+                payload = {
+                    "fingerprint": fingerprint,
+                    "skills": {"sp__llm_wiki": asdict(card)},
+                    "routing_profiles": {},
+                    "routing_tokens": {},
+                }
+                cache_file.write_text(json.dumps(payload), encoding="utf-8")
+
+                loaded = catalog._load_from_cache(fingerprint)
+                self.assertTrue(loaded)
+                self.assertIn("llm_wiki", catalog.skills)
+                self.assertNotIn("sp__llm_wiki", catalog.skills)
+        finally:
+            if prev_state_dir is None:
+                os.environ.pop("LOGICIAN_STATE_DIR", None)
+            else:
+                os.environ["LOGICIAN_STATE_DIR"] = prev_state_dir
 
     def test_reference_markdown_stays_lazy_until_skill_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -153,7 +198,7 @@ Use blue-sky ideation to explore novel concepts and divergent options.""",
             )
 
             self.assertTrue(selection.selected_skills)
-            self.assertEqual(selection.selected_skills[0].id, "sp__design_discovery")
+            self.assertEqual(selection.selected_skills[0].id, "design_discovery")
             self.assertIn("ideation-glossary.md", prompt)
             self.assertIn("Blue Sky Ideation", prompt)
 
@@ -189,7 +234,7 @@ Ask clarifying questions, then propose design options.
             )
 
             self.assertTrue(selection.selected_skills)
-            self.assertEqual(selection.selected_skills[0].id, "sp__brainstorming")
+            self.assertEqual(selection.selected_skills[0].id, "brainstorming")
 
     def test_invoke_skill_forces_next_routing_pass(self) -> None:
         registry = _registry()
@@ -205,14 +250,14 @@ Ask clarifying questions, then propose design options.
         )
         payload = json.loads(invoke_result)
         self.assertEqual(payload.get("status"), "ok")
-        self.assertIn("sp__brainstorming", payload.get("forced_skill_ids", []))
+        self.assertIn("brainstorming", payload.get("forced_skill_ids", []))
 
         selection = registry.route_query_to_skills(
             "continue",
             top_k=1,
         )
         self.assertTrue(selection.selected_skills)
-        self.assertEqual(selection.selected_skills[0].id, "sp__brainstorming")
+        self.assertEqual(selection.selected_skills[0].id, "brainstorming")
 
     def test_non_skill_reference_markdown_not_promoted_to_skill_card(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -245,7 +290,7 @@ Walk backwards from the failure site until you find the first bad input.""",
             )
             catalog.ensure_skill_catalog()
 
-            self.assertEqual(set(catalog.skills.keys()), {"sp__debugging"})
+            self.assertEqual(set(catalog.skills.keys()), {"debugging"})
 
     def test_catalog_startup_scans_entrypoints_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -347,7 +392,7 @@ __tools__ = [demo_lookup]
                 skills = {skill.id: skill for skill in registry.list_skills()}
 
                 self.assertIn("rag", skills)
-                self.assertNotIn("sp__rag", skills)
+                self.assertNotIn("rag", skills)
                 self.assertEqual(skills["rag"].name, "RAG")
                 self.assertIn("demo_lookup", skills["rag"].tool_names)
                 tool = registry.get("demo_lookup")
@@ -403,7 +448,7 @@ Walk backward from the symptom through each caller until the first invalid value
             )
 
             self.assertTrue(selection.selected_skills)
-            self.assertEqual(selection.selected_skills[0].id, "sp__systematic_debugging")
+            self.assertEqual(selection.selected_skills[0].id, "systematic_debugging")
             self.assertIn("ON-DEMAND SKILL CONTEXT:", prompt)
             self.assertIn("root-cause-tracing.md", prompt)
             self.assertIn("Walk backward from the symptom", prompt)
@@ -543,7 +588,7 @@ Avoid when: the task is already straightforward.
             )
 
             self.assertTrue(selection.selected_skills)
-            self.assertEqual(selection.selected_skills[0].id, "sp__strategic_thinking")
+            self.assertEqual(selection.selected_skills[0].id, "strategic_thinking")
 
     def test_usage_and_recency_bias_contribute_to_ranking(self) -> None:
         registry = _registry()
@@ -566,9 +611,7 @@ Avoid when: the task is already straightforward.
     def test_routing_weights_can_be_overridden_via_env(self) -> None:
         prev = os.environ.get("AGENT_SKILL_ROUTING_WEIGHTS")
         try:
-            os.environ["AGENT_SKILL_ROUTING_WEIGHTS"] = json.dumps(
-                {"bm25": 0.5, "dense": 0.0}
-            )
+            os.environ["AGENT_SKILL_ROUTING_WEIGHTS"] = json.dumps({"bm25": 0.5, "dense": 0.0})
             with tempfile.TemporaryDirectory() as tmpdir:
                 root = Path(tmpdir)
                 catalog = SkillCatalog(
@@ -595,7 +638,7 @@ Avoid when: the task is already straightforward.
         self.assertTrue(selected_ids, "Expected at least one skill to be selected")
         # think or orchestrator must appear — both are valid for deliberate reasoning queries
         self.assertTrue(
-            any(sid in selected_ids for sid in ("think", "orchestrator", "sp__think")),
+            any(sid in selected_ids for sid in ("think", "orchestrator", "think")),
             f"Expected think or orchestrator in {selected_ids}",
         )
 
@@ -643,7 +686,7 @@ Avoid when: the task is already straightforward.
         selected_ids = [s.id for s in selection.selected_skills]
         self.assertTrue(selected_ids, "Expected at least one skill to be selected")
         self.assertTrue(
-            any(sid in selected_ids for sid in ("orchestrator", "sp__orchestrator")),
+            any(sid in selected_ids for sid in ("orchestrator", "orchestrator")),
             f"Expected orchestrator in {selected_ids}",
         )
 
@@ -657,7 +700,7 @@ Avoid when: the task is already straightforward.
         selected_ids = [s.id for s in selection.selected_skills]
         self.assertTrue(selected_ids, "Expected at least one skill to be selected")
         self.assertTrue(
-            any(sid in selected_ids for sid in ("memory_management", "sp__memory_management")),
+            any(sid in selected_ids for sid in ("memory_management", "memory_management")),
             f"Expected memory_management in {selected_ids}",
         )
 

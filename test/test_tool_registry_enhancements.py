@@ -940,7 +940,7 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["path"], "default")
 
-    def test_invoke_skill_executes_skill_tool_directly_when_available(self) -> None:
+    def test_invoke_skill_loads_skill_tools_without_executing_them(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             skill_dir = root / "wiki" / "wiki_ops"
@@ -968,7 +968,11 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
             )
             payload = json.loads(result)
             self.assertEqual(payload["status"], "ok")
-            self.assertEqual(payload["value"], "done")
+            self.assertEqual(payload["loaded_skill_id"], "wiki_ops")
+            self.assertEqual(payload["tool"], "wiki_list")
+            self.assertEqual(payload["available_tools"], ["wiki_list"])
+            self.assertEqual(payload["newly_available_tools"], ["wiki_list"])
+            self.assertIsNotNone(registry.get("wiki_list"))
 
     def test_invoke_skill_renders_skill_prompt_with_embedded_shell_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1025,7 +1029,190 @@ def wiki_list_raw(raw_dir: str | None = None) -> dict:
             )
             payload = json.loads(result)
             self.assertEqual(payload["status"], "ok")
-            self.assertEqual(payload["value"], "done")
+            self.assertEqual(payload["loaded_skill_id"], "wiki_skills")
+            self.assertEqual(payload["tool"], "wiki_list")
+            self.assertEqual(payload["available_tools"], ["wiki_list"])
+            self.assertIsNotNone(registry.get("wiki_list"))
+
+    def test_invoke_skill_accepts_skill_path_for_lazy_skill_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "academic" / "arxiv"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: arXiv\ndescription: arXiv search skill.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "arxiv_search.py"
+            module_path.write_text(
+                "def arxiv_search():\n    return {'status': 'ok', 'source': 'arxiv'}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="academic/arxiv",
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["loaded_skill_id"], "arxiv")
+            self.assertEqual(payload["tool"], "arxiv_search")
+            self.assertEqual(payload["available_tools"], ["arxiv_search"])
+            self.assertIsNotNone(registry.get("arxiv_search"))
+
+    def test_invoke_skill_loads_tool_without_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "academic" / "arxiv"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: arXiv\ndescription: arXiv search skill.\npreferred_tools:\n  - arxiv_search\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "arxiv.py"
+            module_path.write_text(
+                "from typing import Any\n\n"
+                "def arxiv_search(query: str) -> dict[str, Any]:\n"
+                "    return {'status': 'ok', 'source': 'arxiv', 'query': query}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool("invoke_skill", skill="academic/arxiv")
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["tool"], "arxiv_search")
+            self.assertEqual(payload["available_tools"], ["arxiv_search"])
+            self.assertEqual(payload["newly_available_tools"], ["arxiv_search"])
+            self.assertIsNotNone(registry.get("arxiv_search"))
+
+            result2 = registry.call_tool("arxiv_search", query="time series")
+            payload2 = json.loads(result2)
+            self.assertEqual(payload2["status"], "ok")
+            self.assertEqual(payload2["source"], "arxiv")
+            self.assertEqual(payload2["query"], "time series")
+
+    def test_invoke_skill_path_with_args_executes_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "academic" / "arxiv"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: arXiv\ndescription: arXiv search skill.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "arxiv_search.py"
+            module_path.write_text(
+                "def arxiv_search(query: str):\n    return {'status': 'ok', 'source': 'arxiv', 'query': query}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="academic/arxiv",
+                args='{"query": "time series forecasting"}',
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["source"], "arxiv")
+            self.assertEqual(payload["query"], "time series forecasting")
+            self.assertEqual(payload["loaded_skill_id"], "arxiv")
+            self.assertEqual(payload["available_tools"], ["arxiv_search"])
+
+    def test_invoke_skill_loads_class_based_provider_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "academic" / "arxiv"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: arXiv\ndescription: arXiv provider skill.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            module_path = scripts_dir / "arxiv.py"
+            module_path.write_text(
+                "class ArxivSource:\n"
+                "    name = 'arxiv'\n"
+                "\n"
+                "    def search(self, query: str):\n"
+                "        return {'status': 'ok', 'source': 'arxiv', 'query': query}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool(
+                "invoke_skill",
+                skill="academic/arxiv",
+                args='{"query": "timeseries forecasting"}',
+            )
+            payload = json.loads(result)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["source"], "arxiv")
+            self.assertEqual(payload["query"], "timeseries forecasting")
+            self.assertEqual(payload["loaded_skill_id"], "arxiv")
+            self.assertEqual(payload["available_tools"], ["arxiv_search"])
+
+    def test_invoke_skill_loads_all_tools_from_scripts_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            skill_dir = root / "wiki" / "wiki_ops"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: wiki ops\ndescription: Wiki operations skill.\n---\n",
+                encoding="utf-8",
+            )
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            (scripts_dir / "wiki_ops.py").write_text(
+                "def wiki_list():\n    return {'status': 'ok', 'tool': 'wiki_list'}\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "wiki_admin.py").write_text(
+                "def wiki_reindex():\n    return {'status': 'ok', 'tool': 'wiki_reindex'}\n",
+                encoding="utf-8",
+            )
+
+            registry = ToolRegistry(auto_load_from_skills=False)
+            registry.skills_dir_path = root
+            registry.skills_md_path = root / "SKILLS.md"
+            registry.install_context(Context())
+
+            result = registry.call_tool("invoke_skill", skill="wiki_ops")
+            payload = json.loads(result)
+
+            self.assertEqual(payload["status"], "ok")
+            self.assertCountEqual(payload["available_tools"], ["wiki_list", "wiki_reindex"])
+            self.assertCountEqual(
+                payload["newly_available_tools"],
+                ["wiki_list", "wiki_reindex"],
+            )
+            self.assertIsNotNone(registry.get("wiki_list"))
+            self.assertIsNotNone(registry.get("wiki_reindex"))
 
     def test_direct_tool_name_lazy_loads_skill_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

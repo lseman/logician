@@ -120,6 +120,15 @@ pub struct LiveStepSummary {
     pub state: ProgressState,
 }
 
+#[derive(Debug, Clone)]
+struct PluginListItem {
+    plugin_id: String,
+    enabled: bool,
+    version: String,
+    scope: String,
+    install_path: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityState {
     Running,
@@ -1562,6 +1571,10 @@ pub struct App {
     changed_files: Vec<ChangedFile>,
     current_change_idx: usize,
     focused_panel: PanelFocus,
+    plugin_list_items: Vec<PluginListItem>,
+    plugin_list_selected: usize,
+    plugin_list_message_idx: Option<usize>,
+    suppress_slash_result_message: bool,
     todo_scroll: u16,
     tool_output_scroll: u16,
     context_scroll: u16,
@@ -1640,6 +1653,10 @@ impl App {
             todo_on: false,
             active_skill_ids: Vec::new(),
             active_selected_tools: Vec::new(),
+            plugin_list_items: Vec::new(),
+            plugin_list_selected: 0,
+            plugin_list_message_idx: None,
+            suppress_slash_result_message: false,
             tool_output_buffer: Vec::new(),
             changed_files: Vec::new(),
             current_change_idx: 0,
@@ -1926,7 +1943,11 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         }
     }
 
-    fn append_memory_summary_section(text: &mut String, v: &Value, include_empty_memory_notice: bool) {
+    fn append_memory_summary_section(
+        text: &mut String,
+        v: &Value,
+        include_empty_memory_notice: bool,
+    ) {
         if let Some(mem) = v.get("memory_summary") {
             let memory_enabled = mem
                 .get("enabled")
@@ -1959,9 +1980,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                                     if let Some(s) = entry.as_str() {
                                         if s.trim().starts_with('|') {
                                             text.push_str("\n");
-                                            text.push_str(
-                                                &Self::normalize_memory_table_entry(s.trim()),
-                                            );
+                                            text.push_str(&Self::normalize_memory_table_entry(
+                                                s.trim(),
+                                            ));
                                         } else {
                                             let display = Self::format_memory_entry(s);
                                             text.push_str(&format!("\n- {display}"));
@@ -2015,19 +2036,247 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
     fn normalize_memory_table_entry(entry: &str) -> String {
         entry
-            .replace('–', "-")
-            .replace('—', "-")
-            .replace('―', "-")
-            .replace('‑', "-")
+            .trim()
+            .trim_start_matches('|')
+            .trim_end_matches('|')
+            .split('|')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ")
     }
 
     // ── Message helpers ───────────────────────────────────────────────────────
 
     pub fn add_message(&mut self, role: Role, text: impl Into<String>) {
         self.push_message(Message::new(role, text));
+        let plugin_list_added = self.try_activate_plugin_list();
+        if plugin_list_added {
+            self.push_message(Message::new(
+                Role::System,
+                "Plugin list active: use Up/Down to navigate and Space to toggle enable/disable.",
+            ));
+        }
         if self.at_bottom {
             self.scroll_to_bottom();
         }
+    }
+
+    fn try_activate_plugin_list(&mut self) -> bool {
+        if let Some(last_idx) = self.messages.len().checked_sub(1) {
+            let text = &self.messages[last_idx].text;
+            if let Some(items) = Self::parse_plugin_list_text(text) {
+                self.plugin_list_items = items;
+                self.plugin_list_selected = 0;
+                self.plugin_list_message_idx = Some(last_idx);
+                self.focused_panel = PanelFocus::Messages;
+                self.update_plugin_list_message();
+                return true;
+            }
+        }
+        self.clear_plugin_list();
+        false
+    }
+
+    fn clear_plugin_list(&mut self) {
+        if self.plugin_list_message_idx.take().is_some() {
+            self.plugin_list_items.clear();
+            self.plugin_list_selected = 0;
+            let _ = self.update_plugin_list_message();
+        }
+    }
+
+    fn plugin_list_active(&self) -> bool {
+        !self.plugin_list_items.is_empty() && self.plugin_list_message_idx.is_some()
+    }
+
+    fn parse_plugin_list_text(text: &str) -> Option<Vec<PluginListItem>> {
+        let mut lines = text.lines();
+        let mut items = Vec::new();
+        let mut saw_header = false;
+        while let Some(line) = lines.next() {
+            let trimmed = line.trim();
+            let trimmed = trimmed
+                .trim_start_matches(|c: char| c == '|' || c == '│' || c == '>' || c.is_whitespace())
+                .trim();
+            if !saw_header {
+                let normalized = trimmed
+                    .strip_prefix('#')
+                    .map(str::trim)
+                    .unwrap_or(trimmed)
+                    .to_lowercase();
+                if normalized == "installed plugins" {
+                    saw_header = true;
+                }
+                continue;
+            }
+            if trimmed.is_empty() {
+                continue;
+            }
+            let item_text = if let Some(rest) = trimmed.strip_prefix('-') {
+                rest.trim_start()
+            } else if let Some(rest) = trimmed.strip_prefix('•') {
+                rest.trim_start()
+            } else if let Some(rest) = trimmed.strip_prefix('*') {
+                rest.trim_start()
+            } else if let Some(rest) = trimmed.strip_prefix('+') {
+                rest.trim_start()
+            } else {
+                continue;
+            };
+            let mut rest = item_text;
+            let path_part = if let Some(path_idx) = rest.find(" path=") {
+                let tail = rest[path_idx + 6..].trim();
+                rest = rest[..path_idx].trim();
+                tail.to_string()
+            } else {
+                continue;
+            };
+            let scope_part = if let Some(scope_idx) = rest.rfind(" scope=") {
+                let tail = rest[scope_idx + 7..].trim();
+                rest = rest[..scope_idx].trim();
+                tail.to_string()
+            } else {
+                continue;
+            };
+            let status_start = match rest.rfind('[') {
+                Some(idx) => idx,
+                None => continue,
+            };
+            let status_end = match rest.rfind(']') {
+                Some(idx) => idx,
+                None => continue,
+            };
+            if status_end <= status_start {
+                continue;
+            }
+            let status = rest[status_start + 1..status_end].trim();
+            rest = rest[..status_start].trim();
+            let enabled = matches!(status, "enabled" | "true");
+            let (plugin_id, version) = match rest.rfind(" v") {
+                Some(version_idx) => {
+                    let id_part = rest[..version_idx].trim();
+                    let clean_id = id_part
+                        .strip_prefix("**")
+                        .and_then(|s| s.strip_suffix("**"))
+                        .unwrap_or(id_part)
+                        .trim()
+                        .to_string();
+                    (clean_id, rest[version_idx + 2..].trim().to_string())
+                }
+                None => (rest.to_string(), String::new()),
+            };
+            items.push(PluginListItem {
+                plugin_id,
+                enabled,
+                version,
+                scope: scope_part,
+                install_path: path_part,
+            });
+        }
+        if items.is_empty() {
+            None
+        } else {
+            Some(items)
+        }
+    }
+
+    fn update_plugin_list_message(&mut self) -> bool {
+        if let Some(message_idx) = self.plugin_list_message_idx {
+            if message_idx >= self.messages.len() {
+                return false;
+            }
+            let text_lines = self
+                .plugin_list_items
+                .iter()
+                .enumerate()
+                .map(|(_, item)| {
+                    let checked = if item.enabled { "[x]" } else { "[ ]" };
+                    let status = if item.enabled { "enabled" } else { "disabled" };
+                    format!(
+                        "- {checked} {plugin_id} v{version} [{status}] [scope={scope}] path={path}",
+                        checked = checked,
+                        plugin_id = item.plugin_id,
+                        version = item.version,
+                        status = status,
+                        scope = item.scope,
+                        path = item.install_path,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let text = format!("# Installed plugins\n\n{}", text_lines.join("\n"));
+
+            let body = self
+                .plugin_list_items
+                .iter()
+                .enumerate()
+                .map(|(idx, item)| {
+                    let selected = idx == self.plugin_list_selected;
+                    let line_style = if selected {
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Gray)
+                    };
+                    let status = if item.enabled { "enabled" } else { "disabled" };
+                    let status_style = if item.enabled {
+                        Style::default().fg(Color::LightGreen)
+                    } else {
+                        Style::default().fg(Color::LightRed)
+                    };
+                    Line::from(vec![
+                        Span::styled("- ", line_style),
+                        Span::styled(if item.enabled { "[x] " } else { "[ ] " }, line_style),
+                        Span::styled(item.plugin_id.clone(), line_style),
+                        Span::styled(format!(" v{} ", item.version), line_style),
+                        Span::styled("[", line_style),
+                        Span::styled(status, status_style),
+                        Span::styled("] [scope=", line_style),
+                        Span::styled(item.scope.clone(), line_style),
+                        Span::styled("] path=", line_style),
+                        Span::styled(item.install_path.clone(), line_style),
+                    ])
+                })
+                .collect::<Vec<_>>();
+
+            self.messages[message_idx] = Message::new_pre_rendered(Role::System, text, body);
+            self.rebuild_cached_transcript();
+            return true;
+        }
+        false
+    }
+
+    fn move_plugin_list_selection(&mut self, delta: isize) {
+        if self.plugin_list_items.is_empty() {
+            return;
+        }
+        let len = self.plugin_list_items.len() as isize;
+        let next = self.plugin_list_selected as isize + delta;
+        self.plugin_list_selected = if next < 0 {
+            0
+        } else if next >= len {
+            (len - 1) as usize
+        } else {
+            next as usize
+        };
+        self.update_plugin_list_message();
+    }
+
+    fn toggle_plugin_list_selected(&mut self) -> Option<KeyAction> {
+        if let Some(item) = self.plugin_list_items.get_mut(self.plugin_list_selected) {
+            let action = if item.enabled { "disable" } else { "enable" };
+            let plugin_id = item.plugin_id.clone();
+            item.enabled = !item.enabled;
+            self.update_plugin_list_message();
+            self.suppress_slash_result_message = true;
+            return Some(KeyAction::Submit(format!(
+                "/plugins {action} {plugin_id}",
+                action = action,
+                plugin_id = plugin_id,
+            )));
+        }
+        None
     }
 
     pub fn add_rendered_message(
@@ -2037,13 +2286,28 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         body: Vec<Line<'static>>,
     ) {
         self.push_message(Message::new_pre_rendered(role, text, body));
+        if self.try_activate_plugin_list() {
+            if self.at_bottom {
+                self.scroll_to_bottom();
+            }
+            return;
+        }
         if self.at_bottom {
             self.scroll_to_bottom();
         }
     }
 
     pub fn add_system_message(&mut self, text: impl Into<String>) {
-        self.add_message(Role::System, text);
+        self.push_message(Message::new(Role::System, text));
+        if self.try_activate_plugin_list() {
+            if self.at_bottom {
+                self.scroll_to_bottom();
+            }
+            return;
+        }
+        if self.at_bottom {
+            self.scroll_to_bottom();
+        }
     }
 
     pub fn add_preformatted_system_message(&mut self, text: impl Into<String>) {
@@ -3081,6 +3345,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
         self.total_tool_errors = 0;
         self.active_skill_ids.clear();
         self.active_selected_tools.clear();
+        self.plugin_list_items.clear();
+        self.plugin_list_selected = 0;
+        self.plugin_list_message_idx = None;
         self.tool_output_buffer.clear();
         self.changed_files.clear();
         self.current_change_idx = 0;
@@ -3149,6 +3416,18 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                 .iter()
                 .map(|item| item.token_count)
                 .sum::<u64>()
+    }
+
+    pub fn context_token_estimate_label(&self) -> String {
+        format_compact_count(self.context_token_estimate_total())
+    }
+
+    pub fn context_size_label(&self) -> String {
+        if self.bridge_state.context_size > 0 {
+            self.bridge_state.context_size.to_string()
+        } else {
+            self.context_token_estimate_label()
+        }
     }
 
     pub fn has_panel_content(&self) -> bool {
@@ -4000,7 +4279,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                                 "loading startup hooks".into()
                             };
                             self.busy = true;
-                        } else if state == "complete" && self.phase_note.starts_with("loading startup hooks") {
+                        } else if state == "complete"
+                            && self.phase_note.starts_with("loading startup hooks")
+                        {
                             self.phase = Phase::Ready;
                             self.phase_note = "ready".into();
                             self.busy = false;
@@ -4136,23 +4417,67 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
     pub fn handle_slash_result(&mut self, result: Result<Value, anyhow::Error>) {
         match result {
             Ok(v) => {
+                let mut suppressed_all = self.suppress_slash_result_message;
+                let mut text = String::new();
                 if let Some(msgs) = v["messages"].as_array() {
-                    let text = msgs
+                    text = msgs
                         .iter()
                         .filter_map(|m| m.as_str())
+                        .filter(|text| {
+                            if !self.suppress_slash_result_message {
+                                return true;
+                            }
+                            let lower = text.to_lowercase();
+                            if lower.contains("has been enabled")
+                                || lower.contains("has been disabled")
+                                || lower.starts_with("plugin")
+                                    && (lower.contains("enabled") || lower.contains("disabled"))
+                            {
+                                return false;
+                            }
+                            true
+                        })
                         .collect::<Vec<_>>()
                         .join("\n");
                     if !text.trim().is_empty() {
+                        suppressed_all = false;
                         if Self::should_render_slash_result_preformatted(&text) {
-                            self.add_preformatted_system_message(text);
+                            self.add_preformatted_system_message(text.clone());
                         } else {
-                            self.add_system_message(text);
+                            self.add_system_message(text.clone());
                         }
                     }
+                }
+                self.suppress_slash_result_message = false;
+                if suppressed_all {
+                    // keep plugin list active when no visible slash feedback was shown
                 }
                 self.install_bridge_commands(&v);
                 if let Some(state) = v.get("state") {
                     self.apply_bridge_state(state);
+                    if text.trim().is_empty() {
+                        let active = state["active"].as_str().unwrap_or("-");
+                        let session = state["session"].as_str().unwrap_or("-");
+                        let context_size = state["context_size"]
+                            .as_u64()
+                            .or_else(|| state["context_size"].as_str().and_then(|s| s.parse().ok()))
+                            .unwrap_or(0);
+                        let context_limit = state["context_limit"]
+                            .as_u64()
+                            .or_else(|| {
+                                state["context_limit"].as_str().and_then(|s| s.parse().ok())
+                            })
+                            .unwrap_or(0);
+                        let ctx_label = if context_limit > 0 {
+                            format!("{}/{}", context_size, context_limit)
+                        } else {
+                            context_size.to_string()
+                        };
+                        self.add_system_message(format!(
+                            "Status: active={} session={} ctx={}",
+                            active, session, ctx_label
+                        ));
+                    }
                 }
                 if v["exit"].as_bool().unwrap_or(false) {
                     self.should_quit = true;
@@ -4697,12 +5022,13 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             self.bridge_state.tool_count.to_string()
         };
         format!(
-            "{}{} · {} · agent:{} · msgs:{} · tools:{} · skills:{} · last_turn_tools:{} · route:{} · image:{} · trace:{} · raw:{} · rag:{} · Ctrl+O trace · Ctrl+P raw · Ctrl+T tasks · Ctrl+G rag · Ctrl+R inspector",
+            "{}{} · {} · agent:{} · msgs:{} · ctx:{} · tools:{} · skills:{} · last_turn_tools:{} · route:{} · image:{} · trace:{} · raw:{} · rag:{} · Ctrl+O trace · Ctrl+P raw · Ctrl+T tasks · Ctrl+G rag · Ctrl+R inspector",
             spin,
             self.phase,
             live_step.text,
             self.bridge_state.active,
             self.bridge_state.msg_count,
+            self.context_size_label(),
             tools_chip,
             self.active_skill_ids.len(),
             self.last_turn_tool_names.len(),
@@ -4961,8 +5287,12 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
             }
         }
 
-        // Escape: cancel when busy, clear input when idle
+        // Escape: close plugin selection first, then cancel when busy, clear input when idle
         if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+            if self.plugin_list_active() {
+                self.clear_plugin_list();
+                return KeyAction::None;
+            }
             if self.busy {
                 return KeyAction::Interrupt;
             }
@@ -5011,6 +5341,29 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
         if self.busy {
             return KeyAction::None;
+        }
+
+        if self.plugin_list_active() && key.modifiers.is_empty() {
+            match key.code {
+                KeyCode::Up => {
+                    self.move_plugin_list_selection(-1);
+                    return KeyAction::None;
+                }
+                KeyCode::Down => {
+                    self.move_plugin_list_selection(1);
+                    return KeyAction::None;
+                }
+                KeyCode::Esc => {
+                    self.clear_plugin_list();
+                    return KeyAction::None;
+                }
+                KeyCode::Char(' ') => {
+                    if let Some(action) = self.toggle_plugin_list_selected() {
+                        return action;
+                    }
+                }
+                _ => {}
+            }
         }
 
         if matches!(
@@ -5190,7 +5543,13 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
 
     fn slash_token_span(&self) -> Option<(usize, usize, String)> {
         let chars: Vec<char> = self.input.chars().collect();
-        let start = chars.iter().position(|c| !c.is_whitespace())?;
+        let cursor = self.input_cursor.min(chars.len());
+
+        // Find the start of the current token around the cursor.
+        let mut start = cursor;
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
         if chars.get(start).copied()? != '/' {
             return None;
         }
@@ -5336,6 +5695,26 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
     // ── Unified diff generator for file edits ──────────────────────────────────
 }
 
+fn format_compact_count(value: u64) -> String {
+    match value {
+        0..=999 => value.to_string(),
+        1_000..=9_999 => format_compact_with_decimal(value, 1_000, "k"),
+        10_000..=999_999 => format!("{}k", value / 1_000),
+        1_000_000..=9_999_999 => format_compact_with_decimal(value, 1_000_000, "m"),
+        _ => format!("{}m", value / 1_000_000),
+    }
+}
+
+fn format_compact_with_decimal(value: u64, scale: u64, suffix: &str) -> String {
+    let whole = value / scale;
+    let decimal = (value % scale) / (scale / 10);
+    if decimal == 0 {
+        format!("{whole}{suffix}")
+    } else {
+        format!("{whole}.{decimal}{suffix}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5411,6 +5790,14 @@ mod tests {
         let action = app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL));
 
         assert_eq!(action, KeyAction::ExpandThinking);
+    }
+
+    #[test]
+    fn compact_count_labels_stay_readable() {
+        assert_eq!(format_compact_count(987), "987");
+        assert_eq!(format_compact_count(1_240), "1.2k");
+        assert_eq!(format_compact_count(18_400), "18k");
+        assert_eq!(format_compact_count(2_600_000), "2.6m");
     }
 
     #[test]

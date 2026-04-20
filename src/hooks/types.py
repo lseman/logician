@@ -10,7 +10,7 @@ https://github.com/anthropics/claude-code/blob/main/src/types/hooks.ts
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -20,9 +20,11 @@ class HookEventType(Enum):
     """Hook event types matching OpenClaude's HOOK_EVENTS."""
 
     SESSION_START = "SessionStart"
+    SESSION_END = "SessionEnd"
     SETUP = "Setup"
     STOP = "Stop"
     NOTIFICATION = "Notification"
+    USER_PROMPT_SUBMIT = "UserPromptSubmit"
     PRE_TOOL_USE = "PreToolUse"
     POST_TOOL_USE = "PostToolUse"
     PRE_COMPACT = "PreCompact"
@@ -102,6 +104,128 @@ class HookExecutionResult:
     raw_output: str = ""
 
 
+# ── Hook Input Payloads ────────────────────────────────────────────────────────
+
+
+@dataclass
+class HookInputPayload:
+    """Common fields shared by all hook stdin payloads."""
+
+    session_id: str = ""
+    transcript_path: str = ""
+    cwd: str | None = None
+
+
+@dataclass
+class SessionStartHookInput(HookInputPayload):
+    source: str = "startup"
+
+
+@dataclass
+class SessionEndHookInput(HookInputPayload):
+    reason: str = "other"
+
+
+@dataclass
+class UserPromptSubmitHookInput(HookInputPayload):
+    prompt: str = ""
+
+
+@dataclass
+class PreToolUseHookInput(HookInputPayload):
+    tool_name: str = ""
+    tool_input: Any = None
+
+
+@dataclass
+class PostToolUseHookInput(HookInputPayload):
+    tool_name: str = ""
+    tool_input: Any = None
+    tool_response: Any = None
+
+
+@dataclass
+class StopHookInput(HookInputPayload):
+    stop_hook_active: bool = False
+
+
+def _hook_payload_dict(
+    payload: HookInputPayload | dict[str, Any] | None,
+) -> dict[str, Any]:
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        return dict(payload)
+    if is_dataclass(payload):
+        return asdict(payload)
+    raise TypeError(f"Unsupported hook payload type: {type(payload)!r}")
+
+
+def build_hook_input(
+    event_type: HookEventType,
+    payload: HookInputPayload | dict[str, Any] | None = None,
+    *,
+    session_id: str = "",
+    transcript_path: str = "",
+    cwd: str | None = None,
+    source: str | None = None,
+    prompt: str | None = None,
+    tool_name: str | None = None,
+    tool_input: Any = None,
+    tool_response: Any = None,
+    stop_hook_active: bool | None = None,
+    reason: str | None = None,
+) -> str:
+    """Build a JSON stdin payload for a hook command.
+
+    The shape follows OpenClaude's hook input contract: common fields
+    (`session_id`, `transcript_path`, `cwd`, `hook_event_name`) plus
+    event-specific fields. Unset fields are omitted.
+    """
+    from pathlib import Path as _Path
+
+    payload_data = _hook_payload_dict(payload)
+    session_id = str(session_id or payload_data.get("session_id") or "")
+    transcript_path = str(transcript_path or payload_data.get("transcript_path") or "")
+    cwd_value = cwd if cwd is not None else payload_data.get("cwd")
+    source = source if source is not None else payload_data.get("source")
+    prompt = prompt if prompt is not None else payload_data.get("prompt")
+    tool_name = tool_name if tool_name is not None else payload_data.get("tool_name")
+    if tool_input is None and "tool_input" in payload_data:
+        tool_input = payload_data.get("tool_input")
+    if tool_response is None and "tool_response" in payload_data:
+        tool_response = payload_data.get("tool_response")
+    if stop_hook_active is None and "stop_hook_active" in payload_data:
+        stop_hook_active = payload_data.get("stop_hook_active")
+    reason = reason if reason is not None else payload_data.get("reason")
+
+    payload: dict[str, Any] = {
+        "session_id": session_id,
+        "transcript_path": transcript_path,
+        "cwd": cwd_value if cwd_value is not None else str(_Path.cwd()),
+        "hook_event_name": event_type.value,
+    }
+
+    if event_type is HookEventType.SESSION_START:
+        payload["source"] = str(source or "startup").strip().lower() or "startup"
+    elif event_type is HookEventType.SESSION_END:
+        payload["reason"] = str(reason or "other")
+    elif event_type is HookEventType.USER_PROMPT_SUBMIT:
+        if prompt is not None:
+            payload["prompt"] = prompt
+    elif event_type in (HookEventType.PRE_TOOL_USE, HookEventType.POST_TOOL_USE):
+        if tool_name is not None:
+            payload["tool_name"] = tool_name
+        if tool_input is not None:
+            payload["tool_input"] = tool_input
+        if event_type is HookEventType.POST_TOOL_USE and tool_response is not None:
+            payload["tool_response"] = tool_response
+    elif event_type is HookEventType.STOP:
+        payload["stop_hook_active"] = bool(stop_hook_active)
+
+    return json.dumps(payload)
+
+
 # ── Parsing Helpers ────────────────────────────────────────────────────────────
 
 
@@ -126,11 +250,13 @@ def parse_hook_response(raw_output: str) -> HookExecutionResult:
     # Parse OpenClaude format
     hook_specific = data.get("hookSpecificOutput", {})
     if isinstance(hook_specific, dict):
-        if hook_specific.get("hookEventName") == "SessionStart":
+        event_name = hook_specific.get("hookEventName")
+        if event_name in ("SessionStart", "UserPromptSubmit"):
             additional = hook_specific.get("additionalContext")
             if additional and isinstance(additional, str):
                 result.additional_contexts.append(additional)
 
+        if event_name == "SessionStart":
             initial_msg = hook_specific.get("initialUserMessage")
             if initial_msg and isinstance(initial_msg, str):
                 result.initial_user_message = initial_msg

@@ -13,6 +13,7 @@ Complements the existing rg_search / fd_find / edit_file_replace with:
   smart_multi_edit  -- intelligent multi-file editing with conflict detection and preview
   rg_multiline      -- multiline pattern search across files
 """
+
 from __future__ import annotations
 
 if "_safe_json" not in globals():
@@ -23,7 +24,7 @@ if "_safe_json" not in globals():
 
 
 import difflib
-import importlib
+import os
 import re
 import shutil
 from pathlib import Path
@@ -39,6 +40,66 @@ from ._search_replace_helpers import (
 from ._search_replace_helpers import (
     unified_diff_text as _unified_diff_text,
 )
+
+
+def _fd_find(
+    pattern: str,
+    directory: str = ".",
+    file_type: str = "f",
+    extension: str = "",
+    max_depth: int = 8,
+    max_results: int = 50,
+    hidden: bool = False,
+) -> dict:
+    root = Path(directory).expanduser().resolve()
+    if not root.is_dir():
+        return {"status": "error", "error": f"Not a directory: {directory}"}
+
+    try:
+        name_re = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        name_re = re.compile(re.escape(pattern), re.IGNORECASE)
+
+    matches: list[tuple[Path, float]] = []
+    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=True):
+        current = Path(dirpath)
+        rel = current.relative_to(root)
+        if len(rel.parts) > max_depth:
+            dirnames[:] = []
+            continue
+
+        if not hidden:
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+
+        if file_type in ("d", ""):
+            for d in dirnames:
+                if not hidden and d.startswith("."):
+                    continue
+                if name_re.search(d):
+                    path = current / d
+                    matches.append((path, path.stat().st_mtime_ns))
+
+        if file_type in ("f", ""):
+            for fname in filenames:
+                if not hidden and fname.startswith("."):
+                    continue
+                if extension and not fname.endswith(f".{extension.lstrip('.')}"):
+                    continue
+                if name_re.search(fname):
+                    path = current / fname
+                    matches.append((path, path.stat().st_mtime_ns))
+
+    matches.sort(key=lambda item: (-item[1], str(item[0])))
+    rel_paths = [str(path.relative_to(root)) for path, _ in matches[:max_results]]
+    return {
+        "status": "ok",
+        "tool_used": "python",
+        "pattern": pattern,
+        "count": len(rel_paths),
+        "truncated": len(matches) > max_results,
+        "paths": rel_paths,
+    }
+
 
 __skill__ = {
     "name": "Search Replace",
@@ -182,9 +243,7 @@ def _parse_sed_line_spec(
         end = start + int(m.group(2))
         return start, end
 
-    raise ValueError(
-        "Unsupported line_spec. Use 'N', 'N,M', 'N:M', or 'N,+K'."
-    )
+    raise ValueError("Unsupported line_spec. Use 'N', 'N,M', 'N:M', or 'N,+K'.")
 
 
 def _parse_sed_substitute(script: str) -> tuple[str, str, str]:
@@ -254,12 +313,7 @@ def find_path(
     Triggers: find file, find path, locate file, locate directory, where is, find by name.
     Returns: Same payload as fd_find for compatibility.
     """
-    fd_find = getattr(
-        importlib.import_module("skills.coding.explore.explore"),
-        "fd_find",
-    )
-
-    return fd_find(
+    return _fd_find(
         pattern=pattern,
         directory=directory,
         file_type=file_type,
@@ -429,9 +483,7 @@ def read_file_smart(
 
         if symbol:
             # Find the symbol using a simple def/class scanner
-            sym_re = re.compile(
-                rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(symbol)}\b"
-            )
+            sym_re = re.compile(rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(symbol)}\b")
             found_start = -1
             for i, line in enumerate(all_lines):
                 if sym_re.match(line):
@@ -446,7 +498,11 @@ def read_file_smart(
             end_idx = found_start + 1
             while end_idx < total:
                 ln = all_lines[end_idx]
-                if ln.strip() and (len(ln) - len(ln.lstrip())) <= sym_indent and end_idx > found_start + 1:
+                if (
+                    ln.strip()
+                    and (len(ln) - len(ln.lstrip())) <= sym_indent
+                    and end_idx > found_start + 1
+                ):
                     break
                 end_idx += 1
             start_line = found_start + 1
@@ -513,10 +569,14 @@ def regex_replace(
 
         # Parse flags
         flag_map = {
-            "IGNORECASE": re.IGNORECASE, "I": re.IGNORECASE,
-            "MULTILINE": re.MULTILINE, "M": re.MULTILINE,
-            "DOTALL": re.DOTALL, "S": re.DOTALL,
-            "VERBOSE": re.VERBOSE, "X": re.VERBOSE,
+            "IGNORECASE": re.IGNORECASE,
+            "I": re.IGNORECASE,
+            "MULTILINE": re.MULTILINE,
+            "M": re.MULTILINE,
+            "DOTALL": re.DOTALL,
+            "S": re.DOTALL,
+            "VERBOSE": re.VERBOSE,
+            "X": re.VERBOSE,
         }
         combined = 0
         for f in str(flags).replace(",", "|").split("|"):
@@ -532,7 +592,9 @@ def regex_replace(
         original = p.read_text(encoding="utf-8")
         count = len(rx.findall(original))
         if count == 0:
-            return _safe_json({"status": "ok", "matches": 0, "message": "Pattern not found — no changes."})
+            return _safe_json(
+                {"status": "ok", "matches": 0, "message": "Pattern not found — no changes."}
+            )
 
         n = int(max_replacements) if int(max_replacements) > 0 else 0
         updated = rx.sub(replacement, original, count=n)
@@ -608,7 +670,12 @@ def sed_replace(
 
         if matches_found == 0:
             return _safe_json(
-                {"status": "ok", "written": False, "matches_found": 0, "message": "Pattern not found — no changes."}
+                {
+                    "status": "ok",
+                    "written": False,
+                    "matches_found": 0,
+                    "message": "Pattern not found — no changes.",
+                }
             )
 
         diff = _unified_diff(original, updated, label=p.name)
@@ -666,9 +733,12 @@ def rg_replace(
 
         # Parse flags
         flag_map = {
-            "IGNORECASE": re.IGNORECASE, "I": re.IGNORECASE,
-            "MULTILINE": re.MULTILINE, "M": re.MULTILINE,
-            "DOTALL": re.DOTALL, "S": re.DOTALL,
+            "IGNORECASE": re.IGNORECASE,
+            "I": re.IGNORECASE,
+            "MULTILINE": re.MULTILINE,
+            "M": re.MULTILINE,
+            "DOTALL": re.DOTALL,
+            "S": re.DOTALL,
         }
         combined = 0
         for f in str(flags).replace(",", "|").split("|"):
@@ -784,14 +854,18 @@ def show_diff(
             other = proposed_content
             label_b = f"{path_a} (proposed)"
         else:
-            return _safe_json({"status": "error", "error": "Provide either path_b or proposed_content."})
+            return _safe_json(
+                {"status": "error", "error": "Provide either path_b or proposed_content."}
+            )
 
         a_lines = original.splitlines(keepends=True)
         b_lines = other.splitlines(keepends=True)
         diff = "".join(
             difflib.unified_diff(
-                a_lines, b_lines,
-                fromfile=path_a, tofile=label_b,
+                a_lines,
+                b_lines,
+                fromfile=path_a,
+                tofile=label_b,
                 n=int(context_lines),
             )
         )
@@ -839,7 +913,11 @@ def count_in_file(
             try:
                 match_count = len(re.findall(pattern, text, flags))
             except re.error:
-                match_count = text.lower().count(pattern.lower()) if not case_sensitive else text.count(pattern)
+                match_count = (
+                    text.lower().count(pattern.lower())
+                    if not case_sensitive
+                    else text.count(pattern)
+                )
 
         result: dict = {
             "status": "ok",
@@ -884,8 +962,13 @@ def rg_multiline(
         # Try rg --multiline first
         if shutil.which("rg"):
             cmd = [
-                "rg", "--multiline", "--line-number", "--no-heading",
-                "--color=never", "--max-count", str(max_results),
+                "rg",
+                "--multiline",
+                "--line-number",
+                "--no-heading",
+                "--color=never",
+                "--max-count",
+                str(max_results),
             ]
             if file_type:
                 cmd += ["--type", file_type]
@@ -906,7 +989,12 @@ def rg_multiline(
                             rel = m.group(1)
                         matches.append({"file": rel, "line": int(m.group(2)), "text": m.group(3)})
                 return _safe_json(
-                    {"status": "ok", "tool_used": "rg --multiline", "count": len(matches), "matches": matches}
+                    {
+                        "status": "ok",
+                        "tool_used": "rg --multiline",
+                        "count": len(matches),
+                        "matches": matches,
+                    }
                 )
 
         # Python fallback with re.DOTALL
@@ -942,9 +1030,12 @@ def rg_multiline(
                 break
 
         return _safe_json(
-            {"status": "ok", "tool_used": "python re.DOTALL", "count": len(matches), "matches": matches}
+            {
+                "status": "ok",
+                "tool_used": "python re.DOTALL",
+                "count": len(matches),
+                "matches": matches,
+            }
         )
     except Exception as exc:
         return _safe_json({"status": "error", "error": str(exc)})
-
-

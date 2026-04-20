@@ -23,7 +23,7 @@ _DIRECT_TOOL_POSITIONAL_ARGS: dict[str, list[str]] = {
 
 # Aliases: map model-generated wrong/variant tool names to real canonical names.
 # Core tools (registered by Agent.__init__): bash, read_file, write_file, edit_file,
-#   glob_files, grep_files, apply_edit_block, think, todo.
+#   fd_find, rg_search, search_code, apply_edit_block, think, todo.
 # These are the primary canonical names — do NOT alias them away from themselves.
 _TOOL_NAME_ALIASES: dict[str, str] = {
     # shell execution variants → core bash
@@ -39,12 +39,12 @@ _TOOL_NAME_ALIASES: dict[str, str] = {
     "open_file": "read_file",
     "view_file": "read_file",
     "cat": "read_file",
-    # file search variants → core glob_files
-    "glob": "glob_files",
-    "find_files": "glob_files",
-    # text search variants → core grep_files
-    "grep": "grep_files",
-    "search_text": "grep_files",
+    # file search variants → canonical fd_find
+    "glob": "fd_find",
+    "find_files": "fd_find",
+    # text search variants → canonical rg_search
+    "grep": "rg_search",
+    "search_text": "rg_search",
 }
 
 

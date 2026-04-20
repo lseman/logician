@@ -616,6 +616,7 @@ class AgentLoop:
         token_callback: Callable[[str], None] | None = None,
         thinking_callback: Callable[[str], None] | None = None,
         tool_callback: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None,
+        post_tool_callback: Callable[[ToolCall, DispatchResult], None] | None = None,
         repair_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> TurnResult:
         """Run one agent turn. Returns when the LLM produces a final response."""
@@ -878,6 +879,16 @@ class AgentLoop:
                 self.config,
                 tool_callback=tool_callback,
             )
+            if post_tool_callback is not None:
+                call_by_id = {call.id: call for call in tool_calls}
+                for dispatch_result in results:
+                    tool_call = call_by_id.get(dispatch_result.call_id)
+                    if tool_call is None:
+                        continue
+                    try:
+                        post_tool_callback(tool_call, dispatch_result)
+                    except Exception:
+                        pass
             tool_msgs = format_tool_results(results)
             convo.extend(tool_msgs)
             for tm in tool_msgs:
@@ -886,6 +897,10 @@ class AgentLoop:
             # Update last_tool_output for InspectionGuard.
             if tool_msgs:
                 state.last_tool_output = tool_msgs[-1].content or ""
+
+            # Tool availability can change mid-turn (for example after invoke_skill
+            # lazy-loads a skill's scripts). Refresh before the next guard/prompt pass.
+            state.available_tool_names = self.dispatcher.available_tool_names()
 
             # Post-tool reflection: brief observation injected before the next LLM call.
             if getattr(self.config, "post_tool_thinking", False):

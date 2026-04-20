@@ -19,33 +19,51 @@ Notes:
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import math
 import os
 import re
+import sys
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from html import unescape
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 import httpx
 
-# Optional deps
-try:
-    import arxiv  # pip install arxiv
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-    HAS_ARXIV = True
-except Exception:
-    HAS_ARXIV = False
+_arxiv_mod = importlib.import_module("arxiv.scripts.arxiv")
+ArxivSource = _arxiv_mod.ArxivSource
 
-try:
-    from habanero import Crossref  # pip install habanero
+_crossref_mod = importlib.import_module("crossref.scripts.crossref")
+CrossrefSource = _crossref_mod.CrossrefSource
 
-    HAS_CROSSREF = True
-except Exception:
-    HAS_CROSSREF = False
+_ieee_mod = importlib.import_module("ieee.scripts.ieee")
+IEEEXploreSource = _ieee_mod.IEEEXploreSource
+
+_openalex_mod = importlib.import_module("openalex.scripts.openalex")
+OpenAlexParams = _openalex_mod.OpenAlexParams
+OpenAlexSource = _openalex_mod.OpenAlexSource
+
+_s2_mod = importlib.import_module("semantic_scholar.scripts.semantic_scholar")
+SemanticScholarSource = _s2_mod.SemanticScholarSource
+
+_unpaywall_mod = importlib.import_module("unpaywall.scripts.unpaywall")
+UnpaywallEnricher = _unpaywall_mod.UnpaywallEnricher
+
+HAS_ARXIV = importlib.util.find_spec("arxiv") is not None
+HAS_CROSSREF = importlib.util.find_spec("habanero") is not None
+HAS_PANDAS = importlib.util.find_spec("pandas") is not None
+if HAS_PANDAS:
+    import pandas as pd  # pip install pandas
 
 try:
     import pandas as pd  # pip install pandas
@@ -300,9 +318,7 @@ def _safe_int(x: Any) -> Optional[int]:
         return None
 
 
-def _extract_citation_count(
-    record: Dict[str, Any], *candidate_keys: str
-) -> Optional[int]:
+def _extract_citation_count(record: Dict[str, Any], *candidate_keys: str) -> Optional[int]:
     """Best-effort citation count extraction from heterogeneous API payloads."""
     if not isinstance(record, dict):
         return None
@@ -428,9 +444,7 @@ class BaseHTTPSource:
 
     def __init__(self, *, timeout: float = 25.0):
         headers = {"User-Agent": "SystematicReviewLib/0.3"}
-        self._client = httpx.Client(
-            timeout=timeout, headers=headers, follow_redirects=True
-        )
+        self._client = httpx.Client(timeout=timeout, headers=headers, follow_redirects=True)
 
     def close(self) -> None:
         try:
@@ -474,743 +488,6 @@ class BaseHTTPSource:
 # Sources
 # ──────────────────────────────────────────────────────────────────────────────
 
-
-class ArxivSource(BaseHTTPSource):
-    name = "arxiv"
-
-    def __init__(self, *, timeout: float = 25.0):
-        super().__init__(timeout=timeout)
-        if not HAS_ARXIV:
-            raise RuntimeError("arxiv is not installed. pip install arxiv")
-
-    def search(
-        self, query: str, *, limit: int = 50, sort: str = "submitted"
-    ) -> List[Paper]:
-        max_r = max(1, min(int(limit), 200))
-
-        sort_by = None
-        if hasattr(arxiv, "SortCriterion"):
-            sc = arxiv.SortCriterion
-            sort_by = {
-                "submitted": getattr(sc, "SubmittedDate", None),
-                "updated": getattr(sc, "LastUpdatedDate", None),
-                "relevance": getattr(sc, "Relevance", None),
-            }.get(sort, getattr(sc, "SubmittedDate", None))
-
-        search = (
-            arxiv.Search(query=query, max_results=max_r, sort_by=sort_by)
-            if sort_by
-            else arxiv.Search(query=query, max_results=max_r)
-        )
-
-        try:
-            client = arxiv.Client()
-            results = list(client.results(search))
-        except Exception:
-            results = list(search.results())
-
-        out: List[Paper] = []
-        for r in results[:max_r]:
-            title = _norm_space(getattr(r, "title", "") or "")
-            year = getattr(
-                getattr(r, "published", None), "year", None
-            ) or _year_from_any(getattr(r, "published", None))
-            entry_id = getattr(r, "entry_id", None) or None
-            arx = _norm_arxiv_id(
-                entry_id.split("/")[-1] if entry_id else None
-            ) or _norm_arxiv_id(getattr(r, "arxiv_id", None))
-            authors_obj = getattr(r, "authors", []) or []
-            authors = [
-                (getattr(a, "name", None) or str(a)).strip()
-                for a in authors_obj
-                if (getattr(a, "name", None) or str(a)).strip()
-            ]
-
-            pdf_url = getattr(r, "pdf_url", None)
-            if not pdf_url and arx:
-                pdf_url = f"https://arxiv.org/pdf/{arx}.pdf"
-
-            url = entry_id or (f"https://arxiv.org/abs/{arx}" if arx else None)
-
-            out.append(
-                Paper(
-                    title=title,
-                    authors=authors,
-                    year=year,
-                    venue="arXiv",
-                    abstract=getattr(r, "summary", None),
-                    doi=None,
-                    arxiv_id=arx,
-                    url=url,
-                    pdf_url=pdf_url,
-                    source="arxiv",
-                    is_open_access=True,
-                    citation_count=None,
-                    extra={},
-                )
-            )
-        return out
-
-
-class SemanticScholarSource(BaseHTTPSource):
-    name = "s2"
-
-    def __init__(self, *, timeout: float = 25.0, api_key_env: str = "S2_API_KEY"):
-        super().__init__(timeout=timeout)
-        self._api_key = os.getenv(api_key_env) or None  # do NOT hardcode
-
-    def search(
-        self,
-        query: str,
-        *,
-        limit: int = 50,
-        offset: int = 0,
-        open_access_only: bool = False,
-        normalize_query: bool = True,
-        retry_with_broad_query: bool = True,
-        debug_raw: bool = False,
-        debug_on_empty: bool = True,
-        debug_body_preview_chars: int = 1200,
-        fields: str = (
-            "title,authors,venue,year,publicationDate,externalIds,url,openAccessPdf,"
-            "abstract,citationCount,isOpenAccess,fieldsOfStudy,s2FieldsOfStudy"
-        ),
-    ) -> List[Paper]:
-        lim = max(1, min(int(limit), 100))
-        off = max(0, int(offset))
-        base = "https://api.semanticscholar.org/graph/v1"
-        url = f"{base}/paper/search"
-
-        effective_query = (
-            _simplify_query_for_s2(query) if normalize_query else _norm_space(query)
-        )
-        params: Dict[str, Any] = {
-            "query": effective_query,
-            "limit": lim,
-            "offset": off,
-            "fields": fields,
-        }
-        if open_access_only:
-            params["openAccessPdf"] = "true"
-
-        headers = {}
-        if self._api_key:
-            headers["x-api-key"] = self._api_key
-
-        r = self._client.get(url, params=params, headers=headers)
-        request_url = str(r.request.url)
-
-        raw: Dict[str, Any] = {}
-        try:
-            payload = r.json()
-            raw = payload if isinstance(payload, dict) else {}
-        except Exception:
-            raw = {}
-
-        items = raw.get("data") or []
-
-        if (
-            r.is_success
-            and retry_with_broad_query
-            and len(items) == 0
-            and normalize_query
-        ):
-            for q2 in _s2_fallback_queries(effective_query):
-                params2 = dict(params)
-                params2["query"] = q2
-                r2 = self._client.get(url, params=params2, headers=headers)
-                raw2: Dict[str, Any] = {}
-                try:
-                    payload2 = r2.json()
-                    raw2 = payload2 if isinstance(payload2, dict) else {}
-                except Exception:
-                    raw2 = {}
-                items2 = raw2.get("data") or []
-                if debug_raw:
-                    dbg2 = {
-                        "source": "s2",
-                        "fallback": True,
-                        "fallback_query": q2,
-                        "status_code": r2.status_code,
-                        "request_url": str(r2.request.url),
-                        "returned_count": len(items2),
-                        "total_hint": raw2.get("total"),
-                    }
-                    print("[S2 DEBUG]", json.dumps(dbg2, indent=2, ensure_ascii=False))
-                if r2.is_success and len(items2) > 0:
-                    r, raw, items = r2, raw2, items2
-                    request_url = str(r.request.url)
-                    effective_query = q2
-                    break
-
-        should_debug = bool(debug_raw) or (bool(debug_on_empty) and len(items) == 0)
-        if should_debug:
-            dbg = {
-                "source": "s2",
-                "query": query,
-                "effective_query": effective_query,
-                "api_key_present": bool(self._api_key),
-                "status_code": r.status_code,
-                "request_url": request_url,
-                "returned_count": len(items),
-                "total_hint": raw.get("total"),
-                "response_headers": {
-                    "content-type": r.headers.get("content-type"),
-                    "x-ratelimit-limit": r.headers.get("x-ratelimit-limit"),
-                    "x-ratelimit-remaining": r.headers.get("x-ratelimit-remaining"),
-                    "retry-after": r.headers.get("retry-after"),
-                },
-                "body_preview": r.text[: max(200, int(debug_body_preview_chars))],
-            }
-            print("[S2 DEBUG]", json.dumps(dbg, indent=2, ensure_ascii=False))
-
-        if r.status_code >= 400:
-            return []
-
-        out: List[Paper] = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            title = _norm_space(it.get("title") or "")
-            year = it.get("year") or _year_from_any(it.get("publicationDate"))
-            venue = it.get("venue") or None
-            abstract = it.get("abstract")
-
-            ext = it.get("externalIds") or {}
-            doi = _norm_doi(ext.get("DOI")) if isinstance(ext, dict) else None
-            arx = _norm_arxiv_id(ext.get("ArXiv")) if isinstance(ext, dict) else None
-
-            authors_raw = it.get("authors") or []
-            authors: List[str] = []
-            for a in authors_raw:
-                if isinstance(a, dict) and a.get("name"):
-                    authors.append(a["name"])
-                elif a:
-                    authors.append(str(a))
-
-            pdf_url = None
-            oapdf = it.get("openAccessPdf") or {}
-            if isinstance(oapdf, dict):
-                pdf_url = oapdf.get("url") or None
-            if (not pdf_url) and arx:
-                pdf_url = f"https://arxiv.org/pdf/{arx}.pdf"
-
-            is_oa = it.get("isOpenAccess")
-            if is_oa is None and pdf_url:
-                is_oa = True
-
-            out.append(
-                Paper(
-                    title=title,
-                    authors=authors,
-                    year=_year_from_any(year),
-                    venue=venue,
-                    abstract=abstract,
-                    doi=doi,
-                    arxiv_id=arx,
-                    url=it.get("url"),
-                    pdf_url=pdf_url,
-                    source="s2",
-                    is_open_access=bool(is_oa) if is_oa is not None else None,
-                    citation_count=_safe_int(it.get("citationCount")),
-                    extra={
-                        "s2_paperId": it.get("paperId"),
-                        "fieldsOfStudy": it.get("fieldsOfStudy") or [],
-                        "s2FieldsOfStudy": it.get("s2FieldsOfStudy") or [],
-                    },
-                )
-            )
-        return out
-
-
-class CrossrefSource(BaseHTTPSource):
-    name = "crossref"
-
-    def __init__(self, *, timeout: float = 35.0):
-        super().__init__(timeout=timeout)
-        if not HAS_CROSSREF:
-            raise RuntimeError("habanero is not installed. pip install habanero")
-        self._cr = Crossref()
-
-    def search(
-        self,
-        query: str,
-        *,
-        limit: int = 50,
-        filter: Optional[Dict[str, str]] = None,
-        sort: Optional[str] = None,
-        order: str = "desc",
-        max_retries: int = 3,
-    ) -> List[Paper]:
-        rows = max(1, min(int(limit), 200))
-        params: Dict[str, Any] = {"query": query, "rows": rows}
-        if filter:
-            params["filter"] = filter
-        if sort:
-            params["sort"] = sort
-            params["order"] = order if order in ("asc", "desc") else "desc"
-
-        res: Dict[str, Any] = {}
-        try:
-            raw = self._cr.works(**params)
-            res = raw if isinstance(raw, dict) else {}
-        except Exception as e:
-            print(f"[WARN] Crossref via habanero failed: {e}. Retrying via HTTP API...")
-            row_attempts = [rows, min(rows, 100), min(rows, 50)]
-            row_attempts = list(dict.fromkeys(row_attempts))
-            last_err: Optional[Exception] = None
-            for rws in row_attempts:
-                try:
-                    p2 = dict(params)
-                    p2["rows"] = rws
-                    res = self._get_json(
-                        "https://api.crossref.org/works",
-                        params=p2,
-                        max_retries=max_retries,
-                        base_backoff_s=1.0,
-                    )
-                    if (res or {}).get("message", {}).get("items"):
-                        break
-                except Exception as e2:
-                    last_err = e2
-            if not res:
-                print(f"Crossref error: {last_err or e}")
-                return []
-
-        items = (res or {}).get("message", {}).get("items", []) or []
-        out: List[Paper] = []
-        for it in items:
-            title = (
-                (it.get("title") or [""])[0]
-                if isinstance(it.get("title"), list)
-                else (it.get("title") or "")
-            )
-            title = _norm_space(title)
-
-            names: List[str] = []
-            for a in it.get("author") or []:
-                given = (a or {}).get("given")
-                family = (a or {}).get("family")
-                nm = " ".join([x for x in [given, family] if x])
-                if nm.strip():
-                    names.append(nm.strip())
-
-            year = None
-            for key in ("published-print", "published-online", "created", "issued"):
-                dparts = (it.get(key) or {}).get("date-parts")
-                if dparts and dparts[0] and dparts[0][0]:
-                    year = int(dparts[0][0])
-                    break
-
-            venue = (
-                (it.get("container-title") or [""])[0]
-                if isinstance(it.get("container-title"), list)
-                else (it.get("container-title") or None)
-            )
-            venue = _norm_space(venue) if venue else None
-
-            doi = _norm_doi(it.get("DOI"))
-            url = it.get("URL") or (f"https://doi.org/{doi}" if doi else None)
-
-            out.append(
-                Paper(
-                    title=title,
-                    authors=names,
-                    year=_year_from_any(year),
-                    venue=venue,
-                    abstract=_strip_markup(it.get("abstract")),
-                    doi=doi,
-                    arxiv_id=None,
-                    url=url,
-                    pdf_url=None,
-                    source="crossref",
-                    is_open_access=None,
-                    citation_count=None,
-                    extra={"type": it.get("type")},
-                )
-            )
-        return out
-
-
-def _openalex_reconstruct_abstract(
-    inv_idx: Optional[Dict[str, List[int]]],
-) -> Optional[str]:
-    if not inv_idx or not isinstance(inv_idx, dict):
-        return None
-    positions: Dict[int, str] = {}
-    try:
-        for w, pos_list in inv_idx.items():
-            if not isinstance(pos_list, list):
-                continue
-            for p in pos_list:
-                if isinstance(p, int) and p >= 0 and p not in positions:
-                    positions[p] = w
-        if not positions:
-            return None
-        max_pos = max(positions.keys())
-        words = [positions.get(i, "") for i in range(max_pos + 1)]
-        txt = " ".join([w for w in words if w])
-        txt = re.sub(r"\s+", " ", txt).strip()
-        return txt or None
-    except Exception:
-        return None
-
-
-@dataclass
-class OpenAlexParams:
-    from_year: Optional[int] = None
-    to_year: Optional[int] = None
-    sort: str = "relevance"  # "relevance" | "date" | "cited"
-    mailto_env: str = "OPENALEX_MAILTO"
-
-    concept_ids: List[str] = field(default_factory=list)
-    concept_names: List[str] = field(default_factory=list)
-    types: List[str] = field(default_factory=list)
-    language: Optional[str] = "en"
-    has_abstract: bool = True
-    open_access_only: bool = False
-
-    max_pages: int = 2
-    per_page: int = 200
-
-    require_terms: List[str] = field(default_factory=list)
-    exclude_terms: List[str] = field(default_factory=list)
-
-
-def _normalize_openalex_type(t: str) -> str:
-    raw = _norm_space(str(t or "")).lower()
-    if not raw:
-        return raw
-    mapping = {
-        "journal-article": "article",
-        "proceedings-article": "article",
-        "posted-content": "preprint",
-        "book-chapter": "book-chapter",
-        "book": "book",
-        "dataset": "dataset",
-        "report": "report",
-        "dissertation": "dissertation",
-        "review": "review",
-        "article": "article",
-        "preprint": "preprint",
-    }
-    return mapping.get(raw, raw)
-
-
-class OpenAlexSource(BaseHTTPSource):
-    name = "openalex"
-
-    def __init__(self, *, timeout: float = 25.0, mailto_env: str = "OPENALEX_MAILTO"):
-        super().__init__(timeout=timeout)
-        self._mailto = os.getenv(mailto_env)
-        self._api_key = os.getenv("OPENALEX_API_KEY") or None  # optional
-
-    def _concept_search(self, name: str, *, limit: int = 10) -> List[Tuple[str, str]]:
-        url = "https://api.openalex.org/concepts"
-        params: Dict[str, Any] = {"search": name, "per-page": max(1, min(limit, 200))}
-        if self._mailto:
-            params["mailto"] = self._mailto
-        if self._api_key:
-            params["api_key"] = self._api_key
-        raw = self._get_json(url, params=params, max_retries=2)
-        out: List[Tuple[str, str]] = []
-        for it in raw.get("results") or []:
-            cid = it.get("id")
-            disp = it.get("display_name")
-            if cid and disp:
-                m = re.search(r"(C\d+)$", str(cid))
-                out.append((m.group(1) if m else str(cid), str(disp)))
-        return out
-
-    def resolve_concepts(
-        self, names: List[str], *, pick_top: int = 1
-    ) -> Dict[str, str]:
-        resolved: Dict[str, str] = {}
-        for nm in names:
-            nm2 = _norm_space(nm)
-            if not nm2:
-                continue
-            hits = self._concept_search(nm2, limit=10)
-            if hits:
-                resolved[nm2] = (
-                    hits[0][0]
-                    if pick_top == 1
-                    else hits[min(pick_top - 1, len(hits) - 1)][0]
-                )
-        return resolved
-
-    def search(
-        self,
-        query: str,
-        *,
-        limit: int = 50,
-        params: Optional[OpenAlexParams] = None,
-        **kwargs,
-    ) -> List[Paper]:
-        p = params or OpenAlexParams()
-        p.per_page = max(1, min(int(p.per_page), 200))
-        p.max_pages = max(1, int(p.max_pages))
-
-        concept_ids = list(p.concept_ids)
-        if p.concept_names:
-            resolved = self.resolve_concepts(p.concept_names)
-            concept_ids.extend(resolved.values())
-
-        flt: List[str] = []
-        if p.from_year is not None:
-            flt.append(f"from_publication_date:{int(p.from_year)}-01-01")
-        if p.to_year is not None:
-            flt.append(f"to_publication_date:{int(p.to_year)}-12-31")
-        if concept_ids:
-            flt.append(
-                "concept.id:"
-                + "|".join([str(c).strip() for c in concept_ids if str(c).strip()])
-            )
-        if p.types:
-            types_norm = [
-                _normalize_openalex_type(t) for t in p.types if str(t).strip()
-            ]
-            types_norm = [t for t in types_norm if t]
-            if types_norm:
-                flt.append("type:" + "|".join(types_norm))
-        if p.language:
-            flt.append(f"language:{p.language}")
-        if p.has_abstract:
-            flt.append("has_abstract:true")
-        if p.open_access_only:
-            flt.append("is_oa:true")
-        for t in p.require_terms:
-            tt = _norm_space(t)
-            if tt:
-                flt.append(f"title.search:{tt}")
-        for t in p.exclude_terms:
-            tt = _norm_space(t)
-            if tt:
-                flt.append(f"!title.search:{tt}")
-
-        url = "https://api.openalex.org/works"
-        out: List[Paper] = []
-        seen_ids: set[str] = set()
-
-        per_page = max(1, min(int(p.per_page), 200))
-        max_needed = max(1, min(int(limit), 2000))
-        pages = min(p.max_pages, max(1, math.ceil(max_needed / per_page)))
-
-        for page in range(1, pages + 1):
-            params_http: Dict[str, Any] = {
-                "search": query,
-                "per-page": per_page,
-                "page": page,
-            }
-            if self._mailto:
-                params_http["mailto"] = self._mailto
-            if self._api_key:
-                params_http["api_key"] = self._api_key
-            if flt:
-                params_http["filter"] = ",".join(flt)
-
-            if p.sort == "date":
-                params_http["sort"] = "publication_date:desc"
-            elif p.sort == "cited":
-                params_http["sort"] = "cited_by_count:desc"
-
-            raw = self._get_json(url, params=params_http, max_retries=2)
-            items = raw.get("results") or []
-
-            for it in items:
-                oid = it.get("id")
-                if oid and oid in seen_ids:
-                    continue
-                if oid:
-                    seen_ids.add(oid)
-
-                title = _norm_space(it.get("title") or "")
-                year = it.get("publication_year") or _year_from_any(
-                    it.get("publication_date")
-                )
-                doi = _norm_doi(it.get("doi"))
-
-                venue = None
-                primary_loc = it.get("primary_location") or {}
-                if isinstance(primary_loc, dict):
-                    src_meta = primary_loc.get("source") or {}
-                    if isinstance(src_meta, dict):
-                        venue = src_meta.get("display_name") or None
-                if not venue:
-                    host = it.get("host_venue") or {}
-                    if isinstance(host, dict):
-                        venue = host.get("display_name") or None
-                if not venue:
-                    for loc in it.get("locations") or []:
-                        if not isinstance(loc, dict):
-                            continue
-                        src_meta = loc.get("source") or {}
-                        if isinstance(src_meta, dict) and src_meta.get("display_name"):
-                            venue = src_meta.get("display_name")
-                            break
-
-                authors: List[str] = []
-                for a in it.get("authorships") or []:
-                    aa = (a or {}).get("author") or {}
-                    nm = aa.get("display_name") if isinstance(aa, dict) else None
-                    if nm:
-                        authors.append(nm)
-
-                oa = it.get("open_access") or {}
-                is_oa = oa.get("is_oa") if isinstance(oa, dict) else None
-                best_oa = it.get("best_oa_location") or {}
-                pdf_url = None
-                if isinstance(best_oa, dict):
-                    pdf_url = best_oa.get("pdf_url") or best_oa.get("url") or None
-                if not pdf_url and isinstance(primary_loc, dict):
-                    pdf_url = primary_loc.get("pdf_url") or None
-
-                abstract = _openalex_reconstruct_abstract(
-                    it.get("abstract_inverted_index")
-                )
-
-                canonical_url = _coalesce(
-                    it.get("doi"),
-                    (
-                        best_oa.get("landing_page_url")
-                        if isinstance(best_oa, dict)
-                        else None
-                    ),
-                    (
-                        primary_loc.get("landing_page_url")
-                        if isinstance(primary_loc, dict)
-                        else None
-                    ),
-                    oid,
-                )
-
-                concepts = []
-                for c in it.get("concepts") or []:
-                    if isinstance(c, dict) and c.get("display_name"):
-                        concepts.append(
-                            {
-                                "display_name": c.get("display_name"),
-                                "score": c.get("score"),
-                                "id": c.get("id"),
-                            }
-                        )
-
-                out.append(
-                    Paper(
-                        title=title,
-                        authors=authors,
-                        year=_year_from_any(year),
-                        venue=venue,
-                        abstract=abstract,
-                        doi=doi,
-                        arxiv_id=None,
-                        url=canonical_url,
-                        pdf_url=pdf_url,
-                        source="openalex",
-                        is_open_access=bool(is_oa) if is_oa is not None else None,
-                        citation_count=_safe_int(it.get("cited_by_count")),
-                        extra={"openalex_id": oid, "concepts": concepts},
-                    )
-                )
-
-            if len(out) >= max_needed:
-                break
-
-        return out[:max_needed]
-
-
-class IEEEXploreSource(BaseHTTPSource):
-    name = "ieee"
-
-    def __init__(self, *, timeout: float = 25.0, api_key_env: str = "IEEE_API_KEY"):
-        super().__init__(timeout=timeout)
-        self._api_key = os.getenv(api_key_env) or None
-        if not self._api_key:
-            print(
-                "Warning: IEEE Xplore API key not found (set IEEE_API_KEY env var). IEEE will return []."
-            )
-
-    def search(
-        self,
-        query: str,
-        *,
-        limit: int = 50,
-        from_year: Optional[int] = None,
-        to_year: Optional[int] = None,
-        **kwargs,
-    ) -> List[Paper]:
-        if not self._api_key:
-            return []
-
-        url = "https://ieeexploreapi.ieee.org/api/v1/search/articles"
-        params: Dict[str, Any] = {
-            "apikey": self._api_key,
-            "querytext": query,
-            "rows": min(int(limit), 200),
-            "start": 1,
-            "sortfield": "publication_year",
-            "sortorder": "desc",
-        }
-        if from_year or to_year:
-            yr_from = from_year or 1800
-            yr_to = to_year or 2099
-            params["ranges"] = f"{yr_from}_{yr_to}_Year"
-
-        out: List[Paper] = []
-        try:
-            data = self._get_json(url, params=params, max_retries=2)
-            articles = data.get("articles", []) or []
-            for art in articles[:limit]:
-                title = _norm_space(art.get("title", ""))
-                year = _safe_int(art.get("publication_year"))
-                authors_raw = (art.get("authors") or {}).get("authors", [])
-                authors: List[str] = []
-                if isinstance(authors_raw, list):
-                    for a in authors_raw:
-                        if isinstance(a, dict) and a.get("preferredName"):
-                            authors.append(str(a.get("preferredName")))
-                        elif isinstance(a, str) and a.strip():
-                            authors.append(a.strip())
-                doi = _norm_doi(art.get("doi"))
-                venue = art.get("publication_title") or art.get(
-                    "publication_number", ""
-                )
-                abstract = art.get("abstract")
-                article_number = art.get("article_number")
-                url2 = (
-                    f"https://ieeexplore.ieee.org/document/{article_number}"
-                    if article_number
-                    else art.get("html_url")
-                )
-                pdf_url = art.get("pdf_url") or None
-                is_oa = _safe_bool(art.get("open_access"))
-
-                out.append(
-                    Paper(
-                        title=title,
-                        authors=authors,
-                        year=year,
-                        venue=venue,
-                        abstract=abstract,
-                        doi=doi,
-                        url=url2,
-                        pdf_url=pdf_url,
-                        source="ieee",
-                        is_open_access=is_oa,
-                        citation_count=_safe_int(art.get("citing_paper_count")),
-                        extra={"article_number": article_number},
-                    )
-                )
-        except httpx.HTTPStatusError as e:
-            print(
-                f"IEEE Xplore HTTP error: {e.response.status_code} - {e.response.text[:200]}"
-            )
-        except Exception as e:
-            print(f"IEEE Xplore error: {e}")
-
-        return out
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # NEW: DBLP (CS/ML friendly)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1228,9 +505,7 @@ class DBLPSource(BaseHTTPSource):
     def __init__(self, *, timeout: float = 25.0):
         super().__init__(timeout=timeout)
 
-    def search(
-        self, query: str, *, limit: int = 50, offset: int = 0, **kwargs
-    ) -> List[Paper]:
+    def search(self, query: str, *, limit: int = 50, offset: int = 0, **kwargs) -> List[Paper]:
         h = max(1, min(int(limit), 1000))
         f = max(0, int(offset))
         url = "https://dblp.org/search/publ/api"
@@ -1262,9 +537,7 @@ class DBLPSource(BaseHTTPSource):
             info = (hitem or {}).get("info") or {}
             if not isinstance(info, dict):
                 continue
-            title = _strip_markup(info.get("title")) or _norm_space(
-                str(info.get("title") or "")
-            )
+            title = _strip_markup(info.get("title")) or _norm_space(str(info.get("title") or ""))
             year = _year_from_any(info.get("year"))
             venue = _strip_markup(info.get("venue")) or info.get("venue") or None
             url2 = info.get("url") or None
@@ -1333,9 +606,7 @@ class HuggingFacePapersSource(BaseHTTPSource):
         super().__init__(timeout=timeout)
         self._token = os.getenv(token_env) or None
 
-    def search(
-        self, query: str, *, limit: int = 50, page: int = 1, **kwargs
-    ) -> List[Paper]:
+    def search(self, query: str, *, limit: int = 50, page: int = 1, **kwargs) -> List[Paper]:
         endpoint_candidates = [
             "https://huggingface.co/papers/search",
             "https://huggingface.co/api/papers",
@@ -1378,9 +649,7 @@ class HuggingFacePapersSource(BaseHTTPSource):
                         ct = (r.headers.get("content-type") or "").lower()
                         final_url = str(r.url)
                         if "json" not in ct:
-                            endpoint_error = (
-                                f"non-json content-type '{ct}' at {final_url}"
-                            )
+                            endpoint_error = f"non-json content-type '{ct}' at {final_url}"
                             break
 
                         payload = r.json()
@@ -1398,21 +667,15 @@ class HuggingFacePapersSource(BaseHTTPSource):
                         if not isinstance(it, dict):
                             continue
 
-                        title = _norm_space(
-                            it.get("title") or it.get("paper_title") or ""
-                        )
+                        title = _norm_space(it.get("title") or it.get("paper_title") or "")
                         if not title:
                             continue
 
                         y = _year_from_any(
-                            it.get("published")
-                            or it.get("published_date")
-                            or it.get("date")
+                            it.get("published") or it.get("published_date") or it.get("date")
                         )
                         url2 = it.get("url") or it.get("paper_url") or None
-                        arx = _norm_arxiv_id(
-                            it.get("arxiv_id") or it.get("arxiv") or None
-                        )
+                        arx = _norm_arxiv_id(it.get("arxiv_id") or it.get("arxiv") or None)
 
                         citation_count = _extract_citation_count(
                             it,
@@ -1424,9 +687,7 @@ class HuggingFacePapersSource(BaseHTTPSource):
                         )
                         if citation_count is None:
                             paper_info = (
-                                it.get("paper")
-                                if isinstance(it.get("paper"), dict)
-                                else None
+                                it.get("paper") if isinstance(it.get("paper"), dict) else None
                             )
                             if isinstance(paper_info, dict):
                                 citation_count = _extract_citation_count(
@@ -1465,9 +726,7 @@ class HuggingFacePapersSource(BaseHTTPSource):
 
                 if any_results_this_endpoint:
                     if current_query != query:
-                        print(
-                            f"[INFO] HF papers fallback query succeeded: '{current_query}'"
-                        )
+                        print(f"[INFO] HF papers fallback query succeeded: '{current_query}'")
                     return out[:limit]
 
             if endpoint_error and current_query == query:
@@ -1562,36 +821,6 @@ class HuggingFacePapersSource(BaseHTTPSource):
 # ──────────────────────────────────────────────────────────────────────────────
 # Optional enrichers (DOI-based)
 # ──────────────────────────────────────────────────────────────────────────────
-
-
-class UnpaywallEnricher(BaseHTTPSource):
-    """
-    Unpaywall OA + PDF lookup by DOI:
-      https://api.unpaywall.org/v2/{doi}?email=...
-    """
-
-    name = "unpaywall"
-
-    def __init__(self, *, timeout: float = 25.0, email: Optional[str] = None):
-        super().__init__(timeout=timeout)
-        self._email = (
-            email
-            or os.getenv("UNPAYWALL_EMAIL")
-            or os.getenv("UNPAYWALL_MAILTO")
-            or None
-        )
-
-    def lookup(self, doi: str) -> Optional[Dict[str, Any]]:
-        if not self._email:
-            return None
-        d = _norm_doi(doi)
-        if not d:
-            return None
-        url = f"https://api.unpaywall.org/v2/{d}"
-        try:
-            return self._get_json(url, params={"email": self._email}, max_retries=2)
-        except Exception:
-            return None
 
 
 class OpenCitationsEnricher(BaseHTTPSource):
@@ -1869,9 +1098,7 @@ class SystematicReview:
         if to_year is not None:
             out = [p for p in out if (p.year is None) or (p.year <= to_year)]
         if open_access_only:
-            out = [
-                p for p in out if p.is_open_access is True or (p.pdf_url is not None)
-            ]
+            out = [p for p in out if p.is_open_access is True or (p.pdf_url is not None)]
         return out
 
     def _fuzzy_dup(self, p: Paper, *, threshold: int = 93) -> bool:
@@ -1922,9 +1149,7 @@ class SystematicReview:
     # Enrichment (optional)
     # ──────────────────────────────────────────────────────────────────────
 
-    def enrich_with_unpaywall(
-        self, *, email: Optional[str] = None, max_workers: int = 8
-    ) -> int:
+    def enrich_with_unpaywall(self, *, email: Optional[str] = None, max_workers: int = 8) -> int:
         """
         For papers with a DOI: fill pdf_url / is_open_access when missing.
         Returns how many papers were updated.
@@ -2207,9 +1432,7 @@ class SystematicReview:
             )
         if plan.enrich_opencitations:
             upd = self.enrich_with_opencitations()
-            print(
-                f"[INFO] OpenCitations enrichment updated citation_count for {upd} papers."
-            )
+            print(f"[INFO] OpenCitations enrichment updated citation_count for {upd} papers.")
 
         screened, prisma = self.screen(plan.screening)
 
@@ -2513,9 +1736,7 @@ class ReviewPlots:
             fig.savefig(save, dpi=200, bbox_inches="tight")
         return fig
 
-    def year_histogram(
-        self, papers: Optional[List[Paper]] = None, *, save: Optional[str] = None
-    ):
+    def year_histogram(self, papers: Optional[List[Paper]] = None, *, save: Optional[str] = None):
         ps = papers if papers is not None else self.sr.papers
         years = [p.year for p in ps if p.year is not None]
         fig = self._fig("Publications by year", figsize=(8.2, 4.5))
@@ -2557,9 +1778,7 @@ class ReviewPlots:
             fig.savefig(save, dpi=200, bbox_inches="tight")
         return fig
 
-    def sources_bar(
-        self, papers: Optional[List[Paper]] = None, *, save: Optional[str] = None
-    ):
+    def sources_bar(self, papers: Optional[List[Paper]] = None, *, save: Optional[str] = None):
         ps = papers if papers is not None else self.sr.papers
         c = Counter([p.source for p in ps if p.source])
         fig = self._fig("Included papers by source", figsize=(7.8, 4.4))
@@ -2633,9 +1852,7 @@ class ReviewPlots:
                 linewidth=0.55,
                 alpha=0.9,
             )
-            self._finalize_axes(
-                plt.gca(), xlabel="Citations", ylabel="Count", ygrid=True
-            )
+            self._finalize_axes(plt.gca(), xlabel="Citations", ylabel="Count", ygrid=True)
             med = sorted(cites)[len(cites) // 2]
             plt.axvline(
                 med,
@@ -2708,9 +1925,7 @@ class ReviewPlots:
         self.sources_bar(ps, save=os.path.join(out_dir, "by_source.pdf"))
         self.venues_bar(ps, save=os.path.join(out_dir, "top_venues.pdf"))
         self.citations_distribution(ps, save=os.path.join(out_dir, "citations.pdf"))
-        self.keyword_cooccurrence(
-            ps, save=os.path.join(out_dir, "keyword_cooccurrence.pdf")
-        )
+        self.keyword_cooccurrence(ps, save=os.path.join(out_dir, "keyword_cooccurrence.pdf"))
         return out_dir
 
 
@@ -2718,7 +1933,10 @@ class ReviewPlots:
 # Tools
 # ──────────────────────────────────────────────────────────────────────────────
 
-def run_systematic_review(query: str, limit_per_source: int = 20, from_year: Optional[int] = None) -> str:
+
+def run_systematic_review(
+    query: str, limit_per_source: int = 20, from_year: Optional[int] = None
+) -> str:
     """Use when: You need to perform a systematic literature review across multiple sources.
 
     Inputs:
@@ -2743,27 +1961,35 @@ def run_systematic_review(query: str, limit_per_source: int = 20, from_year: Opt
         top = sr.sort(res.papers, by="citations")[:15]
         top_list = []
         for p in top:
-            top_list.append({
-                "title": p.title,
-                "authors": p.authors,
-                "year": p.year,
-                "venue": p.venue,
-                "citations": p.citation_count,
-                "url": p.url or p.pdf_url,
-                "source": p.source
-            })
+            top_list.append(
+                {
+                    "title": p.title,
+                    "authors": p.authors,
+                    "year": p.year,
+                    "venue": p.venue,
+                    "citations": p.citation_count,
+                    "url": p.url or p.pdf_url,
+                    "source": p.source,
+                }
+            )
 
-        return json.dumps({
-            "status": "ok",
-            "added_new": res.added_new,
-            "by_source": res.by_source,
-            "prisma": res.prisma.to_dict(),
-            "metrics": metrics,
-            "top_papers": top_list
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "status": "ok",
+                "added_new": res.added_new,
+                "by_source": res.by_source,
+                "prisma": res.prisma.to_dict(),
+                "metrics": metrics,
+                "top_papers": top_list,
+            },
+            ensure_ascii=False,
+        )
     except Exception as exc:
         import traceback
-        return json.dumps({"status": "error", "error": str(exc), "traceback": traceback.format_exc()})
+
+        return json.dumps(
+            {"status": "error", "error": str(exc), "traceback": traceback.format_exc()}
+        )
 
 
 __tools__ = [run_systematic_review]

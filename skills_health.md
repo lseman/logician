@@ -21,8 +21,8 @@ Goal: Quickly detect misrouting, over-triggering, stale state, or context confus
 2. **Last 3–5 Skill Invocations**
    - Skill name | User turn summary | Trigger condition | Outcome (success / fail / loop)
    - Example:
-     sp__brainstorming | "how should I structure auth" | design intent matched → activated | waiting for approval
-     sp__ralph | "fix this bug" | NO explicit PRD/Ralph phrase → should NOT have triggered | misfire
+     brainstorming | "how should I structure auth" | design intent matched → activated | waiting for approval
+     ralph | "fix this bug" | NO explicit PRD/Ralph phrase → should NOT have triggered | misfire
 
 3. **Routing Decision for Current Turn**
    - Turn classification: social / informational / execution / design / prd

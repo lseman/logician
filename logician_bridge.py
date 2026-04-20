@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import importlib
 import json
 import os
 import re
@@ -13,6 +14,12 @@ import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+# Disable bytecode cache during bridge execution to avoid stale .pyc imports
+# and reduce interpreter issues when loading dynamic skill modules.
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.dont_write_bytecode = True
+importlib.invalidate_caches()
 
 warnings.filterwarnings(
     "ignore",
@@ -608,6 +615,7 @@ class BridgeServer:
                 ov["mcp_servers"] = mcp
             if fast_init:
                 ov["lazy_mcp_init"] = True
+            ov["runtime_hooks_enabled"] = True
             return ov
 
         def make_agent(block: dict[str, Any]):
@@ -729,7 +737,13 @@ class BridgeServer:
                 from src.hooks import HookEngine
 
                 engine = HookEngine(progress_callback=_progress)
-                result = engine.execute_session_start_hooks(source)
+                active_name = self._hook_agent_name()
+                active_sid = self.sessions.get(active_name, "") if active_name else ""
+                result = engine.execute_session_start_hooks(
+                    source,
+                    session_id=active_sid,
+                    transcript_path=self._hook_transcript_path(active_name),
+                )
             except Exception as exc:
                 with self._startup_hook_lock:
                     if generation != self._startup_hook_generation:
@@ -753,6 +767,8 @@ class BridgeServer:
                 self._startup_hook_errors = list(result.errors or [])
                 self._startup_hook_complete = True
 
+            self._inject_startup_hook_contexts()
+
         thread = threading.Thread(
             target=_worker,
             name=f"bridge-startup-hooks-{generation}",
@@ -768,6 +784,46 @@ class BridgeServer:
             thread = self._startup_hook_thread
         if thread is not None and thread.is_alive():
             thread.join()
+
+    def _hook_agent_name(self, agent_name: str | None = None) -> str:
+        target = str(agent_name or self.active or "").strip()
+        if target and target in self.agents:
+            return target
+        return next(iter(self.agents.keys()), "") if self.agents else ""
+
+    def _hook_transcript_path(self, agent_name: str | None = None) -> str:
+        target = self._hook_agent_name(agent_name)
+        if not target:
+            return ""
+        agent = self.agents.get(target)
+        if agent is None:
+            return ""
+        memory = getattr(agent, "memory", None)
+        path = str(getattr(memory, "db_path", "") or "").strip()
+        if not path:
+            return ""
+        try:
+            return str(Path(path).expanduser())
+        except Exception:
+            return path
+
+    def _fire_session_end_hooks(self, reason: str) -> None:
+        seen_sessions: set[tuple[str, str]] = set()
+        for agent_name, sid in list(self.sessions.items()):
+            session_id = str(sid or "").strip()
+            if not session_id:
+                continue
+            key = (agent_name, session_id)
+            if key in seen_sessions:
+                continue
+            seen_sessions.add(key)
+            agent = self.agents.get(agent_name)
+            if agent is None:
+                continue
+            try:
+                agent.end_session(reason=reason, session_id=session_id)
+            except Exception:
+                continue
 
     def _handle_startup_hook_progress(
         self,
@@ -906,28 +962,36 @@ class BridgeServer:
         if direct.exists():
             return direct
 
-        # Also check for CLAUDE.md (used by some plugins like claude-mem)
-        claude_md = root / "CLAUDE.md"
-        if claude_md.exists():
-            return claude_md
-
-        # Check .claude-plugin/ subdirectory (common plugin structure)
+        # Prefer CLAUDE.md within a .claude-plugin directory anywhere under the plugin root.
         plugin_claude_md = root / ".claude-plugin" / "CLAUDE.md"
         if plugin_claude_md.exists():
             return plugin_claude_md
+
+        for candidate in sorted(root.rglob("CLAUDE.md")):
+            if not candidate.is_file():
+                continue
+            if candidate.parent.name == ".claude-plugin":
+                return candidate
+
+        # Also check for direct CLAUDE.md in the plugin root.
+        claude_md = root / "CLAUDE.md"
+        if claude_md.exists():
+            return claude_md
 
         for candidate in sorted(root.rglob("MEMORY.md")):
             if candidate.is_file():
                 return candidate
 
         # Also recursively search for CLAUDE.md in nested plugin directories
+        first_candidate: Path | None = None
         for candidate in sorted(root.rglob("CLAUDE.md")):
-            if candidate.is_file():
-                # Prefer CLAUDE.md in .claude-plugin/ directories
-                if candidate.parent.name == ".claude-plugin":
-                    return candidate
-            break  # Only check the first one found via rglob for CLAUDE.md
-        return None
+            if not candidate.is_file():
+                continue
+            if candidate.parent.name == ".claude-plugin":
+                return candidate
+            if first_candidate is None:
+                first_candidate = candidate
+        return first_candidate
 
     def _parse_memory_dir_summary(self, root: Path) -> dict[str, Any]:
         memory_index = self._find_memory_index(root)
@@ -1075,13 +1139,210 @@ class BridgeServer:
             sp = getattr(agent, "system_prompt", None) or ""
             agent.system_prompt = f"{sp}\n\n{block}" if sp else block
 
+    def _normalize_system_prompt(self, text: str) -> str:
+        if not text:
+            return ""
+
+        pattern = r"<startup-hook-context>.*?</startup-hook-context>"
+        matches = re.findall(pattern, text, flags=re.DOTALL | re.IGNORECASE)
+        if matches:
+            normalized_contents: list[str] = []
+            for block in matches:
+                inner = re.sub(
+                    r"</?startup-hook-context>",
+                    "",
+                    block,
+                    flags=re.DOTALL | re.IGNORECASE,
+                ).strip()
+                if inner:
+                    normalized_contents.append(inner)
+
+            merged_block = "<startup-hook-context>\n"
+            merged_block += "\n\n".join(normalized_contents)
+            merged_block += "\n</startup-hook-context>"
+
+            text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+            text = f"{text}\n\n{merged_block}" if text else merged_block
+
+        sections = [s.strip() for s in re.split(r"\n{2,}", text.strip()) if s.strip()]
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for sec in sections:
+            if len(sec) > 140 or sec.count("\n") > 3:
+                if sec in seen:
+                    continue
+                seen.add(sec)
+            deduped.append(sec)
+        return "\n\n".join(deduped)
+
+    def _format_context_preview(
+        self,
+        preview: dict[str, Any],
+        sid: str,
+        runtime_info: dict[str, Any] | None = None,
+    ) -> str:
+        system_prompt = self._normalize_system_prompt(str(preview.get("system_prompt", "")))
+        out: list[str] = []
+        out.append(f"session: {preview.get('session_id', sid)}")
+        out.append(f"classification: {preview.get('classified_as', 'execution')}")
+        domains = preview.get("domain_groups") or []
+        if domains:
+            out.append(f"domain tools: {', '.join(str(item) for item in domains)}")
+        out.append(
+            "messages in prompt: "
+            f"{preview.get('trimmed_message_count', 0)}"
+            f" (loaded={preview.get('history_loaded_count', 0)}, "
+            f"pre-trim={preview.get('untrimmed_message_count', 0)}, "
+            f"limit={preview.get('history_limit', 0)})"
+        )
+        out.append(f"context token budget: {preview.get('context_token_budget', 0)}")
+        out.append("")
+        out.append("## System Prompt")
+        out.append("")
+        out.append("```md")
+        out.append(system_prompt.rstrip())
+        out.append("```")
+        out.append("")
+        out.append("## Message Window")
+        out.append("")
+        try:
+            hook_matches = re.findall(
+                r"<startup-hook-context>(.*?)</startup-hook-context>",
+                system_prompt,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+            suppress_texts: set[str] = set(h.strip() for h in hook_matches if h and h.strip())
+            for sec in re.split(r"\n{2,}", system_prompt or ""):
+                s = sec.strip()
+                if not s:
+                    continue
+                if len(s) > 140 or s.count("\n") > 3:
+                    suppress_texts.add(s)
+        except Exception:
+            suppress_texts = set()
+
+        filtered_messages = []
+        for msg in preview.get("messages", []) or []:
+            content = str(msg.get("content", "") or "").strip()
+            if not content:
+                continue
+            skip = False
+            for st in suppress_texts:
+                if not st:
+                    continue
+                if content == st or content in st or st in content:
+                    skip = True
+                    break
+            if skip:
+                continue
+            filtered_messages.append(msg)
+
+        for idx, msg in enumerate(filtered_messages, start=1):
+            role = str(msg.get("role", "unknown"))
+            name = str(msg.get("name", "") or "").strip()
+            label = f"{idx}. {role}"
+            if name:
+                label += f" ({name})"
+            out.append(f"### {label}")
+            out.append("")
+            out.append("```text")
+            out.append(str(msg.get("content", "")).rstrip())
+            out.append("```")
+            out.append("")
+
+        if runtime_info is not None:
+            out.append("## Runtime Context")
+            out.append("")
+            out.append(
+                f"messages: {runtime_info.get('persisted_messages', 0)} / limit {runtime_info.get('history_limit', 0)}"
+            )
+            rt = runtime_info.get("runtime", {})
+            if rt.get("loaded"):
+                cols = ", ".join(rt.get("value_columns", [])[:6]) or "none"
+                out.append(
+                    f"dataset: {rt.get('data_name', 'unnamed')} rows={rt.get('row_count', 0)} cols={cols}"
+                )
+            else:
+                out.append("dataset: none")
+            active_repos = list(rt.get("active_repos") or [])
+            if active_repos:
+                repo_preview = ", ".join(
+                    str(item.get("id") or item.get("name") or "").strip()
+                    for item in active_repos[:8]
+                    if str(item.get("id") or item.get("name") or "").strip()
+                )
+                if repo_preview:
+                    out.append(f"active_repos: {repo_preview}")
+
+        return "\n".join(out)
+
+    def _normalize_startup_hook_blocks(self, text: str) -> str:
+        """Normalize startup hook context blocks in system prompt."""
+        if not text:
+            return ""
+
+        pattern = r"<startup-hook-context>.*?</startup-hook-context>"
+        matches = re.findall(pattern, text, flags=re.DOTALL | re.IGNORECASE)
+        if matches:
+            normalized_contents: list[str] = []
+            for block in matches:
+                inner = re.sub(
+                    r"</?startup-hook-context>",
+                    "",
+                    block,
+                    flags=re.DOTALL | re.IGNORECASE,
+                ).strip()
+                if inner:
+                    normalized_contents.append(inner)
+
+            merged_block = "<startup-hook-context>\n"
+            merged_block += "\n\n".join(normalized_contents)
+            merged_block += "\n</startup-hook-context>"
+
+            text = re.sub(pattern, "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+            text = f"{text}\n\n{merged_block}" if text else merged_block
+
+        sections = [s.strip() for s in re.split(r"\n{2,}", text.strip()) if s.strip()]
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for sec in sections:
+            if len(sec) > 140 or sec.count("\n") > 3:
+                if sec in seen:
+                    continue
+                seen.add(sec)
+            deduped.append(sec)
+        return "\n\n".join(deduped)
+
+    def _inject_startup_hook_contexts(self) -> None:
+        if not self._startup_hook_contexts:
+            return
+
+        block = (
+            "<startup-hook-context>\n"
+            + "\n\n".join(self._startup_hook_contexts)
+            + "\n</startup-hook-context>"
+        )
+        for agent in self.agents.values():
+            sp = getattr(agent, "system_prompt", None) or ""
+            cleaned = self._normalize_startup_hook_blocks(sp)
+            cleaned = re.sub(
+                r"<startup-hook-context>.*?</startup-hook-context>\s*",
+                "",
+                cleaned,
+                flags=re.DOTALL | re.IGNORECASE,
+            ).strip()
+            agent.system_prompt = f"{cleaned}\n\n{block}" if cleaned else block
+
     def _active_agent(self):
         if self.active is None:
             raise RuntimeError("No active agent")
         return self.agents[self.active]
 
     def _active_mcp_names(self) -> list[str]:
-        active = self.active or ""
+        # If no active agent is explicitly selected, fall back to the
+        # first registered agent so /status can show a meaningful context
+        # preview in unattended runs.
+        active = self.active or (next(iter(self.agents.keys()), "") if self.agents else "")
         if not active or active not in self.agents:
             return []
         try:
@@ -1294,11 +1555,7 @@ class BridgeServer:
         try:
             from src.rag_runtime import legacy_rag_vector_paths
 
-            return [
-                str(path)
-                for path in legacy_rag_vector_paths(ROOT_DIR)
-                if path.exists()
-            ]
+            return [str(path) for path in legacy_rag_vector_paths(ROOT_DIR) if path.exists()]
         except Exception:
             return []
 
@@ -1513,8 +1770,9 @@ class BridgeServer:
         *,
         include_repo_library: bool = True,
         include_rag_inventory: bool = True,
+        include_context_preview: bool = False,
     ) -> dict[str, Any]:
-        active = self.active or ""
+        active = self.active or (next(iter(self.agents.keys()), "") if self.agents else "")
         sid = self.sessions.get(active, "")
         msgs = 0
         todo = []
@@ -1524,6 +1782,9 @@ class BridgeServer:
         retrieval_insights = []
         loaded_tools: list[str] = []
         loaded_skills: list[str] = []
+        context_size = 0
+        context_limit = 0
+        context_token_budget = 0
         if active and sid and active in self.agents:
             try:
                 ctx = self.agents[active].describe_runtime_context(sid)
@@ -1534,6 +1795,26 @@ class BridgeServer:
                 rag_docs = list(runtime.get("rag_docs") or [])
                 active_repos = list(runtime.get("active_repos") or [])
                 retrieval_insights = list(runtime.get("retrieval_insights") or [])
+                context_size = int(
+                    ctx.get("loaded_message_budget", ctx.get("persisted_messages", 0))
+                )
+                context_limit = int(ctx.get("history_limit", 0))
+                if include_context_preview:
+                    preview = self.agents[active].preview_prompt_context("", sid)
+                    info = self.agents[active].describe_runtime_context(sid)
+                    rendered = self._format_context_preview(preview, sid, info)
+                    context_size = len(rendered)
+                    context_limit = 0
+                    context_token_budget = int(preview.get("context_token_budget", 0))
+                else:
+                    context_token_budget = int(
+                        getattr(
+                            getattr(self.agents[active], "config", None),
+                            "context_token_budget",
+                            0,
+                        )
+                        or 0
+                    )
             except Exception:
                 msgs = 0
                 todo = []
@@ -1541,6 +1822,9 @@ class BridgeServer:
                 rag_docs = []
                 active_repos = []
                 retrieval_insights = []
+                context_size = 0
+                context_limit = 0
+                context_token_budget = 0
 
         tool_count = 0
         skill_count = 0
@@ -1591,6 +1875,9 @@ class BridgeServer:
             "active": active,
             "session": sid,
             "msg_count": msgs,
+            "context_size": context_size,
+            "context_limit": context_limit,
+            "context_token_budget": context_token_budget,
             "agents": sorted(self.agents.keys()),
             "mcp_servers": self._active_mcp_names(),
             "pipeline": self.pipeline,
@@ -1626,10 +1913,12 @@ class BridgeServer:
                 self._start_startup_hooks_async("startup")
                 self._wait_for_startup_hooks()
 
-        hook_context, hook_count, hook_context_complete, _hook_errors = self._startup_hook_snapshot()
+        hook_context, hook_count, hook_context_complete, _hook_errors = (
+            self._startup_hook_snapshot()
+        )
 
         memory_summary = (
-            self._parse_memory_summary(exclude_session_start_hook_plugins=True)
+            self._parse_memory_summary(exclude_session_start_hook_plugins=False)
             if include_memory_summary
             else {
                 "enabled": bool(self.cfg.get("project_memory_enabled", True)),
@@ -1662,7 +1951,7 @@ class BridgeServer:
         self.pipeline = None
         self._invalidate_startup_hook_cache()
         if self.cfg.get("project_memory_enabled", True):
-            self._inject_project_memory(exclude_session_start_hook_plugins=True)
+            self._inject_project_memory(exclude_session_start_hook_plugins=False)
         if fast_init:
             self._start_startup_hooks_async("startup")
             self._warm_mcp_servers_async()
@@ -1743,6 +2032,7 @@ class BridgeServer:
 
         if cmd in ("/quit", "/exit", "/q"):
             should_exit = True
+            self._fire_session_end_hooks("exit")
             out.append("bye")
 
         elif cmd == "/help":
@@ -1771,7 +2061,7 @@ class BridgeServer:
             )
 
         elif cmd == "/status":
-            snap = self._state_snapshot()
+            snap = self._state_snapshot(include_context_preview=True)
             agents = ", ".join(snap.get("agents", []) or []) or "-"
             mcps = ", ".join(snap.get("mcp_servers", []) or []) or "-"
             rag = dict(snap.get("rag_inventory") or {})
@@ -1788,6 +2078,7 @@ class BridgeServer:
                     f"active: {snap.get('active', '-')}",
                     f"session: {snap.get('session', '-')}",
                     f"messages: {snap.get('msg_count', 0)}",
+                    f"ctx: {snap.get('context_size', 0)}",
                     f"agents: {agents}",
                     f"mcp: {mcps}",
                     f"pipeline: {ptxt}",
@@ -1799,433 +2090,17 @@ class BridgeServer:
                     f"rag_chunks: {rag.get('repo_chunks', 0)}",
                 ]
             )
-
-        elif cmd == "/plugins":
-            try:
-                from src.plugin_manager.manager import PluginManager
-
-                manager = PluginManager()
-                subcmd = args[0].lower() if args else "list"
-                if subcmd in ("list", "ls"):
-                    result = manager.list_plugins()
-                    if result.get("status") != "ok":
-                        out.append(f"plugins: {result.get('message', 'failed')}")
-                    else:
-                        plugins = result.get("plugins", []) or []
-                        if not plugins:
-                            out.append("No plugins installed.")
-                        else:
-                            out.append("# Installed plugins")
-                            for plugin in plugins:
-                                enabled = "enabled" if plugin.get("enabled") else "disabled"
-                                out.append(
-                                    f"- {plugin.get('plugin_id')} v{plugin.get('version', 'unknown')} "
-                                    f"[{enabled}] scope={plugin.get('scope', 'user')} "
-                                    f"path={plugin.get('install_path', '')}"
-                                )
-                elif subcmd in ("enable", "load") and len(args) > 1:
-                    result = manager.enable(args[1])
-                    self._invalidate_startup_hook_cache()
-                    out.append(result.get("message", ""))
-                    if result.get("status") == "enabled":
-                        try:
-                            agent = self._active_agent()
-                            if hasattr(agent, "tools") and hasattr(
-                                agent.tools, "set_additional_skills_dir_paths"
-                            ):
-                                plugin_paths = manager.skills_paths()
-                                preserved = [
-                                    p
-                                    for p in list(
-                                        getattr(agent.tools, "additional_skills_dir_paths", []) or []
-                                    )
-                                    if p not in plugin_paths
-                                ]
-                                agent.tools.set_additional_skills_dir_paths(
-                                    preserved + plugin_paths
-                                )
-                                if hasattr(agent.tools, "reload_skills"):
-                                    agent.tools.reload_skills()
-                        except Exception:
-                            pass
-                elif subcmd in ("disable", "unload") and len(args) > 1:
-                    result = manager.disable(args[1])
-                    self._invalidate_startup_hook_cache()
-                    out.append(result.get("message", ""))
-                    if result.get("status") == "disabled":
-                        try:
-                            agent = self._active_agent()
-                            if hasattr(agent, "tools") and hasattr(
-                                agent.tools, "set_additional_skills_dir_paths"
-                            ):
-                                plugin_paths = manager.skills_paths()
-                                preserved = [
-                                    p
-                                    for p in list(
-                                        getattr(agent.tools, "additional_skills_dir_paths", []) or []
-                                    )
-                                    if p not in plugin_paths
-                                ]
-                                agent.tools.set_additional_skills_dir_paths(
-                                    preserved + plugin_paths
-                                )
-                                if hasattr(agent.tools, "reload_skills"):
-                                    agent.tools.reload_skills()
-                        except Exception:
-                            pass
-                else:
-                    out.append("Usage: /plugins [list|enable|disable] <plugin_id or plugin name>")
-            except Exception as exc:
-                out.append(f"plugins: failed to load plugin registry: {exc}")
-
-        elif cmd == "/rag":
-            ag = self._active_agent()
-            active_name = self.active or ""
-            sid_text = self.sessions.get(active_name, "")
-            subcmd = args[0].lower() if args else "list"
-
-            if subcmd == "clear":
-                self._clear_recent_rag_queries(active_name, sid_text)
-                out.append("cleared recent RAG searches for this session")
-
-            elif subcmd == "list":
-                repo_ref = args[1] if len(args) > 1 else ""
-                repo = self._resolve_repo_ref(repo_ref) if repo_ref else None
-                raw_payload = ag.tools.call_tool(
-                    "rag_list",
-                    max_sources=10,
-                    include_paths=False,
-                    repo_id=str(repo.get("id") or "") if repo else "",
-                )
-                payload = _parse_tool_payload(raw_payload)
-                if str(payload.get("status") or "").lower() != "ok":
-                    out.append(f"rag list failed: {payload.get('error', 'unknown error')}")
-                else:
-                    out.append(
-                        "store: "
-                        f"{payload.get('vector_backend', 'unknown')} @ {payload.get('vector_path', str(_rag_vector_path()))}"
-                    )
-                    out.append(
-                        "chunks: "
-                        f"{payload.get('total_chunks', 0)} total · "
-                        f"{payload.get('non_artifact_chunks', 0)} source · "
-                        f"{payload.get('deleted_chunks', 0)} deleted"
-                    )
-                    out.append(
-                        "repos: "
-                        f"{payload.get('unique_repos', 0)} indexed · "
-                        f"{payload.get('returned_repos', 0)} shown"
-                    )
-                    for repo_row in list(payload.get("repos") or [])[:8]:
-                        name = str(
-                            repo_row.get("repo_name") or repo_row.get("repo_id") or "repo"
-                        ).strip()
-                        repo_id = str(repo_row.get("repo_id") or "").strip()
-                        label = name if not repo_id or repo_id == name else f"{name} ({repo_id})"
-                        out.append(
-                            f"  {label} · chunks={repo_row.get('artifact_free_chunks', repo_row.get('chunks', 0))} · paths={repo_row.get('unique_paths', 0)}"
-                        )
-                        sample_paths = list(repo_row.get("sample_paths") or [])
-                        if sample_paths:
-                            out.append(f"    sample: {', '.join(sample_paths[:3])}")
-                    sources = list(payload.get("sources") or [])
-                    if sources:
-                        source_preview = ", ".join(
-                            str(item.get("source") or "unknown") for item in sources[:5]
-                        )
-                        out.append(f"sources: {source_preview}")
-                    legacy_paths = list(payload.get("legacy_paths") or [])
-                    if legacy_paths:
-                        out.append("legacy paths: " + ", ".join(str(item) for item in legacy_paths))
-
-            elif subcmd == "search":
-                if len(args) < 2:
-                    out.append("usage: /rag search <query> [top_k]")
-                else:
-                    top_k = 5
-                    query_tokens = args[1:]
-                    if len(query_tokens) > 1:
-                        try:
-                            candidate = int(query_tokens[-1])
-                        except Exception:
-                            candidate = 0
-                        if candidate > 0:
-                            top_k = max(1, min(candidate, 12))
-                            query_tokens = query_tokens[:-1]
-                    query_text = " ".join(query_tokens).strip()
-                    if not query_text:
-                        out.append("usage: /rag search <query> [top_k]")
-                    else:
-                        raw_payload = ag.tools.call_tool(
-                            "rag_search",
-                            query=query_text,
-                            top_k=top_k,
-                        )
-                        payload = _parse_tool_payload(raw_payload)
-                        if str(payload.get("status") or "").lower() != "ok":
-                            out.append(
-                                f"rag search failed: {payload.get('error', 'unknown error')}"
-                            )
-                        else:
-                            hits = list(payload.get("results") or [])
-                            out.append(
-                                f"rag search: {query_text} · {payload.get('count', len(hits))} hit(s)"
-                            )
-                            hit_preview: list[dict[str, Any]] = []
-                            for index, row in enumerate(hits[:6], start=1):
-                                repo_name = str(
-                                    row.get("repo_name") or row.get("repo_id") or "global"
-                                ).strip()
-                                rel_path = str(
-                                    row.get("repo_rel_path")
-                                    or row.get("path")
-                                    or row.get("source")
-                                    or ""
-                                ).strip()
-                                distance = row.get("distance", 0)
-                                preview = str(row.get("preview") or "").strip().replace("\n", " ")
-                                out.append(
-                                    f"  {index}. {repo_name} · {rel_path or 'chunk'} · d={distance}"
-                                )
-                                if preview:
-                                    out.append(f"     {preview[:180]}")
-                                hit_preview.append(
-                                    {
-                                        "repo_name": repo_name,
-                                        "repo_id": str(row.get("repo_id") or "").strip(),
-                                        "path": rel_path,
-                                        "distance": distance,
-                                    }
-                                )
-                            if not hits:
-                                message = str(payload.get("message") or "no matches found").strip()
-                                out.append(message)
-                            graph_expansion = list(payload.get("graph_expansion") or [])
-                            if graph_expansion:
-                                summary = []
-                                for item in graph_expansion[:3]:
-                                    repo_id = str(item.get("repo_id") or "repo").strip()
-                                    related_files = list(item.get("related_files") or [])
-                                    summary.append(f"{repo_id}:{len(related_files)} graph file(s)")
-                                if summary:
-                                    out.append("graph expansion: " + " · ".join(summary))
-                            self._remember_rag_query(
-                                active_name,
-                                sid_text,
-                                {
-                                    "query": query_text,
-                                    "top_k": top_k,
-                                    "count": int(payload.get("count", len(hits)) or 0),
-                                    "repo_filter": list(payload.get("repo_filter") or []),
-                                    "hits": hit_preview,
-                                },
-                            )
-
-            else:
-                out.extend(
-                    [
-                        "usage: /rag list [repo_ref]",
-                        "       /rag search <query> [top_k]",
-                        "       /rag clear",
-                    ]
-                )
-
-        elif cmd == "/skills-health":
-            ag = self._active_agent()
-            include_sources = False
-            max_items = 25
-            for arg in args:
-                if arg in {"--sources", "-s"}:
-                    include_sources = True
-                    continue
-                try:
-                    max_items = max(1, min(200, int(arg)))
-                except Exception:
-                    out.append(f"ignored invalid argument: {arg}")
-
-            raw = ag.tools.call_tool(
-                "skills_health",
-                include_sources=include_sources,
-                max_items=max_items,
-            )
-            payload = _parse_tool_payload(raw)
-            if str(payload.get("status", "")).lower() != "ok":
-                out.append(f"skills_health failed: {payload.get('error', 'unknown error')}")
-            else:
-                paths = payload.get("paths", {}) or {}
-                discovery = payload.get("discovery", {}) or {}
-                catalog = payload.get("catalog", {}) or {}
-                coding = payload.get("coding", {}) or {}
-                organization = payload.get("organization", {}) or {}
-                registry = payload.get("registry", {}) or {}
-                checks = payload.get("checks", {}) or {}
-
-                out.extend(
-                    [
-                        f"skills_dir: {paths.get('skills_dir_path', '-')}",
-                        f"skills_md: {paths.get('skills_md_path', '-')}",
-                        "discovery: "
-                        f"sources={discovery.get('source_count', 0)} "
-                        f"readable={discovery.get('readable_count', 0)} "
-                        f"unreadable={discovery.get('unreadable_count', 0)} "
-                        f"superpowers={discovery.get('superpowers_skill_md_count', 0)}",
-                        "catalog: "
-                        f"total={catalog.get('skills_total', 0)} "
-                        f"guidance={catalog.get('guidance_only_skills', 0)} "
-                        f"tool_backed={catalog.get('tool_backed_skills', 0)} "
-                        f"superpowers={catalog.get('superpowers_skills', 0)}",
-                        "coding: "
-                        f"maturity={coding.get('maturity', 'unknown')} "
-                        f"coverage={coding.get('required_coverage_pct', 0.0)}% "
-                        f"missing_required={coding.get('missing_required_count', 0)} "
-                        f"coding_tools={coding.get('coding_tools_total', 0)}",
-                        "organization: "
-                        f"status={organization.get('status', 'unknown')} "
-                        f"modules={organization.get('coding_modules_count', 0)} "
-                        f"issues={organization.get('issues_count', 0)}",
-                        "registry: "
-                        f"tools={registry.get('tools_total', 0)} "
-                        f"python={registry.get('python_skill_tools', 0)} "
-                        f"builtin={registry.get('builtin_tools', 0)}",
-                        "checks: "
-                        f"brainstorming_present={checks.get('brainstorming_present', False)} "
-                        f"missing_tool_links={checks.get('missing_tools_by_skill_count', 0)}",
-                    ]
-                )
-
-                missing = checks.get("missing_tools_by_skill", []) or []
-                if missing:
-                    out.append("missing tool links:")
-                    for item in missing[:10]:
-                        skill_id = str(item.get("skill_id", "?"))
-                        miss = item.get("missing_tools", []) or []
-                        preview = ", ".join(str(v) for v in miss[:6])
-                        if len(miss) > 6:
-                            preview += f" … (+{len(miss) - 6})"
-                        out.append(f"  {skill_id}: {preview}")
-
-                missing_required = coding.get("missing_required_tools", []) or []
-                if missing_required:
-                    preview = ", ".join(str(v) for v in missing_required[:10])
-                    if len(missing_required) > 10:
-                        preview += f" … (+{len(missing_required) - 10})"
-                    out.append(f"missing required capability tools: {preview}")
-
-                org_issues = organization.get("issues", []) or []
-                if org_issues:
-                    out.append("organization issues:")
-                    for issue in org_issues[:10]:
-                        out.append(f"  - {issue}")
-
-                if include_sources:
-                    sources = discovery.get("sources", []) or []
-                    if sources:
-                        out.append("sample sources:")
-                        for src in sources[:10]:
-                            out.append(f"  {src}")
-
-        elif cmd == "/agents":
-            if self.active is None:
-                out.append("No active agent")
-            else:
-                out.append("agents:")
-                for name in self.agents:
-                    mark = " ◀" if name == self.active else ""
-                    mcp = [c.name for c in getattr(self.agents[name], "_mcp_clients", [])]
-                    mcp_tag = f"  mcp: {', '.join(mcp)}" if mcp else ""
-                    out.append(f"  {name}{mark}{mcp_tag}")
-
-        elif cmd == "/agent":
-            if self.active is None:
-                out.append("No active agent")
-            elif not args:
-                out.append(f"active: {self.active}")
-            elif args[0] not in self.agents:
-                out.append(f"unknown '{args[0]}'")
-            else:
-                self.active = args[0]
-                self.sessions.setdefault(self.active, _new_session_id())
-                out.append(f"switched to '{self.active}' · {self.sessions[self.active]}")
-
-        elif cmd == "/pipeline":
-            if args and args[0].lower() == "stop":
-                self.pipeline = None
-                out.append("pipeline cancelled")
-            elif len(args) < 2:
-                out.append("usage: /pipeline <a> <b> [rounds]")
-            elif args[0] not in self.agents or args[1] not in self.agents:
-                out.append("unknown agent")
-            else:
-                rounds = 3
-                if len(args) >= 3:
-                    rounds = max(1, int(args[2]))
-                self.pipeline = {"a": args[0], "b": args[1], "rounds": rounds}
-                out.append(f"pipeline: {args[0]} -> {args[1]} x{rounds} (send message to run)")
-
         elif cmd == "/context":
             ag = self._active_agent()
             sid = self.sessions.get(self.active or "", "")
             mode = (args[0].lower() if args else "").strip()
+            query = ""
             if mode in {"preview", "prompt"}:
                 query = " ".join(args[1:]).strip()
-                preview = ag.preview_prompt_context(query, sid)
-                out.append(f"session: {preview.get('session_id', sid)}")
-                out.append(f"classification: {preview.get('classified_as', 'execution')}")
-                domains = preview.get("domain_groups") or []
-                if domains:
-                    out.append(f"domain tools: {', '.join(str(item) for item in domains)}")
-                out.append(
-                    "messages in prompt: "
-                    f"{preview.get('trimmed_message_count', 0)}"
-                    f" (loaded={preview.get('history_loaded_count', 0)}, "
-                    f"pre-trim={preview.get('untrimmed_message_count', 0)}, "
-                    f"limit={preview.get('history_limit', 0)})"
-                )
-                out.append(f"context token budget: {preview.get('context_token_budget', 0)}")
-                out.append("")
-                out.append("## System Prompt")
-                out.append("")
-                out.append("```md")
-                out.append(str(preview.get("system_prompt", "")).rstrip())
-                out.append("```")
-                out.append("")
-                out.append("## Message Window")
-                out.append("")
-                for idx, msg in enumerate(preview.get("messages", []) or [], start=1):
-                    role = str(msg.get("role", "unknown"))
-                    name = str(msg.get("name", "") or "").strip()
-                    label = f"{idx}. {role}"
-                    if name:
-                        label += f" ({name})"
-                    out.append(f"### {label}")
-                    out.append("")
-                    out.append("```text")
-                    out.append(str(msg.get("content", "")).rstrip())
-                    out.append("```")
-                    out.append("")
-            else:
-                info = ag.describe_runtime_context(sid)
-                out.append(f"session: {sid}")
-                out.append(
-                    f"messages: {info.get('persisted_messages', 0)} / limit {info.get('history_limit', 0)}"
-                )
-                rt = info.get("runtime", {})
-                if rt.get("loaded"):
-                    cols = ", ".join(rt.get("value_columns", [])[:6]) or "none"
-                    out.append(
-                        f"dataset: {rt.get('data_name', 'unnamed')} rows={rt.get('row_count', 0)} cols={cols}"
-                    )
-                else:
-                    out.append("dataset: none")
-                active_repos = list(rt.get("active_repos") or [])
-                if active_repos:
-                    preview = ", ".join(
-                        str(item.get("id") or item.get("name") or "").strip()
-                        for item in active_repos[:8]
-                        if str(item.get("id") or item.get("name") or "").strip()
-                    )
-                    if preview:
-                        out.append(f"active_repos: {preview}")
+            preview = ag.preview_prompt_context(query, sid)
+            info = ag.describe_runtime_context(sid)
+            rendered = self._format_context_preview(preview, sid, info)
+            out.extend(rendered.split("\n"))
 
         elif cmd == "/compact":
             ag = self._active_agent()
@@ -2237,23 +2112,25 @@ class BridgeServer:
         elif cmd == "/reset":
             ag = self._active_agent()
             sid = self.sessions.get(self.active or "", "")
-            ag.reset_runtime_state(sid)
+            ag.reset_runtime_state(sid, reason="clear")
             out.append("runtime state cleared")
 
         elif cmd == "/new":
             if self.active is None:
                 out.append("No active agent")
             else:
+                old_sid = self.sessions.get(self.active, "")
                 self.sessions[self.active] = _new_session_id()
                 ag = self._active_agent()
                 try:
-                    ag.detach_runtime_state()
+                    ag.detach_runtime_state(session_id=old_sid, reason="clear")
                 except Exception:
                     pass
                 self.pipeline = None
                 out.append(f"new session · {self.sessions[self.active]}")
 
         elif cmd == "/reload":
+            self._fire_session_end_hooks("reload")
             cp = _resolve_config_path(params.get("config_path"))
             self.cfg, self.agents = self._load_agents(cp)
             self.active = next(iter(self.agents.keys()))
@@ -2261,7 +2138,7 @@ class BridgeServer:
             self.pipeline = None
             self._invalidate_startup_hook_cache()
             if self.cfg.get("project_memory_enabled", True):
-                self._inject_project_memory(exclude_session_start_hook_plugins=True)
+                self._inject_project_memory(exclude_session_start_hook_plugins=False)
             out.append(f"reloaded · {len(self.agents)} agent(s)")
 
         elif cmd == "/sessions":
@@ -3032,14 +2909,14 @@ class BridgeServer:
 
         return {
             "messages": out,
-            "state": self._state_snapshot(),
+            "state": self._state_snapshot(include_context_preview=True),
             "exit": should_exit,
         }
 
     def chat(self, params: dict[str, Any]) -> dict[str, Any]:
         raw = str(params.get("message", "")).strip()
         if not raw:
-            return {"messages": [], "state": self._state_snapshot()}
+            return {"messages": [], "state": self._state_snapshot(include_context_preview=True)}
 
         active = self.active
         if active is None:
@@ -3111,7 +2988,10 @@ class BridgeServer:
                 self._emit("thinking_token", {"token": tok})
                 return
             thinking_buffer.append(tok)
-            if "\n" in tok or sum(len(part) for part in thinking_buffer) >= _STREAM_EVENT_CHAR_BATCH:
+            if (
+                "\n" in tok
+                or sum(len(part) for part in thinking_buffer) >= _STREAM_EVENT_CHAR_BATCH
+            ):
                 _flush_thinking_buffer()
 
         def _emit_file_diff(name: str, tool_args: dict[str, Any], info: dict[str, Any]):
@@ -3287,7 +3167,7 @@ class BridgeServer:
                         resp = f"[error] {exc}"
                     turns.append({"agent": str(ag_name), "text": str(resp)})
                     message = str(resp)
-            state = self._state_snapshot()
+            state = self._state_snapshot(include_context_preview=True)
             return {"pipeline": True, "turns": turns, "state": state}
 
         ag = self._active_agent()
@@ -3384,7 +3264,7 @@ class BridgeServer:
             "tool_errors": turn_tool_errors[0],
             "session_id": sid,
             "message_count": len(list(getattr(run_resp, "messages", []) or [])),
-            "state": self._state_snapshot(),
+            "state": self._state_snapshot(include_context_preview=True),
         }
 
 
@@ -3407,9 +3287,13 @@ def main() -> None:
             elif method == "chat":
                 result = server.chat(params)
             elif method == "state":
+                # When asked for state over RPC (e.g. from rust-cli), include a
+                # context preview so callers receive system prompt and message
+                # window information without requiring additional params.
                 result = server._state_snapshot(
                     include_repo_library=bool(params.get("include_repo_library", True)),
                     include_rag_inventory=bool(params.get("include_rag_inventory", True)),
+                    include_context_preview=True,
                 )
             elif method == "startup_context":
                 result = server._startup_context(

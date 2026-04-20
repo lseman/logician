@@ -1061,8 +1061,12 @@ impl MdRenderer {
 
         let visible_cols: Vec<usize> = (0..cols)
             .filter(|&idx| {
-                rows.iter()
-                    .any(|row| !row.get(idx).map(|cell| cell.trim()).unwrap_or("").is_empty())
+                rows.iter().any(|row| {
+                    !row.get(idx)
+                        .map(|cell| cell.trim())
+                        .unwrap_or("")
+                        .is_empty()
+                })
             })
             .collect();
         if visible_cols.is_empty() {
@@ -1544,20 +1548,33 @@ mod tests {
     #[test]
     fn render_table_outputs_trailing_blank_line() {
         let input = "| A | B |\n|---|---|\n| 1 | 2 |\n\n| C | D |\n|---|---|\n| 3 | 4 |\n";
-        let lines: Vec<String> = render_markdown(input).iter().map(|l| l.to_string()).collect();
-        let table_end_index = lines.iter().position(|l| l.contains("└") && l.contains("┘")).expect("first table bottom border");
-        assert!(lines.get(table_end_index + 1).map_or(false, |l| l.trim().is_empty()));
+        let lines: Vec<String> = render_markdown(input)
+            .iter()
+            .map(|l| l.to_string())
+            .collect();
+        let table_end_index = lines
+            .iter()
+            .position(|l| l.contains("└") && l.contains("┘"))
+            .expect("first table bottom border");
+        assert!(lines
+            .get(table_end_index + 1)
+            .map_or(false, |l| l.trim().is_empty()));
     }
 
     #[test]
     fn renders_metadata_tables_as_invisible_rows() {
         let input = "| ID | Time | T | Title | Read | Work |\n|---|---|---|---|---|---|\n| #1084 |  | 🔵 | Plugin loading implementation analyzed |  |  |\n| #1085 | 12:10 PM | 🔵 | Plugin loading pipeline analyzed |  |  |\n";
-        let lines: Vec<String> = render_markdown(input).iter().map(|l| l.to_string()).collect();
+        let lines: Vec<String> = render_markdown(input)
+            .iter()
+            .map(|l| l.to_string())
+            .collect();
         assert!(!lines.iter().any(|l| l.contains("┌") || l.contains("└")));
         assert!(!lines.iter().any(|l| l.contains(" ID ")));
         assert!(lines.iter().any(|l| l.contains("#1084")));
         assert!(lines.iter().any(|l| l.contains("12:10 PM")));
-        assert!(lines.iter().any(|l| l.contains("Plugin loading pipeline analyzed")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("Plugin loading pipeline analyzed")));
     }
 
     #[test]

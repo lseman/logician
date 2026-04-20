@@ -991,7 +991,7 @@ def search_file(
     case_sensitive: bool = True,
     context_lines: int = 2,
 ) -> dict[str, Any]:
-    """Search for text or regex matches in a single file."""
+    """Compatibility wrapper over rg_search scoped to one file."""
     try:
         p = resolve_tool_path(path)
     except ValueError as exc:
@@ -1018,35 +1018,46 @@ def search_file(
         source="search_file",
     )
 
-    lines = text.splitlines()
-    flags = 0 if case_sensitive else re.IGNORECASE
-    try:
-        rx = re.compile(re.escape(pattern) if literal else pattern, flags | re.MULTILINE)
-    except re.error as exc:
-        return _err(f"Invalid regex: {exc}")
+    result = rg_search(
+        pattern=pattern,
+        directory=str(p.parent),
+        file_glob=p.name,
+        context_lines=context_lines,
+        case_sensitive=case_sensitive,
+        fixed_string=literal,
+        max_results=50,
+        output_mode="content",
+    )
+    if result.get("status") != "ok":
+        return result
 
+    lines = text.splitlines()
     matches: list[dict[str, Any]] = []
-    for index, line in enumerate(lines):
-        if not rx.search(line):
+    for item in result.get("matches", []):
+        if not item.get("match", True):
             continue
+        line_number = int(item.get("line", 0) or 0)
+        if line_number <= 0:
+            continue
+        index = line_number - 1
         ctx_start = max(0, index - context_lines)
         ctx_end = min(len(lines), index + context_lines + 1)
         matches.append(
             {
-                "line_number": index + 1,
-                "line_content": line,
+                "line_number": line_number,
+                "line_content": lines[index] if index < len(lines) else str(item.get("text") or ""),
                 "context_before": lines[ctx_start:index],
                 "context_after": lines[index + 1 : ctx_end],
             }
         )
-        if len(matches) >= 50:
-            break
 
     return {
         "status": "ok",
         "path": str(p),
-        "total_matches": len(matches),
+        "total_matches": int(result.get("count", len(matches)) or len(matches)),
         "matches": matches,
+        "compatibility_alias": "rg_search",
+        "tool_used": result.get("tool_used"),
     }
 
 

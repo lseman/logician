@@ -1083,7 +1083,10 @@ _RUNTIME_META.update(
 
 _merge_tool_metadata(
     "search_file",
-    description="Search a single file for literal text or regex matches and return structured line context.",
+    description=(
+        "Compatibility wrapper for searching a single file. Prefer `rg_search` for text search "
+        "and scope it with `directory`/`file_glob` when possible."
+    ),
     validate_input=lambda args: _path_validator(args, require_file=True),
     is_search_or_read_command=_search_flags(is_read=True),
     get_tool_use_summary=_summary_from_query("pattern", scope_keys=("path",)),
@@ -1092,6 +1095,9 @@ _merge_tool_metadata(
 )
 _merge_tool_metadata(
     "glob_files",
+    description=(
+        "Legacy glob-based file finder. Prefer `fd_find` for file discovery and ranked path results."
+    ),
     validate_input=lambda args: _directory_validator(args, key="path"),
     is_search_or_read_command=_search_flags(is_list=True),
     get_tool_use_summary=_summary_from_query("pattern", scope_keys=("path",)),
@@ -1100,6 +1106,9 @@ _merge_tool_metadata(
 )
 _merge_tool_metadata(
     "grep_files",
+    description=(
+        "Legacy tree search helper. Prefer `rg_search` for text search and `search_code` for code-aware search."
+    ),
     validate_input=lambda args: _directory_validator(args, key="path"),
     is_search_or_read_command=_search_flags(),
     get_tool_use_summary=_summary_from_query("pattern", scope_keys=("path",)),
@@ -1108,6 +1117,9 @@ _merge_tool_metadata(
 )
 _merge_tool_metadata(
     "search_code",
+    description=(
+        "Primary code-search entrypoint for multiline text search or Python symbol search."
+    ),
     validate_input=lambda args: _path_validator(args, key="path", default_value="."),
     is_search_or_read_command=_search_flags(),
     get_tool_use_summary=_summary_from_query("query", scope_keys=("path",)),
@@ -1134,21 +1146,27 @@ _merge_tool_metadata(
 )
 _merge_tool_metadata(
     "find_references",
-    description="Find likely symbol references with a word-boundary text search and ranked results.",
+    description=(
+        "Find likely references to a named symbol using a scoped word-boundary search. "
+        "Use this for symbol usages, not generic text search."
+    ),
     validate_input=lambda args: _directory_validator(args, key="directory"),
     is_search_or_read_command=_search_flags(),
     get_tool_use_summary=_summary_from_query("name", scope_keys=("directory",), prefix="references for "),
     get_activity_description=_activity_from_query("Finding references for", "name"),
-    user_facing_name=lambda _args: "Search",
+    user_facing_name=lambda _args: "Inspect",
 )
 _merge_tool_metadata(
     "search_symbols",
-    description="Search source trees for symbol definitions across supported languages using parsed syntax trees.",
+    description=(
+        "Search source trees for symbol definitions across supported languages using parsed syntax trees. "
+        "Use this for definition lookup, not generic text search."
+    ),
     validate_input=lambda args: _directory_validator(args, key="directory"),
     is_search_or_read_command=_search_flags(),
     get_tool_use_summary=_summary_from_query("name", scope_keys=("directory",), prefix="symbols for "),
     get_activity_description=_activity_from_query("Searching symbols for", "name"),
-    user_facing_name=lambda _args: "Search",
+    user_facing_name=lambda _args: "Inspect",
 )
 _merge_tool_metadata(
     "think",
@@ -1586,7 +1604,6 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("read_edit_context", read_edit_context),
     ("write_file", write_file),
     ("edit_file", edit_file),
-    ("search_file", search_file),
     ("list_dir", list_dir),
     ("apply_edit_block", apply_edit_block),
     ("preview_edit", preview_edit),
@@ -1629,8 +1646,6 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("cargo_metadata", cargo_metadata),
     ("lsp_tool", lsp_tool),
     ("bash", bash),
-    ("glob_files", glob_files),
-    ("grep_files", grep_files),
     ("search_code", search_code),
     ("rg_search", rg_search),
     ("fd_find", fd_find),
