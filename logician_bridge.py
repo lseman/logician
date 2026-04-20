@@ -1185,7 +1185,7 @@ class BridgeServer:
         out: list[str] = []
         out.append(f"session: {preview.get('session_id', sid)}")
         out.append(f"classification: {preview.get('classified_as', 'execution')}")
-        domains = preview.get("domain_groups") or []
+        domains = preview.get('domain_groups') or []
         if domains:
             out.append(f"domain tools: {', '.join(str(item) for item in domains)}")
         out.append(
@@ -1222,8 +1222,8 @@ class BridgeServer:
             suppress_texts = set()
 
         filtered_messages = []
-        for msg in preview.get("messages", []) or []:
-            content = str(msg.get("content", "") or "").strip()
+        for msg in preview.get('messages', []) or []:
+            content = str(msg.get('content', '') or '').strip()
             if not content:
                 continue
             skip = False
@@ -1238,15 +1238,15 @@ class BridgeServer:
             filtered_messages.append(msg)
 
         for idx, msg in enumerate(filtered_messages, start=1):
-            role = str(msg.get("role", "unknown"))
-            name = str(msg.get("name", "") or "").strip()
+            role = str(msg.get('role', 'unknown'))
+            name = str(msg.get('name', '') or '').strip()
             label = f"{idx}. {role}"
             if name:
                 label += f" ({name})"
             out.append(f"### {label}")
             out.append("")
             out.append("```text")
-            out.append(str(msg.get("content", "")).rstrip())
+            out.append(str(msg.get('content', '')).rstrip())
             out.append("```")
             out.append("")
 
@@ -1256,20 +1256,20 @@ class BridgeServer:
             out.append(
                 f"messages: {runtime_info.get('persisted_messages', 0)} / limit {runtime_info.get('history_limit', 0)}"
             )
-            rt = runtime_info.get("runtime", {})
-            if rt.get("loaded"):
-                cols = ", ".join(rt.get("value_columns", [])[:6]) or "none"
+            rt = runtime_info.get('runtime', {})
+            if rt.get('loaded'):
+                cols = ", ".join(rt.get('value_columns', [])[:6]) or "none"
                 out.append(
                     f"dataset: {rt.get('data_name', 'unnamed')} rows={rt.get('row_count', 0)} cols={cols}"
                 )
             else:
                 out.append("dataset: none")
-            active_repos = list(rt.get("active_repos") or [])
+            active_repos = list(rt.get('active_repos') or [])
             if active_repos:
                 repo_preview = ", ".join(
-                    str(item.get("id") or item.get("name") or "").strip()
+                    str(item.get('id') or item.get('name') or "").strip()
                     for item in active_repos[:8]
-                    if str(item.get("id") or item.get("name") or "").strip()
+                    if str(item.get('id') or item.get('name') or "").strip()
                 )
                 if repo_preview:
                     out.append(f"active_repos: {repo_preview}")
@@ -1317,11 +1317,7 @@ class BridgeServer:
         if not self._startup_hook_contexts:
             return
 
-        block = (
-            "<startup-hook-context>\n"
-            + "\n\n".join(self._startup_hook_contexts)
-            + "\n</startup-hook-context>"
-        )
+        block = "<startup-hook-context>\n" + "\n\n".join(self._startup_hook_contexts) + "\n</startup-hook-context>"
         for agent in self.agents.values():
             sp = getattr(agent, "system_prompt", None) or ""
             cleaned = self._normalize_startup_hook_blocks(sp)

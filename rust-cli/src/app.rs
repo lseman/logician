@@ -4464,9 +4464,7 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                             .unwrap_or(0);
                         let context_limit = state["context_limit"]
                             .as_u64()
-                            .or_else(|| {
-                                state["context_limit"].as_str().and_then(|s| s.parse().ok())
-                            })
+                            .or_else(|| state["context_limit"].as_str().and_then(|s| s.parse().ok()))
                             .unwrap_or(0);
                         let ctx_label = if context_limit > 0 {
                             format!("{}/{}", context_size, context_limit)
@@ -4475,7 +4473,9 @@ Active: `{}` · Session: `{}` · Ctrl+O trace in Inspector · Ctrl+P raw stream 
                         };
                         self.add_system_message(format!(
                             "Status: active={} session={} ctx={}",
-                            active, session, ctx_label
+                            active,
+                            session,
+                            ctx_label
                         ));
                     }
                 }
