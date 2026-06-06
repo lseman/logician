@@ -619,6 +619,8 @@ function hookMatcherValue(toolName: string): string {
         list_files: ["LS"],
         rg_search: ["Grep"],
         todo_write: ["TodoWrite"],
+        web_search: ["WebSearch"],
+        web_fetch: ["WebFetch"],
     };
     return [toolName, ...(aliases[toolName] || [])].join("|");
 }

@@ -617,6 +617,11 @@ export class TUI extends Container {
         let buffer = "\x1b[?2026h"; // begin synchronized update
         buffer += "\x1b[H"; // home
 
+        // The InputBar marks the edit position with CURSOR_MARKER. Find it so we
+        // can park the hardware cursor exactly there, and strip it from output.
+        let markerRow = -1;
+        let markerCol = 0;
+
         for (let i = 0; i < termHeight; i++) {
             if (i > 0) buffer += "\r\n";
             buffer += "\x1b[2K"; // clear the whole line
@@ -624,7 +629,13 @@ export class TUI extends Container {
                 // Hard-truncate short of the physical last column. Many terminals set a
                 // pending autowrap state when the last cell is written; during rapid
                 // scroll/redraw transitions that can leave stale doubled fragments.
-                const ln = finalLines[i];
+                let ln = finalLines[i];
+                const markerIdx = ln.indexOf(CURSOR_MARKER);
+                if (markerIdx >= 0) {
+                    markerRow = i;
+                    markerCol = visibleWidth(ln.slice(0, markerIdx));
+                    ln = ln.replace(CURSOR_MARKER, "");
+                }
                 buffer += isImageLine(ln)
                     ? ln
                     : clampLineToWidth(ln, Math.max(1, termWidth - 1));
@@ -638,14 +649,16 @@ export class TUI extends Container {
         this.previousWidth = termWidth;
         this.previousHeight = termHeight;
 
-        // Park the hardware cursor on the input line. The visible editing cursor is
-        // rendered inside InputBar; this just keeps the terminal cursor away from
-        // the status footer.
-        const cursorRow = Math.min(
+        // Park the hardware cursor at the input's edit position (under the
+        // visible InputBar cursor). Falls back to the input line's first column
+        // only if no marker was emitted, which keeps the cursor off the footer.
+        const fallbackRow = Math.min(
             termHeight,
             transcriptHeight + 2 + aboveInputHeight,
         );
-        this.write(`\x1b[${cursorRow};1H`);
+        const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackRow;
+        const cursorCol = markerRow >= 0 ? markerCol + 1 : 1;
+        this.write(`\x1b[${cursorRow};${cursorCol}H`);
         this.write(this._showHardwareCursor ? "\x1b[?25h" : "\x1b[?25l");
     }
 

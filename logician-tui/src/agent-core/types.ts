@@ -175,4 +175,13 @@ export interface AgentConfig {
     budgetStopEnabled?: boolean; // diminishing-returns early stop
     proactiveCompactionEnabled?: boolean; // compact before hitting context wall
     proactiveCompactionFraction?: number; // trigger at this fraction of window
+    // Web search backend (SearXNG). When set, the web_search tool is enabled.
+    webSearch?: WebSearchConfig;
+}
+
+export interface WebSearchConfig {
+    /** Base URL of the SearXNG instance (e.g. http://localhost:8090). */
+    baseUrl: string;
+    /** Max results to return (default 10). */
+    maxResults?: number;
 }

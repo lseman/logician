@@ -499,10 +499,13 @@ export class InputBar implements Component, Focusable {
                 : " ";
         const afterCursor = segments.slice(cursorInViewport + 1).join("");
 
-        // Cursor with inverse video (only when focused, not on placeholder)
+        // Mark the edit position so the renderer can park the hardware cursor
+        // there (consumed + stripped in tui-core). Inverse video draws the
+        // visible cursor only when focused and not showing the placeholder, so
+        // the prompt glyph never appears highlighted on an empty field.
         const cursorChar =
             isPlaceholder || !this.focused
-                ? atCursor
+                ? `${CURSOR_MARKER}${atCursor}`
                 : `${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m`;
 
         // Build the line

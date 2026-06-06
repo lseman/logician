@@ -10,12 +10,16 @@ import type {
     AgentEvent,
     Message,
     Tool,
+    WebSearchConfig,
 } from "./agent-core/index.ts";
 import { AgentHarness } from "./agent-core/index.ts";
 import { OpenAIBackend } from "./agent-core/backend.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import { ToolRegistry } from "./agent-core/tools/registry.ts";
-import { createDefaultTools } from "./agent-core/default-tools.ts";
+import {
+    createDefaultTools,
+    DEFAULT_SEARXNG_URL,
+} from "./agent-core/default-tools.ts";
 import { McpManager } from "./agent-core/mcp.ts";
 import { onTodosChanged } from "./agent-core/tools/todo-write.ts";
 import { buildDefaultSystemPrompt } from "./agent-core/system-prompt.ts";
@@ -142,6 +146,15 @@ function envNumber(name: string): number | undefined {
     return Number.isFinite(value) ? value : undefined;
 }
 
+// SearXNG web search defaults to DEFAULT_SEARXNG_URL; override the instance via
+// LOGICIAN_SEARXNG_URL and result count via LOGICIAN_SEARXNG_MAX_RESULTS.
+function resolveWebSearchConfig(): WebSearchConfig {
+    return {
+        baseUrl: process.env.LOGICIAN_SEARXNG_URL?.trim() || DEFAULT_SEARXNG_URL,
+        maxResults: envNumber("LOGICIAN_SEARXNG_MAX_RESULTS"),
+    };
+}
+
 // ── Bridge options ──────────────────────────────────────────────────────────────
 
 export interface AgentBridgeOptions {
@@ -191,9 +204,10 @@ export class AgentCoreBridge {
             this.cwd,
             this.sessionId,
         );
+        const webSearch = resolveWebSearchConfig();
         this.defaultTools = opts.tools?.length
             ? opts.tools
-            : createDefaultTools();
+            : createDefaultTools({ webSearch });
         this.backend = new OpenAIBackend({
             baseUrl: opts.baseUrl,
             model: opts.model,
@@ -208,6 +222,7 @@ export class AgentCoreBridge {
             model: opts.model,
             systemPrompt: this.baseSystemPrompt,
             tools: this.defaultTools,
+            webSearch,
             cwd: this.cwd,
             maxIterations: 30,
             contextWindowTokens:
