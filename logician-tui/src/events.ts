@@ -11,12 +11,18 @@ export type BridgeEventType =
     // Token streaming
     | "token"
     | "thinking_token"
+    // Message start (before assistant response, for steering detection)
+    | "message_start"
+    // Queue update (steering + follow-up)
+    | "queue_update"
     // Tool execution
     | "tool_start"
     | "tool_end"
     | "tool_execution_start"
     | "tool_execution_update"
     | "tool_execution_end"
+    // Steering
+    | "queue_update"
     // Guardrail/repair
     | "guardrail_nudge"
     | "repair_nudge"
@@ -45,6 +51,12 @@ export interface TokenEvent {
 export interface ThinkingTokenEvent {
     type: "thinking_token";
     token: string;
+}
+
+export interface MessageStartEvent {
+    type: "message_start";
+    turnId: string;
+    role: string;
 }
 
 export interface TurnStartEvent {
@@ -157,6 +169,17 @@ export interface SteeredEvent {
     message: string;
 }
 
+export interface QueueUpdateEvent {
+    type: "queue_update";
+    steering: string[];
+    followUp: string[];
+}
+
+export interface ModelSelectEvent {
+    type: "model_select";
+    model: string;
+}
+
 export type ParsedBridgeEvent =
     | TokenEvent
     | ThinkingTokenEvent
@@ -165,6 +188,8 @@ export type ParsedBridgeEvent =
     | ToolStartEvent
     | ToolUpdateEvent
     | ToolEndEvent
+    | MessageStartEvent
+    | QueueUpdateEvent
     | PhaseEvent
     | DecisionEvent
     | ContextUpdateEvent

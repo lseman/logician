@@ -163,11 +163,16 @@ export class AgentHarness {
         this.followUpQueue = [];
     }
 
+    // Expose the current steering queue for the TUI bridge.
+    getSteerQueue(): string[] {
+        return this.steeringQueue;
+    }
+
     get messages(): Message[] {
         return this.loop?.messages ?? this.history;
     }
 
-    // Clear persisted conversation (new session / context reset).
+   // Clear persisted conversation (new session / context reset).
     clearHistory(): void {
         this.history = [];
     }
@@ -175,6 +180,23 @@ export class AgentHarness {
     // Live tool registry of the running loop, or null when idle.
     get tools(): ToolRegistry | null {
         return this.loop?.tools ?? null;
+    }
+
+    // ── Model cycling ──────────────────────────────────────────────────
+
+    /** Get current model name. */
+    getModel(): string {
+        return this.loop?.getModel() ?? this.config.model;
+    }
+
+    /** Get all available models. */
+    getModels(): string[] {
+        return this.loop?.getModels() ?? (this.config.models ? [this.config.model, ...this.config.models] : [this.config.model]);
+    }
+
+    /** Cycle to the next model. Returns the new model name. */
+    cycleModel(direction: "forward" | "backward" = "forward"): string {
+        return this.loop?.cycleModel(direction) ?? this.config.model;
     }
 
     // ── Internals ──────────────────────────────────────────────────────────

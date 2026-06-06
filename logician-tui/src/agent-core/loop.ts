@@ -11,7 +11,7 @@ import type {
     Message,
     ToolCall,
 } from "./types.ts";
-import type { LLMBackend } from "./backend.ts";
+import type { LLMBackend, OpenAIBackend } from "./backend.ts";
 import { EventEmitter, createEventEmitter } from "./events.ts";
 import {
     createUserMessage,
@@ -82,6 +82,14 @@ export class AgentLoop {
     private initialMessages?: Message[];
     private continuationCount = 0;
     private maxContinuations: number;
+    private _retryAttempt = 0;
+    private _retryAbort?: () => void;
+    private get maxRetries(): number {
+        return this.config.maxRetries ?? 3;
+    }
+    private get retryBaseDelayMs(): number {
+        return this.config.retryBaseDelayMs ?? 1000;
+    }
 
     constructor(options: AgentLoopOptions) {
         this.config = options.config;
@@ -177,6 +185,7 @@ export class AgentLoop {
         }
         this.iterationCount = 0;
         this.continuationCount = 0;
+        this._retryAttempt = 0;
 
         this.emitEvent({ type: "agent_start" });
         this.emitEvent({ type: "phase", phase: "idle" });
@@ -202,11 +211,14 @@ export class AgentLoop {
             const toolDefs = this.toolRegistry.toToolDefinitions();
             this.emitContextUpdate(toolDefs);
 
-            // Get LLM response
+            // Get LLM response — with auto-retry on provider errors.
             let assistantContent = "";
             let assistantToolCalls: ToolCall[] = [];
+            let llmSuccess = false;
 
-            for (let attempt = 0; attempt < 2; attempt++) {
+            // Context-full compaction path (one retry, no backoff).
+            let compactionAttempted = false;
+            while (!llmSuccess && !compactionAttempted) {
                 try {
                     const activeToolDefs =
                         this.toolRegistry.toToolDefinitions();
@@ -247,10 +259,13 @@ export class AgentLoop {
                             });
                         }
                     }
-                    break;
+                    llmSuccess = true;
                 } catch (e: unknown) {
                     const error = e as Error;
-                    if (attempt === 0 && isContextFullError(error)) {
+
+                    // 1. Context-full → compact once and retry.
+                    if (!compactionAttempted && isContextFullError(error)) {
+                        compactionAttempted = true;
                         const before = estimateChatPayloadTokens(
                             this._messages,
                             toolDefs,
@@ -280,7 +295,38 @@ export class AgentLoop {
                             this.emitContextUpdate(toolDefs, true);
                             continue;
                         }
+                        // Compaction didn't help — fall through to error.
                     }
+
+                    // 2. Auto-retry on provider errors (429, 500, 502, 503, 504).
+                    if (
+                        this.config.autoRetryEnabled !== false &&
+                        isProviderError(error)
+                    ) {
+                        const canRetry = this._retryAttempt < this.maxRetries;
+                        if (canRetry) {
+                            this._retryAttempt++;
+                            const delayMs =
+                                this.retryBaseDelayMs *
+                                Math.pow(2, this._retryAttempt - 1);
+                            this.emitEvent({
+                                type: "auto_retry_start",
+                                attempt: this._retryAttempt,
+                                maxRetries: this.maxRetries,
+                                delayMs,
+                                error: error.message,
+                            });
+                            await this._sleep(delayMs, turnId);
+                            this.emitEvent({
+                                type: "auto_retry_end",
+                                attempt: this._retryAttempt,
+                                success: true,
+                            });
+                            continue;
+                        }
+                    }
+
+                    // 3. Give up.
                     this.emitEvent({ type: "error", message: error.message });
                     assistantContent = "";
                     assistantToolCalls = [];
@@ -288,11 +334,18 @@ export class AgentLoop {
                 }
             }
 
+            // Reset retry state after each turn (success or failure).
+            this._retryAttempt = 0;
+
             if (!assistantContent && assistantToolCalls.length === 0) {
                 this.emitEvent({ type: "turn_end", turnId });
                 break;
             }
 
+            // Emit message_start before assistant response (for steering
+            // detection — the bridge can detect when steering messages have
+            // been consumed by checking if their text appears in messages).
+            this.emitEvent({ type: "message_start", turnId, role: "assistant" });
             // Add assistant message
             this._messages.push(
                 createAssistantMessage(assistantContent, assistantToolCalls),
@@ -332,31 +385,31 @@ export class AgentLoop {
 
             // prepareNextTurn / shouldStopAfterTurn contract hooks.
             const hadToolCalls = assistantToolCalls.length > 0;
-            await this.runPrepareNextTurn(hadToolCalls);
-            if (await this.runShouldStopAfterTurn(hadToolCalls)) {
+            const isContinuation = this.continuationCount > 0;
+            await this.runPrepareNextTurn(hadToolCalls, isContinuation);
+            if (await this.runShouldStopAfterTurn(hadToolCalls, isContinuation)) {
                 this.emitEvent({ type: "turn_end", turnId });
                 break;
             }
 
-            // Continue loop with tool results.
+            // Continue loop: model called tools or follow-ups exist.
+            // turn_end stays open — the TUI sees one continuous turn.
             if (hadToolCalls) {
-                this.emitEvent({ type: "turn_end", turnId });
                 continue;
             }
 
-            // No tool calls: the turn would end here. Pi-style follow-up
-            // messages get first chance to continue the outer loop.
+            // No tool calls: check follow-ups before ending the turn.
             if (this.continuationCount < this.maxContinuations) {
                 const followUps =
                     await this.runGetFollowUpMessages(assistantContent);
                 if (followUps.length) {
                     this.continuationCount++;
                     this.appendInjectedMessages(transcriptPath, followUps);
-                    this.emitEvent({ type: "turn_end", turnId });
                     continue;
                 }
-
             }
+
+            // Truly done — no tools, no follow-ups.
             this.emitEvent({ type: "turn_end", turnId });
             break;
         }
@@ -372,6 +425,9 @@ export class AgentLoop {
     }
 
     private emitEvent(event: AgentEvent): void {
+        if (event.type === "turn_end" && this.config.turnEndCallback) {
+            this.config.turnEndCallback(event.turnId);
+        }
         if (this.config.onEvent) {
             this.config.onEvent(event);
         }
@@ -485,13 +541,18 @@ export class AgentLoop {
         }
     }
 
-    private async runPrepareNextTurn(hadToolCalls: boolean): Promise<void> {
+    private async runPrepareNextTurn(
+        hadToolCalls: boolean,
+        isContinuation: boolean,
+    ): Promise<void> {
         if (!this.hooks.prepareNextTurn) return;
         try {
             const out = await this.hooks.prepareNextTurn({
                 messages: this._messages,
                 iteration: this.iterationCount,
                 hadToolCalls,
+                continuationCount: this.continuationCount,
+                isContinuation,
             });
             if (out?.messages) this._messages = out.messages;
         } catch (e) {
@@ -504,6 +565,7 @@ export class AgentLoop {
 
     private async runShouldStopAfterTurn(
         hadToolCalls: boolean,
+        isContinuation: boolean,
     ): Promise<boolean> {
         if (!this.hooks.shouldStopAfterTurn) return false;
         try {
@@ -512,6 +574,8 @@ export class AgentLoop {
                     messages: this._messages,
                     iteration: this.iterationCount,
                     hadToolCalls,
+                    continuationCount: this.continuationCount,
+                    isContinuation,
                 })) === true
             );
         } catch (e) {
@@ -549,6 +613,8 @@ export class AgentLoop {
                 messages: this._messages,
                 iteration: this.iterationCount,
                 assistantText,
+                continuationCount: this.continuationCount,
+                maxContinuations: this.maxContinuations,
             });
             return r?.length ? r : [];
         } catch (e) {
@@ -830,6 +896,93 @@ export class AgentLoop {
             // Transcript persistence is best-effort for hook integrations.
         }
     }
+
+    private async _sleep(ms: number, _turnId: string): Promise<void> {
+        // Respect abort signal during backoff sleep.
+        if (this.signal?.aborted) return;
+        await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, ms);
+            this.signal?.addEventListener(
+                "abort",
+                () => {
+                    clearTimeout(timer);
+                    this.emitEvent({
+                        type: "error",
+                        message: "Retry cancelled by abort",
+                    });
+                    reject(new Error("Retry cancelled"));
+                },
+                { once: true },
+            );
+        });
+    }
+
+    // ── Model cycling ─────────────────────────────────────────────────
+    // Pi-style: cycle through configured models (forward or backward).
+    // Creates a new backend with the selected model. Emits `model_select`.
+
+    /** Build the model list — primary + alternates. */
+    private getModelList(): string[] {
+        const models = this.config.models;
+        if (!models || models.length === 0) return [this.config.model];
+        // Deduplicate while preserving order; primary is always first.
+        const seen = new Set<string>();
+        const list: string[] = [];
+        for (const m of [this.config.model, ...models]) {
+            if (!seen.has(m)) {
+                seen.add(m);
+                list.push(m);
+            }
+        }
+        return list;
+    }
+
+    /** Current model index in the model list. */
+    private _modelIndex = 0;
+    private get modelIndex(): number {
+        const list = this.getModelList();
+        if (this._modelIndex >= list.length) this._modelIndex = 0;
+        return this._modelIndex;
+    }
+    private get currentModel(): string {
+        return this.getModelList()[this.modelIndex] ?? this.config.model;
+    }
+
+    /** Cycle to the next model (forward). Returns the new model name. */
+    cycleModel(direction: "forward" | "backward" = "forward"): string {
+        const list = this.getModelList();
+        if (list.length <= 1) return this.config.model;
+
+        const step = direction === "forward" ? 1 : -1;
+        this._modelIndex =
+            (this._modelIndex + step + list.length) % list.length;
+
+        // Swap backend model.
+        const newModel = list[this._modelIndex];
+        this.backend = new OpenAIBackend({
+            baseUrl: this.backend instanceof OpenAIBackend
+                ? (this.backend as any).baseUrl
+                : this.config.baseUrl,
+            model: newModel,
+        });
+
+        this.emitEvent({
+            type: "model_select",
+            model: newModel,
+            index: this._modelIndex,
+        });
+        return newModel;
+    }
+
+    /** Get the current model name (for TUI status bar). */
+    getModel(): string {
+        return this.currentModel;
+    }
+
+    /** Get all available models (for TUI status bar). */
+    getModels(): string[] {
+        return this.getModelList();
+    }
 }
 
 function hookMatcherValue(toolName: string): string {
@@ -869,4 +1022,31 @@ function envNumber(name: string): number | undefined {
     if (!raw) return undefined;
     const value = Number(raw);
     return Number.isFinite(value) ? value : undefined;
+}
+
+function isProviderError(error: Error): boolean {
+    const message = `${error.name || ""} ${error.message || ""}`.toLowerCase();
+    // HTTP status codes from the backend.
+    if (
+        /\b(429|500|502|503|504)\b/.test(message) ||
+        /llm request failed/.test(message)
+    ) {
+        return true;
+    }
+    // Network-level errors.
+    if (
+        message.includes("econnrefused") ||
+        message.includes("econnreset") ||
+        message.includes("etimedout") ||
+        message.includes("eai-again") ||
+        message.includes("socket hang up") ||
+        message.includes("connection refused") ||
+        message.includes("connection reset") ||
+        message.includes("connection timeout") ||
+        message.includes("network error") ||
+        message.includes("fetch failed")
+    ) {
+        return true;
+    }
+    return false;
 }

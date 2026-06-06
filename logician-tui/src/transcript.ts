@@ -4,6 +4,7 @@
 
 import type {
     ParsedBridgeEvent,
+    QueueUpdateEvent,
     TurnEndEvent,
     ToolStartEvent,
     ToolUpdateEvent,
@@ -22,6 +23,7 @@ export interface ToolExecution {
     result?: string;
     partialResult?: string;
     isError: boolean;
+    autoExpand?: boolean;    // always show details (write/edit/file_diff)
 }
 
 // ── Chunk model ───────────────────────────────────────────────────────────────
@@ -113,6 +115,9 @@ export class Transcript {
             }
             case "turn_end":
                 this.handleTurnEnd(event as TurnEndEvent);
+                break;
+            case "queue_update":
+                this.handleQueueUpdate(event as QueueUpdateEvent);
                 break;
         }
         this.notify();
@@ -235,6 +240,10 @@ export class Transcript {
         this.closeStreamingOfType("thinking", msg.chunks);
         this.closeStreamingOfType("content", msg.chunks);
 
+        const isWriteLike =
+            event.tool_name === "write_file" ||
+            event.tool_name === "edit_file" ||
+            event.tool_name === "file_diff";
         msg.chunks.push({
             seq: msg.chunks.length,
             type: "tool",
@@ -246,6 +255,7 @@ export class Transcript {
                 result: undefined,
                 partialResult: undefined,
                 isError: false,
+                autoExpand: isWriteLike,
             },
             isComplete: false,
         });
@@ -476,6 +486,25 @@ export class Transcript {
             .map((c) => c.contentText)
             .join("");
         return text.length > 0 ? text : null;
+    }
+
+    // ── Steering queue (Pi-style) ──────────────────────────────────────
+    // Stores current steering + follow-up messages for UI display.
+
+    private _steerQueue: string[] = [];
+    private _followUpQueue: string[] = [];
+
+    getSteerQueue(): string[] {
+        return this._steerQueue;
+    }
+
+    getFollowUpQueue(): string[] {
+        return this._followUpQueue;
+    }
+
+    handleQueueUpdate(event: QueueUpdateEvent): void {
+        this._steerQueue = event.steering || [];
+        this._followUpQueue = event.followUp || [];
     }
 
     getAssistantTools(turn: Turn): ToolExecution[] {

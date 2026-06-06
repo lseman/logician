@@ -9,7 +9,7 @@ import type {
     ThinkingDisplayStyle,
     Turn,
 } from "../transcript.ts";
-import { highlightAuto, type HighlightResult } from "../agent-core/syntax-highlighter.ts";
+import { highlightAuto } from "../agent-core/syntax-highlighter.ts";
 
 interface Theme {
     userColor: string;
@@ -630,7 +630,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 
     private renderThinkingChunk(
         chunk: AssistantChunk,
-        streaming: boolean,
+        _streaming: boolean,
     ): string[] {
         const text = chunk.contentText || "";
         if (text.trim().length === 0) return [];
@@ -658,7 +658,7 @@ export class TranscriptDisplay implements Component, Scrollable {
                     this.currentWidth - 4,
                 );
                 for (let li = 0; li < wrapped.length; li++) {
-                    let rendered = `${DIM}  ${renderInline(wrapped[li], this.theme.thinkingColor + DIM)}`;
+                    const rendered = `${DIM}  ${renderInline(wrapped[li], this.theme.thinkingColor + DIM)}`;
                     lines.push(rendered);
                 }
                 break;
@@ -839,7 +839,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 
                 const renderedTable = this.renderTable(tableLines, maxLen);
                 for (let ti = 0; ti < renderedTable.length; ti++) {
-                    let line = renderedTable[ti];
+                    const line = renderedTable[ti];
                     lines.push(line);
                 }
                 continue;
@@ -848,7 +848,7 @@ export class TranscriptDisplay implements Component, Scrollable {
             const jsonLines = formatJsonLine(rawLine);
             if (jsonLines) {
                 for (let ji = 0; ji < jsonLines.length; ji++) {
-                    let line =
+                    const line =
                         ji === 0
                             ? firstLinePrefix + jsonLines[ji]
                             : "  " + jsonLines[ji];
@@ -869,7 +869,7 @@ export class TranscriptDisplay implements Component, Scrollable {
             }
             for (let wi = 0; wi < wrapped.length; wi++) {
                 const seg = `${baseColor}${wrapped[wi]}${RESET}`;
-                let line =
+                const line =
                     wi === 0
                         ? firstLinePrefix + seg
                         : `  ${baseColor}${wrapped[wi]}${RESET}`;
@@ -1154,7 +1154,7 @@ export class TranscriptDisplay implements Component, Scrollable {
                 ? "\x1b[38;5;220m▸ streaming\x1b[0m"
                 : "\x1b[38;5;141m▸ running\x1b[0m";
         const summary = this.toolSummary(tool);
-        const hint = this.toolsExpanded
+        const hint = this.toolsExpanded || tool.autoExpand
             ? `${DIM}ctrl+o collapse${RESET}`
             : `${DIM}ctrl+o expand${RESET}`;
         const base =
@@ -1167,7 +1167,8 @@ export class TranscriptDisplay implements Component, Scrollable {
                 .join(" "),
         );
 
-        if (!this.toolsExpanded) return lines;
+        // autoExpand tools (write/edit/file_diff) always show details
+        if (!this.toolsExpanded && !tool.autoExpand) return lines;
 
         for (const detailLine of this.toolDetailLines(
             tool,

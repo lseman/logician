@@ -62,6 +62,15 @@ export type AgentEvent =
           message: string;
       }
     | { type: "phase"; phase: "streaming" | "thinking" | "tool" | "idle" }
+    | {
+          type: "auto_retry_start";
+          attempt: number;
+          maxRetries: number;
+          delayMs: number;
+          error: string;
+      }
+    | { type: "auto_retry_end"; attempt: number; success: boolean }
+    | { type: "model_select"; model: string; index: number }
     | { type: "error"; message: string; error?: unknown };
 
 export type EventHandler = (event: AgentEvent) => void;
@@ -103,6 +112,8 @@ export interface PrepareNextTurnContext {
     messages: Message[];
     iteration: number;
     hadToolCalls: boolean;
+    continuationCount: number;
+    isContinuation: boolean;
 }
 
 // Return rewritten messages to replace the working history before the next
@@ -115,6 +126,8 @@ export interface ShouldStopAfterTurnContext {
     messages: Message[];
     iteration: number;
     hadToolCalls: boolean;
+    continuationCount: number;
+    isContinuation: boolean;
 }
 
 export interface GetSteeringMessagesContext {
@@ -126,6 +139,8 @@ export interface GetFollowUpMessagesContext {
     messages: Message[];
     iteration: number;
     assistantText: string;
+    continuationCount: number;
+    maxContinuations: number;
 }
 
 export type ToolExecutionMode = "sequential" | "parallel";
@@ -191,6 +206,8 @@ export interface ToolContext {
 export interface AgentConfig {
     baseUrl: string;
     model: string;
+    /** Alternative models for cycling. When set, `cycleModel()` switches between them. */
+    models?: string[];
     cwd?: string;
     temperature?: number;
     maxTokens?: number;
@@ -205,6 +222,9 @@ export interface AgentConfig {
     hookSessionId?: string;
     hookTranscriptPath?: string;
     hooks?: AgentLoopHooks;
+    // Callback invoked with turn_end before the event fires on onEvent.
+    // Lets the bridge forward turn_end with the correct turn_id to the TUI.
+    turnEndCallback?: (turnId: string) => void;
     // Built-in loop safeguards. Each rides a contract hook.
     guardsEnabled?: boolean; // duplicate + failure-loop guards (default on)
     duplicateToolThreshold?: number;
@@ -216,6 +236,10 @@ export interface AgentConfig {
     continuationEnabled?: boolean; // default on
     maxContinuations?: number; // cap per run (default 12)
     toolExecution?: ToolExecutionMode; // default sequential
+    // Auto-retry on provider errors (429, 500, 502, 503, 504, timeouts).
+    autoRetryEnabled?: boolean; // default on
+    maxRetries?: number; // max retry attempts (default 3)
+    retryBaseDelayMs?: number; // base delay for exponential backoff (default 1000)
     // Web search backend (SearXNG). When set, the web_search tool is enabled.
     webSearch?: WebSearchConfig;
 }

@@ -42,14 +42,25 @@ export class OpenAIBackend implements LLMBackend {
     }
 
     async generate(
-        messages: Record<string, unknown>[],
-        tools?: Record<string, unknown>[],
-        temperature: number = 0.5,
-        maxTokens: number = 4096,
-        signal?: AbortSignal,
-        onDelta?: (delta: string) => void,
-        onThinking?: (delta: string) => void,
+        params: {
+            messages: Record<string, unknown>[];
+            tools?: Record<string, unknown>[];
+            temperature?: number;
+            maxTokens?: number;
+            signal?: AbortSignal;
+            onDelta?: (delta: string) => void;
+            onThinking?: (delta: string) => void;
+        },
     ): Promise<LLMResponse> {
+        const {
+            messages,
+            tools,
+            temperature = 0.5,
+            maxTokens = 4096,
+            signal,
+            onDelta,
+            onThinking,
+        } = params;
         const body: Record<string, unknown> = {
             model: this.model,
             messages,

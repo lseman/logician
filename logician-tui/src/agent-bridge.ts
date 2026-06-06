@@ -34,6 +34,12 @@ export type ErrorCallback = (err: Error) => void;
 
 function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
     switch (event.type) {
+        case "message_start":
+            return {
+                type: "message_start",
+                turnId: event.turnId,
+                role: event.role,
+            } as ParsedBridgeEvent;
         case "message_delta":
             return { type: "token", token: event.delta };
         case "thinking_delta":
@@ -45,7 +51,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
                 tool_name: event.toolName,
                 tool_args: parseToolArgs(event.args),
                 tool_call_id: event.toolCallId,
-            } as any;
+            } as ParsedBridgeEvent;
         case "tool_call_end":
             return {
                 type: "tool_execution_end",
@@ -54,7 +60,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
                 result: event.result,
                 is_error: event.isError,
                 tool_call_id: event.toolCallId,
-            } as any;
+            } as ParsedBridgeEvent;
         case "tool_call_update":
             return {
                 type: "tool_execution_update",
@@ -62,7 +68,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
                 tool_name: event.toolName,
                 partial_result: event.partialResult,
                 tool_call_id: event.toolCallId,
-            } as any;
+            } as ParsedBridgeEvent;
         case "repair_nudge":
             return {
                 type: "repair_nudge",
@@ -93,6 +99,21 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
             };
         case "error":
             return { type: "token", token: `[Error] ${event.message}` };
+        case "auto_retry_start":
+            return {
+                type: "token",
+                token: `[Retry ${event.attempt}/${event.maxRetries}] ${event.error} (wait ${event.delayMs}ms)`,
+            };
+        case "auto_retry_end":
+            return {
+                type: "token",
+                token: `[Retry ${event.attempt}] succeeded`,
+            };
+        case "model_select":
+            return {
+                type: "token",
+                token: `[Model] ${event.model}`,
+            };
         default:
             return null;
     }
@@ -221,6 +242,10 @@ export class AgentCoreBridge {
     private sessionId = `tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     private transcriptPath = "";
     private startupHooksRan = false;
+    // Session-level steering queue — tracked so the UI can display pending items.
+    // Removed when the loop consumes them (detected via message_start).
+    private _steeringMessages: string[] = [];
+    private _followUpMessages: string[] = [];
     private startupHookResult: PluginCommandResult | null = null;
     private startupPluginCount = 0;
     private contextTokens = 0;
@@ -280,10 +305,19 @@ export class AgentCoreBridge {
                 opts.runtimeHooksEnabled ?? process.env.LOGICIAN_HOOKS !== "0",
             hookSessionId: this.sessionId,
             hookTranscriptPath: this.transcriptPath,
+            turnEndCallback: (turnId: string) => {
+                this.emit({ type: "turn_end", turn_id: turnId, message: "" });
+            },
             onEvent: (event: AgentEvent) => {
                 if (event.type === "context_update") {
                     this.contextTokens = event.tokens;
                     this.contextMaxTokens = event.maxTokens;
+                }
+                // Detect consumed steering messages: when the loop emits
+                // message_start for an assistant response, the steering messages
+                // injected into the turn have been consumed.
+                if (event.type === "message_start" && event.role === "assistant") {
+                    this._removeConsumedSteeringMessages();
                 }
                 const mapped = mapAgentEvent(event);
                 if (mapped) {
@@ -359,25 +393,27 @@ export class AgentCoreBridge {
         } finally {
             this.running = false;
             // Keep the harness alive to retain history across turns.
-            if (this.currentTurnId) {
-                this.emit({
-                    type: "turn_end",
-                    turn_id: this.currentTurnId,
-                    message: "",
-                });
-                this.currentTurnId = null;
-            }
+            this.currentTurnId = null;
             this.emit({ type: "phase", state: "ready" });
         }
     }
 
+    // ── Session-level steering queue (Pi-style) ────────────────────────
+    // Tracks pending steering/follow-up messages for UI display.
+    // Items are removed when consumed by the loop (detected via
+    // message_start events emitted before assistant responses).
+
     /** Inject guidance into the running turn (drained at the next save point). */
     steer(message: string): void {
+        this._steeringMessages.push(message);
+        this._emitQueueUpdate();
         this.harness?.steer(message);
     }
 
     /** Queue a message for after the current turn completes. */
     followUp(message: string): void {
+        this._followUpMessages.push(message);
+        this._emitQueueUpdate();
         this.harness?.followUp(message);
     }
 
@@ -386,9 +422,89 @@ export class AgentCoreBridge {
         this.harness?.nextTurn(message);
     }
 
+    private _emitQueueUpdate(): void {
+        this.emit({
+            type: "queue_update",
+            steering: [...this._steeringMessages],
+            followUp: [...this._followUpMessages],
+        });
+    }
+
+    /** Remove messages that the loop has consumed (delivered to assistant). */
+    private _removeConsumedSteeringMessages(): void {
+        if (!this.harness) return;
+        const messages = this.harness.messages;
+        let changed = false;
+
+        // Remove steering messages whose text appears in the harness messages
+        const remaining: string[] = [];
+        for (const msg of this._steeringMessages) {
+            const consumed = messages.some(
+                (m) =>
+                    m.role === "user" &&
+                    typeof m.content === "string" &&
+                    m.content.includes(msg.trim()),
+            );
+            if (consumed) {
+                changed = true;
+            } else {
+                remaining.push(msg);
+            }
+        }
+        if (changed) {
+            this._steeringMessages = remaining;
+            this._emitQueueUpdate();
+        }
+    }
+
+    /** Get current steering messages (read-only). */
+    getSteeringMessages(): string[] {
+        return [...this._steeringMessages];
+    }
+
+    /** Get current follow-up messages (read-only). */
+    getFollowUpMessages(): string[] {
+        return [...this._followUpMessages];
+    }
+
+    /** Clear all pending messages, returns the messages that were cleared. */
+    clearQueue(): { steering: string[]; followUp: string[] } {
+        const steering = [...this._steeringMessages];
+        const followUp = [...this._followUpMessages];
+        this._steeringMessages = [];
+        this._followUpMessages = [];
+        this._emitQueueUpdate();
+        return { steering, followUp };
+    }
+
+    /** Abort: clear steering/follow-up queues (preserves nextTurn). */
+    abort(): void {
+        this.harness?.abort();
+        this._steeringMessages = [];
+        this._followUpMessages = [];
+        this._emitQueueUpdate();
+    }
+
     /** Execute a slash command (sends as chat message to the agent). */
     sendSlash(raw: string): void {
         this.sendMessage(raw).catch((err) => this.errorCb?.(err));
+    }
+
+    // ── Model cycling ──────────────────────────────────────────────────
+
+    /** Get current model name. */
+    getCurrentModel(): string {
+        return this.harness?.getModel() ?? this.config.model ?? "";
+    }
+
+    /** Get all available models. */
+    getModels(): string[] {
+        return this.harness?.getModels() ?? (this.config.model ? [this.config.model] : []);
+    }
+
+    /** Cycle to the next model. Returns the new model name. */
+    cycleModel(direction: "forward" | "backward" = "forward"): string | null {
+        return this.harness?.cycleModel(direction) ?? null;
     }
 
     async getState(): Promise<Record<string, unknown>> {

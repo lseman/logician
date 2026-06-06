@@ -2,13 +2,14 @@
 // Wires agent-core, transcript, and components together.
 
 import { execSync } from "node:child_process";
-import { TUI } from "./tui-core.ts";
+import { Container, TUI } from "./tui-core.ts";
 import { AgentCoreBridge } from "./agent-bridge.ts";
 import { Transcript } from "./transcript.ts";
 import { TranscriptDisplay } from "./components/transcript-display.ts";
 import { InputBar } from "./components/input-bar.ts";
 import { StatusBar } from "./components/status-bar.ts";
 import { TodoBar } from "./components/todo-bar.ts";
+import { SteerQueue } from "./components/steer-queue.ts";
 import { ThinkingPanel } from "./components/thinking-panel.ts";
 import { SlashPopup } from "./components/slash-popup.ts";
 import {
@@ -35,6 +36,7 @@ export class LogicianTUI {
     private transcript: Transcript;
     private statusPanel: StatusBar;
     private todoBar: TodoBar;
+    private steerQueue: SteerQueue;
     private thinkingPanel: ThinkingPanel;
     private inputBar: InputBar;
     private slashPopup: SlashPopup;
@@ -101,6 +103,7 @@ export class LogicianTUI {
         this.transcript = new Transcript();
         this.statusPanel = new StatusBar();
         this.todoBar = new TodoBar();
+        this.steerQueue = new SteerQueue();
         this.thinkingPanel = new ThinkingPanel();
         this.inputBar = new InputBar();
         this.slashPopup = new SlashPopup();
@@ -334,6 +337,13 @@ export class LogicianTUI {
                 this.todoBar.setTodos(event.todos);
                 this.tui.requestRender();
                 break;
+            case "queue_update":
+                this.steerQueue.setItems(
+                    event.steering || [],
+                    event.followUp || [],
+                );
+                this.tui.requestRender();
+                break;
             case "token":
                 if (!this.streaming) {
                     this.streaming = true;
@@ -392,6 +402,9 @@ export class LogicianTUI {
                     contextTokens: Number(event.tokens_after || 0),
                     contextCompacted: true,
                 });
+                break;
+            case "model_select":
+                this.statusPanel.update({ model: event.token });
                 break;
             case "repair_nudge":
                 this.transcript.addSystemMessage(
@@ -509,6 +522,11 @@ export class LogicianTUI {
             this.transcriptDisplay.setTurns(this.transcript.getTurns());
             this.transcriptDisplay.setThinkingMode(
                 this.transcript.getThinkingDisplayMode(),
+            );
+            // Sync steer queue from transcript state
+            this.steerQueue.setItems(
+                this.transcript.getSteerQueue(),
+                this.transcript.getFollowUpQueue(),
             );
             // Auto-scroll to bottom only when already at bottom
             if (this.tui.isAtBottom) {
@@ -746,7 +764,13 @@ export class LogicianTUI {
         this.tui.setInputBarComponent(this.inputBar);
         this.tui.setScrollableComponent(this.transcriptDisplay);
         this.tui.setFixedBottomComponent(this.statusPanel);
-        this.tui.setFixedAboveInputComponent(this.todoBar);
+
+        // Stack todo bar + steer queue above the input bar (both render empty
+        // when there's nothing to show, so they only take space when active).
+        const pinnedContainer = new Container();
+        pinnedContainer.addChild(this.todoBar);
+        pinnedContainer.addChild(this.steerQueue);
+        this.tui.setFixedAboveInputComponent(pinnedContainer);
 
         // Slash popup as overlay anchored to the bottom of the transcript area, so
         // the suggestion list sits directly above the input bar like an inline

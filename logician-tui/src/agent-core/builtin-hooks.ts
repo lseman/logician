@@ -101,12 +101,49 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
         };
     }
 
+    // Blocked patterns: text indicating the model is stuck, not just
+    // choosing to stop. When detected, skip the todo nudge so the loop
+    // ends cleanly instead of wasting turns.
+    const BLOCKED_PATTERNS = [
+        "i can't",
+        "i'm unable",
+        "i don't have",
+        "cannot access",
+        "i am unable",
+        "i do not have",
+        "not available",
+        "no access",
+        "i don't have access",
+        "i cannot",
+        "unable to",
+        "out of my",
+        "beyond my",
+        "i do not have access",
+    ];
+
+    function isBlocked(assistantText: string): boolean {
+        const lower = assistantText.toLowerCase();
+        return BLOCKED_PATTERNS.some((p) => lower.includes(p));
+    }
+
     // Pi-style follow-up: if the model stops (no tool calls) while its own
     // todo list still has unfinished items, nudge it to keep working. The loop
     // caps total continuations, so this cannot run away.
     const continuationEnabled = config.continuationEnabled !== false;
     if (continuationEnabled) {
-        hooks.getFollowUpMessages = ({ messages }) => {
+        hooks.getFollowUpMessages = ({
+            messages: _messages,
+            assistantText,
+            continuationCount,
+            maxContinuations,
+        }) => {
+            // Skip if model appears blocked by external constraints.
+            if (isBlocked(assistantText)) return undefined;
+
+            // Don't nudge on the last allowed continuation — let the loop
+            // end cleanly instead of wasting the final turn.
+            if (continuationCount >= maxContinuations - 1) return undefined;
+
             const todos = getTodos();
             if (!todos.length) return undefined;
             const remaining = todos.filter((t) => t.status !== "completed");
