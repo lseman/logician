@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 
 export const list_files: Tool = {
     name: "list_files",
+    executionMode: "parallel",
     description:
         "List files under a path, respecting gitignore when rg is available.",
     parameters: {
@@ -30,6 +31,15 @@ export const list_files: Tool = {
                 description: "Maximum files to return, default 500",
             },
         },
+    },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            path: args.path ?? args.directory ?? args.dir,
+            glob: args.glob ?? args.pattern,
+        };
     },
     execute: async (args, ctx): Promise<string> => {
         const basePath = resolvePath(ctx.cwd, String(args.path || "."));

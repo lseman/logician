@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 export const rg_search: Tool = {
     name: "rg_search",
+    executionMode: "parallel",
     description:
         "Search file contents with ripgrep (supports regex, glob, context lines).",
     parameters: {
@@ -28,6 +29,17 @@ export const rg_search: Tool = {
             context: { type: "number", description: "Context lines (-A/-B)" },
         },
         required: ["pattern"],
+    },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (typeof raw === "string") return { pattern: raw };
+        if (!raw || typeof raw !== "object") return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            pattern: args.pattern ?? args.query ?? args.regex,
+            path: args.path ?? args.file_path ?? args.directory,
+            max_results: args.max_results ?? args.maxResults ?? args.limit,
+        };
     },
     execute: async (args, ctx): Promise<string> => {
         const pattern = String(args.pattern);

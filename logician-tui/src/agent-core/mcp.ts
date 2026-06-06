@@ -438,10 +438,15 @@ function loadMcpServerConfigs(cwd: string): Record<string, McpServerConfig> {
 }
 
 function findMcpConfig(cwd: string): string | null {
-    const envPath = process.env.LOGICIAN_MCP_CONFIG || process.env.MCP_CONFIG;
+    const envPath =
+        process.env.LOGICIAN_MCP_CONFIG ||
+        process.env.MCP_CONFIG ||
+        process.env.LOGICIAN_CONFIG;
     if (envPath && existsSync(envPath)) return envPath;
     let dir = resolve(cwd);
     while (true) {
+        const logicianConfig = join(dir, ".logician.json");
+        if (existsSync(logicianConfig)) return logicianConfig;
         const mcpJson = join(dir, ".mcp.json");
         if (existsSync(mcpJson)) return mcpJson;
         const agentConfig = join(dir, "agent_config.json");

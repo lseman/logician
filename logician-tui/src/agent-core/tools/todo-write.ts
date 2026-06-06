@@ -101,6 +101,16 @@ export const todo_write: Tool = {
         },
         required: ["todos"],
     },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (Array.isArray(raw)) return { todos: raw };
+        if (typeof raw === "string") return { todos: raw };
+        if (!raw || typeof raw !== "object") return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            todos: args.todos ?? args.items ?? args.tasks,
+        };
+    },
     execute: async (args): Promise<string> => {
         const result = normalizeTodos(args.todos);
         if (typeof result === "string") return result;

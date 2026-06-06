@@ -22,7 +22,7 @@ import {
     convertToChatFormat,
     estimateChatPayloadTokens,
 } from "./messages.ts";
-import { parseToolCalls } from "./parser.ts";
+import { parseToolCalls, parseToolInput } from "./parser.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { createDefaultTools } from "./default-tools.ts";
 import { runHookEvent } from "./plugins.ts";
@@ -31,6 +31,29 @@ import { composeHooks, buildBuiltinHooks } from "./builtin-hooks.ts";
 // Cap on pi-style continuations within one run, to bound runaway loops when a
 // continuation hook keeps resuming the agent.
 const DEFAULT_MAX_CONTINUATIONS = 12;
+
+interface RunnableToolCall {
+    kind: "runnable";
+    call: ToolCall;
+    args: Record<string, unknown>;
+}
+
+interface FinalToolCall {
+    kind: "final";
+    call: ToolCall;
+    args: Record<string, unknown>;
+    result: string;
+    isError: boolean;
+}
+
+type PreparedLoopToolCall = RunnableToolCall | FinalToolCall;
+
+interface ExecutedLoopToolCall {
+    call: ToolCall;
+    args: Record<string, unknown>;
+    result: string;
+    isError: boolean;
+}
 
 export interface AgentLoopOptions {
     config: AgentConfig;
@@ -170,6 +193,11 @@ export class AgentLoop {
             this.emitEvent({ type: "turn_start", turnId });
             this.emitEvent({ type: "phase", phase: "thinking" });
 
+            const steeringMessages = await this.runGetSteeringMessages();
+            if (steeringMessages.length) {
+                this.appendInjectedMessages(transcriptPath, steeringMessages);
+            }
+
             // Estimate context before the model call so the status bar stays live.
             const toolDefs = this.toolRegistry.toToolDefinitions();
             this.emitContextUpdate(toolDefs);
@@ -209,6 +237,15 @@ export class AgentLoop {
                     assistantToolCalls = response.toolCalls;
                     if (assistantToolCalls.length === 0 && assistantContent) {
                         assistantToolCalls = parseToolCalls(assistantContent);
+                        if (assistantToolCalls.length > 0) {
+                            this.emitEvent({
+                                type: "repair_nudge",
+                                turnId,
+                                repairStage: "parse_tool_calls",
+                                message:
+                                    "Recovered tool call(s) from textual model output.",
+                            });
+                        }
                     }
                     break;
                 } catch (e: unknown) {
@@ -251,7 +288,10 @@ export class AgentLoop {
                 }
             }
 
-            if (!assistantContent && assistantToolCalls.length === 0) break;
+            if (!assistantContent && assistantToolCalls.length === 0) {
+                this.emitEvent({ type: "turn_end", turnId });
+                break;
+            }
 
             // Add assistant message
             this._messages.push(
@@ -277,146 +317,61 @@ export class AgentLoop {
             // Check if we have tool calls
             if (assistantToolCalls.length > 0) {
                 this.emitEvent({ type: "phase", phase: "tool" });
+                await this.executeToolCalls(
+                    assistantToolCalls,
+                    turnId,
+                    transcriptPath,
+                    hookBasePayload,
+                );
 
-                for (const tc of assistantToolCalls) {
-                    if (this.signal?.aborted) {
-                        this.emitEvent({
-                            type: "error",
-                            message: "Operation aborted",
-                        });
-                        break;
-                    }
-                    // Emit tool call start
-                    this.emitEvent({
-                        type: "tool_call_start",
-                        toolName: tc.name,
-                        toolCallId: tc.id,
-                        args: tc.arguments,
-                    });
-
-                    let toolInput = parseToolInput(tc.arguments);
-                    let activeToolCall = tc;
-
-                    // beforeToolCall contract hook: may rewrite args or
-                    // short-circuit execution entirely.
-                    let result: string;
-                    let isError: boolean;
-                    const before = await this.runBeforeToolCall(tc, toolInput);
-                    if (before?.content !== undefined) {
-                        // Short-circuit: tool is NOT executed.
-                        result = before.content;
-                        isError = before.isError ?? false;
-                        this.emitEvent({
-                            type: "tool_call_end",
-                            toolName: tc.name,
-                            toolCallId: tc.id,
-                            result,
-                            isError,
-                        });
-                        await this.recordToolResult(
-                            transcriptPath,
-                            hookBasePayload,
-                            activeToolCall,
-                            toolInput,
-                            result,
-                            isError,
-                        );
-                        continue;
-                    }
-                    if (before?.args !== undefined) {
-                        toolInput = before.args;
-                        activeToolCall = {
-                            ...tc,
-                            arguments: JSON.stringify(before.args),
-                        };
-                    }
-
-                    await this.runHookSafely("PreToolUse", {
-                        ...hookBasePayload,
-                        matcher_value: hookMatcherValue(activeToolCall.name),
-                        tool_name: activeToolCall.name,
-                        tool_input: toolInput,
-                    });
-
-                    // Execute tool
-                    result = await this.toolRegistry.execute(activeToolCall, {
-                        signal: this.signal,
-                        onUpdate: (partialResult) => {
-                            this.emitEvent({
-                                type: "tool_call_update",
-                                toolName: activeToolCall.name,
-                                toolCallId: activeToolCall.id,
-                                partialResult,
-                            });
-                        },
-                    });
-                    isError = result.startsWith("Error:");
-
-                    // afterToolCall contract hook: may rewrite the result.
-                    const after = await this.runAfterToolCall(
-                        activeToolCall,
-                        toolInput,
-                        result,
-                        isError,
-                    );
-                    if (after) {
-                        if (after.content !== undefined) result = after.content;
-                        if (after.isError !== undefined) isError = after.isError;
-                    }
-
-                    // Emit tool call end
-                    this.emitEvent({
-                        type: "tool_call_end",
-                        toolName: activeToolCall.name,
-                        toolCallId: activeToolCall.id,
-                        result,
-                        isError,
-                    });
-
-                    await this.recordToolResult(
-                        transcriptPath,
-                        hookBasePayload,
-                        activeToolCall,
-                        toolInput,
-                        result,
-                        isError,
-                    );
+                if (this.signal?.aborted) {
+                    this.emitEvent({ type: "turn_end", turnId });
+                    break;
                 }
-
-                if (this.signal?.aborted) break;
             }
 
             // prepareNextTurn / shouldStopAfterTurn contract hooks.
             const hadToolCalls = assistantToolCalls.length > 0;
             await this.runPrepareNextTurn(hadToolCalls);
-            if (await this.runShouldStopAfterTurn(hadToolCalls)) break;
+            if (await this.runShouldStopAfterTurn(hadToolCalls)) {
+                this.emitEvent({ type: "turn_end", turnId });
+                break;
+            }
 
             // Continue loop with tool results.
-            if (hadToolCalls) continue;
+            if (hadToolCalls) {
+                this.emitEvent({ type: "turn_end", turnId });
+                continue;
+            }
 
-            // No tool calls: the turn would end here. Pi-style continuation —
-            // let a hook resume the agent (e.g. todos still pending) by
-            // injecting a user message, capped to avoid runaway loops.
+            // No tool calls: the turn would end here. Pi-style follow-up
+            // messages get first chance to continue the outer loop.
             if (this.continuationCount < this.maxContinuations) {
+                const followUps =
+                    await this.runGetFollowUpMessages(assistantContent);
+                if (followUps.length) {
+                    this.continuationCount++;
+                    this.appendInjectedMessages(transcriptPath, followUps);
+                    this.emitEvent({ type: "turn_end", turnId });
+                    continue;
+                }
+
+                // Legacy single-message continuation hook kept for built-ins
+                // and external callers while the new queue contract settles.
                 const cont = await this.runContinueAfterTurn(assistantContent);
                 if (cont) {
                     this.continuationCount++;
-                    this._messages.push(createUserMessage(cont.message));
-                    this.appendTranscript(transcriptPath, {
-                        type: "user",
-                        timestamp: new Date().toISOString(),
-                        message: { role: "user", content: cont.message },
-                    });
+                    this.appendInjectedMessages(transcriptPath, [
+                        createUserMessage(cont.message),
+                    ]);
+                    this.emitEvent({ type: "turn_end", turnId });
                     continue;
                 }
             }
+            this.emitEvent({ type: "turn_end", turnId });
             break;
         }
 
-        this.emitEvent({
-            type: "turn_end",
-            turnId: `turn_${this.iterationCount}`,
-        });
         await this.runHookSafely("Stop", {
             ...hookBasePayload,
             stop_hook_active: false,
@@ -579,6 +534,43 @@ export class AgentLoop {
         }
     }
 
+    private async runGetSteeringMessages(): Promise<Message[]> {
+        if (!this.hooks.getSteeringMessages) return [];
+        try {
+            const r = await this.hooks.getSteeringMessages({
+                messages: this._messages,
+                iteration: this.iterationCount,
+            });
+            return r?.length ? r : [];
+        } catch (e) {
+            this.emitEvent({
+                type: "error",
+                message: `getSteeringMessages hook failed: ${(e as Error).message}`,
+            });
+            return [];
+        }
+    }
+
+    private async runGetFollowUpMessages(
+        assistantText: string,
+    ): Promise<Message[]> {
+        if (!this.hooks.getFollowUpMessages) return [];
+        try {
+            const r = await this.hooks.getFollowUpMessages({
+                messages: this._messages,
+                iteration: this.iterationCount,
+                assistantText,
+            });
+            return r?.length ? r : [];
+        } catch (e) {
+            this.emitEvent({
+                type: "error",
+                message: `getFollowUpMessages hook failed: ${(e as Error).message}`,
+            });
+            return [];
+        }
+    }
+
     private async runContinueAfterTurn(
         assistantText: string,
     ): Promise<{ message: string } | undefined> {
@@ -597,6 +589,198 @@ export class AgentLoop {
             });
             return undefined;
         }
+    }
+
+    private async executeToolCalls(
+        toolCalls: ToolCall[],
+        turnId: string,
+        transcriptPath: string,
+        hookBasePayload: Record<string, unknown>,
+    ): Promise<void> {
+        const prepared: PreparedLoopToolCall[] = [];
+        for (const toolCall of toolCalls) {
+            if (this.signal?.aborted) {
+                this.emitEvent({
+                    type: "error",
+                    message: "Operation aborted",
+                });
+                return;
+            }
+            prepared.push(
+                await this.prepareLoopToolCall(
+                    toolCall,
+                    turnId,
+                    hookBasePayload,
+                ),
+            );
+        }
+
+        const runnable = prepared.filter(
+            (item): item is RunnableToolCall => item.kind === "runnable",
+        );
+        const executedById = new Map<string, ExecutedLoopToolCall>();
+        const parallel = this.shouldExecuteParallel(runnable);
+
+        const executed = parallel
+            ? await Promise.all(
+                  runnable.map((item) => this.executePreparedToolCall(item)),
+              )
+            : await this.executePreparedToolCallsSequentially(runnable);
+        for (const item of executed) executedById.set(item.call.id, item);
+
+        for (const item of prepared) {
+            const executedItem =
+                item.kind === "final" ? item : executedById.get(item.call.id);
+            if (!executedItem) continue;
+            await this.finalizeToolCall(
+                executedItem,
+                transcriptPath,
+                hookBasePayload,
+            );
+        }
+    }
+
+    private async prepareLoopToolCall(
+        toolCall: ToolCall,
+        turnId: string,
+        hookBasePayload: Record<string, unknown>,
+    ): Promise<PreparedLoopToolCall> {
+        const prepared = this.toolRegistry.prepare(toolCall);
+        let toolInput = prepared.args;
+        let activeToolCall = prepared.call;
+
+        this.emitEvent({
+            type: "tool_call_start",
+            toolName: activeToolCall.name,
+            toolCallId: activeToolCall.id,
+            args: activeToolCall.arguments,
+        });
+
+        if (prepared.error) {
+            this.emitEvent({
+                type: "repair_nudge",
+                turnId,
+                repairStage: "prepare_arguments",
+                toolName: toolCall.name,
+                message: prepared.error,
+            });
+            return {
+                kind: "final",
+                call: activeToolCall,
+                args: toolInput,
+                result: prepared.error,
+                isError: true,
+            };
+        }
+
+        const before = await this.runBeforeToolCall(activeToolCall, toolInput);
+        if (before?.content !== undefined) {
+            return {
+                kind: "final",
+                call: activeToolCall,
+                args: toolInput,
+                result: before.content,
+                isError: before.isError ?? false,
+            };
+        }
+        if (before?.args !== undefined) {
+            toolInput = before.args;
+            activeToolCall = {
+                ...toolCall,
+                arguments: JSON.stringify(before.args),
+            };
+        }
+
+        await this.runHookSafely("PreToolUse", {
+            ...hookBasePayload,
+            matcher_value: hookMatcherValue(activeToolCall.name),
+            tool_name: activeToolCall.name,
+            tool_input: toolInput,
+        });
+
+        return { kind: "runnable", call: activeToolCall, args: toolInput };
+    }
+
+    private async executePreparedToolCallsSequentially(
+        calls: RunnableToolCall[],
+    ): Promise<ExecutedLoopToolCall[]> {
+        const out: ExecutedLoopToolCall[] = [];
+        for (const call of calls) {
+            if (this.signal?.aborted) break;
+            out.push(await this.executePreparedToolCall(call));
+        }
+        return out;
+    }
+
+    private async executePreparedToolCall(
+        prepared: RunnableToolCall,
+    ): Promise<ExecutedLoopToolCall> {
+        const result = await this.toolRegistry.execute(
+            prepared.call,
+            {
+                signal: this.signal,
+                onUpdate: (partialResult) => {
+                    this.emitEvent({
+                        type: "tool_call_update",
+                        toolName: prepared.call.name,
+                        toolCallId: prepared.call.id,
+                        partialResult,
+                    });
+                },
+            },
+            prepared.args,
+        );
+        return {
+            call: prepared.call,
+            args: prepared.args,
+            result,
+            isError: result.startsWith("Error:"),
+        };
+    }
+
+    private async finalizeToolCall(
+        executed: ExecutedLoopToolCall,
+        transcriptPath: string,
+        hookBasePayload: Record<string, unknown>,
+    ): Promise<void> {
+        let { result, isError } = executed;
+        const after = await this.runAfterToolCall(
+            executed.call,
+            executed.args,
+            result,
+            isError,
+        );
+        if (after) {
+            if (after.content !== undefined) result = after.content;
+            if (after.isError !== undefined) isError = after.isError;
+        }
+
+        this.emitEvent({
+            type: "tool_call_end",
+            toolName: executed.call.name,
+            toolCallId: executed.call.id,
+            result,
+            isError,
+        });
+
+        await this.recordToolResult(
+            transcriptPath,
+            hookBasePayload,
+            executed.call,
+            executed.args,
+            result,
+            isError,
+        );
+    }
+
+    private shouldExecuteParallel(calls: RunnableToolCall[]): boolean {
+        if ((this.config.toolExecution ?? "parallel") !== "parallel")
+            return false;
+        return calls.every(
+            (call) =>
+                this.toolRegistry.get(call.call.name)?.executionMode ===
+                "parallel",
+        );
     }
 
     private async recordToolResult(
@@ -634,6 +818,21 @@ export class AgentLoop {
         });
     }
 
+    private appendInjectedMessages(
+        transcriptPath: string,
+        messages: Message[],
+    ): void {
+        for (const message of messages) {
+            this._messages.push(message);
+            if (message.role !== "user") continue;
+            this.appendTranscript(transcriptPath, {
+                type: "user",
+                timestamp: new Date().toISOString(),
+                message: { role: "user", content: message.content || "" },
+            });
+        }
+    }
+
     private async runHookSafely(
         eventType: string,
         payload: Record<string, unknown>,
@@ -661,17 +860,6 @@ export class AgentLoop {
         } catch {
             // Transcript persistence is best-effort for hook integrations.
         }
-    }
-}
-
-function parseToolInput(raw: string): Record<string, unknown> {
-    try {
-        const parsed = JSON.parse(raw || "{}");
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-            ? (parsed as Record<string, unknown>)
-            : {};
-    } catch {
-        return {};
     }
 }
 

@@ -14,6 +14,7 @@ import {
 
 export const read_file: Tool = {
     name: "read_file",
+    executionMode: "parallel",
     description:
         `Read file contents. Output is truncated to ${DEFAULT_MAX_LINES} lines or ` +
         `${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files; ` +
@@ -32,6 +33,15 @@ export const read_file: Tool = {
             },
         },
         required: ["path"],
+    },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (typeof raw === "string") return { path: raw };
+        if (!raw || typeof raw !== "object") return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            path: args.path ?? args.file_path ?? args.filename,
+        };
     },
     execute: async (args, ctx): Promise<string> => {
         const filePath = String(args.path);

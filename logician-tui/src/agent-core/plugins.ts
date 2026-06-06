@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+let pluginRuntimeEnv: NodeJS.ProcessEnv = {};
+
 type Scope = "user" | "project" | "local" | "managed";
 type HookEventType =
     | "SessionStart"
@@ -93,6 +95,12 @@ export interface PluginCommandResult {
     raw_output?: string;
     event?: string;
     [key: string]: unknown;
+}
+
+export function configurePluginRuntimeEnv(env: NodeJS.ProcessEnv): void {
+    pluginRuntimeEnv = Object.fromEntries(
+        Object.entries(env).filter(([, value]) => value !== undefined),
+    ) as NodeJS.ProcessEnv;
 }
 
 export function splitPluginArgs(input: string): string[] {
@@ -894,14 +902,8 @@ async function loadPluginHooks(
     pluginId: string,
 ): Promise<LoadedHook[]> {
     const merged: Record<string, HookDefinition[]> = {};
-    const manifestHooks = (
-        await readJson(path.join(pluginDir, ".claude-plugin", "plugin.json"))
-    ).hooks;
-    mergeHooks(merged, parseHooksDict(manifestHooks));
-    const hooksJson = await readJson(
-        path.join(pluginDir, "hooks", "hooks.json"),
-    );
-    mergeHooks(merged, parseHooksDict(hooksJson.hooks || hooksJson));
+    const manifest = await readPluginManifest(pluginDir);
+    await mergeManifestHooks(merged, pluginDir, manifest.hooks);
     const pluginName = await pluginNameFor(pluginDir, pluginId);
     const out: LoadedHook[] = [];
     for (const [eventType, defs] of Object.entries(merged)) {
@@ -916,6 +918,28 @@ async function loadPluginHooks(
         }
     }
     return out;
+}
+
+async function readPluginManifest(
+    pluginDir: string,
+): Promise<Record<string, unknown>> {
+    return readJson(path.join(pluginDir, ".claude-plugin", "plugin.json"));
+}
+
+async function mergeManifestHooks(
+    merged: Record<string, HookDefinition[]>,
+    pluginDir: string,
+    hooks: unknown,
+): Promise<void> {
+    if (typeof hooks === "string") {
+        const hookPath = path.resolve(pluginDir, hooks);
+        const hookJson = await readJson(hookPath);
+        mergeHooks(merged, parseHooksDict(hookJson.hooks || hookJson));
+        return;
+    }
+    mergeHooks(merged, parseHooksDict(hooks));
+    const hookJson = await readJson(path.join(pluginDir, "hooks", "hooks.json"));
+    mergeHooks(merged, parseHooksDict(hookJson.hooks || hookJson));
 }
 
 function parseHooksDict(data: unknown): Record<string, HookDefinition[]> {
@@ -1015,7 +1039,11 @@ async function executeCommand(
     );
     const { stdout, stderr } = await runShellCommand(command.command, {
         cwd: hook.pluginDir,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: hook.pluginDir },
+        env: {
+            ...process.env,
+            ...pluginRuntimeEnv,
+            CLAUDE_PLUGIN_ROOT: hook.pluginDir,
+        },
         input: hookInput,
         timeoutMs: timeout * 1000,
     });
@@ -1024,57 +1052,97 @@ async function executeCommand(
 
 function parseHookResponse(rawOutput: string): HookExecutionResult {
     const result = { ...emptyHookResult(), raw_output: rawOutput };
-    if (!rawOutput.trim()) return result;
+    const trimmedOutput = rawOutput.trim();
+    if (!trimmedOutput) return result;
     try {
-        const data = JSON.parse(rawOutput);
+        const data = JSON.parse(trimmedOutput);
         if (!isRecord(data)) return result;
-
-        const hookSpecific = data.hookSpecificOutput;
-        if (isRecord(hookSpecific)) {
-            const eventName = hookSpecific.hookEventName;
-            if (
-                (eventName === "SessionStart" ||
-                    eventName === "UserPromptSubmit") &&
-                typeof hookSpecific.additionalContext === "string"
-            ) {
-                result.additional_contexts.push(hookSpecific.additionalContext);
-            }
-            if (eventName === "SessionStart") {
-                if (typeof hookSpecific.initialUserMessage === "string")
-                    result.initial_user_message =
-                        hookSpecific.initialUserMessage;
-                if (Array.isArray(hookSpecific.watchPaths))
-                    result.watch_paths.push(
-                        ...hookSpecific.watchPaths.filter(
-                            (p: unknown): p is string => typeof p === "string",
-                        ),
-                    );
-            }
-            return result;
-        }
-
-        pushContextValues(result, data.additional_context);
-        pushContextValues(result, data.additionalContext);
-
-        if (typeof data.initial_user_message === "string") {
-            result.initial_user_message = data.initial_user_message;
-        }
-        if (typeof data.initialUserMessage === "string") {
-            result.initial_user_message = data.initialUserMessage;
-        }
-        pushWatchPaths(result, data.watch_paths);
-        pushWatchPaths(result, data.watchPaths);
-
-        if (data.decision === "block" && typeof data.reason === "string") {
-            result.additional_contexts.push(data.reason);
-        }
-
+        applyHookResponseObject(result, data);
         return result;
     } catch {
-        // Plain text hook output becomes context.
+        // Some hooks emit JSONL control records. Consume those line-by-line so
+        // suppressOutput payloads don't leak into the startup transcript.
     }
-    result.additional_contexts.push(rawOutput.trim());
+
+    const lines = trimmedOutput.split(/\r?\n/);
+    const plainLines: string[] = [];
+    let parsedJsonLine = false;
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            plainLines.push(line);
+            continue;
+        }
+        if (!/^[{[]/.test(trimmed)) {
+            plainLines.push(line);
+            continue;
+        }
+        try {
+            const data = JSON.parse(trimmed);
+            if (!isRecord(data)) {
+                plainLines.push(line);
+                continue;
+            }
+            parsedJsonLine = true;
+            applyHookResponseObject(result, data);
+        } catch {
+            plainLines.push(line);
+        }
+    }
+
+    if (parsedJsonLine) {
+        const plainText = plainLines.join("\n").trim();
+        if (plainText) result.additional_contexts.push(plainText);
+        return result;
+    }
+
+    result.additional_contexts.push(trimmedOutput);
     return result;
+}
+
+function applyHookResponseObject(
+    result: HookExecutionResult,
+    data: Record<string, unknown>,
+): void {
+    const hookSpecific = data.hookSpecificOutput;
+    if (isRecord(hookSpecific)) {
+        const eventName = hookSpecific.hookEventName;
+        if (
+            (eventName === "SessionStart" ||
+                eventName === "UserPromptSubmit") &&
+            typeof hookSpecific.additionalContext === "string"
+        ) {
+            result.additional_contexts.push(hookSpecific.additionalContext);
+        }
+        if (eventName === "SessionStart") {
+            if (typeof hookSpecific.initialUserMessage === "string")
+                result.initial_user_message =
+                    hookSpecific.initialUserMessage;
+            if (Array.isArray(hookSpecific.watchPaths))
+                result.watch_paths.push(
+                    ...hookSpecific.watchPaths.filter(
+                        (p: unknown): p is string => typeof p === "string",
+                    ),
+                );
+        }
+        return;
+    }
+
+    pushContextValues(result, data.additional_context);
+    pushContextValues(result, data.additionalContext);
+
+    if (typeof data.initial_user_message === "string") {
+        result.initial_user_message = data.initial_user_message;
+    }
+    if (typeof data.initialUserMessage === "string") {
+        result.initial_user_message = data.initialUserMessage;
+    }
+    pushWatchPaths(result, data.watch_paths);
+    pushWatchPaths(result, data.watchPaths);
+
+    if (data.decision === "block" && typeof data.reason === "string") {
+        result.additional_contexts.push(data.reason);
+    }
 }
 
 function pushContextValues(result: HookExecutionResult, value: unknown): void {
@@ -1194,21 +1262,30 @@ function withHookMetadata(
 
 function matcherMatches(pattern: string | undefined, source: string): boolean {
     if (!pattern) return true;
-    const clean = pattern.trim().toLowerCase();
-    const sourceClean = source.trim().toLowerCase();
+    const clean = pattern.trim();
+    const sourceClean = source.trim();
     if (clean === "*") return true;
     if (!sourceClean) return true;
+    const sourceParts = sourceClean.split("|").map((s) => s.trim());
+    try {
+        const regex = new RegExp(clean, "i");
+        if (regex.test(sourceClean)) return true;
+        if (sourceParts.some((part) => regex.test(part))) return true;
+    } catch {
+        // Fall back to legacy substring matching for non-regex hook matchers.
+    }
+    const lowerSource = sourceClean.toLowerCase();
     return clean
         .split("|")
         .map((p) => p.trim())
         .some(
             (p) =>
                 p === "*" ||
-                sourceClean
+                lowerSource
                     .split("|")
                     .map((s) => s.trim())
-                    .includes(p) ||
-                sourceClean.includes(p),
+                    .includes(p.toLowerCase()) ||
+                lowerSource.includes(p.toLowerCase()),
         );
 }
 
@@ -1335,9 +1412,7 @@ async function pluginNameFor(
     pluginDir: string,
     pluginId: string,
 ): Promise<string> {
-    const manifest = await readJson(
-        path.join(pluginDir, ".claude-plugin", "plugin.json"),
-    );
+    const manifest = await readPluginManifest(pluginDir);
     return typeof manifest.name === "string" && manifest.name
         ? manifest.name
         : pluginId.split("@")[0];

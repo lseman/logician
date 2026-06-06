@@ -25,6 +25,15 @@ export const write_file: Tool = {
         },
         required: ["path", "content"],
     },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            path: args.path ?? args.file_path ?? args.filename,
+            content: args.content ?? args.text,
+        };
+    },
     execute: async (args, ctx): Promise<string> => {
         const filePath = String(args.path);
         const content = String(args.content ?? "");

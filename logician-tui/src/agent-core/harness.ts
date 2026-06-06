@@ -13,6 +13,8 @@
 import type {
     AgentConfig,
     AgentLoopHooks,
+    GetFollowUpMessagesContext,
+    GetSteeringMessagesContext,
     Message,
     PrepareNextTurnContext,
     PrepareNextTurnResult,
@@ -177,27 +179,46 @@ export class AgentHarness {
 
     // ── Internals ──────────────────────────────────────────────────────────
 
-    // Wrap config.hooks.prepareNextTurn with the harness drain so queued
-    // steering/follow-up messages are injected between turns. Any user-supplied
-    // prepareNextTurn runs after the drain.
+    // Wrap config hooks with harness queue drains. Steering drains before the
+    // next assistant response; follow-up drains only when the loop would stop.
     private withDrainHook(config: AgentConfig): AgentConfig {
         const userHooks: AgentLoopHooks = config.hooks || {};
         const userPrepare = userHooks.prepareNextTurn;
+        const userSteering = userHooks.getSteeringMessages;
+        const userFollowUp = userHooks.getFollowUpMessages;
+
+        const getSteeringMessages = async (
+            ctx: GetSteeringMessagesContext,
+        ): Promise<Message[] | undefined> => {
+            const out = this.steeringQueue
+                .splice(0)
+                .map((text) => createUserMessage(text));
+            const user = await userSteering?.({
+                ...ctx,
+                messages: [...ctx.messages, ...out],
+            });
+            if (user?.length) out.push(...user);
+            return out.length ? out : undefined;
+        };
+
+        const getFollowUpMessages = async (
+            ctx: GetFollowUpMessagesContext,
+        ): Promise<Message[] | undefined> => {
+            const out = this.followUpQueue
+                .splice(0)
+                .map((text) => createUserMessage(text));
+            const user = await userFollowUp?.({
+                ...ctx,
+                messages: [...ctx.messages, ...out],
+            });
+            if (user?.length) out.push(...user);
+            return out.length ? out : undefined;
+        };
 
         const prepareNextTurn = async (
             ctx: PrepareNextTurnContext,
         ): Promise<PrepareNextTurnResult | undefined> => {
             let messages = ctx.messages;
-            const drained = [
-                ...this.steeringQueue.splice(0),
-                ...this.followUpQueue.splice(0),
-            ];
-            if (drained.length) {
-                messages = [
-                    ...messages,
-                    ...drained.map((text) => createUserMessage(text)),
-                ];
-            }
             if (userPrepare) {
                 const r = await userPrepare({ ...ctx, messages });
                 if (r?.messages) messages = r.messages;
@@ -207,7 +228,12 @@ export class AgentHarness {
 
         return {
             ...config,
-            hooks: { ...userHooks, prepareNextTurn },
+            hooks: {
+                ...userHooks,
+                getSteeringMessages,
+                getFollowUpMessages,
+                prepareNextTurn,
+            },
         };
     }
 }

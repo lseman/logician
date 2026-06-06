@@ -37,6 +37,16 @@ export const edit_file: Tool = {
         },
         required: ["path"],
     },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            path: args.path ?? args.file_path ?? args.filename,
+            old_text: args.old_text ?? args.oldString ?? args.old_string,
+            new_text: args.new_text ?? args.newString ?? args.new_string,
+        };
+    },
     execute: async (args, ctx): Promise<string> => {
         const filePath = String(args.path);
         const resolved = resolvePath(ctx.cwd, filePath);

@@ -79,3 +79,4 @@ lazy_timeseries/
 .pi/
 
 logician-tui/dist/
+.logician.json

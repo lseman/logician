@@ -20,6 +20,12 @@ import type { ParsedBridgeEvent } from "./events.ts";
 import { UndoStack } from "./undo-stack.ts";
 import { KillRing } from "./kill-ring.ts";
 import { createSlashCommands, type SlashCommandDef } from "./slash-commands.ts";
+import {
+    configBool,
+    configNumber,
+    configString,
+    loadLogicianConfig,
+} from "./config.ts";
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
@@ -37,6 +43,7 @@ export class LogicianTUI {
     private killRing: KillRing;
     private undoStack: UndoStack<{ value: string; cursor: number }>;
     private streaming = false;
+    private configPath?: string;
 
     // Feature flags
     private traceOn = false;
@@ -46,10 +53,49 @@ export class LogicianTUI {
         "expanded";
 
     constructor() {
+        const loadedConfig = loadLogicianConfig(process.cwd());
+        this.configPath = loadedConfig.path;
+        const config = loadedConfig.config;
+        const modelName = process.env.LOGICIAN_MODEL || configString(config.model) || "";
         this.bridge = new AgentCoreBridge({
-            baseUrl: process.env.LOGICIAN_LLM_URL || "http://127.0.0.1:8080",
-            model: process.env.LOGICIAN_MODEL || "",
-            systemPrompt: process.env.LOGICIAN_SYSTEM_PROMPT,
+            baseUrl:
+                process.env.LOGICIAN_LLM_URL ||
+                configString(config.baseUrl) ||
+                configString(config.llmUrl) ||
+                "http://127.0.0.1:8080",
+            model: modelName,
+            systemPrompt:
+                process.env.LOGICIAN_SYSTEM_PROMPT ||
+                configString(config.systemPrompt),
+            chatTemplate: configString(config.chatTemplate),
+            temperature: configNumber(config.temperature),
+            maxTokens: configNumber(config.maxTokens),
+            maxIterations: configNumber(config.maxIterations),
+            toolExecution:
+                configString(config.toolExecution) === "sequential"
+                    ? "sequential"
+                    : configString(config.toolExecution) === "parallel"
+                      ? "parallel"
+                      : undefined,
+            contextWindowTokens:
+                envNumber("LOGICIAN_CONTEXT_WINDOW") ||
+                envNumber("LOGICIAN_CTX_SIZE") ||
+                configNumber(config.contextWindowTokens) ||
+                configNumber(config.contextWindow),
+            runtimeHooksEnabled:
+                process.env.LOGICIAN_HOOKS !== undefined
+                    ? process.env.LOGICIAN_HOOKS !== "0"
+                    : configBool(config.hooks),
+            mcpEager:
+                process.env.LOGICIAN_MCP_EAGER !== undefined
+                    ? process.env.LOGICIAN_MCP_EAGER !== "0"
+                    : configBool(config.mcpEager),
+            webSearch: config.webSearch
+                ? {
+                      baseUrl: configString(config.webSearch.baseUrl),
+                      maxResults: configNumber(config.webSearch.maxResults),
+                  }
+                : undefined,
             cwd: process.cwd(),
         });
         this.transcript = new Transcript();
@@ -95,6 +141,8 @@ export class LogicianTUI {
                 const lines = [
                     `Agent: ${state.agent_name || "unknown"}`,
                     `Model: ${state.model || "unknown"}`,
+                    `Base URL: ${state.base_url || "unknown"}`,
+                    `Project: ${this.getGitVersion() || "-"}`,
                     `Tools: ${(state.tools as string[])?.length || 0} loaded`,
                     `MCP: ${state.mcp_servers || 0} server(s), ${state.mcp_tools || 0} tool(s)`,
                     `Context: ${formatContextSize(
@@ -103,6 +151,7 @@ export class LogicianTUI {
                     )}`,
                     `Hooks: ${state.hooks_enabled === false ? "disabled" : "enabled"}`,
                     `Hook transcript: ${state.hook_transcript_path || "-"}`,
+                    `Config: ${state.config_path || "-"}`,
                     `Connected: ${state.connected !== false}`,
                 ];
                 const mcpErrors = Array.isArray(state.mcp_errors)
@@ -158,13 +207,15 @@ export class LogicianTUI {
             thinkingLevel: this.thinkingLevel,
             cacheEnabled: this.cacheEnabled,
             phase: "ready",
-            model: process.env.LOGICIAN_MODEL || "local",
+            model: modelName || "local",
             cwd: process.cwd(),
             branch: this.getGitBranch(),
             contextTokens: 0,
             contextMaxTokens:
                 envNumber("LOGICIAN_CONTEXT_WINDOW") ||
-                envNumber("LOGICIAN_CTX_SIZE"),
+                envNumber("LOGICIAN_CTX_SIZE") ||
+                configNumber(config.contextWindowTokens) ||
+                configNumber(config.contextWindow),
         });
 
         // Setup slash commands
@@ -342,6 +393,12 @@ export class LogicianTUI {
                     contextCompacted: true,
                 });
                 break;
+            case "repair_nudge":
+                this.transcript.addSystemMessage(
+                    `Tool-call repair: ${event.message || "recovered malformed tool call"}`,
+                );
+                this.transcriptDisplay.setTurns(this.transcript.getTurns());
+                break;
             case "steered":
                 this.transcript.addSystemMessage(
                     `Steering the running turn: ${event.message}`,
@@ -382,7 +439,26 @@ export class LogicianTUI {
                   .filter(Boolean)
             : [];
 
+        const runtimeRows = [
+            ["Agent", String(state.agent_name || "logician")],
+            ["Model", String(state.model || "unknown")],
+            ["Base URL", String(state.base_url || "unknown")],
+            ["Project", this.getGitVersion() || "-"],
+            ["Config", this.configPath || "-"],
+        ];
+
         const lines = [
+            "# Logician",
+            "Runtime ready.",
+            "",
+            "| Runtime | Value |",
+            "| --- | --- |",
+            ...runtimeRows.map(
+                ([label, value]) =>
+                    `| ${markdownTableCell(label)} | ${markdownTableCell(value)} |`,
+            ),
+            "",
+            "## Startup",
             `Plugins loaded: ${pluginCount}`,
             `Startup hooks: ${hookCount}`,
             state.mcp_deferred
@@ -764,6 +840,35 @@ export class LogicianTUI {
         }
     }
 
+    private getGitVersion(): string {
+        try {
+            const branch =
+                this.getGitBranch() ||
+                execSync("git rev-parse --short HEAD", {
+                    cwd: process.cwd(),
+                    encoding: "utf8",
+                    stdio: ["ignore", "pipe", "ignore"],
+                }).trim();
+            const sha = execSync("git rev-parse --short HEAD", {
+                cwd: process.cwd(),
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "ignore"],
+            }).trim();
+            let dirty = "";
+            try {
+                execSync("git diff --quiet && git diff --cached --quiet", {
+                    cwd: process.cwd(),
+                    stdio: "ignore",
+                });
+            } catch {
+                dirty = " dirty";
+            }
+            return `${branch}@${sha}${dirty}`;
+        } catch {
+            return "";
+        }
+    }
+
     // ── Start ──────────────────────────────────────────────────────────────
 
     start(): void {
@@ -809,6 +914,10 @@ function normalizeStartupHookMessage(item: unknown): {
         title: `${label}${suffix}${matcherText}`,
         content: String(raw.content || "").trim(),
     };
+}
+
+function markdownTableCell(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 function formatContextSize(tokens: number, maxTokens?: number): string {

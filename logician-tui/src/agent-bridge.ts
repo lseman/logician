@@ -2,7 +2,7 @@
 // Replaces the Python bridge with direct TypeScript agent-core integration.
 // Translates agent-core events to the same shapes the transcript expects.
 
-import { mkdirSync, readdir, readFile, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { readdir as readdirAsync, readFile as readFileAsync } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -18,12 +18,14 @@ import { McpManager } from "./agent-core/mcp.ts";
 import { onTodosChanged } from "./agent-core/tools/todo-write.ts";
 import { buildDefaultSystemPrompt } from "./agent-core/system-prompt.ts";
 import {
+    configurePluginRuntimeEnv,
     runHookEvent,
     runPluginBackend,
     runSessionStartHooks,
     splitPluginArgs,
     type PluginCommandResult,
 } from "./agent-core/plugins.ts";
+import { findLogicianConfig } from "./config.ts";
 
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
@@ -61,6 +63,14 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
                 partial_result: event.partialResult,
                 tool_call_id: event.toolCallId,
             } as any;
+        case "repair_nudge":
+            return {
+                type: "repair_nudge",
+                turn_id: event.turnId,
+                repair_stage: event.repairStage,
+                tool_name: event.toolName,
+                message: event.message,
+            };
         case "turn_start":
         case "turn_end":
         case "agent_start":
@@ -128,9 +138,28 @@ function createHookTranscriptPath(cwd: string, sessionId: string): string {
     return transcriptPath;
 }
 
-function mcpEagerStartup(): boolean {
-    if (process.env.LOGICIAN_MCP === "0") return false;
-    return process.env.LOGICIAN_MCP_EAGER !== "0";
+function buildPluginRuntimeEnv(opts: AgentBridgeOptions): NodeJS.ProcessEnv {
+    const model = opts.model?.trim() || "";
+    const baseUrl = opts.baseUrl?.trim().replace(/\/+$/, "");
+    const env: NodeJS.ProcessEnv = {};
+    if (baseUrl) {
+        env.CLAUDE_MEM_MODEL = model;
+        env.CLAUDE_MEM_OPENROUTER_MODEL = model;
+        env.CLAUDE_MEM_TIER_ROUTING_ENABLED = "false";
+        env.CLAUDE_MEM_TIER_SIMPLE_MODEL = "";
+        env.CLAUDE_MEM_TIER_SUMMARY_MODEL = "";
+        env.CLAUDE_MEM_TIER_FAST_MODEL = "";
+        env.CLAUDE_MEM_TIER_SMART_MODEL = "";
+        env.CLAUDE_MEM_PROVIDER = "openrouter";
+        env.CLAUDE_MEM_OPENROUTER_BASE_URL = baseUrl;
+        env.OPENROUTER_BASE_URL = baseUrl;
+        env.CLAUDE_MEM_OPENROUTER_API_KEY =
+            process.env.CLAUDE_MEM_OPENROUTER_API_KEY ||
+            process.env.OPENROUTER_API_KEY ||
+            "logician-local";
+        env.OPENROUTER_API_KEY = env.CLAUDE_MEM_OPENROUTER_API_KEY;
+    }
+    return env;
 }
 
 function envNumber(name: string): number | undefined {
@@ -155,9 +184,17 @@ export interface AgentBridgeOptions {
     baseUrl: string;
     model: string;
     chatTemplate?: string;
+    temperature?: number;
+    maxTokens?: number;
+    maxIterations?: number;
+    contextWindowTokens?: number;
+    toolExecution?: AgentConfig["toolExecution"];
+    runtimeHooksEnabled?: boolean;
+    mcpEager?: boolean;
     tools?: Tool[];
     cwd?: string;
     systemPrompt?: string;
+    webSearch?: Partial<WebSearchConfig>;
 }
 
 // ── AgentCoreBridge ─────────────────────────────────────────────────────────────
@@ -188,6 +225,8 @@ export class AgentCoreBridge {
     private startupPluginCount = 0;
     private contextTokens = 0;
     private contextMaxTokens?: number;
+    private configPath: string | null;
+    private mcpEager: boolean;
 
     constructor(
         opts: AgentBridgeOptions = {
@@ -196,11 +235,20 @@ export class AgentCoreBridge {
         },
     ) {
         this.cwd = opts.cwd || process.cwd();
+        this.configPath = findLogicianConfig(this.cwd);
+        configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
+        this.mcpEager =
+            process.env.LOGICIAN_MCP === "0" ? false : opts.mcpEager !== false;
         this.transcriptPath = createHookTranscriptPath(
             this.cwd,
             this.sessionId,
         );
-        const webSearch = resolveWebSearchConfig();
+        const defaultWebSearch = resolveWebSearchConfig();
+        const webSearch = {
+            baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
+            maxResults:
+                opts.webSearch?.maxResults ?? defaultWebSearch.maxResults,
+        };
         this.defaultTools = opts.tools?.length
             ? opts.tools
             : createDefaultTools({ webSearch });
@@ -220,11 +268,16 @@ export class AgentCoreBridge {
             tools: this.defaultTools,
             webSearch,
             cwd: this.cwd,
-            maxIterations: 30,
+            maxIterations: opts.maxIterations || 30,
+            temperature: opts.temperature,
+            maxTokens: opts.maxTokens,
+            toolExecution: opts.toolExecution,
             contextWindowTokens:
                 envNumber("LOGICIAN_CONTEXT_WINDOW") ||
-                envNumber("LOGICIAN_CTX_SIZE"),
-            runtimeHooksEnabled: process.env.LOGICIAN_HOOKS !== "0",
+                envNumber("LOGICIAN_CTX_SIZE") ||
+                opts.contextWindowTokens,
+            runtimeHooksEnabled:
+                opts.runtimeHooksEnabled ?? process.env.LOGICIAN_HOOKS !== "0",
             hookSessionId: this.sessionId,
             hookTranscriptPath: this.transcriptPath,
             onEvent: (event: AgentEvent) => {
@@ -328,6 +381,11 @@ export class AgentCoreBridge {
         this.harness?.followUp(message);
     }
 
+    /** Queue a message before the next user prompt; survives abort. */
+    nextTurn(message: string): void {
+        this.harness?.nextTurn(message);
+    }
+
     /** Execute a slash command (sends as chat message to the agent). */
     sendSlash(raw: string): void {
         this.sendMessage(raw).catch((err) => this.errorCb?.(err));
@@ -336,8 +394,9 @@ export class AgentCoreBridge {
     async getState(): Promise<Record<string, unknown>> {
         await this.loadMcpToolsOnce();
         const state = {
-            agent_name: "ForeblocksAgent",
+            agent_name: "logician",
             model: this.config.model,
+            base_url: this.config.baseUrl,
             tools:
                 this.harness?.tools?.list().map((t: Tool) => t.name) ||
                 this.defaultTools.map((t) => t.name),
@@ -348,6 +407,7 @@ export class AgentCoreBridge {
             mcp_errors: this.mcpErrors,
             context_tokens: this.contextTokens,
             context_max_tokens: this.contextMaxTokens,
+            config_path: this.configPath || "",
             connected: true,
         };
         return state;
@@ -442,12 +502,13 @@ export class AgentCoreBridge {
 
     async init(): Promise<Record<string, unknown>> {
         await this.runStartupHooksOnce();
-        if (mcpEagerStartup()) {
+        if (this.mcpEager) {
             await this.loadMcpToolsOnce();
         }
         return {
-            agent_name: "ForeblocksAgent",
+            agent_name: "logician",
             model: this.config.model,
+            base_url: this.config.baseUrl,
             mcp_deferred: !this.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
             tools:
                 this.harness?.tools?.list().map((t: Tool) => t.name) ||
@@ -460,6 +521,7 @@ export class AgentCoreBridge {
             context_tokens: this.contextTokens,
             context_max_tokens:
                 this.contextMaxTokens || this.config.contextWindowTokens,
+            config_path: this.configPath || "",
             hooks_enabled: this.config.runtimeHooksEnabled !== false,
             hook_transcript_path: this.config.hookTranscriptPath || "",
             startup_plugins_loaded: this.startupPluginCount,

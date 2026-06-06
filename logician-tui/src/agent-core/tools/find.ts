@@ -13,6 +13,7 @@ const DEFAULT_LIMIT = 1000;
 
 export const find: Tool = {
     name: "find",
+    executionMode: "parallel",
     description:
         "Find files by glob pattern, e.g. '*.ts', '**/*.json', 'src/**/*.test.ts'. " +
         "Respects .gitignore. Returns paths relative to the search directory. " +
@@ -34,6 +35,16 @@ export const find: Tool = {
             },
         },
         required: ["pattern"],
+    },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (typeof raw === "string") return { pattern: raw };
+        if (!raw || typeof raw !== "object") return {};
+        const args = raw as Record<string, unknown>;
+        return {
+            ...args,
+            pattern: args.pattern ?? args.glob ?? args.query,
+            path: args.path ?? args.directory ?? args.dir,
+        };
     },
     execute: async (args, ctx): Promise<string> => {
         const pattern = String(args.pattern);

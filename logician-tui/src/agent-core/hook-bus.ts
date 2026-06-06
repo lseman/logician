@@ -28,6 +28,9 @@ import type {
     ShouldStopAfterTurnContext,
     ContinueAfterTurnContext,
     ContinueAfterTurnResult,
+    GetSteeringMessagesContext,
+    GetFollowUpMessagesContext,
+    Message,
 } from "./types.ts";
 
 export type HookEventName = keyof AgentLoopHooks;
@@ -53,6 +56,8 @@ type AfterHandler = NonNullable<AgentLoopHooks["afterToolCall"]>;
 type PrepareHandler = NonNullable<AgentLoopHooks["prepareNextTurn"]>;
 type StopHandler = NonNullable<AgentLoopHooks["shouldStopAfterTurn"]>;
 type ContinueHandler = NonNullable<AgentLoopHooks["continueAfterTurn"]>;
+type SteeringHandler = NonNullable<AgentLoopHooks["getSteeringMessages"]>;
+type FollowUpHandler = NonNullable<AgentLoopHooks["getFollowUpMessages"]>;
 
 // Read-only observer: sees every event with its name, return ignored.
 export type HookObserver = (
@@ -66,6 +71,8 @@ export class HookBus {
     private prepare: Entry<PrepareHandler>[] = [];
     private stop: Entry<StopHandler>[] = [];
     private continue_: Entry<ContinueHandler>[] = [];
+    private steering: Entry<SteeringHandler>[] = [];
+    private followUp: Entry<FollowUpHandler>[] = [];
     private observers: HookObserver[] = [];
 
     private errorMode: HookErrorMode;
@@ -104,6 +111,14 @@ export class HookBus {
             offs.push(
                 this.on("shouldStopAfterTurn", hooks.shouldStopAfterTurn, reg),
             );
+        if (hooks.getSteeringMessages)
+            offs.push(
+                this.on("getSteeringMessages", hooks.getSteeringMessages, reg),
+            );
+        if (hooks.getFollowUpMessages)
+            offs.push(
+                this.on("getFollowUpMessages", hooks.getFollowUpMessages, reg),
+            );
         if (hooks.continueAfterTurn)
             offs.push(
                 this.on("continueAfterTurn", hooks.continueAfterTurn, reg),
@@ -125,6 +140,8 @@ export class HookBus {
         this.prepare = [];
         this.stop = [];
         this.continue_ = [];
+        this.steering = [];
+        this.followUp = [];
         this.observers = [];
     }
 
@@ -136,6 +153,8 @@ export class HookBus {
             afterToolCall: (ctx) => this.runAfter(ctx),
             prepareNextTurn: (ctx) => this.runPrepare(ctx),
             shouldStopAfterTurn: (ctx) => this.runStop(ctx),
+            getSteeringMessages: (ctx) => this.runSteering(ctx),
+            getFollowUpMessages: (ctx) => this.runFollowUp(ctx),
             continueAfterTurn: (ctx) => this.runContinue(ctx),
         };
     }
@@ -226,6 +245,42 @@ export class HookBus {
         return undefined;
     }
 
+    private async runSteering(
+        ctx: GetSteeringMessagesContext,
+    ): Promise<Message[] | undefined> {
+        await this.notify("getSteeringMessages", ctx);
+        const out: Message[] = [];
+        for (const { handler, source } of this.steering) {
+            const r = await this.guard(
+                () => handler({ ...ctx, messages: [...ctx.messages, ...out] }),
+                "getSteeringMessages",
+                source,
+            );
+            if (r?.length) out.push(...r);
+        }
+        return out.length ? out : undefined;
+    }
+
+    private async runFollowUp(
+        ctx: GetFollowUpMessagesContext,
+    ): Promise<Message[] | undefined> {
+        await this.notify("getFollowUpMessages", ctx);
+        const out: Message[] = [];
+        for (const { handler, source } of this.followUp) {
+            const r = await this.guard(
+                () =>
+                    handler({
+                        ...ctx,
+                        messages: [...ctx.messages, ...out],
+                    }),
+                "getFollowUpMessages",
+                source,
+            );
+            if (r?.length) out.push(...r);
+        }
+        return out.length ? out : undefined;
+    }
+
     // First handler returning a continuation message wins.
     private async runContinue(
         ctx: ContinueAfterTurnContext,
@@ -256,6 +311,10 @@ export class HookBus {
                 return this.stop as Entry<unknown>[];
             case "continueAfterTurn":
                 return this.continue_ as Entry<unknown>[];
+            case "getSteeringMessages":
+                return this.steering as Entry<unknown>[];
+            case "getFollowUpMessages":
+                return this.followUp as Entry<unknown>[];
         }
     }
 

@@ -2,11 +2,8 @@
 // Renders the full conversation history with streaming support and markdown.
 // Chunks are interleaved in chronological order: thinking → content → tool → ...
 
-import type { Component, Scrollable } from "../tui-core.ts";
-import { clampLineToWidth, visibleWidth } from "../tui-core.ts";
+import { clampLineToWidth, visibleWidth, type Component, type Scrollable } from "../tui-core.ts";
 import type {
-    UserMessage,
-    AssistantMessage,
     AssistantChunk,
     ToolExecution,
     ThinkingDisplayStyle,
@@ -387,6 +384,10 @@ function renderInlinePlain(text: string): string {
     return out;
 }
 
+function escapeMarkdownTableCell(value: string): string {
+    return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
 // ── Options ────────────────────────────────────────────────────────────────────
 
 interface TranscriptDisplayOptions {
@@ -395,58 +396,8 @@ interface TranscriptDisplayOptions {
     maxMessageLength?: number;
 }
 
-// ── Chunk helpers ──────────────────────────────────────────────────────────────
-
-/** Get all thinking text from assistant chunks (joined). */
-function getChunkThinking(chunks: AssistantChunk[]): string {
-    return chunks
-        .filter((c) => c.type === "thinking")
-        .map((c) => c.contentText || "")
-        .join("\n\n");
-}
-
-/** Get all content text from assistant chunks (joined). */
-function getChunkContent(chunks: AssistantChunk[]): string {
-    return chunks
-        .filter((c) => c.type === "content")
-        .map((c) => c.contentText || "")
-        .join("");
-}
-
-/** Get all tool chunks from assistant chunks. */
-function getChunkTools(chunks: AssistantChunk[]): ToolExecution[] {
-    return chunks
-        .filter((c) => c.type === "tool" && c.tool)
-        .map((c) => c.tool!);
-}
-
-/** Check if any chunk is still streaming. */
 function hasStreamingChunk(chunks: AssistantChunk[]): boolean {
     return chunks.some((c) => !c.isComplete);
-}
-
-/** Get the last thinking chunk (streaming or final). */
-function getLastThinkingChunk(chunks: AssistantChunk[]): AssistantChunk | undefined {
-    for (let i = chunks.length - 1; i >= 0; i--) {
-        if (chunks[i].type === "thinking") return chunks[i];
-    }
-    return undefined;
-}
-
-/** Get the last content chunk (streaming or final). */
-function getLastContentChunk(chunks: AssistantChunk[]): AssistantChunk | undefined {
-    for (let i = chunks.length - 1; i >= 0; i--) {
-        if (chunks[i].type === "content") return chunks[i];
-    }
-    return undefined;
-}
-
-/** Get the last tool chunk (streaming or final). */
-function getLastToolChunk(chunks: AssistantChunk[]): AssistantChunk | undefined {
-    for (let i = chunks.length - 1; i >= 0; i--) {
-        if (chunks[i].type === "tool") return chunks[i];
-    }
-    return undefined;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -842,6 +793,33 @@ export class TranscriptDisplay implements Component, Scrollable {
                 continue;
             }
 
+            if (this.isMemorySummaryRow(rawLine)) {
+                const rows: string[][] = [];
+                while (
+                    li < rawLines.length &&
+                    this.isMemorySummaryRow(rawLines[li])
+                ) {
+                    const parsed = this.parseMemorySummaryRow(rawLines[li]);
+                    if (parsed) rows.push(parsed);
+                    li++;
+                }
+                li--;
+
+                const renderedTable = this.renderTable(
+                    [
+                        "| ID | Time | Type | Title |",
+                        "| --- | --- | --- | --- |",
+                        ...rows.map(
+                            (row) =>
+                                `| ${row.map(escapeMarkdownTableCell).join(" | ")} |`,
+                        ),
+                    ],
+                    maxLen,
+                );
+                for (const line of renderedTable) lines.push(line);
+                continue;
+            }
+
             if (this.isTableStart(rawLines, li)) {
                 const tableLines: string[] = [];
                 tableLines.push(rawLines[li]);
@@ -927,6 +905,18 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
+    private isMemorySummaryRow(line: string): boolean {
+        return this.parseMemorySummaryRow(line) !== null;
+    }
+
+    private parseMemorySummaryRow(line: string): string[] | null {
+        const match = line.match(/^([A-Za-z]?\d+)\s+((?:\d{1,2}:\d{2}[ap])|")\s+(\S+)\s+(.+)$/);
+        if (match) return [match[1], match[2], match[3], match[4]];
+        const sessionMatch = line.match(/^(S\d+)\s+(.+)$/);
+        if (sessionMatch) return [sessionMatch[1], "", "", sessionMatch[2]];
+        return null;
+    }
+
     private isTableStart(lines: string[], index: number): boolean {
         return (
             this.isTableRow(lines[index] || "") &&
@@ -1009,7 +999,7 @@ export class TranscriptDisplay implements Component, Scrollable {
         );
 
         let widths = naturalWidths.slice();
-        let total = widths.reduce((a, b) => a + b, 0);
+        const total = widths.reduce((a, b) => a + b, 0);
         if (total > usableWidth) {
             const widest = widths.indexOf(Math.max(...widths));
             widths = widths.map((width, idx) => {

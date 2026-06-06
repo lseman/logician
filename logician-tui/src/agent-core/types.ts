@@ -54,6 +54,13 @@ export type AgentEvent =
           toolCallId: string;
           partialResult: string;
       }
+    | {
+          type: "repair_nudge";
+          turnId?: string;
+          repairStage: string;
+          toolName?: string;
+          message: string;
+      }
     | { type: "phase"; phase: "streaming" | "thinking" | "tool" | "idle" }
     | { type: "error"; message: string; error?: unknown };
 
@@ -124,6 +131,19 @@ export interface ContinueAfterTurnResult {
     message: string;
 }
 
+export interface GetSteeringMessagesContext {
+    messages: Message[];
+    iteration: number;
+}
+
+export interface GetFollowUpMessagesContext {
+    messages: Message[];
+    iteration: number;
+    assistantText: string;
+}
+
+export type ToolExecutionMode = "sequential" | "parallel";
+
 export interface AgentLoopHooks {
     beforeToolCall?: (
         ctx: BeforeToolCallContext,
@@ -140,6 +160,15 @@ export interface AgentLoopHooks {
     shouldStopAfterTurn?: (
         ctx: ShouldStopAfterTurnContext,
     ) => Promise<boolean | undefined> | boolean | undefined;
+    // Pi-style steering: inject queued messages before each assistant response.
+    getSteeringMessages?: (
+        ctx: GetSteeringMessagesContext,
+    ) => Promise<Message[] | undefined> | Message[] | undefined;
+    // Pi-style follow-up: when the loop would stop with no tool calls, inject
+    // queued messages and continue the outer loop.
+    getFollowUpMessages?: (
+        ctx: GetFollowUpMessagesContext,
+    ) => Promise<Message[] | undefined> | Message[] | undefined;
     // Pi-style continuation: when the model returns no tool calls (would end the
     // turn), this hook may return a message to inject so the loop keeps working
     // instead of stopping prematurely.
@@ -161,6 +190,14 @@ export interface Tool {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
+    // Optional compatibility shim for weak function-callers or resumed sessions
+    // with older argument shapes. Runs after best-effort parsing and before
+    // hooks/tool execution.
+    prepareArguments?: (args: unknown) => Record<string, unknown>;
+    // Tools that mutate state or depend on ordering should be sequential.
+    // Read-only tools may opt into parallel execution when global toolExecution
+    // is parallel.
+    executionMode?: ToolExecutionMode;
     execute: (
         args: Record<string, unknown>,
         ctx: ToolContext,
@@ -201,6 +238,7 @@ export interface AgentConfig {
     // Pi-style continuation: resume the agent when it stops with pending todos.
     continuationEnabled?: boolean; // default on
     maxContinuations?: number; // cap per run (default 12)
+    toolExecution?: ToolExecutionMode; // default sequential
     // Web search backend (SearXNG). When set, the web_search tool is enabled.
     webSearch?: WebSearchConfig;
 }

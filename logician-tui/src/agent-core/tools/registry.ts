@@ -2,6 +2,13 @@
 // Manages tool registration and execution. Mirrors Python ToolRegistry.
 
 import type { Tool, ToolCall, ToolContext } from "../types.ts";
+import { parseToolInput } from "../parser.ts";
+
+export interface PreparedToolCall {
+    call: ToolCall;
+    args: Record<string, unknown>;
+    error?: string;
+}
 
 export class ToolRegistry {
     private tools = new Map<string, Tool>();
@@ -29,32 +36,55 @@ export class ToolRegistry {
         return this.tools.has(name);
     }
 
+    get(name: string): Tool | undefined {
+        return this.tools.get(name);
+    }
+
     list(): Tool[] {
         return Array.from(this.tools.values());
     }
 
-    async execute(call: ToolCall, context?: ToolContext): Promise<string> {
+    prepare(call: ToolCall): PreparedToolCall {
+        const tool = this.tools.get(call.name);
+        if (!tool) {
+            return {
+                call,
+                args: parseToolInput(call.arguments),
+                error: `Error: Unknown tool: ${call.name}`,
+            };
+        }
+
+        try {
+            let args = parseToolInput(call.arguments);
+            if (tool.prepareArguments) {
+                args = tool.prepareArguments(args);
+            }
+            return {
+                call: { ...call, arguments: JSON.stringify(args) },
+                args,
+            };
+        } catch (e: unknown) {
+            const error = e as Error;
+            return {
+                call,
+                args: parseToolInput(call.arguments),
+                error: `Error preparing ${call.name}: ${error.message}`,
+            };
+        }
+    }
+
+    async execute(
+        call: ToolCall,
+        context?: ToolContext,
+        preparedArgs?: Record<string, unknown>,
+    ): Promise<string> {
         const tool = this.tools.get(call.name);
         if (!tool) {
             return `Error: Unknown tool: ${call.name}`;
         }
 
         try {
-            let args: Record<string, unknown> = {};
-            try {
-                args = JSON.parse(call.arguments || "{}");
-            } catch {
-                // Try YAML-style (simple key: value)
-                args = {};
-                const lines = (call.arguments || "").split("\n");
-                for (const line of lines) {
-                    const match = line.match(/^\s*(\w+)\s*:\s*(.+)\s*$/);
-                    if (match) {
-                        args[match[1]] = match[2].replace(/^"|"$/g, "");
-                    }
-                }
-            }
-
+            const args = preparedArgs ?? this.prepare(call).args;
             return await tool.execute(args, { ...this.ctx, ...context });
         } catch (e: unknown) {
             const error = e as Error;

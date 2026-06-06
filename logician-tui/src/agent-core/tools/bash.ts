@@ -24,6 +24,24 @@ export const bash: Tool = {
         },
         required: ["command"],
     },
+    prepareArguments: (raw): Record<string, unknown> => {
+        if (typeof raw === "string") return { command: raw };
+        if (!raw || typeof raw !== "object") return {};
+        const args = raw as Record<string, unknown>;
+        const command =
+            args.command ??
+            args.cmd ??
+            args.script ??
+            (args.input &&
+            typeof args.input === "object" &&
+            !Array.isArray(args.input)
+                ? (args.input as Record<string, unknown>).command
+                : undefined);
+        return {
+            ...args,
+            ...(command !== undefined ? { command } : {}),
+        };
+    },
     execute: async (args, ctx): Promise<string> => {
         const command = String(args.command);
         const timeout = Number(args.timeout) || 30000;
