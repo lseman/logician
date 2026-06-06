@@ -356,17 +356,6 @@ export class AgentLoop {
                     continue;
                 }
 
-                // Legacy single-message continuation hook kept for built-ins
-                // and external callers while the new queue contract settles.
-                const cont = await this.runContinueAfterTurn(assistantContent);
-                if (cont) {
-                    this.continuationCount++;
-                    this.appendInjectedMessages(transcriptPath, [
-                        createUserMessage(cont.message),
-                    ]);
-                    this.emitEvent({ type: "turn_end", turnId });
-                    continue;
-                }
             }
             this.emitEvent({ type: "turn_end", turnId });
             break;
@@ -568,26 +557,6 @@ export class AgentLoop {
                 message: `getFollowUpMessages hook failed: ${(e as Error).message}`,
             });
             return [];
-        }
-    }
-
-    private async runContinueAfterTurn(
-        assistantText: string,
-    ): Promise<{ message: string } | undefined> {
-        if (!this.hooks.continueAfterTurn) return undefined;
-        try {
-            const r = await this.hooks.continueAfterTurn({
-                messages: this._messages,
-                iteration: this.iterationCount,
-                assistantText,
-            });
-            return r && r.message ? { message: r.message } : undefined;
-        } catch (e) {
-            this.emitEvent({
-                type: "error",
-                message: `continueAfterTurn hook failed: ${(e as Error).message}`,
-            });
-            return undefined;
         }
     }
 

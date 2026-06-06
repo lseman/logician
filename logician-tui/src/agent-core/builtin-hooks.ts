@@ -101,12 +101,12 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
         };
     }
 
-    // Pi-style continuation: if the model stops (no tool calls) while its own
+    // Pi-style follow-up: if the model stops (no tool calls) while its own
     // todo list still has unfinished items, nudge it to keep working. The loop
     // caps total continuations, so this cannot run away.
     const continuationEnabled = config.continuationEnabled !== false;
     if (continuationEnabled) {
-        hooks.continueAfterTurn = () => {
+        hooks.getFollowUpMessages = ({ messages }) => {
             const todos = getTodos();
             if (!todos.length) return undefined;
             const remaining = todos.filter((t) => t.status !== "completed");
@@ -114,13 +114,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
             const next =
                 remaining.find((t) => t.status === "in_progress") ??
                 remaining[0];
-            return {
-                message:
-                    `You still have ${remaining.length} unfinished todo item(s). ` +
-                    `Continue working — next: ${next.content}. ` +
-                    "Use your tools to make progress, and mark items completed as you finish. " +
-                    "If you are truly blocked or done, say so explicitly and stop.",
-            };
+            return [
+                {
+                    role: "user",
+                    content:
+                        `You still have ${remaining.length} unfinished todo item(s). ` +
+                        `Continue working — next: ${next.content}. ` +
+                        "Use your tools to make progress, and mark items completed as you finish. " +
+                        "If you are truly blocked or done, say so explicitly and stop.",
+                },
+            ];
         };
     }
 

@@ -9,6 +9,7 @@ import type {
     ThinkingDisplayStyle,
     Turn,
 } from "../transcript.ts";
+import { highlightAuto, type HighlightResult } from "../agent-core/syntax-highlighter.ts";
 
 interface Theme {
     userColor: string;
@@ -21,7 +22,7 @@ interface Theme {
 
 const DEFAULT_THEME: Theme = {
     userColor: "\x1b[38;5;111m",
-    assistantColor: "\x1b[38;5;159m",
+    assistantColor: "\x1b[38;5;188m",
     thinkingColor: "\x1b[38;5;220m",
     toolColor: "\x1b[38;5;141m",
     errorColor: "\x1b[38;5;203m",
@@ -34,14 +35,14 @@ const SYSTEM_PREFIX = "";
 const THINKING_PREFIX = "\x1b[38;5;220mTHINK \x1b[0m";
 const TOOL_PREFIX = "\x1b[38;5;141mTOOL \x1b[0m";
 const ERROR_PREFIX = "\x1b[38;5;203m✗ \x1b[0m";
-const TOOL_DETAIL_PREFIX = "\x1b[38;5;240m│ \x1b[0m";
+const TOOL_DETAIL_PREFIX = "\x1b[38;5;239m│ \x1b[0m";
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const UNDERLINE = "\x1b[4m";
-const STREAM_CURSOR = "\x1b[38;5;159m▋\x1b[0m";
-const CODE_BLOCK_COLOR = "\x1b[38;5;244m";
+const CODE_BLOCK_COLOR = "\x1b[38;5;241m";
 const CODE_INLINE_COLOR = "\x1b[38;5;80m";
+const CODE_BLOCK_BG = "\x1b[48;5;235m";
 const DIFF_ADD_COLOR = "\x1b[38;5;114m";
 const DIFF_REMOVE_COLOR = "\x1b[38;5;203m";
 const DIFF_HUNK_COLOR = "\x1b[38;5;220m";
@@ -66,6 +67,13 @@ const TAG_COLOR = "\x1b[38;5;208m"; // orange, attention-grabbing
 const BULLET_GLYPHS = ["•", "◦", "▪", "‣"];
 const BULLET_COLOR = "\x1b[38;5;147m"; // soft periwinkle, distinct from text
 const ORDERED_COLOR = "\x1b[38;5;147m";
+
+// ── Code fence language extraction ────────────────────────────────────────────
+
+function extractLangFromFence(line: string): string | null {
+    const m = /^```(\w+)/.exec(line.trim());
+    return m ? m[1].toLowerCase() : null;
+}
 
 // ── Embedded reasoning stripping ──────────────────────────────────────────────
 function stripThinkTags(text: string): string {
@@ -129,6 +137,7 @@ function renderInline(text: string, baseColor: string): string {
             if (end !== -1) {
                 out +=
                     CODE_INLINE_COLOR +
+                    BOLD +
                     "`" +
                     text.slice(i + 1, end) +
                     "`" +
@@ -166,7 +175,7 @@ function renderMarkdownLine(line: string, baseColor: string): string {
 
     // Horizontal rule
     if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
-        return `${DIM}\x1b[38;5;240m${"─".repeat(40)}${RESET}`;
+        return `${DIM}\x1b[38;5;239m${"─".repeat(40)}${RESET}`;
     }
 
     // List items
@@ -561,7 +570,7 @@ export class TranscriptDisplay implements Component, Scrollable {
                     if (lastThinkingSection) {
                         renderedLines.push(
                             padToWidth(
-                                `${this.theme.separatorColor}${DIM}  ── response ──${RESET}`,
+                                `${this.theme.separatorColor}${DIM}  ─── response ───${RESET}`,
                             ),
                         );
                         lastThinkingSection = false;
@@ -605,29 +614,7 @@ export class TranscriptDisplay implements Component, Scrollable {
                 }
                 flushContent();
 
-                // Streaming cursor on last chunk
-                if (streaming && chunks.length > 0) {
-                    const lastChunk = chunks[chunks.length - 1];
-                    if (lastChunk.type === "content" && lastChunk.contentText) {
-                        const answer = stripThinkTags(lastChunk.contentText);
-                        if (answer) {
-                            const lastLine = answer.split("\n").pop() || "";
-                            if (lastLine) {
-                                const prev = renderedLines[renderedLines.length - 1];
-                                if (prev !== undefined) {
-                                    renderedLines[renderedLines.length - 1] =
-                                        prev + STREAM_CURSOR;
-                                }
-                            }
-                        }
-                    } else if (lastChunk.type === "thinking") {
-                        const prev = renderedLines[renderedLines.length - 1];
-                        if (prev !== undefined) {
-                            renderedLines[renderedLines.length - 1] =
-                                prev + STREAM_CURSOR;
-                        }
-                    }
-                }
+                // No streaming cursor — messages display as-is
             }
         }
 
@@ -672,9 +659,6 @@ export class TranscriptDisplay implements Component, Scrollable {
                 );
                 for (let li = 0; li < wrapped.length; li++) {
                     let rendered = `${DIM}  ${renderInline(wrapped[li], this.theme.thinkingColor + DIM)}`;
-                    if (streaming && !chunk.isComplete) {
-                        rendered += STREAM_CURSOR;
-                    }
                     lines.push(rendered);
                 }
                 break;
@@ -762,27 +746,49 @@ export class TranscriptDisplay implements Component, Scrollable {
         const rawLines = text.split("\n");
         let inCodeBlock = false;
         let codeContent = "";
+        let codeBlockLang: string | null = null;
+        const bg = CODE_BLOCK_BG;
+        const bgReset = RESET;
 
         for (let li = 0; li < rawLines.length; li++) {
             const rawLine = rawLines[li];
 
             if (rawLine.startsWith("```")) {
                 if (inCodeBlock) {
-                    const codeLines = codeContent.split("\n");
-                    for (const cl of codeLines) {
+                    // Flush code block with syntax highlighting
+                    const lang = codeBlockLang || null;
+                    if (lang) {
+                        const highlighted = highlightAuto(codeContent);
+                        const langLabel = highlighted.language
+                            ? ` ${highlighted.language} · ${codeContent.split("\n").length} lines`
+                            : "";
                         lines.push(
-                            `${CODE_BLOCK_COLOR}${DIM}  ${cl}${RESET}`,
+                            `${bg}${DIM}  ${rawLine}${langLabel}${bgReset}`,
                         );
+                        for (const cl of highlighted.value.split("\n")) {
+                            lines.push(
+                                `${bg}${DIM}  ${cl}${bgReset}`,
+                            );
+                        }
+                    } else {
+                        const codeLines = codeContent.split("\n");
+                        for (const cl of codeLines) {
+                            lines.push(
+                                `${bg}${DIM}  ${cl}${bgReset}`,
+                            );
+                        }
                     }
                     lines.push(
-                        `${CODE_BLOCK_COLOR}${DIM}  \x60\x60\x60${RESET}`,
+                        `${bg}${DIM}  \x60\x60\x60${bgReset}`,
                     );
                     codeContent = "";
+                    codeBlockLang = null;
                     inCodeBlock = false;
                 } else {
                     inCodeBlock = true;
+                    codeBlockLang = extractLangFromFence(rawLine);
                     lines.push(
-                        `${CODE_BLOCK_COLOR}${DIM}  ${rawLine}${RESET}`,
+                        `${bg}${DIM}  ${rawLine}${bgReset}`,
                     );
                 }
                 continue;
@@ -834,13 +840,6 @@ export class TranscriptDisplay implements Component, Scrollable {
                 const renderedTable = this.renderTable(tableLines, maxLen);
                 for (let ti = 0; ti < renderedTable.length; ti++) {
                     let line = renderedTable[ti];
-                    if (
-                        streaming &&
-                        li === rawLines.length - 1 &&
-                        ti === renderedTable.length - 1
-                    ) {
-                        line += STREAM_CURSOR;
-                    }
                     lines.push(line);
                 }
                 continue;
@@ -853,13 +852,7 @@ export class TranscriptDisplay implements Component, Scrollable {
                         ji === 0
                             ? firstLinePrefix + jsonLines[ji]
                             : "  " + jsonLines[ji];
-                    if (
-                        streaming &&
-                        li === rawLines.length - 1 &&
-                        ji === jsonLines.length - 1
-                    ) {
-                        line += STREAM_CURSOR;
-                    }
+                    // No streaming cursor
                     lines.push(line);
                 }
                 continue;
@@ -880,24 +873,18 @@ export class TranscriptDisplay implements Component, Scrollable {
                     wi === 0
                         ? firstLinePrefix + seg
                         : `  ${baseColor}${wrapped[wi]}${RESET}`;
-                if (
-                    streaming &&
-                    li === rawLines.length - 1 &&
-                    wi === wrapped.length - 1
-                ) {
-                    line += STREAM_CURSOR;
-                }
+                // No streaming cursor
                 lines.push(line);
             }
         }
 
         if (inCodeBlock && codeContent) {
             lines.push(
-                `${CODE_BLOCK_COLOR}${DIM}  [code block open]${RESET}`,
+                `${bg}${DIM}  [code block open]${bgReset}`,
             );
             for (const cl of codeContent.split("\n")) {
                 lines.push(
-                    `${CODE_BLOCK_COLOR}${DIM}  ${cl}${RESET}`,
+                    `${bg}${DIM}  ${cl}${bgReset}`,
                 );
             }
         }
@@ -1027,8 +1014,9 @@ export class TranscriptDisplay implements Component, Scrollable {
         }
 
         const borderColor = "\x1b[38;5;238m";
-        const headerColor = "\x1b[38;5;159m";
+        const headerColor = "\x1b[38;5;188m";
         const rowColor = this.theme.assistantColor;
+        const altRowColor = "\x1b[38;5;239m";
         const border = (
             left: string,
             fill: string,
@@ -1052,15 +1040,17 @@ export class TranscriptDisplay implements Component, Scrollable {
             ...this.renderTableRow(header, widths, headerColor, true),
         );
         out.push(border("+", "-", "+", "+"));
-        for (const row of rows) {
+        for (let ri = 0; ri < rows.length; ri++) {
+            const row = rows[ri];
             const normalized = row.slice(0, columnCount);
             while (normalized.length < columnCount)
                 normalized.push("");
+            const rowColor_ = ri % 2 === 0 ? rowColor : altRowColor;
             out.push(
                 ...this.renderTableRow(
                     normalized,
                     widths,
-                    rowColor,
+                    rowColor_,
                     false,
                 ),
             );
@@ -1159,10 +1149,10 @@ export class TranscriptDisplay implements Component, Scrollable {
         const status = tool.isError
             ? "\x1b[38;5;203merror\x1b[0m"
             : tool.result
-              ? "\x1b[38;5;40mdone\x1b[0m"
+              ? "\x1b[38;5;118m✓ done\x1b[0m"
               : tool.partialResult
-                ? "\x1b[38;5;220mstreaming\x1b[0m"
-                : "\x1b[38;5;220mrunning\x1b[0m";
+                ? "\x1b[38;5;220m▸ streaming\x1b[0m"
+                : "\x1b[38;5;141m▸ running\x1b[0m";
         const summary = this.toolSummary(tool);
         const hint = this.toolsExpanded
             ? `${DIM}ctrl+o collapse${RESET}`
@@ -1495,19 +1485,21 @@ export class TranscriptDisplay implements Component, Scrollable {
         if (!diff.trim()) return [DIM + "(no diff)" + RESET];
         const rawLines = this.truncateText(diff).split("\n");
         const lines: string[] = [];
+        const bg = CODE_BLOCK_BG;
+        const bgReset = RESET;
         for (const raw of rawLines) {
             const color = diffLineColor(raw);
             const content = raw.length
                 ? raw.replace(/\t/g, "    ")
                 : " ";
             if (visibleWidth(content) <= width) {
-                lines.push(`${color}${content}${RESET}`);
+                lines.push(`${bg}${color}${content}${bgReset}`);
             } else {
                 for (const wrapped of this.wrapText(
                     content,
                     width,
                 )) {
-                    lines.push(`${color}${wrapped}${RESET}`);
+                    lines.push(`${bg}${color}${wrapped}${bgReset}`);
                 }
             }
         }
@@ -1522,6 +1514,8 @@ export class TranscriptDisplay implements Component, Scrollable {
             return [DIM + "(no output)" + RESET];
         const rawLines = this.truncateText(text).split("\n");
         const lines: string[] = [];
+        const bg = CODE_BLOCK_BG;
+        const bgReset = RESET;
         for (const raw of rawLines) {
             const content = raw.length
                 ? raw.replace(/\t/g, "    ")
@@ -1530,13 +1524,13 @@ export class TranscriptDisplay implements Component, Scrollable {
                 ? DIFF_REMOVE_COLOR
                 : TERMINAL_COLOR;
             if (visibleWidth(content) <= width) {
-                lines.push(`${color}${content}${RESET}`);
+                lines.push(`${bg}${color}${content}${bgReset}`);
             } else {
                 for (const wrapped of this.wrapText(
                     content,
                     width,
                 )) {
-                    lines.push(`${color}${wrapped}${RESET}`);
+                    lines.push(`${bg}${color}${wrapped}${bgReset}`);
                 }
             }
         }
@@ -1550,13 +1544,15 @@ export class TranscriptDisplay implements Component, Scrollable {
         if (!text) return [DIM + "(empty)" + RESET];
         const rawLines = this.truncateText(text).split("\n");
         const lines: string[] = [];
+        const bg = CODE_BLOCK_BG;
+        const bgReset = RESET;
         for (const raw of rawLines) {
             const formatted = raw.length
                 ? raw.replace(/\t/g, "    ")
                 : " ";
             if (visibleWidth(formatted) <= width) {
                 lines.push(
-                    `${CODE_BLOCK_COLOR}${formatted}${RESET}`,
+                    `${bg}${formatted}${bgReset}`,
                 );
             } else {
                 for (const wrapped of this.wrapText(
@@ -1564,7 +1560,7 @@ export class TranscriptDisplay implements Component, Scrollable {
                     width,
                 )) {
                     lines.push(
-                        `${CODE_BLOCK_COLOR}${wrapped}${RESET}`,
+                        `${bg}${wrapped}${bgReset}`,
                     );
                 }
             }

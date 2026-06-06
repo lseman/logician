@@ -147,6 +147,10 @@ Supported events:
 | `PostToolUse` | After a tool returns |
 | `Stop` | After an agent turn finishes |
 | `SessionEnd` | Shutdown, reset, `/quit`, SIGINT, SIGTERM |
+| `getSteeringMessages` | Before each assistant response — injects queued steering messages |
+| `getFollowUpMessages` | When the loop would otherwise stop — injects queued follow-up messages |
+
+Loop hooks route through `AgentHarness`: `steer()` pushes into the steering queue (drained via `getSteeringMessages` at each assistant response), and `followUp()` pushes into the follow-up queue (drained via `getFollowUpMessages` when the loop would stop).
 
 Hook output may be plain text or JSON. Supported context fields include `hookSpecificOutput.additionalContext`, `additional_context`, and `additionalContext`. Control JSON such as `{"continue":true,"suppressOutput":true}` is consumed without being rendered as startup text.
 

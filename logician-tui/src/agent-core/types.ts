@@ -117,20 +117,6 @@ export interface ShouldStopAfterTurnContext {
     hadToolCalls: boolean;
 }
 
-export interface ContinueAfterTurnContext {
-    messages: Message[];
-    iteration: number;
-    // The assistant's final text this turn (no tool calls were made).
-    assistantText: string;
-}
-
-// Returned by a continuation hook when the agent produced a no-tool-call
-// response but work remains (e.g. a todo list with pending items). The text is
-// injected as a user message and the loop continues instead of stopping.
-export interface ContinueAfterTurnResult {
-    message: string;
-}
-
 export interface GetSteeringMessagesContext {
     messages: Message[];
     iteration: number;
@@ -169,15 +155,6 @@ export interface AgentLoopHooks {
     getFollowUpMessages?: (
         ctx: GetFollowUpMessagesContext,
     ) => Promise<Message[] | undefined> | Message[] | undefined;
-    // Pi-style continuation: when the model returns no tool calls (would end the
-    // turn), this hook may return a message to inject so the loop keeps working
-    // instead of stopping prematurely.
-    continueAfterTurn?: (
-        ctx: ContinueAfterTurnContext,
-    ) =>
-        | Promise<ContinueAfterTurnResult | undefined>
-        | ContinueAfterTurnResult
-        | undefined;
 }
 
 export interface ToolCall {

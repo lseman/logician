@@ -26,8 +26,6 @@ import type {
     PrepareNextTurnContext,
     PrepareNextTurnResult,
     ShouldStopAfterTurnContext,
-    ContinueAfterTurnContext,
-    ContinueAfterTurnResult,
     GetSteeringMessagesContext,
     GetFollowUpMessagesContext,
     Message,
@@ -55,7 +53,6 @@ type BeforeHandler = NonNullable<AgentLoopHooks["beforeToolCall"]>;
 type AfterHandler = NonNullable<AgentLoopHooks["afterToolCall"]>;
 type PrepareHandler = NonNullable<AgentLoopHooks["prepareNextTurn"]>;
 type StopHandler = NonNullable<AgentLoopHooks["shouldStopAfterTurn"]>;
-type ContinueHandler = NonNullable<AgentLoopHooks["continueAfterTurn"]>;
 type SteeringHandler = NonNullable<AgentLoopHooks["getSteeringMessages"]>;
 type FollowUpHandler = NonNullable<AgentLoopHooks["getFollowUpMessages"]>;
 
@@ -70,7 +67,6 @@ export class HookBus {
     private after: Entry<AfterHandler>[] = [];
     private prepare: Entry<PrepareHandler>[] = [];
     private stop: Entry<StopHandler>[] = [];
-    private continue_: Entry<ContinueHandler>[] = [];
     private steering: Entry<SteeringHandler>[] = [];
     private followUp: Entry<FollowUpHandler>[] = [];
     private observers: HookObserver[] = [];
@@ -119,10 +115,6 @@ export class HookBus {
             offs.push(
                 this.on("getFollowUpMessages", hooks.getFollowUpMessages, reg),
             );
-        if (hooks.continueAfterTurn)
-            offs.push(
-                this.on("continueAfterTurn", hooks.continueAfterTurn, reg),
-            );
         return () => offs.forEach((off) => off());
     }
 
@@ -139,7 +131,6 @@ export class HookBus {
         this.after = [];
         this.prepare = [];
         this.stop = [];
-        this.continue_ = [];
         this.steering = [];
         this.followUp = [];
         this.observers = [];
@@ -155,7 +146,6 @@ export class HookBus {
             shouldStopAfterTurn: (ctx) => this.runStop(ctx),
             getSteeringMessages: (ctx) => this.runSteering(ctx),
             getFollowUpMessages: (ctx) => this.runFollowUp(ctx),
-            continueAfterTurn: (ctx) => this.runContinue(ctx),
         };
     }
 
@@ -281,22 +271,6 @@ export class HookBus {
         return out.length ? out : undefined;
     }
 
-    // First handler returning a continuation message wins.
-    private async runContinue(
-        ctx: ContinueAfterTurnContext,
-    ): Promise<ContinueAfterTurnResult | undefined> {
-        await this.notify("continueAfterTurn", ctx);
-        for (const { handler, source } of this.continue_) {
-            const r = await this.guard(
-                () => handler(ctx),
-                "continueAfterTurn",
-                source,
-            );
-            if (r?.message) return r;
-        }
-        return undefined;
-    }
-
     // ── Internals ──────────────────────────────────────────────────────────
 
     private listFor(event: HookEventName): Entry<unknown>[] {
@@ -309,8 +283,6 @@ export class HookBus {
                 return this.prepare as Entry<unknown>[];
             case "shouldStopAfterTurn":
                 return this.stop as Entry<unknown>[];
-            case "continueAfterTurn":
-                return this.continue_ as Entry<unknown>[];
             case "getSteeringMessages":
                 return this.steering as Entry<unknown>[];
             case "getFollowUpMessages":
