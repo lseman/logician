@@ -37,7 +37,15 @@ def create_agent(
     )
 
     if config_overrides:
+        # Apply thinking_level first (it composes other settings)
+        thinking_level = config_overrides.get("thinking_level")
+        if thinking_level is not None:
+            cfg.apply_thinking_level(thinking_level)
+
         for k, v in config_overrides.items():
+            # Skip thinking_level — already applied above
+            if k == "thinking_level":
+                continue
             if k == "thinking":
                 if isinstance(v, dict):
                     v = ThinkingConfig(

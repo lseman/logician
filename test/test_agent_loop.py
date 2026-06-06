@@ -167,6 +167,34 @@ def test_deepseek_reasoning_callback_uses_reasoning_content_channel():
     assert thinking == ["step one\nstep two"]
 
 
+def test_prefilled_think_block_is_extracted_without_opening_tag():
+    llm = FakeLLM(["step one\nstep two</think>\nVisible answer"])
+    fake_dispatcher = FakeDispatcher()
+    config = Config(
+        max_iterations=8,
+        pre_turn_thinking=False,
+        native_thinking_prefill=True,
+    )
+    agent_loop = AgentLoop(
+        llm=llm,
+        guardrails=FakeGuardrails(),
+        prompt_builder=FakePromptBuilder(),
+        dispatcher=fake_dispatcher,
+        config=config,
+    )
+    thinking: list[str] = []
+
+    result = asyncio.run(
+        agent_loop.run(
+            [_user_msg("inspect the project")],
+            thinking_callback=thinking.append,
+        )
+    )
+
+    assert result.final_response == "Visible answer"
+    assert thinking == ["step one\nstep two"]
+
+
 def test_social_turn_skips_mcp_loader():
     """Social turn should not pay MCP startup before the fast path."""
     llm = FakeLLM(["Hello"])

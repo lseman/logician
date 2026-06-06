@@ -23,10 +23,36 @@ class PromptBuilder:
         return "\n\n".join(parts)
 
 
+def discover_context_files(base_dir: Path) -> list[Path]:
+    """Find all AGENTS.md and CLAUDE.md from cwd up to git root, like Pi does."""
+    files: list[Path] = []
+    seen = set()
+    current = base_dir.resolve()
+    # Try to find git root
+    git_root = current
+    while len(str(git_root)) > 1:
+        if (git_root / ".git").exists():
+            break
+        git_root = git_root.parent
+    while current != current.parent and current != git_root.parent:
+        for name in ("AGENTS.md", "CLAUDE.md", "AGENTS.MD", "CLAUDE.MD"):
+            p = current / name
+            if p.exists() and p not in seen:
+                files.append(p)
+                seen.add(p)
+        current = current.parent
+    return files
+
+
 class IdentityComponent:
-    def __init__(self, base_prompt_fn: Callable[[], str] | None = None) -> None:
+    def __init__(
+        self,
+        base_prompt_fn: Callable[[], str] | None = None,
+        base_dir: Path | None = None,
+    ) -> None:
         self._cached: str | None = None
         self._base_prompt_fn = base_prompt_fn
+        self._base_dir = base_dir or Path.cwd()
 
     def render(self, state: TurnState, config: Config) -> str | None:
         if self._base_prompt_fn is not None:
@@ -34,13 +60,20 @@ class IdentityComponent:
             if prompt:
                 return prompt
         if self._cached is None:
-            candidates = [
-                Path(__file__).parent.parent.parent / "SOUL.md",
-            ]
-            for p in candidates:
-                if p.exists():
-                    self._cached = p.read_text(encoding="utf-8")
-                    break
+            # Primary: SOUL.md (project-level)
+            soul = Path(__file__).parent.parent.parent / "SOUL.md"
+            parts: list[str] = []
+
+            # Discover AGENTS.md / CLAUDE.md up the tree (like Pi)
+            context_files = discover_context_files(self._base_dir)
+
+            if soul.exists():
+                parts.append(f"# SOUL\n\n{soul.read_text(encoding='utf-8')}")
+            for p in context_files:
+                parts.append(f"# {p.name}\n\n{p.read_text(encoding='utf-8')}")
+
+            if parts:
+                self._cached = "\n\n".join(parts)
             else:
                 self._cached = "You are a capable coding agent."
         return self._cached
@@ -71,26 +104,110 @@ class DomainToolsComponent:
 
 
 class SkillPlaybookComponent:
-    def __init__(self, routing_fn: Callable[[str], str]) -> None:
-        self._fn = routing_fn
-        self._cache_key: tuple[str, str] | None = None
-        self._cached: str = ""
+    """Pi-style: static skill list with 1-line descriptions in system prompt.
+
+    Replaces the expensive dynamic skill routing (~1,493 tokens/turn) with
+    a compact, static skill catalog (~600 tokens). The model discovers
+    skills by name from the list and reads SKILL.md on demand.
+    """
+
+    def __init__(
+        self,
+        routing_fn: Callable[[str], str] | None = None,
+    ) -> None:
+        self._fn = routing_fn  # kept for backward compat / complex queries
+        self._cached: str | None = None
+
+    # Essential skill names (normalized) — always shown.
+    # These cover ~80% of tasks and are the "core tools" of skills.
+    ESSENTIAL_NAMES = frozenset({
+        "think", "todo", "scratch", "orchestrator",
+        "explore", "edit_block", "multi_edit", "search_replace", "patch", "quality",
+        "shell", "git", "repl", "web",
+        "test_driven_development", "systematic_debugging",
+        "verification_before_completion", "writing_plans",
+        "memory_management",
+        "plan_mode", "subagent_driven_development", "executing_plans",
+        "requests",
+    })
+
+    def _build_skill_list(self) -> str:
+        """Build compact skill list: name — short description (Pi-style).
+
+        Strategy: show only essential skills with ~30-char descriptions.
+        Pi shows 7 tools with 1-line descriptions. This shows ~20 skills.
+        """
+        try:
+            from src.tools import ToolRegistry
+            registry = ToolRegistry()
+            skills = registry.list_skills()
+        except Exception:
+            return ""
+
+        # Filter to essential skills only
+        essential = []
+        for s in skills:
+            normalized = s.name.lower().replace(" ", "_")
+            if normalized in self.ESSENTIAL_NAMES or normalized.startswith("explore") or normalized.startswith("todo"):
+                essential.append(s)
+
+        # Also match by ID prefix
+        id_prefixes = {"think", "todo", "scratch", "shell", "git", "repl", "web",
+                       "edit_block", "multi_edit", "search_replace", "patch", "quality",
+                       "test_driven", "systematic_debugging", "verification", "writing_plan",
+                       "memory_management", "plan_mode", "subagent", "executing", "requests"}
+        for s in skills:
+            if s.id.lower().split("__")[0] in id_prefixes:
+                if s not in essential:
+                    essential.append(s)
+
+        # Deduplicate
+        seen = set()
+        essential = [s for s in essential if s.id not in seen and not seen.add(s.id)]
+
+        lines: list[str] = ["## Available Skills"]
+        lines.append("Use these skills when they match your task. Read SKILL.md for full instructions.")
+        lines.append("")
+
+        for s in sorted(essential, key=lambda x: x.name.lower()):
+            desc = (s.summary or s.description or "").strip()
+            # Truncate to ~40 chars — short enough for compact display
+            if len(desc) > 40:
+                desc = desc[:37] + "..."
+            lines.append(f"- **{s.name}**: {desc}")
+
+        lines.append("")
+        lines.append(
+            "## Skill Loading\n"
+            "When a skill above matches your task, read its SKILL.md for full instructions. "
+            "Skills live under `skills/`. Example: `read_file path=skills/global/think/SKILL.md`"
+        )
+
+        return "\n".join(lines)
 
     def render(self, state: TurnState, config: Config) -> str | None:
         if not getattr(config, "enable_skill_routing", False):
             return None
         if state.classified_as in {"social", "informational"}:
             return None
-        query = state.user_query or state.classified_as
-        # Cache routing result for the duration of a turn — the query doesn't
-        # change between iterations and routing involves an index scan.
-        cache_key = (state.turn_id, query)
-        if self._cache_key != cache_key:
-            self._cache_key = cache_key
-            self._cached = self._fn(query)
+
+        if self._cached is None:
+            self._cached = self._build_skill_list()
+
         if not self._cached.strip():
             return None
-        return f"## Active Skill\n\n{self._cached}"
+
+        # For complex queries, also append routing context
+        if self._fn is not None and len(self._cached) > 200:
+            query = state.user_query or state.classified_as
+            cache_key = (state.turn_id, query)
+            # We use a simple heuristic: if the query is complex (long, has multiple concepts),
+            # append routing results
+            if len(str(query or "")) > 100:
+                routing = self._fn(query)
+                return f"{self._cached}\n\n## Skill Routing (complex query)\n{routing}"
+
+        return self._cached
 
 
 class TurnContextComponent:

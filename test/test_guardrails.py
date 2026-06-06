@@ -279,7 +279,8 @@ def test_read_before_edit_guard_passes_after_file_was_read():
 
 
 def test_python_structural_edit_guard_prefers_libcst_tools_for_python():
-    guard = PythonStructuralEditGuard(Config())
+    cfg = Config(python_structural_editing_preference=True)
+    guard = PythonStructuralEditGuard(cfg)
     state = make_state(available_tool_names={"edit_file_libcst", "replace_function_body"})
     result = guard.check(state, "", [make_call("edit_file", {"path": "src/app.py"})])
     assert not result.passed

@@ -6,22 +6,22 @@ from typing import Any, Literal, Sequence
 from ..runtime import Tool
 from .types import _OpenAIToolSchema
 
+# Minimal default set — only the tools the model needs every turn.
+# Inspired by Pi's lean approach: 5-7 core tools in the prompt.
+# Domain skills add context-specific tools via DomainToolsComponent.
+# For any tool not listed here, the model should use describe_tool or
+# search_tools to discover what's available.
 _DEFAULT_PROMPT_TOOL_NAMES: tuple[str, ...] = (
-    "describe_tool",
-    "search_tools",
-    "think",
-    "todo",
-    "list_dir",
+    # Core file tools (Pi-style: 5 that cover 90% of cases)
     "read_file",
-    "rg_search",
     "write_file",
     "edit_file",
-    "multi_edit",
-    "apply_edit_block",
-    "run_shell",
-    "run_python",
-    "git_status",
-    "git_diff",
+    # Search + discover tools
+    "rg_search",
+    "list_dir",
+    "find_files",
+    # Shell
+    "bash",
 )
 
 
@@ -120,13 +120,28 @@ class RegistryPromptingMixin:
         return mode_norm
 
     @staticmethod
+    def _compact_text(text: str, max_chars: int = 96) -> str:
+        compact = " ".join(str(text or "").split())
+        if len(compact) <= max_chars:
+            return compact
+        return compact[: max(0, max_chars - 3)].rstrip() + "..."
+
+    @staticmethod
     def _compact_tool_signature(tool: Tool) -> str:
+        sig = f"- {tool.name}("
         if tool.parameters:
-            params = ", ".join(
-                f"{p.name}:{p.type}{'' if p.required else '?'}" for p in tool.parameters
-            )
-            return f"- {tool.name}({params})"
-        return f"- {tool.name}()"
+            parts = []
+            for p in tool.parameters:
+                part = f"{p.name}:{p.type}{'' if p.required else '?'}"
+                parts.append(part)
+            sig += ", ".join(parts)
+        else:
+            sig += ""
+        sig += ")"
+        desc = RegistryPromptingMixin._compact_text(tool.description, 110)
+        if desc:
+            sig += f" - {desc}"
+        return sig
 
     def _json_schema_tools_prompt(self, include_tool_names: Sequence[str] | None = None) -> str:
         payload = {
@@ -139,20 +154,10 @@ class RegistryPromptingMixin:
         return "\n\nTOOLS JSON SCHEMA:\n" + json.dumps(payload, ensure_ascii=False)
 
     def _compact_tools_prompt(self, tools_for_prompt: Sequence[Tool], use_toon: bool) -> str:
-        availability_note = (
-            "The listed tools may be a routed subset, not the entire runtime. "
-            "If the user names a different tool, verify with search_tools/describe_tool "
-            "before claiming it is unavailable."
-        )
         if use_toon:
             header = [
-                "\n\nTOOLS (compact): use only if needed.",
-                availability_note,
-                "Tool call format (TOON):",
-                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.",
-                "Never batch writes, edits, or verification commands.",
-                "Prefer batching when the relevant read-only targets are already known.",
-                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.",
+                "\n\nTOOLS: use only if needed. Subset shown; use search_tools/describe_tool for others.",
+                "Call TOON: one tool_call, or batch 2-4 independent read-only calls; never batch writes.",
                 "tool_call:",
                 "  name: <tool_name>",
                 "  arguments:",
@@ -161,13 +166,8 @@ class RegistryPromptingMixin:
             ]
         else:
             header = [
-                "\n\nTOOLS (compact): use only if needed.",
-                availability_note,
-                "Tool call format (JSON):",
-                "Return one tool_call per response, or a small batch of 2-4 independent read-only tool_calls.",
-                "Never batch writes, edits, or verification commands.",
-                "Prefer batching when the relevant read-only targets are already known.",
-                "For codebase review/architecture/improvement requests, inspect enough files before answering; do not stop at one listing or one file if evidence is still thin.",
+                "\n\nTOOLS: use only if needed. Subset shown; use search_tools/describe_tool for others.",
+                "Call JSON: one tool_call, or batch 2-4 independent read-only calls; never batch writes.",
                 '{"tool_call":{"name":"<tool_name>","arguments":{...}}}',
                 "",
             ]
@@ -223,11 +223,16 @@ class RegistryPromptingMixin:
             else:
                 body.append(f"Tool: {tool.name}")
                 body.append(f"Description: {tool.description}")
+                if tool.prompt_guidelines:
+                    body.append(f"Guidelines: {tool.prompt_guidelines}")
                 if tool.parameters:
                     body.append("Parameters:")
                     for p in tool.parameters:
                         req = "required" if p.required else "optional"
-                        body.append(f"  - {p.name} ({p.type}, {req}): {p.description}")
+                        line = f"  - {p.name} ({p.type}, {req}): {p.description}"
+                        if p.prompt_guidelines:
+                            line += f" [{p.prompt_guidelines}]"
+                        body.append(line)
             body.append("")
 
         if compact_fallback_tool_names:

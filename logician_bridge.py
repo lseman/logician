@@ -99,6 +99,8 @@ _BRIDGE_COMMAND_SPECS: list[tuple[str, str]] = [
     ("/help", "Show command list"),
     ("/version", "Show version/runtime info"),
     ("/status", "Runtime state snapshot"),
+    ("/thinking", "Set thinking level (off|low|medium|high|xhigh)"),
+    ("/cache", "Show/set prompt caching status"),
     ("/skills-health", "Skill loader diagnostics"),
     ("/agents", "List loaded agents"),
     ("/agent", "Switch active agent (`/agent <name>`)"),
@@ -176,9 +178,6 @@ def _extract_context7_library_id(raw: Any) -> str | None:
 
 
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".svg")
-_STREAM_EVENT_CHAR_BATCH = 192
-
-
 def _parse_exclude_args(raw: str) -> list[str]:
     text = str(raw or "").strip()
     if not text:
@@ -390,6 +389,28 @@ _HTML_IMAGE_SRC_RE = re.compile(
     r"""<img[^>]+src=["']([^"']+\.(?:png|jpe?g|webp|bmp|gif|svg))["']""",
     re.IGNORECASE,
 )
+
+
+def _should_emit_image(cfg: dict[str, Any]) -> bool:
+    """Check if image auto-render is enabled for this session."""
+    return bool(cfg.get("image_auto_render_enabled", False))
+
+
+def _emit_image(
+    bridge: "BridgeServer",
+    tool: str,
+    path: str,
+    source: str,
+    emitted_images: set[tuple[str, str]],
+) -> None:
+    """Emit an image event only if auto-render is enabled."""
+    key = (tool, path)
+    if key in emitted_images:
+        return
+    if not _should_emit_image(bridge.cfg):
+        return
+    emitted_images.add(key)
+    bridge._emit("image", {"tool": tool, "path": path, "source": source})
 
 
 def _normalize_image_path(value: Any) -> str | None:
@@ -735,8 +756,12 @@ class BridgeServer:
 
             try:
                 from src.hooks import HookEngine
+                from src.hooks.loader import HookLoader
 
-                engine = HookEngine(progress_callback=_progress)
+                engine = HookEngine(
+                    progress_callback=_progress,
+                    loader=HookLoader(config_hooks=self.cfg.get("hooks") or {}),
+                )
                 active_name = self._hook_agent_name()
                 active_sid = self.sessions.get(active_name, "") if active_name else ""
                 result = engine.execute_session_start_hooks(
@@ -1185,7 +1210,7 @@ class BridgeServer:
         out: list[str] = []
         out.append(f"session: {preview.get('session_id', sid)}")
         out.append(f"classification: {preview.get('classified_as', 'execution')}")
-        domains = preview.get('domain_groups') or []
+        domains = preview.get("domain_groups") or []
         if domains:
             out.append(f"domain tools: {', '.join(str(item) for item in domains)}")
         out.append(
@@ -1222,8 +1247,8 @@ class BridgeServer:
             suppress_texts = set()
 
         filtered_messages = []
-        for msg in preview.get('messages', []) or []:
-            content = str(msg.get('content', '') or '').strip()
+        for msg in preview.get("messages", []) or []:
+            content = str(msg.get("content", "") or "").strip()
             if not content:
                 continue
             skip = False
@@ -1238,15 +1263,15 @@ class BridgeServer:
             filtered_messages.append(msg)
 
         for idx, msg in enumerate(filtered_messages, start=1):
-            role = str(msg.get('role', 'unknown'))
-            name = str(msg.get('name', '') or '').strip()
+            role = str(msg.get("role", "unknown"))
+            name = str(msg.get("name", "") or "").strip()
             label = f"{idx}. {role}"
             if name:
                 label += f" ({name})"
             out.append(f"### {label}")
             out.append("")
             out.append("```text")
-            out.append(str(msg.get('content', '')).rstrip())
+            out.append(str(msg.get("content", "")).rstrip())
             out.append("```")
             out.append("")
 
@@ -1256,20 +1281,20 @@ class BridgeServer:
             out.append(
                 f"messages: {runtime_info.get('persisted_messages', 0)} / limit {runtime_info.get('history_limit', 0)}"
             )
-            rt = runtime_info.get('runtime', {})
-            if rt.get('loaded'):
-                cols = ", ".join(rt.get('value_columns', [])[:6]) or "none"
+            rt = runtime_info.get("runtime", {})
+            if rt.get("loaded"):
+                cols = ", ".join(rt.get("value_columns", [])[:6]) or "none"
                 out.append(
                     f"dataset: {rt.get('data_name', 'unnamed')} rows={rt.get('row_count', 0)} cols={cols}"
                 )
             else:
                 out.append("dataset: none")
-            active_repos = list(rt.get('active_repos') or [])
+            active_repos = list(rt.get("active_repos") or [])
             if active_repos:
                 repo_preview = ", ".join(
-                    str(item.get('id') or item.get('name') or "").strip()
+                    str(item.get("id") or item.get("name") or "").strip()
                     for item in active_repos[:8]
-                    if str(item.get('id') or item.get('name') or "").strip()
+                    if str(item.get("id") or item.get("name") or "").strip()
                 )
                 if repo_preview:
                     out.append(f"active_repos: {repo_preview}")
@@ -1317,7 +1342,11 @@ class BridgeServer:
         if not self._startup_hook_contexts:
             return
 
-        block = "<startup-hook-context>\n" + "\n\n".join(self._startup_hook_contexts) + "\n</startup-hook-context>"
+        block = (
+            "<startup-hook-context>\n"
+            + "\n\n".join(self._startup_hook_contexts)
+            + "\n</startup-hook-context>"
+        )
         for agent in self.agents.values():
             sp = getattr(agent, "system_prompt", None) or ""
             cleaned = self._normalize_startup_hook_blocks(sp)
@@ -2105,6 +2134,113 @@ class BridgeServer:
             result = ag.compact_session(sid, keep_last_messages=keep)
             out.append(result.get("message", "done"))
 
+        elif cmd == "/thinking":
+            # /thinking [level] — set thinking level on active agent config
+            valid_levels = ["off", "low", "medium", "high", "xhigh"]
+            if args:
+                level = args[0].lower()
+                if level not in valid_levels:
+                    out.append(f"Unknown level '{level}'. Valid: {', '.join(valid_levels)}")
+                else:
+                    ag = self._active_agent()
+                    cfg = getattr(ag, "config", None)
+                    if cfg is None:
+                        out.append("No config available")
+                    else:
+                        try:
+                            from src.config import ThinkingLevel
+
+                            cfg.apply_thinking_level(level)
+                            cfg.thinking_level = level
+                            # Persist the change to config_overrides for future reloads
+                            self.cfg.setdefault("config_overrides", {})["thinking_level"] = level
+                            out.append(f"Thinking level set to '{level}'")
+                            out.append(f"  pre_turn_thinking:  {getattr(cfg, 'pre_turn_thinking', '?')}")
+                            out.append(f"  post_tool_thinking: {getattr(cfg, 'post_tool_thinking', '?')}")
+                            out.append(f"  confidence_gate:    {getattr(cfg, 'confidence_gate_enabled', '?')}")
+                            out.append(f"  reasoner:           {getattr(getattr(cfg, 'thinking', None), 'reasoner', None) or '(native)'}")
+                        except ValueError as e:
+                            out.append(str(e))
+            else:
+                ag = self._active_agent()
+                cfg = getattr(ag, "config", None)
+                current = getattr(cfg, "thinking_level", None) if cfg else None
+                if current:
+                    out.append(f"Current: {current}")
+                    out.append(f"  pre_turn_thinking:  {getattr(cfg, 'pre_turn_thinking', '?')}")
+                    out.append(f"  post_tool_thinking: {getattr(cfg, 'post_tool_thinking', '?')}")
+                    out.append(f"  confidence_gate:    {getattr(cfg, 'confidence_gate_enabled', '?')}")
+                    out.append(f"  reasoner:           {getattr(getattr(cfg, 'thinking', None), 'reasoner', None) or '(native)'}")
+                else:
+                    out.append("No thinking level set (defaults apply)")
+                out.append(f"Valid levels: {', '.join(valid_levels)}")
+                out.append("Usage: /thinking [off|low|medium|high|xhigh]")
+                out.append("")
+                out.append("  off:      direct action, no reasoning")
+                out.append("  low:      brief plan then act")
+                out.append("  medium:   plan + post-tool reflection")
+                out.append("  high:     full decomposition + confidence gate")
+                out.append("  xhigh:    reasoning extensions (SSR) + all guards")
+
+        elif cmd == "/cache":
+            # /cache [enable|disable|show] — control prompt caching
+            ag = self._active_agent()
+            cfg = getattr(ag, "config", None)
+            if cfg is None:
+                out.append("No config available")
+            elif args:
+                action = args[0].lower()
+                if action in {"enable", "on", "true", "1"}:
+                    cfg.prompt_caching_enabled = True
+                    self.cfg.setdefault("config_overrides", {})["prompt_caching_enabled"] = True
+                    out.append("Prompt caching enabled")
+                elif action in {"disable", "off", "false", "0"}:
+                    cfg.prompt_caching_enabled = False
+                    self.cfg.setdefault("config_overrides", {})["prompt_caching_enabled"] = False
+                    out.append("Prompt caching disabled")
+                elif action == "dual":
+                    cfg.prompt_caching_dual_breakpoint = not cfg.prompt_caching_dual_breakpoint
+                    self.cfg.setdefault("config_overrides", {})["prompt_caching_dual_breakpoint"] = cfg.prompt_caching_dual_breakpoint
+                    out.append(f"Dual cache breakpoint {'enabled' if cfg.prompt_caching_dual_breakpoint else 'disabled'}")
+                elif action == "openai-compat" or action == "compat":
+                    cfg.prompt_caching_openai_compat = not cfg.prompt_caching_openai_compat
+                    self.cfg.setdefault("config_overrides", {})["prompt_caching_openai_compat"] = cfg.prompt_caching_openai_compat
+                    out.append(f"OpenAI compat caching {'enabled' if cfg.prompt_caching_openai_compat else 'disabled'}")
+                elif action in {"native", "llama", "llama-cpp"}:
+                    cfg.llama_cpp_cache_prompt = not getattr(cfg, "llama_cpp_cache_prompt", True)
+                    self.cfg.setdefault("config_overrides", {})["llama_cpp_cache_prompt"] = cfg.llama_cpp_cache_prompt
+                    out.append(f"llama.cpp native cache_prompt {'enabled' if cfg.llama_cpp_cache_prompt else 'disabled'}")
+                else:
+                    out.append(f"Unknown action '{action}'. Valid: enable, disable, native, dual, openai-compat")
+            else:
+                # Show current status
+                enabled = getattr(cfg, "prompt_caching_enabled", False)
+                ttl = getattr(cfg, "prompt_caching_ttl", "5m")
+                retention = getattr(cfg, "prompt_caching_retention", "in_memory")
+                dual = getattr(cfg, "prompt_caching_dual_breakpoint", False)
+                compat = getattr(cfg, "prompt_caching_openai_compat", False)
+                native = getattr(cfg, "llama_cpp_cache_prompt", True)
+
+                if enabled:
+                    out.append("Prompt caching: ENABLED")
+                    out.append(f"  llama.cpp native cache_prompt: {'on' if native else 'off'}")
+                    out.append(f"  TTL/retention: {ttl} (Anthropic) / {retention or 'default'} (OpenAI)")
+                    out.append(f"  Dual breakpoint: {'on' if dual else 'off'}")
+                    out.append(f"  OpenAI compat: {'on' if compat else 'off'}")
+                    out.append("")
+                    out.append("Estimated savings: ~30-70% token cost reduction")
+                    out.append("       ~50-80% latency reduction on cache hits")
+                else:
+                    out.append("Prompt caching: DISABLED")
+
+                out.append("")
+                out.append("Usage: /cache [enable|disable|native|dual|openai-compat]")
+                out.append("  enable:     Turn on prompt caching")
+                out.append("  disable:    Turn off prompt caching")
+                out.append("  native:     Toggle llama.cpp native cache_prompt")
+                out.append("  dual:       Toggle dual cache breakpoint (marks both tool_use and user message)")
+                out.append("  openai-compat: Toggle Anthropic-style caching on OpenAI-compatible APIs")
+
         elif cmd == "/reset":
             ag = self._active_agent()
             sid = self.sessions.get(self.active or "", "")
@@ -2405,6 +2541,59 @@ class BridgeServer:
                     )
                 else:
                     out.append(f"upload-dir failed: {parsed.get('error', 'unknown error')}")
+
+        elif cmd == "/plugins":
+            try:
+                from src.plugin_manager.manager import PluginManager
+
+                manager = PluginManager()
+                subcmd = args[0].lower() if args else "list"
+                if subcmd == "list":
+                    result = manager.list_plugins()
+                    plugins = result.get("plugins", []) or []
+                    if not plugins:
+                        out.append("Installed plugins: none")
+                    else:
+                        out.append("# Installed plugins")
+                        for plugin in plugins:
+                            plugin_id = str(plugin.get("plugin_id") or plugin.get("name") or "")
+                            version = str(plugin.get("version") or "")
+                            enabled = "enabled" if plugin.get("enabled") else "disabled"
+                            scope = str(plugin.get("scope") or "")
+                            install_path = str(plugin.get("install_path") or "")
+                            out.append(
+                                f"- {plugin_id} v{version} [{enabled}] scope={scope} path={install_path}"
+                            )
+                elif subcmd in {"enable", "disable"}:
+                    if len(args) < 2:
+                        out.append(f"usage: /plugins {subcmd} <plugin>")
+                    else:
+                        plugin_name = args[1]
+                        result = getattr(manager, subcmd)(plugin_name)
+                        out.append(str(result.get("message") or result))
+                        if str(result.get("status", "")).lower() in {
+                            "enabled",
+                            "disabled",
+                            "already_enabled",
+                            "already_disabled",
+                        }:
+                            active = self.active
+                            if active and active in self.agents:
+                                ag = self.agents[active]
+                                tools = getattr(ag, "tools", None)
+                                if tools is not None and hasattr(
+                                    tools, "set_additional_skills_dir_paths"
+                                ):
+                                    try:
+                                        tools.set_additional_skills_dir_paths(
+                                            manager.skills_paths()
+                                        )
+                                    except Exception:
+                                        pass
+                else:
+                    out.append("usage: /plugins [list|enable|disable] <plugin>")
+            except Exception as exc:
+                out.append(f"/plugins failed: {exc}")
 
         elif cmd == "/repo":
             ag = self._active_agent()
@@ -2924,8 +3113,6 @@ class BridgeServer:
         emitted_image_events: set[tuple[str, str]] = set()
         turn_tool_errors: list[int] = [0]  # mutable counter accessible in nested fn
         written_paths: list[str] = []
-        token_buffer: list[str] = []
-        thinking_buffer: list[str] = []
 
         def _parse_result_payload(payload: Any) -> dict[str, Any] | None:
             if isinstance(payload, dict):
@@ -2938,36 +3125,16 @@ class BridgeServer:
                 return None
             return parsed if isinstance(parsed, dict) else None
 
-        def _flush_token_buffer() -> None:
-            if not token_buffer:
-                return
-            chunk = "".join(token_buffer)
-            token_buffer.clear()
-            if chunk:
-                self._emit("token", {"token": chunk})
-
-        def _flush_thinking_buffer() -> None:
-            if not thinking_buffer:
-                return
-            chunk = "".join(thinking_buffer)
-            thinking_buffer.clear()
-            if chunk:
-                self._emit("thinking_token", {"token": chunk})
-
         def _flush_stream_buffers() -> None:
-            _flush_thinking_buffer()
-            _flush_token_buffer()
+            return None
 
         def _token(tok: str):
             nonlocal token_seen
             if not token_seen:
                 token_seen = True
                 _phase("streaming", "model output")
+            if tok:
                 self._emit("token", {"token": tok})
-                return
-            token_buffer.append(tok)
-            if "\n" in tok or sum(len(part) for part in token_buffer) >= _STREAM_EVENT_CHAR_BATCH:
-                _flush_token_buffer()
 
         def _phase(state: str, note: str):
             nonlocal thinking_token_seen
@@ -2981,14 +3148,8 @@ class BridgeServer:
             if not thinking_token_seen:
                 thinking_token_seen = True
                 _phase("thinking", "pre-turn plan")
+            if tok:
                 self._emit("thinking_token", {"token": tok})
-                return
-            thinking_buffer.append(tok)
-            if (
-                "\n" in tok
-                or sum(len(part) for part in thinking_buffer) >= _STREAM_EVENT_CHAR_BATCH
-            ):
-                _flush_thinking_buffer()
 
         def _emit_file_diff(name: str, tool_args: dict[str, Any], info: dict[str, Any]):
             """Emit an exact file_diff event based on the tool's real result payload."""
@@ -3089,13 +3250,8 @@ class BridgeServer:
                 {"name": name, "args": tool_args or {}, "sequence": sequence},
             )
             for path in _extract_image_paths(tool_args or {}):
-                key = (str(name or "").strip(), path)
-                if key in emitted_image_events:
-                    continue
-                emitted_image_events.add(key)
-                self._emit(
-                    "image",
-                    {"tool": key[0] or "unknown_tool", "path": path, "source": "args"},
+                _emit_image(
+                    self, str(name or "").strip(), path, "args", emitted_image_events
                 )
 
         def _repair(meta: dict[str, Any] | None = None):
@@ -3181,14 +3337,67 @@ class BridgeServer:
                     },
                 )
         _phase("thinking", "running agent")
-        run_resp = ag.run(
-            raw,
-            session_id=sid,
-            stream_callback=_token,
-            thinking_callback=_thinking_token,
-            tool_callback=_tool,
-            repair_callback=_repair,
-        )
+
+        # Subscribe to structured events (complements the existing callbacks)
+        def _on_event(event: dict[str, Any]) -> None:
+            # Route structured events to the bridge's emit system
+            if event.get("type") == "tool_execution_start":
+                self._emit("tool_execution_start", {
+                    "turn_id": event.get("turn_id"),
+                    "tool_call_id": event.get("tool_call_id"),
+                    "tool_name": event.get("tool_name"),
+                    "tool_args": event.get("tool_args", {}),
+                })
+            elif event.get("type") == "tool_execution_end":
+                self._emit("tool_execution_end", {
+                    "turn_id": event.get("turn_id"),
+                    "tool_call_id": event.get("tool_call_id"),
+                    "tool_name": event.get("tool_name"),
+                    "result": event.get("result", ""),
+                    "is_error": event.get("is_error", False),
+                })
+            elif event.get("type") == "guardrail_nudge":
+                self._emit("guardrail_nudge", {
+                    "turn_id": event.get("turn_id"),
+                    "guard_name": event.get("guard_name"),
+                    "nudge": event.get("nudge", ""),
+                })
+            elif event.get("type") == "repair_nudge":
+                self._emit("repair_nudge", {
+                    "turn_id": event.get("turn_id"),
+                    "stage": event.get("repair_stage"),
+                    "attempt": event.get("attempt"),
+                    "tool": event.get("tool_name"),
+                    "error_type": event.get("error_type"),
+                    "message": event.get("message", ""),
+                })
+            elif event.get("type") == "classified":
+                self._emit("classified", {
+                    "turn_id": event.get("turn_id"),
+                    "intent": event.get("intent"),
+                    "domain_groups": event.get("domain_groups", []),
+                })
+            elif event.get("type") == "turn_start":
+                self._emit("turn_start", {"turn_id": event.get("turn_id")})
+            elif event.get("type") == "turn_end":
+                self._emit("turn_end", {
+                    "turn_id": event.get("turn_id"),
+                    "response": event.get("message", ""),
+                })
+
+        # Subscribe and auto-dispose after run completes
+        dispose = ag.subscribe_events(_on_event)
+        try:
+            run_resp = ag.run(
+                raw,
+                session_id=sid,
+                stream_callback=_token,
+                thinking_callback=_thinking_token,
+                tool_callback=_tool,
+                repair_callback=_repair,
+            )
+        finally:
+            dispose()  # clean up subscription
         response_text = str(getattr(run_resp, "final_response", "") or "")
         tool_calls_payload: list[dict[str, Any]] = []
         for call in list(getattr(run_resp, "tool_calls", []) or []):
@@ -3201,14 +3410,7 @@ class BridgeServer:
                 }
             )
             for path in _extract_image_paths(call_args):
-                key = (call_name, path)
-                if key in emitted_image_events:
-                    continue
-                emitted_image_events.add(key)
-                self._emit(
-                    "image",
-                    {"tool": call_name or "unknown_tool", "path": path, "source": "call"},
-                )
+                _emit_image(self, call_name, path, "call", emitted_image_events)
 
         for msg in list(getattr(run_resp, "messages", []) or []):
             role = str(getattr(msg, "role", "") or "").lower()
@@ -3219,18 +3421,7 @@ class BridgeServer:
             if not content:
                 continue
             for path in _extract_image_paths(content):
-                key = (tool_name, path)
-                if key in emitted_image_events:
-                    continue
-                emitted_image_events.add(key)
-                self._emit(
-                    "image",
-                    {
-                        "tool": tool_name,
-                        "path": path,
-                        "source": "tool_result",
-                    },
-                )
+                _emit_image(self, tool_name, path, "tool_result", emitted_image_events)
         _flush_stream_buffers()
         # Some backends/modes return a full answer without incremental token callbacks
         # (for example constrained decoding or non-streaming server paths). Emit a

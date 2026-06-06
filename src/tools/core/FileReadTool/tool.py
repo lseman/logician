@@ -2,7 +2,34 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+# Common image extensions for file_type detection
+_IMAGE_EXTENSIONS: set[str] = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico", ".tiff", ".tif",
+}
+
+# UTF-8 BOM
+_BOM = "\ufeff"
+
+
+def _strip_bom(text: str) -> str:
+    """Remove UTF-8 BOM from the start of text if present."""
+    if text and text[0] == _BOM:
+        return text[1:]
+    return text
+
+
+def _detect_image_subtype(path: str) -> str | None:
+    """Detect image subtype from file extension."""
+    suffix = Path(path).suffix.lower()
+    subtype_map = {
+        ".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".gif": "gif",
+        ".webp": "webp", ".bmp": "bmp", ".svg": "svg", ".ico": "ico",
+        ".tiff": "tiff", ".tif": "tiff",
+    }
+    return subtype_map.get(suffix)
 
 from ..filesystem import DEFAULT_FILESYSTEM
 from ..SearchTool.inspection import read_edit_context as inspection_read_edit_context
@@ -17,21 +44,23 @@ __all__ = [
 
 def read_file(
     path: str,
-    start_line: int | None = None,
-    end_line: int | None = None,
     offset: int | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Read a file, optionally restricted to a line range."""
-    normalized = _resolve_line_window(
-        start_line=start_line,
-        end_line=end_line,
-        offset=offset,
-        limit=limit,
-    )
-    if isinstance(normalized, dict):
-        return normalized
-    normalized_start, normalized_end = normalized
+    """Read a file, optionally restricted to a line range.
+
+    Inspired by Pi's lean read tool: path, offset (1-indexed line to start),
+    and limit (max lines). Use offset to continue reading large files.
+    """
+    # Normalize offset (Pi-style: 1-indexed)
+    start = offset if offset is not None else 1
+    if start < 1:
+        start = 1
+    end = None
+    if limit is not None and limit > 0:
+        end = start + limit - 1
+
+    normalized_start, normalized_end = start, end
 
     try:
         resolved = resolve_tool_path(path)
@@ -91,6 +120,9 @@ def read_file(
     except (OSError, ValueError):
         return result
 
+    # Strip BOM from content
+    content = _strip_bom(str(result.get("content") or ""))
+
     total_lines = int(result.get("total_lines") or 0)
     effective_start = max(1, normalized_start or 1)
     effective_end = (
@@ -103,7 +135,7 @@ def read_file(
     snapshot = record_file_snapshot(
         globals().get("ctx"),
         resolved,
-        content=str(result.get("content") or ""),
+        content=content,
         mtime_ns=stat_result.st_mtime_ns,
         size_bytes=stat_result.st_size,
         full_read=full_read,
@@ -121,6 +153,10 @@ def read_file(
         "total_lines": snapshot["total_lines"],
         "truncated": snapshot["truncated"],
     }
+    # Add image type hint if detected
+    if Path(str(resolved)).suffix.lower() in _IMAGE_EXTENSIONS:
+        result["image_type"] = _detect_image_subtype(str(resolved))
+    result["content"] = content
     return result
 
 

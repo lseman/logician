@@ -35,8 +35,8 @@ class _StreamingFakeLLM:
         self.chunks = chunks or [response]
         self.calls = 0
 
-    def generate(self, messages, temperature, max_tokens, stream=False, on_token=None):
-        del messages, temperature, max_tokens
+    def generate(self, messages, temperature, max_tokens, stream=False, on_token=None, **kwargs):
+        del messages, temperature, max_tokens, kwargs
         self.calls += 1
         if stream and on_token is not None:
             for chunk in self.chunks:
@@ -209,6 +209,26 @@ class AgentRuntimePublicTests(unittest.TestCase):
             thinking_streamed,
             [' The user', ' said "hi".', " This is social."],
         )
+
+    def test_prefilled_native_thinking_streams_without_opening_tag(self) -> None:
+        self.agent.config.native_thinking_prefill = True
+        self.agent.llm = _StreamingFakeLLM(
+            "I am reasoning</think>\nVisible answer",
+            chunks=["I am ", "reasoning", "</think>", "\nVisible answer"],
+        )
+        thinking_streamed: list[str] = []
+        assistant_streamed: list[str] = []
+
+        response = self.agent.run(
+            "inspect the project files",
+            session_id="prefilled_thinking_stream_case",
+            stream_callback=assistant_streamed.append,
+            thinking_callback=thinking_streamed.append,
+        )
+
+        self.assertEqual(response.final_response, "Visible answer")
+        self.assertEqual(thinking_streamed, ["I am ", "reasoning"])
+        self.assertEqual("".join(assistant_streamed).strip(), "Visible answer")
 
     def test_tool_callback_reports_live_start_and_end_events(self) -> None:
         tool_events: list[tuple[str, dict, dict]] = []

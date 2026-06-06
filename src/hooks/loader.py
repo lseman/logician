@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .types import (
+    HookCommand,
+    HookCommandType,
     HookDefinition,
     HookEventType,
     HookMatcher,
@@ -45,10 +47,18 @@ class HookLoader:
         tuple[tuple[Any, ...], tuple[LoadedHook, ...]],
     ] = {}
 
-    def __init__(self, plugin_manager: PluginManager | None = None) -> None:
+    def __init__(
+        self,
+        plugin_manager: PluginManager | None = None,
+        config_hooks: dict[str, Any] | None = None,
+    ) -> None:
         from src.plugin_manager.manager import PluginManager as PM
 
         self.plugin_manager = plugin_manager or PM()
+        self.config_hooks = config_hooks if isinstance(config_hooks, dict) else {}
+        self._parsed_config_hooks: dict[HookEventType, list[HookDefinition]] = (
+            _parse_hooks_dict(self.config_hooks) if self.config_hooks else {}
+        )
 
     def get_session_start_hooks(self, source: str = "startup") -> list[LoadedHook]:
         """Get all SessionStart hooks from enabled plugins."""
@@ -110,6 +120,19 @@ class HookLoader:
                         )
                     )
 
+        if self._parsed_config_hooks:
+            for definition in self._parsed_config_hooks.get(event_type, []):
+                if self._matcher_matches(definition.matcher, cache_key[1]):
+                    loaded.append(
+                        LoadedHook(
+                            plugin_id="agent_config",
+                            plugin_name="agent_config",
+                            plugin_dir=Path.cwd(),
+                            event_type=event_type,
+                            definition=definition,
+                        )
+                    )
+
         with self._cache_lock:
             self._event_cache[cache_key] = (signature, tuple(loaded))
         return loaded
@@ -131,7 +154,13 @@ class HookLoader:
                 )
             )
 
-        return (registry_sig, tuple(plugin_sigs))
+        config_hooks_sig = None
+        if self.config_hooks:
+            try:
+                config_hooks_sig = json.dumps(self.config_hooks, sort_keys=True)
+            except Exception:
+                config_hooks_sig = str(self.config_hooks)
+        return (registry_sig, tuple(plugin_sigs), config_hooks_sig)
 
     @staticmethod
     def _path_signature(path: Path) -> tuple[bool, int | None, int | None]:
@@ -195,3 +224,59 @@ class HookLoader:
 
         # Also support simple contains for backwards compatibility
         return pattern.lower() in source.lower()
+
+
+def _parse_hooks_dict(data: dict[str, Any]) -> dict[HookEventType, list[HookDefinition]]:
+    """Parse hooks dict into structured HookDefinition objects."""
+    result: dict[HookEventType, list[HookDefinition]] = {}
+
+    for event_name, matchers in data.items():
+        try:
+            event_type = HookEventType(event_name)
+        except ValueError:
+            continue
+
+        if not isinstance(matchers, list):
+            continue
+
+        definitions: list[HookDefinition] = []
+        for matcher_data in matchers:
+            if not isinstance(matcher_data, dict):
+                continue
+
+            matcher_str = matcher_data.get("matcher")
+            matcher = HookMatcher(matcher=matcher_str) if matcher_str else None
+
+            hooks_list: list[HookCommand] = []
+            for hook_data in matcher_data.get("hooks", []):
+                if not isinstance(hook_data, dict):
+                    continue
+
+                hook_type_str = hook_data.get("type", "command")
+                try:
+                    hook_type = HookCommandType(hook_type_str)
+                except ValueError:
+                    hook_type = HookCommandType.COMMAND
+
+                hook_cmd = HookCommand(
+                    type=hook_type,
+                    command=hook_data.get("command"),
+                    prompt=hook_data.get("prompt"),
+                    agent=hook_data.get("agent"),
+                    http_url=hook_data.get("url"),
+                    http_headers=hook_data.get("headers"),
+                    timeout=(
+                        float(hook_data.get("timeout"))
+                        if isinstance(hook_data.get("timeout"), (int, float))
+                        else None
+                    ),
+                )
+                hooks_list.append(hook_cmd)
+
+            if hooks_list:
+                definitions.append(HookDefinition(matcher=matcher, hooks=hooks_list))
+
+        if definitions:
+            result[event_type] = definitions
+
+    return result

@@ -66,12 +66,13 @@ class _ThinkingStreamRouter:
         self,
         stream_callback: Callable[[str], None] | None,
         thinking_callback: Callable[[str], None] | None,
+        *,
+        initial_in_think: bool = False,
     ) -> None:
         self._stream_callback = stream_callback
         self._thinking_callback = thinking_callback
         self._buffer = ""
-        self._in_think = False
-        self._think_parts: list[str] = []
+        self._in_think = initial_in_think
         self.visible_emitted = False
 
     def _emit_visible(self, text: str) -> None:
@@ -98,16 +99,14 @@ class _ThinkingStreamRouter:
                 if match is None:
                     keep = _partial_tag_suffix_length(self._buffer, _CLOSE_THINK_TAGS)
                     if keep:
-                        self._think_parts.append(self._buffer[:-keep])
+                        self._emit_thinking(self._buffer[:-keep])
                         self._buffer = self._buffer[-keep:]
                     else:
-                        self._think_parts.append(self._buffer)
+                        self._emit_thinking(self._buffer)
                         self._buffer = ""
                     break
                 pos, tag = match
-                self._think_parts.append(self._buffer[:pos])
-                self._emit_thinking("".join(self._think_parts))
-                self._think_parts.clear()
+                self._emit_thinking(self._buffer[:pos])
                 self._buffer = self._buffer[pos + len(tag) :]
                 self._in_think = False
                 continue
@@ -130,9 +129,7 @@ class _ThinkingStreamRouter:
 
     def flush(self) -> None:
         if self._in_think:
-            self._think_parts.append(self._buffer)
-            self._emit_thinking("".join(self._think_parts))
-            self._think_parts.clear()
+            self._emit_thinking(self._buffer)
             self._buffer = ""
             self._in_think = False
             return
@@ -185,6 +182,7 @@ class Agent:
                 tensor_parallel_size=self.config.vllm_tensor_parallel_size,
                 gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
                 dtype=self.config.vllm_dtype,
+                config=self.config,
             )
         else:
             from ..backends import LlamaCppClient
@@ -196,6 +194,7 @@ class Agent:
                 chat_template=self.config.chat_template,
                 stop=self.config.stop,
                 retry_attempts=self.config.retry_attempts,
+                config=self.config,
             )
         profile_checkpoint("agent.init.llm_ready")
 
@@ -220,6 +219,11 @@ class Agent:
         self.tools.install_context(self.ctx)
         self.tools.load_tools_from_skills()
         profile_checkpoint("agent.init.skill_tools_loaded")
+
+        # Event emitter for structured lifecycle events (Pi-like event-driven architecture)
+        from .events import EventEmitter
+        self._event_emitter = EventEmitter()
+        profile_checkpoint("agent.init.events_ready")
 
         # Register the core tools as always-on runtime capabilities.
         from ..tools import core as _core_tools
@@ -346,8 +350,11 @@ class Agent:
         if engine is None:
             try:
                 from ..hooks import HookEngine
+                from ..hooks.loader import HookLoader
 
-                engine = HookEngine()
+                engine = HookEngine(
+                    loader=HookLoader(config_hooks=getattr(self.config, "hooks", {}) or {})
+                )
             except Exception:
                 engine = None
             self._hook_engine_cache = engine
@@ -1351,12 +1358,18 @@ class Agent:
     def _build_agent_loop(self) -> AgentLoop:
         """Construct the AgentLoop with the default runtime components."""
         guards = default_guards(self.config)
+        default_tool_names = self.tools.default_prompt_tool_names()
+        # Compact fallback: when domain tools are active, also show a compact
+        # listing of other available tools so the model doesn't get confused
+        # about what's available beyond the routed subset.
+        fallback_names = [n for n in default_tool_names if n not in ("describe_tool", "search_tools")]
         prompt_builder = default_prompt_builder(
             base_prompt_fn=lambda: self.system_prompt,
             tool_schema_fn=lambda: self.tools.tools_schema_prompt(
                 use_toon=self.config.use_toon_for_tools,
                 mode=self.config.tool_schema_mode,
-                include_tool_names=self.tools.default_prompt_tool_names(),
+                include_tool_names=default_tool_names,
+                compact_fallback_tool_names=fallback_names,
             ),
             routing_fn=lambda query: self.tools.skill_routing_prompt(
                 query,
@@ -1395,7 +1408,27 @@ class Agent:
             memory=self.memory,
             mcp_loader=self._ensure_mcp_servers_loaded,
             thinking=thinking,
+            emitter=self._event_emitter,
         )
+
+    def subscribe_events(self, handler: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
+        """Subscribe to agent lifecycle events.
+
+        Returns a dispose function to unsubscribe.
+
+        Events emitted: agent_start, turn_start, classified, tool_execution_start,
+        tool_execution_end, guardrail_nudge, repair_nudge, turn_end.
+
+        Usage:
+            dispose = agent.subscribe_events(lambda e: print(e))
+            agent.run("hello")
+            dispose()  # stop listening
+        """
+        _handler = lambda event: handler(event.to_dict())
+        self._event_emitter.on("*", _handler)
+        def dispose() -> None:
+            self._event_emitter.off("*", _handler)
+        return dispose
 
     def run(
         self,
@@ -1426,7 +1459,9 @@ class Agent:
             timeout_seconds=30.0,
         )
         additional_contexts = list(getattr(user_prompt_hook, "additional_contexts", []) or [])
-        injected_context = "\n\n".join(str(item) for item in additional_contexts if str(item).strip())
+        injected_context = "\n\n".join(
+            str(item) for item in additional_contexts if str(item).strip()
+        )
         if injected_context:
             hook_messages.append(
                 Message(
@@ -1453,7 +1488,13 @@ class Agent:
                 thinking_callback(raw)
 
         stream_router = (
-            _ThinkingStreamRouter(stream_callback=stream_callback, thinking_callback=_emit_thinking)
+            _ThinkingStreamRouter(
+                stream_callback=stream_callback,
+                thinking_callback=_emit_thinking,
+                initial_in_think=bool(
+                    getattr(self.config, "native_thinking_prefill", False)
+                ),
+            )
             if stream_callback is not None
             else None
         )
@@ -1476,6 +1517,7 @@ class Agent:
                 thinking_callback=_emit_thinking,
                 tool_callback=tool_callback,
                 post_tool_callback=self._post_tool_use_hook_callback(sid),
+                pre_tool_callback=self._pre_tool_use_hook_callback(sid),
                 repair_callback=repair_callback,
             )
 
@@ -1555,6 +1597,27 @@ class Agent:
                 tool_name=call.name,
                 tool_input=dict(call.arguments or {}),
                 tool_response=tool_response,
+                timeout_seconds=10.0,
+            )
+
+        return _callback
+
+    def _pre_tool_use_hook_callback(
+        self,
+        session_id: str,
+    ) -> Callable[[ToolCall], None] | None:
+        try:
+            pass
+        except Exception:
+            return None
+
+        def _callback(call: ToolCall) -> None:
+            self._execute_hooks_async(
+                "PreToolUse",
+                session_id=session_id,
+                matcher_value=call.name,
+                tool_name=call.name,
+                tool_input=dict(call.arguments or {}),
                 timeout_seconds=10.0,
             )
 

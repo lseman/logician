@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from ..config import Config
 from ..logging_utils import get_logger
 from ..messages import Message
+from .cache_control import apply_openai_compat_cache_control
 from .common import count_tokens_local, format_messages_for_template
 
 try:
@@ -24,6 +26,7 @@ class VLLMClient:
     Notes:
     - Uses the Python API (no HTTP).
     - For simplicity, streaming here calls `on_token` once with the full text.
+    - Supports prompt caching via vLLM's built-in caching when enabled in config.
     """
 
     def __init__(
@@ -34,11 +37,13 @@ class VLLMClient:
         tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.9,
         dtype: str = "auto",
+        config: Config | None = None,
     ) -> None:
         if not HAS_VLLM:
             raise ImportError("vLLM is not installed. Install with: pip install vllm")
         self.template = chat_template
         self.stop = list(stop)
+        self.config = config or Config()
         self._log = get_logger("agent.vllm")
         self._log.info(
             "Loading vLLM model=%s tp=%d mem=%.2f dtype=%s",
@@ -50,6 +55,11 @@ class VLLMClient:
         extra_kwargs: dict[str, Any] = {}
         if dtype != "auto":
             extra_kwargs["dtype"] = dtype
+
+        # Enable vLLM's built-in prompt caching if enabled in config
+        if getattr(self.config, "prompt_caching_enabled", True):
+            extra_kwargs["enable_prefix_caching"] = True
+
         self.llm = LLM(
             model=model,
             tensor_parallel_size=tensor_parallel_size,

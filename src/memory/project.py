@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..aaak_dialect import compress_text_to_aaak
+from ..hooks.types import HookEventType
 
 OBS_TYPE_EMOJI: dict[str, str] = {
     "bugfix": "🔴",
@@ -492,6 +493,160 @@ def compact_text(text: str, limit: int = 240) -> str:
     if len(compact) <= limit:
         return compact
     return compact[:limit].rstrip() + " ..."
+
+
+def _hook_event_type(event_type: str | HookEventType) -> str:
+    if isinstance(event_type, HookEventType):
+        return event_type.value
+    return str(event_type or "").strip()
+
+
+def _hook_observation_type(event_type: str | HookEventType) -> str:
+    event_name = _hook_event_type(event_type)
+    return {
+        HookEventType.SESSION_START.value: "discovery",
+        HookEventType.USER_PROMPT_SUBMIT.value: "feature",
+        HookEventType.POST_TOOL_USE.value: "change",
+        HookEventType.STOP.value: "change",
+        HookEventType.SESSION_END.value: "decision",
+    }.get(event_name, "discovery")
+
+
+def _hook_event_title(event_type: str | HookEventType, payload: dict[str, Any]) -> str:
+    event_name = _hook_event_type(event_type)
+    prompt = str(payload.get("prompt") or "").strip()
+    tool_name = str(payload.get("tool_name") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    source = str(payload.get("source") or "").strip()
+    if event_name == HookEventType.SESSION_START.value:
+        if source:
+            return f"Session started ({source})"
+        return "Session started"
+    if event_name == HookEventType.USER_PROMPT_SUBMIT.value:
+        if prompt:
+            return prompt.splitlines()[0][:100]
+        return "User prompt submitted"
+    if event_name == HookEventType.POST_TOOL_USE.value:
+        if tool_name:
+            return f"Tool used: {tool_name}"
+        return "PostToolUse event"
+    if event_name == HookEventType.STOP.value:
+        if reason:
+            return f"Stopped: {reason}"
+        return "Stop event"
+    if event_name == HookEventType.SESSION_END.value:
+        if reason:
+            return f"Session ended: {reason}"
+        return "Session ended"
+    return f"Hook event: {event_name}"
+
+
+def _extract_hook_files(payload: dict[str, Any]) -> list[str]:
+    files: list[str] = []
+    tool_input = payload.get("tool_input")
+    tool_response = payload.get("tool_response")
+    if isinstance(tool_input, dict):
+        for key in ("path", "file", "filename", "files"):
+            value = tool_input.get(key) if isinstance(tool_input, dict) else None
+            if isinstance(value, str) and value.strip():
+                files.append(value.strip())
+            elif isinstance(value, list):
+                files.extend(
+                    str(item).strip() for item in value if isinstance(item, str) and item.strip()
+                )
+    if isinstance(tool_response, dict):
+        for key in ("path", "file", "filename", "files"):
+            value = tool_response.get(key)
+            if isinstance(value, str) and value.strip():
+                files.append(value.strip())
+            elif isinstance(value, list):
+                files.extend(
+                    str(item).strip() for item in value if isinstance(item, str) and item.strip()
+                )
+    return [f for f in dict.fromkeys(files) if f]
+
+
+def _format_hook_payload_lines(payload: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    if payload.get("source"):
+        lines.append(f"**Source:** {compact_text(payload['source'], 120)}")
+    if payload.get("prompt"):
+        lines.append(f"**Prompt:** {compact_text(payload['prompt'], 500)}")
+    if payload.get("tool_name"):
+        lines.append(f"**Tool:** {payload['tool_name']}")
+    if payload.get("tool_input") is not None:
+        lines.append(
+            f"**Tool input:** {compact_text(json.dumps(payload['tool_input'], ensure_ascii=False), 400)}"
+        )
+    if payload.get("tool_response") is not None:
+        lines.append(
+            f"**Tool response:** {compact_text(json.dumps(payload['tool_response'], ensure_ascii=False), 800)}"
+        )
+    if payload.get("reason"):
+        lines.append(f"**Reason:** {compact_text(payload['reason'], 240)}")
+    if payload.get("stop_hook_active") is not None:
+        lines.append(f"**Stop hook active:** {bool(payload['stop_hook_active'])}")
+    return lines
+
+
+def record_hook_event(
+    *,
+    event_type: str | HookEventType,
+    payload: dict[str, Any],
+    hook_output: str | list[str] | None = None,
+    base_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Record a project memory observation from a lifecycle hook event."""
+    if not project_memory_enabled():
+        return {
+            "disabled": True,
+            "id": 0,
+            "formatted_id": "",
+            "session": str(payload.get("session") or payload.get("session_id") or ""),
+            "path": "",
+            "timestamp": "",
+            "preview": "",
+            "memory_dir": str(get_memory_dir(base_dir)),
+        }
+
+    event_name = _hook_event_type(event_type)
+    if event_name not in {
+        HookEventType.SESSION_START.value,
+        HookEventType.USER_PROMPT_SUBMIT.value,
+        HookEventType.POST_TOOL_USE.value,
+        HookEventType.STOP.value,
+        HookEventType.SESSION_END.value,
+    }:
+        raise ValueError(f"Unsupported hook event for project memory: {event_name}")
+
+    hook_text = ""
+    if isinstance(hook_output, list):
+        hook_text = "\n\n".join(
+            str(item or "").strip() for item in hook_output if str(item or "").strip()
+        )
+    elif isinstance(hook_output, str):
+        hook_text = str(hook_output or "").strip()
+
+    payload_lines = _format_hook_payload_lines(payload)
+    if hook_text:
+        payload_lines.append(f"**Hook output:** {compact_text(hook_text, 1200)}")
+
+    if not payload_lines:
+        payload_lines = ["No hook payload provided."]
+
+    files = _extract_hook_files(payload)
+    title = _hook_event_title(event_type, payload)
+    content = "\n\n".join(payload_lines)
+    session_key = str(payload.get("session_id") or payload.get("session") or "").strip() or None
+
+    return record_observation(
+        obs_type=_hook_observation_type(event_type),
+        title=title,
+        content=content,
+        files=files,
+        session_key=session_key,
+        base_dir=base_dir,
+    )
 
 
 def _session_label_for_key(index: list[dict[str, Any]], session_key: str | None) -> str:

@@ -94,7 +94,7 @@ def test_identity_fallback_when_soul_missing(monkeypatch):
     original_exists = Path.exists
 
     def fake_exists(self: Path) -> bool:
-        if self.name == "SOUL.md":
+        if self.name in ("SOUL.md", "CLAUDE.md", "AGENTS.md"):
             return False
         return original_exists(self)
 
@@ -177,14 +177,18 @@ def test_skill_playbook_returns_content_when_routing_enabled():
     config = make_config(enable_skill_routing=True)
     result = comp.render(make_state(), config)
     assert result is not None
-    assert result.startswith("## Active Skill")
-    assert "edit_block" in result
+    assert result.startswith("## Available Skills")
+    assert "Think" in result  # essential skill always shown
 
 
-def test_skill_playbook_returns_none_when_fn_returns_empty():
+def test_skill_playbook_returns_static_list():
+    """Skill list is now static — always returns content when routing enabled."""
     comp = SkillPlaybookComponent(lambda q: "")
     config = make_config(enable_skill_routing=True)
-    assert comp.render(make_state(), config) is None
+    result = comp.render(make_state(), config)
+    assert result is not None
+    assert "## Available Skills" in result
+    assert "## Skill Loading" in result
 
 
 def test_skill_playbook_skips_social_turns():
@@ -215,7 +219,7 @@ def test_retrieval_context_returns_none_when_disabled():
 
 def test_retrieval_context_wraps_summary():
     comp = RetrievalContextComponent(lambda state: "repo:file.py - context")
-    result = comp.render(make_state(user_query="find foo"), make_config())
+    result = comp.render(make_state(user_query="find foo"), make_config(prompt_rag_context_enabled=True))
     assert result is not None
     assert result.startswith("## Retrieval Context")
     assert "file.py" in result
@@ -230,7 +234,7 @@ def test_retrieval_context_caches_per_turn():
 
     comp = RetrievalContextComponent(_render)
     state = make_state(user_query="find foo")
-    config = make_config()
+    config = make_config(prompt_rag_context_enabled=True)
     first = comp.render(state, config)
     second = comp.render(state, config)
     assert first == second

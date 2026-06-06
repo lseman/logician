@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .gitignore_filter import filter_gitignored, get_gitignore_spec, is_gitignored
+
 # Device paths that must never be opened (infinite/blocking reads or security hazards).
 _BLOCKED_DEVICE_PATHS: frozenset[str] = frozenset(
     {
@@ -407,6 +409,14 @@ class FilesystemBackend:
         except (OSError, ValueError) as exc:
             return _err(f"Cannot glob files: {exc}")
 
+        # Apply .gitignore filtering to the raw matches
+        if matches:
+            matches = filter_gitignored(
+                [str(m) for m in matches], base
+            )
+            # Re-resolve to Path objects for _file_info
+            matches = [Path(m) for m in matches]
+
         payload = [
             self._file_info(match, base=base)
             for match in matches
@@ -484,12 +494,16 @@ class FilesystemBackend:
             case_sensitive=case_sensitive,
             context_lines=context_lines,
             max_matches=raw_limit,
+            page_limit=page_limit,
             include_hidden=include_hidden,
             offset=offset,
             output_mode=output_mode,
         )
         if rg is not None:
             return rg
+
+        # Pre-compute gitignore spec for the Python fallback
+        gitignore_spec = get_gitignore_spec(search_root)
 
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
@@ -511,6 +525,14 @@ class FilesystemBackend:
                 continue
             if not include_hidden and self._path_is_hidden(fpath, search_root):
                 continue
+            # Check .gitignore
+            if gitignore_spec is not None:
+                try:
+                    rel = str(fpath.relative_to(search_root))
+                    if gitignore_spec.match_file(rel):
+                        continue
+                except (ValueError, OSError):
+                    pass
             try:
                 if fpath.stat().st_size > self.max_file_bytes:
                     skipped_large += 1
@@ -771,6 +793,7 @@ class FilesystemBackend:
         case_sensitive: bool,
         context_lines: int,
         max_matches: int,
+        page_limit: int,
         include_hidden: bool,
         offset: int,
         output_mode: str,
@@ -861,7 +884,7 @@ class FilesystemBackend:
             file_count=len(files_seen),
             files_with_matches=files_with_matches,
             requested_max_matches=max_matches,
-            page_limit=max_matches,
+            page_limit=page_limit,
             raw_matches=matches,
             skipped_binary=0,
             skipped_large=0,

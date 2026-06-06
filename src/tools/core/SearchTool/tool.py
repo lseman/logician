@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..filesystem import DEFAULT_FILESYSTEM
+from ..gitignore_filter import get_gitignore_spec, filter_gitignored
 from .inspection import (
     _err,
     _read_text_preserve_newlines,
@@ -232,12 +233,10 @@ def _build_search_result(
     *,
     tool_used: str,
     pattern: str,
-    output_mode: str,
     matches: list[dict],
     real_count: int,
     truncated: bool,
     top_files: list[dict],
-    max_results: int,
     root: Path,
 ) -> dict:
     base: dict[str, Any] = {
@@ -249,40 +248,12 @@ def _build_search_result(
     }
     if truncated:
         base["hint"] = (
-            f"Results truncated at {max_results}. "
-            "Narrow with file_glob/file_type or increase max_results."
+            f"Results truncated at 100 (limit). "
+            "Narrow with glob or increase limit."
         )
-
-    if output_mode == "files":
-        seen: dict[str, float] = {}
-        for m in matches:
-            if not m.get("match", True):
-                continue
-            f = str(m.get("file", ""))
-            if f and f not in seen:
-                seen[f] = _file_mtime(f, root)
-        sorted_files = sorted(seen.items(), key=lambda kv: (-kv[1], kv[0]))
-        base["files"] = [f for f, _ in sorted_files]
-        base["file_count"] = len(base["files"])
-        return base
-
-    if output_mode == "count":
-        counts: dict[str, int] = {}
-        for m in matches:
-            if not m.get("match", True):
-                continue
-            f = str(m.get("file", ""))
-            if f:
-                counts[f] = counts.get(f, 0) + 1
-        sorted_counts = sorted(
-            counts.items(),
-            key=lambda kv: (-_file_mtime(kv[0], root), -kv[1], kv[0]),
-        )
-        base["per_file"] = [{"file": f, "count": c} for f, c in sorted_counts]
-        return base
 
     base["top_files"] = top_files
-    base["matches"] = matches[:max_results]
+    base["matches"] = matches[:100]
     return base
 
 
@@ -293,53 +264,37 @@ def _build_search_result(
 
 def rg_search(
     pattern: str,
-    directory: str = ".",
-    file_glob: str = "",
-    file_type: str = "",
-    context_lines: int = 0,
-    case_sensitive: bool = False,
-    fixed_string: bool = False,
-    max_results: int = 80,
-    output_mode: str = "content",
+    path: str = ".",
+    glob: str = "",
+    ignore_case: bool = True,
+    literal: bool = False,
+    context: int = 0,
+    limit: int = 100,
 ) -> dict:
-    """Search for text/pattern across a codebase using ripgrep (pure-Python fallback).
+    """Search file contents for a pattern. Returns matching lines with paths.
+
+    Inspired by Pi's grep tool — simple, focused, respects .gitignore.
 
     Args:
-        pattern: Regex or literal string to search for.
-        directory: Root directory to search (default ".").
-        file_glob: Glob pattern to restrict files, e.g. "*.py" or "src/**/*.ts".
-        file_type: ripgrep file-type name ("py", "js", "ts", "rust", "md" …).
-            Only used when rg is available.
-        context_lines: Lines of context before/after each match (default 0).
-        case_sensitive: Match case exactly (default False).
-        fixed_string: Treat pattern as literal string, not regex (default False).
-        max_results: Stop after this many matches (default 80).
-        output_mode: One of:
-            "content" — full match lines + context (default)
-            "files"   — unique file paths sorted by mtime; token-cheap
-            "count"   — match count per file, sorted by mtime then count
+        pattern: Search pattern (regex or literal string).
+        path: Directory or file to search (default: current directory).
+        glob: Filter files by glob pattern, e.g. '*.py' or '**/*.spec.ts'.
+        ignore_case: Case-insensitive search (default: True).
+        literal: Treat pattern as literal string instead of regex (default: False).
+        context: Lines of context before/after each match (default: 0).
+        limit: Maximum number of matches to return (default: 100).
 
     Returns:
-        dict with matches and top_files sorted by modification time (newest first).
+        dict with 'matches' list and metadata. Output truncated to 64KB.
     """
     pattern = str(pattern)
-    directory = str(directory or ".")
-    file_glob = str(file_glob or "")
-    file_type = str(file_type or "")
-    output_mode = str(output_mode or "content").strip().lower()
-    if output_mode not in {"content", "files", "count"}:
-        output_mode = "content"
-    case_sensitive = _coerce_bool(case_sensitive, default=False)
-    fixed_string = _coerce_bool(fixed_string, default=False)
+    directory = str(path or ".")
+    file_glob = str(glob or "")
 
-    context_lines_i, err = _coerce_int(context_lines, name="context_lines", default=0)
-    if err:
-        return {"status": "error", "error": err}
-    max_results_i, err = _coerce_int(max_results, name="max_results", default=80)
-    if err:
-        return {"status": "error", "error": err}
-    context_lines = max(0, context_lines_i)
-    max_results = max(1, max_results_i)
+    ignore_case = _coerce_bool(ignore_case, default=True)
+    literal = _coerce_bool(literal, default=False)
+    context = _coerce_int(context, name="context", default=0)[0]
+    limit = max(1, _coerce_int(limit, name="limit", default=100)[0])
 
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
@@ -347,19 +302,18 @@ def rg_search(
 
     if shutil.which("rg"):
         parts = ["rg", "--line-number", "--no-heading", "--color=never"]
-        if not case_sensitive:
+        if ignore_case:
             parts.append("--ignore-case")
-        if fixed_string:
+        if literal:
             parts.append("--fixed-strings")
-        if context_lines > 0 and output_mode == "content":
-            parts += ["-C", str(context_lines)]
-        if file_type:
-            parts += ["--type", file_type]
+        if context > 0:
+            parts += ["-C", str(context)]
         if file_glob:
             parts += ["--glob", file_glob]
-        parts += ["--max-count", str(max_results)]
+        parts += ["--max-count", str(limit)]
         parts.append(pattern)
         parts.append(str(root))
+
 
         r = _run_cmd(parts, timeout=30)
         if r["exit_code"] not in (0, 1):
@@ -381,7 +335,7 @@ def rg_search(
                 matches.append(
                     {"file": m.group(1), "line": int(m.group(2)), "text": m.group(3), "match": True}
                 )
-            elif context_lines > 0:
+            elif context > 0:
                 mc = ctx_re.match(raw)
                 if mc:
                     matches.append(
@@ -402,36 +356,45 @@ def rg_search(
         matches = _rank_search_matches(
             matches,
             query=pattern,
-            fixed_string=fixed_string,
-            case_sensitive=case_sensitive,
+            fixed_string=literal,
+            case_sensitive=not ignore_case,
             root=root,
         )
         real_count = len([m for m in matches if m.get("match", True)])
-        truncated = real_count >= max_results
+        truncated = real_count >= limit
         top_files = _rollup_matches_by_file(matches, limit=8, root=root)
         return _build_search_result(
             tool_used="rg",
             pattern=pattern,
-            output_mode=output_mode,
             matches=matches,
             real_count=real_count,
             truncated=truncated,
             top_files=top_files,
-            max_results=max_results,
             root=root,
         )
 
     glob_pat = file_glob if file_glob else "**/*"
-    flags = 0 if case_sensitive else re.IGNORECASE
+    flags = 0 if not ignore_case else re.IGNORECASE
     try:
-        rx = re.compile(re.escape(pattern) if fixed_string else pattern, flags)
+        rx = re.compile(re.escape(pattern) if literal else pattern, flags)
     except re.error as exc:
         return {"status": "error", "error": f"Invalid regex: {exc}"}
+
+    # Pre-compute gitignore spec for filtering
+    gitignore_spec = get_gitignore_spec(root)
 
     matches = []
     for fpath in sorted(root.glob(glob_pat)):
         if not fpath.is_file():
             continue
+        # Skip gitignored files in Python fallback
+        if gitignore_spec is not None:
+            try:
+                rel = str(fpath.relative_to(root))
+                if gitignore_spec.match_file(rel):
+                    continue
+            except (ValueError, OSError):
+                pass
         try:
             src_lines = fpath.read_text(encoding="utf-8", errors="replace").splitlines()
         except Exception:
@@ -445,8 +408,8 @@ def rg_search(
                     "match": True,
                 }
                 matches.append(entry)
-                if context_lines > 0 and output_mode == "content":
-                    for delta in range(1, context_lines + 1):
+                if context > 0:
+                    for delta in range(1, context + 1):
                         for sign, before in ((-delta, True), (delta, False)):
                             idx = lineno + sign - 1
                             if 0 <= idx < len(src_lines):
@@ -459,25 +422,23 @@ def rg_search(
                                 matches.insert(-1, ctx_entry) if before else matches.append(
                                     ctx_entry
                                 )
-                if len([m for m in matches if m.get("match")]) >= max_results:
+                if len([m for m in matches if m.get("match")]) >= limit:
                     break
-        if len([m for m in matches if m.get("match")]) >= max_results:
+        if len([m for m in matches if m.get("match")]) >= limit:
             break
 
     matches = _rank_search_matches(
-        matches, query=pattern, fixed_string=fixed_string, case_sensitive=case_sensitive, root=root
+        matches, query=pattern, fixed_string=literal, case_sensitive=not ignore_case, root=root
     )
     real_count = len([m for m in matches if m.get("match")])
     top_files = _rollup_matches_by_file(matches, limit=8, root=root)
     return _build_search_result(
         tool_used="python",
         pattern=pattern,
-        output_mode=output_mode,
         matches=matches,
         real_count=real_count,
-        truncated=real_count >= max_results,
+        truncated=True,
         top_files=top_files,
-        max_results=max_results,
         root=root,
     )
 
@@ -594,12 +555,22 @@ def fd_find(
         name_re = re.compile(re.escape(pattern), re.IGNORECASE)
 
     collect_limit = max_results * 3
+    # Pre-compute gitignore spec for filtering
+    gitignore_spec = get_gitignore_spec(root)
     found_with_mtime: list[tuple[str, float]] = []
     seen: set[str] = set()
     for gp in glob_pats:
         for fpath in sorted(root.glob(gp)):
             if not hidden and any(part.startswith(".") for part in fpath.parts):
                 continue
+            # Skip gitignored files in Python fallback
+            if gitignore_spec is not None:
+                try:
+                    rel = str(fpath.relative_to(root))
+                    if gitignore_spec.match_file(rel):
+                        continue
+                except (ValueError, OSError):
+                    pass
             is_dir = fpath.is_dir()
             if file_type == "f" and is_dir:
                 continue
@@ -1020,13 +991,12 @@ def search_file(
 
     result = rg_search(
         pattern=pattern,
-        directory=str(p.parent),
-        file_glob=p.name,
-        context_lines=context_lines,
-        case_sensitive=case_sensitive,
-        fixed_string=literal,
-        max_results=50,
-        output_mode="content",
+        path=str(p.parent),
+        glob=p.name,
+        ignore_case=not case_sensitive,
+        literal=literal,
+        context=context_lines,
+        limit=50,
     )
     if result.get("status") != "ok":
         return result

@@ -8,6 +8,7 @@ if str(AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(AGENT_ROOT))
 
 from src.backends import LlamaCppClient
+from src.config import Config
 from src.messages import Message, MessageRole
 
 
@@ -78,6 +79,11 @@ class _StreamingRecordingClient(_RecordingClient):
         return _FakeStreamResponse(type(self).stream_lines)
 
 
+class _FakeHttpx:
+    def __init__(self, client_cls) -> None:
+        self.Client = client_cls
+
+
 class LlamaCppBackendTests(unittest.TestCase):
     def setUp(self) -> None:
         _RecordingClient.last_request = None
@@ -98,7 +104,10 @@ class LlamaCppBackendTests(unittest.TestCase):
             retry_attempts=0,
         )
 
-        with patch("src.backends.llama_cpp.httpx.Client", _RecordingClient):
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_RecordingClient),
+        ):
             response = llm.generate(
                 self.messages,
                 temperature=0.1,
@@ -111,6 +120,7 @@ class LlamaCppBackendTests(unittest.TestCase):
         assert req is not None
         self.assertEqual(req["url"], "http://localhost:8080/completion")
         self.assertEqual(req["kwargs"]["json"]["grammar"], 'root ::= "OK"')
+        self.assertTrue(req["kwargs"]["json"]["cache_prompt"])
 
     def test_chat_payload_forwards_grammar_without_tools(self) -> None:
         llm = LlamaCppClient(
@@ -122,7 +132,10 @@ class LlamaCppBackendTests(unittest.TestCase):
             retry_attempts=0,
         )
 
-        with patch("src.backends.llama_cpp.httpx.Client", _RecordingClient):
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_RecordingClient),
+        ):
             response = llm.generate(
                 self.messages,
                 temperature=0.1,
@@ -135,6 +148,70 @@ class LlamaCppBackendTests(unittest.TestCase):
         assert req is not None
         self.assertEqual(req["url"], "http://localhost:8080/v1/chat/completions")
         self.assertEqual(req["kwargs"]["json"]["grammar"], 'root ::= "OK"')
+        self.assertTrue(req["kwargs"]["json"]["cache_prompt"])
+        self.assertIsInstance(req["kwargs"]["json"]["messages"][0]["content"], str)
+
+    def test_chat_payload_uses_native_cache_without_compat_blocks_by_default(self) -> None:
+        llm = LlamaCppClient(
+            base_url="http://localhost:8080",
+            timeout=10.0,
+            use_chat_api=True,
+            chat_template="chatml",
+            stop=[],
+            retry_attempts=0,
+            config=Config(prompt_caching_enabled=True),
+        )
+
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_RecordingClient),
+        ):
+            response = llm.generate(
+                self.messages,
+                temperature=0.1,
+                max_tokens=64,
+            )
+
+        self.assertEqual(response, "chat-ok")
+        req = _RecordingClient.last_request
+        assert req is not None
+        payload = req["kwargs"]["json"]
+        self.assertTrue(payload["cache_prompt"])
+        self.assertIsInstance(payload["messages"][0]["content"], str)
+        self.assertNotIn("cache_control", str(payload["messages"]))
+
+    def test_chat_payload_adds_cache_control_only_when_openai_compat_enabled(self) -> None:
+        cfg = Config(
+            prompt_caching_enabled=True,
+            prompt_caching_openai_compat=True,
+        )
+        llm = LlamaCppClient(
+            base_url="http://localhost:8080",
+            timeout=10.0,
+            use_chat_api=True,
+            chat_template="chatml",
+            stop=[],
+            retry_attempts=0,
+            config=cfg,
+        )
+
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_RecordingClient),
+        ):
+            response = llm.generate(
+                self.messages,
+                temperature=0.1,
+                max_tokens=64,
+            )
+
+        self.assertEqual(response, "chat-ok")
+        req = _RecordingClient.last_request
+        assert req is not None
+        payload = req["kwargs"]["json"]
+        self.assertTrue(payload["cache_prompt"])
+        self.assertIsInstance(payload["messages"][0]["content"], list)
+        self.assertIn("cache_control", payload["messages"][0]["content"][0])
 
     def test_chat_payload_omits_grammar_when_using_tools(self) -> None:
         llm = LlamaCppClient(
@@ -146,7 +223,10 @@ class LlamaCppBackendTests(unittest.TestCase):
             retry_attempts=0,
         )
 
-        with patch("src.backends.llama_cpp.httpx.Client", _RecordingClient):
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_RecordingClient),
+        ):
             response = llm.generate(
                 self.messages,
                 temperature=0.1,
@@ -182,7 +262,10 @@ class LlamaCppBackendTests(unittest.TestCase):
             retry_attempts=0,
         )
 
-        with patch("src.backends.llama_cpp.httpx.Client", _RecordingClient):
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_RecordingClient),
+        ):
             response = llm.generate(
                 self.messages,
                 temperature=0.1,
@@ -229,7 +312,10 @@ class LlamaCppBackendTests(unittest.TestCase):
             b"data: [DONE]",
         ]
 
-        with patch("src.backends.llama_cpp.httpx.Client", _StreamingRecordingClient):
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_StreamingRecordingClient),
+        ):
             response = llm.generate(
                 self.messages,
                 temperature=0.1,
@@ -272,7 +358,10 @@ class LlamaCppBackendTests(unittest.TestCase):
             b"data: [DONE]",
         ]
 
-        with patch("src.backends.llama_cpp.httpx.Client", _StreamingRecordingClient):
+        with patch(
+            "src.backends.llama_cpp._get_httpx",
+            return_value=_FakeHttpx(_StreamingRecordingClient),
+        ):
             response = llm.generate(
                 self.messages,
                 temperature=0.1,

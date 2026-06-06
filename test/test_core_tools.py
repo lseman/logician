@@ -56,7 +56,7 @@ def test_read_file_returns_structured_text_payload() -> None:
         path = fh.name
 
     try:
-        result = read_file(path, start_line=2, end_line=3)
+        result = read_file(path, offset=2, limit=2)
         assert result["status"] == "ok"
         assert result["file_type"] == "text"
         assert result["returned_lines"] == "2-3"
@@ -94,7 +94,7 @@ def test_read_file_cached_range_respects_requested_window(tmp_path: Path) -> Non
     first = read_file(str(path))
     assert first["status"] == "ok"
 
-    second = read_file(str(path), start_line=2, end_line=2)
+    second = read_file(str(path), offset=2, limit=1)
 
     assert second["status"] == "ok"
     assert second["file_type"] == "file_unchanged"
@@ -461,7 +461,7 @@ def test_rg_search_treats_ripgrep_no_match_as_success(
     monkeypatch.setattr("src.tools.core.SearchTool.tool.shutil.which", lambda name: "/usr/bin/rg")
     monkeypatch.setattr("src.tools.core.SearchTool.tool.subprocess.run", lambda *args, **kwargs: _Proc())
 
-    result = rg_search("needle", directory=str(tmp_path), fixed_string=True)
+    result = rg_search("needle", path=str(tmp_path), literal=True)
 
     assert result["status"] == "ok"
     assert result["tool_used"] == "rg"

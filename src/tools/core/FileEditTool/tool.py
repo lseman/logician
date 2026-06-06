@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import functools
 import json
 import os
 import re
@@ -29,8 +30,20 @@ from ..FileReadTool.state import (
     resolve_tool_path,
 )
 from ..filesystem import DEFAULT_FILESYSTEM
+from ..mutation_queue import ensure_write_serializable
 
 
+def _with_write_lock(func: Any) -> Any:
+    """Decorator that serializes write operations per file path."""
+
+    @functools.wraps(func)
+    def wrapper(path: str, *args: Any, **kwargs: Any) -> Any:
+        return ensure_write_serializable(path, func, path, *args, **kwargs)
+
+    return wrapper
+
+
+@_with_write_lock
 def write_file(
     path: str,
     content: str,
@@ -121,13 +134,57 @@ def write_file(
     return result
 
 
+@_with_write_lock
 def edit_file(
     path: str,
-    old_string: str,
-    new_string: str,
+    old_string: str | None = None,
+    new_string: str | None = None,
     replace_all: bool = False,
     normalize_newlines: bool = True,
+    replacements: list[dict[str, str]] | None = None,
+    edits: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
+    """Edit a file by replacing text.
+
+    Supports three modes (in priority order):
+    1. edits[] — Pi-style: [{oldText: "...", newText: "..."}]
+    2. replacements[] — Legacy multi-edit: [{old_string: "...", new_string: "..."}]
+    3. old_string/new_string — Single edit
+
+    Args:
+        path: File path.
+        old_string: Text to find (single-edit mode).
+        new_string: Replacement text (single-edit mode).
+        replace_all: If True, replace all occurrences of old_string.
+        normalize_newlines: Normalize newline style.
+        replacements: List of {old_string, new_string} dicts for multi-edit.
+        edits: List of {oldText, newText} dicts for multi-edit (Pi-style).
+               Takes priority over replacements.
+
+    Returns dict with status, diff, structured_patch, etc.
+    """
+    # 1. Pi-style edits[]: [{oldText: "...", newText: "..."}]
+    if edits is not None:
+        normalized = []
+        for ed in edits:
+            normalized.append({
+                "old_string": ed.get("oldText", ed.get("old_string", "")),
+                "new_string": ed.get("newText", ed.get("new_string", "")),
+            })
+        return _edit_file_multi(
+            path, normalized, normalize_newlines=normalize_newlines
+        )
+
+    # 2. Legacy multi-edit mode
+    if replacements is not None:
+        return _edit_file_multi(
+            path, replacements, normalize_newlines=normalize_newlines
+        )
+
+    # 3. Single-edit mode (legacy API)
+    if old_string is None or new_string is None:
+        return _err("Provide (old_string, new_string), edits[] (Pi-style with oldText/newText), or replacements[]")
+
     try:
         p = resolve_tool_path(path)
     except ValueError as exc:
@@ -157,6 +214,23 @@ def edit_file(
         return prepared
     _, snapshot, original, _ = prepared
 
+    return _do_single_edit(
+        path, p, snapshot, original, old_string, new_string,
+        replace_all, normalize_newlines,
+    )
+
+
+def _do_single_edit(
+    path: str,
+    p: Path,
+    snapshot: dict[str, Any],
+    original: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool,
+    normalize_newlines: bool,
+) -> dict[str, Any]:
+    """Internal: perform a single replacement (used by both edit_file single-mode and multi-edit)."""
     file_newline = _detect_newline_style(original)
     view, boundaries = _normalized_view_boundaries(original)
 
@@ -165,7 +239,7 @@ def edit_file(
     new_normalized, _ = _normalize_agent_content(new_string, language_hint=language_hint)
     old_norm = normalize_text_for_matching(old_normalized)
     if not old_norm:
-        return _err("old_string is empty after normalization")
+        return {"status": "error", "error": "old_string is empty after normalization"}
 
     occurrences = _find_all_occurrences(view, old_norm)
     count = len(occurrences)
@@ -180,54 +254,8 @@ def edit_file(
             "closest_matches": _find_closest_blocks(view, old_norm),
             "suggested_tool": "read_edit_context",
         }
-    if count > 1:
+    if count > 1 and not replace_all:
         occurrence_lines = [_offset_to_line_number(view, idx) for idx in occurrences]
-        if replace_all:
-            patched = original
-            for idx in reversed(occurrences):
-                start_offset = boundaries[idx]
-                end_offset = boundaries[idx + len(old_norm)]
-                actual_old = patched[start_offset:end_offset]
-                replacement = _preserve_quote_style(
-                    old_normalized,
-                    actual_old,
-                    new_normalized,
-                )
-                if normalize_newlines:
-                    replacement = _coerce_to_newline_style(replacement, file_newline)
-                patched = patched[:start_offset] + replacement + patched[end_offset:]
-            try:
-                _atomic_write_text(p, patched)
-            except OSError as exc:
-                return _err(f"Cannot write file: {exc}")
-
-            result: dict[str, Any] = {
-                "status": "ok",
-                "path": str(p),
-                "lines_removed": old_norm.count("\n") + (1 if old_norm else 0),
-                "lines_added": normalize_text_for_matching(new_normalized).count("\n")
-                + (1 if new_normalized else 0),
-                "newline": _newline_name(file_newline),
-                "diff": _unified_diff(original, patched, str(p)),
-                "replace_all": True,
-                "matches_replaced": count,
-                "occurrences_at_lines": occurrence_lines,
-                "snapshot_before": {
-                    "path": snapshot.get("path"),
-                    "mtime_ns": snapshot.get("mtime_ns"),
-                    "full_read": snapshot.get("full_read"),
-                },
-            }
-            result["structured_patch"] = parse_structured_patch(result["diff"])
-            result["snapshot"] = refresh_snapshot_after_write(
-                globals().get("ctx"),
-                p,
-                content=patched,
-            )
-            syntax_error = _validate_syntax(p, patched)
-            if syntax_error:
-                result["syntax_error"] = syntax_error
-            return result
         return {
             "status": "error",
             "error": (
@@ -238,18 +266,34 @@ def edit_file(
             "replace_all_available": True,
         }
 
-    idx = occurrences[0]
-    start_offset = boundaries[idx]
-    end_offset = boundaries[idx + len(old_norm)]
-    actual_old = original[start_offset:end_offset]
-    replacement = _preserve_quote_style(
-        old_normalized,
-        actual_old,
-        new_normalized,
-    )
-    if normalize_newlines:
-        replacement = _coerce_to_newline_style(replacement, file_newline)
-    patched = original[:start_offset] + replacement + original[end_offset:]
+    # Perform replacement(s)
+    patched = original
+    matches_replaced = 0
+    if count > 1 and replace_all:
+        for idx in reversed(occurrences):
+            start_offset = boundaries[idx]
+            end_offset = boundaries[idx + len(old_norm)]
+            actual_old = patched[start_offset:end_offset]
+            replacement = _preserve_quote_style(
+                old_normalized, actual_old, new_normalized,
+            )
+            if normalize_newlines:
+                replacement = _coerce_to_newline_style(replacement, file_newline)
+            patched = patched[:start_offset] + replacement + patched[end_offset:]
+        matches_replaced = count
+    else:
+        idx = occurrences[0]
+        start_offset = boundaries[idx]
+        end_offset = boundaries[idx + len(old_norm)]
+        actual_old = original[start_offset:end_offset]
+        replacement = _preserve_quote_style(
+            old_normalized, actual_old, new_normalized,
+        )
+        if normalize_newlines:
+            replacement = _coerce_to_newline_style(replacement, file_newline)
+        patched = original[:start_offset] + replacement + original[end_offset:]
+        matches_replaced = 1
+
     try:
         _atomic_write_text(p, patched)
     except OSError as exc:
@@ -259,12 +303,11 @@ def edit_file(
         "status": "ok",
         "path": str(p),
         "lines_removed": old_norm.count("\n") + (1 if old_norm else 0),
-        "lines_added": normalize_text_for_matching(new_normalized).count("\n")
-        + (1 if new_normalized else 0),
+        "lines_added": normalize_text_for_matching(new_normalized).count("\n") + (1 if new_normalized else 0),
         "newline": _newline_name(file_newline),
         "diff": _unified_diff(original, patched, str(p)),
-        "replace_all": False,
-        "matches_replaced": 1,
+        "replace_all": replace_all or count > 1,
+        "matches_replaced": matches_replaced,
         "snapshot_before": {
             "path": snapshot.get("path"),
             "mtime_ns": snapshot.get("mtime_ns"),
@@ -283,6 +326,132 @@ def edit_file(
     return result
 
 
+def _edit_file_multi(
+    path: str,
+    replacements: list[dict[str, str]],
+    normalize_newlines: bool = True,
+) -> dict[str, Any]:
+    """Apply multiple replacements sequentially in one file.
+
+    Each replacement must uniquely identify a location (same contract as single edit).
+    Failed hunks are reported individually without stopping remaining replacements.
+    """
+    if not isinstance(replacements, list) or not replacements:
+        return _err("replacements must be a non-empty list of {old_string, new_string} dicts")
+
+    try:
+        p = resolve_tool_path(path)
+    except ValueError as exc:
+        return _err(str(exc))
+    if not p.exists() or not p.is_file():
+        return _err(f"File not found: {path}")
+
+    prepared = ensure_snapshot_allows_existing_file_write(
+        globals().get("ctx"),
+        p,
+        operation="edit",
+    )
+    if isinstance(prepared, dict):
+        return prepared
+    _, snapshot, original, _ = prepared
+
+    language_hint = _language_hint_from_path(path)
+    file_newline = _detect_newline_style(original)
+    current = original
+    applied = 0
+    errors: list[dict[str, Any]] = []
+    diffs: list[str] = []
+    snapshot_before = {
+        "path": snapshot.get("path"),
+        "mtime_ns": snapshot.get("mtime_ns"),
+        "full_read": snapshot.get("full_read"),
+    }
+
+    for index, repl in enumerate(replacements):
+        if not isinstance(repl, dict):
+            errors.append({"block": index, "error": "Each replacement must be a dict"})
+            continue
+        old_str = repl.get("old_string", "")
+        new_str = repl.get("new_string", "")
+        if not old_str:
+            errors.append({"block": index, "error": "old_string is required"})
+            continue
+
+        view, boundaries = _normalized_view_boundaries(current)
+        old_normalized, _ = _normalize_agent_content(old_str, language_hint=language_hint)
+        new_normalized, _ = _normalize_agent_content(new_str, language_hint=language_hint)
+        old_norm = normalize_text_for_matching(old_normalized)
+        if not old_norm:
+            errors.append({"block": index, "error": "old_string is empty after normalization"})
+            continue
+
+        occurrences = _find_all_occurrences(view, old_norm)
+        if len(occurrences) == 0:
+            errors.append({
+                "block": index,
+                "error": "old_string not found",
+                "closest_matches": _find_closest_blocks(view, old_norm),
+                "suggested_tool": "read_edit_context",
+            })
+            continue
+        if len(occurrences) > 1:
+            lines = [_offset_to_line_number(view, idx) for idx in occurrences]
+            errors.append({
+                "block": index,
+                "error": f"old_string found {len(occurrences)} times (lines {lines})",
+                "occurrences_at_lines": lines,
+            })
+            continue
+
+        # Apply replacement
+        idx = occurrences[0]
+        start_offset = boundaries[idx]
+        end_offset = boundaries[idx + len(old_norm)]
+        actual_old = current[start_offset:end_offset]
+        replacement = _preserve_quote_style(
+            old_normalized, actual_old, new_normalized,
+        )
+        if normalize_newlines:
+            replacement = _coerce_to_newline_style(replacement, file_newline)
+        current = current[:start_offset] + replacement + current[end_offset:]
+        applied += 1
+        diffs.append(_unified_diff(
+            original if index == 0 else current,  # Track cumulative diff
+            current, str(p),
+        ))
+
+    if applied == 0 and errors:
+        return {"status": "error", "path": str(p), "edits_applied": 0, "errors": errors}
+
+    try:
+        _atomic_write_text(p, current)
+    except OSError as exc:
+        return _err(f"Cannot write file: {exc}")
+
+    final_diff = _unified_diff(original, current, str(p))
+    result: dict[str, Any] = {
+        "status": "ok" if not errors else "partial",
+        "path": str(p),
+        "edits_applied": applied,
+        "total_edits": len(replacements),
+        "diff": final_diff,
+        "snapshot_before": snapshot_before,
+    }
+    result["structured_patch"] = parse_structured_patch(final_diff)
+    result["snapshot"] = refresh_snapshot_after_write(
+        globals().get("ctx"),
+        p,
+        content=current,
+    )
+    if errors:
+        result["errors"] = errors
+    syntax_error = _validate_syntax(p, current)
+    if syntax_error:
+        result["syntax_error"] = syntax_error
+    return result
+
+
+@_with_write_lock
 def apply_edit_block(path: str, blocks: str) -> dict[str, Any]:
     try:
         p = resolve_tool_path(path)
@@ -449,6 +618,7 @@ def preview_edit(path: str, blocks: str) -> dict[str, Any]:
     }
 
 
+@_with_write_lock
 def smart_edit(path: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
     if not isinstance(edits, list) or not edits:
         return _err("edits must be a non-empty list of dicts")

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from src.hooks.engine import HookEngine
-from src.hooks.loader import LoadedHook
+from src.hooks.loader import HookLoader, LoadedHook
 from src.hooks.types import (
     HookCommand,
     HookCommandType,
@@ -173,15 +173,73 @@ class HookEngineStartupTests(unittest.TestCase):
                 hooks=[HookCommand(type=HookCommandType.COMMAND, command="echo test")]
             ),
         )
-        completed = Mock(return_value=Mock(returncode=0, stdout='{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"ctx"}}', stderr=""))
+        completed = Mock(
+            return_value=Mock(
+                returncode=0,
+                stdout='{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"ctx"}}',
+                stderr="",
+            )
+        )
 
         with patch("src.hooks.engine.subprocess.run", completed):
-            result = engine._execute_bash_hook("echo test", hook, source="startup", timeout_seconds=5)
+            result = engine._execute_bash_hook(
+                "echo test", hook, source="startup", timeout_seconds=5
+            )
 
         self.assertIsNotNone(result)
         self.assertEqual(result.additional_contexts, ["ctx"])
         _, kwargs = completed.call_args
         self.assertEqual(kwargs["input"], engine._hook_input_json("startup"))
+
+    def test_config_hooks_are_loaded_from_agent_config(self) -> None:
+        fake_pm = Mock()
+        fake_pm.registry = Mock()
+        fake_pm.registry._path = None
+        fake_pm.registry.all_installs = lambda: []
+        loader = HookLoader(
+            plugin_manager=fake_pm,
+            config_hooks={
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{"type": "command", "command": "from_config"}],
+                    }
+                ]
+            },
+        )
+        hooks = loader.get_session_start_hooks("startup")
+
+        self.assertEqual(len(hooks), 1)
+        self.assertEqual(hooks[0].plugin_id, "agent_config")
+        self.assertEqual(hooks[0].plugin_name, "agent_config")
+        self.assertEqual(hooks[0].definition.hooks[0].command, "from_config")
+
+    def test_config_hooks_execute_with_hook_engine(self) -> None:
+        fake_pm = Mock()
+        fake_pm.registry = Mock()
+        fake_pm.registry._path = None
+        fake_pm.registry.all_installs = lambda: []
+        loader = HookLoader(
+            plugin_manager=fake_pm,
+            config_hooks={
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{"type": "command", "command": "config-exec"}],
+                    }
+                ]
+            },
+        )
+        engine = HookEngine(loader=loader)
+
+        with patch.object(
+            engine,
+            "_execute_command",
+            return_value=HookExecutionResult(additional_contexts=["ctx"]),
+        ):
+            result = engine.execute_session_start_hooks("startup")
+
+        self.assertEqual(result.additional_contexts, ["ctx"])
 
 
 if __name__ == "__main__":

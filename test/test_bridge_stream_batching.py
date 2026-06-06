@@ -16,6 +16,10 @@ class _StubRunResponse:
 
 
 class _StubAgent:
+    def subscribe_events(self, handler):
+        del handler
+        return lambda: None
+
     def run(self, *args, **kwargs):
         stream_callback = kwargs.get("stream_callback")
         if callable(stream_callback):
@@ -25,7 +29,7 @@ class _StubAgent:
 
 
 class BridgeStreamBatchingTests(unittest.TestCase):
-    def test_chat_batches_follow_on_stream_tokens(self) -> None:
+    def test_chat_emits_each_stream_token_immediately(self) -> None:
         server = BridgeServer()
         server.active = "main"
         server.sessions = {"main": "sess-1"}
@@ -46,7 +50,7 @@ class BridgeStreamBatchingTests(unittest.TestCase):
 
         self.assertEqual(result["final_response"], "Hello")
         token_events = [payload["token"] for event, payload in emitted if event == "token"]
-        self.assertEqual(token_events, ["H", "ello"])
+        self.assertEqual(token_events, ["H", "e", "l", "l", "o"])
 
 
 if __name__ == "__main__":

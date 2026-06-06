@@ -3,9 +3,80 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from enum import Enum, auto
+from typing import Any, Literal, Optional
 
 from .runtime_paths import memory_palace_db_path, message_history_vector_path, rag_vector_path
+
+
+class ThinkingLevel(Enum):
+    """Controls reasoning depth across all thinking-related config knobs.
+
+    Maps a single level string to pre-composed Config settings:
+
+    | Level   | pre_turn | post_tool | confidence_gate | reasoner | description            |
+    |---------|----------|-----------|-----------------|----------|------------------------|
+    | off     | False    | False     | False           | None     | Direct action          |
+    | low     | True     | False     | False           | None     | Brief plan, then act   |
+    | medium  | True     | True      | False           | None     | Plan + reflection      |
+    | high    | True     | True      | True            | None     | Full decomposition     |
+    | xhigh   | True     | True      | True            | SSR/ToT  | Reasoning extensions   |
+    """
+
+    OFF = "off"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+
+    @classmethod
+    def from_str(cls, value: str) -> "ThinkingLevel":
+        return cls(value.lower())
+
+
+# Pre-composed thinking level presets — maps a level name to (config_key, config_value)
+# pairs.  Applied by apply_thinking_level().
+_THINKING_LEVEL_PRESETS: dict[str, dict[str, Any]] = {
+    "off": {
+        "pre_turn_thinking": False,
+        "post_tool_thinking": False,
+        "confidence_gate_enabled": False,
+        "thinking_apply_after_tools": False,
+        "reasoner": None,
+    },
+    "low": {
+        "pre_turn_thinking": True,
+        "post_tool_thinking": False,
+        "confidence_gate_enabled": False,
+        "thinking_apply_after_tools": False,
+        "reasoner": None,
+    },
+    "medium": {
+        "pre_turn_thinking": True,
+        "post_tool_thinking": True,
+        "confidence_gate_enabled": False,
+        "thinking_apply_after_tools": True,
+        "reasoner": None,
+    },
+    "high": {
+        "pre_turn_thinking": True,
+        "post_tool_thinking": True,
+        "confidence_gate_enabled": True,
+        "confidence_gate_threshold": 7.0,
+        "confidence_gate_max_retries": 2,
+        "thinking_apply_after_tools": True,
+        "reasoner": None,
+    },
+    "xhigh": {
+        "pre_turn_thinking": True,
+        "post_tool_thinking": True,
+        "confidence_gate_enabled": True,
+        "confidence_gate_threshold": 8.0,
+        "confidence_gate_max_retries": 3,
+        "thinking_apply_after_tools": True,
+        "reasoner": "ssr",  # SSR is the cheapest reasoner that helps
+    },
+}
 
 
 # ---------------------------------------------------------------------
@@ -17,12 +88,17 @@ class ThinkingConfig:
     reasoner: Optional[str] = None  # name from REASONER_REGISTRY
 
     # Pipeline order:
-    #   "prompt"
-    #   "reasoner"
-    #   "prompt->reasoner"
-    #   "reasoner->prompt"
-    #   "prompt->reasoner->prompt"
-    order: str = "prompt->reasoner"
+    #   "prompt"           — structured prompt refinement only (default)
+    #   "reasoner"         — reasoner-only (dual LLM call)
+    #   "prompt->reasoner" — prompt then reasoner
+    #   "reasoner->prompt" — reasoner then prompt
+    #   "prompt->reasoner->prompt" — full pipeline
+    #
+    # IMPORTANT: Reasoners are opt-in. The default order is "prompt" because
+    # the model's native thinking (via API-native thinking tokens) handles
+    # most reasoning. Reasoners add a second LLM call and should only be
+    # enabled for complex analysis tasks.
+    order: str = "prompt"
 
     max_rounds: int = 1
 
@@ -39,6 +115,11 @@ class ThinkingConfig:
 # ---------------------------------------------------------------------
 @dataclass
 class Config:
+    # ── Thinking level ──────────────────────────────────────────────────────
+    # Single enum that composes multiple thinking knobs (pre_turn, post_tool,
+    # confidence_gate, reasoner).  Set to one of ThinkingLevel values.
+    thinking_level: str | None = None
+
     # Core
     llama_cpp_url: str = field(
         default_factory=lambda: (
@@ -141,7 +222,7 @@ class Config:
     rag_query_cache_enabled: bool = True
     rag_query_cache_ttl_sec: int = 90
     rag_query_cache_max_entries: int = 256
-    prompt_rag_context_enabled: bool = True
+    prompt_rag_context_enabled: bool = False  # RAG injected into system prompt — opt-in (tool-only RAG by default)
     prompt_rag_context_max_results: int = 4
     prompt_rag_context_neighbor_results: int = 2
     prompt_rag_context_max_chars: int = 2200
@@ -162,6 +243,7 @@ class Config:
     project_memory_enabled: bool = True
     # Runtime turn/session hooks are primarily intended for the CLI bridge flow.
     runtime_hooks_enabled: bool = False
+    hooks: dict[str, Any] = field(default_factory=dict)
     memory_palace_db_path: str = field(default_factory=lambda: str(memory_palace_db_path()))
     # Store raw text exactly as written; leave AAAK compression opt-in.
     memory_palace_apply_aaak: bool = False
@@ -203,7 +285,7 @@ class Config:
 
     # Tools
     use_toon_for_tools: bool = False
-    tool_schema_mode: Literal["rich", "compact", "json_schema"] = "rich"
+    tool_schema_mode: Literal["rich", "compact", "json_schema"] = "compact"
     strict_tool_call_parsing: bool = True
     enable_skill_routing: bool = True
     dynamic_skill_routing: bool = True
@@ -215,16 +297,20 @@ class Config:
     skill_on_demand_context_max_skills: int = 2
     skill_on_demand_context_max_files_per_skill: int = 5
     context7_docs_auto_nudge: bool = True
-    # If the model claims it already ran tools without emitting a tool call in
-    # this run, inject a corrective nudge and require a real tool call.
-    tool_claim_guard_enabled: bool = True
+    # ── Guardrails (opt-in, minimal set by default) ──────────────────────
+    # Only duplicate_tool, unsupported_tool, consecutive_tool, and stall
+    # guards are enabled by default. All others are opt-in.
+    tool_claim_guard_enabled: bool = False
     tool_claim_guard_max_nudges: int = 2
-    # If a final answer still contains completed-action claims while zero tool
-    # calls were actually executed, append a runtime transparency note.
     tool_claim_guard_append_runtime_note: bool = True
-    # Guard against statements that contradict the latest filesystem/git
-    # inspection tool result.
-    inspection_result_guard_enabled: bool = True
+    duplicate_tool_guard_enabled: bool = True
+    duplicate_tool_guard_max_repeats: int = 3
+    unsupported_tool_guard_enabled: bool = True
+    consecutive_tool_guard_enabled: bool = True
+    hallucination_guard_enabled: bool = False
+    tool_result_acknowledgement_guard_enabled: bool = False
+    tool_result_acknowledgement_min_response_length: int = 40
+    inspection_result_guard_enabled: bool = False
     inspection_result_guard_max_nudges: int = 2
     inspection_result_guard_append_runtime_note: bool = True
 
@@ -232,13 +318,30 @@ class Config:
     auto_compact: bool = True
     auto_compact_threshold: int = 2  # compact when messages > history_limit * threshold
 
+    # ── Prompt caching ────────────────────────────────────────────────────
+    # Prompt caching support. llama.cpp uses native cache_prompt by default;
+    # OpenAI-compatible cache_control markers are available as an opt-in for
+    # proxy/provider APIs that support them.
+    #
+    # See: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+    prompt_caching_enabled: bool = True  # Enable backend prompt caching hints
+    prompt_caching_ttl: str = "1h"       # Anthropic: "5m" or "1h" (extended)
+    prompt_caching_retention: str = ""   # OpenAI: "in_memory" or "24h" (extended)
+    prompt_caching_openai_compat: bool = False  # Use Anthropic-style markers on OpenAI APIs
+    prompt_caching_dual_breakpoint: bool = False  # Mark both tool_use and user message
+    llama_cpp_cache_prompt: bool = True  # Use llama.cpp native prompt-prefix cache
+    native_thinking_prefill: bool = False  # Chat template opens assistant with <think>
+
     # Constrained decoding: use OpenAI function-calling protocol (use_chat_api=True only)
     # llama.cpp will enforce the grammar server-side, eliminating malformed tool-call parses.
     constrained_decoding: bool = True
     tool_call_repair_enabled: bool = True
     tool_call_repair_max_attempts: int = 1
-    workflow_guard_enabled: bool = True
-    python_structural_editing_preference: bool = True
+    workflow_guard_enabled: bool = False  # read_before_edit + python_structural_edit — opt-in
+    python_structural_editing_preference: bool = False  # Structural editing preference in system prompt — opt-in (moved to skill)
+    # Image auto-render: detect image paths in tool args/results and emit `image` events
+    # so the frontend can render them inline. Set to False to disable.
+    image_auto_render_enabled: bool = False  # disabled by default (opt-in)
 
     # Tool result cache: per-Agent in-memory cache of read-only tool results across turns.
     # Tools whose names contain any entry in tool_cache_write_patterns are never cached.
@@ -276,6 +379,7 @@ class Config:
 
     # Verification guardrail: after write-like tool calls, require at least one
     # verification-style tool call (tests/lint/check) before final answer.
+    verification_guard_enabled: bool = False  # opt-in — requires verification tools after writes
     require_verification_after_writes: bool = True
     verification_tool_patterns: list = field(
         default_factory=lambda: [
@@ -329,6 +433,40 @@ class Config:
 
     # NEW — Thinking pipeline (Prompt + Reasoner)
     thinking: ThinkingConfig | None = None
+
+    def apply_thinking_level(self, level: str | ThinkingLevel | None) -> None:
+        """Apply a ThinkingLevel preset to this config.
+
+        Mutates this Config in-place, setting pre_turn_thinking,
+        post_tool_thinking, confidence_gate settings, and reasoner.
+
+        Args:
+            level: A ThinkingLevel enum member, a string like "off"/"low"/"medium"/"high"/"xhigh",
+                   or None to disable.
+        """
+        if level is None:
+            return
+        if isinstance(level, ThinkingLevel):
+            level_str = level.value
+        else:
+            level_str = str(level).lower()
+
+        presets = _THINKING_LEVEL_PRESETS.get(level_str)
+        if presets is None:
+            raise ValueError(
+                f"Unknown thinking level '{level_str}'. "
+                f"Valid: {', '.join(_THINKING_LEVEL_PRESETS.keys())}"
+            )
+
+        for key, value in presets.items():
+            if key == "reasoner":
+                # reasoner lives inside the thinking: ThinkingConfig field
+                if self.thinking is None and value is not None:
+                    self.thinking = ThinkingConfig()
+                if self.thinking is not None:
+                    self.thinking.reasoner = value
+            elif hasattr(self, key):
+                setattr(self, key, value)
 
     # MCP servers  {name: {"url": ..., "headers": {...}, "enabled": bool}}
     mcp_servers: dict = field(default_factory=dict)

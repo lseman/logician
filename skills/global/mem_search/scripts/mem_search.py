@@ -12,6 +12,7 @@ Three-layer search pattern (minimise tokens):
   2. mem_timeline("#42", depth=3) → context around an anchor      (optional)
   3. mem_get(["#42", "#43"])      → full content for chosen IDs   (~200-1000 t each)
 """
+
 from __future__ import annotations
 
 import json
@@ -19,33 +20,37 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.project_memory import record_observation
+from src.memory import record_observation
 
 # Emoji markers — same convention as claude-mem
 OBS_TYPE_EMOJI: dict[str, str] = {
-    "bugfix":    "🔴",
-    "feature":   "🟣",
-    "refactor":  "🔄",
-    "change":    "✅",
+    "bugfix": "🔴",
+    "feature": "🟣",
+    "refactor": "🔄",
+    "change": "✅",
     "discovery": "🔵",
-    "decision":  "⚖️",
+    "decision": "⚖️",
 }
 VALID_TYPES = set(OBS_TYPE_EMOJI)
 
 
 # ── Storage paths ──────────────────────────────────────────────────────────────
 
+
 def _memory_dir() -> Path:
     return Path.cwd() / ".logician" / "memory"
 
+
 def _obs_dir() -> Path:
     return _memory_dir() / "obs"
+
 
 def _index_path() -> Path:
     return _obs_dir() / "index.json"
 
 
 # ── Index I/O ──────────────────────────────────────────────────────────────────
+
 
 def _load_index() -> list[dict[str, Any]]:
     idx = _index_path()
@@ -56,17 +61,18 @@ def _load_index() -> list[dict[str, Any]]:
     except (json.JSONDecodeError, OSError):
         return []
 
+
 def _save_index(index: list[dict[str, Any]]) -> None:
     _obs_dir().mkdir(parents=True, exist_ok=True)
-    _index_path().write_text(
-        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _index_path().write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 def _next_id(index: list[dict[str, Any]]) -> int:
     return max((e["id"] for e in index), default=0) + 1
 
 
 # ── Public tools ───────────────────────────────────────────────────────────────
+
 
 def mem_search(
     query: str,
@@ -110,13 +116,15 @@ def mem_search(
             continue
         if date_end and ts[:10] > date_end:
             continue
-        haystack = " ".join([
-            entry.get("title", ""),
-            entry.get("preview", ""),
-            " ".join(entry.get("files", [])),
-            entry.get("type", ""),
-            entry.get("session", ""),
-        ]).lower()
+        haystack = " ".join(
+            [
+                entry.get("title", ""),
+                entry.get("preview", ""),
+                " ".join(entry.get("files", [])),
+                entry.get("type", ""),
+                entry.get("session", ""),
+            ]
+        ).lower()
         if query_lower in haystack:
             results.append(entry)
             if len(results) >= limit:
@@ -127,14 +135,16 @@ def mem_search(
         return _search_facts(query)
 
     table = _render_table(results)
-    return _safe_json({
-        "status": "ok",
-        "query": query,
-        "count": len(results),
-        "summary": f"{len(results)} result(s). Use mem_get([\"#001\"]) to load full details.",
-        "table": table,
-        "ids": [_fmt_id(e["id"]) for e in results],
-    })
+    return _safe_json(
+        {
+            "status": "ok",
+            "query": query,
+            "count": len(results),
+            "summary": f'{len(results)} result(s). Use mem_get(["#001"]) to load full details.',
+            "table": table,
+            "ids": [_fmt_id(e["id"]) for e in results],
+        }
+    )
 
 
 def mem_get(ids: list[str]) -> str:
@@ -171,25 +181,31 @@ def mem_get(ids: list[str]) -> str:
             continue
 
         obs_file = obs_dir / f"{obs_id:04d}.md"
-        content = obs_file.read_text(encoding="utf-8", errors="replace") if obs_file.exists() else ""
+        content = (
+            obs_file.read_text(encoding="utf-8", errors="replace") if obs_file.exists() else ""
+        )
 
-        results.append({
-            "id": _fmt_id(obs_id),
-            "type": entry.get("type", ""),
-            "emoji": OBS_TYPE_EMOJI.get(entry.get("type", ""), "•"),
-            "timestamp": entry.get("timestamp", ""),
-            "title": entry.get("title", ""),
-            "files": entry.get("files", []),
-            "session": entry.get("session", ""),
-            "content": content,
-        })
+        results.append(
+            {
+                "id": _fmt_id(obs_id),
+                "type": entry.get("type", ""),
+                "emoji": OBS_TYPE_EMOJI.get(entry.get("type", ""), "•"),
+                "timestamp": entry.get("timestamp", ""),
+                "title": entry.get("title", ""),
+                "files": entry.get("files", []),
+                "session": entry.get("session", ""),
+                "content": content,
+            }
+        )
 
-    return _safe_json({
-        "status": "ok",
-        "count": len(results),
-        "not_found": not_found,
-        "observations": results,
-    })
+    return _safe_json(
+        {
+            "status": "ok",
+            "count": len(results),
+            "not_found": not_found,
+            "observations": results,
+        }
+    )
 
 
 def mem_timeline(anchor: str, depth: int = 5) -> str:
@@ -216,18 +232,22 @@ def mem_timeline(anchor: str, depth: int = 5) -> str:
         session_entries = [e for e in index if e.get("session") == anchor]
         if not session_entries:
             return _safe_json({"status": "not_found", "message": f"Session {anchor!r} not found."})
-        return _safe_json({
-            "status": "ok",
-            "session": anchor,
-            "count": len(session_entries),
-            "table": _render_table(session_entries, highlight=None),
-        })
+        return _safe_json(
+            {
+                "status": "ok",
+                "session": anchor,
+                "count": len(session_entries),
+                "table": _render_table(session_entries, highlight=None),
+            }
+        )
 
     # Numeric anchor
     try:
         anchor_id = int(anchor.lstrip("#"))
     except ValueError:
-        return _safe_json({"status": "error", "message": f"Invalid anchor {anchor!r}. Use '#042' or 'S001'."})
+        return _safe_json(
+            {"status": "error", "message": f"Invalid anchor {anchor!r}. Use '#042' or 'S001'."}
+        )
 
     anchor_idx = next((i for i, e in enumerate(index) if e["id"] == anchor_id), None)
     if anchor_idx is None:
@@ -237,12 +257,14 @@ def mem_timeline(anchor: str, depth: int = 5) -> str:
     end = min(len(index), anchor_idx + depth + 1)
     window = index[start:end]
 
-    return _safe_json({
-        "status": "ok",
-        "anchor": anchor,
-        "count": len(window),
-        "table": _render_table(window, highlight=anchor_id),
-    })
+    return _safe_json(
+        {
+            "status": "ok",
+            "anchor": anchor,
+            "count": len(window),
+            "table": _render_table(window, highlight=anchor_id),
+        }
+    )
 
 
 def mem_record(
@@ -283,10 +305,12 @@ def mem_record(
       Confirmation with the new observation ID.
     """
     if obs_type not in VALID_TYPES:
-        return _safe_json({
-            "status": "error",
-            "message": f"Unknown type {obs_type!r}. Valid: {' | '.join(sorted(VALID_TYPES))}",
-        })
+        return _safe_json(
+            {
+                "status": "error",
+                "message": f"Unknown type {obs_type!r}. Valid: {' | '.join(sorted(VALID_TYPES))}",
+            }
+        )
 
     recorded = record_observation(
         obs_type=obs_type,
@@ -296,15 +320,17 @@ def mem_record(
         session_label=session,
     )
 
-    return _safe_json({
-        "status": "ok",
-        "id": recorded["formatted_id"],
-        "session": recorded["session"],
-        "message": (
-            f"Observation {recorded['formatted_id']} recorded "
-            f"({OBS_TYPE_EMOJI[obs_type]} {obs_type}): {title}"
-        ),
-    })
+    return _safe_json(
+        {
+            "status": "ok",
+            "id": recorded["formatted_id"],
+            "session": recorded["session"],
+            "message": (
+                f"Observation {recorded['formatted_id']} recorded "
+                f"({OBS_TYPE_EMOJI[obs_type]} {obs_type}): {title}"
+            ),
+        }
+    )
 
 
 def mem_list() -> str:
@@ -318,13 +344,15 @@ def mem_list() -> str:
     """
     memory_dir = _memory_dir()
     if not memory_dir.exists():
-        return _safe_json({
-            "status": "empty",
-            "obs_count": 0,
-            "facts_count": 0,
-            "observations": [],
-            "facts": [],
-        })
+        return _safe_json(
+            {
+                "status": "empty",
+                "obs_count": 0,
+                "facts_count": 0,
+                "observations": [],
+                "facts": [],
+            }
+        )
 
     index = _load_index()
 
@@ -339,33 +367,39 @@ def mem_list() -> str:
     facts_subdir = memory_dir / "facts"
     if facts_subdir.exists():
         for f in sorted(facts_subdir.glob("*.md")):
-            mem_type, description = _parse_frontmatter(f.read_text(encoding="utf-8", errors="replace"))
+            mem_type, description = _parse_frontmatter(
+                f.read_text(encoding="utf-8", errors="replace")
+            )
             facts.append({"file": f"facts/{f.name}", "type": mem_type, "description": description})
 
     recent = index[-10:] if index else []
 
-    return _safe_json({
-        "status": "ok",
-        "obs_count": len(index),
-        "facts_count": len(facts),
-        "recent_observations": [
-            {
-                "id": _fmt_id(e["id"]),
-                "type": e.get("type", ""),
-                "emoji": OBS_TYPE_EMOJI.get(e.get("type", ""), "•"),
-                "timestamp": _fmt_time(e.get("timestamp", "")),
-                "title": e.get("title", ""),
-            }
-            for e in recent
-        ],
-        "facts": facts,
-    })
+    return _safe_json(
+        {
+            "status": "ok",
+            "obs_count": len(index),
+            "facts_count": len(facts),
+            "recent_observations": [
+                {
+                    "id": _fmt_id(e["id"]),
+                    "type": e.get("type", ""),
+                    "emoji": OBS_TYPE_EMOJI.get(e.get("type", ""), "•"),
+                    "timestamp": _fmt_time(e.get("timestamp", "")),
+                    "title": e.get("title", ""),
+                }
+                for e in recent
+            ],
+            "facts": facts,
+        }
+    )
 
 
 # ── Private helpers ────────────────────────────────────────────────────────────
 
+
 def _fmt_id(obs_id: int) -> str:
     return f"#{obs_id:03d}"
+
 
 def _fmt_time(ts: str) -> str:
     try:
@@ -373,6 +407,7 @@ def _fmt_time(ts: str) -> str:
         return dt.strftime("%b %d, %H:%M")
     except (ValueError, AttributeError):
         return ts[:16] if ts else ""
+
 
 def _render_table(entries: list[dict[str, Any]], highlight: int | None = None) -> str:
     rows = [
@@ -385,15 +420,18 @@ def _render_table(entries: list[dict[str, Any]], highlight: int | None = None) -
     header = "| ID | Time | T | Title |\n|-----|------|---|-------|"
     return header + "\n" + "\n".join(rows)
 
+
 def _search_facts(query: str) -> str:
     """Fallback: keyword search over legacy static-fact files."""
     memory_dir = _memory_dir()
     if not memory_dir.exists():
-        return _safe_json({
-            "status": "not_found",
-            "query": query,
-            "message": "No .logician/memory/ directory. Use mem_record() to start saving.",
-        })
+        return _safe_json(
+            {
+                "status": "not_found",
+                "query": query,
+                "message": "No .logician/memory/ directory. Use mem_record() to start saving.",
+            }
+        )
 
     query_lower = query.lower()
     results = []
@@ -405,19 +443,24 @@ def _search_facts(query: str) -> str:
             results.append({"file": f.name, "content": content.strip()})
 
     if not results:
-        return _safe_json({
-            "status": "not_found",
-            "query": query,
-            "message": f"No observations or facts found matching {query!r}. Try mem_list() to see all.",
-        })
+        return _safe_json(
+            {
+                "status": "not_found",
+                "query": query,
+                "message": f"No observations or facts found matching {query!r}. Try mem_list() to see all.",
+            }
+        )
 
-    return _safe_json({
-        "status": "ok",
-        "query": query,
-        "count": len(results),
-        "source": "facts",
-        "results": results,
-    })
+    return _safe_json(
+        {
+            "status": "ok",
+            "query": query,
+            "count": len(results),
+            "source": "facts",
+            "results": results,
+        }
+    )
+
 
 def _rebuild_memory_md(index: list[dict[str, Any]]) -> None:
     """Regenerate MEMORY.md in session-table format (mirrors claude-mem style)."""
@@ -487,6 +530,7 @@ def _rebuild_memory_md(index: list[dict[str, Any]]) -> None:
 
     memory_index.write_text("\n".join(lines), encoding="utf-8")
 
+
 def _parse_frontmatter(content: str) -> tuple[str, str]:
     """Extract (type, description) from YAML frontmatter block."""
     mem_type, description = "unknown", ""
@@ -498,10 +542,11 @@ def _parse_frontmatter(content: str) -> tuple[str, str]:
         if stripped == "---":
             break
         if stripped.startswith("type:"):
-            mem_type = stripped[5:].strip().strip('"\'')
+            mem_type = stripped[5:].strip().strip("\"'")
         elif stripped.startswith("description:"):
-            description = stripped[12:].strip().strip('"\'')
+            description = stripped[12:].strip().strip("\"'")
     return mem_type, description
+
 
 def _safe_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str)

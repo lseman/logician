@@ -39,7 +39,8 @@ def _todo_warnings(items: list[dict[str, Any]]) -> list[str]:
         title = str(item.get("title") or "").strip()
         if not title:
             warnings.append("Task item is missing a title.")
-        raw_status = str(item.get("status") or "").strip().lower()
+        # Check raw status first (preserved by _normalize_items for validation)
+        raw_status = str(item.get("_raw_status") or item.get("status") or "").strip().lower()
         if raw_status and raw_status not in _STATUS_ALIASES:
             warnings.append(
                 f"Task '{title or '<untitled>'}' has an unrecognized status '{raw_status}'. "
@@ -294,6 +295,7 @@ def _normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             item_id = int(item_id)
         except Exception:
             item_id = index
+        raw_status = str(item.get("status") or "").strip().lower()
         title = str(item.get("title") or item.get("content") or f"Task {index}").strip()
         task_note = str(item.get("note") or item.get("activeForm") or "").strip()
         normalized.append(
@@ -302,6 +304,7 @@ def _normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "title": title,
                 "status": _normalize_status(item.get("status")),
                 "note": task_note,
+                "_raw_status": raw_status if raw_status else None,
             }
         )
     return normalized

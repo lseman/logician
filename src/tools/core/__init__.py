@@ -11,6 +11,7 @@ from ..compaction import (
 )
 from ..runtime import build_tool
 from .BashTool.tool import bash
+from .FindTool.tool import find_files
 from .BashTool.tool import _validate_command as _validate_bash_command
 from .FileEditTool.tool import (
     apply_edit_block,
@@ -757,6 +758,129 @@ _TOOL_META = {
         "parameters": {
             "query": "Search query such as `python`, `git diff`, or `background process`.",
             "top_k": "Optional maximum number of matches to return.",
+        },
+    },
+    "read_file": {
+        "description": "Read a file and return its content as text.",
+        "parameters": {
+            "path": "File path to read (relative or absolute).",
+            "offset": "Optional line number to start reading from (1-indexed).",
+            "limit": "Optional maximum number of lines to return.",
+        },
+    },
+    "list_dir": {
+        "description": "List files and directories in a path.",
+        "parameters": {
+            "path": "Directory path to list (default: current directory).",
+            "glob_pattern": "Optional glob pattern to filter entries.",
+        },
+    },
+    "apply_edit_block": {
+        "description": "Apply a block-based edit to a file using structured edit blocks.",
+        "parameters": {
+            "path": "File path to edit.",
+            "blocks": "List of edit blocks with search/replace criteria.",
+        },
+    },
+    "preview_edit": {
+        "description": "Preview file edits before applying them.",
+        "parameters": {
+            "path": "File path to preview edits for.",
+            "blocks": "List of edit blocks to preview.",
+        },
+    },
+    "smart_edit": {
+        "description": "Apply intelligent edits to a file with automatic context detection.",
+        "parameters": {
+            "path": "File path to edit.",
+            "edits": "List of edit operations with search and replacement text.",
+        },
+    },
+    "get_git_status": {
+        "description": "Return the current git repository status.",
+        "parameters": {
+            "path": "Path to git repository (default: current directory).",
+        },
+    },
+    "get_git_diff": {
+        "description": "Return git diff for changed files.",
+        "parameters": {
+            "path": "Path to git repository (default: current directory).",
+            "against": "Optional git ref to diff against (default: HEAD).",
+            "staged": "Optional boolean. When true, show staged changes only.",
+        },
+    },
+    "get_symbol_info": {
+        "description": "Get detailed information about a symbol in a file.",
+        "parameters": {
+            "path": "File path containing the symbol.",
+            "symbol": "Symbol name to look up.",
+        },
+    },
+    "read_line": {
+        "description": "Read a specific line from a file.",
+        "parameters": {
+            "path": "File path to read from.",
+            "line_number": "Line number to read (1-indexed).",
+        },
+    },
+    "find_imports": {
+        "description": "Extract import statements from a source file.",
+        "parameters": {
+            "path": "Source file path to analyze.",
+        },
+    },
+    "find_files": {
+        "description": "Find files matching a glob pattern.",
+        "parameters": {
+            "pattern": "Glob pattern to match files (e.g. '*.py', '**/*.json').",
+            "path": "Directory to search in (default: current directory).",
+            "limit": "Optional maximum number of results to return.",
+            "include_hidden": "Optional boolean. When true, include hidden files.",
+        },
+    },
+    "rg_search": {
+        "description": "Search file contents using ripgrep.",
+        "parameters": {
+            "pattern": "Search pattern (regex or literal string).",
+            "path": "Directory or file to search (default: current directory).",
+            "glob": "Optional glob pattern to filter files.",
+            "ignore_case": "Optional boolean. Case-insensitive search.",
+            "literal": "Optional boolean. Treat pattern as literal string.",
+            "context": "Optional number of context lines around matches.",
+            "limit": "Optional maximum number of matches to return.",
+        },
+    },
+    "fd_find": {
+        "description": "Find files and directories using fd.",
+        "parameters": {
+            "pattern": "Glob pattern to match.",
+            "directory": "Directory to search in (default: current directory).",
+            "file_type": "File type filter: 'f' for files, 'd' for directories.",
+            "extension": "File extension filter.",
+            "max_depth": "Optional maximum search depth.",
+            "max_results": "Optional maximum number of results.",
+            "hidden": "Optional boolean. When true, include hidden files.",
+        },
+    },
+    "find_references": {
+        "description": "Find all references to a symbol in a codebase.",
+        "parameters": {
+            "name": "Symbol name to find references for.",
+            "directory": "Directory to search in (default: current directory).",
+            "file_glob": "Optional glob pattern to filter files.",
+        },
+    },
+    "search_symbols": {
+        "description": "Search for symbols by name across a codebase.",
+        "parameters": {
+            "name": "Symbol name to search for.",
+            "directory": "Directory to search in (default: current directory).",
+            "file_glob": "Optional glob pattern to filter files.",
+            "language": "Optional programming language filter.",
+            "kind": "Optional symbol kind filter.",
+            "case_sensitive": "Optional boolean. Case-sensitive search.",
+            "max_results": "Optional maximum number of results to return.",
         },
     },
 }
@@ -1646,6 +1770,7 @@ _BASE_CORE_TOOL_ITEMS: tuple[tuple[str, Any], ...] = (
     ("cargo_metadata", cargo_metadata),
     ("lsp_tool", lsp_tool),
     ("bash", bash),
+    ("find_files", find_files),
     ("search_code", search_code),
     ("rg_search", rg_search),
     ("fd_find", fd_find),

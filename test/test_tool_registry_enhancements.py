@@ -197,6 +197,44 @@ class ToolRegistryEnhancementsTests(unittest.TestCase):
         self.assertIn("run_python", selected)
         self.assertNotIn("svg_render", selected)
 
+    def test_compact_tool_prompt_is_short_and_descriptive(self) -> None:
+        registry = self._registry()
+        registry.register(
+            name="read_file",
+            description="Read a file and return its content as text.",
+            parameters=[
+                ToolParameter(
+                    name="path",
+                    type="string",
+                    description="File path.",
+                    required=True,
+                ),
+            ],
+            function=lambda path: {"status": "ok", "path": path},
+        )
+        registry.register(
+            name="git_status",
+            description="Return the current git repository status.",
+            parameters=[],
+            function=lambda: {"status": "ok"},
+        )
+
+        compact = registry.tools_schema_prompt(
+            use_toon=False,
+            mode="compact",
+            include_tool_names=["read_file", "git_status"],
+        )
+        rich = registry.tools_schema_prompt(
+            use_toon=False,
+            mode="rich",
+            include_tool_names=["read_file", "git_status"],
+        )
+
+        self.assertLess(len(compact), len(rich))
+        self.assertIn("- read_file(path:string) - Read a file", compact)
+        self.assertIn("- git_status() - Return the current git", compact)
+        self.assertNotIn("Parameters:", compact)
+
     def test_manual_register_can_declare_runtime_metadata(self) -> None:
         registry = self._registry()
         registry.register(

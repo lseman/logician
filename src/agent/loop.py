@@ -17,6 +17,18 @@ from ..tools.parser import parse_tool_calls
 from ..tools.runtime import ToolCall
 from .classify import classify_turn
 from .dispatcher import DispatchResult, ToolDispatcher
+from .events import (
+    AgentEvent,
+    AgentEventType,
+    EventEmitter,
+    make_classified,
+    make_guardrail_nudge,
+    make_repair_nudge,
+    make_tool_execution_end,
+    make_tool_execution_start,
+    make_turn_end,
+    make_turn_start,
+)
 from .guardrails import GuardrailEngine
 from .prompt import PromptBuilder
 from .state import TurnState
@@ -75,7 +87,7 @@ _THINK_BLOCK_RE = re.compile(
 )
 
 
-def _extract_think_blocks(text: str) -> tuple[str, str]:
+def _extract_think_blocks(text: str, *, implicit_open: bool = False) -> tuple[str, str]:
     """Extract <think>/<thinking> blocks from an LLM response.
 
     Returns (think_content, clean_response) where:
@@ -85,6 +97,11 @@ def _extract_think_blocks(text: str) -> tuple[str, str]:
     blocks = _THINK_BLOCK_RE.findall(text)
     think_content = "\n\n".join(b.strip() for b in blocks if b.strip())
     clean = _THINK_BLOCK_RE.sub("", text).strip()
+    if implicit_open and not think_content:
+        match = re.search(r"</think(?:ing)?>", clean, flags=re.IGNORECASE)
+        if match:
+            think_content = clean[: match.start()].strip()
+            clean = clean[match.end() :].strip()
     return think_content, clean
 
 
@@ -137,9 +154,8 @@ class AgentLoop:
                 kwargs["on_reasoning_token"] = on_reasoning_token
             else:
                 params = signature.parameters.values()
-                supports_reasoning = (
-                    "on_reasoning_token" in signature.parameters
-                    or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params)
+                supports_reasoning = "on_reasoning_token" in signature.parameters or any(
+                    param.kind == inspect.Parameter.VAR_KEYWORD for param in params
                 )
                 if supports_reasoning:
                     kwargs["on_reasoning_token"] = on_reasoning_token
@@ -191,6 +207,7 @@ class AgentLoop:
         memory: Any | None = None,
         mcp_loader: Callable[[], None] | None = None,
         thinking: ThinkingStrategy | None = None,
+        emitter: EventEmitter | None = None,
     ) -> None:
         self.llm = llm
         self.guardrails = guardrails
@@ -202,6 +219,7 @@ class AgentLoop:
         self.memory = memory
         self._mcp_loader = mcp_loader
         self.thinking = thinking
+        self._emitter = emitter
 
     # ------------------------------------------------------------------
     # Memory helpers
@@ -617,18 +635,23 @@ class AgentLoop:
         thinking_callback: Callable[[str], None] | None = None,
         tool_callback: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None,
         post_tool_callback: Callable[[ToolCall, DispatchResult], None] | None = None,
+        pre_tool_callback: Callable[[ToolCall], None] | None = None,
         repair_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> TurnResult:
         """Run one agent turn. Returns when the LLM produces a final response."""
         last_content = messages[-1].content or ""
         classification = classify_turn(last_content)
+        turn_id = str(uuid.uuid4())
         state = TurnState(
-            turn_id=str(uuid.uuid4()),
+            turn_id=turn_id,
             classified_as=classification.intent,
             domain_groups_activated=classification.domain_groups,
             user_query=last_content,
         )
         state.available_tool_names = self.dispatcher.available_tool_names()
+
+        # Emit classification event
+        self._emit(make_classified(turn_id, classification.intent, classification.domain_groups))
 
         # Persist user message before loading history so it's available for
         # subsequent sessions and doesn't vanish from the DB record.
@@ -647,13 +670,15 @@ class AgentLoop:
 
         # Fast path for social/informational turns — single LLM call, no tools.
         if classification.intent in ("social", "informational"):
-            return await self._fast_path(
+            result = await self._fast_path(
                 convo,
                 state,
                 token_callback=token_callback,
                 thinking_callback=thinking_callback,
                 session_id=session_id,
             )
+            self._emit(make_turn_end(turn_id, str(state.final_response or "")))
+            return result
 
         # Defer MCP startup until the turn actually needs the full tool loop.
         if self._mcp_loader is not None and callable(self._mcp_loader):
@@ -686,6 +711,9 @@ class AgentLoop:
         _draft_sim_threshold = getattr(self.config, "repeated_draft_similarity_threshold", 0.88)
         _last_no_tool_response: str = ""
         _repeated_draft_count: int = 0
+
+        # Emit turn_start at the beginning of each iteration
+        self._emit(make_turn_start(turn_id))
 
         while state.iteration < self.config.max_iterations:
             # 1. Build system prompt
@@ -720,10 +748,13 @@ class AgentLoop:
             #     route to thinking_callback. The clean response (without think
             #     blocks) is used for all subsequent processing so tool calls
             #     and guardrails don't see the thinking noise.
-            think_content, response = _extract_think_blocks(response)
+            think_content, response = _extract_think_blocks(
+                response,
+                implicit_open=bool(getattr(self.config, "native_thinking_prefill", False)),
+            )
             if think_content:
                 state.thinking_log.append(think_content)
-                if thinking_callback is not None:
+                if thinking_callback is not None and not stream_enabled:
                     thinking_callback(think_content)
 
             # 5. Parse tool calls from response
@@ -808,8 +839,10 @@ class AgentLoop:
             guard_result = self.guardrails.run(state, response, tool_calls)
             if guard_result.hard_stop:
                 state.final_response = response
+                self._emit(make_turn_end(turn_id, response))
                 break
             if guard_result.nudge:
+                self._emit(make_guardrail_nudge(turn_id, guard_result.guard_name, guard_result.nudge))
                 convo.append(Message(role=MessageRole.USER, content=guard_result.nudge))
                 state.guardrail_nudges[guard_result.guard_name] = (
                     state.guardrail_nudges.get(guard_result.guard_name, 0) + 1
@@ -873,11 +906,19 @@ class AgentLoop:
             convo.append(assistant_msg)
             self._save_message(assistant_msg, session_id)
 
+            # Emit tool_execution_start events for each tool call
+            for call in tool_calls:
+                call_args = dict(call.arguments or {})
+                self._emit(make_tool_execution_start(
+                    turn_id, call.id, call.name or "", call_args,
+                ))
+
             results = await self.dispatcher.dispatch(
                 tool_calls,
                 state,
                 self.config,
                 tool_callback=tool_callback,
+                pre_tool_callback=pre_tool_callback,
             )
             if post_tool_callback is not None:
                 call_by_id = {call.id: call for call in tool_calls}
@@ -889,6 +930,18 @@ class AgentLoop:
                         post_tool_callback(tool_call, dispatch_result)
                     except Exception:
                         pass
+
+            # Emit tool_execution_end events after dispatch
+            call_by_id = {call.id: call for call in tool_calls}
+            for dispatch_result in results:
+                tool_call = call_by_id.get(dispatch_result.call_id)
+                is_err = dispatch_result.error is not None
+                self._emit(make_tool_execution_end(
+                    turn_id, dispatch_result.call_id,
+                    tool_call.name if tool_call else "",
+                    dispatch_result.error or dispatch_result.output or "",
+                    is_err,
+                ))
             tool_msgs = format_tool_results(results)
             convo.extend(tool_msgs)
             for tm in tool_msgs:
@@ -968,6 +1021,8 @@ class AgentLoop:
             except Exception:
                 pass  # Thinking failure is non-fatal; keep original answer
 
+        # Emit turn_end before returning
+        self._emit(make_turn_end(turn_id, str(state.final_response or "")))
         return TurnResult(state=state, messages=convo)
 
     async def _fast_path(
@@ -996,10 +1051,13 @@ class AgentLoop:
             ),
         )
         # Extract <think> blocks, log them, and route to thinking_callback
-        think_content, response = _extract_think_blocks(response)
+        think_content, response = _extract_think_blocks(
+            response,
+            implicit_open=bool(getattr(self.config, "native_thinking_prefill", False)),
+        )
         if think_content:
             state.thinking_log.append(think_content)
-            if thinking_callback is not None:
+            if thinking_callback is not None and not stream_enabled:
                 thinking_callback(think_content)
         state.final_response = response
         self._save_message(
@@ -1018,3 +1076,15 @@ class AgentLoop:
         if messages and messages[0].role == MessageRole.SYSTEM:
             return [sys_msg] + messages[1:]
         return [sys_msg] + list(messages)
+
+    # ------------------------------------------------------------------
+    # Event emission helper
+    # ------------------------------------------------------------------
+
+    def _emit(self, event: AgentEvent) -> None:
+        """Emit an event if an emitter is configured."""
+        if self._emitter is not None:
+            try:
+                self._emitter.emit(event)
+            except Exception:
+                pass  # event emission failure should not break the loop

@@ -544,21 +544,41 @@ class InspectionGuard:
 
 
 def default_guards(config: Config) -> list[Guard]:
-    """Build the default guard list for a standard agent."""
-    guards: list[Guard] = [
-        DuplicateToolGuard(),
-        UnsupportedToolGuard(),
-        ConsecutiveToolGuard(config),
-        HallucinationGuard(),
-        ToolResultAcknowledgementGuard(),
-    ]
-    if getattr(config, "tool_claim_guard_enabled", True):
+    """Build the default guard list for a standard agent.
+
+    Minimal set: only duplicate_tool + stall (infinite-loop detection) are
+    enabled by default. All other guards are opt-in via config flags.
+    This follows Pi's philosophy: minimal built-in checks, user adds what
+    they need.
+    """
+    guards: list[Guard] = []
+    if getattr(config, "duplicate_tool_guard_enabled", True):
+        guards.append(
+            DuplicateToolGuard()
+        )
+    # Minimal core guards — these prevent the most common failure modes
+    if getattr(config, "unsupported_tool_guard_enabled", True):
+        guards.append(UnsupportedToolGuard())
+    if getattr(config, "consecutive_tool_guard_enabled", True):
+        guards.append(ConsecutiveToolGuard(config))
+    guards.append(
+        StallGuard(max_total_nudges=getattr(config, "max_guardrail_nudges", 5))
+    )
+    # Optional guards — opt-in via config
+    if getattr(config, "tool_result_acknowledgement_guard_enabled", False):
+        min_len = getattr(
+            config, "tool_result_acknowledgement_min_response_length", 40
+        )
+        guards.append(ToolResultAcknowledgementGuard(min_response_length=min_len))
+    if getattr(config, "tool_claim_guard_enabled", False):
         guards.append(ToolClaimGuard())
-    if getattr(config, "workflow_guard_enabled", True):
+    if getattr(config, "hallucination_guard_enabled", False):
+        guards.append(HallucinationGuard())
+    if getattr(config, "workflow_guard_enabled", False):
         guards.append(ReadBeforeEditGuard())
         guards.append(PythonStructuralEditGuard(config))
-    guards.append(VerificationGuard())
-    guards.append(StallGuard(max_total_nudges=getattr(config, "max_guardrail_nudges", 5)))
-    if getattr(config, "inspection_result_guard_enabled", True):
+    if getattr(config, "verification_guard_enabled", False):
+        guards.append(VerificationGuard())
+    if getattr(config, "inspection_result_guard_enabled", False):
         guards.append(InspectionGuard())
     return guards

@@ -231,6 +231,7 @@ class ToolDispatcher:
         state: TurnState,
         config: Config | None = None,
         tool_callback: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None,
+        pre_tool_callback: Callable[[ToolCall], None] | None = None,
     ) -> list[DispatchResult]:
         """
         Split calls into read batch (parallel) then write calls (serial).
@@ -254,6 +255,7 @@ class ToolDispatcher:
                     call,
                     config,
                     tool_callback=tool_callback,
+                    pre_tool_callback=pre_tool_callback,
                     sequence=idx,
                 )
                 results.append(result)
@@ -270,6 +272,7 @@ class ToolDispatcher:
                         call,
                         config,
                         tool_callback=tool_callback,
+                        pre_tool_callback=pre_tool_callback,
                         sequence=idx,
                     )
                 )
@@ -281,6 +284,7 @@ class ToolDispatcher:
                 call,
                 config,
                 tool_callback=tool_callback,
+                pre_tool_callback=pre_tool_callback,
                 sequence=idx,
             )
             results.append(result)
@@ -374,6 +378,7 @@ class ToolDispatcher:
         config: Config | None = None,
         *,
         tool_callback: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None,
+        pre_tool_callback: Callable[[ToolCall], None] | None = None,
         sequence: int = 0,
     ) -> DispatchResult:
         def _emit(stage: str, **meta: Any) -> None:
@@ -391,6 +396,12 @@ class ToolDispatcher:
                 )
             except TypeError:
                 tool_callback(call.name, dict(call.arguments or {}))
+            except Exception:
+                pass
+
+        if pre_tool_callback is not None:
+            try:
+                pre_tool_callback(call)
             except Exception:
                 pass
 

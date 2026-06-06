@@ -75,3 +75,6 @@ skills/40_feynman/
 wiki/
 .vscode/
 lazy_timeseries/
+.mcp.json
+.pi/
+

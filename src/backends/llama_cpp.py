@@ -5,8 +5,10 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from ..config import Config
 from ..logging_utils import get_logger
 from ..messages import Message
+from .cache_control import apply_openai_compat_cache_control, mark_dual_cache_breakpoints
 from .common import (
     count_tokens_local,
     format_messages_for_template,
@@ -31,6 +33,15 @@ def _get_httpx() -> Any:
 
 
 class LlamaCppClient:
+    """llama.cpp HTTP backend with optional prompt caching support.
+
+    Implements Anthropic-style cache_control markers on OpenAI-compatible
+    API calls for providers that support prompt caching (OpenRouter, Vercel,
+    etc.).
+
+    See: src/backends/cache_control.py for caching implementation.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -39,6 +50,7 @@ class LlamaCppClient:
         chat_template: str,
         stop: Iterable[str],
         retry_attempts: int = 2,
+        config: Config | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -46,7 +58,16 @@ class LlamaCppClient:
         self.template = chat_template
         self.stop = list(stop)
         self.retry_attempts = max(0, retry_attempts)
+        self.config = config or Config()
         self._log = get_logger("agent.llama")
+        # Track last assistant tool output for dual cache breakpoint
+        self._last_tool_block: dict[str, Any] | None = None
+
+    def _native_cache_enabled(self) -> bool:
+        return bool(
+            getattr(self.config, "prompt_caching_enabled", True)
+            and getattr(self.config, "llama_cpp_cache_prompt", True)
+        )
 
     def _request(
         self,
@@ -270,13 +291,41 @@ class LlamaCppClient:
                         len(chat_messages),
                     )
                 _use_stream = bool(stream)
+                payload_messages = self._chat_payload_messages(chat_messages)
+
+                cache_compat = bool(
+                    getattr(self.config, "prompt_caching_enabled", True)
+                    and getattr(self.config, "prompt_caching_openai_compat", False)
+                )
+                if cache_compat:
+                    cache_messages = [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in payload_messages
+                    ]
+                    cache_messages, _ = apply_openai_compat_cache_control(
+                        cache_messages,
+                        tools=list(tools) if tools else None,
+                        use_cache=True,
+                    )
+                    if getattr(self.config, "prompt_caching_dual_breakpoint", False):
+                        cache_messages = mark_dual_cache_breakpoints(
+                            cache_messages,
+                            assistant_tool_block=self._last_tool_block,
+                            use_cache=True,
+                        )
+                    request_messages = cache_messages
+                else:
+                    request_messages = payload_messages
+
                 payload = {
-                    "messages": self._chat_payload_messages(chat_messages),
+                    "messages": request_messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stop": self.stop,
                     "stream": _use_stream,
                 }
+                if self._native_cache_enabled():
+                    payload["cache_prompt"] = True
                 if tools:
                     payload["tools"] = tools
                     payload["tool_choice"] = (
@@ -315,12 +364,15 @@ class LlamaCppClient:
                 url = f"{self.base_url}/v1/chat/completions"
                 reasoning_via_message = self.template.strip().lower() == "deepseek"
                 if _use_stream:
+                    # Streaming reasoning arrives as `reasoning_content` deltas for
+                    # any thinking-enabled server (not just deepseek), so always
+                    # forward the reasoning callback when streaming.
                     return self._handle_chat_stream(
                         client,
                         url,
                         payload,
                         on_token=on_token,
-                        on_reasoning_token=on_reasoning_token if reasoning_via_message else None,
+                        on_reasoning_token=on_reasoning_token,
                     )
                 else:
                     r = self._request(client, "POST", url, json=payload)
@@ -349,6 +401,8 @@ class LlamaCppClient:
                     "stop": self.stop,
                     "stream": bool(stream),
                 }
+                if self._native_cache_enabled():
+                    payload["cache_prompt"] = True
                 if grammar:
                     payload["grammar"] = grammar
                 url = f"{self.base_url}/completion"

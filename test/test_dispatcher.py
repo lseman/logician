@@ -109,6 +109,27 @@ def test_state_tool_calls_updated_after_dispatch():
     assert state.tool_calls[0].name == "read_file"
 
 
+def test_pre_tool_callback_is_invoked_before_dispatch():
+    reg = FakeRegistry()
+    dispatcher = ToolDispatcher(reg)
+    call = make_call("read_file", {"path": "/tmp/x.py"})
+    state = make_state()
+    called: list[str] = []
+
+    def pre_tool_callback(tool_call: ToolCall) -> None:
+        called.append(tool_call.name)
+
+    asyncio.run(
+        dispatcher.dispatch(
+            [call],
+            state,
+            pre_tool_callback=pre_tool_callback,
+        )
+    )
+
+    assert called == ["read_file"]
+
+
 def test_consecutive_tool_count_incremented():
     reg = FakeRegistry()
     dispatcher = ToolDispatcher(reg)

@@ -141,7 +141,14 @@ def read_edit_context(
     lines = normalized_text.splitlines(keepends=True)
     total_lines_scanned = len(lines)
     match_start_line = normalized_text.count("\n", 0, match_offset) + 1
-    match_end_line = match_start_line + normalized_needle.count("\n")
+    # match_end_line = last line the match occupies
+    # needle lines = needle.count("\n") + 1 if needle ends without newline,
+    # but if needle ends with newline, the last "line" is empty
+    needle_newlines = normalized_needle.count("\n")
+    if normalized_needle.endswith("\n"):
+        match_end_line = match_start_line + needle_newlines - 1
+    else:
+        match_end_line = match_start_line + needle_newlines
     start_line = max(1, match_start_line - context_lines)
     end_line = min(total_lines_scanned, match_end_line + context_lines)
     content = "".join(lines[start_line - 1 : end_line])

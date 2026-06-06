@@ -1,0 +1,25 @@
+// ── Agent Core Entry Point ───────────────────────────────────────────────────────
+// Exports all agent-core components for TUI integration.
+
+export * from "./types.ts";
+export * from "./events.ts";
+export * from "./messages.ts";
+export * from "./backend.ts";
+export * from "./parser.ts";
+export * from "./loop.ts";
+export * from "./tools/registry.ts";
+export * from "./default-tools.ts";
+export * from "./system-prompt.ts";
+
+// Core tools
+export { read_file } from "./tools/read-file.ts";
+export { rg_search } from "./tools/search.ts";
+export { bash } from "./tools/bash.ts";
+export { edit_file } from "./tools/edit-file.ts";
+export { file_diff } from "./tools/file-diff.ts";
+export { git } from "./tools/git.ts";
+export { list_files } from "./tools/list-files.ts";
+export { write_file } from "./tools/write-file.ts";
+export { find } from "./tools/find.ts";
+export { todo_write, onTodosChanged, getTodos } from "./tools/todo-write.ts";
+export type { TodoItem, TodoStatus } from "./tools/todo-write.ts";

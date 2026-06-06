@@ -421,6 +421,7 @@ class ToolParameter(BaseModel):
     description: str = ""
     required: bool = True
     enum: list[Any] | None = None
+    prompt_guidelines: str = ""  # Model-facing guidance for this parameter
 
     def __init__(self, *args: Any, **data: Any) -> None:
         if args:
@@ -996,6 +997,7 @@ class Tool(BaseModel):
     description: str
     parameters: list[ToolParameter] = Field(default_factory=list)
     function: Any
+    prompt_guidelines: str = ""  # Model-facing usage guidance for this tool
     skill_id: str | None = None
     source_path: str | None = None
     skill_meta: dict[str, Any] | None = None

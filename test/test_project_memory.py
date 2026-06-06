@@ -7,7 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.project_memory import load_index, record_observation
+from src.memory import (
+    get_observation_content,
+    load_index,
+    record_hook_event,
+    record_observation,
+)
 
 
 def _load_mem_search():
@@ -95,6 +100,26 @@ class ProjectMemoryTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["count"], 1)
         self.assertIn("#001", payload["ids"])
+
+    def test_record_hook_event_creates_project_memory_observation(self) -> None:
+        result = record_hook_event(
+            event_type="UserPromptSubmit",
+            payload={
+                "session_id": "hook_session",
+                "prompt": "Summarize the repository",
+                "source": "cli",
+            },
+            hook_output="Memory hook captured the user prompt.",
+        )
+
+        index = load_index()
+        self.assertEqual(len(index), 1)
+        self.assertEqual(index[0]["session_key"], "hook_session")
+        self.assertEqual(index[0]["type"], "feature")
+        self.assertEqual(index[0]["title"], "Summarize the repository")
+        self.assertIn(
+            "Memory hook captured the user prompt", get_observation_content(index[0]["id"])
+        )
 
 
 if __name__ == "__main__":
