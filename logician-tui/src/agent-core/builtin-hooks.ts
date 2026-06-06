@@ -6,6 +6,7 @@
 // AGENT_IMPROVEMENTS.md for the eventual typed hook bus).
 
 import type { AgentConfig, AgentLoopHooks } from "./types.ts";
+import { HookBus } from "./hook-bus.ts";
 import { GuardEngine } from "./guards.ts";
 import { BudgetTracker } from "./budget.ts";
 import {
@@ -100,62 +101,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
     return hooks;
 }
 
-// Compose built-in hooks with user hooks so both run. Built-ins run first;
-// user hooks see the built-ins' output and can override.
+// Compose built-in hooks with user hooks via the typed hook bus. Built-ins
+// register first (so they run first within each event's reducer); user hooks
+// register after and see the built-ins' output. Returns a single
+// AgentLoopHooks the agent loop consumes unchanged.
 export function composeHooks(
     builtin: AgentLoopHooks,
     user: AgentLoopHooks,
 ): AgentLoopHooks {
-    return {
-        beforeToolCall: async (ctx) => {
-            if (builtin.beforeToolCall) {
-                const r = await builtin.beforeToolCall(ctx);
-                // A built-in block short-circuits; user hook doesn't run.
-                if (r?.content !== undefined) return r;
-                if (r?.args !== undefined) {
-                    ctx = { ...ctx, args: r.args };
-                    if (!user.beforeToolCall) return r;
-                    const u = await user.beforeToolCall(ctx);
-                    return u ?? r;
-                }
-            }
-            return user.beforeToolCall?.(ctx);
-        },
-        afterToolCall: async (ctx) => {
-            let result = builtin.afterToolCall
-                ? await builtin.afterToolCall(ctx)
-                : undefined;
-            if (result) {
-                ctx = {
-                    ...ctx,
-                    result: result.content ?? ctx.result,
-                    isError: result.isError ?? ctx.isError,
-                };
-            }
-            if (user.afterToolCall) {
-                const u = await user.afterToolCall(ctx);
-                if (u) result = { ...result, ...u };
-            }
-            return result;
-        },
-        prepareNextTurn: async (ctx) => {
-            let messages = ctx.messages;
-            if (builtin.prepareNextTurn) {
-                const r = await builtin.prepareNextTurn(ctx);
-                if (r?.messages) messages = r.messages;
-            }
-            if (user.prepareNextTurn) {
-                const u = await user.prepareNextTurn({ ...ctx, messages });
-                if (u?.messages) messages = u.messages;
-            }
-            return messages === ctx.messages ? undefined : { messages };
-        },
-        shouldStopAfterTurn: async (ctx) => {
-            if (builtin.shouldStopAfterTurn) {
-                const stop = await builtin.shouldStopAfterTurn(ctx);
-                if (stop === true) return true;
-            }
-            return user.shouldStopAfterTurn?.(ctx);
-        },
-    };
+    const bus = new HookBus();
+    bus.register(builtin, { source: "builtin" });
+    bus.register(user, { source: "user" });
+    return bus.toHooks();
 }

@@ -361,10 +361,11 @@ export class TUI extends Container {
         };
         process.stdin.on("data", this.stdinHandler);
 
-        // Enter alternate screen buffer + hide cursor. The alt screen gives us a
-        // fixed canvas to redraw each frame from the home position, avoiding the
-        // scrollback duplication that plagued the differential renderer.
-        this.write("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l");
+        // Enter alternate screen buffer + hide cursor + enable bracketed paste.
+        // The alt screen gives us a fixed canvas to redraw each frame from the
+        // home position. Bracketed paste makes the terminal wrap pasted text in
+        // \x1b[200~ … \x1b[201~ so the app can distinguish paste from typed input.
+        this.write("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[?2004h");
 
         this.requestRender(true);
     }
@@ -375,8 +376,9 @@ export class TUI extends Container {
             clearTimeout(this.renderTimer);
             this.renderTimer = null;
         }
-        // Show cursor + leave alternate screen, restoring the user's terminal.
-        this.write("\x1b[?25h\x1b[?1049l");
+        // Show cursor + leave alternate screen + disable bracketed paste,
+        // restoring the user's terminal.
+        this.write("\x1b[?25h\x1b[?1049l\x1b[?2004l");
 
         if (this.stdinHandler) {
             process.stdin.removeListener("data", this.stdinHandler);

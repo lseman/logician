@@ -8,6 +8,7 @@ export * from "./backend.ts";
 export * from "./parser.ts";
 export * from "./loop.ts";
 export * from "./harness.ts";
+export * from "./hook-bus.ts";
 export * from "./tools/registry.ts";
 export * from "./default-tools.ts";
 export * from "./system-prompt.ts";

@@ -499,10 +499,11 @@ export class InputBar implements Component, Focusable {
                 : " ";
         const afterCursor = segments.slice(cursorInViewport + 1).join("");
 
-        // Cursor with inverse video (only when focused)
-        const cursorChar = this.focused
-            ? `${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m`
-            : atCursor;
+        // Cursor with inverse video (only when focused, not on placeholder)
+        const cursorChar =
+            isPlaceholder || !this.focused
+                ? atCursor
+                : `${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m`;
 
         // Build the line
         const color = isPlaceholder ? "\x1b[38;5;244m" : "\x1b[38;5;159m";

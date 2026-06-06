@@ -152,6 +152,11 @@ export interface TodosEvent {
     }>;
 }
 
+export interface SteeredEvent {
+    type: "steered";
+    message: string;
+}
+
 export type ParsedBridgeEvent =
     | TokenEvent
     | ThinkingTokenEvent
@@ -168,7 +173,8 @@ export type ParsedBridgeEvent =
     | RepairEvent
     | ClassifiedEvent
     | ImageEvent
-    | TodosEvent;
+    | TodosEvent
+    | SteeredEvent;
 
 // ── Bridge commands (TUI → bridge) ────────────────────────────────────────────
 

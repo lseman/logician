@@ -345,6 +345,12 @@ export class LogicianTUI {
                     contextCompacted: true,
                 });
                 break;
+            case "steered":
+                this.transcript.addSystemMessage(
+                    `Steering the running turn: ${event.message}`,
+                );
+                this.transcriptDisplay.setTurns(this.transcript.getTurns());
+                break;
         }
 
         this.tui.requestRender();
@@ -633,6 +639,16 @@ export class LogicianTUI {
                 this.bridge.sendSlash(text.trim());
                 this.transcriptDisplay.setTurns(this.transcript.getTurns());
                 this.tui.requestRender();
+                return;
+            }
+
+            // While a turn is running, a plain message steers it instead of
+            // starting a new run. The bridge emits a `steered` event that
+            // renders the message, so skip the normal turn/animation setup.
+            if (this.bridge.isActive()) {
+                this.bridge
+                    .sendMessage(text)
+                    .catch((err) => this.bridge.onError?.(err));
                 return;
             }
 

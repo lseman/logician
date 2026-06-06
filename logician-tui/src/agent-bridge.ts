@@ -8,17 +8,12 @@ import path from "node:path";
 import type {
     AgentConfig,
     AgentEvent,
-    EventHandler,
     Message,
     Tool,
-    ToolCall,
 } from "./agent-core/index.ts";
-import {
-    AgentHarness,
-    createEventEmitter,
-} from "./agent-core/index.ts";
+import { AgentHarness } from "./agent-core/index.ts";
 import { OpenAIBackend } from "./agent-core/backend.ts";
-import type { ParsedBridgeEvent, BridgeEventType } from "./events.ts";
+import type { ParsedBridgeEvent } from "./events.ts";
 import { ToolRegistry } from "./agent-core/tools/registry.ts";
 import { createDefaultTools } from "./agent-core/default-tools.ts";
 import { McpManager } from "./agent-core/mcp.ts";
@@ -163,11 +158,10 @@ export interface AgentBridgeOptions {
 export class AgentCoreBridge {
     private config: AgentConfig;
     private backend: OpenAIBackend;
-    private agentLoop: AgentLoop | null = null;
+    private harness: AgentHarness | null = null;
     private callbacks: EventCallback[] = [];
     private errorCb: ErrorCallback | null = null;
     private running = false;
-    private currentLoop: AbortController | null = null;
     private currentTurnId: string | null = null;
     private cwd: string;
     private defaultTools: Tool[];
@@ -265,10 +259,23 @@ export class AgentCoreBridge {
     // ── High-level commands ──────────────────────────────────────────────
 
     async sendMessage(message: string): Promise<void> {
+        // A message submitted while a turn is in flight steers the running
+        // turn instead of starting a second concurrent run.
+        if (this.running && this.harness) {
+            this.harness.steer(message);
+            this.emit({ type: "steered", message });
+            return;
+        }
+
         await this.runStartupHooksOnce();
         await this.loadMcpToolsOnce();
         this.running = true;
-        this.currentLoop = new AbortController();
+        this.harness = new AgentHarness({
+            config: this.config,
+            backend: this.backend,
+            cwd: this.config.cwd,
+            maxIterations: this.config.maxIterations,
+        });
 
         // Emit turn start
         const turnId = `turn_${Date.now()}`;
@@ -277,22 +284,13 @@ export class AgentCoreBridge {
         this.emit({ type: "phase", state: "streaming" });
 
         try {
-            this.agentLoop = new AgentLoopClass({
-                config: this.config,
-                backend: this.backend,
-                cwd: this.config.cwd,
-                maxIterations: this.config.maxIterations,
-                signal: this.currentLoop.signal,
-            });
-
-            // Run the agent loop
-            await this.agentLoop.run(message);
+            await this.harness.prompt(message);
         } catch (e: unknown) {
             const error = e as Error;
             this.errorCb?.(error);
         } finally {
             this.running = false;
-            this.currentLoop = null;
+            this.harness = null;
             if (this.currentTurnId) {
                 this.emit({
                     type: "turn_end",
@@ -303,6 +301,16 @@ export class AgentCoreBridge {
             }
             this.emit({ type: "phase", state: "ready" });
         }
+    }
+
+    /** Inject guidance into the running turn (drained at the next save point). */
+    steer(message: string): void {
+        this.harness?.steer(message);
+    }
+
+    /** Queue a message for after the current turn completes. */
+    followUp(message: string): void {
+        this.harness?.followUp(message);
     }
 
     /** Execute a slash command (sends as chat message to the agent). */
@@ -316,7 +324,7 @@ export class AgentCoreBridge {
             agent_name: "ForeblocksAgent",
             model: this.config.model,
             tools:
-                this.agentLoop?.tools.list().map((t) => t.name) ||
+                this.harness?.tools?.list().map((t: Tool) => t.name) ||
                 this.defaultTools.map((t) => t.name),
             mcp_servers: this.mcpServerCount,
             mcp_tools: this.defaultTools.filter((tool) =>
@@ -404,9 +412,7 @@ export class AgentCoreBridge {
     }
 
     cancel(): void {
-        if (this.currentLoop) {
-            this.currentLoop.abort();
-        }
+        this.harness?.abort();
     }
 
     // ── State management ─────────────────────────────────────────────────
@@ -421,7 +427,7 @@ export class AgentCoreBridge {
             model: this.config.model,
             mcp_deferred: !this.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
             tools:
-                this.agentLoop?.tools.list().map((t) => t.name) ||
+                this.harness?.tools?.list().map((t: Tool) => t.name) ||
                 this.defaultTools.map((t) => t.name),
             mcp_servers_loaded: this.mcpServerCount,
             mcp_tools_loaded: this.defaultTools.filter((tool) =>
@@ -457,11 +463,12 @@ export class AgentCoreBridge {
     }
 
     getMessages(): Message[] {
-        return this.agentLoop?.messages || [];
+        return this.harness?.messages || [];
     }
 
     getTools(): ToolRegistry {
-        if (this.agentLoop?.tools) return this.agentLoop.tools;
+        const live = this.harness?.tools;
+        if (live) return live;
         const registry = new ToolRegistry({ cwd: this.config.cwd });
         registry.registerMany(this.defaultTools);
         return registry;
