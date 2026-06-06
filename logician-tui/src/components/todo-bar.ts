@@ -2,8 +2,7 @@
 // Pinned task list shown directly above the input bar. Renders nothing when the
 // list is empty, so it only takes vertical space while there are active todos.
 
-import type { Component } from "../tui-core.ts";
-import { visibleWidth } from "../tui-core.ts";
+import { visibleWidth, type Component } from "../tui-core.ts";
 
 export interface TodoBarItem {
     content: string;

@@ -14,6 +14,7 @@ import {
     microCompactMessages,
     estimateChatPayloadTokens,
 } from "./messages.ts";
+import { getTodos } from "./tools/todo-write.ts";
 
 const DEFAULT_COMPACTION_FRACTION = 0.8;
 // Don't run proactive compaction every turn — cooldown in turns.
@@ -31,7 +32,9 @@ export interface BuiltinHookDeps {
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
     const { config } = deps;
     const guardsEnabled = config.guardsEnabled !== false;
-    const budgetEnabled = config.budgetStopEnabled !== false;
+    // Budget-based early stop is opt-in: it can cut off a legitimate multi-step
+    // run (e.g. one following a todo list) when per-turn token growth is small.
+    const budgetEnabled = config.budgetStopEnabled === true;
     const compactionEnabled = config.proactiveCompactionEnabled !== false;
 
     const guards = guardsEnabled
@@ -95,6 +98,29 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
         hooks.shouldStopAfterTurn = ({ messages }) => {
             const tokens = estimateChatPayloadTokens(messages, deps.toolDefs());
             return budget.shouldStop(tokens);
+        };
+    }
+
+    // Pi-style continuation: if the model stops (no tool calls) while its own
+    // todo list still has unfinished items, nudge it to keep working. The loop
+    // caps total continuations, so this cannot run away.
+    const continuationEnabled = config.continuationEnabled !== false;
+    if (continuationEnabled) {
+        hooks.continueAfterTurn = () => {
+            const todos = getTodos();
+            if (!todos.length) return undefined;
+            const remaining = todos.filter((t) => t.status !== "completed");
+            if (!remaining.length) return undefined;
+            const next =
+                remaining.find((t) => t.status === "in_progress") ??
+                remaining[0];
+            return {
+                message:
+                    `You still have ${remaining.length} unfinished todo item(s). ` +
+                    `Continue working — next: ${next.content}. ` +
+                    "Use your tools to make progress, and mark items completed as you finish. " +
+                    "If you are truly blocked or done, say so explicitly and stop.",
+            };
         };
     }
 

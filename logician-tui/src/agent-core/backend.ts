@@ -2,7 +2,7 @@
 // OpenAI-compatible HTTP client for streaming LLM responses.
 // Mirrors Python LlamaCppClient/VLLMClient but simplified for TS.
 
-import type { Message, Tool, ToolCall } from "./types.ts";
+import type { ToolCall } from "./types.ts";
 
 export interface LLMResponse {
     content: string | null;
@@ -137,7 +137,7 @@ export class OpenAIBackend implements LLMBackend {
                             }
                         }
                     }
-                } catch (e) {
+                } catch {
                     // Skip parse errors (partial JSON is normal in streaming)
                 }
             }

@@ -17,7 +17,7 @@ export const read_file: Tool = {
     description:
         `Read file contents. Output is truncated to ${DEFAULT_MAX_LINES} lines or ` +
         `${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files; ` +
-        `continue with offset until complete.`,
+        "continue with offset until complete.",
     parameters: {
         type: "object",
         properties: {

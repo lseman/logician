@@ -1,5 +1,4 @@
-import type { Component } from "../tui-core.ts";
-import { clampLineToWidth, visibleWidth } from "../tui-core.ts";
+import { clampLineToWidth, visibleWidth, type Component } from "../tui-core.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -16,6 +15,7 @@ export interface PluginListItem {
     enabled: boolean;
     installPath: string;
     hookCount: number;
+    skillCount: number;
     onDisk: boolean;
 }
 
@@ -50,6 +50,7 @@ export class PluginManagerOverlay implements Component {
                 enabled: Boolean(plugin.enabled),
                 installPath: String(plugin.install_path || ""),
                 hookCount: Number(hooks[pluginId] || 0),
+                skillCount: Number(plugin.skill_count || 0),
                 onDisk: plugin.on_disk !== false,
             };
         });
@@ -139,7 +140,7 @@ export class PluginManagerOverlay implements Component {
         lines.push(
             boxLine(
                 `${BOLD}Plugins${RESET}${DIM} (${this.plugins.length})${RESET}`,
-                `space toggle · r refresh · enter/esc close`,
+                "space toggle · r refresh · enter/esc close",
                 innerWidth,
             ),
         );
@@ -181,6 +182,12 @@ export class PluginManagerOverlay implements Component {
                 const hookText = plugin.hookCount
                     ? `hooks:${plugin.hookCount}`
                     : "hooks:-";
+                const skillText = plugin.skillCount
+                    ? `skills:${plugin.skillCount}`
+                    : "";
+                const metaParts = [hookText];
+                if (skillText) metaParts.push(skillText);
+                const metaStr = metaParts.join(" · ");
                 const diskText = plugin.onDisk ? "" : ` ${WARN}missing${RESET}`;
                 const busy =
                     this.busyPluginId === plugin.pluginId
@@ -189,7 +196,7 @@ export class PluginManagerOverlay implements Component {
                 const name = selected
                     ? `${SELECTED}${BOLD}${plugin.pluginId}${RESET}`
                     : plugin.pluginId;
-                const meta = `${DIM}v${plugin.version || "?"} · ${hookText}${RESET}${diskText}${busy}`;
+                const meta = `${DIM}v${plugin.version || "?"} · ${metaStr}${RESET}${diskText}${busy}`;
                 lines.push(
                     boxLine(`${cursor} ${checkbox} ${name}`, meta, innerWidth),
                 );
@@ -210,7 +217,7 @@ export class PluginManagerOverlay implements Component {
             boxLine(
                 this.message
                     ? `${DIM}${this.message}${RESET}`
-                    : `${MUTED}Enabled plugins expose skills and hooks to Logician.${RESET}`,
+                    : `${MUTED}Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.${RESET}`,
                 "",
                 innerWidth,
             ),

@@ -124,7 +124,7 @@ export function createSlashCommands(
                     localHandlers.setThinkingMode?.(mode);
                     return `Thinking display: ${mode}`;
                 }
-                return `Valid modes: collapsed, summary, expanded`;
+                return "Valid modes: collapsed, summary, expanded";
             },
         ),
         cmd(

@@ -152,6 +152,19 @@ export function clampLineToWidth(text: string, width: number): string {
             i++;
             continue;
         }
+        // Drop other C0 control bytes (NUL, etc.). A stray NUL — e.g. from
+        // reading a binary or corrupted file — truncates the terminal frame and
+        // freezes the TUI mid-render. Tabs are expanded to a single space.
+        const code = text.charCodeAt(i);
+        if (code < 0x20) {
+            if (code === 0x09) {
+                if (visible + 1 > width) break;
+                result += " ";
+                visible += 1;
+            }
+            i++;
+            continue;
+        }
         const w = visibleWidth(ch);
         if (visible + w > width) break;
         result += ch;
@@ -222,8 +235,6 @@ import process from "node:process";
 import { Buffer } from "node:buffer";
 
 // ── TUI — Differential rendering ────────────────────────────────────────────
-
-const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 
 export class TUI extends Container {
     private previousLines: string[] = [];

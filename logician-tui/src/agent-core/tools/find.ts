@@ -14,8 +14,8 @@ const DEFAULT_LIMIT = 1000;
 export const find: Tool = {
     name: "find",
     description:
-        `Find files by glob pattern, e.g. '*.ts', '**/*.json', 'src/**/*.test.ts'. ` +
-        `Respects .gitignore. Returns paths relative to the search directory. ` +
+        "Find files by glob pattern, e.g. '*.ts', '**/*.json', 'src/**/*.test.ts'. " +
+        "Respects .gitignore. Returns paths relative to the search directory. " +
         `Truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB.`,
     parameters: {
         type: "object",

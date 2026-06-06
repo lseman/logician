@@ -209,10 +209,10 @@ export class LogicianTUI {
         this.slashPopup.setCommands(slashCommands);
 
         // Wire up slash popup submit to handle quit dispatch
-        this.slashPopup.setOnSubmit(async (result, dispatch, command) => {
+        this.slashPopup.setOnSubmit((result, dispatch, command) => {
             if (dispatch === "quit") {
-                await this.stop();
-                process.exit(0);
+                void this.stop().then(() => process.exit(0));
+                return;
             }
             if (result) {
                 this.transcript.addSystemMessage(String(result));
@@ -230,13 +230,13 @@ export class LogicianTUI {
                     (c: SlashCommandDef) => c.command.toLowerCase() === cmdName,
                 );
                 if (match && match.command === "/plugins") {
-                    handlePlugins(args);
+                    void handlePlugins(args);
                 }
                 if (match && match.dispatch === "bridge") {
-                    this.bridge.sendSlash(command.trim());
+                    void this.bridge.sendSlash(command.trim());
                 }
                 if (match && match.dispatch === "state") {
-                    handleStatus();
+                    void handleStatus();
                 }
             }
             this.transcriptDisplay.setTurns(this.transcript.getTurns());
@@ -257,24 +257,21 @@ export class LogicianTUI {
         });
 
         // Initialize bridge
-        this.bridge
-            .init()
-            .then((state) => {
-                this.statusPanel.update({
-                    contextTokens: Number(state.context_tokens || 0),
-                    contextMaxTokens:
-                        Number(state.context_max_tokens || 0) || undefined,
-                });
-                const message = this.formatStartupMessage(state);
-                if (message) {
-                    this.transcript.addSystemMessage(message);
-                    this.transcriptDisplay.setTurns(this.transcript.getTurns());
-                    this.tui.requestRender();
-                }
-            })
-            .catch((err) => {
-                console.error(`Bridge init failed: ${err.message}`);
+        this.bridge.init().then((state) => {
+            this.statusPanel.update({
+                contextTokens: Number(state.context_tokens || 0),
+                contextMaxTokens:
+                    Number(state.context_max_tokens || 0) || undefined,
             });
+            const message = this.formatStartupMessage(state);
+            if (message) {
+                this.transcript.addSystemMessage(message);
+                this.transcriptDisplay.setTurns(this.transcript.getTurns());
+                this.tui.requestRender();
+            }
+        }).catch((err) => {
+            console.error(`Bridge init failed: ${err.message}`);
+        });
     }
 
     private handleEvent(event: ParsedBridgeEvent): void {
@@ -605,7 +602,7 @@ export class LogicianTUI {
                         match.bridgeHandler(args);
                     }
                     if (match.command === "/plugins") {
-                        handlePlugins(args);
+                        void handlePlugins(args);
                         this.transcriptDisplay.setTurns(
                             this.transcript.getTurns(),
                         );
@@ -613,10 +610,10 @@ export class LogicianTUI {
                         return;
                     }
                     if (match.dispatch === "bridge") {
-                        this.bridge.sendSlash(text.trim());
+                        void this.bridge.sendSlash(text.trim());
                     }
                     if (match.dispatch === "state") {
-                        handleStatus();
+                        void handleStatus();
                     }
                     if (
                         match.dispatch === "local" &&
@@ -719,7 +716,7 @@ export class LogicianTUI {
             return;
         }
         if (action.type === "refresh") {
-            this.openPluginManager();
+            void this.openPluginManager();
             return;
         }
 
@@ -730,7 +727,7 @@ export class LogicianTUI {
             `${nextEnabled ? "Enabling" : "Disabling"} ${plugin.pluginId}...`,
         );
         this.tui.requestRender();
-        this.bridge
+        void this.bridge
             .setPluginEnabled(plugin.pluginId, nextEnabled)
             .then(async (result) => {
                 this.pluginManager.setMessage(

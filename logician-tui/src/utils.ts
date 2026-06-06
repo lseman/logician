@@ -74,17 +74,17 @@ export function sliceByColumn(
     byGrapheme = false,
 ): string {
     const segmenter = byGrapheme ? getGraphemeSegmenter() : null;
-    const segments = segmenter
+    const _segments = segmenter
         ? [...segmenter.segment(text)].map((s) => s.segment)
         : [...text];
-    let col = 0;
+    const _col = 0;
     let inEscape = false;
 
     // We need character-level control to strip ANSI codes, so work on chars
     // but measure width properly.
     let result = "";
     let currentCol = 0;
-    let started = false;
+    const started = false;
     let i = 0;
     const chars = [...text];
 
@@ -122,7 +122,7 @@ export function findWordBackward(text: string, cursor: number): number {
     // Skip non-word chars going backward
     let i = cursor;
     while (i > 0 && !isWordChar(segments[i - 1])) i--;
-    const start = i;
+    const _start = i;
 
     // Skip word chars going backward
     while (i > 0 && isWordChar(segments[i - 1])) i--;
@@ -137,7 +137,7 @@ export function findWordForward(text: string, cursor: number): number {
     // Skip non-word chars going forward
     let i = cursor;
     while (i < segments.length && !isWordChar(segments[i])) i++;
-    const start = i;
+    const _start = i;
 
     // Skip word chars going forward
     while (i < segments.length && isWordChar(segments[i])) i++;
@@ -266,7 +266,7 @@ export function fuzzyFilter<T>(
     getKey: (item: T) => string,
 ): (T & { score: number })[] {
     const scored = items
-        .map((item, idx) => {
+        .map((item) => {
             const key = getKey(item);
             const result = fuzzyMatch(query, key);
             if (!result) {

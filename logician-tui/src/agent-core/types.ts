@@ -110,6 +110,20 @@ export interface ShouldStopAfterTurnContext {
     hadToolCalls: boolean;
 }
 
+export interface ContinueAfterTurnContext {
+    messages: Message[];
+    iteration: number;
+    // The assistant's final text this turn (no tool calls were made).
+    assistantText: string;
+}
+
+// Returned by a continuation hook when the agent produced a no-tool-call
+// response but work remains (e.g. a todo list with pending items). The text is
+// injected as a user message and the loop continues instead of stopping.
+export interface ContinueAfterTurnResult {
+    message: string;
+}
+
 export interface AgentLoopHooks {
     beforeToolCall?: (
         ctx: BeforeToolCallContext,
@@ -126,6 +140,15 @@ export interface AgentLoopHooks {
     shouldStopAfterTurn?: (
         ctx: ShouldStopAfterTurnContext,
     ) => Promise<boolean | undefined> | boolean | undefined;
+    // Pi-style continuation: when the model returns no tool calls (would end the
+    // turn), this hook may return a message to inject so the loop keeps working
+    // instead of stopping prematurely.
+    continueAfterTurn?: (
+        ctx: ContinueAfterTurnContext,
+    ) =>
+        | Promise<ContinueAfterTurnResult | undefined>
+        | ContinueAfterTurnResult
+        | undefined;
 }
 
 export interface ToolCall {
@@ -168,13 +191,16 @@ export interface AgentConfig {
     hookSessionId?: string;
     hookTranscriptPath?: string;
     hooks?: AgentLoopHooks;
-    // Built-in loop safeguards (all default on). Each rides a contract hook.
-    guardsEnabled?: boolean; // duplicate-call + tool-failure-loop guards
+    // Built-in loop safeguards. Each rides a contract hook.
+    guardsEnabled?: boolean; // duplicate + failure-loop guards (default on)
     duplicateToolThreshold?: number;
     toolFailureLoopThreshold?: number;
-    budgetStopEnabled?: boolean; // diminishing-returns early stop
+    budgetStopEnabled?: boolean; // diminishing-returns early stop (default OFF)
     proactiveCompactionEnabled?: boolean; // compact before hitting context wall
     proactiveCompactionFraction?: number; // trigger at this fraction of window
+    // Pi-style continuation: resume the agent when it stops with pending todos.
+    continuationEnabled?: boolean; // default on
+    maxContinuations?: number; // cap per run (default 12)
     // Web search backend (SearXNG). When set, the web_search tool is enabled.
     webSearch?: WebSearchConfig;
 }

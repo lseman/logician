@@ -26,6 +26,8 @@ import type {
     PrepareNextTurnContext,
     PrepareNextTurnResult,
     ShouldStopAfterTurnContext,
+    ContinueAfterTurnContext,
+    ContinueAfterTurnResult,
 } from "./types.ts";
 
 export type HookEventName = keyof AgentLoopHooks;
@@ -50,6 +52,7 @@ type BeforeHandler = NonNullable<AgentLoopHooks["beforeToolCall"]>;
 type AfterHandler = NonNullable<AgentLoopHooks["afterToolCall"]>;
 type PrepareHandler = NonNullable<AgentLoopHooks["prepareNextTurn"]>;
 type StopHandler = NonNullable<AgentLoopHooks["shouldStopAfterTurn"]>;
+type ContinueHandler = NonNullable<AgentLoopHooks["continueAfterTurn"]>;
 
 // Read-only observer: sees every event with its name, return ignored.
 export type HookObserver = (
@@ -62,6 +65,7 @@ export class HookBus {
     private after: Entry<AfterHandler>[] = [];
     private prepare: Entry<PrepareHandler>[] = [];
     private stop: Entry<StopHandler>[] = [];
+    private continue_: Entry<ContinueHandler>[] = [];
     private observers: HookObserver[] = [];
 
     private errorMode: HookErrorMode;
@@ -100,6 +104,10 @@ export class HookBus {
             offs.push(
                 this.on("shouldStopAfterTurn", hooks.shouldStopAfterTurn, reg),
             );
+        if (hooks.continueAfterTurn)
+            offs.push(
+                this.on("continueAfterTurn", hooks.continueAfterTurn, reg),
+            );
         return () => offs.forEach((off) => off());
     }
 
@@ -116,6 +124,7 @@ export class HookBus {
         this.after = [];
         this.prepare = [];
         this.stop = [];
+        this.continue_ = [];
         this.observers = [];
     }
 
@@ -127,6 +136,7 @@ export class HookBus {
             afterToolCall: (ctx) => this.runAfter(ctx),
             prepareNextTurn: (ctx) => this.runPrepare(ctx),
             shouldStopAfterTurn: (ctx) => this.runStop(ctx),
+            continueAfterTurn: (ctx) => this.runContinue(ctx),
         };
     }
 
@@ -216,6 +226,22 @@ export class HookBus {
         return undefined;
     }
 
+    // First handler returning a continuation message wins.
+    private async runContinue(
+        ctx: ContinueAfterTurnContext,
+    ): Promise<ContinueAfterTurnResult | undefined> {
+        await this.notify("continueAfterTurn", ctx);
+        for (const { handler, source } of this.continue_) {
+            const r = await this.guard(
+                () => handler(ctx),
+                "continueAfterTurn",
+                source,
+            );
+            if (r?.message) return r;
+        }
+        return undefined;
+    }
+
     // ── Internals ──────────────────────────────────────────────────────────
 
     private listFor(event: HookEventName): Entry<unknown>[] {
@@ -228,6 +254,8 @@ export class HookBus {
                 return this.prepare as Entry<unknown>[];
             case "shouldStopAfterTurn":
                 return this.stop as Entry<unknown>[];
+            case "continueAfterTurn":
+                return this.continue_ as Entry<unknown>[];
         }
     }
 

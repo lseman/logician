@@ -48,6 +48,9 @@ export class AgentHarness {
     private _phase: HarnessPhase = "idle";
     private loop: AgentLoop | null = null;
     private abortController: AbortController | null = null;
+    // Conversation persisted across prompts so follow-ups ("continue", "go on")
+    // retain context.
+    private history: Message[] = [];
 
     // Queues drained at save points.
     private steeringQueue: string[] = [];
@@ -86,8 +89,14 @@ export class AgentHarness {
                 cwd: this.cwd,
                 maxIterations: this.maxIterations,
                 signal: this.abortController.signal,
+                initialMessages: this.history.length
+                    ? this.history
+                    : undefined,
             });
-            return await this.loop.run(promptText);
+            const result = await this.loop.run(promptText);
+            // Persist the full conversation for the next prompt.
+            this.history = result;
+            return result;
         } finally {
             this._phase = "idle";
             this.loop = null;
@@ -153,7 +162,12 @@ export class AgentHarness {
     }
 
     get messages(): Message[] {
-        return this.loop?.messages ?? [];
+        return this.loop?.messages ?? this.history;
+    }
+
+    // Clear persisted conversation (new session / context reset).
+    clearHistory(): void {
+        this.history = [];
     }
 
     // Live tool registry of the running loop, or null when idle.

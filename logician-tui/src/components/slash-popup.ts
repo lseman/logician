@@ -1,19 +1,15 @@
 // ── Slash command popup ───────────────────────────────────────────────────────
 // Overlay popup with fuzzy matching, usage hints, and Tab completion.
 
-import type { Component } from "../tui-core.ts";
-import { visibleWidth, clampLineToWidth } from "../tui-core.ts";
-import { filterSlashCommands } from "../slash-commands.ts";
+import { visibleWidth, type Component } from "../tui-core.ts";
+import { filterSlashCommands, type SlashCommandDef } from "../slash-commands.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const HEADER_COLOR = "\x1b[38;5;159m"; // aqua
 const SELECTED_COLOR = "\x1b[38;5;111m"; // green
-const USAGE_COLOR = "\x1b[38;5;141m"; // teal
 
-// Import the shared type
-import type { SlashCommandDef } from "../slash-commands.ts";
 
 export class SlashPopup implements Component {
     private commands: SlashCommandDef[] = [];

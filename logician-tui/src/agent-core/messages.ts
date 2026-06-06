@@ -1,7 +1,7 @@
 // ── Message handling ──────────────────────────────────────────────────────────────
 // Message creation and chat format conversion.
 
-import type { Message, MessageRole } from "./types.ts";
+import type { Message } from "./types.ts";
 
 export function createUserMessage(content: string): Message {
     return { role: "user", content, timestamp: Date.now() };
@@ -27,7 +27,7 @@ export function createToolResultMessage(
     toolCallId: string,
     toolName: string,
     result: string,
-    isError: boolean = false,
+    _isError: boolean = false,
 ): Message {
     return {
         role: "tool",

@@ -1,8 +1,7 @@
 // ── Status bar component ───────────────────────────────────────────────────────
 // Top status bar with animated phase indicator, thinking level, cache, counts.
 
-import type { Component } from "../tui-core.ts";
-import { visibleWidth } from "../tui-core.ts";
+import { visibleWidth, type Component } from "../tui-core.ts";
 
 interface StatusInfo {
     thinkingLevel: string;

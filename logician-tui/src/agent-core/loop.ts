@@ -9,9 +9,7 @@ import type {
     AgentLoopHooks,
     EventHandler,
     Message,
-    Tool,
     ToolCall,
-    ToolContext,
 } from "./types.ts";
 import type { LLMBackend } from "./backend.ts";
 import { EventEmitter, createEventEmitter } from "./events.ts";
@@ -30,12 +28,20 @@ import { createDefaultTools } from "./default-tools.ts";
 import { runHookEvent } from "./plugins.ts";
 import { composeHooks, buildBuiltinHooks } from "./builtin-hooks.ts";
 
+// Cap on pi-style continuations within one run, to bound runaway loops when a
+// continuation hook keeps resuming the agent.
+const DEFAULT_MAX_CONTINUATIONS = 12;
+
 export interface AgentLoopOptions {
     config: AgentConfig;
     backend: LLMBackend;
     cwd?: string;
     maxIterations?: number;
     signal?: AbortSignal;
+    // Prior conversation to continue from. When provided, the new user message
+    // is appended to this history instead of starting a fresh transcript, so
+    // follow-ups like "continue" retain context across turns.
+    initialMessages?: Message[];
 }
 
 export class AgentLoop {
@@ -50,6 +56,9 @@ export class AgentLoop {
     private onEvent?: EventHandler;
     private signal?: AbortSignal;
     private hooks: AgentLoopHooks;
+    private initialMessages?: Message[];
+    private continuationCount = 0;
+    private maxContinuations: number;
 
     constructor(options: AgentLoopOptions) {
         this.config = options.config;
@@ -57,6 +66,9 @@ export class AgentLoop {
         this.cwd = options.cwd || process.cwd();
         this.maxIterations = options.maxIterations || 30;
         this.signal = options.signal;
+        this.initialMessages = options.initialMessages;
+        this.maxContinuations =
+            this.config.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS;
         this.iterationCount = 0;
         this._messages = [];
         this.hooks = this.config.hooks || {};
@@ -121,12 +133,27 @@ export class AgentLoop {
             timestamp: new Date().toISOString(),
             message: { role: "user", content: userMessage },
         });
-        this._messages = [
-            createSystemMessage(systemPrompt),
-            ...hookMessages,
-            createUserMessage(userMessage),
-        ];
+        if (this.initialMessages && this.initialMessages.length) {
+            // Continue an existing conversation: keep prior history, refresh the
+            // system prompt to the current one, append hook context + new turn.
+            const priorNonSystem = this.initialMessages.filter(
+                (m) => m.role !== "system",
+            );
+            this._messages = [
+                createSystemMessage(systemPrompt),
+                ...priorNonSystem,
+                ...hookMessages,
+                createUserMessage(userMessage),
+            ];
+        } else {
+            this._messages = [
+                createSystemMessage(systemPrompt),
+                ...hookMessages,
+                createUserMessage(userMessage),
+            ];
+        }
         this.iterationCount = 0;
+        this.continuationCount = 0;
 
         this.emitEvent({ type: "agent_start" });
         this.emitEvent({ type: "phase", phase: "idle" });
@@ -364,8 +391,26 @@ export class AgentLoop {
             await this.runPrepareNextTurn(hadToolCalls);
             if (await this.runShouldStopAfterTurn(hadToolCalls)) break;
 
-            // Continue loop with tool results, otherwise turn ends.
-            if (!hadToolCalls) break;
+            // Continue loop with tool results.
+            if (hadToolCalls) continue;
+
+            // No tool calls: the turn would end here. Pi-style continuation —
+            // let a hook resume the agent (e.g. todos still pending) by
+            // injecting a user message, capped to avoid runaway loops.
+            if (this.continuationCount < this.maxContinuations) {
+                const cont = await this.runContinueAfterTurn(assistantContent);
+                if (cont) {
+                    this.continuationCount++;
+                    this._messages.push(createUserMessage(cont.message));
+                    this.appendTranscript(transcriptPath, {
+                        type: "user",
+                        timestamp: new Date().toISOString(),
+                        message: { role: "user", content: cont.message },
+                    });
+                    continue;
+                }
+            }
+            break;
         }
 
         this.emitEvent({
@@ -531,6 +576,26 @@ export class AgentLoop {
                 message: `shouldStopAfterTurn hook failed: ${(e as Error).message}`,
             });
             return false;
+        }
+    }
+
+    private async runContinueAfterTurn(
+        assistantText: string,
+    ): Promise<{ message: string } | undefined> {
+        if (!this.hooks.continueAfterTurn) return undefined;
+        try {
+            const r = await this.hooks.continueAfterTurn({
+                messages: this._messages,
+                iteration: this.iterationCount,
+                assistantText,
+            });
+            return r && r.message ? { message: r.message } : undefined;
+        } catch (e) {
+            this.emitEvent({
+                type: "error",
+                message: `continueAfterTurn hook failed: ${(e as Error).message}`,
+            });
+            return undefined;
         }
     }
 

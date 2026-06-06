@@ -2,17 +2,11 @@
 // Replaces the Python bridge with direct TypeScript agent-core integration.
 // Translates agent-core events to the same shapes the transcript expects.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdir, readFile, writeFileSync } from "node:fs";
+import { readdir as readdirAsync, readFile as readFileAsync } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type {
-    AgentConfig,
-    AgentEvent,
-    Message,
-    Tool,
-    WebSearchConfig,
-} from "./agent-core/index.ts";
-import { AgentHarness } from "./agent-core/index.ts";
+import { AgentHarness, type AgentConfig, type AgentEvent, type Message, type Tool, type WebSearchConfig } from "./agent-core/index.ts";
 import { OpenAIBackend } from "./agent-core/backend.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import { ToolRegistry } from "./agent-core/tools/registry.ts";
@@ -185,6 +179,8 @@ export class AgentCoreBridge {
     private baseSystemPrompt: string;
     private additionalSystemPrompt?: string;
     private pluginSystemContext = "";
+    private skillsContext: string | null = null;
+    private skillsInjected: boolean = false;
     private sessionId = `tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     private transcriptPath = "";
     private startupHooksRan = false;
@@ -285,12 +281,16 @@ export class AgentCoreBridge {
         await this.runStartupHooksOnce();
         await this.loadMcpToolsOnce();
         this.running = true;
-        this.harness = new AgentHarness({
-            config: this.config,
-            backend: this.backend,
-            cwd: this.config.cwd,
-            maxIterations: this.config.maxIterations,
-        });
+        // Reuse one harness across messages so conversation history (and thus
+        // "continue" / "go on" follow-ups) persists. Created lazily once.
+        if (!this.harness) {
+            this.harness = new AgentHarness({
+                config: this.config,
+                backend: this.backend,
+                cwd: this.config.cwd,
+                maxIterations: this.config.maxIterations,
+            });
+        }
 
         // Emit turn start
         const turnId = `turn_${Date.now()}`;
@@ -305,7 +305,7 @@ export class AgentCoreBridge {
             this.errorCb?.(error);
         } finally {
             this.running = false;
-            this.harness = null;
+            // Keep the harness alive to retain history across turns.
             if (this.currentTurnId) {
                 this.emit({
                     type: "turn_end",
@@ -412,6 +412,9 @@ export class AgentCoreBridge {
     reset(): void {
         // Reset tool state and conversation
         void this.fireSessionEnd("reset");
+        // Drop the persisted harness so history starts fresh.
+        this.harness?.clearHistory();
+        this.harness = null;
         this.sessionId = `tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         this.transcriptPath = createHookTranscriptPath(
             this.cwd,
@@ -419,6 +422,11 @@ export class AgentCoreBridge {
         );
         this.config.hookSessionId = this.sessionId;
         this.config.hookTranscriptPath = this.transcriptPath;
+        // Reset skill injection state
+        this.skillsContext = null;
+        this.skillsInjected = false;
+        this.pluginSystemContext = "";
+        this.rebuildBaseSystemPrompt();
         this.emit({
             type: "turn_end",
             turn_id: "reset",
@@ -463,7 +471,34 @@ export class AgentCoreBridge {
             startup_hook_initial_message:
                 this.startupHookResult?.initial_user_message || "",
             startup_hook_errors: this.startupHookResult?.errors || [],
+            skills_injected: this.skillsInjected
+                ? await this.countInstalledSkills()
+                : 0,
+            skills_visible: !!this.skillsContext,
         };
+    }
+
+    private async countInstalledSkills(): Promise<number> {
+        const registry = await runPluginBackend("list", []);
+        const plugins = registry.plugins || [];
+        let count = 0;
+        for (const plugin of plugins) {
+            const enabled = plugin.enabled !== false;
+            const onDisk = plugin.on_disk !== false;
+            const installPath = String(plugin.install_path || "");
+            if (!enabled || !onDisk || !installPath) continue;
+            try {
+                const entries = await readdirAsync(
+                    path.join(installPath, "skills")
+                );
+                count += entries.filter(
+                    (e) => e !== ".git" && !e.startsWith(".")
+                ).length;
+            } catch {
+                // no skills dir
+            }
+        }
+        return count;
     }
 
     async stop(): Promise<void> {
@@ -512,8 +547,11 @@ export class AgentCoreBridge {
 
     private rebuildBaseSystemPrompt(): void {
         this.baseSystemPrompt = this.buildBaseSystemPrompt();
-        if (this.pluginSystemContext) {
-            this.config.systemPrompt = `${this.baseSystemPrompt}\n\n${this.pluginSystemContext}`;
+        const contexts: string[] = [];
+        if (this.pluginSystemContext) contexts.push(this.pluginSystemContext);
+        if (this.skillsContext) contexts.push(this.skillsContext);
+        if (contexts.length) {
+            this.config.systemPrompt = `${this.baseSystemPrompt}\n\n${contexts.join("\n\n")}`;
         } else {
             this.config.systemPrompt = this.baseSystemPrompt;
         }
@@ -543,6 +581,62 @@ export class AgentCoreBridge {
         this.config.systemPrompt = `${this.baseSystemPrompt}\n\n${this.pluginSystemContext}`;
     }
 
+    /**
+     * Discover SKILL.md files from installed plugins and inject them into
+     * the system prompt so the agent can see available skills.
+     * Runs after startup hooks as a fallback when hooks fail to produce context.
+     */
+    private async injectSkillsFromPlugins(): Promise<void> {
+        if (this.skillsInjected) return;
+        this.skillsInjected = true;
+
+        const registry = await runPluginBackend("list", []);
+        const plugins = registry.plugins || [];
+        const skillSummaries: string[] = [];
+
+        for (const plugin of plugins) {
+            const enabled = plugin.enabled !== false;
+            const onDisk = plugin.on_disk !== false;
+            const installPath = String(plugin.install_path || "");
+            if (!enabled || !onDisk || !installPath) continue;
+
+            const skillsDir = path.join(installPath, "skills");
+            try {
+                const entries = await readdirAsync(skillsDir);
+                const skillDirs = entries.filter(
+                    (e) => e !== ".git" && !e.startsWith(".")
+                );
+                for (const skillDir of skillDirs) {
+                    const skillMd = path.join(skillsDir, skillDir, "SKILL.md");
+                    try {
+                        const content = await readFileAsync(skillMd, "utf8");
+                        const firstLines = content.split("\n").slice(0, 40).join("\n");
+                        const name = firstLines.includes("name:")
+                            ? firstLines.match(/^name:\s*(.+)$/im)?.[1]?.trim()
+                            : skillDir;
+                        const desc = firstLines.includes("description:")
+                            ? firstLines.match(/^description:\s*(.+)$/im)?.[1]?.trim()
+                            : "";
+                        if (name || desc) {
+                            skillSummaries.push(
+                                `## Skill: ${name || skillDir} (plugin: ${plugin.plugin_id || "unknown"})\n${desc ? `Description: ${desc}\n` : ""}\n---\n${firstLines}`
+                            );
+                        }
+                    } catch {
+                        // Skill has no SKILL.md, skip silently
+                    }
+                }
+            } catch {
+                // No skills directory, skip
+            }
+        }
+
+        if (!skillSummaries.length) return;
+
+        this.skillsContext = `<plugin-skills>\n${skillSummaries.join("\n\n")}\n</plugin-skills>`;
+        this.rebuildBaseSystemPrompt();
+    }
+
     private async runStartupHooksOnce(source = "startup"): Promise<void> {
         if (this.startupHooksRan || this.config.runtimeHooksEnabled === false)
             return;
@@ -561,6 +655,8 @@ export class AgentCoreBridge {
         if (result.status !== "error") {
             this.applyPluginHookContext(result);
         }
+        // Inject skills from plugins as a fallback when hooks produce no context
+        await this.injectSkillsFromPlugins();
     }
 
     private async fireSessionEnd(reason: string): Promise<void> {
@@ -589,7 +685,7 @@ export class AgentCoreBridge {
             const plugins = result.plugins || [];
             const hooks = result.session_start_hooks || {};
             const lines = [
-                `# Installed plugins`,
+                "# Installed plugins",
                 `Registry: ${result.plugins_dir || "unknown"}`,
             ];
             if (!plugins.length) {
@@ -620,7 +716,7 @@ export class AgentCoreBridge {
             const hooks = result.hooks || [];
             const source = String(result.source || "startup");
             const lines = [
-                `# Plugin SessionStart hooks`,
+                "# Plugin SessionStart hooks",
                 `Source: ${source}`,
                 `Registry: ${result.plugins_dir || "unknown"}`,
             ];

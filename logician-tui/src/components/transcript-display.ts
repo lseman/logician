@@ -1,13 +1,16 @@
 // ── Transcript display component ────────────────────────────────────────────────
 // Renders the full conversation history with streaming support and markdown.
+// Chunks are interleaved in chronological order: thinking → content → tool → ...
 
 import type { Component, Scrollable } from "../tui-core.ts";
 import { clampLineToWidth, visibleWidth } from "../tui-core.ts";
 import type {
     UserMessage,
     AssistantMessage,
+    AssistantChunk,
     ToolExecution,
     ThinkingDisplayStyle,
+    Turn,
 } from "../transcript.ts";
 
 interface Theme {
@@ -68,23 +71,16 @@ const BULLET_COLOR = "\x1b[38;5;147m"; // soft periwinkle, distinct from text
 const ORDERED_COLOR = "\x1b[38;5;147m";
 
 // ── Embedded reasoning stripping ──────────────────────────────────────────────
-// Some models emit their chain-of-thought inline as <think>…</think> within the
-// answer content (in addition to the separate reasoning stream). Remove it so the
-// rendered answer never duplicates the thinking block shown above it.
 function stripThinkTags(text: string): string {
     if (!text || !text.includes("<think")) return text;
-    // Drop closed blocks, then any trailing unclosed <think> (still streaming).
     return text
-        .replace(/<think>[\s\S]*?<\/think>/gi, "")
-        .replace(/<think>[\s\S]*$/i, "")
+        .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "")
+        .replace(/<think(?:ing)?>[\s\S]*$/i, "")
         .trimStart();
 }
 
 // ── Inline markdown renderer ──────────────────────────────────────────────────
 
-// If an opening/closing pseudo-XML tag starts at index i, return its length
-// (including angle brackets), else 0. Matches <Name>, </Name>, <Name ...attrs>,
-// and self-closing <Name/>. Tag name must start with a letter.
 function matchTagAt(text: string, i: number): number {
     const m = /^<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/.exec(
         text.slice(i, i + 200),
@@ -162,21 +158,21 @@ function renderInline(text: string, baseColor: string): string {
 // ── Block-level markdown ──────────────────────────────────────────────────────
 
 function renderMarkdownLine(line: string, baseColor: string): string {
-    // Headings — distinct color + weight per level.
+    // Headings
     const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
     if (heading) {
         const level = heading[1].length;
         const style = HEADING_STYLES[level - 1];
-        const marker = level <= 2 ? "▌ " : ""; // bar accent for h1/h2
+        const marker = level <= 2 ? "▌ " : "";
         return `${style.color}${marker}${style.deco}${style.color}${renderInlinePlain(heading[2])}${RESET}`;
     }
 
-    // Horizontal rule (---, ***, ___).
+    // Horizontal rule
     if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
         return `${DIM}\x1b[38;5;240m${"─".repeat(40)}${RESET}`;
     }
 
-    // List items (unordered/ordered) with indent-based nesting.
+    // List items
     const listMatch = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
     if (listMatch) {
         const indent = listMatch[1];
@@ -190,25 +186,22 @@ function renderMarkdownLine(line: string, baseColor: string): string {
         return `${indent}${BULLET_COLOR}${glyph}${RESET} ${renderInline(rest, baseColor)}`;
     }
 
-    // Blockquote.
+    // Blockquote
     const quote = line.match(/^(\s*)>\s?(.*)$/);
     if (quote) {
         return `${quote[1]}${DIM}\x1b[38;5;245m▏ ${renderInlinePlain(quote[2])}${RESET}`;
     }
 
-    // Plain text line — inline formatting (bold, code, italic, tags).
     return renderInline(line, baseColor);
 }
 
-// JSON syntax colors.
-const JSON_KEY_COLOR = "\x1b[38;5;111m"; // blue keys
-const JSON_STR_COLOR = "\x1b[38;5;114m"; // green strings
-const JSON_NUM_COLOR = "\x1b[38;5;179m"; // gold numbers
-const JSON_KW_COLOR = "\x1b[38;5;213m"; // magenta true/false/null
-const JSON_PUNCT_COLOR = "\x1b[38;5;244m"; // dim braces/commas
+// JSON syntax colors
+const JSON_KEY_COLOR = "\x1b[38;5;111m";
+const JSON_STR_COLOR = "\x1b[38;5;114m";
+const JSON_NUM_COLOR = "\x1b[38;5;179m";
+const JSON_KW_COLOR = "\x1b[38;5;213m";
+const JSON_PUNCT_COLOR = "\x1b[38;5;244m";
 
-// If a whole line is a JSON object/array, pretty-print it as colored, indented
-// rows. Returns null when the line is not standalone structured JSON.
 function formatJsonLine(rawLine: string): string[] | null {
     const trimmed = rawLine.trim();
     if (trimmed.length < 2) return null;
@@ -224,7 +217,6 @@ function formatJsonLine(rawLine: string): string[] | null {
         return null;
     }
     if (parsed === null || typeof parsed !== "object") return null;
-    // Skip trivial empties — not worth a multi-line block.
     if (
         Array.isArray(parsed)
             ? parsed.length === 0
@@ -237,12 +229,10 @@ function formatJsonLine(rawLine: string): string[] | null {
 }
 
 function colorizeJsonRow(row: string): string {
-    // Leading indentation, kept as-is.
     const indentMatch = row.match(/^(\s*)(.*)$/s);
     const indent = indentMatch?.[1] ?? "";
     let body = indentMatch?.[2] ?? row;
 
-    // Key: "name":  →  colored key + punct colon.
     const keyMatch = body.match(/^("(?:[^"\\]|\\.)*")(\s*:\s*)(.*)$/s);
     let prefix = "";
     if (keyMatch) {
@@ -250,7 +240,6 @@ function colorizeJsonRow(row: string): string {
         body = keyMatch[3];
     }
 
-    // Trailing comma is punctuation.
     let trailing = "";
     const commaMatch = body.match(/^(.*?)(,)\s*$/s);
     if (commaMatch) {
@@ -372,8 +361,6 @@ function normalizeEditArgs(
     return edits;
 }
 
-// Inline render with no leading baseColor: used inside heading/quote styling
-// where the caller already set the color and bold/code must preserve it.
 function renderInlinePlain(text: string): string {
     let out = "";
     let i = 0;
@@ -381,7 +368,7 @@ function renderInlinePlain(text: string): string {
         if (text.startsWith("**", i)) {
             const end = text.indexOf("**", i + 2);
             if (end !== -1) {
-                out += BOLD + text.slice(i + 2, end) + "\x1b[22m"; // bold off, keep color
+                out += BOLD + text.slice(i + 2, end) + "\x1b[22m";
                 i = end + 2;
                 continue;
             }
@@ -408,6 +395,60 @@ interface TranscriptDisplayOptions {
     maxMessageLength?: number;
 }
 
+// ── Chunk helpers ──────────────────────────────────────────────────────────────
+
+/** Get all thinking text from assistant chunks (joined). */
+function getChunkThinking(chunks: AssistantChunk[]): string {
+    return chunks
+        .filter((c) => c.type === "thinking")
+        .map((c) => c.contentText || "")
+        .join("\n\n");
+}
+
+/** Get all content text from assistant chunks (joined). */
+function getChunkContent(chunks: AssistantChunk[]): string {
+    return chunks
+        .filter((c) => c.type === "content")
+        .map((c) => c.contentText || "")
+        .join("");
+}
+
+/** Get all tool chunks from assistant chunks. */
+function getChunkTools(chunks: AssistantChunk[]): ToolExecution[] {
+    return chunks
+        .filter((c) => c.type === "tool" && c.tool)
+        .map((c) => c.tool!);
+}
+
+/** Check if any chunk is still streaming. */
+function hasStreamingChunk(chunks: AssistantChunk[]): boolean {
+    return chunks.some((c) => !c.isComplete);
+}
+
+/** Get the last thinking chunk (streaming or final). */
+function getLastThinkingChunk(chunks: AssistantChunk[]): AssistantChunk | undefined {
+    for (let i = chunks.length - 1; i >= 0; i--) {
+        if (chunks[i].type === "thinking") return chunks[i];
+    }
+    return undefined;
+}
+
+/** Get the last content chunk (streaming or final). */
+function getLastContentChunk(chunks: AssistantChunk[]): AssistantChunk | undefined {
+    for (let i = chunks.length - 1; i >= 0; i--) {
+        if (chunks[i].type === "content") return chunks[i];
+    }
+    return undefined;
+}
+
+/** Get the last tool chunk (streaming or final). */
+function getLastToolChunk(chunks: AssistantChunk[]): AssistantChunk | undefined {
+    for (let i = chunks.length - 1; i >= 0; i--) {
+        if (chunks[i].type === "tool") return chunks[i];
+    }
+    return undefined;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export class TranscriptDisplay implements Component, Scrollable {
@@ -424,11 +465,7 @@ export class TranscriptDisplay implements Component, Scrollable {
     private thinkingMode: ThinkingDisplayStyle;
     private toolsExpanded = false;
     private maxMessageLength: number;
-    private turns: Array<{
-        userMessage: UserMessage;
-        assistantMessage: AssistantMessage | null;
-        isComplete?: boolean;
-    }> = [];
+    private turns: Turn[] = [];
 
     constructor(options: TranscriptDisplayOptions = {}) {
         this.theme = { ...DEFAULT_THEME, ...options.theme };
@@ -464,8 +501,6 @@ export class TranscriptDisplay implements Component, Scrollable {
     setViewportHeight(height: number): void {
         if (this._viewportHeight === height) return;
         this._viewportHeight = height;
-        // Height change only affects the scrollbar overlay, not content layout —
-        // no need to drop the cached body.
     }
 
     // ── Scroll interface ─────────────────────────────────────────────────────
@@ -492,15 +527,9 @@ export class TranscriptDisplay implements Component, Scrollable {
             Math.max(0, this._scrollOffset - delta),
         );
         this._atBottom = this._scrollOffset >= maxScroll;
-        // Offset-only change: content lines are unchanged, so keep the cached body.
-        // Only the scrollbar column (drawn per-frame in render) needs updating.
     }
 
     scrollToBottom(): void {
-        // Always resolve the offset *after* the next content build (in render),
-        // because during streaming _totalHeight here is the previous frame's height.
-        // Pinning to a stale max would leave the view a few lines short of the real
-        // bottom and slice a window that re-shows already-visible lines.
         this._pendingScrollBottom = true;
         this._atBottom = true;
     }
@@ -515,9 +544,7 @@ export class TranscriptDisplay implements Component, Scrollable {
     }
 
     render(width: number): string[] {
-        // Fast path: content unchanged → reuse cached body, only repaint the current
-        // viewport and scrollbar. This keeps wheel scrolling cheap and prevents the
-        // core renderer from taking a second, potentially stale slice.
+        // Fast path: content unchanged → reuse cached body, only repaint viewport
         if (width === this.cachedWidth && this.cachedLines !== null) {
             this.resolvePendingScroll();
             return this.renderViewport(this.cachedLines, width);
@@ -527,9 +554,6 @@ export class TranscriptDisplay implements Component, Scrollable {
         this.cachedWidth = width;
 
         const renderedLines: string[] = [];
-        // Reserve one terminal column to avoid autowrap-at-EOL artifacts, and one
-        // column for our scrollbar. Printing in the physical last column is a known
-        // source of stale doubled fragments in terminal TUIs during fast redraws.
         const frameWidth = Math.max(1, width - 2);
         const contentWidth = Math.max(1, frameWidth - 2);
 
@@ -544,8 +568,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 
         for (let ti = 0; ti < this.turns.length; ti++) {
             const turn = this.turns[ti];
-            // Separate turns with a single blank line for a flowing layout - no
-            // boxed rule. The first turn relies on the top padding above.
             if (ti > 0) renderedLines.push(padToWidth(emptyLine));
 
             // User or system message
@@ -571,60 +593,148 @@ export class TranscriptDisplay implements Component, Scrollable {
                 }
             }
 
-            // Assistant message
+            // Assistant message — render chunks in seq order (chronological)
             if (turn.assistantMessage) {
-                const thinking = this.renderThinking(turn.assistantMessage);
-                for (const line of thinking)
-                    renderedLines.push(padToWidth(line));
+                const msg = turn.assistantMessage;
+                const chunks = msg.chunks;
+                const streaming = !msg.isComplete || hasStreamingChunk(chunks);
+                let lastThinkingSection = false;
 
-                const toolLines = this.renderTools(
-                    turn.assistantMessage,
-                    contentWidth,
-                );
-                for (const line of toolLines)
-                    renderedLines.push(padToWidth(line));
-
-                // Some models echo their reasoning inside the answer as <think>…</think>.
-                // Strip it so the response doesn't repeat the thinking we already showed.
-                const answer = stripThinkTags(turn.assistantMessage.content);
-
-                if (answer) {
-                    // Transition marker: once we leave the thinking phase and the real
-                    // answer begins, draw a subtle divider so the boundary is clear.
-                    if (thinking.length > 0) {
+                // Buffer consecutive content chunks so block-level markdown
+                // (tables, code fences) that spans chunk boundaries renders whole.
+                let contentBuffer = "";
+                const flushContent = () => {
+                    if (!contentBuffer) return;
+                    const answer = stripThinkTags(contentBuffer);
+                    contentBuffer = "";
+                    if (lastThinkingSection) {
                         renderedLines.push(
                             padToWidth(
                                 `${this.theme.separatorColor}${DIM}  ── response ──${RESET}`,
                             ),
                         );
+                        lastThinkingSection = false;
                     }
-                    const streaming =
-                        turn.assistantMessage.isComplete === false;
-                    const contentLines = this.renderMarkdownLines(
-                        answer,
-                        contentWidth - 2,
-                        streaming,
-                    );
-                    for (const line of contentLines)
-                        renderedLines.push(padToWidth(line));
+                    if (answer) {
+                        const contentLines = this.renderMarkdownLines(
+                            answer,
+                            contentWidth - 2,
+                            streaming,
+                        );
+                        for (const line of contentLines)
+                            renderedLines.push(padToWidth(line));
+                    }
+                };
+
+                for (const chunk of chunks) {
+                    if (chunk.type === "content") {
+                        contentBuffer += chunk.contentText || "";
+                        continue;
+                    }
+                    flushContent();
+                    if (chunk.type === "thinking") {
+                        // Render thinking block
+                        const thinkLines = this.renderThinkingChunk(
+                            chunk,
+                            streaming,
+                        );
+                        for (const line of thinkLines)
+                            renderedLines.push(padToWidth(line));
+                        lastThinkingSection = true;
+                    } else if (chunk.type === "tool" && chunk.tool) {
+                        lastThinkingSection = false;
+                        const toolLines = this.renderTool(
+                            chunk.tool,
+                            width,
+                        );
+                        for (const line of toolLines)
+                            renderedLines.push(padToWidth(line));
+                        renderedLines.push(padToWidth(emptyLine));
+                    }
+                }
+                flushContent();
+
+                // Streaming cursor on last chunk
+                if (streaming && chunks.length > 0) {
+                    const lastChunk = chunks[chunks.length - 1];
+                    if (lastChunk.type === "content" && lastChunk.contentText) {
+                        const answer = stripThinkTags(lastChunk.contentText);
+                        if (answer) {
+                            const lastLine = answer.split("\n").pop() || "";
+                            if (lastLine) {
+                                const prev = renderedLines[renderedLines.length - 1];
+                                if (prev !== undefined) {
+                                    renderedLines[renderedLines.length - 1] =
+                                        prev + STREAM_CURSOR;
+                                }
+                            }
+                        }
+                    } else if (lastChunk.type === "thinking") {
+                        const prev = renderedLines[renderedLines.length - 1];
+                        if (prev !== undefined) {
+                            renderedLines[renderedLines.length - 1] =
+                                prev + STREAM_CURSOR;
+                        }
+                    }
                 }
             }
-
-            renderedLines.push(padToWidth(""));
         }
 
         renderedLines.push(padToWidth(emptyLine));
         this._totalHeight = renderedLines.length;
 
-        // Cache the scrollbar-free content first so resolvePendingScroll/applyScrollbar
-        // see the freshly built height, then pin to bottom if a scroll was pending.
         this.cachedLines = renderedLines;
         this.resolvePendingScroll();
         return this.renderViewport(renderedLines, width);
     }
 
-    // Pin the offset to the true bottom once the current content height is known.
-    // Deferred from scrollToBottom() so streaming never pins against a stale height.
+    // ── Chunk rendering ──────────────────────────────────────────────────────
+
+    private renderThinkingChunk(
+        chunk: AssistantChunk,
+        streaming: boolean,
+    ): string[] {
+        const text = chunk.contentText || "";
+        if (text.trim().length === 0) return [];
+
+        const lines: string[] = [];
+
+        switch (this.thinkingMode) {
+            case "collapsed": {
+                const preview = text.trim().slice(0, 100);
+                lines.push(
+                    `${THINKING_PREFIX}${DIM}${preview ? `thinking · ${preview}...` : "thinking"}${RESET}`,
+                );
+                break;
+            }
+            case "summary": {
+                lines.push(
+                    `${THINKING_PREFIX}\x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
+                );
+                break;
+            }
+            case "expanded": {
+                lines.push(`${THINKING_PREFIX}${BOLD}reasoning${RESET}`);
+                const wrapped = this.wrapText(
+                    text,
+                    this.currentWidth - 4,
+                );
+                for (let li = 0; li < wrapped.length; li++) {
+                    let rendered = `${DIM}  ${renderInline(wrapped[li], this.theme.thinkingColor + DIM)}`;
+                    if (streaming && !chunk.isComplete) {
+                        rendered += STREAM_CURSOR;
+                    }
+                    lines.push(rendered);
+                }
+                break;
+            }
+        }
+
+        return lines;
+    }
+
+    // ── Scroll helpers ───────────────────────────────────────────────────────
+
     private resolvePendingScroll(): void {
         if (!this._pendingScrollBottom) return;
         this._scrollOffset = Math.max(
@@ -635,18 +745,10 @@ export class TranscriptDisplay implements Component, Scrollable {
         this._pendingScrollBottom = false;
     }
 
-    // Slice the current viewport and overlay the scrollbar column in one place.
-    // Keeping windowing here avoids a race where the component paints a scrollbar
-    // for one offset and the outer renderer slices the content with another.
     private renderViewport(content: string[], width: number): string[] {
         const viewportHeight = this._viewportHeight || 0;
-        if (viewportHeight <= 0) {
-            return content;
-        }
-
-        if (content.length <= viewportHeight) {
-            return content;
-        }
+        if (viewportHeight <= 0) return content;
+        if (content.length <= viewportHeight) return content;
 
         const maxScroll = content.length - viewportHeight;
         this._scrollOffset = Math.min(
@@ -661,7 +763,9 @@ export class TranscriptDisplay implements Component, Scrollable {
         );
         const thumbHeight = Math.max(
             1,
-            Math.floor((viewportHeight * viewportHeight) / content.length),
+            Math.floor(
+                (viewportHeight * viewportHeight) / content.length,
+            ),
         );
         const thumbStart =
             maxScroll > 0
@@ -686,13 +790,7 @@ export class TranscriptDisplay implements Component, Scrollable {
         return visible;
     }
 
-    setTurns(
-        turns: Array<{
-            userMessage: UserMessage;
-            assistantMessage: AssistantMessage | null;
-            isComplete?: boolean;
-        }>,
-    ): void {
+    setTurns(turns: Turn[]): void {
         this.turns = turns;
         this.invalidate();
     }
@@ -701,64 +799,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 
     private _scrollbarVisible: boolean = false;
     private _viewportHeight: number = 0;
-
-    private renderThinking(msg: AssistantMessage): string[] {
-        if (msg.thinkingBlocks.length === 0) return [];
-        const lines: string[] = [];
-
-        switch (this.thinkingMode) {
-            case "collapsed": {
-                const summary = msg.thinkingBlocks
-                    .map((t) => t.trim())
-                    .filter(Boolean);
-                if (summary.length === 0) return [];
-                const preview = summary[0]?.slice(0, 100) || "";
-                lines.push(
-                    `${THINKING_PREFIX}${DIM}${preview ? `thinking · ${preview}...` : "thinking"}${RESET}`,
-                );
-                break;
-            }
-            case "summary": {
-                const blocks = msg.thinkingBlocks
-                    .map((t) => t.trim())
-                    .filter(Boolean);
-                for (const block of blocks.slice(0, 3)) {
-                    lines.push(
-                        `${THINKING_PREFIX}\x1b[2m${block.slice(0, 150)}\x1b[0m`,
-                    );
-                }
-                break;
-            }
-            case "expanded": {
-                const blocks = msg.thinkingBlocks
-                    .map((t) => t.trim())
-                    .filter(Boolean);
-                const streaming =
-                    msg.isComplete === false && msg.content.length === 0;
-                lines.push(`${THINKING_PREFIX}${BOLD}reasoning${RESET}`);
-                for (let bi = 0; bi < blocks.length; bi++) {
-                    const wrapped = this.wrapText(
-                        blocks[bi],
-                        this.currentWidth - 4,
-                    );
-                    for (let li = 0; li < wrapped.length; li++) {
-                        let rendered = `${DIM}  ${renderInline(wrapped[li], this.theme.thinkingColor + DIM)}`;
-                        if (
-                            streaming &&
-                            bi === blocks.length - 1 &&
-                            li === wrapped.length - 1
-                        ) {
-                            rendered += STREAM_CURSOR;
-                        }
-                        lines.push(rendered);
-                    }
-                }
-                break;
-            }
-        }
-
-        return lines;
-    }
 
     private renderMarkdownLines(
         text: string,
@@ -779,7 +819,9 @@ export class TranscriptDisplay implements Component, Scrollable {
                 if (inCodeBlock) {
                     const codeLines = codeContent.split("\n");
                     for (const cl of codeLines) {
-                        lines.push(`${CODE_BLOCK_COLOR}${DIM}  ${cl}${RESET}`);
+                        lines.push(
+                            `${CODE_BLOCK_COLOR}${DIM}  ${cl}${RESET}`,
+                        );
                     }
                     lines.push(
                         `${CODE_BLOCK_COLOR}${DIM}  \x60\x60\x60${RESET}`,
@@ -788,7 +830,9 @@ export class TranscriptDisplay implements Component, Scrollable {
                     inCodeBlock = false;
                 } else {
                     inCodeBlock = true;
-                    lines.push(`${CODE_BLOCK_COLOR}${DIM}  ${rawLine}${RESET}`);
+                    lines.push(
+                        `${CODE_BLOCK_COLOR}${DIM}  ${rawLine}${RESET}`,
+                    );
                 }
                 continue;
             }
@@ -824,7 +868,6 @@ export class TranscriptDisplay implements Component, Scrollable {
                 continue;
             }
 
-            // Standalone single-line JSON object/array → pretty-print, indented + colored.
             const jsonLines = formatJsonLine(rawLine);
             if (jsonLines) {
                 for (let ji = 0; ji < jsonLines.length; ji++) {
@@ -846,8 +889,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 
             const rendered = renderMarkdownLine(rawLine, baseColor);
             const wrapped = this.wrapText(rendered, maxLen);
-            // A blank source line still emits one colored, full-reset row so the gap
-            // between paragraphs keeps the message color instead of a bare newline.
             if (
                 wrapped.length === 0 ||
                 (wrapped.length === 1 && wrapped[0] === "")
@@ -856,9 +897,6 @@ export class TranscriptDisplay implements Component, Scrollable {
                 continue;
             }
             for (let wi = 0; wi < wrapped.length; wi++) {
-                // Re-apply baseColor at the start of every wrapped segment: wrapText
-                // splits a single colored line into pieces and the SGR codes do not
-                // carry across the break, so continuation rows would lose their color.
                 const seg = `${baseColor}${wrapped[wi]}${RESET}`;
                 let line =
                     wi === 0
@@ -876,9 +914,13 @@ export class TranscriptDisplay implements Component, Scrollable {
         }
 
         if (inCodeBlock && codeContent) {
-            lines.push(`${CODE_BLOCK_COLOR}${DIM}  [code block open]${RESET}`);
+            lines.push(
+                `${CODE_BLOCK_COLOR}${DIM}  [code block open]${RESET}`,
+            );
             for (const cl of codeContent.split("\n")) {
-                lines.push(`${CODE_BLOCK_COLOR}${DIM}  ${cl}${RESET}`);
+                lines.push(
+                    `${CODE_BLOCK_COLOR}${DIM}  ${cl}${RESET}`,
+                );
             }
         }
 
@@ -900,13 +942,35 @@ export class TranscriptDisplay implements Component, Scrollable {
     private isTableSeparator(line: string): boolean {
         const cells = this.splitTableRow(line);
         if (cells.length < 2) return false;
-        return cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+        return cells.every((cell) => /^:?-+:?$/.test(cell.trim()));
     }
 
     private splitTableRow(line: string): string[] {
         const trimmed = line.trim();
         const withoutEdges = trimmed.replace(/^\|/, "").replace(/\|$/, "");
-        return withoutEdges.split("|").map((cell) => cell.trim());
+        const cells: string[] = [];
+        let current = "";
+        let escaped = false;
+        for (const ch of withoutEdges) {
+            if (escaped) {
+                current += ch === "|" ? "|" : `\\${ch}`;
+                escaped = false;
+                continue;
+            }
+            if (ch === "\\") {
+                escaped = true;
+                continue;
+            }
+            if (ch === "|") {
+                cells.push(current.trim());
+                current = "";
+                continue;
+            }
+            current += ch;
+        }
+        if (escaped) current += "\\";
+        cells.push(current.trim());
+        return cells;
     }
 
     private renderTable(rawLines: string[], maxLen: number): string[] {
@@ -932,12 +996,17 @@ export class TranscriptDisplay implements Component, Scrollable {
             columnCount * minColumnWidth,
             maxLen - gapWidth,
         );
-        const naturalWidths = Array.from({ length: columnCount }, (_, col) => {
-            return Math.max(
-                minColumnWidth,
-                ...normalizedRows.map((row) => visibleWidth(row[col] || "")),
-            );
-        });
+        const naturalWidths = Array.from(
+            { length: columnCount },
+            (_, col) => {
+                return Math.max(
+                    minColumnWidth,
+                    ...normalizedRows.map(
+                        (row) => visibleWidth(row[col] || ""),
+                    ),
+                );
+            },
+        );
 
         let widths = naturalWidths.slice();
         let total = widths.reduce((a, b) => a + b, 0);
@@ -948,12 +1017,20 @@ export class TranscriptDisplay implements Component, Scrollable {
                 return Math.min(width, 24);
             });
             const reserved = widths.reduce(
-                (sum, width, idx) => (idx === widest ? sum : sum + width),
+                (sum, width, idx) =>
+                    idx === widest ? sum : sum + width,
                 0,
             );
-            widths[widest] = Math.max(minColumnWidth, usableWidth - reserved);
-            while (widths.reduce((a, b) => a + b, 0) > usableWidth) {
-                const shrinkIndex = widths.indexOf(Math.max(...widths));
+            widths[widest] = Math.max(
+                minColumnWidth,
+                usableWidth - reserved,
+            );
+            while (
+                widths.reduce((a, b) => a + b, 0) > usableWidth
+            ) {
+                const shrinkIndex = widths.indexOf(
+                    Math.max(...widths),
+                );
                 if (widths[shrinkIndex] <= minColumnWidth) break;
                 widths[shrinkIndex]--;
             }
@@ -971,7 +1048,9 @@ export class TranscriptDisplay implements Component, Scrollable {
             return (
                 borderColor +
                 left +
-                widths.map((width) => fill.repeat(width + 2)).join(join) +
+                widths
+                    .map((width) => fill.repeat(width + 2))
+                    .join(join) +
                 right +
                 RESET
             );
@@ -979,13 +1058,21 @@ export class TranscriptDisplay implements Component, Scrollable {
 
         const out: string[] = [];
         out.push(border("+", "-", "+", "+"));
-        out.push(...this.renderTableRow(header, widths, headerColor, true));
+        out.push(
+            ...this.renderTableRow(header, widths, headerColor, true),
+        );
         out.push(border("+", "-", "+", "+"));
         for (const row of rows) {
             const normalized = row.slice(0, columnCount);
-            while (normalized.length < columnCount) normalized.push("");
+            while (normalized.length < columnCount)
+                normalized.push("");
             out.push(
-                ...this.renderTableRow(normalized, widths, rowColor, false),
+                ...this.renderTableRow(
+                    normalized,
+                    widths,
+                    rowColor,
+                    false,
+                ),
             );
         }
         out.push(border("+", "-", "+", "+"));
@@ -1009,23 +1096,36 @@ export class TranscriptDisplay implements Component, Scrollable {
         const borderColor = "\x1b[38;5;238m";
 
         for (let row = 0; row < rowHeight; row++) {
-            const renderedCells = wrappedCells.map((cellLines, idx) => {
-                const raw = cellLines[row] || "";
-                const styled = renderInline(raw, header ? color + BOLD : color);
-                const padding = " ".repeat(
-                    Math.max(0, widths[idx] - visibleWidth(raw)),
-                );
-                return ` ${styled}${padding} `;
-            });
+            const renderedCells = wrappedCells.map(
+                (cellLines, idx) => {
+                    const raw = cellLines[row] || "";
+                    const styled = renderInline(
+                        raw,
+                        header ? color + BOLD : color,
+                    );
+                    const padding = " ".repeat(
+                        Math.max(
+                            0,
+                            widths[idx] - visibleWidth(raw),
+                        ),
+                    );
+                    return ` ${styled}${padding} `;
+                },
+            );
             lines.push(
-                `${borderColor}|${RESET}${renderedCells.join(`${borderColor}|${RESET}`)}${borderColor}|${RESET}`,
+                `${borderColor}|${RESET}${renderedCells.join(
+                    `${borderColor}|${RESET}`,
+                )}${borderColor}|${RESET}`,
             );
         }
 
         return lines;
     }
 
-    private wrapPlainCell(text: string, width: number): string[] {
+    private wrapPlainCell(
+        text: string,
+        width: number,
+    ): string[] {
         if (!text) return [""];
         const words = text.split(/\s+/);
         const lines: string[] = [];
@@ -1051,7 +1151,8 @@ export class TranscriptDisplay implements Component, Scrollable {
                 current += " " + word;
             } else {
                 lines.push(current);
-                if (visibleWidth(word) > width) pushHardWrapped(word);
+                if (visibleWidth(word) > width)
+                    pushHardWrapped(word);
                 else current = word;
             }
         }
@@ -1059,16 +1160,10 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines.length > 0 ? lines : [""];
     }
 
-    private renderTools(msg: AssistantMessage, width: number): string[] {
-        if (msg.tools.length === 0) return [];
-        const lines: string[] = [];
-        for (const tool of msg.tools) {
-            lines.push(...this.renderTool(tool, width));
-        }
-        return lines;
-    }
-
-    private renderTool(tool: ToolExecution, width: number): string[] {
+    private renderTool(
+        tool: ToolExecution,
+        width: number,
+    ): string[] {
         const lines: string[] = [];
         const isError = tool.isError ? ERROR_PREFIX : TOOL_PREFIX;
         const status = tool.isError
@@ -1094,8 +1189,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 
         if (!this.toolsExpanded) return lines;
 
-        for (const detailLine of this.toolDetailLines(tool, width - 2)) {
-            const wrapped = this.wrapText(detailLine, Math.max(20, width - 4));
+        for (const detailLine of this.toolDetailLines(
+            tool,
+            width - 2,
+        )) {
+            const wrapped = this.wrapText(
+                detailLine,
+                Math.max(20, width - 4),
+            );
             for (const line of wrapped) {
                 lines.push(`${TOOL_DETAIL_PREFIX}${line}`);
             }
@@ -1106,7 +1207,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 
     private toolSummary(tool: ToolExecution): string {
         const args = tool.args || {};
-        const path = stringArg(args, "path") || stringArg(args, "file_path");
+        const path =
+            stringArg(args, "path") || stringArg(args, "file_path");
         if (tool.tool_name === "write_file") {
             const content = stringArg(args, "content") || "";
             const lineCount = content ? content.split("\n").length : 0;
@@ -1119,8 +1221,13 @@ export class TranscriptDisplay implements Component, Scrollable {
                 .join(" · ");
         }
         if (tool.tool_name === "edit_file") {
-            const editCount = Array.isArray(args.edits) ? args.edits.length : 1;
-            return [path, `${editCount} edit${editCount === 1 ? "" : "s"}`]
+            const editCount = Array.isArray(args.edits)
+                ? args.edits.length
+                : 1;
+            return [
+                path,
+                `${editCount} edit${editCount === 1 ? "" : "s"}`,
+            ]
                 .filter(Boolean)
                 .join(" · ");
         }
@@ -1135,8 +1242,12 @@ export class TranscriptDisplay implements Component, Scrollable {
         }
         if (tool.tool_name.startsWith("mcp__")) {
             return [
-                tool.tool_name.replace(/^mcp__/, "").replace(/__/g, "."),
-                tool.result ? compactText(tool.result).slice(0, 80) : "",
+                tool.tool_name
+                    .replace(/^mcp__/, "")
+                    .replace(/__/g, "."),
+                tool.result
+                    ? compactText(tool.result).slice(0, 80)
+                    : "",
             ]
                 .filter(Boolean)
                 .join(" · ");
@@ -1146,13 +1257,18 @@ export class TranscriptDisplay implements Component, Scrollable {
         return result ? compactText(result).slice(0, 80) : "";
     }
 
-    private toolDetailLines(tool: ToolExecution, width: number): string[] {
+    private toolDetailLines(
+        tool: ToolExecution,
+        width: number,
+    ): string[] {
         const args = tool.args || {};
         const lines: string[] = [];
         const result = tool.result ?? tool.partialResult;
 
         if (tool.isError && result && isPermissionRejection(result)) {
-            lines.push(...this.renderPermissionBlock(result, width));
+            lines.push(
+                ...this.renderPermissionBlock(result, width),
+            );
             return lines;
         }
 
@@ -1181,7 +1297,9 @@ export class TranscriptDisplay implements Component, Scrollable {
             ) &&
             !tool.tool_name.startsWith("mcp__")
         ) {
-            lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
+            lines.push(
+                `${BOLD}${tool.isError ? "error" : "result"}${RESET}`,
+            );
             lines.push(...this.previewBlock(result, width));
         } else if (!result) {
             lines.push(`${DIM}waiting for result...${RESET}`);
@@ -1190,10 +1308,14 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
-    private renderWriteDetails(tool: ToolExecution, width: number): string[] {
+    private renderWriteDetails(
+        tool: ToolExecution,
+        width: number,
+    ): string[] {
         const args = tool.args || {};
         const lines: string[] = [];
-        const path = stringArg(args, "path") || stringArg(args, "file_path");
+        const path =
+            stringArg(args, "path") || stringArg(args, "file_path");
         const content = stringArg(args, "content");
         const result = tool.result ?? tool.partialResult;
         if (path) lines.push(`${BOLD}path${RESET} ${path}`);
@@ -1208,16 +1330,22 @@ export class TranscriptDisplay implements Component, Scrollable {
             lines.push(`${BOLD}diff${RESET}`);
             lines.push(...this.renderDiffBlock(diff, width));
         } else if (result) {
-            lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
+            lines.push(
+                `${BOLD}${tool.isError ? "error" : "result"}${RESET}`,
+            );
             lines.push(...this.previewBlock(result, width));
         }
         return lines;
     }
 
-    private renderEditDetails(tool: ToolExecution, width: number): string[] {
+    private renderEditDetails(
+        tool: ToolExecution,
+        width: number,
+    ): string[] {
         const args = tool.args || {};
         const lines: string[] = [];
-        const path = stringArg(args, "path") || stringArg(args, "file_path");
+        const path =
+            stringArg(args, "path") || stringArg(args, "file_path");
         const result = tool.result ?? tool.partialResult;
         if (path) lines.push(`${BOLD}path${RESET} ${path}`);
         const edits = normalizeEditArgs(args);
@@ -1233,7 +1361,9 @@ export class TranscriptDisplay implements Component, Scrollable {
             lines.push(`${BOLD}diff${RESET}`);
             lines.push(...this.renderDiffBlock(diff, width));
         } else if (result) {
-            lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
+            lines.push(
+                `${BOLD}${tool.isError ? "error" : "result"}${RESET}`,
+            );
             lines.push(...this.previewBlock(result, width));
         }
         return lines;
@@ -1245,7 +1375,8 @@ export class TranscriptDisplay implements Component, Scrollable {
     ): string[] {
         const args = tool.args || {};
         const lines: string[] = [];
-        const path = stringArg(args, "path") || stringArg(args, "file_path");
+        const path =
+            stringArg(args, "path") || stringArg(args, "file_path");
         if (path) lines.push(`${BOLD}path${RESET} ${path}`);
         if (args.staged) lines.push(`${BOLD}mode${RESET} staged`);
         const result = tool.result ?? tool.partialResult;
@@ -1253,13 +1384,20 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
-    private renderBashDetails(tool: ToolExecution, width: number): string[] {
+    private renderBashDetails(
+        tool: ToolExecution,
+        width: number,
+    ): string[] {
         const args = tool.args || {};
         const lines: string[] = [];
         const command = stringArg(args, "command") || "";
-        const timeout = args.timeout ? `${Number(args.timeout)}ms` : "30000ms";
+        const timeout = args.timeout
+            ? `${Number(args.timeout)}ms`
+            : "30000ms";
         if (command) {
-            lines.push(`${BOLD}command${RESET} ${DIM}${timeout}${RESET}`);
+            lines.push(
+                `${BOLD}command${RESET} ${DIM}${timeout}${RESET}`,
+            );
             lines.push(...this.previewBlock(command, width));
         }
         const result = tool.result ?? tool.partialResult;
@@ -1272,15 +1410,22 @@ export class TranscriptDisplay implements Component, Scrollable {
             lines.push(`${BOLD}${label}${RESET}`);
             lines.push(...this.renderTerminalBlock(result, width));
         } else {
-            lines.push(`${DIM}waiting for command output...${RESET}`);
+            lines.push(
+                `${DIM}waiting for command output...${RESET}`,
+            );
         }
         return lines;
     }
 
-    private renderMcpDetails(tool: ToolExecution, width: number): string[] {
+    private renderMcpDetails(
+        tool: ToolExecution,
+        width: number,
+    ): string[] {
         const lines: string[] = [];
         const args = tool.args || {};
-        const serverParts = tool.tool_name.replace(/^mcp__/, "").split("__");
+        const serverParts = tool.tool_name
+            .replace(/^mcp__/, "")
+            .split("__");
         if (serverParts.length >= 2) {
             lines.push(`${BOLD}server${RESET} ${serverParts[0]}`);
             lines.push(
@@ -1302,7 +1447,10 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
-    private renderPermissionBlock(result: string, width: number): string[] {
+    private renderPermissionBlock(
+        result: string,
+        width: number,
+    ): string[] {
         const lines = [
             `${WARNING_COLOR}${BOLD}permission / rejection${RESET}`,
             ...this.previewBlock(result, width),
@@ -1310,7 +1458,10 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
-    private renderMcpResultBlocks(result: string, width: number): string[] {
+    private renderMcpResultBlocks(
+        result: string,
+        width: number,
+    ): string[] {
         const parsed = parseJsonMaybe(result);
         if (!parsed) return this.previewBlock(result, width);
         const content =
@@ -1322,10 +1473,14 @@ export class TranscriptDisplay implements Component, Scrollable {
             content.forEach((item, index) => {
                 const block = item as Record<string, unknown>;
                 lines.push(
-                    `${DIM}block ${index + 1}: ${String(block.type || "content")}${RESET}`,
+                    `${DIM}block ${index + 1}: ${String(
+                        block.type || "content",
+                    )}${RESET}`,
                 );
                 if (typeof block.text === "string") {
-                    lines.push(...this.previewBlock(block.text, width));
+                    lines.push(
+                        ...this.previewBlock(block.text, width),
+                    );
                 } else {
                     lines.push(
                         ...this.previewBlock(
@@ -1337,20 +1492,31 @@ export class TranscriptDisplay implements Component, Scrollable {
             });
             return lines;
         }
-        return this.previewBlock(JSON.stringify(parsed, null, 2), width);
+        return this.previewBlock(
+            JSON.stringify(parsed, null, 2),
+            width,
+        );
     }
 
-    private renderDiffBlock(diff: string, width: number): string[] {
+    private renderDiffBlock(
+        diff: string,
+        width: number,
+    ): string[] {
         if (!diff.trim()) return [DIM + "(no diff)" + RESET];
         const rawLines = this.truncateText(diff).split("\n");
         const lines: string[] = [];
         for (const raw of rawLines) {
             const color = diffLineColor(raw);
-            const content = raw.length ? raw.replace(/\t/g, "    ") : " ";
+            const content = raw.length
+                ? raw.replace(/\t/g, "    ")
+                : " ";
             if (visibleWidth(content) <= width) {
                 lines.push(`${color}${content}${RESET}`);
             } else {
-                for (const wrapped of this.wrapText(content, width)) {
+                for (const wrapped of this.wrapText(
+                    content,
+                    width,
+                )) {
                     lines.push(`${color}${wrapped}${RESET}`);
                 }
             }
@@ -1358,19 +1524,28 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
-    private renderTerminalBlock(text: string, width: number): string[] {
-        if (!text) return [DIM + "(no output)" + RESET];
+    private renderTerminalBlock(
+        text: string,
+        width: number,
+    ): string[] {
+        if (!text)
+            return [DIM + "(no output)" + RESET];
         const rawLines = this.truncateText(text).split("\n");
         const lines: string[] = [];
         for (const raw of rawLines) {
-            const content = raw.length ? raw.replace(/\t/g, "    ") : " ";
+            const content = raw.length
+                ? raw.replace(/\t/g, "    ")
+                : " ";
             const color = raw.startsWith("Error:")
                 ? DIFF_REMOVE_COLOR
                 : TERMINAL_COLOR;
             if (visibleWidth(content) <= width) {
                 lines.push(`${color}${content}${RESET}`);
             } else {
-                for (const wrapped of this.wrapText(content, width)) {
+                for (const wrapped of this.wrapText(
+                    content,
+                    width,
+                )) {
                     lines.push(`${color}${wrapped}${RESET}`);
                 }
             }
@@ -1378,24 +1553,39 @@ export class TranscriptDisplay implements Component, Scrollable {
         return lines;
     }
 
-    private previewBlock(text: string, width: number): string[] {
+    private previewBlock(
+        text: string,
+        width: number,
+    ): string[] {
         if (!text) return [DIM + "(empty)" + RESET];
         const rawLines = this.truncateText(text).split("\n");
         const lines: string[] = [];
         for (const raw of rawLines) {
-            const formatted = raw.length ? raw.replace(/\t/g, "    ") : " ";
+            const formatted = raw.length
+                ? raw.replace(/\t/g, "    ")
+                : " ";
             if (visibleWidth(formatted) <= width) {
-                lines.push(`${CODE_BLOCK_COLOR}${formatted}${RESET}`);
+                lines.push(
+                    `${CODE_BLOCK_COLOR}${formatted}${RESET}`,
+                );
             } else {
-                for (const wrapped of this.wrapText(formatted, width)) {
-                    lines.push(`${CODE_BLOCK_COLOR}${wrapped}${RESET}`);
+                for (const wrapped of this.wrapText(
+                    formatted,
+                    width,
+                )) {
+                    lines.push(
+                        `${CODE_BLOCK_COLOR}${wrapped}${RESET}`,
+                    );
                 }
             }
         }
         return lines;
     }
 
-    private wrapText(text: string, maxLineLength: number): string[] {
+    private wrapText(
+        text: string,
+        maxLineLength: number,
+    ): string[] {
         const lines: string[] = [];
         const rawLines = text.split("\n");
         for (const rawLine of rawLines) {
@@ -1408,7 +1598,9 @@ export class TranscriptDisplay implements Component, Scrollable {
                     if (current.length === 0) {
                         current = word;
                     } else if (
-                        visibleWidth(current) + 1 + visibleWidth(word) <=
+                        visibleWidth(current) +
+                            1 +
+                            visibleWidth(word) <=
                         maxLineLength
                     ) {
                         current += " " + word;

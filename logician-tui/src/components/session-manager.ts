@@ -1,9 +1,7 @@
 // ── Session manager overlay ──────────────────────────────────────────────────
 // List, search, and switch sessions.
 
-import type { Component } from "../tui-core.ts";
-import { visibleWidth } from "../tui-core.ts";
-import { filterSlashCommands } from "../slash-commands.ts";
+import { visibleWidth, type Component } from "../tui-core.ts";
 
 const BORDERS = {
     top: "┌",

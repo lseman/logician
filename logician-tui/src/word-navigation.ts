@@ -14,8 +14,6 @@ export function findWordBackward(text: string, cursor: number): number {
     // Skip non-word chars going backward
     let i = segCursor;
     while (i > 0 && !isWordChar(segments[i - 1])) i--;
-    const start = i;
-
     // Skip word chars going backward
     while (i > 0 && isWordChar(segments[i - 1])) i--;
     return i;
@@ -30,7 +28,6 @@ export function findWordForward(text: string, cursor: number): number {
     // Skip non-word chars going forward
     let i = segCursor;
     while (i < segments.length && !isWordChar(segments[i])) i++;
-    const start = i;
 
     // Skip word chars going forward
     while (i < segments.length && isWordChar(segments[i])) i++;

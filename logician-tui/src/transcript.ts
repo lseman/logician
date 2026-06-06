@@ -1,5 +1,6 @@
 // ── Transcript management ──────────────────────────────────────────────────────
-// Maintains the full conversation history with streaming state
+// Interleaved chunk model — chunks ordered by arrival time.
+// Rendering follows chronological order: thinking → response → tool → thinking …
 
 import type {
     ParsedBridgeEvent,
@@ -11,6 +12,8 @@ import type {
 
 export type ThinkingDisplayStyle = "collapsed" | "summary" | "expanded";
 
+// ── Tool execution (used by tool chunks) ──────────────────────────────────────
+
 export interface ToolExecution {
     tool: string;
     tool_name: string;
@@ -21,11 +24,23 @@ export interface ToolExecution {
     isError: boolean;
 }
 
+// ── Chunk model ───────────────────────────────────────────────────────────────
+// Ordered, typed chunks replace the old clustered [thinking[], content, tools[]].
+
+export interface AssistantChunk {
+    seq: number;         // insertion sequence — defines display order
+    type: "thinking" | "content" | "tool";
+    // per-type fields
+    contentText?: string;     // for 'thinking' and 'content'
+    tool?: ToolExecution;     // for 'tool'
+    isComplete: boolean;      // true when chunk is finalised
+}
+
+// ── Message types ─────────────────────────────────────────────────────────────
+
 export interface AssistantMessage {
     type: "assistant";
-    thinkingBlocks: string[];
-    content: string;
-    tools: ToolExecution[];
+    chunks: AssistantChunk[];       // ordered interleaved chunks
     isComplete: boolean;
 }
 
@@ -104,15 +119,7 @@ export class Transcript {
     }
 
     private handleTurnStart(event: { turn_id: string }): void {
-        // The user-submitted turn was created locally with a synthetic id (addTurn).
-        // The bridge assigns its own turn_id on turn_start — adopt it onto the most
-        // recent turn that has no assistant response yet so streamed tokens land on
-        // the right turn. Fall back to creating a new turn if none is pending.
         if (!event.turn_id) return;
-        // Adopt the bridge's turn_id onto the most recent turn that has no assistant
-        // response yet so streamed tokens land on the right turn. If there is no
-        // pending turn (e.g. duplicate turn_start), just point currentTurnId at the
-        // latest turn — never fabricate an empty-user turn.
         const pending = [...this.state.turns]
             .reverse()
             .find((t) => !t.isComplete && t.assistantMessage === null);
@@ -125,20 +132,72 @@ export class Transcript {
         }
     }
 
+    // ── Chunk helpers ──────────────────────────────────────────────────────
+
+    /** Get the last chunk of a given type that is still incomplete (streaming). */
+    private lastStreamingChunkOfType(
+        type: "thinking" | "content" | "tool",
+        chunks: AssistantChunk[],
+    ): AssistantChunk | undefined {
+        for (let i = chunks.length - 1; i >= 0; i--) {
+            if (chunks[i].type === type && !chunks[i].isComplete) {
+                return chunks[i];
+            }
+        }
+        return undefined;
+    }
+
+    private ensureAssistant(turn: Turn): AssistantMessage {
+        if (!turn.assistantMessage) {
+            turn.assistantMessage = {
+                type: "assistant",
+                chunks: [],
+                isComplete: false,
+            };
+        }
+        return turn.assistantMessage;
+    }
+
+    // ── Chunk transition helpers ─────────────────────────────────────────
+    // When a new chunk type starts, close any open chunk of a different type.
+
+    private closeStreamingOfType(
+        type: "thinking" | "content" | "tool",
+        chunks: AssistantChunk[],
+    ): void {
+        for (let i = 0; i < chunks.length; i++) {
+            if (chunks[i].type === type && !chunks[i].isComplete) {
+                chunks[i].isComplete = true;
+            }
+        }
+    }
+
+    // ── Token handlers ─────────────────────────────────────────────────────
+
     private handleToken(token: string): void {
         const turn = this.getCurrentTurn();
         if (!turn) return;
 
-        if (!turn.assistantMessage) {
-            turn.assistantMessage = {
-                type: "assistant",
-                thinkingBlocks: [],
-                content: token,
-                tools: [],
-                isComplete: false,
-            };
+        const msg = this.ensureAssistant(turn);
+        // Close any open thinking chunk before starting content
+        this.closeStreamingOfType("thinking", msg.chunks);
+
+        const lastContent = this.lastStreamingChunkOfType(
+            "content",
+            msg.chunks,
+        );
+
+        if (lastContent) {
+            // Append to existing streaming content chunk
+            lastContent.contentText! += token;
         } else {
-            turn.assistantMessage.content += token;
+            // No streaming content chunk — create a new one
+            msg.chunks.push({
+                seq: msg.chunks.length,
+                type: "content",
+                contentText: token,
+                isComplete: false,
+            });
         }
     }
 
@@ -146,22 +205,24 @@ export class Transcript {
         const turn = this.getCurrentTurn();
         if (!turn) return;
 
-        if (!turn.assistantMessage) {
-            turn.assistantMessage = {
-                type: "assistant",
-                thinkingBlocks: [token],
-                content: "",
-                tools: [],
-                isComplete: false,
-            };
+        const msg = this.ensureAssistant(turn);
+        // Close any open content chunk before starting thinking
+        this.closeStreamingOfType("content", msg.chunks);
+
+        const lastThinking = this.lastStreamingChunkOfType(
+            "thinking",
+            msg.chunks,
+        );
+
+        if (lastThinking) {
+            lastThinking.contentText! += token;
         } else {
-            const blocks = turn.assistantMessage.thinkingBlocks;
-            const last = blocks[blocks.length - 1];
-            if (last === undefined) {
-                blocks.push(token);
-            } else {
-                blocks[blocks.length - 1] = last + token;
-            }
+            msg.chunks.push({
+                seq: msg.chunks.length,
+                type: "thinking",
+                contentText: token,
+                isComplete: false,
+            });
         }
     }
 
@@ -169,66 +230,79 @@ export class Transcript {
         const turn = this.getCurrentTurn();
         if (!turn) return;
 
-        if (!turn.assistantMessage) {
-            turn.assistantMessage = {
-                type: "assistant",
-                thinkingBlocks: [],
-                content: "",
-                tools: [],
-                isComplete: false,
-            };
-        }
+        const msg = this.ensureAssistant(turn);
+        // Close any open thinking or content chunk before starting tool
+        this.closeStreamingOfType("thinking", msg.chunks);
+        this.closeStreamingOfType("content", msg.chunks);
 
-        turn.assistantMessage.tools.push({
-            tool: event.tool,
-            tool_name: event.tool_name,
-            tool_call_id: event.tool_call_id,
-            args: event.tool_args as Record<string, unknown> | undefined,
-            result: undefined,
-            partialResult: undefined,
-            isError: false,
+        msg.chunks.push({
+            seq: msg.chunks.length,
+            type: "tool",
+            tool: {
+                tool: event.tool,
+                tool_name: event.tool_name,
+                tool_call_id: event.tool_call_id,
+                args: event.tool_args as Record<string, unknown> | undefined,
+                result: undefined,
+                partialResult: undefined,
+                isError: false,
+            },
+            isComplete: false,
         });
     }
 
     private handleToolUpdate(event: ToolUpdateEvent): void {
         const turn = this.getCurrentTurn();
-        if (!turn?.assistantMessage?.tools.length) return;
-        const tool = this.findToolForEvent(turn.assistantMessage.tools, event);
-        if (!tool) return;
+        if (!turn?.assistantMessage) return;
+
+        // Find the streaming tool chunk (last incomplete tool chunk)
+        const toolChunk = this.lastStreamingChunkOfType(
+            "tool",
+            turn.assistantMessage.chunks,
+        );
+        if (!toolChunk?.tool) return;
+
         if (event.partial_result !== undefined) {
-            tool.partialResult = String(event.partial_result);
+            toolChunk.tool.partialResult = String(event.partial_result);
         }
     }
 
     private handleToolEnd(event: ToolEndEvent): void {
         const turn = this.getCurrentTurn();
-        if (!turn) return;
+        if (!turn?.assistantMessage) return;
 
         const assistant = turn.assistantMessage;
-        if (!assistant || assistant.tools.length === 0) return;
 
-        const tool =
-            this.findToolForEvent(assistant.tools, event) ||
-            assistant.tools[assistant.tools.length - 1];
-        if (event.result !== undefined) {
-            tool.result = String(event.result);
-            tool.partialResult = undefined;
+        // Find the tool chunk matching this event
+        let toolChunk: AssistantChunk | undefined;
+        if (event.tool_call_id) {
+            toolChunk = assistant.chunks
+                .slice()
+                .reverse()
+                .find(
+                    (c) =>
+                        c.type === "tool" &&
+                        c.tool?.tool_call_id === event.tool_call_id,
+                );
         }
+        if (!toolChunk) {
+            // Fallback: mark the last tool chunk as done
+            toolChunk = assistant.chunks
+                .slice()
+                .reverse()
+                .find((c) => c.type === "tool");
+        }
+        if (!toolChunk || !toolChunk.tool) return;
+
+        // Mark the tool as finished
+        const tool = toolChunk.tool;
+        tool.result = event.result !== undefined ? String(event.result) : "";
+        tool.partialResult = undefined;
         const isError = (event as unknown as Record<string, unknown>).is_error;
         if (isError !== undefined) {
             tool.isError = Boolean(isError);
         }
-    }
-
-    private findToolForEvent(
-        tools: ToolExecution[],
-        event: { tool_call_id?: string },
-    ): ToolExecution | undefined {
-        return event.tool_call_id
-            ? [...tools]
-                  .reverse()
-                  .find((tool) => tool.tool_call_id === event.tool_call_id)
-            : undefined;
+        toolChunk.isComplete = true;
     }
 
     private handleTurnEnd(event: TurnEndEvent): void {
@@ -324,7 +398,25 @@ export class Transcript {
         return this.state.cacheEnabled;
     }
 
-    // ── Accessors ────────────────────────────────────────────────────────
+    // ── Chunk accessors (for thinking panel & display) ───────────────────
+
+    /** Get thinking chunks from the current (streaming) turn. */
+    getThinkingChunks(): AssistantChunk[] {
+        const turn = this.getCurrentTurn();
+        if (!turn?.assistantMessage) return [];
+        return turn.assistantMessage.chunks.filter(
+            (c) => c.type === "thinking",
+        );
+    }
+
+    /** Get thinking chunks from a completed turn. */
+    getTurnThinkingChunks(turn: Turn): AssistantChunk[] {
+        const assistant = turn.assistantMessage;
+        if (!assistant) return [];
+        return assistant.chunks.filter((c) => c.type === "thinking");
+    }
+
+    // ── Backward-compatible getters ──────────────────────────────────────
 
     getTurns(): Turn[] {
         return this.state.turns;
@@ -340,13 +432,19 @@ export class Transcript {
     getStreamingContent(): string | null {
         const turn = this.getCurrentTurn();
         if (!turn?.assistantMessage) return null;
-        return turn.assistantMessage.content;
+        const text = turn.assistantMessage.chunks
+            .filter((c) => c.type === "content" && !c.isComplete)
+            .map((c) => c.contentText)
+            .join("");
+        return text || null;
     }
 
+    /** Legacy: thinking blocks — derived from chunks for compatibility. */
     getStreamingThinking(): string[] {
-        const turn = this.getCurrentTurn();
-        if (!turn?.assistantMessage) return [];
-        return turn.assistantMessage.thinkingBlocks;
+        const chunks = this.getThinkingChunks();
+        return chunks
+            .map((c) => c.contentText || "")
+            .filter(Boolean);
     }
 
     hasStreamingContent(): boolean {
@@ -355,18 +453,17 @@ export class Transcript {
     }
 
     hasStreamingThinking(): boolean {
-        const thinking = this.getStreamingThinking();
-        return thinking.length > 0 && thinking.some((t) => t.trim().length > 0);
+        const chunks = this.getThinkingChunks();
+        return chunks.some((t) => (t.contentText || "").trim().length > 0);
     }
-
-    // ── Rendering helpers ────────────────────────────────────────────────
 
     getAssistantThinking(turn: Turn): string | null {
         const assistant = turn.assistantMessage;
         if (!assistant) return null;
-        const thinking = assistant.thinkingBlocks.filter(
-            (t) => t.trim().length > 0,
-        );
+        const thinking = assistant.chunks
+            .filter((c) => c.type === "thinking")
+            .map((c) => c.contentText || "")
+            .filter(Boolean);
         if (thinking.length === 0) return null;
         return thinking.join("\n\n");
     }
@@ -374,13 +471,19 @@ export class Transcript {
     getAssistantContent(turn: Turn): string | null {
         const assistant = turn.assistantMessage;
         if (!assistant) return null;
-        return assistant.content.length > 0 ? assistant.content : null;
+        const text = assistant.chunks
+            .filter((c) => c.type === "content")
+            .map((c) => c.contentText)
+            .join("");
+        return text.length > 0 ? text : null;
     }
 
     getAssistantTools(turn: Turn): ToolExecution[] {
         const assistant = turn.assistantMessage;
         if (!assistant) return [];
-        return assistant.tools;
+        return assistant.chunks
+            .filter((c) => c.type === "tool" && c.tool)
+            .map((c) => c.tool!);
     }
 
     // ── Listener management ────────────────────────────────────────────

@@ -116,7 +116,7 @@ export function splitPluginArgs(input: string): string[] {
             else current += ch;
             continue;
         }
-        if (ch === "'" || ch === '"') {
+        if (ch === "'" || ch === "\"") {
             quote = ch;
             continue;
         }
@@ -278,6 +278,12 @@ class TsPluginManager {
         const rows = [];
         for (const [pluginId, inst] of await this.allInstalls()) {
             const [name, marketplace = ""] = pluginId.split("@");
+            const onDisk = await isDir(inst.installPath || "");
+            const skillCount = onDisk
+                ? await childDirNames(path.join(inst.installPath, "skills")).then(
+                      (d) => d.length
+                  )
+                : 0;
             rows.push({
                 plugin_id: pluginId,
                 name,
@@ -289,7 +295,8 @@ class TsPluginManager {
                 sha: (inst.gitCommitSha || "").slice(0, 12),
                 installed_at: inst.installedAt || "",
                 last_updated: inst.lastUpdated || "",
-                on_disk: await isDir(inst.installPath || ""),
+                on_disk: onDisk,
+                skill_count: skillCount,
             });
         }
         return { status: "ok", plugins: rows, plugins_dir: this.pluginsDir };

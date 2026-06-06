@@ -2,8 +2,7 @@
 // Full-featured single-line text input — undo/redo, kill ring, word nav,
 // bracketed paste, history, grapheme-aware cursor. Mirrors pi TUI's input.
 
-import type { Component, Focusable } from "../tui-core.ts";
-import { CURSOR_MARKER, visibleWidth } from "../tui-core.ts";
+import { CURSOR_MARKER, visibleWidth, type Component, type Focusable } from "../tui-core.ts";
 import type { UndoStack } from "../undo-stack.ts";
 import type { KillRing } from "../kill-ring.ts";
 import { getGraphemeSegmenter } from "../utils.ts";
