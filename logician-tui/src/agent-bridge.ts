@@ -7,8 +7,6 @@ import os from "node:os";
 import path from "node:path";
 import type {
     AgentConfig,
-    AgentLoop,
-    AgentLoopOptions,
     AgentEvent,
     EventHandler,
     Message,
@@ -16,7 +14,7 @@ import type {
     ToolCall,
 } from "./agent-core/index.ts";
 import {
-    AgentLoop as AgentLoopClass,
+    AgentHarness,
     createEventEmitter,
 } from "./agent-core/index.ts";
 import { OpenAIBackend } from "./agent-core/backend.ts";

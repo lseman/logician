@@ -21,7 +21,6 @@ import {
     createToolResultMessage,
     createAssistantMessage,
     compactMessagesForContext,
-    microCompactMessages,
     convertToChatFormat,
     estimateChatPayloadTokens,
 } from "./messages.ts";
@@ -29,8 +28,6 @@ import { parseToolCalls } from "./parser.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { createDefaultTools } from "./default-tools.ts";
 import { runHookEvent } from "./plugins.ts";
-import { GuardEngine } from "./guards.ts";
-import { BudgetTracker } from "./budget.ts";
 import { composeHooks, buildBuiltinHooks } from "./builtin-hooks.ts";
 
 export interface AgentLoopOptions {
@@ -94,6 +91,17 @@ export class AgentLoop {
     }
 
     async run(userMessage: string): Promise<Message[]> {
+        // Compose built-in safeguard hooks (guards, budget stop, proactive
+        // compaction) with any user-supplied hooks. Built-in state (failure
+        // counts, budget tracker, compaction cooldown) is per-run, so build
+        // here rather than in the constructor.
+        const builtin = buildBuiltinHooks({
+            config: this.config,
+            contextWindowTokens: () => this.contextWindowTokens(),
+            toolDefs: () => this.toolRegistry.toToolDefinitions(),
+        });
+        this.hooks = composeHooks(builtin, this.config.hooks || {});
+
         // Initialize with system prompt
         const systemPrompt =
             this.config.systemPrompt || "You are a helpful assistant.";

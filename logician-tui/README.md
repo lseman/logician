@@ -9,14 +9,16 @@ Terminal TUI for [Logician](https://github.com/logician-ai/logician) — streami
 ## Features
 
 - **Streaming responses** — tokens render in real-time as they arrive
-- **Thinking visibility** — collapsible thinking blocks with configurable levels
-- **pi-style input** — grapheme-aware editing with undo, kill ring, history
-- **Slash commands** — 30+ commands with fuzzy matching and Tab completion
+- **Thinking visibility** — collapsible thinking blocks with configurable levels and display modes
+- **pi-style input** — grapheme-aware editing with undo/redo, kill ring, history navigation
+- **Slash commands** — 30+ commands with fuzzy matching, Tab completion, and arrow navigation
 - **Session management** — list, search, switch, and export sessions
-- **Markdown rendering** — bold, italic, code blocks, lists, blockquotes
-- **Animated status bar** — phase indicators, thinking level, cache status
+- **Markdown rendering** — bold, italic, code blocks, lists, blockquotes, headings, JSON formatting
+- **Animated status bar** — phase indicators, thinking level, cache status, context size
+- **Todo bar** — inline task tracking with `/todo_write` integration
 - **Plugin system** — manage and toggle plugins from the TUI
 - **MCP support** — loads local stdio and HTTP MCP tools from project config
+- **Agent-core** — built-in agent loop with tool registry, budget tracking, and guard rails
 
 ## Quick Start
 
@@ -140,8 +142,8 @@ LOGICIAN_CONFIG=/path/to/config.json logician-tui
 | Agent    | `/status`, `/agents`, `/agent`, `/pipeline`, `/reload`                         |
 | Context  | `/context`, `/compact`, `/reset`, `/changes`                                   |
 | RAG      | `/mount`, `/mount-code`, `/upload`, `/upload-dir`, `/docs`, `/rag`             |
-| Plugins  | `/skills-health`, `/plugins`                                                   |
-| Display  | `/thinking [level]`, `/mode`, `/cache [on\|off]`, `/trace [on\|off]`, `/clear` |
+| Skills   | `/skills-health`, `/plugins`                                                   |
+| Display  | `/thinking [level]`, `/thinking-steps [mode]`, `/mode`, `/cache [on\|off]`, `/trace [on\|off]`, `/clear` |
 | Auth     | `/login [provider]`                                                            |
 | Exit     | `/q`, `/quit`, `/exit`                                                         |
 
@@ -207,7 +209,8 @@ src/
 │   ├── status-bar.ts     # Phase indicator with animation
 │   ├── thinking-panel.ts # Collapsible thinking blocks
 │   ├── transcript-display.ts # Message rendering with markdown
-│   └── plugin-manager.ts # Plugin management overlay
+│   ├── plugin-manager.ts # Plugin management overlay
+│   └── todo-bar.ts       # Inline task tracking
 └── agent-core/
     ├── index.ts          # Agent core entry
     ├── loop.ts           # Main agent loop
@@ -219,6 +222,10 @@ src/
     ├── plugins.ts        # Plugin system
     ├── system-prompt.ts  # System prompt builder
     ├── default-tools.ts  # Default tool definitions
+    ├── budget.ts         # Token budget tracking
+    ├── guards.ts         # Agent guard rails
+    ├── mcp.ts            # MCP server integration
+    ├── builtin-hooks.ts  # Built-in hook definitions
     └── tools/
         ├── registry.ts   # Tool registry
         ├── bash.ts       # Shell execution
@@ -229,6 +236,11 @@ src/
         ├── read-file.ts  # File reading
         ├── list-files.ts # Directory listing
         ├── search.ts     # Content search
+        ├── find.ts       # File search (ripgrep)
+        ├── todo-write.ts # Todo management
+        ├── read-tracker.ts  # File read tracking
+        ├── file-mutation-queue.ts # Coordinated file writes
+        ├── truncate.ts   # Context truncation
         └── helpers.ts    # Tool utilities
 ```
 
