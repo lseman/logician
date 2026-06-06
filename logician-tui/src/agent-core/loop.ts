@@ -21,6 +21,7 @@ import {
     createToolResultMessage,
     createAssistantMessage,
     compactMessagesForContext,
+    microCompactMessages,
     convertToChatFormat,
     estimateChatPayloadTokens,
 } from "./messages.ts";
@@ -28,6 +29,9 @@ import { parseToolCalls } from "./parser.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import { createDefaultTools } from "./default-tools.ts";
 import { runHookEvent } from "./plugins.ts";
+import { GuardEngine } from "./guards.ts";
+import { BudgetTracker } from "./budget.ts";
+import { composeHooks, buildBuiltinHooks } from "./builtin-hooks.ts";
 
 export interface AgentLoopOptions {
     config: AgentConfig;

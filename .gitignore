@@ -78,3 +78,4 @@ lazy_timeseries/
 .mcp.json
 .pi/
 
+logician-tui/dist/

@@ -141,6 +141,21 @@ export function compactMessagesForContext(
     };
 }
 
+// Cheap standalone pass: truncate only oversized message bodies, leave history
+// structure intact. Used for proactive compaction before the full summarizing
+// pass is needed.
+export function microCompactMessages(messages: Message[]): CompactionResult {
+    const tokensBefore = estimateMessageTokens(messages);
+    const out = messages.map((message) => compactLargeMessageContent(message));
+    const tokensAfter = estimateMessageTokens(out);
+    return {
+        messages: out,
+        tokensBefore,
+        tokensAfter,
+        changed: tokensAfter < tokensBefore,
+    };
+}
+
 function compactLargeMessageContent(message: Message): Message {
     if (typeof message.content !== "string") return message;
     const maxChars =

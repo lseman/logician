@@ -168,4 +168,11 @@ export interface AgentConfig {
     hookSessionId?: string;
     hookTranscriptPath?: string;
     hooks?: AgentLoopHooks;
+    // Built-in loop safeguards (all default on). Each rides a contract hook.
+    guardsEnabled?: boolean; // duplicate-call + tool-failure-loop guards
+    duplicateToolThreshold?: number;
+    toolFailureLoopThreshold?: number;
+    budgetStopEnabled?: boolean; // diminishing-returns early stop
+    proactiveCompactionEnabled?: boolean; // compact before hitting context wall
+    proactiveCompactionFraction?: number; // trigger at this fraction of window
 }
