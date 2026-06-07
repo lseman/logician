@@ -1,9 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execFile } from "child_process";
-import { promisify } from "util";
-
-const execFileAsync = promisify(execFile);
 
 export function resolvePath(
     cwd: string | undefined,
@@ -35,25 +31,6 @@ export function readUtf8IfExists(filePath: string): string | null {
     return fs.readFileSync(filePath, "utf-8");
 }
 
-export async function gitDiffForPath(
-    cwd: string | undefined,
-    filePath: string,
-): Promise<string> {
-    try {
-        const rel =
-            path.relative(path.resolve(cwd || process.cwd()), filePath) ||
-            filePath;
-        const { stdout } = await execFileAsync("git", ["diff", "--", rel], {
-            cwd: cwd || process.cwd(),
-            timeout: 10000,
-            maxBuffer: 1024 * 1024,
-        });
-        if (stdout.trim()) return stdout.trimEnd();
-    } catch {
-        // Fall through to synthetic diff.
-    }
-    return "";
-}
 
 export function syntheticUnifiedDiff(
     filePath: string,
@@ -127,13 +104,15 @@ export function summarizeDiff(diff: string, maxChars = 12000): string {
 }
 
 export async function mutationSummary(
-    cwd: string | undefined,
+    _cwd: string | undefined,
     filePath: string,
     before: string | null,
     after: string,
 ): Promise<string> {
-    const gitDiff = await gitDiffForPath(cwd, filePath);
+    // Always use synthetic diff from before/after to show the exact edit.
+    // Git diff against HEAD would show unrelated uncommitted changes, not the
+    // actual edit being reported to the LLM.
     return summarizeDiff(
-        gitDiff || syntheticUnifiedDiff(filePath, before, after),
+        syntheticUnifiedDiff(filePath, before, after),
     );
 }

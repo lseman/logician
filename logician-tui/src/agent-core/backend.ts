@@ -2,7 +2,7 @@
 // OpenAI-compatible HTTP client for streaming LLM responses.
 // Mirrors Python LlamaCppClient/VLLMClient but simplified for TS.
 
-import type { ToolCall } from "./types.ts";
+import type { ThinkingLevel, ToolCall } from "./types.ts";
 
 export interface LLMResponse {
     content: string | null;
@@ -20,6 +20,7 @@ export interface LLMBackend {
         signal?: AbortSignal,
         onDelta?: (delta: string) => void,
         onThinking?: (delta: string) => void,
+        thinkingLevel?: ThinkingLevel,
     ): Promise<LLMResponse>;
 }
 
@@ -28,39 +29,37 @@ export class OpenAIBackend implements LLMBackend {
     private model: string;
     private chatTemplate?: string;
     private stop?: string[];
+    private defaultThinkingLevel: ThinkingLevel = "medium";
 
     constructor(options: {
         baseUrl: string;
         model: string;
         chatTemplate?: string;
         stop?: string[];
+        thinkingLevel?: ThinkingLevel;
     }) {
         this.baseUrl = options.baseUrl.replace(/\/+$/, "");
         this.model = options.model;
         this.chatTemplate = options.chatTemplate;
         this.stop = options.stop;
+        this.defaultThinkingLevel = options.thinkingLevel ?? "medium";
+    }
+
+    /** Update the default thinking level at runtime. */
+    setDefaultThinkingLevel(level: ThinkingLevel): void {
+        this.defaultThinkingLevel = level;
     }
 
     async generate(
-        params: {
-            messages: Record<string, unknown>[];
-            tools?: Record<string, unknown>[];
-            temperature?: number;
-            maxTokens?: number;
-            signal?: AbortSignal;
-            onDelta?: (delta: string) => void;
-            onThinking?: (delta: string) => void;
-        },
+        messages: Record<string, unknown>[],
+        tools?: Record<string, unknown>[] | undefined,
+        temperature: number = 0.5,
+        maxTokens: number = 4096,
+        signal?: AbortSignal | undefined,
+        onDelta?: (delta: string) => void,
+        onThinking?: (delta: string) => void,
+        thinkingLevel?: ThinkingLevel,
     ): Promise<LLMResponse> {
-        const {
-            messages,
-            tools,
-            temperature = 0.5,
-            maxTokens = 4096,
-            signal,
-            onDelta,
-            onThinking,
-        } = params;
         const body: Record<string, unknown> = {
             model: this.model,
             messages,
@@ -69,6 +68,13 @@ export class OpenAIBackend implements LLMBackend {
             stream: true,
             ...(this.stop && { stop: this.stop }),
         };
+
+        // Pass reasoning/thinking level to OpenAI-compatible providers.
+        // "off" = omit reasoning field entirely.
+        const effectiveLevel = thinkingLevel ?? this.defaultThinkingLevel;
+        if (effectiveLevel !== "off") {
+            body.reasoning = { effort: effectiveLevel };
+        }
 
         if (tools && tools.length > 0) {
             body.tools = tools;

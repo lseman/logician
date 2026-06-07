@@ -288,6 +288,7 @@ export class HookBus {
             case "getFollowUpMessages":
                 return this.followUp as Entry<unknown>[];
         }
+        return [];
     }
 
     private async notify(event: HookEventName, ctx: unknown): Promise<void> {

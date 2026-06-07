@@ -103,9 +103,12 @@ export interface AfterToolCallContext {
 }
 
 // Return `{ content }` and/or `{ isError }` to rewrite the recorded tool result.
+// Return `{ terminate: true }` to signal the loop to stop after the current
+// tool batch (only effective when ALL tools in the batch set terminate=true).
 export interface AfterToolCallResult {
     content?: string;
     isError?: boolean;
+    terminate?: boolean;
 }
 
 export interface PrepareNextTurnContext {
@@ -145,6 +148,28 @@ export interface GetFollowUpMessagesContext {
 
 export type ToolExecutionMode = "sequential" | "parallel";
 
+/**
+ * Controls how many queued user messages are injected when the loop reaches
+ * a queue drain point.
+ *
+ * - "all": drain and inject every queued message at that point.
+ * - "one-at-a-time": drain and inject only the oldest queued message, leaving
+ *   the rest queued for later drain points.
+ */
+export type QueueMode = "all" | "one-at-a-time";
+
+/**
+ * Thinking/reasoning level for models that support it.
+ * "off" = no reasoning. All other levels pass reasoning tokens to the provider.
+ */
+export type ThinkingLevel =
+    | "off"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh";
+
 export interface AgentLoopHooks {
     beforeToolCall?: (
         ctx: BeforeToolCallContext,
@@ -170,6 +195,10 @@ export interface AgentLoopHooks {
     getFollowUpMessages?: (
         ctx: GetFollowUpMessagesContext,
     ) => Promise<Message[] | undefined> | Message[] | undefined;
+    // Pi-style next-turn: messages queued to be prepended to the next user
+    // prompt. Survives turn boundaries — useful for context that persists
+    // across the user's next explicit message.
+    getNextTurnMessages?: () => Promise<Message[] | undefined> | Message[] | undefined;
 }
 
 export interface ToolCall {
@@ -236,6 +265,11 @@ export interface AgentConfig {
     continuationEnabled?: boolean; // default on
     maxContinuations?: number; // cap per run (default 12)
     toolExecution?: ToolExecutionMode; // default sequential
+    // Pi-style queue modes: how steering/follow-up messages are drained.
+    steeringQueueMode?: QueueMode; // default "all" (drain all at once)
+    followUpQueueMode?: QueueMode; // default "all" (drain all at once)
+    // Thinking/reasoning level for models that support it.
+    thinkingLevel?: ThinkingLevel; // default "medium"
     // Auto-retry on provider errors (429, 500, 502, 503, 504, timeouts).
     autoRetryEnabled?: boolean; // default on
     maxRetries?: number; // max retry attempts (default 3)

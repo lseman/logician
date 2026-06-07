@@ -173,6 +173,7 @@ export interface QueueUpdateEvent {
     type: "queue_update";
     steering: string[];
     followUp: string[];
+    nextTurn?: string[];
 }
 
 export interface ModelSelectEvent {
@@ -199,7 +200,8 @@ export type ParsedBridgeEvent =
     | ClassifiedEvent
     | ImageEvent
     | TodosEvent
-    | SteeredEvent;
+    | SteeredEvent
+    | ModelSelectEvent;
 
 // ── Bridge commands (TUI → bridge) ────────────────────────────────────────────
 

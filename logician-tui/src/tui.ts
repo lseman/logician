@@ -257,6 +257,9 @@ export class LogicianTUI {
                 this.thinkingPanel.clear();
                 setStatusPhase("ready");
             },
+            getContext: () => {
+                return this.bridge.getContext();
+            },
         };
 
         const slashCommands = createSlashCommands(this.bridge, localHandlers);
@@ -285,6 +288,30 @@ export class LogicianTUI {
                 );
                 if (match && match.command === "/plugins") {
                     void handlePlugins(args);
+                }
+                if (match && match.command === "/compact") {
+                    void this.bridge.compact().then((result) => {
+                        if (result === null) {
+                            this.transcript.addSystemMessage(
+                                "Nothing to compact.",
+                            );
+                        } else {
+                            this.transcript.addSystemMessage(
+                                `Context compacted (${formatContextSize(
+                                    result.tokensBefore,
+                                )} -> ${formatContextSize(
+                                    result.tokensAfter,
+                                )}). Saved ${formatContextSize(
+                                    result.tokensSaved,
+                                )}.`,
+                            );
+                        }
+                        this.transcriptDisplay.setTurns(
+                            this.transcript.getTurns(),
+                        );
+                        this.tui.requestRender();
+                    });
+                    return;
                 }
                 if (match && match.dispatch === "bridge") {
                     void this.bridge.sendSlash(command.trim());
@@ -404,7 +431,7 @@ export class LogicianTUI {
                 });
                 break;
             case "model_select":
-                this.statusPanel.update({ model: event.token });
+                this.statusPanel.update({ model: event.model });
                 break;
             case "repair_nudge":
                 this.transcript.addSystemMessage(

@@ -18,12 +18,19 @@ import type {
     Message,
     PrepareNextTurnContext,
     PrepareNextTurnResult,
+    QueueMode,
     Tool,
 } from "./types.ts";
 import type { LLMBackend } from "./backend.ts";
 import type { ToolRegistry } from "./tools/registry.ts";
 import { AgentLoop } from "./loop.ts";
-import { createUserMessage } from "./messages.ts";
+import {
+    createUserMessage,
+    compactMessagesForContext,
+    microCompactMessages,
+    estimateChatPayloadTokens,
+    convertToChatFormat,
+} from "./messages.ts";
 
 export type HarnessPhase = "idle" | "turn";
 
@@ -58,14 +65,21 @@ export class AgentHarness {
     private steeringQueue: string[] = [];
     private followUpQueue: string[] = [];
     // nextTurn messages survive across runs and abort; injected before the next
-    // user prompt.
-    private nextTurnQueue: string[] = [];
+    // user prompt. Exposed for bridge UI display.
+    nextTurnQueue: string[] = [];
+    // Queue drain modes: "all" = drain everything, "one-at-a-time" = drain one.
+    private steeringQueueMode: QueueMode;
+    private followUpQueueMode: QueueMode;
 
     constructor(options: AgentHarnessOptions) {
         this.config = options.config;
         this.backend = options.backend;
         this.cwd = options.cwd;
         this.maxIterations = options.maxIterations;
+        this.steeringQueueMode =
+            options.config.steeringQueueMode ?? "all";
+        this.followUpQueueMode =
+            options.config.followUpQueueMode ?? "all";
     }
 
     get phase(): HarnessPhase {
@@ -168,6 +182,16 @@ export class AgentHarness {
         return this.steeringQueue;
     }
 
+    /** Controls how queued steering messages are drained. */
+    setSteeringMode(mode: QueueMode): void {
+        this.steeringQueueMode = mode;
+    }
+
+    /** Controls how queued follow-up messages are drained. */
+    setFollowUpMode(mode: QueueMode): void {
+        this.followUpQueueMode = mode;
+    }
+
     get messages(): Message[] {
         return this.loop?.messages ?? this.history;
     }
@@ -175,6 +199,114 @@ export class AgentHarness {
    // Clear persisted conversation (new session / context reset).
     clearHistory(): void {
         this.history = [];
+    }
+
+    /** Compact messages using LLM-generated summary. Returns tokens saved, or null if nothing to compact. */
+    async compact(): Promise<number | null> {
+        const messages = this.loop?.messages ?? this.history;
+        if (!messages.length) return null;
+        const before = estimateChatPayloadTokens(messages);
+
+        const targetTokens = Math.floor(
+            (this.config.contextWindowTokens ?? 0) * 0.65,
+        );
+        const keepRecentMessages = Math.max(2, 8);
+
+        const systemMessages = messages.filter(
+            (m) => m.role === "system",
+        );
+        const nonSystem = messages.filter((m) => m.role !== "system");
+        let tailStart = Math.max(0, nonSystem.length - keepRecentMessages);
+        // Ensure tool pairs stay together
+        while (tailStart > 0 && nonSystem[tailStart]?.role === "tool") {
+            tailStart--;
+        }
+
+        const older = nonSystem.slice(0, tailStart);
+        const recent = nonSystem.slice(tailStart);
+        if (!older.length) {
+            // Nothing to summarize — micro-compact oversized bodies
+            const microResult = microCompactMessages(messages);
+            if (microResult.changed) {
+                if (this.loop) this.loop.setMessages(microResult.messages);
+                else this.history = microResult.messages;
+                return before - microResult.tokensAfter;
+            }
+            return 0;
+        }
+
+        // Two-pass: first truncate locally to fit budget, then LLM summarizes.
+        // Sending full messages to the LLM defeats the purpose of compaction.
+        const truncated = microCompactMessages(older);
+        const summary = await this.generateSummary(
+            truncated.messages,
+            systemMessages,
+        );
+        if (!summary) {
+            // LLM failed — fall back to local truncation
+            const fallbackResult = compactMessagesForContext(messages, {
+                targetTokens,
+            });
+            if (fallbackResult.changed) {
+                if (this.loop) this.loop.setMessages(fallbackResult.messages);
+                else this.history = fallbackResult.messages;
+                return before - fallbackResult.tokensAfter;
+            }
+            return 0;
+        }
+
+        const compacted = [
+            ...systemMessages,
+            createUserMessage(
+                `<context-compaction reason="manual">\n${summary}\n</context-compaction>`,
+            ),
+            ...recent,
+        ];
+
+        if (this.loop) {
+            this.loop.setMessages(compacted);
+        } else {
+            this.history = compacted;
+        }
+
+        const after = estimateChatPayloadTokens(compacted);
+        return before - after;
+    }
+
+    /** Ask LLM to summarize older messages for compaction. */
+    private async generateSummary(
+        messages: Message[],
+        systemMessages: Message[],
+    ): Promise<string | null> {
+        try {
+            const chatMessages = [
+                ...systemMessages,
+                {
+                    role: "user" as const,
+                    content:
+                        "Summarize the following conversation history concisely. " +
+                        "Focus on key decisions, actions taken, files modified, " +
+                        "and any important context that should be retained. " +
+                        "Be brief but preserve all actionable information.",
+                },
+                ...messages,
+            ];
+
+            const response = await this.backend.generate(
+                convertToChatFormat(chatMessages),
+                undefined,
+                this.config.temperature ?? 0.3,
+                Math.min(2048, (this.config.maxTokens ?? 4096) / 2),
+                undefined,
+                undefined,
+                undefined,
+                this.config.thinkingLevel,
+            );
+
+            return response.content?.trim() || null;
+        } catch {
+            return null;
+        }
     }
 
     // Live tool registry of the running loop, or null when idle.
@@ -199,6 +331,24 @@ export class AgentHarness {
         return this.loop?.cycleModel(direction) ?? this.config.model;
     }
 
+    // ── Thinking level ─────────────────────────────────────────────────
+
+    /** Get current thinking/reasoning level. */
+    getThinkingLevel(): string {
+        return this.config.thinkingLevel ?? "medium";
+    }
+
+    /** Set thinking/reasoning level. Takes effect on the next turn. */
+    setThinkingLevel(level: string): void {
+        this.config.thinkingLevel = level as
+            | "off"
+            | "minimal"
+            | "low"
+            | "medium"
+            | "high"
+            | "xhigh";
+    }
+
     // ── Internals ──────────────────────────────────────────────────────────
 
     // Wrap config hooks with harness queue drains. Steering drains before the
@@ -206,35 +356,58 @@ export class AgentHarness {
     private withDrainHook(config: AgentConfig): AgentConfig {
         const userHooks: AgentLoopHooks = config.hooks || {};
         const userPrepare = userHooks.prepareNextTurn;
+        const userAfterToolCall = userHooks.afterToolCall;
         const userSteering = userHooks.getSteeringMessages;
         const userFollowUp = userHooks.getFollowUpMessages;
 
         const getSteeringMessages = async (
             ctx: GetSteeringMessagesContext,
         ): Promise<Message[] | undefined> => {
-            const out = this.steeringQueue
-                .splice(0)
-                .map((text) => createUserMessage(text));
+            // Respect queue mode
+            let out: string[];
+            if (this.steeringQueueMode === "all") {
+                out = this.steeringQueue.splice(0);
+            } else {
+                // one-at-a-time
+                const first = this.steeringQueue[0];
+                if (!first) out = [];
+                else {
+                    out = [first];
+                    this.steeringQueue.shift();
+                }
+            }
+            const messages = out.map((text) => createUserMessage(text));
             const user = await userSteering?.({
                 ...ctx,
-                messages: [...ctx.messages, ...out],
+                messages: [...ctx.messages, ...messages],
             });
-            if (user?.length) out.push(...user);
-            return out.length ? out : undefined;
+            if (user?.length) messages.push(...user);
+            return messages.length ? messages : undefined;
         };
 
         const getFollowUpMessages = async (
             ctx: GetFollowUpMessagesContext,
         ): Promise<Message[] | undefined> => {
-            const out = this.followUpQueue
-                .splice(0)
-                .map((text) => createUserMessage(text));
+            // Respect queue mode
+            let out: string[];
+            if (this.followUpQueueMode === "all") {
+                out = this.followUpQueue.splice(0);
+            } else {
+                // one-at-a-time
+                const first = this.followUpQueue[0];
+                if (!first) out = [];
+                else {
+                    out = [first];
+                    this.followUpQueue.shift();
+                }
+            }
+            const messages = out.map((text) => createUserMessage(text));
             const user = await userFollowUp?.({
                 ...ctx,
-                messages: [...ctx.messages, ...out],
+                messages: [...ctx.messages, ...messages],
             });
-            if (user?.length) out.push(...user);
-            return out.length ? out : undefined;
+            if (user?.length) messages.push(...user);
+            return messages.length ? messages : undefined;
         };
 
         const prepareNextTurn = async (
@@ -248,6 +421,12 @@ export class AgentHarness {
             return messages === ctx.messages ? undefined : { messages };
         };
 
+        // Pi-style: afterToolCall can set terminate=true to stop the loop
+        // after the current tool batch (only when ALL tools in the batch set it).
+        const afterToolCall = async (
+            ctx: import("./types").AfterToolCallContext,
+        ) => userAfterToolCall?.(ctx);
+
         return {
             ...config,
             hooks: {
@@ -255,6 +434,7 @@ export class AgentHarness {
                 getSteeringMessages,
                 getFollowUpMessages,
                 prepareNextTurn,
+                afterToolCall,
             },
         };
     }

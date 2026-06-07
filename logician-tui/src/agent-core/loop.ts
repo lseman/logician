@@ -11,7 +11,8 @@ import type {
     Message,
     ToolCall,
 } from "./types.ts";
-import type { LLMBackend, OpenAIBackend } from "./backend.ts";
+import type { LLMBackend } from "./backend.ts";
+import { OpenAIBackend } from "./backend.ts";
 import { EventEmitter, createEventEmitter } from "./events.ts";
 import {
     createUserMessage,
@@ -84,6 +85,15 @@ export class AgentLoop {
     private maxContinuations: number;
     private _retryAttempt = 0;
     private _retryAbort?: () => void;
+    private nextTurnQueue: Message[] = [];
+    private steeringQueueMode: "all" | "one-at-a-time";
+    private followUpQueueMode: "all" | "one-at-a-time";
+    // Track terminate hint from afterToolCall — when ALL tools in a batch
+    // set it, the loop stops after that batch (Pi-style early termination).
+    private _batchTerminate = false;
+    private get batchTerminate(): boolean {
+        return this._batchTerminate;
+    }
     private get maxRetries(): number {
         return this.config.maxRetries ?? 3;
     }
@@ -104,6 +114,11 @@ export class AgentLoop {
         this._messages = [];
         this.hooks = this.config.hooks || {};
         this.emitter = createEventEmitter();
+        this.steeringQueueMode =
+            this.config.steeringQueueMode ?? "all";
+        this.followUpQueueMode =
+            this.config.followUpQueueMode ?? "all";
+        this.nextTurnQueue = [];
 
         // Set up tool registry
         this.toolRegistry = new ToolRegistry({ cwd: this.cwd });
@@ -131,6 +146,11 @@ export class AgentLoop {
 
     get messages(): Message[] {
         return this._messages;
+    }
+
+    /** Replace working messages (used by manual compaction). */
+    setMessages(messages: Message[]): void {
+        this._messages = messages;
     }
 
     async run(userMessage: string): Promise<Message[]> {
@@ -187,6 +207,12 @@ export class AgentLoop {
         this.continuationCount = 0;
         this._retryAttempt = 0;
 
+        // Drain next-turn messages (persist across turns, prepended to user prompt)
+        const nextTurnMessages = this.drainNextTurnMessages();
+        if (nextTurnMessages.length) {
+            this.appendInjectedMessages(transcriptPath, nextTurnMessages);
+        }
+
         this.emitEvent({ type: "agent_start" });
         this.emitEvent({ type: "phase", phase: "idle" });
 
@@ -202,6 +228,7 @@ export class AgentLoop {
             this.emitEvent({ type: "turn_start", turnId });
             this.emitEvent({ type: "phase", phase: "thinking" });
 
+            // Drain steering messages respecting queue mode
             const steeringMessages = await this.runGetSteeringMessages();
             if (steeringMessages.length) {
                 this.appendInjectedMessages(transcriptPath, steeringMessages);
@@ -243,6 +270,7 @@ export class AgentLoop {
                         (delta: string) => {
                             this.emitEvent({ type: "thinking_delta", delta });
                         },
+                        this.config.thinkingLevel,
                     );
 
                     assistantContent = response.content || "";
@@ -299,8 +327,10 @@ export class AgentLoop {
                     }
 
                     // 2. Auto-retry on provider errors (429, 500, 502, 503, 504).
+                    // 400 is a client error (malformed request) — never retry it.
                     if (
                         this.config.autoRetryEnabled !== false &&
+                        !/\b400\b/.test(error.message) &&
                         isProviderError(error)
                     ) {
                         const canRetry = this._retryAttempt < this.maxRetries;
@@ -378,6 +408,13 @@ export class AgentLoop {
                 );
 
                 if (this.signal?.aborted) {
+                    this.emitEvent({ type: "turn_end", turnId });
+                    break;
+                }
+                // Pi-style early termination: when ALL tools in the batch
+                // set terminate=true, stop after this batch.
+                if (this.batchTerminate) {
+                    this._batchTerminate = false;
                     this.emitEvent({ type: "turn_end", turnId });
                     break;
                 }
@@ -520,7 +557,7 @@ export class AgentLoop {
         args: Record<string, unknown>,
         result: string,
         isError: boolean,
-    ): Promise<{ content?: string; isError?: boolean } | undefined> {
+    ): Promise<{ content?: string; isError?: boolean; terminate?: boolean } | undefined> {
         if (!this.hooks.afterToolCall) return undefined;
         try {
             return (
@@ -663,14 +700,30 @@ export class AgentLoop {
             : await this.executePreparedToolCallsSequentially(runnable);
         for (const item of executed) executedById.set(item.call.id, item);
 
+        // Track terminate hints: the batch terminates only when ALL tools
+        // in it set terminate=true (Pi-style early termination).
+        const allPrepareFinalized: Array<{
+            item: PreparedLoopToolCall;
+            executedItem: ExecutedLoopToolCall | undefined;
+            terminate: boolean;
+        }> = [];
+
         for (const item of prepared) {
             const executedItem =
                 item.kind === "final" ? item : executedById.get(item.call.id);
             if (!executedItem) continue;
-            await this.finalizeToolCall(
+            const terminate = await this.finalizeToolCall(
                 executedItem,
                 transcriptPath,
                 hookBasePayload,
+            );
+            allPrepareFinalized.push({ item, executedItem, terminate });
+        }
+
+        // Set batchTerminate when ALL finalized tools set it.
+        if (allPrepareFinalized.length > 0) {
+            this._batchTerminate = allPrepareFinalized.every(
+                (f) => f.terminate,
             );
         }
     }
@@ -777,8 +830,9 @@ export class AgentLoop {
         executed: ExecutedLoopToolCall,
         transcriptPath: string,
         hookBasePayload: Record<string, unknown>,
-    ): Promise<void> {
+    ): Promise<boolean> {
         let { result, isError } = executed;
+        let terminate = false;
         const after = await this.runAfterToolCall(
             executed.call,
             executed.args,
@@ -788,6 +842,7 @@ export class AgentLoop {
         if (after) {
             if (after.content !== undefined) result = after.content;
             if (after.isError !== undefined) isError = after.isError;
+            if (after.terminate) terminate = true;
         }
 
         this.emitEvent({
@@ -806,6 +861,7 @@ export class AgentLoop {
             result,
             isError,
         );
+        return terminate;
     }
 
     private shouldExecuteParallel(calls: RunnableToolCall[]): boolean {
@@ -917,6 +973,56 @@ export class AgentLoop {
         });
     }
 
+    // ── Queue draining helpers ───────────────────────────────────────
+    // Pi-style queue modes: "all" drains everything, "one-at-a-time"
+    // drains one message at a time.
+
+    private drainNextTurnMessages(): Message[] {
+        const msgs = this.nextTurnQueue;
+        this.nextTurnQueue = [];
+        return msgs;
+    }
+
+    private drainQueuedMessages(
+        messages: Message[],
+        mode: "all" | "one-at-a-time",
+    ): Message[] {
+        if (mode === "all") {
+            const drained = [...messages];
+            messages.length = 0;
+            return drained;
+        }
+        // one-at-a-time
+        const first = messages[0];
+        if (!first) return [];
+        messages.shift();
+        return [first];
+    }
+
+    /** Enqueue a message to be prepended to the next user prompt. */
+    addNextTurn(message: Message): void {
+        this.nextTurnQueue.push(message);
+    }
+
+    /** Enqueue a steering message (injected mid-turn). */
+    addSteering(message: Message): void {
+        this.hooks.getSteeringMessages = async () => {
+            const existing = await this.hooks.getSteeringMessages?.({
+                messages: this._messages,
+                iteration: this.iterationCount,
+            }) || [];
+            return [...existing, message];
+        };
+    }
+
+    /** Enqueue a follow-up message (injected after agent stops). */
+    addFollowUp(message: Message): void {
+        this.hooks.getFollowUpMessages = async (ctx) => {
+            const existing = await this.hooks.getFollowUpMessages?.(ctx);
+            return [...(existing || []), message];
+        };
+    }
+
     // ── Model cycling ─────────────────────────────────────────────────
     // Pi-style: cycle through configured models (forward or backward).
     // Creates a new backend with the selected model. Emits `model_select`.
@@ -1026,11 +1132,10 @@ function envNumber(name: string): number | undefined {
 
 function isProviderError(error: Error): boolean {
     const message = `${error.name || ""} ${error.message || ""}`.toLowerCase();
-    // HTTP status codes from the backend.
-    if (
-        /\b(429|500|502|503|504)\b/.test(message) ||
-        /llm request failed/.test(message)
-    ) {
+    // HTTP status codes from the backend (transient provider errors).
+    // Note: 400 is a client error (malformed request, missing fields) —
+    // callers must explicitly exclude it before checking this function.
+    if (/\b(429|500|502|503|504)\b/.test(message)) {
         return true;
     }
     // Network-level errors.

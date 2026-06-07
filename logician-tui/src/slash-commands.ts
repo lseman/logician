@@ -65,7 +65,15 @@ export function createSlashCommands(
         cmd("/reload", "Reload config and agents", "bridge", false),
 
         // ── Context & memory ─────────────────────────────────────────────────
-        cmd("/context", "Show session/data context", "bridge", false),
+        cmd(
+            "/context",
+            "Show session/data context",
+            "local",
+            false,
+            () => {
+                return localHandlers.getContext?.() || "No context available.";
+            },
+        ),
         cmd(
             "/compact",
             "Summarize older conversation history",

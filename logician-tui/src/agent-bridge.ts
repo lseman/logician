@@ -17,6 +17,7 @@ import {
 import { McpManager } from "./agent-core/mcp.ts";
 import { onTodosChanged } from "./agent-core/tools/todo-write.ts";
 import { buildDefaultSystemPrompt } from "./agent-core/system-prompt.ts";
+import { estimateChatPayloadTokens } from "./agent-core/messages.ts";
 import {
     configurePluginRuntimeEnv,
     runHookEvent,
@@ -422,11 +423,24 @@ export class AgentCoreBridge {
         this.harness?.nextTurn(message);
     }
 
+    /** Controls how queued steering messages are drained. */
+    setSteeringMode(mode: "all" | "one-at-a-time"): void {
+        this.config.steeringQueueMode = mode;
+        this.harness?.setSteeringMode(mode);
+    }
+
+    /** Controls how queued follow-up messages are drained. */
+    setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+        this.config.followUpQueueMode = mode;
+        this.harness?.setFollowUpMode(mode);
+    }
+
     private _emitQueueUpdate(): void {
         this.emit({
             type: "queue_update",
             steering: [...this._steeringMessages],
             followUp: [...this._followUpMessages],
+            nextTurn: [...this.harness?.nextTurnQueue || []],
         });
     }
 
@@ -467,14 +481,25 @@ export class AgentCoreBridge {
         return [...this._followUpMessages];
     }
 
+    /** Get current next-turn messages (read-only). */
+    getNextTurnMessages(): string[] {
+        return [...(this.harness?.nextTurnQueue || [])];
+    }
+
     /** Clear all pending messages, returns the messages that were cleared. */
-    clearQueue(): { steering: string[]; followUp: string[] } {
+    clearQueue(): {
+        steering: string[];
+        followUp: string[];
+        nextTurn: string[];
+    } {
         const steering = [...this._steeringMessages];
         const followUp = [...this._followUpMessages];
+        const nextTurn = [...(this.harness?.nextTurnQueue || [])];
         this._steeringMessages = [];
         this._followUpMessages = [];
+        this.harness?.nextTurnQueue.splice(0);
         this._emitQueueUpdate();
-        return { steering, followUp };
+        return { steering, followUp, nextTurn };
     }
 
     /** Abort: clear steering/follow-up queues (preserves nextTurn). */
@@ -580,9 +605,17 @@ export class AgentCoreBridge {
     }
 
     setThinkingLevel(level: string): void {
-        // In a full implementation, this would update the config
-        this.config.temperature =
-            level === "high" ? 0.8 : level === "medium" ? 0.5 : 0.2;
+        this.config.thinkingLevel = level as
+            | "off"
+            | "minimal"
+            | "low"
+            | "medium"
+            | "high"
+            | "xhigh";
+        // Also update the backend's default so future turns pick it up.
+        (this.backend as OpenAIBackend).setDefaultThinkingLevel(
+            level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
+        );
     }
 
     reset(): void {
@@ -612,6 +645,29 @@ export class AgentCoreBridge {
 
     cancel(): void {
         this.harness?.abort();
+    }
+
+    /** Manual context compaction. Returns { tokensSaved, tokensBefore, tokensAfter } or null if nothing to compact. */
+    async compact(): Promise<{
+        tokensSaved: number;
+        tokensBefore: number;
+        tokensAfter: number;
+    } | null> {
+        if (!this.harness) return null;
+        const saved = await this.harness.compact();
+        if (saved === null) return null;
+        // Re-emit context update with new token count
+        const messages = this.harness.messages;
+        const after = estimateChatPayloadTokens(messages);
+        const before = after + saved;
+        this.contextTokens = after;
+        this.emit({
+            type: "compaction",
+            reason: "manual",
+            tokens_before: before,
+            tokens_after: after,
+        } as ParsedBridgeEvent);
+        return { tokensSaved: saved, tokensBefore: before, tokensAfter: after };
     }
 
     // ── State management ─────────────────────────────────────────────────
@@ -692,6 +748,52 @@ export class AgentCoreBridge {
 
     getMessages(): Message[] {
         return this.harness?.messages || [];
+    }
+
+    /** Return full context as formatted text for /context command. */
+    getContext(): string {
+        const msgs = this.getMessages();
+        if (!msgs.length) return "No messages yet.";
+
+        const lines: string[] = [];
+
+        for (const msg of msgs) {
+            const role = msg.role.toUpperCase();
+            const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : "";
+            const header = `[${role}]${ts ? ` ${ts}` : ""}`;
+
+            if (msg.role === "tool" && msg.content) {
+                // Tool result: show name + truncated result
+                const callId = msg.tool_call_id || "";
+                const name = msgs.find(
+                    (m) =>
+                        m.role === "assistant" &&
+                        m.tool_calls?.some((tc) => tc.id === callId),
+                )?.tool_calls?.find((tc) => tc.id === callId)?.name || "tool";
+                const truncated =
+                    msg.content.length > 2000
+                        ? msg.content.slice(0, 2000) + "\n... [truncated]"
+                        : msg.content;
+                lines.push(`${header} (${name})\n${truncated}`);
+            } else if (msg.role === "assistant" && msg.tool_calls?.length) {
+                // Assistant with tool calls
+                lines.push(
+                    `${header}\n${msg.content || "(no content)"}\n\nTool calls:`,
+                );
+                for (const tc of msg.tool_calls) {
+                    lines.push(`  - ${tc.name}(${tc.arguments || ""})`);
+                }
+            } else {
+                const truncated =
+                    msg.content && msg.content.length > 2000
+                        ? msg.content.slice(0, 2000) + "\n... [truncated]"
+                        : msg.content || "";
+                lines.push(`${header}\n${truncated}`);
+            }
+            lines.push("");
+        }
+
+        return `## Context (${msgs.length} messages)\n\n${lines.join("\n")}`;
     }
 
     getTools(): ToolRegistry {
