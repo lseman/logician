@@ -80,3 +80,5 @@ lazy_timeseries/
 
 logician-tui/dist/
 .logician.json
+tui/node_modules/
+tui/dist/
