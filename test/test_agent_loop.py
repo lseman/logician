@@ -56,12 +56,25 @@ class FakeDispatcher:
     def __init__(self) -> None:
         self.dispatched: list[ToolCall] = []
         self._available_tool_names: set[str] = set()
+        self._dispatch_results: list[DispatchResult] = []
 
-    async def dispatch(self, calls, state, config=None, tool_callback=None):
-        del tool_callback
+    async def dispatch(self, calls, state, config=None, tool_callback=None, pre_tool_callback=None, post_tool_callback=None):
+        del tool_callback, pre_tool_callback, post_tool_callback
         self.dispatched.extend(calls)
         state.consecutive_tool_count += len(calls)
-        return []
+        # Record calls so the loop tracks them (mirrors real dispatcher)
+        for call in calls:
+            state.record_call(call)
+        # Return results so the loop tracks executed tool calls
+        results = []
+        for call in calls:
+            results.append(DispatchResult(
+                tool_name=call.name or "unknown",
+                call_id=call.id or "",
+                output="ok",
+            ))
+        self._dispatch_results.extend(results)
+        return results
 
     def available_tool_names(self) -> set[str]:
         return set(self._available_tool_names)
@@ -373,15 +386,15 @@ def test_max_iterations_exits_loop():
     assert len(fake_dispatcher.dispatched) == 3
 
 
-def test_hybrid_direct_answer_tool_call_is_executed():
-    """Hybrid direct-answer pass is reparsed if the model emits a tool call anyway."""
+def test_tool_then_final_response():
+    """Model emits a tool call then a final answer."""
     tool_response = _tool_call_json("read_file", {"path": "/tmp/x.txt"})
     final_response = "Verified the file contents."
 
     agent_loop, fake_dispatcher = _make_loop(
-        ["NO_TOOL", tool_response, "NO_TOOL", final_response],
+        [tool_response, final_response],
     )
-    messages = [_user_msg("write a file and then verify it")]
+    messages = [_user_msg("read a file and then answer")]
     result = asyncio.run(agent_loop.run(messages, token_callback=lambda _token: None))
 
     assert result.final_response == final_response
