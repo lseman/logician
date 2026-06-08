@@ -15,6 +15,7 @@ import { refreshAfterWrite } from "./read-tracker.ts";
 
 export const write_file: Tool = {
 	name: "write_file",
+	hookAliases: ["Write"],
 	description:
 		"Create or overwrite a complete file. Creates parent directories and returns a unified diff.",
 	parameters: {

@@ -14,6 +14,7 @@ import {
 
 export const read_file: Tool = {
 	name: "read_file",
+	hookAliases: ["Read"],
 	executionMode: "parallel",
 	description:
 		`Read file contents. Output is truncated to ${DEFAULT_MAX_LINES} lines or ` +

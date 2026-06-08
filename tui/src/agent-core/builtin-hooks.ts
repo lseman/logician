@@ -8,9 +8,8 @@ import { GuardEngine } from "./guards.ts";
 import { HookBus } from "./hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
-	compactMessagesForContext,
+	compactToFit,
 	estimateChatPayloadTokens,
-	microCompactMessages,
 } from "./messages.ts";
 import { getTodos } from "./tools/todo-write.ts";
 import type { AgentConfig, AgentLoopHooks } from "./types.ts";
@@ -74,25 +73,15 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
 			if (iteration - lastCompactionTurn < COMPACTION_COOLDOWN_TURNS) {
 				return undefined;
 			}
-			const tokens = estimateChatPayloadTokens(messages, deps.toolDefs());
-			if (tokens < max * fraction) return undefined;
-
-			// Cheap pass first: trim oversized bodies only.
-			const micro = microCompactMessages(messages);
-			const microTokens = estimateChatPayloadTokens(
-				micro.messages,
-				deps.toolDefs(),
-			);
-			if (microTokens < max * fraction) {
-				lastCompactionTurn = iteration;
-				return micro.changed ? { messages: micro.messages } : undefined;
-			}
-			// Still over: full summarizing compaction.
-			const full = compactMessagesForContext(micro.messages, {
+			// Shared ladder: estimate → micro → full-if-still-over. Fires at
+			// `fraction` of the window, targets COMPACTION_TARGET_FRACTION.
+			const result = compactToFit(messages, {
+				triggerTokens: max * fraction,
 				targetTokens: Math.floor(max * COMPACTION_TARGET_FRACTION),
+				toolDefs: deps.toolDefs(),
 			});
 			lastCompactionTurn = iteration;
-			return full.changed ? { messages: full.messages } : undefined;
+			return result.changed ? { messages: result.messages } : undefined;
 		};
 	}
 
@@ -101,31 +90,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
 			const tokens = estimateChatPayloadTokens(messages, deps.toolDefs());
 			return budget.shouldStop(tokens);
 		};
-	}
-
-	// Blocked patterns: text indicating the model is stuck, not just
-	// choosing to stop. When detected, skip the todo nudge so the loop
-	// ends cleanly instead of wasting turns.
-	const BLOCKED_PATTERNS = [
-		"i can't",
-		"i'm unable",
-		"i don't have",
-		"cannot access",
-		"i am unable",
-		"i do not have",
-		"not available",
-		"no access",
-		"i don't have access",
-		"i cannot",
-		"unable to",
-		"out of my",
-		"beyond my",
-		"i do not have access",
-	];
-
-	function isBlocked(assistantText: string): boolean {
-		const lower = assistantText.toLowerCase();
-		return BLOCKED_PATTERNS.some((p) => lower.includes(p));
 	}
 
 	// Pi-style follow-up: if the model stops (no tool calls) while its own
@@ -139,8 +103,11 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
 			continuationCount,
 			maxContinuations,
 		}) => {
-			// Skip if model appears blocked by external constraints.
-			if (isBlocked(assistantText)) return undefined;
+			// Skip the nudge when the model explicitly declares it is done or
+			// blocked. We honour the model's own stop signal (the nudge prompt
+			// asks it to "say so explicitly and stop") rather than sniffing prose
+			// anywhere in the message — see declaresStop().
+			if (declaresStop(assistantText)) return undefined;
 
 			// Don't nudge on the last allowed continuation — let the loop
 			// end cleanly instead of wasting the final turn.
@@ -166,6 +133,42 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
 	}
 
 	return hooks;
+}
+
+// Explicit stop declarations the model makes when done or blocked. Matched only
+// against the message *tail* (its final statement, where models declare status)
+// and anchored to a line/sentence start — so a mid-paragraph "I cannot stress
+// enough …" no longer reads as "blocked". Patterns are intentionally narrow:
+// the cost of a false negative (one wasted nudge, capped by maxContinuations) is
+// far lower than a false positive (silently abandoning unfinished work).
+const STOP_DECLARATIONS = [
+	// Completion.
+	/\b(task|work|everything|all (?:the )?(?:tasks|items|todos))\s+(?:is|are)\s+(?:now\s+)?(?:complete|completed|done|finished)\b/,
+	/\b(?:i(?:'ve| have))\s+(?:now\s+)?(?:completed|finished|done)\b/,
+	/\ball\s+(?:done|complete|completed|finished)\b/,
+	/\bnothing\s+(?:more|else|further)\s+to\s+do\b/,
+	// Blocked / lacking capability, stated as a standalone status. "I can't" /
+	// "I am unable" must be followed by a stop-relevant object so an incidental
+	// "I cannot stress enough …" does not read as blocked.
+	/\bi\s+(?:can(?:'t|not)|am unable to)\s+(?:access|proceed|continue|complete|finish|do (?:this|that|so)|help with)\b/,
+	/\bi\s+(?:do(?:n't| not)|don't)\s+have\s+(?:access|the ability|permission)\b/,
+	/\b(?:unable to proceed|cannot proceed|cannot continue|i'm blocked|i am blocked)\b/,
+];
+
+/**
+ * Does the assistant's message explicitly declare it is done or blocked? Only
+ * the last non-empty line (capped at 240 chars) is inspected, lower-cased, so a
+ * status declaration at the end of a turn is honoured while incidental phrasing
+ * earlier in the message is ignored.
+ */
+export function declaresStop(assistantText: string): boolean {
+	const lines = assistantText
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean);
+	const tail = lines.at(-1)?.toLowerCase().slice(0, 240) ?? "";
+	if (!tail) return false;
+	return STOP_DECLARATIONS.some((re) => re.test(tail));
 }
 
 /** A named layer of hooks registered into the shared bus, in order. */

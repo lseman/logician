@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 export const rg_search: Tool = {
 	name: "rg_search",
+	hookAliases: ["Grep"],
 	executionMode: "parallel",
 	description:
 		"Search file contents with ripgrep (supports regex, glob, context lines).",

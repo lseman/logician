@@ -15,6 +15,7 @@ import {
 	type AgentConfig,
 	type AgentEvent,
 	AgentHarness,
+	type HarnessPhase,
 	type Message,
 	type Tool,
 	type WebSearchConfig,
@@ -29,8 +30,9 @@ import {
 	runSessionStartHooks,
 	splitPluginArgs,
 } from "./agent-core/plugins.ts";
-import { formatSkillInvocation, loadSkills } from "./agent-core/skills.ts";
+import { formatSkillCatalog, loadSkills } from "./agent-core/skills.ts";
 import { buildDefaultSystemPrompt } from "./agent-core/system-prompt.ts";
+import { createReadSkillTool } from "./agent-core/tools/read-skill.ts";
 import { ToolRegistry } from "./agent-core/tools/registry.ts";
 import { onTodosChanged } from "./agent-core/tools/todo-write.ts";
 import { findLogicianConfig } from "./config.ts";
@@ -49,8 +51,6 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				turnId: event.turnId,
 				role: event.role,
 			} as ParsedBridgeEvent;
-		case "message_delta":
-			return { type: "token", token: event.delta };
 		case "text_start":
 			return { type: "text_start", turnId: event.turnId };
 		case "text_delta":
@@ -81,6 +81,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				result: event.result,
 				is_error: event.isError,
 				tool_call_id: event.toolCallId,
+				details: event.details,
 			} as ParsedBridgeEvent;
 		case "tool_call_delta":
 			return {
@@ -142,6 +143,11 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 			return {
 				type: "token",
 				token: `[Model] ${event.model}`,
+			};
+		case "max_iterations":
+			return {
+				type: "token",
+				token: `[Stopped] reached the ${event.limit}-turn safety limit without finishing (${event.iterations} turns).`,
 			};
 		default:
 			return null;
@@ -396,6 +402,10 @@ export class AgentCoreBridge {
 			});
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
+			// Surface harness phase transitions the loop can't see — compaction
+			// and branch_summary. turn/idle are already covered by the
+			// streaming/ready phase emits around prompt().
+			this.harness.setOnPhaseChange((phase) => this._emitHarnessPhase(phase));
 		}
 
 		// Emit turn start
@@ -462,6 +472,23 @@ export class AgentCoreBridge {
 			followUp: q.followUp,
 			nextTurn: q.nextTurn,
 		});
+	}
+
+	// Map harness structural phases to UI phase states. The "turn" phase is
+	// already covered by the streaming/ready emits around prompt() (and is
+	// skipped here to avoid clobbering the loop's finer-grained states). The
+	// background phases — compaction, branch_summary — are otherwise invisible
+	// to the UI, so surface them and restore "ready" when they return to idle.
+	private _emitHarnessPhase(phase: HarnessPhase): void {
+		// Don't touch UI phase while a turn drives its own streaming/ready cycle.
+		if (phase === "turn" || this.running) return;
+		const state =
+			phase === "compaction"
+				? "compacting"
+				: phase === "branch_summary"
+					? "branching"
+					: "ready";
+		this.emit({ type: "phase", state });
 	}
 
 	/** Get current steering messages (read-only). */
@@ -666,6 +693,33 @@ export class AgentCoreBridge {
 			tokens_after: after,
 		} as ParsedBridgeEvent);
 		return { tokensSaved: saved, tokensBefore: before, tokensAfter: after };
+	}
+
+	// ── Conversation branching ─────────────────────────────────────────────
+
+	/** Fork the conversation; returns the new branch id, or null if no harness. */
+	fork(): string | null {
+		return this.harness?.fork() ?? null;
+	}
+
+	/**
+	 * Summarize the active branch and merge it back into the parent. Returns the
+	 * summary text, or null if nothing to summarize / no harness.
+	 */
+	async branchSummary(): Promise<string | null> {
+		if (!this.harness) return null;
+		const summary = await this.harness.branchSummary();
+		// Token count changed (branch tail collapsed into one message).
+		this.contextTokens = estimateChatPayloadTokens(this.harness.messages);
+		return summary;
+	}
+
+	/** Discard the active branch without merging. Returns true if one was discarded. */
+	discardBranch(): boolean {
+		const discarded = this.harness?.discardBranch() ?? false;
+		if (discarded && this.harness)
+			this.contextTokens = estimateChatPayloadTokens(this.harness.messages);
+		return discarded;
 	}
 
 	// ── State management ─────────────────────────────────────────────────
@@ -880,7 +934,6 @@ export class AgentCoreBridge {
 		if (!skillsDirs.length) return;
 
 		const { skills, diagnostics } = await loadSkills(skillsDirs);
-		if (!skills.length) return;
 
 		// Log diagnostics to transcript for visibility.
 		for (const diag of diagnostics) {
@@ -890,13 +943,24 @@ export class AgentCoreBridge {
 			});
 		}
 
-		// Format each skill as an XML invocation block.
-		const skillBlocks: string[] = [];
-		for (const skill of skills) {
-			skillBlocks.push(formatSkillInvocation(skill));
+		// Skills flagged disable-model-invocation are not advertised to the model.
+		const visible = skills.filter((s) => !s.disableModelInvocation);
+		if (!visible.length) return;
+
+		// Inject a compact catalog (name + description), not full bodies. The
+		// model loads a skill's full instructions on demand via read_skill.
+		this.skillsContext = formatSkillCatalog(visible);
+
+		// Register the read_skill tool bound to the loaded skills so the model can
+		// pull full bodies. Append to the tool set (next loop turn picks it up) and
+		// patch the live harness registry if a run is already active.
+		const readSkill = createReadSkillTool(visible);
+		if (readSkill && !this.defaultTools.some((t) => t.name === "read_skill")) {
+			this.defaultTools = [...this.defaultTools, readSkill];
+			this.config.tools = this.defaultTools;
+			this.harness?.setTools(this.defaultTools);
 		}
 
-		this.skillsContext = `<skills>\n${skillBlocks.join("\n\n")}\n</skills>`;
 		this.rebuildBaseSystemPrompt();
 	}
 

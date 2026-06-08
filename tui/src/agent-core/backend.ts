@@ -4,6 +4,97 @@
 
 import type { ThinkingLevel, ToolCall } from "./types.ts";
 
+// ── Typed backend errors ───────────────────────────────────────────────────
+// The backend classifies provider/network failures at the boundary so the loop
+// can branch on a category instead of re-sniffing error message strings. The
+// loop keeps a string-matching fallback for errors thrown outside the backend.
+
+export type BackendErrorCategory =
+	// Prompt exceeds the model's context window. Recover by compacting, not by
+	// retrying the same request.
+	| "context_full"
+	// Provider rate limit (HTTP 429). Retryable with backoff.
+	| "rate_limit"
+	// Transient server / network failure (HTTP 5xx, connection errors).
+	// Retryable with backoff.
+	| "transient"
+	// Client error (HTTP 4xx other than 429): malformed request. Not retryable.
+	| "client"
+	// Anything the backend couldn't classify.
+	| "unknown";
+
+export class BackendError extends Error {
+	readonly category: BackendErrorCategory;
+	readonly status?: number;
+	/** Whether retrying the same request could succeed (rate_limit / transient). */
+	readonly retryable: boolean;
+
+	constructor(opts: {
+		category: BackendErrorCategory;
+		message: string;
+		status?: number;
+	}) {
+		super(opts.message);
+		this.name = "BackendError";
+		this.category = opts.category;
+		this.status = opts.status;
+		this.retryable =
+			opts.category === "rate_limit" || opts.category === "transient";
+	}
+}
+
+// Classify an HTTP error response by status + body. Context-full is detected
+// from the body text since providers signal it inconsistently (400 or 413 with
+// a "context"/"too long"/"tokens" message).
+export function classifyHttpError(status: number, body: string): BackendError {
+	const lower = body.toLowerCase();
+	const looksContextFull = [
+		"context",
+		"too long",
+		"too many tokens",
+		"maximum context",
+		"reduce the length",
+		"n_ctx",
+	].some((p) => lower.includes(p));
+	const message = `LLM request failed: ${status} ${body}`;
+
+	if (looksContextFull) {
+		return new BackendError({ category: "context_full", message, status });
+	}
+	if (status === 429) {
+		return new BackendError({ category: "rate_limit", message, status });
+	}
+	if (status >= 500) {
+		return new BackendError({ category: "transient", message, status });
+	}
+	if (status >= 400) {
+		return new BackendError({ category: "client", message, status });
+	}
+	return new BackendError({ category: "unknown", message, status });
+}
+
+// Classify a thrown network/fetch error (no HTTP response). Connection-level
+// failures are transient; an abort is rethrown unchanged by the caller.
+export function classifyNetworkError(error: Error): BackendError {
+	const msg = `${error.name || ""} ${error.message || ""}`.toLowerCase();
+	const transient = [
+		"econnrefused",
+		"econnreset",
+		"etimedout",
+		"eai-again",
+		"socket hang up",
+		"connection refused",
+		"connection reset",
+		"connection timeout",
+		"network error",
+		"fetch failed",
+	].some((p) => msg.includes(p));
+	return new BackendError({
+		category: transient ? "transient" : "unknown",
+		message: error.message,
+	});
+}
+
 export interface LLMResponse {
 	content: string | null;
 	toolCalls: ToolCall[];
@@ -17,6 +108,9 @@ export interface GenerateCallbacks {
 	onThinking?: (delta: string) => void;
 	onTextStart?: () => void;
 	onTextEnd?: () => void;
+	// Fired once per streamed tool call, the moment its name is first known
+	// (placeholder/empty-name chunks are skipped). Gives the UI an early
+	// "running" state while the model is still emitting the call's arguments.
 	onToolCallStart?: (toolCallId: string, name: string, args: string) => void;
 	onToolCallDelta?: (toolCallId: string, delta: string) => void;
 }
@@ -29,6 +123,12 @@ export interface GenerateOptions {
 	signal?: AbortSignal;
 	thinkingLevel?: ThinkingLevel;
 	callbacks?: GenerateCallbacks;
+	// Per-request extras supplied by the loop's provider-boundary hooks
+	// (beforeProviderRequest / beforeProviderPayload).
+	headers?: Record<string, string>;
+	transformPayload?: (
+		payload: Record<string, unknown>,
+	) => Promise<Record<string, unknown>> | Record<string, unknown>;
 }
 
 export interface LLMBackend {
@@ -92,6 +192,8 @@ export class OpenAIBackend implements LLMBackend {
 			signal,
 			thinkingLevel,
 			callbacks = {},
+			headers: extraHeaders,
+			transformPayload,
 		} = options;
 		const {
 			onDelta,
@@ -122,22 +224,37 @@ export class OpenAIBackend implements LLMBackend {
 			body.tools = tools;
 		}
 
-		const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(body),
-			signal,
-		});
+		// Let a provider-payload hook inspect/rewrite the final body.
+		const finalBody = transformPayload ? await transformPayload(body) : body;
+
+		let response: Response;
+		try {
+			response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					...extraHeaders,
+				},
+				body: JSON.stringify(finalBody),
+				signal,
+			});
+		} catch (e) {
+			const error = e as Error;
+			// Aborts propagate unchanged so the loop's signal check handles them.
+			if (error.name === "AbortError") throw error;
+			throw classifyNetworkError(error);
+		}
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw new Error(`LLM request failed: ${response.status} ${errorText}`);
+			throw classifyHttpError(response.status, errorText);
 		}
 
 		if (!response.body) {
-			throw new Error("Response body is unavailable");
+			throw new BackendError({
+				category: "transient",
+				message: "Response body is unavailable",
+			});
 		}
 
 		const reader = response.body.getReader();
@@ -147,8 +264,9 @@ export class OpenAIBackend implements LLMBackend {
 		let toolCalls: ToolCall[] = [];
 		let stopReason: LLMResponse["stopReason"] = "stop";
 		let hasText = false;
-		let hasToolCalls = false;
-
+		// Tool-call indices whose early start event has already been emitted, so
+		// onToolCallStart fires exactly once per streamed call.
+		const startedToolIndexes = new Set<number>();
 		while (true) {
 			const { value, done } = await reader.read();
 			if (done) break;
@@ -185,30 +303,37 @@ export class OpenAIBackend implements LLMBackend {
 
 					if (delta.tool_calls) {
 						for (const tc of delta.tool_calls) {
-							// Accumulate tool call
+							// Accumulate tool call across chunks.
 							if (!toolCalls[tc.index]) {
 								toolCalls[tc.index] = {
 									id: "",
 									name: "",
 									arguments: "",
 								};
-								// Emit tool_call_start on first chunk of a new tool call
-								if (!hasToolCalls || !toolCalls[tc.index].id) {
-									hasToolCalls = true;
-									const callId = tc.id || `tool_${tc.index}`;
-									const callName = tc.function?.name || "";
-									const callArgs = tc.function?.arguments || "";
-									onToolCallStart?.(callId, callName, callArgs);
-								}
 							}
 							if (tc.id) toolCalls[tc.index].id = tc.id;
 							if (tc.function?.name)
 								toolCalls[tc.index].name = tc.function.name;
 							if (tc.function?.arguments) {
 								toolCalls[tc.index].arguments += tc.function.arguments;
-								// Emit delta for accumulated arguments
+							}
+
+							// Emit the early start once, the moment the name is known.
+							// Skipping empty-name chunks lets the UI reuse this chunk
+							// (by id/name) when the loop emits the authoritative start
+							// before execution — no duplicate card.
+							const acc = toolCalls[tc.index];
+							if (acc.name && !startedToolIndexes.has(tc.index)) {
+								startedToolIndexes.add(tc.index);
+								onToolCallStart?.(
+									acc.id || `tool_${tc.index}`,
+									acc.name,
+									acc.arguments,
+								);
+							}
+							if (tc.function?.arguments && startedToolIndexes.has(tc.index)) {
 								onToolCallDelta?.(
-									tc.id || `tool_${tc.index}`,
+									acc.id || `tool_${tc.index}`,
 									tc.function.arguments,
 								);
 							}

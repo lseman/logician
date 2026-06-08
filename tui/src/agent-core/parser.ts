@@ -38,7 +38,7 @@ export function parseToolCalls(text: string): ToolCall[] {
 	// Strategy 1: JSON in fenced blocks. This catches the most common textual
 	// fallback from OpenAI-compatible models when native tool calls wobble.
 	const fencePattern = /```(?:json|tool|tool_call)?\s*([\s\S]*?)```/gi;
-	let match;
+	let match: RegExpExecArray | null;
 	while ((match = fencePattern.exec(text)) !== null) {
 		const parsed = parseLooseJson(match[1].trim());
 		if (parsed.ok) readObject(parsed.value);
@@ -57,7 +57,7 @@ export function parseToolCalls(text: string): ToolCall[] {
 	// Strategy 3: JSON objects { "name": "...", "arguments": "..." }
 	const jsonPattern =
 		/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
-	while ((match = jsonPattern.exec(text)) !== null) {
+		while ((match = jsonPattern.exec(text)) !== null) {
 		push(match[1], match[2]);
 	}
 
@@ -68,7 +68,7 @@ export function parseToolCalls(text: string): ToolCall[] {
 	// Strategy 4: YAML-style tool_call blocks
 	const yamlPattern =
 		/tool_call:\s*\n\s*name:\s*([^\n]+)\s*\n\s*arguments:\s*"((?:[^"\\]|\\.)*)"/g;
-	while ((match = yamlPattern.exec(text)) !== null) {
+		while ((match = yamlPattern.exec(text)) !== null) {
 		push(match[1].trim(), match[2]);
 	}
 
@@ -79,7 +79,7 @@ export function parseToolCalls(text: string): ToolCall[] {
 	// Strategy 5: Anthropic/OpenClaude-ish XML fallback.
 	const xmlPattern =
 		/<tool_use\b[^>]*>\s*<name>\s*([^<]+?)\s*<\/name>\s*<(?:arguments|input)>\s*([\s\S]*?)\s*<\/(?:arguments|input)>\s*<\/tool_use>/gi;
-	while ((match = xmlPattern.exec(text)) !== null) {
+		while ((match = xmlPattern.exec(text)) !== null) {
 		push(match[1].trim(), match[2].trim());
 	}
 

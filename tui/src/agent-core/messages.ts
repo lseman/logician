@@ -230,6 +230,55 @@ export function compactMessagesForContext(
 	};
 }
 
+/**
+ * Token-budget compaction ladder shared by the proactive builtin hook and the
+ * loop's context-full recovery. Single source of truth for the
+ * estimate → micro → (full if still over) sequence:
+ *
+ *  1. If already under `triggerTokens` and not `force`d, do nothing.
+ *  2. Run the cheap micro pass (trim oversized bodies). If that brings the
+ *     payload under `triggerTokens`, stop there.
+ *  3. Otherwise run the full summarizing pass targeting `targetTokens`.
+ *
+ * `triggerTokens` is the threshold that fires compaction (e.g. window * 0.8);
+ * `targetTokens` is what the full pass aims to reach (e.g. window * 0.65).
+ * `force` skips the under-threshold checks — used when the provider already
+ * rejected the request as too long, so compaction must run regardless of the
+ * local estimate.
+ */
+export function compactToFit(
+	messages: Message[],
+	opts: {
+		triggerTokens: number;
+		targetTokens?: number;
+		toolDefs?: Record<string, unknown>[];
+		keepRecentMessages?: number;
+	},
+): CompactionResult {
+	const { triggerTokens, targetTokens, toolDefs, keepRecentMessages } = opts;
+	const force = triggerTokens <= 0;
+	const estimate = (msgs: Message[]) =>
+		estimateChatPayloadTokens(msgs, toolDefs);
+	const noop: CompactionResult = {
+		messages,
+		tokensBefore: estimate(messages),
+		tokensAfter: estimate(messages),
+		changed: false,
+	};
+
+	if (!force && noop.tokensBefore < triggerTokens) return noop;
+
+	// Cheap pass first.
+	const micro = microCompactMessages(messages);
+	if (!force && estimate(micro.messages) < triggerTokens) return micro;
+
+	// Still over (or forced): full summarizing pass on the micro'd messages.
+	return compactMessagesForContext(micro.messages, {
+		targetTokens,
+		keepRecentMessages,
+	});
+}
+
 // Cheap standalone pass: truncate only oversized message bodies, leave history
 // structure intact. Used for proactive compaction before the full summarizing
 // pass is needed.

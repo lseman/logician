@@ -35,16 +35,30 @@ export type AgentMessage =
 	| Message
 	| CustomAgentMessageMap[keyof CustomAgentMessageMap & string];
 
+/** Why the model (or loop) ended its turn. Mirrors the provider stop reason,
+ *  plus "tool_calls" when the assistant requested tools and "aborted". */
+export type StopReason = "stop" | "length" | "tool_calls" | "error" | "aborted";
+
 export type AgentEvent =
 	| { type: "agent_start" }
-	| { type: "agent_end" }
+	// Carries the final conversation so a consumer can persist / render the
+	// completed transcript without tracking every incremental event.
+	| { type: "agent_end"; messages?: Message[] }
 	| { type: "turn_start"; turnId: string }
-	| { type: "turn_end"; turnId: string }
+	// stopReason: why the turn ended. message/toolResults: the assistant message
+	// produced this turn and any tool results, so the UI can render a completed
+	// turn from one event.
+	| {
+			type: "turn_end";
+			turnId: string;
+			stopReason?: StopReason;
+			message?: Message;
+			toolResults?: Message[];
+	  }
 	| { type: "message_start"; turnId: string; role: MessageRole }
 	| { type: "text_start"; turnId: string }
 	| { type: "text_delta"; turnId: string; delta: string }
 	| { type: "text_end"; turnId: string }
-	| { type: "message_delta"; turnId: string; delta: string }
 	| { type: "message_update"; turnId: string; message: Message }
 	| { type: "message_end"; turnId: string }
 	| {
@@ -59,9 +73,7 @@ export type AgentEvent =
 			tokensBefore: number;
 			tokensAfter: number;
 	  }
-	| { type: "thinking_start" }
 	| { type: "thinking_delta"; delta: string }
-	| { type: "thinking_end" }
 	| {
 			type: "tool_call_start";
 			toolName: string;
@@ -79,6 +91,8 @@ export type AgentEvent =
 			toolCallId: string;
 			result: string;
 			isError?: boolean;
+			// Structured metadata returned by the tool alongside its text result.
+			details?: Record<string, unknown>;
 	  }
 	| {
 			type: "tool_call_update";
@@ -93,7 +107,7 @@ export type AgentEvent =
 			toolName?: string;
 			message: string;
 	  }
-	| { type: "phase"; phase: "streaming" | "thinking" | "tool" | "idle" }
+	| { type: "phase"; phase: "thinking" | "tool" | "idle" }
 	| {
 			type: "auto_retry_start";
 			attempt: number;
@@ -103,6 +117,10 @@ export type AgentEvent =
 	  }
 	| { type: "auto_retry_end"; attempt: number; success: boolean }
 	| { type: "model_select"; model: string; index: number }
+	// Emitted when the loop stops because the safety cap on unproductive turns
+	// was reached (not because the agent finished). Lets the UI distinguish a
+	// truncated run from a completed one.
+	| { type: "max_iterations"; iterations: number; limit: number }
 	| { type: "error"; message: string; error?: unknown };
 
 export type EventHandler = (event: AgentEvent) => void;
@@ -170,6 +188,43 @@ export interface GetSteeringMessagesContext {
 	iteration: number;
 }
 
+export interface TransformContext {
+	messages: AgentMessage[];
+	iteration: number;
+	signal?: AbortSignal;
+}
+
+// Fires just before each provider request. Lets a hook inject per-request
+// headers (e.g. a freshly-resolved OAuth token) or tune the timeout.
+export interface BeforeProviderRequestContext {
+	model: string;
+	sessionId: string;
+	iteration: number;
+}
+
+export interface BeforeProviderRequestResult {
+	headers?: Record<string, string>;
+	timeoutMs?: number;
+}
+
+// Fires with the fully-built request payload right before serialization. Lets a
+// hook inspect or rewrite the raw body (analytics, A/B params, provider quirks).
+export interface BeforeProviderPayloadContext {
+	model: string;
+	payload: Record<string, unknown>;
+}
+
+export interface BeforeProviderPayloadResult {
+	payload: Record<string, unknown>;
+}
+
+// Return rewritten messages to replace the working context before the LLM call
+// (pruning, external-context injection, nextTurn drain). Runs before
+// convertToLlm, after steering injection. Return undefined = no change.
+export interface TransformContextResult {
+	messages: AgentMessage[];
+}
+
 export interface GetFollowUpMessagesContext {
 	messages: Message[];
 	iteration: number;
@@ -221,6 +276,29 @@ export interface AgentLoopHooks {
 		| Promise<PrepareNextTurnResult | undefined>
 		| PrepareNextTurnResult
 		| undefined;
+	// Pi-style context transform: rewrite the working AgentMessage[] before each
+	// LLM call (before convertToLlm). Used for proactive pruning / external
+	// context injection / draining the harness nextTurn queue.
+	transformContext?: (
+		ctx: TransformContext,
+	) =>
+		| Promise<TransformContextResult | undefined>
+		| TransformContextResult
+		| undefined;
+	// Provider-boundary hooks: inject per-request headers / tune timeout, and
+	// inspect/rewrite the raw request payload before it is sent.
+	beforeProviderRequest?: (
+		ctx: BeforeProviderRequestContext,
+	) =>
+		| Promise<BeforeProviderRequestResult | undefined>
+		| BeforeProviderRequestResult
+		| undefined;
+	beforeProviderPayload?: (
+		ctx: BeforeProviderPayloadContext,
+	) =>
+		| Promise<BeforeProviderPayloadResult | undefined>
+		| BeforeProviderPayloadResult
+		| undefined;
 	shouldStopAfterTurn?: (
 		ctx: ShouldStopAfterTurnContext,
 	) => Promise<boolean | undefined> | boolean | undefined;
@@ -241,6 +319,15 @@ export interface ToolCall {
 	arguments: string;
 }
 
+// Structured tool result. Tools may return a plain string (back-compat) or this
+// shape to attach machine-readable `details` (diffs, line counts, paths) that
+// flow through tool_call_end for richer UI without polluting the text the model
+// sees.
+export interface ToolResult {
+	content: string;
+	details?: Record<string, unknown>;
+}
+
 export interface Tool {
 	name: string;
 	description: string;
@@ -253,7 +340,16 @@ export interface Tool {
 	// Read-only tools may opt into parallel execution when global toolExecution
 	// is parallel.
 	executionMode?: ToolExecutionMode;
-	execute: (args: Record<string, unknown>, ctx: ToolContext) => Promise<string>;
+	// Extra names this tool answers to when matching Claude-Code-style hook
+	// matchers (PreToolUse / PostToolUse). e.g. the `bash` tool aliases "Bash".
+	// The loop builds the matcher value from the tool's own name + these.
+	hookAliases?: string[];
+	// Return a string (content only) or a ToolResult (content + structured
+	// details). The registry normalizes both to a ToolResult.
+	execute: (
+		args: Record<string, unknown>,
+		ctx: ToolContext,
+	) => Promise<string | ToolResult>;
 }
 
 export interface ToolContext {

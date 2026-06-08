@@ -114,9 +114,8 @@ export class StatusBar implements Component {
 		const location = this.formatLocation();
 		const model = this.info.model || "local";
 		const reasoner = this.info.reasoner || "none";
-		const reasonerColor = reasoner === "none"
-			? "\x1b[38;5;244m"
-			: "\x1b[38;5;159m";
+		const reasonerColor =
+			reasoner === "none" ? "\x1b[38;5;244m" : "\x1b[38;5;159m";
 		const reasonerDisplay = `${reasonerColor}reasoner:${reasoner}${RESET}`;
 		const bottomLeft = `${DIM}${location}${RESET}`;
 		const bottomRight = `${reasonerDisplay} ${DIM}·${RESET} ${DIM}${model}${RESET}`;
@@ -214,28 +213,25 @@ export class StatusBar implements Component {
 			tool: "\x1b[38;5;141m",
 			error: "\x1b[38;5;203m",
 			streaming: "\x1b[38;5;111m",
+			compacting: "\x1b[38;5;208m",
+			branching: "\x1b[38;5;177m",
 		};
 		const color = phaseColors[this.info.phase] ?? "\x1b[38;5;240m";
 
 		const phase = this.info.phase.toLowerCase();
 
-		// Animated spinner for active phases
-		if (phase === "streaming") {
+		// Animated spinner for active phases.
+		const SPINNING = [
+			"streaming",
+			"thinking",
+			"tool",
+			"compacting",
+			"branching",
+		];
+		if (SPINNING.includes(phase)) {
 			const spinners = ["◐", "◓", "◑", "◒"];
 			const s = spinners[this.tick % spinners.length];
-			return `${color}\x1b[1m${s} STREAMING${RESET}\x1b[0m`;
-		}
-
-		if (phase === "thinking") {
-			const spinners = ["◐", "◓", "◑", "◒"];
-			const s = spinners[this.tick % spinners.length];
-			return `${color}\x1b[1m${s} THINKING${RESET}\x1b[0m`;
-		}
-
-		if (phase === "tool") {
-			const spinners = ["◐", "◓", "◑", "◒"];
-			const s = spinners[this.tick % spinners.length];
-			return `${color}\x1b[1m${s} TOOL${RESET}\x1b[0m`;
+			return `${color}\x1b[1m${s} ${phase.toUpperCase()}${RESET}\x1b[0m`;
 		}
 
 		return `${color}\x1b[1m${phase.toUpperCase()}\x1b[0m`;

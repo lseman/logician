@@ -66,9 +66,20 @@ export function createSlashCommands(
 
 		// ── Context & memory ─────────────────────────────────────────────────
 		cmd("/context", "Show session/data context", "local", false, () => {
-			return (localHandlers.getContext?.() as string | undefined) || "No context available.";
+			return (
+				(localHandlers.getContext?.() as string | undefined) ||
+				"No context available."
+			);
 		}),
 		cmd("/compact", "Summarize older conversation history", "bridge", false),
+		cmd("/fork", "Fork the conversation into a branch", "bridge", false),
+		cmd(
+			"/branch-summary",
+			"Summarize the active branch back into the parent",
+			"bridge",
+			false,
+		),
+		cmd("/discard-branch", "Discard the active branch", "bridge", false),
 		cmd("/reset", "Reset runtime tool state", "bridge", false),
 		cmd("/changes", "Show git status and diff preview", "bridge", false),
 
@@ -85,7 +96,12 @@ export function createSlashCommands(
 		cmd("/plugins", "Manage installed plugins", "local", true),
 
 		// ── Reasoning ────────────────────────────────────────────────────────
-		cmd("/reasoner", "Select reasoning mode (none|ssr|tot|reflexion|...)", "local", true),
+		cmd(
+			"/reasoner",
+			"Select reasoning mode (none|ssr|tot|reflexion|...)",
+			"local",
+			true,
+		),
 
 		// ── Display ──────────────────────────────────────────────────────────
 		cmd(

@@ -1,6 +1,6 @@
 # Agent Loop / Flow Improvements: Logician TUI vs Pi
 
-Comparison of the TypeScript agent loop in `logician-tui` against `repos/pi/packages/agent`.
+Comparison of the TypeScript agent loop in `tui` against `repos/pi/packages/agent`.
 Actionable improvements ranked by impact.
 
 ---
@@ -9,7 +9,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** Full `Session` abstraction with JSONL storage, branch summaries, compaction entries, and model/thinking-level change history. Sessions survive restarts.
 
-**Logician-tui has nothing.** Messages live only in memory. A crash or reload loses everything.
+**tui has nothing.** Messages live only in memory. A crash or reload loses everything.
 
 **What to build:**
 - `Session` class wrapping a JSONL file per conversation
@@ -26,7 +26,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `loadSkills()` walks directories for `SKILL.md` files with YAML frontmatter (`name`, `description`, `disable-model-invocation`). Skills get injected into the system prompt as `<skill>` blocks. Supports sourced skills with provenance.
 
-**Logician-tui has nothing.** No skill loading, no skill injection.
+**tui has nothing.** No skill loading, no skill injection.
 
 **What to build:**
 - `loadSkills(env, dirs)` — recursive SKILL.md discovery with ignore-file support
@@ -44,7 +44,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `promptTemplates` resource array. `promptFromTemplate(name, args)` invokes a template with string interpolation. Templates are loaded alongside skills.
 
-**Logician-tui has nothing.**
+**tui has nothing.**
 
 **What to build:**
 - `PromptTemplate` interface: `{ name, template, description }`
@@ -60,7 +60,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `transformContext: (messages, signal) => Promise<AgentMessage[]>` runs before `convertToLlm`. Enables pre-processing at the AgentMessage level: pruning old messages, injecting external context, filtering UI-only messages.
 
-**Logician-tui has no equivalent.** Context compaction happens inline in the loop or via `prepareNextTurn`, which is post-turn.
+**tui has no equivalent.** Context compaction happens inline in the loop or via `prepareNextTurn`, which is post-turn.
 
 **What to build:**
 - Add `transformContext` to `AgentLoopConfig`
@@ -76,7 +76,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `getApiKey(provider) => Promise<string | undefined>` resolves API keys per-request. Critical for short-lived OAuth tokens (GitHub Copilot) that expire mid-run.
 
-**Logician-tui has nothing.** API key is static in config/backend.
+**tui has nothing.** API key is static in config/backend.
 
 **What to build:**
 - Add `getApiKey` to `AgentLoopConfig`
@@ -92,7 +92,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** Distinct events: `text_start`, `text_delta`, `text_end`, `thinking_start`, `thinking_delta`, `thinking_end`, `toolcall_start`, `toolcall_delta`, `toolcall_end`, plus `message_update` with the full partial message.
 
-**Logician-tui has basic deltas.** `message_delta` and `thinking_delta` — no text/tool boundaries, no partial message snapshots.
+**tui has basic deltas.** `message_delta` and `thinking_delta` — no text/tool boundaries, no partial message snapshots.
 
 **What to build:**
 - Emit `thinking_start` / `thinking_end` markers (already partially done)
@@ -109,7 +109,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `AgentMessage` is a union of LLM messages + custom app messages (notifications, status updates, UI-only artifacts). `convertToLlm` filters/transforms to LLM-compatible format. Apps extend via declaration merging.
 
-**Logician-tui has plain `Message[]`.** No room for non-LLM messages. All messages go to the model.
+**tui has plain `Message[]`.** No room for non-LLM messages. All messages go to the model.
 
 **What to build:**
 - `AgentMessage` union type extending `Message` with custom roles
@@ -129,7 +129,7 @@ Actionable improvements ranked by impact.
 - `branchSummarization` — summarize a branch when navigating to a different point in history
 - Configurable `DEFAULT_COMPACTION_SETTINGS`
 
-**Logician-tui has basic compaction.** `compactMessagesForContext` (LLM-based) + `microCompactMessages` exists but is not well integrated. No branch summarization.
+**tui has basic compaction.** `compactMessagesForContext` (LLM-based) + `microCompactMessages` exists but is not well integrated. No branch summarization.
 
 **What to build:**
 - Integrate micro-compaction as first pass before LLM compaction
@@ -149,7 +149,7 @@ Actionable improvements ranked by impact.
 - `turn_end` with `message` and `toolResults` arrays
 - `agent_end` carries final `messages` array
 
-**Logician-tui has flat events.** `tool_call_start/end/update` with string results. `message_delta` instead of partial message. `turn_end` only has `turnId`.
+**tui has flat events.** `tool_call_start/end/update` with string results. `message_delta` instead of partial message. `turn_end` only has `turnId`.
 
 **What to build:**
 - Enrich `tool_call_end` with structured result (content, details, isError)
@@ -166,7 +166,7 @@ Actionable improvements ranked by impact.
 
 **Pi defaults to "one-at-a-time".** Steering and follow-up messages drain one at a time, giving the user fine-grained control over message injection cadence.
 
-**Logician-tui defaults to "all".** Drains everything at once. Can overwhelm the model with queued messages.
+**tui defaults to "all".** Drains everything at once. Can overwhelm the model with queued messages.
 
 **What to build:**
 - Change defaults to "one-at-a-time" for both steering and follow-up
@@ -181,7 +181,7 @@ Actionable improvements ranked by impact.
 
 **Pi encodes errors as messages.** When the LLM call fails, it produces an `AssistantMessage` with `stopReason: "error"` and `errorMessage`. The loop continues normally, the error is visible in the transcript, and the user can respond.
 
-**Logician-tui throws.** Errors bubble up, caught by auto-retry or emitted as `error` events. No error message in the transcript.
+**tui throws.** Errors bubble up, caught by auto-retry or emitted as `error` events. No error message in the transcript.
 
 **What to build:**
 - On LLM failure, append an assistant message with the error text
@@ -197,7 +197,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `AgentToolResult` has `content: (TextContent | ImageContent)[]` and `details: T`. Tools can return structured metadata alongside text.
 
-**Logician-tui has plain strings.** Tool `execute` returns `Promise<string>`. No structured details.
+**tui has plain strings.** Tool `execute` returns `Promise<string>`. No structured details.
 
 **What to build:**
 - Change `Tool.execute` to return `{ content: string, details?: Record<string, unknown> }`
@@ -212,7 +212,7 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** `before_provider_request` fires before each LLM call with the model, session ID, and stream options. Returns a patch for headers, timeout, retries, cache retention. `before_provider_payload` fires with the raw request payload for inspection/modification.
 
-**Logician-tui has nothing.** No hook into the provider call boundary.
+**tui has nothing.** No hook into the provider call boundary.
 
 **What to build:**
 - `beforeProviderRequest` hook: receive model, sessionId, streamOptions; return patch
@@ -228,12 +228,12 @@ Actionable improvements ranked by impact.
 
 **Pi has it.** Explicit phases: `"idle"`, `"turn"`, `"compaction"`, `"branch_summary"`. Operations are rejected when the harness is in the wrong phase (e.g., `steer()` throws while idle).
 
-**Logician-tui has basic phases.** `"idle"` and `"turn"` in the harness. No compaction or branch_summary phases.
+**tui has basic phases.** `"idle"` and `"turn"` in the harness. No compaction or branch_summary phases.
 
 **What to build:**
 - Add `"compaction"` and `"branch_summary"` phases
 - Phase-gate operations (compact requires idle, steer requires turn)
-- `HarnessBusyError` with operation name (already exists in logician-tui)
+- `HarnessBusyError` with operation name (already exists in tui)
 
 **Pi reference:** `agent-harness.ts` — `AgentHarnessPhase`, phase checks
 
@@ -241,19 +241,19 @@ Actionable improvements ranked by impact.
 
 ## Summary Matrix
 
-| Feature | Pi | Logician-TUI | Priority |
+| Feature | Pi | tui | Priority |
 |---------|----|--------------|----------|
 | Session persistence | ✅ JSONL + branch | ❌ memory only | **High** |
-| Skills system | ✅ SKILL.md loading | ❌ none | **High** |
+| Skills system | ✅ SKILL.md loading | ✅ done (load + validate + catalog injection + read_skill on-demand tool + disable-model-invocation) | **High** |
 | Prompt templates | ✅ template invocation | ❌ none | **Medium** |
-| Context transform hook | ✅ pre-convert | ❌ none | **Medium** |
-| Dynamic API keys | ✅ per-request | ❌ static | **Medium** |
-| Granular streaming | ✅ text/tool/thinking events | ❌ basic deltas | **Medium** |
-| AgentMessage abstraction | ✅ custom messages | ❌ plain Message[] | **Medium** |
-| Compaction improvements | ✅ micro + branch | ⚠️ basic | **Medium** |
-| Event system overhaul | ✅ rich payloads | ⚠️ flat strings | **Low-Med** |
-| Queue mode defaults | ✅ one-at-a-time | ⚠️ all | **Low** |
-| Error encoding | ✅ in transcript | ❌ throw only | **Low-Med** |
-| Tool result details | ✅ structured | ❌ plain string | **Low** |
-| Provider hooks | ✅ before_request/payload | ❌ none | **Low** |
-| Phase tracking | ✅ 4 phases | ⚠️ 2 phases | **Low** |
+| Context transform hook | ✅ pre-convert | ✅ done (transformContext) | **Medium** |
+| Dynamic API keys | ✅ per-request | ⚠️ via beforeProviderRequest headers | **Medium** |
+| Granular streaming | ✅ text/tool/thinking events | ✅ done (text/tool boundaries + message_update) | **Medium** |
+| AgentMessage abstraction | ✅ custom messages | ✅ done (AgentMessage union + convertToLlm) | **Medium** |
+| Compaction improvements | ✅ micro + branch | ⚠️ micro+LLM done; no branch summary | **Medium** |
+| Event system overhaul | ✅ rich payloads | ✅ done (stopReason, turn_end msg/toolResults, agent_end messages) | **Low-Med** |
+| Queue mode defaults | ✅ one-at-a-time | ✅ done (one-at-a-time) | **Low** |
+| Error encoding | ✅ in transcript | ✅ done (assistant error msg + stopReason='error') | **Low-Med** |
+| Tool result details | ✅ structured | ✅ done (string \| ToolResult union → tool_call_end.details) | **Low** |
+| Provider hooks | ✅ before_request/payload | ✅ done (beforeProviderRequest + beforeProviderPayload) | **Low** |
+| Phase tracking | ✅ 4 phases | ✅ done (4 phases + gating: compact↔idle, steer↔turn) | **Low** |

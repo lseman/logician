@@ -12,6 +12,7 @@ import {
 
 export const bash: Tool = {
 	name: "bash",
+	hookAliases: ["Bash"],
 	description: `Execute a bash command with timeout (default 30s). Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB, keeping the end.`,
 	parameters: {
 		type: "object",

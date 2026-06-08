@@ -9,6 +9,7 @@ import { isStaleSinceRead, refreshAfterWrite } from "./read-tracker.ts";
 
 export const edit_file: Tool = {
 	name: "edit_file",
+	hookAliases: ["Edit"],
 	description:
 		"Replace exact text in a file and return a unified diff. Supports either old_text/new_text or edits[].",
 	parameters: {

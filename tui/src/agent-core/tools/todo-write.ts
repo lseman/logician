@@ -73,6 +73,7 @@ const STATUS_MARK: Record<TodoStatus, string> = {
 
 export const todo_write: Tool = {
 	name: "todo_write",
+	hookAliases: ["TodoWrite"],
 	description:
 		"Replace the current todo list to track multi-step work. Pass the full list every " +
 		"call. Mark exactly one item in_progress while working on it, completed when done.",

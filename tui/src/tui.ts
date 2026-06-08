@@ -13,7 +13,6 @@ import {
 	type ReasonerSelectorAction,
 	ReasonerSelectorOverlay,
 } from "./components/reasoner-selector.ts";
-import { getReasonerMeta, getReasonerIds } from "./reasoners/registry.ts";
 import { SlashPopup } from "./components/slash-popup.ts";
 import { StatusBar } from "./components/status-bar.ts";
 import { SteerQueue } from "./components/steer-queue.ts";
@@ -28,6 +27,11 @@ import {
 } from "./config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import { KillRing } from "./kill-ring.ts";
+import {
+	getReasonerIds,
+	getReasonerMeta,
+	type ReasonerMeta,
+} from "./reasoners/registry.ts";
 import { createSlashCommands, type SlashCommandDef } from "./slash-commands.ts";
 import { Transcript } from "./transcript.ts";
 import { Container, TUI } from "./tui-core.ts";
@@ -256,7 +260,10 @@ export class LogicianTUI {
 				setStatusPhase("ready");
 			},
 			setCache: (enabled: unknown) => {
-				const en = typeof enabled === "boolean" ? enabled : enabled === "true" || enabled === true;
+				const en =
+					typeof enabled === "boolean"
+						? enabled
+						: enabled === "true" || enabled === true;
 				this.cacheEnabled = en;
 				this.transcript.setCacheEnabled(en);
 				this.bridge.sendSlash(`/cache ${en ? "enable" : "disable"}`);
@@ -276,7 +283,8 @@ export class LogicianTUI {
 				setStatusPhase("ready");
 			},
 			setTrace: (on: unknown) => {
-				this.traceOn = typeof on === "boolean" ? on : on === "true" || on === true;
+				this.traceOn =
+					typeof on === "boolean" ? on : on === "true" || on === true;
 				setStatusPhase("ready");
 			},
 			clear: () => {
@@ -332,6 +340,36 @@ export class LogicianTUI {
 						this.transcriptDisplay.setTurns(this.transcript.getTurns());
 						this.tui.requestRender();
 					});
+					return;
+				}
+				if (match && match.command === "/fork") {
+					const id = this.bridge.fork();
+					this.transcript.addSystemMessage(
+						id ? `Forked conversation (${id}).` : "Nothing to fork.",
+					);
+					this.transcriptDisplay.setTurns(this.transcript.getTurns());
+					this.tui.requestRender();
+					return;
+				}
+				if (match && match.command === "/branch-summary") {
+					void this.bridge.branchSummary().then((summary) => {
+						this.transcript.addSystemMessage(
+							summary === null
+								? "No active branch to summarize."
+								: `Branch merged: ${summary}`,
+						);
+						this.transcriptDisplay.setTurns(this.transcript.getTurns());
+						this.tui.requestRender();
+					});
+					return;
+				}
+				if (match && match.command === "/discard-branch") {
+					const ok = this.bridge.discardBranch();
+					this.transcript.addSystemMessage(
+						ok ? "Branch discarded." : "No active branch.",
+					);
+					this.transcriptDisplay.setTurns(this.transcript.getTurns());
+					this.tui.requestRender();
 					return;
 				}
 				if (match && match.dispatch === "bridge") {
@@ -897,7 +935,7 @@ export class LogicianTUI {
 		this.statusPanel.update({ phase: "reasoner" });
 		const currentId = this.bridge.getReasonerStatus();
 		const reasoners: ReasonerInfo[] = getReasonerIds().map((id) => {
-			const meta = getReasonerMeta(id)!;
+			const meta = getReasonerMeta(id) as ReasonerMeta;
 			return {
 				id,
 				name: meta.name,

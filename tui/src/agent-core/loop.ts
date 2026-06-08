@@ -3,13 +3,18 @@
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { LLMBackend } from "./backend.ts";
+import { withTimeout } from "./async-utils.ts";
+import {
+	BackendError,
+	type BackendErrorCategory,
+	type LLMBackend,
+} from "./backend.ts";
 import { buildBuiltinHooks, composeHooks } from "./builtin-hooks.ts";
 import { createDefaultTools } from "./default-tools.ts";
 import { createEventEmitter, type EventEmitter } from "./events.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
-	compactMessagesForContext,
+	compactToFit,
 	convertToChatFormat,
 	createAssistantMessage,
 	createSystemMessage,
@@ -20,17 +25,18 @@ import {
 } from "./messages.ts";
 import { parseToolCalls, parseToolInput } from "./parser.ts";
 import { runHookEvent } from "./plugins.ts";
-import { ToolRegistry } from "./tools/registry.ts";
 import { ToolResultCache } from "./tool-cache.ts";
+import { ToolRegistry } from "./tools/registry.ts";
 import {
-	AgentError,
-	AgentErrorType,
 	type AgentConfig,
+	type AgentError,
+	AgentErrorType,
 	type AgentEvent,
 	type AgentLoopHooks,
 	type AgentMessage,
 	type EventHandler,
 	type Message,
+	type StopReason,
 	type ToolCall,
 } from "./types.ts";
 
@@ -62,6 +68,30 @@ interface ExecutedLoopToolCall {
 	args: Record<string, unknown>;
 	result: string;
 	isError: boolean;
+	details?: Record<string, unknown>;
+}
+
+// Outcome of a single turn. `continue` drives the outer loop; `productive`
+// marks a turn that called tools (made forward progress) so the unproductive-
+// turn safety cap can be reset rather than exhausted by real work.
+interface TurnOutcome {
+	continue: boolean;
+	productive: boolean;
+	// Carried into the turn_end event so a consumer can render a completed turn
+	// from one event. Set when the turn produced an assistant message.
+	stopReason?: StopReason;
+	message?: Message;
+	toolResults?: Message[];
+}
+
+// Result of a single LLM call, including why it stopped. On an unrecoverable
+// failure stopReason is "error" and errorMessage holds the provider message so
+// the turn can encode it as a visible, recoverable transcript entry.
+interface LLMCallResult {
+	content: string;
+	toolCalls: ToolCall[];
+	stopReason: StopReason;
+	errorMessage?: string;
 }
 
 export interface TurnMetrics {
@@ -92,6 +122,7 @@ export class AgentLoop {
 	private toolRegistry: ToolRegistry;
 	private emitter: EventEmitter;
 	private _messages: Message[];
+	private _sessionId = "";
 	private cwd: string;
 	private maxIterations: number;
 	private iterationCount: number = 0;
@@ -157,6 +188,13 @@ export class AgentLoop {
 		);
 
 		// Set up event handler
+		this.wrapOnEvent();
+	}
+
+	// Capture the config's raw onEvent and replace it with a wrapper that fans
+	// every event out through the emitter before the raw handler. Re-run on
+	// config refresh so a reused loop keeps emitting through the emitter.
+	private wrapOnEvent(): void {
 		this.onEvent = this.config.onEvent;
 		this.config.onEvent = (event: AgentEvent) => {
 			this.emitter.emit(event);
@@ -184,6 +222,19 @@ export class AgentLoop {
 	/** Swap the abort signal for a new run (used by harness loop reuse). */
 	updateSignal(signal: AbortSignal | undefined): void {
 		this.signal = signal;
+	}
+
+	/**
+	 * Refresh the loop's config when an existing loop is reused for a new prompt
+	 * (harness loop reuse). Without this, runtime changes the harness applies
+	 * between prompts — system prompt, temperature, tools, internalHooks — would
+	 * not reach the loop, which otherwise keeps its construction-time config.
+	 * Re-applies the emitter fan-out wrapper around the incoming raw onEvent,
+	 * mirroring the constructor.
+	 */
+	updateConfig(config: AgentConfig): void {
+		this.config = config;
+		this.wrapOnEvent();
 	}
 
 	async run(userMessage: string): Promise<Message[]> {
@@ -215,6 +266,7 @@ export class AgentLoop {
 		const systemPrompt =
 			this.config.systemPrompt || "You are a helpful assistant.";
 		const sessionId = this.config.hookSessionId || `tui_${Date.now()}`;
+		this._sessionId = sessionId;
 		const transcriptPath = this.config.hookTranscriptPath || "";
 		const hookBasePayload = {
 			session_id: sessionId,
@@ -256,19 +308,33 @@ export class AgentLoop {
 		this.emitEvent({ type: "agent_start" });
 		this.emitEvent({ type: "phase", phase: "idle" });
 
-		while (this.iterationCount < this.maxIterations) {
+		// Safety cap counts only *unproductive* turns (no tool calls). Turns that
+		// call tools make forward progress and reset the counter, so a long tool-
+		// using task is not silently truncated mid-work. The cap exists solely to
+		// bound a model that loops without acting.
+		let unproductiveTurns = 0;
+		while (true) {
 			if (this.signal?.aborted) {
 				this.emitEvent({ type: "error", message: "Operation aborted" });
 				break;
 			}
+			if (unproductiveTurns >= this.maxIterations) {
+				this.emitEvent({
+					type: "max_iterations",
+					iterations: this.iterationCount,
+					limit: this.maxIterations,
+				});
+				break;
+			}
 			this.iterationCount++;
 			const turnId = `turn_${this.iterationCount}`;
-			const shouldContinue = await this.runTurn(
+			const outcome = await this.runTurn(
 				turnId,
 				transcriptPath,
 				hookBasePayload,
 			);
-			if (!shouldContinue) break;
+			unproductiveTurns = outcome.productive ? 0 : unproductiveTurns + 1;
+			if (!outcome.continue) break;
 		}
 
 		await this.runHookSafely("Stop", {
@@ -276,7 +342,7 @@ export class AgentLoop {
 			stop_hook_active: false,
 		});
 		this.emitEvent({ type: "phase", phase: "idle" });
-		this.emitEvent({ type: "agent_end" });
+		this.emitEvent({ type: "agent_end", messages: this._messages });
 
 		return this._messages;
 	}
@@ -290,10 +356,34 @@ export class AgentLoop {
 		turnId: string,
 		transcriptPath: string,
 		hookBasePayload: Record<string, unknown>,
-	): Promise<boolean> {
+	): Promise<TurnOutcome> {
 		this.emitEvent({ type: "turn_start", turnId });
 		this.emitEvent({ type: "phase", phase: "thinking" });
+		// runTurnInner reports whether the loop should continue and whether the
+		// turn was productive. When it stops, turn_end is emitted once here
+		// rather than at every early-return.
+		const outcome = await this.runTurnInner(
+			turnId,
+			transcriptPath,
+			hookBasePayload,
+		);
+		if (!outcome.continue) {
+			this.emitEvent({
+				type: "turn_end",
+				turnId,
+				stopReason: outcome.stopReason,
+				message: outcome.message,
+				toolResults: outcome.toolResults,
+			});
+		}
+		return outcome;
+	}
 
+	private async runTurnInner(
+		turnId: string,
+		transcriptPath: string,
+		hookBasePayload: Record<string, unknown>,
+	): Promise<TurnOutcome> {
 		// Drain steering messages respecting queue mode
 		const steeringMessages = await this.runGetSteeringMessages();
 		if (steeringMessages.length) {
@@ -301,38 +391,49 @@ export class AgentLoop {
 		}
 
 		const toolDefs = this.toolRegistry.toToolDefinitions();
-		this.emitContextUpdate(toolDefs);
 
 		// Get LLM response with timeout, auto-retry, and context-full compaction.
-		let assistantContent = "";
-		let assistantToolCalls: ToolCall[] = [];
-		const llmStart = Date.now();
+		// callLLM emits the context_update right before each provider request, so
+		// no separate emit is needed here.
+		let result = await this.callLLMGuarded(turnId, toolDefs);
+		let { content: assistantContent, toolCalls: assistantToolCalls } = result;
 
-		try {
-			const result = await this.withTimeout(
-				this.callLLM(turnId, toolDefs),
-				this.turnTimeoutMs,
-			);
-			assistantContent = result.content;
-			assistantToolCalls = result.toolCalls;
-			this._turnMetrics.totalLlmTimeMs += Date.now() - llmStart;
-		} catch (e: unknown) {
-			const error = e as Error;
-			const agentErr = e as AgentError;
-			if (agentErr.type === AgentErrorType.TURN_TIMEOUT) {
-				this.emitEvent({
-					type: "error",
-					message: `Turn ${turnId} timed out after ${this.turnTimeoutMs}ms`,
-				});
-			} else {
-				this.emitEvent({ type: "error", message: error.message });
-			}
-			this._turnMetrics.totalLlmTimeMs += Date.now() - llmStart;
+		// Unrecoverable LLM failure: encode it as a visible assistant message so
+		// the turn ends cleanly with the error in the transcript and the user (or
+		// a follow-up) can recover ("retry", "switch model") rather than facing a
+		// silent empty turn.
+		if (result.stopReason === "error") {
+			const text = `⚠️ Model request failed: ${result.errorMessage ?? "unknown error"}`;
+			const message = createAssistantMessage(text);
+			this.emitEvent({ type: "message_start", turnId, role: "assistant" });
+			this._messages.push(message);
+			this.appendTranscript(transcriptPath, {
+				type: "assistant",
+				timestamp: new Date().toISOString(),
+				message: { role: "assistant", content: [{ type: "text", text }] },
+			});
+			this.emitEvent({ type: "message_end", turnId });
+			return {
+				continue: false,
+				productive: false,
+				stopReason: "error",
+				message,
+			};
 		}
 
+		// Empty response (no content, no tools) is ambiguous: a real stop or a
+		// transient empty completion. handleEmptyResponse retries once and, if
+		// still empty, either nudges-and-continues or ends the turn.
 		if (!assistantContent && assistantToolCalls.length === 0) {
-			this.emitEvent({ type: "turn_end", turnId });
-			return false;
+			const recovered = await this.handleEmptyResponse(
+				turnId,
+				toolDefs,
+				transcriptPath,
+			);
+			if (recovered.outcome) return recovered.outcome;
+			result = recovered.result;
+			assistantContent = result.content;
+			assistantToolCalls = result.toolCalls;
 		}
 
 		// Emit message_start before assistant response (for steering
@@ -340,9 +441,11 @@ export class AgentLoop {
 		// been consumed by checking if their text appears in messages).
 		this.emitEvent({ type: "message_start", turnId, role: "assistant" });
 		// Add assistant message
-		this._messages.push(
-			createAssistantMessage(assistantContent, assistantToolCalls),
+		const assistantMessage = createAssistantMessage(
+			assistantContent,
+			assistantToolCalls,
 		);
+		this._messages.push(assistantMessage);
 		this.appendTranscript(transcriptPath, {
 			type: "assistant",
 			timestamp: new Date().toISOString(),
@@ -360,45 +463,70 @@ export class AgentLoop {
 		});
 		this.emitEvent({ type: "message_end", turnId });
 
+		// A turn that calls tools made forward progress (productive) — even if it
+		// then stops — so it never counts against the unproductive-turn cap.
+		const hadToolCalls = assistantToolCalls.length > 0;
+		const turnStopReason: StopReason = hadToolCalls
+			? "tool_calls"
+			: result.stopReason;
+		// Tool-result messages executeToolCalls appended, for the turn_end payload.
+		let toolResults: Message[] = [];
+
 		// Check if we have tool calls
-		if (assistantToolCalls.length > 0) {
+		if (hadToolCalls) {
 			this.emitEvent({ type: "phase", phase: "tool" });
 			const toolStart = Date.now();
+			const beforeTools = this._messages.length;
 			await this.executeToolCalls(
 				assistantToolCalls,
 				turnId,
 				transcriptPath,
 				hookBasePayload,
 			);
+			toolResults = this._messages.slice(beforeTools);
 			this._turnMetrics.totalToolTimeMs += Date.now() - toolStart;
 			this._turnMetrics.toolCalls += assistantToolCalls.length;
 
 			if (this.signal?.aborted) {
-				this.emitEvent({ type: "turn_end", turnId });
-				return false;
+				return {
+					continue: false,
+					productive: true,
+					stopReason: "aborted",
+					message: assistantMessage,
+					toolResults,
+				};
 			}
 			// Pi-style early termination: when ALL tools in the batch
 			// set terminate=true, stop after this batch.
 			if (this.batchTerminate) {
 				this.batchTerminate = false;
-				this.emitEvent({ type: "turn_end", turnId });
-				return false;
+				return {
+					continue: false,
+					productive: true,
+					stopReason: turnStopReason,
+					message: assistantMessage,
+					toolResults,
+				};
 			}
 		}
 
 		// prepareNextTurn / shouldStopAfterTurn contract hooks.
-		const hadToolCalls = assistantToolCalls.length > 0;
 		const isContinuation = this.continuationCount > 0;
 		await this.runPrepareNextTurn(hadToolCalls, isContinuation);
 		if (await this.runShouldStopAfterTurn(hadToolCalls, isContinuation)) {
-			this.emitEvent({ type: "turn_end", turnId });
-			return false;
+			return {
+				continue: false,
+				productive: hadToolCalls,
+				stopReason: turnStopReason,
+				message: assistantMessage,
+				toolResults,
+			};
 		}
 
 		// Continue loop: model called tools or follow-ups exist.
 		// turn_end stays open — the TUI sees one continuous turn.
 		if (hadToolCalls) {
-			return true;
+			return { continue: true, productive: true };
 		}
 
 		// No tool calls: check follow-ups before ending the turn.
@@ -408,13 +536,85 @@ export class AgentLoop {
 				this.continuationCount++;
 				this._turnMetrics.continuations++;
 				this.appendInjectedMessages(transcriptPath, followUps);
-				return true;
+				return { continue: true, productive: false };
 			}
 		}
 
 		// Truly done — no tools, no follow-ups.
-		this.emitEvent({ type: "turn_end", turnId });
-		return false;
+		return {
+			continue: false,
+			productive: hadToolCalls,
+			stopReason: turnStopReason,
+			message: assistantMessage,
+			toolResults,
+		};
+	}
+
+	/**
+	 * Recover from an empty LLM response (no content, no tool calls). Retries the
+	 * call once: if the retry produces output, returns it for the turn to use
+	 * ({ result }). If it is still empty, returns a terminal { outcome } — a
+	 * nudge-and-continue while continuations remain, otherwise a clean stop —
+	 * so the caller can return immediately.
+	 */
+	private async handleEmptyResponse(
+		turnId: string,
+		toolDefs: Record<string, unknown>[],
+		transcriptPath: string,
+	): Promise<{ result: LLMCallResult; outcome?: TurnOutcome }> {
+		const result = await this.callLLMGuarded(turnId, toolDefs);
+		if (result.content || result.toolCalls.length > 0) return { result };
+
+		// Still empty after one retry.
+		if (this.continuationCount < this.maxContinuations) {
+			this.continuationCount++;
+			this._turnMetrics.continuations++;
+			this.appendInjectedMessages(transcriptPath, [
+				createUserMessage(
+					"Your last response was empty. If the task is complete, say so " +
+						"explicitly. Otherwise, continue using your tools to make progress.",
+				),
+			]);
+			return { result, outcome: { continue: true, productive: false } };
+		}
+		return {
+			result,
+			outcome: { continue: false, productive: false, stopReason: "stop" },
+		};
+	}
+
+	/**
+	 * Run callLLM under the per-turn timeout, recording LLM time and surfacing
+	 * timeout / error events. Never throws: on failure returns an empty result
+	 * so the caller can decide how to proceed (retry / nudge / stop).
+	 */
+	private async callLLMGuarded(
+		turnId: string,
+		toolDefs: Record<string, unknown>[],
+	): Promise<LLMCallResult> {
+		const llmStart = Date.now();
+		try {
+			return await withTimeout(
+				this.callLLM(turnId, toolDefs),
+				this.turnTimeoutMs,
+			);
+		} catch (e: unknown) {
+			const error = e as Error;
+			const agentErr = e as AgentError;
+			const message =
+				agentErr.type === AgentErrorType.TURN_TIMEOUT
+					? `Turn ${turnId} timed out after ${this.turnTimeoutMs}ms`
+					: error.message;
+			this.emitEvent({ type: "error", message });
+			return {
+				content: "",
+				toolCalls: [],
+				stopReason: "error",
+				errorMessage: message,
+			};
+		} finally {
+			this._turnMetrics.totalLlmTimeMs += Date.now() - llmStart;
+		}
 	}
 
 	/**
@@ -424,27 +624,38 @@ export class AgentLoop {
 	private async callLLM(
 		turnId: string,
 		toolDefs: Record<string, unknown>[],
-	): Promise<{ content: string; toolCalls: ToolCall[] }> {
+	): Promise<LLMCallResult> {
 		let assistantContent = "";
 		let assistantToolCalls: ToolCall[] = [];
+		let stopReason: StopReason = "stop";
+		let errorMessage: string | undefined;
 		let llmSuccess = false;
 		let compactionAttempted = false;
 
 		while (!llmSuccess && !compactionAttempted) {
 			try {
 				const activeToolDefs = this.toolRegistry.toToolDefinitions();
+				// Transform context (prune / inject / drain nextTurn) before convert.
+				await this.runTransformContext();
 				// Apply custom convertToLlm (filters non-LLM messages) then convert to chat format.
 				const llmMessages = (this.config.convertToLlm || defaultConvertToLlm)(
 					this._messages as AgentMessage[],
 				);
 				const activeChatMessages = convertToChatFormat(llmMessages);
 				this.emitContextUpdate(activeToolDefs);
+				// Provider-boundary hooks: per-request headers/timeout + payload
+				// rewrite. Resolved once per request, just before sending.
+				const reqPatch = await this.runBeforeProviderRequest();
 				const response = await this.backend.generate(activeChatMessages, {
 					tools: activeToolDefs.length > 0 ? activeToolDefs : undefined,
 					temperature: this.config.temperature || 0.5,
 					maxTokens: this.config.maxTokens || 4096,
 					signal: this.signal,
 					thinkingLevel: this.config.thinkingLevel,
+					headers: reqPatch?.headers,
+					transformPayload: this.hooks.beforeProviderPayload
+						? (payload) => this.applyProviderPayload(payload)
+						: undefined,
 					callbacks: {
 						onDelta: (delta: string) => {
 							assistantContent += delta;
@@ -468,6 +679,10 @@ export class AgentLoop {
 						onTextEnd: () => {
 							this.emitEvent({ type: "text_end", turnId });
 						},
+						// Early "running" state while the model is still streaming the
+						// call. The backend only fires this once the name is known, so
+						// the UI reuses this chunk (by id/name) when the authoritative
+						// tool_call_start is emitted in prepareLoopToolCall — no dup.
 						onToolCallStart: (
 							toolCallId: string,
 							name: string,
@@ -503,24 +718,39 @@ export class AgentLoop {
 						});
 					}
 				}
+				// tool_calls supersedes the provider stop reason; otherwise carry it
+				// through (stop / length).
+				stopReason =
+					assistantToolCalls.length > 0
+						? "tool_calls"
+						: response.stopReason === "length"
+							? "length"
+							: "stop";
 				llmSuccess = true;
 			} catch (e: unknown) {
 				const error = e as Error;
+				// Prefer the backend's typed category; fall back to message-string
+				// matching for errors thrown outside the backend boundary.
+				const category = classifyLoopError(error);
 
 				// 1. Context-full → compact once and retry.
-				if (!compactionAttempted && isContextFullError(error)) {
+				if (!compactionAttempted && category === "context_full") {
 					compactionAttempted = true;
 					this._turnMetrics.compactions++;
-					const before = estimateChatPayloadTokens(this._messages, toolDefs);
+					const before = this.estimatePayloadTokens(toolDefs);
 					const ctxWindow = this.contextWindowTokens();
-					const compacted = compactMessagesForContext(this._messages, {
+					// Forced ladder (triggerTokens 0): the provider already rejected
+					// the request as too long, so compact regardless of local estimate.
+					const compacted = compactToFit(this._messages, {
+						triggerTokens: 0,
 						targetTokens: ctxWindow
 							? Math.floor(ctxWindow * COMPACTION_TARGET_FRACTION)
 							: undefined,
+						toolDefs,
 					});
 					if (compacted.changed) {
 						this._messages = compacted.messages;
-						const after = estimateChatPayloadTokens(this._messages, toolDefs);
+						const after = this.estimatePayloadTokens(toolDefs);
 						this.emitEvent({
 							type: "compaction",
 							reason: "context_full",
@@ -533,12 +763,10 @@ export class AgentLoop {
 					// Compaction didn't help — fall through to error.
 				}
 
-				// 2. Auto-retry on provider errors (429, 500, 502, 503, 504).
-				// 400 is a client error (malformed request) — never retry it.
+				// 2. Auto-retry on retryable provider errors (rate_limit / transient).
 				if (
 					this.config.autoRetryEnabled !== false &&
-					!/\b400\b/.test(error.message) &&
-					isProviderError(error)
+					(category === "rate_limit" || category === "transient")
 				) {
 					const canRetry = this._retryAttempt < this.maxRetries;
 					if (canRetry) {
@@ -563,10 +791,13 @@ export class AgentLoop {
 					}
 				}
 
-				// 3. Give up.
+				// 3. Give up. Encode the failure so the caller can surface it as a
+				// recoverable transcript entry rather than a silent empty turn.
 				this.emitEvent({ type: "error", message: error.message });
 				assistantContent = "";
 				assistantToolCalls = [];
+				stopReason = "error";
+				errorMessage = error.message;
 				break;
 			}
 		}
@@ -574,35 +805,12 @@ export class AgentLoop {
 		// Reset retry state after each turn (success or failure).
 		this._retryAttempt = 0;
 
-		return { content: assistantContent, toolCalls: assistantToolCalls };
-	}
-
-	/**
-	 * Run `fn` with a timeout. Rejects with `AgentError(turn_timeout)` if the
-	 * timeout fires before `fn` completes.
-	 */
-	private async withTimeout<T>(
-		fn: Promise<T>,
-		timeoutMs: number,
-	): Promise<T> {
-		return new Promise<T>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				reject(new AgentError({
-					type: AgentErrorType.TURN_TIMEOUT,
-					message: `Operation timed out after ${timeoutMs}ms`,
-				}));
-			}, timeoutMs);
-			fn.then(
-				(value) => {
-					clearTimeout(timer);
-					resolve(value);
-				},
-				(reason) => {
-					clearTimeout(timer);
-					reject(reason);
-				},
-			);
-		});
+		return {
+			content: assistantContent,
+			toolCalls: assistantToolCalls,
+			stopReason,
+			errorMessage,
+		};
 	}
 
 	private emitEvent(event: AgentEvent): void {
@@ -614,13 +822,31 @@ export class AgentLoop {
 		}
 	}
 
+	// Memoized payload-token estimate. estimateChatPayloadTokens re-serializes
+	// the whole history, and a single turn queries it several times (context
+	// update, compaction path) with unchanged messages. Cache by a cheap version
+	// signature (count + last-message identity + tool-def count) so repeated
+	// queries within a turn are free; recompute only when the history changes.
+	private _tokenMemo?: { sig: string; tokens: number };
+
+	private estimatePayloadTokens(tools: Record<string, unknown>[]): number {
+		const last = this._messages[this._messages.length - 1];
+		const sig = `${this._messages.length}|${last?.role ?? ""}:${
+			last?.content?.length ?? 0
+		}|${tools.length}`;
+		if (this._tokenMemo?.sig === sig) return this._tokenMemo.tokens;
+		const tokens = estimateChatPayloadTokens(this._messages, tools);
+		this._tokenMemo = { sig, tokens };
+		return tokens;
+	}
+
 	private emitContextUpdate(
 		tools: Record<string, unknown>[] = this.toolRegistry.toToolDefinitions(),
 		compacted = false,
 	): void {
 		this.emitEvent({
 			type: "context_update",
-			tokens: estimateChatPayloadTokens(this._messages, tools),
+			tokens: this.estimatePayloadTokens(tools),
 			maxTokens: this.contextWindowTokens(),
 			compacted,
 		});
@@ -741,6 +967,46 @@ export class AgentLoop {
 				isContinuation,
 			})) === true
 		);
+	}
+
+	// Transform the working context before the LLM call (after steering
+	// injection, before convertToLlm). Lets hooks prune/inject at the
+	// AgentMessage level — e.g. the harness drains its nextTurn queue here.
+	private async runTransformContext(): Promise<void> {
+		if (!this.hooks.transformContext) return;
+		const out = await this.hooks.transformContext({
+			messages: this._messages as AgentMessage[],
+			iteration: this.iterationCount,
+			signal: this.signal,
+		});
+		if (out?.messages) this._messages = out.messages as Message[];
+	}
+
+	// Resolve per-request headers / timeout from beforeProviderRequest hooks.
+	private async runBeforeProviderRequest(): Promise<
+		{ headers?: Record<string, string>; timeoutMs?: number } | undefined
+	> {
+		if (!this.hooks.beforeProviderRequest) return undefined;
+		return (
+			(await this.hooks.beforeProviderRequest({
+				model: this.getModel(),
+				sessionId: this._sessionId,
+				iteration: this.iterationCount,
+			})) ?? undefined
+		);
+	}
+
+	// Apply beforeProviderPayload hooks to the raw request body. Passed to the
+	// backend as transformPayload so the final, backend-built body is rewritten.
+	private async applyProviderPayload(
+		payload: Record<string, unknown>,
+	): Promise<Record<string, unknown>> {
+		if (!this.hooks.beforeProviderPayload) return payload;
+		const out = await this.hooks.beforeProviderPayload({
+			model: this.getModel(),
+			payload,
+		});
+		return out?.payload ?? payload;
 	}
 
 	private async runGetSteeringMessages(): Promise<Message[]> {
@@ -878,7 +1144,7 @@ export class AgentLoop {
 
 		await this.runHookSafely("PreToolUse", {
 			...hookBasePayload,
-			matcher_value: hookMatcherValue(activeToolCall.name),
+			matcher_value: this.hookMatcherValue(activeToolCall.name),
 			tool_name: activeToolCall.name,
 			tool_input: toolInput,
 		});
@@ -901,7 +1167,10 @@ export class AgentLoop {
 		prepared: RunnableToolCall,
 	): Promise<ExecutedLoopToolCall> {
 		// ── Cache hit — skip execution ─────────────────────────────────────
-		const cached = this.toolCache.get(prepared.call.name, prepared.call.arguments);
+		const cached = this.toolCache.get(
+			prepared.call.name,
+			prepared.call.arguments,
+		);
 		if (cached) {
 			return {
 				call: prepared.call,
@@ -911,7 +1180,7 @@ export class AgentLoop {
 			};
 		}
 
-		const result = await this.toolRegistry.execute(
+		const { content: result, details } = await this.toolRegistry.execute(
 			prepared.call,
 			{
 				signal: this.signal,
@@ -928,12 +1197,18 @@ export class AgentLoop {
 		);
 		// ── Cache miss — store result (only successful) ────────────────────
 		const isError = result.startsWith("Error:");
-		this.toolCache.put(prepared.call.name, prepared.call.arguments, result, isError);
+		this.toolCache.put(
+			prepared.call.name,
+			prepared.call.arguments,
+			result,
+			isError,
+		);
 		return {
 			call: prepared.call,
 			args: prepared.args,
 			result,
 			isError,
+			details,
 		};
 	}
 
@@ -962,6 +1237,7 @@ export class AgentLoop {
 			toolCallId: executed.call.id,
 			result,
 			isError,
+			details: executed.details,
 		});
 
 		await this.recordToolResult(
@@ -1006,7 +1282,7 @@ export class AgentLoop {
 
 		await this.runHookSafely("PostToolUse", {
 			...hookBasePayload,
-			matcher_value: hookMatcherValue(toolCall.name),
+			matcher_value: this.hookMatcherValue(toolCall.name),
 			tool_name: toolCall.name,
 			tool_input: toolInput,
 			tool_response: result,
@@ -1073,10 +1349,6 @@ export class AgentLoop {
 		});
 	}
 
-	// ── Queue draining helpers ───────────────────────────────────────
-	// Pi-style queue modes: "all" drains everything, "one-at-a-time"
-	// drains one message at a time.
-
 	// ── Model cycling ─────────────────────────────────────────────────
 	// Pi-style: cycle through configured models (forward or backward).
 	// Creates a new backend with the selected model. Emits `model_select`.
@@ -1137,26 +1409,31 @@ export class AgentLoop {
 	getModels(): string[] {
 		return this.getModelList();
 	}
+
+	// Build the Claude-Code hook matcher value for a tool: its own name plus any
+	// aliases declared on the tool definition (e.g. bash → "bash|Bash"). Aliases
+	// live on the tool, not in a loop-level lookup table.
+	private hookMatcherValue(toolName: string): string {
+		const aliases = this.toolRegistry.get(toolName)?.hookAliases ?? [];
+		return [toolName, ...aliases].join("|");
+	}
 }
 
-function hookMatcherValue(toolName: string): string {
-	const aliases: Record<string, string[]> = {
-		bash: ["Bash"],
-		read_file: ["Read"],
-		write_file: ["Write"],
-		edit_file: ["Edit"],
-		list_files: ["LS"],
-		rg_search: ["Grep"],
-		todo_write: ["TodoWrite"],
-		web_search: ["WebSearch"],
-		web_fetch: ["WebFetch"],
-	};
-	return [toolName, ...(aliases[toolName] || [])].join("|");
+function envNumber(name: string): number | undefined {
+	const raw = process.env[name];
+	if (!raw) return undefined;
+	const value = Number(raw);
+	return Number.isFinite(value) ? value : undefined;
 }
 
-function isContextFullError(error: Error): boolean {
+// Resolve an error to a BackendErrorCategory. The backend already classifies
+// failures at its boundary (BackendError); this only adds a string-matching
+// fallback for errors thrown elsewhere (e.g. a custom backend that throws plain
+// Errors, or a wrapped provider SDK error).
+function classifyLoopError(error: Error): BackendErrorCategory {
+	if (error instanceof BackendError) return error.category;
 	const message = `${error.name || ""} ${error.message || ""}`.toLowerCase();
-	return [
+	const contextFull = [
 		"context full",
 		"context window",
 		"exceeds context",
@@ -1168,38 +1445,23 @@ function isContextFullError(error: Error): boolean {
 		"tokens exceed",
 		"context size",
 		"n_ctx",
-	].some((pattern) => message.includes(pattern));
-}
-
-function envNumber(name: string): number | undefined {
-	const raw = process.env[name];
-	if (!raw) return undefined;
-	const value = Number(raw);
-	return Number.isFinite(value) ? value : undefined;
-}
-
-function isProviderError(error: Error): boolean {
-	const message = `${error.name || ""} ${error.message || ""}`.toLowerCase();
-	// HTTP status codes from the backend (transient provider errors).
-	// Note: 400 is a client error (malformed request, missing fields) —
-	// callers must explicitly exclude it before checking this function.
-	if (/\b(429|500|502|503|504)\b/.test(message)) {
-		return true;
-	}
-	// Network-level errors.
-	if (
-		message.includes("econnrefused") ||
-		message.includes("econnreset") ||
-		message.includes("etimedout") ||
-		message.includes("eai-again") ||
-		message.includes("socket hang up") ||
-		message.includes("connection refused") ||
-		message.includes("connection reset") ||
-		message.includes("connection timeout") ||
-		message.includes("network error") ||
-		message.includes("fetch failed")
-	) {
-		return true;
-	}
-	return false;
+	].some((p) => message.includes(p));
+	if (contextFull) return "context_full";
+	if (/\b429\b/.test(message)) return "rate_limit";
+	if (/\b(500|502|503|504)\b/.test(message)) return "transient";
+	const network = [
+		"econnrefused",
+		"econnreset",
+		"etimedout",
+		"eai-again",
+		"socket hang up",
+		"connection refused",
+		"connection reset",
+		"connection timeout",
+		"network error",
+		"fetch failed",
+	].some((p) => message.includes(p));
+	if (network) return "transient";
+	if (/\b4\d\d\b/.test(message)) return "client";
+	return "unknown";
 }

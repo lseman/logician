@@ -3,13 +3,15 @@
 // setters that take effect on the *next* turn (never mutating an in-flight
 // provider request), and steering / follow-up / nextTurn queues drained at
 // save points. Mirrors pi's AgentHarness (packages/agent/docs/agent-harness.md),
-// scoped to what logician-tui's loop exposes.
+// scoped to what tui's loop exposes.
 //
 // The loop already exposes a save point: the `prepareNextTurn` contract hook
 // fires after each turn and can rewrite the working messages. The harness
 // installs a drain hook there to inject queued messages and apply config
 // changes between turns.
 
+import { get_reasoner, getReasonerMeta } from "../reasoners/registry.ts";
+import { withTimeout } from "./async-utils.ts";
 import type { LLMBackend } from "./backend.ts";
 import { AgentLoop } from "./loop.ts";
 import {
@@ -21,25 +23,41 @@ import {
 	microCompactMessages,
 } from "./messages.ts";
 import type { ToolRegistry } from "./tools/registry.ts";
-import {
-	AgentError,
-	AgentErrorType,
-	type AgentConfig,
-	type AgentLoopHooks,
-	type Message,
-	type QueueMode,
-	type Tool,
+import type {
+	AgentConfig,
+	AgentLoopHooks,
+	Message,
+	QueueMode,
+	Tool,
 } from "./types.ts";
-import { get_reasoner, getReasonerMeta } from "../reasoners/registry.ts";
 
-export type HarnessPhase = "idle" | "turn";
+// Explicit harness phases (mirrors pi's AgentHarnessPhase). Operations are
+// gated on phase: structural ops (prompt, compact) require "idle"; steering
+// requires an active "turn". "compaction" and "branch_summary" are transient
+// phases held while those background operations run, blocking concurrent
+// structural ops.
+export type HarnessPhase = "idle" | "turn" | "compaction" | "branch_summary";
 
 export class HarnessBusyError extends Error {
-	constructor(op: string) {
-		super(`AgentHarness is busy; ${op} requires idle phase`);
+	constructor(op: string, phase: HarnessPhase, required: HarnessPhase) {
+		super(
+			`AgentHarness cannot ${op}: phase is "${phase}", requires "${required}"`,
+		);
 		this.name = "HarnessBusyError";
 	}
 }
+
+// Legal phase transitions. Every working phase is entered only from "idle" and
+// exits only back to "idle" — the harness runs one structural operation at a
+// time. Encoding this as a table (rather than scattered `if (phase !== ...)`
+// checks) makes the state machine the single source of truth and lets every
+// operation share one guarded `transition` helper.
+const PHASE_TRANSITIONS: Record<HarnessPhase, readonly HarnessPhase[]> = {
+	idle: ["turn", "compaction", "branch_summary"],
+	turn: ["idle"],
+	compaction: ["idle"],
+	branch_summary: ["idle"],
+};
 
 export interface AgentHarnessOptions {
 	config: AgentConfig;
@@ -55,6 +73,23 @@ export interface HarnessQueues {
 	nextTurn: string[];
 }
 
+/**
+ * A forked conversation branch. `parent` is the history at fork time (restored
+ * on merge/discard); `forkedAt` marks how many messages were shared with the
+ * parent so branchSummary() can summarize only the diverged tail.
+ */
+interface Branch {
+	id: string;
+	parent: Message[];
+	forkedAt: number;
+}
+
+/** Public branch info for UI / callers. */
+export interface BranchInfo {
+	id: string;
+	depth: number;
+}
+
 export class AgentHarness {
 	private config: AgentConfig;
 	private backend: LLMBackend;
@@ -67,8 +102,17 @@ export class AgentHarness {
 	// Config snapshot for loop reuse. Updated when the harness config changes.
 	private loopConfig: AgentConfig | null = null;
 	// Conversation persisted across prompts so follow-ups ("continue", "go on")
-	// retain context.
+	// retain context. When a branch is active this holds the branch's messages;
+	// the parent is preserved on the branch stack until merged or discarded.
 	private history: Message[] = [];
+
+	// Conversation branches. fork() snapshots the current history into a parent
+	// frame and starts a fresh branch that shares the parent's messages; turns
+	// run on the branch. branchSummary() collapses the branch's diverged tail
+	// into a single summary message merged back into the parent (pi semantics).
+	// Single-level by design — nesting can stack frames later if needed.
+	private branches: Branch[] = [];
+	private branchSeq = 0;
 
 	// Queues drained at save points. The harness owns the single source of
 	// truth for all three queues; the bridge/UI read snapshots via getQueues()
@@ -84,6 +128,10 @@ export class AgentHarness {
 	// Fired whenever any queue changes (enqueue, drain, clear) so the UI can
 	// reflect the live queue state without polling or mirroring.
 	private onQueueChange?: (queues: HarnessQueues) => void;
+	// Fired on every phase transition so the UI / bridge can surface the harness
+	// state (idle / turn / compaction / branch_summary) — not just the loop's
+	// finer-grained activity sub-states.
+	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 
 	constructor(options: AgentHarnessOptions) {
 		this.config = options.config;
@@ -100,88 +148,125 @@ export class AgentHarness {
 		return this._phase;
 	}
 
+	/** Subscribe to phase transitions (idle ↔ turn / compaction / branch_summary). */
+	setOnPhaseChange(
+		cb: (phase: HarnessPhase, prev: HarnessPhase) => void,
+	): void {
+		this.onPhaseChange = cb;
+	}
+
+	// Guarded phase transition. Throws HarnessBusyError if `to` is not reachable
+	// from the current phase, otherwise applies it and notifies subscribers. The
+	// single mutation point for `_phase` — all ops go through here.
+	private transition(to: HarnessPhase, op: string): void {
+		if (!PHASE_TRANSITIONS[this._phase].includes(to)) {
+			// The required phase for any working op is "idle"; surface that.
+			throw new HarnessBusyError(op, this._phase, "idle");
+		}
+		const prev = this._phase;
+		this._phase = to;
+		if (prev !== to) this.onPhaseChange?.(to, prev);
+	}
+
+	// Run `fn` inside a working phase: transition into it (gated), always return
+	// to idle afterwards. Shared by prompt / compact / branchSummary so the
+	// enter-guard and the idle-restore live in one place.
+	private async runInPhase<T>(
+		phase: HarnessPhase,
+		op: string,
+		fn: () => Promise<T>,
+	): Promise<T> {
+		this.transition(phase, op);
+		try {
+			return await fn();
+		} finally {
+			this.transition("idle", op);
+		}
+	}
+
+	// Guard for instantaneous idle-only operations (fork / discardBranch) that
+	// complete synchronously and so never hold a working phase.
+	private assertIdle(op: string): void {
+		if (this._phase !== "idle")
+			throw new HarnessBusyError(op, this._phase, "idle");
+	}
+
 	// ── Structural operation: prompt ───────────────────────────────────────
 	// Rejected while busy. Drains nextTurn messages before the user prompt.
 	async prompt(userMessage: string): Promise<Message[]> {
-		if (this._phase !== "idle") throw new HarnessBusyError("prompt");
-		this._phase = "turn";
-		this.abortController = new AbortController();
+		return this.runInPhase("turn", "prompt", async () => {
+			this.abortController = new AbortController();
 
-		const pending = this.nextTurnQueue.splice(0);
-		if (pending.length) this.emitQueueChange();
-		const promptText = pending.length
-			? `${pending.join("\n\n")}\n\n${userMessage}`
-			: userMessage;
+			// nextTurn messages are drained inside the loop via the transformContext
+			// hook (see withDrainHook), so they enter the context as real user
+			// messages rather than being concatenated onto the prompt string.
+			const promptText = userMessage;
+			const preReasoning = await this.runPreReasoner(promptText);
 
-		// Optional reasoner pre-phase: run structured reasoning before ReAct.
-		// Timeout prevents a slow reasoner from blocking the entire prompt.
-		const reasonerId = this.config.reasonerId;
-		let preReasoning: string | undefined;
-		if (reasonerId && reasonerId !== "none") {
-			const meta = getReasonerMeta(reasonerId);
-			if (meta) {
-				try {
-					const reasoner = get_reasoner(
-						reasonerId,
-						this.backend,
-						meta.defaultConfig,
-					);
-					const trace = await this.withTimeout(
-						reasoner.solve(promptText),
-						60_000, // 60s reasoner timeout
-					);
-					if (trace.reasoning) {
-						preReasoning = trace.reasoning;
-					}
-				} catch {
-					// Reasoner failure or timeout → fall back to plain ReAct.
+			try {
+				// Build or update the loop config (new on config change).
+				this.loopConfig = this.withDrainHook(this.config);
+				if (!this.loop) {
+					this.loop = new AgentLoop({
+						config: this.loopConfig,
+						backend: this.backend,
+						cwd: this.cwd,
+						maxIterations: this.maxIterations,
+						signal: this.abortController.signal,
+						initialMessages: this.history.length ? this.history : undefined,
+					});
+				} else {
+					// Reuse existing loop: refresh its config (system prompt,
+					// temperature, tools, freshly-built internalHooks) and swap in the
+					// new abort signal. Without updateConfig the loop would keep its
+					// construction-time config and ignore runtime changes.
+					this.loop.updateConfig(this.loopConfig);
+					this.loop.updateSignal(this.abortController.signal);
 				}
-			}
-		}
+				const loop = this.loop;
 
+				// Inject synthetic assistant message with reasoner output.
+				if (preReasoning) {
+					loop.setMessages([
+						createAssistantMessage(preReasoning),
+						...this.history,
+					]);
+				}
+
+				const result = await loop.run(promptText);
+				// Persist the full conversation for the next prompt.
+				this.history = result;
+				return result;
+			} finally {
+				this.abortController = null;
+				// Steering/follow-up are turn-scoped; clear leftovers.
+				this.steeringQueue = [];
+				this.followUpQueue = [];
+				this.emitQueueChange();
+			}
+		});
+	}
+
+	// Optional reasoner pre-phase: run structured reasoning before ReAct. A
+	// timeout prevents a slow reasoner from blocking the whole prompt; any
+	// failure falls back to plain ReAct (returns undefined).
+	private async runPreReasoner(
+		promptText: string,
+	): Promise<string | undefined> {
+		const reasonerId = this.config.reasonerId;
+		if (!reasonerId || reasonerId === "none") return undefined;
+		const meta = getReasonerMeta(reasonerId);
+		if (!meta) return undefined;
 		try {
-			// Build or update the loop config (new on config change).
-			if (!this.loopConfig) {
-				this.loopConfig = this.withDrainHook(this.config);
-				this.loop = new AgentLoop({
-					config: this.loopConfig,
-					backend: this.backend,
-					cwd: this.cwd,
-					maxIterations: this.maxIterations,
-					signal: this.abortController.signal,
-					initialMessages: this.history.length ? this.history : undefined,
-				});
-			} else {
-				// Reuse existing loop but update signal (abort) and config changes.
-				this.loopConfig = this.withDrainHook(this.config);
-				this.loop!.updateSignal(this.abortController.signal);
-				// Config mutations (systemPrompt, temperature, tools, etc.)
-				// take effect live on the next turn since the loop reads
-				// this.loopConfig each iteration.
-			}
-
-			// Local reference so TS knows loop is non-null in this scope.
-			const loop = this.loop!;
-
-			// Inject synthetic assistant message with reasoner output.
-			if (preReasoning) {
-				loop.setMessages([
-					createAssistantMessage(preReasoning),
-					...this.history,
-				]);
-			}
-
-			const result = await loop.run(promptText);
-			// Persist the full conversation for the next prompt.
-			this.history = result;
-			return result;
-		} finally {
-			this._phase = "idle";
-			this.abortController = null;
-			// Steering/follow-up are turn-scoped; clear leftovers.
-			this.steeringQueue = [];
-			this.followUpQueue = [];
-			this.emitQueueChange();
+			const reasoner = get_reasoner(
+				reasonerId,
+				this.backend,
+				meta.defaultConfig,
+			);
+			const trace = await withTimeout(reasoner.solve(promptText), 60_000);
+			return trace.reasoning || undefined;
+		} catch {
+			return undefined;
 		}
 	}
 
@@ -218,7 +303,11 @@ export class AgentHarness {
 	// ── Queue operations (allowed during a turn) ───────────────────────────
 
 	// Inject guidance into the running turn (drained at the next save point).
+	// Only meaningful during a turn — steering an idle harness has nothing to
+	// drain into.
 	steer(text: string): void {
+		if (this._phase !== "turn")
+			throw new HarnessBusyError("steer", this._phase, "turn");
 		this.steeringQueue.push(text);
 		this.emitQueueChange();
 	}
@@ -287,32 +376,131 @@ export class AgentHarness {
 		return this.loop?.messages ?? this.history;
 	}
 
-	// Clear persisted conversation (new session / context reset).
+	// Clear persisted conversation (new session / context reset). Syncs the
+	// loop's working messages too — otherwise a reused loop would keep serving
+	// its stale transcript on the next prompt — and drops any open branches
+	// (their parent snapshots are now meaningless).
 	clearHistory(): void {
-		this.history = [];
+		this.branches = [];
+		this.setActiveHistory([]);
+	}
+
+	// ── Conversation branching ─────────────────────────────────────────────
+	// fork() snapshots the live conversation and starts a branch that shares the
+	// parent's messages; subsequent turns run on the branch. branchSummary()
+	// summarizes the branch's diverged tail and merges it back into the parent.
+
+	/**
+	 * Fork the current conversation into a new branch. The branch starts as a
+	 * copy of the live history; turns run on it until merged (branchSummary) or
+	 * discarded (discardBranch). Idle-only. Returns the new branch id.
+	 */
+	fork(): string {
+		this.assertIdle("fork");
+		const current = this.activeHistory();
+		const branch: Branch = {
+			id: `branch_${++this.branchSeq}`,
+			parent: current,
+			forkedAt: current.length,
+		};
+		this.branches.push(branch);
+		// Branch begins as a copy of the parent so divergence is detectable.
+		this.setActiveHistory([...current]);
+		return branch.id;
+	}
+
+	/**
+	 * Collapse the active branch's diverged tail into a single summary message
+	 * and merge it back into the parent, then make the parent active again.
+	 * Idle-only; holds the "branch_summary" phase while the LLM summarizes.
+	 * Returns the summary text, or null if there was nothing to summarize.
+	 */
+	async branchSummary(): Promise<string | null> {
+		this.assertIdle("branchSummary");
+		const branch = this.branches.at(-1);
+		if (!branch) return null;
+
+		const current = this.activeHistory();
+		const diverged = current.slice(branch.forkedAt);
+		if (!diverged.length) {
+			// Nothing explored on the branch; just restore the parent.
+			this.branches.pop();
+			this.setActiveHistory(branch.parent);
+			return null;
+		}
+
+		return this.runInPhase("branch_summary", "branchSummary", async () => {
+			const summary =
+				(await this.generateSummary(
+					microCompactMessages(diverged).messages,
+					[],
+				)) ??
+				// LLM failure: fall back to a terse local note so the merge still
+				// records that a branch happened.
+				`[branch ${branch.id}: ${diverged.length} messages explored]`;
+
+			this.branches.pop();
+			this.setActiveHistory([
+				...branch.parent,
+				createAssistantMessage(`Branch summary: ${summary}`),
+			]);
+			return summary;
+		});
+	}
+
+	/**
+	 * Discard the active branch without merging; restore the parent. Idle-only.
+	 * Returns true if a branch was discarded.
+	 */
+	discardBranch(): boolean {
+		this.assertIdle("discardBranch");
+		const branch = this.branches.pop();
+		if (!branch) return false;
+		this.setActiveHistory(branch.parent);
+		return true;
+	}
+
+	/** Stack of active branches (innermost last). */
+	listBranches(): BranchInfo[] {
+		return this.branches.map((b, i) => ({ id: b.id, depth: i + 1 }));
+	}
+
+	// Live conversation: the loop's messages while running, else harness history.
+	private activeHistory(): Message[] {
+		return this.loop?.messages ?? this.history;
+	}
+
+	// Set the live conversation on both the harness and (if present) the loop,
+	// keeping the two in sync after a branch switch.
+	private setActiveHistory(messages: Message[]): void {
+		this.history = messages;
+		this.loop?.setMessages(messages);
 	}
 
 	/** Compact messages using an LLM-generated summary. Returns tokens saved, or null if nothing to compact. */
 	async compact(): Promise<number | null> {
+		this.assertIdle("compact");
 		const messages = this.loop?.messages ?? this.history;
 		if (!messages.length) return null;
 		const before = estimateChatPayloadTokens(messages);
 
-		// Shared compaction skeleton; the summarizer micro-truncates the older
-		// block first (sending full messages to the LLM defeats the purpose),
-		// then asks the LLM for a summary. On LLM failure it returns null and
-		// compactMessages falls back to a local micro-compaction.
-		const result = await compactMessages(messages, {
-			reason: "manual",
-			summarize: (older, system) =>
-				this.generateSummary(microCompactMessages(older).messages, system),
-		});
+		return this.runInPhase("compaction", "compact", async () => {
+			// Shared compaction skeleton; the summarizer micro-truncates the older
+			// block first (sending full messages to the LLM defeats the purpose),
+			// then asks the LLM for a summary. On LLM failure it returns null and
+			// compactMessages falls back to a local micro-compaction.
+			const result = await compactMessages(messages, {
+				reason: "manual",
+				summarize: (older, system) =>
+					this.generateSummary(microCompactMessages(older).messages, system),
+			});
 
-		if (!result.changed) return 0;
-		if (this.loop) this.loop.setMessages(result.messages);
-		else this.history = result.messages;
-		const after = estimateChatPayloadTokens(result.messages);
-		return before - after;
+			if (!result.changed) return 0;
+			if (this.loop) this.loop.setMessages(result.messages);
+			else this.history = result.messages;
+			const after = estimateChatPayloadTokens(result.messages);
+			return before - after;
+		});
 	}
 
 	/** Ask LLM to summarize older messages for compaction. */
@@ -401,83 +589,77 @@ export class AgentHarness {
 	// longer build a second wrapping bus or touch the user's `config.hooks`.
 	// Steering drains before the next assistant response; follow-up drains only
 	// when the loop would otherwise stop.
+	//
+	// Phase invariant: these drains run *only* inside loop.run(), which executes
+	// inside the harness "turn" phase (see prompt()/runInPhase). The phase state
+	// machine forbids compaction / branch_summary while a turn is active and
+	// vice-versa (PHASE_TRANSITIONS: every working phase ↔ idle), so a steering
+	// drain can never interleave with a compaction or branch-summary rewrite of
+	// the same message list. steer() itself is gated to the "turn" phase, so the
+	// queue is only ever fed while a turn owns the conversation.
 	private withDrainHook(config: AgentConfig): AgentConfig {
 		const internalHooks: AgentLoopHooks = {};
 
-		// Drain steering before each assistant response (preemptive).
-		internalHooks.getSteeringMessages = async (): Promise<Message[] | undefined> => {
-			let out: string[];
-			if (this.steeringQueueMode === "all") {
-				out = this.steeringQueue.splice(0);
-			} else {
-				const first = this.steeringQueue[0];
-				out = first ? [first] : [];
-				if (first) this.steeringQueue.shift();
-			}
-			if (!out.length) return undefined;
+		// Drain nextTurn messages into the context before the first LLM call.
+		// They enter as real user messages inserted just before the user's
+		// prompt (the trailing message), preserving "before the next user
+		// prompt" semantics. The splice empties the queue, so subsequent LLM
+		// calls in the same turn see nothing to drain.
+		internalHooks.transformContext = ({ messages }) => {
+			const pending = this.nextTurnQueue.splice(0);
+			if (!pending.length) return undefined;
 			this.emitQueueChange();
-			return out.map((text) => createUserMessage(text));
+			const injected = pending.map((text) => createUserMessage(text));
+			// Insert before the trailing message (the user prompt); if there is
+			// no trailing message, append.
+			const last = messages.length - 1;
+			const at = last >= 0 ? last : 0;
+			return {
+				messages: [
+					...messages.slice(0, at),
+					...injected,
+					...messages.slice(at),
+				],
+			};
+		};
+
+		// Drain steering before each assistant response (preemptive).
+		internalHooks.getSteeringMessages = async (): Promise<
+			Message[] | undefined
+		> => {
+			const out = this.drainQueue(this.steeringQueue, this.steeringQueueMode);
+			return this.toInjectedMessages(out);
 		};
 
 		// Drain steering + follow-up when the loop would stop (stacked continuation).
 		// Steering has priority — user guidance overrides follow-up and todo nudges.
-		internalHooks.getFollowUpMessages = async (): Promise<Message[] | undefined> => {
-			const out: string[] = [];
-
-			// Drain steering first (user guidance takes priority).
-			let steeringOut: string[];
-			if (this.steeringQueueMode === "all") {
-				steeringOut = this.steeringQueue.splice(0);
-			} else {
-				const first = this.steeringQueue[0];
-				steeringOut = first ? [first] : [];
-				if (first) this.steeringQueue.shift();
-			}
-			out.push(...steeringOut);
-
-			// Drain follow-up queue.
-			let followUpOut: string[];
-			if (this.followUpQueueMode === "all") {
-				followUpOut = this.followUpQueue.splice(0);
-			} else {
-				const first = this.followUpQueue[0];
-				followUpOut = first ? [first] : [];
-				if (first) this.followUpQueue.shift();
-			}
-			out.push(...followUpOut);
-
-			if (!out.length) return undefined;
-			this.emitQueueChange();
-			return out.map((text) => createUserMessage(text));
+		internalHooks.getFollowUpMessages = async (): Promise<
+			Message[] | undefined
+		> => {
+			const out = [
+				...this.drainQueue(this.steeringQueue, this.steeringQueueMode),
+				...this.drainQueue(this.followUpQueue, this.followUpQueueMode),
+			];
+			return this.toInjectedMessages(out);
 		};
 
 		return { ...config, internalHooks };
 	}
 
-	/**
-	 * Run `fn` with a timeout. Rejects with AgentError if the timeout fires.
-	 */
-	private async withTimeout<T>(
-		fn: Promise<T>,
-		timeoutMs: number,
-	): Promise<T> {
-		return new Promise<T>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				reject(new AgentError({
-					type: AgentErrorType.TURN_TIMEOUT,
-					message: `Operation timed out after ${timeoutMs}ms`,
-				}));
-			}, timeoutMs);
-			fn.then(
-				(value) => {
-					clearTimeout(timer);
-					resolve(value);
-				},
-				(reason) => {
-					clearTimeout(timer);
-					reject(reason);
-				},
-			);
-		});
+	// Drain a queue per its mode: "all" empties it, "one-at-a-time" takes the
+	// oldest. Mutates the queue in place. Shared by all three drain points.
+	private drainQueue(queue: string[], mode: QueueMode): string[] {
+		if (mode === "all") return queue.splice(0);
+		const first = queue.shift();
+		return first ? [first] : [];
+	}
+
+	// Convert drained queue text into user messages, emitting a queue change
+	// when anything was drained. Returns undefined for an empty drain so the
+	// hook reports "no messages".
+	private toInjectedMessages(texts: string[]): Message[] | undefined {
+		if (!texts.length) return undefined;
+		this.emitQueueChange();
+		return texts.map((text) => createUserMessage(text));
 	}
 }

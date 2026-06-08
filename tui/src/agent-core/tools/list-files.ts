@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 
 export const list_files: Tool = {
 	name: "list_files",
+	hookAliases: ["LS"],
 	executionMode: "parallel",
 	description:
 		"List files under a path, respecting gitignore when rg is available.",

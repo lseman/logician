@@ -6,6 +6,7 @@ import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 
 export const web_fetch: Tool = {
 	name: "web_fetch",
+	hookAliases: ["WebFetch"],
 	executionMode: "parallel",
 	description: `Fetch and extract readable content from a web page. Strips navigation, ads, scripts. Returns title, description, and main text content. Truncated to ${DEFAULT_MAX_BYTES / 1024}KB.`,
 	parameters: {
@@ -62,7 +63,7 @@ export const web_fetch: Tool = {
 					Accept:
 						"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 					"User-Agent":
-						"LogicianTUI/1.0 (coding agent; +https://github.com/logician-tui)",
+						"LogicianTUI/1.0 (coding agent; +https://github.com/tui)",
 				},
 			});
 
