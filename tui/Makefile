@@ -2,7 +2,7 @@ BIN := dist/logician
 ENTRY := src/index.ts
 BUN ?= $(shell command -v bun 2>/dev/null || printf '%s/.bun/bin/bun' "$$HOME")
 
-.PHONY: build binary clean check format
+.PHONY: build binary install dev start check lint lint-fix format clean
 
 build: binary
 
@@ -15,11 +15,26 @@ binary:
 	@chmod +x $(BIN)
 	@echo "Built $(BIN)"
 
+install:
+	npm install
+
+dev:
+	npm run dev
+
+start:
+	npm start
+
 check:
-	npx tsc --noEmit
+	npm run typecheck
+
+lint:
+	npm run lint
+
+lint-fix:
+	npm run lint:fix
 
 format:
-	npx prettier --write "src/**/*.ts" "*.json" "*.md" --tab-width 4
+	npx @biomejs/biome format --write src "*.json"
 
 clean:
 	rm -rf dist

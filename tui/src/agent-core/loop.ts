@@ -225,6 +225,17 @@ export class AgentLoop {
 	}
 
 	/**
+	 * Refresh the conversation to continue from on the next run() (harness loop
+	 * reuse). Without this, run() rebuilds from the construction-time
+	 * initialMessages every prompt, replaying only the first prompt's history and
+	 * dropping every turn since. Pass the harness's live history before each
+	 * reused run.
+	 */
+	updateInitialMessages(messages: Message[] | undefined): void {
+		this.initialMessages = messages?.length ? messages : undefined;
+	}
+
+	/**
 	 * Refresh the loop's config when an existing loop is reused for a new prompt
 	 * (harness loop reuse). Without this, runtime changes the harness applies
 	 * between prompts — system prompt, temperature, tools, internalHooks — would
@@ -265,7 +276,10 @@ export class AgentLoop {
 		// Initialize with system prompt
 		const systemPrompt =
 			this.config.systemPrompt || "You are a helpful assistant.";
-		const sessionId = this.config.hookSessionId || `tui_${Date.now()}`;
+		// Resolve once and keep it stable across reused runs: a reused loop must
+		// not mint a fresh id each prompt or hook session continuity breaks.
+		const sessionId =
+			this.config.hookSessionId || this._sessionId || `tui_${Date.now()}`;
 		this._sessionId = sessionId;
 		const transcriptPath = this.config.hookTranscriptPath || "";
 		const hookBasePayload = {
@@ -304,6 +318,7 @@ export class AgentLoop {
 		this.iterationCount = 0;
 		this.continuationCount = 0;
 		this._retryAttempt = 0;
+		this._lastUsageTokens = undefined;
 
 		this.emitEvent({ type: "agent_start" });
 		this.emitEvent({ type: "phase", phase: "idle" });
@@ -593,10 +608,21 @@ export class AgentLoop {
 		toolDefs: Record<string, unknown>[],
 	): Promise<LLMCallResult> {
 		const llmStart = Date.now();
+		// Per-call controller linked to the run-level signal. On timeout we abort
+		// it so the in-flight provider request is cancelled rather than left
+		// streaming into a turn the loop has already abandoned. An external abort
+		// (this.signal) is forwarded to it too.
+		const callController = new AbortController();
+		const forwardAbort = () => callController.abort();
+		if (this.signal) {
+			if (this.signal.aborted) callController.abort();
+			else this.signal.addEventListener("abort", forwardAbort, { once: true });
+		}
 		try {
 			return await withTimeout(
-				this.callLLM(turnId, toolDefs),
+				this.callLLM(turnId, toolDefs, callController.signal),
 				this.turnTimeoutMs,
+				() => callController.abort(),
 			);
 		} catch (e: unknown) {
 			const error = e as Error;
@@ -613,6 +639,7 @@ export class AgentLoop {
 				errorMessage: message,
 			};
 		} finally {
+			this.signal?.removeEventListener("abort", forwardAbort);
 			this._turnMetrics.totalLlmTimeMs += Date.now() - llmStart;
 		}
 	}
@@ -620,10 +647,13 @@ export class AgentLoop {
 	/**
 	 * Call the LLM with context-full compaction retry and auto-retry on
 	 * transient provider errors. Returns the assistant content and tool calls.
+	 * `signal` is the per-call signal (run signal + turn timeout) passed to the
+	 * backend so a timeout actually cancels the request.
 	 */
 	private async callLLM(
 		turnId: string,
 		toolDefs: Record<string, unknown>[],
+		signal: AbortSignal,
 	): Promise<LLMCallResult> {
 		let assistantContent = "";
 		let assistantToolCalls: ToolCall[] = [];
@@ -650,7 +680,7 @@ export class AgentLoop {
 					tools: activeToolDefs.length > 0 ? activeToolDefs : undefined,
 					temperature: this.config.temperature || 0.5,
 					maxTokens: this.config.maxTokens || 4096,
-					signal: this.signal,
+					signal,
 					thinkingLevel: this.config.thinkingLevel,
 					headers: reqPatch?.headers,
 					transformPayload: this.hooks.beforeProviderPayload
@@ -707,6 +737,10 @@ export class AgentLoop {
 
 				assistantContent = response.content || "";
 				assistantToolCalls = response.toolCalls;
+				// Prefer the provider's real token count over the local estimate for
+				// context reporting; cleared each turn so a missing usage chunk falls
+				// back to the estimate rather than a stale value.
+				this._lastUsageTokens = response.usage?.totalTokens;
 				if (assistantToolCalls.length === 0 && assistantContent) {
 					assistantToolCalls = parseToolCalls(assistantContent);
 					if (assistantToolCalls.length > 0) {
@@ -828,6 +862,9 @@ export class AgentLoop {
 	// signature (count + last-message identity + tool-def count) so repeated
 	// queries within a turn are free; recompute only when the history changes.
 	private _tokenMemo?: { sig: string; tokens: number };
+	// Provider-reported total tokens from the last LLM response, when available.
+	// Used by emitContextUpdate in preference to the local estimate.
+	private _lastUsageTokens?: number;
 
 	private estimatePayloadTokens(tools: Record<string, unknown>[]): number {
 		const last = this._messages[this._messages.length - 1];
@@ -846,7 +883,9 @@ export class AgentLoop {
 	): void {
 		this.emitEvent({
 			type: "context_update",
-			tokens: this.estimatePayloadTokens(tools),
+			// Provider usage is authoritative when the last response reported it;
+			// otherwise fall back to the local payload estimate.
+			tokens: this._lastUsageTokens ?? this.estimatePayloadTokens(tools),
 			maxTokens: this.contextWindowTokens(),
 			compacted,
 		});
@@ -1038,19 +1077,27 @@ export class AgentLoop {
 		transcriptPath: string,
 		hookBasePayload: Record<string, unknown>,
 	): Promise<void> {
+		// Prepare every call up front. On abort, stop preparing but still emit a
+		// final aborted result for each remaining call below — the assistant
+		// message already carries all tool_calls, and every tool_call needs a
+		// matching tool result or the next request is malformed (dangling calls).
 		const prepared: PreparedLoopToolCall[] = [];
+		let abortedDuringPrepare = false;
 		for (const toolCall of toolCalls) {
 			if (this.signal?.aborted) {
-				this.emitEvent({
-					type: "error",
-					message: "Operation aborted",
-				});
-				return;
+				this.emitEvent({ type: "error", message: "Operation aborted" });
+				abortedDuringPrepare = true;
+				break;
 			}
 			prepared.push(
 				await this.prepareLoopToolCall(toolCall, turnId, hookBasePayload),
 			);
 		}
+		// Calls never prepared (abort cut the loop short) still need a result.
+		const preparedIds = new Set(prepared.map((p) => p.call.id));
+		const unprepared = abortedDuringPrepare
+			? toolCalls.filter((tc) => !preparedIds.has(tc.id))
+			: [];
 
 		const runnable = prepared.filter(
 			(item): item is RunnableToolCall => item.kind === "runnable",
@@ -1074,15 +1121,28 @@ export class AgentLoop {
 		}> = [];
 
 		for (const item of prepared) {
+			// A runnable item with no executed entry was skipped by an abort mid-
+			// batch; synthesize an aborted result so its tool_call is still paired.
 			const executedItem =
-				item.kind === "final" ? item : executedById.get(item.call.id);
-			if (!executedItem) continue;
+				item.kind === "final"
+					? item
+					: (executedById.get(item.call.id) ??
+						this.abortedToolResult(item.call, item.args));
 			const terminate = await this.finalizeToolCall(
 				executedItem,
 				transcriptPath,
 				hookBasePayload,
 			);
 			allPrepareFinalized.push({ item, executedItem, terminate });
+		}
+
+		// Pair any never-prepared calls (raw ToolCall, no args parsed) too.
+		for (const call of unprepared) {
+			await this.finalizeToolCall(
+				this.abortedToolResult(call, {}),
+				transcriptPath,
+				hookBasePayload,
+			);
 		}
 
 		// Set batchTerminate when ALL finalized tools set it.
@@ -1166,18 +1226,26 @@ export class AgentLoop {
 	private async executePreparedToolCall(
 		prepared: RunnableToolCall,
 	): Promise<ExecutedLoopToolCall> {
+		// Only pure tools (cacheable=true) use the result cache. Most tools observe
+		// mutable state the agent itself changes between calls (filesystem, git,
+		// shell), so caching them would serve stale results — e.g. re-reading a
+		// file the agent just edited.
+		const cacheable = this.toolRegistry.get(prepared.call.name)?.cacheable;
+
 		// ── Cache hit — skip execution ─────────────────────────────────────
-		const cached = this.toolCache.get(
-			prepared.call.name,
-			prepared.call.arguments,
-		);
-		if (cached) {
-			return {
-				call: prepared.call,
-				args: prepared.args,
-				result: cached.result,
-				isError: cached.isError,
-			};
+		if (cacheable) {
+			const cached = this.toolCache.get(
+				prepared.call.name,
+				prepared.call.arguments,
+			);
+			if (cached) {
+				return {
+					call: prepared.call,
+					args: prepared.args,
+					result: cached.result,
+					isError: cached.isError,
+				};
+			}
 		}
 
 		const { content: result, details } = await this.toolRegistry.execute(
@@ -1195,20 +1263,37 @@ export class AgentLoop {
 			},
 			prepared.args,
 		);
-		// ── Cache miss — store result (only successful) ────────────────────
+		// ── Cache miss — store result (only successful, only cacheable) ────
 		const isError = result.startsWith("Error:");
-		this.toolCache.put(
-			prepared.call.name,
-			prepared.call.arguments,
-			result,
-			isError,
-		);
+		if (cacheable) {
+			this.toolCache.put(
+				prepared.call.name,
+				prepared.call.arguments,
+				result,
+				isError,
+			);
+		}
 		return {
 			call: prepared.call,
 			args: prepared.args,
 			result,
 			isError,
 			details,
+		};
+	}
+
+	// A synthetic result for a tool call the loop never executed (abort mid-batch).
+	// Keeps the assistant's tool_call paired with a tool result so the next
+	// request is well-formed.
+	private abortedToolResult(
+		call: ToolCall,
+		args: Record<string, unknown>,
+	): ExecutedLoopToolCall {
+		return {
+			call,
+			args,
+			result: "Error: tool call aborted before execution.",
+			isError: true,
 		};
 	}
 

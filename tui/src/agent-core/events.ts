@@ -22,8 +22,13 @@ export class EventEmitter {
 			try {
 				listener(event);
 			} catch (e) {
-				// eslint-disable-next-line no-console
-				console.error("Event handler error:", e);
+				// A listener throwing is a consumer bug, not a loop failure — never
+				// abort the emit. Don't use console.* here: in a TUI it corrupts the
+				// rendered frame. Write to stderr only when stdout is not a TTY (tests,
+				// piped runs); otherwise drop silently.
+				if (!process.stdout.isTTY) {
+					process.stderr.write(`Event handler error: ${String(e)}\n`);
+				}
 			}
 		}
 	}

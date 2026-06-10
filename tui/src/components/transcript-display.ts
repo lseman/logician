@@ -84,8 +84,8 @@ function extractLangFromFence(line: string): string | null {
 function stripThinkTags(text: string): string {
 	if (!text?.includes("<think")) return text;
 	return text
-		.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "")
-		.replace(/<think(?:ing)?>[\s\S]*$/i, "")
+		.replace(/<think(?:ing)?>\s*[\s\S]*?<\/think(?:ing)?>\s*/gi, "")
+		.replace(/<think(?:ing)?>\s*[\s\S]*$/i, "")
 		.trimStart();
 }
 

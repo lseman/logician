@@ -57,7 +57,7 @@ function callPath(call: ToolCall): string {
 }
 
 // Coarse error bucket so distinct-but-equivalent failures collapse together.
-// logician-tui has no structured error payloads, so we key on the leading
+// tui has no structured error payloads, so we key on the leading
 // slice of the error text under the tool name.
 function failureCategory(toolName: string, result: string): string {
 	const body = result.replace(/^Error:\s*/i, "").trim();
@@ -115,6 +115,15 @@ export class GuardEngine {
 				(this.failPathCounts.get(path) || 0) >= this.failureThreshold
 			) {
 				return this.tripFailure(call.name, `\`${path}\``);
+			}
+			// Category bucket: distinct-but-equivalent failures (e.g. three
+			// different search patterns that all error the same way) collapse to
+			// one category. Trip when any category for this tool crosses the
+			// threshold, even though each individual call/path differs.
+			for (const [cat, count] of this.failCategoryCounts) {
+				if (count >= this.failureThreshold && cat.startsWith(`${call.name} `)) {
+					return this.tripFailure(call.name, "this kind of operation");
+				}
 			}
 		}
 

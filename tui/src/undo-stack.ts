@@ -22,7 +22,6 @@ export class UndoStack<T> {
 
 	pop(): T | null {
 		if (this.past.length === 0) return null;
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 		const snapshot = this.past.pop()!;
 		this.future.push(snapshot);
 		return snapshot.state;
@@ -47,7 +46,6 @@ export class UndoStack<T> {
 
 	redo(): T | null {
 		if (this.future.length === 0) return null;
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 		const snapshot = this.future.pop()!;
 		this.past.push(snapshot);
 		return snapshot.state;

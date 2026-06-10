@@ -203,6 +203,15 @@ export class AgentHarness {
 			const promptText = userMessage;
 			const preReasoning = await this.runPreReasoner(promptText);
 
+			// Continuation history for this prompt: prior conversation plus, when a
+			// reasoner ran, its output as a synthetic assistant message so the loop
+			// sees the reasoning. run() rebuilds _messages from initialMessages, so
+			// this must flow through initialMessages — not a post-construction
+			// setMessages, which run() would discard.
+			const continuation = preReasoning
+				? [...this.history, createAssistantMessage(preReasoning)]
+				: this.history;
+
 			try {
 				// Build or update the loop config (new on config change).
 				this.loopConfig = this.withDrainHook(this.config);
@@ -213,25 +222,22 @@ export class AgentHarness {
 						cwd: this.cwd,
 						maxIterations: this.maxIterations,
 						signal: this.abortController.signal,
-						initialMessages: this.history.length ? this.history : undefined,
+						initialMessages: continuation.length ? continuation : undefined,
 					});
 				} else {
 					// Reuse existing loop: refresh its config (system prompt,
-					// temperature, tools, freshly-built internalHooks) and swap in the
-					// new abort signal. Without updateConfig the loop would keep its
-					// construction-time config and ignore runtime changes.
+					// temperature, tools, freshly-built internalHooks), the abort signal,
+					// and the conversation to continue from. Without updateConfig the
+					// loop would keep its construction-time config; without
+					// updateInitialMessages it would replay only the first prompt's
+					// history and drop every turn since.
 					this.loop.updateConfig(this.loopConfig);
 					this.loop.updateSignal(this.abortController.signal);
+					this.loop.updateInitialMessages(
+						continuation.length ? continuation : undefined,
+					);
 				}
 				const loop = this.loop;
-
-				// Inject synthetic assistant message with reasoner output.
-				if (preReasoning) {
-					loop.setMessages([
-						createAssistantMessage(preReasoning),
-						...this.history,
-					]);
-				}
 
 				const result = await loop.run(promptText);
 				// Persist the full conversation for the next prompt.

@@ -59,9 +59,17 @@ export function findLogicianConfig(cwd = process.cwd()): string | null {
 		const candidate = join(dir, ".logician.json");
 		if (existsSync(candidate)) return candidate;
 		const parent = dirname(dir);
-		if (parent === dir) return null;
+		if (parent === dir) break;
 		dir = parent;
 	}
+
+	// Fall back to a per-user global config when no project config is found.
+	const home = process.env.HOME;
+	if (home) {
+		const global = join(home, ".logician", "logician.json");
+		if (existsSync(global)) return global;
+	}
+	return null;
 }
 
 export function configString(

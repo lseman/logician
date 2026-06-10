@@ -5,7 +5,9 @@
 
 export const getGraphemeSegmenter = (): Intl.Segmenter => {
 	try {
-		return new (Intl as unknown as { Segmenter: typeof Intl.Segmenter }).Segmenter(undefined, {
+		return new (
+			Intl as unknown as { Segmenter: typeof Intl.Segmenter }
+		).Segmenter(undefined, {
 			segmenter: "grapheme",
 		} as unknown as Intl.SegmenterOptions);
 	} catch {

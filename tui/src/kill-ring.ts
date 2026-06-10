@@ -32,10 +32,8 @@ export class KillRing {
 	}
 
 	pop(): string | null {
-		if (this.entries.length === 0) return null;
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		const entry = this.entries.pop()!;
-		return entry.text;
+		const entry = this.entries.pop();
+		return entry ? entry.text : null;
 	}
 
 	peek(): string | null {
@@ -45,9 +43,10 @@ export class KillRing {
 
 	rotate(): void {
 		if (this.entries.length < 2) return;
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		const last = this.entries.pop()!;
-		this.entries.unshift(last);
+		const last = this.entries.pop();
+		if (last) {
+			this.entries.unshift(last);
+		}
 	}
 
 	get length(): number {

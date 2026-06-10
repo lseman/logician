@@ -340,6 +340,11 @@ export interface Tool {
 	// Read-only tools may opt into parallel execution when global toolExecution
 	// is parallel.
 	executionMode?: ToolExecutionMode;
+	// Whether identical calls may be served from the result cache. Default false:
+	// most tools observe mutable state (filesystem, git, shell) that the agent's
+	// own actions change between calls, so caching would serve stale results. Set
+	// true only for genuinely pure tools whose output depends solely on their args.
+	cacheable?: boolean;
 	// Extra names this tool answers to when matching Claude-Code-style hook
 	// matchers (PreToolUse / PostToolUse). e.g. the `bash` tool aliases "Bash".
 	// The loop builds the matcher value from the tool's own name + these.

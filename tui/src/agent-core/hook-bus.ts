@@ -21,6 +21,10 @@ import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
 	AgentLoopHooks,
+	BeforeProviderPayloadContext,
+	BeforeProviderPayloadResult,
+	BeforeProviderRequestContext,
+	BeforeProviderRequestResult,
 	BeforeToolCallContext,
 	BeforeToolCallResult,
 	GetFollowUpMessagesContext,
@@ -29,6 +33,8 @@ import type {
 	PrepareNextTurnContext,
 	PrepareNextTurnResult,
 	ShouldStopAfterTurnContext,
+	TransformContext,
+	TransformContextResult,
 } from "./types.ts";
 
 export type HookEventName = keyof AgentLoopHooks;
@@ -52,6 +58,13 @@ interface Entry<H> {
 type BeforeHandler = NonNullable<AgentLoopHooks["beforeToolCall"]>;
 type AfterHandler = NonNullable<AgentLoopHooks["afterToolCall"]>;
 type PrepareHandler = NonNullable<AgentLoopHooks["prepareNextTurn"]>;
+type TransformHandler = NonNullable<AgentLoopHooks["transformContext"]>;
+type ProviderRequestHandler = NonNullable<
+	AgentLoopHooks["beforeProviderRequest"]
+>;
+type ProviderPayloadHandler = NonNullable<
+	AgentLoopHooks["beforeProviderPayload"]
+>;
 type StopHandler = NonNullable<AgentLoopHooks["shouldStopAfterTurn"]>;
 type SteeringHandler = NonNullable<AgentLoopHooks["getSteeringMessages"]>;
 type FollowUpHandler = NonNullable<AgentLoopHooks["getFollowUpMessages"]>;
@@ -66,6 +79,9 @@ export class HookBus {
 	private before: Entry<BeforeHandler>[] = [];
 	private after: Entry<AfterHandler>[] = [];
 	private prepare: Entry<PrepareHandler>[] = [];
+	private transform: Entry<TransformHandler>[] = [];
+	private providerRequest: Entry<ProviderRequestHandler>[] = [];
+	private providerPayload: Entry<ProviderPayloadHandler>[] = [];
 	private stop: Entry<StopHandler>[] = [];
 	private steering: Entry<SteeringHandler>[] = [];
 	private followUp: Entry<FollowUpHandler>[] = [];
@@ -103,13 +119,23 @@ export class HookBus {
 			offs.push(this.on("afterToolCall", hooks.afterToolCall, reg));
 		if (hooks.prepareNextTurn)
 			offs.push(this.on("prepareNextTurn", hooks.prepareNextTurn, reg));
+		if (hooks.transformContext)
+			offs.push(this.on("transformContext", hooks.transformContext, reg));
+		if (hooks.beforeProviderRequest)
+			offs.push(
+				this.on("beforeProviderRequest", hooks.beforeProviderRequest, reg),
+			);
+		if (hooks.beforeProviderPayload)
+			offs.push(
+				this.on("beforeProviderPayload", hooks.beforeProviderPayload, reg),
+			);
 		if (hooks.shouldStopAfterTurn)
 			offs.push(this.on("shouldStopAfterTurn", hooks.shouldStopAfterTurn, reg));
 		if (hooks.getSteeringMessages)
 			offs.push(this.on("getSteeringMessages", hooks.getSteeringMessages, reg));
 		if (hooks.getFollowUpMessages)
 			offs.push(this.on("getFollowUpMessages", hooks.getFollowUpMessages, reg));
-		return () => offs.forEach((off) => off());
+		return () => offs.forEach((off) => { off(); });
 	}
 
 	observe(observer: HookObserver): () => void {
@@ -124,6 +150,9 @@ export class HookBus {
 		this.before = [];
 		this.after = [];
 		this.prepare = [];
+		this.transform = [];
+		this.providerRequest = [];
+		this.providerPayload = [];
 		this.stop = [];
 		this.steering = [];
 		this.followUp = [];
@@ -137,6 +166,9 @@ export class HookBus {
 			beforeToolCall: (ctx) => this.runBefore(ctx),
 			afterToolCall: (ctx) => this.runAfter(ctx),
 			prepareNextTurn: (ctx) => this.runPrepare(ctx),
+			transformContext: (ctx) => this.runTransform(ctx),
+			beforeProviderRequest: (ctx) => this.runProviderRequest(ctx),
+			beforeProviderPayload: (ctx) => this.runProviderPayload(ctx),
 			shouldStopAfterTurn: (ctx) => this.runStop(ctx),
 			getSteeringMessages: (ctx) => this.runSteering(ctx),
 			getFollowUpMessages: (ctx) => this.runFollowUp(ctx),
@@ -218,6 +250,62 @@ export class HookBus {
 		return messages === ctx.messages ? undefined : { messages };
 	}
 
+	private async runTransform(
+		ctx: TransformContext,
+	): Promise<TransformContextResult | undefined> {
+		await this.notify("transformContext", ctx);
+		if (!this.transform.length) return undefined;
+		let messages = ctx.messages;
+		for (const { handler, source } of this.transform) {
+			const r = await this.guard(
+				() => handler({ ...ctx, messages }),
+				"transformContext",
+				source,
+			);
+			if (r?.messages) messages = r.messages;
+		}
+		return messages === ctx.messages ? undefined : { messages };
+	}
+
+	private async runProviderRequest(
+		ctx: BeforeProviderRequestContext,
+	): Promise<BeforeProviderRequestResult | undefined> {
+		await this.notify("beforeProviderRequest", ctx);
+		if (!this.providerRequest.length) return undefined;
+		let headers: Record<string, string> | undefined;
+		let timeoutMs: number | undefined;
+		for (const { handler, source } of this.providerRequest) {
+			const r = await this.guard(
+				() => handler(ctx),
+				"beforeProviderRequest",
+				source,
+			);
+			if (!r) continue;
+			if (r.headers) headers = { ...headers, ...r.headers };
+			if (r.timeoutMs !== undefined) timeoutMs = r.timeoutMs;
+		}
+		return headers || timeoutMs !== undefined
+			? { headers, timeoutMs }
+			: undefined;
+	}
+
+	private async runProviderPayload(
+		ctx: BeforeProviderPayloadContext,
+	): Promise<BeforeProviderPayloadResult | undefined> {
+		await this.notify("beforeProviderPayload", ctx);
+		if (!this.providerPayload.length) return undefined;
+		let payload = ctx.payload;
+		for (const { handler, source } of this.providerPayload) {
+			const r = await this.guard(
+				() => handler({ ...ctx, payload }),
+				"beforeProviderPayload",
+				source,
+			);
+			if (r?.payload) payload = r.payload;
+		}
+		return payload === ctx.payload ? undefined : { payload };
+	}
+
 	private async runStop(
 		ctx: ShouldStopAfterTurnContext,
 	): Promise<boolean | undefined> {
@@ -279,6 +367,12 @@ export class HookBus {
 				return this.after as Entry<unknown>[];
 			case "prepareNextTurn":
 				return this.prepare as Entry<unknown>[];
+			case "transformContext":
+				return this.transform as Entry<unknown>[];
+			case "beforeProviderRequest":
+				return this.providerRequest as Entry<unknown>[];
+			case "beforeProviderPayload":
+				return this.providerPayload as Entry<unknown>[];
 			case "shouldStopAfterTurn":
 				return this.stop as Entry<unknown>[];
 			case "getSteeringMessages":

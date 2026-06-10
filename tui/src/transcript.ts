@@ -206,8 +206,7 @@ export class Transcript {
 
 		if (lastContent) {
 			// Append to existing streaming content chunk
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-			lastContent.contentText! += token;
+			lastContent.contentText = (lastContent.contentText || "") + token;
 		} else {
 			// No streaming content chunk — create a new one
 			msg.chunks.push({

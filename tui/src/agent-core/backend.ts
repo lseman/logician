@@ -100,6 +100,9 @@ export interface LLMResponse {
 	toolCalls: ToolCall[];
 	stopReason: "stop" | "length" | "error";
 	errorMessage?: string;
+	// Provider-reported token usage from the final stream chunk, when available.
+	// Lets the loop report real context size instead of a local char/4 estimate.
+	usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
 }
 
 /** Streaming callbacks for a generate() call. All optional. */
@@ -210,6 +213,9 @@ export class OpenAIBackend implements LLMBackend {
 			temperature,
 			max_tokens: maxTokens,
 			stream: true,
+			// Ask OpenAI-compatible providers to emit a final usage chunk so the
+			// loop can report real token counts instead of a local estimate.
+			stream_options: { include_usage: true },
 			...(this.stop && { stop: this.stop }),
 		};
 
@@ -263,6 +269,8 @@ export class OpenAIBackend implements LLMBackend {
 		let fullContent = "";
 		let toolCalls: ToolCall[] = [];
 		let stopReason: LLMResponse["stopReason"] = "stop";
+		let finishReason: string | undefined;
+		let usage: LLMResponse["usage"];
 		let hasText = false;
 		// Tool-call indices whose early start event has already been emitted, so
 		// onToolCallStart fires exactly once per streamed call.
@@ -283,6 +291,17 @@ export class OpenAIBackend implements LLMBackend {
 
 				try {
 					const chunk = JSON.parse(data);
+					// finish_reason and usage can arrive on chunks that carry no delta
+					// (notably the trailing usage-only chunk), so read them first.
+					const chunkFinish = chunk.choices?.[0]?.finish_reason;
+					if (chunkFinish) finishReason = chunkFinish;
+					if (chunk.usage) {
+						usage = {
+							promptTokens: chunk.usage.prompt_tokens,
+							completionTokens: chunk.usage.completion_tokens,
+							totalTokens: chunk.usage.total_tokens,
+						};
+					}
 					const delta = chunk.choices?.[0]?.delta;
 					if (!delta) continue;
 
@@ -359,7 +378,13 @@ export class OpenAIBackend implements LLMBackend {
 				arguments: tc.arguments || "{}",
 			}));
 
-		if (toolCalls.length > 0) {
+		// Map the provider finish_reason to our stop reason. "length" means the
+		// completion was truncated by max_tokens — the loop surfaces this rather
+		// than treating it as a clean stop. Tool calls override (handled by the
+		// loop, which sets "tool_calls").
+		if (finishReason === "length") {
+			stopReason = "length";
+		} else if (toolCalls.length > 0) {
 			stopReason = "stop";
 		}
 
@@ -367,6 +392,7 @@ export class OpenAIBackend implements LLMBackend {
 			content: fullContent || null,
 			toolCalls,
 			stopReason,
+			usage,
 		};
 	}
 }

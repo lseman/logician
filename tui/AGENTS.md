@@ -2,7 +2,7 @@
 
 ## Scope
 
-These instructions apply to the `logician-tui` package.
+These instructions apply to the `tui` package.
 
 ## Workflow
 

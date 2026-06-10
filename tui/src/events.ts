@@ -116,6 +116,8 @@ export interface ToolEndEvent {
 	is_error?: boolean;
 	turn_id?: string;
 	tool_call_id?: string;
+	// Structured metadata the tool returned alongside its text result.
+	details?: Record<string, unknown>;
 }
 
 export interface ToolUpdateEvent {

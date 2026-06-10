@@ -3,22 +3,44 @@
 Source repos studied: `repos/pi` (TypeScript, `packages/agent` + `packages/coding-agent`) and
 `repos/openclaude` (TypeScript, `src/query`, `src/services`, `src/coordinator`, `src/memdir`).
 
-This doc proposes improvements to **our** agent (`src/agent/*` Python core + `logician-tui/src/agent-core`
+This doc proposes improvements to **our** agent (`src/agent/*` Python core + `tui/src/agent-core`
 TS loop). Each item lists: what they do, what we have today, the gap, and a concrete action with priority.
 
 Priorities: **P0** cheap+high-impact · **P1** high-value · **P2** foundation · **P3** longer-term.
 
 ---
 
+## Status (2026-06-10)
+
+Most of the P0–P2 items below **have since landed in the TS core** (`tui/src/agent-core/`).
+This doc is kept as a design reference; per-item status is flagged inline (✅ done / 🟡 partial /
+⬜ not started). The TS implementation is now the source of truth — the Python notes describe the
+older `src/agent/*` core.
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 1 | Tool-failure loop guard | ✅ | `guards.ts` (signature + path + category buckets) |
+| 2 | Diminishing-returns budget stop | ✅ | `budget.ts` + `shouldStopAfterTurn` |
+| 3 | Compact tool descriptions | ✅ | `skills.ts` catalog + on-demand `read-skill` |
+| 4 | AgentHarness (phase / save points) | ✅ | `harness.ts` phase state machine |
+| 5 | Steering / follow-up / nextTurn queues | ✅ | `harness.ts` queues + drain hooks |
+| 6 | Two-tier compaction (micro + full) | ✅ | `messages.ts` `compactToFit` |
+| 7 | Coordinator / worker mode | ⬜ | — |
+| 8 | Typed result-producing hook bus | ✅ | `hook-bus.ts` reducers |
+| 9 | Stop-hook veto / completion gate | 🟡 | `shouldStopAfterTurn` exists; no veto-and-resume chain |
+| 10 | Durable / resumable harness | ⬜ | — |
+| 11 | Memory-dir relevance scoring | ⬜ | — |
+| 12 | Session tree / branching | 🟡 | `harness.ts` fork/branchSummary (single-level) |
+
 ## Already adopted / in flight
 
 - **Richer loop contract** (`beforeToolCall` / `afterToolCall` / `prepareNextTurn` / `shouldStopAfterTurn`)
-  — landed in `logician-tui/src/agent-core/loop.ts`. Pi's full version is the `AgentHarness` (below).
+  — landed in `tui/src/agent-core/loop.ts`, composed through the typed `HookBus`.
 - **String-event plugin hooks** (`UserPromptSubmit`/`PreToolUse`/`PostToolUse`/`Stop`) — already live.
 - **Token-budget trim** (`AgentLoop._trim_to_budget`), **tool-call repair**, **guardrails**
   (duplicate/consecutive/hallucination/read-before-edit/verification) — already live in Python core.
 
-The items below are what we do **not** yet have.
+The items below were the original gap analysis; remaining open work is #7, #9 (finish), #10, #11.
 
 ---
 

@@ -82,7 +82,9 @@ export async function loadSkills(
 }
 
 /**
- * Format a skill as an XML invocation block for system-prompt injection.
+ * Format a skill as an XML invocation block carrying its full body. Used by the
+ * on-demand read_skill tool, NOT for bulk system-prompt injection (that would
+ * dump every skill body into context — see formatSkillCatalog).
  *
  * Optionally appends additional user instructions after the skill block.
  */
@@ -94,6 +96,27 @@ export function formatSkillInvocation(
 	return additionalInstructions
 		? `${skillBlock}\n\n${additionalInstructions}`
 		: skillBlock;
+}
+
+/**
+ * Format a compact catalog of skills (name + description only) for system-prompt
+ * injection. The model reads a skill's full body on demand via the read_skill
+ * tool, so the prompt stays small regardless of how many skills are installed.
+ */
+export function formatSkillCatalog(skills: Skill[]): string {
+	const entries = skills
+		.map(
+			(s) =>
+				`  <skill name="${escapeXml(s.name)}">${escapeXml(s.description)}</skill>`,
+		)
+		.join("\n");
+	return (
+		"<available-skills>\n" +
+		"The following skills are available. To use one, call the read_skill " +
+		"tool with its name to load its full instructions, then follow them.\n" +
+		`${entries}\n` +
+		"</available-skills>"
+	);
 }
 
 // ── Internal ─────────────────────────────────────────────────────────────────

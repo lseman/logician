@@ -2,7 +2,7 @@
 // Manages tool registration and execution. Mirrors Python ToolRegistry.
 
 import { parseToolInput } from "../parser.ts";
-import type { Tool, ToolCall, ToolContext } from "../types.ts";
+import type { Tool, ToolCall, ToolContext, ToolResult } from "../types.ts";
 
 export interface PreparedToolCall {
 	call: ToolCall;
@@ -77,18 +77,20 @@ export class ToolRegistry {
 		call: ToolCall,
 		context?: ToolContext,
 		preparedArgs?: Record<string, unknown>,
-	): Promise<string> {
+	): Promise<ToolResult> {
 		const tool = this.tools.get(call.name);
 		if (!tool) {
-			return `Error: Unknown tool: ${call.name}`;
+			return { content: `Error: Unknown tool: ${call.name}` };
 		}
 
 		try {
 			const args = preparedArgs ?? this.prepare(call).args;
-			return await tool.execute(args, { ...this.ctx, ...context });
+			const raw = await tool.execute(args, { ...this.ctx, ...context });
+			// Normalize the string | ToolResult union to a ToolResult.
+			return typeof raw === "string" ? { content: raw } : raw;
 		} catch (e: unknown) {
 			const error = e as Error;
-			return `Error executing ${call.name}: ${error.message}`;
+			return { content: `Error executing ${call.name}: ${error.message}` };
 		}
 	}
 

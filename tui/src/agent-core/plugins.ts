@@ -714,7 +714,9 @@ class TsPluginManager {
 		return {
 			version: 2,
 			plugins:
-				raw.plugins && typeof raw.plugins === "object" ? (raw.plugins as Record<string, PluginInstall[]>) : {},
+				raw.plugins && typeof raw.plugins === "object"
+					? (raw.plugins as Record<string, PluginInstall[]>)
+					: {},
 		};
 	}
 

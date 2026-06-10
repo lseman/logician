@@ -1,10 +1,10 @@
 {
-	"name": "@earendil-works/logician-tui",
+	"name": "@earendil-works/tui",
 	"version": "0.2.0",
 	"description": "Terminal TUI for Logician — SSH-ready, streaming-first, thinking-visible, pi-style input",
 	"type": "module",
 	"bin": {
-		"logician-tui": "src/index.ts"
+		"tui": "src/index.ts"
 	},
 	"scripts": {
 		"dev": "tsx watch src/index.ts",

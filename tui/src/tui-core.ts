@@ -661,7 +661,9 @@ export class TUI extends Container {
 		// 1. Transcript area (scrollable)
 		if (this.scrollableComponent) {
 			(
-				this.scrollableComponent as unknown as { setViewportHeight: (h: number) => void }
+				this.scrollableComponent as unknown as {
+					setViewportHeight: (h: number) => void;
+				}
 			).setViewportHeight(transcriptHeight);
 			this._viewportHeight = transcriptHeight;
 			let transcriptLines: string[];
@@ -681,9 +683,8 @@ export class TUI extends Container {
 			// Use scrollable component's scrollOffset (set during render by scrollToBottom)
 			const comp = this.scrollableComponent as Scrollable;
 			const scrollOff = Math.min(maxScroll, Math.max(0, comp.scrollOffset));
-			const visibleLines = (
-				comp as unknown as { rendersViewport?: boolean }
-			).rendersViewport
+			const visibleLines = (comp as unknown as { rendersViewport?: boolean })
+				.rendersViewport
 				? transcriptLines
 				: transcriptLines.slice(scrollOff, scrollOff + transcriptHeight);
 

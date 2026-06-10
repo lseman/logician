@@ -116,7 +116,11 @@ export class ReasonerSelectorOverlay implements Component {
 
 		if (!this.reasoners.length) {
 			lines.push(
-				boxLine(`${MUTED}No reasoning modes available.${RESET}`, "", innerWidth),
+				boxLine(
+					`${MUTED}No reasoning modes available.${RESET}`,
+					"",
+					innerWidth,
+				),
 			);
 		} else {
 			const maxRows = 10;
@@ -136,9 +140,7 @@ export class ReasonerSelectorOverlay implements Component {
 				const selected = i === this.selectedIndex;
 				const cursor = selected ? "▸" : " ";
 				const activeMark = r.active ? `${ACTIVE}● active${RESET}` : "";
-				const name = selected
-					? `${SELECTED}${BOLD}${r.name}${RESET}`
-					: r.name;
+				const name = selected ? `${SELECTED}${BOLD}${r.name}${RESET}` : r.name;
 				const desc = `${DIM}${r.description}${RESET}`;
 				const meta = activeMark ? `${desc}  ${activeMark}` : desc;
 				lines.push(boxLine(`${cursor} ${name}`, meta, innerWidth));
