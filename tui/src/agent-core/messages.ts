@@ -1,7 +1,8 @@
 // ── Message handling ──────────────────────────────────────────────────────────────
-// Message creation and chat format conversion.
+// Message creation, chat format conversion, and compaction integration.
 
-import type { AgentMessage, Message, MessageRole } from "./types.ts";
+import type { AgentMessage, CompactableMessage, Message, MessageRole } from "./types.ts";
+import { compactToFit as newCompactToFit } from "./compaction/compaction";
 
 /** Convert AgentMessage[] to LLM-compatible Message[]. Filters out custom messages. */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
@@ -233,18 +234,11 @@ export function compactMessagesForContext(
 /**
  * Token-budget compaction ladder shared by the proactive builtin hook and the
  * loop's context-full recovery. Single source of truth for the
- * estimate → micro → (full if still over) sequence:
+ * estimate → micro → (full if still over) sequence.
  *
- *  1. If already under `triggerTokens` and not `force`d, do nothing.
- *  2. Run the cheap micro pass (trim oversized bodies). If that brings the
- *     payload under `triggerTokens`, stop there.
- *  3. Otherwise run the full summarizing pass targeting `targetTokens`.
- *
- * `triggerTokens` is the threshold that fires compaction (e.g. window * 0.8);
- * `targetTokens` is what the full pass aims to reach (e.g. window * 0.65).
- * `force` skips the under-threshold checks — used when the provider already
- * rejected the request as too long, so compaction must run regardless of the
- * local estimate.
+ * Delegates to the new turn-aware compaction system for the full summarizing
+ * pass (Pi-style turn-boundary cut points + usage tracking). Falls back to
+ * the local summarizer when no LLM summarizer is available.
  */
 export function compactToFit(
 	messages: Message[],
@@ -256,27 +250,32 @@ export function compactToFit(
 	},
 ): CompactionResult {
 	const { triggerTokens, targetTokens, toolDefs, keepRecentMessages } = opts;
-	const force = triggerTokens <= 0;
-	const estimate = (msgs: Message[]) =>
-		estimateChatPayloadTokens(msgs, toolDefs);
-	const noop: CompactionResult = {
-		messages,
-		tokensBefore: estimate(messages),
-		tokensAfter: estimate(messages),
-		changed: false,
-	};
 
-	if (!force && noop.tokensBefore < triggerTokens) return noop;
+	// Convert Message[] to CompactableMessage[] for the new compaction system
+	const compactableMsgs: CompactableMessage[] = messages as unknown as CompactableMessage[];
 
-	// Cheap pass first.
-	const micro = microCompactMessages(messages);
-	if (!force && estimate(micro.messages) < triggerTokens) return micro;
-
-	// Still over (or forced): full summarizing pass on the micro'd messages.
-	return compactMessagesForContext(micro.messages, {
-		targetTokens,
+	// Delegate to the new turn-aware compaction system
+	const result = newCompactToFit(compactableMsgs, {
+		triggerTokens,
 		keepRecentMessages,
+		settings: {
+			contextWindow: opts.targetTokens ? Math.round(opts.targetTokens * 1.5) : undefined,
+		},
 	});
+
+	// Convert back to Message[]
+	const convertedMessages = result.messages as unknown as Message[];
+
+	if (!result.changed) {
+		return { messages, tokensBefore: estimateMessageTokens(messages), tokensAfter: estimateMessageTokens(messages), changed: false };
+	}
+
+	return {
+		messages: convertedMessages,
+		tokensBefore: result.tokensBefore,
+		tokensAfter: result.tokensAfter,
+		changed: true,
+	};
 }
 
 // Cheap standalone pass: truncate only oversized message bodies, leave history

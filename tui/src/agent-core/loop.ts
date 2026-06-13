@@ -13,8 +13,6 @@ import { buildBuiltinHooks, composeHooks } from "./builtin-hooks.ts";
 import { createDefaultTools } from "./default-tools.ts";
 import { createEventEmitter, type EventEmitter } from "./events.ts";
 import {
-	COMPACTION_TARGET_FRACTION,
-	compactToFit,
 	convertToChatFormat,
 	createAssistantMessage,
 	createSystemMessage,
@@ -23,8 +21,12 @@ import {
 	convertToLlm as defaultConvertToLlm,
 	estimateChatPayloadTokens,
 } from "./messages.ts";
+import { recoverFromContextFull } from "./compaction/index.ts";
+import type { CompactableMessage } from "./types.ts";
 import { parseToolCalls, parseToolInput } from "./parser.ts";
 import { runHookEvent } from "./plugins.ts";
+import { LoopDetector, type TurnSignature } from "./loop-detector.ts";
+import { resetTaskStatus } from "./tools/task-status.ts";
 import { ToolResultCache } from "./tool-cache.ts";
 import { ToolRegistry } from "./tools/registry.ts";
 import {
@@ -82,6 +84,13 @@ interface TurnOutcome {
 	stopReason?: StopReason;
 	message?: Message;
 	toolResults?: Message[];
+	// Raw data for loop detection — built once in runTurnInner, consumed in the
+	// main loop. Avoids duplicating buildTurnSignature across every return path.
+	loopSignatureData?: {
+		assistantContent: string;
+		toolCalls: ToolCall[];
+		toolResults: Message[];
+	};
 }
 
 // Result of a single LLM call, including why it stopped. On an unrecoverable
@@ -102,6 +111,8 @@ export interface TurnMetrics {
 	compactions: number;
 	retries: number;
 	continuations: number;
+	// Sum of provider-reported total tokens across all LLM calls this run.
+	usageTokens: number;
 }
 
 export interface AgentLoopOptions {
@@ -137,6 +148,11 @@ export class AgentLoop {
 	// Track terminate hint from afterToolCall — when ALL tools in a batch
 	// set it, the loop stops after that batch (Pi-style early termination).
 	private batchTerminate = false;
+	// Mid-stream steering interrupt: the in-flight provider call's controller,
+	// and whether the current abort is an interrupt (keep partial output and
+	// continue) rather than a cancellation.
+	private currentCallController: AbortController | null = null;
+	private interruptRequested = false;
 	private get maxRetries(): number {
 		return this.config.maxRetries ?? 3;
 	}
@@ -156,7 +172,23 @@ export class AgentLoop {
 		compactions: 0,
 		retries: 0,
 		continuations: 0,
+		usageTokens: 0,
 	};
+	// Provider-reported tokens consumed this run (for maxTotalTokens budget).
+	private _runUsageTokens = 0;
+	private loopDetector: LoopDetector;
+	// Loop recovery: when a loop is detected, inject a recovery message and
+	// give the agent one more chance. Prevents hard-stops on recoverable loops.
+	private get loopRecoveryEnabled(): boolean {
+		return this.config.loopRecoveryEnabled !== false;
+	}
+	private loopRecoveryAttempted = false;
+	// How many consecutive identical turns trigger loop detection.
+	private get loopDetectionWindow(): number {
+		return this.config.loopDetectionWindow ?? 3;
+	}
+
+
 
 	/** Read-only snapshot of turn-level metrics (available after run() completes). */
 	get turnMetrics(): TurnMetrics {
@@ -182,24 +214,54 @@ export class AgentLoop {
 		);
 
 		// Set up tool registry
-		this.toolRegistry = new ToolRegistry({ cwd: this.cwd });
+		this.toolRegistry = new ToolRegistry({
+			cwd: this.cwd,
+			onQuestionRequest: this.config.onQuestionRequest,
+		});
 		this.toolRegistry.registerMany(
 			this.config.tools?.length ? this.config.tools : createDefaultTools(),
 		);
 
-		// Set up event handler
+		this.loopDetector = new LoopDetector({
+			maxHistory: this.config.loopDetectionWindow ?? 10,
+			exactRepeatWindow: this.config.loopDetectionWindow ?? 3,
+			degenerateWindow: this.config.degenerateLoopThreshold ?? 4,
+			stagnationWindow: this.config.stagnationThreshold ?? 5,
+		});
 		this.wrapOnEvent();
 	}
 
-	// Capture the config's raw onEvent and replace it with a wrapper that fans
+	// Capture the config's raw onEvent and replace it with a wrapper that
+	// stamps the envelope (seq/ts), appends to the JSONL event log, and fans
 	// every event out through the emitter before the raw handler. Re-run on
 	// config refresh so a reused loop keeps emitting through the emitter.
+	private eventSeq = 0;
 	private wrapOnEvent(): void {
 		this.onEvent = this.config.onEvent;
 		this.config.onEvent = (event: AgentEvent) => {
+			// Stamp only once: a subagent's events arrive pre-stamped by the
+			// child loop and keep the child's ordering.
+			if (event.seq === undefined) {
+				event.seq = ++this.eventSeq;
+				event.ts = Date.now();
+			}
+			this.appendEventLog(event);
 			this.emitter.emit(event);
 			this.onEvent?.(event);
 		};
+	}
+
+	// Best-effort JSONL event log for replay/debugging. message_update is
+	// skipped — it re-serializes the whole partial message every delta and the
+	// stream is reconstructible from text_delta events.
+	private appendEventLog(event: AgentEvent): void {
+		const path = this.config.eventLogPath;
+		if (!path || event.type === "message_update") return;
+		try {
+			appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
+		} catch {
+			// Event logging must never break a turn.
+		}
 	}
 
 	get events(): EventEmitter {
@@ -319,6 +381,13 @@ export class AgentLoop {
 		this.continuationCount = 0;
 		this._retryAttempt = 0;
 		this._lastUsageTokens = undefined;
+		this._runUsageTokens = 0;
+		this.loopRecoveryAttempted = false;
+		// New run = new task: clear any task_status left by the previous one so
+		// the continuation logic doesn't honour a stale declaration.
+		resetTaskStatus();
+		// Reset loop detector for each independent run.
+		this.loopDetector.reset();
 
 		this.emitEvent({ type: "agent_start" });
 		this.emitEvent({ type: "phase", phase: "idle" });
@@ -327,13 +396,13 @@ export class AgentLoop {
 		// call tools make forward progress and reset the counter, so a long tool-
 		// using task is not silently truncated mid-work. The cap exists solely to
 		// bound a model that loops without acting.
-		let unproductiveTurns = 0;
+		let unproductiveTurnCount = 0;
 		while (true) {
 			if (this.signal?.aborted) {
 				this.emitEvent({ type: "error", message: "Operation aborted" });
 				break;
 			}
-			if (unproductiveTurns >= this.maxIterations) {
+			if (unproductiveTurnCount >= this.maxIterations) {
 				this.emitEvent({
 					type: "max_iterations",
 					iterations: this.iterationCount,
@@ -348,8 +417,115 @@ export class AgentLoop {
 				transcriptPath,
 				hookBasePayload,
 			);
-			unproductiveTurns = outcome.productive ? 0 : unproductiveTurns + 1;
+			
+			// Detect repetitive turn patterns (same content + same tool calls/results).
+			if (outcome.loopSignatureData) {
+				const sig = this.buildTurnSignature(
+					outcome.loopSignatureData.assistantContent,
+					outcome.loopSignatureData.toolCalls,
+					outcome.loopSignatureData.toolResults,
+				);
+				if (this.loopDetector.recordAndDetect(
+					sig.assistantContent,
+					sig.toolCalls,
+				)) {
+					outcome.stopReason = "loop_detected";
+				}
+			}
+
+			if (outcome.stopReason === "loop_detected") {
+				// Loop recovery: before hard-stopping, inject a recovery message
+				// and give the agent one more chance. This catches recoverable
+				// loops (e.g. the agent is circling on a subtask it can't resolve)
+				// instead of terminating immediately.
+				if (this.loopRecoveryEnabled && !this.loopRecoveryAttempted) {
+					this.loopRecoveryAttempted = true;
+					this.continuationCount++;
+					this._turnMetrics.continuations++;
+					const diagnostic = this.loopDetector.getLoopDiagnostic();
+					const recoveryMsg = diagnostic
+						? (() => {
+								// Build loop-type-specific recovery guidance from the diagnostic.
+								let action: string;
+								if (diagnostic.startsWith("Exact repeat")) {
+									// Exact repeat: the same input produces the same output every time.
+									// The agent needs a fundamentally different approach, not just a
+									// tweak of the current one.
+									action =
+										`You are stuck in an exact-repeat loop — the same input produces the ` +
+										`same output every time. Changing arguments within the same approach ` +
+										`will not help. You must switch to a completely different strategy: ` +
+										`use a different tool, re-read the starting context from scratch, or ` +
+										`break the task into a smaller sub-problem you haven't attempted yet.`;
+								} else if (diagnostic.startsWith("Degenerate")) {
+									// Degenerate loop: same tools, same results, varying args.
+									// The agent is producing work but not getting anywhere.
+									action =
+										`You are in a degenerate loop — you call the same tools and keep ` +
+										`getting the same results, even though your arguments change slightly. ` +
+										`Your current tool+strategy combo cannot solve this. Try a different ` +
+										`tool entirely, or step back and reconsider whether the approach itself ` +
+										`is correct for this task.`;
+								} else if (diagnostic.startsWith("Stagnation")) {
+									// Stagnation: no new signal across the window.
+									// The agent has exhausted known patterns.
+									action =
+										`You are stagnating — you've exhausted all the (tool, result) shapes ` +
+										`you know and are cycling through them without introducing anything new. ` +
+										`At this point you should: (1) re-read your original task to check you ` +
+										`understand what's actually needed, (2) pick a direction you haven't ` +
+										`explored, or (3) acknowledge what you've tried and explain why the task ` +
+										`may be incomplete.`;
+								} else {
+									// Fallback for unexpected diagnostic format.
+									action =
+										`You are repeating the same pattern without progress. Stop and look ` +
+										`at your last few turns — they're all producing the same result. ` +
+										`Pick ONE thing you haven't tried yet and do it. If you genuinely ` +
+										`have no new ideas, say why and stop.`;
+								}
+								return `Loop detected: ${diagnostic} ${action}`;
+							})()
+							: `Loop detected: you are repeating the same pattern without progress. ` +
+								`Stop and look at your last few turns — they're all producing the same result. ` +
+								`Pick ONE thing you haven't tried yet and do it. ` +
+								`If you genuinely have no new ideas, say why and stop.`;
+					this.appendInjectedMessages(transcriptPath, [
+						createUserMessage(recoveryMsg),
+					]);
+					this.emitEvent({
+						type: "loop_detected",
+						message: "Loop detected — recovery message injected.",
+						attempt: 1,
+					});
+					// Continue the loop with the recovery message in context.
+					continue;
+				}
+				// No recovery or already tried: hard stop.
+				this.emitEvent({
+					type: this.loopRecoveryAttempted ? "loop_detected" : "error",
+					message: this.loopRecoveryAttempted
+						? "Loop detected: recovery attempt did not resolve the pattern. Terminating run."
+						: "Loop detected: The agent is repeating itself. Terminating run.",
+				});
+				break;
+			}
+
+			unproductiveTurnCount = outcome.productive ? 0 : unproductiveTurnCount + 1;
 			if (!outcome.continue) break;
+
+			// Run token budget: stop cleanly between turns once the provider-
+			// reported usage exceeds the cap. Checked only when the provider
+			// actually reports usage — a backend without usage chunks never trips.
+			const budget = this.config.maxTotalTokens;
+			if (budget && budget > 0 && this._runUsageTokens >= budget) {
+				this.emitEvent({
+					type: "budget_exhausted",
+					usedTokens: this._runUsageTokens,
+					limitTokens: budget,
+				});
+				break;
+			}
 		}
 
 		await this.runHookSafely("Stop", {
@@ -433,22 +609,22 @@ export class AgentLoop {
 				productive: false,
 				stopReason: "error",
 				message,
+				loopSignatureData: { assistantContent: text, toolCalls: [], toolResults: [] },
 			};
 		}
 
 		// Empty response (no content, no tools) is ambiguous: a real stop or a
-		// transient empty completion. handleEmptyResponse retries once and, if
-		// still empty, either nudges-and-continues or ends the turn.
+		// transient empty completion. Retry once; if still empty, nudge-and-
+		// continue or stop.
 		if (!assistantContent && assistantToolCalls.length === 0) {
-			const recovered = await this.handleEmptyResponse(
-				turnId,
-				toolDefs,
-				transcriptPath,
-			);
-			if (recovered.outcome) return recovered.outcome;
-			result = recovered.result;
-			assistantContent = result.content;
-			assistantToolCalls = result.toolCalls;
+			const retryResult = await this.retryEmptyCall(turnId, toolDefs);
+			if (retryResult.content || retryResult.toolCalls.length > 0) {
+				result = retryResult;
+				assistantContent = result.content;
+				assistantToolCalls = result.toolCalls;
+			} else {
+				return await this.handleEmptyResponseAfterRetry(transcriptPath);
+			}
 		}
 
 		// Emit message_start before assistant response (for steering
@@ -509,6 +685,7 @@ export class AgentLoop {
 					stopReason: "aborted",
 					message: assistantMessage,
 					toolResults,
+					loopSignatureData: { assistantContent, toolCalls: assistantToolCalls, toolResults },
 				};
 			}
 			// Pi-style early termination: when ALL tools in the batch
@@ -521,6 +698,7 @@ export class AgentLoop {
 					stopReason: turnStopReason,
 					message: assistantMessage,
 					toolResults,
+					loopSignatureData: { assistantContent, toolCalls: assistantToolCalls, toolResults },
 				};
 			}
 		}
@@ -535,18 +713,23 @@ export class AgentLoop {
 				stopReason: turnStopReason,
 				message: assistantMessage,
 				toolResults,
+				loopSignatureData: { assistantContent, toolCalls: assistantToolCalls, toolResults },
 			};
 		}
 
 		// Continue loop: model called tools or follow-ups exist.
 		// turn_end stays open — the TUI sees one continuous turn.
 		if (hadToolCalls) {
-			return { continue: true, productive: true };
+			return {
+				continue: true,
+				productive: true,
+				loopSignatureData: { assistantContent, toolCalls: assistantToolCalls, toolResults },
+			};
 		}
 
 		// No tool calls: check follow-ups before ending the turn.
 		if (this.continuationCount < this.maxContinuations) {
-			const followUps = await this.runGetFollowUpMessages(assistantContent);
+			const followUps = await this.runGetFollowUpMessages(assistantContent, turnStopReason);
 			if (followUps.length) {
 				this.continuationCount++;
 				this._turnMetrics.continuations++;
@@ -562,40 +745,45 @@ export class AgentLoop {
 			stopReason: turnStopReason,
 			message: assistantMessage,
 			toolResults,
+			loopSignatureData: { assistantContent, toolCalls: assistantToolCalls, toolResults },
 		};
 	}
 
 	/**
-	 * Recover from an empty LLM response (no content, no tool calls). Retries the
-	 * call once: if the retry produces output, returns it for the turn to use
-	 * ({ result }). If it is still empty, returns a terminal { outcome } — a
-	 * nudge-and-continue while continuations remain, otherwise a clean stop —
-	 * so the caller can return immediately.
+	 * Retry an LLM call that produced no output. Returns the result so the
+	 * caller can continue the turn, or a terminal TurnOutcome when the retry
+	 * also produced nothing and no further continuations are available.
 	 */
-	private async handleEmptyResponse(
+	private async retryEmptyCall(
 		turnId: string,
 		toolDefs: Record<string, unknown>[],
-		transcriptPath: string,
-	): Promise<{ result: LLMCallResult; outcome?: TurnOutcome }> {
-		const result = await this.callLLMGuarded(turnId, toolDefs);
-		if (result.content || result.toolCalls.length > 0) return { result };
+	): Promise<LLMCallResult> {
+		return this.callLLMGuarded(turnId, toolDefs);
+	}
 
-		// Still empty after one retry.
+	/**
+	 * Decide what to do when the LLM response is empty (no content, no tool
+	 * calls) after one retry. Injects a nudge message and returns a
+	 * nudge-and-continue outcome when continuations remain; otherwise returns
+	 * a clean stop outcome.
+	 */
+	private async handleEmptyResponseAfterRetry(
+		transcriptPath: string,
+	): Promise<TurnOutcome> {
 		if (this.continuationCount < this.maxContinuations) {
 			this.continuationCount++;
 			this._turnMetrics.continuations++;
 			this.appendInjectedMessages(transcriptPath, [
 				createUserMessage(
-					"Your last response was empty. If the task is complete, say so " +
-						"explicitly. Otherwise, continue using your tools to make progress.",
+					"Your last response was empty — the model produced no content or tool calls. " +
+					"This can happen with transient errors or a stalled generation. " +
+					"If the task is complete, say so explicitly and stop. " +
+					"Otherwise, pick one specific action from your remaining work and execute it with a tool.",
 				),
 			]);
-			return { result, outcome: { continue: true, productive: false } };
+			return { continue: true, productive: false };
 		}
-		return {
-			result,
-			outcome: { continue: false, productive: false, stopReason: "stop" },
-		};
+		return { continue: false, productive: false, stopReason: "stop" };
 	}
 
 	/**
@@ -618,6 +806,7 @@ export class AgentLoop {
 			if (this.signal.aborted) callController.abort();
 			else this.signal.addEventListener("abort", forwardAbort, { once: true });
 		}
+		this.currentCallController = callController;
 		try {
 			return await withTimeout(
 				this.callLLM(turnId, toolDefs, callController.signal),
@@ -639,9 +828,25 @@ export class AgentLoop {
 				errorMessage: message,
 			};
 		} finally {
+			this.currentCallController = null;
 			this.signal?.removeEventListener("abort", forwardAbort);
 			this._turnMetrics.totalLlmTimeMs += Date.now() - llmStart;
 		}
+	}
+
+	/**
+	 * Interrupt the in-flight LLM call (mid-stream steering): the partial
+	 * assistant text streamed so far is kept as the turn's message and the
+	 * loop continues, draining steering at the next save point. Returns false
+	 * when no call is in flight (nothing to interrupt — queued steering will
+	 * drain normally).
+	 */
+	interruptTurn(): boolean {
+		const controller = this.currentCallController;
+		if (!controller) return false;
+		this.interruptRequested = true;
+		controller.abort();
+		return true;
 	}
 
 	/**
@@ -701,7 +906,7 @@ export class AgentLoop {
 							});
 						},
 						onThinking: (delta: string) => {
-							this.emitEvent({ type: "thinking_delta", delta });
+							this.emitEvent({ type: "thinking_delta", turnId, delta });
 						},
 						onTextStart: () => {
 							this.emitEvent({ type: "text_start", turnId });
@@ -741,6 +946,9 @@ export class AgentLoop {
 				// context reporting; cleared each turn so a missing usage chunk falls
 				// back to the estimate rather than a stale value.
 				this._lastUsageTokens = response.usage?.totalTokens;
+				const consumed = response.usage?.totalTokens ?? 0;
+				this._runUsageTokens += consumed;
+				this._turnMetrics.usageTokens += consumed;
 				if (assistantToolCalls.length === 0 && assistantContent) {
 					assistantToolCalls = parseToolCalls(assistantContent);
 					if (assistantToolCalls.length > 0) {
@@ -761,8 +969,40 @@ export class AgentLoop {
 							? "length"
 							: "stop";
 				llmSuccess = true;
+				// This request was an auto-retry and it actually succeeded.
+				if (this._retryAttempt > 0) {
+					this.emitEvent({
+						type: "auto_retry_end",
+						attempt: this._retryAttempt,
+						success: true,
+					});
+				}
 			} catch (e: unknown) {
 				const error = e as Error;
+
+				// Mid-stream steering interrupt: not an error. Keep the partial
+				// assistant text as this turn's message; the steering message drains
+				// at the next save point and the loop continues. A real run-level
+				// abort takes precedence and flows through the normal abort path.
+				if (this.interruptRequested && !this.signal?.aborted) {
+					this.interruptRequested = false;
+					assistantToolCalls = [];
+					stopReason = "stop";
+					llmSuccess = true;
+					break;
+				}
+				this.interruptRequested = false;
+
+				// The failed request was itself an auto-retry: close it out as a
+				// failure before deciding whether to retry again or give up.
+				if (this._retryAttempt > 0) {
+					this.emitEvent({
+						type: "auto_retry_end",
+						attempt: this._retryAttempt,
+						success: false,
+					});
+				}
+
 				// Prefer the backend's typed category; fall back to message-string
 				// matching for errors thrown outside the backend boundary.
 				const category = classifyLoopError(error);
@@ -771,28 +1011,23 @@ export class AgentLoop {
 				if (!compactionAttempted && category === "context_full") {
 					compactionAttempted = true;
 					this._turnMetrics.compactions++;
-					const before = this.estimatePayloadTokens(toolDefs);
 					const ctxWindow = this.contextWindowTokens();
-					// Forced ladder (triggerTokens 0): the provider already rejected
-					// the request as too long, so compact regardless of local estimate.
-					const compacted = compactToFit(this._messages, {
-						triggerTokens: 0,
-						targetTokens: ctxWindow
-							? Math.floor(ctxWindow * COMPACTION_TARGET_FRACTION)
-							: undefined,
-						toolDefs,
-					});
-					if (compacted.changed) {
-						this._messages = compacted.messages;
-						const after = this.estimatePayloadTokens(toolDefs);
-						this.emitEvent({
-							type: "compaction",
-							reason: "context_full",
-							tokensBefore: before,
-							tokensAfter: after,
+					if (ctxWindow) {
+						const recovery = recoverFromContextFull({
+							messages: this._messages as CompactableMessage[],
+							contextWindowTokens: ctxWindow,
 						});
-						this.emitContextUpdate(toolDefs, true);
-						continue;
+						if (recovery.success) {
+							this._messages = recovery.messages as Message[];
+							this.emitEvent({
+								type: "compaction",
+								reason: "context_full",
+								tokensBefore: recovery.tokensBefore,
+								tokensAfter: recovery.tokensAfter,
+							});
+							this.emitContextUpdate(toolDefs, true);
+							continue;
+						}
 					}
 					// Compaction didn't help — fall through to error.
 				}
@@ -806,8 +1041,14 @@ export class AgentLoop {
 					if (canRetry) {
 						this._retryAttempt++;
 						this._turnMetrics.retries++;
-						const delayMs =
-							this.retryBaseDelayMs * 2 ** (this._retryAttempt - 1);
+						// Provider-requested delay (Retry-After) wins over exponential
+						// backoff; ±20% jitter desynchronizes concurrent retries.
+						const base =
+							error instanceof BackendError &&
+							error.retryAfterMs !== undefined
+								? error.retryAfterMs
+								: this.retryBaseDelayMs * 2 ** (this._retryAttempt - 1);
+						const delayMs = Math.round(base * (0.8 + Math.random() * 0.4));
 						this.emitEvent({
 							type: "auto_retry_start",
 							attempt: this._retryAttempt,
@@ -816,11 +1057,9 @@ export class AgentLoop {
 							error: error.message,
 						});
 						await this._sleep(delayMs);
-						this.emitEvent({
-							type: "auto_retry_end",
-							attempt: this._retryAttempt,
-							success: true,
-						});
+						// No auto_retry_end here: the retry hasn't happened yet. The
+						// outcome event fires when the retried request succeeds (success
+						// path below) or fails again (top of this catch).
 						continue;
 					}
 				}
@@ -1059,6 +1298,7 @@ export class AgentLoop {
 
 	private async runGetFollowUpMessages(
 		assistantText: string,
+		stopReason?: StopReason,
 	): Promise<Message[]> {
 		if (!this.hooks.getFollowUpMessages) return [];
 		const r = await this.hooks.getFollowUpMessages({
@@ -1067,6 +1307,7 @@ export class AgentLoop {
 			assistantText,
 			continuationCount: this.continuationCount,
 			maxContinuations: this.maxContinuations,
+			stopReason,
 		});
 		return r?.length ? r : [];
 	}
@@ -1202,14 +1443,118 @@ export class AgentLoop {
 			};
 		}
 
-		await this.runHookSafely("PreToolUse", {
+		// Permission gate (modes + rules + interactive ask). Runs after
+		// beforeToolCall so rules see the final, possibly-rewritten args.
+		const permissionBlock = await this.checkPermissions(
+			activeToolCall,
+			toolInput,
+		);
+		if (permissionBlock) {
+			return {
+				kind: "final",
+				call: activeToolCall,
+				args: toolInput,
+				result: permissionBlock,
+				isError: true,
+			};
+		}
+
+		// External PreToolUse hooks can block (exit code 2 / decision JSON).
+		const hookResult = await this.runHookForResult("PreToolUse", {
 			...hookBasePayload,
 			matcher_value: this.hookMatcherValue(activeToolCall.name),
 			tool_name: activeToolCall.name,
 			tool_input: toolInput,
 		});
+		if (hookResult?.permission_decision === "deny") {
+			const reason = hookResult.permission_reason || "Blocked by hook.";
+			this.emitEvent({
+				type: "tool_permission_decision",
+				toolName: activeToolCall.name,
+				toolCallId: activeToolCall.id,
+				decision: "deny",
+				source: "hook",
+			});
+			return {
+				kind: "final",
+				call: activeToolCall,
+				args: toolInput,
+				result: `Permission denied by hook: ${reason}`,
+				isError: true,
+			};
+		}
 
 		return { kind: "runnable", call: activeToolCall, args: toolInput };
+	}
+
+	/**
+	 * Evaluate the permission gate for a prepared tool call. Returns the error
+	 * text to record as the tool result when the call is denied, or undefined
+	 * when it may run. "ask" verdicts route to config.onPermissionRequest; with
+	 * no handler installed they fail closed.
+	 */
+	private async checkPermissions(
+		toolCall: ToolCall,
+		args: Record<string, unknown>,
+	): Promise<string | undefined> {
+		const pm = this.config.permissions;
+		if (!pm) return undefined;
+		const verdict = pm.evaluate(toolCall, args, this.toolRegistry.get(toolCall.name));
+		if (verdict.decision === "allow") return undefined;
+		if (verdict.decision === "deny") {
+			this.emitEvent({
+				type: "tool_permission_decision",
+				toolName: toolCall.name,
+				toolCallId: toolCall.id,
+				decision: "deny",
+				source: verdict.source,
+			});
+			return `Permission denied: ${verdict.reason ?? `${toolCall.name} is not allowed in ${pm.getMode()} mode`}.`;
+		}
+
+		// "ask" — interactive approval.
+		this.emitEvent({
+			type: "tool_permission_request",
+			toolName: toolCall.name,
+			toolCallId: toolCall.id,
+			args: toolCall.arguments,
+		});
+		const handler = this.config.onPermissionRequest;
+		if (!handler) {
+			this.emitEvent({
+				type: "tool_permission_decision",
+				toolName: toolCall.name,
+				toolCallId: toolCall.id,
+				decision: "deny",
+				source: "mode",
+			});
+			return (
+				`Permission denied: ${toolCall.name} requires approval in ` +
+				`${pm.getMode()} mode and no approval handler is installed.`
+			);
+		}
+		let decision: "allow" | "deny" | "always";
+		try {
+			decision = await handler({
+				toolName: toolCall.name,
+				toolCallId: toolCall.id,
+				args,
+			});
+		} catch {
+			decision = "deny";
+		}
+		if (decision === "always") pm.addSessionAllow(toolCall.name);
+		this.emitEvent({
+			type: "tool_permission_decision",
+			toolName: toolCall.name,
+			toolCallId: toolCall.id,
+			decision,
+			source: "user",
+		});
+		if (decision === "deny") {
+			return `Permission denied: the user declined this ${toolCall.name} call.`;
+		}
+		return undefined;
 	}
 
 	private async executePreparedToolCallsSequentially(
@@ -1393,11 +1738,21 @@ export class AgentLoop {
 		eventType: string,
 		payload: Record<string, unknown>,
 	): Promise<void> {
-		if (!this.hooksEnabled()) return;
+		await this.runHookForResult(eventType, payload);
+	}
+
+	// Run an external hook event and return its result (for events whose output
+	// carries decisions, e.g. PreToolUse). Failures return null — hooks must
+	// not break the agent turn.
+	private async runHookForResult(
+		eventType: string,
+		payload: Record<string, unknown>,
+	): Promise<Awaited<ReturnType<typeof runHookEvent>> | null> {
+		if (!this.hooksEnabled()) return null;
 		try {
-			await runHookEvent(eventType, payload);
+			return await runHookEvent(eventType, payload);
 		} catch {
-			// Hook failures should not break the agent turn.
+			return null;
 		}
 	}
 
@@ -1501,6 +1856,34 @@ export class AgentLoop {
 	private hookMatcherValue(toolName: string): string {
 		const aliases = this.toolRegistry.get(toolName)?.hookAliases ?? [];
 		return [toolName, ...aliases].join("|");
+	}
+
+	// Build a TurnSignature from the assistant content and tool result messages.
+	// This is used by the main loop to detect repetitive turn patterns.
+	private buildTurnSignature(
+		assistantContent: string,
+		toolCalls: ToolCall[],
+		toolResults: Message[],
+	): TurnSignature {
+		// Build a map from tool_call_id to result text.
+		const resultMap = new Map<string, string>();
+		for (const msg of toolResults) {
+			if (msg.role !== "tool") continue;
+			const id = msg.tool_call_id ?? "";
+			resultMap.set(id, msg.content ?? "");
+		}
+		const signatures = toolCalls.map((tc) => {
+			const result = resultMap.get(tc.id) ?? "";
+			return {
+				name: tc.name,
+				args: tc.arguments,
+				result: result.slice(0, 100), // truncate for signature stability
+			};
+		});
+		return {
+			assistantContent,
+			toolCalls: signatures,
+		};
 	}
 }
 

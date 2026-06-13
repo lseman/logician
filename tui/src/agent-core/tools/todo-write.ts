@@ -72,6 +72,7 @@ const STATUS_MARK: Record<TodoStatus, string> = {
 };
 
 export const todo_write: Tool = {
+	readOnly: true,
 	name: "todo_write",
 	hookAliases: ["TodoWrite"],
 	description:

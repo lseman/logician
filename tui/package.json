@@ -1,7 +1,7 @@
 {
 	"name": "@earendil-works/tui",
 	"version": "0.2.0",
-	"description": "Terminal TUI for Logician — SSH-ready, streaming-first, thinking-visible, pi-style input",
+	"description": "Terminal TUI for Logician \u2014 SSH-ready, streaming-first, thinking-visible, pi-style input",
 	"type": "module",
 	"bin": {
 		"tui": "src/index.ts"
@@ -11,16 +11,8 @@
 		"start": "tsx src/index.ts",
 		"lint": "eslint src/",
 		"lint:fix": "eslint src/ --fix",
+		"test": "tsx --test src/agent-core/__tests__/*.test.ts",
 		"typecheck": "tsc --noEmit"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "2.4.16",
-		"@types/node": "^22.0.0",
-		"@typescript-eslint/eslint-plugin": "^8.60.1",
-		"@typescript-eslint/parser": "^8.60.1",
-		"eslint": "^10.4.1",
-		"tsx": "^4.0.0",
-		"typescript": "^5.5.0"
 	},
 	"engines": {
 		"node": ">=22.19.0"
@@ -31,5 +23,14 @@
 		"ignore": "^7.0.5",
 		"lowlight": "^3.3.0",
 		"yaml": "^2.9.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.16",
+		"@types/node": "^22.0.0",
+		"@typescript-eslint/eslint-plugin": "^8.60.1",
+		"@typescript-eslint/parser": "^8.60.1",
+		"eslint": "^10.4.1",
+		"tsx": "^4.0.0",
+		"typescript": "^5.5.0"
 	}
 }

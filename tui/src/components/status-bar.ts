@@ -16,6 +16,7 @@ interface StatusInfo {
 	contextMaxTokens?: number;
 	contextCompacted: boolean;
 	reasoner: string;
+	sessionTitle?: string;
 }
 
 const DEFAULT_INFO: StatusState = {
@@ -31,6 +32,7 @@ const DEFAULT_INFO: StatusState = {
 	contextMaxTokens: undefined,
 	contextCompacted: false,
 	reasoner: "none",
+	sessionTitle: "",
 };
 
 export class StatusBar implements Component {
@@ -117,9 +119,17 @@ export class StatusBar implements Component {
 		const reasonerColor =
 			reasoner === "none" ? "\x1b[38;5;244m" : "\x1b[38;5;159m";
 		const reasonerDisplay = `${reasonerColor}reasoner:${reasoner}${RESET}`;
-		const bottomLeft = `${DIM}${location}${RESET}`;
+		const sessionInfo = this.info.sessionTitle
+			? `${DIM}${this.truncateVisible(this.info.sessionTitle, 30)}${RESET}`
+			: "";
+		const bottomCenter = sessionInfo
+			? `${DIM}[session]${RESET} ${sessionInfo}`
+			: "";
+		const bottomLeftFull = bottomCenter
+			? `${DIM}${location}${RESET} ${DIM}·${RESET} ${bottomCenter}`
+			: `${DIM}${location}${RESET}`;
 		const bottomRight = `${reasonerDisplay} ${DIM}·${RESET} ${DIM}${model}${RESET}`;
-		const bottom = this.joinLeftRight(bottomLeft, bottomRight, safeWidth);
+		const bottom = this.joinLeftRight(bottomLeftFull, bottomRight, safeWidth);
 
 		this.cachedLines = [top, bottom];
 		return this.cachedLines;
@@ -251,6 +261,7 @@ interface StatusState {
 	contextMaxTokens?: number;
 	contextCompacted: boolean;
 	reasoner: string;
+	sessionTitle?: string;
 }
 
 const RESET = "\x1b[0m";

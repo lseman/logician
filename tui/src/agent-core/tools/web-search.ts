@@ -10,6 +10,7 @@ export function createWebSearchTool(config: WebSearchConfig): Tool {
 
 	return {
 		name: "web_search",
+		readOnly: true,
 		hookAliases: ["WebSearch"],
 		executionMode: "parallel",
 		description: `Search the web via SearXNG (${baseUrl}). Returns title, URL, and snippet for each result.`,

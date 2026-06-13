@@ -5,6 +5,7 @@ import type { Tool, ToolContext } from "../types.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 
 export const web_fetch: Tool = {
+	readOnly: true,
 	name: "web_fetch",
 	hookAliases: ["WebFetch"],
 	executionMode: "parallel",

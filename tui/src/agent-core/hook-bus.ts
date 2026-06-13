@@ -17,6 +17,7 @@
 // failing extension is identifiable, and `errorMode` controls whether a thrown
 // handler aborts the chain or is skipped.
 
+import { withTimeout } from "./async-utils.ts";
 import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
@@ -41,6 +42,8 @@ export type HookEventName = keyof AgentLoopHooks;
 
 export interface HookRegistration {
 	source?: string;
+	/** Per-handler timeout. Overrides the bus default; 0 disables. */
+	timeoutMs?: number;
 }
 
 export type HookErrorMode = "continue" | "throw";
@@ -48,11 +51,16 @@ export type HookErrorMode = "continue" | "throw";
 export interface HookBusOptions {
 	errorMode?: HookErrorMode;
 	onError?: (error: Error, event: HookEventName, source?: string) => void;
+	/** Default per-handler timeout — one slow handler must not stall the turn.
+	 *  A timed-out handler is treated like a thrown one (skipped + reported).
+	 *  0 = no default timeout. */
+	defaultTimeoutMs?: number;
 }
 
 interface Entry<H> {
 	handler: H;
 	source?: string;
+	timeoutMs?: number;
 }
 
 type BeforeHandler = NonNullable<AgentLoopHooks["beforeToolCall"]>;
@@ -89,10 +97,12 @@ export class HookBus {
 
 	private errorMode: HookErrorMode;
 	private onError?: HookBusOptions["onError"];
+	private defaultTimeoutMs: number;
 
 	constructor(options: HookBusOptions = {}) {
 		this.errorMode = options.errorMode ?? "continue";
 		this.onError = options.onError;
+		this.defaultTimeoutMs = options.defaultTimeoutMs ?? 0;
 	}
 
 	// Register one handler for an event. Returns an unsubscribe function.
@@ -102,7 +112,7 @@ export class HookBus {
 		reg: HookRegistration = {},
 	): () => void {
 		const list = this.listFor(event) as Entry<AgentLoopHooks[E]>[];
-		const entry = { handler, source: reg.source };
+		const entry = { handler, source: reg.source, timeoutMs: reg.timeoutMs };
 		list.push(entry);
 		return () => {
 			const i = list.indexOf(entry);
@@ -184,11 +194,12 @@ export class HookBus {
 		if (!this.before.length) return undefined;
 		let current = ctx;
 		let rewritten: Record<string, unknown> | undefined;
-		for (const { handler, source } of this.before) {
+		for (const { handler, source, timeoutMs } of this.before) {
 			const r = await this.guard(
 				() => handler(current),
 				"beforeToolCall",
 				source,
+				timeoutMs,
 			);
 			if (!r) continue;
 			// A content result short-circuits: tool is not run.
@@ -211,11 +222,12 @@ export class HookBus {
 		let current = ctx;
 		let modified = false;
 		let terminate = false;
-		for (const { handler, source } of this.after) {
+		for (const { handler, source, timeoutMs } of this.after) {
 			const r = await this.guard(
 				() => handler(current),
 				"afterToolCall",
 				source,
+				timeoutMs,
 			);
 			if (!r) continue;
 			// terminate from ANY handler wins; the loop applies its
@@ -239,11 +251,12 @@ export class HookBus {
 		await this.notify("prepareNextTurn", ctx);
 		if (!this.prepare.length) return undefined;
 		let messages = ctx.messages;
-		for (const { handler, source } of this.prepare) {
+		for (const { handler, source, timeoutMs } of this.prepare) {
 			const r = await this.guard(
 				() => handler({ ...ctx, messages }),
 				"prepareNextTurn",
 				source,
+				timeoutMs,
 			);
 			if (r?.messages) messages = r.messages;
 		}
@@ -256,11 +269,12 @@ export class HookBus {
 		await this.notify("transformContext", ctx);
 		if (!this.transform.length) return undefined;
 		let messages = ctx.messages;
-		for (const { handler, source } of this.transform) {
+		for (const { handler, source, timeoutMs } of this.transform) {
 			const r = await this.guard(
 				() => handler({ ...ctx, messages }),
 				"transformContext",
 				source,
+				timeoutMs,
 			);
 			if (r?.messages) messages = r.messages;
 		}
@@ -274,11 +288,16 @@ export class HookBus {
 		if (!this.providerRequest.length) return undefined;
 		let headers: Record<string, string> | undefined;
 		let timeoutMs: number | undefined;
-		for (const { handler, source } of this.providerRequest) {
+		for (const {
+			handler,
+			source,
+			timeoutMs: hookTimeoutMs,
+		} of this.providerRequest) {
 			const r = await this.guard(
 				() => handler(ctx),
 				"beforeProviderRequest",
 				source,
+				hookTimeoutMs,
 			);
 			if (!r) continue;
 			if (r.headers) headers = { ...headers, ...r.headers };
@@ -295,11 +314,12 @@ export class HookBus {
 		await this.notify("beforeProviderPayload", ctx);
 		if (!this.providerPayload.length) return undefined;
 		let payload = ctx.payload;
-		for (const { handler, source } of this.providerPayload) {
+		for (const { handler, source, timeoutMs } of this.providerPayload) {
 			const r = await this.guard(
 				() => handler({ ...ctx, payload }),
 				"beforeProviderPayload",
 				source,
+				timeoutMs,
 			);
 			if (r?.payload) payload = r.payload;
 		}
@@ -310,11 +330,12 @@ export class HookBus {
 		ctx: ShouldStopAfterTurnContext,
 	): Promise<boolean | undefined> {
 		await this.notify("shouldStopAfterTurn", ctx);
-		for (const { handler, source } of this.stop) {
+		for (const { handler, source, timeoutMs } of this.stop) {
 			const r = await this.guard(
 				() => handler(ctx),
 				"shouldStopAfterTurn",
 				source,
+				timeoutMs,
 			);
 			if (r === true) return true;
 		}
@@ -326,11 +347,12 @@ export class HookBus {
 	): Promise<Message[] | undefined> {
 		await this.notify("getSteeringMessages", ctx);
 		const out: Message[] = [];
-		for (const { handler, source } of this.steering) {
+		for (const { handler, source, timeoutMs } of this.steering) {
 			const r = await this.guard(
 				() => handler({ ...ctx, messages: [...ctx.messages, ...out] }),
 				"getSteeringMessages",
 				source,
+				timeoutMs,
 			);
 			if (r?.length) out.push(...r);
 		}
@@ -342,7 +364,7 @@ export class HookBus {
 	): Promise<Message[] | undefined> {
 		await this.notify("getFollowUpMessages", ctx);
 		const out: Message[] = [];
-		for (const { handler, source } of this.followUp) {
+		for (const { handler, source, timeoutMs } of this.followUp) {
 			const r = await this.guard(
 				() =>
 					handler({
@@ -351,6 +373,7 @@ export class HookBus {
 					}),
 				"getFollowUpMessages",
 				source,
+				timeoutMs,
 			);
 			if (r?.length) out.push(...r);
 		}
@@ -397,9 +420,12 @@ export class HookBus {
 		fn: () => T | Promise<T>,
 		event: HookEventName,
 		source?: string,
+		timeoutMs?: number,
 	): Promise<T | undefined> {
+		const effective = timeoutMs ?? this.defaultTimeoutMs;
 		try {
-			return await fn();
+			const run = Promise.resolve(fn());
+			return effective > 0 ? await withTimeout(run, effective) : await run;
 		} catch (e) {
 			const error = e as Error;
 			this.onError?.(error, event, source);

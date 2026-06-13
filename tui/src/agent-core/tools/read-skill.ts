@@ -17,6 +17,7 @@ export function createReadSkillTool(skills: Skill[]): Tool | null {
 
 	return {
 		name: "read_skill",
+		readOnly: true,
 		executionMode: "parallel",
 		description:
 			"Load a skill's full instructions by name. Call this when a skill from " +

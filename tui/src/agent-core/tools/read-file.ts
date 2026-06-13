@@ -13,6 +13,7 @@ import {
 } from "./truncate.ts";
 
 export const read_file: Tool = {
+	readOnly: true,
 	name: "read_file",
 	hookAliases: ["Read"],
 	executionMode: "parallel",

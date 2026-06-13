@@ -390,10 +390,10 @@ export class InputBar implements Component, Focusable {
 
 	private _handlePaste(pastedText: string): void {
 		this._pushUndo();
+		// Preserve newlines (multi-line paste like Pi). Only normalize tabs.
 		const cleanText = pastedText
-			.replace(/\r\n/g, " ")
-			.replace(/\r/g, " ")
-			.replace(/\n/g, " ")
+			.replace(/\r\n/g, "\n")
+			.replace(/\r/g, "\n")
 			.replace(/\t/g, "    ");
 		this._insert(cleanText);
 	}

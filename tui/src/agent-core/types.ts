@@ -1,5 +1,6 @@
 // ── Core types ───────────────────────────────────────────────────────────────────
-// Mirrors Python AgentEvent/AgentLoop shapes for clean TUI integration.
+
+import type { PermissionManager } from "./permissions.ts";
 
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 
@@ -11,6 +12,9 @@ export interface Message {
 	name?: string;
 	timestamp?: number;
 }
+
+/** Loose message type compatible with both Message and AgentMessage. Used by compaction. */
+export type CompactableMessage = { role: string; content?: unknown[] | string | null; usage?: Record<string, number> };
 
 // ── AgentMessage Abstraction ─────────────────────────────────────────────
 // Union of standard LLM messages + custom app messages (notifications,
@@ -37,9 +41,21 @@ export type AgentMessage =
 
 /** Why the model (or loop) ended its turn. Mirrors the provider stop reason,
  *  plus "tool_calls" when the assistant requested tools and "aborted". */
-export type StopReason = "stop" | "length" | "tool_calls" | "error" | "aborted";
+export type StopReason = "stop" | "length" | "tool_calls" | "error" | "aborted" | "loop_detected";
 
-export type AgentEvent =
+/**
+ * Envelope metadata stamped onto every event at the emit boundary: a
+ * monotonic per-loop sequence number and a wall-clock timestamp. Consumers
+ * can rely on them for ordering, replay, and latency measurement.
+ */
+export interface AgentEventEnvelope {
+	seq?: number;
+	ts?: number;
+}
+
+export type AgentEvent = AgentEventBody & AgentEventEnvelope;
+
+export type AgentEventBody =
 	| { type: "agent_start" }
 	// Carries the final conversation so a consumer can persist / render the
 	// completed transcript without tracking every incremental event.
@@ -73,7 +89,7 @@ export type AgentEvent =
 			tokensBefore: number;
 			tokensAfter: number;
 	  }
-	| { type: "thinking_delta"; delta: string }
+	| { type: "thinking_delta"; turnId?: string; delta: string }
 	| {
 			type: "tool_call_start";
 			toolName: string;
@@ -121,6 +137,40 @@ export type AgentEvent =
 	// was reached (not because the agent finished). Lets the UI distinguish a
 	// truncated run from a completed one.
 	| { type: "max_iterations"; iterations: number; limit: number }
+	// Loop detected — optionally includes a recovery message that was injected.
+	| {
+			type: "loop_detected";
+			message: string;
+			attempt?: number; // recovery attempt number (1 = first recovery)
+	  }
+	// Subagent lifecycle. `subagent_event` wraps every event the child loop
+	// emits so a consumer can render a collapsed child transcript.
+	| { type: "subagent_start"; agentId: string; agent: string; task: string }
+	| { type: "subagent_event"; agentId: string; event: AgentEvent }
+	| {
+			type: "subagent_end";
+			agentId: string;
+			agent: string;
+			result: string;
+			isError?: boolean;
+			turns?: number;
+	  }
+	// A tool call is waiting on a user permission decision (mode "ask").
+	| {
+			type: "tool_permission_request";
+			toolName: string;
+			toolCallId: string;
+			args: string;
+	  }
+	| {
+			type: "tool_permission_decision";
+			toolName: string;
+			toolCallId: string;
+			decision: "allow" | "deny" | "always";
+			source: "rule" | "mode" | "user" | "hook";
+	  }
+	// The run consumed its configured token budget and stopped cleanly.
+	| { type: "budget_exhausted"; usedTokens: number; limitTokens: number }
 	| { type: "error"; message: string; error?: unknown };
 
 export type EventHandler = (event: AgentEvent) => void;
@@ -231,6 +281,9 @@ export interface GetFollowUpMessagesContext {
 	assistantText: string;
 	continuationCount: number;
 	maxContinuations: number;
+	// Why the model stopped this turn. "length" = response truncated mid-output;
+	// hooks can use this to auto-continue without requiring todos.
+	stopReason?: StopReason;
 }
 
 export type ToolExecutionMode = "sequential" | "parallel";
@@ -349,6 +402,10 @@ export interface Tool {
 	// matchers (PreToolUse / PostToolUse). e.g. the `bash` tool aliases "Bash".
 	// The loop builds the matcher value from the tool's own name + these.
 	hookAliases?: string[];
+	// True for tools that never modify files or system state (reads, searches,
+	// fetches). Drives plan mode / acceptEdits permission decisions and the
+	// default tool set of read-only subagents.
+	readOnly?: boolean;
 	// Return a string (content only) or a ToolResult (content + structured
 	// details). The registry normalizes both to a ToolResult.
 	execute: (
@@ -357,11 +414,17 @@ export interface Tool {
 	) => Promise<string | ToolResult>;
 }
 
+export interface AskUserContext {
+	question: string;
+	choices: Array<{ value: string; label: string }>;
+}
+
 export interface ToolContext {
 	cwd?: string;
 	maxOutputChars?: number;
 	signal?: AbortSignal;
 	onUpdate?: (partialResult: string) => void;
+	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
 }
 
 export interface AgentConfig {
@@ -375,6 +438,15 @@ export interface AgentConfig {
 	chatTemplate?: string;
 	stop?: string[];
 	maxIterations?: number;
+	// How many consecutive identical turns to detect as a loop.
+	loopDetectionWindow?: number; // default 3
+	// Threshold for degenerate-loop detection (same tool-name sequence, varying args). Default 4.
+	degenerateLoopThreshold?: number;
+	// Threshold for stagnation detection (zero new result-prefixes across window). Default 5.
+	stagnationThreshold?: number;
+	// When a loop is detected, inject a recovery message and give the agent one
+	// more chance instead of hard-stopping. Default true.
+	loopRecoveryEnabled?: boolean;
 	contextWindowTokens?: number;
 	systemPrompt?: string;
 	tools?: Tool[];
@@ -428,6 +500,29 @@ export interface AgentConfig {
 	// Stale entries expire after cacheTtlMs (default 30s).
 	cacheSize?: number; // default 1000
 	cacheTtlMs?: number; // default 30_000
+	// Permission gate for tool execution (modes + allow/deny rules). Absent =
+	// allow everything (legacy behavior).
+	permissions?: PermissionManager;
+	// Interactive approval for "ask" verdicts. "always" allows and records a
+	// session-wide allow rule for the tool. Without a handler, "ask" verdicts
+	// are denied (fail closed) with an explanatory tool result.
+	onPermissionRequest?: (ctx: {
+		toolName: string;
+		toolCallId: string;
+		args: Record<string, unknown>;
+	}) => Promise<"allow" | "deny" | "always">;
+	// Interactive question: the agent calls `ask_user` tool and waits for the
+	// user's answer. Without a handler, the tool returns an error.
+	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
+	// Hard token budget for one run (provider-reported usage when available,
+	// else local estimate). When exceeded the loop stops cleanly after the
+	// current turn and emits budget_exhausted.
+	maxTotalTokens?: number;
+	// Append every AgentEvent as JSONL to this path (event replay / debugging).
+	eventLogPath?: string;
+	// When true, steer() interrupts the in-flight LLM stream (keeping partial
+	// output) instead of waiting for the next save point.
+	steeringInterrupt?: boolean;
 }
 
 export interface WebSearchConfig {
@@ -478,7 +573,10 @@ export class AgentError extends Error {
 	readonly retryable: boolean;
 
 	constructor(options: AgentErrorOptions) {
-		super(options.message, { cause: options.cause as Error });
+		super(options.message);
+		if (options.cause) {
+			Object.defineProperty(this, "cause", { value: options.cause, writable: true, enumerable: false });
+		}
 		this.name = "AgentError";
 		this.type = options.type;
 		this.cause = options.cause;

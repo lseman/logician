@@ -564,8 +564,12 @@ function findMcpConfig(cwd: string): string | null {
   }
 
   // Fall back to the per-user global config when no project config is found.
+  // Check ~/.logician/mcp.json first (standard MCP format), then
+  // ~/.logician/logician.json (legacy logician format).
   const home = process.env.HOME;
   if (home) {
+    const userMcpJson = join(home, ".logician", "mcp.json");
+    if (existsSync(userMcpJson)) return userMcpJson;
     const global = join(home, ".logician", "logician.json");
     if (existsSync(global)) return global;
   }

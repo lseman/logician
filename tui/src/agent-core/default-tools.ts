@@ -1,3 +1,4 @@
+import { ask_user } from "./tools/ask-user.ts";
 import { bash } from "./tools/bash.ts";
 import { edit_file } from "./tools/edit-file.ts";
 import { file_diff } from "./tools/file-diff.ts";
@@ -5,7 +6,8 @@ import { find } from "./tools/find.ts";
 import { git } from "./tools/git.ts";
 import { list_files } from "./tools/list-files.ts";
 import { read_file } from "./tools/read-file.ts";
-import { rg_search } from "./tools/search.ts";
+import { grep } from "./tools/search.ts";
+import { task_status } from "./tools/task-status.ts";
 import { todo_write } from "./tools/todo-write.ts";
 import { web_fetch } from "./tools/web-fetch.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
@@ -26,13 +28,15 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		list_files,
 		find,
 		read_file,
-		rg_search,
+		grep,
 		edit_file,
 		write_file,
 		file_diff,
 		bash,
 		git,
 		todo_write,
+		ask_user,
+		task_status,
 		web_fetch,
 		createWebSearchTool(webSearch),
 	];

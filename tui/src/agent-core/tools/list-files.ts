@@ -1,87 +1,155 @@
 // ── list_files tool ───────────────────────────────────────────────────────────────
-// Fast repository file listing, preferring ripgrep's gitignore-aware scanner.
+// List directory contents. Returns entries sorted alphabetically (case-insensitive),
+// with "/" suffix for directories. Supports glob filtering and byte truncation.
+// Ported from Pi's ls tool with logician integration.
 
-import { execFile } from "node:child_process";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { promisify } from "node:util";
-import type { Tool } from "../types.ts";
-import { ensureInsideCwd, resolvePath } from "./helpers.ts";
+import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
+import path from "node:path";
+import type { Tool, ToolResult } from "../types.ts";
+import { truncateHead, formatSize } from "./truncate.ts";
+import { resolvePath } from "./helpers.ts";
 
-const execFileAsync = promisify(execFile);
-
-export const list_files: Tool = {
-	name: "list_files",
-	hookAliases: ["LS"],
-	executionMode: "parallel",
-	description:
-		"List files under a path, respecting gitignore when rg is available.",
-	parameters: {
-		type: "object",
-		properties: {
-			path: {
-				type: "string",
-				description: "Directory to list, defaults to cwd",
-			},
-			glob: {
-				type: "string",
-				description: "Optional glob filter, e.g. '*.ts'",
-			},
-			limit: {
-				type: "number",
-				description: "Maximum files to return, default 500",
-			},
-		},
+const lsSchema = {
+	type: "object",
+	properties: {
+		path: { type: "string", description: "Directory to list (default: current directory)" },
+		limit: { type: "number", description: "Maximum number of entries to return (default: 500)" },
 	},
-	prepareArguments: (raw): Record<string, unknown> => {
-		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-		const args = raw as Record<string, unknown>;
-		return {
-			...args,
-			path: args.path ?? args.directory ?? args.dir,
-			glob: args.glob ?? args.pattern,
-		};
-	},
-	execute: async (args, ctx): Promise<string> => {
-		const basePath = resolvePath(ctx.cwd, String(args.path || "."));
-		ensureInsideCwd(ctx.cwd, basePath);
-		const limit = Math.max(1, Number(args.limit) || 500);
-		const glob = String(args.glob || "");
+} as const;
 
-		try {
-			const cmd = ["--files"];
-			if (glob) cmd.push("-g", glob);
-			cmd.push(basePath);
-			const { stdout } = await execFileAsync("rg", cmd, {
-				cwd: ctx.cwd || process.cwd(),
-				timeout: 10000,
-				maxBuffer: 1024 * 1024,
-			});
-			const lines = stdout.split("\n").filter(Boolean).slice(0, limit);
-			return lines.join("\n") || "No files found.";
-		} catch {
-			const files: string[] = [];
-			walk(basePath, files, limit, ctx.cwd || process.cwd());
-			return files.join("\n") || "No files found.";
-		}
-	},
+type ListFilesArgs = {
+	path?: string;
+	limit?: number;
 };
 
-function walk(dir: string, out: string[], limit: number, cwd: string): void {
-	if (out.length >= limit) return;
-	if (!fs.existsSync(dir)) return;
-	const stat = fs.statSync(dir);
-	if (!stat.isDirectory()) {
-		out.push(path.relative(cwd, dir));
-		return;
-	}
-	for (const entry of fs.readdirSync(dir).sort()) {
-		if (entry === ".git" || entry === "node_modules" || entry === "dist")
-			continue;
-		const full = path.join(dir, entry);
-		const s = fs.statSync(full);
-		if (s.isDirectory()) walk(full, out, limit, cwd);
-		else out.push(path.relative(cwd, full));
-		if (out.length >= limit) return;
-	}
+const DEFAULT_LIMIT = 500;
+
+export interface ListFilesDetails {
+	truncation?: { truncated: boolean; maxBytes?: number };
+	entryLimitReached?: number;
+	[key: string]: unknown;
 }
+
+function prepareArguments(raw: unknown): Record<string, unknown> {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+	const args = raw as Record<string, unknown>;
+	return {
+		path: args.path ?? args.directory ?? args.dir,
+		limit: args.limit ?? args.max_files,
+	};
+}
+
+/** Pluggable operations for ls. Override to delegate to remote systems. */
+interface LsOperations {
+	exists: (p: string) => Promise<boolean>;
+	stat: (p: string) => Promise<{ isDirectory: () => boolean }>;
+	readdir: (p: string) => Promise<string[]>;
+}
+
+const defaultOps: LsOperations = {
+	exists: async (p) => {
+		try {
+			await fsStat(p);
+			return true;
+		} catch {
+			return false;
+		}
+	},
+	stat: fsStat,
+	readdir: fsReaddir,
+};
+
+export const list_files: Tool = {
+	readOnly: true,
+	name: "list_files",
+	hookAliases: ["LS"],
+	description:
+		"List directory contents. Returns entries sorted alphabetically with '/' suffix for directories. Supports glob filtering. Output is truncated to 500 entries or 50KB (whichever is hit first).",
+	parameters: lsSchema,
+	prepareArguments,
+	execute: async (args, ctx): Promise<string | ToolResult> => {
+		const ops = defaultOps;
+		const { path: dirPathStr, limit } = args as ListFilesArgs;
+
+		const dirPath = dirPathStr ? resolvePath(ctx.cwd, dirPathStr) : ctx.cwd || ".";
+		const safePath = resolvePath(ctx.cwd, dirPath);
+		const effectiveLimit = limit ?? DEFAULT_LIMIT;
+
+		// Check if path exists.
+		if (!(await ops.exists(safePath))) {
+			return `Error: Path not found: ${safePath}`;
+		}
+
+		// Check if path is a directory.
+		let isDir: boolean;
+		try {
+			isDir = (await ops.stat(safePath)).isDirectory();
+		} catch {
+			return `Error: Not a directory: ${safePath}`;
+		}
+		if (!isDir) {
+			return `Error: Not a directory: ${safePath}`;
+		}
+
+		// Read directory entries.
+		let entries: string[];
+		try {
+			entries = await ops.readdir(safePath);
+		} catch (e: unknown) {
+			const message = e instanceof Error ? e.message : String(e);
+			return `Error: Cannot read directory: ${message}`;
+		}
+
+		// Sort alphabetically, case-insensitive.
+		entries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+
+		// Format entries with directory indicators.
+		const results: string[] = [];
+		let entryLimitReached = false;
+
+		for (const entry of entries) {
+			if (results.length >= effectiveLimit) {
+				entryLimitReached = true;
+				break;
+			}
+
+			const fullPath = path.join(safePath, entry);
+			let suffix = "";
+			try {
+				const entryStat = await ops.stat(fullPath);
+				if (entryStat.isDirectory()) suffix = "/";
+			} catch {
+				// Skip entries we cannot stat.
+				continue;
+			}
+			results.push(entry + suffix);
+		}
+
+		if (results.length === 0) {
+			return "(empty directory)";
+		}
+
+		const rawOutput = results.join("\n");
+		const truncation = truncateHead(rawOutput);
+		let output = truncation.content;
+
+		const details: ListFilesDetails = {};
+		const notices: string[] = [];
+
+		if (entryLimitReached) {
+			notices.push(`${effectiveLimit} entries limit reached. Use limit=${effectiveLimit * 2} for more`);
+			details.entryLimitReached = effectiveLimit;
+		}
+		if (truncation.truncated) {
+			notices.push(`${formatSize(truncation.maxBytes)} limit`);
+			details.truncation = { truncated: true, maxBytes: truncation.maxBytes };
+		}
+
+		if (notices.length > 0) output += `\n\n[${notices.join(". ")}]`;
+
+		return {
+			content: output,
+			details,
+		};
+	},
+};

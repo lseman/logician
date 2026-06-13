@@ -1,110 +1,108 @@
+// ── Helpers (slim) ─────────────────────────────────────────────────────────────
+// Re-exports from focused modules + text utilities (BOM, line endings).
+// Original helpers.ts was 595 lines; now ~80 lines.
+
+// Re-exports from focused modules
+export {
+	applyEditsToNormalizedContent,
+	type Edit,
+	type ApplyEditsResult,
+} from "./fuzzy-edit.ts";
+export {
+	generateDiffString,
+	generateUnifiedPatch,
+	syntheticUnifiedDiff,
+	summarizeDiff,
+	type EditDiffResult,
+} from "./diff-utils.ts";
+export {
+	resolvePath,
+	ensureInsideCwd,
+	readUtf8IfExists,
+} from "./path-utils.ts";
+
+// ============================================================================
+// BOM handling
+// ============================================================================
+
+const BOM = "\uFEFF";
+
+/** Strip UTF-8 BOM from the start of a string. Returns { bom, text }. */
+export function stripBom(content: string): { bom: string; text: string } {
+	if (content.charCodeAt(0) === 0xfeff) {
+		return { bom: BOM, text: content.slice(1) };
+	}
+	return { bom: "", text: content };
+}
+
+// ============================================================================
+// Line ending handling
+// ============================================================================
+
+const CRLF = "\r\n";
+const LF = "\n";
+
+/** Detect whether the content uses CRLF or LF line endings. */
+export function detectLineEnding(content: string): string {
+	return content.includes(CRLF) ? CRLF : LF;
+}
+
+/** Normalize all line endings to LF. */
+export function normalizeToLF(content: string): string {
+	return content.replace(CRLF, LF);
+}
+
+/** Convert LF line endings back to the detected original line ending style. */
+export function restoreLineEndings(content: string, lineEnding: string): string {
+	if (lineEnding === CRLF) {
+		return content.replace(LF, CRLF);
+	}
+	return content;
+}
+
+// ============================================================================
+// Fuzzy whitespace normalization for text matching
+// ============================================================================
+
+/**
+ * Normalize whitespace for fuzzy matching:
+ * - Replace all whitespace runs (spaces, tabs, \r, \t, \f, \v) with a single space
+ * - Trim leading/trailing whitespace
+ * - Collapse newlines to spaces so multi-line oldText can match across lines
+ */
+export function normalizeForFuzzyMatch(text: string): string {
+	return text.replace(/[\s]+/g, " ").trim();
+}
+
+// ============================================================================
+// Edit operations interface
+// ============================================================================
+
 import * as fs from "node:fs";
-import * as path from "node:path";
+import { access, readFile, writeFile } from "node:fs/promises";
 
-export function resolvePath(
-	cwd: string | undefined,
-	inputPath: string,
-): string {
-	const base = cwd || process.cwd();
-	return path.isAbsolute(inputPath)
-		? path.normalize(inputPath)
-		: path.resolve(base, inputPath);
+export interface EditOperations {
+	readFile: (absolutePath: string) => Promise<Buffer>;
+	writeFile: (absolutePath: string, content: string) => Promise<void>;
+	access: (absolutePath: string) => Promise<void>;
 }
 
-export function ensureInsideCwd(
-	cwd: string | undefined,
-	absolutePath: string,
-): void {
-	const base = path.resolve(cwd || process.cwd());
-	const rel = path.relative(base, absolutePath);
-	if (rel.startsWith("..") || path.isAbsolute(rel)) {
-		throw new Error(`Path is outside the working directory: ${absolutePath}`);
-	}
-}
+const defaultEditOperations: EditOperations = {
+	readFile: (p) => readFile(p, "utf-8").then((b) => Buffer.from(b)),
+	writeFile: (p, content) => writeFile(p, content, "utf-8"),
+	access: (p) => access(p, fs.constants.R_OK | fs.constants.W_OK),
+};
 
-export function readUtf8IfExists(filePath: string): string | null {
-	if (!fs.existsSync(filePath)) return null;
-	const stat = fs.statSync(filePath);
-	if (stat.isDirectory()) throw new Error(`Path is a directory: ${filePath}`);
-	return fs.readFileSync(filePath, "utf-8");
-}
+export { defaultEditOperations };
 
-export function syntheticUnifiedDiff(
-	filePath: string,
-	before: string | null,
-	after: string,
-): string {
-	const beforeLines = (before ?? "").split("\n");
-	const afterLines = after.split("\n");
-	const beforeLabel =
-		before === null ? "/dev/null" : `a/${path.basename(filePath)}`;
-	const afterLabel = `b/${path.basename(filePath)}`;
+import { summarizeDiff as _summarizeDiff, syntheticUnifiedDiff as _synth } from "./diff-utils.ts";
 
-	let prefix = 0;
-	while (
-		prefix < beforeLines.length &&
-		prefix < afterLines.length &&
-		beforeLines[prefix] === afterLines[prefix]
-	) {
-		prefix++;
-	}
-
-	let beforeSuffix = beforeLines.length - 1;
-	let afterSuffix = afterLines.length - 1;
-	while (
-		beforeSuffix >= prefix &&
-		afterSuffix >= prefix &&
-		beforeLines[beforeSuffix] === afterLines[afterSuffix]
-	) {
-		beforeSuffix--;
-		afterSuffix--;
-	}
-
-	const contextBefore = Math.max(0, prefix - 3);
-	const contextAfterBefore = Math.min(beforeLines.length - 1, beforeSuffix + 3);
-	const contextAfterAfter = Math.min(afterLines.length - 1, afterSuffix + 3);
-	const oldStart = contextBefore + 1;
-	const newStart = contextBefore + 1;
-	const oldCount = Math.max(0, contextAfterBefore - contextBefore + 1);
-	const newCount = Math.max(0, contextAfterAfter - contextBefore + 1);
-
-	const out = [
-		`--- ${beforeLabel}`,
-		`+++ ${afterLabel}`,
-		`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
-	];
-
-	for (let i = contextBefore; i < prefix; i++)
-		out.push(` ${beforeLines[i] ?? ""}`);
-	for (let i = prefix; i <= beforeSuffix; i++)
-		out.push(`-${beforeLines[i] ?? ""}`);
-	for (let i = prefix; i <= afterSuffix; i++)
-		out.push(`+${afterLines[i] ?? ""}`);
-
-	const afterContextStart = Math.max(prefix, afterSuffix + 1);
-	for (let i = afterContextStart; i <= contextAfterAfter; i++)
-		out.push(` ${afterLines[i] ?? ""}`);
-
-	return out.join("\n");
-}
-
-export function summarizeDiff(diff: string, maxChars = 12000): string {
-	if (!diff.trim()) return "(no diff)";
-	if (diff.length <= maxChars) return diff;
-	return (
-		diff.slice(0, maxChars) +
-		`\n... [diff truncated, ${diff.length} chars total]`
-	);
-}
-
+/** Generate a summary diff for file mutation reporting. */
 export async function mutationSummary(
 	_cwd: string | undefined,
 	filePath: string,
 	before: string | null,
 	after: string,
 ): Promise<string> {
-	// Always use synthetic diff from before/after to show the exact edit.
-	// Git diff against HEAD would show unrelated uncommitted changes, not the
-	// actual edit being reported to the LLM.
-	return summarizeDiff(syntheticUnifiedDiff(filePath, before, after));
+	return _summarizeDiff(_synth(filePath, before, after));
 }

@@ -1,8 +1,9 @@
 // ── AgentCoreBridge ──────────────────────────────────────────────────────────────
+import { envNumber, escapeTable, tableRow } from "./tui-utils.ts";
 // Replaces the Python bridge with direct TypeScript agent-core integration.
 // Translates agent-core events to the same shapes the transcript expects.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir as readdirAsync } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,11 @@ import {
   type McpToggleResult,
   McpManager,
 } from "./agent-core/mcp.ts";
+import {
+  type PermissionMode,
+  PermissionManager,
+  type PermissionRules,
+} from "./agent-core/permissions.ts";
 import { estimateChatPayloadTokens } from "./agent-core/messages.ts";
 import {
   configurePluginRuntimeEnv,
@@ -34,7 +40,17 @@ import {
   runSessionStartHooks,
   splitPluginArgs,
 } from "./agent-core/plugins.ts";
-import { formatSkillCatalog, loadSkills } from "./agent-core/skills.ts";
+import {
+  formatSkillCatalog,
+  formatSkillInvocation,
+  loadSkills,
+  type Skill,
+} from "./agent-core/skills.ts";
+import {
+  type AgentDefinition,
+  createSpawnAgentTool,
+  loadAgentDefinitions,
+} from "./agent-core/subagent.ts";
 import { buildDefaultSystemPrompt } from "./agent-core/system-prompt.ts";
 import { createReadSkillTool } from "./agent-core/tools/read-skill.ts";
 import { ToolRegistry } from "./agent-core/tools/registry.ts";
@@ -132,30 +148,144 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
         tokens_after: event.tokensAfter,
       };
     case "error":
-      return { type: "token", token: `[Error] ${event.message}` };
+      return { type: "notice", level: "error", label: "Error", text: event.message };
     case "auto_retry_start":
       return {
-        type: "token",
-        token: `[Retry ${event.attempt}/${event.maxRetries}] ${event.error} (wait ${event.delayMs}ms)`,
+        type: "notice",
+        level: "warn",
+        label: `Retry ${event.attempt}/${event.maxRetries}`,
+        text: `${event.error} — retrying in ${formatDelay(event.delayMs)}`,
       };
     case "auto_retry_end":
       return {
-        type: "token",
-        token: `[Retry ${event.attempt}] succeeded`,
+        type: "notice",
+        level: event.success ? "success" : "warn",
+        label: `Retry ${event.attempt}`,
+        text: event.success ? "succeeded" : "failed",
       };
     case "model_select":
+      return { type: "notice", level: "info", label: "Model", text: event.model };
+    case "subagent_start":
       return {
-        type: "token",
-        token: `[Model] ${event.model}`,
+        type: "notice",
+        level: "info",
+        label: `Subagent ${event.agent}`,
+        text: `started: ${event.task.slice(0, 120)}`,
+      };
+    case "subagent_end":
+      return {
+        type: "notice",
+        level: event.isError ? "warn" : "success",
+        label: `Subagent ${event.agent}`,
+        text: event.isError
+          ? event.result
+          : `done${event.turns ? ` in ${event.turns} turn(s)` : ""}`,
+      };
+    case "subagent_event": {
+      // Render the child's tool activity as compact notice lines so the user
+      // can follow what a subagent is doing; its streamed text already flows
+      // through the parent spawn_agent tool cell via onUpdate.
+      const child = event.event;
+      if (child.type === "tool_call_start") {
+        return {
+          type: "notice",
+          level: "info",
+          label: `↳ ${event.agentId}`,
+          text: `${child.toolName}${truncateArgs(child.args)}`,
+        };
+      }
+      if (child.type === "tool_call_end" && child.isError) {
+        return {
+          type: "notice",
+          level: "warn",
+          label: `↳ ${event.agentId}`,
+          text: `${child.toolName} ✗ ${child.result.slice(0, 120)}`,
+        };
+      }
+      if (child.type === "error") {
+        return {
+          type: "notice",
+          level: "warn",
+          label: `↳ ${event.agentId}`,
+          text: child.message,
+        };
+      }
+      return null;
+    }
+    case "tool_permission_request":
+      return {
+        type: "notice",
+        level: "warn",
+        label: "Permission",
+        text: `${event.toolName} awaiting approval`,
+      };
+    case "tool_permission_decision":
+      return {
+        type: "notice",
+        level: event.decision === "deny" ? "warn" : "info",
+        label: "Permission",
+        text: `${event.toolName}: ${event.decision} (${event.source})`,
+      };
+    case "budget_exhausted":
+      return {
+        type: "notice",
+        level: "warn",
+        label: "Budget",
+        text: `token budget exhausted (${event.usedTokens}/${event.limitTokens}) — run stopped.`,
       };
     case "max_iterations":
       return {
-        type: "token",
-        token: `[Stopped] reached the ${event.limit}-turn safety limit without finishing (${event.iterations} turns).`,
+        type: "notice",
+        level: "warn",
+        label: "Stopped",
+        text: `reached the ${event.limit}-turn safety limit without finishing (${event.iterations} turns).`,
       };
     default:
       return null;
   }
+}
+
+// One-line argument preview for subagent tool notices.
+// Extracts the most meaningful key (path, pattern, command) from JSON args
+// so subagent tool lines are human-readable instead of raw JSON fragments.
+function truncateArgs(args: string): string {
+  const flat = (args || "").replace(/\s+/g, " ").trim();
+  if (!flat || flat === "{}" || flat === "{") return "";
+  // Always try to extract the most meaningful single key for common tools.
+  const key = pickArgKey(args, flat);
+  return key ? ` ${key}` : ` ${flat}`;
+}
+
+/** Pick the most meaningful key-value pair for a tool argument string. */
+function pickArgKey(raw: string, flat: string): string | null {
+  const priorities = [
+    // File operations
+    "path",
+    "file_path",
+    // Search
+    "pattern",
+    "glob",
+    // Bash
+    "command",
+    // MCP / generic
+  ];
+  for (const key of priorities) {
+    // Match "key":"value" or "key": "value" (handle escaped quotes in value).
+    const re = new RegExp(`"${key}"\\s*:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|([^,}\\s]+))`);
+    const m = re.exec(flat);
+    if (m) {
+      const val = m[1] || m[2] || "";
+      return `${key}=${val}`;
+    }
+  }
+  // Fallback: first string value.
+  const sm = flat.match(/"([^"]{1,80})"/);
+  return sm ? sm[1].slice(0, 80) : null;
+}
+
+// Humanize a backoff delay for retry notices: "500ms", "1.0s", "4.0s".
+function formatDelay(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 function parseToolArgs(args: string): Record<string, unknown> | undefined {
@@ -222,12 +352,6 @@ function buildPluginRuntimeEnv(opts: AgentBridgeOptions): NodeJS.ProcessEnv {
   return env;
 }
 
-function envNumber(name: string): number | undefined {
-  const raw = process.env[name];
-  if (!raw) return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
 
 // SearXNG web search defaults to DEFAULT_SEARXNG_URL; override the instance via
 // LOGICIAN_SEARXNG_URL and result count via LOGICIAN_SEARXNG_MAX_RESULTS.
@@ -250,6 +374,10 @@ export interface AgentBridgeOptions {
   contextWindowTokens?: number;
   toolExecution?: AgentConfig["toolExecution"];
   runtimeHooksEnabled?: boolean;
+  permissionMode?: PermissionMode;
+  permissionRules?: PermissionRules;
+  steeringInterrupt?: boolean;
+  maxTotalTokens?: number;
   mcpEager?: boolean;
   tools?: Tool[];
   cwd?: string;
@@ -288,6 +416,22 @@ export class AgentCoreBridge {
   private configPath: string | null;
   private mcpEager: boolean;
   private currentTurnId: string | null = null;
+  private agentDefs: AgentDefinition[] = [];
+  private loadedSkills: Skill[] = [];
+  private permissionManager: PermissionManager;
+  // Pending interactive permission requests, keyed by tool_call_id; resolved
+  // by respondToPermission() from the UI.
+  private permissionResolvers = new Map<
+    string,
+    (decision: "allow" | "deny" | "always") => void
+  >();
+
+  // Pending interactive question requests, keyed by question_id; resolved
+  // by respondToQuestion() from the UI.
+  private questionResolvers = new Map<
+    string,
+    { allow: (answer: string) => void; deny: () => void }
+  >();
 
   constructor(
     opts: AgentBridgeOptions = {
@@ -318,6 +462,11 @@ export class AgentCoreBridge {
     this.additionalSystemPrompt = opts.systemPrompt;
     this.baseSystemPrompt = this.buildBaseSystemPrompt();
 
+    this.permissionManager = new PermissionManager({
+      mode: opts.permissionMode ?? "acceptAll",
+      rules: opts.permissionRules,
+    });
+
     this.config = {
       baseUrl: opts.baseUrl,
       model: opts.model,
@@ -337,6 +486,31 @@ export class AgentCoreBridge {
         opts.runtimeHooksEnabled ?? process.env.LOGICIAN_HOOKS !== "0",
       hookSessionId: this.sessionId,
       hookTranscriptPath: this.transcriptPath,
+      eventLogPath: eventLogPathFor(this.transcriptPath),
+      steeringInterrupt: opts.steeringInterrupt,
+      maxTotalTokens: opts.maxTotalTokens,
+      permissions: this.permissionManager,
+      onPermissionRequest: (ctx) =>
+        new Promise((resolve) => {
+          this.permissionResolvers.set(ctx.toolCallId, resolve);
+          this.emit({
+            type: "permission_request",
+            tool_name: ctx.toolName,
+            tool_call_id: ctx.toolCallId,
+            args: ctx.args,
+          });
+        }),
+      onQuestionRequest: (ctx) =>
+        new Promise<string>((resolve) => {
+          const questionId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          this.questionResolvers.set(questionId, { allow: resolve, deny: () => resolve("__dismissed__") });
+          this.emit({
+            type: "question_request",
+            question_id: questionId,
+            question: ctx.question,
+            choices: ctx.choices,
+          });
+        }),
       turnEndCallback: (turnId: string) => {
         this.emit({ type: "turn_end", turn_id: turnId, message: "" });
       },
@@ -397,6 +571,28 @@ export class AgentCoreBridge {
     this.running = true;
     // Reuse one harness across messages so conversation history (and thus
     // "continue" / "go on" follow-ups) persists. Created lazily once.
+    const harness = this.ensureHarness();
+
+    // Emit turn start
+    const turnId = `turn_${Date.now()}`;
+    this.currentTurnId = turnId;
+    this.emit({ type: "turn_start", turn_id: turnId });
+
+    try {
+      await harness.prompt(message);
+    } catch (e: unknown) {
+      const error = e as Error;
+      this.errorCb?.(error);
+    } finally {
+      this.running = false;
+      // Keep the harness alive to retain history across turns.
+      this.currentTurnId = null;
+      this.emit({ type: "phase", state: "ready" });
+    }
+  }
+
+  // Lazily build the singleton harness and wire its UI callbacks.
+  private ensureHarness(): AgentHarness {
     if (!this.harness) {
       this.harness = new AgentHarness({
         config: this.config,
@@ -410,24 +606,37 @@ export class AgentCoreBridge {
       // and branch_summary. turn/idle are already covered by the
       // streaming/ready phase emits around prompt().
       this.harness.setOnPhaseChange((phase) => this._emitHarnessPhase(phase));
+      // Autonomous continuation: when the harness settles with pending
+      // nextTurn messages, auto-trigger the next prompt so the agent
+      // continues without requiring user input. The nextTurn items are
+      // injected before the trigger message by the transformContext hook.
+      this.harness.setOnSettled((nextTurnCount) => {
+        if (nextTurnCount > 0 && !this.running) {
+          void this.sendMessage("continue");
+        }
+      });
+      // Emit a save_point event after every completed turn so the UI can
+      // show autosave status and know a rewind point exists.
+      this.harness.setOnSavePoint(() => {
+        this.emit({ type: "save_point" });
+      });
     }
+    return this.harness;
+  }
 
-    // Emit turn start
-    const turnId = `turn_${Date.now()}`;
-    this.currentTurnId = turnId;
-    this.emit({ type: "turn_start", turn_id: turnId });
-    this.emit({ type: "phase", state: "streaming" });
-
+  /**
+   * Replace the harness conversation with restored session history (resume /
+   * session switch), so the model continues with the restored context instead
+   * of starting cold. Pass [] to clear (new session). No-op while a turn is
+   * running (the harness rejects structural ops mid-turn).
+   */
+  restoreHistory(messages: Message[]): boolean {
     try {
-      await this.harness.prompt(message);
-    } catch (e: unknown) {
-      const error = e as Error;
-      this.errorCb?.(error);
-    } finally {
-      this.running = false;
-      // Keep the harness alive to retain history across turns.
-      this.currentTurnId = null;
-      this.emit({ type: "phase", state: "ready" });
+      this.ensureHarness().setHistory(messages);
+      this.contextTokens = estimateChatPayloadTokens(messages);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -456,6 +665,15 @@ export class AgentCoreBridge {
   setSteeringMode(mode: "all" | "one-at-a-time"): void {
     this.config.steeringQueueMode = mode;
     this.harness?.setSteeringMode(mode);
+  }
+
+  /** Toggle mid-stream steering interrupt (cut the stream vs. queue). */
+  setSteeringInterrupt(enabled: boolean): void {
+    this.config.steeringInterrupt = enabled;
+  }
+
+  getSteeringInterrupt(): boolean {
+    return this.config.steeringInterrupt === true;
   }
 
   /** Controls how queued follow-up messages are drained. */
@@ -533,7 +751,128 @@ export class AgentCoreBridge {
 
   /** Execute a slash command (sends as chat message to the agent). */
   sendSlash(raw: string): void {
+    // /jb — inject jb.md content as user prompt
+    const trimmed = raw.trim();
+    if (trimmed === "/jb" || trimmed.startsWith("/jb ")) {
+      const jbPath = path.join(this.cwd, "tui", "jb.md");
+      try {
+        const content = readFileSync(jbPath, "utf-8");
+        this.sendMessage(content).catch((err) => this.errorCb?.(err));
+      } catch (e: unknown) {
+        const nodeErr = e as { code?: string };
+        if (nodeErr.code !== "ENOENT") {
+          this.errorCb?.(e as Error);
+        }
+        // Silently fail for missing jb.md — it's optional.
+      }
+      return;
+    }
     this.sendMessage(raw).catch((err) => this.errorCb?.(err));
+  }
+
+  // ── Skill invocation ───────────────────────────────────────────────
+
+  /** Skills discovered at startup (for /<skill-name> completion). */
+  getSkills(): Skill[] {
+    return this.loadedSkills;
+  }
+
+  /**
+   * Invoke a skill by name as a user prompt: sends the skill's full body
+   * (plus any arguments) to the agent. Returns false for unknown names so the
+   * caller can fall back to normal slash handling.
+   */
+  invokeSkill(name: string, args: string): boolean {
+    const skill = this.loadedSkills.find((s) => s.name === name);
+    if (!skill) return false;
+    const message = formatSkillInvocation(
+      skill,
+      args.trim()
+        ? `User arguments for this skill invocation: ${args.trim()}`
+        : undefined,
+    );
+    this.sendMessage(message).catch((err) => this.errorCb?.(err));
+    return true;
+  }
+
+  // ── Permissions ────────────────────────────────────────────────────
+
+  /** Answer a pending permission_request. Returns false for unknown ids. */
+  respondToPermission(
+    toolCallId: string,
+    decision: "allow" | "deny" | "always",
+  ): boolean {
+    const resolve = this.permissionResolvers.get(toolCallId);
+    if (!resolve) return false;
+    this.permissionResolvers.delete(toolCallId);
+    resolve(decision);
+    return true;
+  }
+
+  /** True while a permission_request awaits a decision. */
+  hasPendingPermission(): boolean {
+    return this.permissionResolvers.size > 0;
+  }
+
+  // ── Interactive questions ────────────────────────────────────────────
+
+  /**
+   * Register a pending question and emit it to the UI. Returns the question id
+   * so the agent can track which question it asked. Call respondToQuestion() to
+   * resolve it.
+   */
+  askQuestion(
+    question: string,
+    choices: Array<{ value: string; label: string }>,
+  ): string {
+    const questionId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    this.questionResolvers.set(questionId, { allow: (ans: string) => {}, deny: () => {} });
+    this.emit({
+      type: "question_request",
+      question_id: questionId,
+      question,
+      choices,
+    });
+    return questionId;
+  }
+
+  /**
+   * Answer a pending question by id. The answer is forwarded to the agent's
+   * resolver. Returns false if the question id is unknown.
+   */
+  respondToQuestion(questionId: string, answer: string): boolean {
+    const resolver = this.questionResolvers.get(questionId);
+    if (!resolver) return false;
+    this.questionResolvers.delete(questionId);
+    resolver.allow(answer);
+    return true;
+  }
+
+  /** True while a question_request awaits an answer. */
+  hasPendingQuestion(): boolean {
+    return this.questionResolvers.size > 0;
+  }
+
+  /** Deny every pending permission request (abort / shutdown). */
+  private denyPendingPermissions(): void {
+    for (const [id, resolve] of this.permissionResolvers) {
+      this.permissionResolvers.delete(id);
+      resolve("deny");
+    }
+  }
+
+  setPermissionMode(mode: PermissionMode): void {
+    this.permissionManager.setMode(mode);
+    this.emit({
+      type: "notice",
+      level: "info",
+      label: "Permissions",
+      text: `mode: ${mode}`,
+    });
+  }
+
+  getPermissionMode(): PermissionMode {
+    return this.permissionManager.getMode();
   }
 
   // ── Model cycling ──────────────────────────────────────────────────
@@ -679,6 +1018,7 @@ export class AgentCoreBridge {
     this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
     this.config.hookSessionId = this.sessionId;
     this.config.hookTranscriptPath = this.transcriptPath;
+    this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
     // Reset skill injection state
     this.skillsContext = null;
     this.skillsInjected = false;
@@ -692,6 +1032,8 @@ export class AgentCoreBridge {
   }
 
   cancel(): void {
+    // A turn blocked on an approval must unblock to abort cleanly.
+    this.denyPendingPermissions();
     this.harness?.abort();
   }
 
@@ -737,6 +1079,24 @@ export class AgentCoreBridge {
     return summary;
   }
 
+  /**
+   * Rewind to the checkpoint taken before the last prompt: restores the
+   * conversation AND the files that turn wrote via the write tools. Returns
+   * what was restored, or null when there is nothing to rewind / a turn is
+   * running.
+   */
+  rewind(): { messages: number; filesRestored: number } | null {
+    try {
+      const restored = this.harness?.rewind() ?? null;
+      if (restored !== null && this.harness) {
+        this.contextTokens = estimateChatPayloadTokens(this.harness.messages);
+      }
+      return restored;
+    } catch {
+      return null;
+    }
+  }
+
   /** Discard the active branch without merging. Returns true if one was discarded. */
   discardBranch(): boolean {
     const discarded = this.harness?.discardBranch() ?? false;
@@ -752,7 +1112,7 @@ export class AgentCoreBridge {
     if (this.mcpEager) {
       await this.loadMcpToolsOnce();
     }
-    return {
+    const info: Record<string, unknown> = {
       agent_name: "logician",
       model: this.config.model,
       base_url: this.config.baseUrl,
@@ -783,6 +1143,10 @@ export class AgentCoreBridge {
         : 0,
       skills_visible: !!this.skillsContext,
     };
+    // Explicitly signal ready so the TUI status bar doesn't get stuck in
+    // streaming after init.
+    this.emit({ type: "phase", state: "ready" });
+    return info;
   }
 
   private async countInstalledSkills(): Promise<number> {
@@ -966,7 +1330,9 @@ export class AgentCoreBridge {
       });
     }
 
-    // Skills flagged disable-model-invocation are not advertised to the model.
+    // All loaded skills are user-invocable via /<skill-name>; only the ones
+    // not flagged disable-model-invocation are advertised to the model.
+    this.loadedSkills = skills;
     const visible = skills.filter((s) => !s.disableModelInvocation);
     if (!visible.length) return;
 
@@ -1007,6 +1373,32 @@ export class AgentCoreBridge {
     }
     // Inject skills from plugins as a fallback when hooks produce no context
     await this.injectSkillsFromPlugins();
+    await this.injectSubagents();
+  }
+
+  /**
+   * Register the spawn_agent tool bound to discovered agent definitions
+   * (.logician/agents/*.md + built-ins). Subagent events are forwarded into
+   * the normal event stream as subagent_* envelopes.
+   */
+  private async injectSubagents(): Promise<void> {
+    if (this.defaultTools.some((t) => t.name === "spawn_agent")) return;
+    const cwd = this.config.cwd || process.cwd();
+    this.agentDefs = await loadAgentDefinitions([
+      path.join(cwd, ".logician", "agents"),
+    ]);
+    const spawn = createSpawnAgentTool({
+      config: () => this.config,
+      backend: this.backend,
+      cwd,
+      agents: () => this.agentDefs,
+      emit: (event) => this.config.onEvent?.(event),
+      defaultMaxIterations: this.config.maxIterations,
+    });
+    this.defaultTools = [...this.defaultTools, spawn];
+    this.config.tools = this.defaultTools;
+    this.harness?.setTools(this.defaultTools);
+    this.rebuildBaseSystemPrompt();
   }
 
   private async fireSessionEnd(reason: string): Promise<void> {
@@ -1145,10 +1537,10 @@ export class AgentCoreBridge {
   }
 }
 
-function tableRow(values: string[]): string {
-  return `| ${values.map(escapeTable).join(" | ")} |`;
+// Event-log path derived from the transcript path ("…/<id>.events.jsonl").
+function eventLogPathFor(transcriptPath: string): string | undefined {
+  if (!transcriptPath) return undefined;
+  return transcriptPath.replace(/\.jsonl$/, ".events.jsonl");
 }
 
-function escapeTable(value: string): string {
-  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
-}
+

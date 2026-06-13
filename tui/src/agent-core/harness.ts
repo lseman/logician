@@ -12,6 +12,12 @@
 
 import { get_reasoner, getReasonerMeta } from "../reasoners/registry.ts";
 import { withTimeout } from "./async-utils.ts";
+import { runSessionStartHooks, runHookEvent } from "./plugins.ts";
+import {
+	beginFileFrame,
+	clearFileFrames,
+	restoreFileFrame,
+} from "./file-checkpoints.ts";
 import type { LLMBackend } from "./backend.ts";
 import { AgentLoop } from "./loop.ts";
 import {
@@ -22,6 +28,13 @@ import {
 	estimateChatPayloadTokens,
 	microCompactMessages,
 } from "./messages.ts";
+import {
+	compact,
+	estimateContextTokens,
+	shouldCompact,
+	type CompactionSettings,
+	DEFAULT_COMPACTION_SETTINGS,
+} from "./compaction/index.ts";
 import type { ToolRegistry } from "./tools/registry.ts";
 import type {
 	AgentConfig,
@@ -114,6 +127,11 @@ export class AgentHarness {
 	private branches: Branch[] = [];
 	private branchSeq = 0;
 
+	// Conversation checkpoints: a snapshot of history is pushed before each
+	// prompt so a bad turn can be rewound. Bounded ring (newest last).
+	private checkpoints: Message[][] = [];
+	private static readonly MAX_CHECKPOINTS = 20;
+
 	// Queues drained at save points. The harness owns the single source of
 	// truth for all three queues; the bridge/UI read snapshots via getQueues()
 	// and subscribe to onQueueChange rather than keeping their own copies.
@@ -132,6 +150,33 @@ export class AgentHarness {
 	// state (idle / turn / compaction / branch_summary) — not just the loop's
 	// finer-grained activity sub-states.
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
+	// Fired when the harness goes idle after a prompt(), carrying the count of
+	// pending nextTurn messages. A non-zero count means the caller can auto-
+	// trigger another prompt() to drain them (Pi-style autonomous continuation).
+	private onSettled?: (nextTurnCount: number) => void;
+	// Fired after every turn_end (each save point). Pi analogue: lets the UI
+	// show autosave status and know a safe rewind point exists.
+	private onSavePoint?: () => void;
+	// Fired when compaction completes (auto or manual).
+	private onCompaction?: (reason: "auto" | "manual", tokensBefore: number, tokensAfter: number) => void;
+	// Auto-compaction configuration (merged with defaults).
+	private autoCompactionSettings: CompactionSettings = DEFAULT_COMPACTION_SETTINGS;
+	// Plugin hooks enabled flag — mirrors the loop's hooksEnabled pattern.
+	private _hooksEnabled = true;
+	// Session state for plugin lifecycle payloads.
+	private _sessionId?: string;
+	private _transcriptPath?: string;
+	private _hasStartedSession = false;
+	// Resolved when the current prompt() completes; undefined when idle.
+	// waitForIdle() awaits this so callers don't need to poll this.running.
+	private _runPromise?: Promise<void>;
+	private _runResolve?: () => void;
+	// Called once before each prompt() run, after nextTurn drain, before the
+	// loop starts. Returns optional extra messages to prepend to the context
+	// and/or a system-prompt override for this run only.
+	private _beforeAgentStart?: (
+		promptText: string,
+	) => Promise<{ messages?: Message[]; systemPrompt?: string } | undefined> | { messages?: Message[]; systemPrompt?: string } | undefined;
 
 	constructor(options: AgentHarnessOptions) {
 		this.config = options.config;
@@ -153,6 +198,49 @@ export class AgentHarness {
 		cb: (phase: HarnessPhase, prev: HarnessPhase) => void,
 	): void {
 		this.onPhaseChange = cb;
+	}
+
+	/**
+	 * Subscribe to the settled event. Fired when the harness returns to idle
+	 * after a prompt(), with the count of pending nextTurn messages. When
+	 * nextTurnCount > 0 the caller can auto-trigger another prompt() to drain
+	 * them without user input (Pi-style autonomous continuation).
+	 */
+	setOnSettled(cb: (nextTurnCount: number) => void): void {
+		this.onSettled = cb;
+	}
+
+	/**
+	 * Subscribe to save-point events. Fired after every turn completes (each
+	 * point where the conversation is safely persisted). Use to update autosave
+	 * indicators or enable rewind UI.
+	 */
+	setOnSavePoint(cb: () => void): void {
+		this.onSavePoint = cb;
+	}
+
+	/**
+	 * Resolves when the harness is next idle. If already idle, resolves
+	 * immediately. Use before structural ops (compact, setHistory, fork) when
+	 * the caller cannot guarantee the harness is idle.
+	 */
+	async waitForIdle(): Promise<void> {
+		if (this._phase === "idle") return;
+		await this._runPromise;
+	}
+
+	/**
+	 * Register a hook called once before each prompt() run. Receives the
+	 * prompt text; may return extra messages to prepend to the context and/or
+	 * a system-prompt override scoped to this run only. Returning undefined
+	 * leaves both unchanged.
+	 */
+	setBeforeAgentStart(
+		cb: (
+			promptText: string,
+		) => Promise<{ messages?: Message[]; systemPrompt?: string } | undefined> | { messages?: Message[]; systemPrompt?: string } | undefined,
+	): void {
+		this._beforeAgentStart = cb;
 	}
 
 	// Guarded phase transition. Throws HarnessBusyError if `to` is not reachable
@@ -194,13 +282,47 @@ export class AgentHarness {
 	// ── Structural operation: prompt ───────────────────────────────────────
 	// Rejected while busy. Drains nextTurn messages before the user prompt.
 	async prompt(userMessage: string): Promise<Message[]> {
+		// Start the run promise so waitForIdle() can await turn completion.
+		this._runPromise = new Promise<void>((resolve) => {
+			this._runResolve = resolve;
+		});
+
+		// Pi-style auto-compaction: run BEFORE the turn phase so it can
+		// enter its own "compaction" phase. Must fire before entering the
+		// turn phase because phase transitions only allow idle → working.
+		if (this.autoCompactionSettings.enabled) {
+			const compacted = await this.runAutoCompaction("auto");
+			if (compacted) {
+				// Context was compacted; retry the whole prompt with the new history.
+				return this.prompt(userMessage);
+			}
+		}
+
 		return this.runInPhase("turn", "prompt", async () => {
 			this.abortController = new AbortController();
+
+			// Fire SessionStart on first prompt (session init).
+			if (!this._hasStartedSession) {
+				await this.emitSessionStart("startup");
+			}
+
+			// Checkpoint the pre-turn conversation + open a file frame so rewind()
+			// restores both the messages and the files this turn writes.
+			this.checkpoints.push([...this.history]);
+			if (this.checkpoints.length > AgentHarness.MAX_CHECKPOINTS) {
+				this.checkpoints.shift();
+			}
+			beginFileFrame();
 
 			// nextTurn messages are drained inside the loop via the transformContext
 			// hook (see withDrainHook), so they enter the context as real user
 			// messages rather than being concatenated onto the prompt string.
 			const promptText = userMessage;
+
+			// before_agent_start: let callers inject extra context or override the
+			// system prompt for this run only (Pi analogue).
+			const beforeStart = await this._beforeAgentStart?.(promptText);
+
 			const preReasoning = await this.runPreReasoner(promptText);
 
 			// Continuation history for this prompt: prior conversation plus, when a
@@ -208,13 +330,24 @@ export class AgentHarness {
 			// sees the reasoning. run() rebuilds _messages from initialMessages, so
 			// this must flow through initialMessages — not a post-construction
 			// setMessages, which run() would discard.
-			const continuation = preReasoning
+			let continuation: Message[] = preReasoning
 				? [...this.history, createAssistantMessage(preReasoning)]
 				: this.history;
 
+			// Prepend any extra messages injected by beforeAgentStart.
+			if (beforeStart?.messages?.length) {
+				continuation = [...beforeStart.messages, ...continuation];
+			}
+
+			// System-prompt override scoped to this run: patch the config clone
+			// before withDrainHook so the loop picks it up.
+			const runConfig = beforeStart?.systemPrompt
+				? { ...this.config, systemPrompt: beforeStart.systemPrompt }
+				: this.config;
+
 			try {
 				// Build or update the loop config (new on config change).
-				this.loopConfig = this.withDrainHook(this.config);
+				this.loopConfig = this.withDrainHook(runConfig);
 				if (!this.loop) {
 					this.loop = new AgentLoop({
 						config: this.loopConfig,
@@ -249,6 +382,14 @@ export class AgentHarness {
 				this.steeringQueue = [];
 				this.followUpQueue = [];
 				this.emitQueueChange();
+				// Resolve waitForIdle() waiters before settled fires so callers
+				// that await idle inside the settled handler don't deadlock.
+				this._runResolve?.();
+				this._runPromise = undefined;
+				this._runResolve = undefined;
+				// Notify subscribers that the harness has settled. nextTurnQueue
+				// survives abort and is the signal for autonomous continuation.
+				this.onSettled?.(this.nextTurnQueue.length);
 			}
 		});
 	}
@@ -316,6 +457,12 @@ export class AgentHarness {
 			throw new HarnessBusyError("steer", this._phase, "turn");
 		this.steeringQueue.push(text);
 		this.emitQueueChange();
+		// Interrupt mode: cut the in-flight stream (partial output is kept) so
+		// the steering message takes effect immediately instead of waiting for
+		// the current LLM call to finish.
+		if (this.config.steeringInterrupt) {
+			this.loop?.interruptTurn();
+		}
 	}
 
 	// Queue a message for after the current turn completes (same drain point).
@@ -330,12 +477,13 @@ export class AgentHarness {
 		this.emitQueueChange();
 	}
 
-	// Abort the running turn. Clears steering/follow-up; preserves nextTurn.
+	// Abort the running turn. Fires SessionEnd plugin event.
 	abort(): void {
 		this.abortController?.abort();
 		this.steeringQueue = [];
 		this.followUpQueue = [];
 		this.emitQueueChange();
+		this.emitSessionEnd("abort").catch(() => {});
 	}
 
 	// ── Queue state (single source of truth for the UI) ────────────────────
@@ -378,17 +526,157 @@ export class AgentHarness {
 		this.followUpQueueMode = mode;
 	}
 
+	// ── Plugin lifecycle hooks ─────────────────────────────────────────────
+
+	/** Enable or disable plugin hooks entirely. Also propagates to the loop config. */
+	setHooksEnabled(enabled: boolean): void {
+		this._hooksEnabled = enabled;
+		// Propagate to loop config so the loop's hooks also see it.
+		this.config.runtimeHooksEnabled = enabled;
+	}
+
+	/** Set the session ID for plugin event payloads. Also propagates to the loop config. */
+	setSessionId(id: string): void {
+		this._sessionId = id;
+		// Propagate to loop config so the loop's hooks also see it.
+		this.config.hookSessionId = id;
+	}
+
+	/** Set the transcript path for plugin event payloads. Also propagates to the loop config. */
+	setTranscriptPath(path: string): void {
+		this._transcriptPath = path;
+		// Propagate to loop config so the loop's hooks also see it.
+		this.config.hookTranscriptPath = path;
+	}
+
+	/** Fire SessionStart plugin event (called on first prompt / after /clear). */
+	private async emitSessionStart(source: string = "startup"): Promise<void> {
+		if (!this._hooksEnabled) return;
+		try {
+			await runSessionStartHooks({
+				source,
+				session_id: this._sessionId || "",
+				transcript_path: this._transcriptPath || "",
+				cwd: this.cwd || process.cwd(),
+			});
+			this._hasStartedSession = true;
+		} catch {
+			// SessionStart failure must not block the session.
+		}
+	}
+
+	/** Fire SessionEnd plugin event (called on clear/abort/quit). */
+	private async emitSessionEnd(reason: string = "other"): Promise<void> {
+		if (!this._hooksEnabled) return;
+		try {
+			await runHookEvent("SessionEnd", {
+				session_id: this._sessionId || "",
+				transcript_path: this._transcriptPath || "",
+				cwd: this.cwd || process.cwd(),
+				reason,
+			});
+		} catch {
+			// SessionEnd failure must not block cleanup.
+		}
+	}
+
+	/** Fire PreCompact / PostCompact plugin events around compaction. */
+	private async emitPreCompact(): Promise<void> {
+		if (!this._hooksEnabled) return;
+		try {
+			await runHookEvent("PreCompact", {
+				session_id: this._sessionId || "",
+				transcript_path: this._transcriptPath || "",
+				cwd: this.cwd || process.cwd(),
+			});
+		} catch {
+			// PreCompact failure must not block compaction.
+		}
+	}
+
+	private async emitPostCompact(): Promise<void> {
+		if (!this._hooksEnabled) return;
+		try {
+			await runHookEvent("PostCompact", {
+				session_id: this._sessionId || "",
+				transcript_path: this._transcriptPath || "",
+				cwd: this.cwd || process.cwd(),
+			});
+		} catch {
+			// PostCompact failure must not block compaction.
+		}
+	}
+
+	// ── Auto-compaction ────────────────────────────────────────────────────
+
+	/** Configure auto-compaction settings. Takes effect on the next prompt(). */
+	setAutoCompactionSettings(settings: Partial<CompactionSettings>): void {
+		this.autoCompactionSettings = { ...this.autoCompactionSettings, ...settings };
+	}
+
+	/** Enable or disable auto-compaction. */
+	enableAutoCompaction(enabled: boolean): void {
+		this.autoCompactionSettings.enabled = enabled;
+	}
+
+	/** Subscribe to compaction events. */
+	setOnCompaction(cb: (reason: "auto" | "manual", tokensBefore: number, tokensAfter: number) => void): void {
+		this.onCompaction = cb;
+	}
+
 	get messages(): Message[] {
 		return this.loop?.messages ?? this.history;
 	}
 
-	// Clear persisted conversation (new session / context reset). Syncs the
-	// loop's working messages too — otherwise a reused loop would keep serving
-	// its stale transcript on the next prompt — and drops any open branches
-	// (their parent snapshots are now meaningless).
+	// Clear persisted conversation (new session / context reset). Fires SessionEnd then SessionStart.
 	clearHistory(): void {
+		// SessionEnd before clearing (session reset).
+		this.emitSessionEnd("reset").catch(() => {});
 		this.branches = [];
+		this.checkpoints = [];
+		clearFileFrames();
 		this.setActiveHistory([]);
+		// SessionStart after clearing (fresh session).
+		this.emitSessionStart("clear").catch(() => {});
+		this._hasStartedSession = false;
+	}
+
+	/**
+	 * Replace the persisted conversation with externally restored messages
+	 * (session resume / switch), so the model continues with the restored
+	 * context rather than starting cold. Idle-only. Drops open branches (their
+	 * parent snapshots no longer apply) and any system messages — the loop
+	 * re-injects the current system prompt each run.
+	 * Fires SessionEnd then SessionStart.
+	 */
+	setHistory(messages: Message[]): void {
+		this.assertIdle("setHistory");
+		// SessionEnd before switching (old session).
+		this.emitSessionEnd("switch").catch(() => {});
+		this.branches = [];
+		this.checkpoints = [];
+		clearFileFrames();
+		this.setActiveHistory(messages.filter((m) => m.role !== "system"));
+		// SessionStart after switching (new session context).
+		this.emitSessionStart("resume").catch(() => {});
+		this._hasStartedSession = false;
+	}
+
+	/**
+	 * Restore the conversation to the snapshot taken before the most recent
+	 * prompt (undo the last turn). Idle-only. Returns the restored message
+	 * count, or null when no checkpoint exists.
+	 */
+	rewind(): { messages: number; filesRestored: number } | null {
+		this.assertIdle("rewind");
+		const snapshot = this.checkpoints.pop();
+		if (!snapshot) return null;
+		this.branches = [];
+		this.setActiveHistory(snapshot);
+		// Restore files the rewound turn wrote (write tools only; bash is not
+		// captured — see file-checkpoints.ts).
+		const filesRestored = restoreFileFrame() ?? 0;
+		return { messages: snapshot.length, filesRestored };
 	}
 
 	// ── Conversation branching ─────────────────────────────────────────────
@@ -491,6 +779,8 @@ export class AgentHarness {
 		const before = estimateChatPayloadTokens(messages);
 
 		return this.runInPhase("compaction", "compact", async () => {
+			// Fire PreCompact before compaction.
+			await this.emitPreCompact();
 			// Shared compaction skeleton; the summarizer micro-truncates the older
 			// block first (sending full messages to the LLM defeats the purpose),
 			// then asks the LLM for a summary. On LLM failure it returns null and
@@ -501,11 +791,74 @@ export class AgentHarness {
 					this.generateSummary(microCompactMessages(older).messages, system),
 			});
 
-			if (!result.changed) return 0;
+			if (!result.changed) {
+				await this.emitPostCompact();
+				return 0;
+			}
 			if (this.loop) this.loop.setMessages(result.messages);
 			else this.history = result.messages;
 			const after = estimateChatPayloadTokens(result.messages);
+			this.onCompaction?.("manual", before, after);
+			await this.emitPostCompact();
 			return before - after;
+		});
+	}
+
+	/**
+	 * Pi-style auto-compaction: compact using the compaction module when
+	 * context exceeds the configured threshold. Integrates file operation
+	 * tracking into the summary output.
+	 */
+	private async runAutoCompaction(reason: "auto" | "manual"): Promise<boolean> {
+		const messages = this.loop?.messages ?? this.history;
+		if (!messages.length || !this.autoCompactionSettings.enabled) return false;
+
+		return this.runInPhase("compaction", "autoCompact", async () => {
+			// Fire PreCompact before auto-compaction.
+			await this.emitPreCompact();
+
+			const agentMessages = messages as unknown as Array<{ role: string; content?: unknown[] }>;
+
+			// Check if compaction is needed
+			if (!shouldCompact(agentMessages, this.autoCompactionSettings)) {
+				await this.emitPostCompact();
+				return false;
+			}
+
+			const before = estimateContextTokens(agentMessages).tokens;
+
+			// Use Pi-style compaction with file operation tracking,
+			// passing our LLM-backed summarizer for real summaries.
+			const compactionResult = await compact(
+				agentMessages,
+				this.autoCompactionSettings,
+				undefined, // prevSummary
+				undefined, // customInstructions
+				// Adapt harness's generateSummary to the SummaryFn signature.
+				// We need to extract system messages from history for the summarizer.
+				async (compactionMessages) => {
+					// Convert CompactableMessage[] to Message[] for the harness summarizer
+					const messages = compactionMessages as unknown as Message[];
+					// System messages are already in history (at the start),
+					// so we pass an empty array — the harness summarizer
+					// receives the conversation without the system prompt.
+					const summary = await this.generateSummary(messages, []);
+					return summary || `[Auto-compaction summary failed — context preserved but no summary generated]`;
+				},
+			);
+
+			// Build new history: summary + kept messages converted back to Message[]
+			const summaryMessage = { role: "system" as const, content: `\n<compaction_summary>${compactionResult.summary}</compaction_summary>\n` };
+
+			const keptMessages: Message[] = compactionResult.messagesToKeep as unknown as Message[];
+			const newHistory = [summaryMessage, ...keptMessages.filter(m => m.content)];
+			this.history = newHistory;
+			if (this.loop) this.loop.setMessages(newHistory);
+
+			const after = estimateChatPayloadTokens(newHistory);
+			this.onCompaction?.(reason, before, after);
+			await this.emitPostCompact();
+			return true;
 		});
 	}
 
@@ -649,7 +1002,18 @@ export class AgentHarness {
 			return this.toInjectedMessages(out);
 		};
 
-		return { ...config, internalHooks };
+		// Wrap onEvent to emit save_point after every completed turn. The
+		// original handler (set by the bridge) is called first so events reach
+		// the UI before the save_point notification fires.
+		const originalOnEvent = config.onEvent;
+		const wrappedOnEvent = this.onSavePoint
+			? (event: import("./types.ts").AgentEvent) => {
+					originalOnEvent?.(event);
+					if (event.type === "turn_end") this.onSavePoint?.();
+			  }
+			: originalOnEvent;
+
+		return { ...config, internalHooks, onEvent: wrappedOnEvent };
 	}
 
 	// Drain a queue per its mode: "all" empties it, "one-at-a-time" takes the

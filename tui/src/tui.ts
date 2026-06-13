@@ -1,9 +1,16 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
+import { escapeTable, tableRow, formatDelay, parseInterval, formatTokenCount, formatContextSize, envNumber } from "./tui-utils.ts";
+
+// Re-export markdownTableCell (same as escapeTable for table use)
 
 import { execSync } from "node:child_process";
 import { AgentCoreBridge } from "./agent-bridge.ts";
 import { InputBar } from "./components/input-bar.ts";
+import {
+  type ChoiceItem,
+  ChoicePopup,
+} from "./components/choice-popup.ts";
 import {
   type McpManagerAction,
   McpManagerOverlay,
@@ -17,12 +24,14 @@ import {
   type ReasonerSelectorAction,
   ReasonerSelectorOverlay,
 } from "./components/reasoner-selector.ts";
+import { SessionManager } from "./components/session-manager.ts";
 import { SlashPopup } from "./components/slash-popup.ts";
 import { StatusBar } from "./components/status-bar.ts";
 import { SteerQueue } from "./components/steer-queue.ts";
 import { ThinkingPanel } from "./components/thinking-panel.ts";
 import { TodoBar } from "./components/todo-bar.ts";
 import { TranscriptDisplay } from "./components/transcript-display.ts";
+import { SessionStore } from "./session-store.ts";
 import {
   configBool,
   configNumber,
@@ -31,13 +40,15 @@ import {
 } from "./config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import { KillRing } from "./kill-ring.ts";
+import { LoopManager } from "./loop-manager.ts";
 import {
   getReasonerIds,
   getReasonerMeta,
   type ReasonerMeta,
 } from "./reasoners/registry.ts";
+import type { Message as CoreMessage } from "./agent-core/index.ts";
 import { createSlashCommands, type SlashCommandDef } from "./slash-commands.ts";
-import { Transcript } from "./transcript.ts";
+import { Transcript, type Turn } from "./transcript.ts";
 import { Container, TUI } from "./tui-core.ts";
 import { UndoStack } from "./undo-stack.ts";
 
@@ -53,19 +64,28 @@ export class LogicianTUI {
   private thinkingPanel: ThinkingPanel;
   private inputBar: InputBar;
   private slashPopup: SlashPopup;
+  private choicePopup: ChoicePopup;
   private pluginManager: PluginManagerOverlay;
   private mcpManager: McpManagerOverlay;
   private reasonerSelector: ReasonerSelectorOverlay;
   private transcriptDisplay: TranscriptDisplay;
+  private sessionManager: SessionManager;
+  private sessionStore: SessionStore;
   private killRing: KillRing;
   private undoStack: UndoStack<{ value: string; cursor: number }>;
+  private loopManager: LoopManager;
   private streaming = false;
+  private loopActive = false;
   private configPath?: string;
   private thinkingLevel = "medium";
   private cacheEnabled = true;
   private thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
     "expanded";
   private traceOn = false;
+  private currentSessionId: string | null = null;
+  // Tool call awaiting an interactive allow/deny answer in the input bar.
+  private pendingPermission: { toolCallId: string; toolName: string } | null =
+    null;
 
   constructor() {
     const loadedConfig = loadLogicianConfig(process.cwd());
@@ -111,6 +131,20 @@ export class LogicianTUI {
             maxResults: configNumber(config.webSearch.maxResults),
           }
         : undefined,
+      permissionMode: configString(config.permissionMode) as
+        | "acceptAll"
+        | "acceptEdits"
+        | "ask"
+        | "plan"
+        | undefined,
+      permissionRules:
+        config.permissions &&
+        typeof config.permissions === "object" &&
+        !Array.isArray(config.permissions)
+          ? (config.permissions as { allow?: string[]; deny?: string[] })
+          : undefined,
+      steeringInterrupt: configBool(config.steeringInterrupt),
+      maxTotalTokens: configNumber(config.maxTotalTokens),
       cwd: process.cwd(),
     });
     this.transcript = new Transcript();
@@ -120,6 +154,7 @@ export class LogicianTUI {
     this.thinkingPanel = new ThinkingPanel();
     this.inputBar = new InputBar();
     this.slashPopup = new SlashPopup();
+    this.choicePopup = new ChoicePopup();
     this.pluginManager = new PluginManagerOverlay();
     this.mcpManager = new McpManagerOverlay();
     this.reasonerSelector = new ReasonerSelectorOverlay();
@@ -128,11 +163,49 @@ export class LogicianTUI {
     });
     this.killRing = new KillRing();
     this.undoStack = new UndoStack();
+    this.loopManager = new LoopManager();
+    this.loopManager.setOnTick((iteration, prompt) => {
+      this.loopActive = true;
+      this.transcript.addSystemMessage(
+        `🔄 Loop iteration ${iteration}: ${prompt}`,
+      );
+      this.transcript.addTurn(prompt);
+      this.transcriptDisplay.setTurns(this.transcript.getTurns());
+      this.tui.requestRender();
+      void this.bridge.sendMessage(prompt).catch(() => {});
+    });
 
     // Create the TUI with hardware cursor support
     this.tui = new TUI(process.stdout, true);
     this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
     this.todoBar.setOnInvalidate(() => this.tui.requestRender());
+
+    // ── Session store ────────────────────────────────────────────────────
+    this.sessionStore = new SessionStore(process.cwd());
+    this.sessionManager = new SessionManager();
+    this.sessionManager.setStore(this.sessionStore);
+    this.sessionManager.setActionCallback((action) =>
+      this.handleSessionAction(action),
+    );
+    // Create initial session if none exists
+    if (this.sessionStore.listSessions().length === 0) {
+      this.currentSessionId = this.sessionStore.createSession({
+        title: "New Session",
+      });
+      this.statusPanel.update({ sessionTitle: "New Session" });
+    } else {
+      // Resume the most recent session
+      const sessions = this.sessionStore.listSessions();
+      if (sessions.length > 0) {
+        this.currentSessionId = sessions[0].id;
+        const turns = this.sessionStore.loadTurns(this.currentSessionId);
+        if (turns.length > 0) {
+          this.restoreSession(turns);
+          this.statusPanel.update({ sessionTitle: sessions[0].title });
+          this.tui.requestRender();
+        }
+      }
+    }
 
     // Wire up dependencies
     this.inputBar.setKillRing(this.killRing);
@@ -316,10 +389,91 @@ export class LogicianTUI {
       getContext: () => {
         return this.bridge.getContext();
       },
+      sessions: () => {
+        this.openSessionManager();
+      },
+      newSession: () => {
+        this._autoSaveTurn();
+        this.currentSessionId = this.sessionStore.createSession({
+          title: "New Session",
+        });
+        this.transcript.clear();
+        this.transcriptDisplay.setTurns(this.transcript.getTurns());
+        this.statusPanel.update({ sessionTitle: "New Session" });
+        setStatusPhase("ready");
+      },
+      saveSession: () => {
+        this._autoSaveTurn();
+        this.statusPanel.update({
+          phase: "saved",
+        });
+        this.transcript.addSystemMessage("Session saved.");
+        this.transcriptDisplay.setTurns(this.transcript.getTurns());
+        this.tui.requestRender();
+      },
+      renameSession: (title: unknown) => {
+        if (!this.currentSessionId) return;
+        const newTitle =
+          typeof title === "string" ? title : String(title || "");
+        if (!newTitle.trim()) return;
+        this.sessionStore.renameSession(this.currentSessionId, newTitle.trim());
+        this.statusPanel.update({ sessionTitle: newTitle.trim() });
+        setStatusPhase("ready");
+      },
+      setPermissionMode: (mode: unknown) => {
+        this.bridge.setPermissionMode(
+          String(mode) as "acceptAll" | "acceptEdits" | "ask" | "plan",
+        );
+        setStatusPhase("ready");
+      },
+      getPermissionMode: () => this.bridge.getPermissionMode(),
+      togglePlanMode: () => {
+        const next =
+          this.bridge.getPermissionMode() === "plan" ? "acceptAll" : "plan";
+        this.bridge.setPermissionMode(next);
+        this.statusPanel.update({
+          phase: next === "plan" ? "plan" : "ready",
+        });
+        return next === "plan"
+          ? "Plan mode ON — only read-only tools; the agent should present a plan."
+          : "Plan mode OFF — permission mode back to acceptAll.";
+      },
+      rewind: () => {
+        const restored = this.bridge.rewind();
+        if (restored === null) return "Nothing to rewind.";
+        return (
+          `Rewound to checkpoint: ${restored.messages} message(s) in ` +
+          `context, ${restored.filesRestored} file(s) restored ` +
+          "(bash mutations are not captured)."
+        );
+      },
     };
 
     const slashCommands = createSlashCommands(this.bridge, localHandlers);
     this.slashPopup.setCommands(slashCommands);
+
+    // Wire up choice popup submit: send the selected answer back to the bridge
+    this.choicePopup.setOnSubmit((selected) => {
+      const qid = this.choicePopup.getQuestionId();
+      if (qid && this.bridge.respondToQuestion(qid, selected.value)) {
+        this.transcript.addSystemMessage(
+          `Question answered: ${selected.label}`,
+        );
+      }
+      this.transcriptDisplay.setTurns(this.transcript.getTurns());
+      this.tui.requestRender();
+    });
+
+    // Wire up choice popup dismissal: let the bridge know the user skipped
+    this.choicePopup.setOnDismiss(() => {
+      const qid = this.choicePopup.getQuestionId();
+      if (qid) {
+        this.bridge.respondToQuestion(qid, "__dismissed__");
+        this.transcript.addSystemMessage(`Question dismissed.`);
+      }
+      this.transcriptDisplay.setTurns(this.transcript.getTurns());
+      this.tui.requestRender();
+    });
 
     // Wire up slash popup submit to handle quit dispatch
     this.slashPopup.setOnSubmit((result, dispatch, command) => {
@@ -396,6 +550,77 @@ export class LogicianTUI {
           this.tui.requestRender();
           return;
         }
+        if (match && match.command === "/sessions") {
+          this.openSessionManager();
+          return;
+        }
+        if (match && match.command === "/loop") {
+          const args = command.trim().split(/\s+/).slice(1).join(" ");
+          if (args.toLowerCase() === "stop") {
+            this.loopManager.stop();
+            this.loopActive = false;
+            this.transcript.addSystemMessage("Loop stopped.");
+            this.transcriptDisplay.setTurns(this.transcript.getTurns());
+            this.tui.requestRender();
+            return;
+          }
+          const intervalMatch = args.match(/^(\d+)(s|m|h|d)\s+(.+)$/);
+          if (intervalMatch) {
+            const [, value, unit, prompt] = intervalMatch;
+            const mult: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+            const ms = parseInt(value, 10) * (mult[unit] ?? 60000);
+            this.loopManager.start(prompt, ms);
+            this.loopActive = true;
+            this.transcript.addSystemMessage(
+              `🔄 Loop started: "${prompt}" every ${value}${unit}`,
+            );
+          } else if (args) {
+            // No interval specified — default to 5 minutes
+            this.loopManager.start(args, 5 * 60 * 1000);
+            this.loopActive = true;
+            this.transcript.addSystemMessage(
+              `🔄 Loop started: "${args}" (default 5m interval)`,
+            );
+          } else {
+            this.transcript.addSystemMessage(
+              "Usage: /loop <prompt> [interval] — e.g. /loop 5m check the deploy\n" +
+              "Or: /loop stop",
+            );
+          }
+          this.transcriptDisplay.setTurns(this.transcript.getTurns());
+          this.tui.requestRender();
+          return;
+        }
+        if (match && match.command === "/new") {
+          this._autoSaveTurn();
+          this.currentSessionId = this.sessionStore.createSession({
+            title: "New Session",
+          });
+          this.transcript.clear();
+          this.transcriptDisplay.setTurns(this.transcript.getTurns());
+          this.statusPanel.update({ sessionTitle: "New Session" });
+          this.tui.requestRender();
+          return;
+        }
+        if (match && match.command === "/save") {
+          this._autoSaveTurn();
+          this.transcript.addSystemMessage("Session saved.");
+          this.transcriptDisplay.setTurns(this.transcript.getTurns());
+          this.tui.requestRender();
+          return;
+        }
+        if (match && match.command === "/rename") {
+          if (this.currentSessionId && args.trim()) {
+            this.sessionStore.renameSession(this.currentSessionId, args.trim());
+            this.statusPanel.update({ sessionTitle: args.trim() });
+            this.transcript.addSystemMessage(
+              `Session renamed to "${args.trim()}"`,
+            );
+          }
+          this.transcriptDisplay.setTurns(this.transcript.getTurns());
+          this.tui.requestRender();
+          return;
+        }
         if (match && match.dispatch === "bridge") {
           void this.bridge.sendSlash(command.trim());
         }
@@ -435,6 +660,27 @@ export class LogicianTUI {
           this.transcriptDisplay.setTurns(this.transcript.getTurns());
           this.tui.requestRender();
         }
+        // Surface discovered skills as /<skill-name> commands in the popup.
+        const skills = this.bridge.getSkills();
+        if (skills.length) {
+          const existing = this.slashPopup.getCommands() as SlashCommandDef[];
+          const taken = new Set(existing.map((c) => c.command));
+          const skillCmds: SlashCommandDef[] = skills
+            .map((s) => ({
+              command: `/${s.name}`,
+              usage: `/${s.name}${s.argumentHint ? ` ${s.argumentHint}` : ""}`,
+              description: `Skill: ${s.description.slice(0, 80)}`,
+              dispatch: "local" as const,
+              acceptsArgs: true,
+              bridgeHandler: (args: string) => {
+                this.bridge.invokeSkill(s.name, args);
+              },
+            }))
+            .filter((c) => !taken.has(c.command));
+          if (skillCmds.length) {
+            this.slashPopup.setCommands([...existing, ...skillCmds]);
+          }
+        }
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
@@ -455,6 +701,34 @@ export class LogicianTUI {
         this.steerQueue.setItems(event.steering || [], event.followUp || []);
         this.tui.requestRender();
         break;
+      case "permission_request": {
+        this.pendingPermission = {
+          toolCallId: event.tool_call_id,
+          toolName: event.tool_name,
+        };
+        const preview = JSON.stringify(event.args ?? {}).slice(0, 200);
+        this.transcript.addSystemMessage(
+          `Permission needed: ${event.tool_name} ${preview}\n` +
+            "Reply y (allow once), a (always allow this tool), or n (deny).",
+        );
+        this.statusPanel.update({ phase: "permission" });
+        this.statusPanel.stopAnimation();
+        this.transcriptDisplay.setTurns(this.transcript.getTurns());
+        this.tui.requestRender();
+        break;
+      }
+      case "question_request": {
+        this.choicePopup.setQuestionId(event.question_id);
+        this.choicePopup.setQuestion(event.question);
+        this.choicePopup.setChoices(event.choices);
+        this.choicePopup.show();
+        this.transcript.addSystemMessage(
+          `Question: ${event.question}\nSelect an option below.`,
+        );
+        this.transcriptDisplay.setTurns(this.transcript.getTurns());
+        this.tui.requestRender();
+        break;
+      }
       case "token":
         if (!this.streaming) {
           this.streaming = true;
@@ -470,6 +744,8 @@ export class LogicianTUI {
       case "turn_end":
         this.streaming = false;
         this.statusPanel.stopAnimation();
+        // Auto-save the completed turn
+        this._autoSaveTurn();
         this.statusPanel.update({
           phase: "ready",
           turnCount: this.transcript.getTurns().length,
@@ -673,6 +949,13 @@ export class LogicianTUI {
         return { consume: true };
       }
 
+      // ChoicePopup — agent Q&A dropdown
+      if (this.choicePopup.isVisibleOverlay()) {
+        this.choicePopup.handleInput(data);
+        this.tui.requestRender();
+        return { consume: true };
+      }
+
       // Inline slash autocomplete: while the popup is showing matches, the
       // input bar keeps focus and ordinary typing flows through to it. We only
       // intercept the navigation/accept keys here.
@@ -697,9 +980,17 @@ export class LogicianTUI {
           }
           return { consume: true };
         }
-        // Escape — dismiss the menu but keep what was typed
+        // Escape — dismiss the menu but keep what was typed;
+        // if a loop is active, stop it
         if (data === "\x1b") {
           this.slashPopup.hide();
+          if (this.loopActive) {
+            this.loopManager.stop();
+            this.loopActive = false;
+            this.transcript.addSystemMessage("Loop stopped (Esc).");
+            this.transcriptDisplay.setTurns(this.transcript.getTurns());
+            this.tui.requestRender();
+          }
           this.tui.requestRender();
           return { consume: true };
         }
@@ -747,6 +1038,12 @@ export class LogicianTUI {
         return { consume: true };
       }
 
+      // Ctrl+S — open session manager
+      if (data === "\x13") {
+        this.openSessionManager();
+        return { consume: true };
+      }
+
       // Ctrl+Backspace in input bar is handled by InputBar directly
       return { consume: false };
     });
@@ -771,6 +1068,30 @@ export class LogicianTUI {
 
     // Input bar handler
     this.inputBar.onSubmit = (text: string) => {
+      // A pending permission request captures the next submission:
+      // y/a/n (or allow/always/deny) answers it instead of becoming a message.
+      if (this.pendingPermission) {
+        const answer = text.trim().toLowerCase();
+        const decision =
+          answer === "y" || answer === "yes" || answer === "allow"
+            ? "allow"
+            : answer === "a" || answer === "always"
+              ? "always"
+              : "deny";
+        this.bridge.respondToPermission(
+          this.pendingPermission.toolCallId,
+          decision,
+        );
+        this.transcript.addSystemMessage(
+          `Permission ${decision}: ${this.pendingPermission.toolName}`,
+        );
+        this.pendingPermission = null;
+        this.statusPanel.update({ phase: "streaming" });
+        this.transcriptDisplay.setTurns(this.transcript.getTurns());
+        this.tui.requestRender();
+        return;
+      }
+
       // Always push to history (both slash and regular messages)
       this.inputBar.pushHistory(text);
 
@@ -843,6 +1164,16 @@ export class LogicianTUI {
           return;
         }
 
+        // Unknown command — a skill invocation? (/<skill-name> args)
+        if (this.bridge.invokeSkill(cmdName.slice(1), args)) {
+          this.transcript.addTurn(text.trim());
+          this.transcriptDisplay.setTurns(this.transcript.getTurns());
+          this.statusPanel.update({ phase: "streaming" });
+          this.statusPanel.startAnimation();
+          this.tui.requestRender();
+          return;
+        }
+
         // Unknown command — send to bridge as slash
         this.transcript.addTurn(text.trim());
         this.bridge.sendSlash(text.trim());
@@ -868,9 +1199,129 @@ export class LogicianTUI {
     };
 
     this.inputBar.onCancel = () => {
+      this.pendingPermission = null;
       this.bridge.cancel();
       this.statusPanel.update({ phase: "ready" });
     };
+  }
+
+  // ── Session management ───────────────────────────────────────────────
+
+  /**
+   * Restore a session into BOTH the UI transcript and the model context.
+   * Without the bridge restore, a resumed session renders its history but the
+   * model starts cold ("continue" loses everything). Pass [] for a fresh
+   * session (clears both).
+   */
+  private restoreSession(turns: Turn[]): void {
+    this.transcript.loadTurns(turns);
+    this.transcriptDisplay.setTurns(this.transcript.getTurns());
+    this.bridge.restoreHistory(turnsToMessages(turns));
+  }
+
+  /** Auto-save the latest turn to the current session. */
+  private _autoSaveTurn(): void {
+    if (!this.currentSessionId) return;
+    const turns = this.transcript.getTurns();
+    const latestTurn = turns[turns.length - 1];
+    if (latestTurn && latestTurn.isComplete) {
+      this.sessionStore.saveTurn(latestTurn);
+      // Update the session title from the first user message
+      if (latestTurn.userMessage.content.length > 0) {
+        const title = latestTurn.userMessage.content
+          .replace(/\n+/g, " ")
+          .slice(0, 60);
+        const current = this.sessionStore.getSession(this.currentSessionId);
+        if (current && current.title === "Untitled Session") {
+          this.sessionStore.renameSession(this.currentSessionId, title);
+        }
+      }
+    }
+  }
+
+  /** Handle session manager actions (select, rename, delete, new). */
+  private handleSessionAction(action: {
+    type: "close" | "select" | "rename" | "delete" | "new";
+    sessionId?: string;
+    title?: string;
+  }): void {
+    switch (action.type) {
+      case "close":
+        this.tui.removeOverlay(this.sessionManager);
+        break;
+
+      case "select":
+        if (!action.sessionId) return;
+        const session = this.sessionStore.getSession(action.sessionId);
+        if (!session) return;
+
+        // Save current session
+        this._autoSaveTurn();
+
+        // Load new session turns into transcript + model context
+        const turns = this.sessionStore.loadTurns(action.sessionId);
+        this.currentSessionId = action.sessionId;
+        this.restoreSession(turns);
+        this.statusPanel.update({
+          sessionTitle: session.title,
+          turnCount: turns.length,
+        });
+        this.tui.removeOverlay(this.sessionManager);
+        this.tui.requestRender();
+        break;
+
+      case "rename":
+        if (!action.sessionId || !action.title) return;
+        this.sessionStore.renameSession(action.sessionId, action.title);
+        this.tui.removeOverlay(this.sessionManager);
+        this.tui.requestRender();
+        break;
+
+      case "delete":
+        if (!action.sessionId) return;
+        this.sessionStore.deleteSession(action.sessionId);
+        if (this.currentSessionId === action.sessionId) {
+          // Switch to the next most recent session or create new
+          const remaining = this.sessionStore.listSessions();
+          if (remaining.length > 0) {
+            this.currentSessionId = remaining[0].id;
+            const turns = this.sessionStore.loadTurns(this.currentSessionId);
+            this.restoreSession(turns);
+            this.statusPanel.update({ sessionTitle: remaining[0].title });
+          } else {
+            this.currentSessionId = this.sessionStore.createSession({
+              title: "New Session",
+            });
+            this.restoreSession([]);
+          }
+        }
+        this.tui.removeOverlay(this.sessionManager);
+        this.tui.requestRender();
+        break;
+
+      case "new":
+        this._autoSaveTurn();
+        this.currentSessionId = this.sessionStore.createSession({
+          title: "New Session",
+        });
+        this.restoreSession([]);
+        this.statusPanel.update({ sessionTitle: "New Session" });
+        this.tui.removeOverlay(this.sessionManager);
+        this.tui.requestRender();
+        break;
+    }
+  }
+
+  /** Open the session manager overlay. */
+  private openSessionManager(): void {
+    this.statusPanel.update({ phase: "sessions" });
+    this.sessionManager.refresh();
+    this.sessionManager.show();
+    const overlay = this.tui.showOverlay(this.sessionManager, {
+      anchor: "center",
+      maxHeight: 18,
+    });
+    overlay.focus();
   }
 
   // ── Layout ─────────────────────────────────────────────────────────────
@@ -903,6 +1354,14 @@ export class LogicianTUI {
     this.tui.showOverlay(this.mcpManager, {
       anchor: "center",
       maxHeight: 18,
+    });
+    this.tui.showOverlay(this.sessionManager, {
+      anchor: "center",
+      maxHeight: 18,
+    });
+    this.tui.showOverlay(this.choicePopup, {
+      anchor: "center",
+      maxHeight: 14,
     });
   }
 
@@ -1188,21 +1647,22 @@ function markdownTableCell(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
-function formatContextSize(tokens: number, maxTokens?: number): string {
-  const current = formatTokenCount(Math.max(0, Math.round(tokens || 0)));
-  if (!maxTokens || maxTokens <= 0) return current;
-  return `${current}/${formatTokenCount(Math.round(maxTokens))}`;
-}
-
-function formatTokenCount(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
-  return String(tokens);
-}
-
-function envNumber(name: string): number | undefined {
-  const raw = process.env[name];
-  if (!raw) return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
+// Convert stored transcript turns into agent-core messages so a restored
+// session's conversation re-enters the model context. Tool chunks are stored
+// as names only (no results), so only user/assistant text is restorable.
+function turnsToMessages(turns: Turn[]): CoreMessage[] {
+  const messages: CoreMessage[] = [];
+  for (const turn of turns) {
+    if (turn.userMessage.content) {
+      messages.push({ role: "user", content: turn.userMessage.content });
+    }
+    const assistantText = (turn.assistantMessage?.chunks ?? [])
+      .filter((c) => c.type === "content" && c.contentText)
+      .map((c) => c.contentText)
+      .join("");
+    if (assistantText) {
+      messages.push({ role: "assistant", content: assistantText });
+    }
+  }
+  return messages;
 }

@@ -10,8 +10,6 @@ binary:
 	@test -x "$(BUN)" || { echo "bun is required to build $(BIN)"; exit 1; }
 	@mkdir -p dist
 	$(BUN) build --compile $(ENTRY) --outfile $(BIN)
-	@cp AGENTS.md dist/AGENTS.md
-	@cp .mcp.json dist/.mcp.json
 	@chmod +x $(BIN)
 	@echo "Built $(BIN)"
 

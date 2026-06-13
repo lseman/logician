@@ -10,6 +10,7 @@ import { ensureInsideCwd, resolvePath, summarizeDiff } from "./helpers.ts";
 const execFileAsync = promisify(execFile);
 
 export const file_diff: Tool = {
+	readOnly: true,
 	name: "file_diff",
 	executionMode: "parallel",
 	description:

@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_LIMIT = 1000;
 
 export const find: Tool = {
+	readOnly: true,
 	name: "find",
 	executionMode: "parallel",
 	description:

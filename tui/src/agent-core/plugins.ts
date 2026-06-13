@@ -12,9 +12,7 @@ type Scope = "user" | "project" | "local" | "managed";
 type HookEventType =
 	| "SessionStart"
 	| "SessionEnd"
-	| "Setup"
 	| "Stop"
-	| "Notification"
 	| "UserPromptSubmit"
 	| "PreToolUse"
 	| "PostToolUse"
@@ -74,6 +72,11 @@ interface HookExecutionResult {
 	initial_user_message: string | null;
 	watch_paths: string[];
 	raw_output: string;
+	// Structured PreToolUse decision: a hook can block ("deny") or force-allow
+	// a tool call via JSON output ({decision:"block"} / hookSpecificOutput
+	// permissionDecision) or exit code 2 (deny, stderr = reason).
+	permission_decision?: "allow" | "deny" | "ask";
+	permission_reason?: string;
 }
 
 export interface PluginCommandResult {
@@ -968,7 +971,7 @@ async function executeCommand(
 				? envNumber("LOGICIAN_STARTUP_HOOK_TIMEOUT_MS", 1200) / 1000
 				: 30),
 	);
-	const { stdout, stderr } = await runShellCommand(command.command, {
+	const { stdout, stderr, code } = await runShellCommand(command.command, {
 		cwd: hook.pluginDir,
 		env: {
 			...process.env,
@@ -978,7 +981,15 @@ async function executeCommand(
 		input: hookInput,
 		timeoutMs: timeout * 1000,
 	});
-	return parseHookResponse((stdout || stderr || "").trim());
+	const parsed = parseHookResponse((stdout || stderr || "").trim());
+	// Claude Code convention: exit code 2 = blocking error; stderr is the
+	// reason fed back to the model.
+	if (code === 2) {
+		parsed.permission_decision = "deny";
+		parsed.permission_reason =
+			parsed.permission_reason || stderr.trim() || "Blocked by hook.";
+	}
+	return parsed;
 }
 
 function parseHookResponse(rawOutput: string): HookExecutionResult {
@@ -1054,6 +1065,15 @@ function applyHookResponseObject(
 					),
 				);
 		}
+		// Claude Code PreToolUse schema: permissionDecision allow|deny|ask.
+		if (eventName === "PreToolUse") {
+			const decision = hookSpecific.permissionDecision;
+			if (decision === "allow" || decision === "deny" || decision === "ask") {
+				result.permission_decision = decision;
+				if (typeof hookSpecific.permissionDecisionReason === "string")
+					result.permission_reason = hookSpecific.permissionDecisionReason;
+			}
+		}
 		return;
 	}
 
@@ -1071,6 +1091,8 @@ function applyHookResponseObject(
 
 	if (data.decision === "block" && typeof data.reason === "string") {
 		result.additional_contexts.push(data.reason);
+		result.permission_decision = "deny";
+		result.permission_reason = result.permission_reason || data.reason;
 	}
 }
 
@@ -1130,9 +1152,7 @@ function parseHookEventType(value: string): HookEventType | null {
 	const events: HookEventType[] = [
 		"SessionStart",
 		"SessionEnd",
-		"Setup",
 		"Stop",
-		"Notification",
 		"UserPromptSubmit",
 		"PreToolUse",
 		"PostToolUse",
@@ -1161,6 +1181,15 @@ function mergeHookResult(
 		target.initial_user_message = source.initial_user_message;
 	target.watch_paths.push(...source.watch_paths);
 	if (source.raw_output) target.raw_output = source.raw_output;
+	// Merge permission decisions: deny > ask > allow (most restrictive wins).
+	if (source.permission_decision) {
+		const rank = { deny: 2, ask: 1, allow: 0 } as const;
+		const current = target.permission_decision;
+		if (!current || rank[source.permission_decision] > rank[current]) {
+			target.permission_decision = source.permission_decision;
+			target.permission_reason = source.permission_reason;
+		}
+	}
 }
 
 function emptyHookResult(): HookExecutionResult {

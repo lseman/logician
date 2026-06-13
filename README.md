@@ -478,7 +478,7 @@ Useful commands:
 
 ## MCP
 
-MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks upward from the current directory looking for `.logician.json`, `.mcp.json`, or `agent_config.json`, and finally falls back to the per-user global `~/.logician/logician.json`.
+MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks upward from the current directory looking for `.logician.json`, `.mcp.json`, or `agent_config.json`, and finally falls back to the per-user global `~/.logician/mcp.json` (standard MCP format) or `~/.logician/logician.json` (legacy logician format).
 
 ```json
 {

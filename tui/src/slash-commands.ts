@@ -53,7 +53,9 @@ export function createSlashCommands(
 
     // ── Session management ───────────────────────────────────────────────
     cmd("/new", "Start a new session", "bridge", false),
-    cmd("/sessions", "List previous sessions", "bridge", true),
+    cmd("/sessions", "List previous sessions", "local", true),
+    cmd("/save", "Save current session", "local", false),
+    cmd("/rename", "Rename current session", "local", true),
     cmd("/load", "Load a previous session (ID)", "bridge", true),
     cmd("/export", "Export chat history to file", "bridge", true),
 
@@ -166,15 +168,59 @@ export function createSlashCommands(
       return "Transcript cleared.";
     }),
 
+    // ── Permissions ──────────────────────────────────────────────────────
+    cmd(
+      "/permissions",
+      "Set permission mode (acceptAll|acceptEdits|ask|plan)",
+      "local",
+      true,
+      (args: string) => {
+        const valid = ["acceptAll", "acceptEdits", "ask", "plan"];
+        const mode = valid.find(
+          (m) => m.toLowerCase() === args.trim().toLowerCase(),
+        );
+        if (mode) {
+          localHandlers.setPermissionMode?.(mode);
+          return `Permission mode: ${mode}`;
+        }
+        return `Valid modes: ${valid.join(", ")} (current: ${
+          localHandlers.getPermissionMode?.() ?? "acceptAll"
+        })`;
+      },
+    ),
+    cmd(
+      "/plan",
+      "Toggle plan mode (read-only tools; agent presents a plan)",
+      "local",
+      false,
+      () => String(localHandlers.togglePlanMode?.() ?? "Plan mode unavailable"),
+    ),
+    cmd(
+      "/rewind",
+      "Rewind conversation to the previous checkpoint",
+      "local",
+      false,
+      () => String(localHandlers.rewind?.() ?? "Nothing to rewind."),
+    ),
+
     // ── Shortcuts ────────────────────────────────────────────────────────
     cmd("/q", "Quick quit", "quit", false),
     cmd("/quit", "Exit TUI", "quit", false),
     cmd("/exit", "Alias for /quit", "quit", false),
 
+    // ── Loop ─────────────────────────────────────────────────────────────
+    cmd(
+      "/loop",
+      "Run a prompt repeatedly (e.g. /loop 5m check the deploy)",
+      "local",
+      true,
+    ),
+
     // ── Misc ─────────────────────────────────────────────────────────────
     cmd("/version", "Show TUI and bridge version", "local", false),
     cmd("/login", "Authenticate with provider", "bridge", true),
     cmd("/export", "Export transcript", "bridge", true),
+    cmd("/jb", "Inject jb.md prompt", "bridge", false),
   ];
 }
 

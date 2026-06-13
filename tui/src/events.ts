@@ -38,6 +38,8 @@ export type BridgeEventType =
 	| "decision"
 	| "context_update"
 	| "compaction"
+	// Agent question / interactive prompt
+	| "question_request"
 	// Media
 	| "image";
 
@@ -212,6 +214,37 @@ export interface ModelSelectEvent {
 	model: string;
 }
 
+// A standalone status line (retry / error / model / stopped) rendered as its
+// own iconed, coloured chunk rather than folded into assistant prose.
+export interface NoticeEvent {
+	type: "notice";
+	level: "info" | "warn" | "error" | "success";
+	label: string;
+	text: string;
+}
+
+// A tool call is paused waiting for the user's allow/deny decision. The UI
+// answers via bridge.respondToPermission(tool_call_id, decision).
+export interface PermissionRequestEvent {
+	type: "permission_request";
+	tool_name: string;
+	tool_call_id: string;
+	args: Record<string, unknown>;
+}
+
+export interface QuestionRequestEvent {
+	type: "question_request";
+	question_id: string;
+	question: string;
+	choices: Array<{ value: string; label: string }>;
+}
+
+// Fired after every completed turn — a safe rewind point exists and the
+// conversation has been persisted. Use to show autosave indicators.
+export interface SavePointEvent {
+	type: "save_point";
+}
+
 export type ParsedBridgeEvent =
 	| TokenEvent
 	| ThinkingTokenEvent
@@ -235,7 +268,11 @@ export type ParsedBridgeEvent =
 	| ImageEvent
 	| TodosEvent
 	| SteeredEvent
-	| ModelSelectEvent;
+	| ModelSelectEvent
+	| NoticeEvent
+	| PermissionRequestEvent
+	| QuestionRequestEvent
+	| SavePointEvent;
 
 // ── Bridge commands (TUI → bridge) ────────────────────────────────────────────
 

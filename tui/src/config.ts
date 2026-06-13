@@ -21,6 +21,13 @@ export interface LogicianTuiConfig {
 		baseUrl?: string;
 		maxResults?: number;
 	};
+	permissionMode?: "acceptAll" | "acceptEdits" | "ask" | "plan";
+	permissions?: {
+		allow?: string[];
+		deny?: string[];
+	};
+	steeringInterrupt?: boolean;
+	maxTotalTokens?: number;
 }
 
 export interface ResolvedLogicianConfig {

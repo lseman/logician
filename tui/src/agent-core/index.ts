@@ -9,6 +9,9 @@ export * from "./hook-bus.ts";
 export * from "./loop.ts";
 export * from "./messages.ts";
 export * from "./parser.ts";
+export * from "./permissions.ts";
+export * from "./skills.ts";
+export * from "./subagent.ts";
 export * from "./system-prompt.ts";
 export { bash } from "./tools/bash.ts";
 export { edit_file } from "./tools/edit-file.ts";
@@ -19,7 +22,13 @@ export { list_files } from "./tools/list-files.ts";
 // Core tools
 export { read_file } from "./tools/read-file.ts";
 export * from "./tools/registry.ts";
-export { rg_search } from "./tools/search.ts";
+export { grep } from "./tools/search.ts";
+export {
+	getTaskStatus,
+	resetTaskStatus,
+	task_status,
+} from "./tools/task-status.ts";
+export type { TaskStatusRecord } from "./tools/task-status.ts";
 export type { TodoItem, TodoStatus } from "./tools/todo-write.ts";
 export { getTodos, onTodosChanged, todo_write } from "./tools/todo-write.ts";
 export { write_file } from "./tools/write-file.ts";

@@ -28,16 +28,20 @@ export class BackendError extends Error {
 	readonly status?: number;
 	/** Whether retrying the same request could succeed (rate_limit / transient). */
 	readonly retryable: boolean;
+	/** Provider-requested retry delay (Retry-After header), when present. */
+	readonly retryAfterMs?: number;
 
 	constructor(opts: {
 		category: BackendErrorCategory;
 		message: string;
 		status?: number;
+		retryAfterMs?: number;
 	}) {
 		super(opts.message);
 		this.name = "BackendError";
 		this.category = opts.category;
 		this.status = opts.status;
+		this.retryAfterMs = opts.retryAfterMs;
 		this.retryable =
 			opts.category === "rate_limit" || opts.category === "transient";
 	}
@@ -46,7 +50,11 @@ export class BackendError extends Error {
 // Classify an HTTP error response by status + body. Context-full is detected
 // from the body text since providers signal it inconsistently (400 or 413 with
 // a "context"/"too long"/"tokens" message).
-export function classifyHttpError(status: number, body: string): BackendError {
+export function classifyHttpError(
+	status: number,
+	body: string,
+	retryAfterHeader?: string | null,
+): BackendError {
 	const lower = body.toLowerCase();
 	const looksContextFull = [
 		"context",
@@ -62,7 +70,12 @@ export function classifyHttpError(status: number, body: string): BackendError {
 		return new BackendError({ category: "context_full", message, status });
 	}
 	if (status === 429) {
-		return new BackendError({ category: "rate_limit", message, status });
+		return new BackendError({
+			category: "rate_limit",
+			message,
+			status,
+			retryAfterMs: parseRetryAfter(retryAfterHeader),
+		});
 	}
 	if (status >= 500) {
 		return new BackendError({ category: "transient", message, status });
@@ -71,6 +84,23 @@ export function classifyHttpError(status: number, body: string): BackendError {
 		return new BackendError({ category: "client", message, status });
 	}
 	return new BackendError({ category: "unknown", message, status });
+}
+
+// Parse a Retry-After header: either delay-seconds or an HTTP date. Returns
+// milliseconds, clamped to [0, 5 min]; undefined when absent/unparseable.
+function parseRetryAfter(header?: string | null): number | undefined {
+	if (!header) return undefined;
+	const trimmed = header.trim();
+	const seconds = Number(trimmed);
+	let ms: number;
+	if (Number.isFinite(seconds)) {
+		ms = seconds * 1000;
+	} else {
+		const date = Date.parse(trimmed);
+		if (Number.isNaN(date)) return undefined;
+		ms = date - Date.now();
+	}
+	return Math.min(Math.max(ms, 0), 5 * 60_000);
 }
 
 // Classify a thrown network/fetch error (no HTTP response). Connection-level
@@ -253,7 +283,11 @@ export class OpenAIBackend implements LLMBackend {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			throw classifyHttpError(response.status, errorText);
+			throw classifyHttpError(
+				response.status,
+				errorText,
+				response.headers.get("retry-after"),
+			);
 		}
 
 		if (!response.body) {

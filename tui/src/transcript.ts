@@ -28,12 +28,17 @@ export interface ToolExecution {
 // ── Chunk model ───────────────────────────────────────────────────────────────
 // Ordered, typed chunks replace the old clustered [thinking[], content, tools[]].
 
+export type NoticeLevel = "info" | "warn" | "error" | "success";
+
 export interface AssistantChunk {
 	seq: number; // insertion sequence — defines display order
-	type: "thinking" | "content" | "tool";
+	type: "thinking" | "content" | "tool" | "notice";
 	// per-type fields
 	contentText?: string; // for 'thinking' and 'content'
 	tool?: ToolExecution; // for 'tool'
+	// for 'notice': a standalone status line (retry / error / model / stopped)
+	// rendered with its own icon + colour, not folded into assistant prose.
+	notice?: { level: NoticeLevel; label: string; text: string };
 	isComplete: boolean; // true when chunk is finalised
 }
 
@@ -93,6 +98,9 @@ export class Transcript {
 				break;
 			case "token":
 				this.handleToken(String(event.token || ""));
+				break;
+			case "notice":
+				this.handleNotice(event as ParsedBridgeEvent & { type: "notice" });
 				break;
 			case "thinking_token":
 				this.handleThinkingToken(String(event.token || ""));
@@ -216,6 +224,27 @@ export class Transcript {
 				isComplete: false,
 			});
 		}
+	}
+
+	// Push a status line as its own chunk so it renders distinctly (iconed,
+	// coloured) and never merges into the surrounding assistant prose. Closes any
+	// open thinking/content chunk first so the notice lands on its own line.
+	private handleNotice(event: {
+		level: NoticeLevel;
+		label: string;
+		text: string;
+	}): void {
+		const turn = this.getCurrentTurn();
+		if (!turn) return;
+		const msg = this.ensureAssistant(turn);
+		this.closeStreamingOfType("thinking", msg.chunks);
+		this.closeStreamingOfType("content", msg.chunks);
+		msg.chunks.push({
+			seq: msg.chunks.length,
+			type: "notice",
+			notice: { level: event.level, label: event.label, text: event.text },
+			isComplete: true,
+		});
 	}
 
 	private handleThinkingToken(token: string): void {
@@ -380,6 +409,16 @@ export class Transcript {
 
 	clear(): void {
 		this.state = { ...DEFAULT_STATE };
+		this.notify();
+	}
+
+	/**
+	 * Replace all turns with restored session turns (resume / session switch).
+	 * Preserves display settings; only the conversation content is swapped.
+	 */
+	loadTurns(turns: Turn[]): void {
+		this.state.turns = [...turns];
+		this.state.currentTurnId = null;
 		this.notify();
 	}
 

@@ -16,6 +16,12 @@ export interface Skill {
 	content: string;
 	filePath: string;
 	disableModelInvocation: boolean;
+	/** Tool-name allowlist suggested while this skill is active. */
+	allowedTools?: string[];
+	/** Hint shown for /skill-name argument completion. */
+	argumentHint?: string;
+	/** Preferred model for this skill (advisory). */
+	model?: string;
 }
 
 export type SkillDiagnosticCode =
@@ -36,6 +42,9 @@ interface SkillFrontmatter {
 	name?: string;
 	description?: string;
 	"disable-model-invocation"?: boolean;
+	"allowed-tools"?: string[] | string;
+	"argument-hint"?: string;
+	model?: string;
 	[key: string]: unknown;
 }
 
@@ -92,7 +101,10 @@ export function formatSkillInvocation(
 	skill: Skill,
 	additionalInstructions?: string,
 ): string {
-	const skillBlock = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\n${skill.content}\n</skill>`;
+	const toolsNote = skill.allowedTools?.length
+		? `\nPreferred tools while following this skill: ${skill.allowedTools.join(", ")}.`
+		: "";
+	const skillBlock = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\n${skill.content}\n</skill>${toolsNote}`;
 	return additionalInstructions
 		? `${skillBlock}\n\n${additionalInstructions}`
 		: skillBlock;
@@ -302,6 +314,16 @@ async function loadSkillFromFile(
 		return { skill: null, diagnostics };
 	}
 
+	const allowedToolsRaw = frontmatter["allowed-tools"];
+	const allowedTools = Array.isArray(allowedToolsRaw)
+		? allowedToolsRaw.map(String).filter(Boolean)
+		: typeof allowedToolsRaw === "string"
+			? allowedToolsRaw
+					.split(",")
+					.map((t) => t.trim())
+					.filter(Boolean)
+			: undefined;
+
 	return {
 		skill: {
 			name,
@@ -309,6 +331,13 @@ async function loadSkillFromFile(
 			content: body,
 			filePath,
 			disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+			allowedTools,
+			argumentHint:
+				typeof frontmatter["argument-hint"] === "string"
+					? frontmatter["argument-hint"]
+					: undefined,
+			model:
+				typeof frontmatter.model === "string" ? frontmatter.model : undefined,
 		},
 		diagnostics,
 	};
@@ -346,7 +375,7 @@ function validateDescription(description: string | undefined): string[] {
 	return errors;
 }
 
-function parseFrontmatter<T extends Record<string, unknown>>(
+export function parseFrontmatter<T extends Record<string, unknown>>(
 	content: string,
 ):
 	| { ok: true; value: { frontmatter: T; body: string } }
