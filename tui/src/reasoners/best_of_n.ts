@@ -16,7 +16,7 @@ export class BestOfNReasoner extends BaseReasoner {
 	config: BestOfNConfig;
 
 	constructor(
-		llm: import("../agent-core/backend.js").LLMBackend,
+		llm: import("../agent-core/core/backend.js").LLMBackend,
 		config: BestOfNConfig = {},
 	) {
 		super(llm, config);

@@ -647,11 +647,17 @@ export class TUI extends Container {
 			aboveInputLines = [];
 		}
 		const aboveInputHeight = aboveInputLines.length;
+		const aboveInputSeparatorHeight = aboveInputHeight > 0 ? 1 : 0;
 
-		// Fixed layout: transcript + divider + [pinned] + input bar + divider + status footer.
+		// Fixed layout: transcript + divider + [pinned + divider] + input bar + divider + status footer.
 		const transcriptHeight = Math.max(
 			1,
-			termHeight - 2 - aboveInputHeight - inputHeight - statusHeight,
+			termHeight -
+				2 -
+				aboveInputHeight -
+				aboveInputSeparatorHeight -
+				inputHeight -
+				statusHeight,
 		);
 		const transcriptWidth = termWidth;
 
@@ -709,6 +715,9 @@ export class TUI extends Container {
 		// 2b. Pinned region above input (todo list), when present
 		for (let i = 0; i < aboveInputHeight; i++) {
 			lines.push(aboveInputLines[i] || " ".repeat(termWidth));
+		}
+		if (aboveInputSeparatorHeight > 0) {
+			lines.push(`\x1b[38;5;236m${"─".repeat(termWidth)}\x1b[0m`);
 		}
 
 		// 3. Input bar (fixed)

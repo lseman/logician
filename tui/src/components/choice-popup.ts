@@ -5,6 +5,7 @@
 // the agent's tool call / pending question.
 
 import { type Component, visibleWidth } from "../tui-core.ts";
+import { theme } from "../theme.ts";
 
 export interface ChoiceItem {
 	/** The value sent back to the agent when selected. */
@@ -25,9 +26,9 @@ export interface ChoicePopupOptions {
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const QUESTION_COLOR = "\x1b[38;5;159m"; // aqua
-const SELECTED_COLOR = "\x1b[38;5;111m"; // green
-const KEY_COLOR = "\x1b[38;5;245m"; // dim gray
+const getQuestionColor = (): string => theme.fg("header", "");
+const getSelectedColor = (): string => theme.fg("selected", "");
+const getKeyColor = (): string => theme.fg("muted", "");
 
 export class ChoicePopup implements Component {
 	private question = "";
@@ -195,7 +196,7 @@ export class ChoicePopup implements Component {
 		const lines: string[] = [];
 
 		// Question line
-		const qLine = ` ${QUESTION_COLOR}${BOLD}${this.question.slice(0, contentWidth)}${RESET}`;
+		const qLine = ` ${getQuestionColor()}${BOLD}${this.question.slice(0, contentWidth)}${RESET}`;
 		lines.push(qLine);
 
 		// Choices
@@ -206,13 +207,19 @@ export class ChoicePopup implements Component {
 
 			// Key hint: show the key in brackets (e.g. [1], [2])
 			const keyHint = isSelected
-				? ` ${KEY_COLOR}[${i + 1}]${RESET}`
-				: ` ${KEY_COLOR}[${i + 1}]${RESET}`;
+				? ` ${getKeyColor()}[${i + 1}]${RESET}`
+				: ` ${getKeyColor()}[${i + 1}]${RESET}`;
 
 			let label = ch.label;
-			// Truncate long labels to fit
-			const prefixWidth = visibleWidth(`${keyHint} `) + numLabel.length + 1;
-			const maxLabel = contentWidth - prefixWidth - 2;
+			// Truncate long labels to fit.
+			// Selected line: ` ${color}${keyHint} ${numLabel} ${BOLD}${label}${RESET}`
+			//   visible prefix = 1 + 4 + 1 + 2 + 1 = 9
+			// Unselected:    `   ${keyHint}   ${numLabel} ${label}`
+			//   visible prefix = 3 + 4 + 3 + 2 + 1 = 13
+			const prefixLen = isSelected
+				? 1 + 4 + 1 + 2 + 1
+				: 3 + 4 + 3 + 2 + 1;
+			const maxLabel = contentWidth - prefixLen - 2;
 			if (maxLabel > 0 && visibleWidth(label) > maxLabel) {
 				// Strip ANSI codes, truncate, re-add reset
 				const plain = label.replace(/\x1b\[[0-9;]*m/g, "");
@@ -222,13 +229,13 @@ export class ChoicePopup implements Component {
 			}
 
 			const line = isSelected
-				? ` ${SELECTED_COLOR}${keyHint} ${numLabel} ${BOLD}${label}${RESET}`
+				? ` ${getSelectedColor()}${keyHint} ${numLabel} ${BOLD}${label}${RESET}`
 				: `   ${keyHint}   ${numLabel} ${label}`;
 			lines.push(line);
 		}
 
 		// Hint bar
-	 const hint = `${DIM}↑↓ navigate · 1-9 select · ⏎ confirm · Tab accept · Esc dismiss${RESET}`;
+		const hint = `${DIM}↑↓ navigate · 1-9 select · ⏎ confirm · Tab accept · Esc dismiss${RESET}`;
 		lines.push(`  ${hint}`);
 
 		this.cachedLines = lines;

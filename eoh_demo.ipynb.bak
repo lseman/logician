@@ -1,0 +1,612 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "17812807",
+   "metadata": {},
+   "source": [
+    "# Evolution of Heuristics (EoH) — Demo\n",
+    "\n",
+    "This notebook demonstrates the full EoH workflow:\n",
+    "\n",
+    "1. **Create an agent** backed by a local LLM (llama.cpp or vLLM)\n",
+    "2. **Define a problem** satisfying `ProblemAPI`\n",
+    "3. **Configure `EvalSpec`** — problem + training instances + metaheuristic\n",
+    "4. **Configure `EoHConfig`** — population size, generations, strategy, budgets\n",
+    "5. **Run `run_eoh()`** — evolve heuristics over the specified generations\n",
+    "6. **Inspect results** — best individual, hall-of-fame, convergence history\n",
+    "\n",
+    "The problem used here is the `SphereProblem` (minimise $\\sum x_i^2$), which is\n",
+    "small and fast — useful for verifying the pipeline before applying EoH to real tasks."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "957fc104",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Working directory: /data/back_home/baseline/foreblocks/agent\n"
+     ]
+    }
+   ],
+   "source": [
+    "import sys\n",
+    "import json\n",
+    "import random\n",
+    "from pathlib import Path\n",
+    "\n",
+    "# Make sure we can import the local src package\n",
+    "ROOT = Path(\".\").resolve()\n",
+    "if str(ROOT) not in sys.path:\n",
+    "    sys.path.insert(0, str(ROOT))\n",
+    "\n",
+    "print(\"Working directory:\", ROOT)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "dc2de0f8",
+   "metadata": {},
+   "source": [
+    "## 1. Create the Agent\n",
+    "\n",
+    "`create_agent()` wraps the LLM backend and all tool/skill infrastructure.\n",
+    "Point `llm_url` at your running llama.cpp or vLLM server."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "765abacd",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Agent ready: Agent\n"
+     ]
+    }
+   ],
+   "source": [
+    "from src.agent.factory import create_agent\n",
+    "\n",
+    "LLM_URL = \"http://localhost:8080\"   # ← change to your endpoint\n",
+    "\n",
+    "agent = create_agent(\n",
+    "    llm_url=LLM_URL,\n",
+    "    use_chat_api=True,\n",
+    "    chat_template=\"chatml\",\n",
+    "    db_path=\"/tmp/eoh_demo_sessions.db\",\n",
+    "    embedding_model=None,           # disable RAG for speed\n",
+    "    config_overrides={\n",
+    "        \"temperature\": 0.7,\n",
+    "        \"max_tokens\": 1600,\n",
+    "        \"max_iterations\": 1,        # EoH manages its own loop; keep agent passes minimal\n",
+    "    },\n",
+    ")\n",
+    "\n",
+    "print(\"Agent ready:\", type(agent).__name__)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "a591199f",
+   "metadata": {},
+   "source": [
+    "## 2. Define the Problem\n",
+    "\n",
+    "We use the built-in `SphereProblem` (continuous minimisation).\n",
+    "Any class that implements the `ProblemAPI` protocol works here."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "2a4eb785",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Problem : SphereProblem  sense=min  dim=12\n",
+      "Train   : 12 instances\n",
+      "Valid   : 6 instances\n",
+      "\n",
+      "API description (injected into LLM prompts):\n",
+      "ProblemAPI:\n",
+      "  - problem.sense is \"min\" or \"max\"\n",
+      "  - problem.random_solution(instance, rng) -> solution\n",
+      "  - problem.objective(solution, instance) -> float\n",
+      "  - problem.is_feasible(solution, instance) -> bool\n",
+      "  - optional: problem.repair(solution, instance, rng) -> solution\n",
+      "  - optional: problem.move_neighborhood(solution, instance, rng) -> move\n",
+      "  - optional: problem.apply_move(solution, move, instance, rng) -> solution\n",
+      "\n",
+      "MetaheuristicAPI (used in evaluation):\n",
+      "  - metaheuristic.run(problem, instance, hooks, budget, rng) -> RunTrace\n",
+      "\n",
+      "Your heuristic must output build_hooks()->dict with any subset of:\n",
+      "  init_solution / propose_move / apply_move / accept_move / update_params / restart\n",
+      "\n",
+      "GA conventions:\n",
+      "  - propose_move() may return {\"op\":\"mutate\", ...} or {\"op\":\"crossover\",\"mate\":sol,...}.\n",
+      "  - apply_move() should understand the move object you emit.\n"
+     ]
+    }
+   ],
+   "source": [
+    "from src.eoh.examples.sphere import SphereProblem, make_sphere_instances, example_api_desc\n",
+    "\n",
+    "DIM   = 12      # search-space dimensionality\n",
+    "BOUND = 5.0     # coordinate bounds [-5, 5]\n",
+    "\n",
+    "problem = SphereProblem(dim=DIM, bound=BOUND)\n",
+    "\n",
+    "# Training instances (seen during evolution)\n",
+    "train_instances = make_sphere_instances(n=12, dim=DIM, bound=BOUND)\n",
+    "\n",
+    "# Validation instances (held-out; used for final scoring only)\n",
+    "valid_instances = make_sphere_instances(n=6,  dim=DIM, bound=BOUND)\n",
+    "\n",
+    "print(f\"Problem : {problem.__class__.__name__}  sense={problem.sense}  dim={DIM}\")\n",
+    "print(f\"Train   : {len(train_instances)} instances\")\n",
+    "print(f\"Valid   : {len(valid_instances)} instances\")\n",
+    "print()\n",
+    "print(\"API description (injected into LLM prompts):\")\n",
+    "print(example_api_desc())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "900a0006",
+   "metadata": {},
+   "source": [
+    "## 3. Build the `EvalSpec`\n",
+    "\n",
+    "`EvalSpec` groups the problem, its instances, and the metaheuristic driver.\n",
+    "Leaving `metaheuristic=None` lets EoH default to its built-in Genetic Algorithm."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "60cc2f7c",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Metaheuristic: ga\n"
+     ]
+    }
+   ],
+   "source": [
+    "from src.eoh.evaluation import EvalSpec\n",
+    "from src.eoh.metaheuristics.ga import GeneticAlgorithm, GAConfig\n",
+    "\n",
+    "ga = GeneticAlgorithm(GAConfig(pop_size=24))\n",
+    "\n",
+    "eval_spec = EvalSpec(\n",
+    "    problem=problem,\n",
+    "    instances_train=train_instances,\n",
+    "    instances_valid=valid_instances,\n",
+    "    metaheuristic=ga,\n",
+    ")\n",
+    "\n",
+    "print(\"Metaheuristic:\", ga.name)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "30d805db",
+   "metadata": {},
+   "source": [
+    "## 4. Configure EoH\n",
+    "\n",
+    "Key knobs:\n",
+    "\n",
+    "| Parameter | Meaning |\n",
+    "|---|---|\n",
+    "| `pop_size` | Individuals in the population |\n",
+    "| `elite_k` | Top-k kept every generation |\n",
+    "| `offspring_per_gen` | New individuals created per generation |\n",
+    "| `generations` | Number of evolution rounds |\n",
+    "| `strategy` | `\"e1\"` (mutation/crossover) or `\"e2\"` (self-improve) |\n",
+    "| `progressive` | Stage evaluations (cheap → full) to discard bad candidates early |\n",
+    "| `stage_instances` | How many training instances per stage |\n",
+    "| `stage_budgets` | Budget per instance per stage |"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "b5e794a9",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "EoHConfig(pop_size=8, elite_k=3, offspring_per_gen=8, generations=5, strategy='e1', representation='thought+code', tournament_k=4, crossover_rate=0.35, temperature=0.7, max_tokens=1400, enforce_markers=True, allow_code_only_fallback=True, max_code_chars=16000, llm_retries=2, reformat_retries=1, new_session_per_call=True, agent_verbose=False, agent_use_semantic=False, max_parent_code_in_prompt=7000, max_parent_thought_in_prompt=1800, max_exemplar_code_in_prompt=4500, max_exemplar_thought_in_prompt=1200, cache_enabled=True, prompt_cache_enabled=True, progressive=True, stage_budgets=(Budget(max_iters=60, max_time_s=0.1), Budget(max_iters=140, max_time_s=0.22)), stage_instances=(3, 8), parallel_eval=False, max_workers=0, w_mean=1.0, w_cvar=0.3, cvar_alpha=0.25, w_feas=0.8, w_time=0.15, infeas_quality_penalty=1000000000000.0)\n"
+     ]
+    }
+   ],
+   "source": [
+    "from src.eoh.models import EoHConfig\n",
+    "from src.eoh.types import Budget\n",
+    "\n",
+    "cfg = EoHConfig(\n",
+    "    # Population\n",
+    "    pop_size=8,\n",
+    "    elite_k=3,\n",
+    "    offspring_per_gen=8,\n",
+    "    generations=5,           # increase for real runs (15–30)\n",
+    "\n",
+    "    # Search strategy\n",
+    "    strategy=\"e1\",            # \"e1\": mutation + crossover\n",
+    "    representation=\"thought+code\",\n",
+    "    crossover_rate=0.35,\n",
+    "\n",
+    "    # LLM sampling\n",
+    "    temperature=0.7,\n",
+    "    max_tokens=1400,\n",
+    "    new_session_per_call=True,\n",
+    "\n",
+    "    # Progressive evaluation (cheap stage first, full stage only for survivors)\n",
+    "    progressive=True,\n",
+    "    stage_instances=(3, 8),\n",
+    "    stage_budgets=(\n",
+    "        Budget(max_iters=60,  max_time_s=0.10),   # fast screening\n",
+    "        Budget(max_iters=140, max_time_s=0.22),   # full evaluation\n",
+    "    ),\n",
+    "\n",
+    "    # Fitness weights\n",
+    "    w_mean=1.0,\n",
+    "    w_cvar=0.3,\n",
+    "    w_feas=0.8,\n",
+    "    w_time=0.15,\n",
+    "\n",
+    "    # Caching (avoids re-querying the LLM for identical prompts)\n",
+    "    cache_enabled=True,\n",
+    "    prompt_cache_enabled=True,\n",
+    "\n",
+    "    # Parallelism\n",
+    "    parallel_eval=False,      # set True and max_workers>0 to parallelise eval\n",
+    ")\n",
+    "\n",
+    "print(cfg)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "acd1bb5c",
+   "metadata": {},
+   "source": [
+    "## 5. Run EoH\n",
+    "\n",
+    "`run_eoh()` temporarily replaces the agent's system prompt with the EoH system\n",
+    "prompt, runs `EoHEngine.evolve()`, then restores it."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "555356c3",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/tqdm/auto.py:21: TqdmWarning: IProgress not found. Please update jupyter and ipywidgets. See https://ipywidgets.readthedocs.io/en/stable/user_install.html\n",
+      "  from .autonotebook import tqdm as notebook_tqdm\n",
+      "Loading weights: 100%|██████████| 199/199 [00:00<00:00, 2954.16it/s, Materializing param=pooler.dense.weight]                               \n",
+      "\u001b[1mBertModel LOAD REPORT\u001b[0m from: BAAI/bge-base-en-v1.5\n",
+      "Key                     | Status     |  | \n",
+      "------------------------+------------+--+-\n",
+      "embeddings.position_ids | UNEXPECTED |  | \n",
+      "\n",
+      "\u001b[3mNotes:\n",
+      "- UNEXPECTED\u001b[3m\t:can be ignored when loading from different task/architecture; not ok if you expect identical arch.\u001b[0m\n"
+     ]
+    },
+    {
+     "ename": "KeyboardInterrupt",
+     "evalue": "",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[31m---------------------------------------------------------------------------\u001b[39m",
+      "\u001b[31mKeyboardInterrupt\u001b[39m                         Traceback (most recent call last)",
+      "\u001b[36mCell\u001b[39m\u001b[36m \u001b[39m\u001b[32mIn[6]\u001b[39m\u001b[32m, line 10\u001b[39m\n\u001b[32m      1\u001b[39m \u001b[38;5;28;01mfrom\u001b[39;00m\u001b[38;5;250m \u001b[39m\u001b[34;01msrc\u001b[39;00m\u001b[34;01m.\u001b[39;00m\u001b[34;01meoh\u001b[39;00m\u001b[34;01m.\u001b[39;00m\u001b[34;01mrunner\u001b[39;00m\u001b[38;5;250m \u001b[39m\u001b[38;5;28;01mimport\u001b[39;00m run_eoh\n\u001b[32m      3\u001b[39m TASK_DESC = (\n\u001b[32m      4\u001b[39m     \u001b[33m\"\u001b[39m\u001b[33mEvolve a generic heuristic policy (hook dict) to improve the metaheuristic\u001b[39m\u001b[33m'\u001b[39m\u001b[33ms \u001b[39m\u001b[33m\"\u001b[39m\n\u001b[32m      5\u001b[39m     \u001b[33m\"\u001b[39m\u001b[33mperformance on the given ProblemAPI. \u001b[39m\u001b[33m\"\u001b[39m\n\u001b[32m      6\u001b[39m     \u001b[33m\"\u001b[39m\u001b[33mOptimise for: feasibility, fast convergence, and stable improvements across \u001b[39m\u001b[33m\"\u001b[39m\n\u001b[32m      7\u001b[39m     \u001b[33m\"\u001b[39m\u001b[33mdifferent random seeds.\u001b[39m\u001b[33m\"\u001b[39m\n\u001b[32m      8\u001b[39m )\n\u001b[32m---> \u001b[39m\u001b[32m10\u001b[39m result = \u001b[43mrun_eoh\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m     11\u001b[39m \u001b[43m    \u001b[49m\u001b[43magent\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     12\u001b[39m \u001b[43m    \u001b[49m\u001b[43mtask_desc\u001b[49m\u001b[43m=\u001b[49m\u001b[43mTASK_DESC\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     13\u001b[39m \u001b[43m    \u001b[49m\u001b[43mapi_desc\u001b[49m\u001b[43m=\u001b[49m\u001b[43mexample_api_desc\u001b[49m\u001b[43m(\u001b[49m\u001b[43m)\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     14\u001b[39m \u001b[43m    \u001b[49m\u001b[43meval_spec\u001b[49m\u001b[43m=\u001b[49m\u001b[43meval_spec\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     15\u001b[39m \u001b[43m    \u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m=\u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     16\u001b[39m \u001b[43m    \u001b[49m\u001b[43mrng_seed\u001b[49m\u001b[43m=\u001b[49m\u001b[32;43m42\u001b[39;49m\u001b[43m,\u001b[49m\n\u001b[32m     17\u001b[39m \u001b[43m)\u001b[49m\n\u001b[32m     19\u001b[39m \u001b[38;5;28mprint\u001b[39m(\u001b[33m\"\u001b[39m\u001b[33mEoH complete.\u001b[39m\u001b[33m\"\u001b[39m)\n\u001b[32m     20\u001b[39m \u001b[38;5;28mprint\u001b[39m(\u001b[33mf\u001b[39m\u001b[33m\"\u001b[39m\u001b[33mBest fitness : \u001b[39m\u001b[38;5;132;01m{\u001b[39;00mresult.best.fitness\u001b[38;5;132;01m:\u001b[39;00m\u001b[33m.4f\u001b[39m\u001b[38;5;132;01m}\u001b[39;00m\u001b[33m\"\u001b[39m)\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/eoh/runner.py:62\u001b[39m, in \u001b[36mrun_eoh\u001b[39m\u001b[34m(agent, task_desc, api_desc, eval_spec, cfg, rng_seed, baseline)\u001b[39m\n\u001b[32m     60\u001b[39m     \u001b[38;5;28;01mif\u001b[39;00m old_sys \u001b[38;5;129;01mis\u001b[39;00m \u001b[38;5;129;01mnot\u001b[39;00m \u001b[38;5;28;01mNone\u001b[39;00m:\n\u001b[32m     61\u001b[39m         agent.system_prompt = EOH_SYSTEM_PROMPT\n\u001b[32m---> \u001b[39m\u001b[32m62\u001b[39m     \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[43mengine\u001b[49m\u001b[43m.\u001b[49m\u001b[43mevolve\u001b[49m\u001b[43m(\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m     63\u001b[39m \u001b[38;5;28;01mfinally\u001b[39;00m:\n\u001b[32m     64\u001b[39m     \u001b[38;5;28;01mif\u001b[39;00m old_sys \u001b[38;5;129;01mis\u001b[39;00m \u001b[38;5;129;01mnot\u001b[39;00m \u001b[38;5;28;01mNone\u001b[39;00m:\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/eoh/engine.py:422\u001b[39m, in \u001b[36mEoHEngine.evolve\u001b[39m\u001b[34m(self)\u001b[39m\n\u001b[32m    420\u001b[39m \u001b[38;5;28;01melse\u001b[39;00m:\n\u001b[32m    421\u001b[39m     p = \u001b[38;5;28mself\u001b[39m._tournament(pop)\n\u001b[32m--> \u001b[39m\u001b[32m422\u001b[39m     parsed = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_ask_parse\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m    423\u001b[39m \u001b[43m        \u001b[49m\u001b[43m_e1_mutation_prompt\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m    424\u001b[39m \u001b[43m            \u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mtask_desc\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mapi_desc\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43mp\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mcfg\u001b[49m\n\u001b[32m    425\u001b[39m \u001b[43m        \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    426\u001b[39m \u001b[43m    \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    427\u001b[39m     \u001b[38;5;28;01mif\u001b[39;00m \u001b[38;5;129;01mnot\u001b[39;00m parsed:\n\u001b[32m    428\u001b[39m         \u001b[38;5;28;01mcontinue\u001b[39;00m\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/eoh/engine.py:112\u001b[39m, in \u001b[36mEoHEngine._ask_parse\u001b[39m\u001b[34m(self, user_prompt)\u001b[39m\n\u001b[32m    110\u001b[39m last_text = \u001b[33m\"\u001b[39m\u001b[33m\"\u001b[39m\n\u001b[32m    111\u001b[39m \u001b[38;5;28;01mfor\u001b[39;00m _ \u001b[38;5;129;01min\u001b[39;00m \u001b[38;5;28mrange\u001b[39m(\u001b[38;5;28mself\u001b[39m.cfg.llm_retries + \u001b[32m1\u001b[39m):\n\u001b[32m--> \u001b[39m\u001b[32m112\u001b[39m     text = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_llm_cached\u001b[49m\u001b[43m(\u001b[49m\u001b[43muser_prompt\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    113\u001b[39m     last_text = text\n\u001b[32m    115\u001b[39m     parsed = parse_thought_code(text)\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/eoh/engine.py:105\u001b[39m, in \u001b[36mEoHEngine._llm_cached\u001b[39m\u001b[34m(self, prompt)\u001b[39m\n\u001b[32m    103\u001b[39m key = hashlib.sha256(prompt.encode(\u001b[33m\"\u001b[39m\u001b[33mutf-8\u001b[39m\u001b[33m\"\u001b[39m, errors=\u001b[33m\"\u001b[39m\u001b[33mignore\u001b[39m\u001b[33m\"\u001b[39m)).hexdigest()\n\u001b[32m    104\u001b[39m \u001b[38;5;28;01mif\u001b[39;00m key \u001b[38;5;129;01mnot\u001b[39;00m \u001b[38;5;129;01min\u001b[39;00m \u001b[38;5;28mself\u001b[39m._prompt_cache:\n\u001b[32m--> \u001b[39m\u001b[32m105\u001b[39m     \u001b[38;5;28mself\u001b[39m._prompt_cache[key] = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_agent_generate\u001b[49m\u001b[43m(\u001b[49m\u001b[43mprompt\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    106\u001b[39m \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[38;5;28mself\u001b[39m._prompt_cache[key]\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/eoh/engine.py:82\u001b[39m, in \u001b[36mEoHEngine._agent_generate\u001b[39m\u001b[34m(self, user_prompt)\u001b[39m\n\u001b[32m     79\u001b[39m session_id = \u001b[38;5;28mstr\u001b[39m(uuid.uuid4()) \u001b[38;5;28;01mif\u001b[39;00m \u001b[38;5;28mself\u001b[39m.cfg.new_session_per_call \u001b[38;5;28;01melse\u001b[39;00m \u001b[38;5;28;01mNone\u001b[39;00m\n\u001b[32m     81\u001b[39m \u001b[38;5;28;01mif\u001b[39;00m \u001b[38;5;28mhasattr\u001b[39m(\u001b[38;5;28mself\u001b[39m.agent, \u001b[33m\"\u001b[39m\u001b[33mrun\u001b[39m\u001b[33m\"\u001b[39m):\n\u001b[32m---> \u001b[39m\u001b[32m82\u001b[39m     resp = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43magent\u001b[49m\u001b[43m.\u001b[49m\u001b[43mrun\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m     83\u001b[39m \u001b[43m        \u001b[49m\u001b[43muser_prompt\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     84\u001b[39m \u001b[43m        \u001b[49m\u001b[43msession_id\u001b[49m\u001b[43m=\u001b[49m\u001b[43msession_id\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     85\u001b[39m \u001b[43m        \u001b[49m\u001b[43mtemperature\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m.\u001b[49m\u001b[43mtemperature\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     86\u001b[39m \u001b[43m        \u001b[49m\u001b[43mmax_tokens\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m.\u001b[49m\u001b[43mmax_tokens\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     87\u001b[39m \u001b[43m        \u001b[49m\u001b[43mverbose\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m.\u001b[49m\u001b[43magent_verbose\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     88\u001b[39m \u001b[43m        \u001b[49m\u001b[43muse_semantic_retrieval\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mcfg\u001b[49m\u001b[43m.\u001b[49m\u001b[43magent_use_semantic\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m     89\u001b[39m \u001b[43m        \u001b[49m\u001b[43mstream_callback\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43;01mNone\u001b[39;49;00m\u001b[43m,\u001b[49m\n\u001b[32m     90\u001b[39m \u001b[43m    \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m     91\u001b[39m     \u001b[38;5;28;01mreturn\u001b[39;00m resp.final_response\n\u001b[32m     93\u001b[39m \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[38;5;28mself\u001b[39m.agent.chat(\n\u001b[32m     94\u001b[39m     user_prompt,\n\u001b[32m     95\u001b[39m     session_id=session_id,\n\u001b[32m     96\u001b[39m     verbose=\u001b[38;5;28mself\u001b[39m.cfg.agent_verbose,\n\u001b[32m     97\u001b[39m     use_semantic_retrieval=\u001b[38;5;28mself\u001b[39m.cfg.agent_use_semantic,\n\u001b[32m     98\u001b[39m )\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/agent/core.py:1038\u001b[39m, in \u001b[36mAgent.run\u001b[39m\u001b[34m(self, message, session_id, temperature, max_tokens, verbose, use_semantic_retrieval, retrieval_mode, stream_callback, fresh_session)\u001b[39m\n\u001b[32m   1036\u001b[39m gen_start = time.perf_counter()\n\u001b[32m   1037\u001b[39m \u001b[38;5;28;01mtry\u001b[39;00m:\n\u001b[32m-> \u001b[39m\u001b[32m1038\u001b[39m     text = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mllm\u001b[49m\u001b[43m.\u001b[49m\u001b[43mgenerate\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m   1039\u001b[39m \u001b[43m        \u001b[49m\u001b[43mllm_convo\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m   1040\u001b[39m \u001b[43m        \u001b[49m\u001b[43mtemperature\u001b[49m\u001b[43m=\u001b[49m\u001b[43mtemp\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m   1041\u001b[39m \u001b[43m        \u001b[49m\u001b[43mmax_tokens\u001b[49m\u001b[43m=\u001b[49m\u001b[43mn_tok\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m   1042\u001b[39m \u001b[43m        \u001b[49m\u001b[43mstream\u001b[49m\u001b[43m=\u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mconfig\u001b[49m\u001b[43m.\u001b[49m\u001b[43mstream\u001b[49m\u001b[43m \u001b[49m\u001b[38;5;129;43;01mand\u001b[39;49;00m\u001b[43m \u001b[49m\u001b[43mstream_callback\u001b[49m\u001b[43m \u001b[49m\u001b[38;5;129;43;01mis\u001b[39;49;00m\u001b[43m \u001b[49m\u001b[38;5;129;43;01mnot\u001b[39;49;00m\u001b[43m \u001b[49m\u001b[38;5;28;43;01mNone\u001b[39;49;00m\u001b[43m,\u001b[49m\n\u001b[32m   1043\u001b[39m \u001b[43m        \u001b[49m\u001b[43mon_token\u001b[49m\u001b[43m=\u001b[49m\u001b[43mstream_callback\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m   1044\u001b[39m \u001b[43m    \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m   1045\u001b[39m \u001b[38;5;28;01mexcept\u001b[39;00m \u001b[38;5;167;01mException\u001b[39;00m \u001b[38;5;28;01mas\u001b[39;00m e:\n\u001b[32m   1046\u001b[39m     gen_dur = time.perf_counter() - gen_start\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/backends.py:190\u001b[39m, in \u001b[36mLlamaCppClient.generate\u001b[39m\u001b[34m(self, messages, temperature, max_tokens, stream, on_token)\u001b[39m\n\u001b[32m    188\u001b[39m     \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[33m\"\u001b[39m\u001b[33m\"\u001b[39m.join(full).strip()\n\u001b[32m    189\u001b[39m \u001b[38;5;28;01melse\u001b[39;00m:\n\u001b[32m--> \u001b[39m\u001b[32m190\u001b[39m     r = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_request\u001b[49m\u001b[43m(\u001b[49m\u001b[43mclient\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[33;43m\"\u001b[39;49m\u001b[33;43mPOST\u001b[39;49m\u001b[33;43m\"\u001b[39;49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43murl\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43mjson\u001b[49m\u001b[43m=\u001b[49m\u001b[43mpayload\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    191\u001b[39m     data = r.json()\n\u001b[32m    192\u001b[39m     \u001b[38;5;28;01mreturn\u001b[39;00m data[\u001b[33m\"\u001b[39m\u001b[33mchoices\u001b[39m\u001b[33m\"\u001b[39m][\u001b[32m0\u001b[39m][\u001b[33m\"\u001b[39m\u001b[33mmessage\u001b[39m\u001b[33m\"\u001b[39m][\u001b[33m\"\u001b[39m\u001b[33mcontent\u001b[39m\u001b[33m\"\u001b[39m].strip()\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/src/backends.py:99\u001b[39m, in \u001b[36mLlamaCppClient._request\u001b[39m\u001b[34m(self, client, method, url, **kw)\u001b[39m\n\u001b[32m     97\u001b[39m \u001b[38;5;28;01mtry\u001b[39;00m:\n\u001b[32m     98\u001b[39m     \u001b[38;5;28mself\u001b[39m._log.debug(\u001b[33m\"\u001b[39m\u001b[33mHTTP \u001b[39m\u001b[38;5;132;01m%s\u001b[39;00m\u001b[33m \u001b[39m\u001b[38;5;132;01m%s\u001b[39;00m\u001b[33m (attempt \u001b[39m\u001b[38;5;132;01m%d\u001b[39;00m\u001b[33m)\u001b[39m\u001b[33m\"\u001b[39m, method, url, attempt)\n\u001b[32m---> \u001b[39m\u001b[32m99\u001b[39m     resp = \u001b[43mclient\u001b[49m\u001b[43m.\u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m(\u001b[49m\u001b[43mmethod\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43murl\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43m*\u001b[49m\u001b[43m*\u001b[49m\u001b[43mkw\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    100\u001b[39m     resp.raise_for_status()\n\u001b[32m    101\u001b[39m     \u001b[38;5;28;01mreturn\u001b[39;00m resp\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpx/_client.py:825\u001b[39m, in \u001b[36mClient.request\u001b[39m\u001b[34m(self, method, url, content, data, files, json, params, headers, cookies, auth, follow_redirects, timeout, extensions)\u001b[39m\n\u001b[32m    810\u001b[39m     warnings.warn(message, \u001b[38;5;167;01mDeprecationWarning\u001b[39;00m, stacklevel=\u001b[32m2\u001b[39m)\n\u001b[32m    812\u001b[39m request = \u001b[38;5;28mself\u001b[39m.build_request(\n\u001b[32m    813\u001b[39m     method=method,\n\u001b[32m    814\u001b[39m     url=url,\n\u001b[32m   (...)\u001b[39m\u001b[32m    823\u001b[39m     extensions=extensions,\n\u001b[32m    824\u001b[39m )\n\u001b[32m--> \u001b[39m\u001b[32m825\u001b[39m \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43msend\u001b[49m\u001b[43m(\u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43mauth\u001b[49m\u001b[43m=\u001b[49m\u001b[43mauth\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43mfollow_redirects\u001b[49m\u001b[43m=\u001b[49m\u001b[43mfollow_redirects\u001b[49m\u001b[43m)\u001b[49m\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpx/_client.py:914\u001b[39m, in \u001b[36mClient.send\u001b[39m\u001b[34m(self, request, stream, auth, follow_redirects)\u001b[39m\n\u001b[32m    910\u001b[39m \u001b[38;5;28mself\u001b[39m._set_timeout(request)\n\u001b[32m    912\u001b[39m auth = \u001b[38;5;28mself\u001b[39m._build_request_auth(request, auth)\n\u001b[32m--> \u001b[39m\u001b[32m914\u001b[39m response = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_send_handling_auth\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m    915\u001b[39m \u001b[43m    \u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    916\u001b[39m \u001b[43m    \u001b[49m\u001b[43mauth\u001b[49m\u001b[43m=\u001b[49m\u001b[43mauth\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    917\u001b[39m \u001b[43m    \u001b[49m\u001b[43mfollow_redirects\u001b[49m\u001b[43m=\u001b[49m\u001b[43mfollow_redirects\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    918\u001b[39m \u001b[43m    \u001b[49m\u001b[43mhistory\u001b[49m\u001b[43m=\u001b[49m\u001b[43m[\u001b[49m\u001b[43m]\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    919\u001b[39m \u001b[43m\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    920\u001b[39m \u001b[38;5;28;01mtry\u001b[39;00m:\n\u001b[32m    921\u001b[39m     \u001b[38;5;28;01mif\u001b[39;00m \u001b[38;5;129;01mnot\u001b[39;00m stream:\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpx/_client.py:942\u001b[39m, in \u001b[36mClient._send_handling_auth\u001b[39m\u001b[34m(self, request, auth, follow_redirects, history)\u001b[39m\n\u001b[32m    939\u001b[39m request = \u001b[38;5;28mnext\u001b[39m(auth_flow)\n\u001b[32m    941\u001b[39m \u001b[38;5;28;01mwhile\u001b[39;00m \u001b[38;5;28;01mTrue\u001b[39;00m:\n\u001b[32m--> \u001b[39m\u001b[32m942\u001b[39m     response = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_send_handling_redirects\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m    943\u001b[39m \u001b[43m        \u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    944\u001b[39m \u001b[43m        \u001b[49m\u001b[43mfollow_redirects\u001b[49m\u001b[43m=\u001b[49m\u001b[43mfollow_redirects\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    945\u001b[39m \u001b[43m        \u001b[49m\u001b[43mhistory\u001b[49m\u001b[43m=\u001b[49m\u001b[43mhistory\u001b[49m\u001b[43m,\u001b[49m\n\u001b[32m    946\u001b[39m \u001b[43m    \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    947\u001b[39m     \u001b[38;5;28;01mtry\u001b[39;00m:\n\u001b[32m    948\u001b[39m         \u001b[38;5;28;01mtry\u001b[39;00m:\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpx/_client.py:979\u001b[39m, in \u001b[36mClient._send_handling_redirects\u001b[39m\u001b[34m(self, request, follow_redirects, history)\u001b[39m\n\u001b[32m    976\u001b[39m \u001b[38;5;28;01mfor\u001b[39;00m hook \u001b[38;5;129;01min\u001b[39;00m \u001b[38;5;28mself\u001b[39m._event_hooks[\u001b[33m\"\u001b[39m\u001b[33mrequest\u001b[39m\u001b[33m\"\u001b[39m]:\n\u001b[32m    977\u001b[39m     hook(request)\n\u001b[32m--> \u001b[39m\u001b[32m979\u001b[39m response = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_send_single_request\u001b[49m\u001b[43m(\u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    980\u001b[39m \u001b[38;5;28;01mtry\u001b[39;00m:\n\u001b[32m    981\u001b[39m     \u001b[38;5;28;01mfor\u001b[39;00m hook \u001b[38;5;129;01min\u001b[39;00m \u001b[38;5;28mself\u001b[39m._event_hooks[\u001b[33m\"\u001b[39m\u001b[33mresponse\u001b[39m\u001b[33m\"\u001b[39m]:\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpx/_client.py:1014\u001b[39m, in \u001b[36mClient._send_single_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m   1009\u001b[39m     \u001b[38;5;28;01mraise\u001b[39;00m \u001b[38;5;167;01mRuntimeError\u001b[39;00m(\n\u001b[32m   1010\u001b[39m         \u001b[33m\"\u001b[39m\u001b[33mAttempted to send an async request with a sync Client instance.\u001b[39m\u001b[33m\"\u001b[39m\n\u001b[32m   1011\u001b[39m     )\n\u001b[32m   1013\u001b[39m \u001b[38;5;28;01mwith\u001b[39;00m request_context(request=request):\n\u001b[32m-> \u001b[39m\u001b[32m1014\u001b[39m     response = \u001b[43mtransport\u001b[49m\u001b[43m.\u001b[49m\u001b[43mhandle_request\u001b[49m\u001b[43m(\u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m   1016\u001b[39m \u001b[38;5;28;01massert\u001b[39;00m \u001b[38;5;28misinstance\u001b[39m(response.stream, SyncByteStream)\n\u001b[32m   1018\u001b[39m response.request = request\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpx/_transports/default.py:250\u001b[39m, in \u001b[36mHTTPTransport.handle_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m    237\u001b[39m req = httpcore.Request(\n\u001b[32m    238\u001b[39m     method=request.method,\n\u001b[32m    239\u001b[39m     url=httpcore.URL(\n\u001b[32m   (...)\u001b[39m\u001b[32m    247\u001b[39m     extensions=request.extensions,\n\u001b[32m    248\u001b[39m )\n\u001b[32m    249\u001b[39m \u001b[38;5;28;01mwith\u001b[39;00m map_httpcore_exceptions():\n\u001b[32m--> \u001b[39m\u001b[32m250\u001b[39m     resp = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_pool\u001b[49m\u001b[43m.\u001b[49m\u001b[43mhandle_request\u001b[49m\u001b[43m(\u001b[49m\u001b[43mreq\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    252\u001b[39m \u001b[38;5;28;01massert\u001b[39;00m \u001b[38;5;28misinstance\u001b[39m(resp.stream, typing.Iterable)\n\u001b[32m    254\u001b[39m \u001b[38;5;28;01mreturn\u001b[39;00m Response(\n\u001b[32m    255\u001b[39m     status_code=resp.status,\n\u001b[32m    256\u001b[39m     headers=resp.headers,\n\u001b[32m    257\u001b[39m     stream=ResponseStream(resp.stream),\n\u001b[32m    258\u001b[39m     extensions=resp.extensions,\n\u001b[32m    259\u001b[39m )\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/connection_pool.py:256\u001b[39m, in \u001b[36mConnectionPool.handle_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m    253\u001b[39m         closing = \u001b[38;5;28mself\u001b[39m._assign_requests_to_connections()\n\u001b[32m    255\u001b[39m     \u001b[38;5;28mself\u001b[39m._close_connections(closing)\n\u001b[32m--> \u001b[39m\u001b[32m256\u001b[39m     \u001b[38;5;28;01mraise\u001b[39;00m exc \u001b[38;5;28;01mfrom\u001b[39;00m\u001b[38;5;250m \u001b[39m\u001b[38;5;28;01mNone\u001b[39;00m\n\u001b[32m    258\u001b[39m \u001b[38;5;66;03m# Return the response. Note that in this case we still have to manage\u001b[39;00m\n\u001b[32m    259\u001b[39m \u001b[38;5;66;03m# the point at which the response is closed.\u001b[39;00m\n\u001b[32m    260\u001b[39m \u001b[38;5;28;01massert\u001b[39;00m \u001b[38;5;28misinstance\u001b[39m(response.stream, typing.Iterable)\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/connection_pool.py:236\u001b[39m, in \u001b[36mConnectionPool.handle_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m    232\u001b[39m connection = pool_request.wait_for_connection(timeout=timeout)\n\u001b[32m    234\u001b[39m \u001b[38;5;28;01mtry\u001b[39;00m:\n\u001b[32m    235\u001b[39m     \u001b[38;5;66;03m# Send the request on the assigned connection.\u001b[39;00m\n\u001b[32m--> \u001b[39m\u001b[32m236\u001b[39m     response = \u001b[43mconnection\u001b[49m\u001b[43m.\u001b[49m\u001b[43mhandle_request\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m    237\u001b[39m \u001b[43m        \u001b[49m\u001b[43mpool_request\u001b[49m\u001b[43m.\u001b[49m\u001b[43mrequest\u001b[49m\n\u001b[32m    238\u001b[39m \u001b[43m    \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    239\u001b[39m \u001b[38;5;28;01mexcept\u001b[39;00m ConnectionNotAvailable:\n\u001b[32m    240\u001b[39m     \u001b[38;5;66;03m# In some cases a connection may initially be available to\u001b[39;00m\n\u001b[32m    241\u001b[39m     \u001b[38;5;66;03m# handle a request, but then become unavailable.\u001b[39;00m\n\u001b[32m    242\u001b[39m     \u001b[38;5;66;03m#\u001b[39;00m\n\u001b[32m    243\u001b[39m     \u001b[38;5;66;03m# In this case we clear the connection and try again.\u001b[39;00m\n\u001b[32m    244\u001b[39m     pool_request.clear_connection()\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/connection.py:103\u001b[39m, in \u001b[36mHTTPConnection.handle_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m    100\u001b[39m     \u001b[38;5;28mself\u001b[39m._connect_failed = \u001b[38;5;28;01mTrue\u001b[39;00m\n\u001b[32m    101\u001b[39m     \u001b[38;5;28;01mraise\u001b[39;00m exc\n\u001b[32m--> \u001b[39m\u001b[32m103\u001b[39m \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_connection\u001b[49m\u001b[43m.\u001b[49m\u001b[43mhandle_request\u001b[49m\u001b[43m(\u001b[49m\u001b[43mrequest\u001b[49m\u001b[43m)\u001b[49m\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/http11.py:136\u001b[39m, in \u001b[36mHTTP11Connection.handle_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m    134\u001b[39m     \u001b[38;5;28;01mwith\u001b[39;00m Trace(\u001b[33m\"\u001b[39m\u001b[33mresponse_closed\u001b[39m\u001b[33m\"\u001b[39m, logger, request) \u001b[38;5;28;01mas\u001b[39;00m trace:\n\u001b[32m    135\u001b[39m         \u001b[38;5;28mself\u001b[39m._response_closed()\n\u001b[32m--> \u001b[39m\u001b[32m136\u001b[39m \u001b[38;5;28;01mraise\u001b[39;00m exc\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/http11.py:106\u001b[39m, in \u001b[36mHTTP11Connection.handle_request\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m     95\u001b[39m     \u001b[38;5;28;01mpass\u001b[39;00m\n\u001b[32m     97\u001b[39m \u001b[38;5;28;01mwith\u001b[39;00m Trace(\n\u001b[32m     98\u001b[39m     \u001b[33m\"\u001b[39m\u001b[33mreceive_response_headers\u001b[39m\u001b[33m\"\u001b[39m, logger, request, kwargs\n\u001b[32m     99\u001b[39m ) \u001b[38;5;28;01mas\u001b[39;00m trace:\n\u001b[32m    100\u001b[39m     (\n\u001b[32m    101\u001b[39m         http_version,\n\u001b[32m    102\u001b[39m         status,\n\u001b[32m    103\u001b[39m         reason_phrase,\n\u001b[32m    104\u001b[39m         headers,\n\u001b[32m    105\u001b[39m         trailing_data,\n\u001b[32m--> \u001b[39m\u001b[32m106\u001b[39m     ) = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_receive_response_headers\u001b[49m\u001b[43m(\u001b[49m\u001b[43m*\u001b[49m\u001b[43m*\u001b[49m\u001b[43mkwargs\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    107\u001b[39m     trace.return_value = (\n\u001b[32m    108\u001b[39m         http_version,\n\u001b[32m    109\u001b[39m         status,\n\u001b[32m    110\u001b[39m         reason_phrase,\n\u001b[32m    111\u001b[39m         headers,\n\u001b[32m    112\u001b[39m     )\n\u001b[32m    114\u001b[39m network_stream = \u001b[38;5;28mself\u001b[39m._network_stream\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/http11.py:177\u001b[39m, in \u001b[36mHTTP11Connection._receive_response_headers\u001b[39m\u001b[34m(self, request)\u001b[39m\n\u001b[32m    174\u001b[39m timeout = timeouts.get(\u001b[33m\"\u001b[39m\u001b[33mread\u001b[39m\u001b[33m\"\u001b[39m, \u001b[38;5;28;01mNone\u001b[39;00m)\n\u001b[32m    176\u001b[39m \u001b[38;5;28;01mwhile\u001b[39;00m \u001b[38;5;28;01mTrue\u001b[39;00m:\n\u001b[32m--> \u001b[39m\u001b[32m177\u001b[39m     event = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_receive_event\u001b[49m\u001b[43m(\u001b[49m\u001b[43mtimeout\u001b[49m\u001b[43m=\u001b[49m\u001b[43mtimeout\u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    178\u001b[39m     \u001b[38;5;28;01mif\u001b[39;00m \u001b[38;5;28misinstance\u001b[39m(event, h11.Response):\n\u001b[32m    179\u001b[39m         \u001b[38;5;28;01mbreak\u001b[39;00m\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_sync/http11.py:217\u001b[39m, in \u001b[36mHTTP11Connection._receive_event\u001b[39m\u001b[34m(self, timeout)\u001b[39m\n\u001b[32m    214\u001b[39m     event = \u001b[38;5;28mself\u001b[39m._h11_state.next_event()\n\u001b[32m    216\u001b[39m \u001b[38;5;28;01mif\u001b[39;00m event \u001b[38;5;129;01mis\u001b[39;00m h11.NEED_DATA:\n\u001b[32m--> \u001b[39m\u001b[32m217\u001b[39m     data = \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_network_stream\u001b[49m\u001b[43m.\u001b[49m\u001b[43mread\u001b[49m\u001b[43m(\u001b[49m\n\u001b[32m    218\u001b[39m \u001b[43m        \u001b[49m\u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43mREAD_NUM_BYTES\u001b[49m\u001b[43m,\u001b[49m\u001b[43m \u001b[49m\u001b[43mtimeout\u001b[49m\u001b[43m=\u001b[49m\u001b[43mtimeout\u001b[49m\n\u001b[32m    219\u001b[39m \u001b[43m    \u001b[49m\u001b[43m)\u001b[49m\n\u001b[32m    221\u001b[39m     \u001b[38;5;66;03m# If we feed this case through h11 we'll raise an exception like:\u001b[39;00m\n\u001b[32m    222\u001b[39m     \u001b[38;5;66;03m#\u001b[39;00m\n\u001b[32m    223\u001b[39m     \u001b[38;5;66;03m#     httpcore.RemoteProtocolError: can't handle event type\u001b[39;00m\n\u001b[32m   (...)\u001b[39m\u001b[32m    227\u001b[39m     \u001b[38;5;66;03m# perspective. Instead we handle this case distinctly and treat\u001b[39;00m\n\u001b[32m    228\u001b[39m     \u001b[38;5;66;03m# it as a ConnectError.\u001b[39;00m\n\u001b[32m    229\u001b[39m     \u001b[38;5;28;01mif\u001b[39;00m data == \u001b[33mb\u001b[39m\u001b[33m\"\u001b[39m\u001b[33m\"\u001b[39m \u001b[38;5;129;01mand\u001b[39;00m \u001b[38;5;28mself\u001b[39m._h11_state.their_state == h11.SEND_RESPONSE:\n",
+      "\u001b[36mFile \u001b[39m\u001b[32m/data/back_home/baseline/foreblocks/agent/.venv/lib/python3.14/site-packages/httpcore/_backends/sync.py:128\u001b[39m, in \u001b[36mSyncStream.read\u001b[39m\u001b[34m(self, max_bytes, timeout)\u001b[39m\n\u001b[32m    126\u001b[39m \u001b[38;5;28;01mwith\u001b[39;00m map_exceptions(exc_map):\n\u001b[32m    127\u001b[39m     \u001b[38;5;28mself\u001b[39m._sock.settimeout(timeout)\n\u001b[32m--> \u001b[39m\u001b[32m128\u001b[39m     \u001b[38;5;28;01mreturn\u001b[39;00m \u001b[38;5;28;43mself\u001b[39;49m\u001b[43m.\u001b[49m\u001b[43m_sock\u001b[49m\u001b[43m.\u001b[49m\u001b[43mrecv\u001b[49m\u001b[43m(\u001b[49m\u001b[43mmax_bytes\u001b[49m\u001b[43m)\u001b[49m\n",
+      "\u001b[31mKeyboardInterrupt\u001b[39m: "
+     ]
+    },
+    {
+     "ename": "",
+     "evalue": "",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[1;31mThe Kernel crashed while executing code in the current cell or a previous cell. \n",
+      "\u001b[1;31mPlease review the code in the cell(s) to identify a possible cause of the failure. \n",
+      "\u001b[1;31mClick <a href='https://aka.ms/vscodeJupyterKernelCrash'>here</a> for more info. \n",
+      "\u001b[1;31mView Jupyter <a href='command:jupyter.viewOutput'>log</a> for further details."
+     ]
+    }
+   ],
+   "source": [
+    "from src.eoh.runner import run_eoh\n",
+    "\n",
+    "TASK_DESC = (\n",
+    "    \"Evolve a generic heuristic policy (hook dict) to improve the metaheuristic's \"\n",
+    "    \"performance on the given ProblemAPI. \"\n",
+    "    \"Optimise for: feasibility, fast convergence, and stable improvements across \"\n",
+    "    \"different random seeds.\"\n",
+    ")\n",
+    "\n",
+    "result = run_eoh(\n",
+    "    agent,\n",
+    "    task_desc=TASK_DESC,\n",
+    "    api_desc=example_api_desc(),\n",
+    "    eval_spec=eval_spec,\n",
+    "    cfg=cfg,\n",
+    "    rng_seed=42,\n",
+    ")\n",
+    "\n",
+    "print(\"EoH complete.\")\n",
+    "print(f\"Best fitness : {result.best.fitness:.4f}\")\n",
+    "print(f\"Hall of fame : {len(result.hall_of_fame)} individuals\")\n",
+    "print(f\"Generations  : {len(result.history)}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9235cfa7",
+   "metadata": {},
+   "source": [
+    "## 6. Inspect the Best Individual"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "fa6c5e9d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "best = result.best\n",
+    "\n",
+    "print(\"=\" * 60)\n",
+    "print(f\"ID          : {best.id}\")\n",
+    "print(f\"Generation  : {best.generation}\")\n",
+    "print(f\"Fitness     : {best.fitness:.6f}\")\n",
+    "print(f\"Parents     : {best.parents}\")\n",
+    "print(f\"Hook impls  : {best.metrics.get('hook_impl', [])}\")\n",
+    "print()\n",
+    "print(\"[THOUGHT]\")\n",
+    "print(best.thought or \"(none)\")\n",
+    "print()\n",
+    "print(\"[CODE]\")\n",
+    "print(best.code)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "58b4d0d1",
+   "metadata": {},
+   "source": [
+    "## 7. Hall of Fame"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "508e33b0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(f\"{'Rank':<5} {'ID':<14} {'Gen':<5} {'Fitness':>10}  Hook impls\")\n",
+    "print(\"-\" * 70)\n",
+    "for rank, ind in enumerate(result.hall_of_fame, 1):\n",
+    "    hooks = \", \".join(ind.metrics.get(\"hook_impl\", [])) or \"-\"\n",
+    "    print(f\"{rank:<5} {ind.id:<14} {ind.generation:<5} {ind.fitness:>10.4f}  {hooks}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "bd03968a",
+   "metadata": {},
+   "source": [
+    "## 8. Convergence History"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "f56eaad6",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "\n",
+    "# Each entry in result.history is a dict with at least 'generation' and 'best_fitness'\n",
+    "print(f\"{'Gen':<5} {'Best fitness':>14} {'Pop best':>12}\")\n",
+    "print(\"-\" * 36)\n",
+    "for entry in result.history:\n",
+    "    gen  = entry.get(\"generation\", \"?\")\n",
+    "    best_f = entry.get(\"best_fitness\", float(\"nan\"))\n",
+    "    pop_b  = entry.get(\"pop_best_fitness\", float(\"nan\"))\n",
+    "    print(f\"{gen:<5} {best_f:>14.4f} {pop_b:>12.4f}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "a200aa17",
+   "metadata": {},
+   "source": [
+    "## 9. Plot Convergence (optional — requires matplotlib)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "9cbfcd3a",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "try:\n",
+    "    import matplotlib.pyplot as plt\n",
+    "\n",
+    "    gens      = [e[\"generation\"]        for e in result.history]\n",
+    "    best_fits = [e.get(\"best_fitness\", float(\"nan\")) for e in result.history]\n",
+    "    pop_bests = [e.get(\"pop_best_fitness\", float(\"nan\")) for e in result.history]\n",
+    "\n",
+    "    fig, ax = plt.subplots(figsize=(8, 4))\n",
+    "    ax.plot(gens, best_fits, marker=\"o\", label=\"Hall-of-fame best\", linewidth=2)\n",
+    "    ax.plot(gens, pop_bests, marker=\"s\", linestyle=\"--\", label=\"Population best\")\n",
+    "    ax.set_xlabel(\"Generation\")\n",
+    "    ax.set_ylabel(\"Fitness\")\n",
+    "    ax.set_title(\"EoH convergence — SphereProblem\")\n",
+    "    ax.legend()\n",
+    "    ax.grid(True, alpha=0.3)\n",
+    "    plt.tight_layout()\n",
+    "    plt.show()\n",
+    "except ImportError:\n",
+    "    print(\"matplotlib not installed — skipping plot.\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "5d56cb47",
+   "metadata": {},
+   "source": [
+    "## 10. Validate Best Heuristic on Hold-out Instances\n",
+    "\n",
+    "Re-evaluate the best individual on the validation set to get an unbiased \n",
+    "performance estimate."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "2b772ccc",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from src.eoh.safety import compile_hooks\n",
+    "from src.eoh.metaheuristics.ga import GeneticAlgorithm, GAConfig\n",
+    "from src.eoh.types import Budget\n",
+    "import statistics\n",
+    "\n",
+    "# Compile best heuristic code into a hooks dict\n",
+    "hooks = compile_hooks(best.code)\n",
+    "\n",
+    "val_ga  = GeneticAlgorithm(GAConfig(pop_size=24))\n",
+    "val_bud = Budget(max_iters=200, max_time_s=0.5)\n",
+    "rng     = random.Random(99)\n",
+    "\n",
+    "objs: list[float] = []\n",
+    "for inst in valid_instances:\n",
+    "    trace = val_ga.run(problem, inst, hooks, val_bud, rng)\n",
+    "    objs.append(trace.best_obj)\n",
+    "\n",
+    "print(f\"Validation results over {len(valid_instances)} instances:\")\n",
+    "print(f\"  mean  obj : {statistics.mean(objs):.6f}\")\n",
+    "print(f\"  stdev obj : {statistics.stdev(objs):.6f}\")\n",
+    "print(f\"  best  obj : {min(objs):.6f}\")\n",
+    "print(f\"  worst obj : {max(objs):.6f}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9182bbce",
+   "metadata": {},
+   "source": [
+    "## 11. Save / Load Best Individual\n",
+    "\n",
+    "Persist the best heuristic for reuse outside of EoH."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "fefbc675",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "from dataclasses import asdict\n",
+    "\n",
+    "OUT_PATH = Path(\"/tmp/eoh_best.json\")\n",
+    "\n",
+    "payload = {\n",
+    "    \"id\":         best.id,\n",
+    "    \"generation\": best.generation,\n",
+    "    \"fitness\":    best.fitness,\n",
+    "    \"thought\":    best.thought,\n",
+    "    \"code\":       best.code,\n",
+    "    \"metrics\":    best.metrics,\n",
+    "    \"parents\":    best.parents,\n",
+    "}\n",
+    "OUT_PATH.write_text(json.dumps(payload, indent=2))\n",
+    "print(f\"Saved to {OUT_PATH}\")\n",
+    "\n",
+    "# --- reload ---\n",
+    "loaded = json.loads(OUT_PATH.read_text())\n",
+    "print(\"Loaded fitness:\", loaded[\"fitness\"])\n",
+    "hooks_reloaded = compile_hooks(loaded[\"code\"])\n",
+    "print(\"Hooks reloaded:\", list(hooks_reloaded.keys()))"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": ".venv",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.14.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

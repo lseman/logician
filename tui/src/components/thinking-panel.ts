@@ -2,21 +2,24 @@
 // Collapsible panel showing thinking blocks
 
 import type { Component, Focusable } from "../tui-core.ts";
-import { highlightAuto } from "../agent-core/syntax-highlighter.ts";
+import { theme } from "../theme.ts";
+import { highlightAuto } from "../agent-core/tools/shared/syntax-highlighter.ts";
+
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
 
 interface ThinkingBlock {
 	content: string;
 	isComplete: boolean;
 }
 
-const THINKING_HEADER = "\x1b[38;5;220m\x1b[1m⚡ THINKING\x1b[0m";
-const THINKING_PREFIX = "\x1b[38;5;220m  \x1b[0m";
-const CODE_BLOCK_BG = "\x1b[48;5;235m";
+const getThinkingHeader = (): string =>
+	theme.fg("thinkingText", "") + BOLD + "⚡ THINKING" + RESET;
+const getThinkingPrefix = (): string =>
+	theme.fg("thinkingText", "") + "  " + RESET;
+const getBlockBg = (): string => theme.bg("mdCodeBlockBg", "");
 const CODE_BLOCK_RESET = "\x1b[0m";
-const CODE_BLOCK_DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 
 export class ThinkingPanel implements Component, Focusable {
 	public focused = false;
@@ -91,7 +94,7 @@ export class ThinkingPanel implements Component, Focusable {
 		const lines: string[] = [];
 
 		// Header
-		lines.push(THINKING_HEADER);
+		lines.push(getThinkingHeader());
 
 		// Each block
 		for (const block of this.blocks) {
@@ -115,14 +118,16 @@ export class ThinkingPanel implements Component, Focusable {
 							const langLabel = highlighted.language
 								? ` ${highlighted.language} · ${codeContent.split("\n").length} lines`
 								: "";
-							lines.push(`${CODE_BLOCK_BG}${DIM}  \`${rawLine}\`${langLabel}${CODE_BLOCK_RESET}`);
+							lines.push(
+								`${getBlockBg()}${DIM}  \`${rawLine}\`${langLabel}${CODE_BLOCK_RESET}`,
+							);
 							for (const cl of highlighted.value.split("\n")) {
-								lines.push(`${CODE_BLOCK_BG}${DIM}  ${cl}${CODE_BLOCK_RESET}`);
+								lines.push(`${getBlockBg()}${DIM}  ${cl}${CODE_BLOCK_RESET}`);
 							}
 						} else {
 							const codeLines = codeContent.split("\n");
 							for (const cl of codeLines) {
-								lines.push(`${CODE_BLOCK_BG}${DIM}  ${cl}${CODE_BLOCK_RESET}`);
+								lines.push(`${getBlockBg()}${DIM}  ${cl}${CODE_BLOCK_RESET}`);
 							}
 						}
 						inCodeBlock = false;
@@ -141,22 +146,22 @@ export class ThinkingPanel implements Component, Focusable {
 					// Word wrap
 					if (rawLine.length > contentWidth) {
 						const words = rawLine.split(/\s+/);
-						let current = THINKING_PREFIX;
+						let current = getThinkingPrefix();
 						for (const word of words) {
-							if (current.length <= THINKING_PREFIX.length) {
-								current = THINKING_PREFIX + word;
+							if (current.length <= getThinkingPrefix().length) {
+								current = getThinkingPrefix() + word;
 							} else if (current.length + 1 + word.length <= contentWidth) {
 								current += ` ${word}`;
 							} else {
 								lines.push(current);
-								current = THINKING_PREFIX + word;
+								current = getThinkingPrefix() + word;
 							}
 						}
-						if (current !== THINKING_PREFIX) {
+						if (current !== getThinkingPrefix()) {
 							lines.push(current);
 						}
 					} else {
-						lines.push(THINKING_PREFIX + rawLine);
+						lines.push(getThinkingPrefix() + rawLine);
 					}
 				}
 			}

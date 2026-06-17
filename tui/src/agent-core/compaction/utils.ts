@@ -35,7 +35,10 @@ export function extractFileOpsFromMessage(
 	for (const block of message.content) {
 		if (typeof block !== "object" || block === null) continue;
 		if (!("type" in block) || block.type !== "toolCall") continue;
-		const call = block as { name?: string; arguments?: Record<string, unknown> };
+		const call = block as {
+			name?: string;
+			arguments?: Record<string, unknown>;
+		};
 		if (!call.name || !call.arguments) continue;
 
 		const args = call.arguments as Record<string, unknown>;
@@ -63,7 +66,10 @@ export function extractFileOpsFromMessage(
  * Compute final file lists from file operations.
  * Returns readFiles (files only read, not modified) and modifiedFiles.
  */
-export function computeFileLists(fileOps: FileOperations): { readFiles: string[]; modifiedFiles: string[] } {
+export function computeFileLists(fileOps: FileOperations): {
+	readFiles: string[];
+	modifiedFiles: string[];
+} {
 	const modified = new Set([...fileOps.edited, ...fileOps.written]);
 	const readOnly = [...fileOps.read].filter((f) => !modified.has(f)).sort();
 	const modifiedFiles = [...modified].sort();
@@ -73,13 +79,18 @@ export function computeFileLists(fileOps: FileOperations): { readFiles: string[]
 /**
  * Format file operations as XML tags for summary.
  */
-export function formatFileOperations(readFiles: string[], modifiedFiles: string[]): string {
+export function formatFileOperations(
+	readFiles: string[],
+	modifiedFiles: string[],
+): string {
 	const sections: string[] = [];
 	if (readFiles.length > 0) {
 		sections.push(`<read-files>\n${readFiles.join("\n")}\n</read-files>`);
 	}
 	if (modifiedFiles.length > 0) {
-		sections.push(`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`);
+		sections.push(
+			`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`,
+		);
 	}
 	if (sections.length === 0) return "";
 	return `\n\n${sections.join("\n\n")}`;
@@ -110,10 +121,12 @@ function truncateForSummary(text: string, maxChars: number): string {
  * Prevents the model from treating it as a conversation to continue.
  * Includes thinking blocks (from Pi) for reasoning model awareness.
  */
-export function serializeConversation(messages: Array<{
-	role: string;
-	content: string | Array<{ type: string; text?: string }>;
-}>): string {
+export function serializeConversation(
+	messages: Array<{
+		role: string;
+		content: string | Array<{ type: string; text?: string }>;
+	}>,
+): string {
 	const parts: string[] = [];
 
 	for (const msg of messages) {
@@ -122,7 +135,9 @@ export function serializeConversation(messages: Array<{
 				typeof msg.content === "string"
 					? msg.content
 					: msg.content
-							.filter((c): c is { type: string; text: string } => c.type === "text")
+							.filter(
+								(c): c is { type: string; text: string } => c.type === "text",
+							)
 							.map((c) => c.text)
 							.join("");
 			if (content) parts.push(`[User]: ${content}`);
@@ -137,10 +152,24 @@ export function serializeConversation(messages: Array<{
 				for (const block of msg.content) {
 					if (block.type === "text" && block.text) {
 						textParts.push(block.text);
-					} else if (block.type === "thinking" && typeof block === "object" && block !== null) {
-						thinkingParts.push((block as unknown as { thinking: string }).thinking);
-					} else if (block.type === "toolCall" && typeof block === "object" && block !== null && "name" in block) {
-						const call = block as { name?: string; arguments?: Record<string, unknown> };
+					} else if (
+						block.type === "thinking" &&
+						typeof block === "object" &&
+						block !== null
+					) {
+						thinkingParts.push(
+							(block as unknown as { thinking: string }).thinking,
+						);
+					} else if (
+						block.type === "toolCall" &&
+						typeof block === "object" &&
+						block !== null &&
+						"name" in block
+					) {
+						const call = block as {
+							name?: string;
+							arguments?: Record<string, unknown>;
+						};
 						const args = call.arguments ?? {};
 						const argsStr = Object.entries(args)
 							.map(([k, v]) => `${k}=${safeJsonStringify(v)}`)
@@ -153,18 +182,24 @@ export function serializeConversation(messages: Array<{
 			if (thinkingParts.length > 0) {
 				parts.push(`[Assistant thinking]: ${thinkingParts.join("\n")}`);
 			}
-			if (textParts.length > 0) parts.push(`[Assistant]: ${textParts.join("\n")}`);
-			if (toolCalls.length > 0) parts.push(`[Assistant tool calls]: ${toolCalls.join("; ")}`);
+			if (textParts.length > 0)
+				parts.push(`[Assistant]: ${textParts.join("\n")}`);
+			if (toolCalls.length > 0)
+				parts.push(`[Assistant tool calls]: ${toolCalls.join("; ")}`);
 		} else if (msg.role === "toolResult" || msg.role === "tool_result") {
 			const content =
 				typeof msg.content === "string"
 					? msg.content
 					: msg.content
-							.filter((c): c is { type: string; text: string } => c.type === "text")
+							.filter(
+								(c): c is { type: string; text: string } => c.type === "text",
+							)
 							.map((c) => c.text)
 							.join("");
 			if (content) {
-				parts.push(`[Tool result]: ${truncateForSummary(content, TOOL_RESULT_MAX_CHARS)}`);
+				parts.push(
+					`[Tool result]: ${truncateForSummary(content, TOOL_RESULT_MAX_CHARS)}`,
+				);
 			}
 		}
 	}

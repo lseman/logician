@@ -33,7 +33,10 @@ export function envNumber(name: string): number | undefined {
 
 /** Escape a value for use in a markdown table cell. */
 export function escapeTable(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, "\\n");
+	return value
+		.replace(/\\/g, "\\\\")
+		.replace(/\|/g, "\\|")
+		.replace(/\n/g, "\\n");
 }
 
 /** Format a table row from an array of cell values. */
@@ -48,10 +51,14 @@ export function parseInterval(arg: string): number | null {
 	const [, value, unit] = m;
 	const n = parseInt(value, 10);
 	switch (unit) {
-		case "s": return n * 1000;
-		case "m": return n * 60_000;
-		case "h": return n * 3_600_000;
-		case "d": return n * 86_400_000;
+		case "s":
+			return n * 1000;
+		case "m":
+			return n * 60_000;
+		case "h":
+			return n * 3_600_000;
+		case "d":
+			return n * 86_400_000;
 	}
 	return null;
 }

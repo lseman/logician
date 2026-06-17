@@ -94,7 +94,14 @@ function serializeTools(
 
 export class SessionStore {
 	private db: Database;
-	private statements: Record<string, { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown }> = {};
+	private statements: Record<
+		string,
+		{
+			run: (...args: unknown[]) => unknown;
+			get: (...args: unknown[]) => unknown;
+			all: (...args: unknown[]) => unknown;
+		}
+	> = {};
 	private projectDir: string;
 	private currentSessionId: string | null = null;
 
@@ -300,7 +307,10 @@ export class SessionStore {
 	/** Delete a session. */
 	deleteSession(id: string): boolean {
 		const result = this.statements.deleteSession.run(id);
-		if ((result as { changes: number }).changes > 0 && this.currentSessionId === id) {
+		if (
+			(result as { changes: number }).changes > 0 &&
+			this.currentSessionId === id
+		) {
 			this.currentSessionId = null;
 		}
 		return (result as { changes: number }).changes > 0;

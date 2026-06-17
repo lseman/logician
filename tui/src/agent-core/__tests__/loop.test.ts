@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { AgentLoop } from "../loop.ts";
-import { task_status } from "../tools/task-status.ts";
-import type { AgentConfig, Tool } from "../types.ts";
+import { AgentLoop } from "../core/loop.ts";
+import { task_status } from "../tools/skills/task-status.ts";
+import type { AgentConfig, Tool } from "../core/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
 const noop: Tool = {
@@ -39,16 +42,20 @@ void test("mid-stream interrupt keeps the partial text and continues the run", a
 		() => textResponse("final answer"),
 	]);
 
+	let followUpDrained = 0;
 	const loop = new AgentLoop({
 		config: makeConfig({
 			continuationEnabled: false,
 			hooks: {
 				// Steering message waiting at the follow-up drain keeps the loop
 				// going after the interrupted (tool-less) turn.
-				getFollowUpMessages: ({ continuationCount }) =>
-					continuationCount === 0
-						? [{ role: "user", content: "steered: be brief" }]
-						: undefined,
+				getFollowUpMessages: () => {
+					if (followUpDrained === 0) {
+						followUpDrained++;
+						return [{ role: "user", content: "steered: be brief" }];
+					}
+					return undefined;
+				},
 			},
 		}),
 		backend,
@@ -91,8 +98,120 @@ void test("task_status terminates the run without a follow-up nudge", async () =
 	assert.match(toolResult?.content ?? "", /done/);
 });
 
+void test("Stop plugin hook can block stop and continue with hook context", async () => {
+	const root = mkdtempSync(join(tmpdir(), "logician-stop-hook-"));
+	const pluginDir = join(root, "plugin");
+	mkdirSync(join(pluginDir, ".claude-plugin"), { recursive: true });
+	mkdirSync(join(pluginDir, "hooks"), { recursive: true });
+	const hookScript = join(pluginDir, "stop-hook.mjs");
+	const callsFile = join(root, "calls.txt");
+	writeFileSync(
+		join(pluginDir, ".claude-plugin", "plugin.json"),
+		JSON.stringify({
+			name: "stopper",
+			version: "1.0.0",
+			hooks: "hooks/hooks.json",
+		}),
+	);
+	writeFileSync(
+		join(pluginDir, "hooks", "hooks.json"),
+		JSON.stringify({
+			hooks: {
+				Stop: [
+					{
+						hooks: [
+							{
+								type: "command",
+								command: `node ${JSON.stringify(hookScript)}`,
+							},
+						],
+					},
+				],
+			},
+		}),
+	);
+	writeFileSync(
+		hookScript,
+		`
+import { appendFileSync } from "node:fs";
+const input = await new Promise((resolve) => {
+  let data = "";
+  process.stdin.on("data", (chunk) => data += chunk);
+  process.stdin.on("end", () => resolve(data));
+});
+const payload = JSON.parse(input || "{}");
+appendFileSync(${JSON.stringify(callsFile)}, String(payload.stop_hook_active) + "\\n");
+if (!payload.stop_hook_active) {
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "Stop",
+      decision: "block",
+      additionalContext: "Stop hook says one more step is required."
+    }
+  }));
+}
+`,
+	);
+	writeFileSync(
+		join(root, "installed_plugins.json"),
+		JSON.stringify({
+			version: 2,
+			plugins: {
+				"stopper@test": [
+					{
+						scope: "user",
+						installPath: pluginDir,
+						version: "1.0.0",
+						installedAt: new Date().toISOString(),
+						lastUpdated: new Date().toISOString(),
+						enabled: true,
+					},
+				],
+			},
+		}),
+	);
+
+	const previousCache = process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR;
+	process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = root;
+	try {
+		const backend = new FakeBackend([
+			() => textResponse("I think this is done."),
+			(messages) => {
+				assert.ok(
+					messages.some((m) =>
+						String(m.content ?? "").includes(
+							"Stop hook says one more step is required.",
+						),
+					),
+				);
+				return textResponse("final answer after hook");
+			},
+			() => textResponse("should never happen"),
+		]);
+		const loop = new AgentLoop({
+			config: makeConfig({
+				runtimeHooksEnabled: true,
+				maxContinuations: 3,
+			}),
+			backend,
+		});
+		const messages = await loop.run("finish the task");
+
+		assert.equal(backend.calls, 2);
+		assert.ok(messages.some((m) => m.content === "final answer after hook"));
+		assert.deepEqual(readFileSync(callsFile, "utf8").trim().split("\n"), [
+			"false",
+			"true",
+		]);
+	} finally {
+		if (previousCache === undefined)
+			delete process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR;
+		else process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = previousCache;
+	}
+});
+
 void test("permission deny records an error tool result instead of executing", async () => {
-	const { PermissionManager } = await import("../permissions.ts");
+	const { PermissionManager } = await import("../tools/shared/permissions.ts");
 	let executed = false;
 	const spy: Tool = {
 		...noop,
@@ -168,7 +287,7 @@ void test("events carry a monotonic seq and timestamp", async () => {
 });
 
 void test("auto_retry_end reports failure when retries keep failing", async () => {
-	const { BackendError } = await import("../backend.ts");
+	const { BackendError } = await import("../core/backend.ts");
 	const events: Array<{ type: string; success?: boolean }> = [];
 	const fail = () => {
 		throw new BackendError({ category: "transient", message: "fetch failed" });
@@ -202,7 +321,7 @@ void test("auto_retry_end reports failure when retries keep failing", async () =
 });
 
 void test("auto_retry_end reports success only after the retried request works", async () => {
-	const { BackendError } = await import("../backend.ts");
+	const { BackendError } = await import("../core/backend.ts");
 	const events: Array<{ type: string; success?: boolean }> = [];
 	const backend = new FakeBackend([
 		() => {

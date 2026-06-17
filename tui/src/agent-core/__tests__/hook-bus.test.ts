@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HookBus } from "../hook-bus.ts";
-import type { ToolCall } from "../types.ts";
+import { HookBus } from "../hooks/hook-bus.ts";
+import type { ToolCall } from "../core/types.ts";
 
 const ctx = {
 	toolCall: { id: "1", name: "bash", arguments: "{}" } as ToolCall,
@@ -33,7 +33,8 @@ void test("beforeToolCall: args rewrites thread to later handlers", async () => 
 void test("a throwing handler is skipped and reported, chain continues", async () => {
 	const errors: string[] = [];
 	const bus = new HookBus({
-		onError: (e, event, source) => errors.push(`${event}:${source}:${e.message}`),
+		onError: (e, event, source) =>
+			errors.push(`${event}:${source}:${e.message}`),
 	});
 	bus.on(
 		"shouldStopAfterTurn",
@@ -47,8 +48,6 @@ void test("a throwing handler is skipped and reported, chain continues", async (
 		messages: [],
 		iteration: 1,
 		hadToolCalls: false,
-		continuationCount: 0,
-		isContinuation: false,
 	});
 	assert.equal(r, true);
 	assert.deepEqual(errors, ["shouldStopAfterTurn:bad:boom"]);

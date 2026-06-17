@@ -9,7 +9,7 @@ import {
 	currentFrameSize,
 	recordFileBeforeWrite,
 	restoreFileFrame,
-} from "../file-checkpoints.ts";
+} from "../core/file-checkpoints.ts";
 
 void test("restore rewrites a modified file and deletes a created one", () => {
 	clearFileFrames();

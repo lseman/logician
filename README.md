@@ -6,7 +6,52 @@ Terminal agent UI for Logician: a TypeScript agent-core wrapped in a compact, SS
 [![Node.js >= 22](https://img.shields.io/badge/node-%3E%3D22.19-brightgreen.svg)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`tui` owns the interactive agent loop: it streams model output, routes tool calls, applies plugin hooks, tracks context, and renders thinking, response, and tool activity in chronological order.
+`tui` owns the interactive agent loop: it streams model output, routes tool calls, applies plugin hooks, manages context, runs structured reasoning, and renders thinking, response, and tool activity in chronological order. It supports configurable themes, MCP servers, plugin hooks, subagents, web search, and conversation branching.
+
+## Table of Contents
+
+- [Architecture](#architecture)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Requirements](#requirements)
+- [Themes](#themes)
+- [Configuration](#configuration)
+  - [JSON Config Options](#json-config-options)
+  - [Environment Variables](#environment-variables)
+- [Agent Loop](#agent-loop)
+  - [Inner loop (one turn)](#inner-loop-one-turn)
+  - [Outer loop (the harness)](#outer-loop-the-harness)
+  - [Context Management](#context-management)
+- [Structured Reasoning](#structured-reasoning)
+- [Subagents](#subagents)
+- [Permissions](#permissions)
+- [Web Search](#web-search)
+- [Tool Result Cache](#tool-result-cache)
+- [Events](#events)
+  - [Lifecycle / turn](#lifecycle--turn)
+  - [Streaming / message](#streaming--message)
+  - [Tools](#tools)
+  - [Context / recovery](#context--recovery)
+  - [Typical emit order](#typical-emit-order-one-tool-using-turn)
+- [AgentMessage Abstraction](#agentmessage-abstraction)
+- [Plugin Hooks](#plugin-hooks)
+  - [Plugin Events](#plugin-events)
+  - [Contract Hooks](#contract-hooks)
+    - [Reducer semantics](#reducer-semantics)
+    - [Hook interface types](#hook-interface-types)
+    - [Hook output format](#hook-output-format)
+    - [Error handling](#error-handling)
+    - [Registering hooks programmatically](#registering-hooks-programmatically)
+    - [Plugin manifest hooks field](#plugin-manifest-hooks-field)
+  - [Hook payload shapes](#hook-payload-shapes)
+- [MCP](#mcp)
+- [Skills](#skills)
+- [Transcript Model](#transcript-model)
+- [Controls](#controls)
+- [Slash Commands](#slash-commands)
+- [Source Layout](#source-layout)
+- [Development Notes](#development-notes)
+- [License](#license)
 
 ## Architecture
 
@@ -48,21 +93,30 @@ Terminal agent UI for Logician: a TypeScript agent-core wrapped in a compact, SS
 └─────────────────────────────────────────────────────────┘
 ```
 
-## What It Does
+## Features
 
 - **Ordered transcript**: thinking, response, and tool chunks render chronologically instead of being grouped after the fact.
 - **Streaming**: assistant tokens, reasoning tokens, and tool output update live.
+- **Configurable themes**: 256-color and truecolor (hex) support with built-in `dark`, `light`, and `github-dark` palettes; drop custom themes into `~/.logician/themes/`.
 - **Thinking controls**: choose the thinking budget and display thinking as collapsed, summary, or expanded.
+- **Structured reasoning**: optional reasoner pre-phase (SSR, ToT, Reflexion, etc.) runs on the prompt before the ReAct loop.
+- **Subagents**: spawn specialized agents (general, explorer, coder) with full tool access; defined in `BUILTIN_AGENTS` and extensible.
 - **Tool display**: tools are compact by default, with `Ctrl+O` for args, output, command logs, diffs, and write/edit details.
 - **Markdown rendering**: headings, lists, code, JSON, markdown tables, and compact memory-summary tables render cleanly in the terminal.
+- **Conversation branching**: fork the conversation, explore, then summarize the branch back into the parent or discard it.
+- **Permission modes**: `acceptAll`, `acceptEdits`, `ask`, or `plan` — control how tool calls are handled.
+- **Web search**: SearXNG-powered web search tool available to the agent via `webSearch` config.
+- **Tool result cache**: LRU+TTL cache for opt-in pure tools; skips re-execution of identical calls.
 - **Plugin hooks**: Claude-style hooks inject startup context, react to prompts/tools/stops, and inspect a JSONL transcript.
 - **Typed hook bus**: multiple extensions register handlers per event with deterministic reducer semantics (short-circuit, patch-accumulate, transform, first-true).
+- **Inner/outer loop**: Pi-style split — inner loop handles tool calls; outer loop drains follow-up messages when the agent stops. No hard continuation cap.
+- **Session persistence**: JSONL-based conversation storage with checkpoint/restore, enabled via `harness.enableSession()` or `harness.resumeSession(id)`.
 - **MCP support**: stdio and streamable HTTP MCP servers are discovered from local config and exposed as tools.
 - **Pi-style input**: Unicode-aware editing, undo/redo, kill ring, word navigation, history, and slash autocomplete.
 - **Status + todo bars**: phase, model, branch, cache, context size, and active todos stay visible without stealing space.
 - **Context management**: proactive compaction, micro-compaction, budget-based early stop, duplicate/failure-loop guards, and real provider token counts when available.
 - **Resilient turns**: per-turn timeout that cancels the in-flight request, context-full compaction-retry, transient-error auto-retry, empty-response recovery, and well-formed transcripts on mid-batch abort.
-- **Conversation branching**: fork the conversation, explore, then summarize the branch back into the parent or discard it.
+- **Skills**: SKILL.md with frontmatter, loaded on-demand from plugin directories or `~/.logician/skills/`.
 - **AgentMessage abstraction**: union of standard LLM messages + custom app messages (notifications, status updates, UI-only artifacts). `convertToLlm` filters non-LLM messages before sending to the model. Apps extend via declaration merging.
 
 ## Quick Start
@@ -95,6 +149,76 @@ make build
 
 By default the TUI points at `http://127.0.0.1:8080`.
 
+## Themes
+
+Logician supports a configurable theme system with both 256-color codes and hex (truecolor) values. Themes are automatically converted to the appropriate ANSI sequences at startup.
+
+### Built-in Themes
+
+| Theme | Description |
+|---|---|
+| `dark` | Default dark palette (high contrast, 256-color) |
+| `light` | Light background palette |
+| `github-dark` | GitHub's official dark terminal palette (hex → 256/truecolor conversion) |
+
+### Usage
+
+```bash
+# Switch theme from the CLI
+/theme dark
+/theme light
+/theme github-dark
+
+# Or set in config
+{
+    "theme": "github-dark"
+}
+```
+
+### Custom Themes
+
+Drop a JSON file into `~/.logician/themes/` and it will be discovered automatically:
+
+```json
+{
+    "name": "my-theme",
+    "mode": "truecolor",
+    "colors": {
+        "accent": "#58a6ff",
+        "text": "#c9d1d9",
+        "bg": "#0d1117",
+        "mdCodeBlockBg": "#161b22",
+        "mdHeading": "#58a6ff",
+        "toolTitle": "#f0883e",
+        "success": "#56d364",
+        "error": "#f85149",
+        "warning": "#d29922",
+        "thinkingText": "#8b949e"
+    }
+}
+```
+
+### Available Color Tokens
+
+| Category | Tokens |
+|---|---|
+| **Core UI** | `accent`, `success`, `error`, `warning`, `muted`, `dim`, `text`, `border`, `borderMuted` |
+| **Speakers** | `userText`, `assistantText`, `systemText` |
+| **Markdown** | `mdHeading`, `mdCode`, `mdCodeBlock`, `mdCodeBlockBg`, `mdCodeBlockBorder`, `mdLink`, `mdQuote`, `mdListBullet` |
+| **Tool Display** | `toolTitle`, `toolRunning`, `toolSuccess`, `toolError`, `toolStreaming`, `toolOutput` |
+| **Diff** | `diffAdded`, `diffRemoved`, `diffContext`, `diffHunk`, `diffMeta` |
+| **Terminal** | `terminalOutput` |
+| **Thinking** | `thinkingText`, `thinkingDim` |
+| **Status** | `statusBg`, `statusBorder`, `statusText` |
+
+### Theme Architecture
+
+Themes are loaded from two locations in order:
+1. `tui/themes/` — built-in themes (bundled with the package)
+2. `~/.logician/themes/` — user custom themes (discovered at runtime)
+
+The `initTheme(name?)` function loads a theme by name. The `theme` proxy provides `fg(token, text)` and `bg(token, text)` helpers. Hex colors are converted via `valueToAnsi()` to either 256-color or truecolor ANSI sequences depending on the theme's `mode`.
+
 ## Configuration
 
 Project config lives in `.logician.json`. The TUI resolves it in order: `LOGICIAN_CONFIG` (explicit file) → nearest `.logician.json` walking upward from the current directory → the per-user global `~/.logician/logician.json`. Environment variables still win over file values.
@@ -120,8 +244,34 @@ Project config lives in `.logician.json`. The TUI resolves it in order: `LOGICIA
 }
 ```
 
+### JSON Config Options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `baseUrl` | string | `http://127.0.0.1:8080` | OpenAI-compatible backend URL |
+| `llmUrl` | string | same as `baseUrl` | Alternative backend URL |
+| `model` | string | empty | Model name sent to the backend |
+| `theme` | string | empty | Initial theme name (`dark`, `light`, `github-dark`) |
+| `systemPrompt` | string | empty | Extra system instructions |
+| `chatTemplate` | string | empty | Custom chat template |
+| `temperature` | number | backend default | Sampling temperature |
+| `maxTokens` | number | backend default | Maximum generation tokens |
+| `maxIterations` | number | backend default | Maximum ReAct loop iterations |
+| `contextWindowTokens` | number | empty | Context window size (for status display) |
+| `hooks` | boolean | `true` | Enable plugin hooks |
+| `mcpServers` | object | empty | MCP server definitions |
+| `mcpEager` | boolean | `true` | Eager MCP discovery |
+| `webSearch` | object | empty | Web search config (`baseUrl`, `maxResults`) |
+| `permissionMode` | string | `acceptAll` | Permission mode |
+| `permissions` | object | empty | Permission allow/deny rules |
+| `toolExecution` | string | `sequential` | Tool execution mode (`sequential` or `parallel`) |
+| `steeringInterrupt` | boolean | `false` | Allow steering during turns |
+| `maxTotalTokens` | number | empty | Total token budget for the session |
+
+### Environment Variables
+
 | Variable | Default | Purpose |
-| --- | --- | --- |
+|---|---|---|
 | `LOGICIAN_LLM_URL` | `http://127.0.0.1:8080` | OpenAI-compatible backend URL |
 | `LOGICIAN_MODEL` | empty | Model name sent to the backend |
 | `LOGICIAN_SYSTEM_PROMPT` | empty | Extra system instructions appended to the default prompt |
@@ -150,6 +300,10 @@ Two layers cooperate: the **AgentHarness** (outer, orchestration) drives prompts
 
 ### Outer loop (the harness)
 
+After each inner-loop turn (no tool calls), the outer loop checks for queued follow-up messages. If any exist and the safety cap isn't exceeded, they are injected into the context and the inner loop re-enters. This Pi-style pattern replaces the old hard 12-turn continuation cap with queue-driven continuation: `steer()` injects before the next model call, `followUp()` injects only when the agent stops, and `nextTurn()` survives abort and is injected before the next prompt.
+
+### Outer loop (the harness)
+
 - **Phase state machine** — `idle → turn | compaction | branch_summary → idle`. Structural ops (prompt, compact, fork) are gated on `idle`; steering is gated on an active `turn`. One operation at a time.
 - **Three queues** — `steer()` (into a running turn), `followUp()` (after the current turn), `nextTurn()` (before the next prompt, survives abort). The harness is the single source of truth; the UI reads snapshots via `onQueueChange`.
 - **Runtime config setters** — system prompt, temperature, max tokens, tools, thinking level, model take effect on the **next** turn, never mutating an in-flight request.
@@ -165,6 +319,51 @@ Two layers cooperate: the **AgentHarness** (outer, orchestration) drives prompts
 - **Budget stop** — ends the loop when per-turn token growth shows diminishing returns (opt-in).
 - **Guards** — duplicate-call detection plus a failure-loop guard bucketed by call signature, target path, and error category.
 - **Tool result cache** — opt-in per tool (`cacheable: true`). Off by default because most tools observe mutable state the agent itself changes between calls.
+
+## Structured Reasoning
+
+An optional structured reasoner runs as a **pre-phase** before the ReAct loop. It takes the user prompt and produces a structured output (plan, decision tree, or reflection) that is injected as a synthetic assistant message.
+
+### Reasoning Modes
+
+| Mode | Description |
+|---|---|
+| `ssr` | Self-Speaking Reasoning — step-by-step structured output |
+| `tot` | Tree of Thoughts — explore multiple reasoning paths |
+| `reflexion` | Reflexion — reflect on previous attempts and retry |
+| `chain` | Chain-of-Thought — sequential reasoning |
+| `planner` | Planner — break task into steps, execute, verify |
+
+Access the reasoner selector via `/reasoner` in the TUI. The selected reasoner applies to the **next** prompt only — it never mutates an in-flight run.
+
+## Subagents
+
+Logician supports spawning specialized subagents with their own prompts and tool access. Subagents are defined as `AgentDefinition` objects and can be extended with custom agents.
+
+### Built-in Agents
+
+| Agent | Description |
+|---|---|
+| `general` | Full tool set, multi-step subtasks |
+| `explorer` | Read-only exploration, file analysis |
+| `coder` | Code-focused with write/edit tools |
+
+### Agent Definition
+
+```ts
+interface AgentDefinition {
+    name: string;
+    description: string;
+    prompt: string;
+}
+```
+
+Agents are loaded from:
+1. `BUILTIN_AGENTS` (hardcoded)
+2. `~/.logician/agents/` directory
+3. Plugin `agents/` directories
+
+Custom agents are loaded as YAML files with frontmatter describing name, description, and prompt.
 
 ## Events
 
@@ -245,9 +444,69 @@ declare module "@earendil-works/tui/agent-core/types" {
 
 `convertToLlm()` filters non-standard-role messages before sending to the model. Override via `AgentConfig.convertToLlm` for custom filtering logic.
 
+## Permissions
+
+Logician supports configurable permission modes for tool execution:
+
+| Mode | Behavior |
+|---|---|
+| `acceptAll` | All tool calls execute automatically |
+| `acceptEdits` | Read-only tools auto-execute; edits require confirmation |
+| `ask` | Every tool call prompts for approval |
+| `plan` | Tools are simulated; no actual execution |
+
+Set via config:
+
+```json
+{
+    "permissionMode": "acceptEdits",
+    "permissions": {
+        "allow": ["read_file", "grep"],
+        "deny": ["Bash"]
+    }
+}
+```
+
+The `PermissionManager` class evaluates each tool call against the configured rules and returns a `PermissionVerdict` (`allow`, `deny`, or `ask`).
+
+## Web Search
+
+Logician includes a SearXNG-powered web search tool available to the agent. Configure in `.logician.json`:
+
+```json
+{
+    "webSearch": {
+        "baseUrl": "http://127.0.0.1:8090",
+        "maxResults": 10
+    }
+}
+```
+
+The search tool is registered as `web_search` and uses the configured SearXNG instance. If no `baseUrl` is set, it defaults to `http://127.0.0.1:8090`.
+
+## Tool Result Cache
+
+The tool result cache uses an LRU+TTL strategy to skip re-execution of identical tool calls (same name + same canonicalized arguments). Only successful results are cached.
+
+### Configuration
+
+Tools opt into caching with `cacheable: true` in their tool definition. Off by default because most tools observe mutable state the agent itself changes between calls.
+
+```ts
+const tool: Tool = {
+    name: "read_file",
+    cacheable: true,  // enable cache for this tool
+    // ...
+};
+```
+
+Cache entries are keyed by canonicalized argument JSON (sorted keys for deterministic hashing).
+
 ## Plugin Hooks
 
-`tui` loads Claude-style plugins from the local Claude plugin registry. Hook commands receive:
+`tui` loads Claude-style plugins from the local Claude plugin registry.
+
+> For a detailed compatibility reference between Logician hooks and Claude Code hooks, see [hooks-compatibility.md](docs/hooks-compatibility.md). Hook commands receive:
 
 - `session_id`
 - `cwd`
@@ -324,8 +583,8 @@ interface PrepareNextTurnContext {
     messages: Message[];
     iteration: number;
     hadToolCalls: boolean;
-    continuationCount: number;
-    isContinuation: boolean;
+    continuationCount?: number;   // always 0 now (outer loop handles continuation)
+    isContinuation?: boolean;     // always false now
 }
 interface PrepareNextTurnResult {
     messages: Message[];    // rewrite working history
@@ -335,8 +594,8 @@ interface ShouldStopAfterTurnContext {
     messages: Message[];
     iteration: number;
     hadToolCalls: boolean;
-    continuationCount: number;
-    isContinuation: boolean;
+    continuationCount?: number;   // always 0 now
+    isContinuation?: boolean;     // always false now
 }
 
 interface GetSteeringMessagesContext {
@@ -347,8 +606,8 @@ interface GetFollowUpMessagesContext {
     messages: Message[];
     iteration: number;
     assistantText: string;
-    continuationCount: number;
-    maxContinuations: number;
+    continuationCount?: number;   // always 0 now (outer loop handles continuation)
+    maxContinuations?: number;    // safety cap on outer-loop drains
 }
 
 interface TransformContext {
@@ -478,7 +737,7 @@ Useful commands:
 
 ## MCP
 
-MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks upward from the current directory looking for `.logician.json`, `.mcp.json`, or `agent_config.json`, and finally falls back to the per-user global `~/.logician/mcp.json` (standard MCP format) or `~/.logician/logician.json` (legacy logician format).
+MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks upward from the current directory looking for `.logician.json` or `.mcp.json`, and finally falls back to the per-user global `~/.logician/mcp.json` (standard MCP format) or `~/.logician/logician.json` (legacy logician format).
 
 ```json
 {
@@ -500,6 +759,79 @@ MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks u
 ```
 
 MCP tools are registered as `mcp__<server>__<tool>`, with unsafe characters normalized to underscores.
+
+## Skills
+
+Skills are prompt templates loaded on-demand from SKILL.md files with frontmatter metadata. They extend the agent's capabilities for specific domains or tasks.
+
+### Skill Format
+
+```markdown
+---
+name: python-debugging
+description: Debug Python applications with pdb, pytest, and tracing tools.
+trigger: ["python", "debug", "pytest"]
+---
+
+You are a Python debugging specialist. When debugging Python code:
+1. First understand the error message
+2. Use pdb for interactive debugging
+3. Run pytest to verify fixes
+```
+
+### Loading
+
+Skills are loaded from:
+1. Plugin `skills/` directories (`.claude-plugin/skills/<name>/SKILL.md`)
+2. `~/.logician/skills/` directory
+3. The `skills` directory in the project root
+
+Use `/skills-health` to verify skill availability and `/rag` to load additional skill context.
+
+### API
+
+```ts
+interface Skill {
+    name: string;
+    description: string;
+    trigger: string[];
+    content: string;  // SKILL.md body
+}
+
+function loadSkills(dirs: string[]): Promise<Skill[]>;
+function readSkill(skill: Skill): Promise<string>;
+function formatSkillCatalog(skills: Skill[]): string;
+```
+
+Skills are integrated into the system prompt on-demand based on the user's prompt content matching the skill's `trigger` patterns.
+
+## Session Persistence
+
+Conversations can be persisted to JSONL files and resumed later. Enable via the harness:
+
+```ts
+// Start a new persisted session
+await harness.enableSession();  // auto-creates under ~/.logician/sessions/
+
+// Or resume an existing session
+const resumed = await harness.resumeSession("session_123456_abc");
+if (resumed) {
+    // History loaded, ready to continue
+}
+
+// List all saved sessions
+const sessions = harness.listSessions();
+
+// Session data is appended after each prompt completes
+// Files live under: ~/.logician/sessions/<sessionId>/
+```
+
+Checkpoints are supported for undo/restore:
+
+```ts
+const checkpointPath = session.saveCheckpoint();  // snapshot current state
+const restored = session.loadCheckpoint(42);      // restore to 42 messages
+```
 
 ## Transcript Model
 
@@ -547,18 +879,42 @@ Content chunks are buffered before block rendering so markdown tables and code f
 ## Slash Commands
 
 | Area | Commands |
-| --- | --- |
+|---|---|
 | Help | `/help`, `/?`, `/version` |
-| Sessions | `/new`, `/sessions`, `/load`, `/export` |
+| Sessions | `/new`, `/sessions`, `/load`, `/save`, `/rename`, `/export` |
 | Agent | `/status`, `/agents`, `/agent`, `/pipeline`, `/reload` |
-| Context | `/context`, `/compact`, `/reset`, `/changes` |
-| RAG/docs | `/mount`, `/mount-code`, `/upload`, `/upload-dir`, `/docs`, `/rag` |
-| Skills/plugins | `/skills-health`, `/plugins` |
-| Display | `/thinking`, `/thinking-steps`, `/mode`, `/cache`, `/trace`, `/clear` |
-| Auth | `/login` |
+| Context | `/context`, `/compact`, `/reset`, `/changes`, `/mode` |
+| Branching | `/fork`, `/discard-branch` |
+| Display | `/thinking`, `/thinking-steps`, `/cache`, `/trace`, `/clear`, `/theme` |
+| Reasoning | `/reasoner` |
+| Skills | `/skills-health` |
+| Plugins | `/plugins` |
+| MCP | `/mcp` |
+| Mount/Upload | `/mount`, `/mount-code`, `/upload`, `/upload-dir`, `/docs`, `/rag` |
+| Misc | `/jb` (inject jb.md prompt), `/login`, `/status` |
 | Exit | `/q`, `/quit`, `/exit` |
 
 The slash popup supports fuzzy matching, arrow navigation, usage hints, and Tab completion.
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LOGICIAN_LLM_URL` | `http://127.0.0.1:8080` | OpenAI-compatible backend URL |
+| `LOGICIAN_MODEL` | empty | Model name sent to the backend |
+| `LOGICIAN_SYSTEM_PROMPT` | empty | Extra system instructions appended to the default prompt |
+| `LOGICIAN_CONFIG` | auto `.logician.json` | Explicit config file path |
+| `LOGICIAN_CONTEXT_WINDOW` | empty | Context window shown in the status bar |
+| `LOGICIAN_CTX_SIZE` | empty | Alias used for context-window status |
+| `LOGICIAN_MCP` | `1` | Set `0` to disable MCP loading |
+| `LOGICIAN_MCP_CONFIG` | auto | MCP config file path |
+| `LOGICIAN_MCP_EAGER` | `1` | Set `0` to defer MCP discovery |
+| `LOGICIAN_HOOKS` | `1` | Set `0` to disable runtime plugin hooks |
+| `LOGICIAN_STARTUP_HOOK_TIMEOUT_MS` | `1200` | Startup hook command timeout (ms) |
+| `LOGICIAN_THEME` | empty | Initial theme name |
+| `LOGICIAN_PERMISSION_MODE` | empty | Default permission mode (`acceptAll`, `acceptEdits`, `ask`, `plan`) |
+| `CLAUDE_PLUGIN_ROOT` | — | Passed to hook commands (set at runtime) |
+| `CLAUDE_CODE_PLUGIN_CACHE_DIR` | `~/.claude/plugins` | Override plugin registry location |
 
 ## Source Layout
 
@@ -580,27 +936,69 @@ src/
 │   ├── slash-popup.ts
 │   ├── plugin-manager.ts
 │   └── session-manager.ts
-└── agent-core/
-    ├── types.ts              # Core types: Message, AgentMessage, AgentEvent, hooks
-    ├── loop.ts               # Inner ReAct turn loop
-    ├── harness.ts            # Outer orchestration: phase machine, queues, branching, compaction
-    ├── events.ts             # AgentEvent emitter (bounded history)
-    ├── hook-bus.ts           # Typed multi-handler hook bus
-    ├── backend.ts            # OpenAI-compatible streaming backend (finish_reason, usage)
-    ├── messages.ts           # Message creation, chat format, compaction ladder
-    ├── default-tools.ts      # Built-in tool list
-    ├── tool-cache.ts         # LRU+TTL result cache for opt-in pure tools
-    ├── async-utils.ts        # withTimeout (cancelable) and shared async helpers
-    ├── plugins.ts            # Claude-style plugin hooks
-    ├── builtin-hooks.ts      # Safeguard hooks (guards, budget, compaction, follow-up)
-    ├── guards.ts             # Duplicate + failure-loop guards
-    ├── budget.ts             # Diminishing-returns budget tracker
-    ├── parser.ts             # Tool call parsing
-    ├── mcp.ts                # MCP server loading and registration
-    ├── system-prompt.ts      # Default system prompt generation
-    ├── skills.ts             # Skills catalog + on-demand read_skill
-    ├── syntax-highlighter.ts # Terminal syntax highlighting
-    └── tools/                # Tool implementations
+└── agent-core/               # Core agent logic — modular subfolder structure
+    ├── index.ts              # Thin barrel re-exporting sub-modules
+    ├── core/                 # Orchestration layer
+    │   ├── harness.ts        # Outer orchestration: phase machine, queues, branching, compaction, session persistence
+    │   ├── loop.ts           # Inner ReAct turn loop (inner/outer split, queue-driven continuation)
+    │   ├── loop-detector.ts  # 3-strategy loop detection (exact repeat, degenerate, stagnation)
+    │   ├── types.ts          # Core types: Message, AgentMessage, AgentEvent, hooks, config
+    │   ├── backend.ts        # OpenAI-compatible streaming backend (finish_reason, usage)
+    │   ├── messages.ts       # Message creation, chat format, compaction ladder
+    │   ├── events.ts         # AgentEvent emitter (bounded history)
+    │   ├── session.ts        # JSONL session persistence (append, load, checkpoint, restore)
+    │   ├── tool-cache.ts     # LRU+TTL result cache for opt-in pure tools
+    │   └── file-checkpoints.ts # File snapshot state for /rewind
+    ├── hooks/                # Event handling
+    │   ├── hook-bus.ts       # Typed multi-handler hook bus (short-circuit, patch, transform, first-true)
+    │   ├── builtin-hooks.ts  # Safeguard hooks (guards, budget, compaction, follow-up, circling)
+    │   ├── guards.ts         # Duplicate + failure-loop guards
+    │   └── budget.ts         # Diminishing-returns budget tracker
+    ├── tools/                # Tool execution
+    │   ├── skills/           # Agent skill tools (each is one tool)
+    │   │   ├── read-file.ts  # Read files with truncation and read-tracking
+    │   │   ├── write-file.ts # Write files with mutation queue and freshness tracking
+    │   │   ├── edit-file.ts  # Precise edit with fuzzy fallback, diff tracking
+    │   │   ├── bash.ts       # Shell execution with output accumulation and truncation
+    │   │   ├── shell.ts      # Shell helpers
+    │   │   ├── git.ts        # Git operations
+    │   │   ├── find.ts       # Find files by pattern
+    │   │   ├── search.ts     # Grep-style content search
+    │   │   ├── list-files.ts # Directory listing
+    │   │   ├── web-fetch.ts  # Fetch URLs
+    │   │   ├── web-search.ts # SearXNG-powered search
+    │   │   ├── ask-user.ts   # User confirmation dialog
+    │   │   ├── todo-write.ts # Todo list management
+    │   │   ├── task-status.ts # Task status tracking
+    │   │   ├── file-diff.ts  # File diff tool
+    │   │   ├── fuzzy-edit.ts # Fuzzy string editing
+    │   │   ├── read-skill.ts # Skill loading tool
+    │   │   ├── read-tracker.ts # File read tracking for freshness
+    │   │   ├── output-accumulator.ts # Output buffering for tools
+    │   │   ├── truncate.ts   # Truncation utilities
+    │   │   └── diff-utils.ts # Diff generation utilities
+    │   └── shared/           # Tool infrastructure
+    │       ├── registry.ts   # Tool registry (registration, execution, typing)
+    │       ├── parser.ts     # Tool call / argument parsing
+    │       ├── permissions.ts # Permission mode manager (acceptAll, ask, plan)
+    │       ├── plugins.ts    # Claude-style plugin hooks (JSON-driven shell/HTTP)
+    │       ├── skills.ts     # Skills catalog + frontmatter parsing
+    │       ├── subagent.ts   # Subagent definitions and spawn tool
+    │       ├── mcp.ts        # MCP server loading and registration
+    │       ├── system-prompt.ts # Default system prompt generation
+    │       ├── helpers.ts    # Shared text/path utilities (BOM, resolution, normalization)
+    │       ├── path-utils.ts # Path resolution and validation
+    │       ├── default-tools.ts # Built-in tool factory
+    │       ├── file-mutation-queue.ts # Ordered write queue for safe concurrent edits
+    │       ├── async-utils.ts # withTimeout (cancelable) and shared async helpers
+    │       └── syntax-highlighter.ts # Terminal syntax highlighting (pygments)
+    ├── compaction/           # Compaction utilities
+    │   ├── index.ts          # Public compaction API
+    │   ├── compaction.ts     # Token budget compaction + micro-compaction
+    │   ├── recovery.ts       # Context-full recovery logic
+    │   ├── branch-summarization.ts # Branch summary generation
+    │   └── utils.ts          # Compaction helpers
+    └── __tests__/            # Test suite
 ```
 
 ## Development Notes

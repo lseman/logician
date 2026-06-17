@@ -1,12 +1,13 @@
 import { type Component, clampLineToWidth, visibleWidth } from "../tui-core.ts";
+import { theme } from "../theme.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const HEADER = "\x1b[38;5;159m";
-const SELECTED = "\x1b[38;5;111m";
-const MUTED = "\x1b[38;5;245m";
-const WARN = "\x1b[38;5;215m";
+const getHeader = (): string => theme.fg("header", "");
+const getSelected = (): string => theme.fg("selected", "");
+const getMuted = (): string => theme.fg("muted", "");
+const getWarn = (): string => theme.fg("active", "");
 
 export interface PluginListItem {
 	pluginId: string;
@@ -136,7 +137,7 @@ export class PluginManagerOverlay implements Component {
 		const innerWidth = Math.max(1, overlayWidth - 4);
 		const lines: string[] = [];
 
-		lines.push(`${HEADER}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
+		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
 		lines.push(
 			boxLine(
 				`${BOLD}Plugins${RESET}${DIM} (${this.plugins.length})${RESET}`,
@@ -147,11 +148,11 @@ export class PluginManagerOverlay implements Component {
 		if (this.pluginsDir) {
 			lines.push(boxLine(`${DIM}${this.pluginsDir}${RESET}`, "", innerWidth));
 		}
-		lines.push(`${HEADER}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
 
 		if (!this.plugins.length) {
 			lines.push(
-				boxLine(`${MUTED}No plugins installed.${RESET}`, "", innerWidth),
+				boxLine(`${getMuted()}No plugins installed.${RESET}`, "", innerWidth),
 			);
 		} else {
 			const maxRows = 10;
@@ -164,7 +165,9 @@ export class PluginManagerOverlay implements Component {
 			);
 			const end = Math.min(this.plugins.length, start + maxRows);
 			if (start > 0) {
-				lines.push(boxLine(`${MUTED}↑ ${start} more${RESET}`, "", innerWidth));
+				lines.push(
+					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
+				);
 			}
 			for (let i = start; i < end; i++) {
 				const plugin = this.plugins[i];
@@ -180,13 +183,13 @@ export class PluginManagerOverlay implements Component {
 				const metaParts = [hookText];
 				if (skillText) metaParts.push(skillText);
 				const metaStr = metaParts.join(" · ");
-				const diskText = plugin.onDisk ? "" : ` ${WARN}missing${RESET}`;
+				const diskText = plugin.onDisk ? "" : ` ${getWarn()}missing${RESET}`;
 				const busy =
 					this.busyPluginId === plugin.pluginId
 						? ` ${DIM}updating...${RESET}`
 						: "";
 				const name = selected
-					? `${SELECTED}${BOLD}${plugin.pluginId}${RESET}`
+					? `${getSelected()}${BOLD}${plugin.pluginId}${RESET}`
 					: plugin.pluginId;
 				const meta = `${DIM}v${plugin.version || "?"} · ${metaStr}${RESET}${diskText}${busy}`;
 				lines.push(boxLine(`${cursor} ${checkbox} ${name}`, meta, innerWidth));
@@ -194,7 +197,7 @@ export class PluginManagerOverlay implements Component {
 			if (end < this.plugins.length) {
 				lines.push(
 					boxLine(
-						`${MUTED}↓ ${this.plugins.length - end} more${RESET}`,
+						`${getMuted()}↓ ${this.plugins.length - end} more${RESET}`,
 						"",
 						innerWidth,
 					),
@@ -202,17 +205,17 @@ export class PluginManagerOverlay implements Component {
 			}
 		}
 
-		lines.push(`${HEADER}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
 		lines.push(
 			boxLine(
 				this.message
 					? `${DIM}${this.message}${RESET}`
-					: `${MUTED}Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.${RESET}`,
+					: `${getMuted()}Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.${RESET}`,
 				"",
 				innerWidth,
 			),
 		);
-		lines.push(`${HEADER}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
 
 		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
 		return this.cachedLines;
@@ -232,5 +235,5 @@ function boxLine(left: string, right: string, width: number): string {
 	const gap = Math.max(1, width - leftWidth - rightWidth);
 	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
 	const pad = Math.max(0, width - visibleWidth(content));
-	return `${HEADER}│${RESET} ${content}${" ".repeat(pad)} ${HEADER}│${RESET}`;
+	return `${getHeader()}│${RESET} ${content}${" ".repeat(pad)} ${getHeader()}│${RESET}`;
 }

@@ -2,6 +2,7 @@
 // List, search, rename, and switch sessions. Powered by SessionStore.
 
 import { type Component, visibleWidth } from "../tui-core.ts";
+import { theme } from "../theme.ts";
 import type { SessionStore } from "../session-store.ts";
 
 const BORDERS = {
@@ -16,10 +17,10 @@ const BORDERS = {
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const HEADER_COLOR = "\x1b[38;5;159m";
-const SELECTED_COLOR = "\x1b[38;5;111m";
-const YELLOW = "\x1b[38;5;220m";
-const RED = "\x1b[38;5;203m";
+const getHeaderColor = (): string => theme.fg("header", "");
+const getSelectedColor = (): string => theme.fg("selected", "");
+const getYellow = (): string => theme.fg("levelHigh", "");
+const getRed = (): string => theme.fg("error", "");
 
 export interface SessionInfo {
 	id: string;
@@ -344,7 +345,7 @@ export class SessionManager implements Component {
 		// ── List mode ────────────────────────────────────────────────────────
 		if (this.mode === "list") {
 			lines.push(
-				`${HEADER_COLOR}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
+				`${getHeaderColor()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
 			);
 			lines.push(
 				`${BORDERS.v} ${BOLD}Sessions${DIM} (${this.sessions.length} total)${RESET}`,
@@ -367,7 +368,7 @@ export class SessionManager implements Component {
 
 				let line = "";
 				if (isSelected) {
-					line = `${BORDERS.v} ${SELECTED_COLOR}${prefix}${BOLD}${s.title}${RESET}${SELECTED_COLOR}`;
+					line = `${BORDERS.v} ${getSelectedColor()}${prefix}${BOLD}${s.title}${RESET}${getSelectedColor()}`;
 				} else {
 					line = `${BORDERS.v}  ${s.title}`;
 				}
@@ -412,14 +413,14 @@ export class SessionManager implements Component {
 					this.sessions.find((s) => s.id === this.renameSessionId)?.title ||
 					"Untitled";
 				lines.push(
-					`${HEADER_COLOR}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
+					`${getHeaderColor()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
 				);
 				lines.push(
 					`${BORDERS.v} ${BOLD}Rename:${RESET} ${DIM}${title}${RESET}`,
 				);
 				lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
 				const cursor = this.renameInput;
-				const display = `${YELLOW}${cursor}${RESET}_`;
+				const display = `${getYellow()}${cursor}${RESET}_`;
 				lines.push(`${BORDERS.v}  ${display}`);
 				lines.push(
 					`${BORDERS.v}  ${DIM}Enter to confirm, Esc to cancel${RESET}`,
@@ -430,14 +431,14 @@ export class SessionManager implements Component {
 			} else {
 				// Filter input (renameSessionId === null means we're filtering)
 				lines.push(
-					`${HEADER_COLOR}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
+					`${getHeaderColor()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
 				);
 				lines.push(
 					`${BORDERS.v} ${BOLD}Filter:${RESET} ${DIM}${this.sessions.length} matches${RESET}`,
 				);
 				lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
 				const cursor = this.renameInput;
-				const display = `${YELLOW}${cursor}${RESET}_`;
+				const display = `${getYellow()}${cursor}${RESET}_`;
 				lines.push(`${BORDERS.v}  ${display}`);
 				lines.push(`${BORDERS.v}  ${DIM}Enter to apply, Esc to cancel${RESET}`);
 				lines.push(
@@ -453,10 +454,10 @@ export class SessionManager implements Component {
 					? this.sessions[this.selectedIndex]
 					: null;
 			lines.push(
-				`${RED}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
+				`${getRed()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
 			);
 			lines.push(
-				`${BORDERS.v} ${BOLD}${RED}Delete session?${RESET}${DIM}${session ? `: ${session.title}` : ""}${RESET}`,
+				`${BORDERS.v} ${BOLD}${getRed()}Delete session?${RESET}${DIM}${session ? `: ${session.title}` : ""}${RESET}`,
 			);
 			lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
 			lines.push(`${BORDERS.v}  ${DIM}Y to confirm, Esc to cancel${RESET}`);

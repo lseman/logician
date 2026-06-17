@@ -192,8 +192,14 @@ export interface ImageEvent {
 export interface TodosEvent {
 	type: "todos";
 	todos: Array<{
-		content: string;
-		status: "pending" | "in_progress" | "completed";
+		id: number;
+		subject: string;
+		description?: string;
+		activeForm?: string;
+		status: "pending" | "in_progress" | "completed" | "deleted";
+		blockedBy?: number[];
+		owner?: string;
+		metadata?: Record<string, unknown>;
 	}>;
 }
 

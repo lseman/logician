@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PermissionManager, primaryArgString } from "../permissions.ts";
-import type { ToolCall } from "../types.ts";
+import {
+	PermissionManager,
+	primaryArgString,
+} from "../tools/shared/permissions.ts";
+import type { ToolCall } from "../core/types.ts";
 
 function call(name: string, args: Record<string, unknown>): ToolCall {
 	return { id: "t1", name, arguments: JSON.stringify(args) };

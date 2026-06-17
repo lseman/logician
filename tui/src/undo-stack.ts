@@ -22,7 +22,7 @@ export class UndoStack<T> {
 
 	pop(): T | null {
 		if (this.past.length === 0) return null;
-		const snapshot = this.past.pop()!;
+		const snapshot = this.past.pop() as UndoSnapshot<T>;
 		this.future.push(snapshot);
 		return snapshot.state;
 	}
@@ -46,7 +46,7 @@ export class UndoStack<T> {
 
 	redo(): T | null {
 		if (this.future.length === 0) return null;
-		const snapshot = this.future.pop()!;
+		const snapshot = this.future.pop() as UndoSnapshot<T>;
 		this.past.push(snapshot);
 		return snapshot.state;
 	}

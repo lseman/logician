@@ -1,7 +1,20 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
+import { initTheme, theme, getAvailableThemes } from "./theme.ts";
 import { LogicianTUI } from "./tui.ts";
+import { loadLogicianConfig } from "./config.ts";
+
+// Initialize theme before any component rendering
+const config = loadLogicianConfig(process.cwd()).config;
+initTheme(config.theme);
+
+// Display theme info at startup
+const themes = getAvailableThemes();
+if (themes.length > 0) {
+	// eslint-disable-next-line no-console -- startup theme info
+	console.error(`Theme: ${theme.name} (available: ${themes.join(", ")})`);
+}
 
 const tui = new LogicianTUI();
 

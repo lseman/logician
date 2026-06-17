@@ -1,6 +1,7 @@
 // ── Slash command popup ───────────────────────────────────────────────────────
 // Overlay popup with fuzzy matching, usage hints, and Tab completion.
 
+import { theme } from "../theme.ts";
 import {
 	filterSlashCommands,
 	type SlashCommandDef,
@@ -10,8 +11,8 @@ import { type Component, visibleWidth } from "../tui-core.ts";
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const HEADER_COLOR = "\x1b[38;5;159m"; // aqua
-const SELECTED_COLOR = "\x1b[38;5;111m"; // green
+const getHeaderColor = (): string => theme.fg("header", "");
+const getSelectedColor = (): string => theme.fg("selected", "");
 
 export class SlashPopup implements Component {
 	private commands: SlashCommandDef[] = [];
@@ -216,7 +217,7 @@ export class SlashPopup implements Component {
 		const count = filtered.length;
 		const hint = `${DIM}↑↓ select · Tab complete · ⏎ run · Esc close${RESET}`;
 		lines.push(
-			` ${HEADER_COLOR}commands${RESET}${DIM} (${count})${RESET}  ${hint}`,
+			` ${getHeaderColor()}commands${RESET}${DIM} (${count})${RESET}  ${hint}`,
 		);
 
 		// Command list
@@ -231,7 +232,7 @@ export class SlashPopup implements Component {
 			const usageSuffix = parts.slice(1).join(" ");
 
 			let line = isSelected
-				? ` ${SELECTED_COLOR}${prefix}${BOLD}${cmdName}${RESET}${SELECTED_COLOR}`
+				? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
 				: ` ${prefix}${cmdName}`;
 
 			// Add usage suffix if present

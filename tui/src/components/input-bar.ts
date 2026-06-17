@@ -3,12 +3,16 @@
 // bracketed paste, history, grapheme-aware cursor. Mirrors pi TUI's input.
 
 import type { KillRing } from "../kill-ring.ts";
+import { theme } from "../theme.ts";
 import {
 	type Component,
 	CURSOR_MARKER,
 	type Focusable,
 	visibleWidth,
 } from "../tui-core.ts";
+
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
 import type { UndoStack } from "../undo-stack.ts";
 import { getGraphemeSegmenter } from "../utils.ts";
 import { findWordBackward, findWordForward } from "../word-navigation.ts";
@@ -31,7 +35,13 @@ export class InputBar implements Component, Focusable {
 	private history: string[] = [];
 	private historyIndex: number | null = null;
 	private historyUnsaved: string | null = null;
-	private _prompt = "\x1b[1m\x1b[38;5;111m› \x1b[0m";
+	private _prompt: string | undefined;
+	private get _promptResolved(): string {
+		if (this._prompt === undefined) {
+			this._prompt = theme.fg("prompt", "") + BOLD + "› " + RESET;
+		}
+		return this._prompt;
+	}
 	private _placeholder = "Type a message…";
 	private maxHistory = 100;
 
@@ -78,7 +88,7 @@ export class InputBar implements Component, Focusable {
 	}
 
 	get prompt(): string {
-		return this._prompt;
+		return this._promptResolved;
 	}
 
 	set prompt(p: string) {
@@ -475,7 +485,7 @@ export class InputBar implements Component, Focusable {
 		}
 
 		this.cachedWidth = width;
-		const prompt = this._prompt;
+		const prompt = this._promptResolved;
 		const promptWidth = visibleWidth(prompt);
 		const contentWidth = Math.max(1, width - promptWidth - 1);
 		const displayText = this.value || this._placeholder;
@@ -511,16 +521,22 @@ export class InputBar implements Component, Focusable {
 				: `${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m`;
 
 		// Build the line
-		const color = isPlaceholder ? "\x1b[38;5;244m" : "\x1b[38;5;159m";
+		const color = isPlaceholder
+			? theme.fg("inputPlaceholder", "")
+			: theme.fg("inputText", "");
 		const rawLine =
 			prompt +
-			(viewport.leftClipped ? "\x1b[38;5;244m‹\x1b[0m" : "") +
+			(viewport.leftClipped
+				? theme.fg("inputPlaceholder", "") + "‹" + RESET
+				: "") +
 			color +
 			beforeCursor +
 			cursorChar +
 			afterCursor +
 			"\x1b[0m" +
-			(viewport.rightClipped ? "\x1b[38;5;244m›\x1b[0m" : "");
+			(viewport.rightClipped
+				? theme.fg("inputPlaceholder", "") + "›" + RESET
+				: "");
 
 		// Calculate visible width (strip CURSOR_MARKER for measurement)
 		const cleanLine = rawLine.replace(CURSOR_MARKER, "");

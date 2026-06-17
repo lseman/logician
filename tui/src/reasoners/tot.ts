@@ -18,7 +18,7 @@ export class ToTReasoner extends BaseReasoner {
 	config: ToTConfig;
 
 	constructor(
-		llm: import("../agent-core/backend.js").LLMBackend,
+		llm: import("../agent-core/core/backend.js").LLMBackend,
 		config: ToTConfig = {},
 	) {
 		super(llm, config);

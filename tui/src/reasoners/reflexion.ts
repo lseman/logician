@@ -16,7 +16,7 @@ export class ReflexionReasoner extends BaseReasoner {
 	config: ReflexionConfig;
 
 	constructor(
-		llm: import("../agent-core/backend.js").LLMBackend,
+		llm: import("../agent-core/core/backend.js").LLMBackend,
 		config: ReflexionConfig = {},
 	) {
 		super(llm, config);

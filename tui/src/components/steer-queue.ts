@@ -5,7 +5,9 @@
 // Mirrors Pi's updatePendingMessagesDisplay() pattern.
 
 import { type Component, visibleWidth } from "../tui-core.ts";
+import { theme } from "../theme.ts";
 
+const RESET = "\x1b[0m";
 export class SteerQueue implements Component {
 	private steering: string[] = [];
 	private followUp: string[] = [];
@@ -41,7 +43,8 @@ export class SteerQueue implements Component {
 			parts.push(`${this.followUp.length} follow-up`);
 		}
 		const header =
-			`${HEADER} Queued\x1b[0m  ` + `${COUNT}${parts.join(" · ")}\x1b[0m`;
+			`${getHeader()} Queued\x1b[0m  ` +
+			`${getCount()}${parts.join(" · ")}\x1b[0m`;
 		lines.push(pad(clampLine(header, width), width));
 
 		// Numbered rows, capped. Steering first (cyan), then follow-up (dim).
@@ -54,12 +57,12 @@ export class SteerQueue implements Component {
 			rows.push({ mark: STEER_MARK, style: steerStyle, msg }),
 		);
 		this.followUp.forEach((msg) =>
-			rows.push({ mark: FOLLOW_MARK, style: followStyle, msg }),
+			rows.push({ mark: getFollowMark(), style: followStyle, msg }),
 		);
 
 		const shown = rows.slice(0, MAX_ROWS);
 		shown.forEach((row, i) => {
-			const n = `${NUM}${i + 1}.\x1b[0m`;
+			const n = `${getNum()}${i + 1}.\x1b[0m`;
 			const text = `${row.mark} ${n} ${row.style(oneLine(row.msg))}`;
 			lines.push(pad(clampLine(text, width), width));
 		});
@@ -67,7 +70,7 @@ export class SteerQueue implements Component {
 		const hidden = rows.length - shown.length;
 		if (hidden > 0) {
 			lines.push(
-				pad(clampLine(`   ${COUNT}… ${hidden} more\x1b[0m`, width), width),
+				pad(clampLine(`   ${getCount()}… ${hidden} more\x1b[0m`, width), width),
 			);
 		}
 
@@ -85,13 +88,13 @@ export class SteerQueue implements Component {
 // ── Styling ──────────────────────────────────────────────────────────────────
 
 const MAX_ROWS = 6;
-const HEADER = "\x1b[38;5;245m";
-const COUNT = "\x1b[38;5;240m";
-const NUM = "\x1b[38;5;245m";
+const getHeader = (): string => theme.fg("muted", "");
+const getCount = (): string => theme.fg("dim", "");
+const getNum = (): string => theme.fg("muted", "");
 const STEER_MARK = " \x1b[36m▸\x1b[0m"; // cyan triangle ▸
-const FOLLOW_MARK = " \x1b[38;5;240m↳\x1b[0m"; // dim hook arrow ↳
-const steerStyle = (s: string): string => `\x1b[38;5;252m${s}\x1b[0m`;
-const followStyle = (s: string): string => `\x1b[38;5;245m${s}\x1b[0m`;
+const getFollowMark = (): string => " " + theme.fg("dim", "") + "↳" + RESET;
+const steerStyle = (s: string): string => theme.fg("text", "") + s + RESET;
+const followStyle = (s: string): string => theme.fg("muted", "") + s + RESET;
 
 /** Collapse newlines/whitespace runs so each queued message is one row. */
 function oneLine(msg: string): string {

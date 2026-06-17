@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { formatSkillInvocation, loadSkills } from "../skills.ts";
+import { formatSkillInvocation, loadSkills } from "../tools/shared/skills.ts";
 
 void test("frontmatter extensions are parsed (allowed-tools, argument-hint, model)", async () => {
 	const root = mkdtempSync(join(tmpdir(), "skills-"));
@@ -43,7 +43,11 @@ void test("skill without a description is rejected with a diagnostic", async () 
 	const root = mkdtempSync(join(tmpdir(), "skills-"));
 	const dir = join(root, "nameless");
 	mkdirSync(dir);
-	writeFileSync(join(dir, "SKILL.md"), "---\nname: nameless\n---\nBody.", "utf8");
+	writeFileSync(
+		join(dir, "SKILL.md"),
+		"---\nname: nameless\n---\nBody.",
+		"utf8",
+	);
 	const { skills, diagnostics } = await loadSkills(root);
 	assert.equal(skills.length, 0);
 	assert.ok(diagnostics.some((d) => d.code === "invalid_metadata"));

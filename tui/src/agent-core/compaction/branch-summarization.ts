@@ -5,8 +5,8 @@
 //
 // This is Pi's branch summarization system, adapted for Logician's message API.
 
-import type { AgentMessage, CompactableMessage } from "../types";
-import { estimateTokens, SUMMARIZATION_SYSTEM_PROMPT } from "./compaction";
+import type { AgentMessage, CompactableMessage } from "../core/types.ts";
+import { estimateCompressableTokens } from "./compaction";
 import {
 	COMPUTE_FILE_LISTS,
 	CREATE_FILE_OPS,
@@ -26,7 +26,7 @@ export interface BranchSummaryDetails {
 }
 
 /** Prepared branch content for summarization. */
-export interface BranchPreparation {
+interface BranchPreparation {
 	messages: CompactableMessage[];
 	fileOps: ReturnType<typeof CREATE_FILE_OPS>;
 	totalTokens: number;
@@ -65,7 +65,7 @@ export function collectBranchMessages(
 	// Walk backwards from newest, respecting budget
 	for (let i = branchMessages.length - 1; i >= 0; i--) {
 		const msg = branchMessages[i];
-		const tokens = estimateTokens(msg as AgentMessage | CompactableMessage);
+		const tokens = estimateCompressableTokens(msg as AgentMessage | CompactableMessage);
 
 		if (totalTokens + tokens > tokenBudget && tokenBudget > 0) {
 			// Allow compacted/summary entries to pass with some slack
@@ -92,7 +92,8 @@ export function collectBranchMessages(
 // Summarization prompts
 // ============================================================================
 
-const BRANCH_SUMMARY_PREAMBLE = `The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\n`;
+const BRANCH_SUMMARY_PREAMBLE =
+	"The user explored a different conversation branch before returning here.\nSummary of that exploration:\n\n";
 
 const BRANCH_SUMMARY_PROMPT = `Create a structured summary of this conversation branch for context when returning later.
 
@@ -142,21 +143,27 @@ export async function generateBranchSummary(
 		reserveTokens = DEFAULT_BRANCH_SUMMARY_OPTIONS.reserveTokens,
 	} = options;
 
-	const { messages, fileOps, totalTokens } = collectBranchMessages(
+	const { messages, fileOps } = collectBranchMessages(
 		branchMessages,
 		128000, // default context window
 		reserveTokens ?? 16384,
 	);
 
 	if (messages.length === 0) {
-		return { summary: "No content to summarize", readFiles: [], modifiedFiles: [] };
+		return {
+			summary: "No content to summarize",
+			readFiles: [],
+			modifiedFiles: [],
+		};
 	}
 
 	const llmMessages = convertMessagesToLlmFormat(messages);
-	const conversationText = serializeConversation(llmMessages as Array<{
-		role: string;
-		content: string | Array<{ type: string; text?: string }>;
-	}>);
+	const conversationText = serializeConversation(
+		llmMessages as Array<{
+			role: string;
+			content: string | Array<{ type: string; text?: string }>;
+		}>,
+	);
 
 	let instructions: string;
 	if (replaceInstructions && customInstructions) {
@@ -173,9 +180,14 @@ export async function generateBranchSummary(
 	const summary = `${BRANCH_SUMMARY_PREAMBLE}[Branch summary would be generated here by calling the LLM with the conversation above.\n\nPrompt length: ${promptText.length} chars]`;
 
 	const { readFiles, modifiedFiles } = COMPUTE_FILE_LISTS(fileOps);
-	const fullSummary = summary + FORMAT_FILE_OPERATIONS(readFiles, modifiedFiles);
+	const fullSummary =
+		summary + FORMAT_FILE_OPERATIONS(readFiles, modifiedFiles);
 
-	return { summary: fullSummary || "No summary generated", readFiles, modifiedFiles };
+	return {
+		summary: fullSummary || "No summary generated",
+		readFiles,
+		modifiedFiles,
+	};
 }
 
 function convertMessagesToLlmFormat(messages: CompactableMessage[]): Array<{
@@ -189,12 +201,27 @@ function convertMessagesToLlmFormat(messages: CompactableMessage[]): Array<{
 
 	for (const msg of messages) {
 		if (msg.role === "assistant" && Array.isArray(msg.content)) {
-			const textParts = msg.content.filter((b: unknown) =>
-				typeof b === "object" && b !== null && "type" in b && b.type === "text"
-			).map((b: unknown) => ({ type: "text" as const, text: (b as { text: string }).text }));
-			result.push({ role: msg.role, content: textParts.length > 0 ? textParts : "" });
+			const textParts = msg.content
+				.filter(
+					(b: unknown) =>
+						typeof b === "object" &&
+						b !== null &&
+						"type" in b &&
+						b.type === "text",
+				)
+				.map((b: unknown) => ({
+					type: "text" as const,
+					text: (b as { text: string }).text,
+				}));
+			result.push({
+				role: msg.role,
+				content: textParts.length > 0 ? textParts : "",
+			});
 		} else {
-			result.push({ role: msg.role, content: typeof msg.content === "string" ? msg.content : "" });
+			result.push({
+				role: msg.role,
+				content: typeof msg.content === "string" ? msg.content : "",
+			});
 		}
 	}
 

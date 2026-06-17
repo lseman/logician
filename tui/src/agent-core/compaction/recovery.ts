@@ -3,9 +3,8 @@
 // Calls compactToFit with forced ladder (triggerTokens=0) and returns the
 // new messages + metrics for the caller to emit.
 
-import { compactToFit, type CompactToFitResult } from "./compaction.ts";
-import type { CompactableMessage } from "../types.ts";
-import { estimateContextTokens } from "./compaction.ts";
+import { compactToFit } from "./compaction.ts";
+import type { CompactableMessage } from "../core/types.ts";
 
 const COMPACTION_TARGET_FRACTION = 0.65;
 
@@ -34,7 +33,9 @@ export function recoverFromContextFull(
 	opts: ContextFullRecoveryOptions,
 ): ContextFullRecoveryResult {
 	const { messages, contextWindowTokens } = opts;
-	const targetTokens = Math.floor(contextWindowTokens * COMPACTION_TARGET_FRACTION);
+	const targetTokens = Math.floor(
+		contextWindowTokens * COMPACTION_TARGET_FRACTION,
+	);
 
 	const result = compactToFit(messages, {
 		triggerTokens: 0, // Force: provider already rejected

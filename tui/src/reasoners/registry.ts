@@ -3,7 +3,7 @@
 //
 // Factory: get_reasoner(name, llm, **config) → Reasoner instance.
 
-import type { LLMBackend } from "../agent-core/backend.js";
+import type { LLMBackend } from "../agent-core/core/backend.js";
 import { AutoCoTReasoner } from "./auto_cot.js";
 import type { Reasoner, ReasonerConfig, ReasonerConstructor } from "./base.js";
 import { BestOfNReasoner } from "./best_of_n.js";

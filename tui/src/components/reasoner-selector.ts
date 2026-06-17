@@ -4,14 +4,15 @@
 // Reasoner selection applies to the next turn (never mutates an in-flight run).
 
 import { type Component, clampLineToWidth, visibleWidth } from "../tui-core.ts";
+import { theme } from "../theme.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const HEADER = "\x1b[38;5;159m";
-const SELECTED = "\x1b[38;5;111m";
-const MUTED = "\x1b[38;5;245m";
-const ACTIVE = "\x1b[38;5;226m";
+const getHeader = (): string => theme.fg("header", "");
+const getSelected = (): string => theme.fg("selected", "");
+const getMuted = (): string => theme.fg("muted", "");
+const getActive = (): string => theme.fg("active", "");
 
 export interface ReasonerInfo {
 	id: string;
@@ -104,7 +105,7 @@ export class ReasonerSelectorOverlay implements Component {
 		const innerWidth = Math.max(1, overlayWidth - 4);
 		const lines: string[] = [];
 
-		lines.push(`${HEADER}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
+		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
 		lines.push(
 			boxLine(
 				`${BOLD}Reasoning Mode${RESET}${DIM} (${this.reasoners.length})${RESET}`,
@@ -112,12 +113,12 @@ export class ReasonerSelectorOverlay implements Component {
 				innerWidth,
 			),
 		);
-		lines.push(`${HEADER}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
 
 		if (!this.reasoners.length) {
 			lines.push(
 				boxLine(
-					`${MUTED}No reasoning modes available.${RESET}`,
+					`${getMuted()}No reasoning modes available.${RESET}`,
 					"",
 					innerWidth,
 				),
@@ -133,14 +134,18 @@ export class ReasonerSelectorOverlay implements Component {
 			);
 			const end = Math.min(this.reasoners.length, start + maxRows);
 			if (start > 0) {
-				lines.push(boxLine(`${MUTED}↑ ${start} more${RESET}`, "", innerWidth));
+				lines.push(
+					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
+				);
 			}
 			for (let i = start; i < end; i++) {
 				const r = this.reasoners[i];
 				const selected = i === this.selectedIndex;
 				const cursor = selected ? "▸" : " ";
-				const activeMark = r.active ? `${ACTIVE}● active${RESET}` : "";
-				const name = selected ? `${SELECTED}${BOLD}${r.name}${RESET}` : r.name;
+				const activeMark = r.active ? `${getActive()}● active${RESET}` : "";
+				const name = selected
+					? `${getSelected()}${BOLD}${r.name}${RESET}`
+					: r.name;
 				const desc = `${DIM}${r.description}${RESET}`;
 				const meta = activeMark ? `${desc}  ${activeMark}` : desc;
 				lines.push(boxLine(`${cursor} ${name}`, meta, innerWidth));
@@ -148,7 +153,7 @@ export class ReasonerSelectorOverlay implements Component {
 			if (end < this.reasoners.length) {
 				lines.push(
 					boxLine(
-						`${MUTED}↓ ${this.reasoners.length - end} more${RESET}`,
+						`${getMuted()}↓ ${this.reasoners.length - end} more${RESET}`,
 						"",
 						innerWidth,
 					),
@@ -156,17 +161,17 @@ export class ReasonerSelectorOverlay implements Component {
 			}
 		}
 
-		lines.push(`${HEADER}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
 		lines.push(
 			boxLine(
 				this.message
 					? `${DIM}${this.message}${RESET}`
-					: `${MUTED}Select a reasoning mode for the next turn.${RESET}`,
+					: `${getMuted()}Select a reasoning mode for the next turn.${RESET}`,
 				"",
 				innerWidth,
 			),
 		);
-		lines.push(`${HEADER}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
 
 		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
 		return this.cachedLines;
@@ -186,5 +191,5 @@ function boxLine(left: string, right: string, width: number): string {
 	const gap = Math.max(1, width - leftWidth - rightWidth);
 	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
 	const pad = Math.max(0, width - visibleWidth(content));
-	return `${HEADER}│${RESET} ${content}${" ".repeat(pad)} ${HEADER}│${RESET}`;
+	return `${getHeader()}│${RESET} ${content}${" ".repeat(pad)} ${getHeader()}│${RESET}`;
 }
