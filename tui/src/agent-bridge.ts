@@ -43,6 +43,7 @@ import {
 import {
 	formatSkillCatalog,
 	formatSkillInvocation,
+	formatSkillsForSystemPrompt,
 	loadSkills,
 	type Skill,
 } from "./agent-core/tools/shared/skills.ts";
@@ -50,11 +51,11 @@ import {
 	type AgentDefinition,
 	createSpawnAgentTool,
 	loadAgentDefinitions,
-} from "./agent-core/tools/shared/subagent.ts";
+} from "./agent-core/tools/subagents/subagent.ts";
 import { buildDefaultSystemPrompt } from "./agent-core/tools/shared/system-prompt.ts";
 import { createReadSkillTool } from "./agent-core/tools/skills/read-skill.ts";
 import { ToolRegistry } from "./agent-core/tools/shared/registry.ts";
-import { onTodosChanged } from "./agent-core/tools/skills/todo.ts";
+import { onTodosChanged } from "./agent-core/tools/todos/todo.ts";
 import { findLogicianConfig } from "./config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 
@@ -640,6 +641,9 @@ export class AgentCoreBridge {
 			this.harness.setOnSavePoint(() => {
 				this.emit({ type: "save_point" });
 			});
+			// Apply compaction settings from user settings (~/.logician/settings.json).
+			const userSettings = loadUserSettings();
+			applyCompactionSettings(this.harness, userSettings);
 		}
 		return this.harness;
 	}
@@ -787,7 +791,86 @@ export class AgentCoreBridge {
 			}
 			return;
 		}
+		// /reload — reload settings, skills, extensions, and MCP config
+		if (trimmed === "/reload") {
+			this.reload().catch((err) => this.errorCb?.(err));
+			return;
+		}
 		this.sendMessage(raw).catch((err) => this.errorCb?.(err));
+	}
+
+	// ── Reload ────────────────────────────────────────────────────────────
+
+	/** Reload settings, skills, and MCP config from disk. */
+	private async reload(): Promise<void> {
+		const results: string[] = [];
+
+		// 1. Reload user settings (~/.logician/settings.json)
+		try {
+			const userSettings = loadUserSettings();
+			const harness = this.ensureHarness();
+			applyCompactionSettings(harness, userSettings);
+
+			// Update model/thinking from user settings
+			if (userSettings.defaultModel !== undefined) {
+				const model = String(userSettings.defaultModel);
+				this.config.model = model;
+				harness.setModel(model);
+			}
+			if (userSettings.defaultThinkingLevel !== undefined) {
+				const level = String(userSettings.defaultThinkingLevel);
+				this.config.thinkingLevel =
+					level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+				harness.setThinkingLevel(
+					level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
+				);
+			}
+			results.push(`User settings reloaded.`);
+		} catch (e: unknown) {
+			results.push(`User settings: not found or invalid.`);
+		}
+
+		// 2. Reload skills
+		try {
+			const skillDirs = await getSkillsDirs(this.cwd);
+			const { skills, diagnostics } = await loadSkills(skillDirs);
+			this.loadedSkills = skills;
+			this.skillsContext = skills.length
+				? formatSkillsForSystemPrompt(skills)
+				: "";
+			// Rebuild harness system prompt if harness exists
+			if (this.harness) {
+				this.harness.setSystemPrompt(this.buildBaseSystemPrompt());
+			}
+			results.push(`Skills reloaded (${skills.length} loaded).`);
+			if (diagnostics?.length) {
+				for (const diag of diagnostics.slice(0, 5)) {
+					results.push(
+						`  ⚠ ${diag.code}: ${diag.message}`,
+					);
+				}
+			}
+		} catch (e: unknown) {
+			results.push(`Skills: reload failed (${(e as Error).message}).`);
+		}
+
+		// 3. Reload MCP config
+		try {
+			const result = await this.mcpManager.load(
+				this.config.cwd || process.cwd(),
+			);
+			this.mcpServerCount = result.servers;
+			this.mcpErrors = result.errors;
+			results.push(`MCP servers: ${result.servers} loaded.`);
+		} catch (e: unknown) {
+			results.push(`MCP: reload failed (${(e as Error).message}).`);
+		}
+
+		// Send summary back to user
+		const summary = results.join("\n");
+		this.sendMessage(`**Config reloaded:**\n\n${summary}`).catch(
+			(err) => this.errorCb?.(err),
+		);
 	}
 
 	// ── Skill invocation ───────────────────────────────────────────────
@@ -1565,4 +1648,81 @@ export class AgentCoreBridge {
 function eventLogPathFor(transcriptPath: string): string | undefined {
 	if (!transcriptPath) return undefined;
 	return transcriptPath.replace(/\.jsonl$/, ".events.jsonl");
+}
+
+// ── User settings (local ~/.logician/settings.json) ──────────────────────
+
+interface UserSettings {
+	compaction?: {
+		enabled?: boolean;
+		reserveTokens?: number;
+		keepRecentTokens?: number;
+	};
+	[key: string]: unknown;
+}
+
+/** Load user settings from ~/.logician/settings.json. Returns empty object on failure. */
+function loadUserSettings(): UserSettings {
+	const settingsPath = path.join(os.homedir(), ".logician", "settings.json");
+	try {
+		const raw = readFileSync(settingsPath, "utf8");
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		return typeof parsed === "object" && parsed !== null ? (parsed as UserSettings) : {};
+	} catch {
+		return {};
+	}
+}
+
+/** Apply compaction settings from user settings to the harness. */
+function applyCompactionSettings(harness: AgentHarness, settings: UserSettings): void {
+	const compaction = settings.compaction;
+	if (!compaction) return;
+
+	const compactionSettings: {
+		reserveTokens?: number;
+		keepRecentTokens?: number;
+	} = {};
+
+	if (compaction.reserveTokens !== undefined && compaction.reserveTokens > 0) {
+		compactionSettings.reserveTokens = compaction.reserveTokens;
+	}
+	if (compaction.keepRecentTokens !== undefined && compaction.keepRecentTokens > 0) {
+		compactionSettings.keepRecentTokens = compaction.keepRecentTokens;
+	}
+
+	if (Object.keys(compactionSettings).length > 0) {
+		harness.setAutoCompactionSettings(compactionSettings);
+	}
+
+	if (compaction.enabled === true) {
+		harness.enableAutoCompaction(true);
+	}
+}
+
+// ── Directory discovery ──────────────────────────────────────────────────
+
+/** Discover skill directories from plugins and project layout. */
+export async function getSkillsDirs(cwd: string): Promise<string[]> {
+	const dirs: string[] = [];
+
+	// Plugin skills
+	try {
+		const registry = await runPluginBackend("list", []);
+		const plugins = registry.plugins || [];
+		for (const plugin of plugins) {
+			const enabled = plugin.enabled !== false;
+			const onDisk = plugin.on_disk !== false;
+			const installPath = String(plugin.install_path || "");
+			if (!enabled || !onDisk || !installPath) continue;
+			dirs.push(path.join(installPath, "skills"));
+		}
+	} catch {
+		// Plugin backend may not be ready during early reload
+	}
+
+	// Project-local skills (Pi-style cwd traversal)
+	dirs.push(path.join(cwd, ".logician", "skills"));
+	dirs.push(path.join(cwd, "skills"));
+
+	return dirs;
 }

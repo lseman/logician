@@ -21,7 +21,9 @@ const KNOWN_KEYS = new Set([
 	"mcpEager", "webSearch", "permissionMode", "permissions",
 	"steeringInterrupt", "maxTotalTokens",
 	"loopDetectionEnabled", "guardsEnabled", "continuationEnabled",
+	"compaction",
 ]);
+const COMPACTION_KEYS = new Set(["enabled", "reserveTokens", "keepRecentTokens"]);
 
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
@@ -172,6 +174,28 @@ export function validateConfig(
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled);
 
+	// compaction sub-object.
+	if (obj.compaction !== undefined) {
+		if (typeof obj.compaction !== "object" || obj.compaction === null) {
+			warn(warnings, '"compaction" must be an object.');
+		} else {
+			const c = obj.compaction as Record<string, unknown>;
+			const ccfg: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number } = {};
+			for (const key of Object.keys(c)) {
+				if (!COMPACTION_KEYS.has(key)) {
+					warn(warnings, `Unknown compaction key: "${key}".`);
+				}
+			}
+			const ce = configBool(c.enabled);
+			if (ce !== undefined) ccfg.enabled = ce;
+			const crt = configNumber(c.reserveTokens);
+			if (crt !== undefined && crt > 0) ccfg.reserveTokens = crt;
+			const krt = configNumber(c.keepRecentTokens);
+			if (krt !== undefined && krt > 0) ccfg.keepRecentTokens = krt;
+			if (Object.keys(ccfg).length > 0) cfg.compaction = ccfg;
+		}
+	}
+
 	// MCP fields (passthrough, but warn on unknown sub-keys).
 	if (obj.mcp !== undefined && typeof obj.mcp === "object") {
 		cfg.mcp = obj.mcp as Record<string, unknown>;
@@ -269,6 +293,12 @@ export interface LogicianTuiConfig {
 	loopDetectionEnabled?: boolean; // OFF by default
 	guardsEnabled?: boolean; // OFF by default
 	continuationEnabled?: boolean; // OFF by default
+	// Compaction settings.
+	compaction?: {
+		enabled?: boolean;
+		reserveTokens?: number;
+		keepRecentTokens?: number;
+	};
 }
 
 export function loadLogicianConfig(
@@ -314,7 +344,7 @@ export function findLogicianConfig(cwd = process.cwd()): string | null {
 	// Fall back to a per-user global config when no project config is found.
 	const home = process.env.HOME;
 	if (home) {
-		const global = join(home, ".logician", "logician.json");
+		const global = join(home, ".logician", "settings.json");
 		if (existsSync(global)) return global;
 	}
 	return null;
@@ -352,12 +382,12 @@ export function configBool(
 	return fallback;
 }
 
-/** Save a single config field to the global user config file (~/.logician/logician.json). */
+/** Save a single config field to the global user config file (~/.logician/settings.json). */
 export function saveConfigField(key: string, value: unknown): boolean {
 	try {
 		const home = process.env.HOME || "";
 		if (!home) return false;
-		const configPath = join(home, ".logician", "logician.json");
+		const configPath = join(home, ".logician", "settings.json");
 		const dir = dirname(configPath);
 		if (!existsSync(dir)) {
 			appendFileSync(configPath, "{}\n");

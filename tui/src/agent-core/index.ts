@@ -11,7 +11,9 @@ export * from "./core/loop-detector.ts";
 export * from "./core/loop.ts";
 export * from "./core/messages.ts";
 export * from "./core/session.ts";
+export * from "./core/stateless-loop.ts";
 export * from "./core/tool-cache.ts";
+export { type TruncationResult, type TruncationOptions, truncateTail, sanitizeBinaryOutput, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES, GREP_MAX_LINE_LENGTH } from "./core/truncate.ts";
 export * from "./core/types.ts";
 
 // Hooks: hook bus, builtin hooks, budget
@@ -23,7 +25,7 @@ export * from "./hooks/plugin-hooks.ts";
 export * from "./tools/shared/permissions.ts";
 export * from "./tools/shared/parser.ts";
 export * from "./tools/shared/plugins.ts";
-export * from "./tools/shared/subagent.ts";
+export * from "./tools/subagents/subagent.ts";
 export * from "./tools/shared/skills.ts";
 export * from "./tools/shared/mcp.ts";
 export * from "./tools/shared/system-prompt.ts";
@@ -37,7 +39,6 @@ export * from "./tools/shared/registry.ts";
 
 // Skills (individual tool implementations)
 export * from "./tools/skills/truncate.ts";
-export * from "./tools/skills/output-accumulator.ts";
 export * from "./tools/skills/read-tracker.ts";
 
 // Specific tool exports (for backward compat)
@@ -55,8 +56,8 @@ export {
 	task_status,
 } from "./tools/skills/task-status.ts";
 export type { TaskStatusRecord } from "./tools/skills/task-status.ts";
-export type { Task, TaskStatus } from "./tools/skills/todo.ts";
-export { getTasks, onTodosChanged } from "./tools/skills/todo.ts";
+export type { Task, TaskStatus } from "./tools/todos/todo.ts";
+export { getTasks, onTodosChanged } from "./tools/todos/todo.ts";
 export { write_file } from "./tools/skills/write-file.ts";
 
 // Compaction (kept at top level for backwards compat).

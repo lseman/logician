@@ -91,9 +91,9 @@ export function estimateCompressableTokens(
 			chars += textContent.length;
 			break;
 		case "assistant": {
-			if (Array.isArray((msg as AgentMessage).content)) {
-				for (const block of (msg as AgentMessage & { content?: unknown[] })
-					.content ?? []) {
+			const agentMsg = msg as unknown as AgentMessage & { content?: unknown[] };
+			if (Array.isArray(agentMsg.content)) {
+				for (const block of agentMsg.content ?? []) {
 					if (typeof block === "object" && block !== null) {
 						const bo = block as Record<string, unknown>;
 						if (bo.type === "text" && typeof bo.text === "string") {

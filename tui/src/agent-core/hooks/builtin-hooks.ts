@@ -13,7 +13,7 @@ import {
 } from "../core/messages.ts";
 import { compactToFit } from "../compaction/compaction.ts";
 import { getTaskStatus } from "../tools/skills/task-status.ts";
-import { getTasks } from "../tools/skills/todo.ts";
+import { getTasks } from "../tools/todos/todo.ts";
 import type { AgentConfig, AgentLoopHooks, CompactableMessage, Message } from "../core/types.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the

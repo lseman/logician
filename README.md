@@ -221,7 +221,7 @@ The `initTheme(name?)` function loads a theme by name. The `theme` proxy provide
 
 ## Configuration
 
-Project config lives in `.logician.json`. The TUI resolves it in order: `LOGICIAN_CONFIG` (explicit file) → nearest `.logician.json` walking upward from the current directory → the per-user global `~/.logician/logician.json`. Environment variables still win over file values.
+Project config lives in `.logician.json`. The TUI resolves it in order: `LOGICIAN_CONFIG` (explicit file) → nearest `.logician.json` walking upward from the current directory → the per-user global `~/.logician/settings.json`. Environment variables still win over file values.
 
 ```json
 {
@@ -737,7 +737,7 @@ Useful commands:
 
 ## MCP
 
-MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks upward from the current directory looking for `.logician.json` or `.mcp.json`, and finally falls back to the per-user global `~/.logician/mcp.json` (standard MCP format) or `~/.logician/logician.json` (legacy logician format).
+MCP discovery checks `LOGICIAN_MCP_CONFIG`, then `LOGICIAN_CONFIG`, then walks upward from the current directory looking for `.logician.json` or `.mcp.json`, and finally falls back to the per-user global `~/.logician/mcp.json` (standard MCP format) or `~/.logician/settings.json` (legacy logician format).
 
 ```json
 {

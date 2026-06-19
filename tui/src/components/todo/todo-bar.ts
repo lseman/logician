@@ -7,8 +7,8 @@
 //
 // Groups tasks by status: in_progress first, then pending, then completed.
 
-import { type Component, visibleWidth } from "../tui-core.ts";
-import { theme } from "../theme.ts";
+import { type Component, visibleWidth } from "../../tui-core.ts";
+import { theme } from "../../theme.ts";
 
 const RESET = "\x1b[0m";
 

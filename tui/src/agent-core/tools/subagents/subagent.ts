@@ -13,7 +13,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LLMBackend } from "../../core/backend.ts";
 import { AgentLoop } from "../../core/loop.ts";
-import { parseFrontmatter } from "./skills.ts";
+import { parseFrontmatter } from "../shared/skills.ts";
 import type { AgentConfig, AgentEvent, Tool } from "../../core/types.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────

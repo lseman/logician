@@ -8,7 +8,7 @@ import { list_files } from "../skills/list-files.ts";
 import { read_file } from "../skills/read-file.ts";
 import { grep } from "../skills/search.ts";
 import { task_status } from "../skills/task-status.ts";
-import { todo_tool } from "../skills/todo.ts";
+import { todo_tool } from "../todos/todo.ts";
 import { web_fetch } from "../skills/web-fetch.ts";
 import { createWebSearchTool } from "../skills/web-search.ts";
 import { write_file } from "../skills/write-file.ts";

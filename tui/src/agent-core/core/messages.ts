@@ -3,21 +3,97 @@
 
 import type {
 	AgentMessage,
+	BashExecutionMessage,
+	BranchSummaryMessage,
+	CompactionSummaryMessage,
+	CustomMessage,
 	Message,
 	MessageRole,
 } from "./types.ts";
 
-/** Convert AgentMessage[] to LLM-compatible Message[]. Filters out custom messages. */
+export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
+
+<summary>
+`;
+
+export const COMPACTION_SUMMARY_SUFFIX = `
+</summary>`;
+
+export const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch that this conversation came back from:
+
+<summary>
+`;
+
+export const BRANCH_SUMMARY_SUFFIX = `</summary>`;
+
+export function bashExecutionToText(msg: BashExecutionMessage): string {
+	let text = `Ran \`${msg.command}\`\n`;
+	if (msg.output) {
+		text += `\`\`\`\n${msg.output}\n\`\`\``;
+	} else {
+		text += "(no output)";
+	}
+	if (msg.cancelled) {
+		text += "\n\n(command cancelled)";
+	} else if (msg.exitCode !== null && msg.exitCode !== undefined && msg.exitCode !== 0) {
+		text += `\n\nCommand exited with code ${msg.exitCode}`;
+	}
+	if (msg.truncated && msg.fullOutputPath) {
+		text += `\n\n[Output truncated. Full output: ${msg.fullOutputPath}]`;
+	}
+	return text;
+}
+
+/** Convert AgentMessage[] to LLM-compatible Message[]. Handles custom message types. */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
-	const standardRoles = new Set<MessageRole>([
-		"system",
-		"user",
-		"assistant",
-		"tool",
-	]);
-	return messages.filter((m) =>
-		standardRoles.has(m.role as MessageRole),
-	) as Message[];
+	return messages
+		.map((m): Message | undefined => {
+			if (!m) return undefined;
+			const role = m.role as string;
+			switch (role) {
+				case "compactionSummary": {
+					const msg = m as unknown as CompactionSummaryMessage;
+					return {
+						role: "user",
+						content: COMPACTION_SUMMARY_PREFIX + msg.summary + COMPACTION_SUMMARY_SUFFIX,
+						timestamp: msg.timestamp,
+					};
+				}
+				case "branchSummary": {
+					const msg = m as unknown as BranchSummaryMessage;
+					return {
+						role: "user",
+						content: BRANCH_SUMMARY_PREFIX + msg.summary + BRANCH_SUMMARY_SUFFIX,
+						timestamp: msg.timestamp,
+					};
+				}
+				case "bashExecution": {
+					const msg = m as unknown as BashExecutionMessage;
+					if (msg.excludeFromContext) return undefined;
+					return {
+						role: "user",
+						content: bashExecutionToText(msg),
+						timestamp: msg.timestamp,
+					};
+				}
+				case "custom": {
+					const msg = m as unknown as CustomMessage;
+					return {
+						role: "user",
+						content: msg.content,
+						timestamp: msg.timestamp,
+					};
+				}
+				case "system":
+				case "user":
+				case "assistant":
+				case "tool":
+					return m as Message;
+				default:
+					return undefined;
+			}
+		})
+		.filter((m): m is Message => m !== undefined);
 }
 
 export function createUserMessage(content: string): Message {

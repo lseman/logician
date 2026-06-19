@@ -34,7 +34,7 @@ import { SlashPopup } from "./components/slash-popup.ts";
 import { StatusBar } from "./components/status-bar.ts";
 import { SteerQueue } from "./components/steer-queue.ts";
 import { ThinkingPanel } from "./components/thinking-panel.ts";
-import { TodoBar } from "./components/todo-bar.ts";
+import { TodoBar } from "./components/todo/todo-bar.ts";
 import { TranscriptDisplay } from "./components/transcript-display.ts";
 import { SessionStore } from "./session-store.ts";
 import {

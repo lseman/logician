@@ -4,11 +4,6 @@
 
 // Re-exports from focused modules
 export {
-	applyEditsToNormalizedContent,
-	type Edit,
-	type ApplyEditsResult,
-} from "../skills/fuzzy-edit.ts";
-export {
 	generateDiffString,
 	generateUnifiedPatch,
 	syntheticUnifiedDiff,
@@ -67,17 +62,7 @@ export function restoreLineEndings(
 // Fuzzy whitespace normalization for text matching
 // ============================================================================
 
-/**
- * Normalize whitespace for fuzzy matching:
- * - Replace all whitespace runs (spaces, tabs, \r, \t, \f, \v) with a single space
- * - Trim leading/trailing whitespace
- * - Collapse newlines to spaces so multi-line oldText can match across lines
- */
-export function normalizeForFuzzyMatch(text: string): string {
-	return text.replace(/[\s]+/g, " ").trim();
-}
-
-// ============================================================================
+// ===========================================================================
 // Edit operations interface
 // ============================================================================
 

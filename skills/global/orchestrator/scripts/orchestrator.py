@@ -64,7 +64,7 @@ Return ONLY a JSON list of objects: {{"title": "...", "note": "..."}}
     # we can import the todo function if it was already defined or use the registry.
 
     try:
-        from .m_20_todo import todo
+        from ...todo.scripts.todo import todo
 
         # Format for todo("set")
         todo_items = []

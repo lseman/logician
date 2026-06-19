@@ -41,6 +41,16 @@ import { LoopDetector, type TurnSignature } from "./loop-detector.ts";
 import { resetTaskStatus } from "../tools/skills/task-status.ts";
 import { ToolResultCache } from "./tool-cache.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
+import {
+	resolveEffectiveAcceptance,
+	shouldRunAcceptanceFinalization,
+	formatAcceptancePrompt,
+	parseAcceptanceReport,
+	stripAcceptanceReport,
+	type ResolvedAcceptance,
+	type AcceptanceReport,
+	type AcceptanceLedger,
+} from "./acceptance-contract.ts";
 
 // Default max outer-loop continuations (follow-up driven). Bounds runaway
 // auto-continuation when follow-up messages keep arriving.
@@ -141,6 +151,8 @@ export class AgentLoop {
 	private signal?: AbortSignal;
 	private hooks: AgentLoopHooks;
 	private initialMessages?: Message[];
+	/** Per-turn snapshot of harness-level stream options. Updated by harness. */
+	streamOptions: import("./types.ts").AgentHarnessStreamOptions = {};
 	private _retryAttempt = 0;
 	private toolCache: ToolResultCache;
 	// Track terminate hint from afterToolCall — when ALL tools in a batch
@@ -183,6 +195,9 @@ export class AgentLoop {
 	}
 	private loopDetectionAttempted = false;
 
+	/** Ledger for acceptance contract self-review/verification. */
+	acceptanceLedger: AcceptanceLedger | null = null;
+
 	/** Read-only snapshot of turn-level metrics (available after run() completes). */
 	get turnMetrics(): TurnMetrics {
 		return { ...this._turnMetrics };
@@ -198,6 +213,7 @@ export class AgentLoop {
 		this.iterationCount = 0;
 		this._messages = [];
 		this.hooks = this.config.hooks || {};
+		this.streamOptions = options.config.streamOptions || {};
 		this.emitter = createEventEmitter();
 		this.toolCache = new ToolResultCache(
 			this.config.cacheSize ?? 1000,
@@ -563,7 +579,93 @@ export class AgentLoop {
 		this.emitEvent({ type: "phase", phase: "idle" });
 		this.emitEvent({ type: "agent_end", messages: this._messages });
 
+		// Run acceptance finalization if configured
+		await this.runAcceptanceFinalization();
+
 		return this._messages;
+	}
+
+	private async runAcceptanceFinalization(): Promise<void> {
+		const config = this.config.acceptance;
+		if (!config) {
+			this.acceptanceLedger = { status: "not-required" };
+			return;
+		}
+
+		const resolved = resolveEffectiveAcceptance({ explicit: config });
+		if (!shouldRunAcceptanceFinalization(resolved)) {
+			this.acceptanceLedger = { status: "not-required" };
+			return;
+		}
+
+		// Get the last assistant message content for report parsing
+		let lastContent = "";
+		for (let i = this._messages.length - 1; i >= 0; i--) {
+			const msg = this._messages[i];
+			if (msg.role === "assistant" && msg.content) {
+				lastContent = msg.content;
+				break;
+			}
+		}
+
+		const { report, error } = parseAcceptanceReport(lastContent);
+		const verification: AcceptanceLedger["verification"] = [];
+
+		// Run verification commands if configured
+		if (resolved.verify.length > 0) {
+			for (const v of resolved.verify) {
+				try {
+					const { exec } = await import("node:child_process");
+					const result = await new Promise<{
+						exitCode: number;
+						stdout: string;
+						stderr: string;
+					}>((resolve) => {
+						exec(
+							v.command,
+							{ cwd: v.cwd, timeout: v.timeoutMs || 30000 },
+							(err, stdout, stderr) => {
+								resolve({
+									exitCode: err ? 1 : 0,
+									stdout: stdout?.toString() || "",
+									stderr: stderr?.toString() || "",
+								});
+							},
+						);
+					});
+					verification.push({
+						command: v.command,
+						result: result.exitCode === 0 ? "passed" : "failed",
+						summary: result.stdout?.trim().slice(0, 200),
+					});
+				} catch {
+					verification.push({
+						command: v.command,
+						result: "failed",
+						summary: "command execution error",
+					});
+				}
+			}
+		}
+
+		if (error || !report) {
+			this.acceptanceLedger = {
+				status: lastContent ? "failed" : "timeout",
+				config: resolved,
+				verification,
+			};
+		} else {
+			const hasFailure = report.criteriaSatisfied?.some(
+				(c) => c.status === "failed",
+			);
+			const verifyFailed = verification.some((v) => v.result === "failed");
+			this.acceptanceLedger = {
+				status: hasFailure || verifyFailed ? "failed" : "passed",
+				report,
+				config: resolved,
+				verification,
+			};
+		}
 	}
 
 	/**
@@ -929,10 +1031,15 @@ export class AgentLoop {
 					maxTokens: this.config.maxTokens || 4096,
 					signal,
 					thinkingLevel: this.config.thinkingLevel,
-					headers: reqPatch?.headers,
+					headers: reqPatch?.headers && Object.fromEntries(
+						Object.entries(reqPatch.headers).filter(([, v]) => v !== undefined),
+					),
 					transformPayload: this.hooks.beforeProviderPayload
 						? (payload) => this.applyProviderPayload(payload)
 						: undefined,
+					maxRetries: reqPatch?.maxRetries ?? undefined,
+					cacheRetention: reqPatch?.cacheRetention,
+					metadata: reqPatch?.metadata,
 					callbacks: {
 						onDelta: (delta: string) => {
 							assistantContent += delta;
@@ -1278,9 +1385,17 @@ export class AgentLoop {
 		if (out?.messages) this._messages = out.messages as Message[];
 	}
 
-	// Resolve per-request headers / timeout from beforeProviderRequest hooks.
+	// Resolve per-request headers / timeout / metadata from beforeProviderRequest hooks.
 	private async runBeforeProviderRequest(): Promise<
-		{ headers?: Record<string, string>; timeoutMs?: number } | undefined
+		| {
+				headers?: Record<string, string | undefined>;
+				timeoutMs?: number;
+				maxRetries?: number;
+				cacheRetention?: string;
+				metadata?: Record<string, unknown>;
+				transport?: string;
+			}
+			| undefined
 	> {
 		if (!this.hooks.beforeProviderRequest) return undefined;
 		return (
@@ -1288,6 +1403,7 @@ export class AgentLoop {
 				model: this.getModel(),
 				sessionId: this._sessionId,
 				iteration: this.iterationCount,
+				streamOptions: this.streamOptions,
 			})) ?? undefined
 		);
 	}

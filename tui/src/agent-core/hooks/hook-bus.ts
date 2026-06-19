@@ -298,7 +298,7 @@ export class HookBus {
 	): Promise<BeforeProviderRequestResult | undefined> {
 		await this.notify("beforeProviderRequest", ctx);
 		if (!this.providerRequest.length) return undefined;
-		let headers: Record<string, string> | undefined;
+		const collectedHeaders: Record<string, string> = {};
 		let timeoutMs: number | undefined;
 		for (const { handler, source, timeoutMs: hookTimeoutMs } of this
 			.providerRequest) {
@@ -309,11 +309,15 @@ export class HookBus {
 				hookTimeoutMs,
 			);
 			if (!r) continue;
-			if (r.headers) headers = { ...headers, ...r.headers };
+			if (r.headers) {
+				for (const [k, v] of Object.entries(r.headers)) {
+					if (v !== undefined) collectedHeaders[k] = v;
+				}
+			}
 			if (r.timeoutMs !== undefined) timeoutMs = r.timeoutMs;
 		}
-		return headers || timeoutMs !== undefined
-			? { headers, timeoutMs }
+		return Object.keys(collectedHeaders).length || timeoutMs !== undefined
+			? { headers: collectedHeaders, timeoutMs }
 			: undefined;
 	}
 

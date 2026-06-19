@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { AgentHarness, HarnessBusyError } from "../core/harness.ts";
 import type { AgentConfig } from "../core/types.ts";
@@ -104,4 +107,20 @@ void test("fork + discardBranch restores the parent conversation", async () => {
 	assert.equal(harness2.messages.length, base2);
 	assert.equal(harness2.listBranches().length, 0);
 	assert.ok(baseLen > 0);
+});
+
+void test("enabled session persists real turn messages without placeholders", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-session-"));
+	const harness = makeHarness(new FakeBackend([() => textResponse("answer")]));
+	await harness.enableSession(dir);
+	await harness.prompt("question");
+
+	const persisted = harness.listSessions();
+	assert.equal(persisted.length, 1);
+	const resumed = makeHarness(new FakeBackend([]));
+	assert.equal(await resumed.resumeSession(persisted[0].id, dir), true);
+	assert.deepEqual(
+		resumed.messages.map((m) => `${m.role}:${m.content ?? ""}`),
+		["user:question", "assistant:answer"],
+	);
 });

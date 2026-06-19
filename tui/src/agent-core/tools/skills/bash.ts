@@ -12,7 +12,7 @@ import {
 	formatSize,
 	type TruncationResult,
 } from "./truncate.ts";
-import { OutputAccumulator } from "./output-accumulator.ts";
+import { OutputAccumulator } from "./truncate.ts";
 import {
 	getShellConfig,
 	getShellEnv,

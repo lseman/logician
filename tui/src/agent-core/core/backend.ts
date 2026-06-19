@@ -166,6 +166,12 @@ export interface GenerateOptions {
 	transformPayload?: (
 		payload: Record<string, unknown>,
 	) => Promise<Record<string, unknown>> | Record<string, unknown>;
+	// Max retry attempts for this request (overrides config default).
+	maxRetries?: number;
+	// Cache retention hint forwarded to providers supporting it.
+	cacheRetention?: string;
+	// Provider metadata forwarded with requests.
+	metadata?: Record<string, unknown>;
 }
 
 export interface LLMBackend {

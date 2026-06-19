@@ -2,12 +2,14 @@
 // Edit file contents with exact text replacement. Supports both single old_text/new_text
 // and multi-edit arrays. Uses fuzzy whitespace matching for robustness, BOM handling,
 // and line-ending preservation — all ported from pi's edit tool.
+//
+// Fuzzy edit logic (buildPosMapping, searchForText, applyEditsToNormalizedContent,
+// normalizeForFuzzyMatch) is included inline to avoid a circular dependency with
+// helpers.ts (which used to re-export these).
 
 import type { Tool, ToolResult } from "../../core/types.ts";
 import {
-	applyEditsToNormalizedContent,
 	detectLineEnding,
-	Edit,
 	ensureInsideCwd,
 	generateDiffString,
 	generateUnifiedPatch,
@@ -18,6 +20,158 @@ import {
 } from "../shared/helpers.ts";
 import { withFileMutationQueue } from "../shared/file-mutation-queue.ts";
 import { isStaleSinceRead, refreshAfterWrite } from "./read-tracker.ts";
+
+// ============================================================================
+// Fuzzy edit logic (merged from fuzzy-edit.ts)
+// ============================================================================
+
+export interface Edit {
+	oldText: string;
+	newText: string;
+}
+
+export interface ApplyEditsResult {
+	baseContent: string;
+	newContent: string;
+}
+
+/** Normalize whitespace for fuzzy matching. */
+export function normalizeForFuzzyMatch(text: string): string {
+	return text.replace(/[\s]+/g, " ").trim();
+}
+
+/** Map positions from fuzzy-normalized content back to actual content positions. */
+function buildPosMapping(actual: string, fuzzy: string): number[] {
+	const mapping: number[] = [];
+	let actualPos = 0;
+	let fuzzyPos = 0;
+
+	while (fuzzyPos < fuzzy.length) {
+		const fuzzyChar = fuzzy[fuzzyPos];
+		if (actualPos >= actual.length) {
+			mapping[fuzzyPos] = actualPos;
+			fuzzyPos++;
+			continue;
+		}
+		const actualChar = actual[actualPos];
+		if (fuzzyChar === " ") {
+			if (actualChar === " " || actualChar === "\t" || actualChar === "\n") {
+				mapping[fuzzyPos] = actualPos;
+				actualPos++;
+			} else {
+				mapping[fuzzyPos] = actualPos;
+				fuzzyPos++;
+			}
+		} else {
+			while (
+				actualPos < actual.length &&
+				(actual[actualPos] === " " || actual[actualPos] === "\t" || actual[actualPos] === "\n")
+			) {
+				actualPos++;
+			}
+			mapping[fuzzyPos] = actualPos;
+			actualPos++;
+			fuzzyPos++;
+		}
+	}
+	return mapping;
+}
+
+function searchForText(content: string, oldText: string, startPos: number): number {
+	let ci = startPos;
+	let ti = 0;
+	let matchEnd = -1;
+
+	while (ci < content.length && ti < oldText.length) {
+		const c = content[ci];
+		const t = oldText[ti];
+		if (c === " " || c === "\t" || c === "\n") {
+			ci++;
+			continue;
+		}
+		if (t === " " && c !== " ") {
+			ti++;
+			continue;
+		}
+		if (c.toLowerCase() === t.toLowerCase()) {
+			matchEnd = ci + 1;
+			ci++;
+			ti++;
+		} else {
+			if (matchEnd !== -1 && matchEnd !== ci) {
+				ci = matchEnd + 1;
+				matchEnd = -1;
+			} else if (ti > 0) {
+				break;
+			} else {
+				ci++;
+			}
+		}
+	}
+	if (ti === oldText.length) {
+		return ci;
+	} else if (matchEnd !== -1 && ti > 0) {
+		let endPos = matchEnd;
+		while (endPos < content.length && content[endPos] === " ") endPos++;
+		return endPos;
+	}
+	return -1;
+}
+
+export function applyEditsToNormalizedContent(
+	normalizedContent: string,
+	edits: Edit[],
+	_filePath: string,
+): ApplyEditsResult {
+	const fuzzyNormalized = normalizeForFuzzyMatch(normalizedContent);
+	const sortedEdits = edits
+		.map((edit, i) => ({ ...edit, originalIndex: i }))
+		.sort((a, b) => a.oldText.length - b.oldText.length);
+
+	const editPositions: Array<{
+		start: number;
+		end: number;
+		oldText: string;
+		newText: string;
+	}> = [];
+
+	for (const edit of sortedEdits) {
+		if (!edit.oldText) continue;
+		const fuzzyOldText = normalizeForFuzzyMatch(edit.oldText);
+		const fuzzyMatchPos = fuzzyNormalized.indexOf(fuzzyOldText);
+
+		if (fuzzyMatchPos !== -1) {
+			const fuzzyMapping = buildPosMapping(normalizedContent, fuzzyNormalized);
+			const actualStart = fuzzyMapping[fuzzyMatchPos] ?? fuzzyMatchPos;
+			const actualEnd =
+				fuzzyMapping[fuzzyMatchPos + fuzzyOldText.length - 1] ??
+				fuzzyMatchPos + fuzzyOldText.length;
+			editPositions.push({
+				start: actualStart,
+				end: actualEnd,
+				oldText: edit.oldText,
+				newText: edit.newText,
+			});
+		} else {
+			const exactPos = normalizedContent.indexOf(edit.oldText);
+			if (exactPos !== -1) {
+				editPositions.push({
+					start: exactPos,
+					end: exactPos + edit.oldText.length,
+					oldText: edit.oldText,
+					newText: edit.newText,
+				});
+			}
+		}
+	}
+
+	let newContent = normalizedContent;
+	for (let i = editPositions.length - 1; i >= 0; i--) {
+		const { start, end, newText } = editPositions[i];
+		newContent = newContent.slice(0, start) + newText + newContent.slice(end);
+	}
+	return { baseContent: normalizedContent, newContent };
+}
 
 // ============================================================================
 // Schema & argument normalization
@@ -33,7 +187,7 @@ const editSchema = {
 		edits: {
 			type: "array",
 			description:
-				"Exact text replacements. Each must match a unique, non-overlapping region. If two changes touch the same block, merge them into one edit.",
+				"Exact text replacements. Each must match a unique, non-overlapping region of the original file. If two changes touch the same block, merge them into one edit.",
 			items: {
 				type: "object",
 				properties: {
@@ -53,13 +207,11 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 	const args = raw as Record<string, unknown>;
 
-	// Normalize path aliases
 	const path =
 		(typeof args.path === "string" && args.path) ||
 		(typeof args.file_path === "string" && args.file_path) ||
 		"";
 
-	// Normalize single-edit field aliases
 	const oldText =
 		(typeof args.oldText === "string" && args.oldText) ||
 		(typeof args.old_text === "string" && args.old_text) ||
@@ -71,7 +223,6 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		(typeof args.newString === "string" && args.newString) ||
 		"";
 
-	// Some models (Opus 4.6, GLM-5.1) send edits as a JSON string instead of an array
 	let rawEdits = args.edits;
 	if (typeof rawEdits === "string") {
 		try {
@@ -83,13 +234,9 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	}
 
 	const edits: Array<{ oldText: string; newText: string }> = [];
-
-	// Collect single-edit fields if present
 	if (oldText || newText) {
 		edits.push({ oldText, newText });
 	}
-
-	// Collect edits[] entries
 	if (Array.isArray(rawEdits)) {
 		for (const item of rawEdits) {
 			if (!item || typeof item !== "object") continue;
@@ -108,10 +255,7 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		}
 	}
 
-	return {
-		path,
-		edits,
-	};
+	return { path, edits };
 }
 
 // ============================================================================
@@ -142,7 +286,6 @@ export const edit_file: Tool = {
 		const resolved = resolvePath(ctx.cwd, path);
 		ensureInsideCwd(ctx.cwd, resolved);
 
-		// Check file existence and permissions
 		try {
 			await defaultEditOperations.access(resolved);
 		} catch (error: unknown) {
@@ -153,47 +296,38 @@ export const edit_file: Tool = {
 			return `Could not edit file: ${path}. ${errorMessage}.`;
 		}
 
-		// Check read-tracker staleness
 		if (isStaleSinceRead(resolved)) {
 			return `${resolved} has been modified since it was last read. Read it again before editing.`;
 		}
 
 		return withFileMutationQueue(resolved, async () => {
-			// Read file
 			const buffer = await defaultEditOperations.readFile(resolved);
 			const rawContent = buffer.toString("utf-8");
-
-			// Strip BOM before matching (LLM won't include invisible BOM in oldText)
 			const { text: content } = stripBom(rawContent);
 			const lineEnding = detectLineEnding(content);
 			const normalizedContent = normalizeToLF(content);
 
-			// Apply edits with fuzzy whitespace matching
 			const { baseContent, newContent } = applyEditsToNormalizedContent(
 				normalizedContent,
 				edits,
 				path,
 			);
 
-			// Restore original line endings
 			const finalContent =
 				(content.startsWith("\uFEFF") ? "\uFEFF" : "") +
 				(lineEnding === "\r\n"
 					? newContent.replace(/\n/g, "\r\n")
 					: newContent);
 
-			// Write back
 			await defaultEditOperations.writeFile(resolved, finalContent);
 			refreshAfterWrite(resolved);
 
-			// Generate diff and patch
 			const { diff, firstChangedLine } = generateDiffString(
 				baseContent,
 				finalContent,
 			);
 			const patch = generateUnifiedPatch(path, baseContent, finalContent);
 
-			// Return structured result
 			return {
 				content: `Successfully replaced ${edits.length} block(s) in ${path}.`,
 				details: {
