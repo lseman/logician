@@ -85,8 +85,11 @@ function makeUpdateThrottler(): (callback: () => void) => void {
 
 export const bash: Tool = {
 	name: "bash",
+	label: "Bash",
 	hookAliases: ["Bash"],
 	description: `Execute bash commands with timeout. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
+	promptSnippet: "Execute shell commands in a sandboxed subprocess with timeout",
+	promptGuidelines: ["Use bash for file operations like ls, grep, find; use read for file content instead of cat"],
 	parameters: bashSchema,
 	prepareArguments,
 	execute: async (args, ctx): Promise<string | ToolResult> => {

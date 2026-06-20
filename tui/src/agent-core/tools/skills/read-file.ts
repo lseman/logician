@@ -15,12 +15,15 @@ import {
 export const read_file: Tool = {
 	readOnly: true,
 	name: "read_file",
+	label: "Read File",
 	hookAliases: ["Read"],
 	executionMode: "parallel",
 	description:
 		`Read file contents. Output is truncated to ${DEFAULT_MAX_LINES} lines or ` +
 		`${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files; ` +
 		"continue with offset until complete.",
+	promptSnippet: "Read file contents with line numbers and truncation support",
+	promptGuidelines: ["Use read_file to read files; use bash cat for quick checks"],
 	parameters: {
 		type: "object",
 		properties: {

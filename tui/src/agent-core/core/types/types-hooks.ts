@@ -120,7 +120,23 @@ export interface GetFollowUpMessagesContext {
 	stopReason?: StopReason;
 }
 
-export interface AgentLoopHooks {
+export interface BeforeCompactContext {
+	/** Messages that will be summarized. */
+	messages: Message[];
+	/** Estimated token count before compaction. */
+	tokensBefore: number;
+	/** "manual" = explicit compact() call; "auto" = threshold-triggered. */
+	reason: "manual" | "auto";
+}
+
+export interface BeforeCompactResult {
+	/** Return true to skip compaction entirely. */
+	cancel?: boolean;
+	/** Provide a pre-built summary to use instead of generating one. */
+	summary?: string;
+}
+
+export interface AgentHooks {
 	beforeToolCall?: (
 		ctx: BeforeToolCallContext,
 	) =>
@@ -167,4 +183,7 @@ export interface AgentLoopHooks {
 	getFollowUpMessages?: (
 		ctx: GetFollowUpMessagesContext,
 	) => Promise<Message[] | undefined> | Message[] | undefined;
+	beforeCompact?: (
+		ctx: BeforeCompactContext,
+	) => Promise<BeforeCompactResult | undefined> | BeforeCompactResult | undefined;
 }

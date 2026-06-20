@@ -25,6 +25,7 @@ const getRed = (): string => theme.fg("error", "");
 export interface SessionInfo {
 	id: string;
 	title: string;
+	name: string | null;
 	preview: string;
 	lastUpdated: string;
 	messageCount: number;
@@ -72,6 +73,7 @@ export class SessionManager implements Component {
 			this.sessions = summaries.map((s) => ({
 				id: s.id,
 				title: s.title,
+				name: s.name,
 				preview: s.preview,
 				lastUpdated: s.lastUpdated,
 				messageCount: s.messageCount,
@@ -241,6 +243,7 @@ export class SessionManager implements Component {
 				? this.store.listSessions().map((s) => ({
 						id: s.id,
 						title: s.title,
+						name: s.name,
 						preview: s.preview,
 						lastUpdated: s.lastUpdated,
 						messageCount: s.messageCount,
@@ -251,6 +254,7 @@ export class SessionManager implements Component {
 			this.sessions = all.filter(
 				(s) =>
 					s.title.toLowerCase().includes(query) ||
+					(s.name ?? "").toLowerCase().includes(query) ||
 					s.preview.toLowerCase().includes(query),
 			);
 		}
@@ -367,10 +371,11 @@ export class SessionManager implements Component {
 				const prefix = isSelected ? "▸ " : "  ";
 
 				let line = "";
+				const title = s.name ? `${s.name}${DIM} (${s.title})${RESET}` : s.title;
 				if (isSelected) {
-					line = `${BORDERS.v} ${getSelectedColor()}${prefix}${BOLD}${s.title}${RESET}${getSelectedColor()}`;
+					line = `${BORDERS.v} ${getSelectedColor()}${prefix}${BOLD}${title}${RESET}${getSelectedColor()}`;
 				} else {
-					line = `${BORDERS.v}  ${s.title}`;
+					line = `${BORDERS.v}  ${title}`;
 				}
 
 				// Metadata

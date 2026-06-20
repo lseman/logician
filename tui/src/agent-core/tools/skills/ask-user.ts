@@ -7,12 +7,14 @@ import type { Tool, ToolContext } from "../../core/types.ts";
 export const ask_user: Tool = {
 	readOnly: true,
 	name: "ask_user",
+	label: "Ask User",
 	hookAliases: ["AskUser"],
 	description:
 		"Ask the user a question with selectable options. Execution blocks " +
 		"until the user responds. Use this when the agent needs user input to " +
 		"proceed — e.g. clarifying requirements, choosing between alternatives, " +
 		"or getting confirmation.",
+	promptSnippet: "Ask the user structured questions with options",
 	parameters: {
 		type: "object",
 		properties: {

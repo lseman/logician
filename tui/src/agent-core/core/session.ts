@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import { markPathIgnoredByCloudSync } from "../tools/shared/path-utils.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -47,6 +48,95 @@ export interface SessionMessage {
 	entryId?: string;
 	/** UUID of the parent entry (enables tree traversal). */
 	parentId?: string;
+}
+
+export interface MessageSessionEntry {
+	type: "message";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	message: SessionMessage;
+}
+
+export interface ModelChangeSessionEntry {
+	type: "model_change";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	model: string;
+}
+
+export interface ThinkingLevelSessionEntry {
+	type: "thinking_level_change";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	thinkingLevel: string;
+}
+
+export interface ActiveToolsSessionEntry {
+	type: "active_tools_change";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	activeToolNames: string[];
+}
+
+export interface SettingsChangeSessionEntry {
+	type: "settings_change";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	key: string;
+	value: string | null;
+	previousValue?: string | null;
+}
+
+export interface CompactionSessionEntry {
+	type: "compaction";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	summary: string;
+	firstKeptEntryId?: string;
+	tokensBefore: number;
+}
+
+export interface BranchSummarySessionEntry {
+	type: "branch_summary";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	fromId?: string;
+	summary: string;
+}
+
+export interface LabelSessionEntry {
+	type: "label";
+	id: string;
+	parentId?: string;
+	timestamp: number;
+	targetId: string;
+	label?: string;
+}
+
+export type SessionEntry =
+	| MessageSessionEntry
+	| ModelChangeSessionEntry
+	| ThinkingLevelSessionEntry
+	| ActiveToolsSessionEntry
+	| SettingsChangeSessionEntry
+	| CompactionSessionEntry
+	| BranchSummarySessionEntry
+	| LabelSessionEntry;
+
+export interface SessionContext {
+	messages: SessionMessage[];
+	model?: string;
+	thinkingLevel?: string;
+	activeToolNames?: string[];
+	settings: Map<string, string | null>;
+	labels: Map<string, string>;
 }
 
 /** Checkpoint metadata written to a separate file. */
@@ -127,6 +217,11 @@ export class Session {
 		// Load existing version for migration
 		const existingMeta = this.getMetaSilent();
 		if (existingMeta) {
+			this.createdAt = existingMeta.createdAt ?? this.createdAt;
+			this.messageCount = existingMeta.messageCount ?? this.messageCount;
+			this.lastActivity = existingMeta.lastActivity ?? this.lastActivity;
+			this.name = existingMeta.name;
+			this.parentId = config?.parentId ?? existingMeta.parentId;
 			this.version = (config?.version ?? existingMeta.version ?? 1) as number;
 			this.migrateVersion();
 		} else {
@@ -141,6 +236,7 @@ export class Session {
 	private init(): void {
 		mkdirSync(this.dir, { recursive: true });
 		mkdirSync(this.checkpointDir, { recursive: true });
+		markPathIgnoredByCloudSync(this.dir);
 
 		if (!existsSync(this.metaPath)) {
 			writeFileSync(
@@ -151,6 +247,8 @@ export class Session {
 					messageCount: 0,
 					lastActivity: this.lastActivity,
 					name: this.name,
+					parentId: this.parentId,
+					version: this.version,
 				}),
 				"utf8",
 			);
@@ -161,19 +259,94 @@ export class Session {
 
 	/** Persist a message to the session file. */
 	append(msg: SessionMessage): void {
+		this.appendMessageEntry(msg);
+	}
+
+	appendMessageEntry(msg: SessionMessage): void {
+		this.appendEntry({
+			type: "message",
+			id: msg.entryId ?? randomUUID(),
+			parentId: msg.parentId,
+			timestamp: msg.timestamp ?? Date.now(),
+			message: msg,
+		});
+	}
+
+	appendModelChange(model: string): void {
+		this.appendEntry({ type: "model_change", id: randomUUID(), timestamp: Date.now(), model });
+		this.appendSettingsChange("model", model);
+	}
+
+	appendThinkingLevelChange(thinkingLevel: string): void {
+		this.appendEntry({ type: "thinking_level_change", id: randomUUID(), timestamp: Date.now(), thinkingLevel });
+		this.appendSettingsChange("thinking_level", thinkingLevel);
+	}
+
+	appendSettingsChange(
+		key: string,
+		value: string | null,
+		previousValue?: string | null,
+	): void {
+		this.appendEntry({
+			type: "settings_change",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			key,
+			value,
+			previousValue,
+		});
+	}
+
+	appendActiveToolsChange(activeToolNames: string[]): void {
+		this.appendEntry({
+			type: "active_tools_change",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			activeToolNames,
+		});
+	}
+
+	appendCompaction(summary: string, tokensBefore: number, firstKeptEntryId?: string): void {
+		this.appendEntry({
+			type: "compaction",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			summary,
+			firstKeptEntryId,
+			tokensBefore,
+		});
+	}
+
+	appendBranchSummary(summary: string, fromId?: string): void {
+		this.appendEntry({
+			type: "branch_summary",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			summary,
+			fromId,
+		});
+	}
+
+	appendLabel(targetId: string, label?: string): void {
+		this.appendEntry({
+			type: "label",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			targetId,
+			label,
+		});
+	}
+
+	appendEntry(entry: SessionEntry): void {
 		mkdirSync(dirname(this.filePath), { recursive: true });
-		// Assign entryId if not present
-		if (!msg.entryId) {
-			msg.entryId = randomUUID();
+		if (!entry.parentId) {
+			entry.parentId = this.getLeafEntryId();
 		}
-		// Inherit parentId from parent message if not set
-		if (!msg.parentId) {
-			const messages = this.load();
-			if (messages.length > 0) {
-				msg.parentId = messages[messages.length - 1].entryId;
-			}
+		if (entry.type === "message") {
+			entry.message.entryId = entry.id;
+			entry.message.parentId = entry.parentId;
 		}
-		appendFileSync(this.filePath, `${JSON.stringify(msg)}\n`, "utf8");
+		appendFileSync(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
 		this.messageCount++;
 		this.lastActivity = Date.now();
 		this.updateMeta();
@@ -181,10 +354,81 @@ export class Session {
 
 	/** Load all messages from the session file. */
 	load(): SessionMessage[] {
+		return this.loadEntries()
+			.filter((entry): entry is MessageSessionEntry => entry.type === "message")
+			.map((entry) => entry.message);
+	}
+
+	loadEntries(): SessionEntry[] {
 		if (!existsSync(this.filePath)) return [];
 		const content = readFileSync(this.filePath, "utf8");
 		const lines = content.trim().split("\n").filter(Boolean);
-		return lines.map((line) => JSON.parse(line));
+		return lines.map((line) => this.parseEntryLine(line));
+	}
+
+	buildContext(): SessionContext {
+		const entries = this.getPathToRootEntries();
+		const labels = new Map<string, string>();
+		const settings = new Map<string, string | null>();
+		const context: SessionContext = { messages: [], labels, settings };
+		let lastCompaction: CompactionSessionEntry | undefined;
+		for (const entry of entries) {
+			if (entry.type === "model_change") {
+				context.model = entry.model;
+				settings.set("model", entry.model);
+			} else if (entry.type === "thinking_level_change") {
+				context.thinkingLevel = entry.thinkingLevel;
+				settings.set("thinking_level", entry.thinkingLevel);
+			} else if (entry.type === "settings_change") {
+				settings.set(entry.key, entry.value);
+				if (entry.key === "model" && entry.value) context.model = entry.value;
+				if (entry.key === "thinking_level" && entry.value) {
+					context.thinkingLevel = entry.value;
+				}
+			} else if (entry.type === "active_tools_change") {
+				context.activeToolNames = [...entry.activeToolNames];
+			} else if (entry.type === "label") {
+				if (entry.label) labels.set(entry.targetId, entry.label);
+				else labels.delete(entry.targetId);
+			} else if (entry.type === "compaction") {
+				lastCompaction = entry;
+			}
+		}
+
+		if (lastCompaction) {
+			context.messages.push({
+				role: "system",
+				content: `<compaction_summary>${lastCompaction.summary}</compaction_summary>`,
+				timestamp: lastCompaction.timestamp,
+				entryId: lastCompaction.id,
+				parentId: lastCompaction.parentId,
+			});
+		}
+		const compactionIndex = lastCompaction ? entries.indexOf(lastCompaction) : -1;
+		const keptStartIndex =
+			lastCompaction?.firstKeptEntryId
+				? entries.findIndex((entry) => entry.id === lastCompaction.firstKeptEntryId)
+				: -1;
+		const contextEntries = lastCompaction
+			? [
+					...(keptStartIndex >= 0 ? entries.slice(keptStartIndex, compactionIndex) : []),
+					...entries.slice(compactionIndex + 1),
+				]
+			: entries;
+		for (const entry of contextEntries) {
+			if (entry.type === "message") {
+				context.messages.push(entry.message);
+			} else if (entry.type === "branch_summary") {
+				context.messages.push({
+					role: "assistant",
+					content: `Branch summary: ${entry.summary}`,
+					timestamp: entry.timestamp,
+					entryId: entry.id,
+					parentId: entry.parentId,
+				});
+			}
+		}
+		return context;
 	}
 
 	/** Save a checkpoint of the current state. Returns the checkpoint path. */
@@ -267,18 +511,22 @@ export class Session {
 
 	/** Get the path of entries from root to the last message (tree traversal). */
 	getPathToRoot(): SessionMessage[] {
-		const messages = this.load();
-		if (messages.length === 0) return [];
+		return this.getPathToRootEntries()
+			.filter((entry): entry is MessageSessionEntry => entry.type === "message")
+			.map((entry) => entry.message);
+	}
 
-		// Build index by entryId
-		const byId = new Map<string, SessionMessage>();
-		for (const msg of messages) {
-			byId.set(msg.entryId || msg.timestamp.toString(), msg);
+	getPathToRootEntries(): SessionEntry[] {
+		const entries = this.loadEntries();
+		if (entries.length === 0) return [];
+
+		const byId = new Map<string, SessionEntry>();
+		for (const entry of entries) {
+			byId.set(entry.id, entry);
 		}
 
-		// Walk from last message back to root
-		const path: SessionMessage[] = [];
-		let currentId: string | undefined = messages[messages.length - 1].entryId;
+		const path: SessionEntry[] = [];
+		let currentId: string | undefined = entries[entries.length - 1].id;
 		let seen = new Set<string>();
 
 		while (currentId && !seen.has(currentId)) {
@@ -294,8 +542,8 @@ export class Session {
 
 	/** Get last entryId in the session. */
 	getLeafEntryId(): string | undefined {
-		const messages = this.load();
-		return messages.length > 0 ? messages[messages.length - 1].entryId : undefined;
+		const entries = this.loadEntries();
+		return entries.length > 0 ? entries[entries.length - 1].id : undefined;
 	}
 
 	/** Truncate the session file (keep only recent messages). */
@@ -305,7 +553,13 @@ export class Session {
 		this.messageCount = truncated.length;
 		writeFileSync(
 			this.filePath,
-			truncated.map((m) => JSON.stringify(m)).join("\n") + "\n",
+			truncated.map((m) => JSON.stringify({
+				type: "message",
+				id: m.entryId ?? randomUUID(),
+				parentId: m.parentId,
+				timestamp: m.timestamp,
+				message: m,
+			} satisfies MessageSessionEntry)).join("\n") + "\n",
 			"utf8",
 		);
 		this.lastActivity = Date.now();
@@ -323,9 +577,27 @@ export class Session {
 				messageCount: this.messageCount,
 				lastActivity: this.lastActivity,
 				name: this.name,
+				parentId: this.parentId,
+				version: this.version,
 			}),
 			"utf8",
 		);
+	}
+
+	private parseEntryLine(line: string): SessionEntry {
+		const parsed = JSON.parse(line);
+		if (parsed && typeof parsed === "object" && typeof parsed.type === "string") {
+			return parsed as SessionEntry;
+		}
+		const message = parsed as SessionMessage;
+		const id = message.entryId ?? `${message.timestamp}`;
+		return {
+			type: "message",
+			id,
+			parentId: message.parentId,
+			timestamp: message.timestamp ?? Date.now(),
+			message: { ...message, entryId: id },
+		};
 	}
 
 	private pruneCheckpoints(): void {

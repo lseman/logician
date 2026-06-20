@@ -1,10 +1,10 @@
 // ── OpenClaude/Claude plugin hook adapter ────────────────────────────────────
-// Converts JSON/stdin plugin hooks into AgentLoopHooks so the core loop only
+// Converts JSON/stdin plugin hooks into AgentHooks so the runner only
 // deals with one hook contract.
 
 import { createUserMessage } from "../core/messages.ts";
 import type {
-	AgentLoopHooks,
+	AgentHooks,
 	Message,
 	ToolCall,
 } from "../core/types.ts";
@@ -20,7 +20,7 @@ export interface PluginHookLayerOptions {
 }
 
 export interface PluginHookLayer {
-	hooks: AgentLoopHooks | undefined;
+	hooks: AgentHooks | undefined;
 	userPromptMessages(prompt: string): Promise<Message[]>;
 	finalStop(): Promise<void>;
 	readonly stopObserved: boolean;
@@ -38,7 +38,7 @@ class RuntimePluginHookLayer implements PluginHookLayer {
 
 	constructor(private readonly options: PluginHookLayerOptions) {}
 
-	get hooks(): AgentLoopHooks | undefined {
+	get hooks(): AgentHooks | undefined {
 		if (!this.options.enabled) return undefined;
 		return {
 			beforeToolCall: async ({ toolCall, args }) => {

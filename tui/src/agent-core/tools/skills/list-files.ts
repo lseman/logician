@@ -68,9 +68,12 @@ const defaultOps: LsOperations = {
 export const list_files: Tool = {
 	readOnly: true,
 	name: "list_files",
+	label: "List Files",
 	hookAliases: ["LS"],
 	description:
 		"List directory contents. Returns entries sorted alphabetically with '/' suffix for directories. Supports glob filtering. Output is truncated to 500 entries or 50KB (whichever is hit first).",
+	promptSnippet: "List directory contents with sorted entries and directory indicators",
+	promptGuidelines: ["Use list_files (ls) for directory listings"],
 	parameters: lsSchema,
 	prepareArguments,
 	execute: async (args, ctx): Promise<string | ToolResult> => {

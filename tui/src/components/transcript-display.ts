@@ -1104,7 +1104,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 				.join(" "),
 		);
 
-		// Details only when the global tool-expand toggle is on (ctrl+o).
+						// Always show the result (diff) for edit_file and write_file even when collapsed.
+		const showDiffResult =
+			["edit_file", "write_file"].includes(tool.tool_name) && !!tool.result;
+		if (showDiffResult) {
+			const resultText = tool.result!.startsWith("Error:")
+				? tool.result!
+				: tool.result!;
+			const label = tool.isError ? "error" : "result";
+			lines.push(`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET} ${resultText}`);
+		}
 		if (!this.toolsExpanded) return lines;
 
 		for (const detailLine of this.toolDetailLines(tool, width - 2)) {

@@ -16,9 +16,11 @@ const execFileAsync = promisify(execFile);
 export const file_diff: Tool = {
 	readOnly: true,
 	name: "file_diff",
+	label: "File Diff",
 	executionMode: "parallel",
 	description:
 		"Show the current git diff for a file or the whole working tree.",
+	promptSnippet: "Generate unified diff between old and new file content",
 	parameters: {
 		type: "object",
 		properties: {

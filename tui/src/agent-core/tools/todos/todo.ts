@@ -363,6 +363,7 @@ const normalizeInput = (
 export const todo_tool: Tool = {
 	readOnly: false,
 	name: "todo",
+	label: "Todo",
 	hookAliases: ["Todo"],
 	description:
 		"Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). " +
@@ -372,6 +373,8 @@ export const todo_tool: Tool = {
 		"list hides tombstoned (deleted) tasks by default; pass includeDeleted:true to see them. Pass status to filter by a single status. " +
 		"Subject must be short and imperative (e.g. 'Research existing tool'); description is for long-form detail. " +
 		"activeForm is a present-continuous label shown while in_progress (e.g. 'writing tests').",
+	promptSnippet: "Manage task list with status tracking and dependencies",
+	promptGuidelines: ["Use todo to track multi-step progress; mark in_progress before work, completed immediately when done"],
 	parameters: {
 		type: "object",
 		properties: {

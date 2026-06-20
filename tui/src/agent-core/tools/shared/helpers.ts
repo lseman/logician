@@ -44,7 +44,7 @@ export function detectLineEnding(content: string): string {
 
 /** Normalize all line endings to LF. */
 export function normalizeToLF(content: string): string {
-	return content.replace(CRLF, LF);
+	return content.replace(/\r\n/g, LF);
 }
 
 /** Convert LF line endings back to the detected original line ending style. */
@@ -53,7 +53,7 @@ export function restoreLineEndings(
 	lineEnding: string,
 ): string {
 	if (lineEnding === CRLF) {
-		return content.replace(LF, CRLF);
+		return content.replace(/\n/g, CRLF);
 	}
 	return content;
 }

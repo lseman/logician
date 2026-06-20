@@ -16,7 +16,13 @@ export type ToolExecutionMode = "sequential" | "parallel";
 
 export interface Tool {
 	name: string;
+	/** Human-readable label shown in UI/tool lists. */
+	label?: string;
 	description: string;
+	/** One-line description for the "Available tools" section in the system prompt. */
+	promptSnippet?: string;
+	/** Guideline bullets for the system prompt Guidelines section. */
+	promptGuidelines?: string[];
 	parameters: Record<string, unknown>;
 	prepareArguments?: (args: unknown) => Record<string, unknown>;
 	executionMode?: ToolExecutionMode;

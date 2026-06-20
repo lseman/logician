@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { AgentHarness, HarnessBusyError } from "../core/harness.ts";
+import { Session } from "../core/session.ts";
 import type { AgentConfig } from "../core/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 
@@ -122,5 +123,33 @@ void test("enabled session persists real turn messages without placeholders", as
 	assert.deepEqual(
 		resumed.messages.map((m) => `${m.role}:${m.content ?? ""}`),
 		["user:question", "assistant:answer"],
+	);
+});
+
+void test("session typed entries build deterministic context", () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-session-tree-"));
+	const session = new Session("tree", { baseDir: dir, enabled: true });
+	session.appendModelChange("model-a");
+	session.appendThinkingLevelChange("high");
+	session.appendActiveToolsChange(["read", "write"]);
+	session.append({ role: "user", content: "old", timestamp: 1 });
+	const firstKept = session.getLeafEntryId();
+	session.appendCompaction("summarized old context", 100, firstKept);
+	session.append({ role: "assistant", content: "new", timestamp: 2 });
+	const lastId = session.getLeafEntryId();
+	session.appendLabel(lastId!, "answer");
+
+	const context = session.buildContext();
+	assert.equal(context.model, "model-a");
+	assert.equal(context.thinkingLevel, "high");
+	assert.deepEqual(context.activeToolNames, ["read", "write"]);
+	assert.equal(context.labels.get(lastId!), "answer");
+	assert.deepEqual(
+		context.messages.map((message) => `${message.role}:${message.content ?? ""}`),
+		[
+			"system:<compaction_summary>summarized old context</compaction_summary>",
+			"user:old",
+			"assistant:new",
+		],
 	);
 });

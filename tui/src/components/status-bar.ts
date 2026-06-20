@@ -31,7 +31,7 @@ interface StatusInfo {
 }
 
 const DEFAULT_INFO: StatusInfo = {
-	thinkingLevel: "medium",
+	thinkingLevel: "off",
 	cacheEnabled: true,
 	cacheSize: 0,
 	turnCount: 0,

@@ -9,7 +9,7 @@ build: binary
 binary:
 	@test -x "$(BUN)" || { echo "bun is required to build $(BIN)"; exit 1; }
 	@mkdir -p dist
-	$(BUN) build --compile $(ENTRY) --outfile $(BIN)
+	$(BUN) build --target=bun --compile $(ENTRY) --outfile $(BIN)
 	@cp -r themes dist/
 	@chmod +x $(BIN)
 	@echo "Built $(BIN)"

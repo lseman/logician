@@ -25,6 +25,7 @@ export function resetTaskStatus(): void {
 
 export const task_status: Tool = {
 	name: "task_status",
+	label: "Task Status",
 	readOnly: true,
 	executionMode: "sequential",
 	description:
@@ -32,6 +33,7 @@ export const task_status: Tool = {
 		"final action, when everything requested is complete (status=done) or " +
 		"you cannot proceed (status=blocked). It ends the run cleanly — do not " +
 		"call it while work remains.",
+	promptSnippet: "Get task status records for todo items",
 	parameters: {
 		type: "object",
 		properties: {

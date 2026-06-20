@@ -1,16 +1,44 @@
 // ── Slash command definitions ─────────────────────────────────────────────────
-// ~30 commands matching Rust TUI, with usage patterns and dispatch types.
+// ~30 commands with rich context: categories, argument hints, examples.
 
 export type SlashDispatch = "local" | "bridge" | "state" | "quit";
+export type SlashCommandSource = "builtin" | "extension" | "skill";
+export type SlashCommandCategory =
+	| "help"
+	| "session"
+	| "agent"
+	| "context"
+	| "rag"
+	| "skills"
+	| "reasoning"
+	| "display"
+	| "permissions"
+	| "shortcuts"
+	| "loop"
+	| "misc";
+
+/** Category ordering for grouped popup display. */
+export const CATEGORY_ORDER: Readonly<SlashCommandCategory[]> = [
+	"help", "session", "agent", "context", "rag", "skills",
+	"reasoning", "display", "permissions", "shortcuts", "loop", "misc",
+];
 
 export interface SlashCommandDef {
-	command: string; // e.g. "/help"
-	usage: string; // e.g. "/help [topic]"
+	command: string;
+	usage?: string;
 	description: string;
 	dispatch: SlashDispatch;
 	acceptsArgs: boolean;
-	handler?: (args: string) => string | undefined; // returns message for local-only commands
-	bridgeHandler?: (args: string) => void; // sends to bridge
+	/** One-line argument hint for the popup (e.g. "<number>", "[mode]"). */
+	argHint?: string;
+	/** Command category for grouped popup display. */
+	category?: SlashCommandCategory;
+	/** Usage examples (shown in popup when command selected). */
+	examples?: string[];
+	/** Source attribution (builtin / extension / skill). */
+	source?: SlashCommandSource;
+	handler?: (args: string) => string | undefined;
+	bridgeHandler?: (args: string) => void;
 }
 
 // ── Command spec factory ──────────────────────────────────────────────────────
@@ -20,6 +48,7 @@ function cmd(
 	description: string,
 	dispatch: SlashDispatch = "bridge",
 	acceptsArgs = false,
+	extra?: Partial<SlashCommandDef>,
 	handler?: (args: string) => string | undefined,
 	bridgeHandler?: (args: string) => void,
 ): SlashCommandDef {
@@ -29,6 +58,9 @@ function cmd(
 		description,
 		dispatch,
 		acceptsArgs,
+		category: "misc",
+		source: "builtin",
+		...extra,
 		handler,
 		bridgeHandler,
 	};
@@ -46,91 +78,81 @@ export function createSlashCommands(
 ): SlashCommandDef[] {
 	return [
 		// ── Help & info ──────────────────────────────────────────────────────
-		cmd("/help", "Show all available commands", "local", false, () => {
-			return "Type / to see all commands. Prefix with / and Tab to autocomplete.";
-		}),
-		cmd("/?", "Alias for /help", "local", false, () => "/help"),
+		cmd("/help", "Show all available commands", "local", false,
+			{ category: "help", argHint: "[topic]", examples: ["/help", "/help session"] },
+			() => "Type / to see all commands. Prefix with / and Tab to autocomplete."),
+		cmd("/?", "Alias for /help", "local", false,
+			{ category: "help" },
+			() => "/help"),
 
 		// ── Session management ───────────────────────────────────────────────
-		cmd("/new", "Start a new session", "bridge", false),
-		cmd("/sessions", "List previous sessions", "local", true),
-		cmd("/save", "Save current session", "local", false),
-		cmd("/rename", "Rename current session", "local", true),
-		cmd("/load", "Load a previous session (ID)", "bridge", true),
-		cmd("/export", "Export chat history to file", "bridge", true),
+		cmd("/new", "Start a new session", "bridge", false, { category: "session" }),
+		cmd("/sessions", "List previous sessions", "local", true, { category: "session", argHint: "[filter]", examples: ["/sessions", "/sessions 2024"] }),
+		cmd("/save", "Save current session", "local", false, { category: "session" }),
+		cmd("/rename", "Rename current session", "local", true, { category: "session", argHint: "<name>", examples: ["/rename My analysis"] }),
+		cmd("/name", "Set short human name on current session", "local", true,
+			{ category: "session", argHint: "<name>", examples: ["/name my-debug-run"] },
+			(...args) => String(localHandlers.nameSession?.(...args) ?? "No active session.")),
+		cmd("/bookmark", "Add a label/bookmark to current position", "local", true,
+			{ category: "session", argHint: "<label> [note]", examples: ["/bookmark breakthrough found the root cause"] },
+			(...args) => String(localHandlers.bookmark?.(...args) ?? "No active session.")),
+		cmd("/bookmarks", "List bookmarks in current session", "local", false,
+			{ category: "session" },
+			() => String(localHandlers.listBookmarks?.() ?? "No bookmarks.")),
+		cmd("/load", "Load a previous session", "bridge", true, { category: "session", argHint: "<session_id>", examples: ["/load abc123"] }),
+		cmd("/export", "Export chat history to file", "bridge", true, { category: "session", argHint: "[path]", examples: ["/export", "/export chat.jsonl"] }),
 
 		// ── Agent control ────────────────────────────────────────────────────
-		cmd("/status", "Show runtime state snapshot", "state", false),
-		cmd("/agents", "List loaded agents", "bridge", false),
-		cmd("/agent", "Switch active agent", "bridge", true),
-		cmd("/pipeline", "Set inter-agent pipeline", "bridge", true),
-		cmd("/reload", "Reload config and agents", "bridge", false),
+		cmd("/status", "Show runtime state snapshot", "state", false, { category: "agent" }),
+		cmd("/agents", "List loaded agents", "bridge", false, { category: "agent" }),
+		cmd("/agent", "Switch active agent", "bridge", true, { category: "agent", argHint: "<name>", examples: ["/agent coder"] }),
+		cmd("/pipeline", "Set inter-agent pipeline", "bridge", true, { category: "agent", argHint: "<agents...>", examples: ["/pipeline planner reviewer"] }),
+		cmd("/reload", "Reload config and agents", "bridge", false, { category: "agent" }),
 
 		// ── Context & memory ─────────────────────────────────────────────────
-		cmd("/context", "Show session/data context", "local", false, () => {
+		cmd("/context", "Show session/data context", "local", false, { category: "context" }, () => {
 			return (
 				(localHandlers.getContext?.() as string | undefined) ||
 				"No context available."
 			);
 		}),
-		cmd("/compact", "Summarize older conversation history", "bridge", false),
-		cmd(
-			"/fork",
-			"Fork the conversation into a branch",
-			"local",
-			false,
-			() => String(localHandlers.fork?.() ?? "Fork unavailable."),
-		),
-		cmd(
-			"/branch-summary",
-			"Summarize the active branch back into the parent",
-			"local",
-			false,
-			() => String(localHandlers.branchSummary?.() ?? "No active branch."),
-		),
-		cmd(
-			"/discard-branch",
-			"Discard the active branch without merging",
-			"local",
-			false,
-			() => String(localHandlers.discardBranch?.() ?? "No active branch."),
-		),
-		cmd("/reset", "Reset runtime tool state", "bridge", false),
-		cmd("/changes", "Show git status and diff preview", "bridge", false),
+		cmd("/compact", "Summarize older conversation history", "bridge", false, { category: "context" }),
+		cmd("/fork", "Fork the conversation into a branch", "local", false,
+			{ category: "context", examples: ["/fork"] },
+			() => String(localHandlers.fork?.() ?? "Fork unavailable.")),
+		cmd("/branch-summary", "Summarize active branch into parent", "local", false,
+			{ category: "context" },
+			() => String(localHandlers.branchSummary?.() ?? "No active branch.")),
+		cmd("/discard-branch", "Discard the active branch", "local", false,
+			{ category: "context" },
+			() => String(localHandlers.discardBranch?.() ?? "No active branch.")),
+		cmd("/reset", "Reset runtime tool state", "bridge", false, { category: "context" }),
+		cmd("/changes", "Show git status and diff preview", "bridge", false, { category: "context" }),
 
 		// ── RAG & docs ───────────────────────────────────────────────────────
-		cmd("/mount", "Mount codebase (context + RAG)", "bridge", true),
-		cmd("/mount-code", "Alias for /mount", "bridge", true),
-		cmd("/upload", "Ingest one document into RAG", "bridge", true),
-		cmd("/upload-dir", "Bulk ingest docs into RAG", "bridge", true),
-		cmd("/docs", "Fetch docs from Context7 library", "bridge", true),
-		cmd("/rag", "Search RAG index", "bridge", true),
+		cmd("/mount", "Mount codebase (context + RAG)", "bridge", true, { category: "rag", argHint: "[path]", examples: ["/mount", "/mount ./src"] }),
+		cmd("/mount-code", "Alias for /mount", "bridge", true, { category: "rag" }),
+		cmd("/upload", "Ingest one document into RAG", "bridge", true, { category: "rag", argHint: "<path>", examples: ["/upload doc.pdf"] }),
+		cmd("/upload-dir", "Bulk ingest docs into RAG", "bridge", true, { category: "rag", argHint: "<dir>", examples: ["/upload-dir ./docs"] }),
+		cmd("/docs", "Fetch docs from Context7", "bridge", true, { category: "rag", argHint: "<lib>", examples: ["/docs react", "/docs nextjs"] }),
+		cmd("/rag", "Search RAG index", "bridge", true, { category: "rag", argHint: "<query>", examples: ["/rag authentication"] }),
 
 		// ── Skills ───────────────────────────────────────────────────────────
-		cmd("/skills-health", "Show skill loader diagnostics", "bridge", false),
-		cmd("/plugins", "Manage installed plugins", "local", true),
-		cmd("/mcp", "Manage MCP servers", "local", true),
-		cmd(
-			"/theme",
-			"Select a color theme (dark|github-dark|light|custom)",
-			"local",
-			true,
+		cmd("/skills-health", "Show skill loader diagnostics", "bridge", false, { category: "skills" }),
+		cmd("/plugins", "Manage installed plugins", "local", true, { category: "skills", argHint: "[list|install|remove]", examples: ["/plugins", "/plugins install my-ext"] }),
+		cmd("/mcp", "Manage MCP servers", "local", true, { category: "skills", argHint: "[list|add|remove]", examples: ["/mcp", "/mcp add http://localhost:3000"] }),
+		cmd("/theme", "Select a color theme", "local", true,
+			{ category: "display", argHint: "<theme>", examples: ["/theme dark", "/theme github-dark", "/theme light"] },
 		),
 
 		// ── Reasoning ────────────────────────────────────────────────────────
-		cmd(
-			"/reasoner",
-			"Select reasoning mode (none|ssr|tot|reflexion|...)",
-			"local",
-			true,
+		cmd("/reasoner", "Select reasoning mode", "local", true,
+			{ category: "reasoning", argHint: "<mode>", examples: ["/reasoner none", "/reasoner tot", "/reasoner reflexion"] },
 		),
 
 		// ── Display ──────────────────────────────────────────────────────────
-		cmd(
-			"/thinking",
-			"Set thinking level (off|low|medium|high|xhigh)",
-			"local",
-			true,
+		cmd("/thinking", "Set thinking level", "local", true,
+			{ category: "display", argHint: "<level>", examples: ["/thinking off", "/thinking high", "/thinking xhigh"] },
 			(args: string) => {
 				const level = args.trim().toLowerCase();
 				const valid = ["off", "low", "medium", "high", "xhigh"];
@@ -141,21 +163,15 @@ export function createSlashCommands(
 				return `Valid levels: ${valid.join(", ")}`;
 			},
 		),
-		cmd(
-			"/mode",
-			"Cycle thinking display mode (collapsed|summary|expanded)",
-			"local",
-			false,
+		cmd("/mode", "Cycle thinking display mode", "local", false,
+			{ category: "display", examples: ["/mode"] },
 			() => {
 				localHandlers.cycleThinking?.();
 				return "Thinking mode cycled.";
 			},
 		),
-		cmd(
-			"/thinking-steps",
-			"Set thinking display mode",
-			"local",
-			true,
+		cmd("/thinking-steps", "Set thinking display mode", "local", true,
+			{ category: "display", argHint: "<mode>", examples: ["/thinking-steps collapsed", "/thinking-steps expanded"] },
 			(args: string) => {
 				const mode = args.trim().toLowerCase();
 				if (["collapsed", "summary", "expanded"].includes(mode)) {
@@ -165,34 +181,37 @@ export function createSlashCommands(
 				return "Valid modes: collapsed, summary, expanded";
 			},
 		),
-		cmd("/cache", "Toggle prompt caching", "local", true, (args: string) => {
-			const enabled =
-				args.trim().toLowerCase() !== "disable" &&
-				args.trim().toLowerCase() !== "off" &&
-				args.trim().toLowerCase() !== "0";
-			localHandlers.setCache?.(enabled);
-			return `Cache: ${enabled ? "enabled" : "disabled"}`;
-		}),
-		cmd("/trace", "Toggle trace messages", "local", true, (args: string) => {
-			const state = args.trim().toLowerCase();
-			if (state === "off" || state === "0") {
-				localHandlers.setTrace?.(false);
-				return "Trace: off";
-			}
-			localHandlers.setTrace?.(true);
-			return "Trace: on";
-		}),
-		cmd("/clear", "Clear visible transcript only", "local", false, () => {
-			localHandlers.clear?.();
-			return "Transcript cleared.";
-		}),
+		cmd("/cache", "Toggle prompt caching", "local", true,
+			{ category: "display", argHint: "[on|off]", examples: ["/cache", "/cache disable"] },
+			(args: string) => {
+				const enabled =
+					args.trim().toLowerCase() !== "disable" &&
+					args.trim().toLowerCase() !== "off" &&
+					args.trim().toLowerCase() !== "0";
+				localHandlers.setCache?.(enabled);
+				return `Cache: ${enabled ? "enabled" : "disabled"}`;
+			}),
+		cmd("/trace", "Toggle trace messages", "local", true,
+			{ category: "display", argHint: "[on|off]", examples: ["/trace", "/trace off"] },
+			(args: string) => {
+				const state = args.trim().toLowerCase();
+				if (state === "off" || state === "0") {
+					localHandlers.setTrace?.(false);
+					return "Trace: off";
+				}
+				localHandlers.setTrace?.(true);
+				return "Trace: on";
+			}),
+		cmd("/clear", "Clear visible transcript only", "local", false,
+			{ category: "display", examples: ["/clear"] },
+			() => {
+				localHandlers.clear?.();
+				return "Transcript cleared.";
+			}),
 
 		// ── Permissions ──────────────────────────────────────────────────────
-		cmd(
-			"/permissions",
-			"Set permission mode (acceptAll|acceptEdits|ask|plan)",
-			"local",
-			true,
+		cmd("/permissions", "Set permission mode", "local", true,
+			{ category: "permissions", argHint: "<mode>", examples: ["/permissions acceptAll", "/permissions ask"] },
 			(args: string) => {
 				const valid = ["acceptAll", "acceptEdits", "ask", "plan"];
 				const mode = valid.find(
@@ -207,40 +226,64 @@ export function createSlashCommands(
 				})`;
 			},
 		),
-		cmd(
-			"/plan",
-			"Toggle plan mode (read-only tools; agent presents a plan)",
-			"local",
-			false,
-			() => String(localHandlers.togglePlanMode?.() ?? "Plan mode unavailable"),
-		),
-		cmd(
-			"/rewind",
-			"Rewind conversation to the previous checkpoint",
-			"local",
-			false,
-			() => String(localHandlers.rewind?.() ?? "Nothing to rewind."),
-		),
+		cmd("/plan", "Toggle plan mode", "local", false,
+			{ category: "permissions", examples: ["/plan"] },
+			() => String(localHandlers.togglePlanMode?.() ?? "Plan mode unavailable")),
+		cmd("/rewind", "Rewind to previous checkpoint", "local", false,
+			{ category: "permissions", examples: ["/rewind"] },
+			() => String(localHandlers.rewind?.() ?? "Nothing to rewind.")),
 
 		// ── Shortcuts ────────────────────────────────────────────────────────
-		cmd("/q", "Quick quit", "quit", false),
-		cmd("/quit", "Exit TUI", "quit", false),
-		cmd("/exit", "Alias for /quit", "quit", false),
+		cmd("/q", "Quick quit", "quit", false, { category: "shortcuts", examples: ["/q"] }),
+		cmd("/quit", "Exit TUI", "quit", false, { category: "shortcuts" }),
+		cmd("/exit", "Alias for /quit", "quit", false, { category: "shortcuts" }),
 
 		// ── Loop ─────────────────────────────────────────────────────────────
-		cmd(
-			"/loop",
-			"Run a prompt repeatedly (e.g. /loop 5m check the deploy)",
-			"local",
-			true,
-		),
+		cmd("/loop", "Run a prompt repeatedly", "local", true,
+			{ category: "loop", argHint: "<count|duration> <prompt>", examples: ["/loop 5m check deploy", "/loop 10 build"] }),
 
 		// ── Misc ─────────────────────────────────────────────────────────────
-		cmd("/version", "Show TUI and bridge version", "local", false),
-		cmd("/login", "Authenticate with provider", "bridge", true),
-		cmd("/export", "Export transcript", "bridge", true),
-		cmd("/jb", "Inject jb.md prompt", "bridge", false),
+		cmd("/version", "Show TUI and bridge version", "local", false, { category: "misc" }),
+		cmd("/login", "Authenticate with provider", "bridge", true, { category: "misc", argHint: "<provider>", examples: ["/login anthropic"] }),
+		cmd("/jb", "Inject jb.md prompt", "bridge", false, { category: "misc" }),
+
+		// ── Settings ─────────────────────────────────────────────────────
+		cmd("/settings", "View or modify runtime settings", "local", true,
+			{ category: "misc", argHint: "[subcommand <value>]", examples: [
+				"/settings",
+				"/settings thinking high",
+				"/settings model claude-sonnet-4",
+				"/settings model-cycle",
+				"/settings temp 0.7",
+				"/settings max-tokens 8192",
+				"/settings max-iterations 20",
+				"/settings loop-detection on",
+				"/settings guards on",
+				"/settings compaction on",
+				"/settings permissions ask",
+			]},
+			(args) => {
+				localHandlers.settings?.(args);
+				return undefined;
+			})
 	];
+}
+
+// ── Category grouping helper ──────────────────────────────────────────────────
+
+/** Group commands by category, preserving CATEGORY_ORDER. Only non-empty categories included. */
+export function groupByCategory(commands: SlashCommandDef[]): Map<SlashCommandCategory, SlashCommandDef[]> {
+	const groups = new Map<SlashCommandCategory, SlashCommandDef[]>();
+	for (const cat of CATEGORY_ORDER) groups.set(cat, []);
+	for (const cmd of commands) {
+		const cat = cmd.category ?? "misc";
+		groups.get(cat)?.push(cmd);
+	}
+	// Remove empty categories
+	for (const [cat, cmds] of groups) {
+		if (cmds.length === 0) groups.delete(cat);
+	}
+	return groups;
 }
 
 // ── Fuzzy filter helper ───────────────────────────────────────────────────────

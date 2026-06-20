@@ -100,13 +100,37 @@ export class ToolRegistry {
 	}
 
 	toToolDefinitions(): Record<string, unknown>[] {
-		return this.list().map((tool) => ({
-			type: "function",
-			function: {
+		return this.list().map((tool) => {
+			const fn: Record<string, unknown> = {
 				name: tool.name,
 				description: tool.description,
 				parameters: tool.parameters,
-			},
-		}));
+			};
+			if (tool.promptSnippet) fn.promptSnippet = tool.promptSnippet;
+			if (tool.label) fn.label = tool.label;
+			return { type: "function" as const, function: fn };
+		});
+	}
+
+	/** Return tool info for system prompt tool list section. */
+	toolSnippets(): Record<string, string> {
+		const snippets: Record<string, string> = {};
+		for (const tool of this.list()) {
+			if (tool.promptSnippet) {
+				snippets[tool.name] = tool.promptSnippet;
+			}
+		}
+		return snippets;
+	}
+
+	/** Return tool-level guidelines for system prompt. */
+	toolGuidelines(): string[] {
+		const guidelines: string[] = [];
+		for (const tool of this.list()) {
+			if (tool.promptGuidelines) {
+				guidelines.push(...tool.promptGuidelines);
+			}
+		}
+		return guidelines;
 	}
 }

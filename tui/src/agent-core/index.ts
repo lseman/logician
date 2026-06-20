@@ -4,14 +4,13 @@
 
 // Core: loop, harness, types, backend, messages, events, session
 export * from "./core/backend.ts";
+export * from "./core/agent-loop-runner.ts";
 export * from "./core/events.ts";
 export * from "./core/file-checkpoints.ts";
 export * from "./core/harness.ts";
 export * from "./core/loop-detector.ts";
-export * from "./core/loop.ts";
 export * from "./core/messages.ts";
 export * from "./core/session.ts";
-export * from "./core/stateless-loop.ts";
 export * from "./core/tool-cache.ts";
 export { type TruncationResult, type TruncationOptions, truncateTail, sanitizeBinaryOutput, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES, GREP_MAX_LINE_LENGTH } from "./core/truncate.ts";
 export * from "./core/types.ts";

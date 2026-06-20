@@ -3,7 +3,7 @@
 // Depends on plugins-executor for hook loading/execution.
 
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +29,7 @@ import {
 	executeLoadedHook,
 	buildHookInput,
 	matcherMatches,
+	type HookEventType,
 } from "./plugins-executor.ts";
 
 const execFileAsync = promisify(execFile);
@@ -50,6 +51,12 @@ export interface PluginInstall {
 export interface RegistryData {
 	version: 2;
 	plugins: Record<string, PluginInstall[]>;
+}
+
+type PluginSettingsEntry = boolean | { enabled?: boolean };
+
+interface UserSettingsData {
+	plugins?: Record<string, PluginSettingsEntry>;
 }
 
 export interface PluginCommandResult {
@@ -115,7 +122,7 @@ export class TsPluginManager {
 				marketplace,
 				version: inst.version || "unknown",
 				scope: inst.scope || "user",
-				enabled: inst.enabled !== false,
+				enabled: this.isEnabled(inst),
 				install_path: inst.installPath || "",
 				sha: (inst.gitCommitSha || "").slice(0, 12),
 				installed_at: inst.installedAt || "",
@@ -135,8 +142,18 @@ export class TsPluginManager {
 		const registry = await this.loadRegistry();
 		const out: Array<[string, PluginInstall]> = [];
 		for (const [pluginId, installs] of Object.entries(registry.plugins)) {
-			for (const install of installs || [])
-				out.push([pluginId, normalizeInstall(install) as PluginInstall]);
+			for (const install of installs || []) {
+				const normalized = normalizeInstall(
+					install as unknown as Record<string, unknown>,
+				) as unknown as PluginInstall;
+				out.push([
+					pluginId,
+					{
+						...normalized,
+						enabled: this.effectiveEnabled(pluginId, normalized),
+					},
+				]);
+			}
 		}
 		return out;
 	}
@@ -156,8 +173,15 @@ export class TsPluginManager {
 		const records = registry.plugins[pluginId] || [];
 		const idx = records.findIndex((r) => (r.scope || "user") === "user");
 		const targetIdx = idx >= 0 ? idx : 0;
-		const inst = normalizeInstall(records[targetIdx]) as PluginInstall;
-		if ((inst.enabled !== false) === enabled) {
+		const inst = normalizeInstall(records[targetIdx] as unknown as Record<string, unknown>) as unknown as PluginInstall;
+		const alreadyEffective = this.effectiveEnabled(pluginId, inst) === enabled;
+		if ((inst.enabled !== false) !== enabled) {
+			records[targetIdx] = { ...inst, enabled, lastUpdated: nowIso() };
+			registry.plugins[pluginId] = records;
+			await this.saveRegistry(registry);
+		}
+		await this.savePluginSetting(pluginId, enabled);
+		if (alreadyEffective) {
 			return {
 				status: enabled ? "already_enabled" : "already_disabled",
 				message: `Plugin '${name}' is already ${enabled ? "enabled" : "disabled"}.`,
@@ -166,9 +190,6 @@ export class TsPluginManager {
 				plugins_dir: this.pluginsDir,
 			};
 		}
-		records[targetIdx] = { ...inst, enabled, lastUpdated: nowIso() };
-		registry.plugins[pluginId] = records;
-		await this.saveRegistry(registry);
 		return {
 			status: enabled ? "enabled" : "disabled",
 			message: `Plugin '${name}' has been ${enabled ? "enabled" : "disabled"}.`,
@@ -251,7 +272,7 @@ export class TsPluginManager {
 			};
 		const registry = await this.loadRegistry();
 		const records = registry.plugins[pluginId] || [];
-		const inst = normalizeInstall(records[0]) as PluginInstall;
+		const inst = normalizeInstall(records[0] as unknown as Record<string, unknown>) as unknown as PluginInstall;
 		if (!keepCache && inst.installPath)
 			await fs
 				.rm(inst.installPath, { recursive: true, force: true })
@@ -354,7 +375,7 @@ export class TsPluginManager {
 			plugin_id: pluginId,
 			version: inst.version,
 			sha: inst.gitCommitSha || "",
-			enabled: inst.enabled !== false,
+			enabled: this.effectiveEnabled(pluginId, inst),
 			install_path: inst.installPath,
 			on_disk: await isDir(inst.installPath),
 			manifest,
@@ -367,6 +388,10 @@ export class TsPluginManager {
 	async sessionStartHookCounts(): Promise<Record<string, number>> {
 		const counts: Record<string, number> = {};
 		for (const [pluginId, inst] of await this.allInstalls()) {
+			if (!this.isEnabled(inst)) {
+				counts[pluginId] = 0;
+				continue;
+			}
 			counts[pluginId] = (
 				await loadPluginHooks(inst.installPath, pluginId)
 			).filter((h) => h.eventType === "SessionStart").length;
@@ -453,8 +478,8 @@ export class TsPluginManager {
 					hook,
 					await executeLoadedHook(
 						hook,
-						eventType,
-						buildHookInput(eventType as typeof eventType, payload),
+						eventType as unknown as HookEventType,
+						buildHookInput(eventType as unknown as HookEventType, payload),
 					),
 				),
 			);
@@ -481,7 +506,7 @@ export class TsPluginManager {
 	): Promise<import("./plugins-executor.ts").LoadedHook[]> {
 		const hooks: import("./plugins-executor.ts").LoadedHook[] = [];
 		for (const [pluginId, inst] of await this.allInstalls()) {
-			if (inst.enabled === false || !(await isDir(inst.installPath))) continue;
+			if (!this.isEnabled(inst) || !(await isDir(inst.installPath))) continue;
 			for (const hook of await loadPluginHooks(inst.installPath, pluginId)) {
 				if (
 					hook.eventType === eventType &&
@@ -507,6 +532,8 @@ export class TsPluginManager {
 		const version = String(
 			pluginJson.version || (sha ? sha.slice(0, 12) : `local-${Date.now()}`),
 		);
+		const pluginId = `${name}@${owner}`;
+		const enabled = this.configuredEnabled(pluginId) ?? true;
 		const cachePath = path.join(
 			this.pluginsDir,
 			"cache",
@@ -518,7 +545,6 @@ export class TsPluginManager {
 			.rm(cachePath, { recursive: true, force: true })
 			.catch(() => undefined);
 		await copyDir(sourceDir, cachePath);
-		const pluginId = `${name}@${owner}`;
 		await this.upsert(pluginId, {
 			scope: "user",
 			installPath: cachePath,
@@ -526,11 +552,12 @@ export class TsPluginManager {
 			installedAt: nowIso(),
 			lastUpdated: nowIso(),
 			gitCommitSha: sha,
-			enabled: true,
+			enabled,
 			dependencies: Array.isArray(pluginJson.dependencies)
 				? pluginJson.dependencies.map(String)
 				: [],
 		} as PluginInstall);
+		await this.savePluginSetting(pluginId, enabled);
 		return {
 			status: "installed",
 			message: `Plugin '${name}' v${version} installed to ${cachePath}.`,
@@ -564,6 +591,58 @@ export class TsPluginManager {
 		);
 	}
 
+	private isEnabled(install: PluginInstall): boolean {
+		return install.enabled !== false;
+	}
+
+	private effectiveEnabled(pluginId: string, install: PluginInstall): boolean {
+		return this.configuredEnabled(pluginId) ?? install.enabled !== false;
+	}
+
+	private configuredEnabled(pluginId: string): boolean | undefined {
+		const configured = this.loadUserSettings().plugins?.[pluginId];
+		if (typeof configured === "boolean") return configured;
+		if (
+			configured &&
+			typeof configured === "object" &&
+			typeof configured.enabled === "boolean"
+		) {
+			return configured.enabled;
+		}
+		return undefined;
+	}
+
+	private settingsPath(): string {
+		return path.join(os.homedir(), ".logician", "settings.json");
+	}
+
+	private loadUserSettings(): UserSettingsData {
+		try {
+			const settingsPath = this.settingsPath();
+			if (!existsSync(settingsPath)) return {};
+			const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as unknown;
+			return raw && typeof raw === "object" ? (raw as UserSettingsData) : {};
+		} catch {
+			return {};
+		}
+	}
+
+	private async savePluginSetting(
+		pluginId: string,
+		enabled: boolean,
+	): Promise<void> {
+		const settingsPath = this.settingsPath();
+		await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+		const raw = this.loadUserSettings() as Record<string, unknown>;
+		const plugins =
+			raw.plugins && typeof raw.plugins === "object" && !Array.isArray(raw.plugins)
+				? { ...(raw.plugins as Record<string, PluginSettingsEntry>) }
+				: {};
+		plugins[pluginId] = { enabled };
+		raw.plugins = plugins;
+		await fs.writeFile(settingsPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+	}
+
 	private async upsert(
 		pluginId: string,
 		install: PluginInstall,
@@ -590,7 +669,7 @@ export class TsPluginManager {
 
 	private async getInstall(pluginId: string): Promise<PluginInstall | null> {
 		const records = (await this.loadRegistry()).plugins[pluginId] || [];
-		return records.length ? (normalizeInstall(records[0]) as PluginInstall) : null;
+		return records.length ? (normalizeInstall(records[0] as unknown as Record<string, unknown>) as unknown as PluginInstall) : null;
 	}
 
 	private async findMarketplacePlugin(name: string): Promise<{

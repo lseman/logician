@@ -1,5 +1,5 @@
 // ── Subagents ────────────────────────────────────────────────────────────────
-// spawn_agent tool: run a task in a child AgentLoop with its own context
+// spawn_agent tool: run a task in a child functional agent runner with its own context
 // window and a scoped tool set, returning only the child's final message to
 // the parent. This is the main context-economy lever — explorations and
 // reviews burn the child's window, not the parent's.
@@ -12,9 +12,9 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LLMBackend } from "../../core/backend.ts";
-import { AgentLoop } from "../../core/loop.ts";
+import { runAgentLoop } from "../../core/agent-loop-runner.ts";
 import { parseFrontmatter } from "../shared/skills.ts";
-import type { AgentConfig, AgentEvent, Tool } from "../../core/types.ts";
+import type { AgentConfig, AgentEvent, Message, Tool } from "../../core/types.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────
 
@@ -245,17 +245,29 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 			const backend = def.model
 				? deps.backend.withModel(def.model)
 				: deps.backend;
-			const loop = new AgentLoop({
-				config: childConfig,
-				backend,
-				cwd: childConfig.cwd,
-				maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
-				signal: ctx.signal,
-			});
+			let turns = 0;
 
 			try {
-				const messages = await loop.run(task);
-				const final = [...messages]
+				const newMessages = await runAgentLoop(
+					{
+						systemPrompt: childConfig.systemPrompt,
+						messages: [],
+						tools: childConfig.tools,
+						cwd: childConfig.cwd,
+					},
+					[{ role: "user", content: task } satisfies Message],
+					{
+						...childConfig,
+						backend,
+						maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
+						signal: ctx.signal,
+					},
+					(event) => {
+						if (event.type === "turn_start") turns++;
+						childConfig.onEvent?.(event);
+					},
+				);
+				const final = [...newMessages]
 					.reverse()
 					.find((m) => m.role === "assistant" && m.content?.trim());
 				const result = truncateResult(
@@ -266,14 +278,14 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 					agentId,
 					agent: def.name,
 					result,
-					turns: loop.turnMetrics.turns,
+					turns,
 				});
 				return {
 					content: result,
 					details: {
 						agent: def.name,
 						agentId,
-						metrics: loop.turnMetrics as unknown as Record<string, unknown>,
+						metrics: { turns },
 					},
 				};
 			} catch (e: unknown) {

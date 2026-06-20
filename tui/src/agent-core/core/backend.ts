@@ -192,7 +192,7 @@ export class OpenAIBackend implements LLMBackend {
 	readonly model: string;
 	private chatTemplate?: string;
 	private stop?: string[];
-	private defaultThinkingLevel: ThinkingLevel = "medium";
+	private defaultThinkingLevel: ThinkingLevel = "off";
 
 	constructor(options: {
 		baseUrl: string;
@@ -205,7 +205,7 @@ export class OpenAIBackend implements LLMBackend {
 		this.model = options.model;
 		this.chatTemplate = options.chatTemplate;
 		this.stop = options.stop;
-		this.defaultThinkingLevel = options.thinkingLevel ?? "medium";
+		this.defaultThinkingLevel = options.thinkingLevel ?? "off";
 	}
 
 	/** Clone this backend bound to a different model (LLMBackend.withModel). */
@@ -360,6 +360,9 @@ export class OpenAIBackend implements LLMBackend {
 						fullContent += delta.content;
 					}
 
+					if (delta.reasoning) {
+						onThinking?.(delta.reasoning);
+					}
 					if (delta.reasoning_content) {
 						onThinking?.(delta.reasoning_content);
 					}

@@ -603,6 +603,14 @@ export class AgentCoreBridge {
 			await harness.prompt(message);
 		} catch (e: unknown) {
 			const error = e as Error;
+			// Emit a visible error notice so the user sees connection/server
+			// failures in the transcript rather than only in the console.
+			this.emit({
+				type: "notice",
+				level: "error",
+				label: "Error",
+				text: error.message,
+			});
 			this.errorCb?.(error);
 		} finally {
 			this.running = false;

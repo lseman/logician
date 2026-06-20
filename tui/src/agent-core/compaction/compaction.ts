@@ -38,6 +38,34 @@ export interface CompactionDetails {
 	modifiedFiles: string[];
 }
 
+/** Metrics for a compaction operation. */
+export interface CompactionMetrics {
+	/** Tokens before compaction. */
+	tokensBefore: number;
+	/** Tokens after compaction. */
+	tokensAfter: number;
+	/** Tokens saved by compaction. */
+	tokensSaved: number;
+	/** Compression ratio (tokensAfter / tokensBefore). */
+	compressionRatio: number;
+	/** Number of messages compacted. */
+	messagesCompacted: number;
+	/** Number of messages retained. */
+	messagesRetained: number;
+	/** Total messages before compaction. */
+	totalMessagesBefore: number;
+	/** Total messages after compaction. */
+	totalMessagesAfter: number;
+	/** Files read during the compacted region. */
+	readFiles: string[];
+	/** Files modified during the compacted region. */
+	modifiedFiles: string[];
+	/** Number of tool calls in the compacted region. */
+	toolCallCount: number;
+	/** Whether compaction was forced (vs. triggered by threshold). */
+	forced: boolean;
+}
+
 /** Compaction result ready to be persisted. */
 export interface CompactionResult<T = unknown> {
 	summary: string;
@@ -49,6 +77,8 @@ export interface CompactionResult<T = unknown> {
 	tokensAfter: number;
 	/** Tokens before compaction. */
 	tokensBefore: number;
+	/** Metrics for this compaction operation. */
+	metrics?: CompactionMetrics;
 	messagesToKeep: CompactableMessage[];
 	details?: T;
 }
@@ -59,6 +89,10 @@ export interface CompactionSettings {
 	reserveTokens: number;
 	keepRecentTokens: number;
 	contextWindow?: number;
+	/** Number of recent messages to always preserve (regardless of token budget). */
+	protectedMessageCount?: number;
+	/** Whether to force compaction regardless of current token usage. */
+	force?: boolean;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -66,6 +100,8 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
 	contextWindow: 128000,
+	protectedMessageCount: 3,
+	force: false,
 };
 
 // ============================================================================
@@ -268,6 +304,10 @@ export interface CutPointResult {
 	firstKeptEntryId?: string;
 	turnStartIndex: number; // -1 if cut is clean (at user message)
 	isSplitTurn: boolean;
+		/** Index of the first protected message (system prompt boundary). */
+	protectedStartIndex: number;
+	/** Index of the last protected message (recent messages boundary). */
+	protectedEndIndex: number;
 }
 
 /** Find the compaction cut point keeping approximately keepRecentTokens from the end. */
@@ -291,6 +331,8 @@ function findCutPoint(
 			firstKeptIndex: startIndex,
 			turnStartIndex: -1,
 			isSplitTurn: false,
+			protectedStartIndex: startIndex,
+			protectedEndIndex: endIndex,
 		};
 	}
 
@@ -336,6 +378,8 @@ function findCutPoint(
 		firstKeptEntryId: messages[cutIndex]?.entryId,
 		turnStartIndex,
 		isSplitTurn: !isUserMessage && turnStartIndex !== -1,
+		protectedStartIndex: startIndex,
+		protectedEndIndex: endIndex,
 	};
 }
 

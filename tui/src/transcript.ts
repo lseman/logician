@@ -81,7 +81,7 @@ const DEFAULT_STATE: SessionState = {
 	turns: [],
 	currentTurnId: null,
 	thinkingDisplayMode: "expanded",
-	thinkingLevel: "medium",
+	thinkingLevel: "off",
 	cacheEnabled: true,
 };
 

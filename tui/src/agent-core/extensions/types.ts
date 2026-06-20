@@ -14,13 +14,21 @@ import type { EventBus } from "./event-bus.ts";
 // ============================================================================
 
 export type ExtensionEventType =
+	| "agent_start"
+	| "agent_end"
 	| "session_start"
 	| "session_end"
 	| "user_prompt_submit"
+	| "message_start"
+	| "message_update"
+	| "message_end"
 	| "before_tool_call"
 	| "after_tool_call"
+	| "tool_call_start"
+	| "tool_call_end"
 	| "before_compact"
 	| "after_compact"
+	| "queue_update"
 	| "turn_start"
 	| "turn_end";
 
@@ -40,6 +48,20 @@ export type ExtensionEventHandler = (
 	event: ExtensionEvent,
 	ctx: ExtensionContext,
 ) => Promise<unknown> | unknown;
+
+export interface BeforeToolCallExtensionResult {
+	block?: boolean;
+	reason?: string;
+	args?: Record<string, unknown>;
+	content?: string;
+	isError?: boolean;
+}
+
+export interface AfterToolCallExtensionResult {
+	content?: string;
+	isError?: boolean;
+	terminate?: boolean;
+}
 
 // ============================================================================
 // Tool Registration

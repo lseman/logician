@@ -584,6 +584,26 @@ export class TUI extends Container {
 				}
 			}
 		}
+		// Handle escape key: close any visible overlay from the stack.
+		if (data === "\x1b") {
+			if (this.overlayStack.length > 0) {
+				const top = this.overlayStack[this.overlayStack.length - 1];
+				const comp = top.component;
+				if (
+					!top.hidden &&
+					"handleInput" in comp &&
+					typeof (comp as Record<string, unknown>).handleInput === "function"
+				) {
+					const action = ((comp as Record<string, unknown>).handleInput as (d: string) => unknown)(data);
+					const actionObj = action as { type?: string } | null;
+					if (actionObj?.type === "close" || actionObj?.type === "cancel") {
+						this.removeOverlay(top.component);
+						return;
+					}
+				}
+			}
+		}
+
 		for (const listener of this.inputListeners) {
 			const result = listener(data);
 			if (result?.consume) return;

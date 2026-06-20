@@ -1,6 +1,28 @@
 // ── Async utilities ─────────────────────────────────────────────────────────
 // Small shared async helpers used across the loop and harness.
 
+/**
+ * Sleep for `ms` milliseconds. Rejects early if `signal` is aborted.
+ * Ported from pi packages/coding-agent/src/utils/sleep.ts.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(new DOMException("Aborted", "AbortError"));
+			return;
+		}
+		const timer = setTimeout(resolve, ms);
+		signal?.addEventListener(
+			"abort",
+			() => {
+				clearTimeout(timer);
+				reject(new DOMException("Aborted", "AbortError"));
+			},
+			{ once: true },
+		);
+	});
+}
+
 import { AgentError, AgentErrorType } from "../../core/types.ts";
 
 /**

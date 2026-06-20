@@ -717,6 +717,10 @@ export class LogicianTUI {
 		this.bridge.onError((err) => {
 			// eslint-disable-next-line no-console
 			console.error(`Bridge error: ${err.message}`);
+			// Also display in transcript so the user sees connection/server errors
+			this.transcript.addSystemMessage(`Connection error: ${err.message}`);
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
 		});
 
 		// Initialize bridge
@@ -758,6 +762,13 @@ export class LogicianTUI {
 			.catch((err) => {
 				// eslint-disable-next-line no-console
 				console.error(`Bridge init failed: ${err.message}`);
+				// Display init/connection errors in transcript so the user knows
+				// the agent couldn't start (e.g. server unreachable).
+				this.transcript.addSystemMessage(
+					`Failed to start agent: ${err.message}`,
+				);
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				this.tui.requestRender();
 			});
 	}
 

@@ -264,9 +264,12 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 
 export const edit_file: Tool = {
 	name: "edit_file",
+	label: "Edit File",
 	hookAliases: ["Edit"],
 	description:
 		"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. Supports BOM handling and line-ending preservation.",
+	promptSnippet: "Edit files using exact text replacement with precise matching",
+	promptGuidelines: ["Use edit_file for surgical edits; keep oldText unique in the file"],
 	parameters: editSchema,
 	prepareArguments,
 	execute: async (

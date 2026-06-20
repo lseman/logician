@@ -10,7 +10,9 @@ import {
 	parseMcpToolDefinition,
 	type McpToolDefinition,
 	type McpClient,
+	type McpServerConfig,
 } from "./mcp-client.ts";
+import { parseJsonWithComments } from "./json-utils.ts";
 
 export interface McpLoadResult {
 	tools: Tool[];
@@ -18,17 +20,6 @@ export interface McpLoadResult {
 	errors: string[];
 }
 
-interface McpServerConfig {
-	enabled?: boolean;
-	type?: string;
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-	cwd?: string;
-	url?: string;
-	headers?: Record<string, string>;
-	timeout?: number;
-}
 
 export interface McpServerInfo {
 	serverName: string;
@@ -160,10 +151,7 @@ export class McpManager {
 			};
 		}
 
-		const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<
-			string,
-			unknown
-		>;
+		const raw = parseJsonWithComments<Record<string, unknown>>(readFileSync(configPath, "utf8"));
 		const config =
 			(raw.mcpServers as Record<string, McpServerConfig>) ||
 			(raw.mcp as Record<string, McpServerConfig>) ||
@@ -206,10 +194,7 @@ export class McpManager {
 			throw new Error("No MCP config file found.");
 		}
 
-		const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<
-			string,
-			unknown
-		>;
+		const raw = parseJsonWithComments<Record<string, unknown>>(readFileSync(configPath, "utf8"));
 		const configKey = raw.mcpServers ? "mcpServers" : "mcp";
 		const config = (raw[configKey] as Record<string, McpServerConfig>) || {};
 

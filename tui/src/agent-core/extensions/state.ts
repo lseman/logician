@@ -1,9 +1,8 @@
 // ── Extension state persistence ──────────────────────────────────────────────
-// Per-extension key-value store backed by SQLite. State survives across turns
+// Per-extension key-value store backed by JSON. State survives across turns
 // and session restarts. Stored under ~/.logician/extensions/<ext-id>/state.db.
 
-import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -19,36 +18,45 @@ function openStateDB(extId: string): StateDB {
 		? join(process.env.XDG_DATA_HOME, "logician", "extensions")
 		: join(homedir(), ".local", "share", "logician", "extensions");
 
-	const dbPath = join(storageRoot, extId, "state.db");
+	const dbPath = join(storageRoot, extId, "state.json");
 	const dir = dirname(dbPath);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
 
-	const db = new Database(dbPath);
-	db.exec("PRAGMA journal_mode = WAL");
-	db.exec(`
-		CREATE TABLE IF NOT EXISTS kv (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		)
-	`);
+	const read = (): Record<string, string> => {
+		if (!existsSync(dbPath)) return {};
+		try {
+			const parsed = JSON.parse(readFileSync(dbPath, "utf8")) as unknown;
+			return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+				? parsed as Record<string, string>
+				: {};
+		} catch {
+			return {};
+		}
+	};
+	const write = (data: Record<string, string>): void => {
+		writeFileSync(dbPath, JSON.stringify(data, null, 2));
+	};
 
 	return {
 		get(key: string): string | null {
-			const row = db.prepare("SELECT value FROM kv WHERE key = ?").get(key) as { value: string } | undefined;
-			return row?.value ?? null;
+			return read()[key] ?? null;
 		},
 		set(key: string, value: string): void {
-			db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run(key, value);
+			const data = read();
+			data[key] = value;
+			write(data);
 		},
 		delete(key: string): boolean {
-			const result = db.prepare("DELETE FROM kv WHERE key = ?").run(key);
-			return (result as { changes: number }).changes > 0;
+			const data = read();
+			if (!(key in data)) return false;
+			delete data[key];
+			write(data);
+			return true;
 		},
 		keys(): string[] {
-			const rows = db.prepare("SELECT key FROM kv ORDER BY key").all() as Array<{ key: string }>;
-			return rows.map((r) => r.key);
+			return Object.keys(read()).sort();
 		},
 	};
 }

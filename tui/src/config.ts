@@ -1,8 +1,8 @@
 import {
 	existsSync,
+	mkdirSync,
 	readFileSync,
 	writeFileSync,
-	appendFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -21,7 +21,7 @@ const KNOWN_KEYS = new Set([
 	"mcpEager", "webSearch", "permissionMode", "permissions",
 	"steeringInterrupt", "maxTotalTokens",
 	"loopDetectionEnabled", "guardsEnabled", "continuationEnabled",
-	"compaction",
+	"compaction", "plugins",
 ]);
 const COMPACTION_KEYS = new Set(["enabled", "reserveTokens", "keepRecentTokens"]);
 
@@ -204,6 +204,14 @@ export function validateConfig(
 		cfg.mcpServers = obj.mcpServers as Record<string, unknown>;
 	}
 
+	if (obj.plugins !== undefined) {
+		if (typeof obj.plugins !== "object" || obj.plugins === null || Array.isArray(obj.plugins)) {
+			warn(warnings, '"plugins" must be an object.');
+		} else {
+			cfg.plugins = obj.plugins as Record<string, unknown>;
+		}
+	}
+
 	// webSearch sub-object.
 	if (obj.webSearch !== undefined) {
 		if (typeof obj.webSearch !== "object" || obj.webSearch === null) {
@@ -277,6 +285,7 @@ export interface LogicianTuiConfig {
 	hooks?: boolean;
 	mcp?: Record<string, unknown>;
 	mcpServers?: Record<string, unknown>;
+	plugins?: Record<string, unknown>;
 	mcpEager?: boolean;
 	webSearch?: {
 		baseUrl?: string;
@@ -390,7 +399,7 @@ export function saveConfigField(key: string, value: unknown): boolean {
 		const configPath = join(home, ".logician", "settings.json");
 		const dir = dirname(configPath);
 		if (!existsSync(dir)) {
-			appendFileSync(configPath, "{}\n");
+			mkdirSync(dir, { recursive: true });
 		}
 		const raw = existsSync(configPath)
 			? (JSON.parse(readFileSync(configPath, "utf8")) as Record<

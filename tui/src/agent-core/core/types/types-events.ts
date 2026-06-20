@@ -14,6 +14,12 @@ export interface AgentEventEnvelope {
 export type AgentEventBody =
 	| { type: "agent_start" }
 	| { type: "agent_end"; messages?: Message[] }
+	| {
+			type: "queue_update";
+			steering: readonly string[];
+			followUp: readonly string[];
+			nextTurn: readonly string[];
+	  }
 	| { type: "turn_start"; turnId: string }
 	| {
 			type: "turn_end";
@@ -27,7 +33,7 @@ export type AgentEventBody =
 	| { type: "text_delta"; turnId: string; delta: string }
 	| { type: "text_end"; turnId: string }
 	| { type: "message_update"; turnId: string; message: Message }
-	| { type: "message_end"; turnId: string }
+	| { type: "message_end"; turnId: string; message?: Message }
 	| {
 			type: "context_update";
 			tokens: number;
@@ -39,6 +45,15 @@ export type AgentEventBody =
 			reason: "context_full" | "manual";
 			tokensBefore: number;
 			tokensAfter: number;
+	  }
+	| { type: "compaction_start"; reason: "manual" | "auto" | "threshold" | "overflow" }
+	| {
+			type: "compaction_end";
+			reason: "manual" | "auto" | "threshold" | "overflow";
+			tokensBefore: number;
+			tokensAfter: number;
+			changed: boolean;
+			errorMessage?: string;
 	  }
 	| { type: "thinking_delta"; turnId?: string; delta: string }
 	| {
@@ -115,7 +130,17 @@ export type AgentEventBody =
 	| { type: "budget_exhausted"; usedTokens: number; limitTokens: number }
 	| { type: "error"; message: string; error?: unknown }
 	| { type: "model_update"; model: string }
-	| { type: "tools_update"; toolNames: string[] };
+	| { type: "model_cycle"; model: string; fromModel: string; thinkingLevel: string }
+	| { type: "thinking_level_changed"; level: string }
+	| { type: "thinking_level_clamped"; level: string; reason: string }
+	| { type: "tools_update"; toolNames: string[] }
+	| {
+			type: "abort";
+			clearedSteering: readonly string[];
+			clearedFollowUp: readonly string[];
+			clearedNextTurn: readonly string[];
+	  }
+	| { type: "settled"; nextTurnCount: number };
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;
 export type EventHandler = (event: AgentEvent) => void;

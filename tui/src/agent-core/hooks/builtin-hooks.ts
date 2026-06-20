@@ -1,6 +1,6 @@
 // ── Built-in loop hooks ────────────────────────────────────────────────────
 // Constructs the default safeguard hooks (guards, budget stop, proactive
-// compaction) as a single AgentLoopHooks object, and composes them with any
+// compaction) as a single AgentHooks object, and composes them with any
 // user-supplied hooks via the typed HookBus so both run.
 
 import { BudgetTracker } from "./budget.ts";
@@ -14,7 +14,7 @@ import {
 import { compactToFit } from "../compaction/compaction.ts";
 import { getTaskStatus } from "../tools/skills/task-status.ts";
 import { getTasks } from "../tools/todos/todo.ts";
-import type { AgentConfig, AgentLoopHooks, CompactableMessage, Message } from "../core/types.ts";
+import type { AgentConfig, AgentHooks, CompactableMessage, Message } from "../core/types.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the
@@ -34,7 +34,7 @@ export interface BuiltinHookDeps {
 
 // Build the default safeguard hooks. Returns undefined per-event when a
 // safeguard is disabled so composition can skip it cleanly.
-export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
+export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, loopDetector } = deps;
 	// Tool guards (duplicate + failure-loop, merged from GuardEngine). Default
 	// OFF — matching pi's trust-model approach. Guards that block tools after 3
@@ -59,7 +59,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentLoopHooks {
 		config.proactiveCompactionFraction ?? DEFAULT_COMPACTION_FRACTION;
 	let lastCompactionTurn = -COMPACTION_COOLDOWN_TURNS;
 
-	const hooks: AgentLoopHooks = {};
+	const hooks: AgentHooks = {};
 
 	hooks.beforeToolCall = ({ toolCall, args }) => {
 		// Snapshot a file's pre-write state for /rewind (write tools only; bash
@@ -231,13 +231,13 @@ export function detectsCircling(assistantText: string): boolean {
 /** A named layer of hooks registered into the shared bus, in order. */
 export interface HookLayer {
 	source: string;
-	hooks: AgentLoopHooks | undefined;
+	hooks: AgentHooks | undefined;
 }
 
 // Compose ordered hook layers via one typed HookBus. Earlier layers run first
 // within each event's reducer and later layers see their output — so the
 // canonical order is built-ins → harness queues → user. Returns a single
-// AgentLoopHooks the agent loop consumes unchanged.
+// AgentHooks object the runner consumes unchanged.
 //
 // The bus owns error isolation: a thrown handler is skipped (errorMode
 // "continue") and reported via onError, so the loop's call sites don't need
@@ -250,7 +250,7 @@ export function composeHooks(
 	layers: HookLayer[],
 	onError?: (error: Error, event: string, source?: string) => void,
 	onHookEvent?: (event: string, ctx: unknown) => void,
-): AgentLoopHooks {
+): AgentHooks {
 	const bus = new HookBus({
 		onError,
 		defaultTimeoutMs: HOOK_HANDLER_TIMEOUT_MS,

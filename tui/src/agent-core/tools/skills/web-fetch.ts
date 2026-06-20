@@ -7,9 +7,12 @@ import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 export const web_fetch: Tool = {
 	readOnly: true,
 	name: "web_fetch",
+	label: "Web Fetch",
 	hookAliases: ["WebFetch"],
 	executionMode: "parallel",
 	description: `Fetch and extract readable content from a web page. Strips navigation, ads, scripts. Returns title, description, and main text content. Truncated to ${DEFAULT_MAX_BYTES / 1024}KB.`,
+	promptSnippet: "Fetch and read content from a specific URL",
+	promptGuidelines: ["Use web_fetch to read full URL content; web_search finds URLs, fetch reads them"],
 	parameters: {
 		type: "object",
 		properties: {

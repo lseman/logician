@@ -9,16 +9,38 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import type { Turn } from "./transcript.ts";
+import { markPathIgnoredByCloudSync } from "./agent-core/tools/shared/path-utils.ts";
+
+const SCHEMA_VERSION = 2;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SessionRow {
 	id: string;
 	title: string;
+	name: string | null;
 	cwd: string;
 	model: string;
 	created_at: string;
 	updated_at: string;
+}
+
+export interface LabelRow {
+	id: string;
+	session_id: string;
+	turn_id: string | null;
+	label: string;
+	note: string | null;
+	created_at: string;
+}
+
+export interface SettingChangeRow {
+	id: string;
+	session_id: string;
+	key: string;
+	value: string | null;
+	previous_value: string | null;
+	created_at: string;
 }
 
 export interface TurnRow {
@@ -36,6 +58,7 @@ export interface TurnRow {
 export interface SessionSummary {
 	id: string;
 	title: string;
+	name: string | null;
 	preview: string;
 	lastUpdated: string;
 	messageCount: number;
@@ -114,6 +137,7 @@ export class SessionStore {
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
 		}
+		markPathIgnoredByCloudSync(dir);
 
 		this.db = new Database(dbPath);
 		this.db.exec("PRAGMA journal_mode = WAL");
@@ -121,16 +145,71 @@ export class SessionStore {
 		this.db.exec("PRAGMA foreign_keys = true");
 
 		this.initSchema();
+		this.runMigrations();
 		this.prepareStatements();
 	}
 
 	// ── Schema ────────────────────────────────────────────────────────────
+
+	private runMigrations(): void {
+		const current = (
+			this.db.prepare("PRAGMA user_version").get() as { user_version: number }
+		).user_version;
+		if (current >= SCHEMA_VERSION) return;
+
+		this.db.exec("BEGIN");
+		try {
+			// v0 -> v1: named sessions and labels/bookmarks.
+			if (current < 1) {
+				if (!this.hasColumn("sessions", "name")) {
+					this.db.exec("ALTER TABLE sessions ADD COLUMN name TEXT");
+				}
+				this.db.exec(`
+					CREATE TABLE IF NOT EXISTS labels (
+						id TEXT PRIMARY KEY,
+						session_id TEXT NOT NULL,
+						turn_id TEXT,
+						label TEXT NOT NULL,
+						note TEXT,
+						created_at TEXT NOT NULL DEFAULT (datetime('now')),
+						FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+						FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE SET NULL
+					);
+					CREATE INDEX IF NOT EXISTS idx_labels_session ON labels(session_id);
+					PRAGMA user_version = 1;
+				`);
+			}
+
+			// v1 -> v2: settings change log for model/thinking persistence.
+			if (current < 2) {
+				this.db.exec(`
+					CREATE TABLE IF NOT EXISTS settings_changes (
+						id TEXT PRIMARY KEY,
+						session_id TEXT NOT NULL,
+						key TEXT NOT NULL,
+						value TEXT,
+						previous_value TEXT,
+						created_at TEXT NOT NULL DEFAULT (datetime('now')),
+						FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+					);
+					CREATE INDEX IF NOT EXISTS idx_settings_changes_session
+						ON settings_changes(session_id, created_at);
+					PRAGMA user_version = 2;
+				`);
+			}
+			this.db.exec("COMMIT");
+		} catch (error) {
+			this.db.exec("ROLLBACK");
+			throw error;
+		}
+	}
 
 	private initSchema(): void {
 		this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL DEFAULT 'Untitled Session',
+        name TEXT,
         cwd TEXT NOT NULL DEFAULT '',
         model TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -153,7 +232,38 @@ export class SessionStore {
       CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id);
       CREATE INDEX IF NOT EXISTS idx_turns_number ON turns(session_id, turn_number);
       CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS labels (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        turn_id TEXT,
+        label TEXT NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_labels_session ON labels(session_id);
+
+      CREATE TABLE IF NOT EXISTS settings_changes (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT,
+        previous_value TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_settings_changes_session
+        ON settings_changes(session_id, created_at);
     `);
+	}
+
+	private hasColumn(table: string, column: string): boolean {
+		const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+			name: string;
+		}>;
+		return rows.some((row) => row.name === column);
 	}
 
 	private prepareStatements(): void {
@@ -196,6 +306,11 @@ export class SessionStore {
 			"SELECT id FROM sessions ORDER BY created_at ASC LIMIT 1",
 		);
 		p("countSessions", "SELECT COUNT(*) AS cnt FROM sessions");
+		p(
+			"setSessionName",
+			"UPDATE sessions SET name = ?, updated_at = datetime('now') WHERE id = ?",
+		);
+		p("findSessionByName", "SELECT * FROM sessions WHERE name = ? LIMIT 1");
 
 		// ── Turns ──
 		p(
@@ -243,6 +358,27 @@ export class SessionStore {
       LIMIT 20
     `,
 		);
+
+		// ── Labels ──
+		p(
+			"addLabel",
+			"INSERT INTO labels (id, session_id, turn_id, label, note) VALUES (?, ?, ?, ?, ?)",
+		);
+		p(
+			"listLabels",
+			"SELECT * FROM labels WHERE session_id = ? ORDER BY created_at ASC",
+		);
+		p("deleteLabel", "DELETE FROM labels WHERE id = ?");
+
+		// ── Settings changes ──
+		p(
+			"addSettingChange",
+			"INSERT INTO settings_changes (id, session_id, key, value, previous_value) VALUES (?, ?, ?, ?, ?)",
+		);
+		p(
+			"listSettingChanges",
+			"SELECT * FROM settings_changes WHERE session_id = ? ORDER BY created_at ASC",
+		);
 	}
 
 	// ── Session CRUD ─────────────────────────────────────────────────────
@@ -288,6 +424,7 @@ export class SessionStore {
 			return {
 				id: row.id,
 				title: row.title,
+				name: row.name,
 				preview: previewText || "Empty session",
 				lastUpdated: row.updated_at,
 				messageCount: row.msg_count,
@@ -495,6 +632,7 @@ export class SessionStore {
 		return rows.map((row) => ({
 			id: row.id,
 			title: row.title,
+			name: row.name,
 			preview: row.title,
 			lastUpdated: row.updated_at,
 			messageCount: row.msg_count,
@@ -545,6 +683,81 @@ export class SessionStore {
 			}
 		}
 		return deleted;
+	}
+
+	// ── Named Sessions ────────────────────────────────────────────────────
+
+	/** Set a short human name on the current or specified session. */
+	setSessionName(name: string, sessionId?: string): boolean {
+		const id = sessionId ?? this.currentSessionId;
+		if (!id) return false;
+		const result = this.statements.setSessionName.run(name.trim() || null, id);
+		return (result as { changes: number }).changes > 0;
+	}
+
+	/** Look up a session by name (exact match). */
+	findSessionByName(name: string): SessionRow | null {
+		return this.statements.findSessionByName.get(name) as SessionRow | null;
+	}
+
+	// ── Labels / Bookmarks ────────────────────────────────────────────────
+
+	/** Add a label/bookmark to the current session, optionally tied to a turn. */
+	addLabel(label: string, opts?: { turnId?: string; note?: string; sessionId?: string }): string {
+		const sessionId = opts?.sessionId ?? this.currentSessionId;
+		if (!sessionId) throw new Error("No active session");
+		const id = `lbl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+		this.statements.addLabel.run(
+			id,
+			sessionId,
+			opts?.turnId ?? null,
+			label,
+			opts?.note ?? null,
+		);
+		return id;
+	}
+
+	/** List all labels for a session. */
+	listLabels(sessionId?: string): LabelRow[] {
+		const id = sessionId ?? this.currentSessionId;
+		if (!id) return [];
+		return this.statements.listLabels.all(id) as LabelRow[];
+	}
+
+	/** Delete a label by ID. */
+	deleteLabel(labelId: string): boolean {
+		const result = this.statements.deleteLabel.run(labelId);
+		return (result as { changes: number }).changes > 0;
+	}
+
+	// ── Settings Changes ──────────────────────────────────────────────────
+
+	recordSettingChange(
+		key: string,
+		value: string | null,
+		previousValue?: string | null,
+		sessionId?: string,
+	): string | null {
+		const id = sessionId ?? this.currentSessionId;
+		if (!id) return null;
+		const changeId = `chg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+		this.statements.addSettingChange.run(
+			changeId,
+			id,
+			key,
+			value,
+			previousValue ?? null,
+		);
+		this.db
+			.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?")
+			.run(id);
+		return changeId;
+	}
+
+	listSettingChanges(sessionId?: string): SettingChangeRow[] {
+		const id = sessionId ?? this.currentSessionId;
+		if (!id) return [];
+		return this.statements.listSettingChanges.all(id) as SettingChangeRow[];
 	}
 
 	// ── Close ─────────────────────────────────────────────────────────────

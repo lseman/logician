@@ -4,7 +4,7 @@
 // Sub-modules:
 //   types-messages.ts  : Message, MessageRole, AgentMessage, StopReason
 //   types-events.ts    : AgentEvent, AgentEventBody, EventHandler
-//   types-hooks.ts     : All hook context/result types, AgentLoopHooks
+//   types-hooks.ts     : All hook context/result types, AgentHooks
 //   types-tools.ts     : Tool, ToolCall, ToolResult, ToolContext
 //   types-config.ts    : AgentConfig, WebSearchConfig, QueueMode, ThinkingLevel
 //   types-errors.ts    : AgentErrorType, AgentError, wrapError
@@ -56,7 +56,9 @@ export type {
 	AfterProviderResponseContext,
 	TransformContextResult,
 	GetFollowUpMessagesContext,
-	AgentLoopHooks,
+	BeforeCompactContext,
+	BeforeCompactResult,
+	AgentHooks,
 } from "./types-hooks.ts";
 
 // ── Tools ─────────────────────────────────────────────────────────────────

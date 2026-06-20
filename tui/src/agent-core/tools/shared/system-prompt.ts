@@ -20,6 +20,8 @@ export interface BuildSystemPromptOptions {
 	selectedTools?: Tool[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
+	/** Optional tool-level guidelines keyed by tool name. */
+	toolGuidelines?: Record<string, string[]>;
 	/** Additional guideline bullets appended to the default system prompt. */
 	promptGuidelines?: string[];
 	/** Text to append to system prompt. */
@@ -310,16 +312,24 @@ In addition to the tools above, you may have access to other custom tools depend
  */
 export function buildDefaultSystemPrompt(cwd: string, tools: Tool[]): string {
 	const snippets: Record<string, string> = {};
+	const guidelines: Record<string, string[]> = {};
 	for (const tool of tools) {
-		// Use first sentence or first 80 chars of description as snippet
-		const desc = tool.description || "";
-		const firstSentence = desc.split(".")[0];
-		snippets[tool.name] = firstSentence || desc;
+		if (tool.promptSnippet) {
+			snippets[tool.name] = tool.promptSnippet;
+		} else {
+			const desc = tool.description || "";
+			const firstSentence = desc.split(".")[0];
+			snippets[tool.name] = firstSentence || desc;
+		}
+		if (tool.promptGuidelines) {
+			guidelines[tool.name] = tool.promptGuidelines;
+		}
 	}
 
 	return buildSystemPrompt({
 		cwd,
 		selectedTools: tools,
 		toolSnippets: snippets,
+		toolGuidelines: guidelines,
 	});
 }

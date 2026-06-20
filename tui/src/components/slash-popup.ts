@@ -1,10 +1,13 @@
 // ── Slash command popup ───────────────────────────────────────────────────────
-// Overlay popup with fuzzy matching, usage hints, and Tab completion.
+// Overlay popup with fuzzy matching, category grouping, arg hints, and examples.
 
 import { theme } from "../theme.ts";
 import {
 	filterSlashCommands,
+	groupByCategory,
+	CATEGORY_ORDER,
 	type SlashCommandDef,
+	type SlashCommandCategory,
 } from "../slash-commands.ts";
 import { type Component, visibleWidth } from "../tui-core.ts";
 
@@ -13,6 +16,27 @@ const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const getHeaderColor = (): string => theme.fg("header", "");
 const getSelectedColor = (): string => theme.fg("selected", "");
+const getCategoryColor = (cat: SlashCommandCategory): string => {
+	const colors: Record<SlashCommandCategory, string> = {
+		help: "\x1b[36m", session: "\x1b[33m", agent: "\x1b[35m",
+		context: "\x1b[34m", rag: "\x1b[32m", skills: "\x1b[95m",
+		reasoning: "\x1b[37m", display: "\x1b[93m", permissions: "\x1b[31m",
+		shortcuts: "\x1b[36m", loop: "\x1b[94m", misc: "\x1b[90m",
+	};
+	return colors[cat] ?? "\x1b[90m";
+};
+
+interface RenderState {
+	filtered: SlashCommandDef[];
+	isFiltered: boolean;
+	selectedCmd: SlashCommandDef | null;
+	// For grouped display (when not filtered): ordered category headers with command indices
+	groups: Array<{ category: SlashCommandCategory; start: number; count: number }>;
+	// Map from flat index to command (with group headers in between)
+	flatEntries: Array<{ cmd: SlashCommandDef; isHeader: boolean; category?: SlashCommandCategory }>;
+	// Selection translated to flat index
+	flatSelection: number;
+}
 
 export class SlashPopup implements Component {
 	private commands: SlashCommandDef[] = [];
@@ -26,6 +50,49 @@ export class SlashPopup implements Component {
 		dispatch?: "quit",
 		command?: string,
 	) => void;
+
+	/** Prepare rendering state: groups commands by category or filters by query. */
+	private _prepareRenderState(): RenderState {
+		const filtered = filterSlashCommands(this.commands, this.query);
+		const isFiltered = this.query.length > 1;
+
+		if (isFiltered) {
+			return {
+				filtered,
+				isFiltered: true,
+				selectedCmd: filtered.length > 0 ? filtered[this.selectedIndex] : null,
+				groups: [],
+				flatEntries: filtered.map((cmd) => ({ cmd, isHeader: false })),
+				flatSelection: Math.min(this.selectedIndex, filtered.length - 1),
+			};
+		}
+
+		const groupsMap = groupByCategory(filtered);
+		const groups: RenderState["groups"] = [];
+		const flatEntries: RenderState["flatEntries"] = [];
+		let idx = 0;
+		for (const cat of CATEGORY_ORDER) {
+			const cmds = groupsMap.get(cat);
+			if (!cmds || cmds.length === 0) continue;
+			const start = idx;
+			flatEntries.push({ cmd: {} as SlashCommandDef, isHeader: true, category: cat });
+			idx++;
+			for (const cmd of cmds) {
+				flatEntries.push({ cmd, isHeader: false });
+				idx++;
+			}
+			groups.push({ category: cat, start, count: cmds.length });
+		}
+
+		return {
+			filtered,
+			isFiltered: false,
+			selectedCmd: filtered.length > 0 ? filtered[this.selectedIndex] : null,
+			groups,
+			flatEntries,
+			flatSelection: Math.min(this.selectedIndex, flatEntries.length - 1),
+		};
+	}
 
 	setCommands(commands: SlashCommandDef[]): void {
 		this.commands = commands;
@@ -208,48 +275,96 @@ export class SlashPopup implements Component {
 
 		if (!this.visible) return [];
 
-		const filtered = this._getFiltered();
+		const state = this._prepareRenderState();
 		const contentWidth = Math.min(80, Math.max(40, width - 4));
 		const lines: string[] = [];
 
-		// Title row — the typed text already shows in the input bar below, so here
-		// we just label the menu and show the match count plus key hints.
-		const count = filtered.length;
+		// Title row
+		const count = state.filtered.length;
 		const hint = `${DIM}↑↓ select · Tab complete · ⏎ run · Esc close${RESET}`;
 		lines.push(
 			` ${getHeaderColor()}commands${RESET}${DIM} (${count})${RESET}  ${hint}`,
 		);
 
-		// Command list
-		for (let i = 0; i < filtered.length; i++) {
-			const cmd = filtered[i];
-			const isSelected = i === this.selectedIndex;
-			const prefix = isSelected ? "▸ " : "  ";
+		if (state.groups.length > 0) {
+			// Grouped display: category headers + commands
+			for (const entry of state.flatEntries) {
+				if (entry.isHeader) {
+					const catColor = getCategoryColor(entry.category!);
+					const catLabel = entry.category!.charAt(0).toUpperCase() + entry.category!.slice(1);
+					lines.push(`${DIM}${catColor}── ${catLabel} ──${RESET}`);
+					continue;
+				}
 
-			// Split command name and usage for alignment
-			const parts = cmd.usage.split(" ");
-			const cmdName = parts[0] || cmd.command;
-			const usageSuffix = parts.slice(1).join(" ");
+				const cmd = entry.cmd;
+				const idx = state.flatEntries.indexOf(entry);
+				const isSelected = idx === state.flatSelection;
+				const prefix = isSelected ? "▸ " : "  ";
 
-			let line = isSelected
-				? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
-				: ` ${prefix}${cmdName}`;
+				const cmdName = cmd.command;
+				let line = isSelected
+					? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
+					: ` ${prefix}${cmdName}`;
 
-			// Add usage suffix if present
-			if (usageSuffix) {
-				line += ` ${DIM}${usageSuffix}${RESET}`;
+				// Arg hint in brackets
+				if (cmd.argHint) {
+					line += ` ${DIM}[${cmd.argHint}]${RESET}`;
+				}
+
+				// Description
+				if (cmd.description) {
+					const descStart = visibleWidth(line) + 2;
+					const descWidth = Math.max(1, contentWidth - descStart);
+					if (descWidth > 0) {
+						line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
+					}
+				}
+
+				lines.push(line);
 			}
+		} else {
+			// Flat filtered list
+			for (let i = 0; i < state.filtered.length; i++) {
+				const cmd = state.filtered[i];
+				const isSelected = i === state.flatSelection;
+				const prefix = isSelected ? "▸ " : "  ";
+				const cmdName = cmd.command;
 
-			// Add description
-			if (cmd.description) {
-				const descStart = visibleWidth(line) + 2;
-				const descWidth = Math.max(1, contentWidth - descStart);
-				if (descWidth > 0) {
-					line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
+				let line = isSelected
+					? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
+					: ` ${prefix}${cmdName}`;
+
+				// Arg hint
+				if (cmd.argHint) {
+					line += ` ${DIM}[${cmd.argHint}]${RESET}`;
+				}
+
+				// Description
+				if (cmd.description) {
+					const descStart = visibleWidth(line) + 2;
+					const descWidth = Math.max(1, contentWidth - descStart);
+					if (descWidth > 0) {
+						line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
+					}
+				}
+
+				lines.push(line);
+			}
+		}
+
+		// Details panel for selected command (examples, arg info)
+		if (state.selectedCmd && (state.selectedCmd.examples || state.selectedCmd.argHint)) {
+			const sel = state.selectedCmd;
+			lines.push(``);
+			const detailsColor = getCategoryColor(sel.category ?? "misc");
+			if (sel.argHint) {
+				lines.push(`${DIM}Usage:${RESET} ${detailsColor}${sel.command}${RESET} ${BOLD}${sel.argHint}${RESET}`);
+			}
+			if (sel.examples && sel.examples.length > 0) {
+				for (const ex of sel.examples) {
+					lines.push(`${DIM}  Example:${RESET} ${DIM}${ex}${RESET}`);
 				}
 			}
-
-			lines.push(line);
 		}
 
 		this.cachedLines = lines;

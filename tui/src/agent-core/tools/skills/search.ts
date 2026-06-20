@@ -10,6 +10,7 @@ import path from "node:path";
 import type { Tool, ToolResult } from "../../core/types.ts";
 import { truncateHead, truncateLine, formatSize } from "./truncate.ts";
 import { resolvePath } from "../shared/helpers.ts";
+import { ensureTool } from "../shared/tools-manager.ts";
 
 const grepSchema = {
 	type: "object",
@@ -94,9 +95,12 @@ const defaultOps: SearchOperations = {
 export const grep: Tool = {
 	readOnly: true,
 	name: "grep",
+	label: "Search Files",
 	hookAliases: ["Grep"],
 	description:
 		"Search file contents for a pattern. Returns matching lines with file paths and line numbers. Output is truncated to 100 matches or 50KB (whichever is hit first). Long lines are truncated to 500 chars.",
+	promptSnippet: "Search file contents with pattern matching and line numbers",
+	promptGuidelines: ["Use grep to search file contents; use find to search by name"],
 	parameters: grepSchema,
 	prepareArguments,
 	execute: async (args, ctx): Promise<string | ToolResult> => {
@@ -111,6 +115,9 @@ export const grep: Tool = {
 		} = args as SearchToolArgs;
 
 		if (!pattern) return "Error: pattern is required.";
+
+		const rgPath = await ensureTool("rg");
+		if (!rgPath) return "Error: ripgrep (rg) is not installed.";
 
 		const searchPath = searchDir
 			? resolvePath(ctx.cwd, searchDir)
@@ -151,21 +158,28 @@ export const grep: Tool = {
 			return lines;
 		};
 
-		const argsRg: string[] = ["--json", "--line-number", "--color=never"];
+		const argsRg: string[] = ["--json", "--line-number", "--color=never", "--hidden"];
 		if (ignoreCase) argsRg.push("--ignore-case");
 		if (literal) argsRg.push("--fixed-strings");
 		if (glob) argsRg.push("--glob", glob);
 		argsRg.push("--", pattern, searchPath);
 
 		return new Promise<string | ToolResult>((resolve) => {
-			const child = spawn("rg", argsRg, { stdio: ["ignore", "pipe", "pipe"] });
+			if (ctx.signal?.aborted) {
+				resolve("Error: Command aborted");
+				return;
+			}
+			const child = spawn(rgPath, argsRg, { stdio: ["ignore", "pipe", "pipe"] });
 			const rl = createInterface({ input: child.stdout });
+
+			const onAbort = () => { child.kill(); };
+			ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
 			let _stderr = "";
 			let matchCount = 0;
 			let matchLimitReached = false;
 			let linesTruncated = false;
-			const matches: Array<{ filePath: string; lineNumber: number }> = [];
+			const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
 
 			rl.on("line", (line) => {
 				if (!line.trim() || matchCount >= effectiveLimit) return;
@@ -182,13 +196,14 @@ export const grep: Tool = {
 					(event as { type: string }).type === "match"
 				) {
 					const e = event as unknown as {
-						data: { path: { text: string }; line_number: number };
+						data: { path: { text: string }; line_number: number; lines?: { text?: string } };
 					};
 					if (e.data?.path?.text && typeof e.data.line_number === "number") {
 						matchCount++;
 						matches.push({
 							filePath: e.data.path.text,
 							lineNumber: e.data.line_number,
+							lineText: e.data.lines?.text,
 						});
 						if (matchCount >= effectiveLimit) {
 							matchLimitReached = true;
@@ -203,9 +218,10 @@ export const grep: Tool = {
 			});
 
 			rl.on("close", () => {
-					void (async () => {
+				ctx.signal?.removeEventListener("abort", onAbort);
+				void (async () => {
 					if (matchCount === 0) {
-						resolve("No matches found.");
+						resolve(ctx.signal?.aborted ? "Error: Command aborted" : "No matches found.");
 						return;
 					}
 
@@ -213,6 +229,16 @@ export const grep: Tool = {
 
 					for (const match of matches) {
 						const relativePath = formatPath(match.filePath);
+
+						// Fast-path (no context): use lineText from rg JSON, skip file re-read.
+						if (contextValue === 0) {
+							const rawLine = match.lineText ?? (await getFileLines(match.filePath))[match.lineNumber - 1] ?? "";
+							const { text: truncatedText, wasTruncated } = truncateLine(rawLine.replace(/\r\n?/g, ""));
+							if (wasTruncated) linesTruncated = true;
+							outputLines.push(`${relativePath}:${match.lineNumber}: ${truncatedText}`);
+							continue;
+						}
+
 						const lines = await getFileLines(match.filePath);
 						if (!lines.length) {
 							outputLines.push(
@@ -221,35 +247,17 @@ export const grep: Tool = {
 							continue;
 						}
 
-						if (contextValue === 0) {
-							const lineText = lines[match.lineNumber - 1] ?? "";
-							const { text: truncatedText } = truncateLine(
-								lineText.replace(/\r/g, ""),
-							);
-							outputLines.push(
-								`${relativePath}:${match.lineNumber}: ${truncatedText}`,
-							);
-						} else {
-							const start = Math.max(1, match.lineNumber - contextValue);
-							const end = Math.min(
-								lines.length,
-								match.lineNumber + contextValue,
-							);
-							for (let current = start; current <= end; current++) {
-								const lineText = lines[current - 1] ?? "";
-								const sanitized = lineText.replace(/\r/g, "");
-								const { text: truncatedText, wasTruncated } =
-									truncateLine(sanitized);
-								if (wasTruncated) linesTruncated = true;
-								if (current === match.lineNumber) {
-									outputLines.push(
-										`${relativePath}:${current}: ${truncatedText}`,
-									);
-								} else {
-									outputLines.push(
-										`${relativePath}-${current}- ${truncatedText}`,
-									);
-								}
+						const start = Math.max(1, match.lineNumber - contextValue);
+						const end = Math.min(lines.length, match.lineNumber + contextValue);
+						for (let current = start; current <= end; current++) {
+							const lineText = lines[current - 1] ?? "";
+							const sanitized = lineText.replace(/\r/g, "");
+							const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
+							if (wasTruncated) linesTruncated = true;
+							if (current === match.lineNumber) {
+								outputLines.push(`${relativePath}:${current}: ${truncatedText}`);
+							} else {
+								outputLines.push(`${relativePath}-${current}- ${truncatedText}`);
 							}
 						}
 					}

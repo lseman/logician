@@ -11,8 +11,8 @@
 //   prepareNextTurn  → transform: messages thread through all handlers.
 //   shouldStopAfterTurn → first-true wins.
 //
-// The bus emits a single `AgentLoopHooks` via `toHooks()`, so the agent loop is
-// unchanged — it still calls one handler per event. `observe()` is a read-only
+// The bus emits a single `AgentHooks` via `toHooks()`, so the runner still
+// calls one handler per event. `observe()` is a read-only
 // firehose over every event. Handlers can be scoped with source metadata so a
 // failing extension is identifiable, and `errorMode` controls whether a thrown
 // handler aborts the chain or is skipped.
@@ -22,7 +22,7 @@ import type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,
 	AfterToolCallResult,
-	AgentLoopHooks,
+	AgentHooks,
 	BeforeProviderPayloadContext,
 	BeforeProviderPayloadResult,
 	BeforeProviderRequestContext,
@@ -39,7 +39,7 @@ import type {
 	TransformContextResult,
 } from "../core/types.ts";
 
-export type HookEventName = keyof AgentLoopHooks;
+export type HookEventName = keyof AgentHooks;
 
 export interface HookRegistration {
 	source?: string;
@@ -64,20 +64,16 @@ interface Entry<H> {
 	timeoutMs?: number;
 }
 
-type BeforeHandler = NonNullable<AgentLoopHooks["beforeToolCall"]>;
-type AfterHandler = NonNullable<AgentLoopHooks["afterToolCall"]>;
-type PrepareHandler = NonNullable<AgentLoopHooks["prepareNextTurn"]>;
-type TransformHandler = NonNullable<AgentLoopHooks["transformContext"]>;
-type ProviderRequestHandler = NonNullable<
-	AgentLoopHooks["beforeProviderRequest"]
->;
-type ProviderPayloadHandler = NonNullable<
-	AgentLoopHooks["beforeProviderPayload"]
->;
-type AfterProviderHandler = NonNullable<AgentLoopHooks["afterProviderResponse"]>;
-type StopHandler = NonNullable<AgentLoopHooks["shouldStopAfterTurn"]>;
-type SteeringHandler = NonNullable<AgentLoopHooks["getSteeringMessages"]>;
-type FollowUpHandler = NonNullable<AgentLoopHooks["getFollowUpMessages"]>;
+type BeforeHandler = NonNullable<AgentHooks["beforeToolCall"]>;
+type AfterHandler = NonNullable<AgentHooks["afterToolCall"]>;
+type PrepareHandler = NonNullable<AgentHooks["prepareNextTurn"]>;
+type TransformHandler = NonNullable<AgentHooks["transformContext"]>;
+type ProviderRequestHandler = NonNullable<AgentHooks["beforeProviderRequest"]>;
+type ProviderPayloadHandler = NonNullable<AgentHooks["beforeProviderPayload"]>;
+type AfterProviderHandler = NonNullable<AgentHooks["afterProviderResponse"]>;
+type StopHandler = NonNullable<AgentHooks["shouldStopAfterTurn"]>;
+type SteeringHandler = NonNullable<AgentHooks["getSteeringMessages"]>;
+type FollowUpHandler = NonNullable<AgentHooks["getFollowUpMessages"]>;
 
 // Read-only observer: sees every event with its name, return ignored.
 export type HookObserver = (
@@ -111,10 +107,10 @@ export class HookBus {
 	// Register one handler for an event. Returns an unsubscribe function.
 	on<E extends HookEventName>(
 		event: E,
-		handler: NonNullable<AgentLoopHooks[E]>,
+		handler: NonNullable<AgentHooks[E]>,
 		reg: HookRegistration = {},
 	): () => void {
-		const list = this.listFor(event) as Entry<AgentLoopHooks[E]>[];
+		const list = this.listFor(event) as Entry<AgentHooks[E]>[];
 		const entry = { handler, source: reg.source, timeoutMs: reg.timeoutMs };
 		list.push(entry);
 		return () => {
@@ -123,8 +119,8 @@ export class HookBus {
 		};
 	}
 
-	// Register a whole AgentLoopHooks object at once (each present handler).
-	register(hooks: AgentLoopHooks, reg: HookRegistration = {}): () => void {
+	// Register a whole AgentHooks object at once (each present handler).
+	register(hooks: AgentHooks, reg: HookRegistration = {}): () => void {
 		const offs: Array<() => void> = [];
 		if (hooks.beforeToolCall)
 			offs.push(this.on("beforeToolCall", hooks.beforeToolCall, reg));
@@ -180,9 +176,9 @@ export class HookBus {
 		this.observers = [];
 	}
 
-	// Single composed AgentLoopHooks for the agent loop. Each event runs its
+	// Single composed AgentHooks for the runner. Each event runs its
 	// reducer over all registered handlers.
-	toHooks(): AgentLoopHooks {
+	toHooks(): AgentHooks {
 		return {
 			beforeToolCall: (ctx) => this.runBefore(ctx),
 			afterToolCall: (ctx) => this.runAfter(ctx),

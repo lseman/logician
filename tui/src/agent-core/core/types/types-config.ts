@@ -1,9 +1,9 @@
 // ── Config types ──────────────────────────────────────────────────────────
 
-import type { AgentLoopHooks } from "./types-hooks.ts";
+import type { AgentHooks } from "./types-hooks.ts";
 import type { EventHandler, AgentEvent } from "./types-events.ts";
 import type { Tool } from "./types-tools.ts";
-import type { PermissionManager } from "../tools/shared/permissions.ts";
+import type { PermissionManager } from "../../tools/shared/permissions.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
 
@@ -52,8 +52,8 @@ export interface AgentConfig {
 	runtimeHooksEnabled?: boolean;
 	hookSessionId?: string;
 	hookTranscriptPath?: string;
-	hooks?: AgentLoopHooks;
-	internalHooks?: AgentLoopHooks;
+	hooks?: AgentHooks;
+	internalHooks?: AgentHooks;
 	convertToLlm?: (messages: import("./types-messages.ts").AgentMessage[]) => import("./types-messages.ts").Message[];
 	turnEndCallback?: (turnId: string) => void;
 	guardsEnabled?: boolean;

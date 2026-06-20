@@ -19,13 +19,26 @@ interface PendingRequest {
 	timer: NodeJS.Timeout;
 }
 
-interface McpToolDefinition {
+export interface McpServerConfig {
+	enabled?: boolean;
+	type?: string;
+	command?: string;
+	args?: string[];
+	env?: Record<string, string>;
+	cwd?: string;
+	url?: string;
+	headers?: Record<string, string>;
+	timeout?: number;
+}
+
+export interface McpToolDefinition {
 	name: string;
+	title?: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
 }
 
-interface McpClient {
+export interface McpClient {
 	name: string;
 	initialize(): Promise<void>;
 	listTools(): Promise<McpToolDefinition[]>;
@@ -332,8 +345,14 @@ export function createMcpTool(client: McpClient, def: McpToolDefinition): unknow
 	const name = `mcp__${safeToolName(client.name)}__${safeName}`;
 	return {
 		name,
+		label: def.title || `MCP: ${def.name}`,
 		description:
 			def.description || `MCP tool '${def.name}' from server '${client.name}'.`,
+		promptSnippet: def.description
+			? def.description.length > 80
+				? def.description.slice(0, 80) + "..."
+				: def.description
+			: `MCP tool '${def.name}'`,
 		parameters: def.inputSchema,
 		execute: async (args: Record<string, unknown>) => {
 			const result = await client.callTool(def.name, args);
@@ -390,6 +409,7 @@ export function parseMcpToolDefinition(raw: unknown): McpToolDefinition {
 		item.input_schema || { type: "object", properties: {} };
 	return {
 		name: String(item.name || "unknown_tool"),
+		title: typeof item.title === "string" ? item.title : undefined,
 		description: String(item.description || ""),
 		inputSchema:
 			inputSchema && typeof inputSchema === "object"
