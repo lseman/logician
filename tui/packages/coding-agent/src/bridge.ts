@@ -7,11 +7,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir as readdirAsync } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { OpenAIBackend } from "@logician-agent-core/core/backend.ts";
+import { OpenAIBackend } from "@logician/agent-core/core/backend.ts";
 import {
 	createDefaultTools,
 	DEFAULT_SEARXNG_URL,
-} from "@logician-agent-core/tools/shared/default-tools.ts";
+} from "./tools/default-tools.ts";
 import {
 	type AgentConfig,
 	type AgentEvent,
@@ -20,18 +20,18 @@ import {
 	type Message,
 	type Tool,
 	type WebSearchConfig,
-} from "@logician-agent-core";
+} from "@logician/agent-core";
 import {
 	type McpSnapshotResult,
 	type McpToggleResult,
 	McpManager,
-} from "@logician-agent-core/tools/shared/mcp.ts";
+} from "./mcp/index.ts";
 import {
 	type PermissionMode,
 	PermissionManager,
 	type PermissionRules,
-} from "@logician-agent-core/tools/shared/permissions.ts";
-import { estimateChatPayloadTokens } from "@logician-agent-core/core/messages.ts";
+} from "@logician/agent-core/tools/shared/permissions.ts";
+import { estimateChatPayloadTokens } from "@logician/agent-core/core/messages.ts";
 import {
 	configurePluginRuntimeEnv,
 	type PluginCommandResult,
@@ -39,25 +39,26 @@ import {
 	runPluginBackend,
 	runSessionStartHooks,
 	splitPluginArgs,
-} from "@logician-agent-core/tools/shared/plugins.ts";
+} from "@logician/agent-core/tools/shared/plugins.ts";
 import {
 	formatSkillCatalog,
 	formatSkillInvocation,
 	formatSkillsForSystemPrompt,
 	loadSkills,
 	type Skill,
-} from "@logician-agent-core/tools/shared/skills.ts";
+} from "./skills.ts";
 import {
 	type AgentDefinition,
 	createSpawnAgentTool,
 	loadAgentDefinitions,
-} from "@logician-agent-core/tools/subagents/subagent.ts";
-import { buildDefaultSystemPrompt } from "@logician-agent-core/tools/shared/system-prompt.ts";
-import { createReadSkillTool } from "@logician-agent-core/tools/skills/read-skill.ts";
-import { ToolRegistry } from "@logician-agent-core/tools/shared/registry.ts";
-import { onTodosChanged } from "@logician-agent-core/tools/todos/todo.ts";
+} from "./subagents/subagent.ts";
+import { buildDefaultSystemPrompt } from "./system-prompt.ts";
+import { createReadSkillTool } from "./tools/read-skill.ts";
+import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
+import { onTodosChanged } from "@logician/agent-core/tools/todos/todo.ts";
 import { findLogicianConfig } from "./config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
+import { get_reasoner, getReasonerMeta } from "./reasoners/registry.ts";
 
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
@@ -628,6 +629,13 @@ export class AgentCoreBridge {
 				backend: this.backend,
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
+				preReasoner: async (reasonerId, promptText, backend) => {
+					const meta = getReasonerMeta(reasonerId);
+					if (!meta) return undefined;
+					const reasoner = get_reasoner(reasonerId, backend, meta.defaultConfig);
+					const trace = await reasoner.solve(promptText);
+					return trace.reasoning || undefined;
+				},
 			});
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
@@ -809,76 +817,36 @@ export class AgentCoreBridge {
 
 	// ── Reload ────────────────────────────────────────────────────────────
 
-	/** Reload settings, skills, and MCP config from disk. */
+	/** Reload: restart the session (like Pi's /reload). */
 	private async reload(): Promise<void> {
-		const results: string[] = [];
+		// Stop any running turn
+		this.cancel();
+		this.running = false;
 
-		// 1. Reload user settings (~/.logician/settings.json)
-		try {
-			const userSettings = loadUserSettings();
-			const harness = this.ensureHarness();
-			applyCompactionSettings(harness, userSettings);
+		// Drop the old harness — conversation starts fresh
+		this.harness = null;
 
-			// Update model/thinking from user settings
-			if (userSettings.defaultModel !== undefined) {
-				const model = String(userSettings.defaultModel);
-				this.config.model = model;
-				harness.setModel(model);
-			}
-			if (userSettings.defaultThinkingLevel !== undefined) {
-				const level = String(userSettings.defaultThinkingLevel);
-				this.config.thinkingLevel =
-					level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-				harness.setThinkingLevel(
-					level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
-				);
-			}
-			results.push(`User settings reloaded.`);
-		} catch (e: unknown) {
-			results.push(`User settings: not found or invalid.`);
-		}
+		// Generate a new session ID
+		this.sessionId = `tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
+		this.config.hookSessionId = this.sessionId;
+		this.config.hookTranscriptPath = this.transcriptPath;
+		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
 
-		// 2. Reload skills
-		try {
-			const skillDirs = await getSkillsDirs(this.cwd);
-			const { skills, diagnostics } = await loadSkills(skillDirs);
-			this.loadedSkills = skills;
-			this.skillsContext = skills.length
-				? formatSkillsForSystemPrompt(skills)
-				: "";
-			// Rebuild harness system prompt if harness exists
-			if (this.harness) {
-				this.harness.setSystemPrompt(this.buildBaseSystemPrompt());
-			}
-			results.push(`Skills reloaded (${skills.length} loaded).`);
-			if (diagnostics?.length) {
-				for (const diag of diagnostics.slice(0, 5)) {
-					results.push(
-						`  ⚠ ${diag.code}: ${diag.message}`,
-					);
-				}
-			}
-		} catch (e: unknown) {
-			results.push(`Skills: reload failed (${(e as Error).message}).`);
-		}
+		// Reset state that is per-session
+		this.loadedSkills = [];
+		this.skillsContext = null;
+		this.skillsInjected = false;
+		this.startupHooksRan = false;
+		this.startupHookResult = null;
+		this.pluginSystemContext = "";
 
-		// 3. Reload MCP config
-		try {
-			const result = await this.mcpManager.load(
-				this.config.cwd || process.cwd(),
-			);
-			this.mcpServerCount = result.servers;
-			this.mcpErrors = result.errors;
-			results.push(`MCP servers: ${result.servers} loaded.`);
-		} catch (e: unknown) {
-			results.push(`MCP: reload failed (${(e as Error).message}).`);
-		}
-
-		// Send summary back to user
-		const summary = results.join("\n");
-		this.sendMessage(`**Config reloaded:**\n\n${summary}`).catch(
-			(err) => this.errorCb?.(err),
-		);
+		// Send reload confirmation (not via sendMessage to avoid starting a turn)
+		this.emit({
+			type: "turn_end",
+			turn_id: "reload",
+			message: "**Session reloaded.**",
+		});
 	}
 
 	// ── Skill invocation ───────────────────────────────────────────────
