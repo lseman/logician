@@ -42,6 +42,7 @@ import {
 } from "@logician/agent-core/tools/shared/plugins.ts";
 import {
 	formatSkillCatalog,
+	findSkillByName,
 	formatSkillInvocation,
 	formatSkillsForSystemPrompt,
 	loadSkills,
@@ -862,7 +863,7 @@ export class AgentCoreBridge {
 	 * caller can fall back to normal slash handling.
 	 */
 	invokeSkill(name: string, args: string): boolean {
-		const skill = this.loadedSkills.find((s) => s.name === name);
+		const skill = findSkillByName(this.loadedSkills, name);
 		if (!skill) return false;
 		const message = formatSkillInvocation(
 			skill,
