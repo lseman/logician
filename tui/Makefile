@@ -1,5 +1,5 @@
 BIN := dist/logician
-ENTRY := src/index.ts
+ENTRY := packages/tui/src/index.ts
 BUN ?= $(shell command -v bun 2>/dev/null || printf '%s/.bun/bin/bun' "$$HOME")
 
 .PHONY: build binary install dev start check lint lint-fix format clean
@@ -36,7 +36,7 @@ lint-fix:
 	npm run lint:fix
 
 format:
-	npx @biomejs/biome format --write src "*.json"
+	npx @biomejs/biome format --write packages/ "*.json"
 
 clean:
 	rm -rf dist

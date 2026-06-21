@@ -1,0 +1,23 @@
+{
+	"name": "@logician/tui",
+	"version": "0.2.0",
+	"description": "Terminal TUI layer for Logician",
+	"type": "module",
+	"main": "src/index.ts",
+	"scripts": {
+		"start": "tsx src/index.ts"
+	},
+	"dependencies": {
+		"@logician/agent-core": "0.2.0",
+		"@logician/coding-agent": "0.2.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.16",
+		"@types/node": "^22.0.0",
+		"@typescript-eslint/eslint-plugin": "^8.60.1",
+		"@typescript-eslint/parser": "^8.60.1",
+		"eslint": "^10.4.1",
+		"tsx": "^4.0.0",
+		"typescript": "^5.5.0"
+	}
+}

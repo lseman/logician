@@ -6,13 +6,13 @@ export default [
 		ignores: ["dist/**", "node_modules/**", "*.js"],
 	},
 	{
-		files: ["src/**/*.ts"],
+		files: ["packages/**/*.ts"],
 		languageOptions: {
 			parser: tsParser,
 			parserOptions: {
 				ecmaVersion: 2023,
 				sourceType: "module",
-				project: "./tsconfig.json",
+				project: ["packages/*/tsconfig.json"],
 				tsconfigRootDir: import.meta.dirname,
 			},
 		},
