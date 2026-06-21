@@ -1,8 +1,7 @@
 // ── Prompt template slash command handler ─────────────────────────────────────
 // /prompt <name> [variable=value ...] — expand a template and return the result.
 
-import type { PromptTemplate } from "./loader.ts";
-import { substituteTemplate } from "./loader.ts";
+import { substituteTemplate, type PromptTemplate } from "./loader.ts";
 
 export interface TemplateCommandResult {
 	success: boolean;

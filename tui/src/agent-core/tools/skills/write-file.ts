@@ -5,12 +5,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool } from "../../core/types.ts";
 import { withFileMutationQueue } from "../shared/file-mutation-queue.ts";
-import {
-	ensureInsideCwd,
-	mutationSummary,
-	readUtf8IfExists,
-	resolvePath,
-} from "../shared/helpers.ts";
+import { ensureInsideCwd, readUtf8IfExists, resolvePath } from "../shared/path-utils.ts";
+import { mutationSummary } from "../shared/helpers.ts";
 import { refreshAfterWrite } from "./read-tracker.ts";
 
 export const write_file: Tool = {

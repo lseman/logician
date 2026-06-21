@@ -3,11 +3,9 @@
 // and returns the extension definitions with any diagnostics.
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import ignore from "ignore";
 import type { Diagnostic, ExtensionDefinition, LoadExtensionsResult } from "./types.ts";
-
-const IGNORE_PATTERNS = ["node_modules", ".git", "__tests__", "__mocks__", ".cache"];
 
 function addIgnoreRules(dir: string, matcher: ReturnType<typeof ignore>, rootDir: string): void {
 	const relativeDir = relative(rootDir, dir);
@@ -130,7 +128,7 @@ export function loadExtensions(options: {
 	agentDir?: string;
 	explicitPaths?: string[];
 }): LoadExtensionsResult {
-	const { userDir, projectDir, agentDir, explicitPaths } = options;
+	const { userDir, projectDir, explicitPaths } = options;
 	const allDefinitions: ExtensionDefinition[] = [];
 	const allDiagnostics: Diagnostic[] = [];
 

@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Tool } from "../../core/types.ts";
-import { ensureInsideCwd, resolvePath } from "../shared/helpers.ts";
+import { ensureInsideCwd, resolvePath } from "../shared/path-utils.ts";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.ts";
 import { ensureTool } from "../shared/tools-manager.ts";
 

@@ -12,7 +12,6 @@ export * from "./core/loop-detector.ts";
 export * from "./core/messages.ts";
 export * from "./core/session.ts";
 export * from "./core/tool-cache.ts";
-export { type TruncationResult, type TruncationOptions, truncateTail, sanitizeBinaryOutput, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES, GREP_MAX_LINE_LENGTH } from "./core/truncate.ts";
 export * from "./core/types.ts";
 
 // Hooks: hook bus, builtin hooks, budget

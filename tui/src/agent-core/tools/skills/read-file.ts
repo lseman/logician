@@ -3,7 +3,7 @@
 
 import * as fs from "node:fs";
 import type { Tool } from "../../core/types.ts";
-import { ensureInsideCwd, resolvePath } from "../shared/helpers.ts";
+import { ensureInsideCwd, resolvePath } from "../shared/path-utils.ts";
 import { recordRead } from "./read-tracker.ts";
 import {
 	DEFAULT_MAX_BYTES,

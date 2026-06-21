@@ -3,8 +3,7 @@
 // Depends on plugins-executor for hook loading/execution.
 
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -16,7 +15,6 @@ import {
 	isDir,
 	copyDir,
 	gitHead,
-	pluginNameFor,
 	findPluginManifest,
 	resolvePluginsDir,
 	sanitize,
@@ -100,10 +98,12 @@ export interface PluginCommandResult {
 export class TsPluginManager {
 	readonly pluginsDir: string;
 	private registryPath: string;
+	private readonly env?: NodeJS.ProcessEnv;
 
-	constructor() {
+	constructor(options: { env?: NodeJS.ProcessEnv } = {}) {
 		this.pluginsDir = resolvePluginsDir();
 		this.registryPath = path.join(this.pluginsDir, "installed_plugins.json");
+		this.env = options.env;
 	}
 
 	async listPlugins(): Promise<PluginCommandResult> {
@@ -252,7 +252,7 @@ export class TsPluginManager {
 			const cmd = ["clone", "--depth=1"];
 			if (ref) cmd.push("--branch", ref);
 			cmd.push(gitUrl, cloneDir);
-			await execFileAsync("git", cmd, { timeout: 180_000 });
+			await execFileAsync("git", cmd, { timeout: 180_000, env: this.env });
 			return await this.installFromLocal(
 				subdir ? path.join(cloneDir, subdir) : cloneDir,
 				owner,

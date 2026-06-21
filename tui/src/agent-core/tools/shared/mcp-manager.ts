@@ -7,8 +7,6 @@ import type { Tool } from "../../core/types.ts";
 import {
 	createMcpClient,
 	createMcpTool,
-	parseMcpToolDefinition,
-	type McpToolDefinition,
 	type McpClient,
 	type McpServerConfig,
 } from "./mcp-client.ts";

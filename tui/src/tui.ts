@@ -1439,11 +1439,13 @@ export class LogicianTUI {
 		this.tui.setScrollableComponent(this.transcriptDisplay);
 		this.tui.setFixedBottomComponent(this.statusPanel);
 
-		// Stack todo bar + steer queue above the input bar (both render empty
-		// when there's nothing to show, so they only take space when active).
+		// Stack todo bar + steer queue + question handler above the input bar
+		// (both render empty when there's nothing to show, so they only take
+		// space when active).
 		const pinnedContainer = new Container();
 		pinnedContainer.addChild(this.todoBar);
 		pinnedContainer.addChild(this.steerQueue);
+		pinnedContainer.addChild(this.choicePopup);
 		this.tui.setFixedAboveInputComponent(pinnedContainer);
 
 		// Slash popup as overlay anchored to the bottom of the transcript area, so
@@ -1465,10 +1467,6 @@ export class LogicianTUI {
 		this.tui.showOverlay(this.sessionManager, {
 			anchor: "center",
 			maxHeight: 18,
-		});
-		this.tui.showOverlay(this.choicePopup, {
-			anchor: "center",
-			maxHeight: 14,
 		});
 	}
 

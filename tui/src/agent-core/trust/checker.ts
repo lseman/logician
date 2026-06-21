@@ -3,7 +3,7 @@
 // Resources: settings.json, extensions/, skills/, prompts/, themes/, SYSTEM.md,
 //            APPEND_SYSTEM.md, .agents/skills/
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 

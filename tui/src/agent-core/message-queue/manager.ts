@@ -3,8 +3,7 @@
 // Supports "one-at-a-time" (delivers one message then waits) or "all" (delivers
 // all queued messages at once) modes for both steering and follow-up.
 
-import type { QueuedMessage } from "./queue.ts";
-import { MessageQueue } from "./queue.ts";
+import { MessageQueue, type QueuedMessage } from "./queue.ts";
 
 export type DeliveryMode = "one-at-a-time" | "all";
 

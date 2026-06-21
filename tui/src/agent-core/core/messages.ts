@@ -8,7 +8,6 @@ import type {
 	CompactionSummaryMessage,
 	CustomMessage,
 	Message,
-	MessageRole,
 } from "./types.ts";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
@@ -24,7 +23,7 @@ export const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch tha
 <summary>
 `;
 
-export const BRANCH_SUMMARY_SUFFIX = `</summary>`;
+export const BRANCH_SUMMARY_SUFFIX = "</summary>";
 
 export function bashExecutionToText(msg: BashExecutionMessage): string {
 	let text = `Ran \`${msg.command}\`\n`;

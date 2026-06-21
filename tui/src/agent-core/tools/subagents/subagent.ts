@@ -14,7 +14,12 @@ import { join } from "node:path";
 import type { LLMBackend } from "../../core/backend.ts";
 import { runAgentLoop } from "../../core/agent-loop-runner.ts";
 import { parseFrontmatter } from "../shared/skills.ts";
-import type { AgentConfig, AgentEvent, Message, Tool } from "../../core/types.ts";
+import type {
+	AgentConfig,
+	AgentEvent,
+	Message,
+	Tool,
+} from "../../core/types.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────
 
@@ -49,7 +54,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 		name: "explorer",
 		description:
 			"Read-only researcher. Locates code, maps structure, answers " +
-			"\"where/how is X done\" questions without modifying anything.",
+			'"where/how is X done" questions without modifying anything.',
 		prompt:
 			`${GENERIC_SUBAGENT_PROMPT}\n\nYou are read-only: explore and report, ` +
 			"never modify. Report concrete file paths and line references.",
@@ -231,7 +236,11 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 				// External settings-hooks (PreToolUse shell hooks etc.) stay enabled
 				// so safety hooks also govern subagent tool use.
 				runtimeHooksEnabled: parent.runtimeHooksEnabled,
-				continuationEnabled: false,
+				// Enable continuation so the child model doesn't abandon mid-task.
+				// Subagents frequently get a premature "stop" — the default nudge
+				// "You stopped without completing your work. Continue." is enough
+				// to push them past that. Bounded by maxIterations on the child.
+				continuationEnabled: true,
 				onEvent: (event) => {
 					if (event.type === "text_delta") {
 						lastText += event.delta;

@@ -5,11 +5,8 @@ import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import type { Tool } from "../../core/types.ts";
-import {
-	ensureInsideCwd,
-	resolvePath,
-	summarizeDiff,
-} from "../shared/helpers.ts";
+import { ensureInsideCwd, resolvePath } from "../shared/path-utils.ts";
+import { summarizeDiff } from "./diff-utils.ts";
 
 const execFileAsync = promisify(execFile);
 

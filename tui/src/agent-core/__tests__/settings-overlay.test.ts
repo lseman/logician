@@ -30,12 +30,12 @@ const makeSettings = (): SettingDef[] => [
 	},
 	{
 		name: "Thinking Level",
-		currentValue: "off",
+		currentValue: "medium",
 		description: "Reasoning depth",
 		options: [
-			{ label: "off", value: "off", current: true },
+			{ label: "off", value: "off" },
 			{ label: "low", value: "low" },
-			{ label: "medium", value: "medium" },
+			{ label: "medium", value: "medium", current: true },
 			{ label: "high", value: "high" },
 		],
 	},
@@ -224,14 +224,14 @@ describe("SettingsSelectorOverlay", () => {
 		// Open detail view for Thinking Level (index 1)
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r");
-		assert.strictEqual(overlay["selectedOptionIndex"], 0); // off is current at index 0
+		assert.strictEqual(overlay["selectedOptionIndex"], 2); // medium is current at index 2
 
 		// Move down with j
 		overlay.handleInput("j");
-		assert.strictEqual(overlay["selectedOptionIndex"], 1); // low
+		assert.strictEqual(overlay["selectedOptionIndex"], 3); // high
 
 		// Move up with k
 		overlay.handleInput("k");
-		assert.strictEqual(overlay["selectedOptionIndex"], 0); // off
+		assert.strictEqual(overlay["selectedOptionIndex"], 2); // medium
 	});
 });

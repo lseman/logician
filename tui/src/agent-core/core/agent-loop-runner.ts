@@ -2,7 +2,7 @@
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
 
-import type { LLMBackend, BackendError } from "./backend.ts";
+import type { LLMBackend } from "./backend.ts";
 import {
 	convertToChatFormat,
 	createAssistantMessage,
@@ -24,18 +24,6 @@ import type {
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import { OutputGuard } from "./output-guard.ts";
 import { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
-import type {
-	BeforeAgentStartEvent,
-	TurnStartEvent,
-	TurnEndEvent,
-	MessageStartEvent,
-	MessageUpdateEvent,
-	MessageEndEvent,
-	ToolExecutionStartEvent,
-	ToolExecutionEndEvent,
-	BeforeProviderRequestEvent,
-	AfterProviderResponseEvent,
-} from "../hooks/extension-events.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -73,7 +61,10 @@ export interface RunAgentLoopConfig extends AgentConfig {
 		messages: Message[];
 		iteration: number;
 		hadToolCalls: boolean;
-	}) => Promise<{ messages?: Message[] } | undefined> | { messages?: Message[] } | undefined;
+	}) =>
+		| Promise<{ messages?: Message[] } | undefined>
+		| { messages?: Message[] }
+		| undefined;
 	shouldStopAfterTurn?: (ctx: {
 		messages: Message[];
 		iteration: number;
@@ -85,7 +76,10 @@ export interface RunAgentLoopConfig extends AgentConfig {
 		messages: AgentMessage[];
 		iteration: number;
 		signal?: AbortSignal;
-	}) => Promise<{ messages?: AgentMessage[] } | undefined> | { messages?: AgentMessage[] } | undefined;
+	}) =>
+		| Promise<{ messages?: AgentMessage[] } | undefined>
+		| { messages?: AgentMessage[] }
+		| undefined;
 	// Output guard config (optional). When provided, the loop uses OutputGuard
 	// to handle context_full, retryable errors, and empty responses.
 	outputGuard?: OutputGuard | null;
@@ -94,11 +88,15 @@ export interface RunAgentLoopConfig extends AgentConfig {
 }
 
 const DEFAULT_MAX_ITERATIONS = 30;
-const DEFAULT_MAX_CONTINUATIONS = 12;
 
 function withSystemPrompt(context: RunAgentLoopContext): Message[] {
-	const nonSystem = context.messages.filter((message) => message.role !== "system");
-	return [createSystemMessage(context.systemPrompt ?? "You are a helpful assistant."), ...nonSystem];
+	const nonSystem = context.messages.filter(
+		(message) => message.role !== "system",
+	);
+	return [
+		createSystemMessage(context.systemPrompt ?? "You are a helpful assistant."),
+		...nonSystem,
+	];
 }
 
 function assistantText(message: Message | undefined): string {
@@ -108,7 +106,9 @@ function assistantText(message: Message | undefined): string {
 }
 
 async function firstMessages(
-	callbacks: Array<(() => Promise<Message[] | undefined> | Message[] | undefined) | undefined>,
+	callbacks: Array<
+		(() => Promise<Message[] | undefined> | Message[] | undefined) | undefined
+	>,
 ): Promise<Message[]> {
 	for (const callback of callbacks) {
 		const messages = await drainMessages(callback);
@@ -118,7 +118,11 @@ async function firstMessages(
 }
 
 async function transformMessages(
-	callbacks: Array<AgentHooks["transformContext"] | RunAgentLoopConfig["transformContext"] | undefined>,
+	callbacks: Array<
+		| AgentHooks["transformContext"]
+		| RunAgentLoopConfig["transformContext"]
+		| undefined
+	>,
 	ctx: { messages: AgentMessage[]; iteration: number; signal?: AbortSignal },
 ): Promise<AgentMessage[] | undefined> {
 	for (const callback of callbacks) {
@@ -129,7 +133,11 @@ async function transformMessages(
 }
 
 async function prepareMessages(
-	callbacks: Array<AgentHooks["prepareNextTurn"] | RunAgentLoopConfig["prepareNextTurn"] | undefined>,
+	callbacks: Array<
+		| AgentHooks["prepareNextTurn"]
+		| RunAgentLoopConfig["prepareNextTurn"]
+		| undefined
+	>,
 	ctx: { messages: Message[]; iteration: number; hadToolCalls: boolean },
 ): Promise<Message[] | undefined> {
 	for (const callback of callbacks) {
@@ -140,7 +148,11 @@ async function prepareMessages(
 }
 
 async function shouldStop(
-	callbacks: Array<AgentHooks["shouldStopAfterTurn"] | RunAgentLoopConfig["shouldStopAfterTurn"] | undefined>,
+	callbacks: Array<
+		| AgentHooks["shouldStopAfterTurn"]
+		| RunAgentLoopConfig["shouldStopAfterTurn"]
+		| undefined
+	>,
 	ctx: {
 		messages: Message[];
 		iteration: number;
@@ -156,12 +168,23 @@ async function shouldStop(
 	return false;
 }
 
-function stopReasonFor(responseStopReason: "stop" | "length" | "error", toolCalls: ToolCall[]): StopReason {
+function stopReasonFor(
+	responseStopReason: "stop" | "length" | "error",
+	toolCalls: ToolCall[],
+): StopReason {
 	if (toolCalls.length > 0) return "tool_calls";
-	return responseStopReason === "length" ? "length" : responseStopReason === "error" ? "error" : "stop";
+	return responseStopReason === "length"
+		? "length"
+		: responseStopReason === "error"
+			? "error"
+			: "stop";
 }
 
-async function emitMessagePair(emit: AgentEventSink, turnId: string, message: Message): Promise<void> {
+async function emitMessagePair(
+	emit: AgentEventSink,
+	turnId: string,
+	message: Message,
+): Promise<void> {
 	await emit({ type: "message_start", turnId, role: message.role });
 	await emit({ type: "message_end", turnId, message });
 }
@@ -185,7 +208,6 @@ export async function runAgentLoop(
 	let messages = [...withSystemPrompt(context), ...prompts];
 	const newMessages: Message[] = [...prompts];
 	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-	const maxContinuations = config.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS;
 	const registry = new ToolRegistry({
 		cwd: context.cwd ?? config.cwd,
 		signal: config.signal,
@@ -193,9 +215,8 @@ export async function runAgentLoop(
 	});
 	registry.registerMany(context.tools ?? config.tools ?? []);
 
-			const outputGuard = config.outputGuard;
+	const outputGuard = config.outputGuard;
 	let iteration = 0;
-	let continuationCount = 0;
 	let pendingMessages = await firstMessages([
 		() => config.getSteeringMessages?.({ messages, iteration }),
 		() => config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
@@ -222,10 +243,16 @@ export async function runAgentLoop(
 		}
 
 		let hasMoreToolCalls = true;
-		while ((hasMoreToolCalls || pendingMessages.length > 0) && iteration < maxIterations) {
+		while (
+			(hasMoreToolCalls || pendingMessages.length > 0) &&
+			iteration < maxIterations
+		) {
 			iteration++;
 			const turnId = `turn_${iteration}`;
-			await emitTyped(config.extensionBus, { type: "turn_start", turnIndex: iteration });
+			await emitTyped(config.extensionBus, {
+				type: "turn_start",
+				turnIndex: iteration,
+			});
 			await emit({ type: "turn_start", turnId });
 
 			if (pendingMessages.length > 0) {
@@ -238,8 +265,16 @@ export async function runAgentLoop(
 			}
 
 			const transformed = await transformMessages(
-				[config.transformContext, config.internalHooks?.transformContext, config.hooks?.transformContext],
-				{ messages: messages as AgentMessage[], iteration, signal: config.signal },
+				[
+					config.transformContext,
+					config.internalHooks?.transformContext,
+					config.hooks?.transformContext,
+				],
+				{
+					messages: messages as AgentMessage[],
+					iteration,
+					signal: config.signal,
+				},
 			);
 			if (transformed) messages = transformed as Message[];
 
@@ -263,7 +298,8 @@ export async function runAgentLoop(
 					thinkingLevel: config.thinkingLevel,
 					callbacks: {
 						onDelta: (delta) => emit({ type: "text_delta", turnId, delta }),
-						onThinking: (delta) => emit({ type: "thinking_delta", turnId, delta }),
+						onThinking: (delta) =>
+							emit({ type: "thinking_delta", turnId, delta }),
 						onTextStart: () => emit({ type: "text_start", turnId }),
 						onTextEnd: () => emit({ type: "text_end", turnId }),
 						onToolCallStart: (toolCallId, toolName, args) =>
@@ -289,13 +325,23 @@ export async function runAgentLoop(
 					});
 
 					if (guardResult.action === "abort") {
-						emit({ type: "auto_retry_end", attempt: guardResult.attempt ?? 0, success: false });
-						await emitTyped(config.extensionBus, { type: "agent_end", messages: newMessages });
-			await emit({ type: "agent_end", messages: newMessages });
+						emit({
+							type: "auto_retry_end",
+							attempt: guardResult.attempt ?? 0,
+							success: false,
+						});
+						await emitTyped(config.extensionBus, {
+							type: "agent_end",
+							messages: newMessages,
+						});
+						await emit({ type: "agent_end", messages: newMessages });
 						return newMessages;
 					}
 
-					if (guardResult.action === "retry" || guardResult.action === "compact_then_retry") {
+					if (
+						guardResult.action === "retry" ||
+						guardResult.action === "compact_then_retry"
+					) {
 						emit({
 							type: "auto_retry_start",
 							attempt: guardResult.attempt ?? 1,
@@ -308,8 +354,17 @@ export async function runAgentLoop(
 							await new Promise((r) => setTimeout(r, guardResult.retryDelayMs));
 						}
 
-						emit({ type: "auto_retry_end", attempt: guardResult.attempt ?? 1, success: true });
-						emit({ type: "context_update", tokens: 0, maxTokens: config.contextWindowTokens, compacted: true });
+						emit({
+							type: "auto_retry_end",
+							attempt: guardResult.attempt ?? 1,
+							success: true,
+						});
+						emit({
+							type: "context_update",
+							tokens: 0,
+							maxTokens: config.contextWindowTokens,
+							compacted: true,
+						});
 						// Continue to next iteration (retry the LLM call)
 						continue;
 					}
@@ -319,7 +374,10 @@ export async function runAgentLoop(
 			}
 
 			const toolCalls = response?.toolCalls ?? [];
-			const stopReason = stopReasonFor((response?.stopReason as "stop" | "length" | "error") ?? "stop", toolCalls);
+			const stopReason = stopReasonFor(
+				(response?.stopReason as "stop" | "length" | "error") ?? "stop",
+				toolCalls,
+			);
 
 			// Output guard: check for empty/degenerate responses
 			if (outputGuard) {
@@ -328,28 +386,58 @@ export async function runAgentLoop(
 					toolCalls.length,
 				);
 				if (guardCheck.action === "abort") {
-					emit({ type: "error", message: guardCheck.message ?? "Model returned empty response." });
-					await emitTyped(config.extensionBus, { type: "agent_end", messages: newMessages });
-			await emit({ type: "agent_end", messages: newMessages });
+					emit({
+						type: "error",
+						message: guardCheck.message ?? "Model returned empty response.",
+					});
+					await emitTyped(config.extensionBus, {
+						type: "agent_end",
+						messages: newMessages,
+					});
+					await emit({ type: "agent_end", messages: newMessages });
 					return newMessages;
 				}
 			}
 
-			const assistant = createAssistantMessage(response?.content as string ?? "", toolCalls);
+			const assistant = createAssistantMessage(
+				(response?.content as string) ?? "",
+				toolCalls,
+			);
 			messages.push(assistant);
 			newMessages.push(assistant);
-			await emitTyped(config.extensionBus, { type: "message_start", message: assistant });
+			await emitTyped(config.extensionBus, {
+				type: "message_start",
+				message: assistant,
+			});
 			await emit({ type: "message_start", turnId, role: "assistant" });
 			await emit({ type: "message_update", turnId, message: assistant });
-			await emitTyped(config.extensionBus, { type: "message_update", message: assistant });
+			await emitTyped(config.extensionBus, {
+				type: "message_update",
+				message: assistant,
+			});
 			await emit({ type: "message_end", turnId, message: assistant });
-			await emitTyped(config.extensionBus, { type: "message_end", message: assistant });
+			await emitTyped(config.extensionBus, {
+				type: "message_end",
+				message: assistant,
+			});
 
 			if (stopReason === "error") {
-				await emit({ type: "error", message: response.errorMessage ?? "Model request failed" });
-				await emit({ type: "turn_end", turnId, stopReason, message: assistant, toolResults: [] });
-				await emitTyped(config.extensionBus, { type: "agent_end", messages: newMessages });
-			await emit({ type: "agent_end", messages: newMessages });
+				await emit({
+					type: "error",
+					message: response.errorMessage ?? "Model request failed",
+				});
+				await emit({
+					type: "turn_end",
+					turnId,
+					stopReason,
+					message: assistant,
+					toolResults: [],
+				});
+				await emitTyped(config.extensionBus, {
+					type: "agent_end",
+					messages: newMessages,
+				});
+				await emit({ type: "agent_end", messages: newMessages });
 				return newMessages;
 			}
 
@@ -368,11 +456,12 @@ export async function runAgentLoop(
 					toolCall: prepared.call,
 					args: prepared.args,
 					iteration,
-				}) ?? config.hooks?.beforeToolCall?.({
-					toolCall: prepared.call,
-					args: prepared.args,
-					iteration,
-				}));
+				}) ??
+					config.hooks?.beforeToolCall?.({
+						toolCall: prepared.call,
+						args: prepared.args,
+						iteration,
+					}));
 				let resultText = before?.content;
 				let isError = before?.isError === true;
 				const args = before?.args ?? prepared.args;
@@ -381,7 +470,11 @@ export async function runAgentLoop(
 						resultText = prepared.error;
 						isError = true;
 					} else {
-						const result = await registry.execute(prepared.call, { signal: config.signal }, args);
+						const result = await registry.execute(
+							prepared.call,
+							{ signal: config.signal },
+							args,
+						);
 						resultText = result.content;
 					}
 				}
@@ -391,13 +484,14 @@ export async function runAgentLoop(
 					result: resultText,
 					isError,
 					iteration,
-				}) ?? config.hooks?.afterToolCall?.({
-					toolCall: prepared.call,
-					args,
-					result: resultText,
-					isError,
-					iteration,
-				}));
+				}) ??
+					config.hooks?.afterToolCall?.({
+						toolCall: prepared.call,
+						args,
+						result: resultText,
+						isError,
+						iteration,
+					}));
 				if (after?.content !== undefined) resultText = after.content;
 				if (after?.isError !== undefined) isError = after.isError;
 				await emit({
@@ -435,68 +529,119 @@ export async function runAgentLoop(
 				message: assistant,
 				toolResults,
 			});
-			await emit({ type: "turn_end", turnId, stopReason, message: assistant, toolResults });
+			await emit({
+				type: "turn_end",
+				turnId,
+				stopReason,
+				message: assistant,
+				toolResults,
+			});
 
-		// Reset output guard after each completed turn
-		outputGuard?.reset();
+			// Reset output guard after each completed turn
+			outputGuard?.reset();
 
 			const prepared = await prepareMessages(
-				[config.prepareNextTurn, config.internalHooks?.prepareNextTurn, config.hooks?.prepareNextTurn],
+				[
+					config.prepareNextTurn,
+					config.internalHooks?.prepareNextTurn,
+					config.hooks?.prepareNextTurn,
+				],
 				{
-				messages,
-				iteration,
-				hadToolCalls: toolCalls.length > 0,
+					messages,
+					iteration,
+					hadToolCalls: toolCalls.length > 0,
 				},
 			);
 			if (prepared) messages = prepared;
 
 			const stop = await shouldStop(
-				[config.shouldStopAfterTurn, config.internalHooks?.shouldStopAfterTurn, config.hooks?.shouldStopAfterTurn],
+				[
+					config.shouldStopAfterTurn,
+					config.internalHooks?.shouldStopAfterTurn,
+					config.hooks?.shouldStopAfterTurn,
+				],
 				{
-				messages,
-				iteration,
-				hadToolCalls: toolCalls.length > 0,
-				message: assistant,
-				toolResults,
+					messages,
+					iteration,
+					hadToolCalls: toolCalls.length > 0,
+					message: assistant,
+					toolResults,
 				},
 			);
 			if (stop) {
-				await emitTyped(config.extensionBus, { type: "agent_end", messages: newMessages });
-			await emit({ type: "agent_end", messages: newMessages });
+				await emitTyped(config.extensionBus, {
+					type: "agent_end",
+					messages: newMessages,
+				});
+				await emit({ type: "agent_end", messages: newMessages });
 				return newMessages;
 			}
 
 			pendingMessages = await firstMessages([
 				() => config.getSteeringMessages?.({ messages, iteration }),
-				() => config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
+				() =>
+					config.internalHooks?.getSteeringMessages?.({ messages, iteration }),
 				() => config.hooks?.getSteeringMessages?.({ messages, iteration }),
 			]);
 		}
 
 		const followUps = await firstMessages([
-			() => config.getFollowUpMessages?.({
-				messages,
-				iteration,
-				assistantText: assistantText(newMessages.at(-1)),
-				stopReason: "stop",
-			}),
-			() => config.internalHooks?.getFollowUpMessages?.({
-				messages,
-				iteration,
-				assistantText: assistantText(newMessages.at(-1)),
-				maxContinuations,
-				stopReason: "stop",
-			}),
-			() => config.hooks?.getFollowUpMessages?.({
-				messages,
-				iteration,
-				assistantText: assistantText(newMessages.at(-1)),
-				maxContinuations,
-				stopReason: "stop",
-			}),
+			() =>
+				config.getFollowUpMessages?.({
+					messages,
+					iteration,
+					assistantText: assistantText(newMessages.at(-1)),
+					stopReason: "stop",
+				}),
+			() =>
+				config.internalHooks?.getFollowUpMessages?.({
+					messages,
+					iteration,
+					assistantText: assistantText(newMessages.at(-1)),
+					stopReason: "stop",
+				}),
+			() =>
+				config.hooks?.getFollowUpMessages?.({
+					messages,
+					iteration,
+					assistantText: assistantText(newMessages.at(-1)),
+					stopReason: "stop",
+				}),
 		]);
-		if (followUps.length > 0 && continuationCount < maxContinuations) {
-			continuationCount++;
+
+		// Default continuation: when model stopped without tool calls, nudge it
+		// to continue rather than exiting. The model often says "stop" prematurely
+		// (local models, context pressure, compaction confusion), so this prevents
+		// the agent from abandoning mid-task.
+		if (config.continuationEnabled === true && followUps.length === 0) {
+			// Find last assistant message (newMessages interleaves assistant + tool results)
+			let lastAssistant: Message | undefined;
+			for (let i = newMessages.length - 1; i >= 0; i--) {
+				if (newMessages[i].role === "assistant") {
+					lastAssistant = newMessages[i];
+					break;
+				}
+			}
+			const lastWasToolCall =
+				lastAssistant &&
+				typeof lastAssistant.content === "string" &&
+				lastAssistant.tool_calls
+					? Array.isArray(lastAssistant.tool_calls) &&
+						lastAssistant.tool_calls.length > 0
+					: false;
+			if (!lastWasToolCall) {
+				// Model stopped without tool calls — it may be done, but with
+				// continuation enabled we give it one more chance to continue.
+				followUps.push({
+					role: "user" as const,
+					content:
+						"You stopped without completing your work. Continue with the next step. " +
+						"Do not repeat what you already did — move forward.",
+				});
+			}
+		}
+
+		if (followUps.length > 0) {
 			pendingMessages = followUps;
 			continue;
 		}
@@ -504,7 +649,11 @@ export async function runAgentLoop(
 	}
 
 	if (iteration >= maxIterations) {
-		await emit({ type: "max_iterations", iterations: iteration, limit: maxIterations });
+		await emit({
+			type: "max_iterations",
+			iterations: iteration,
+			limit: maxIterations,
+		});
 	}
 
 	// Final output guard reset when agent ends

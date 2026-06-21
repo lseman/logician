@@ -15,7 +15,7 @@
 //
 // Usage: create one per harness/loop invocation, feed each response + error.
 
-import type { AgentEvent, EventHandler } from "./types.ts";
+import type { EventHandler } from "./types.ts";
 import { BackendError, type BackendErrorCategory } from "./backend.ts";
 import type { LoopDetector } from "./loop-detector.ts";
 

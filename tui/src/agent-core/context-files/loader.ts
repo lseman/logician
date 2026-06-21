@@ -13,10 +13,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 
 const CONTEXT_FILENAMES = ["AGENTS.md", "CLAUDE.md"];
-const SYSTEM_FILENAMES = ["SYSTEM.md", "APPEND_SYSTEM.md"];
 
 function findContextFile(startDir: string): string | null {
 	for (const name of CONTEXT_FILENAMES) {

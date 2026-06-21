@@ -3,8 +3,6 @@
 // in AgentConfig. The agent must produce a ```acceptance-report JSON block
 // in its final turn output, or the run is marked failed/timeout.
 
-import type { Message } from "./types/types-messages.ts";
-
 export type EvidenceKind =
 	| "changed-files"
 	| "tests-added"
@@ -197,10 +195,10 @@ export function formatAcceptancePrompt(resolved: ResolvedAcceptance): string {
 	lines.push("");
 	lines.push("```acceptance-report");
 	lines.push("{");
-	lines.push('  "criteriaSatisfied": [{ "id": "criterion-1", "status": "satisfied", "evidence": "..." }],');
-	lines.push('  "changedFiles": ["file.ts"],');
-	lines.push('  "commandsRun": [{ "command": "npm test", "result": "passed", "summary": "all pass" }],');
-	lines.push('  "residualRisks": []');
+	lines.push("  \"criteriaSatisfied\": [{ \"id\": \"criterion-1\", \"status\": \"satisfied\", \"evidence\": \"...\" }],");
+	lines.push("  \"changedFiles\": [\"file.ts\"],");
+	lines.push("  \"commandsRun\": [{ \"command\": \"npm test\", \"result\": \"passed\", \"summary\": \"all pass\" }],");
+	lines.push("  \"residualRisks\": []");
 	lines.push("}");
 	lines.push("```");
 	lines.push("");

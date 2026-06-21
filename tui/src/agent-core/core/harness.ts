@@ -3,8 +3,6 @@
 // setters that take effect on the *next* turn, and steering / follow-up /
 // nextTurn queues drained at save points.
 //
-// Phase types extracted to harness-phase.ts for reference.
-// Compaction logic extracted to harness-compaction.ts for reference.
 
 import { get_reasoner, getReasonerMeta } from "../../reasoners/registry.ts";
 import { withTimeout } from "../tools/shared/async-utils.ts";

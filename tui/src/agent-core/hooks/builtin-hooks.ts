@@ -14,7 +14,12 @@ import {
 import { compactToFit } from "../compaction/compaction.ts";
 import { getTaskStatus } from "../tools/skills/task-status.ts";
 import { getTasks } from "../tools/todos/todo.ts";
-import type { AgentConfig, AgentHooks, CompactableMessage, Message } from "../core/types.ts";
+import type {
+	AgentConfig,
+	AgentHooks,
+	CompactableMessage,
+	Message,
+} from "../core/types.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the
@@ -40,12 +45,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// OFF — matching pi's trust-model approach. Guards that block tools after 3
 	// failures/dupe calls force the model to switch strategies mid-task, often
 	// causing more looping. Enable only when debugging specific failure loops.
-	const guardThresholds = config.guardsEnabled === true
-		? {
-				duplicateThreshold: config.duplicateToolThreshold,
-				failureThreshold: config.toolFailureLoopThreshold,
-			}
-		: undefined;
+	const guardThresholds =
+		config.guardsEnabled === true
+			? {
+					duplicateThreshold: config.duplicateToolThreshold,
+					failureThreshold: config.toolFailureLoopThreshold,
+				}
+			: undefined;
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step
 	// run (e.g. one following a todo list) when per-turn token growth is small.
 	const budgetEnabled = config.budgetStopEnabled === true;
@@ -87,11 +93,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// documented as a final, standalone call).
 	hooks.afterToolCall = ({ toolCall, result, isError }) => {
 		if (guardThresholds && isError) {
-			loopDetector.recordFailure(
-				toolCall.name,
-				toolCall.arguments,
-				result,
-			);
+			loopDetector.recordFailure(toolCall.name, toolCall.arguments, result);
 		}
 		if (toolCall.name === "task_status" && !isError) {
 			return { terminate: true };
@@ -110,10 +112,14 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// `fraction` of the window, targets COMPACTION_TARGET_FRACTION.
 			const result = compactToFit(messages as CompactableMessage[], {
 				triggerTokens: max * fraction,
-				settings: { contextWindow: Math.round(max * COMPACTION_TARGET_FRACTION * 1.5) },
+				settings: {
+					contextWindow: Math.round(max * COMPACTION_TARGET_FRACTION * 1.5),
+				},
 			});
 			lastCompactionTurn = iteration;
-			return result.changed ? { messages: result.messages as Message[] } : undefined;
+			return result.changed
+				? { messages: result.messages as Message[] }
+				: undefined;
 		};
 	}
 
@@ -133,10 +139,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// cause the model to retry the same failing approach.
 	const continuationEnabled = config.continuationEnabled === true;
 	if (continuationEnabled) {
-		hooks.getFollowUpMessages = ({
-			assistantText,
-			stopReason,
-		}) => {
+		hooks.getFollowUpMessages = ({ assistantText, stopReason }) => {
 			// Structured stop beats everything: a task_status call this run is
 			// an explicit done/blocked declaration — never nudge past it.
 			if (getTaskStatus()) return undefined;
@@ -167,8 +170,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// to force a strategy shift rather than blind continuation.
 			const isCircling = detectsCircling(assistantText);
 
-			// Build adaptive nudge text based on circling detection. The outer
-			// loop applies `maxContinuations`, so this hook only decides content.
+			// Build adaptive nudge text based on circling detection. This hook
+			// only decides content — the loop continues until shouldStopAfterTurn
+			// returns true.
 			const next =
 				remaining.find((t) => t.status === "in_progress") ?? remaining[0];
 

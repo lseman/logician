@@ -8,13 +8,11 @@
 // helpers.ts (which used to re-export these).
 
 import type { Tool, ToolResult } from "../../core/types.ts";
+import { ensureInsideCwd, resolvePath } from "../shared/path-utils.ts";
+import { generateDiffString, generateUnifiedPatch } from "./diff-utils.ts";
 import {
 	detectLineEnding,
-	ensureInsideCwd,
-	generateDiffString,
-	generateUnifiedPatch,
 	normalizeToLF,
-	resolvePath,
 	stripBom,
 	defaultEditOperations,
 } from "../shared/helpers.ts";
@@ -75,47 +73,6 @@ function buildPosMapping(actual: string, fuzzy: string): number[] {
 		}
 	}
 	return mapping;
-}
-
-function searchForText(content: string, oldText: string, startPos: number): number {
-	let ci = startPos;
-	let ti = 0;
-	let matchEnd = -1;
-
-	while (ci < content.length && ti < oldText.length) {
-		const c = content[ci];
-		const t = oldText[ti];
-		if (c === " " || c === "\t" || c === "\n") {
-			ci++;
-			continue;
-		}
-		if (t === " " && c !== " ") {
-			ti++;
-			continue;
-		}
-		if (c.toLowerCase() === t.toLowerCase()) {
-			matchEnd = ci + 1;
-			ci++;
-			ti++;
-		} else {
-			if (matchEnd !== -1 && matchEnd !== ci) {
-				ci = matchEnd + 1;
-				matchEnd = -1;
-			} else if (ti > 0) {
-				break;
-			} else {
-				ci++;
-			}
-		}
-	}
-	if (ti === oldText.length) {
-		return ci;
-	} else if (matchEnd !== -1 && ti > 0) {
-		let endPos = matchEnd;
-		while (endPos < content.length && content[endPos] === " ") endPos++;
-		return endPos;
-	}
-	return -1;
 }
 
 export function applyEditsToNormalizedContent(

@@ -10,9 +10,9 @@ import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
+	OutputAccumulator,
 	type TruncationResult,
 } from "./truncate.ts";
-import { OutputAccumulator } from "./truncate.ts";
 import {
 	getShellConfig,
 	getShellEnv,

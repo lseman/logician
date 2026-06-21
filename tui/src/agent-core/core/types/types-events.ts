@@ -1,6 +1,6 @@
 // ── Event types ───────────────────────────────────────────────────────────
 
-import type { MessageRole, StopReason } from "./types-messages.ts";
+import type { Message, MessageRole, StopReason } from "./types-messages.ts";
 
 /**
  * Envelope metadata stamped onto every event at the emit boundary: a
@@ -144,6 +144,3 @@ export type AgentEventBody =
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;
 export type EventHandler = (event: AgentEvent) => void;
-
-// Re-export Message for the event types
-import type { Message } from "./types-messages.ts";

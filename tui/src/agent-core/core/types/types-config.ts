@@ -1,7 +1,7 @@
 // ── Config types ──────────────────────────────────────────────────────────
 
 import type { AgentHooks } from "./types-hooks.ts";
-import type { EventHandler, AgentEvent } from "./types-events.ts";
+import type { EventHandler } from "./types-events.ts";
 import type { Tool } from "./types-tools.ts";
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
 
@@ -54,7 +54,9 @@ export interface AgentConfig {
 	hookTranscriptPath?: string;
 	hooks?: AgentHooks;
 	internalHooks?: AgentHooks;
-	convertToLlm?: (messages: import("./types-messages.ts").AgentMessage[]) => import("./types-messages.ts").Message[];
+	convertToLlm?: (
+		messages: import("./types-messages.ts").AgentMessage[],
+	) => import("./types-messages.ts").Message[];
 	turnEndCallback?: (turnId: string) => void;
 	guardsEnabled?: boolean;
 	duplicateToolThreshold?: number;
@@ -63,7 +65,6 @@ export interface AgentConfig {
 	proactiveCompactionEnabled?: boolean;
 	proactiveCompactionFraction?: number;
 	continuationEnabled?: boolean;
-	maxContinuations?: number;
 	loopDetectionEnabled?: boolean;
 	toolExecution?: "sequential" | "parallel";
 	steeringQueueMode?: QueueMode;
@@ -83,7 +84,9 @@ export interface AgentConfig {
 		toolCallId: string;
 		args: Record<string, unknown>;
 	}) => Promise<"allow" | "deny" | "always">;
-	onQuestionRequest?: (ctx: import("./types-tools.ts").AskUserContext) => Promise<string>;
+	onQuestionRequest?: (
+		ctx: import("./types-tools.ts").AskUserContext,
+	) => Promise<string>;
 	maxTotalTokens?: number;
 	// Per-turn stream options managed by the harness.
 	streamOptions?: AgentHarnessStreamOptions;

@@ -17,11 +17,12 @@ import {
 	SUMMARIZATION_PROMPT,
 	TURN_PREFIX_SUMMARIZATION_PROMPT,
 	UPDATE_SUMMARIZATION_PROMPT,
-	CREATE_FILE_OPS,
-	EXTRACT_FILE_OPS_FROM_MESSAGE,
-	COMPUTE_FILE_LISTS,
-	FORMAT_FILE_OPERATIONS,
 	SUMMARIZATION_SYSTEM_PROMPT,
+	type FileOperations,
+	createFileOps,
+	extractFileOpsFromMessage,
+	computeFileLists,
+	formatFileOperations,
 	serializeConversation,
 } from "./utils";
 
@@ -470,7 +471,7 @@ interface CompactionPreparation {
 	tokensBefore: number;
 	cutPoint: CutPointResult;
 	previousSummary?: string;
-	fileOps: ReturnType<typeof CREATE_FILE_OPS>;
+	fileOps: FileOperations;
 	settings: CompactionSettings;
 }
 
@@ -530,13 +531,13 @@ function prepareCompaction(
 			: undefined;
 
 	// Extract file operations
-	const fileOps = CREATE_FILE_OPS();
+	const fileOps = createFileOps();
 	for (const msg of messagesToSummarize) {
-		EXTRACT_FILE_OPS_FROM_MESSAGE(msg, fileOps);
+		extractFileOpsFromMessage(msg, fileOps);
 	}
 	if (turnPrefixMessages) {
 		for (const msg of turnPrefixMessages) {
-			EXTRACT_FILE_OPS_FROM_MESSAGE(msg, fileOps);
+			extractFileOpsFromMessage(msg, fileOps);
 		}
 	}
 
@@ -610,8 +611,8 @@ export async function compact(
 		);
 	}
 
-	const { readFiles, modifiedFiles } = COMPUTE_FILE_LISTS(preparation.fileOps);
-	summary += FORMAT_FILE_OPERATIONS(readFiles, modifiedFiles);
+	const { readFiles, modifiedFiles } = computeFileLists(preparation.fileOps);
+	summary += formatFileOperations(readFiles, modifiedFiles);
 
 	// Estimate tokens after compaction: summary + kept messages
 	const compactedPayload = estimateCompressableTokens({

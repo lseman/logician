@@ -96,7 +96,9 @@ describe("Model cycle events", () => {
 
 		h.cycleModel("forward");
 		unsub();
-		const cycleEvent = events.find((e) => e.type === "model_cycle");
+		const cycleEvent = events.find(
+			(e) => e.type === "model_cycle" && e.fromModel !== e.model,
+		);
 		assert.ok(cycleEvent !== undefined);
 		if (cycleEvent && cycleEvent.type === "model_cycle") {
 			assert.strictEqual(cycleEvent.model, "claude-sonnet");

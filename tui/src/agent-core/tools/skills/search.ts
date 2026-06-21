@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Tool, ToolResult } from "../../core/types.ts";
 import { truncateHead, truncateLine, formatSize } from "./truncate.ts";
-import { resolvePath } from "../shared/helpers.ts";
+import { resolvePath } from "../shared/path-utils.ts";
 import { ensureTool } from "../shared/tools-manager.ts";
 
 const grepSchema = {

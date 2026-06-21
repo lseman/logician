@@ -116,7 +116,6 @@ export interface GetFollowUpMessagesContext {
 	messages: Message[];
 	iteration: number;
 	assistantText: string;
-	maxContinuations: number;
 	stopReason?: StopReason;
 }
 
@@ -173,7 +172,9 @@ export interface AgentHooks {
 		| Promise<BeforeProviderPayloadResult | undefined>
 		| BeforeProviderPayloadResult
 		| undefined;
-	afterProviderResponse?: (ctx: AfterProviderResponseContext) => Promise<void> | void;
+	afterProviderResponse?: (
+		ctx: AfterProviderResponseContext,
+	) => Promise<void> | void;
 	shouldStopAfterTurn?: (
 		ctx: ShouldStopAfterTurnContext,
 	) => Promise<boolean | undefined> | boolean | undefined;
@@ -185,5 +186,8 @@ export interface AgentHooks {
 	) => Promise<Message[] | undefined> | Message[] | undefined;
 	beforeCompact?: (
 		ctx: BeforeCompactContext,
-	) => Promise<BeforeCompactResult | undefined> | BeforeCompactResult | undefined;
+	) =>
+		| Promise<BeforeCompactResult | undefined>
+		| BeforeCompactResult
+		| undefined;
 }

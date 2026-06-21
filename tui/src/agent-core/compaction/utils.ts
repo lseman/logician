@@ -208,15 +208,6 @@ export function serializeConversation(
 }
 
 // ============================================================================
-// Uppercase aliases for backward compatibility
-// ============================================================================
-
-export const CREATE_FILE_OPS = createFileOps;
-export const EXTRACT_FILE_OPS_FROM_MESSAGE = extractFileOpsFromMessage;
-export const COMPUTE_FILE_LISTS = computeFileLists;
-export const FORMAT_FILE_OPERATIONS = formatFileOperations;
-
-// ============================================================================
 // Summarization System Prompt
 // ============================================================================
 

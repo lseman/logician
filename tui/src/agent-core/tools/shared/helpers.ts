@@ -1,20 +1,5 @@
-// ── Helpers (slim) ─────────────────────────────────────────────────────────────
-// Re-exports from focused modules + text utilities (BOM, line endings).
-// Original helpers.ts was 595 lines; now ~80 lines.
-
-// Re-exports from focused modules
-export {
-	generateDiffString,
-	generateUnifiedPatch,
-	syntheticUnifiedDiff,
-	summarizeDiff,
-	type EditDiffResult,
-} from "../skills/diff-utils.ts";
-export {
-	resolvePath,
-	ensureInsideCwd,
-	readUtf8IfExists,
-} from "./path-utils.ts";
+// ── Helpers ───────────────────────────────────────────────────────────────────
+// Text utilities: BOM handling, line endings, edit operations, mutation summary.
 
 // ============================================================================
 // BOM handling
@@ -59,10 +44,6 @@ export function restoreLineEndings(
 }
 
 // ============================================================================
-// Fuzzy whitespace normalization for text matching
-// ============================================================================
-
-// ===========================================================================
 // Edit operations interface
 // ============================================================================
 
@@ -83,10 +64,7 @@ const defaultEditOperations: EditOperations = {
 
 export { defaultEditOperations };
 
-import {
-	summarizeDiff as _summarizeDiff,
-	syntheticUnifiedDiff as _synth,
-} from "../skills/diff-utils.ts";
+import { summarizeDiff, syntheticUnifiedDiff } from "../skills/diff-utils.ts";
 
 /** Generate a summary diff for file mutation reporting. */
 export async function mutationSummary(
@@ -95,5 +73,5 @@ export async function mutationSummary(
 	before: string | null,
 	after: string,
 ): Promise<string> {
-	return _summarizeDiff(_synth(filePath, before, after));
+	return summarizeDiff(syntheticUnifiedDiff(filePath, before, after));
 }

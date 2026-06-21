@@ -2,12 +2,11 @@
 // CLI entry points and re-exports. All imports that previously used
 // `plugins.ts` continue to work unchanged.
 
-import { TsPluginManager } from "./plugins-manager.ts";
-import type { PluginCommandResult } from "./plugins-manager.ts";
+import { TsPluginManager, type PluginCommandResult } from "./plugins-manager.ts";
 
 // ── CLI functions ─────────────────────────────────────────────────────────────
 
-let pluginRuntimeEnv: NodeJS.ProcessEnv = {};
+let pluginRuntimeEnv: NodeJS.ProcessEnv | undefined;
 
 export function configurePluginRuntimeEnv(env: NodeJS.ProcessEnv): void {
 	pluginRuntimeEnv = Object.fromEntries(
@@ -58,7 +57,7 @@ export async function runPluginBackend(
 	action: string,
 	args: string[],
 ): Promise<PluginCommandResult> {
-	const manager = new TsPluginManager();
+	const manager = new TsPluginManager({ env: pluginRuntimeEnv });
 	try {
 		switch (action) {
 			case "list":
