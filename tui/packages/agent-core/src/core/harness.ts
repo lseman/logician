@@ -550,7 +550,7 @@ export class AgentHarness {
 			await this.runExtensionBeforeAgentStart(promptText);
 		const beforeStart = await this._beforeAgentStart?.(promptText);
 
-		const initialMessages: Message[] = [...this.history];
+		let initialMessages: Message[] = [...this.history];
 
 		const injectedMessages = [
 			...(extensionBeforeStart?.messages ?? []),
