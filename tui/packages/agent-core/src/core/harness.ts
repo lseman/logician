@@ -4,7 +4,6 @@
 // nextTurn queues drained at save points.
 //
 
-import { get_reasoner, getReasonerMeta } from "../reasoners/registry.ts";
 import { withTimeout } from "../tools/shared/async-utils.ts";
 import { runSessionStartHooks, runHookEvent } from "../tools/shared/plugins.ts";
 import {
@@ -13,19 +12,28 @@ import {
 	restoreFileFrame,
 } from "./file-checkpoints.ts";
 import type { LLMBackend } from "./backend.ts";
-import { runAgentLoop, type RunAgentLoopConfig } from "./agent-loop-runner.ts";
+import {
+	runAgentLoop,
+	runAgentLoopContinue,
+	type RunAgentLoopConfig,
+} from "./agent-loop-runner.ts";
 import { Session, SessionManager } from "./session.ts";
-import { compactMessages, convertToChatFormat, createUserMessage, estimateChatPayloadTokens } from "./messages.ts";
+import {
+	compactMessages,
+	convertToChatFormat,
+	createUserMessage,
+	estimateChatPayloadTokens,
+} from "./messages.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
-import { MessageDeliveryManager, type DeliveryMode } from "../message-queue/manager.ts";
+import {
+	MessageDeliveryManager,
+	type DeliveryMode,
+} from "../message-queue/manager.ts";
 import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
-import { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
+import type { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
 import { composeHooks } from "../hooks/builtin-hooks.ts";
 import {
 	collectMessagesForBranchSummary,
-	type BranchProgressRaw,
-	type FileOperations,
-	createFileOps,
 	extractFileOpsFromMessages,
 	computeFileLists,
 	formatFileOperations,
@@ -37,6 +45,7 @@ import type {
 	AgentEvent,
 	AgentHarnessStreamOptions,
 	AgentHooks,
+	AgentModelConfig,
 	BeforeCompactContext,
 	BeforeCompactResult,
 	EventHandler,
@@ -47,6 +56,7 @@ import type {
 } from "./types.ts";
 import type { CompactionSettings } from "../compaction/index.ts";
 import { OutputGuard } from "./output-guard.ts";
+import { validateConfig, throwOnValidationErrors } from "./config-validator.ts";
 
 // Explicit harness phases
 export type HarnessPhase = "idle" | "turn" | "compaction" | "branch_summary";
@@ -101,7 +111,7 @@ export interface AbortResult {
 /** Structured branch summary data. */
 export interface BranchSummaryData {
 	/** Goal of the branch. */
-goal: string;
+	goal: string;
 	/** Constraints and preferences. */
 	constraints: string[];
 	/** Progress tracking. */
@@ -146,8 +156,12 @@ export class AgentHarness {
 	private abortController: AbortController | null = null;
 	private loopConfig: AgentConfig | null = null;
 	private history: Message[] = [];
-	private branches: Array<{ id: string; parent: Message[]; forkedAt: number; summary: BranchSummaryData | null }> =
-		[];
+	private branches: Array<{
+		id: string;
+		parent: Message[];
+		forkedAt: number;
+		summary: BranchSummaryData | null;
+	}> = [];
 	private branchSeq = 0;
 	private checkpoints: Message[][] = [];
 	private _nextTurnQueue: string[] = [];
@@ -191,6 +205,9 @@ export class AgentHarness {
 		| undefined;
 
 	constructor(options: AgentHarnessOptions) {
+		const errors = validateConfig(options.config);
+		throwOnValidationErrors(errors);
+
 		this.config = options.config;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
@@ -198,8 +215,10 @@ export class AgentHarness {
 		this._extensionRunner = options.extensionRunner;
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
 		this.msgManager = new MessageDeliveryManager({
-			steeringMode: (options.config.steeringQueueMode ?? "one-at-a-time") as DeliveryMode,
-			followUpMode: (options.config.followUpQueueMode ?? "one-at-a-time") as DeliveryMode,
+			steeringMode: (options.config.steeringQueueMode ??
+				"one-at-a-time") as DeliveryMode,
+			followUpMode: (options.config.followUpQueueMode ??
+				"one-at-a-time") as DeliveryMode,
 		});
 	}
 
@@ -207,7 +226,9 @@ export class AgentHarness {
 		return this._phase;
 	}
 
-	setOnPhaseChange(cb: (phase: HarnessPhase, prev: HarnessPhase) => void): void {
+	setOnPhaseChange(
+		cb: (phase: HarnessPhase, prev: HarnessPhase) => void,
+	): void {
 		this.onPhaseChange = cb;
 	}
 
@@ -351,7 +372,10 @@ export class AgentHarness {
 			beginFileFrame();
 
 			const promptText = userMessage;
-			const snapshot = await this.createTurnSnapshot(promptText, this.abortController.signal);
+			const snapshot = await this.createTurnSnapshot(
+				promptText,
+				this.abortController.signal,
+			);
 
 			try {
 				this.loopConfig = snapshot.config;
@@ -376,8 +400,14 @@ export class AgentHarness {
 					},
 				);
 				const result = [
-					{ role: "system" as const, content: snapshot.config.systemPrompt ?? "You are a helpful assistant." },
-					...snapshot.initialMessages.filter((message) => message.role !== "system"),
+					{
+						role: "system" as const,
+						content:
+							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
+					},
+					...snapshot.initialMessages.filter(
+						(message) => message.role !== "system",
+					),
 					...newMessages,
 				];
 				this.history = result;
@@ -396,17 +426,121 @@ export class AgentHarness {
 		});
 	}
 
+	/**
+	 * Resume the agent loop from existing history without injecting a new user message.
+	 * The last message in history must be a user or tool-result message (not assistant).
+	 * Mirrors pi's agent.continue() — used when the agent stopped prematurely and
+	 * the caller wants to re-enter the loop without fabricating a follow-up prompt.
+	 */
+	async continue(): Promise<Message[]> {
+		const nonSystem = this.history.filter((m) => m.role !== "system");
+		if (nonSystem.length === 0) {
+			throw new Error("Cannot continue: no messages in history");
+		}
+		const last = nonSystem[nonSystem.length - 1];
+		if (last?.role === "assistant") {
+			throw new Error("Cannot continue from message role: assistant");
+		}
+
+		this._runPromise = new Promise<void>((resolve) => {
+			this._runResolve = resolve;
+		});
+
+		if (!this.outputGuard && this.config.contextWindowTokens) {
+			this.setOutputGuardConfig({
+				maxRetries: this.config.streamOptions?.maxRetries ?? 3,
+				retryBaseDelayMs: 500,
+				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
+			});
+		}
+
+		return this.runInPhase("turn", "continue", async () => {
+			this.abortController = new AbortController();
+
+			if (!this._hasStartedSession) {
+				await this.emitSessionStart("startup");
+			}
+
+			this.checkpoints.push([...this.history]);
+			if (this.checkpoints.length > MAX_CHECKPOINTS) {
+				this.checkpoints.shift();
+			}
+			beginFileFrame();
+
+			const snapshot = await this.createContinueSnapshot(
+				this.abortController.signal,
+			);
+
+			try {
+				this.loopConfig = snapshot.config;
+				const newMessages = await runAgentLoopContinue(
+					{
+						systemPrompt: snapshot.config.systemPrompt,
+						messages: snapshot.initialMessages,
+						tools: snapshot.config.tools,
+						cwd: this.cwd,
+					},
+					{
+						...snapshot.config,
+						backend: this.backend,
+						signal: snapshot.signal,
+						maxIterations: this.maxIterations,
+						outputGuard: this.outputGuard,
+						extensionBus: this._extensionBus,
+					} satisfies RunAgentLoopConfig,
+					async (event) => {
+						await this.handleAgentEvent(event);
+					},
+				);
+				const result = [
+					{
+						role: "system" as const,
+						content:
+							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
+					},
+					...snapshot.initialMessages.filter((m) => m.role !== "system"),
+					...newMessages,
+				];
+				this.history = result;
+				return result;
+			} finally {
+				this.abortController = null;
+				this.msgManager.queue.clear();
+				this.emitQueueChange();
+				this._runResolve?.();
+				this._runPromise = undefined;
+				this._runResolve = undefined;
+				const nextTurnCount = this._nextTurnQueue.length;
+				this.onSettled?.(nextTurnCount);
+				this.emitToSubscribers({ type: "settled", nextTurnCount });
+			}
+		});
+	}
+
+	private async createContinueSnapshot(
+		signal: AbortSignal,
+	): Promise<HarnessTurnSnapshot> {
+		const config = this.withDrainHook(this.withExtensionRuntime(this.config));
+		const streamOptions = { ...this._streamOptions };
+		config.streamOptions = streamOptions;
+		return {
+			promptText: "",
+			initialMessages: [...this.history],
+			config,
+			streamOptions,
+			signal,
+		};
+	}
+
 	private async createTurnSnapshot(
 		promptText: string,
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
-		const extensionBeforeStart = await this.runExtensionBeforeAgentStart(promptText);
+		const extensionBeforeStart =
+			await this.runExtensionBeforeAgentStart(promptText);
 		const beforeStart = await this._beforeAgentStart?.(promptText);
-		const preReasoning = await this.runPreReasoner(promptText);
 
-		let initialMessages: Message[] = preReasoning
-			? [...this.history, { role: "assistant", content: preReasoning, tool_calls: [] }]
-			: [...this.history];
+		const initialMessages: Message[] = [...this.history];
 
 		const injectedMessages = [
 			...(extensionBeforeStart?.messages ?? []),
@@ -452,7 +586,8 @@ export class AgentHarness {
 		const value = result as { messages?: Message[]; systemPrompt?: string };
 		return {
 			messages: Array.isArray(value.messages) ? value.messages : undefined,
-			systemPrompt: typeof value.systemPrompt === "string" ? value.systemPrompt : undefined,
+			systemPrompt:
+				typeof value.systemPrompt === "string" ? value.systemPrompt : undefined,
 		};
 	}
 
@@ -460,24 +595,22 @@ export class AgentHarness {
 		const runner = this._extensionRunner;
 		if (!runner) return config;
 
-		const extensionTools = runner.getTools().map((tool) =>
-			this.wrapExtensionTool(tool),
-		);
+		const extensionTools = runner
+			.getTools()
+			.map((tool) => this.wrapExtensionTool(tool));
 		const tools = [...(config.tools ?? []), ...extensionTools];
 		const extensionHooks = runner.getHooks();
 		if (!extensionHooks) return { ...config, tools };
 
+		const layers: HookLayer[] = [
+			{ source: "extensions", hooks: extensionHooks },
+			{ source: "user", hooks: config.hooks },
+		];
+
 		return {
 			...config,
 			tools,
-			hooks: composeHooks(
-				[
-					{ source: "extensions", hooks: extensionHooks },
-					{ source: "user", hooks: config.hooks },
-				],
-				undefined,
-				config.onHookEvent,
-			),
+			hooks: composeHooks(layers, undefined, config.onHookEvent),
 		};
 	}
 
@@ -554,35 +687,15 @@ export class AgentHarness {
 		}
 	}
 
-	private async runPreReasoner(
-		promptText: string,
-	): Promise<string | undefined> {
-		const reasonerId = this.config.reasonerId;
-		if (!reasonerId || reasonerId === "none") return undefined;
-		const meta = getReasonerMeta(reasonerId);
-		if (!meta) return undefined;
-		try {
-			const reasoner = get_reasoner(
-				reasonerId,
-				this.backend,
-				meta.defaultConfig,
-			);
-			const trace = await withTimeout(reasoner.solve(promptText), 60_000);
-			return trace.reasoning || undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
 	// ── Output guard setup ───────────────────────────────────────────────
 
 	setOutputGuardConfig(config: {
-			maxRetries?: number;
-			retryBaseDelayMs?: number;
-			maxRetryDelayMs?: number;
-			autoCompactOnContextFull?: boolean;
-			maxEmptyResponses?: number;
-		}): void {
+		maxRetries?: number;
+		retryBaseDelayMs?: number;
+		maxRetryDelayMs?: number;
+		autoCompactOnContextFull?: boolean;
+		maxEmptyResponses?: number;
+	}): void {
 		this.outputGuard = new OutputGuard({
 			...config,
 			onCompact: async () => {
@@ -663,7 +776,12 @@ export class AgentHarness {
 		this.msgManager.queue.clear();
 		this._nextTurnQueue = [];
 		this.emitQueueChange();
-		this.emitToSubscribers({ type: "abort", clearedSteering, clearedFollowUp, clearedNextTurn });
+		this.emitToSubscribers({
+			type: "abort",
+			clearedSteering,
+			clearedFollowUp,
+			clearedNextTurn,
+		});
 		this.emitSessionEnd("abort").catch(() => {});
 		return { clearedSteering, clearedFollowUp, clearedNextTurn };
 	}
@@ -772,7 +890,9 @@ export class AgentHarness {
 		}
 	}
 
-	private async emitPreCompact(ctx?: BeforeCompactContext): Promise<BeforeCompactResult | undefined> {
+	private async emitPreCompact(
+		ctx?: BeforeCompactContext,
+	): Promise<BeforeCompactResult | undefined> {
 		let hookResult: BeforeCompactResult | undefined;
 		if (ctx) {
 			try {
@@ -846,7 +966,10 @@ export class AgentHarness {
 	async resumeSession(sessionId: string, baseDir?: string): Promise<boolean> {
 		try {
 			const sessionBaseDir = baseDir ?? this._sessionBaseDir;
-			const session = new Session(sessionId, { baseDir: sessionBaseDir, enabled: true });
+			const session = new Session(sessionId, {
+				baseDir: sessionBaseDir,
+				enabled: true,
+			});
 			const persisted = session.load();
 			if (persisted.length > 0) {
 				const messages: Message[] = persisted.map((m) => ({
@@ -876,7 +999,9 @@ export class AgentHarness {
 		lastActivity: number;
 	}> {
 		try {
-			const baseDir = this._sessionBaseDir ?? (this._session ? `${this._session.dirPath}/../..` : undefined);
+			const baseDir =
+				this._sessionBaseDir ??
+				(this._session ? `${this._session.dirPath}/../..` : undefined);
 			const manager = new SessionManager({ baseDir });
 			return manager
 				.listSessions()
@@ -944,7 +1069,7 @@ export class AgentHarness {
 	fork(customSummary?: BranchSummaryData): string {
 		this.assertIdle("fork");
 		const current = this.activeHistory();
-		const branch: typeof this.branches[number] = {
+		const branch: (typeof this.branches)[number] = {
 			id: `branch_${++this.branchSeq}`,
 			parent: current,
 			forkedAt: current.length,
@@ -962,7 +1087,9 @@ export class AgentHarness {
 	 * @param options.customInstructions Optional LLM prompt instructions.
 	 * @returns The full structured summary, or null if branch was empty.
 	 */
-	async branchSummary(options?: { customInstructions?: string }): Promise<string | null> {
+	async branchSummary(options?: {
+		customInstructions?: string;
+	}): Promise<string | null> {
 		this.assertIdle("branchSummary");
 		const branch = this.branches.at(-1);
 		if (!branch) return null;
@@ -981,7 +1108,9 @@ export class AgentHarness {
 				current,
 				branch.parent,
 				branch.forkedAt,
-				this.config.contextWindowTokens ? Math.floor(this.config.contextWindowTokens * 0.5) : 0,
+				this.config.contextWindowTokens
+					? Math.floor(this.config.contextWindowTokens * 0.5)
+					: 0,
 			);
 
 			const { fileOps } = collection;
@@ -1050,9 +1179,17 @@ export class AgentHarness {
 		if (options?.summarize && abandoned.length > target.length) {
 			const abandonedMessages = abandoned.slice(target.length);
 			const fileOps = extractFileOpsFromMessages(abandonedMessages);
-			summaryText = await this.generateBranchSummaryText(abandonedMessages, options.customInstructions, fileOps);
+			summaryText = await this.generateBranchSummaryText(
+				abandonedMessages,
+				options.customInstructions,
+				fileOps,
+			);
 			if (summaryText) {
-				this.history.push({ role: "assistant", content: summaryText.full, tool_calls: [] });
+				this.history.push({
+					role: "assistant",
+					content: summaryText.full,
+					tool_calls: [],
+				});
 			}
 		}
 
@@ -1077,7 +1214,9 @@ export class AgentHarness {
 		for (const branch of this.branches) {
 			const depth = this.branches.indexOf(branch);
 			const prefix = "  ".repeat(depth) + (depth > 0 ? "└─ " : "");
-			lines.push(`${prefix}[${branch.id}] forked at message ${branch.forkedAt}`);
+			lines.push(
+				`${prefix}[${branch.id}] forked at message ${branch.forkedAt}`,
+			);
 
 			if (branch.summary) {
 				// Show summary preview (first line of goal)
@@ -1090,10 +1229,14 @@ export class AgentHarness {
 					lines.push(`${"  ".repeat(depth + 1)}Done: ${doneCount} items`);
 				}
 				if (branch.summary.progress.inProgress.length > 0) {
-					lines.push(`${"  ".repeat(depth + 1)}In Progress: ${branch.summary.progress.inProgress.length} items`);
+					lines.push(
+						`${"  ".repeat(depth + 1)}In Progress: ${branch.summary.progress.inProgress.length} items`,
+					);
 				}
 				if (branch.summary.progress.blocked.length > 0) {
-					lines.push(`${"  ".repeat(depth + 1)}Blocked: ${branch.summary.progress.blocked.length} items`);
+					lines.push(
+						`${"  ".repeat(depth + 1)}Blocked: ${branch.summary.progress.blocked.length} items`,
+					);
 				}
 			}
 		}
@@ -1139,9 +1282,19 @@ export class AgentHarness {
 					tokensBefore: before,
 				},
 			});
-			const preResult = await this.emitPreCompact({ messages, tokensBefore: before, reason: "manual" });
+			const preResult = await this.emitPreCompact({
+				messages,
+				tokensBefore: before,
+				reason: "manual",
+			});
 			if (preResult?.cancel) {
-				this.emitToSubscribers({ type: "compaction_end", reason: "manual", tokensBefore: before, tokensAfter: before, changed: false });
+				this.emitToSubscribers({
+					type: "compaction_end",
+					reason: "manual",
+					tokensBefore: before,
+					tokensAfter: before,
+					changed: false,
+				});
 				return 0;
 			}
 
@@ -1150,24 +1303,24 @@ export class AgentHarness {
 				summarize: preResult?.summary
 					? async () => preResult.summary!
 					: (older, system) =>
-					this.generateSummary(
-						older.map((m) => ({
-							role: m.role as Message["role"],
-							content: m.content ?? "",
-							tool_call_id: m.tool_call_id,
-							tool_calls: m.tool_calls,
-							name: m.name,
-							timestamp: m.timestamp,
-						})),
-						system.map((m) => ({
-							role: m.role as Message["role"],
-							content: m.content ?? "",
-							tool_call_id: m.tool_call_id,
-							tool_calls: m.tool_calls,
-							name: m.name,
-							timestamp: m.timestamp,
-						})),
-					),
+							this.generateSummary(
+								older.map((m) => ({
+									role: m.role as Message["role"],
+									content: m.content ?? "",
+									tool_call_id: m.tool_call_id,
+									tool_calls: m.tool_calls,
+									name: m.name,
+									timestamp: m.timestamp,
+								})),
+								system.map((m) => ({
+									role: m.role as Message["role"],
+									content: m.content ?? "",
+									tool_call_id: m.tool_call_id,
+									tool_calls: m.tool_calls,
+									name: m.name,
+									timestamp: m.timestamp,
+								})),
+							),
 			});
 
 			if (!result.changed) {
@@ -1227,10 +1380,20 @@ export class AgentHarness {
 			}
 
 			const before = this.estimateContextTokens();
-			const preResult = await this.emitPreCompact({ messages, tokensBefore: before, reason });
+			const preResult = await this.emitPreCompact({
+				messages,
+				tokensBefore: before,
+				reason,
+			});
 			if (preResult?.cancel) {
 				await this.emitPostCompact();
-				this.emitToSubscribers({ type: "compaction_end", reason, tokensBefore: before, tokensAfter: before, changed: false });
+				this.emitToSubscribers({
+					type: "compaction_end",
+					reason,
+					tokensBefore: before,
+					tokensAfter: before,
+					changed: false,
+				});
 				return false;
 			}
 
@@ -1249,24 +1412,24 @@ export class AgentHarness {
 				summarize: preResult?.summary
 					? async () => preResult.summary!
 					: (older, system) =>
-					this.generateSummary(
-						older.map((m) => ({
-							role: m.role as Message["role"],
-							content: m.content ?? "",
-							tool_call_id: m.tool_call_id,
-							tool_calls: m.tool_calls,
-							name: m.name,
-							timestamp: m.timestamp,
-						})),
-						system.map((m) => ({
-							role: m.role as Message["role"],
-							content: m.content ?? "",
-							tool_call_id: m.tool_call_id,
-							tool_calls: m.tool_calls,
-							name: m.name,
-							timestamp: m.timestamp,
-						})),
-					),
+							this.generateSummary(
+								older.map((m) => ({
+									role: m.role as Message["role"],
+									content: m.content ?? "",
+									tool_call_id: m.tool_call_id,
+									tool_calls: m.tool_calls,
+									name: m.name,
+									timestamp: m.timestamp,
+								})),
+								system.map((m) => ({
+									role: m.role as Message["role"],
+									content: m.content ?? "",
+									tool_call_id: m.tool_call_id,
+									tool_calls: m.tool_calls,
+									name: m.name,
+									timestamp: m.timestamp,
+								})),
+							),
 			});
 
 			if (!result.changed) {
@@ -1327,9 +1490,9 @@ export class AgentHarness {
 				...messages,
 			];
 
-				const response = await this.backend.generate(
-					convertToChatFormat(chatMessages),
-					{
+			const response = await this.backend.generate(
+				convertToChatFormat(chatMessages),
+				{
 					temperature: this.config.temperature ?? 0.3,
 					maxTokens: Math.min(2048, (this.config.maxTokens ?? 4096) / 2),
 					thinkingLevel: this.config.thinkingLevel,
@@ -1394,13 +1557,12 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 				instructions += `\n\nAdditional focus: ${customInstructions}`;
 			}
 
-			const chatMessages = convertToChatFormat([
-				...messages,
-			] as unknown as Message[]);
-
 			const response = await this.backend.generate(
 				[
-					{ role: "user", content: `<conversation>\n${conversationText}\n</conversation>\n\n${instructions}` },
+					{
+						role: "user",
+						content: `<conversation>\n${conversationText}\n</conversation>\n\n${instructions}`,
+					},
 				] as { role: string; content: string }[],
 				{
 					temperature: 0.3,
@@ -1459,32 +1621,50 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 
 	// ── Model cycling with thinking level clamping ────────────────────────
 
-	/** Thinking level to token budget mapping (used for clamping). */
-	private static readonly THINKING_BUDGETS: Record<string, number> = {
-		off: 0,
-		minimal: 1024,
-		low: 4096,
-		medium: 8192,
-		high: 16384,
-		xhigh: 32768,
-	};
-
 	getModel(): string {
 		return this.config.model;
 	}
 
+	getBaseUrl(): string {
+		return this.config.baseUrl;
+	}
+
 	getModels(): string[] {
-		return (
-			this.config.models
-				? [this.config.model, ...this.config.models]
-				: [this.config.model]
-		);
+		const currentName = this.config.model;
+		if (this.config.models) {
+			const names = this.config.models.map((m) => m.name);
+			return [currentName, ...names];
+		}
+		return [currentName];
+	}
+
+	/** Resolve the baseUrl for a given model identifier. */
+	private getModelUrl(modelName: string): string {
+		const models = this.config.models;
+		if (models) {
+			const found = models.find((m) => m.model === modelName);
+			if (found?.url) {
+				return found.url;
+			}
+		}
+		return this.config.baseUrl;
+	}
+
+	/** Set the models array for cycling. */
+	setModels(models: AgentModelConfig[]): void {
+		this.config.models = models;
 	}
 
 	/** Clamp thinking level to what the given model supports. */
-	private clampThinkingLevel(level: string, model: string): ThinkingLevel {
-		const levels: ThinkingLevel[] =
-			["off", "minimal", "low", "medium", "high", "xhigh"];
+	private clampThinkingLevel(level: string): ThinkingLevel {
+		const levels: ThinkingLevel[] = [
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+		];
 		const idx = levels.indexOf(level as ThinkingLevel);
 		if (idx >= 0) return level as ThinkingLevel;
 
@@ -1494,25 +1674,51 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 
 	cycleModel(direction: "forward" | "backward" = "forward"): string {
 		// Build cycling ring: [currentModel, ...configuredModels].
-		// Prepend current model only if not already in the list.
 		const configured = this.config.models ?? [];
-		const cycleModels = configured.includes(this.config.model)
-			? [...configured]
-			: [this.config.model, ...configured];
+		if (configured.length === 0) {
+			return this.config.model;
+		}
+
+		// Build array of {name, model} for cycling.
+		const cycleModels: Array<{ name: string; model: string }> = configured.map(
+			(m) => ({ name: m.name, model: m.model }),
+		);
+
+		// Check if current model is already in the list.
+		const currentInList = cycleModels.some(
+			(m) => m.model === this.config.model,
+		);
+		if (!currentInList) {
+			cycleModels.unshift({
+				name: this.config.model,
+				model: this.config.model,
+			});
+		}
+
 		if (cycleModels.length <= 1) {
 			return this.config.model;
 		}
-		const currentIndex = cycleModels.indexOf(this.config.model);
+
+		const currentIndex = cycleModels.findIndex(
+			(m) => m.model === this.config.model,
+		);
 		const nextIndex =
 			direction === "forward"
 				? (currentIndex + 1) % cycleModels.length
 				: (currentIndex - 1 + cycleModels.length) % cycleModels.length;
-		const model = cycleModels[nextIndex] ?? this.config.model;
+		const next = cycleModels[nextIndex];
+		const model = next?.model ?? this.config.model;
 		const fromModel = this.config.model;
+
+		// Switch baseUrl if target model has a custom url.
+		const targetUrl = this.getModelUrl(model);
+		if (targetUrl !== this.config.baseUrl) {
+			this.config.baseUrl = targetUrl;
+		}
 
 		// Preserve thinking level, clamped to model capabilities
 		const currentLevel = this.config.thinkingLevel ?? "off";
-		const clampedLevel = this.clampThinkingLevel(currentLevel, model);
+		const clampedLevel = this.clampThinkingLevel(currentLevel);
 
 		if (clampedLevel !== currentLevel) {
 			this.config.thinkingLevel = clampedLevel;
@@ -1525,7 +1731,12 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 
 		this.config.model = model;
 		this._session?.appendModelChange(model);
-		this.emitToSubscribers({ type: "model_cycle", model, fromModel, thinkingLevel: clampedLevel });
+		this.emitToSubscribers({
+			type: "model_cycle",
+			model,
+			fromModel,
+			thinkingLevel: clampedLevel,
+		});
 		return model;
 	}
 
@@ -1560,6 +1771,10 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 	// ── Model & provider ──────────────────────────────────────────────────
 
 	setModel(model: string): void {
+		const targetUrl = this.getModelUrl(model);
+		if (targetUrl !== this.config.baseUrl) {
+			this.config.baseUrl = targetUrl;
+		}
 		this.config.model = model;
 		this._session?.appendModelChange(model);
 		this.emitToSubscribers({ type: "model_update", model });
@@ -1578,7 +1793,10 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 	// ── Improved token estimation using serialized payload ─────────────────
 
 	private estimatePayloadTokens(): number {
-		return estimateChatPayloadTokens(this.messages, this.idleTools?.toToolDefinitions?.());
+		return estimateChatPayloadTokens(
+			this.messages,
+			this.idleTools?.toToolDefinitions?.(),
+		);
 	}
 
 	private estimateContextTokens(): number {
