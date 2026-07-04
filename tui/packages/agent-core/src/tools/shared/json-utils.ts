@@ -58,3 +58,15 @@ export function stripJsonComments(input: string): string {
 export function parseJsonWithComments<T = unknown>(input: string): T {
 	return JSON.parse(stripJsonComments(input)) as T;
 }
+
+/** Safe parse: returns defaultValue on invalid JSON instead of throwing. */
+export function parseJsonWithCommentsSafe<T = unknown>(
+	input: string,
+	defaultValue: T,
+): T {
+	try {
+		return parseJsonWithComments<T>(input);
+	} catch {
+		return defaultValue;
+	}
+}

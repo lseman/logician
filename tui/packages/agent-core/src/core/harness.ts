@@ -31,7 +31,8 @@ import {
 } from "../message-queue/manager.ts";
 import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
 import type { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
-import { composeHooks } from "../hooks/builtin-hooks.ts";
+import { composeHooks, buildBuiltinHooks, type HookLayer } from "../hooks/builtin-hooks.ts";
+import { LoopDetector } from "./loop-detector.ts";
 import {
 	collectMessagesForBranchSummary,
 	extractFileOpsFromMessages,
@@ -166,6 +167,7 @@ export class AgentHarness {
 	private checkpoints: Message[][] = [];
 	private _nextTurnQueue: string[] = [];
 	private msgManager: MessageDeliveryManager;
+	private loopDetector: LoopDetector;
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
@@ -213,6 +215,14 @@ export class AgentHarness {
 		this.cwd = options.cwd;
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
+		this.loopDetector = new LoopDetector({
+			maxHistory: options.config.loopDetectionWindow,
+			exactRepeatWindow: options.config.loopDetectionWindow,
+			degenerateWindow: options.config.degenerateLoopThreshold,
+			stagnationWindow: options.config.stagnationThreshold,
+			duplicateThreshold: options.config.duplicateToolThreshold,
+			failureThreshold: options.config.toolFailureLoopThreshold,
+		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
 		this.msgManager = new MessageDeliveryManager({
 			steeringMode: (options.config.steeringQueueMode ??
@@ -600,9 +610,16 @@ export class AgentHarness {
 			.map((tool) => this.wrapExtensionTool(tool));
 		const tools = [...(config.tools ?? []), ...extensionTools];
 		const extensionHooks = runner.getHooks();
-		if (!extensionHooks) return { ...config, tools };
+
+		const builtinHooks = buildBuiltinHooks({
+			config,
+			contextWindowTokens: () => config.contextWindowTokens,
+			toolDefs: () => tools,
+			loopDetector: this.loopDetector,
+		});
 
 		const layers: HookLayer[] = [
+			{ source: "builtin", hooks: builtinHooks },
 			{ source: "extensions", hooks: extensionHooks },
 			{ source: "user", hooks: config.hooks },
 		];
@@ -710,6 +727,10 @@ export class AgentHarness {
 
 	getOutputGuard(): OutputGuard | null {
 		return this.outputGuard;
+	}
+
+	getLoopDetector(): LoopDetector {
+		return this.loopDetector;
 	}
 
 	// ── Runtime config setters ─────────────────────────────────────────────

@@ -31,10 +31,19 @@ export interface AgentHarnessStreamOptions {
 	cacheRetention?: string;
 }
 
+export interface AgentModelConfig {
+	/** Display name for the model. */
+	name: string;
+	/** Model identifier sent to the API. */
+	model: string;
+	/** Optional per-model baseUrl override for cycling between endpoints. */
+	url?: string;
+}
+
 export interface AgentConfig {
 	baseUrl: string;
 	model: string;
-	models?: string[];
+	models?: AgentModelConfig[];
 	cwd?: string;
 	temperature?: number;
 	maxTokens?: number;
@@ -70,6 +79,7 @@ export interface AgentConfig {
 	steeringQueueMode?: QueueMode;
 	followUpQueueMode?: QueueMode;
 	thinkingLevel?: ThinkingLevel;
+	/** @deprecated Reasoner system removed. This field is ignored. */
 	reasonerId?: string;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;
