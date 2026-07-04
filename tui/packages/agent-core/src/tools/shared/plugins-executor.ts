@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { stripJsonComments } from "./json-utils.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -576,7 +577,9 @@ export async function readJson(
 	file: string,
 ): Promise<Record<string, unknown>> {
 	try {
-		return JSON.parse(await fs.readFile(file, "utf8"));
+		const content = await fs.readFile(file, "utf8");
+		const stripped = stripJsonComments(content);
+		return JSON.parse(stripped);
 	} catch {
 		return {};
 	}
