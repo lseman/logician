@@ -1632,6 +1632,11 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 
 	// ── Config getters ─────────────────────────────────────────────────────
 
+	/** Immutable snapshot of current config. Prefer to individual getters. */
+	getCurrentConfig(): Readonly<AgentConfig> {
+		return Object.freeze({ ...this.config });
+	}
+
 	getTemperature(): number {
 		return this.config.temperature ?? 0.7;
 	}

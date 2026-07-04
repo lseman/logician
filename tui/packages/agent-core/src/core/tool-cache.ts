@@ -34,10 +34,20 @@ export interface CacheEntry {
 	expiresAt?: number;
 }
 
+export interface CacheStats {
+	hits: number;
+	misses: number;
+	evictions: number;
+	hitRate: number;
+}
+
 export class ToolResultCache {
 	private cache = new Map<string, CacheEntry>();
 	private maxSize: number;
 	private defaultTtlMs: number;
+	private hits = 0;
+	private misses = 0;
+	private evictions = 0;
 
 	constructor(maxSize = 1000, defaultTtlMs = 30_000) {
 		this.maxSize = maxSize;
@@ -48,17 +58,23 @@ export class ToolResultCache {
 	get(toolName: string, args: string): CacheEntry | null {
 		const key = `${toolName}::${canonicalizeArgs(args)}`;
 		const entry = this.cache.get(key);
-		if (!entry) return null;
+		if (!entry) {
+			this.misses++;
+			return null;
+		}
 		// Never serve cached errors — re-execute to detect transient failures
 		if (entry.isError) {
 			this.cache.delete(key);
+			this.misses++;
 			return null;
 		}
 		// TTL check
 		if (entry.expiresAt && Date.now() > entry.expiresAt) {
 			this.cache.delete(key);
+			this.misses++;
 			return null;
 		}
+		this.hits++;
 		return entry;
 	}
 
@@ -69,7 +85,10 @@ export class ToolResultCache {
 		if (this.cache.size >= this.maxSize) {
 			// Evict oldest entry (first-in = oldest in insertion order)
 			const firstKey = this.cache.keys().next().value;
-			if (firstKey) this.cache.delete(firstKey);
+			if (firstKey) {
+				this.cache.delete(firstKey);
+				this.evictions++;
+			}
 		}
 		this.cache.set(key, {
 			result,
@@ -86,5 +105,23 @@ export class ToolResultCache {
 	/** Current cache size. */
 	get size(): number {
 		return this.cache.size;
+	}
+
+	/** Get cache performance statistics. */
+	stats(): CacheStats {
+		const total = this.hits + this.misses;
+		return {
+			hits: this.hits,
+			misses: this.misses,
+			evictions: this.evictions,
+			hitRate: total > 0 ? (this.hits / total) * 100 : 0,
+		};
+	}
+
+	/** Reset statistics counters. */
+	resetStats(): void {
+		this.hits = 0;
+		this.misses = 0;
+		this.evictions = 0;
 	}
 }

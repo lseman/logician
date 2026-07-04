@@ -18,6 +18,7 @@
 // handler aborts the chain or is skipped.
 
 import { withTimeout } from "../tools/shared/async-utils.ts";
+import { HookMetricsCollector } from "./hook-metrics.ts";
 import type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,
@@ -93,6 +94,7 @@ export class HookBus {
 	private steering: Entry<SteeringHandler>[] = [];
 	private followUp: Entry<FollowUpHandler>[] = [];
 	private observers: HookObserver[] = [];
+	private metrics = new HookMetricsCollector();
 
 	private errorMode: HookErrorMode;
 	private onError?: HookBusOptions["onError"];
@@ -102,6 +104,11 @@ export class HookBus {
 		this.errorMode = options.errorMode ?? "continue";
 		this.onError = options.onError;
 		this.defaultTimeoutMs = options.defaultTimeoutMs ?? 0;
+	}
+
+	/** Get hook execution metrics. */
+	getMetrics(): HookMetricsCollector {
+		return this.metrics;
 	}
 
 	// Register one handler for an event. Returns an unsubscribe function.
@@ -441,11 +448,17 @@ export class HookBus {
 		timeoutMs?: number,
 	): Promise<T | undefined> {
 		const effective = timeoutMs ?? this.defaultTimeoutMs;
+		const start = Date.now();
 		try {
 			const run = Promise.resolve(fn());
-			return effective > 0 ? await withTimeout(run, effective) : await run;
+			const result = effective > 0 ? await withTimeout(run, effective) : await run;
+			const duration = Date.now() - start;
+			this.metrics.record(event, duration);
+			return result;
 		} catch (e) {
 			const error = e as Error;
+			const duration = Date.now() - start;
+			this.metrics.record(event, duration, error);
 			this.onError?.(error, event, source);
 			if (this.errorMode === "throw") throw error;
 			return undefined;
