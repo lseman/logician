@@ -28,3 +28,12 @@ void test("5xx is transient, other 4xx is client", () => {
 	assert.equal(classifyHttpError(503, "unavailable").category, "transient");
 	assert.equal(classifyHttpError(404, "nope").category, "client");
 });
+
+void test("malformed assistant message is client, not context_full", () => {
+	const err = classifyHttpError(
+		400,
+		"Assistant message must contain either 'content' or 'tool_calls'!",
+	);
+	assert.equal(err.category, "client");
+	assert.equal(err.retryable, false);
+});

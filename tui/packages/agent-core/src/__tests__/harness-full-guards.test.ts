@@ -1,51 +1,65 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import { AgentHarness } from "../core/harness.ts";
 import type { AgentConfig, Tool } from "../core/types.ts";
 import { OpenAIBackend } from "../core/backend.ts";
 
-describe("harness with full guards", () => {
-	let config: AgentConfig;
-	let backend: OpenAIBackend;
+let config: AgentConfig;
+let backend: OpenAIBackend;
 
-	beforeEach(() => {
-		config = {
-			baseUrl: "https://api.openai.com/v1",
-			model: "gpt-4o",
-			contextWindowTokens: 128000,
-			temperature: 1,
+test("setup", () => {
+	config = {
+		baseUrl: "https://api.openai.com/v1",
+		model: "gpt-4o",
+		contextWindowTokens: 128000,
+		temperature: 1,
 
-			// Enable all guards
-			guardsEnabled: true,
-			duplicateToolThreshold: 3,
-			toolFailureLoopThreshold: 3,
-			budgetStopEnabled: true,
-			proactiveCompactionEnabled: true,
-			proactiveCompactionFraction: 0.8,
-			continuationEnabled: true,
+		// Enable all guards
+		guardsEnabled: true,
+		duplicateToolThreshold: 3,
+		toolFailureLoopThreshold: 3,
+		budgetStopEnabled: true,
+		proactiveCompactionEnabled: true,
+		proactiveCompactionFraction: 0.8,
+		continuationEnabled: true,
 
-			// Loop detection
-			loopDetectionEnabled: true,
-			loopDetectionWindow: 10,
-			degenerateLoopThreshold: 4,
-			stagnationThreshold: 5,
+		// Loop detection
+		loopDetectionEnabled: true,
+		loopDetectionWindow: 10,
+		degenerateLoopThreshold: 4,
+		stagnationThreshold: 5,
 
-			// Error recovery
-			autoRetryEnabled: true,
-			maxRetries: 3,
-			retryBaseDelayMs: 1000,
-			turnTimeoutMs: 60000,
+		// Error recovery
+		autoRetryEnabled: true,
+		maxRetries: 3,
+		retryBaseDelayMs: 1000,
+		turnTimeoutMs: 60000,
 
-			tools: [],
-		};
+		tools: [],
+	};
 
-		backend = new OpenAIBackend({
-			baseUrl: config.baseUrl,
-			apiKey: "test-key",
-			model: config.model,
-		});
+	backend = new OpenAIBackend({
+		baseUrl: config.baseUrl,
+		model: config.model,
 	});
+});
 
-	it("constructs with all config fields validated", () => {
+function describe(name: string, fn: () => void) { fn(); }
+function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }
+function expect<T>(actual: T) {
+	return {
+		toBe(expected: unknown) { assert.equal(actual, expected); },
+		toBeDefined() { assert.notEqual(actual, undefined); },
+		toThrow() {
+			let threw = false;
+			try { (actual as () => void)(); } catch { threw = true; }
+			assert.ok(threw, "expected function to throw");
+		},
+	};
+}
+
+void describe("harness with full guards", () => {
+	void it("constructs with all config fields validated", () => {
 		const harness = new AgentHarness({
 			config,
 			backend,
@@ -55,7 +69,7 @@ describe("harness with full guards", () => {
 		expect(harness.getLoopDetector()).toBeDefined();
 	});
 
-	it("rejects invalid config at construction", () => {
+	void it("rejects invalid config at construction", () => {
 		const badConfig: AgentConfig = {
 			...config,
 			temperature: 3, // out of range
@@ -66,7 +80,7 @@ describe("harness with full guards", () => {
 		}).toThrow();
 	});
 
-	it("accepts valid queue modes", () => {
+	void it("accepts valid queue modes", () => {
 		const queueConfig: AgentConfig = {
 			...config,
 			steeringQueueMode: "all",
@@ -77,7 +91,7 @@ describe("harness with full guards", () => {
 		expect(harness.phase).toBe("idle");
 	});
 
-	it("accepts valid thinkingLevel", () => {
+	void it("accepts valid thinkingLevel", () => {
 		const thinkingConfig: AgentConfig = {
 			...config,
 			thinkingLevel: "high",
@@ -87,7 +101,7 @@ describe("harness with full guards", () => {
 		expect(harness.phase).toBe("idle");
 	});
 
-	it("exposes loopDetector via getLoopDetector", () => {
+	void it("exposes loopDetector via getLoopDetector", () => {
 		const harness = new AgentHarness({ config, backend });
 		const detector = harness.getLoopDetector();
 
@@ -97,7 +111,7 @@ describe("harness with full guards", () => {
 		expect(typeof detector.consumeTurn).toBe("function");
 	});
 
-	it("enforces positive numeric constraints", () => {
+	void it("enforces positive numeric constraints", () => {
 		const configs = [
 			{ ...config, maxTokens: -1 },
 			{ ...config, maxRetries: -1 },
@@ -112,7 +126,7 @@ describe("harness with full guards", () => {
 		}
 	});
 
-	it("enforces fraction constraints (0-1)", () => {
+	void it("enforces fraction constraints (0-1)", () => {
 		const badConfigs = [
 			{ ...config, proactiveCompactionFraction: 1.5 },
 			{ ...config, proactiveCompactionFraction: -0.1 },
@@ -126,7 +140,7 @@ describe("harness with full guards", () => {
 		}
 	});
 
-	it("respects deprecation: reasonerId ignored", () => {
+	void it("respects deprecation: reasonerId ignored", () => {
 		const legacyConfig: AgentConfig = {
 			...config,
 			reasonerId: "some-reasoner", // deprecated, should not error

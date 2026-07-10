@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import type { Turn } from "./transcript.ts";
-import { markPathIgnoredByCloudSync } from "@logician-agent-core/tools/shared/path-utils";
+import { markPathIgnoredByCloudSync } from "@logician/agent-core/tools/shared/path-utils.ts";
 
 const SCHEMA_VERSION = 2;
 

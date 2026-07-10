@@ -30,6 +30,8 @@ export interface OutputGuardConfig {
 	autoCompactOnContextFull?: boolean;
 	/** Max consecutive empty assistant responses before aborting (default 3). */
 	maxEmptyResponses?: number;
+	/** Max consecutive non-committal assistant responses before aborting (default 3). */
+	maxNonCommittalResponses?: number;
 	/** Hook to trigger compaction. Returns tokens saved, or null if no compaction. */
 	onCompact?: () => Promise<number | null>;
 	/** Emit events to the UI/event bus. */
@@ -54,26 +56,29 @@ export interface OutputGuardResult {
 }
 
 /** Default config values. */
-const DEFAULT_CONFIG: Required<Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">> = {
+const DEFAULT_CONFIG: Required<
+	Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">
+> = {
 	maxRetries: 3,
 	retryBaseDelayMs: 500,
 	maxRetryDelayMs: 15000,
 	autoCompactOnContextFull: true,
 	maxEmptyResponses: 3,
+	maxNonCommittalResponses: 3,
 };
 
 export class OutputGuard {
-	private config: Required<Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">>;
-	private readonly onCompact: OutputGuardConfig["onCompact"];
+	private config: Required<
+		Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">
+	>;
 	private readonly onEvent: OutputGuardConfig["onEvent"];
 	private readonly loopDetector: OutputGuardConfig["loopDetector"];
 	private retryCount = 0;
 	private consecutiveEmptyResponses = 0;
-	private lastErrorCategory: BackendErrorCategory | null = null;
+	private consecutiveNonCommittalResponses = 0;
 
 	constructor(config: OutputGuardConfig = {}) {
 		this.config = { ...DEFAULT_CONFIG, ...config };
-		this.onCompact = config.onCompact;
 		this.onEvent = config.onEvent;
 		this.loopDetector = config.loopDetector;
 	}
@@ -84,12 +89,34 @@ export class OutputGuard {
 	 */
 	handleError(error: unknown): OutputGuardResult {
 		// Classify the error
-		const backendErr = error instanceof Error
-			? this.extractBackendError(error)
-			: null;
+		const backendErr =
+			error instanceof Error ? this.extractBackendError(error) : null;
+
+		// Special handling for malformed assistant message errors.
+		// When the API rejects with 400 "Assistant message must contain either
+		// 'content' or 'tool_calls'!", the conversation history contains a
+		// malformed assistant message (empty content, no tool_calls).  The
+		// fix is to compact (which drops the bad message) and retry.
+		if (this.isMalformedAssistantMessageError(error)) {
+			this.retryCount = 0;
+			this.emitEvent({
+				type: "auto_retry_start",
+				attempt: 1,
+				maxRetries: 1,
+				delayMs: 0,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return {
+				action: "compact_then_retry",
+				attempt: 1,
+				maxRetries: 1,
+				isRetryable: true,
+				message:
+					"Malformed assistant message in history — compaction triggered to drop it.",
+			};
+		}
 
 		const category = backendErr?.category ?? "unknown";
-		this.lastErrorCategory = category;
 
 		// Context-full: auto-compact and retry
 		if (category === "context_full") {
@@ -180,9 +207,12 @@ export class OutputGuard {
 
 	/**
 	 * Process a successful model response. Checks for empty/degenerate patterns.
-	 * Returns "abort" if the model keeps returning nothing.
+	 * Returns "abort" if the model keeps returning nothing or is stuck in non-committal mode.
 	 */
-	checkResponse(content: string | null | undefined, toolCallsCount: number): OutputGuardResult {
+	checkResponse(
+		content: string | null | undefined,
+		toolCallsCount: number,
+	): OutputGuardResult {
 		// Track empty responses (no content AND no tool calls)
 		const isEmpty = !content || content.trim().length === 0;
 		const hasNoTools = toolCallsCount === 0;
@@ -202,6 +232,43 @@ export class OutputGuard {
 			}
 		} else {
 			this.consecutiveEmptyResponses = 0;
+		}
+
+		// Track non-committal responses (has content but no tool calls, matches vague patterns)
+		if (content && content.trim().length > 0 && hasNoTools) {
+			const nonCommittalPatterns = [
+				/\b(i\s+(need|should|have|might|could|will)\s+(to\s+)?(?:check|look|think|consider|analyze|investigate|examine|review|verify))\b/i,
+				/\b(let\s+me\s+(think|see|check|try|consider))\b/i,
+				/\b(i'm\s+(going\s+to|thinking\s+about|not\s+sure|still\s+considering))\b/i,
+				/\b(i'll\s+(try|check|look|see|think))\b/i,
+				/\b(need\s+to\s+(check|think|verify|confirm))\b/i,
+				/\b(however|but|although)\s+(i\s+(need|should|have|might))\b/i,
+				/\b(this\s+(requires|needs|demands|warrants)\s+(further|more|additional))\b/i,
+				/\b(i\s+(don't|do\s+not)\s+(know|think\s+|certain))\b/i,
+				/\blet(?:'s|\s+me)\s+(?:step\s+back|circle\s+back|reconsider)\b/i,
+				/\b(at\s+this\s+point|so\s+far)\s+(i\s+(have|can|see)|we\s+(need|should))\b/i,
+			];
+
+			const isNonCommittal = nonCommittalPatterns.some((p) => p.test(content));
+			if (isNonCommittal) {
+				this.consecutiveNonCommittalResponses++;
+				if (
+					this.consecutiveNonCommittalResponses >=
+					this.config.maxNonCommittalResponses
+				) {
+					this.emitEvent({
+						type: "error",
+						message: `Model returned ${this.config.maxNonCommittalResponses} consecutive non-committal responses without tool calls. Aborting turn.`,
+					});
+					return {
+						action: "abort",
+						message: `Model stuck in non-committal mode. No tool calls after ${this.config.maxNonCommittalResponses} responses.`,
+						isRetryable: false,
+					};
+				}
+			} else {
+				this.consecutiveNonCommittalResponses = 0;
+			}
 		}
 
 		return { action: "proceed" };
@@ -241,7 +308,7 @@ export class OutputGuard {
 	reset(): void {
 		this.retryCount = 0;
 		this.consecutiveEmptyResponses = 0;
-		this.lastErrorCategory = null;
+		this.consecutiveNonCommittalResponses = 0;
 	}
 
 	/**
@@ -260,7 +327,10 @@ export class OutputGuard {
 		toolCalls: Array<{ name: string; args: string; result: string }>,
 	): boolean {
 		if (!this.loopDetector) return false;
-		const isLooping = this.loopDetector.recordAndDetect(assistantContent, toolCalls);
+		const isLooping = this.loopDetector.recordAndDetect(
+			assistantContent,
+			toolCalls,
+		);
 		if (isLooping) {
 			const diag = this.loopDetector.getLoopDiagnostic();
 			if (diag) {
@@ -276,14 +346,38 @@ export class OutputGuard {
 
 	// ── Internals ──────────────────────────────────────────────────────────
 
+	/** Detect the specific "Assistant message must contain either 'content' or 'tool_calls'" error. */
+	private isMalformedAssistantMessageError(error: unknown): boolean {
+		const msg = error instanceof Error ? error.message : String(error);
+		return (
+			msg.includes("Assistant message must contain") &&
+			msg.includes("tool_calls")
+		);
+	}
+
 	private extractBackendError(error: Error): BackendError | null {
 		if (error instanceof BackendError) return error;
 		// Try to extract category from message for errors that didn't go through classifyHttpError
 		const lower = error.message.toLowerCase();
-		const categories: Array<{ patterns: string[]; category: BackendErrorCategory }> = [
-			{ patterns: ["context", "too long", "too many tokens", "maximum context", "reduce the length"], category: "context_full" },
+		const categories: Array<{
+			patterns: string[];
+			category: BackendErrorCategory;
+		}> = [
+			{
+				patterns: [
+					"context",
+					"too long",
+					"too many tokens",
+					"maximum context",
+					"reduce the length",
+				],
+				category: "context_full",
+			},
 			{ patterns: ["rate limit", "429", "retry"], category: "rate_limit" },
-			{ patterns: ["500", "502", "503", "504", "server error", "upstream"], category: "transient" },
+			{
+				patterns: ["500", "502", "503", "504", "server error", "upstream"],
+				category: "transient",
+			},
 		];
 		for (const { patterns, category } of categories) {
 			if (patterns.some((p) => lower.includes(p))) {
@@ -299,11 +393,14 @@ export class OutputGuard {
 			return Math.min(backendErr.retryAfterMs, this.config.maxRetryDelayMs);
 		}
 		// Exponential backoff: base * 2^(attempt-1), capped
-		const exponential = this.config.retryBaseDelayMs * Math.pow(2, this.retryCount - 1);
+		const exponential =
+			this.config.retryBaseDelayMs * 2 ** (this.retryCount - 1);
 		return Math.min(exponential, this.config.maxRetryDelayMs);
 	}
 
-	private emitEvent(event: Parameters<NonNullable<OutputGuardConfig["onEvent"]>>[0]): void {
+	private emitEvent(
+		event: Parameters<NonNullable<OutputGuardConfig["onEvent"]>>[0],
+	): void {
 		this.onEvent?.(event);
 	}
 }

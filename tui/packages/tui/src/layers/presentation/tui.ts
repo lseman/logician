@@ -1,9 +1,6 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
-import {
-	formatContextSize,
-	envNumber,
-} from "@logician/coding-agent";
+import { formatContextSize, envNumber } from "@logician/coding-agent";
 
 // Re-export markdownTableCell (same as escapeTable for table use)
 
@@ -24,6 +21,11 @@ import {
 	type ReasonerSelectorAction,
 	ReasonerSelectorOverlay,
 } from "../../components/reasoner-selector.ts";
+import {
+	type ModelInfo,
+	type ModelSelectorAction,
+	ModelSelectorOverlay,
+} from "../../components/model-selector.ts";
 import { SessionManager } from "../../components/session-manager.ts";
 import {
 	type ThemeInfo,
@@ -51,9 +53,12 @@ import {
 	getReasonerIds,
 	getReasonerMeta,
 	type ReasonerMeta,
-} from "@logician-agent-core/reasoners/registry";
-import type { Message as CoreMessage } from "@logician-agent-core";
-import { createSlashCommands, type SlashCommandDef } from "@logician/coding-agent/slash-commands";
+} from "@logician/coding-agent/reasoners/registry.ts";
+import type { Message as CoreMessage } from "@logician/agent-core";
+import {
+	createSlashCommands,
+	type SlashCommandDef,
+} from "@logician/coding-agent/slash-commands";
 import { setTheme, getAvailableThemes, theme } from "../theme/theme.ts";
 import { Transcript, type Turn } from "@logician/coding-agent/transcript";
 import { Container, TUI } from "../core/tui-core.ts";
@@ -75,6 +80,7 @@ export class LogicianTUI {
 	private pluginManager: PluginManagerOverlay;
 	private mcpManager: McpManagerOverlay;
 	private reasonerSelector: ReasonerSelectorOverlay;
+	private modelSelector: ModelSelectorOverlay;
 	private themeSelector: ThemeSelectorOverlay;
 	private transcriptDisplay: TranscriptDisplay;
 	private sessionManager: SessionManager;
@@ -109,6 +115,7 @@ export class LogicianTUI {
 				configString(config.llmUrl) ||
 				"http://127.0.0.1:8080",
 			model: modelName,
+			models: config.models,
 			systemPrompt:
 				process.env.LOGICIAN_SYSTEM_PROMPT || configString(config.systemPrompt),
 			chatTemplate: configString(config.chatTemplate),
@@ -154,7 +161,8 @@ export class LogicianTUI {
 					: undefined,
 			steeringInterrupt: configBool(config.steeringInterrupt),
 			maxTotalTokens: configNumber(config.maxTotalTokens),
-			// Safeguard options: default OFF (match pi's trust-model approach).
+			// Safeguard options: loop detection and guards default OFF (match pi's trust-model).
+			// Continuation defaults ON — prevents premature stopping when model says "done" mid-task.
 			loopDetectionEnabled: configBool(config.loopDetectionEnabled),
 			guardsEnabled: configBool(config.guardsEnabled),
 			continuationEnabled: configBool(config.continuationEnabled),
@@ -171,6 +179,7 @@ export class LogicianTUI {
 		this.pluginManager = new PluginManagerOverlay();
 		this.mcpManager = new McpManagerOverlay();
 		this.reasonerSelector = new ReasonerSelectorOverlay();
+		this.modelSelector = new ModelSelectorOverlay();
 		this.themeSelector = new ThemeSelectorOverlay();
 		this.transcriptDisplay = new TranscriptDisplay({
 			thinkingMode: this.thinkingDisplayMode,
@@ -502,7 +511,8 @@ export class LogicianTUI {
 			branchSummary: async () => {
 				const summary = await this.bridge.branchSummary();
 				setStatusPhase("ready");
-				if (summary === null) return "No active branch (or nothing to summarize).";
+				if (summary === null)
+					return "No active branch (or nothing to summarize).";
 				return `Branch merged. Summary: ${summary}`;
 			},
 			discardBranch: () => {
@@ -744,8 +754,8 @@ export class LogicianTUI {
 					const taken = new Set(existing.map((c) => c.command));
 					const skillCmds: SlashCommandDef[] = skills
 						.map((s) => ({
-							command: `/${s.name}`,
-							usage: `/${s.name}${s.argumentHint ? ` ${s.argumentHint}` : ""}`,
+							command: `/${s.slashName}`,
+							usage: `/${s.slashName}${s.argumentHint ? ` ${s.argumentHint}` : ""}`,
 							description: `Skill: ${s.description.slice(0, 80)}`,
 							dispatch: "local" as const,
 							acceptsArgs: true,
@@ -1040,6 +1050,14 @@ export class LogicianTUI {
 				this.tui.requestRender();
 				return { consume: true };
 			}
+			if (this.modelSelector.isVisibleOverlay()) {
+				const action = this.modelSelector.handleInput(data);
+				if (action) {
+					this.handleModelSelectorAction(action);
+				}
+				this.tui.requestRender();
+				return { consume: true };
+			}
 			if (this.themeSelector.isVisibleOverlay()) {
 				const action = this.themeSelector.handleInput(data);
 				if (action) {
@@ -1111,9 +1129,9 @@ export class LogicianTUI {
 				// onChange hook re-syncs the popup query afterwards.
 			}
 
-			// Ctrl+L — clear screen
+			// Ctrl+L — open model selector
 			if (data === "\x0c") {
-				this.tui.requestRender(true);
+				this.openModelSelector();
 				return { consume: true };
 			}
 
@@ -1357,7 +1375,7 @@ export class LogicianTUI {
 				this.tui.removeOverlay(this.sessionManager);
 				break;
 
-			case "select":
+			case "select": {
 				if (!action.sessionId) return;
 				const session = this.sessionStore.getSession(action.sessionId);
 				if (!session) return;
@@ -1376,6 +1394,7 @@ export class LogicianTUI {
 				this.tui.removeOverlay(this.sessionManager);
 				this.tui.requestRender();
 				break;
+			}
 
 			case "rename":
 				if (!action.sessionId || !action.title) return;
@@ -1658,6 +1677,57 @@ export class LogicianTUI {
 		this.tui.removeOverlay(this.reasonerSelector);
 		this.statusPanel.update({ phase: "ready" });
 		this.transcript.addSystemMessage(`Reasoning mode: ${reasoner.name}`);
+		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.tui.requestRender();
+	}
+
+	// ── Model selector ───────────────────────────────────────────────────
+
+	private openModelSelector(): void {
+		this.statusPanel.update({ phase: "model" });
+		const currentModel = this.bridge.getCurrentModel();
+		const models = this.bridge.getModels();
+		const baseUrl = this.bridge.getCurrentBaseUrl();
+		const modelInfos: ModelInfo[] = models.map((id) => {
+			const url = this.bridge.getModelUrl(id);
+			const showUrl = url && url !== baseUrl ? url : undefined;
+			return {
+				id,
+				name: id,
+				active: id === currentModel,
+				url: showUrl,
+			};
+		});
+		this.modelSelector.setModels(modelInfos);
+		this.modelSelector.setMessage(
+			"Enter selects model for the current session.",
+		);
+		this.modelSelector.show();
+		const overlay = this.tui.showOverlay(this.modelSelector, {
+			anchor: "center",
+			maxHeight: 18,
+		});
+		overlay.focus();
+	}
+
+	private handleModelSelectorAction(action: ModelSelectorAction): void {
+		if (action.type === "close") {
+			this.tui.removeOverlay(this.modelSelector);
+			this.statusPanel.update({ phase: "ready" });
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			return;
+		}
+		const selected = action.model;
+		this.modelSelector.setMessage(`Switching to ${selected.name}...`);
+		this.tui.requestRender();
+		// Switch the model via the bridge (handles url switching too)
+		this.bridge.setModel(selected.id);
+		// Save to global settings
+		saveConfigField("model", selected.id);
+		// Update status
+		this.tui.removeOverlay(this.modelSelector);
+		this.statusPanel.update({ phase: "ready", model: selected.id });
+		this.transcript.addSystemMessage(`Switched model: ${selected.name}`);
 		this.transcriptDisplay.setTurns(this.transcript.getTurns());
 		this.tui.requestRender();
 	}

@@ -14,10 +14,6 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"baseUrl": ".",
-		"paths": {
-			"@logician-agent-core": ["../agent-core/src/index.ts"],
-			"@logician-agent-core/*": ["../agent-core/src/*"]
-		},
 		"types": ["node", "bun-types"]
 	},
 	"include": ["src/**/*", "../agent-core/src/**/*"]

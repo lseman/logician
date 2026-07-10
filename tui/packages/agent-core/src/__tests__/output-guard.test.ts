@@ -188,4 +188,28 @@ describe("OutputGuard", () => {
 		const r2 = guard.handleError(err);
 		assert.strictEqual(r2.retryDelayMs, 2000);
 	});
+
+	// ── Malformed assistant message recovery ───────────────────────────────
+
+	it("recovers from malformed assistant message error via compact_then_retry", () => {
+		const guard = makeGuard();
+		const err = new Error(
+			"LLM request failed: 400 Assistant message must contain either 'content' or 'tool_calls'!",
+		);
+		const result = guard.handleError(err);
+
+		assert.strictEqual(result.action, "compact_then_retry");
+		assert.strictEqual(result.attempt, 1);
+		assert.strictEqual(result.isRetryable, true);
+		assert.ok(result.message?.includes("Malformed assistant message"));
+	});
+
+	it("recovers from malformed assistant message even without BackendError wrapper", () => {
+		const guard = makeGuard();
+		const err = new Error("Assistant message must contain either 'content' or 'tool_calls'!");
+		const result = guard.handleError(err);
+
+		assert.strictEqual(result.action, "compact_then_retry");
+		assert.strictEqual(result.isRetryable, true);
+	});
 });

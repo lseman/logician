@@ -15,8 +15,6 @@
 		"noEmit": true,
 		"baseUrl": ".",
 		"paths": {
-			"@logician-agent-core": ["../agent-core/src/index.ts"],
-			"@logician-agent-core/*": ["../agent-core/src/*"],
 			"@logician/coding-agent": ["../coding-agent/src/index.ts"],
 			"@logician/coding-agent/*": ["../coding-agent/src/*"]
 		},

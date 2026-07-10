@@ -19,44 +19,24 @@ export * from "./hooks/builtin-hooks.ts";
 export * from "./hooks/hook-bus.ts";
 export * from "./hooks/plugin-hooks.ts";
 
-// Shared (registry, parser, permissions, plugins, subagent, skills, mcp, helpers, utils)
+// Shared (registry, parser, permissions, plugins, subagent, skills, mcp, utils)
 export * from "./tools/shared/permissions.ts";
 export * from "./tools/shared/parser.ts";
 export * from "./tools/shared/plugins.ts";
-export * from "./tools/subagents/subagent.ts";
-export * from "./tools/shared/skills.ts";
-export * from "./tools/shared/mcp.ts";
-export * from "./tools/shared/system-prompt.ts";
 export * from "./tools/shared/async-utils.ts";
-export * from "./tools/shared/helpers.ts";
 export * from "./tools/shared/path-utils.ts";
-export * from "./tools/shared/file-mutation-queue.ts";
 export * from "./tools/shared/syntax-highlighter.ts";
-export * from "./tools/shared/default-tools.ts";
 export * from "./tools/shared/registry.ts";
 
-// Skills (individual tool implementations)
-export * from "./tools/skills/truncate.ts";
-export * from "./tools/skills/read-tracker.ts";
-
-// Specific tool exports (for backward compat)
-export { bash } from "./tools/skills/bash.ts";
-export { edit_file } from "./tools/skills/edit-file.ts";
-export { file_diff } from "./tools/skills/file-diff.ts";
-export { find } from "./tools/skills/find.ts";
-export { git } from "./tools/skills/git.ts";
-export { list_files } from "./tools/skills/list-files.ts";
-export { read_file } from "./tools/skills/read-file.ts";
-export { grep } from "./tools/skills/search.ts";
+// Generic workflow tools used by built-in hooks.
 export {
 	getTaskStatus,
 	resetTaskStatus,
 	task_status,
-} from "./tools/skills/task-status.ts";
-export type { TaskStatusRecord } from "./tools/skills/task-status.ts";
+} from "./tools/workflow/task-status.ts";
+export type { TaskStatusRecord } from "./tools/workflow/task-status.ts";
 export type { Task, TaskStatus } from "./tools/todos/todo.ts";
 export { getTasks, onTodosChanged } from "./tools/todos/todo.ts";
-export { write_file } from "./tools/skills/write-file.ts";
 
 // Compaction (kept at top level for backwards compat).
 // Note: core/messages.ts and compaction/compaction.ts both define
@@ -74,15 +54,6 @@ export {
 
 // Extensions: TypeScript extension system
 export * from "./extensions/index.ts";
-
-// Trust: project trust model
-export * from "./trust/index.ts";
-
-// Context files: AGENTS.md/CLAUDE.md discovery
-export * from "./context-files/index.ts";
-
-// Prompt templates: reusable markdown templates
-export * from "./prompts/index.ts";
 
 // Message queue: steering and follow-up messages
 export * from "./message-queue/index.ts";

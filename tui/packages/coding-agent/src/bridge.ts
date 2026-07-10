@@ -14,6 +14,7 @@ import {
 } from "./tools/default-tools.ts";
 import {
 	type AgentConfig,
+	type AgentModelConfig,
 	type AgentEvent,
 	AgentHarness,
 	type HarnessPhase,
@@ -44,7 +45,6 @@ import {
 	formatSkillCatalog,
 	findSkillByName,
 	formatSkillInvocation,
-	formatSkillsForSystemPrompt,
 	loadSkills,
 	type Skill,
 } from "./skills.ts";
@@ -381,6 +381,7 @@ function resolveWebSearchConfig(): WebSearchConfig {
 export interface AgentBridgeOptions {
 	baseUrl: string;
 	model: string;
+	models?: AgentModelConfig[];
 	chatTemplate?: string;
 	temperature?: number;
 	maxTokens?: number;
@@ -487,6 +488,7 @@ export class AgentCoreBridge {
 		this.config = {
 			baseUrl: opts.baseUrl,
 			model: opts.model,
+			models: opts.models,
 			systemPrompt: this.baseSystemPrompt,
 			tools: this.defaultTools,
 			webSearch,
@@ -633,7 +635,11 @@ export class AgentCoreBridge {
 				preReasoner: async (reasonerId, promptText, backend) => {
 					const meta = getReasonerMeta(reasonerId);
 					if (!meta) return undefined;
-					const reasoner = get_reasoner(reasonerId, backend, meta.defaultConfig);
+					const reasoner = get_reasoner(
+						reasonerId,
+						backend,
+						meta.defaultConfig,
+					);
 					const trace = await reasoner.solve(promptText);
 					return trace.reasoning || undefined;
 				},
@@ -965,6 +971,23 @@ export class AgentCoreBridge {
 		return this.harness?.getModel() ?? this.config.model ?? "";
 	}
 
+	/** Get current base URL. */
+	getCurrentBaseUrl(): string {
+		return this.config.baseUrl;
+	}
+
+	/** Resolve the URL for a given model name. */
+	getModelUrl(modelName: string): string {
+		const models = this.config.models;
+		if (models) {
+			const found = models.find((m) => m.model === modelName);
+			if (found?.url) {
+				return found.url;
+			}
+		}
+		return this.config.baseUrl;
+	}
+
 	/** Get all available models. */
 	getModels(): string[] {
 		return (
@@ -976,6 +999,23 @@ export class AgentCoreBridge {
 	/** Cycle to the next model. Returns the new model name. */
 	cycleModel(direction: "forward" | "backward" = "forward"): string | null {
 		return this.harness?.cycleModel(direction) ?? null;
+	}
+
+	/** Set the model list for cycling. */
+	setModels(models: AgentModelConfig[]): void {
+		this.config.models = models;
+		// If the harness is already built, update its config directly.
+		if (this.harness) {
+			this.harness.setModels(models);
+		}
+	}
+
+	/** Change the current model. */
+	setModel(modelId: string): void {
+		this.config.model = modelId;
+		if (this.harness) {
+			this.harness.setModel(modelId);
+		}
 	}
 
 	async getState(): Promise<Record<string, unknown>> {
@@ -1396,11 +1436,10 @@ export class AgentCoreBridge {
 			skillsDirs.push(path.join(installPath, "skills"));
 		}
 
-		// Also discover project-local skills (Pi-style cwd traversal).
+		// Also discover project-local skills by walking cwd ancestors.
 		// Missing directories are skipped silently by loadSkills.
 		const cwd = this.config.cwd || process.cwd();
-		skillsDirs.push(path.join(cwd, ".logician", "skills"));
-		skillsDirs.push(path.join(cwd, "skills"));
+		skillsDirs.push(...getProjectSkillDirs(cwd));
 
 		if (!skillsDirs.length) return;
 
@@ -1644,14 +1683,19 @@ function loadUserSettings(): UserSettings {
 	try {
 		const raw = readFileSync(settingsPath, "utf8");
 		const parsed = JSON.parse(raw) as Record<string, unknown>;
-		return typeof parsed === "object" && parsed !== null ? (parsed as UserSettings) : {};
+		return typeof parsed === "object" && parsed !== null
+			? (parsed as UserSettings)
+			: {};
 	} catch {
 		return {};
 	}
 }
 
 /** Apply compaction settings from user settings to the harness. */
-function applyCompactionSettings(harness: AgentHarness, settings: UserSettings): void {
+function applyCompactionSettings(
+	harness: AgentHarness,
+	settings: UserSettings,
+): void {
 	const compaction = settings.compaction;
 	if (!compaction) return;
 
@@ -1663,7 +1707,10 @@ function applyCompactionSettings(harness: AgentHarness, settings: UserSettings):
 	if (compaction.reserveTokens !== undefined && compaction.reserveTokens > 0) {
 		compactionSettings.reserveTokens = compaction.reserveTokens;
 	}
-	if (compaction.keepRecentTokens !== undefined && compaction.keepRecentTokens > 0) {
+	if (
+		compaction.keepRecentTokens !== undefined &&
+		compaction.keepRecentTokens > 0
+	) {
 		compactionSettings.keepRecentTokens = compaction.keepRecentTokens;
 	}
 
@@ -1697,9 +1744,20 @@ export async function getSkillsDirs(cwd: string): Promise<string[]> {
 		// Plugin backend may not be ready during early reload
 	}
 
-	// Project-local skills (Pi-style cwd traversal)
-	dirs.push(path.join(cwd, ".logician", "skills"));
-	dirs.push(path.join(cwd, "skills"));
+	dirs.push(...getProjectSkillDirs(cwd));
 
 	return dirs;
+}
+
+function getProjectSkillDirs(cwd: string): string[] {
+	const dirs: string[] = [];
+	let current = path.resolve(cwd);
+	while (true) {
+		dirs.push(path.join(current, ".logician", "skills"));
+		dirs.push(path.join(current, "skills"));
+		const parent = path.dirname(current);
+		if (parent === current) break;
+		current = parent;
+	}
+	return Array.from(new Set(dirs));
 }

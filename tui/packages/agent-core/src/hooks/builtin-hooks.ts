@@ -4,15 +4,16 @@
 // user-supplied hooks via the typed HookBus so both run.
 
 import { BudgetTracker } from "./budget.ts";
+import { ThinkingLoopDetector } from "../core/thinking-loop-detector.ts";
 import { recordFileBeforeWrite } from "../core/file-checkpoints.ts";
-import { type LoopDetector } from "../core/loop-detector.ts";
+import type { LoopDetector } from "../core/loop-detector.ts";
 import { HookBus } from "./hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
 } from "../core/messages.ts";
 import { compactToFit } from "../compaction/compaction.ts";
-import { getTaskStatus } from "../tools/skills/task-status.ts";
+import { getTaskStatus } from "../tools/workflow/task-status.ts";
 import { getTasks } from "../tools/todos/todo.ts";
 import type {
 	AgentConfig,
@@ -35,6 +36,8 @@ export interface BuiltinHookDeps {
 	toolDefs: () => Record<string, unknown>[];
 	// Loop detector instance for guard integration (merged from GuardEngine).
 	loopDetector: LoopDetector;
+	// Typed event emitter for structured events (optional).
+	eventBus?: { emit: (event: Record<string, unknown>) => void };
 }
 
 // Build the default safeguard hooks. Returns undefined per-event when a
@@ -55,6 +58,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step
 	// run (e.g. one following a todo list) when per-turn token growth is small.
 	const budgetEnabled = config.budgetStopEnabled === true;
+	// Thinking loop detection: detects meta-reasoning spirals where the model
+	// keeps thinking without taking action. Default ON.
+	const thinkingLoopEnabled = config.thinkingLoopDetectionEnabled ?? true;
 	// Proactive compaction: default ON but aggressive (80% window). Can lose
 	// context mid-task. Consider disabling for long-running tasks.
 	const compactionEnabled = config.proactiveCompactionEnabled !== false;
@@ -64,6 +70,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const fraction =
 		config.proactiveCompactionFraction ?? DEFAULT_COMPACTION_FRACTION;
 	let lastCompactionTurn = -COMPACTION_COOLDOWN_TURNS;
+
+	const thinkingLoopDetector = thinkingLoopEnabled
+		? new ThinkingLoopDetector({
+				minThinkingLength: config.thinkingLoopMinThinkingLength,
+				thinkingOnlyThreshold: config.thinkingLoopThinkingOnlyThreshold,
+				escalationRatio: config.thinkingLoopEscalationRatio,
+				maxTotalThinkingTokens: config.thinkingLoopMaxTotalThinkingTokens,
+				metaReasoningThreshold: config.thinkingLoopMetaReasoningThreshold,
+			})
+		: null;
 
 	const hooks: AgentHooks = {};
 
@@ -127,6 +143,61 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		hooks.shouldStopAfterTurn = ({ messages }) => {
 			const tokens = estimateChatPayloadTokens(messages, deps.toolDefs());
 			return budget.shouldStop(tokens);
+		};
+	}
+
+	// Thinking loop detection: record each LLM response via afterProviderResponse,
+	// then check for thinking loops on shouldStopAfterTurn.
+	if (thinkingLoopDetector) {
+		hooks.afterProviderResponse = ({
+			content,
+			toolCallCount,
+			iteration,
+			usageTokens,
+		}) => {
+			const diagnostic = thinkingLoopDetector.recordTurn(
+				content ?? "",
+				toolCallCount,
+				iteration,
+				usageTokens,
+			);
+			if (diagnostic) {
+				// Extract strategy from diagnostic for the event
+				let strategy:
+					| "thinking_only"
+					| "escalation"
+					| "meta_reasoning"
+					| "budget_exhausted" = "thinking_only";
+				if (
+					diagnostic.includes("escalation") ||
+					diagnostic.includes("spiral")
+				) {
+					strategy = "escalation";
+				} else if (diagnostic.includes("meta-reasoning")) {
+					strategy = "meta_reasoning";
+				} else if (diagnostic.includes("budget")) {
+					strategy = "budget_exhausted";
+				}
+				const event = {
+					type: "thinking_loop_detected" as const,
+					message: diagnostic,
+					strategy,
+					iteration,
+				};
+				deps.eventBus?.emit(event);
+			}
+		};
+
+		// Merge into shouldStopAfterTurn alongside budget check
+		const prevShouldStop = hooks.shouldStopAfterTurn;
+		hooks.shouldStopAfterTurn = ({ messages, iteration }) => {
+			const budgetResult = prevShouldStop?.({
+				messages,
+				iteration,
+				hadToolCalls: false,
+			});
+			if (budgetResult === true) return true;
+			return thinkingLoopDetector?.getDiagnostic() !== null;
 		};
 	}
 
@@ -218,9 +289,9 @@ const CIRCLING_PATTERNS = [
 	// "Let me try again", "Let me try X", future retry (self-directed).
 	/\blet\s+me\s+(?:try|try again|attempt)\b/i,
 	// "I've tried X again", "I've attempted X yet".
-	/\b(i\'|ve|I\'ve)\s+(?:tried|attempted)\s+.*\b(again|another|a different|yet|elsewhere|else)\b/i,
+	/\b(i'|ve|I've)\s+(?:tried|attempted)\s+.*\b(again|another|a different|yet|elsewhere|else)\b/i,
 	// "cannot/can't X but try/attempt" — failed then retrying.
-	/\b(cannot|can\'t|unable)\s+.*\b(but\s+|however\s+|instead\s+|though\s+|though\s+I)\b.*\b(try|attempt|do|make|go)\b/i,
+	/\b(cannot|can't|unable)\s+.*\b(but\s+|however\s+|instead\s+|though\s+|though\s+I)\b.*\b(try|attempt|do|make|go)\b/i,
 	// "I'm going to try again", "I'm going to attempt".
 	/\bi\s*'m\s+going\s+to\s+(?:try|try again|attempt)\b/i,
 ];

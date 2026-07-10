@@ -1,10 +1,6 @@
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import type { AgentModelConfig } from "@logician/agent-core";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
@@ -15,15 +11,39 @@ export interface ResolvedLogicianConfig {
 
 /** Known config keys for unknown-field detection. */
 const KNOWN_KEYS = new Set([
-	"baseUrl", "llmUrl", "model", "theme", "systemPrompt", "chatTemplate",
-	"temperature", "maxTokens", "maxIterations", "toolExecution",
-	"contextWindow", "contextWindowTokens", "hooks", "mcp", "mcpServers",
-	"mcpEager", "webSearch", "permissionMode", "permissions",
-	"steeringInterrupt", "maxTotalTokens",
-	"loopDetectionEnabled", "guardsEnabled", "continuationEnabled",
-	"compaction", "plugins",
+	"baseUrl",
+	"llmUrl",
+	"model",
+	"models",
+	"theme",
+	"systemPrompt",
+	"chatTemplate",
+	"temperature",
+	"maxTokens",
+	"maxIterations",
+	"toolExecution",
+	"contextWindow",
+	"contextWindowTokens",
+	"hooks",
+	"mcp",
+	"mcpServers",
+	"mcpEager",
+	"webSearch",
+	"permissionMode",
+	"permissions",
+	"steeringInterrupt",
+	"maxTotalTokens",
+	"loopDetectionEnabled",
+	"guardsEnabled",
+	"continuationEnabled",
+	"compaction",
+	"plugins",
 ]);
-const COMPACTION_KEYS = new Set(["enabled", "reserveTokens", "keepRecentTokens"]);
+const COMPACTION_KEYS = new Set([
+	"enabled",
+	"reserveTokens",
+	"keepRecentTokens",
+]);
 
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
@@ -71,19 +91,58 @@ export function validateConfig(
 		if (isValidUrl(obj.baseUrl)) {
 			cfg.baseUrl = configString(obj.baseUrl);
 		} else {
-			warn(warnings, "\"baseUrl\" must be a valid http/https URL.");
+			warn(warnings, '"baseUrl" must be a valid http/https URL.');
 		}
 	}
 	if (obj.llmUrl !== undefined) {
 		if (isValidUrl(obj.llmUrl)) {
 			cfg.llmUrl = configString(obj.llmUrl);
 		} else {
-			warn(warnings, "\"llmUrl\" must be a valid http/https URL.");
+			warn(warnings, '"llmUrl" must be a valid http/https URL.');
 		}
 	}
 
 	// Simple strings.
 	cfg.model = configString(obj.model);
+
+	// models: array of model objects for cycling (Ctrl+L model selector)
+	if (obj.models !== undefined) {
+		if (Array.isArray(obj.models)) {
+			const parsed: AgentModelConfig[] = [];
+			for (const item of obj.models) {
+				if (typeof item === "string" && item.trim()) {
+					// Legacy string entry: convert to object
+					parsed.push({ name: item.trim(), model: item.trim() });
+				} else if (
+					typeof item === "object" &&
+					item !== null &&
+					"model" in item &&
+					"name" in item &&
+					typeof (item as Record<string, unknown>).name === "string" &&
+					typeof (item as Record<string, unknown>).model === "string" &&
+					((item as AgentModelConfig).name.trim() ||
+						(item as AgentModelConfig).model.trim())
+				) {
+					const m = item as AgentModelConfig;
+					parsed.push({
+						name: m.name.trim(),
+						model: m.model.trim(),
+						url: typeof m.url === "string" ? m.url.trim() : m.url,
+					});
+				} else {
+					warn(
+						warnings,
+						`"models" entry invalid, got: ${JSON.stringify(item)}.`,
+					);
+				}
+			}
+			if (parsed.length > 0) {
+				cfg.models = parsed as LogicianTuiConfig["models"];
+			}
+		} else {
+			warn(warnings, '"models" must be an array.');
+		}
+	}
 	cfg.theme = configString(obj.theme);
 	cfg.systemPrompt = configString(obj.systemPrompt);
 	cfg.chatTemplate = configString(obj.chatTemplate);
@@ -93,7 +152,10 @@ export function validateConfig(
 		const t = configNumber(obj.temperature);
 		if (t !== undefined) {
 			if (!inRange(t, 0, 2)) {
-				warn(warnings, `"temperature" out of range [0,2], value: ${t}. Clamping to [0,2].`);
+				warn(
+					warnings,
+					`"temperature" out of range [0,2], value: ${t}. Clamping to [0,2].`,
+				);
 				cfg.temperature = Math.max(0, Math.min(2, t));
 			} else {
 				cfg.temperature = t;
@@ -151,7 +213,10 @@ export function validateConfig(
 	if (obj.toolExecution !== undefined) {
 		const te = configString(obj.toolExecution);
 		if (te !== "sequential" && te !== "parallel") {
-			warn(warnings, `"toolExecution" must be "sequential" or "parallel", got: "${te}".`);
+			warn(
+				warnings,
+				`"toolExecution" must be "sequential" or "parallel", got: "${te}".`,
+			);
 		} else {
 			cfg.toolExecution = te as "sequential" | "parallel";
 		}
@@ -172,7 +237,7 @@ export function validateConfig(
 	cfg.steeringInterrupt = configBool(obj.steeringInterrupt);
 	cfg.loopDetectionEnabled = configBool(obj.loopDetectionEnabled);
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
-	cfg.continuationEnabled = configBool(obj.continuationEnabled);
+	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 
 	// compaction sub-object.
 	if (obj.compaction !== undefined) {
@@ -180,7 +245,11 @@ export function validateConfig(
 			warn(warnings, '"compaction" must be an object.');
 		} else {
 			const c = obj.compaction as Record<string, unknown>;
-			const ccfg: { enabled?: boolean; reserveTokens?: number; keepRecentTokens?: number } = {};
+			const ccfg: {
+				enabled?: boolean;
+				reserveTokens?: number;
+				keepRecentTokens?: number;
+			} = {};
 			for (const key of Object.keys(c)) {
 				if (!COMPACTION_KEYS.has(key)) {
 					warn(warnings, `Unknown compaction key: "${key}".`);
@@ -205,7 +274,11 @@ export function validateConfig(
 	}
 
 	if (obj.plugins !== undefined) {
-		if (typeof obj.plugins !== "object" || obj.plugins === null || Array.isArray(obj.plugins)) {
+		if (
+			typeof obj.plugins !== "object" ||
+			obj.plugins === null ||
+			Array.isArray(obj.plugins)
+		) {
 			warn(warnings, '"plugins" must be an object.');
 		} else {
 			cfg.plugins = obj.plugins as Record<string, unknown>;
@@ -215,7 +288,7 @@ export function validateConfig(
 	// webSearch sub-object.
 	if (obj.webSearch !== undefined) {
 		if (typeof obj.webSearch !== "object" || obj.webSearch === null) {
-			warn(warnings, "\"webSearch\" must be an object.");
+			warn(warnings, '"webSearch" must be an object.');
 		} else {
 			const ws = obj.webSearch as Record<string, unknown>;
 			const wscfg: NonNullable<LogicianTuiConfig["webSearch"]> = {};
@@ -226,7 +299,7 @@ export function validateConfig(
 			}
 			if (ws.baseUrl !== undefined) {
 				if (!isValidUrl(ws.baseUrl)) {
-					warn(warnings, "\"webSearch.baseUrl\" must be a valid http/https URL.");
+					warn(warnings, '"webSearch.baseUrl" must be a valid http/https URL.');
 				} else {
 					wscfg.baseUrl = configString(ws.baseUrl);
 				}
@@ -246,7 +319,7 @@ export function validateConfig(
 	// permissions sub-object.
 	if (obj.permissions !== undefined) {
 		if (typeof obj.permissions !== "object" || obj.permissions === null) {
-			warn(warnings, "\"permissions\" must be an object.");
+			warn(warnings, '"permissions" must be an object.');
 		} else {
 			const perms = obj.permissions as Record<string, unknown>;
 			const percfg: NonNullable<LogicianTuiConfig["permissions"]> = {};
@@ -256,23 +329,30 @@ export function validateConfig(
 				}
 			}
 			if (Array.isArray(perms.allow)) {
-				percfg.allow = perms.allow.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+				percfg.allow = perms.allow.filter(
+					(v): v is string => typeof v === "string" && v.trim().length > 0,
+				);
 			}
 			if (Array.isArray(perms.deny)) {
-				percfg.deny = perms.deny.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+				percfg.deny = perms.deny.filter(
+					(v): v is string => typeof v === "string" && v.trim().length > 0,
+				);
 			}
 			cfg.permissions = Object.keys(percfg).length > 0 ? percfg : undefined;
 		}
 	}
 
 	// Strip undefined values so the returned config only contains set fields.
-	return Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== undefined)) as LogicianTuiConfig;
+	return Object.fromEntries(
+		Object.entries(cfg).filter(([, v]) => v !== undefined),
+	) as LogicianTuiConfig;
 }
 
 export interface LogicianTuiConfig {
 	baseUrl?: string;
 	llmUrl?: string;
 	model?: string;
+	models?: AgentModelConfig[];
 	theme?: string;
 	systemPrompt?: string;
 	chatTemplate?: string;
@@ -301,7 +381,7 @@ export interface LogicianTuiConfig {
 	// Safeguard options (match pi's trust-model approach by default).
 	loopDetectionEnabled?: boolean; // OFF by default
 	guardsEnabled?: boolean; // OFF by default
-	continuationEnabled?: boolean; // OFF by default
+	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	// Compaction settings.
 	compaction?: {
 		enabled?: boolean;

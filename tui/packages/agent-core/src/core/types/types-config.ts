@@ -103,6 +103,13 @@ export interface AgentConfig {
 	eventLogPath?: string;
 	steeringInterrupt?: boolean;
 	acceptance?: AcceptanceConfig;
+	// Thinking loop detection
+	thinkingLoopDetectionEnabled?: boolean;
+	thinkingLoopMinThinkingLength?: number;
+	thinkingLoopThinkingOnlyThreshold?: number;
+	thinkingLoopEscalationRatio?: number;
+	thinkingLoopMaxTotalThinkingTokens?: number;
+	thinkingLoopMetaReasoningThreshold?: number;
 }
 
 export interface WebSearchConfig {

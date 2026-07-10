@@ -4,7 +4,6 @@
 // nextTurn queues drained at save points.
 //
 
-import { withTimeout } from "../tools/shared/async-utils.ts";
 import { runSessionStartHooks, runHookEvent } from "../tools/shared/plugins.ts";
 import {
 	beginFileFrame,
@@ -31,8 +30,13 @@ import {
 } from "../message-queue/manager.ts";
 import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
 import type { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
-import { composeHooks, buildBuiltinHooks, type HookLayer } from "../hooks/builtin-hooks.ts";
+import {
+	composeHooks,
+	buildBuiltinHooks,
+	type HookLayer,
+} from "../hooks/builtin-hooks.ts";
 import { LoopDetector } from "./loop-detector.ts";
+import { ThinkingLoopDetector } from "./thinking-loop-detector.ts";
 import {
 	collectMessagesForBranchSummary,
 	extractFileOpsFromMessages,
@@ -85,6 +89,11 @@ export interface AgentHarnessOptions {
 	cwd?: string;
 	maxIterations?: number;
 	extensionRunner?: ExtensionRunner;
+	preReasoner?: (
+		reasonerId: string,
+		promptText: string,
+		backend: LLMBackend,
+	) => Promise<string | undefined>;
 }
 
 interface HarnessTurnSnapshot {
@@ -168,6 +177,7 @@ export class AgentHarness {
 	private _nextTurnQueue: string[] = [];
 	private msgManager: MessageDeliveryManager;
 	private loopDetector: LoopDetector;
+	private thinkingLoopDetector: ThinkingLoopDetector | null;
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
@@ -223,6 +233,19 @@ export class AgentHarness {
 			duplicateThreshold: options.config.duplicateToolThreshold,
 			failureThreshold: options.config.toolFailureLoopThreshold,
 		});
+		this.thinkingLoopDetector =
+			options.config.thinkingLoopDetectionEnabled !== false
+				? new ThinkingLoopDetector({
+						minThinkingLength: options.config.thinkingLoopMinThinkingLength,
+						thinkingOnlyThreshold:
+							options.config.thinkingLoopThinkingOnlyThreshold,
+						escalationRatio: options.config.thinkingLoopEscalationRatio,
+						maxTotalThinkingTokens:
+							options.config.thinkingLoopMaxTotalThinkingTokens,
+						metaReasoningThreshold:
+							options.config.thinkingLoopMetaReasoningThreshold,
+					})
+				: null;
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
 		this.msgManager = new MessageDeliveryManager({
 			steeringMode: (options.config.steeringQueueMode ??
@@ -614,8 +637,15 @@ export class AgentHarness {
 		const builtinHooks = buildBuiltinHooks({
 			config,
 			contextWindowTokens: () => config.contextWindowTokens,
-			toolDefs: () => tools,
+			toolDefs: () => tools as unknown as Record<string, unknown>[],
 			loopDetector: this.loopDetector,
+			eventBus: this._extensionBus
+				? {
+						emit: (event: Record<string, unknown>) => {
+							void this._extensionBus?.emit(event as any);
+						},
+					}
+				: undefined,
 		});
 
 		const layers: HookLayer[] = [
@@ -731,6 +761,24 @@ export class AgentHarness {
 
 	getLoopDetector(): LoopDetector {
 		return this.loopDetector;
+	}
+
+	getThinkingLoopDetector(): ThinkingLoopDetector | null {
+		return this.thinkingLoopDetector;
+	}
+
+	setThinkingLoopDetectorEnabled(enabled: boolean): void {
+		if (enabled && !this.thinkingLoopDetector) {
+			this.thinkingLoopDetector = new ThinkingLoopDetector({
+				minThinkingLength: this.config.thinkingLoopMinThinkingLength,
+				thinkingOnlyThreshold: this.config.thinkingLoopThinkingOnlyThreshold,
+				escalationRatio: this.config.thinkingLoopEscalationRatio,
+				maxTotalThinkingTokens: this.config.thinkingLoopMaxTotalThinkingTokens,
+				metaReasoningThreshold: this.config.thinkingLoopMetaReasoningThreshold,
+			});
+		} else if (!enabled) {
+			this.thinkingLoopDetector = null;
+		}
 	}
 
 	// ── Runtime config setters ─────────────────────────────────────────────

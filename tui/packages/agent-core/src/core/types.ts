@@ -20,13 +20,13 @@ export type {
 	BashExecutionMessage,
 	CustomMessage,
 } from "./types/types-messages.ts";
-export { type CompactableMessage } from "./types/types-messages.ts";
+export type { CompactableMessage } from "./types/types-messages.ts";
 
-export {
-	type AgentEventEnvelope,
-	type AgentEventBody,
-	type AgentEvent,
-	type EventHandler,
+export type {
+	AgentEventEnvelope,
+	AgentEventBody,
+	AgentEvent,
+	EventHandler,
 } from "./types/types-events.ts";
 
 export type {
@@ -53,26 +53,27 @@ export type {
 	AgentHooks,
 } from "./types/types-hooks.ts";
 
-export {
-	type ToolCall,
-	type ToolResult,
-	type ToolExecutionMode,
-	type Tool,
-	type AskUserContext,
-	type ToolContext,
+export type {
+	ToolCall,
+	ToolResult,
+	ToolExecutionMode,
+	Tool,
+	AskUserContext,
+	ToolContext,
 } from "./types/types-tools.ts";
 
-export {
-	type QueueMode,
-	type ThinkingLevel,
-	type AgentConfig,
-	type AgentHarnessStreamOptions,
-	type WebSearchConfig,
-	type EvidenceKind,
-	type AcceptanceCriterion,
-	type AcceptanceVerification,
-	type AcceptanceReview,
-	type AcceptanceConfig,
+export type {
+	QueueMode,
+	ThinkingLevel,
+	AgentConfig,
+	AgentModelConfig,
+	AgentHarnessStreamOptions,
+	WebSearchConfig,
+	EvidenceKind,
+	AcceptanceCriterion,
+	AcceptanceVerification,
+	AcceptanceReview,
+	AcceptanceConfig,
 } from "./types/types-config.ts";
 
 export {

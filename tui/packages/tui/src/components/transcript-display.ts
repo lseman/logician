@@ -2,7 +2,7 @@
 // Renders the full conversation history with streaming support and markdown.
 // Chunks are interleaved in chronological order: thinking → content → tool → ...
 
-import { highlightAuto } from "@logician-agent-core/tools/shared/syntax-highlighter.ts";
+import { highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import { theme } from "../layers/theme/theme.ts";
 import type {
 	AssistantChunk,
@@ -1112,7 +1112,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? tool.result!
 				: tool.result!;
 			const label = tool.isError ? "error" : "result";
-			lines.push(`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET} ${resultText}`);
+			const resultLines = resultText.split("\n");
+			lines.push(
+				`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET} ${resultLines[0]}`,
+			);
+			for (let ri = 1; ri < resultLines.length; ri++) {
+				lines.push(`${theme.fg("dim", "│ ")}${resultLines[ri]}`);
+			}
 		}
 		if (!this.toolsExpanded) return lines;
 

@@ -1,8 +1,25 @@
-import { describe, it, expect } from "bun:test";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import { validateConfig, throwOnValidationErrors } from "../core/config-validator.ts";
 import type { AgentConfig } from "../core/types.ts";
 
-describe("config validator", () => {
+function describe(name: string, fn: () => void) { fn(); }
+function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }
+function expect<T>(actual: T) {
+	return {
+		toHaveLength(len: number) { assert.equal(Array.isArray(actual) ? actual.length : 0, len); },
+		toBe(expected: unknown) { assert.equal(actual, expected); },
+		toBeTrue() { assert.equal(actual, true); },
+		toBeFalse() { assert.equal(actual, false); },
+		toThrow() {
+			let threw = false;
+			try { (actual as () => void)(); } catch { threw = true; }
+			assert.ok(threw, "expected function to throw");
+		},
+	};
+}
+
+void describe("config validator", () => {
 	const validConfig: AgentConfig = {
 		baseUrl: "https://api.example.com",
 		model: "claude-opus",
@@ -10,36 +27,36 @@ describe("config validator", () => {
 		contextWindowTokens: 200000,
 	};
 
-	it("passes valid config", () => {
+	void it("passes valid config", () => {
 		const errors = validateConfig(validConfig);
 		expect(errors).toHaveLength(0);
 	});
 
-	it("rejects missing baseUrl", () => {
+	void it("rejects missing baseUrl", () => {
 		const config = { ...validConfig, baseUrl: "" };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "baseUrl")).toBe(true);
+		expect(errors.some((e) => e.field === "baseUrl")).toBeTrue();
 	});
 
-	it("rejects invalid temperature", () => {
+	void it("rejects invalid temperature", () => {
 		const config = { ...validConfig, temperature: 3 };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "temperature")).toBe(true);
+		expect(errors.some((e) => e.field === "temperature")).toBeTrue();
 	});
 
-	it("rejects invalid thinkingLevel", () => {
+	void it("rejects invalid thinkingLevel", () => {
 		const config = { ...validConfig, thinkingLevel: "ultra" as any };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "thinkingLevel")).toBe(true);
+		expect(errors.some((e) => e.field === "thinkingLevel")).toBeTrue();
 	});
 
-	it("rejects invalid queue mode", () => {
+	void it("rejects invalid queue mode", () => {
 		const config = { ...validConfig, steeringQueueMode: "invalid" as any };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "steeringQueueMode")).toBe(true);
+		expect(errors.some((e) => e.field === "steeringQueueMode")).toBeTrue();
 	});
 
-	it("throws on validation errors", () => {
+	void it("throws on validation errors", () => {
 		const config = { ...validConfig, baseUrl: "" };
 		expect(() => {
 			const errors = validateConfig(config);
@@ -47,7 +64,7 @@ describe("config validator", () => {
 		}).toThrow();
 	});
 
-	it("allows valid optional fields", () => {
+	void it("allows valid optional fields", () => {
 		const config: AgentConfig = {
 			...validConfig,
 			maxRetries: 3,

@@ -56,6 +56,11 @@ export function classifyHttpError(
 	retryAfterHeader?: string | null,
 ): BackendError {
 	const lower = body.toLowerCase();
+	// "Assistant message must contain either 'content' or 'tool_calls'" is
+	// NOT a context-full error — it means a previously-stored assistant message
+	// is malformed (empty content, no tool_calls).  Compaction won't fix it;
+	// the same bad message would be resent.  Classify as client so the loop
+	// can recover by compacting (which drops the bad message) or aborting.
 	const looksContextFull = [
 		"context",
 		"too long",

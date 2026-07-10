@@ -1,12 +1,26 @@
-import { describe, it, expect } from "bun:test";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
 	stripJsonComments,
 	parseJsonWithComments,
 	parseJsonWithCommentsSafe,
 } from "../tools/shared/json-utils.ts";
 
-describe("json-utils", () => {
-	it("strips single-line comments", () => {
+function describe(name: string, fn: () => void) { fn(); }
+function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }
+function expect<T>(actual: T) {
+	return {
+		toBe(expected: unknown) { assert.equal(actual, expected); },
+		toThrow() {
+			let threw = false;
+			try { (actual as () => void)(); } catch { threw = true; }
+			assert.ok(threw, "expected function to throw");
+		},
+	};
+}
+
+void describe("json-utils", () => {
+	void it("strips single-line comments", () => {
 		const input = `{
       "key": "value" // this is a comment
     }`;
@@ -15,7 +29,7 @@ describe("json-utils", () => {
 		expect(parsed.key).toBe("value");
 	});
 
-	it("strips multi-line comments", () => {
+	void it("strips multi-line comments", () => {
 		const input = `{
       /* this is a block comment */
       "key": "value"
@@ -25,7 +39,7 @@ describe("json-utils", () => {
 		expect(parsed.key).toBe("value");
 	});
 
-	it("preserves comments inside strings", () => {
+	void it("preserves comments inside strings", () => {
 		const input = `{
       "key": "value with // comment inside"
     }`;
@@ -34,7 +48,7 @@ describe("json-utils", () => {
 		expect(parsed.key).toBe("value with // comment inside");
 	});
 
-	it("handles escaped quotes in strings", () => {
+	void it("handles escaped quotes in strings", () => {
 		const input = `{
       "key": "value with \\"escaped\\" quotes" // comment
     }`;
@@ -43,7 +57,7 @@ describe("json-utils", () => {
 		expect(parsed.key).toBe('value with "escaped" quotes');
 	});
 
-	it("parseJsonWithComments works", () => {
+	void it("parseJsonWithComments works", () => {
 		const input = `{
       "name": "test", // name field
       "value": 42 /* numeric */
@@ -53,18 +67,18 @@ describe("json-utils", () => {
 		expect(result.value).toBe(42);
 	});
 
-	it("parseJsonWithComments throws on invalid JSON", () => {
+	void it("parseJsonWithComments throws on invalid JSON", () => {
 		const input = "{ invalid }";
 		expect(() => parseJsonWithComments(input)).toThrow();
 	});
 
-	it("parseJsonWithCommentsSafe returns default on error", () => {
+	void it("parseJsonWithCommentsSafe returns default on error", () => {
 		const input = "{ invalid }";
 		const result = parseJsonWithCommentsSafe(input, { fallback: true });
 		expect(result.fallback).toBe(true);
 	});
 
-	it("parseJsonWithCommentsSafe parses valid JSON", () => {
+	void it("parseJsonWithCommentsSafe parses valid JSON", () => {
 		const input = `{ "key": "value" // comment }`;
 		const result = parseJsonWithCommentsSafe<{ key: string }>(input, { key: "default" });
 		expect(result.key).toBe("value");

@@ -22,8 +22,8 @@ import type {
 	ToolCall,
 } from "./types.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
-import { OutputGuard } from "./output-guard.ts";
-import { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
+import type { OutputGuard } from "./output-guard.ts";
+import type { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -173,11 +173,113 @@ function stopReasonFor(
 	toolCalls: ToolCall[],
 ): StopReason {
 	if (toolCalls.length > 0) return "tool_calls";
-	return responseStopReason === "length"
-		? "length"
-		: responseStopReason === "error"
-			? "error"
-			: "stop";
+	if (responseStopReason === "length") return "length";
+	if (responseStopReason === "error") return "error";
+	return "stop";
+}
+
+// Patterns that indicate the model is NOT ready to stop — vague, non-committal,
+// or stuck in "I need to think" mode. Used to decide whether to inject a nudge
+// or emit a task_failed event.
+const NON_COMMITTAL_PATTERNS = [
+	/\b(i\s+(need|should|have|might|could|will)\s+(to\s+)?(?:check|look|think|consider|analyze|investigate|examine|review|verify))\b/i,
+	/\b(let\s+me\s+(think|see|check|try|consider))\b/i,
+	/\b(i'm\s+(going\s+to|thinking\s+about|not\s+sure|still\s+considering))\b/i,
+	/\b(i'll\s+(try|check|look|see|think))\b/i,
+	/\b(need\s+to\s+(check|think|verify|confirm))\b/i,
+	/\b(however|but|although)\s+(i\s+(need|should|have|might))\b/i,
+	/\b(this\s+(requires|needs|demands|warrants)\s+(further|more|additional))\b/i,
+	/\b(i\s+(don't|do\s+not)\s+(know|think\s+|certain))\b/i,
+	/\blet(?:'s|\s+me)\s+(?:step\s+back|circle\s+back|reconsider)\b/i,
+	/\b(at\s+this\s+point|so\s+far)\s+(i\s+(have|can|see)|we\s+(need|should))\b/i,
+];
+
+// Patterns that indicate the model IS ready to stop — explicit completion signals.
+const COMPLETE_PATTERNS = [
+	/\b(task\s+complete|all\s+done|finished|completed\s+successfully|nothing\s+(else|more)\s+to\s+do|no\s+(further|more)\s+(steps?|action|work)|that('s|\s+is)\s+(all|done|complete))\b/i,
+	/^done\s*$/i,
+];
+
+function looksComplete(text: string): boolean {
+	if (!text) return false;
+	return COMPLETE_PATTERNS.some((re) => re.test(text));
+}
+
+function looksNonCommittal(text: string): boolean {
+	if (!text || text.trim().length < 10) return false;
+	return NON_COMMITTAL_PATTERNS.some((re) => re.test(text));
+}
+
+function lastAssistantContent(messages: Message[]): string {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (m.role === "assistant" && typeof m.content === "string") {
+			return m.content;
+		}
+	}
+	return "";
+}
+
+function lastHadToolCalls(messages: Message[]): boolean {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (m.role === "assistant") {
+			return (
+				Array.isArray(m.tool_calls) && (m.tool_calls as unknown[]).length > 0
+			);
+		}
+	}
+	return false;
+}
+
+async function emitConclusion(
+	emit: AgentEventSink,
+	newMessages: Message[],
+	iteration: number,
+	maxIterations: number,
+	hadFollowUps: boolean,
+): Promise<void> {
+	const text = lastAssistantContent(newMessages);
+	const hadTools = lastHadToolCalls(newMessages);
+
+	// Normal exit: model had tool calls or explicitly says it's done.
+	if (hadTools) return;
+	if (looksComplete(text)) return;
+
+	// Non-committal text + no follow-ups injected = model is stuck.
+	if (looksNonCommittal(text) && !hadFollowUps) {
+		await emit({
+			type: "task_failed",
+			reason:
+				"Model stopped with non-committal text after " +
+				iteration +
+				" iteration(s). It did not complete the task or produce actionable output.",
+			iteration,
+			lastContent: text.slice(0, 300),
+		});
+		return;
+	}
+
+	// Max iterations reached without completion signals.
+	if (iteration >= maxIterations) {
+		await emit({
+			type: "task_failed",
+			reason:
+				"Reached " +
+				maxIterations +
+				" iteration limit without completing the task. " +
+				(lastCompleteOrVague(text)
+					? "Last response was non-committal."
+					: "Last response did not signal task completion."
+				).trim(),
+			iteration,
+			lastContent: text.slice(0, 300),
+		});
+	}
+}
+
+function lastCompleteOrVague(text: string): boolean {
+	return looksComplete(text) || looksNonCommittal(text);
 }
 
 async function emitMessagePair(
@@ -374,10 +476,9 @@ export async function runAgentLoop(
 			}
 
 			const toolCalls = response?.toolCalls ?? [];
-			const stopReason = stopReasonFor(
-				(response?.stopReason as "stop" | "length" | "error") ?? "stop",
-				toolCalls,
-			);
+			const rawStopReason =
+				(response?.stopReason as "stop" | "length" | "error") ?? "stop";
+			const stopReason = stopReasonFor(rawStopReason, toolCalls);
 
 			// Output guard: check for empty/degenerate responses
 			if (outputGuard) {
@@ -443,6 +544,7 @@ export async function runAgentLoop(
 
 			const toolResults: Message[] = [];
 			hasMoreToolCalls = false;
+			let toolTerminated = false;
 			for (const toolCall of toolCalls) {
 				const prepared = registry.prepare(toolCall);
 				// Emit typed tool execution start
@@ -519,7 +621,11 @@ export async function runAgentLoop(
 				newMessages.push(toolResult);
 				toolResults.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
-				hasMoreToolCalls = after?.terminate !== true;
+				if (after?.terminate === true) {
+					toolTerminated = true;
+					break;
+				}
+				hasMoreToolCalls = true;
 			}
 
 			await emitTyped(config.extensionBus, {
@@ -554,20 +660,68 @@ export async function runAgentLoop(
 			);
 			if (prepared) messages = prepared;
 
-			const stop = await shouldStop(
-				[
-					config.shouldStopAfterTurn,
-					config.internalHooks?.shouldStopAfterTurn,
-					config.hooks?.shouldStopAfterTurn,
-				],
-				{
-					messages,
-					iteration,
-					hadToolCalls: toolCalls.length > 0,
-					message: assistant,
-					toolResults,
-				},
-			);
+			// Fix #4: when a tool signals terminate, still drain followUps before exiting.
+			// This prevents skipping queued follow-up messages (e.g. steering injected
+			// mid-turn) just because a tool requested termination.
+			if (toolTerminated) {
+				const followUpsOnTerminate = await firstMessages([
+					() =>
+						config.getFollowUpMessages?.({
+							messages,
+							iteration,
+							assistantText: assistantText(newMessages.at(-1)),
+							stopReason: "stop",
+						}),
+					() =>
+						config.internalHooks?.getFollowUpMessages?.({
+							messages,
+							iteration,
+							assistantText: assistantText(newMessages.at(-1)),
+							stopReason: "stop",
+						}),
+					() =>
+						config.hooks?.getFollowUpMessages?.({
+							messages,
+							iteration,
+							assistantText: assistantText(newMessages.at(-1)),
+							stopReason: "stop",
+						}),
+				]);
+				if (followUpsOnTerminate.length > 0) {
+					pendingMessages = followUpsOnTerminate;
+					hasMoreToolCalls = false;
+					// Re-enter inner loop with follow-up messages
+					continue;
+				}
+				await emitTyped(config.extensionBus, {
+					type: "agent_end",
+					messages: newMessages,
+				});
+				await emit({ type: "agent_end", messages: newMessages });
+				return newMessages;
+			}
+
+			// Fix #5: only invoke shouldStopAfterTurn when no tool calls ran.
+			// Tool turns always continue unless the hook is explicitly wired to stop
+			// on tool turns — checking it unconditionally causes premature exits when
+			// hooks have stale state from a previous no-tool turn.
+			const stop =
+				toolCalls.length === 0
+					? await shouldStop(
+							[
+								config.shouldStopAfterTurn,
+								config.internalHooks?.shouldStopAfterTurn,
+								config.hooks?.shouldStopAfterTurn,
+							],
+							{
+								messages,
+								iteration,
+								hadToolCalls: false,
+								message: assistant,
+								toolResults,
+							},
+						)
+					: false;
 			if (stop) {
 				await emitTyped(config.extensionBus, {
 					type: "agent_end",
@@ -585,6 +739,7 @@ export async function runAgentLoop(
 			]);
 		}
 
+		// Agent would stop here — drain followUp queue (pi-style outer loop).
 		const followUps = await firstMessages([
 			() =>
 				config.getFollowUpMessages?.({
@@ -609,34 +764,22 @@ export async function runAgentLoop(
 				}),
 		]);
 
-		// Default continuation: when model stopped without tool calls, nudge it
-		// to continue rather than exiting. The model often says "stop" prematurely
-		// (local models, context pressure, compaction confusion), so this prevents
-		// the agent from abandoning mid-task.
-		if (config.continuationEnabled === true && followUps.length === 0) {
-			// Find last assistant message (newMessages interleaves assistant + tool results)
-			let lastAssistant: Message | undefined;
-			for (let i = newMessages.length - 1; i >= 0; i--) {
-				if (newMessages[i].role === "assistant") {
-					lastAssistant = newMessages[i];
-					break;
-				}
-			}
-			const lastWasToolCall =
-				lastAssistant &&
-				typeof lastAssistant.content === "string" &&
-				lastAssistant.tool_calls
-					? Array.isArray(lastAssistant.tool_calls) &&
-						lastAssistant.tool_calls.length > 0
-					: false;
-			if (!lastWasToolCall) {
-				// Model stopped without tool calls — it may be done, but with
-				// continuation enabled we give it one more chance to continue.
+		// Runner-level continuation nudge: fires when no follow-ups from hooks
+		// and no hook-level nudge is active. When continuationEnabled is true,
+		// builtin-hooks handles all continuation logic — skip runner nudge to
+		// avoid conflicts (e.g., builtin-hooks returns undefined when no tasks
+		// remain, runner would still fire a generic "continue" nudge).
+		const hookLevelNudgeActive = config.continuationEnabled === true;
+		if (!hookLevelNudgeActive && followUps.length === 0) {
+			const text = lastAssistantContent(newMessages);
+			const hadTools = lastHadToolCalls(newMessages);
+
+			if (!hadTools && !looksComplete(text)) {
 				followUps.push({
 					role: "user" as const,
 					content:
-						"You stopped without completing your work. Continue with the next step. " +
-						"Do not repeat what you already did — move forward.",
+						"Continue with the next step. If the task is fully complete, " +
+						"say so explicitly. Otherwise keep working — do not stop prematurely.",
 				});
 			}
 		}
@@ -649,12 +792,29 @@ export async function runAgentLoop(
 	}
 
 	if (iteration >= maxIterations) {
+		const lastText = lastAssistantContent(newMessages);
+		await emit({
+			type: "task_failed",
+			reason: `Agent reached the ${maxIterations}-turn safety limit without finishing`,
+			iteration,
+			lastContent: lastText,
+		});
 		await emit({
 			type: "max_iterations",
 			iterations: iteration,
 			limit: maxIterations,
 		});
 	}
+
+	// Emit conclusion / task_failed before agent_end
+	const hadFollowUps = iteration < maxIterations;
+	await emitConclusion(
+		emit,
+		newMessages,
+		iteration,
+		maxIterations,
+		hadFollowUps,
+	);
 
 	// Final output guard reset when agent ends
 	outputGuard?.reset();

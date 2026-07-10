@@ -3,7 +3,7 @@
 
 import type { Component, Focusable } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
-import { highlightAuto } from "@logician-agent-core/tools/shared/syntax-highlighter.ts";
+import { highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";

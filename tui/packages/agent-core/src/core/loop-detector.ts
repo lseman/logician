@@ -373,6 +373,12 @@ export class LoopDetector {
 		}
 	}
 
+	// ── Consume a turn (advance the turn counter) ─────────────────────────
+	consumeTurn(): void {
+		// No-op on the detector itself; the harness tracks turn count.
+		// This method exists for the harness to signal turn completion.
+	}
+
 	// ── Reset ─────────────────────────────────────────────────────────────
 	reset(): void {
 		this.history = [];

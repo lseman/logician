@@ -107,9 +107,17 @@ export function createAssistantMessage(
 	content: string,
 	toolCalls?: Array<{ id: string; name: string; arguments: string }>,
 ): Message {
+	// An assistant message must have either content or tool_calls or the API
+	// rejects it with 400 "Assistant message must contain either 'content' or
+	// 'tool_calls'!".  When the model returns nothing, keep content as a
+	// non-empty string so the message is still valid and the loop can recover
+	// (compact, nudge, or abort) instead of looping forever on the same error.
+	const effectiveContent = toolCalls && toolCalls.length > 0
+		? content || null
+		: content || " ";
 	return {
 		role: "assistant",
-		content: content || null,
+		content: effectiveContent,
 		tool_calls: toolCalls,
 		timestamp: Date.now(),
 	};
@@ -150,6 +158,13 @@ export function convertToChatFormat(
 			}));
 		}
 		if (m.name) obj.name = m.name;
+		// Defensive: an assistant message must have at least 'content' or
+		// 'tool_calls' or the API rejects it with 400.  createAssistantMessage
+		// already prevents this, but guard here too so any stray message
+		// doesn't crash the loop.
+		if (m.role === "assistant" && !obj.content && !obj.tool_calls) {
+			obj.content = "";
+		}
 		return obj;
 	});
 }

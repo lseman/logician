@@ -12,9 +12,26 @@
 		"./slash-commands": "./src/slash-commands.ts",
 		"./transcript": "./src/transcript.ts",
 		"./events": "./src/events.ts",
-		"./loop-manager": "./src/loop-manager.ts"
+		"./loop-manager": "./src/loop-manager.ts",
+		"./mcp": "./src/mcp/index.ts",
+		"./mcp/*": "./src/mcp/*",
+		"./skills": "./src/skills.ts",
+		"./subagents": "./src/subagents/subagent.ts",
+		"./subagents/*": "./src/subagents/*",
+		"./system-prompt": "./src/system-prompt.ts",
+		"./reasoners": "./src/reasoners/index.ts",
+		"./reasoners/*": "./src/reasoners/*",
+		"./context-files": "./src/context-files/index.ts",
+		"./context-files/*": "./src/context-files/*",
+		"./prompts": "./src/prompts/index.ts",
+		"./prompts/*": "./src/prompts/*",
+		"./trust": "./src/trust/index.ts",
+		"./trust/*": "./src/trust/*",
+		"./tools": "./src/tools/index.ts",
+		"./tools/*": "./src/tools/*"
 	},
 	"scripts": {
+		"test": "tsx --test src/__tests__/*.test.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

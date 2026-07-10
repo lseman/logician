@@ -90,8 +90,12 @@ function detectCycle(tasks: Task[], taskId: number): boolean {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 
+function stripNewlines(s: string): string {
+	return s.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function actionCreate(params: Record<string, unknown>): string {
-	const subject = String(params.subject ?? "").trim();
+	const subject = stripNewlines(String(params.subject ?? ""));
 	if (!subject) return "Error: subject is required for create.";
 
 	const task: Task = {
@@ -101,8 +105,9 @@ function actionCreate(params: Record<string, unknown>): string {
 	};
 
 	if (params.description) task.description = String(params.description);
-	if (params.activeForm) task.activeForm = String(params.activeForm);
-	if (params.owner) task.owner = String(params.owner);
+	if (params.activeForm)
+		task.activeForm = stripNewlines(String(params.activeForm));
+	if (params.owner) task.owner = stripNewlines(String(params.owner));
 	if (params.metadata)
 		task.metadata = params.metadata as Record<string, unknown>;
 
@@ -191,12 +196,14 @@ function actionUpdate(params: Record<string, unknown>): string {
 	}
 
 	// Apply mutations
-	if (params.subject !== undefined) task.subject = String(params.subject);
+	if (params.subject !== undefined)
+		task.subject = stripNewlines(String(params.subject));
 	if (params.description !== undefined)
 		task.description = String(params.description);
 	if (params.activeForm !== undefined)
-		task.activeForm = String(params.activeForm);
-	if (params.owner !== undefined) task.owner = String(params.owner);
+		task.activeForm = stripNewlines(String(params.activeForm));
+	if (params.owner !== undefined)
+		task.owner = stripNewlines(String(params.owner));
 
 	// Metadata merge (null removes key)
 	if (params.metadata !== undefined) {
@@ -374,7 +381,9 @@ export const todo_tool: Tool = {
 		"Subject must be short and imperative (e.g. 'Research existing tool'); description is for long-form detail. " +
 		"activeForm is a present-continuous label shown while in_progress (e.g. 'writing tests').",
 	promptSnippet: "Manage task list with status tracking and dependencies",
-	promptGuidelines: ["Use todo to track multi-step progress; mark in_progress before work, completed immediately when done"],
+	promptGuidelines: [
+		"Use todo to track multi-step progress; mark in_progress before work, completed immediately when done",
+	],
 	parameters: {
 		type: "object",
 		properties: {

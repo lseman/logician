@@ -46,7 +46,10 @@ export type AgentEventBody =
 			tokensBefore: number;
 			tokensAfter: number;
 	  }
-	| { type: "compaction_start"; reason: "manual" | "auto" | "threshold" | "overflow" }
+	| {
+			type: "compaction_start";
+			reason: "manual" | "auto" | "threshold" | "overflow";
+	  }
 	| {
 			type: "compaction_end";
 			reason: "manual" | "auto" | "threshold" | "overflow";
@@ -100,6 +103,12 @@ export type AgentEventBody =
 	| { type: "model_select"; model: string; index: number }
 	| { type: "max_iterations"; iterations: number; limit: number }
 	| {
+			type: "task_failed";
+			reason: string;
+			iteration: number;
+			lastContent?: string;
+	  }
+	| {
 			type: "loop_detected";
 			message: string;
 			attempt?: number;
@@ -130,7 +139,12 @@ export type AgentEventBody =
 	| { type: "budget_exhausted"; usedTokens: number; limitTokens: number }
 	| { type: "error"; message: string; error?: unknown }
 	| { type: "model_update"; model: string }
-	| { type: "model_cycle"; model: string; fromModel: string; thinkingLevel: string }
+	| {
+			type: "model_cycle";
+			model: string;
+			fromModel: string;
+			thinkingLevel: string;
+	  }
 	| { type: "thinking_level_changed"; level: string }
 	| { type: "thinking_level_clamped"; level: string; reason: string }
 	| { type: "tools_update"; toolNames: string[] }
@@ -140,7 +154,24 @@ export type AgentEventBody =
 			clearedFollowUp: readonly string[];
 			clearedNextTurn: readonly string[];
 	  }
-	| { type: "settled"; nextTurnCount: number };
+	| { type: "settled"; nextTurnCount: number }
+	| {
+			type: "thinking_loop_detected";
+			message: string;
+			strategy:
+				| "thinking_only"
+				| "escalation"
+				| "meta_reasoning"
+				| "budget_exhausted";
+			iteration: number;
+	  }
+	| {
+			type: "thinking_loop_stats";
+			consecutiveThinkingOnly: number;
+			totalThinkingTurns: number;
+			totalThinkingTokens: number;
+			metaReasoningHits: number;
+	  };
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;
 export type EventHandler = (event: AgentEvent) => void;

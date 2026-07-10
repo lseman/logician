@@ -11,7 +11,7 @@
 		"start": "tsx packages/tui/src/index.ts",
 		"lint": "eslint packages/",
 		"lint:fix": "eslint packages/ --fix",
-		"test": "tsx packages/agent-core/src/__tests__/*.test.ts",
+		"test": "tsx --test packages/agent-core/src/__tests__/*.test.ts packages/coding-agent/src/__tests__/*.test.ts",
 		"typecheck": "tsc --noEmit -p packages/agent-core/tsconfig.json -p packages/coding-agent/tsconfig.json -p packages/tui/tsconfig.json"
 	},
 	"engines": {

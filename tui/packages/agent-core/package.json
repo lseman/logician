@@ -1,7 +1,7 @@
 {
 	"name": "@logician/agent-core",
 	"version": "0.2.0",
-	"description": "Agent engine for Logician — loop, tools, hooks, compaction, trust",
+	"description": "Lean agent engine for Logician — loop, harness, hooks, types",
 	"type": "module",
 	"main": "src/index.ts",
 	"exports": {
@@ -11,11 +11,7 @@
 		"./extensions/*": "./src/extensions/*",
 		"./hooks/*": "./src/hooks/*",
 		"./compaction/*": "./src/compaction/*",
-		"./context-files/*": "./src/context-files/*",
-		"./message-queue/*": "./src/message-queue/*",
-		"./prompts/*": "./src/prompts/*",
-		"./trust/*": "./src/trust/*",
-		"./reasoners/*": "./src/reasoners/*"
+		"./message-queue/*": "./src/message-queue/*"
 	},
 	"scripts": {
 		"test": "tsx src/__tests__/*.test.ts",
