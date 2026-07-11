@@ -20,9 +20,9 @@ import type {
 } from "./types.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import { createExtensionState } from "./state.ts";
-import { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
-import { createExtensionContext } from "../hooks/extension-context.ts";
-import type { ExtensionEventName } from "../hooks/extension-events.ts";
+import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import { createExtensionContext } from "../hooks/extensions/context.ts";
+import type { ExtensionEventName } from "../hooks/extensions/events.ts";
 
 // ============================================================================
 // No-op UI (for headless/non-TUI contexts)

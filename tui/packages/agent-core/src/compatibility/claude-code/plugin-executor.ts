@@ -1,4 +1,4 @@
-// ── Plugin hook executor ──────────────────────────────────────────────────────
+// ── Claude Code plugin hook executor ─────────────────────────────────────────
 // Loads, parses, matches, and executes plugin hooks. Handles shell/HTTP/prompt
 // command types, JSON response parsing, and result merging.
 
@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { stripJsonComments } from "./json-utils.ts";
+import { stripJsonComments } from "../../tools/shared/json-utils.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

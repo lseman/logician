@@ -1,4 +1,4 @@
-// ── Plugin manager ────────────────────────────────────────────────────────────
+// ── Claude Code plugin manager ───────────────────────────────────────────────
 // Installs, lists, updates, and removes plugins. Manages the registry JSON.
 // Depends on plugins-executor for hook loading/execution.
 
@@ -28,7 +28,7 @@ import {
 	buildHookInput,
 	matcherMatches,
 	type HookEventType,
-} from "./plugins-executor.ts";
+} from "./plugin-executor.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -503,8 +503,8 @@ export class TsPluginManager {
 	private async getHooks(
 		eventType: string,
 		matcherValue = "",
-	): Promise<import("./plugins-executor.ts").LoadedHook[]> {
-		const hooks: import("./plugins-executor.ts").LoadedHook[] = [];
+	): Promise<import("./plugin-executor.ts").LoadedHook[]> {
+		const hooks: import("./plugin-executor.ts").LoadedHook[] = [];
 		for (const [pluginId, inst] of await this.allInstalls()) {
 			if (!this.isEnabled(inst) || !(await isDir(inst.installPath))) continue;
 			for (const hook of await loadPluginHooks(inst.installPath, pluginId)) {

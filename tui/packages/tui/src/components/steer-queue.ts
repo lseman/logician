@@ -74,12 +74,7 @@ export class SteerQueue implements Component {
 			);
 		}
 
-		lines.push(
-			pad(
-				clampLine("   \x1b[2mctrl+u to edit queued messages\x1b[0m", width),
-				width,
-			),
-		);
+		lines.push(pad(clampLine("   \x1b[2m/steer-now process · /queue-drop N remove · /queue-clear clear\x1b[0m", width), width));
 
 		return lines;
 	}

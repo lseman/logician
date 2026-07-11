@@ -238,6 +238,19 @@ function stringArg(
 	return typeof value === "string" ? value : undefined;
 }
 
+/** Read an early string field from streamed JSON before the full args parse. */
+function streamedStringArg(json: string | undefined, key: string): string | undefined {
+	if (!json) return undefined;
+	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = new RegExp(`"${escapedKey}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(json);
+	if (!match) return undefined;
+	try {
+		return JSON.parse(`"${match[1]}"`) as string;
+	} catch {
+		return match[1];
+	}
+}
+
 function compactText(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
 }
@@ -1117,7 +1130,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 		// Extract file path for write_file / edit_file to show in header
 		const filePath = (() => {
 			const args = tool.args || {};
-			const path = stringArg(args, "path") || stringArg(args, "file_path");
+			const path =
+				stringArg(args, "path") ||
+				stringArg(args, "file_path") ||
+				streamedStringArg(tool.partialResult, "path") ||
+				streamedStringArg(tool.partialResult, "file_path") ||
+				(tool.tool_name === "write_file"
+					? /^Created\s+(.+?)(?:\s+\([^\n]*\))?(?:\n|$)/.exec(tool.result ?? "")?.[1]
+					: undefined);
 			if (!path) return "";
 			if (tool.tool_name === "write_file" || tool.tool_name === "edit_file") {
 				return path;
@@ -1126,6 +1146,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 		})();
 
 		const summary = this.toolSummary(tool);
+		const elapsed = tool.durationMs !== undefined
+			? tool.durationMs < 1000
+				? `${tool.durationMs}ms`
+				: `${(tool.durationMs / 1000).toFixed(1)}s`
+			: "";
 		const hint = this.toolsExpanded
 			? `${DIM}ctrl+o collapse${RESET}`
 			: `${DIM}ctrl+o expand${RESET}`;
@@ -1139,14 +1164,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 				`${DIM}(${RESET}${status}${DIM})${RESET}`;
 
 		lines.push(
-			[base, summary ? `${DIM}${summary}${RESET}` : "", hint]
+			[base, summary ? `${DIM}${summary}${RESET}` : "", elapsed ? `${DIM}· ${elapsed}${RESET}` : "", hint]
 				.filter(Boolean)
 				.join(" "),
 		);
 
 		// Always show the result (diff) for edit_file and write_file even when collapsed.
 		const showDiffResult =
-			["edit_file", "write_file"].includes(tool.tool_name) && !!tool.result;
+			!this.toolsExpanded &&
+			["edit_file", "write_file"].includes(tool.tool_name) &&
+			!!tool.result;
 		if (showDiffResult) {
 			const resultText = tool.result!.startsWith("Error:")
 				? tool.result!
@@ -1174,6 +1201,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 		if (!this.toolsExpanded) return lines;
 
+		lines.push(`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`);
 		for (const detailLine of this.toolDetailLines(tool, width - 2)) {
 			const wrapped = this.wrapText(detailLine, Math.max(20, width - 4));
 			for (const line of wrapped) {
@@ -1182,6 +1210,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 
 		return lines;
+	}
+
+	private detailSection(label: string, meta = ""): string {
+		return `${theme.fg("active", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
 	}
 
 	private toolSummary(tool: ToolExecution): string {
@@ -1244,7 +1276,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		} else {
 			const argText = JSON.stringify(args, null, 2);
 			if (argText && argText !== "{}") {
-				lines.push(`${BOLD}args${RESET}`);
+				lines.push(this.detailSection("arguments"));
 				lines.push(...argText.split("\n"));
 			}
 		}
@@ -1256,7 +1288,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			) &&
 			!tool.tool_name.startsWith("mcp__")
 		) {
-			lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
+			lines.push(this.detailSection(tool.isError ? "error" : "result"));
 			lines.push(...this.previewBlock(result, width));
 		} else if (!result) {
 			lines.push(`${DIM}waiting for result...${RESET}`);
@@ -1272,14 +1304,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const content = stringArg(args, "content");
 		const streaming = !tool.isComplete;
 
-		if (path) lines.push(`${BOLD}path${RESET} ${path}`);
+		if (path) lines.push(this.detailSection("file", path));
 
 		if (content !== undefined && content !== "") {
 			const lineCount = content.split("\n").length;
 			const meta = streaming
 				? `${DIM}${content.length} bytes · ${lineCount} lines · streaming${RESET}`
 				: `${DIM}${content.length} bytes · ${lineCount} lines${RESET}`;
-			lines.push(`${BOLD}content${RESET} ${meta}`);
+			lines.push(this.detailSection("content", meta));
 			const lang = this.detectLanguage(path);
 			lines.push(...this.renderFileContent(content, width, lineCount, lang));
 		} else if (streaming) {
@@ -1292,11 +1324,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? tool.result
 				: tool.result;
 			if (tool.isError) {
-				lines.push(`${BOLD}error${RESET}`);
+				lines.push(this.detailSection("error"));
 				lines.push(...this.previewBlock(resultText, width));
 			} else if (!content) {
 				// No content shown above; show the diff result.
-				lines.push(`${BOLD}result${RESET}`);
+				lines.push(this.detailSection("result"));
 				lines.push(...this.renderDiffBlock(resultText, width));
 			}
 		} else if (!streaming && !content) {
@@ -1314,10 +1346,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const streaming = !tool.isComplete;
 		const edits = normalizeEditArgs(args);
 
-		if (path) lines.push(`${BOLD}path${RESET} ${path}`);
+		if (path) lines.push(this.detailSection("file", path));
 
 		for (let i = 0; i < edits.length; i++) {
-			lines.push(`${BOLD}edit ${i + 1}${RESET}`);
+			lines.push(this.detailSection(`edit ${i + 1}`, `${i + 1} of ${edits.length}`));
 			const oldText = edits[i].oldText;
 			const newText = edits[i].newText;
 
@@ -1327,7 +1359,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				const oldMeta = streaming
 					? `${DIM}${oldText.length} bytes · ${oldLineCount} lines · streaming${RESET}`
 					: `${DIM}${oldText.length} bytes · ${oldLineCount} lines${RESET}`;
-				lines.push(`${BOLD}text${RESET} ${oldMeta}`);
+				lines.push(`${DIM}${oldMeta}${RESET}`);
 				lines.push(...this.renderPiContent(oldText, width, oldLineCount));
 			}
 			if (newText) {
@@ -1336,7 +1368,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				const newMeta = streaming
 					? `${DIM}${newText.length} bytes · ${newLineCount} lines · streaming${RESET}`
 					: `${DIM}${newText.length} bytes · ${newLineCount} lines${RESET}`;
-				lines.push(`${BOLD}text${RESET} ${newMeta}`);
+				lines.push(`${DIM}${newMeta}${RESET}`);
 				lines.push(...this.renderPiContent(newText, width, newLineCount));
 			}
 		}
@@ -1349,7 +1381,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			const resultText = tool.result.startsWith("Error:")
 				? tool.result
 				: tool.result;
-			lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
+			lines.push(this.detailSection(tool.isError ? "error" : "result"));
 			if (tool.isError) {
 				lines.push(...this.previewBlock(resultText, width));
 			} else {
@@ -1364,8 +1396,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const args = tool.args || {};
 		const lines: string[] = [];
 		const path = stringArg(args, "path") || stringArg(args, "file_path");
-		if (path) lines.push(`${BOLD}path${RESET} ${path}`);
-		if (args.staged) lines.push(`${BOLD}mode${RESET} staged`);
+		if (path) lines.push(this.detailSection("file", path));
+		if (args.staged) lines.push(`${DIM}staged changes${RESET}`);
 		const result = tool.result ?? tool.partialResult;
 		if (result) lines.push(...this.renderDiffBlock(result, width));
 		return lines;
@@ -1377,7 +1409,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const command = stringArg(args, "command") || "";
 		const timeout = args.timeout ? `${Number(args.timeout)}ms` : "30000ms";
 		if (command) {
-			lines.push(`${BOLD}command${RESET} ${DIM}${timeout}${RESET}`);
+			lines.push(this.detailSection("command", `timeout ${timeout}`));
 			lines.push(...this.previewBlock(command, width));
 		}
 		const result = tool.result ?? tool.partialResult;
@@ -1387,7 +1419,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 					? "error output"
 					: "output"
 				: "streaming output";
-			lines.push(`${BOLD}${label}${RESET}`);
+			lines.push(this.detailSection(label));
 			lines.push(...this.renderTerminalBlock(result, width));
 		} else {
 			lines.push(`${DIM}waiting for command output...${RESET}`);
@@ -1400,17 +1432,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const args = tool.args || {};
 		const serverParts = tool.tool_name.replace(/^mcp__/, "").split("__");
 		if (serverParts.length >= 2) {
-			lines.push(`${BOLD}server${RESET} ${serverParts[0]}`);
-			lines.push(`${BOLD}tool${RESET} ${serverParts.slice(1).join("__")}`);
+			lines.push(this.detailSection("mcp", `${serverParts[0]} · ${serverParts.slice(1).join("__")}`));
 		}
 		const argText = JSON.stringify(args, null, 2);
 		if (argText && argText !== "{}") {
-			lines.push(`${BOLD}args${RESET}`);
+			lines.push(this.detailSection("arguments"));
 			lines.push(...this.previewBlock(argText, width));
 		}
 		const result = tool.result ?? tool.partialResult;
 		if (result) {
-			lines.push(`${BOLD}${tool.isError ? "mcp error" : "mcp result"}${RESET}`);
+			lines.push(this.detailSection(tool.isError ? "mcp error" : "mcp result"));
 			lines.push(...this.renderMcpResultBlocks(result, width));
 		}
 		return lines;

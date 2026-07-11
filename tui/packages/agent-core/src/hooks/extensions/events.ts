@@ -6,7 +6,7 @@
 // Events are typed and emitted via ExtensionEventBus. Extensions subscribe
 // per-event-type and receive strongly-typed payloads.
 
-import type { Message, StopReason } from "../core/types.ts";
+import type { Message, StopReason } from "../../core/types.ts";
 
 // ============================================================================
 // Extension lifecycle events

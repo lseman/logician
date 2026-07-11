@@ -1,16 +1,17 @@
-// ── OpenClaude/Claude plugin hook adapter ────────────────────────────────────
-// Converts JSON/stdin plugin hooks into AgentHooks so the runner only
-// deals with one hook contract.
+// ── Claude Code compatibility hook layer ────────────────────────────────────
+// Adapts the Claude Code plugin hook protocol (JSON over stdin, Claude event
+// names, and Claude hook responses) to Logician's native AgentHooks contract.
+// This is a compatibility boundary, not Logician's general hook system.
 
-import { createUserMessage } from "../core/messages.ts";
+import { createUserMessage } from "../../core/messages.ts";
 import type {
 	AgentHooks,
 	Message,
 	ToolCall,
-} from "../core/types.ts";
-import { runHookEvent, type PluginCommandResult } from "../tools/shared/plugins.ts";
+} from "../../core/types.ts";
+import { runHookEvent, type PluginCommandResult } from "../../tools/shared/plugins.ts";
 
-export interface PluginHookLayerOptions {
+export interface ClaudeCodeHookLayerOptions {
 	enabled: boolean;
 	sessionId: string;
 	transcriptPath: string;
@@ -19,24 +20,24 @@ export interface PluginHookLayerOptions {
 	onHookPermissionDenied?: (toolCall: ToolCall) => void;
 }
 
-export interface PluginHookLayer {
+export interface ClaudeCodeHookLayer {
 	hooks: AgentHooks | undefined;
 	userPromptMessages(prompt: string): Promise<Message[]>;
 	finalStop(): Promise<void>;
 	readonly stopObserved: boolean;
 }
 
-export function createPluginHookLayer(
-	options: PluginHookLayerOptions,
-): PluginHookLayer {
-	return new RuntimePluginHookLayer(options);
+export function createClaudeCodeHookLayer(
+	options: ClaudeCodeHookLayerOptions,
+): ClaudeCodeHookLayer {
+	return new RuntimeClaudeCodeHookLayer(options);
 }
 
-class RuntimePluginHookLayer implements PluginHookLayer {
+class RuntimeClaudeCodeHookLayer implements ClaudeCodeHookLayer {
 	private stopHookContinuationActive = false;
 	private _stopObserved = false;
 
-	constructor(private readonly options: PluginHookLayerOptions) {}
+	constructor(private readonly options: ClaudeCodeHookLayerOptions) {}
 
 	get hooks(): AgentHooks | undefined {
 		if (!this.options.enabled) return undefined;
@@ -150,6 +151,13 @@ class RuntimePluginHookLayer implements PluginHookLayer {
 		}
 	}
 }
+
+/** @deprecated Use ClaudeCodeHookLayerOptions. */
+export type PluginHookLayerOptions = ClaudeCodeHookLayerOptions;
+/** @deprecated Use ClaudeCodeHookLayer. */
+export type PluginHookLayer = ClaudeCodeHookLayer;
+/** @deprecated Use createClaudeCodeHookLayer. */
+export const createPluginHookLayer = createClaudeCodeHookLayer;
 
 function contextText(result: PluginCommandResult | null): string {
 	return (result?.additional_contexts || [])

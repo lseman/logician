@@ -14,7 +14,7 @@ import type {
 	ExtensionEventResult,
 	ExtensionEventHandler,
 	ExtensionErrorHandler,
-} from "./extension-events.ts";
+} from "./events.ts";
 
 export interface ExtensionEventBusOptions {
 	/** Called when a handler throws. Default: log to console.error. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { detectsCircling } from "../hooks/builtin-hooks.ts";
+import { detectsCircling } from "../hooks/builtin/builtin-hooks.ts";
 
 // ── detectsCircling ───────────────────────────────────────────────────────
 

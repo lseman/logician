@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { HookBus } from "../hooks/hook-bus.ts";
+import { HookBus } from "../hooks/native/hook-bus.ts";
 import type { ToolCall } from "../core/types.ts";
 
 const ctx = {
@@ -159,4 +159,39 @@ void test("beforeCompact cancellation short-circuits later hooks", async () => {
 	});
 	assert.deepEqual(result, { cancel: true });
 	assert.equal(laterRan, false);
+});
+
+void test("handlers use deterministic priority ordering and stable diagnostics", async () => {
+	const bus = new HookBus();
+	const order: string[] = [];
+	bus.on("afterProviderResponse", () => { order.push("normal"); }, { id: "normal", source: "extension" });
+	bus.on("afterProviderResponse", () => { order.push("policy"); }, { id: "policy", source: "builtin", priority: 100 });
+	await bus.toHooks().afterProviderResponse?.({ content: "", toolCallCount: 0, iteration: 1, model: "test", stopReason: "stop" });
+	assert.deepEqual(order, ["policy", "normal"]);
+	assert.deepEqual(bus.getDiagnostics().map((item) => item.id), ["policy", "normal"]);
+	assert.throws(() => bus.on("afterProviderResponse", () => {}, { id: "policy" }), /Duplicate hook handler id/);
+});
+
+void test("dispose runs cleanups once and rejects new registrations", async () => {
+	const bus = new HookBus();
+	const order: number[] = [];
+	bus.addCleanup(() => { order.push(1); });
+	bus.addCleanup(async () => { order.push(2); });
+	await bus.dispose();
+	await bus.dispose();
+	assert.deepEqual(order, [2, 1]);
+	assert.throws(() => bus.on("afterProviderResponse", () => {}), /disposed/);
+});
+
+void test("timeout aborts the handler signal instead of only abandoning its promise", async () => {
+	const bus = new HookBus({ defaultTimeoutMs: 15 });
+	let observedAbort = false;
+	bus.on("afterProviderResponse", async (_ctx, signal) => {
+		await new Promise<void>((resolve) => {
+			signal?.addEventListener("abort", () => { observedAbort = true; resolve(); }, { once: true });
+		});
+	}, { id: "abort-aware" });
+	await bus.toHooks().afterProviderResponse?.({ content: "", toolCallCount: 0, iteration: 1, model: "test", stopReason: "stop" });
+	assert.equal(observedAbort, true);
+	assert.equal(bus.getDiagnostics()[0]?.timeouts, 1);
 });

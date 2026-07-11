@@ -2,8 +2,8 @@
 
 import test, { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
-import { createExtensionContext } from "../hooks/extension-context.ts";
+import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import { createExtensionContext } from "../hooks/extensions/context.ts";
 
 describe("ExtensionEventBus", () => {
 	it("emits event to registered handler", async () => {

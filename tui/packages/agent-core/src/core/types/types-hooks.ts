@@ -149,60 +149,72 @@ export interface BeforeAgentStartResult {
 export interface AgentHooks {
 	beforeAgentStart?: (
 		ctx: BeforeAgentStartContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<BeforeAgentStartResult | undefined>
 		| BeforeAgentStartResult
 		| undefined;
 	beforeToolCall?: (
 		ctx: BeforeToolCallContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<BeforeToolCallResult | undefined>
 		| BeforeToolCallResult
 		| undefined;
 	afterToolCall?: (
 		ctx: AfterToolCallContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<AfterToolCallResult | undefined>
 		| AfterToolCallResult
 		| undefined;
 	prepareNextTurn?: (
 		ctx: PrepareNextTurnContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<PrepareNextTurnResult | undefined>
 		| PrepareNextTurnResult
 		| undefined;
 	transformContext?: (
 		ctx: TransformContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<TransformContextResult | undefined>
 		| TransformContextResult
 		| undefined;
 	beforeProviderRequest?: (
 		ctx: BeforeProviderRequestContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<BeforeProviderRequestResult | undefined>
 		| BeforeProviderRequestResult
 		| undefined;
 	beforeProviderPayload?: (
 		ctx: BeforeProviderPayloadContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<BeforeProviderPayloadResult | undefined>
 		| BeforeProviderPayloadResult
 		| undefined;
 	afterProviderResponse?: (
 		ctx: AfterProviderResponseContext,
+		signal?: AbortSignal,
 	) => Promise<void> | void;
 	shouldStopAfterTurn?: (
 		ctx: ShouldStopAfterTurnContext,
+		signal?: AbortSignal,
 	) => Promise<boolean | undefined> | boolean | undefined;
 	getSteeringMessages?: (
 		ctx: GetSteeringMessagesContext,
+		signal?: AbortSignal,
 	) => Promise<Message[] | undefined> | Message[] | undefined;
 	getFollowUpMessages?: (
 		ctx: GetFollowUpMessagesContext,
+		signal?: AbortSignal,
 	) => Promise<Message[] | undefined> | Message[] | undefined;
 	beforeCompact?: (
 		ctx: BeforeCompactContext,
+		signal?: AbortSignal,
 	) =>
 		| Promise<BeforeCompactResult | undefined>
 		| BeforeCompactResult

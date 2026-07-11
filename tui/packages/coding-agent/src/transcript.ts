@@ -24,6 +24,8 @@ export interface ToolExecution {
 	partialResult?: string;
 	isError: boolean;
 	isComplete: boolean;
+	startedAt?: number;
+	durationMs?: number;
 }
 
 // ── Chunk model ───────────────────────────────────────────────────────────────
@@ -333,6 +335,7 @@ export class Transcript {
 				partialResult: undefined,
 				isError: false,
 				isComplete: false,
+				startedAt: Date.now(),
 			},
 			isComplete: false,
 		});
@@ -387,6 +390,17 @@ export class Transcript {
 
 		// Mark the tool as finished
 		const tool = toolChunk.tool;
+		if (tool.partialResult) {
+			try {
+				const streamedArgs = JSON.parse(tool.partialResult) as unknown;
+				if (streamedArgs && typeof streamedArgs === "object" && !Array.isArray(streamedArgs)) {
+					tool.args = { ...(tool.args ?? {}), ...(streamedArgs as Record<string, unknown>) };
+				}
+			} catch {
+				// A provider may finish without a complete argument stream. The renderer
+				// can still recover paths from the textual tool result.
+			}
+		}
 		tool.result = event.result !== undefined ? String(event.result) : "";
 		tool.partialResult = undefined;
 		const isError = (event as unknown as Record<string, unknown>).is_error;
@@ -394,6 +408,7 @@ export class Transcript {
 			tool.isError = Boolean(isError);
 		}
 		tool.isComplete = true;
+		if (tool.startedAt !== undefined) tool.durationMs = Math.max(0, Date.now() - tool.startedAt);
 		toolChunk.isComplete = true;
 	}
 

@@ -45,6 +45,7 @@ export interface SettingDef {
 
 export type SettingsSelectorAction =
 	| { type: "change"; settingName: string; value: string }
+	| { type: "open"; settingName: string }
 	| { type: "close" };
 
 export class SettingsSelectorOverlay implements Component {
@@ -107,8 +108,11 @@ export class SettingsSelectorOverlay implements Component {
 	private handleMenuInput(data: string): SettingsSelectorAction | null {
 		if (data === "\r" || data === "\n") {
 			// Enter opens detail view for the selected setting
-			this.inDetailView = true;
 			const s = this.settings[this.selectedIndex];
+			if (s?.name.toLowerCase() === "model") {
+				return { type: "open", settingName: s.name };
+			}
+			this.inDetailView = true;
 			this.selectedOptionIndex = s
 				? s.options.findIndex((o) => o.current) >= 0
 					? s.options.findIndex((o) => o.current)

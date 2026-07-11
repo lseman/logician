@@ -72,9 +72,9 @@ describe("Model cycling", () => {
 		const models = h.getModels();
 		assert.strictEqual(models[0], "gpt-4");
 		assert.strictEqual(models.length, 4);
-		assert.strictEqual(models[1], "Claude Sonnet");
-		assert.strictEqual(models[2], "Gemma");
-		assert.strictEqual(models[3], "LLaMa");
+		assert.strictEqual(models[1], "claude-sonnet");
+		assert.strictEqual(models[2], "gemma");
+		assert.strictEqual(models[3], "llama");
 	});
 
 	it("cycleModel with no models returns current model", () => {

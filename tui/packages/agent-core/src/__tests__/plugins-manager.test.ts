@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { TsPluginManager } from "../tools/shared/plugins-manager.ts";
+import { TsPluginManager } from "../compatibility/claude-code/plugin-manager.ts";
 
 function writePluginSource(root: string, version: string): string {
 	const pluginDir = join(root, "demo-plugin");

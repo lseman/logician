@@ -29,16 +29,16 @@ import {
 	type DeliveryMode,
 } from "../message-queue/manager.ts";
 import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
-import type { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
+import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 import {
 	composeHooks,
 	buildBuiltinHooks,
 	type HookLayer,
-} from "../hooks/builtin-hooks.ts";
+} from "../hooks/builtin/builtin-hooks.ts";
 import {
-	createPluginHookLayer,
-	type PluginHookLayer,
-} from "../hooks/plugin-hooks.ts";
+	createClaudeCodeHookLayer,
+	type ClaudeCodeHookLayer,
+} from "../compatibility/claude-code/hook-layer.ts";
 import { LoopDetector } from "./loop-detector.ts";
 import { ThinkingLoopDetector } from "./thinking-loop-detector.ts";
 import {
@@ -79,6 +79,7 @@ import {
 	type AgentRuntimeState,
 	type HarnessPhase,
 } from "./runtime-state.ts";
+import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
 
 export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
 
@@ -615,7 +616,7 @@ export class AgentHarness {
 		promptText: string,
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
-		const pluginHookLayer = this.createPluginHookLayer();
+		const pluginHookLayer = this.createClaudeCodeHookLayer();
 		const pluginPromptMessages =
 			await pluginHookLayer.userPromptMessages(promptText);
 		const extensionBeforeStart =
@@ -689,8 +690,8 @@ export class AgentHarness {
 		};
 	}
 
-	private createPluginHookLayer(): PluginHookLayer {
-		return createPluginHookLayer({
+	private createClaudeCodeHookLayer(): ClaudeCodeHookLayer {
+		return createClaudeCodeHookLayer({
 			enabled: this._hooksEnabled,
 			sessionId: this._sessionId || "",
 			transcriptPath: this._transcriptPath || "",
@@ -701,7 +702,7 @@ export class AgentHarness {
 
 	private withExtensionRuntime(
 		config: AgentConfig,
-		pluginHookLayer?: PluginHookLayer,
+		pluginHookLayer?: ClaudeCodeHookLayer,
 	): AgentConfig {
 		const runner = this._extensionRunner;
 		const extensionTools = runner
@@ -727,7 +728,7 @@ export class AgentHarness {
 		const layers: HookLayer[] = [
 			{ source: "builtin", hooks: builtinHooks },
 			{ source: "extensions", hooks: extensionHooks },
-			{ source: "plugins", hooks: (pluginHookLayer ?? this.createPluginHookLayer()).hooks },
+			{ source: "claude-code-compat", hooks: (pluginHookLayer ?? this.createClaudeCodeHookLayer()).hooks },
 			{ source: "user", hooks: config.hooks },
 		];
 
@@ -912,6 +913,28 @@ export class AgentHarness {
 		if (this.config.steeringInterrupt) {
 			this.abortController?.abort();
 		}
+	}
+
+	/** Promote queued steering into the immediate next turn and interrupt the current step. */
+	flushSteeringNow(): number {
+		if (this._phase !== "turn")
+			throw new HarnessBusyError("flush steering", this._phase, "turn");
+		const queued = this.msgManager.queue.dequeueSteering();
+		if (queued.length === 0) return 0;
+		this._nextTurnQueue.push(...queued.map((message) => message.content));
+		this.emitQueueChange();
+		this.abortController?.abort(new Error("Steering queue forced by user"));
+		return queued.length;
+	}
+
+	dropQueuedMessage(displayIndex: number): string | undefined {
+		const queue = this.msgManager.queue;
+		const displayed = [...queue.getSteering(), ...queue.getFollowUp()];
+		const target = displayed[displayIndex];
+		if (!target) return undefined;
+		const removed = queue.remove(target.id);
+		if (removed) this.emitQueueChange();
+		return removed?.content;
 	}
 
 	followUp(text: string): void {
@@ -1828,12 +1851,19 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 	}
 
 	getModels(): string[] {
-		const currentName = this.config.model;
-		if (this.config.models) {
-			const names = this.config.models.map((m) => m.name);
-			return [currentName, ...names];
-		}
-		return [currentName];
+		const configured = this.config.models ?? [];
+		return [
+			...(configured.some((option) => option.model === this.config.model)
+				? []
+				: [this.config.model]),
+			...configured.map((option) => option.model),
+		];
+	}
+
+	setModelEndpoint(model: string, baseUrl: string): void {
+		this.config.model = model;
+		this.config.baseUrl = baseUrl;
+		this.backend = this.backend.withEndpoint?.(model, baseUrl) ?? this.backend.withModel(model);
 	}
 
 	/** Resolve the baseUrl for a given model identifier. */
@@ -2011,53 +2041,12 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 	}
 
 	private withDrainHook(config: AgentConfig): AgentConfig {
-		const internalHooks: AgentHooks = {};
-
-		internalHooks.transformContext = ({ messages }) => {
-			const pending = this._nextTurnQueue.splice(0);
-			if (!pending.length) return undefined;
-			this.emitQueueChange();
-			const injected = pending.map((text) => createUserMessage(text));
-			const last = messages.length - 1;
-			const at = last >= 0 ? last : 0;
-			return {
-				messages: [
-					...messages.slice(0, at),
-					...injected,
-					...messages.slice(at),
-				],
-			};
-		};
-
-		internalHooks.getSteeringMessages = async (): Promise<
-			Message[] | undefined
-		> => {
-			const drained = this.msgManager.afterTurn();
-			if (drained.length === 0) return undefined;
-			return this.toInjectedMessages(drained.map((m) => m.content));
-		};
-
-		internalHooks.getFollowUpMessages = async (): Promise<
-			Message[] | undefined
-		> => {
-			const drained = this.msgManager.onIdle();
-			if (drained.length === 0) return undefined;
-			return this.toInjectedMessages(drained.map((m) => m.content));
-		};
-
-		const originalOnEvent = config.onEvent;
-		const wrappedOnEvent = (event: AgentEvent) => {
-			originalOnEvent?.(event);
-			if (event.type === "turn_end") this.onSavePoint?.();
-			for (const handler of this._subscribers) handler(event);
-		};
-
-		return { ...config, internalHooks, onEvent: wrappedOnEvent };
-	}
-
-	private toInjectedMessages(texts: string[]): Message[] | undefined {
-		if (!texts.length) return undefined;
-		this.emitQueueChange();
-		return texts.map((text) => createUserMessage(text));
+		return withHarnessQueueHooks(config, {
+			messageDelivery: this.msgManager,
+			nextTurnQueue: this._nextTurnQueue,
+			onQueueChange: () => this.emitQueueChange(),
+			onSavePoint: this.onSavePoint,
+			subscribers: this._subscribers,
+		});
 	}
 }

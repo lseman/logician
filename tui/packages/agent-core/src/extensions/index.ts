@@ -7,15 +7,15 @@ export * from "./state.ts";
 export * from "./runner.ts";
 
 // Typed extension event system
-export { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
-export { createExtensionContext } from "../hooks/extension-context.ts";
+export { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+export { createExtensionContext } from "../hooks/extensions/context.ts";
 export type {
 	ExtensionEvent,
 	ExtensionEventName,
 	ExtensionEventResult,
 	ExtensionEventHandler,
 	ExtensionErrorHandler,
-} from "../hooks/extension-events.ts";
+} from "../hooks/extensions/events.ts";
 export type {
 	BeforeAgentStartEvent,
 	AgentEndEvent,
@@ -35,9 +35,9 @@ export type {
 	SessionShutdownEvent,
 	BeforeProviderRequestEvent,
 	AfterProviderResponseEvent,
-} from "../hooks/extension-events.ts";
+} from "../hooks/extensions/events.ts";
 export type {
 	ExtensionContext,
 	ExtensionContextState,
 	ExtensionContextActions,
-} from "../hooks/extension-context.ts";
+} from "../hooks/extensions/context.ts";

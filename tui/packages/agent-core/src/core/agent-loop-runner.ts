@@ -29,7 +29,7 @@ import {
 	resetTaskStatus,
 } from "./task-status-state.ts";
 import type { OutputGuard } from "./output-guard.ts";
-import type { ExtensionEventBus } from "../hooks/extension-event-bus.ts";
+import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 import {
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
@@ -39,6 +39,14 @@ import {
 	type ResolvedAcceptance,
 	type AcceptanceReport,
 } from "./acceptance-contract.ts";
+import {
+	emitConclusion,
+	lastAssistantContent,
+	lastHadToolCalls,
+	looksComplete,
+	looksNonCommittal,
+} from "../runtime/conclusion-policy.ts";
+import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -204,110 +212,6 @@ function stopReasonFor(
 	if (responseStopReason === "length") return "length";
 	if (responseStopReason === "error") return "error";
 	return "stop";
-}
-
-// Patterns that indicate the model is NOT ready to stop — vague, non-committal,
-// or stuck in "I need to think" mode. Used to decide whether to inject a nudge
-// or emit a task_failed event.
-const NON_COMMITTAL_PATTERNS = [
-	/\b(i\s+(need|should|have|might|could|will)\s+(to\s+)?(?:check|look|think|consider|analyze|investigate|examine|review|verify))\b/i,
-	/\b(let\s+me\s+(think|see|check|try|consider))\b/i,
-	/\b(i'm\s+(going\s+to|thinking\s+about|not\s+sure|still\s+considering))\b/i,
-	/\b(i'll\s+(try|check|look|see|think))\b/i,
-	/\b(need\s+to\s+(check|think|verify|confirm))\b/i,
-	/\b(however|but|although)\s+(i\s+(need|should|have|might))\b/i,
-	/\b(this\s+(requires|needs|demands|warrants)\s+(further|more|additional))\b/i,
-	/\b(i\s+(don't|do\s+not)\s+(know|think\s+|certain))\b/i,
-	/\blet(?:'s|\s+me)\s+(?:step\s+back|circle\s+back|reconsider)\b/i,
-	/\b(at\s+this\s+point|so\s+far)\s+(i\s+(have|can|see)|we\s+(need|should))\b/i,
-];
-
-// Patterns that indicate the model IS ready to stop — explicit completion signals.
-const COMPLETE_PATTERNS = [
-	/\b(task\s+complete|all\s+done|finished|completed\s+successfully|nothing\s+(else|more)\s+to\s+do|no\s+(further|more)\s+(steps?|action|work)|that('s|\s+is)\s+(all|done|complete))\b/i,
-	/^done\s*$/i,
-];
-
-function looksComplete(text: string): boolean {
-	if (!text) return false;
-	return COMPLETE_PATTERNS.some((re) => re.test(text));
-}
-
-function looksNonCommittal(text: string): boolean {
-	if (!text || text.trim().length < 10) return false;
-	return NON_COMMITTAL_PATTERNS.some((re) => re.test(text));
-}
-
-function lastAssistantContent(messages: Message[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m.role === "assistant" && typeof m.content === "string") {
-			return m.content;
-		}
-	}
-	return "";
-}
-
-function lastHadToolCalls(messages: Message[]): boolean {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m.role === "assistant") {
-			return (
-				Array.isArray(m.tool_calls) && (m.tool_calls as unknown[]).length > 0
-			);
-		}
-	}
-	return false;
-}
-
-async function emitConclusion(
-	emit: AgentEventSink,
-	newMessages: Message[],
-	iteration: number,
-	maxIterations: number,
-	hadFollowUps: boolean,
-): Promise<void> {
-	const text = lastAssistantContent(newMessages);
-	const hadTools = lastHadToolCalls(newMessages);
-
-	// Normal exit: model had tool calls or explicitly says it's done.
-	if (hadTools) return;
-	if (looksComplete(text)) return;
-
-	// Non-committal text + no follow-ups injected = model is stuck.
-	if (looksNonCommittal(text) && !hadFollowUps) {
-		await emit({
-			type: "task_failed",
-			reason:
-				"Model stopped with non-committal text after " +
-				iteration +
-				" iteration(s). It did not complete the task or produce actionable output.",
-			iteration,
-			lastContent: text.slice(0, 300),
-		});
-		return;
-	}
-
-	// Max iterations reached without completion signals.
-	if (iteration >= maxIterations) {
-		await emit({
-			type: "task_failed",
-			reason:
-				"Reached " +
-				maxIterations +
-				" iteration limit without completing the task. " +
-				(lastCompleteOrVague(text)
-					? "Last response was non-committal."
-					: "Last response did not signal task completion."
-				).trim(),
-			iteration,
-			lastContent: text.slice(0, 300),
-		});
-	}
-}
-
-function lastCompleteOrVague(text: string): boolean {
-	return looksComplete(text) || looksNonCommittal(text);
 }
 
 async function emitMessagePair(
@@ -1031,205 +935,27 @@ export async function runAgentLoop(
 				});
 			}
 
-			const toolResults: Message[] = [];
 			hasMoreToolCalls = false;
-			let toolTerminated = false;
-			type PlannedToolCall = {
-				prepared: ReturnType<ToolRegistry["prepare"]>;
-				args: Record<string, unknown>;
-				immediateContent?: string;
-				immediateError: boolean;
-			};
-			const plans: PlannedToolCall[] = [];
-			for (const toolCall of toolCalls) {
-				const prepared = registry.prepare(toolCall);
-				// Emit tool execution start (pi-style)
-				await emit({
-					type: "tool_execution_start",
-					toolCallId: prepared.call.id,
-					toolName: prepared.call.name,
-					args: prepared.args,
-				});
-				// Emit typed tool execution start for extension bus
-				await emitTyped(config.extensionBus, {
-					type: "tool_execution_start",
-					toolCallId: prepared.call.id,
-					toolName: prepared.call.name,
-					args: prepared.args,
-				});
-				const before = await (config.internalHooks?.beforeToolCall?.({
-					toolCall: prepared.call,
-					args: prepared.args,
-					iteration,
-				}) ??
-					config.hooks?.beforeToolCall?.({
-						toolCall: prepared.call,
-						args: prepared.args,
-						iteration,
-					}));
-				plans.push({
-					prepared,
-					args: before?.args ?? prepared.args,
-					immediateContent: before?.content ?? prepared.error,
-					immediateError:
-						before?.isError === true || prepared.error !== undefined,
-				});
-				if (config.signal?.aborted) break;
-			}
-
-			const executeToolCall = async (plan: PlannedToolCall) => {
-				const { prepared, args } = plan;
-				let resultText = plan.immediateContent;
-				let isError = plan.immediateError;
-				let resultTerminate = false;
-				const updateEvents: Promise<void>[] = [];
-				let acceptingUpdates = true;
-				if (resultText === undefined) {
-					const result = await registry.execute(
-						prepared.call,
-						{
-							signal: config.signal,
-								onUpdate: (partialResult) => {
-								if (!acceptingUpdates) return;
-								updateEvents.push(
-									Promise.resolve(
-										emit({
-											type: "tool_execution_update",
-											toolCallId: prepared.call.id,
-											toolName: prepared.call.name,
-											args: args,
-											partialResult,
-										}),
-									),
-								);
-								updateEvents.push(
-									Promise.resolve(
-										emit({
-											type: "tool_call_update",
-											toolCallId: prepared.call.id,
-											toolName: prepared.call.name,
-											partialResult,
-										}),
-									),
-								);
-							},
-						},
-						args,
-					);
-					acceptingUpdates = false;
-					await Promise.all(updateEvents);
-					resultText = result.content;
-					isError = result.isError === true;
-					resultTerminate = result.terminate === true;
-				}
-				acceptingUpdates = false;
-				await Promise.all(updateEvents);
-				const after = await (config.internalHooks?.afterToolCall?.({
-					toolCall: prepared.call,
-					args,
-					result: resultText,
-					isError,
-					iteration,
-				}) ??
-					config.hooks?.afterToolCall?.({
-						toolCall: prepared.call,
-						args,
-						result: resultText,
-						isError,
-						iteration,
-					}));
-				if (after?.content !== undefined) resultText = after.content;
-				if (after?.isError !== undefined) isError = after.isError;
-				// Emit tool call end (for backward compatibility)
-				await emit({
-					type: "tool_call_end",
-					toolName: prepared.call.name,
-					toolCallId: prepared.call.id,
-					result: resultText,
-					isError,
-				});
-				// Emit tool execution end (pi-style)
-				await emit({
-					type: "tool_execution_end",
-					toolCallId: prepared.call.id,
-					toolName: prepared.call.name,
-					result: resultText,
-					isError,
-				});
-				// Emit typed tool execution end for extension bus
-				await emitTyped(config.extensionBus, {
-					type: "tool_execution_end",
-					toolCallId: prepared.call.id,
-					toolName: prepared.call.name,
-					result: resultText,
-					isError,
-				});
-				return {
-					message: createToolResultMessage(
-						prepared.call.id,
-						prepared.call.name,
-						resultText,
-						isError,
-					),
-					terminate: after?.terminate ?? resultTerminate,
-				};
-			};
-
-			// Pi treats tool calls from a length-truncated response as unsafe: the
-			// provider may have salvaged valid-looking but incomplete JSON. Never
-			// execute those calls; let the model re-issue the complete batch.
-			const executeTruncatedToolCall = async (toolCall: ToolCall) => {
-				const resultText =
-					`Tool call "${toolCall.name}" was not executed because the ` +
-					"assistant response hit the output token limit; its arguments may be truncated. " +
-					"Re-issue the tool call with complete arguments.";
-				await emit({
-					type: "tool_call_end",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					result: resultText,
-					isError: true,
-				});
-				return {
-					message: createToolResultMessage(
-						toolCall.id,
-						toolCall.name,
-						resultText,
-						true,
-					),
-					terminate: false,
-				};
-			};
-
-			const mustRunSequentially =
-				config.toolExecution !== "parallel" ||
-				toolCalls.some(
-					(call) => registry.get(call.name)?.executionMode === "sequential",
-				);
-			const outcomes: Array<{ message: Message; terminate: boolean }> = [];
-			if (rawStopReason === "length") {
-				for (const toolCall of toolCalls) {
-					outcomes.push(await executeTruncatedToolCall(toolCall));
-				}
-			} else if (mustRunSequentially) {
-				for (const plan of plans) {
-					outcomes.push(await executeToolCall(plan));
-					if (config.signal?.aborted) break;
-				}
-			} else {
-				outcomes.push(...(await Promise.all(plans.map(executeToolCall))));
-			}
-
-			for (const outcome of outcomes) {
-				const toolResult = outcome.message;
+			const batch = await executeToolBatch({
+				registry,
+				toolCalls,
+				rawStopReason,
+				toolExecution: config.toolExecution,
+				iteration,
+				signal: config.signal,
+				internalHooks: config.internalHooks,
+				hooks: config.hooks,
+				emit,
+				emitExtension: (event) => emitTyped(config.extensionBus, event),
+			});
+			const toolResults = batch.messages;
+			const toolTerminated = batch.terminated;
+			for (const toolResult of toolResults) {
 				messages.push(toolResult);
 				newMessages.push(toolResult);
-				toolResults.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
 				hasMoreToolCalls = true;
 			}
-			toolTerminated =
-				outcomes.length > 0 && outcomes.every((outcome) => outcome.terminate);
 
 			// The final usage-only SSE chunk is optional and many local providers
 			// omit it. Estimate the serialized conversation as a reliable fallback

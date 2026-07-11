@@ -42,9 +42,10 @@ export class ModelSelectorOverlay implements Component {
 
 	setModels(models: ModelInfo[]): void {
 		this.models = models;
-		if (this.selectedIndex >= this.models.length) {
-			this.selectedIndex = Math.max(0, this.models.length - 1);
-		}
+		const activeIndex = this.models.findIndex((model) => model.active);
+		this.selectedIndex = activeIndex >= 0
+			? activeIndex
+			: Math.min(this.selectedIndex, Math.max(0, this.models.length - 1));
 		this.invalidate();
 	}
 
@@ -161,12 +162,6 @@ export class ModelSelectorOverlay implements Component {
 					selected: isSelected,
 					statusDot: m.active ? "active" : undefined,
 				};
-
-				// If active, add "● active" badge to the left
-				if (m.active) {
-					const activeDot = theme.fg("active", "");
-					item.label = `${item.label}  ${activeDot}● active${RESET}`;
-				}
 
 				lines.push(renderListItem(item, innerWidth));
 			}

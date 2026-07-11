@@ -61,7 +61,7 @@ import { buildDefaultSystemPrompt } from "./system-prompt.ts";
 import { createReadSkillTool } from "./tools/read-skill.ts";
 import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
 import { onTodosChanged } from "@logician/agent-core/core/todo-state.ts";
-import { ExtensionEventBus } from "@logician/agent-core/hooks/extension-event-bus.ts";
+import { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
 import { findLogicianConfig } from "./config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import {
@@ -914,6 +914,12 @@ export class AgentCoreBridge {
 		return this.harness?.getQueues().steering ?? [];
 	}
 
+	/** Interrupt the current provider step and process queued steering immediately. */
+	flushSteeringNow(): number {
+		if (!this.running || !this.harness) return 0;
+		return this.harness.flushSteeringNow();
+	}
+
 	/** Get current follow-up messages (read-only). */
 	getFollowUpMessages(): string[] {
 		return this.harness?.getQueues().followUp ?? [];
@@ -939,6 +945,10 @@ export class AgentCoreBridge {
 		);
 	}
 
+	dropQueuedMessage(displayIndex: number): string | undefined {
+		return this.harness?.dropQueuedMessage(displayIndex);
+	}
+
 	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
 	abort(): void {
 		// harness.abort() clears steering/follow-up and emits onQueueChange.
@@ -948,6 +958,37 @@ export class AgentCoreBridge {
 	/** Execute a slash command (sends as chat message to the agent). */
 	sendSlash(raw: string): void {
 		const trimmed = raw.trim();
+		if (trimmed === "/steer-now") {
+			const count = this.flushSteeringNow();
+			this.emit({
+				type: "notice",
+				level: count > 0 ? "info" : "warn",
+				label: "Steering",
+				text: count > 0
+					? `Processing ${count} queued steering message${count === 1 ? "" : "s"} now.`
+					: "No queued steering messages to process.",
+			});
+			return;
+		}
+		if (trimmed === "/queue") {
+			const steering = this.getSteeringMessages();
+			const followUp = this.getFollowUpMessages();
+			const rows = [...steering.map((message) => `▸ ${message}`), ...followUp.map((message) => `↳ ${message}`)];
+			this.emit({ type: "notice", level: "info", label: "Queue", text: rows.length ? rows.map((row, index) => `${index + 1}. ${row}`).join("\n") : "Queue is empty." });
+			return;
+		}
+		if (trimmed === "/queue-clear") {
+			const cleared = this.clearQueue();
+			const count = cleared.steering.length + cleared.followUp.length + cleared.nextTurn.length;
+			this.emit({ type: "notice", level: "info", label: "Queue", text: `Cleared ${count} queued message${count === 1 ? "" : "s"}.` });
+			return;
+		}
+		if (trimmed === "/queue-drop" || trimmed.startsWith("/queue-drop ")) {
+			const value = Number.parseInt(trimmed.slice("/queue-drop".length).trim(), 10);
+			const removed = Number.isInteger(value) && value > 0 ? this.dropQueuedMessage(value - 1) : undefined;
+			this.emit({ type: "notice", level: removed ? "info" : "warn", label: "Queue", text: removed ? `Removed: ${removed}` : "Usage: /queue-drop <number>" });
+			return;
+		}
 		// /om:status — show observational memory status
 		if (trimmed === "/om:status") {
 			const status =
@@ -1150,11 +1191,35 @@ export class AgentCoreBridge {
 
 	/** Get all available models. */
 	getModels(): string[] {
-		return (
-			this.harness?.getModels() ??
-			(this.config.models?.map((m) => m.name) ??
-				(this.config.model ? [this.config.model] : []))
-		);
+		return this.config.models?.length
+			? this.config.models.map((model) => model.model)
+			: [this.getCurrentModel()];
+	}
+
+	getModelOptions(): Array<{ key: string; name: string; model: string; url: string; active: boolean }> {
+		const configured = this.config.models ?? [];
+		if (configured.length === 0) {
+			return [{ key: this.getCurrentModel(), name: this.getCurrentModel(), model: this.getCurrentModel(), url: this.getCurrentBaseUrl(), active: true }];
+		}
+		return configured.map((option, index) => {
+			const url = option.url || this.config.baseUrl;
+			return {
+				key: `${index}:${option.name}`,
+				name: option.name,
+				model: option.model,
+				url,
+				active: option.model === this.getCurrentModel() && url === this.getCurrentBaseUrl(),
+			};
+		});
+	}
+
+	setModelOption(key: string): { model: string; url: string } | null {
+		const option = this.getModelOptions().find((candidate) => candidate.key === key);
+		if (!option) return null;
+		this.config.model = option.model;
+		this.config.baseUrl = option.url;
+		this.harness?.setModelEndpoint(option.model, option.url);
+		return { model: option.model, url: option.url };
 	}
 
 	/** Cycle to the next model. Returns the new model name. */

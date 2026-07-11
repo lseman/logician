@@ -11,6 +11,10 @@
 		"./builtins/*": "./src/builtins/*",
 		"./extensions/*": "./src/extensions/*",
 		"./hooks/*": "./src/hooks/*",
+		"./hooks/native": "./src/hooks/native/index.ts",
+		"./hooks/builtin": "./src/hooks/builtin/index.ts",
+		"./hooks/extensions": "./src/hooks/extensions/index.ts",
+		"./compatibility/claude-code": "./src/compatibility/claude-code/index.ts",
 		"./compaction/*": "./src/compaction/*",
 		"./message-queue/*": "./src/message-queue/*"
 	},

@@ -1797,19 +1797,12 @@ export class LogicianTUI {
 
 	private openModelSelector(): void {
 		this.statusPanel.update({ phase: "model" });
-		const currentModel = this.bridge.getCurrentModel();
-		const models = this.bridge.getModels();
-		const baseUrl = this.bridge.getCurrentBaseUrl();
-		const modelInfos: ModelInfo[] = models.map((id) => {
-			const url = this.bridge.getModelUrl(id);
-			const showUrl = url && url !== baseUrl ? url : undefined;
-			return {
-				id,
-				name: id,
-				active: id === currentModel,
-				url: showUrl,
-			};
-		});
+		const modelInfos: ModelInfo[] = this.bridge.getModelOptions().map((option) => ({
+			id: option.key,
+			name: option.name,
+			active: option.active,
+			url: `${option.model} · ${option.url}`,
+		}));
 		this.modelSelector.setModels(modelInfos);
 		this.modelSelector.setMessage(
 			"Enter selects model for the current session.",
@@ -1833,12 +1826,14 @@ export class LogicianTUI {
 		this.modelSelector.setMessage(`Switching to ${selected.name}...`);
 		this.tui.requestRender();
 		// Switch the model via the bridge (handles url switching too)
-		this.bridge.setModel(selected.id);
+		const applied = this.bridge.setModelOption(selected.id);
+		if (!applied) return;
 		// Save to global settings
-		saveConfigField("model", selected.id);
+		saveConfigField("model", applied.model);
+		saveConfigField("baseUrl", applied.url);
 		// Update status
 		this.tui.removeOverlay(this.modelSelector);
-		this.statusPanel.update({ phase: "ready", model: selected.id });
+		this.statusPanel.update({ phase: "ready", model: applied.model });
 		this.transcript.addSystemMessage(`Switched model: ${selected.name}`);
 		this.transcriptDisplay.setTurns(this.transcript.getTurns());
 		this.tui.requestRender();
@@ -2005,6 +2000,12 @@ export class LogicianTUI {
 			this.tui.requestRender();
 			return;
 		}
+		if (action.type === "open" && action.settingName.toLowerCase() === "model") {
+			this.tui.removeOverlay(this.settingsSelector);
+			this.openModelSelector();
+			return;
+		}
+		if (action.type !== "change") return;
 		// action.type === "change"
 		const { settingName, value } = action;
 		this.settingsSelector.setMessage(`Applying ${settingName}...`);

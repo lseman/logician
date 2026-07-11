@@ -2,7 +2,7 @@
 // Registers hooks on the extension event bus to trigger
 // the consolidation pipeline.
 
-import type { ExtensionEventBus } from "@logician/agent-core/hooks/extension-event-bus.ts";
+import type { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
 import type { MemoryStore } from "./store.ts";
 import type { ConsolidationPipeline } from "./consolidation.ts";
 

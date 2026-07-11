@@ -17,7 +17,7 @@
 // failing extension is identifiable, and `errorMode` controls whether a thrown
 // handler aborts the chain or is skipped.
 
-import { withTimeout } from "../tools/shared/async-utils.ts";
+import { withTimeout } from "../../tools/shared/async-utils.ts";
 import { HookMetricsCollector } from "./hook-metrics.ts";
 import type {
 	AfterProviderResponseContext,
@@ -42,12 +42,16 @@ import type {
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-} from "../core/types.ts";
+} from "../../core/types.ts";
 
 export type HookEventName = keyof AgentHooks;
 
 export interface HookRegistration {
+	/** Stable identity used for diagnostics and duplicate detection. */
+	id?: string;
 	source?: string;
+	/** Higher priorities run first. Equal priorities retain registration order. */
+	priority?: number;
 	/** Per-handler timeout. Overrides the bus default; 0 disables. */
 	timeoutMs?: number;
 }
@@ -65,8 +69,23 @@ export interface HookBusOptions {
 
 interface Entry<H> {
 	handler: H;
+	id: string;
 	source?: string;
+	priority: number;
 	timeoutMs?: number;
+	order: number;
+}
+
+export interface HookHandlerDiagnostics {
+	id: string;
+	source?: string;
+	event: HookEventName;
+	priority: number;
+	count: number;
+	errors: number;
+	timeouts: number;
+	totalMs: number;
+	lastMs?: number;
 }
 
 type BeforeHandler = NonNullable<AgentHooks["beforeToolCall"]>;
@@ -86,6 +105,7 @@ type CompactHandler = NonNullable<AgentHooks["beforeCompact"]>;
 export type HookObserver = (
 	event: HookEventName,
 	ctx: unknown,
+	signal?: AbortSignal,
 ) => void | Promise<void>;
 
 export class HookBus {
@@ -103,6 +123,11 @@ export class HookBus {
 	private compact: Entry<CompactHandler>[] = [];
 	private observers: HookObserver[] = [];
 	private metrics = new HookMetricsCollector();
+	private handlerStats = new Map<string, HookHandlerDiagnostics>();
+	private cleanups = new Set<() => void | Promise<void>>();
+	private nextOrder = 0;
+	private nextAnonymousId = 0;
+	private disposed = false;
 
 	private errorMode: HookErrorMode;
 	private onError?: HookBusOptions["onError"];
@@ -119,15 +144,29 @@ export class HookBus {
 		return this.metrics;
 	}
 
+	getDiagnostics(): HookHandlerDiagnostics[] {
+		return [...this.handlerStats.values()].map((value) => ({ ...value }));
+	}
+
+	addCleanup(cleanup: () => void | Promise<void>): () => void {
+		this.assertActive();
+		this.cleanups.add(cleanup);
+		return () => this.cleanups.delete(cleanup);
+	}
+
 	// Register one handler for an event. Returns an unsubscribe function.
 	on<E extends HookEventName>(
 		event: E,
 		handler: NonNullable<AgentHooks[E]>,
 		reg: HookRegistration = {},
 	): () => void {
+		this.assertActive();
 		const list = this.listFor(event) as Entry<AgentHooks[E]>[];
-		const entry = { handler, source: reg.source, timeoutMs: reg.timeoutMs };
+		const id = reg.id ?? `${String(event)}#${++this.nextAnonymousId}`;
+		if (this.hasHandlerId(id)) throw new Error(`Duplicate hook handler id: ${id}`);
+		const entry = { handler, id, source: reg.source, priority: reg.priority ?? 0, timeoutMs: reg.timeoutMs, order: this.nextOrder++ };
 		list.push(entry);
+		list.sort((a, b) => b.priority - a.priority || a.order - b.order);
 		return () => {
 			const i = list.indexOf(entry);
 			if (i >= 0) list.splice(i, 1);
@@ -181,7 +220,7 @@ export class HookBus {
 		};
 	}
 
-	clear(): void {
+	async clear(): Promise<void> {
 		this.before = [];
 		this.after = [];
 		this.prepare = [];
@@ -195,41 +234,53 @@ export class HookBus {
 		this.agentStart = [];
 		this.compact = [];
 		this.observers = [];
+		const cleanups = [...this.cleanups];
+		this.cleanups.clear();
+		for (const cleanup of cleanups.reverse()) await cleanup();
+	}
+
+	async dispose(): Promise<void> {
+		if (this.disposed) return;
+		await this.clear();
+		this.disposed = true;
 	}
 
 	// Single composed AgentHooks for the runner. Each event runs its
 	// reducer over all registered handlers.
 	toHooks(): AgentHooks {
 		return {
-			beforeAgentStart: (ctx) => this.runAgentStart(ctx),
-			beforeToolCall: (ctx) => this.runBefore(ctx),
-			afterToolCall: (ctx) => this.runAfter(ctx),
-			prepareNextTurn: (ctx) => this.runPrepare(ctx),
-			transformContext: (ctx) => this.runTransform(ctx),
-			beforeProviderRequest: (ctx) => this.runProviderRequest(ctx),
-			beforeProviderPayload: (ctx) => this.runProviderPayload(ctx),
-			afterProviderResponse: (ctx) => this.runAfterProvider(ctx),
-			shouldStopAfterTurn: (ctx) => this.runStop(ctx),
-			getSteeringMessages: (ctx) => this.runSteering(ctx),
-			getFollowUpMessages: (ctx) => this.runFollowUp(ctx),
-			beforeCompact: (ctx) => this.runCompact(ctx),
+			beforeAgentStart: (ctx, signal) => this.runAgentStart(ctx, signal),
+			beforeToolCall: (ctx, signal) => this.runBefore(ctx, signal),
+			afterToolCall: (ctx, signal) => this.runAfter(ctx, signal),
+			prepareNextTurn: (ctx, signal) => this.runPrepare(ctx, signal),
+			transformContext: (ctx, signal) => this.runTransform(ctx, signal),
+			beforeProviderRequest: (ctx, signal) => this.runProviderRequest(ctx, signal),
+			beforeProviderPayload: (ctx, signal) => this.runProviderPayload(ctx, signal),
+			afterProviderResponse: (ctx, signal) => this.runAfterProvider(ctx, signal),
+			shouldStopAfterTurn: (ctx, signal) => this.runStop(ctx, signal),
+			getSteeringMessages: (ctx, signal) => this.runSteering(ctx, signal),
+			getFollowUpMessages: (ctx, signal) => this.runFollowUp(ctx, signal),
+			beforeCompact: (ctx, signal) => this.runCompact(ctx, signal),
 		};
 	}
 
 	// ── Reducers ───────────────────────────────────────────────────────────
 	private async runAgentStart(
 		ctx: BeforeAgentStartContext,
+		signal?: AbortSignal,
 	): Promise<BeforeAgentStartResult | undefined> {
-		await this.notify("beforeAgentStart", ctx);
+		await this.notify("beforeAgentStart", ctx, signal);
 		let messages = ctx.messages;
 		let systemPrompt = ctx.systemPrompt;
 		let changed = false;
-		for (const { handler, source, timeoutMs } of this.agentStart) {
+		for (const { handler, id, source, timeoutMs } of this.agentStart) {
 			const result = await this.guard(
-				() => handler({ ...ctx, messages, systemPrompt }),
+				(scopedSignal) => handler({ ...ctx, messages, systemPrompt }, scopedSignal),
 				"beforeAgentStart",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (result?.messages) {
 				messages = result.messages;
@@ -245,17 +296,20 @@ export class HookBus {
 
 	private async runBefore(
 		ctx: BeforeToolCallContext,
+		signal?: AbortSignal,
 	): Promise<BeforeToolCallResult | undefined> {
-		await this.notify("beforeToolCall", ctx);
+		await this.notify("beforeToolCall", ctx, signal);
 		if (!this.before.length) return undefined;
 		let current = ctx;
 		let rewritten: Record<string, unknown> | undefined;
-		for (const { handler, source, timeoutMs } of this.before) {
+		for (const { handler, id, source, timeoutMs } of this.before) {
 			const r = await this.guard(
-				() => handler(current),
+				(scopedSignal) => handler(current, scopedSignal),
 				"beforeToolCall",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (!r) continue;
 			// A content result short-circuits: tool is not run.
@@ -272,18 +326,21 @@ export class HookBus {
 
 	private async runAfter(
 		ctx: AfterToolCallContext,
+		signal?: AbortSignal,
 	): Promise<AfterToolCallResult | undefined> {
-		await this.notify("afterToolCall", ctx);
+		await this.notify("afterToolCall", ctx, signal);
 		if (!this.after.length) return undefined;
 		let current = ctx;
 		let modified = false;
 		let terminate = false;
-		for (const { handler, source, timeoutMs } of this.after) {
+		for (const { handler, id, source, timeoutMs } of this.after) {
 			const r = await this.guard(
-				() => handler(current),
+				(scopedSignal) => handler(current, scopedSignal),
 				"afterToolCall",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (!r) continue;
 			// terminate from ANY handler wins; the loop applies its
@@ -303,16 +360,19 @@ export class HookBus {
 
 	private async runPrepare(
 		ctx: PrepareNextTurnContext,
+		signal?: AbortSignal,
 	): Promise<PrepareNextTurnResult | undefined> {
-		await this.notify("prepareNextTurn", ctx);
+		await this.notify("prepareNextTurn", ctx, signal);
 		if (!this.prepare.length) return undefined;
 		let messages = ctx.messages;
-		for (const { handler, source, timeoutMs } of this.prepare) {
+		for (const { handler, id, source, timeoutMs } of this.prepare) {
 			const r = await this.guard(
-				() => handler({ ...ctx, messages }),
+				(scopedSignal) => handler({ ...ctx, messages }, scopedSignal),
 				"prepareNextTurn",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (r?.messages) messages = r.messages;
 		}
@@ -321,16 +381,19 @@ export class HookBus {
 
 	private async runTransform(
 		ctx: TransformContext,
+		signal?: AbortSignal,
 	): Promise<TransformContextResult | undefined> {
-		await this.notify("transformContext", ctx);
+		await this.notify("transformContext", ctx, signal);
 		if (!this.transform.length) return undefined;
 		let messages = ctx.messages;
-		for (const { handler, source, timeoutMs } of this.transform) {
+		for (const { handler, id, source, timeoutMs } of this.transform) {
 			const r = await this.guard(
-				() => handler({ ...ctx, messages }),
+				(scopedSignal) => handler({ ...ctx, messages }, scopedSignal),
 				"transformContext",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (r?.messages) messages = r.messages;
 		}
@@ -339,8 +402,9 @@ export class HookBus {
 
 	private async runProviderRequest(
 		ctx: BeforeProviderRequestContext,
+		signal?: AbortSignal,
 	): Promise<BeforeProviderRequestResult | undefined> {
-		await this.notify("beforeProviderRequest", ctx);
+		await this.notify("beforeProviderRequest", ctx, signal);
 		if (!this.providerRequest.length) return undefined;
 		const collectedHeaders: Record<string, string | undefined> = {};
 		let timeoutMs: number | undefined;
@@ -348,13 +412,15 @@ export class HookBus {
 		let cacheRetention: string | undefined;
 		let metadata: Record<string, unknown> | undefined;
 		let transport: string | undefined;
-		for (const { handler, source, timeoutMs: hookTimeoutMs } of this
+		for (const { handler, id, source, timeoutMs: hookTimeoutMs } of this
 			.providerRequest) {
 			const r = await this.guard(
-				() => handler(ctx),
+				(scopedSignal) => handler(ctx, scopedSignal),
 				"beforeProviderRequest",
 				source,
 				hookTimeoutMs,
+				id,
+				signal,
 			);
 			if (!r) continue;
 			if (r.headers) {
@@ -388,39 +454,45 @@ export class HookBus {
 
 	private async runProviderPayload(
 		ctx: BeforeProviderPayloadContext,
+		signal?: AbortSignal,
 	): Promise<BeforeProviderPayloadResult | undefined> {
-		await this.notify("beforeProviderPayload", ctx);
+		await this.notify("beforeProviderPayload", ctx, signal);
 		if (!this.providerPayload.length) return undefined;
 		let payload = ctx.payload;
-		for (const { handler, source, timeoutMs } of this.providerPayload) {
+		for (const { handler, id, source, timeoutMs } of this.providerPayload) {
 			const r = await this.guard(
-				() => handler({ ...ctx, payload }),
+				(scopedSignal) => handler({ ...ctx, payload }, scopedSignal),
 				"beforeProviderPayload",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (r?.payload) payload = r.payload;
 		}
 		return payload === ctx.payload ? undefined : { payload };
 	}
 
-	private async runAfterProvider(ctx: AfterProviderResponseContext): Promise<void> {
-		await this.notify("afterProviderResponse", ctx);
-		for (const { handler, source, timeoutMs } of this.afterProvider) {
-			await this.guard(() => handler(ctx), "afterProviderResponse", source, timeoutMs);
+	private async runAfterProvider(ctx: AfterProviderResponseContext, signal?: AbortSignal): Promise<void> {
+		await this.notify("afterProviderResponse", ctx, signal);
+		for (const { handler, id, source, timeoutMs } of this.afterProvider) {
+			await this.guard((scopedSignal) => handler(ctx, scopedSignal), "afterProviderResponse", source, timeoutMs, id, signal);
 		}
 	}
 
 	private async runStop(
 		ctx: ShouldStopAfterTurnContext,
+		signal?: AbortSignal,
 	): Promise<boolean | undefined> {
-		await this.notify("shouldStopAfterTurn", ctx);
-		for (const { handler, source, timeoutMs } of this.stop) {
+		await this.notify("shouldStopAfterTurn", ctx, signal);
+		for (const { handler, id, source, timeoutMs } of this.stop) {
 			const r = await this.guard(
-				() => handler(ctx),
+				(scopedSignal) => handler(ctx, scopedSignal),
 				"shouldStopAfterTurn",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (r === true) return true;
 		}
@@ -429,15 +501,18 @@ export class HookBus {
 
 	private async runSteering(
 		ctx: GetSteeringMessagesContext,
+		signal?: AbortSignal,
 	): Promise<Message[] | undefined> {
-		await this.notify("getSteeringMessages", ctx);
+		await this.notify("getSteeringMessages", ctx, signal);
 		const out: Message[] = [];
-		for (const { handler, source, timeoutMs } of this.steering) {
+		for (const { handler, id, source, timeoutMs } of this.steering) {
 			const r = await this.guard(
-				() => handler({ ...ctx, messages: [...ctx.messages, ...out] }),
+				(scopedSignal) => handler({ ...ctx, messages: [...ctx.messages, ...out] }, scopedSignal),
 				"getSteeringMessages",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (r?.length) out.push(...r);
 		}
@@ -446,19 +521,22 @@ export class HookBus {
 
 	private async runFollowUp(
 		ctx: GetFollowUpMessagesContext,
+		signal?: AbortSignal,
 	): Promise<Message[] | undefined> {
-		await this.notify("getFollowUpMessages", ctx);
+		await this.notify("getFollowUpMessages", ctx, signal);
 		const out: Message[] = [];
-		for (const { handler, source, timeoutMs } of this.followUp) {
+		for (const { handler, id, source, timeoutMs } of this.followUp) {
 			const r = await this.guard(
-				() =>
+				(scopedSignal) =>
 					handler({
 						...ctx,
 						messages: [...ctx.messages, ...out],
-					}),
+					}, scopedSignal),
 				"getFollowUpMessages",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (r?.length) out.push(...r);
 		}
@@ -467,15 +545,18 @@ export class HookBus {
 
 	private async runCompact(
 		ctx: BeforeCompactContext,
+		signal?: AbortSignal,
 	): Promise<BeforeCompactResult | undefined> {
-		await this.notify("beforeCompact", ctx);
+		await this.notify("beforeCompact", ctx, signal);
 		let summary: string | undefined;
-		for (const { handler, source, timeoutMs } of this.compact) {
+		for (const { handler, id, source, timeoutMs } of this.compact) {
 			const result = await this.guard(
-				() => handler(ctx),
+				(scopedSignal) => handler(ctx, scopedSignal),
 				"beforeCompact",
 				source,
 				timeoutMs,
+				id,
+				signal,
 			);
 			if (result?.cancel) return { cancel: true };
 			if (result?.summary !== undefined) summary = result.summary;
@@ -515,10 +596,10 @@ export class HookBus {
 		return [];
 	}
 
-	private async notify(event: HookEventName, ctx: unknown): Promise<void> {
+	private async notify(event: HookEventName, ctx: unknown, signal?: AbortSignal): Promise<void> {
 		for (const observer of this.observers) {
 			try {
-				await observer(event, ctx);
+				await observer(event, ctx, signal);
 			} catch {
 				// Observers are read-only; their failures never affect a turn.
 			}
@@ -526,26 +607,66 @@ export class HookBus {
 	}
 
 	private async guard<T>(
-		fn: () => T | Promise<T>,
+		fn: (signal: AbortSignal) => T | Promise<T>,
 		event: HookEventName,
 		source?: string,
 		timeoutMs?: number,
+		id = `${String(event)}#unknown`,
+		parentSignal?: AbortSignal,
 	): Promise<T | undefined> {
 		const effective = timeoutMs ?? this.defaultTimeoutMs;
-		const start = Date.now();
+		const start = performance.now();
+		const controller = new AbortController();
+		const abort = () => controller.abort(parentSignal?.reason);
+		if (parentSignal?.aborted) abort();
+		else parentSignal?.addEventListener("abort", abort, { once: true });
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		if (effective > 0) timeout = setTimeout(() => controller.abort(new Error(`Hook handler timeout after ${effective}ms`)), effective);
 		try {
-			const run = Promise.resolve(fn());
+			if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Hook handler aborted");
+			const run = Promise.resolve(fn(controller.signal));
 			const result = effective > 0 ? await withTimeout(run, effective) : await run;
-			const duration = Date.now() - start;
+			if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Hook handler aborted");
+			const duration = performance.now() - start;
 			this.metrics.record(event, duration);
+			this.recordHandler(id, source, event, duration);
 			return result;
 		} catch (e) {
 			const error = e as Error;
-			const duration = Date.now() - start;
+			const duration = performance.now() - start;
 			this.metrics.record(event, duration, error);
+			this.recordHandler(id, source, event, duration, error);
 			this.onError?.(error, event, source);
 			if (this.errorMode === "throw") throw error;
 			return undefined;
+		} finally {
+			if (timeout) clearTimeout(timeout);
+			parentSignal?.removeEventListener("abort", abort);
 		}
+	}
+
+	private hasHandlerId(id: string): boolean {
+		return ([...this.agentStart, ...this.before, ...this.after, ...this.prepare, ...this.transform, ...this.providerRequest, ...this.providerPayload, ...this.afterProvider, ...this.stop, ...this.steering, ...this.followUp, ...this.compact] as Array<Entry<unknown>>).some((entry) => entry.id === id);
+	}
+
+	private assertActive(): void {
+		if (this.disposed) throw new Error("HookBus has been disposed");
+	}
+
+	private recordHandler(id: string, source: string | undefined, event: HookEventName, duration: number, error?: Error): void {
+		const current = this.handlerStats.get(id) ?? { id, source, event, priority: this.findPriority(id), count: 0, errors: 0, timeouts: 0, totalMs: 0 };
+		current.count++;
+		current.totalMs += duration;
+		current.lastMs = duration;
+		if (error) {
+			current.errors++;
+			if (/timeout/i.test(error.message)) current.timeouts++;
+		}
+		this.handlerStats.set(id, current);
+	}
+
+	private findPriority(id: string): number {
+		const entries = [...this.agentStart, ...this.before, ...this.after, ...this.prepare, ...this.transform, ...this.providerRequest, ...this.providerPayload, ...this.afterProvider, ...this.stop, ...this.steering, ...this.followUp, ...this.compact] as Array<Entry<unknown>>;
+		return entries.find((entry) => entry.id === id)?.priority ?? 0;
 	}
 }

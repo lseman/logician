@@ -15,16 +15,17 @@ export * from "./core/tool-cache.ts";
 export * from "./core/types.ts";
 
 // Hooks: hook bus, builtin hooks, budget
-export * from "./hooks/builtin-hooks.ts";
-export * from "./hooks/hook-bus.ts";
-export * from "./hooks/plugin-hooks.ts";
+export * from "./hooks/builtin/index.ts";
+export * from "./hooks/native/index.ts";
+export * from "./compatibility/claude-code/hook-layer.ts";
+export * from "./compatibility/claude-code/index.ts";
 
 // Shared (registry, parser, permissions, plugins, subagent, skills, mcp, utils)
 export * from "./tools/shared/permissions.ts";
 export * from "./tools/shared/parser.ts";
 export * from "./tools/shared/plugins.ts";
-export * from "./tools/shared/plugins-executor.ts";
-export * from "./tools/shared/plugins-manager.ts";
+export * from "./compatibility/claude-code/plugin-executor.ts";
+export * from "./compatibility/claude-code/plugin-manager.ts";
 export * from "./tools/shared/async-utils.ts";
 export * from "./tools/shared/path-utils.ts";
 export * from "./tools/shared/syntax-highlighter.ts";

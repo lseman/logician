@@ -189,6 +189,8 @@ export interface LLMBackend {
 
 	/** Return a backend identical to this one but bound to a different model. */
 	withModel(model: string): LLMBackend;
+	/** Clone the backend with both model and provider endpoint when supported. */
+	withEndpoint?(model: string, baseUrl: string): LLMBackend;
 
 	/** The model this backend currently targets. */
 	readonly model: string;
@@ -219,6 +221,16 @@ export class OpenAIBackend implements LLMBackend {
 	withModel(model: string): OpenAIBackend {
 		return new OpenAIBackend({
 			baseUrl: this.baseUrl,
+			model,
+			chatTemplate: this.chatTemplate,
+			stop: this.stop,
+			thinkingLevel: this.defaultThinkingLevel,
+		});
+	}
+
+	withEndpoint(model: string, baseUrl: string): OpenAIBackend {
+		return new OpenAIBackend({
+			baseUrl,
 			model,
 			chatTemplate: this.chatTemplate,
 			stop: this.stop,

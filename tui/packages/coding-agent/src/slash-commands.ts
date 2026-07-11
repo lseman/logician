@@ -195,6 +195,21 @@ export function createSlashCommands(
 			argHint: "<agents...>",
 			examples: ["/pipeline planner reviewer"],
 		}),
+		cmd("/steer-now", "Process queued steering immediately", "bridge", false, {
+			category: "agent",
+			examples: ["/steer-now"],
+		}),
+		cmd("/queue", "Show queued steering and follow-up messages", "bridge", false, {
+			category: "agent",
+		}),
+		cmd("/queue-drop", "Remove one queued message by number", "bridge", true, {
+			category: "agent",
+			argHint: "<number>",
+			examples: ["/queue-drop 2"],
+		}),
+		cmd("/queue-clear", "Remove all queued messages", "bridge", false, {
+			category: "agent",
+		}),
 		cmd("/reload", "Reload config and agents", "bridge", false, {
 			category: "agent",
 		}),

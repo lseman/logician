@@ -79,6 +79,12 @@ export class MessageQueue {
 		return followUp;
 	}
 
+	remove(id: string): QueuedMessage | undefined {
+		const index = this.queue.findIndex((message) => message.id === id);
+		if (index < 0) return undefined;
+		return this.queue.splice(index, 1)[0];
+	}
+
 	/** Clear all queued messages (used on abort). */
 	clear(): QueuedMessage[] {
 		const all = [...this.queue];

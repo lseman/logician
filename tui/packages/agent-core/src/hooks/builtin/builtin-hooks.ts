@@ -4,23 +4,23 @@
 // user-supplied hooks via the typed HookBus so both run.
 
 import { BudgetTracker } from "./budget.ts";
-import { ThinkingLoopDetector } from "../core/thinking-loop-detector.ts";
-import { recordFileBeforeWrite } from "../core/file-checkpoints.ts";
-import type { LoopDetector } from "../core/loop-detector.ts";
-import { HookBus } from "./hook-bus.ts";
+import { ThinkingLoopDetector } from "../../core/thinking-loop-detector.ts";
+import { recordFileBeforeWrite } from "../../core/file-checkpoints.ts";
+import type { LoopDetector } from "../../core/loop-detector.ts";
+import { HookBus } from "../native/hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
-} from "../core/messages.ts";
-import { compactToFit } from "../compaction/compaction.ts";
-import { getTaskStatus } from "../core/task-status-state.ts";
-import { getTasks } from "../core/todo-state.ts";
+} from "../../core/messages.ts";
+import { compactToFit } from "../../compaction/compaction.ts";
+import { getTaskStatus } from "../../core/task-status-state.ts";
+import { getTasks } from "../../core/todo-state.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
 	CompactableMessage,
 	Message,
-} from "../core/types.ts";
+} from "../../core/types.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the

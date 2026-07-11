@@ -22,6 +22,22 @@ void test("memory command is discoverable with management actions", () => {
 	assert.match(memory.argHint ?? "", /status.*list.*search.*show.*add.*drop.*clear/);
 });
 
+void test("steer-now forces the existing steering queue without accepting text", () => {
+	const commands = createSlashCommands(bridge, {});
+	const command = commands.find((item) => item.command === "/steer-now");
+	assert.ok(command);
+	assert.equal(command.dispatch, "bridge");
+	assert.equal(command.acceptsArgs, false);
+});
+
+void test("queue management commands are discoverable", () => {
+	const commands = createSlashCommands(bridge, {});
+	assert.ok(commands.some((command) => command.command === "/queue"));
+	assert.ok(commands.some((command) => command.command === "/queue-clear"));
+	const drop = commands.find((command) => command.command === "/queue-drop");
+	assert.equal(drop?.argHint, "<number>");
+});
+
 void test("help renders the live registry and supports topics", () => {
 	const commands = createSlashCommands(bridge, {});
 	const help = commands.find((command) => command.command === "/help");
