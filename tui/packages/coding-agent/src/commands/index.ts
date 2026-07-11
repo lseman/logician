@@ -1,1 +1,1 @@
-export * from "../slash-commands.ts";
+export * from "./slash-commands.ts";

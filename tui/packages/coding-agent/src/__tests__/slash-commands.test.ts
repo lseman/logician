@@ -4,7 +4,7 @@ import {
 	createSlashCommands,
 	filterSlashCommands,
 	formatSlashHelp,
-} from "../slash-commands.ts";
+} from "../commands/slash-commands.ts";
 
 const bridge = { sendSlash: () => {}, cancel: () => {}, reset: () => {} };
 

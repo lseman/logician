@@ -4,7 +4,6 @@
 // nextTurn queues drained at save points.
 //
 
-import { runSessionStartHooks, runHookEvent } from "../tools/shared/plugins.ts";
 import {
 	beginFileFrame,
 	clearFileFrames,
@@ -16,13 +15,8 @@ import {
 	runAgentLoopContinue,
 	type RunAgentLoopConfig,
 } from "./agent-loop-runner.ts";
-import { Session, SessionManager } from "./session.ts";
-import {
-	compactMessages,
-	convertToChatFormat,
-	createUserMessage,
-	estimateChatPayloadTokens,
-} from "./messages.ts";
+import { Session } from "./session.ts";
+import { createUserMessage, estimateChatPayloadTokens } from "./messages.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import {
 	MessageDeliveryManager,
@@ -42,13 +36,24 @@ import {
 import { LoopDetector } from "./loop-detector.ts";
 import { ThinkingLoopDetector } from "./thinking-loop-detector.ts";
 import {
-	collectMessagesForBranchSummary,
-	extractFileOpsFromMessages,
-	computeFileLists,
-	formatFileOperations,
-	parseBranchSummary,
-	serializeMessages,
-} from "./branch-summarization.ts";
+	forkBranch,
+	summarizeAndMergeBranch,
+	navigateToCheckpoint as navigateToCheckpointHelper,
+	renderBranchTree,
+	listBranches as listBranchesHelper,
+	type Branch,
+} from "./harness-branching.ts";
+import { runCompaction, shouldAutoCompact } from "./harness-compaction.ts";
+import { cycleModel as cycleModelHelper, resolveModelUrl } from "./harness-model.ts";
+import {
+	emitSessionStart as emitSessionStartHelper,
+	emitSessionEnd as emitSessionEndHelper,
+	emitPreCompact as emitPreCompactHelper,
+	emitPostCompact as emitPostCompactHelper,
+	loadSessionMessages,
+	listSessions as listSessionsHelper,
+} from "./harness-session.ts";
+import type { BranchSummaryData, BranchInfo } from "./harness-types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -80,6 +85,8 @@ import {
 	type HarnessPhase,
 } from "./runtime-state.ts";
 import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
+
+export type { BranchSummaryData, BranchInfo } from "./harness-types.ts";
 
 export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
 
@@ -130,39 +137,6 @@ export interface AbortResult {
 	clearedNextTurn: string[];
 }
 
-/** Structured branch summary data. */
-export interface BranchSummaryData {
-	/** Goal of the branch. */
-	goal: string;
-	/** Constraints and preferences. */
-	constraints: string[];
-	/** Progress tracking. */
-	progress: BranchProgress;
-	/** Key decisions with rationale. */
-	keyDecisions: Array<{ decision: string; rationale: string }>;
-	/** Next steps to continue work. */
-	nextSteps: string[];
-	/** Full human-readable summary. */
-	full: string;
-}
-
-/** Progress tracking for branch summaries. */
-export interface BranchProgress {
-	done: string[];
-	inProgress: string[];
-	blocked: string[];
-}
-
-/** Public branch info for UI / callers. */
-export interface BranchInfo {
-	id: string;
-	depth: number;
-	/** Summary of this branch's work (null until branchSummary is called). */
-	summary: BranchSummaryData | null;
-	/** Message index where this branch forked. */
-	forkedAt: number;
-}
-
 // Conversation checkpoints: a snapshot of history is pushed before each
 // prompt so a bad turn can be rewound. Bounded ring (newest last).
 const MAX_CHECKPOINTS = 20;
@@ -179,12 +153,7 @@ export class AgentHarness {
 	private abortController: AbortController | null = null;
 	private loopConfig: AgentConfig | null = null;
 	private history: Message[] = [];
-	private branches: Array<{
-		id: string;
-		parent: Message[];
-		forkedAt: number;
-		summary: BranchSummaryData | null;
-	}> = [];
+	private branches: Branch[] = [];
 	private branchSeq = 0;
 	private checkpoints: Message[][] = [];
 	private _nextTurnQueue: string[] = [];
@@ -1042,73 +1011,37 @@ export class AgentHarness {
 		this.config.hookTranscriptPath = path;
 	}
 
+	private hookContext(): { sessionId: string; transcriptPath: string; cwd: string } {
+		return {
+			sessionId: this._sessionId || "",
+			transcriptPath: this._transcriptPath || "",
+			cwd: this.cwd || process.cwd(),
+		};
+	}
+
 	private async emitSessionStart(source: string = "startup"): Promise<void> {
-		if (!this._hooksEnabled) return;
-		try {
-			await runSessionStartHooks({
-				source,
-				session_id: this._sessionId || "",
-				transcript_path: this._transcriptPath || "",
-				cwd: this.cwd || process.cwd(),
-			});
-			this._hasStartedSession = true;
-		} catch {
-			// must not block the session
-		}
+		const started = await emitSessionStartHelper(this._hooksEnabled, this.hookContext(), source);
+		if (started) this._hasStartedSession = true;
 	}
 
 	private async emitSessionEnd(reason: string = "other"): Promise<void> {
-		if (!this._hooksEnabled) return;
-		try {
-			await runHookEvent("SessionEnd", {
-				session_id: this._sessionId || "",
-				transcript_path: this._transcriptPath || "",
-				cwd: this.cwd || process.cwd(),
-				reason,
-			});
-		} catch {
-			// must not block cleanup
-		}
+		await emitSessionEndHelper(this._hooksEnabled, this.hookContext(), reason);
 	}
 
 	private async emitPreCompact(
 		ctx?: BeforeCompactContext,
 	): Promise<BeforeCompactResult | undefined> {
-		let hookResult: BeforeCompactResult | undefined;
-		if (ctx) {
-			try {
-				hookResult =
-					(await this.config.internalHooks?.beforeCompact?.(ctx)) ??
-					(await this.config.hooks?.beforeCompact?.(ctx)) ??
-					undefined;
-			} catch {
-				// must not block compaction
-			}
-		}
-		if (!this._hooksEnabled) return hookResult;
-		try {
-			await runHookEvent("PreCompact", {
-				session_id: this._sessionId || "",
-				transcript_path: this._transcriptPath || "",
-				cwd: this.cwd || process.cwd(),
-			});
-		} catch {
-			// must not block compaction
-		}
-		return hookResult;
+		return emitPreCompactHelper(
+			this._hooksEnabled,
+			this.hookContext(),
+			this.config.internalHooks?.beforeCompact,
+			this.config.hooks?.beforeCompact,
+			ctx,
+		);
 	}
 
 	private async emitPostCompact(): Promise<void> {
-		if (!this._hooksEnabled) return;
-		try {
-			await runHookEvent("PostCompact", {
-				session_id: this._sessionId || "",
-				transcript_path: this._transcriptPath || "",
-				cwd: this.cwd || process.cwd(),
-			});
-		} catch {
-			// must not block compaction
-		}
+		await emitPostCompactHelper(this._hooksEnabled, this.hookContext());
 	}
 
 	// ── Auto-compaction ────────────────────────────────────────────────────
@@ -1180,32 +1113,18 @@ export class AgentHarness {
 	}
 
 	async resumeSession(sessionId: string, baseDir?: string): Promise<boolean> {
-		try {
-			const sessionBaseDir = baseDir ?? this._sessionBaseDir;
-			const session = new Session(sessionId, {
-				baseDir: sessionBaseDir,
-				enabled: true,
-			});
-			const persisted = session.load();
-			if (persisted.length > 0) {
-				const messages: Message[] = persisted.map((m) => ({
-					role: m.role as Message["role"],
-					content: m.content,
-					tool_call_id: m.tool_call_id,
-					tool_calls: m.tool_calls,
-					name: m.name,
-					timestamp: m.timestamp,
-				}));
-				this.setActiveHistory(messages.filter((m) => m.role !== "system"));
-			}
-			this._sessionBaseDir = sessionBaseDir;
-			this._session = session;
-			this._sessionId = sessionId;
-			await this.emitSessionStart("resume");
-			return true;
-		} catch {
-			return false;
+		const sessionBaseDir = baseDir ?? this._sessionBaseDir;
+		const resumed = loadSessionMessages(sessionId, sessionBaseDir);
+		if (!resumed) return false;
+
+		if (resumed.messages.length > 0) {
+			this.setActiveHistory(resumed.messages.filter((m) => m.role !== "system"));
 		}
+		this._sessionBaseDir = sessionBaseDir;
+		this._session = resumed.session;
+		this._sessionId = sessionId;
+		await this.emitSessionStart("resume");
+		return true;
 	}
 
 	listSessions(): Array<{
@@ -1214,29 +1133,10 @@ export class AgentHarness {
 		messageCount: number;
 		lastActivity: number;
 	}> {
-		try {
-			const baseDir =
-				this._sessionBaseDir ??
-				(this._session ? `${this._session.dirPath}/../..` : undefined);
-			const manager = new SessionManager({ baseDir });
-			return manager
-				.listSessions()
-				.map(
-					(m: {
-						id: string;
-						name?: string;
-						messageCount: number;
-						lastActivity: number;
-					}) => ({
-						id: m.id,
-						name: m.name,
-						messageCount: m.messageCount,
-						lastActivity: m.lastActivity,
-					}),
-				);
-		} catch {
-			return [];
-		}
+		const baseDir =
+			this._sessionBaseDir ??
+			(this._session ? `${this._session.dirPath}/../..` : undefined);
+		return listSessionsHelper(baseDir);
 	}
 
 	get messages(): Message[] {
@@ -1285,12 +1185,8 @@ export class AgentHarness {
 	fork(customSummary?: BranchSummaryData): string {
 		this.assertIdle("fork");
 		const current = this.activeHistory();
-		const branch: (typeof this.branches)[number] = {
-			id: `branch_${++this.branchSeq}`,
-			parent: current,
-			forkedAt: current.length,
-			summary: customSummary ?? null,
-		};
+		const { branch, nextBranchSeq } = forkBranch(this.branches, this.branchSeq, current, customSummary);
+		this.branchSeq = nextBranchSeq;
 		this.branches.push(branch);
 		this.setActiveHistory([...current]);
 		return branch.id;
@@ -1319,42 +1215,15 @@ export class AgentHarness {
 		}
 
 		return this.runInPhase("branch_summary", "branchSummary", async () => {
-			// Collect messages with file ops and token budget
-			const collection = collectMessagesForBranchSummary(
-				current,
-				branch.parent,
-				branch.forkedAt,
-				this.config.contextWindowTokens
-					? Math.floor(this.config.contextWindowTokens * 0.5)
-					: 0,
-			);
-
-			const { fileOps } = collection;
-
-			// Generate structured summary via LLM
-			const summary = await this.generateBranchSummaryText(
-				collection.messages,
-				options?.customInstructions,
-				fileOps,
-			);
-
-			// Update branch with summary
-			branch.summary = summary;
+			const outcome = await summarizeAndMergeBranch(this.backend, branch, current, {
+				customInstructions: options?.customInstructions,
+				contextWindowTokens: this.config.contextWindowTokens,
+				maxTokens: this.config.maxTokens,
+				thinkingLevel: this.config.thinkingLevel,
+			});
 			this.branches.pop();
-
-			if (!summary) {
-				return null;
-			}
-
-			// Append summary message to history
-			const summaryEntry: Message = {
-				role: "assistant",
-				content: summary.full,
-				tool_calls: [],
-			};
-
-			this.setActiveHistory([...branch.parent, summaryEntry]);
-			return summary.full;
+			this.setActiveHistory(outcome.history);
+			return outcome.summaryText;
 		});
 	}
 
@@ -1383,36 +1252,24 @@ export class AgentHarness {
 		options?: { summarize?: boolean; customInstructions?: string },
 	): Promise<BranchSummaryData | null> {
 		this.assertIdle("navigateToCheckpoint");
-		if (checkpointIndex < 0 || checkpointIndex >= this.checkpoints.length) {
-			return null;
-		}
+		const outcome = await navigateToCheckpointHelper(
+			this.backend,
+			this.checkpoints,
+			checkpointIndex,
+			this.history,
+			{
+				summarize: options?.summarize,
+				customInstructions: options?.customInstructions,
+				maxTokens: this.config.maxTokens,
+				thinkingLevel: this.config.thinkingLevel,
+			},
+		);
+		if (!outcome) return null;
 
-		const target = this.checkpoints[checkpointIndex];
-		const abandoned = this.history;
-
-		// Summarize abandoned path if requested
-		let summaryText: BranchSummaryData | null = null;
-		if (options?.summarize && abandoned.length > target.length) {
-			const abandonedMessages = abandoned.slice(target.length);
-			const fileOps = extractFileOpsFromMessages(abandonedMessages);
-			summaryText = await this.generateBranchSummaryText(
-				abandonedMessages,
-				options.customInstructions,
-				fileOps,
-			);
-			if (summaryText) {
-				this.history.push({
-					role: "assistant",
-					content: summaryText.full,
-					tool_calls: [],
-				});
-			}
-		}
-
-		this.history = [...target];
+		this.history = outcome.history;
 		this.checkpoints = this.checkpoints.slice(0, checkpointIndex);
 		this.branches = [];
-		return summaryText;
+		return outcome.summary;
 	}
 
 	/**
@@ -1420,53 +1277,11 @@ export class AgentHarness {
 	 * Shows parent/child relationships with depth indicators.
 	 */
 	branchTree(): string {
-		if (this.branches.length === 0) {
-			return "No active branches.";
-		}
-
-		const lines: string[] = [];
-		lines.push(`Branches (${this.branches.length}):`);
-
-		for (const branch of this.branches) {
-			const depth = this.branches.indexOf(branch);
-			const prefix = "  ".repeat(depth) + (depth > 0 ? "└─ " : "");
-			lines.push(
-				`${prefix}[${branch.id}] forked at message ${branch.forkedAt}`,
-			);
-
-			if (branch.summary) {
-				// Show summary preview (first line of goal)
-				const goal = branch.summary.goal;
-				const preview = goal.length > 60 ? goal.slice(0, 60) + "..." : goal;
-				lines.push(`${"  ".repeat(depth + 1)}Goal: ${preview}`);
-
-				if (branch.summary.progress.done.length > 0) {
-					const doneCount = branch.summary.progress.done.length;
-					lines.push(`${"  ".repeat(depth + 1)}Done: ${doneCount} items`);
-				}
-				if (branch.summary.progress.inProgress.length > 0) {
-					lines.push(
-						`${"  ".repeat(depth + 1)}In Progress: ${branch.summary.progress.inProgress.length} items`,
-					);
-				}
-				if (branch.summary.progress.blocked.length > 0) {
-					lines.push(
-						`${"  ".repeat(depth + 1)}Blocked: ${branch.summary.progress.blocked.length} items`,
-					);
-				}
-			}
-		}
-
-		return lines.join("\n");
+		return renderBranchTree(this.branches);
 	}
 
 	listBranches(): BranchInfo[] {
-		return this.branches.map((b, i) => ({
-			id: b.id,
-			depth: i + 1,
-			summary: b.summary,
-			forkedAt: b.forkedAt,
-		}));
+		return listBranchesHelper(this.branches);
 	}
 
 	// ── Conversation management ────────────────────────────────────────────
@@ -1514,29 +1329,12 @@ export class AgentHarness {
 				return 0;
 			}
 
-			const result = await compactMessages(messages, {
+			const result = await runCompaction(this.backend, messages, before, {
 				reason: "manual",
-				summarize: preResult?.summary
-					? async () => preResult.summary!
-					: (older, system) =>
-							this.generateSummary(
-								older.map((m) => ({
-									role: m.role as Message["role"],
-									content: m.content ?? "",
-									tool_call_id: m.tool_call_id,
-									tool_calls: m.tool_calls,
-									name: m.name,
-									timestamp: m.timestamp,
-								})),
-								system.map((m) => ({
-									role: m.role as Message["role"],
-									content: m.content ?? "",
-									tool_call_id: m.tool_call_id,
-									tool_calls: m.tool_calls,
-									name: m.name,
-									timestamp: m.timestamp,
-								})),
-							),
+				presetSummary: preResult?.summary,
+				temperature: this.config.temperature,
+				maxTokens: this.config.maxTokens,
+				thinkingLevel: this.config.thinkingLevel,
 			});
 
 			if (!result.changed) {
@@ -1551,7 +1349,7 @@ export class AgentHarness {
 				return 0;
 			}
 			this.history = result.messages;
-			const after = this.estimatePayloadTokens();
+			const after = result.tokensAfter;
 			this.onCompaction?.("manual", before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
@@ -1623,29 +1421,12 @@ export class AgentHarness {
 				},
 			});
 
-			const result = await compactMessages(messages, {
+			const result = await runCompaction(this.backend, messages, before, {
 				reason,
-				summarize: preResult?.summary
-					? async () => preResult.summary!
-					: (older, system) =>
-							this.generateSummary(
-								older.map((m) => ({
-									role: m.role as Message["role"],
-									content: m.content ?? "",
-									tool_call_id: m.tool_call_id,
-									tool_calls: m.tool_calls,
-									name: m.name,
-									timestamp: m.timestamp,
-								})),
-								system.map((m) => ({
-									role: m.role as Message["role"],
-									content: m.content ?? "",
-									tool_call_id: m.tool_call_id,
-									tool_calls: m.tool_calls,
-									name: m.name,
-									timestamp: m.timestamp,
-								})),
-							),
+				presetSummary: preResult?.summary,
+				temperature: this.config.temperature,
+				maxTokens: this.config.maxTokens,
+				thinkingLevel: this.config.thinkingLevel,
 			});
 
 			if (!result.changed) {
@@ -1684,139 +1465,6 @@ export class AgentHarness {
 			});
 			return true;
 		});
-	}
-
-	// ── Summary generation ─────────────────────────────────────────────────
-
-	private async generateSummary(
-		messages: Message[],
-		systemMessages: Message[],
-	): Promise<string | null> {
-		try {
-			const chatMessages = [
-				...systemMessages,
-				{
-					role: "user" as const,
-					content:
-						"Summarize the following conversation history concisely. " +
-						"Focus on key decisions, actions taken, files modified, " +
-						"and any important context that should be retained. " +
-						"Be brief but preserve all actionable information.",
-				},
-				...messages,
-			];
-
-			const response = await this.backend.generate(
-				convertToChatFormat(chatMessages),
-				{
-					temperature: this.config.temperature ?? 0.3,
-					maxTokens: Math.min(2048, (this.config.maxTokens ?? 4096) / 2),
-					thinkingLevel: this.config.thinkingLevel,
-				},
-			);
-
-			return response.content?.trim() || null;
-		} catch {
-			return null;
-		}
-	}
-
-	/**
-	 * Generate a structured branch summary via LLM.
-	 * Collects file ops, builds the branch summary prompt, calls the LLM,
-	 * and returns a BranchSummaryData object.
-	 */
-	private async generateBranchSummaryText(
-		messages: Message[],
-		customInstructions?: string,
-		fileOps?: { read: Set<string>; modified: Set<string> },
-	): Promise<BranchSummaryData | null> {
-		if (messages.length === 0) return null;
-
-		const extractedOps = fileOps ?? extractFileOpsFromMessages(messages);
-		const { readFiles, modifiedFiles } = computeFileLists(extractedOps);
-
-		try {
-			// Build the branch summary prompt
-			const conversationText = serializeMessages(messages);
-
-			let instructions = `Create a structured summary of this conversation branch for context when returning later.
-
-Use this EXACT format:
-
-## Goal
-[One sentence: what was the user trying to accomplish]
-
-## Constraints & Preferences
-- [constraint 1]
-- [constraint 2]
-- (none) if none were mentioned
-
-## Progress
-### Done
-- [x] [completed task/change]
-### In Progress
-- [ ] [started but unfinished]
-### Blocked
-- [issue preventing progress, if any]
-
-## Key Decisions
-- **[decision]**: [brief rationale]
-
-## Next Steps
-1. [first step to continue]
-2. [second step, if any]
-
-Preserve exact file paths, function names, and error messages. Be concise.`;
-
-			if (customInstructions) {
-				instructions += `\n\nAdditional focus: ${customInstructions}`;
-			}
-
-			const response = await this.backend.generate(
-				[
-					{
-						role: "user",
-						content: `<conversation>\n${conversationText}\n</conversation>\n\n${instructions}`,
-					},
-				] as { role: string; content: string }[],
-				{
-					temperature: 0.3,
-					maxTokens: Math.min(2048, (this.config.maxTokens ?? 4096) / 2),
-					thinkingLevel: this.config.thinkingLevel,
-				},
-			);
-
-			const summaryText = response.content?.trim();
-			if (!summaryText) return null;
-
-			// Parse the structured fields from LLM output
-			const parsed = parseBranchSummary(summaryText);
-
-			// Append file operations to full text
-			const fileOpsText = formatFileOperations(readFiles, modifiedFiles);
-			const full = `${summaryText}\n${fileOpsText}`;
-
-			return {
-				goal: parsed.goal || "Branch conversation",
-				constraints: parsed.constraints || [],
-				progress: parsed.progress || { done: [], inProgress: [], blocked: [] },
-				keyDecisions: parsed.keyDecisions || [],
-				nextSteps: parsed.nextSteps || [],
-				full,
-			};
-		} catch {
-			// Fallback: return a basic summary from raw messages
-			const fallback = `Branch ${messages.length} messages explored.`;
-			return {
-				goal: "Branch exploration",
-				constraints: [],
-				progress: { done: [], inProgress: [], blocked: [] },
-				keyDecisions: [],
-				nextSteps: [],
-				full: fallback,
-			};
-		}
 	}
 
 	// ── Tool registry ──────────────────────────────────────────────────────
@@ -1868,14 +1516,7 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 
 	/** Resolve the baseUrl for a given model identifier. */
 	private getModelUrl(modelName: string): string {
-		const models = this.config.models;
-		if (models) {
-			const found = models.find((m) => m.model === modelName);
-			if (found?.url) {
-				return found.url;
-			}
-		}
-		return this.config.baseUrl;
+		return resolveModelUrl(this.config.models, modelName, this.config.baseUrl);
 	}
 
 	/** Set the models array for cycling. */
@@ -1883,89 +1524,41 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 		this.config.models = models;
 	}
 
-	/** Clamp thinking level to what the given model supports. */
-	private clampThinkingLevel(level: string): ThinkingLevel {
-		const levels: ThinkingLevel[] = [
-			"off",
-			"minimal",
-			"low",
-			"medium",
-			"high",
-			"xhigh",
-		];
-		const idx = levels.indexOf(level as ThinkingLevel);
-		if (idx >= 0) return level as ThinkingLevel;
-
-		// Unknown level — default to medium
-		return "medium";
-	}
-
 	cycleModel(direction: "forward" | "backward" = "forward"): string {
-		// Build cycling ring: [currentModel, ...configuredModels].
-		const configured = this.config.models ?? [];
-		if (configured.length === 0) {
-			return this.config.model;
-		}
-
-		// Build array of {name, model} for cycling.
-		const cycleModels: Array<{ name: string; model: string }> = configured.map(
-			(m) => ({ name: m.name, model: m.model }),
-		);
-
-		// Check if current model is already in the list.
-		const currentInList = cycleModels.some(
-			(m) => m.model === this.config.model,
-		);
-		if (!currentInList) {
-			cycleModels.unshift({
-				name: this.config.model,
-				model: this.config.model,
-			});
-		}
-
-		if (cycleModels.length <= 1) {
-			return this.config.model;
-		}
-
-		const currentIndex = cycleModels.findIndex(
-			(m) => m.model === this.config.model,
-		);
-		const nextIndex =
-			direction === "forward"
-				? (currentIndex + 1) % cycleModels.length
-				: (currentIndex - 1 + cycleModels.length) % cycleModels.length;
-		const next = cycleModels[nextIndex];
-		const model = next?.model ?? this.config.model;
-		const fromModel = this.config.model;
-
-		// Switch baseUrl if target model has a custom url.
-		const targetUrl = this.getModelUrl(model);
-		if (targetUrl !== this.config.baseUrl) {
-			this.config.baseUrl = targetUrl;
-		}
-
-		// Preserve thinking level, clamped to model capabilities
 		const currentLevel = this.config.thinkingLevel ?? "off";
-		const clampedLevel = this.clampThinkingLevel(currentLevel);
+		const result = cycleModelHelper(
+			this.config.model,
+			this.config.baseUrl,
+			this.config.thinkingLevel,
+			this.config.models ?? [],
+			direction,
+		);
+		if (!result.didCycle) {
+			return result.model;
+		}
 
-		if (clampedLevel !== currentLevel) {
-			this.config.thinkingLevel = clampedLevel;
+		if (result.baseUrl !== this.config.baseUrl) {
+			this.config.baseUrl = result.baseUrl;
+		}
+
+		if (result.thinkingLevelClamped) {
+			this.config.thinkingLevel = result.thinkingLevel;
 			this.emitToSubscribers({
 				type: "thinking_level_clamped",
-				level: clampedLevel,
-				reason: `Model ${model} does not support ${currentLevel} thinking level`,
+				level: result.thinkingLevel,
+				reason: `Model ${result.model} does not support ${currentLevel} thinking level`,
 			});
 		}
 
-		this.config.model = model;
-		this._session?.appendModelChange(model);
+		this.config.model = result.model;
+		this._session?.appendModelChange(result.model);
 		this.emitToSubscribers({
 			type: "model_cycle",
-			model,
-			fromModel,
-			thinkingLevel: clampedLevel,
+			model: result.model,
+			fromModel: result.fromModel,
+			thinkingLevel: result.thinkingLevel,
 		});
-		return model;
+		return result.model;
 	}
 
 	// ── Thinking level ─────────────────────────────────────────────────────
@@ -2032,12 +1625,7 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 	}
 
 	private shouldCompact(messages: Message[]): boolean {
-		const settings = this.autoCompactionSettings;
-		if (!settings.enabled) return false;
-		const contextWindow = settings.contextWindow ?? 128000;
-		const threshold = contextWindow - (settings.reserveTokens ?? 16384);
-		const currentTokens = estimateChatPayloadTokens(messages);
-		return currentTokens > threshold;
+		return shouldAutoCompact(this.autoCompactionSettings, messages);
 	}
 
 	private withDrainHook(config: AgentConfig): AgentConfig {

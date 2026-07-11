@@ -1,5 +1,5 @@
 // ── AgentCoreBridge ──────────────────────────────────────────────────────────────
-import { envNumber, tableRow } from "./tui-utils.ts";
+import { envNumber, tableRow } from "../tui-utils.ts";
 // Replaces the Python bridge with direct TypeScript agent-core integration.
 // Translates agent-core events to the same shapes the transcript expects.
 
@@ -11,7 +11,7 @@ import { OpenAIBackend } from "@logician/agent-core/core/backend.ts";
 import {
 	createDefaultTools,
 	DEFAULT_SEARXNG_URL,
-} from "./tools/default-tools.ts";
+} from "../tools/default-tools.ts";
 import {
 	type AgentConfig,
 	type AgentModelConfig,
@@ -26,7 +26,7 @@ import {
 	type McpSnapshotResult,
 	type McpToggleResult,
 	McpManager,
-} from "./mcp/index.ts";
+} from "../mcp/index.ts";
 import {
 	type PermissionMode,
 	PermissionManager,
@@ -47,7 +47,7 @@ import {
 	formatSkillInvocation,
 	loadSkills,
 	type Skill,
-} from "./skills.ts";
+} from "../skills.ts";
 import {
 	type AgentDefinition,
 	loadAgentDefinitions,
@@ -57,12 +57,12 @@ import {
 	type SubagentToolDeps,
 } from "@logician/agent-capabilities/tools";
 import type { ParallelSpawnOptions } from "@logician/agent-capabilities/subagents/parallel-subagent.ts";
-import { buildDefaultSystemPrompt } from "./system-prompt.ts";
-import { createReadSkillTool } from "./tools/read-skill.ts";
+import { buildDefaultSystemPrompt } from "../system-prompt.ts";
+import { createReadSkillTool } from "../tools/read-skill.ts";
 import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
 import { onTodosChanged } from "@logician/agent-core/core/todo-state.ts";
 import { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
-import { findLogicianConfig } from "./config.ts";
+import { findLogicianConfig } from "../configuration/config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import {
 	createMemorySystem,

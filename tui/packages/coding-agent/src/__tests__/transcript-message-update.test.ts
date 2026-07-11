@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Transcript } from "../transcript.ts";
+import { Transcript } from "../sessions/transcript.ts";
 
 void test("full message updates render non-streaming assistant responses", () => {
 	const transcript = new Transcript();

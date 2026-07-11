@@ -9,7 +9,7 @@ import type {
 	ToolStartEvent,
 	ToolUpdateEvent,
 	TurnEndEvent,
-} from "./events.ts";
+} from "../runtime/events.ts";
 
 export type ThinkingDisplayStyle = "collapsed" | "summary" | "expanded";
 

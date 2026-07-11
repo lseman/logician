@@ -2,8 +2,8 @@
 // Exports the orchestration layer: bridge, sessions, config, slash commands,
 // transcript, MCP, plugins, loop detection, and utilities.
 
-export * from "./bridge.ts";
-export { SessionStore } from "./session-store.ts";
+export * from "./runtime/bridge.ts";
+export { SessionStore } from "./sessions/session-store.ts";
 export {
 	configBool,
 	configNumber,
@@ -12,18 +12,18 @@ export {
 	loadLogicianConfig,
 	saveConfigField,
 	type LogicianTuiConfig,
-} from "./config.ts";
+} from "./configuration/config.ts";
 export {
 	createSlashCommands,
 	type SlashCommandDef,
 	type SlashCommandCategory,
 	type SlashCommandSource,
 	type SlashDispatch,
-} from "./slash-commands.ts";
-export { Transcript, type Turn } from "./transcript.ts";
-export { type ParsedBridgeEvent } from "./events.ts";
+} from "./commands/slash-commands.ts";
+export { Transcript, type Turn } from "./sessions/transcript.ts";
+export { type ParsedBridgeEvent } from "./runtime/events.ts";
 export { formatContextSize, envNumber, tableRow } from "./tui-utils.ts";
-export { LoopManager } from "./loop-manager.ts";
+export { LoopManager } from "./runtime/loop-manager.ts";
 export * from "./tools/index.ts";
 export * from "./mcp/index.ts";
 export * from "./skills.ts";

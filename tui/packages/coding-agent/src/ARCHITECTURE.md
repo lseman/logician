@@ -10,6 +10,8 @@ The coding agent is the product orchestration layer above `agent-core` and
 - `tools/`, `skills`, `prompts/`, `context-files/`, `mcp/`, and `trust/` are
   feature modules consumed by the runtime.
 
-Legacy root import paths remain supported. New code should import through these
-responsibility-oriented entry points so implementation files can be split
-without another public API migration.
+Implementation files live under their responsibility-oriented directory
+(`runtime/bridge.ts`, `sessions/session-store.ts`, etc). Legacy flat subpath
+exports (`@logician/coding-agent/bridge`, `/config`, `/slash-commands`, ...)
+remain in package.json for external back-compat, but now resolve into these
+directories rather than root-level files.
