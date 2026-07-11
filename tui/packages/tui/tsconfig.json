@@ -16,10 +16,12 @@
 		"baseUrl": ".",
 		"paths": {
 			"@logician/coding-agent": ["../coding-agent/src/index.ts"],
-			"@logician/coding-agent/*": ["../coding-agent/src/*"]
+			"@logician/coding-agent/*": ["../coding-agent/src/*"],
+			"@logician/agent-capabilities": ["../agent-capabilities/src/index.ts"],
+			"@logician/agent-capabilities/*": ["../agent-capabilities/src/*"]
 		},
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*", "../agent-core/src/**/*", "../coding-agent/src/**/*"],
+	"include": ["src/**/*", "../agent-core/src/**/*", "../coding-agent/src/**/*", "../agent-capabilities/src/**/*"],
 	"exclude": ["node_modules", "dist"]
 }

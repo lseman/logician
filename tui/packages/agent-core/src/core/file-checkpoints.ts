@@ -77,11 +77,6 @@ export function restoreFileFrame(): number | null {
 	return restored;
 }
 
-/** Pop the most recent frame without restoring (frame bookkeeping on abort). */
-export function discardFileFrame(): void {
-	frames.pop();
-}
-
 /** Number of files recorded in the current frame (for tests/UI). */
 export function currentFrameSize(): number {
 	return frames.at(-1)?.files.size ?? 0;

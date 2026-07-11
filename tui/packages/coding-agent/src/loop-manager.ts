@@ -1,12 +1,19 @@
-// ── Loop Manager ────────────────────────────────────────────────────────────────
-// Runs a prompt repeatedly on a timer. Start with /loop <prompt> [interval],
-// stop with /loop stop or pressing Esc while a loop is active.
+// ── Completion-aware recurring loop manager ──────────────────────────────
+// Schedules the next run only after the current run settles. This guarantees
+// at-most-one in-flight agent request and avoids setInterval overlap.
+
+export type LoopStatus = "idle" | "scheduled" | "running" | "stopped";
 
 export interface LoopState {
-	prompt: string;
-	intervalMs: number;
-	timer: ReturnType<typeof setInterval> | null;
-	iteration: number;
+	readonly prompt: string;
+	readonly intervalMs: number;
+	readonly iteration: number;
+	readonly status: Exclude<LoopStatus, "idle">;
+	readonly startedAt: number;
+	readonly nextRunAt?: number;
+	readonly lastStartedAt?: number;
+	readonly lastFinishedAt?: number;
+	readonly lastError?: string;
 }
 
 export type LoopAction =
@@ -14,72 +21,144 @@ export type LoopAction =
 	| { type: "stop" }
 	| { type: "tick"; iteration: number };
 
+export type LoopTickHandler = (
+	iteration: number,
+	prompt: string,
+	signal: AbortSignal,
+) => void | Promise<void>;
+
+export type LoopStateHandler = (state: Readonly<LoopState> | null) => void;
+
+const MIN_INTERVAL_MS = 100;
+
 export class LoopManager {
 	private state: LoopState | null = null;
-	private onTick?: (iteration: number, prompt: string) => void;
+	private timer: ReturnType<typeof setTimeout> | null = null;
+	private controller: AbortController | null = null;
+	private generation = 0;
+	private onTick?: LoopTickHandler;
+	private onStateChange?: LoopStateHandler;
 
-	setOnTick(cb: (iteration: number, prompt: string) => void): void {
+	setOnTick(cb: LoopTickHandler): void {
 		this.onTick = cb;
 	}
 
-	/** Parse interval token like "5m", "30s", "1h" into ms. Returns null if not an interval. */
+	setOnStateChange(cb: LoopStateHandler): void {
+		this.onStateChange = cb;
+	}
+
+	/** Parse an interval token like "5m", "30s", or "1h". */
 	static parseInterval(arg: string): number | null {
-		const m = arg.match(/^(\d+)(s|m|h|d)$/);
-		if (!m) return null;
-		const [, value, unit] = m;
-		const n = parseInt(value, 10);
-		switch (unit) {
-			case "s":
-				return n * 1000;
-			case "m":
-				return n * 60_000;
-			case "h":
-				return n * 3_600_000;
-			case "d":
-				return n * 86_400_000;
-		}
-		return null;
+		const match = arg.trim().toLowerCase().match(/^(\d+)(ms|s|m|h|d)$/);
+		if (!match) return null;
+		const value = Number(match[1]);
+		if (!Number.isSafeInteger(value) || value <= 0) return null;
+		const multiplier =
+			match[2] === "ms"
+				? 1
+				: match[2] === "s"
+					? 1_000
+					: match[2] === "m"
+						? 60_000
+						: match[2] === "h"
+							? 3_600_000
+							: 86_400_000;
+		const interval = value * multiplier;
+		return Number.isSafeInteger(interval) && interval >= MIN_INTERVAL_MS
+			? interval
+			: null;
 	}
 
-	/** Start a new loop. Stops any existing loop first. */
+	/** Start a loop. The first run occurs after the configured interval. */
 	start(prompt: string, intervalMs: number): void {
+		const normalizedPrompt = prompt.trim();
+		if (!normalizedPrompt) throw new Error("Loop prompt cannot be empty");
+		if (!Number.isFinite(intervalMs) || intervalMs < MIN_INTERVAL_MS) {
+			throw new Error(`Loop interval must be at least ${MIN_INTERVAL_MS}ms`);
+		}
 		this.stop();
-		this.state = { prompt, intervalMs, timer: null, iteration: 0 };
-		this.state.timer = setInterval(() => {
-			if (!this.state) return;
-			this.state.iteration++;
-			this.onTick?.(this.state.iteration, this.state.prompt);
-		}, intervalMs);
+		const now = Date.now();
+		this.state = {
+			prompt: normalizedPrompt,
+			intervalMs: Math.round(intervalMs),
+			iteration: 0,
+			status: "scheduled",
+			startedAt: now,
+			nextRunAt: now + Math.round(intervalMs),
+		};
+		const generation = ++this.generation;
+		this.notify();
+		this.schedule(generation, intervalMs);
 	}
 
-	/** Stop the current loop. */
+	/** Stop scheduling and cooperatively cancel an active callback. */
 	stop(): void {
-		if (this.state?.timer) {
-			clearInterval(this.state.timer);
-			this.state.timer = null;
-		}
+		this.generation++;
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = null;
+		this.controller?.abort();
+		this.controller = null;
 		this.state = null;
+		this.notify();
 	}
 
-	/** Check if a loop is currently active. */
 	isActive(): boolean {
-		return this.state !== null && this.state.timer !== null;
+		return this.state !== null;
 	}
 
-	/** Get the current loop state (for display). */
-	getState(): LoopState | null {
-		return this.state;
+	/** Return a detached immutable snapshot, never the manager's live state. */
+	getState(): Readonly<LoopState> | null {
+		return this.state ? Object.freeze({ ...this.state }) : null;
 	}
 
-	/** Process an action (start/stop). */
 	handleAction(action: LoopAction): void {
-		switch (action.type) {
-			case "start":
-				this.start(action.prompt, action.intervalMs);
-				break;
-			case "stop":
-				this.stop();
-				break;
+		if (action.type === "start") this.start(action.prompt, action.intervalMs);
+		else if (action.type === "stop") this.stop();
+	}
+
+	private schedule(generation: number, delayMs: number): void {
+		this.timer = setTimeout(() => {
+			void this.runTick(generation);
+		}, delayMs);
+	}
+
+	private async runTick(generation: number): Promise<void> {
+		if (generation !== this.generation || !this.state) return;
+		this.timer = null;
+		this.controller = new AbortController();
+		const iteration = this.state.iteration + 1;
+		this.state = {
+			...this.state,
+			iteration,
+			status: "running",
+			nextRunAt: undefined,
+			lastStartedAt: Date.now(),
+			lastError: undefined,
+		};
+		this.notify();
+
+		let lastError: string | undefined;
+		try {
+			await this.onTick?.(iteration, this.state.prompt, this.controller.signal);
+		} catch (error) {
+			lastError = error instanceof Error ? error.message : String(error);
 		}
+
+		if (generation !== this.generation || !this.state) return;
+		this.controller = null;
+		const now = Date.now();
+		this.state = {
+			...this.state,
+			status: "scheduled",
+			lastFinishedAt: now,
+			lastError,
+			nextRunAt: now + this.state.intervalMs,
+		};
+		this.notify();
+		this.schedule(generation, this.state.intervalMs);
+	}
+
+	private notify(): void {
+		this.onStateChange?.(this.getState());
 	}
 }

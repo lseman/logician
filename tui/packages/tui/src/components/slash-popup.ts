@@ -14,6 +14,7 @@ import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
+const MAX_VISIBLE_ENTRIES = 8;
 const getHeaderColor = (): string => theme.fg("header", "");
 const getSelectedColor = (): string => theme.fg("selected", "");
 const getCategoryColor = (cat: SlashCommandCategory): string => {
@@ -71,6 +72,8 @@ export class SlashPopup implements Component {
 		const groups: RenderState["groups"] = [];
 		const flatEntries: RenderState["flatEntries"] = [];
 		let idx = 0;
+		let commandIndex = 0;
+		let flatSelection = 0;
 		for (const cat of CATEGORY_ORDER) {
 			const cmds = groupsMap.get(cat);
 			if (!cmds || cmds.length === 0) continue;
@@ -78,8 +81,10 @@ export class SlashPopup implements Component {
 			flatEntries.push({ cmd: {} as SlashCommandDef, isHeader: true, category: cat });
 			idx++;
 			for (const cmd of cmds) {
+				if (commandIndex === this.selectedIndex) flatSelection = idx;
 				flatEntries.push({ cmd, isHeader: false });
 				idx++;
+				commandIndex++;
 			}
 			groups.push({ category: cat, start, count: cmds.length });
 		}
@@ -90,7 +95,7 @@ export class SlashPopup implements Component {
 			selectedCmd: filtered.length > 0 ? filtered[this.selectedIndex] : null,
 			groups,
 			flatEntries,
-			flatSelection: Math.min(this.selectedIndex, flatEntries.length - 1),
+			flatSelection,
 		};
 	}
 
@@ -224,29 +229,36 @@ export class SlashPopup implements Component {
 
 	private _submit(): void {
 		const filtered = this._getFiltered();
-		let dispatchType: "quit" | undefined;
 		if (filtered.length > 0) {
 			const cmd = filtered[this.selectedIndex];
-			const args = this.query.replace(/^\/\w+\s*/, "").trim();
-			this._lastCommand = this.query;
-			if (cmd.handler) {
-				const result = cmd.handler(args);
-				if (result) {
-					this._lastResult = String(result);
-				}
-			}
-			if (cmd.bridgeHandler) {
-				cmd.bridgeHandler(args);
-			}
-			dispatchType = cmd.dispatch === "quit" ? "quit" : undefined;
-		}
-		// Notify TUI about dispatch actions
-		if (dispatchType === "quit" && this.onSubmit) {
-			this.onSubmit(null, "quit", this._lastCommand);
-		} else if (this._lastResult && this.onSubmit) {
-			this.onSubmit(this._lastResult, undefined, this._lastCommand);
+			const args = this.query.replace(/^\/[^\s]+\s*/, "").trim();
+			const raw = args ? `${cmd.command} ${args}` : cmd.command;
+			this.submitRaw(raw);
 		}
 		this.hide();
+	}
+
+	/** Execute an exact command through the same path used by popup submission. */
+	submitRaw(raw: string): boolean {
+		this._lastResult = null;
+		this._lastCommand = raw.trim();
+		const commandName = this._lastCommand.split(/\s+/, 1)[0]?.toLowerCase();
+		const cmd = this.commands.find(
+			(command) => command.command.toLowerCase() === commandName,
+		);
+		if (!cmd) return false;
+		const args = this._lastCommand.replace(/^\/[^\s]+\s*/, "").trim();
+		if (cmd.handler) {
+			const result = cmd.handler(args);
+			if (result) this._lastResult = String(result);
+		}
+		cmd.bridgeHandler?.(args);
+		if (cmd.dispatch === "quit") {
+			this.onSubmit?.(null, "quit", this._lastCommand);
+		} else {
+			this.onSubmit?.(this._lastResult, undefined, this._lastCommand);
+		}
+		return true;
 	}
 
 	setOnSubmit(
@@ -288,7 +300,14 @@ export class SlashPopup implements Component {
 
 		if (state.groups.length > 0) {
 			// Grouped display: category headers + commands
-			for (const entry of state.flatEntries) {
+			const { items, hiddenAbove, hiddenBelow } = windowAroundSelection(
+				state.flatEntries,
+				state.flatSelection,
+			);
+			if (hiddenAbove > 0) {
+				lines.push(`${DIM}  ↑ ${hiddenAbove} more above${RESET}`);
+			}
+			for (const entry of items) {
 				if (entry.isHeader) {
 					const catColor = getCategoryColor(entry.category!);
 					const catLabel = entry.category!.charAt(0).toUpperCase() + entry.category!.slice(1);
@@ -322,11 +341,22 @@ export class SlashPopup implements Component {
 
 				lines.push(line);
 			}
+			if (hiddenBelow > 0) {
+				lines.push(`${DIM}  ↓ ${hiddenBelow} more below${RESET}`);
+			}
 		} else {
 			// Flat filtered list
-			for (let i = 0; i < state.filtered.length; i++) {
-				const cmd = state.filtered[i];
-				const isSelected = i === state.flatSelection;
+			const indexed = state.filtered.map((cmd, index) => ({ cmd, index }));
+			const { items, hiddenAbove, hiddenBelow } = windowAroundSelection(
+				indexed,
+				state.flatSelection,
+			);
+			if (hiddenAbove > 0) {
+				lines.push(`${DIM}  ↑ ${hiddenAbove} more above${RESET}`);
+			}
+			for (const item of items) {
+				const { cmd, index } = item;
+				const isSelected = index === state.flatSelection;
 				const prefix = isSelected ? "▸ " : "  ";
 				const cmdName = cmd.command;
 
@@ -350,6 +380,9 @@ export class SlashPopup implements Component {
 
 				lines.push(line);
 			}
+			if (hiddenBelow > 0) {
+				lines.push(`${DIM}  ↓ ${hiddenBelow} more below${RESET}`);
+			}
 		}
 
 		// Details panel for selected command (examples, arg info)
@@ -370,4 +403,24 @@ export class SlashPopup implements Component {
 		this.cachedLines = lines;
 		return lines;
 	}
+}
+
+function windowAroundSelection<T>(
+	items: T[],
+	selection: number,
+): { items: T[]; hiddenAbove: number; hiddenBelow: number } {
+	if (items.length <= MAX_VISIBLE_ENTRIES) {
+		return { items, hiddenAbove: 0, hiddenBelow: 0 };
+	}
+	const half = Math.floor(MAX_VISIBLE_ENTRIES / 2);
+	const start = Math.max(
+		0,
+		Math.min(selection - half, items.length - MAX_VISIBLE_ENTRIES),
+	);
+	const end = Math.min(items.length, start + MAX_VISIBLE_ENTRIES);
+	return {
+		items: items.slice(start, end),
+		hiddenAbove: start,
+		hiddenBelow: items.length - end,
+	};
 }

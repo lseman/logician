@@ -1,21 +1,23 @@
-// ── SettingsOverlay ──────────────────────────────────────────────────────────
-// Overlay for browsing and modifying runtime settings.
+// ── SettingsOverlay — beautiful settings browser ────────────────────────────
+// Rounded-corner overlay for browsing and modifying runtime settings.
 // Two views: main menu (list of settings with current values) and detail view
 // (show available options for a selected setting, with enter to apply).
-// Mirrors ReasonerSelectorOverlay / ThemeSelectorOverlay pattern.
+// Uses the shared popup-utils design system.
 
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
+import {
+	BOX,
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	type ListItem,
+} from "./popup-utils.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const getHeader = (): string => theme.fg("header", "");
-const getSelected = (): string => theme.fg("selected", "");
-const getMuted = (): string => theme.fg("muted", "");
-const getActive = (): string => theme.fg("active", "");
-const getGreen = (): string => theme.fg("success", "");
-const getRed = (): string => theme.fg("error", "");
 
 // ── Data types ──────────────────────────────────────────────────────────────
 
@@ -185,57 +187,64 @@ export class SettingsSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(56, Math.min(width, 120));
-		const innerWidth = Math.max(1, overlayWidth - 4);
+		const popupWidth = Math.max(56, Math.min(width, 120));
+		const innerWidth = popupWidth - 4;
 		const lines: string[] = [];
 
-		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
+		const headerFg = theme.fg("header", "");
 
+		// ── Top rounded corner ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		// ── Title row ──
 		if (!this.inDetailView) {
-			const title = `${BOLD}Runtime Settings${RESET}${DIM} (${this.settings.length})${RESET}`;
-			lines.push(
-				boxLine(title, "↑↓ select · enter detail · esc close", innerWidth),
-			);
+			const titleText = "Runtime Settings";
+			const subtitleText = ` (${this.settings.length})`;
+			const hintsText = " ↑↓ select · enter detail · esc close";
+			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+			const titleVisible = visibleWidth(titleLine);
+			const titlePad = Math.max(0, innerWidth - titleVisible);
+			lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
 		} else {
 			const s = this.settings[this.selectedIndex];
-			const subtitle = s ? `${s.options.length} options` : "";
-			const title = `${BOLD}${s?.name ?? "Settings"}${RESET}${DIM}${subtitle ? ` (${subtitle})` : ""}${RESET}`;
-			lines.push(
-				boxLine(title, "↑↓ select · enter apply · tab back", innerWidth),
-			);
+			const subtitle = s ? ` (${s.options.length} options)` : "";
+			const titleText = s?.name ?? "Settings";
+			const hintsText = " ↑↓ select · enter apply · tab back";
+			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitle}${hintsText}`;
+			const titleVisible = visibleWidth(titleLine);
+			const titlePad = Math.max(0, innerWidth - titleVisible);
+			lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
 		}
 
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth, 1));
 
+		// ── Content ──
 		if (!this.inDetailView) {
-			this.renderMainMenu(lines, innerWidth);
+			this.renderMainMenu(lines, innerWidth, popupWidth);
 		} else {
-			this.renderDetailView(lines, innerWidth);
+			this.renderDetailView(lines, innerWidth, popupWidth);
 		}
 
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
-		lines.push(
-			boxLine(
-				this.message
-					? `${DIM}${this.message}${RESET}`
-					: this.inDetailView
-						? `${getMuted()}Select an option to apply.${RESET}`
-						: `${getMuted()}Press Enter to configure a setting.${RESET}`,
-				"",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		// ── Bottom bar ──
+		lines.push(renderSeparator(popupWidth, 1));
+		const bottomText = this.message
+			? this.message
+			: this.inDetailView
+				? "Select an option to apply."
+				: "Press Enter to configure a setting.";
+		lines.push(renderStatusLine(bottomText, innerWidth));
 
-		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
+		// ── Bottom rounded corner ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
-	private renderMainMenu(lines: string[], innerWidth: number): void {
+	private renderMainMenu(lines: string[], innerWidth: number, popupWidth: number): void {
 		if (!this.settings.length) {
-			lines.push(
-				boxLine(`${getMuted()}No settings available.${RESET}`, "", innerWidth),
-			);
+			lines.push(renderStatusLine("No settings available.", innerWidth));
 			return;
 		}
 
@@ -249,56 +258,49 @@ export class SettingsSelectorOverlay implements Component {
 		);
 		const end = Math.min(this.settings.length, start + maxRows);
 		if (start > 0) {
-			lines.push(
-				boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
-			);
+			lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 		}
 		for (let i = start; i < end; i++) {
 			const s = this.settings[i];
-			const selected = i === this.selectedIndex;
-			const cursor = selected ? `${getSelected()}▸${RESET}` : " ";
-			const currentMark = `${getMuted()}(${s.currentValue})${RESET}`;
-			const name = selected
-				? `${getSelected()}${BOLD}${s.name}${RESET}`
-				: s.name;
-			lines.push(boxLine(`${cursor} ${name}`, currentMark, innerWidth));
+			const isSelected = i === this.selectedIndex;
+
+			// Build the item with a gear icon for settings
+			const item: ListItem = {
+				label: s.name,
+				metadata: `(${s.currentValue})`,
+				selected: isSelected,
+				bullet: isSelected ? "▸" : " ",
+			};
+
+			lines.push(renderListItem(item, innerWidth));
 		}
 		if (end < this.settings.length) {
-			lines.push(
-				boxLine(
-					`${getMuted()}↓ ${this.settings.length - end} more${RESET}`,
-					"",
-					innerWidth,
-				),
-			);
+			lines.push(renderStatusLine(`↓ ${this.settings.length - end} more`, innerWidth));
 		}
 	}
 
-	private renderDetailView(lines: string[], innerWidth: number): void {
+	private renderDetailView(lines: string[], innerWidth: number, popupWidth: number): void {
 		const s = this.settings[this.selectedIndex];
 		if (!s) {
-			lines.push(
-				boxLine(`${getMuted()}No setting selected.${RESET}`, "", innerWidth),
-			);
+			lines.push(renderStatusLine("No setting selected.", innerWidth));
 			return;
 		}
 
+		// ── Current value indicator ──
 		const currentMark = s.options.find((o) => o.current);
 		if (currentMark) {
-			const markColor =
+			const currentColor =
 				typeof currentMark.toggleOn === "boolean"
 					? currentMark.toggleOn
-						? getGreen()
-						: getRed()
-					: getActive();
-			lines.push(
-				boxLine(
-					`${markColor}Current: ${currentMark.label}${RESET}`,
-					"",
-					innerWidth,
-				),
-			);
+						? theme.fg("success", "")
+						: theme.fg("error", "")
+					: theme.fg("active", "");
+			const indicator = `${currentColor}● Current: ${currentMark.label}${RESET}`;
+			lines.push(renderStatusLine(indicator, innerWidth, ""));
 		}
+
+		// ── Separator before options ──
+		lines.push(renderSeparator(popupWidth, 1));
 
 		const maxRows = 10;
 		const start = Math.max(
@@ -310,35 +312,36 @@ export class SettingsSelectorOverlay implements Component {
 		);
 		const end = Math.min(s.options.length, start + maxRows);
 		if (start > 0) {
-			lines.push(
-				boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
-			);
+			lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 		}
 		for (let i = start; i < end; i++) {
 			const opt = s.options[i];
-			const selected = i === this.selectedOptionIndex;
-			const cursor = selected ? `${getSelected()}▸${RESET}` : " ";
-			const currentDot = opt.current ? `${getActive()}●${RESET}` : "";
-			const toggleMark =
-				typeof opt.toggleOn === "boolean"
-					? opt.toggleOn
-						? `${getGreen()}[on]${RESET}`
-						: `${getRed()}[off]${RESET}`
-					: "";
-			const rightSide = [currentDot, toggleMark].filter(Boolean).join(" ");
-			const value = selected
-				? `${getSelected()}${BOLD}${opt.label}${RESET}`
-				: opt.label;
-			lines.push(boxLine(`${cursor} ${value}`, rightSide, innerWidth));
+			const isSelected = i === this.selectedOptionIndex;
+
+			// Build the item
+			const item: ListItem = {
+				label: opt.label,
+				selected: isSelected,
+				bullet: isSelected ? "▸" : " ",
+			};
+
+			// Current dot
+			if (opt.current) {
+				item.statusDot = "active";
+			}
+
+			// Toggle mark
+			if (typeof opt.toggleOn === "boolean") {
+				const mark = opt.toggleOn
+					? `${theme.fg("success", "")}[on]${RESET}`
+					: `${theme.fg("error", "")}[off]${RESET}`;
+				item.metadata = mark;
+			}
+
+			lines.push(renderListItem(item, innerWidth));
 		}
 		if (end < s.options.length) {
-			lines.push(
-				boxLine(
-					`${getMuted()}↓ ${s.options.length - end} more${RESET}`,
-					"",
-					innerWidth,
-				),
-			);
+			lines.push(renderStatusLine(`↓ ${s.options.length - end} more`, innerWidth));
 		}
 	}
 
@@ -357,13 +360,4 @@ export class SettingsSelectorOverlay implements Component {
 		this.selectedOptionIndex = (this.selectedOptionIndex + delta + n) % n;
 		this.invalidate();
 	}
-}
-
-function boxLine(left: string, right: string, width: number): string {
-	const leftWidth = visibleWidth(left);
-	const rightWidth = visibleWidth(right);
-	const gap = Math.max(1, width - leftWidth - rightWidth);
-	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
-	const pad = Math.max(0, width - visibleWidth(content));
-	return `${getHeader()}│${RESET} ${content}${" ".repeat(pad)} ${getHeader()}│${RESET}`;
 }

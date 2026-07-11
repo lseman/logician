@@ -4,6 +4,7 @@
 
 import type {
 	ParsedBridgeEvent,
+	MessageUpdateEvent,
 	ToolEndEvent,
 	ToolStartEvent,
 	ToolUpdateEvent,
@@ -98,6 +99,9 @@ export class Transcript {
 				break;
 			case "token":
 				this.handleToken(String(event.token || ""));
+				break;
+			case "message_update":
+				this.handleMessageUpdate(event as MessageUpdateEvent);
 				break;
 			case "notice":
 				this.handleNotice(event as ParsedBridgeEvent & { type: "notice" });
@@ -223,6 +227,26 @@ export class Transcript {
 				contentText: token,
 				isComplete: false,
 			});
+		}
+	}
+
+	/** Reconcile a provider's full assistant snapshot with streamed deltas. */
+	private handleMessageUpdate(event: MessageUpdateEvent): void {
+		if (event.message.role !== "assistant") return;
+		const full = event.message.content ?? "";
+		if (!full) return;
+		const turn = this.getCurrentTurn();
+		if (!turn) return;
+		const message = this.ensureAssistant(turn);
+		const rendered = message.chunks
+			.filter((chunk) => chunk.type === "content")
+			.map((chunk) => chunk.contentText ?? "")
+			.join("");
+		// Streaming backends already delivered this prefix. Append only the
+		// missing suffix; non-streaming backends append the complete response.
+		if (full.startsWith(rendered)) {
+			const missing = full.slice(rendered.length);
+			if (missing) this.handleToken(missing);
 		}
 	}
 

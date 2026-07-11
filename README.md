@@ -5,7 +5,8 @@ Logician is a TypeScript coding-agent workspace with a terminal UI, a lean reusa
 The current architecture follows the same broad split as Pi:
 
 - `agent-core` owns the generic agent engine: backend contracts, messages, the ReAct loop, harness state, hooks, sessions, core types, compaction, and small shared primitives.
-- `coding-agent` owns the coding-agent application layer: default tools, system prompt assembly, skills, MCP, subagents, reasoners, trust/config/context loading, slash-command logic, session storage, and the bridge used by the UI.
+- `agent-capabilities` owns agent capabilities: todo tracking, ask-user, subagents, reasoners, and core tools that mutate state.
+- `coding-agent` owns the coding-agent application layer: default coding tools, system prompt assembly, skills, MCP, trust/config/context loading, slash-command logic, session storage, and the bridge used by the UI.
 - `tui` owns terminal rendering, input handling, themes, overlays, transcript display, and interactive command UX.
 
 ## Workspace
@@ -15,7 +16,8 @@ tui/
   package.json
   packages/
     agent-core/       Lean agent loop, harness, hooks, core types
-    coding-agent/     Coding tools, skills, MCP, prompts, reasoners, bridge
+    agent-capabilities/ Agent capabilities: todo, ask-user, subagents, reasoners
+    coding-agent/     Coding tools, skills, MCP, prompts, bridge
     tui/              Terminal UI layer
 ```
 
@@ -27,11 +29,17 @@ Important package exports:
 @logician/agent-core/hooks/*
 @logician/agent-core/tools/*
 
+@logician/agent-capabilities
+@logician/agent-capabilities/todo/*
+@logician/agent-capabilities/ask-user/*
+@logician/agent-capabilities/subagents/*
+@logician/agent-capabilities/reasoners/*
+@logician/agent-capabilities/tools
+
 @logician/coding-agent
 @logician/coding-agent/tools
 @logician/coding-agent/skills
 @logician/coding-agent/mcp
-@logician/coding-agent/reasoners/*
 @logician/coding-agent/context-files
 @logician/coding-agent/prompts
 @logician/coding-agent/trust
@@ -47,8 +55,8 @@ Important package exports:
 - Configurable permission modes: `acceptAll`, `acceptEdits`, `ask`, and `plan`.
 - Skills loaded from `SKILL.md` files with YAML frontmatter and on-demand `read_skill` access.
 - MCP support for stdio and streamable HTTP servers.
-- Subagents with built-in `general` and `explorer` definitions plus user/plugin-defined agents.
-- Optional structured reasoners including SSR, Tree of Thoughts, Reflexion, Self-Consistency, Best-of-N, Auto-CoT, and In-Context CoT.
+- Subagents with built-in `general` and `explorer` definitions plus user/plugin-defined agents (in `agent-capabilities`).
+- Optional structured reasoners including SSR, Tree of Thoughts, Reflexion, Self-Consistency, Best-of-N, Auto-CoT, In-Context CoT, and Chain of Verification (in `agent-capabilities`).
 - Session persistence, bookmarks, branch/fork workflows, rewind checkpoints, and manual/proactive compaction.
 - Plugin hooks compatible with Claude-style lifecycle events.
 - Themeable terminal UI with built-in and user themes.
@@ -223,20 +231,26 @@ Inspect the change as a reviewer. Prioritize bugs and regressions before style.
 
 The default coding-agent tool set is owned by `@logician/coding-agent/tools`, not `agent-core`.
 
-| Tool | Purpose |
-| --- | --- |
-| `bash` | Run shell commands with timeout/abort handling |
-| `read_file` | Read files with path normalization and CWD safety |
-| `write_file` | Create/replace files with serialized file mutation |
-| `edit_file` | Apply strict text edits with fuzzy normalization fallback |
-| `file_diff` | Show file diffs |
-| `grep` | Search content using ripgrep |
-| `find` | Locate files using fd/find fallback |
-| `list_files` | List directory entries safely |
-| `git` | Read git status/diff/log data |
-| `web_search` | Search via SearXNG |
-| `web_fetch` | Fetch web content |
-| `read_skill` | Load full instructions for a named skill |
+| Tool | Package | Purpose |
+| --- | --- | --- |
+| `bash` | `coding-agent` | Run shell commands with timeout/abort handling |
+| `read_file` | `coding-agent` | Read files with path normalization and CWD safety |
+| `write_file` | `coding-agent` | Create/replace files with serialized file mutation |
+| `edit_file` | `coding-agent` | Apply strict text edits with fuzzy normalization fallback |
+| `file_diff` | `coding-agent` | Show file diffs |
+| `grep` | `coding-agent` | Search content using ripgrep |
+| `find` | `coding-agent` | Locate files using fd/find fallback |
+| `list_files` | `coding-agent` | List directory entries safely |
+| `git` | `coding-agent` | Read git status/diff/log data |
+| `web_search` | `coding-agent` | Search via SearXNG |
+| `web_fetch` | `coding-agent` | Fetch web content |
+| `read_skill` | `coding-agent` | Load full instructions for a named skill |
+| `todo` | `agent-capabilities` | Task tracking and management |
+| `task_status` | `agent-capabilities` | Structured end-of-task declaration |
+| `ask_user` | `agent-capabilities` | Ask user for input |
+| `spawn_agent` | `agent-capabilities` | Run task in a child functional agent runner |
+| `spawn_agent_parallel` | `agent-capabilities` | Run task in a child agent with its own git worktree |
+| `coordinate_subagents` | `agent-capabilities` | Coordinate multiple subagents to work on independent subtasks concurrently |
 
 ## Development
 
@@ -264,28 +278,37 @@ tsx --test packages/agent-core/src/__tests__/*.test.ts packages/coding-agent/src
 
 The current split is intentionally moving toward a lean `agent-core`.
 
-Already application-owned by `coding-agent`:
+Owned by `agent-core`:
 
-- coding tools
+- generic agent engine: backend contracts, messages, the ReAct loop, harness state, hooks, sessions, core types, compaction, message queue, built-in hook policy, extension primitives
+- state management: todo/workflow state, task status state
+
+Owned by `agent-capabilities`:
+
+- agent capabilities: todo tracking, ask-user, subagents, reasoners, core tools that mutate state
+- subagent tools: spawn_agent, spawn_agent_parallel, coordinate_subagents
+- reasoner implementations: SSR, ToT, GoT, Reflexion, Self-Consistency, Best-of-N, Auto-CoT, In-Context CoT, CoVe
+
+Owned by `coding-agent`:
+
+- coding tools: bash, read_file, write_file, edit_file, file_diff, grep, find, list_files, git, web_search, web_fetch, read_skill
 - skills
 - MCP
 - system prompt construction
 - context file loading
 - prompt templates
 - project trust
-- subagents
-- reasoners
 - session store and UI bridge
+- slash-command logic
 
-Still in `agent-core` because the harness directly coordinates them:
+Owned by `tui`:
 
-- compaction
-- message queue
-- built-in hook policy
-- todo/workflow state
-- extension primitives
-
-Those remaining pieces are the next candidates for dependency inversion if `agent-core` needs to become even closer to Pi's minimal loop-plus-harness package.
+- terminal rendering
+- input handling
+- themes
+- overlays
+- transcript display
+- interactive command UX
 
 ## License
 

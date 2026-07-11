@@ -20,6 +20,9 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "./shell.ts";
+import { ToolResultCache } from "@logician/agent-core/core/tool-cache.ts";
+
+const bashCache = new ToolResultCache();
 
 const bashSchema = {
 	type: "object",
@@ -88,8 +91,11 @@ export const bash: Tool = {
 	label: "Bash",
 	hookAliases: ["Bash"],
 	description: `Execute bash commands with timeout. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
-	promptSnippet: "Execute shell commands in a sandboxed subprocess with timeout",
-	promptGuidelines: ["Use bash for file operations like ls, grep, find; use read for file content instead of cat"],
+	promptSnippet:
+		"Execute shell commands in a sandboxed subprocess with timeout",
+	promptGuidelines: [
+		"Use bash for file operations like ls, grep, find; use read for file content instead of cat",
+	],
 	parameters: bashSchema,
 	prepareArguments,
 	execute: async (args, ctx): Promise<string | ToolResult> => {
@@ -112,6 +118,18 @@ export const bash: Tool = {
 		const output = new OutputAccumulator({ tempFilePrefix: "logician-bash" });
 		const timeoutSeconds = timeout;
 		const throttledUpdate = makeUpdateThrottler();
+
+		// Check cache first
+		const argsStr = JSON.stringify({ command, timeout, cwd });
+		const cachedEntry = bashCache.get("bash", argsStr);
+		if (cachedEntry) {
+			try {
+				const cachedResult = JSON.parse(cachedEntry.result);
+				return cachedResult;
+			} catch {
+				// fall through
+			}
+		}
 
 		return new Promise<string | ToolResult>((resolve) => {
 			let settled = false;
@@ -211,7 +229,10 @@ export const bash: Tool = {
 							output.getLastLineBytes(),
 						);
 						resolve({
-							content: appendStatus(text === "(no output)" ? "" : text, "Command aborted"),
+							content: appendStatus(
+								text === "(no output)" ? "" : text,
+								"Command aborted",
+							),
 							details,
 						});
 						return;
@@ -242,7 +263,10 @@ export const bash: Tool = {
 						signal,
 						output.getLastLineBytes(),
 					);
-					resolve({ content: text, details });
+					const result = { content: text, details };
+					// Cache the result
+					bashCache.put("bash", argsStr, JSON.stringify(result), false);
+					resolve(result);
 				});
 			});
 		});

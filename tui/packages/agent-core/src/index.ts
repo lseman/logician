@@ -5,11 +5,11 @@
 // Core: loop, harness, types, backend, messages, events, session
 export * from "./core/backend.ts";
 export * from "./core/agent-loop-runner.ts";
-export * from "./core/events.ts";
 export * from "./core/file-checkpoints.ts";
 export * from "./core/harness.ts";
 export * from "./core/loop-detector.ts";
 export * from "./core/messages.ts";
+export * from "./core/runtime-state.ts";
 export * from "./core/session.ts";
 export * from "./core/tool-cache.ts";
 export * from "./core/types.ts";
@@ -23,20 +23,25 @@ export * from "./hooks/plugin-hooks.ts";
 export * from "./tools/shared/permissions.ts";
 export * from "./tools/shared/parser.ts";
 export * from "./tools/shared/plugins.ts";
+export * from "./tools/shared/plugins-executor.ts";
+export * from "./tools/shared/plugins-manager.ts";
 export * from "./tools/shared/async-utils.ts";
 export * from "./tools/shared/path-utils.ts";
 export * from "./tools/shared/syntax-highlighter.ts";
 export * from "./tools/shared/registry.ts";
+export * from "./tools/shared/frontmatter.ts";
+export * from "./tools/shared/json-utils.ts";
 
-// Generic workflow tools used by built-in hooks.
+// Task/todo state read by built-in hooks. The task_status and todo Tool
+// objects that mutate this state live in @logician/agent-capabilities, which depends
+// on this package — the state stays here to avoid a circular dependency.
 export {
 	getTaskStatus,
 	resetTaskStatus,
-	task_status,
-} from "./tools/workflow/task-status.ts";
-export type { TaskStatusRecord } from "./tools/workflow/task-status.ts";
-export type { Task, TaskStatus } from "./tools/todos/todo.ts";
-export { getTasks, onTodosChanged } from "./tools/todos/todo.ts";
+} from "./core/task-status-state.ts";
+export type { TaskStatusRecord } from "./core/task-status-state.ts";
+export type { Task, TaskStatus } from "./core/todo-state.ts";
+export { getTasks, onTodosChanged } from "./core/todo-state.ts";
 
 // Compaction (kept at top level for backwards compat).
 // Note: core/messages.ts and compaction/compaction.ts both define

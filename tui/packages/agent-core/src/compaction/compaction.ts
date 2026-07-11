@@ -109,7 +109,6 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 // Token estimation — dual-mode: provider usage when available, char heuristic fallback
 // ============================================================================
 
-const ESTIMATED_CHARS_PER_TOKEN = 4;
 const ESTIMATED_IMAGE_CHARS = 4800;
 
 /** Estimate tokens for one message using character heuristic. Conservative (overestimates). */
@@ -123,58 +122,109 @@ export function estimateCompressableTokens(
 	const textContent = content || "";
 
 	const role = msg.role as string;
-	switch (role) {
-		case "user":
-			chars += textContent.length;
-			break;
-		case "assistant": {
-			const agentMsg = msg as unknown as AgentMessage & { content?: unknown[] };
-			if (Array.isArray(agentMsg.content)) {
-				for (const block of agentMsg.content ?? []) {
-					if (typeof block === "object" && block !== null) {
-						const bo = block as Record<string, unknown>;
-						if (bo.type === "text" && typeof bo.text === "string") {
-							chars += bo.text.length;
-						} else if (
-							bo.type === "thinking" &&
-							typeof bo.thinking === "string"
-						) {
-							chars += bo.thinking.length;
-						} else if (bo.type === "toolCall" && typeof bo.name === "string") {
-							const argsStr =
-								typeof bo.arguments === "string"
-									? bo.arguments
-									: JSON.stringify(bo.arguments ?? {});
-							chars += bo.name.length + argsStr.length;
-						} else if ((block as { type?: string }).type === "image") {
-							chars += ESTIMATED_IMAGE_CHARS;
-						}
+	if (role === "user") {
+		chars += textContent.length;
+	} else if (role === "assistant") {
+		const agentMsg = msg as unknown as AgentMessage & { content?: unknown[] };
+		if (Array.isArray(agentMsg.content)) {
+			for (const block of agentMsg.content ?? []) {
+				if (typeof block === "object" && block !== null) {
+					const bo = block as Record<string, unknown>;
+					if (bo.type === "text" && typeof bo.text === "string") {
+						chars += bo.text.length;
+					} else if (
+						bo.type === "thinking" &&
+						typeof bo.thinking === "string"
+					) {
+						chars += bo.thinking.length;
+					} else if (bo.type === "toolCall" && typeof bo.name === "string") {
+						const argsStr =
+							typeof bo.arguments === "string"
+								? bo.arguments
+								: JSON.stringify(bo.arguments ?? {});
+						chars += bo.name.length + argsStr.length;
+					} else if ((block as { type?: string }).type === "image") {
+						chars += ESTIMATED_IMAGE_CHARS;
 					}
 				}
-			} else {
-				chars += textContent.length;
 			}
-			break;
+		} else {
+			chars += textContent.length;
 		}
-		case "toolResult":
-		case "tool":
-			chars += textContent.length;
-			break;
-		case "custom":
-			chars += textContent.length;
-			break;
-		case "branchSummary":
-		case "compactionSummary": {
-			const branchMsg = msg as { summary?: string };
-			chars += branchMsg.summary?.length ?? 0;
-			break;
-		}
-		default:
-			chars += textContent.length;
+	} else if (role === "toolResult" || role === "tool") {
+		chars += textContent.length;
+	} else if (role === "custom") {
+		chars += textContent.length;
+	} else if (role === "branchSummary" || role === "compactionSummary") {
+		const branchMsg = msg as { summary?: string };
+		chars += branchMsg.summary?.length ?? 0;
+	} else {
+		chars += textContent.length;
 	}
 
-	return Math.ceil(chars / ESTIMATED_CHARS_PER_TOKEN);
+	// Use content-aware heuristic instead of naive char/4
+	const contentType = estimateCompressableTokens.classifyContentType(content);
+	const ratio = estimateCompressableTokens.getRatio(contentType);
+	return Math.ceil(chars / ratio);
 }
+
+/** Classify content type for token estimation. */
+estimateCompressableTokens.classifyContentType = (text: string): string => {
+	if (!text || text.length < 16) return "natural";
+	const trimmed = text.trim();
+
+	// JSON detection: starts with { or [, balanced braces
+	const startsJSON =
+		(trimmed.startsWith("{") || trimmed.startsWith("[")) &&
+		trimmed.includes(":") &&
+		(trimmed.match(/"[^"]*"\s*:/g) || []).length >= 2;
+	if (startsJSON) {
+		const braceRatio =
+			(trimmed.match(/[{}[\]]/g) || []).length /
+			trimmed.replace(/[\s\n\r]/g, "").length;
+		if (braceRatio > 0.1) return "json";
+	}
+
+	// Code detection: known keywords, operators, patterns
+	const codeKeywords = [
+		"function|const|let|var|class|import|export|return|if|else|for|while",
+		"def |async |await |yield |lambda |struct|enum|interface",
+		"public|private|protected|static|void|extends|implements",
+		"try|catch|finally|throw|new|this|super|instanceof",
+	];
+	const codePattern = new RegExp(codeKeywords.join("|"), "i");
+	const codeRatio =
+		(
+			trimmed.match(
+				/\b(function|const|let|var|class|import|export|return|if|else|for|while|def |async |await)\b/gi,
+			) || []
+		).length / Math.max(1, trimmed.split(/\s+/).length);
+	if (codePattern.test(trimmed) || codeRatio > 0.05) return "code";
+
+	// Multi-byte detection for natural language
+	const multiByte = (trimmed.match(/[\u0080-\uFFFF]/g) || []).length;
+	const multiByteRatio = multiByte / trimmed.length;
+
+	if (multiByteRatio > 0.3) return "unicode";
+	if (multiByteRatio > 0.05) return "natural-unicode";
+	return "natural";
+};
+
+/** Get token-to-char ratio for content type. */
+estimateCompressableTokens.getRatio = (type: string): number => {
+	switch (type) {
+		case "json":
+			return 1.5;
+		case "code":
+			return 2;
+		case "unicode":
+			return 1.5;
+		case "natural-unicode":
+			return 2.5;
+		default:
+			return 3.5;
+	}
+};
 
 /** Estimated context-token usage for a message list. */
 export interface ContextUsageEstimate {
@@ -225,7 +275,9 @@ export function estimateContextTokens(
 	// Fallback: full char-based estimation
 	let estimated = 0;
 	for (const msg of messages) {
-		estimated += estimateCompressableTokens(msg as AgentMessage | CompactableMessage);
+		estimated += estimateCompressableTokens(
+			msg as AgentMessage | CompactableMessage,
+		);
 	}
 	return {
 		tokens: estimated,
@@ -305,7 +357,7 @@ export interface CutPointResult {
 	firstKeptEntryId?: string;
 	turnStartIndex: number; // -1 if cut is clean (at user message)
 	isSplitTurn: boolean;
-		/** Index of the first protected message (system prompt boundary). */
+	/** Index of the first protected message (system prompt boundary). */
 	protectedStartIndex: number;
 	/** Index of the last protected message (recent messages boundary). */
 	protectedEndIndex: number;

@@ -87,6 +87,10 @@
     "jsonNumber": "#f0883e",
     "jsonKeyword": "#ff7b72",
     "jsonPunctuation": "#7d8590",
-    "pluginStartup": "#888888"
+    "pluginStartup": "#888888",
+    "memoryTag": "#56d4dd",
+    "memoryId": "#d2a8ff",
+    "memoryContent": "#e6edf3",
+    "memoryCount": "#3fb950"
     }
 }

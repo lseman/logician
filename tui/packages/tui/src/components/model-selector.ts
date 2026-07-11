@@ -1,6 +1,6 @@
-// ── ModelSelectorOverlay ────────────────────────────────────────────────────────
-// Overlay for selecting an active model from the configured list.
-// Pattern: list, select, confirm, close — mirrors ThemeSelector/ReasonerSelector.
+// ── ModelSelectorOverlay — beautiful model selection popup ─────────────────
+// Rounded-corner overlay for selecting an active model from the configured list.
+// Uses the shared popup-utils design system.
 
 import {
 	type Component,
@@ -8,14 +8,18 @@ import {
 	visibleWidth,
 } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
+import {
+	BOX,
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	type ListItem,
+} from "./popup-utils.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
-const getHeader = (): string => theme.fg("header", "");
-const getSelected = (): string => theme.fg("selected", "");
-const getMuted = (): string => theme.fg("muted", "");
-const getActive = (): string => theme.fg("active", "");
 
 export interface ModelInfo {
 	id: string;
@@ -104,26 +108,33 @@ export class ModelSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(48, Math.min(width, 110));
-		const innerWidth = Math.max(1, overlayWidth - 4);
+		const popupWidth = Math.max(48, Math.min(width, 120));
+		const innerWidth = popupWidth - 4;
 		const lines: string[] = [];
 
-		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
-		lines.push(
-			boxLine(
-				`${BOLD}Model${RESET}${DIM} (${this.models.length})${RESET}`,
-				"↑↓ select · enter confirm · esc close",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		// ── Top rounded corner ──
+		const headerFg = theme.fg("header", "");
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
 
+		// ── Title row ──
+		const titleText = "Model";
+		const subtitleText = ` (${this.models.length})`;
+		const hintsText = " ↑↓ select · enter confirm · esc close";
+		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+		const titleVisible = visibleWidth(titleLine);
+		const titlePad = Math.max(0, innerWidth - titleVisible);
+		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth, 1));
+
+		// ── Model list ──
 		if (!this.models.length) {
 			lines.push(
-				boxLine(
-					`${getMuted()}No models configured. Add "models" array to settings.json.${RESET}`,
-					"",
+				renderStatusLine(
+					"No models configured. Add \"models\" array to settings.json.",
 					innerWidth,
+					theme.fg("warning", ""),
 				),
 			);
 		} else {
@@ -137,46 +148,44 @@ export class ModelSelectorOverlay implements Component {
 			);
 			const end = Math.min(this.models.length, start + maxRows);
 			if (start > 0) {
-				lines.push(
-					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
-				);
+				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const m = this.models[i];
-				const selected = i === this.selectedIndex;
-				const cursor = selected ? "▸" : " ";
-				const activeMark = m.active ? `${getActive()}● active${RESET}` : "";
-				const name = selected
-					? `${getSelected()}${BOLD}${m.name}${RESET}`
-					: m.name;
-				const desc = `${DIM}${m.url ?? m.id}${RESET}`;
-				const meta = activeMark ? `${desc}  ${activeMark}` : desc;
-				lines.push(boxLine(`${cursor} ${name}`, meta, innerWidth));
+				const isSelected = i === this.selectedIndex;
+
+				// Build the item
+				const item: ListItem = {
+					label: m.name,
+					metadata: m.url ?? m.id,
+					selected: isSelected,
+					statusDot: m.active ? "active" : undefined,
+				};
+
+				// If active, add "● active" badge to the left
+				if (m.active) {
+					const activeDot = theme.fg("active", "");
+					item.label = `${item.label}  ${activeDot}● active${RESET}`;
+				}
+
+				lines.push(renderListItem(item, innerWidth));
 			}
 			if (end < this.models.length) {
-				lines.push(
-					boxLine(
-						`${getMuted()}↓ ${this.models.length - end} more${RESET}`,
-						"",
-						innerWidth,
-					),
-				);
+				lines.push(renderStatusLine(`↓ ${this.models.length - end} more`, innerWidth));
 			}
 		}
 
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
-		lines.push(
-			boxLine(
-				this.message
-					? `${DIM}${this.message}${RESET}`
-					: `${getMuted()}Select a model for this session.${RESET}`,
-				"",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		// ── Bottom bar ──
+		lines.push(renderSeparator(popupWidth, 1));
+		const bottomText = this.message
+			? this.message
+			: "Select a model for this session.";
+		lines.push(renderStatusLine(bottomText, innerWidth));
 
-		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
+		// ── Bottom rounded corner ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
@@ -186,13 +195,4 @@ export class ModelSelectorOverlay implements Component {
 		this.selectedIndex = (this.selectedIndex + delta + n) % n;
 		this.invalidate();
 	}
-}
-
-function boxLine(left: string, right: string, width: number): string {
-	const leftWidth = visibleWidth(left);
-	const rightWidth = visibleWidth(right);
-	const gap = Math.max(1, width - leftWidth - rightWidth);
-	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
-	const pad = Math.max(0, width - visibleWidth(content));
-	return `${getHeader()}│${RESET} ${content}${" ".repeat(pad)} ${getHeader()}│${RESET}`;
 }

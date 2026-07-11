@@ -13,8 +13,8 @@ import {
 	estimateChatPayloadTokens,
 } from "../core/messages.ts";
 import { compactToFit } from "../compaction/compaction.ts";
-import { getTaskStatus } from "../tools/workflow/task-status.ts";
-import { getTasks } from "../tools/todos/todo.ts";
+import { getTaskStatus } from "../core/task-status-state.ts";
+import { getTasks } from "../core/todo-state.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
@@ -281,19 +281,24 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 // Patterns that suggest the model is circling — retrying the same approach
 // without success. These are broader than stop declarations because we want
 // to escalate the nudge tone (not skip the nudge) when circling is detected.
+// Stricter patterns to avoid false positives on legitimate multi-step work.
 const CIRCLING_PATTERNS = [
-	// "I'll try again", "I'll try X", "I'll attempt X" — future retry intent.
-	/\bi(?:\s+will|'ll|ll)\s+(?:try|try again|attempt|attempt again)\b/i,
-	// "I tried X again", "I attempted X yet/another", past retry.
-	/\bi\s+(?:tried|attempted|tried to)\s+.*\b(again|another|a different|yet|elsewhere|else|but|however|though|next)\b/i,
-	// "Let me try again", "Let me try X", future retry (self-directed).
-	/\blet\s+me\s+(?:try|try again|attempt)\b/i,
-	// "I've tried X again", "I've attempted X yet".
-	/\b(i'|ve|I've)\s+(?:tried|attempted)\s+.*\b(again|another|a different|yet|elsewhere|else)\b/i,
+	// Future retry intent without evidence of a changed strategy.
+	/\b(?:i\s+will|i'll)\s+(?:try|attempt)(?:\s+to)?\b/i,
+	/\b(?:let\s+me|i(?:'m|\s+am)\s+going\s+to)\s+(?:try|attempt)\b/i,
+	// A failed attempt followed by an explicit failure clause.
+	/\bi\s+(?:tried|attempted)\b.*\b(?:but|however)\b.*\b(?:did(?:n't| not)\s+work|failed|unable)\b/i,
+	/\bi\s+(?:tried|attempted)\b.*\b(?:again|next|yet)\b/i,
+	// "I'll try again" (no X) — bare retry intent without specifying a new approach.
+	/\bi(?:\s+will|'ll|ll)\s+(?:try again|attempt again)\b/i,
+	// "I tried X again" — explicit past retry with "again".
+	/\bi\s+(?:tried|attempted)\s+.*\b(again|yet)\b/i,
+	// "Let me try again" (bare) — retry without new approach.
+	/\blet\s+me\s+(?:try again|attempt again)\b/i,
+	// "I've tried X again" — past retry with "again".
+	/\b(i'|ve|I've)\s+(?:tried|attempted)\s+.*\b(again|yet)\b/i,
 	// "cannot/can't X but try/attempt" — failed then retrying.
-	/\b(cannot|can't|unable)\s+.*\b(but\s+|however\s+|instead\s+|though\s+|though\s+I)\b.*\b(try|attempt|do|make|go)\b/i,
-	// "I'm going to try again", "I'm going to attempt".
-	/\bi\s*'m\s+going\s+to\s+(?:try|try again|attempt)\b/i,
+	/\b(cannot|can't|unable)\s+.*\b(but\s+|however\s+|instead\s+)\b.*\b(try|attempt|do|make|go)\b/i,
 ];
 
 // Inspects the full text (not just the tail) since circling patterns appear anywhere.

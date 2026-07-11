@@ -1,17 +1,30 @@
-// ── ChoicePopup — agent Q&A dropdown ────────────────────────────────────────
-// Overlay popup that lets the agent ask questions with selectable options.
-// The user navigates with ↑/↓ and confirms with Enter (or Tab to accept).
-// The selected answer is sent back via onSubmit so the bridge can resolve
-// the agent's tool call / pending question.
+// ── ChoicePopup — beautiful agent Q&A popup ────────────────────────────────
+// Rounded-corner overlay popup for agent questions with numbered selectable options.
+// Uses the shared popup-utils design system.
 
-import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
+import {
+	type Component,
+	clampLineToWidth,
+	visibleWidth,
+} from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
+import {
+	BOX,
+	renderQuestion,
+	renderChoiceOption,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	type ChoiceOption,
+} from "./popup-utils.ts";
 
 export interface ChoiceItem {
 	/** The value sent back to the agent when selected. */
 	value: string;
 	/** Display label for the user. */
 	label: string;
+	/** Optional short description shown on the right. */
+	description?: string;
 }
 
 export interface ChoicePopupOptions {
@@ -23,12 +36,9 @@ export interface ChoicePopupOptions {
 	choices: ChoiceItem[];
 }
 
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const getQuestionColor = (): string => theme.fg("header", "");
-const getSelectedColor = (): string => theme.fg("selected", "");
-const getKeyColor = (): string => theme.fg("muted", "");
+export type ChoicePopupAction =
+	| { type: "select"; item: ChoiceItem }
+	| { type: "close" };
 
 export class ChoicePopup implements Component {
 	private question = "";
@@ -38,8 +48,6 @@ export class ChoicePopup implements Component {
 	public visible = false;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
-	private onSubmit?: (selected: ChoiceItem) => void;
-	private onDismiss?: () => void;
 
 	setQuestion(q: string): void {
 		this.question = q;
@@ -72,6 +80,11 @@ export class ChoicePopup implements Component {
 		return this.selectedIndex;
 	}
 
+	getSelected(): ChoiceItem | null {
+		if (this.choices.length === 0) return null;
+		return this.choices[this.selectedIndex];
+	}
+
 	isVisibleOverlay(): boolean {
 		return this.visible;
 	}
@@ -85,27 +98,8 @@ export class ChoicePopup implements Component {
 		this.invalidate();
 	}
 
-	select(): void {
-		if (this.choices.length === 0) return;
-		const selected = this.choices[this.selectedIndex];
-		this._lastSelected = selected;
-		this.onSubmit?.(selected);
-		this.hide();
-	}
-
-	selectFirst(): void {
-		if (this.choices.length === 0) return;
-		const selected = this.choices[0];
-		this._lastSelected = selected;
-		this.onSubmit?.(selected);
-		this.hide();
-	}
-
-	hide(userDismissed = false): void {
+	hide(): void {
 		this.visible = false;
-		if (userDismissed && this.onDismiss) {
-			this.onDismiss();
-		}
 		this.invalidate();
 	}
 
@@ -116,35 +110,34 @@ export class ChoicePopup implements Component {
 
 	// ── Input handling (called from the TUI input listener) ─────────────────
 
-	handleInput(data: string): void {
-		if (data === "\r" || data === "\n") {
-			this.select();
-			return;
-		}
+	handleInput(data: string): ChoicePopupAction | null {
+		if (!this.visible) return null;
 
 		if (data === "\x1b" || data === "\x03") {
-			// Escape — dismiss without selecting; send null to let agent know.
-			this._lastSelected = null;
-			this.hide(true);
-			return;
+			return { type: "close" };
+		}
+
+		if (data === "\r" || data === "\n") {
+			if (this.choices.length === 0) return null;
+			return {
+				type: "select",
+				item: this.choices[this.selectedIndex],
+			};
+		}
+
+		if (data === "\x1b[A" || data === "\x1bOA") {
+			this.moveSelection(-1);
+			return null;
+		}
+
+		if (data === "\x1b[B" || data === "\x1bOB") {
+			this.moveSelection(1);
+			return null;
 		}
 
 		if (data === "\t") {
-			// Tab — accept the first option
-			this.selectFirst();
-			return;
-		}
-
-		// Up arrow
-		if (data === "\x1b[A" || data === "\x1bOA") {
-			this.moveSelection(-1);
-			return;
-		}
-
-		// Down arrow
-		if (data === "\x1b[B" || data === "\x1bOB") {
-			this.moveSelection(1);
-			return;
+			if (this.choices.length === 0) return null;
+			return { type: "select", item: this.choices[0] };
 		}
 
 		// Number keys 1-9 — select that option directly
@@ -154,27 +147,13 @@ export class ChoicePopup implements Component {
 				const idx = c - 0x31;
 				if (idx < this.choices.length) {
 					this.selectedIndex = idx;
-					this.select();
+					return { type: "select", item: this.choices[idx] };
 				}
-				return;
+				return null;
 			}
 		}
-	}
 
-	/** The last selected item (or null if dismissed). */
-	_lastSelected: ChoiceItem | null = null;
-
-	/** The value of the last selection, or null if dismissed. */
-	getSelectedValue(): string | null {
-		return this._lastSelected?.value ?? null;
-	}
-
-	setOnSubmit(cb: (selected: ChoiceItem) => void): void {
-		this.onSubmit = cb;
-	}
-
-	setOnDismiss(cb: () => void): void {
-		this.onDismiss = cb;
+		return null;
 	}
 
 	invalidate(): void {
@@ -190,55 +169,78 @@ export class ChoicePopup implements Component {
 
 		if (!this.visible) return [];
 
-		if (this.choices.length === 0) return [];
-
-		const contentWidth = Math.min(80, Math.max(40, width - 4));
+		const popupWidth = Math.max(48, Math.min(width, 110));
+		const innerWidth = popupWidth - 4;
 		const lines: string[] = [];
 
-		// Question line
-		const qLine = ` ${getQuestionColor()}${BOLD}${this.question.slice(0, contentWidth)}${RESET}`;
-		lines.push(qLine);
+		// ── Top rounded corner ──
+		const headerFg = theme.fg("header", "");
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
 
-		// Choices
-		for (let i = 0; i < this.choices.length; i++) {
-			const ch = this.choices[i];
-			const isSelected = i === this.selectedIndex;
-			const numLabel = `${DIM}${i + 1}.${RESET}`;
+		// ── Title row ──
+		const titleText = "Question";
+		const subtitleText = ` (${this.choices.length})`;
+		const hintsText = " ↑↓ select · enter confirm · esc close";
+		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+		const titleVisible = visibleWidth(titleLine);
+		const titlePad = Math.max(0, innerWidth - titleVisible);
+		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
 
-			// Key hint: show the key in brackets (e.g. [1], [2])
-			const keyHint = isSelected
-				? ` ${getKeyColor()}[${i + 1}]${RESET}`
-				: ` ${getKeyColor()}[${i + 1}]${RESET}`;
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth, 1));
 
-			let label = ch.label;
-			// Truncate long labels to fit.
-			// Selected line: ` ${color}${keyHint} ${numLabel} ${BOLD}${label}${RESET}`
-			//   visible prefix = 1 + 4 + 1 + 2 + 1 = 9
-			// Unselected:    `   ${keyHint}   ${numLabel} ${label}`
-			//   visible prefix = 3 + 4 + 3 + 2 + 1 = 13
-			const prefixLen = isSelected
-				? 1 + 4 + 1 + 2 + 1
-				: 3 + 4 + 3 + 2 + 1;
-			const maxLabel = contentWidth - prefixLen - 2;
-			if (maxLabel > 0 && visibleWidth(label) > maxLabel) {
-				// Strip ANSI codes, truncate, re-add reset
-				const plain = label.replace(/\x1b\[[0-9;]*m/g, "");
-				if (plain.length > maxLabel) {
-					label = plain.slice(0, maxLabel - 1) + "…";
-				}
-			}
-
-			const line = isSelected
-				? ` ${getSelectedColor()}${keyHint} ${numLabel} ${BOLD}${label}${RESET}`
-				: `   ${keyHint}   ${numLabel} ${label}`;
-			lines.push(line);
+		// ── Question text ──
+		if (this.question) {
+			lines.push(renderQuestion(this.question, innerWidth));
+		} else {
+			lines.push("");
 		}
 
-		// Hint bar
-		const hint = `${DIM}↑↓ navigate · 1-9 select · ⏎ confirm · Tab accept · Esc dismiss${RESET}`;
-		lines.push(`  ${hint}`);
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth, 1));
 
-		this.cachedLines = lines;
-		return lines;
+		// ── Choices ──
+		if (this.choices.length > 0) {
+			const maxRows = 10;
+			const start = Math.max(
+				0,
+				Math.min(
+					this.selectedIndex - Math.floor(maxRows / 2),
+					Math.max(0, this.choices.length - maxRows),
+				),
+			);
+			const end = Math.min(this.choices.length, start + maxRows);
+			if (start > 0) {
+				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
+			}
+			for (let i = start; i < end; i++) {
+				const ch = this.choices[i];
+				const option: ChoiceOption = {
+					label: ch.label,
+					value: ch.value,
+					selected: i === this.selectedIndex,
+					description: ch.description,
+				};
+				lines.push(renderChoiceOption(option, innerWidth, i));
+			}
+			if (end < this.choices.length) {
+				lines.push(renderStatusLine(`↓ ${this.choices.length - end} more`, innerWidth));
+			}
+		} else {
+			lines.push("");
+		}
+
+		// ── Bottom hint ──
+		lines.push(renderSeparator(popupWidth, 1));
+		const bottomText = this.question
+			? "Select an option to answer."
+			: "";
+		lines.push(renderStatusLine(bottomText, innerWidth));
+
+		// ── Bottom rounded corner ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
 	}
 }

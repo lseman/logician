@@ -58,12 +58,19 @@ class RuntimePluginHookLayer implements PluginHookLayer {
 			},
 
 			afterToolCall: async ({ toolCall, args, result, isError }) => {
-				const hookResult = await this.run("PostToolUse", {
-					matcher_value: this.options.getMatcherValue(toolCall.name),
-					tool_name: toolCall.name,
-					tool_input: args,
-					tool_response: result,
-				});
+				const hookResult = isError
+					? await this.run("PostToolUseFailure", {
+							matcher_value: this.options.getMatcherValue(toolCall.name),
+							tool_name: toolCall.name,
+							tool_input: args,
+							tool_error: result,
+						})
+					: await this.run("PostToolUse", {
+							matcher_value: this.options.getMatcherValue(toolCall.name),
+							tool_name: toolCall.name,
+							tool_input: args,
+							tool_response: result,
+						});
 				const context = contextText(hookResult);
 				if (!context) return undefined;
 				return {

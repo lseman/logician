@@ -45,10 +45,10 @@ export interface ThinkingLoopDetectorOptions {
 }
 
 const DEFAULT_MIN_THINKING_LENGTH = 500;
-const DEFAULT_THINKING_ONLY_THRESHOLD = 5;
-const DEFAULT_ESCALATION_RATIO = 1.5;
-const DEFAULT_MAX_TOTAL_THINKING_TOKENS = 80_000;
-const DEFAULT_META_REASONING_THRESHOLD = 3;
+const DEFAULT_THINKING_ONLY_THRESHOLD = 8;
+const DEFAULT_ESCALATION_RATIO = 2.0;
+const DEFAULT_MAX_TOTAL_THINKING_TOKENS = 120_000;
+const DEFAULT_META_REASONING_THRESHOLD = 5;
 
 // Patterns indicating the model is reasoning about its own reasoning rather
 // than taking action. These capture the "meta-loop" signature.

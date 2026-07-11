@@ -191,5 +191,5 @@ function boxLine(left: string, right: string, width: number): string {
 	const gap = Math.max(1, width - leftWidth - rightWidth);
 	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
 	const pad = Math.max(0, width - visibleWidth(content));
-	return `${getHeader()}│${RESET} ${content}${" ".repeat(pad)} ${getHeader()}│${RESET}`;
+	return ` ${content}${" ".repeat(pad)} `;
 }

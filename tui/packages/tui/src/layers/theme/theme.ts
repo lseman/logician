@@ -80,7 +80,12 @@ export type ThemeColor =
 	| "jsonString"
 	| "jsonNumber"
 	| "jsonKeyword"
-	| "jsonPunctuation";
+	| "jsonPunctuation"
+	// Memory / observations
+	| "memoryTag"
+	| "memoryId"
+	| "memoryContent"
+	| "memoryCount"
 
 export type ThemeBg = "mdCodeBlockBg";
 
@@ -234,6 +239,13 @@ export class Theme {
 		const ansi = this.bgCache.get(color);
 		if (!ansi) throw new Error(`Unknown theme bg: ${color}`);
 		return ansi;
+	}
+
+	/** Derive a background ANSI code from a foreground color's fg code (38;... → 48;...). */
+	fgAsBg(color: ThemeColor): string {
+		const ansi = this.fgCache.get(color);
+		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
+		return ansi.replace("\x1b[38;", "\x1b[48;");
 	}
 
 	bold(text: string): string {
@@ -413,6 +425,10 @@ function buildThemeFromJson(
 		"jsonNumber",
 		"jsonKeyword",
 		"jsonPunctuation",
+		"memoryTag",
+		"memoryId",
+		"memoryContent",
+		"memoryCount",
 	];
 
 	const bgKeys: ThemeBg[] = ["mdCodeBlockBg"];

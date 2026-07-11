@@ -4,8 +4,19 @@ import type { AgentHooks } from "./types-hooks.ts";
 import type { EventHandler } from "./types-events.ts";
 import type { Tool } from "./types-tools.ts";
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
+import type { AcceptanceConfig } from "../acceptance-contract.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
+
+/** Self-evaluation / reflection config for the agent loop. */
+export interface ReflectionConfig {
+	/** Whether to run a self-evaluation step before final conclusion. */
+	enabled?: boolean;
+	/** Maximum reflection turns allowed. */
+	maxReflections?: number;
+	/** Reflection prompt template. $task is replaced with the original task description. */
+	prompt?: string;
+}
 
 export type ThinkingLevel =
 	| "off"
@@ -79,8 +90,6 @@ export interface AgentConfig {
 	steeringQueueMode?: QueueMode;
 	followUpQueueMode?: QueueMode;
 	thinkingLevel?: ThinkingLevel;
-	/** @deprecated Reasoner system removed. This field is ignored. */
-	reasonerId?: string;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
@@ -103,6 +112,8 @@ export interface AgentConfig {
 	eventLogPath?: string;
 	steeringInterrupt?: boolean;
 	acceptance?: AcceptanceConfig;
+	/** Self-evaluation / reflection config. */
+	reflectionConfig?: ReflectionConfig;
 	// Thinking loop detection
 	thinkingLoopDetectionEnabled?: boolean;
 	thinkingLoopMinThinkingLength?: number;
@@ -118,44 +129,16 @@ export interface WebSearchConfig {
 }
 
 // ── Acceptance Contract types ─────────────────────────────────────────────
+// Re-exported so consumers that import from types.ts get everything in one place.
 
-export type EvidenceKind =
-	| "changed-files"
-	| "tests-added"
-	| "commands-run"
-	| "validation-output"
-	| "residual-risks"
-	| "no-staged-files"
-	| "diff-summary"
-	| "review-findings"
-	| "manual-notes";
-
-export interface AcceptanceCriterion {
-	id?: string;
-	must: string;
-	evidence?: EvidenceKind[];
-	severity?: "required" | "recommended";
-}
-
-export interface AcceptanceVerification {
-	id: string;
-	command: string;
-	cwd?: string;
-	timeoutMs?: number;
-	allowFailure?: boolean;
-}
-
-export interface AcceptanceReview {
-	agent: string;
-	focus?: string;
-	required?: boolean;
-}
-
-export interface AcceptanceConfig {
-	criteria?: string[] | AcceptanceCriterion[];
-	evidence?: EvidenceKind[];
-	verify?: AcceptanceVerification[];
-	review?: AcceptanceReview;
-	stopRules?: string[];
-	maxFinalizationTurns?: number;
-}
+export type {
+	EvidenceKind,
+	CriterionSeverity,
+	AcceptanceLevel,
+	AcceptanceCriterion,
+	AcceptanceVerification,
+	AcceptanceReview,
+	ResolvedAcceptance,
+	AcceptanceReport,
+	AcceptanceLedger,
+} from "../acceptance-contract.ts";

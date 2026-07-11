@@ -50,6 +50,8 @@ export type {
 	GetFollowUpMessagesContext,
 	BeforeCompactContext,
 	BeforeCompactResult,
+	BeforeAgentStartContext,
+	BeforeAgentStartResult,
 	AgentHooks,
 } from "./types/types-hooks.ts";
 
@@ -73,8 +75,8 @@ export type {
 	AcceptanceCriterion,
 	AcceptanceVerification,
 	AcceptanceReview,
-	AcceptanceConfig,
 } from "./types/types-config.ts";
+export type { AcceptanceConfig } from "./acceptance-contract.ts";
 
 export {
 	AgentErrorType,

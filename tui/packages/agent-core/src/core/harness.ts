@@ -35,6 +35,10 @@ import {
 	buildBuiltinHooks,
 	type HookLayer,
 } from "../hooks/builtin-hooks.ts";
+import {
+	createPluginHookLayer,
+	type PluginHookLayer,
+} from "../hooks/plugin-hooks.ts";
 import { LoopDetector } from "./loop-detector.ts";
 import { ThinkingLoopDetector } from "./thinking-loop-detector.ts";
 import {
@@ -62,9 +66,21 @@ import type {
 import type { CompactionSettings } from "../compaction/index.ts";
 import { OutputGuard } from "./output-guard.ts";
 import { validateConfig, throwOnValidationErrors } from "./config-validator.ts";
+import {
+	createMemoryStore,
+	extractMemoriesFromText,
+	formatMemoryPrompt,
+	retrieveForPrompt,
+	type MemoryStore,
+} from "./memory.ts";
+import {
+	createRuntimeState,
+	reduceRuntimeState,
+	type AgentRuntimeState,
+	type HarnessPhase,
+} from "./runtime-state.ts";
 
-// Explicit harness phases
-export type HarnessPhase = "idle" | "turn" | "compaction" | "branch_summary";
+export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
 
 export class HarnessBusyError extends Error {
 	constructor(op: string, phase: HarnessPhase, required: HarnessPhase) {
@@ -89,11 +105,6 @@ export interface AgentHarnessOptions {
 	cwd?: string;
 	maxIterations?: number;
 	extensionRunner?: ExtensionRunner;
-	preReasoner?: (
-		reasonerId: string,
-		promptText: string,
-		backend: LLMBackend,
-	) => Promise<string | undefined>;
 }
 
 interface HarnessTurnSnapshot {
@@ -162,6 +173,7 @@ export class AgentHarness {
 	private maxIterations?: number;
 
 	private _phase: HarnessPhase = "idle";
+	private runtime: AgentRuntimeState = createRuntimeState();
 	private idleTools: ToolRegistry;
 	private abortController: AbortController | null = null;
 	private loopConfig: AgentConfig | null = null;
@@ -182,6 +194,7 @@ export class AgentHarness {
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
 	private onSavePoint?: () => void;
+	private onShutdown?: () => void;
 	private onCompaction?: (
 		reason: "auto" | "manual",
 		tokensBefore: number,
@@ -193,6 +206,11 @@ export class AgentHarness {
 		keepRecentTokens: 20_000,
 		contextWindow: 128_000,
 	};
+
+	// ── Structured memory ────────────────────────────────────────────────
+	private memoryStore: MemoryStore;
+	private memoryEnabled = true;
+	private memoryTurnCount = 0;
 
 	// ── Output Guard ─────────────────────────────────────────────────────
 	private outputGuard: OutputGuard | null = null;
@@ -253,10 +271,23 @@ export class AgentHarness {
 			followUpMode: (options.config.followUpQueueMode ??
 				"one-at-a-time") as DeliveryMode,
 		});
+		this.memoryStore = createMemoryStore();
 	}
 
 	get phase(): HarnessPhase {
 		return this._phase;
+	}
+
+	get runtimeState(): AgentRuntimeState {
+		return {
+			...this.runtime,
+			streamingMessage: this.runtime.streamingMessage
+				? { ...this.runtime.streamingMessage }
+				: undefined,
+			pendingToolCalls: [...this.runtime.pendingToolCalls],
+			retry: this.runtime.retry ? { ...this.runtime.retry } : undefined,
+			outcome: this.runtime.outcome ? { ...this.runtime.outcome } : undefined,
+		};
 	}
 
 	setOnPhaseChange(
@@ -271,6 +302,10 @@ export class AgentHarness {
 
 	setOnSavePoint(cb: () => void): void {
 		this.onSavePoint = cb;
+	}
+
+	setOnShutdown(cb: () => void): void {
+		this.onShutdown = cb;
 	}
 
 	subscribe(handler: EventHandler): () => void {
@@ -347,7 +382,8 @@ export class AgentHarness {
 		}
 		const prev = this._phase;
 		this._phase = to;
-		if (prev !== to) this.onPhaseChange?.(prev, to);
+		this.runtime = { ...this.runtime, phase: to };
+		if (prev !== to) this.onPhaseChange?.(to, prev);
 	}
 
 	private async runInPhase<T>(
@@ -412,6 +448,7 @@ export class AgentHarness {
 
 			try {
 				this.loopConfig = snapshot.config;
+				let compactedContext: Message[] | undefined;
 				const newMessages = await runAgentLoop(
 					{
 						systemPrompt: snapshot.config.systemPrompt,
@@ -427,12 +464,15 @@ export class AgentHarness {
 						maxIterations: this.maxIterations,
 						outputGuard: this.outputGuard,
 						extensionBus: this._extensionBus,
+						onContextCompacted: (messages) => {
+							compactedContext = messages;
+						},
 					} satisfies RunAgentLoopConfig,
 					async (event) => {
 						await this.handleAgentEvent(event);
 					},
 				);
-				const result = [
+				const result = compactedContext ?? [
 					{
 						role: "system" as const,
 						content:
@@ -506,6 +546,7 @@ export class AgentHarness {
 
 			try {
 				this.loopConfig = snapshot.config;
+				let compactedContext: Message[] | undefined;
 				const newMessages = await runAgentLoopContinue(
 					{
 						systemPrompt: snapshot.config.systemPrompt,
@@ -520,12 +561,15 @@ export class AgentHarness {
 						maxIterations: this.maxIterations,
 						outputGuard: this.outputGuard,
 						extensionBus: this._extensionBus,
+						onContextCompacted: (messages) => {
+							compactedContext = messages;
+						},
 					} satisfies RunAgentLoopConfig,
 					async (event) => {
 						await this.handleAgentEvent(event);
 					},
 				);
-				const result = [
+				const result = compactedContext ?? [
 					{
 						role: "system" as const,
 						content:
@@ -553,7 +597,9 @@ export class AgentHarness {
 	private async createContinueSnapshot(
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
-		const config = this.withDrainHook(this.withExtensionRuntime(this.config));
+		const config = this.withDrainHook(
+			this.withExtensionRuntime(this.snapshotConfig()),
+		);
 		const streamOptions = { ...this._streamOptions };
 		config.streamOptions = streamOptions;
 		return {
@@ -569,6 +615,9 @@ export class AgentHarness {
 		promptText: string,
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
+		const pluginHookLayer = this.createPluginHookLayer();
+		const pluginPromptMessages =
+			await pluginHookLayer.userPromptMessages(promptText);
 		const extensionBeforeStart =
 			await this.runExtensionBeforeAgentStart(promptText);
 		const beforeStart = await this._beforeAgentStart?.(promptText);
@@ -576,6 +625,7 @@ export class AgentHarness {
 		let initialMessages: Message[] = [...this.history];
 
 		const injectedMessages = [
+			...pluginPromptMessages,
 			...(extensionBeforeStart?.messages ?? []),
 			...(beforeStart?.messages ?? []),
 		];
@@ -585,10 +635,13 @@ export class AgentHarness {
 
 		const systemPrompt =
 			beforeStart?.systemPrompt ?? extensionBeforeStart?.systemPrompt;
-		const baseConfig = systemPrompt
-			? { ...this.config, systemPrompt }
-			: this.config;
-		const config = this.withDrainHook(this.withExtensionRuntime(baseConfig));
+		const baseConfig = {
+			...this.snapshotConfig(),
+			...(systemPrompt ? { systemPrompt } : {}),
+		};
+		const config = this.withDrainHook(
+			this.withExtensionRuntime(baseConfig, pluginHookLayer),
+		);
 		const streamOptions = { ...this._streamOptions };
 		config.streamOptions = streamOptions;
 
@@ -598,6 +651,18 @@ export class AgentHarness {
 			config,
 			streamOptions,
 			signal,
+		};
+	}
+
+	/** Capture mutable runtime config at a turn boundary. */
+	private snapshotConfig(): AgentConfig {
+		return {
+			...this.config,
+			tools: this.config.tools ? [...this.config.tools] : undefined,
+			models: this.config.models ? [...this.config.models] : undefined,
+			streamOptions: this.config.streamOptions
+				? { ...this.config.streamOptions }
+				: undefined,
 		};
 	}
 
@@ -624,15 +689,26 @@ export class AgentHarness {
 		};
 	}
 
-	private withExtensionRuntime(config: AgentConfig): AgentConfig {
-		const runner = this._extensionRunner;
-		if (!runner) return config;
+	private createPluginHookLayer(): PluginHookLayer {
+		return createPluginHookLayer({
+			enabled: this._hooksEnabled,
+			sessionId: this._sessionId || "",
+			transcriptPath: this._transcriptPath || "",
+			cwd: this.cwd || process.cwd(),
+			getMatcherValue: (toolName) => toolName,
+		});
+	}
 
+	private withExtensionRuntime(
+		config: AgentConfig,
+		pluginHookLayer?: PluginHookLayer,
+	): AgentConfig {
+		const runner = this._extensionRunner;
 		const extensionTools = runner
-			.getTools()
-			.map((tool) => this.wrapExtensionTool(tool));
+			? runner.getTools().map((tool) => this.wrapExtensionTool(tool))
+			: [];
 		const tools = [...(config.tools ?? []), ...extensionTools];
-		const extensionHooks = runner.getHooks();
+		const extensionHooks = runner?.getHooks();
 
 		const builtinHooks = buildBuiltinHooks({
 			config,
@@ -651,6 +727,7 @@ export class AgentHarness {
 		const layers: HookLayer[] = [
 			{ source: "builtin", hooks: builtinHooks },
 			{ source: "extensions", hooks: extensionHooks },
+			{ source: "plugins", hooks: (pluginHookLayer ?? this.createPluginHookLayer()).hooks },
 			{ source: "user", hooks: config.hooks },
 		];
 
@@ -704,11 +781,18 @@ export class AgentHarness {
 	}
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
+		this.reduceRuntimeEvent(event);
+		// The primary application event path is synchronous and latency-sensitive;
+		// extension delivery must not hold streaming deltas behind an await.
+		this.loopConfig?.onEvent?.(event);
 		if (event.type === "message_end" && event.message) {
 			this.persistTurnMessages([event.message]);
 		}
 		await this.emitExtensionAgentEvent(event);
-		this.loopConfig?.onEvent?.(event);
+	}
+
+	private reduceRuntimeEvent(event: AgentEvent): void {
+		this.runtime = reduceRuntimeState(this.runtime, event, this._phase);
 	}
 
 	private async emitExtensionAgentEvent(event: AgentEvent): Promise<void> {
@@ -795,6 +879,10 @@ export class AgentHarness {
 		this.config.maxTokens = maxTokens;
 	}
 
+	setMaxIterations(maxIterations: number): void {
+		this.maxIterations = maxIterations;
+	}
+
 	setTools(tools: Tool[]): void {
 		this.config.tools = tools;
 		this.idleTools = this.createToolRegistry(tools);
@@ -841,6 +929,7 @@ export class AgentHarness {
 		const clearedSteering = q.getSteering().map((m) => m.content);
 		const clearedFollowUp = q.getFollowUp().map((m) => m.content);
 		const clearedNextTurn = [...this._nextTurnQueue];
+		this.runtime = { ...this.runtime, abortRequested: true };
 		this.abortController?.abort();
 		this.msgManager.queue.clear();
 		this._nextTurnQueue = [];
@@ -1020,6 +1109,41 @@ export class AgentHarness {
 		) => void,
 	): void {
 		this.onCompaction = cb;
+	}
+
+	// ── Memory management ────────────────────────────────────────────────
+
+	setMemoryEnabled(enabled: boolean): void {
+		this.memoryEnabled = enabled;
+	}
+
+	getMemoryStore(): MemoryStore {
+		return this.memoryStore;
+	}
+
+	getMemoryPrompt(maxEntries?: number): string {
+		return formatMemoryPrompt(this.memoryStore, maxEntries ?? 10);
+	}
+
+	/** Persist memory to a JSON file for cross-session recall. */
+	saveMemory(path: string): void {
+		try {
+			const fs = require("node:fs");
+			fs.writeFileSync(path, this.memoryStore.serialize());
+		} catch {
+			// Ignore persistence errors
+		}
+	}
+
+	/** Load memory from a JSON file. */
+	loadMemory(path: string): void {
+		try {
+			const fs = require("node:fs");
+			const data = fs.readFileSync(path, "utf-8");
+			this.memoryStore.deserialize(data);
+		} catch {
+			// Ignore load errors
+		}
 	}
 
 	// ── Session & history ──────────────────────────────────────────────────

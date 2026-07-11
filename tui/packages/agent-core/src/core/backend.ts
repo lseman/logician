@@ -168,6 +168,8 @@ export interface GenerateOptions {
 	// Per-request extras supplied by the loop's provider-boundary hooks
 	// (beforeProviderRequest / beforeProviderPayload).
 	headers?: Record<string, string>;
+	/** Per-request deadline. Combined with the caller's cancellation signal. */
+	timeoutMs?: number;
 	transformPayload?: (
 		payload: Record<string, unknown>,
 	) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -241,6 +243,7 @@ export class OpenAIBackend implements LLMBackend {
 			thinkingLevel,
 			callbacks = {},
 			headers: extraHeaders,
+			timeoutMs,
 			transformPayload,
 		} = options;
 		const {
@@ -278,6 +281,14 @@ export class OpenAIBackend implements LLMBackend {
 		// Let a provider-payload hook inspect/rewrite the final body.
 		const finalBody = transformPayload ? await transformPayload(body) : body;
 
+		const timeoutSignal =
+			timeoutMs !== undefined && timeoutMs > 0
+				? AbortSignal.timeout(timeoutMs)
+				: undefined;
+		const requestSignal =
+			signal && timeoutSignal
+				? AbortSignal.any([signal, timeoutSignal])
+				: (signal ?? timeoutSignal);
 		let response: Response;
 		try {
 			response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
@@ -287,7 +298,7 @@ export class OpenAIBackend implements LLMBackend {
 					...extraHeaders,
 				},
 				body: JSON.stringify(finalBody),
-				signal,
+				signal: requestSignal,
 			});
 		} catch (e) {
 			const error = e as Error;

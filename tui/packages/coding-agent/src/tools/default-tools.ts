@@ -1,6 +1,4 @@
-import { ask_user } from "@logician/agent-core/tools/workflow/ask-user.ts";
-import { task_status } from "@logician/agent-core/tools/workflow/task-status.ts";
-import { todo_tool } from "@logician/agent-core/tools/todos/todo.ts";
+import { getBuiltInTools } from "@logician/agent-capabilities/tools";
 import type { Tool, WebSearchConfig } from "@logician/agent-core/core/types.ts";
 import { bash } from "./bash.ts";
 import { edit_file } from "./edit-file.ts";
@@ -34,9 +32,7 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		file_diff,
 		bash,
 		git,
-		todo_tool,
-		ask_user,
-		task_status,
+		...getBuiltInTools(),
 		web_fetch,
 		createWebSearchTool(webSearch),
 	];

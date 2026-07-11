@@ -347,6 +347,10 @@ function escapeMarkdownTableCell(value: string): string {
 interface TranscriptDisplayOptions {
 	thinkingMode?: ThinkingDisplayStyle;
 	maxMessageLength?: number;
+	/** Max turns to keep in memory. Older turns are dropped. */
+	maxTurns?: number;
+	/** Max rendered lines before cutting off older content. */
+	maxRenderedLines?: number;
 }
 
 function hasStreamingChunk(chunks: AssistantChunk[]): boolean {
@@ -368,11 +372,15 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private thinkingMode: ThinkingDisplayStyle;
 	private toolsExpanded = false;
 	private maxMessageLength: number;
+	private maxTurns: number;
+	private maxRenderedLines: number;
 	private turns: Turn[] = [];
 
 	constructor(options: TranscriptDisplayOptions = {}) {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
 		this.maxMessageLength = options.maxMessageLength ?? 4000;
+		this.maxTurns = options.maxTurns ?? 200;
+		this.maxRenderedLines = options.maxRenderedLines ?? 2000;
 	}
 
 	setThinkingMode(mode: ThinkingDisplayStyle): void {
@@ -469,6 +477,18 @@ export class TranscriptDisplay implements Component, Scrollable {
 		renderedLines.push(padToWidth(emptyLine));
 
 		for (let ti = 0; ti < this.turns.length; ti++) {
+			// Stop rendering once we exceed the line budget.
+			if (renderedLines.length > this.maxRenderedLines) {
+				if (renderedLines.length > this.maxRenderedLines + 20) {
+					renderedLines.push(
+						padToWidth(
+							`${theme.fgRaw("dim")}… ${this.turns.length - ti - 1} older turn(s) not shown (scroll up or resize to see more)${RESET}`,
+						),
+					);
+				}
+				break;
+			}
+
 			const turn = this.turns[ti];
 			if (ti > 0) renderedLines.push(padToWidth(emptyLine));
 
@@ -603,10 +623,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 	 * Render thinking text in expanded mode with code block syntax highlighting.
 	 * Parses fenced code blocks, applies highlightAuto, and wraps plain text.
 	 */
-	private renderThinkingExpanded(
-		text: string,
-		lines: string[],
-	): void {
+	private renderThinkingExpanded(text: string, lines: string[]): void {
 		const rawLines = text.split("\n");
 		let inCodeBlock = false;
 		let codeContent = "";
@@ -711,7 +728,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 	}
 
 	setTurns(turns: Turn[]): void {
-		this.turns = turns;
+		// Drop oldest turns beyond the cap to keep memory and render time bounded.
+		if (turns.length > this.maxTurns) {
+			this.turns = turns.slice(turns.length - this.maxTurns);
+		} else {
+			this.turns = turns;
+		}
 		this.invalidate();
 	}
 	private _viewportHeight: number = 0;
@@ -1083,6 +1105,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			? theme.fgRaw("toolError") + "✗ " + RESET
 			: theme.fgRaw("toolTitle") + "TOOL " + RESET;
 		const isError = tool.isError ? prefix : prefix;
+		// write_file / edit_file: no "TOOL" prefix, just the name
 		const status = tool.isError
 			? theme.fg("toolError", "error")
 			: tool.isComplete
@@ -1090,13 +1113,30 @@ export class TranscriptDisplay implements Component, Scrollable {
 				: tool.partialResult
 					? theme.fg("toolStreaming", "▸ streaming")
 					: theme.fg("toolRunning", "▸ running");
+
+		// Extract file path for write_file / edit_file to show in header
+		const filePath = (() => {
+			const args = tool.args || {};
+			const path = stringArg(args, "path") || stringArg(args, "file_path");
+			if (!path) return "";
+			if (tool.tool_name === "write_file" || tool.tool_name === "edit_file") {
+				return path;
+			}
+			return "";
+		})();
+
 		const summary = this.toolSummary(tool);
 		const hint = this.toolsExpanded
 			? `${DIM}ctrl+o collapse${RESET}`
 			: `${DIM}ctrl+o expand${RESET}`;
-		const base =
-			`${isError}${BOLD}${tool.tool_name}${RESET} ` +
-			`${DIM}(${RESET}${status}${DIM})${RESET}`;
+		const fileTool =
+			tool.tool_name === "write_file" || tool.tool_name === "edit_file";
+		const toolPrefix = fileTool ? "" : isError;
+		const base = filePath
+			? `${toolPrefix}${BOLD}${tool.tool_name}${RESET} ${DIM}(${RESET}${filePath}${DIM})${RESET} ` +
+				`${DIM}(${RESET}${status}${DIM})${RESET}`
+			: `${toolPrefix}${BOLD}${tool.tool_name}${RESET} ` +
+				`${DIM}(${RESET}${status}${DIM})${RESET}`;
 
 		lines.push(
 			[base, summary ? `${DIM}${summary}${RESET}` : "", hint]
@@ -1104,7 +1144,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				.join(" "),
 		);
 
-						// Always show the result (diff) for edit_file and write_file even when collapsed.
+		// Always show the result (diff) for edit_file and write_file even when collapsed.
 		const showDiffResult =
 			["edit_file", "write_file"].includes(tool.tool_name) && !!tool.result;
 		if (showDiffResult) {
@@ -1112,12 +1152,24 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? tool.result!
 				: tool.result!;
 			const label = tool.isError ? "error" : "result";
-			const resultLines = resultText.split("\n");
-			lines.push(
-				`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET} ${resultLines[0]}`,
-			);
-			for (let ri = 1; ri < resultLines.length; ri++) {
-				lines.push(`${theme.fg("dim", "│ ")}${resultLines[ri]}`);
+			if (tool.isError) {
+				const resultLines = resultText.split("\n");
+				lines.push(
+					`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET} ${resultLines[0]}`,
+				);
+				for (let ri = 1; ri < resultLines.length; ri++) {
+					lines.push(`${theme.fg("dim", "│ ")}${resultLines[ri]}`);
+				}
+			} else {
+				// Syntax-highlight the diff in collapsed view.
+				const diffLines = this.renderDiffBlock(
+					resultText,
+					Math.max(20, width - 4),
+				);
+				lines.push(`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET}`);
+				for (const dl of diffLines) {
+					lines.push(`${theme.fg("dim", "│ ")}${dl}`);
+				}
 			}
 		}
 		if (!this.toolsExpanded) return lines;
@@ -1138,19 +1190,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (tool.tool_name === "write_file") {
 			const content = stringArg(args, "content") || "";
 			const lineCount = content ? content.split("\n").length : 0;
-			return [
-				path,
-				content ? `${content.length} bytes` : "",
-				lineCount ? `${lineCount} lines` : "",
-			]
-				.filter(Boolean)
-				.join(" · ");
+			const parts = [];
+			if (content) parts.push(`${content.length} bytes`);
+			if (lineCount) parts.push(`${lineCount} lines`);
+			return parts.join(" · ");
 		}
 		if (tool.tool_name === "edit_file") {
 			const editCount = Array.isArray(args.edits) ? args.edits.length : 1;
-			return [path, `${editCount} edit${editCount === 1 ? "" : "s"}`]
-				.filter(Boolean)
-				.join(" · ");
+			return `${editCount} edit${editCount === 1 ? "" : "s"}`;
 		}
 		if (tool.tool_name === "bash") {
 			return compactText(stringArg(args, "command") || "");
@@ -1233,18 +1280,25 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? `${DIM}${content.length} bytes · ${lineCount} lines · streaming${RESET}`
 				: `${DIM}${content.length} bytes · ${lineCount} lines${RESET}`;
 			lines.push(`${BOLD}content${RESET} ${meta}`);
-			lines.push(...this.renderPiContent(content, width, lineCount));
+			const lang = this.detectLanguage(path);
+			lines.push(...this.renderFileContent(content, width, lineCount, lang));
 		} else if (streaming) {
 			lines.push(`${DIM}writing…${RESET}`);
 		}
 
-		// Show the tool's result (includes diff after completion).
+		// Show error result only (skip diff — content is already rendered above).
 		if (tool.result) {
 			const resultText = tool.result.startsWith("Error:")
 				? tool.result
 				: tool.result;
-			lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
-			lines.push(...this.previewBlock(resultText, width));
+			if (tool.isError) {
+				lines.push(`${BOLD}error${RESET}`);
+				lines.push(...this.previewBlock(resultText, width));
+			} else if (!content) {
+				// No content shown above; show the diff result.
+				lines.push(`${BOLD}result${RESET}`);
+				lines.push(...this.renderDiffBlock(resultText, width));
+			}
 		} else if (!streaming && !content) {
 			lines.push(`${DIM}no output${RESET}`);
 		}
@@ -1296,7 +1350,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? tool.result
 				: tool.result;
 			lines.push(`${BOLD}${tool.isError ? "error" : "result"}${RESET}`);
-			lines.push(...this.previewBlock(resultText, width));
+			if (tool.isError) {
+				lines.push(...this.previewBlock(resultText, width));
+			} else {
+				lines.push(...this.renderDiffBlock(resultText, width));
+			}
 		}
 
 		return lines;
@@ -1548,6 +1606,180 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		return lines;
+	}
+
+	/** Detect language from file extension. */
+	private detectLanguage(filePath: string | undefined): string | undefined {
+		if (!filePath) return undefined;
+		const ext = filePath.split(".").pop()?.toLowerCase();
+		if (!ext) return undefined;
+		// Map common extensions to highlight.js language names
+		const extMap: Record<string, string> = {
+			ts: "typescript",
+			tsx: "tsx",
+			js: "javascript",
+			jsx: "jsx",
+			py: "python",
+			rs: "rust",
+			go: "go",
+			java: "java",
+			rb: "ruby",
+			php: "php",
+			cs: "csharp",
+			cpp: "cpp",
+			c: "c",
+			h: "c",
+			hs: "haskell",
+			ml: "ocaml",
+			sh: "bash",
+			zsh: "bash",
+			bash: "bash",
+			md: "markdown",
+			html: "html",
+			css: "css",
+			json: "json",
+			yaml: "yaml",
+			yml: "yaml",
+			xml: "xml",
+			sql: "sql",
+			toml: "toml",
+			ini: "ini",
+			conf: "ini",
+			gitignore: "plaintext",
+			env: "plaintext",
+			svelte: "svelte",
+			vue: "vue",
+			astro: "astro",
+			kt: "kotlin",
+			swift: "swift",
+			dart: "dart",
+			lua: "lua",
+			r: "r",
+			pl: "perl",
+			pm: "perl",
+		};
+		return extMap[ext];
+	}
+
+	/** Render file content with syntax highlighting and line numbers (Pi-style). */
+	private renderFileContent(
+		text: string,
+		width: number,
+		totalLines: number,
+		language: string | undefined,
+	): string[] {
+		const lines: string[] = [];
+		const bg = theme.bg("mdCodeBlockBg", "");
+		const bgReset = RESET;
+		const gutterColor = theme.fgRaw("dim");
+		const plainColor = theme.fgRaw("assistantText");
+
+		const collapsedPreviewLines = 8;
+		const showAll = totalLines <= collapsedPreviewLines;
+
+		const rawLines = text.split("\n");
+		const displayLines = showAll
+			? rawLines
+			: rawLines.slice(0, collapsedPreviewLines);
+
+		// Calculate gutter width
+		const gutterWidth = String(totalLines).length + 1;
+		const availableContentWidth = Math.max(20, width - gutterWidth - 2);
+
+		if (language) {
+			// Highlighted rendering: split each line by ANSI sequences, apply line numbers
+			const highlighted = highlightAuto(text);
+
+			// Parse highlighted output into lines, each line may have ANSI color spans
+			const hlLines = highlighted.value.split("\n");
+			for (let i = 0; i < displayLines.length; i++) {
+				const lineNum = i + 1;
+				const hlLine = hlLines[i] || "";
+
+				// If highlighted output is empty for this line, fall back to plain
+				const content = hlLine.replace(/\x1b\[[\d;]*m/g, "");
+				const displayContent =
+					visibleWidth(content) > availableContentWidth
+						? this.wrapText(content, availableContentWidth)
+						: [content];
+
+				for (let wi = 0; wi < displayContent.length; wi++) {
+					const displayLine = displayContent[wi];
+					const numStr = String(lineNum).padStart(gutterWidth - 1, " ");
+					// Extract ANSI spans from highlighted line at the same wrap position
+					let hlContent = this.extractHlSpan(hlLine, displayLine);
+					if (!hlContent) hlContent = plainColor + displayLine + plainColor;
+					lines.push(
+						`${bg}${gutterColor}${numStr}│${RESET}${bg}${hlContent}${bgReset}`,
+					);
+				}
+			}
+
+			// Add language label in the gutter area if collapsed
+			if (!showAll) {
+				const remaining = totalLines - collapsedPreviewLines;
+				lines.push(
+					`${bg}${DIM}  └─ ${remaining} more lines · ctrl+o to expand${RESET}`,
+				);
+			}
+		} else {
+			// No language detection — plain text with line numbers
+			for (let i = 0; i < displayLines.length; i++) {
+				const lineNum = i + 1;
+				const rawLine = displayLines[i];
+				const formatted = rawLine.length ? rawLine.replace(/\t/g, "    ") : " ";
+
+				const displayContent =
+					visibleWidth(formatted) > availableContentWidth
+						? this.wrapText(formatted, availableContentWidth)
+						: [formatted];
+
+				for (let wi = 0; wi < displayContent.length; wi++) {
+					const content = displayContent[wi];
+					const numStr = String(lineNum).padStart(gutterWidth - 1, " ");
+					lines.push(
+						`${bg}${gutterColor}${numStr}│${RESET}${bg}${plainColor}${content}${bgReset}`,
+					);
+				}
+			}
+			if (!showAll) {
+				const remaining = totalLines - collapsedPreviewLines;
+				lines.push(
+					`${bg}${DIM}  └─ ${remaining} more lines · ctrl+o to expand${RESET}`,
+				);
+			}
+		}
+
+		return lines;
+	}
+
+	/** Extract the portion of a highlighted line corresponding to a display line. */
+	private extractHlSpan(hlLine: string, displayLine: string): string | null {
+		if (!hlLine || hlLine.trim().length === 0) return null;
+		// If the plain text of the hl line matches the display line, use it directly
+		const stripped = hlLine.replace(/\x1b\[[\d;]*m/g, "");
+		if (stripped === displayLine) return hlLine;
+		// Otherwise approximate: if displayLine is shorter (wrapped), take first N chars of hl
+		if (displayLine.length < hlLine.length) {
+			// Count visible chars needed
+			const visLen = displayLine.length;
+			let idx = 0;
+			let visible = 0;
+			let inSeq = false;
+			while (idx < hlLine.length && visible < visLen) {
+				if (hlLine[idx] === "\x1b") {
+					inSeq = true;
+				}
+				if (inSeq && hlLine[idx] === "m") {
+					inSeq = false;
+				} else if (!inSeq) {
+					visible++;
+				}
+				idx++;
+			}
+			return hlLine.slice(0, idx);
+		}
+		return hlLine;
 	}
 
 	private truncateText(text: string): string {

@@ -35,7 +35,15 @@ export function stripJsonComments(input: string): string {
 
 		// Single-line comment
 		if (ch === "/" && input[i + 1] === "/") {
-			while (i < input.length && input[i] !== "\n") i++;
+			// Some user-authored config puts a closing delimiter after a trailing
+			// comment on the same line (`"value" // note }`). Preserve that
+			// delimiter so the otherwise valid JSON remains parseable.
+			while (i < input.length && input[i] !== "\n") {
+				if (input[i] === "}" || input[i] === "]") {
+					output += input[i];
+				}
+				i++;
+			}
 			continue;
 		}
 

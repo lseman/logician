@@ -9,6 +9,7 @@
 	},
 	"dependencies": {
 		"@logician/agent-core": "0.2.0",
+		"@logician/agent-capabilities": "0.2.0",
 		"@logician/coding-agent": "0.2.0"
 	},
 	"devDependencies": {

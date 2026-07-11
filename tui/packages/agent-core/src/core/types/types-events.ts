@@ -15,6 +15,12 @@ export type AgentEventBody =
 	| { type: "agent_start" }
 	| { type: "agent_end"; messages?: Message[] }
 	| {
+			type: "run_outcome";
+			status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
+			summary?: string;
+			source: "structured" | "heuristic" | "runtime";
+	  }
+	| {
 			type: "queue_update";
 			steering: readonly string[];
 			followUp: readonly string[];
@@ -83,6 +89,26 @@ export type AgentEventBody =
 			toolName: string;
 			toolCallId: string;
 			partialResult: string;
+	  }
+	| {
+			type: "tool_execution_start";
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+	  }
+	| {
+			type: "tool_execution_update";
+			toolCallId: string;
+			toolName: string;
+			args: Record<string, unknown>;
+			partialResult: string;
+	  }
+	| {
+			type: "tool_execution_end";
+			toolCallId: string;
+			toolName: string;
+			result: string;
+			isError: boolean;
 	  }
 	| {
 			type: "repair_nudge";
@@ -171,6 +197,53 @@ export type AgentEventBody =
 			totalThinkingTurns: number;
 			totalThinkingTokens: number;
 			metaReasoningHits: number;
+	  }
+	| {
+			type: "acceptance_start";
+			level: string;
+			criteriaCount: number;
+	  }
+	| {
+			type: "acceptance_check";
+			criterionId: string;
+			status: "satisfied" | "failed" | "partial";
+			severity: string;
+	  }
+	| {
+			type: "acceptance_verify";
+			command: string;
+			result: "passed" | "failed" | "skipped";
+			summary?: string;
+	  }
+	| {
+			type: "acceptance_complete";
+			status: "passed" | "failed" | "timeout";
+			report?: Record<string, unknown>;
+	  }
+	| {
+			type: "reflection_start";
+			turnId: string;
+	  }
+	| {
+			type: "reflection_end";
+			turnId: string;
+			assessment: "complete" | "incomplete";
+			needsMoreWork: boolean;
+			issues: string[];
+	  }
+	// Session tree entries
+	| {
+			type: "thinking_level_change";
+			thinkingLevel: string;
+	  }
+	| {
+			type: "model_change";
+			provider: string;
+			modelId: string;
+	  }
+	| {
+			type: "active_tools_change";
+			activeToolNames: string[];
 	  };
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;

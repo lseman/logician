@@ -17,6 +17,7 @@ export type HookEventType =
 	| "UserPromptSubmit"
 	| "PreToolUse"
 	| "PostToolUse"
+	| "PostToolUseFailure"
 	| "PreCompact"
 	| "PostCompact";
 
@@ -378,17 +379,23 @@ export function buildHookInput(
 	if (eventType === "UserPromptSubmit" && payload.prompt !== undefined)
 		data.prompt = payload.prompt;
 	if (
-		(eventType === "PreToolUse" || eventType === "PostToolUse") &&
+		(eventType === "PreToolUse" ||
+			eventType === "PostToolUse" ||
+			eventType === "PostToolUseFailure") &&
 		payload.tool_name !== undefined
 	)
 		data.tool_name = payload.tool_name;
 	if (
-		(eventType === "PreToolUse" || eventType === "PostToolUse") &&
+		(eventType === "PreToolUse" ||
+			eventType === "PostToolUse" ||
+			eventType === "PostToolUseFailure") &&
 		payload.tool_input !== undefined
 	)
 		data.tool_input = payload.tool_input;
 	if (eventType === "PostToolUse" && payload.tool_response !== undefined)
 		data.tool_response = payload.tool_response;
+	if (eventType === "PostToolUseFailure" && payload.tool_error !== undefined)
+		data.tool_error = payload.tool_error;
 	if (eventType === "Stop")
 		data.stop_hook_active = Boolean(payload.stop_hook_active);
 	return JSON.stringify(data);
@@ -398,7 +405,7 @@ export function parseHookEventType(value: string): HookEventType | null {
 	const clean = value.trim().toLowerCase();
 	const events: HookEventType[] = [
 		"SessionStart", "SessionEnd", "Stop", "UserPromptSubmit",
-		"PreToolUse", "PostToolUse", "PreCompact", "PostCompact",
+		"PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact", "PostCompact",
 	];
 	return events.find((event) => event.toLowerCase() === clean) || null;
 }

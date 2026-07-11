@@ -38,10 +38,18 @@ export type BridgeEventType =
 	| "decision"
 	| "context_update"
 	| "compaction"
+	| "memory_update"
 	// Agent question / interactive prompt
 	| "question_request"
 	// Media
 	| "image";
+
+export interface MemoryUpdateEvent {
+	type: "memory_update";
+	kind: "observations_added" | "reflections_added" | "observations_dropped" | "cleared";
+	count: number;
+	items?: Array<{ id: string; content: string; relevance?: string }>;
+}
 
 export interface BridgeEvent {
 	type: BridgeEventType;
@@ -278,6 +286,7 @@ export type ParsedBridgeEvent =
 	| NoticeEvent
 	| PermissionRequestEvent
 	| QuestionRequestEvent
+	| MemoryUpdateEvent
 	| SavePointEvent;
 
 // ── Bridge commands (TUI → bridge) ────────────────────────────────────────────

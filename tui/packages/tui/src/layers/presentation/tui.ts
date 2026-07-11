@@ -32,6 +32,11 @@ import {
 	type ThemeSelectorAction,
 	ThemeSelectorOverlay,
 } from "../../components/theme-selector.ts";
+import {
+	type SettingDef,
+	type SettingsSelectorAction,
+	SettingsSelectorOverlay,
+} from "../../components/settings-overlay.ts";
 import { SlashPopup } from "../../components/slash-popup.ts";
 import { StatusBar } from "../../components/status-bar.ts";
 import { SteerQueue } from "../../components/steer-queue.ts";
@@ -53,10 +58,11 @@ import {
 	getReasonerIds,
 	getReasonerMeta,
 	type ReasonerMeta,
-} from "@logician/coding-agent/reasoners/registry.ts";
+} from "@logician/agent-capabilities/reasoners/registry";
 import type { Message as CoreMessage } from "@logician/agent-core";
 import {
 	createSlashCommands,
+	filterSlashCommands,
 	type SlashCommandDef,
 } from "@logician/coding-agent/slash-commands";
 import { setTheme, getAvailableThemes, theme } from "../theme/theme.ts";
@@ -82,6 +88,7 @@ export class LogicianTUI {
 	private reasonerSelector: ReasonerSelectorOverlay;
 	private modelSelector: ModelSelectorOverlay;
 	private themeSelector: ThemeSelectorOverlay;
+	private settingsSelector: SettingsSelectorOverlay;
 	private transcriptDisplay: TranscriptDisplay;
 	private sessionManager: SessionManager;
 	private sessionStore: SessionStore;
@@ -91,7 +98,7 @@ export class LogicianTUI {
 	private streaming = false;
 	private loopActive = false;
 	private configPath?: string;
-	private thinkingLevel = "medium";
+	private thinkingLevel = "off";
 	private cacheEnabled = true;
 	private thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
 		"expanded";
@@ -181,13 +188,14 @@ export class LogicianTUI {
 		this.reasonerSelector = new ReasonerSelectorOverlay();
 		this.modelSelector = new ModelSelectorOverlay();
 		this.themeSelector = new ThemeSelectorOverlay();
+		this.settingsSelector = new SettingsSelectorOverlay();
 		this.transcriptDisplay = new TranscriptDisplay({
 			thinkingMode: this.thinkingDisplayMode,
 		});
 		this.killRing = new KillRing();
 		this.undoStack = new UndoStack();
 		this.loopManager = new LoopManager();
-		this.loopManager.setOnTick((iteration, prompt) => {
+		this.loopManager.setOnTick(async (iteration, prompt) => {
 			this.loopActive = true;
 			this.transcript.addSystemMessage(
 				`🔄 Loop iteration ${iteration}: ${prompt}`,
@@ -195,7 +203,17 @@ export class LogicianTUI {
 			this.transcript.addTurn(prompt);
 			this.transcriptDisplay.setTurns(this.transcript.getTurns());
 			this.tui.requestRender();
-			void this.bridge.sendMessage(prompt).catch(() => {});
+			await this.bridge.sendMessage(prompt);
+		});
+		this.loopManager.setOnStateChange((state) => {
+			this.loopActive = state !== null;
+			if (state?.lastError) {
+				this.transcript.addSystemMessage(
+					`Loop iteration ${state.iteration} failed: ${state.lastError}`,
+				);
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				this.tui.requestRender();
+			}
 		});
 
 		// Create the TUI with hardware cursor support
@@ -252,6 +270,16 @@ export class LogicianTUI {
 		const handleStatus = async () => {
 			try {
 				const state = await this.bridge.getState();
+				const runtime = (state.runtime_state ?? {}) as {
+					phase?: string;
+					isStreaming?: boolean;
+					pendingToolCalls?: string[];
+					retry?: { attempt?: number; maxRetries?: number };
+					lastError?: string;
+					outcome?: { status?: string; summary?: string; source?: string };
+					lastTurnDurationMs?: number;
+					lastRunDurationMs?: number;
+				};
 				const lines = [
 					`Agent: ${state.agent_name || "unknown"}`,
 					`Model: ${state.model || "unknown"}`,
@@ -263,6 +291,28 @@ export class LogicianTUI {
 						Number(state.context_tokens || 0),
 						Number(state.context_max_tokens || 0) || undefined,
 					)}`,
+					`Runtime: ${runtime.phase || "idle"}${runtime.isStreaming ? " (streaming)" : ""}`,
+					`Active tools: ${runtime.pendingToolCalls?.length || 0}`,
+					...(runtime.lastTurnDurationMs !== undefined
+						? [`Last turn: ${runtime.lastTurnDurationMs}ms`]
+						: []),
+					...(runtime.lastRunDurationMs !== undefined
+						? [`Last run: ${runtime.lastRunDurationMs}ms`]
+						: []),
+					...(runtime.retry
+						? [
+								`Retry: ${runtime.retry.attempt || 0}/${runtime.retry.maxRetries || 0}`,
+							]
+						: []),
+					...(runtime.lastError ? [`Last error: ${runtime.lastError}`] : []),
+					...(runtime.outcome
+						? [
+								`Outcome: ${runtime.outcome.status || "unknown"} (${runtime.outcome.source || "unknown"})`,
+								...(runtime.outcome.summary
+									? [`Outcome summary: ${runtime.outcome.summary}`]
+									: []),
+							]
+						: []),
 					`Hooks: ${state.hooks_enabled === false ? "disabled" : "enabled"}`,
 					`Hook transcript: ${state.hook_transcript_path || "-"}`,
 					`Config: ${state.config_path || "-"}`,
@@ -324,7 +374,7 @@ export class LogicianTUI {
 					return;
 				}
 				// Direct set: /reasoner ssr, /reasoner none, etc.
-				this.bridge.setReasonerId(normalized);
+				// reasoner removed;
 				const meta = getReasonerMeta(normalized);
 				const label = meta ? meta.name : normalized;
 				this.transcript.addSystemMessage(`Reasoning mode: ${label}`);
@@ -391,7 +441,7 @@ export class LogicianTUI {
 			gitStaged: gitStatus.staged,
 			gitUntracked: gitStatus.untracked,
 			contextTokens: 0,
-			reasoner: this.bridge.getReasonerStatus(),
+			reasoner: "none",
 			contextMaxTokens:
 				envNumber("LOGICIAN_CONTEXT_WINDOW") ||
 				envNumber("LOGICIAN_CTX_SIZE") ||
@@ -440,6 +490,70 @@ export class LogicianTUI {
 				this.transcript.clear();
 				this.thinkingPanel.clear();
 				setStatusPhase("ready");
+			},
+			version: () => "Logician 0.2.0 (TypeScript runtime)",
+			memory: (raw: unknown) => this.bridge.memoryCommand(String(raw ?? "")),
+			settings: (raw: unknown) => {
+				const args = String(raw ?? "").trim();
+				if (!args) {
+					this.openSettingsSelector();
+					return "";
+				}
+				const [key, value = ""] = args.split(/\s+/, 2);
+				const on = value.toLowerCase() === "on";
+				switch (key.toLowerCase()) {
+					case "thinking":
+						if (!value) return "Usage: /settings thinking <level>";
+						this.bridge.setThinkingLevel(value);
+						return `Thinking level: ${value}`;
+					case "model":
+						if (!value) return "Usage: /settings model <name>";
+						this.bridge.setModel(value);
+						return `Model: ${value}`;
+					case "model-cycle":
+					case "model_cycle":
+						return `Model: ${this.bridge.cycleModel() ?? "unchanged"}`;
+					case "temp": {
+						const number = Number(value);
+						if (!Number.isFinite(number) || number < 0 || number > 2)
+							return "Temperature must be between 0 and 2.";
+						this.bridge.setTemperature(number);
+						return `Temperature: ${number}`;
+					}
+					case "max-tokens":
+					case "max_tokens": {
+						const number = Number.parseInt(value, 10);
+						if (!Number.isFinite(number) || number < 1)
+							return "Max tokens must be a positive integer.";
+						this.bridge.setMaxTokens(number);
+						return `Max tokens: ${number}`;
+					}
+					case "max-iterations":
+					case "max_iterations": {
+						const number = Number.parseInt(value, 10);
+						if (!Number.isFinite(number) || number < 1)
+							return "Max iterations must be a positive integer.";
+						this.bridge.setMaxIterations(number);
+						return `Max iterations: ${number}`;
+					}
+					case "permissions":
+						if (!value) return "Usage: /settings permissions <mode>";
+						this.bridge.setPermissionMode(
+							value as "acceptAll" | "acceptEdits" | "ask" | "plan",
+						);
+						return `Permission mode: ${value}`;
+					case "loop-detection":
+						this.bridge.setRuntimeToggle("loopDetectionEnabled", on);
+						return `Loop detection: ${on ? "on" : "off"}`;
+					case "guards":
+						this.bridge.setRuntimeToggle("guardsEnabled", on);
+						return `Guards: ${on ? "on" : "off"}`;
+					case "compaction":
+						this.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
+						return `Compaction: ${on ? "on" : "off"}`;
+					default:
+						return `Unknown setting "${key}". Use /settings to list available settings.`;
+				}
 			},
 			getContext: () => {
 				return this.bridge.getContext();
@@ -527,41 +641,18 @@ export class LogicianTUI {
 		const slashCommands = createSlashCommands(this.bridge, localHandlers);
 		this.slashPopup.setCommands(slashCommands);
 
-		// Wire up choice popup submit: send the selected answer back to the bridge
-		this.choicePopup.setOnSubmit((selected) => {
-			const qid = this.choicePopup.getQuestionId();
-			if (qid && this.bridge.respondToQuestion(qid, selected.value)) {
-				this.transcript.addSystemMessage(
-					`Question answered: ${selected.label}`,
-				);
-			}
-			this.transcriptDisplay.setTurns(this.transcript.getTurns());
-			this.tui.requestRender();
-		});
-
-		// Wire up choice popup dismissal: let the bridge know the user skipped
-		this.choicePopup.setOnDismiss(() => {
-			const qid = this.choicePopup.getQuestionId();
-			if (qid) {
-				this.bridge.respondToQuestion(qid, "__dismissed__");
-				this.transcript.addSystemMessage("Question dismissed.");
-			}
-			this.transcriptDisplay.setTurns(this.transcript.getTurns());
-			this.tui.requestRender();
-		});
-
 		// Wire up slash popup submit to handle quit dispatch
 		this.slashPopup.setOnSubmit((result, dispatch, command) => {
 			if (dispatch === "quit") {
 				void this.stop().then(() => process.exit(0));
 				return;
 			}
-			if (result) {
-				this.transcript.addSystemMessage(String(result));
-			}
 			// Add slash command as user message to transcript
 			if (command?.trim()) {
 				this.transcript.addTurn(command.trim());
+				if (result) {
+					this.transcript.addSystemMessage(String(result));
+				}
 				const cmdName = command.trim().split(/\s+/)[0]?.toLowerCase() || "";
 				const args = command.trim().split(/\s+/).slice(1).join(" ");
 				const allCmds = this.slashPopup.getCommands() as SlashCommandDef[];
@@ -816,10 +907,11 @@ export class LogicianTUI {
 				this.choicePopup.setQuestion(event.question);
 				this.choicePopup.setChoices(event.choices);
 				this.choicePopup.show();
-				this.transcript.addSystemMessage(
-					`Question: ${event.question}\nSelect an option below.`,
-				);
-				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				const overlay = this.tui.showOverlay(this.choicePopup, {
+					anchor: "center",
+					maxHeight: 18,
+				});
+				overlay.focus();
 				this.tui.requestRender();
 				break;
 			}
@@ -892,6 +984,28 @@ export class LogicianTUI {
 				);
 				this.transcriptDisplay.setTurns(this.transcript.getTurns());
 				break;
+			case "memory_update": {
+				if (event.kind === "observations_added") {
+					const previews = (event.items ?? [])
+						.slice(0, 3)
+						.map((item) => `[${item.id}] ${item.content.slice(0, 120)}`)
+						.join("\n");
+					this.transcript.addSystemMessage(
+						`Memory added: ${event.count} observation${event.count === 1 ? "" : "s"}` +
+							(previews ? `\n${previews}` : ""),
+					);
+				} else if (event.kind === "reflections_added") {
+					this.transcript.addSystemMessage(
+						`Memory synthesized: ${event.count} reflection${event.count === 1 ? "" : "s"}`,
+					);
+				} else if (event.kind === "observations_dropped") {
+					this.transcript.addSystemMessage(
+						`Memory compacted: ${event.count} observation${event.count === 1 ? "" : "s"} archived.`,
+					);
+				}
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				break;
+			}
 			case "steered":
 				// No inline confirmation — the SteerQueue widget already reflects
 				// pending messages, and the injected content shows up in the turn.
@@ -1024,6 +1138,33 @@ export class LogicianTUI {
 		handleReasoner: (args: string) => Promise<void>,
 		handleTheme: (args: string) => Promise<void>,
 	): void {
+		// ── Choice popup handlers ──────────────────────────────────────
+		const handleChoicePopupSubmit = (): void => {
+			const qid = this.choicePopup.getQuestionId();
+			const selected = this.choicePopup.getSelected();
+			if (
+				qid &&
+				selected &&
+				this.bridge.respondToQuestion(qid, selected.value)
+			) {
+				this.transcript.addSystemMessage(
+					`Question answered: ${selected.label}`,
+				);
+			}
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
+		};
+
+		const handleChoicePopupDismiss = (): void => {
+			const qid = this.choicePopup.getQuestionId();
+			if (qid) {
+				this.bridge.respondToQuestion(qid, "__dismissed__");
+				this.transcript.addSystemMessage("Question dismissed.");
+			}
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
+		};
+
 		// Global input listener
 		this.tui.addInputListener((data: string) => {
 			if (this.pluginManager.isVisibleOverlay()) {
@@ -1066,10 +1207,26 @@ export class LogicianTUI {
 				this.tui.requestRender();
 				return { consume: true };
 			}
+			if (this.settingsSelector.isVisibleOverlay()) {
+				const action = this.settingsSelector.handleInput(data);
+				if (action) {
+					this.handleSettingsSelectorAction(action);
+				}
+				this.tui.requestRender();
+				return { consume: true };
+			}
 
-			// ChoicePopup — agent Q&A dropdown
+			// ChoicePopup — agent Q&A popup
 			if (this.choicePopup.isVisibleOverlay()) {
-				this.choicePopup.handleInput(data);
+				const action = this.choicePopup.handleInput(data);
+				if (action) {
+					if (action.type === "select") {
+						handleChoicePopupSubmit();
+					} else {
+						handleChoicePopupDismiss();
+					}
+					this.tui.removeOverlay(this.choicePopup);
+				}
 				this.tui.requestRender();
 				return { consume: true };
 			}
@@ -1224,68 +1381,7 @@ export class LogicianTUI {
 				);
 
 				if (match) {
-					// Add the slash command as a user message to transcript
-					this.transcript.addTurn(text.trim());
-
-					if (match.dispatch === "quit") {
-						this.transcriptDisplay.setTurns(this.transcript.getTurns());
-						this.tui.requestRender();
-						void this.stop().then(() => process.exit(0));
-						return;
-					}
-
-					if (match.handler) {
-						const result = match.handler(args);
-						if (result) {
-							this.transcript.addSystemMessage(String(result));
-						}
-					}
-					if (match.bridgeHandler) {
-						match.bridgeHandler(args);
-					}
-					if (match.command === "/plugins") {
-						void handlePlugins(args);
-						this.transcriptDisplay.setTurns(this.transcript.getTurns());
-						this.tui.requestRender();
-						return;
-					}
-					if (match.command === "/mcp") {
-						void handleMcp(args);
-						this.transcriptDisplay.setTurns(this.transcript.getTurns());
-						this.tui.requestRender();
-						return;
-					}
-					if (match.command === "/reasoner") {
-						void handleReasoner(args);
-						this.transcriptDisplay.setTurns(this.transcript.getTurns());
-						this.tui.requestRender();
-						return;
-					}
-					if (match.command === "/theme") {
-						void handleTheme(args);
-						this.transcriptDisplay.setTurns(this.transcript.getTurns());
-						this.tui.requestRender();
-						return;
-					}
-					if (match.dispatch === "bridge") {
-						void this.bridge.sendSlash(text.trim());
-					}
-					if (match.dispatch === "state") {
-						void handleStatus();
-					}
-					if (
-						match.dispatch === "local" &&
-						!match.handler &&
-						!match.bridgeHandler &&
-						match.command !== "/plugins" &&
-						match.command !== "/reasoner" &&
-						match.command !== "/theme"
-					) {
-						// Local command without handler — just show result
-						this.transcript.addSystemMessage(`[${match.command}] executed`);
-					}
-					this.transcriptDisplay.setTurns(this.transcript.getTurns());
-					this.tui.requestRender();
+					this.slashPopup.submitRaw(text.trim());
 					return;
 				}
 
@@ -1299,9 +1395,18 @@ export class LogicianTUI {
 					return;
 				}
 
-				// Unknown command — send to bridge as slash
+				// Unknown command — do not silently turn a typo into an agent prompt.
 				this.transcript.addTurn(text.trim());
-				this.bridge.sendSlash(text.trim());
+				const suggestions = filterSlashCommands(allCmds, cmdName, 3).map(
+					(command) => command.command,
+				);
+				this.transcript.addSystemMessage(
+					`Unknown command: ${cmdName}.` +
+						(suggestions.length > 0
+							? ` Did you mean ${suggestions.join(", ")}?`
+							: "") +
+						" Use /help to list available commands.",
+				);
 				this.transcriptDisplay.setTurns(this.transcript.getTurns());
 				this.tui.requestRender();
 				return;
@@ -1313,12 +1418,16 @@ export class LogicianTUI {
 			if (this.bridge.isActive()) {
 				this.bridge
 					.sendMessage(text)
-					.catch((err) => this.bridge.onError?.(err));
+					.catch((err) => this.bridge.reportError(err));
 				return;
 			}
 
 			this.transcript.addTurn(text);
-			this.bridge.sendMessage(text).catch((err) => this.bridge.onError?.(err));
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
+			this.bridge
+				.sendMessage(text)
+				.catch((err) => this.bridge.reportError(err));
 			this.statusPanel.update({ phase: "streaming" });
 			this.statusPanel.startAnimation();
 		};
@@ -1464,7 +1573,6 @@ export class LogicianTUI {
 		const pinnedContainer = new Container();
 		pinnedContainer.addChild(this.todoBar);
 		pinnedContainer.addChild(this.steerQueue);
-		pinnedContainer.addChild(this.choicePopup);
 		this.tui.setFixedAboveInputComponent(pinnedContainer);
 
 		// Slash popup as overlay anchored to the bottom of the transcript area, so
@@ -1484,6 +1592,10 @@ export class LogicianTUI {
 			maxHeight: 18,
 		});
 		this.tui.showOverlay(this.sessionManager, {
+			anchor: "center",
+			maxHeight: 18,
+		});
+		this.tui.showOverlay(this.settingsSelector, {
 			anchor: "center",
 			maxHeight: 18,
 		});
@@ -1641,7 +1753,7 @@ export class LogicianTUI {
 
 	private async openReasonerSelector(): Promise<void> {
 		this.statusPanel.update({ phase: "reasoner" });
-		const currentId = this.bridge.getReasonerStatus();
+		const currentId = "none";
 		const reasoners: ReasonerInfo[] = getReasonerIds().map((id) => {
 			const meta = getReasonerMeta(id) as ReasonerMeta;
 			return {
@@ -1673,7 +1785,7 @@ export class LogicianTUI {
 		const reasoner = action.reasoner;
 		this.reasonerSelector.setMessage(`Setting: ${reasoner.name}...`);
 		this.tui.requestRender();
-		this.bridge.setReasonerId(reasoner.id);
+		// reasoner removed;
 		this.tui.removeOverlay(this.reasonerSelector);
 		this.statusPanel.update({ phase: "ready" });
 		this.transcript.addSystemMessage(`Reasoning mode: ${reasoner.name}`);
@@ -1778,6 +1890,196 @@ export class LogicianTUI {
 		setTheme(name);
 		saveConfigField("theme", name);
 		return true;
+	}
+
+	private async openSettingsSelector(): Promise<void> {
+		try {
+			const data = this.bridge.getSettingsData();
+			const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+			const permissionModes = ["acceptAll", "acceptEdits", "ask", "plan"];
+			const settings: SettingDef[] = [
+				{
+					name: "Model",
+					currentValue: data.model,
+					description: "LLM model to use",
+					options: [{ label: data.model, value: data.model, current: true }],
+				},
+				{
+					name: "Temperature",
+					currentValue: String(data.temperature),
+					description: "Sampling temperature (0–2)",
+					options: [0.0, 0.3, 0.5, 0.7, 1.0].map((v) => ({
+						label: String(v),
+						value: String(v),
+						current: Math.abs(data.temperature - v) < 0.001,
+					})),
+				},
+				{
+					name: "Max tokens",
+					currentValue: String(data.maxTokens),
+					description: "Maximum response tokens",
+					options: [1024, 2048, 4096, 8192, 16384].map((v) => ({
+						label: String(v),
+						value: String(v),
+						current: data.maxTokens === v,
+					})),
+				},
+				{
+					name: "Max iterations",
+					currentValue: String(data.maxIterations),
+					description: "Maximum tool-use iterations per turn",
+					options: [10, 20, 30, 50, 100].map((v) => ({
+						label: String(v),
+						value: String(v),
+						current: data.maxIterations === v,
+					})),
+				},
+				{
+					name: "Thinking level",
+					currentValue: data.thinkingLevel,
+					description: "Depth of reasoning before responding",
+					options: thinkingLevels.map((v) => ({
+						label: v.charAt(0).toUpperCase() + v.slice(1),
+						value: v,
+						current: data.thinkingLevel === v,
+					})),
+				},
+				{
+					name: "Permission mode",
+					currentValue: data.permissionMode,
+					description: "How the agent handles tool permissions",
+					options: permissionModes.map((v) => ({
+						label: v,
+						value: v,
+						current: data.permissionMode === v,
+					})),
+				},
+				{
+					name: "Loop detection",
+					currentValue: data.loopDetectionEnabled ? "on" : "off",
+					description: "Detect and break infinite agent loops",
+					options: [
+						{ label: "on", value: "true", current: data.loopDetectionEnabled, toggleOn: true },
+						{ label: "off", value: "false", current: !data.loopDetectionEnabled, toggleOn: false },
+					],
+				},
+				{
+					name: "Guards",
+					currentValue: data.guardsEnabled ? "on" : "off",
+					description: "Safety guards against harmful tool use",
+					options: [
+						{ label: "on", value: "true", current: data.guardsEnabled, toggleOn: true },
+						{ label: "off", value: "false", current: !data.guardsEnabled, toggleOn: false },
+					],
+				},
+				{
+					name: "Compaction",
+					currentValue: data.proactiveCompactionEnabled ? "on" : "off",
+					description: "Auto-compact context to save tokens",
+					options: [
+						{ label: "on", value: "true", current: data.proactiveCompactionEnabled, toggleOn: true },
+						{ label: "off", value: "false", current: !data.proactiveCompactionEnabled, toggleOn: false },
+					],
+				},
+			];
+			this.settingsSelector.setSettings(settings);
+			this.settingsSelector.setMessage("Enter selects a setting · Enter in detail applies");
+			this.settingsSelector.show();
+			const overlay = this.tui.showOverlay(this.settingsSelector, {
+				anchor: "center",
+				maxHeight: 18,
+			});
+			overlay.focus();
+		} catch (e: unknown) {
+			this.transcript.addSystemMessage(
+				`Settings error: ${e instanceof Error ? e.message : String(e)}`,
+			);
+		}
+	}
+
+	private handleSettingsSelectorAction(action: SettingsSelectorAction): void {
+		if (action.type === "close") {
+			this.tui.removeOverlay(this.settingsSelector);
+			this.statusPanel.update({ phase: "ready" });
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
+			return;
+		}
+		// action.type === "change"
+		const { settingName, value } = action;
+		this.settingsSelector.setMessage(`Applying ${settingName}...`);
+		this.tui.requestRender();
+
+		// Apply the setting via the bridge
+		switch (settingName.toLowerCase()) {
+			case "model":
+				this.bridge.setModel(value);
+				this.transcript.addSystemMessage(`Model: ${value}`);
+				break;
+			case "temperature": {
+				const num = Number(value);
+				if (Number.isFinite(num) && num >= 0 && num <= 2) {
+					this.bridge.setTemperature(num);
+					this.transcript.addSystemMessage(`Temperature: ${num}`);
+				} else {
+					this.transcript.addSystemMessage("Temperature must be between 0 and 2.");
+				}
+				break;
+			}
+			case "max tokens": {
+				const num = Number.parseInt(value, 10);
+				if (Number.isFinite(num) && num >= 1) {
+					this.bridge.setMaxTokens(num);
+					this.transcript.addSystemMessage(`Max tokens: ${num}`);
+				} else {
+					this.transcript.addSystemMessage("Max tokens must be a positive integer.");
+				}
+				break;
+			}
+			case "max iterations": {
+				const num = Number.parseInt(value, 10);
+				if (Number.isFinite(num) && num >= 1) {
+					this.bridge.setMaxIterations(num);
+					this.transcript.addSystemMessage(`Max iterations: ${num}`);
+				} else {
+					this.transcript.addSystemMessage("Max iterations must be a positive integer.");
+				}
+				break;
+			}
+			case "thinking level":
+				this.bridge.setThinkingLevel(value);
+				this.transcript.addSystemMessage(`Thinking level: ${value}`);
+				break;
+			case "permission mode":
+				this.bridge.setPermissionMode(value as "acceptAll" | "acceptEdits" | "ask" | "plan");
+				this.transcript.addSystemMessage(`Permission mode: ${value}`);
+				break;
+			case "loop detection": {
+				const on = value === "true";
+				this.bridge.setRuntimeToggle("loopDetectionEnabled", on);
+				this.transcript.addSystemMessage(`Loop detection: ${on ? "on" : "off"}`);
+				break;
+			}
+			case "guards": {
+				const on = value === "true";
+				this.bridge.setRuntimeToggle("guardsEnabled", on);
+				this.transcript.addSystemMessage(`Guards: ${on ? "on" : "off"}`);
+				break;
+			}
+			case "compaction": {
+				const on = value === "true";
+				this.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
+				this.transcript.addSystemMessage(`Compaction: ${on ? "on" : "off"}`);
+				break;
+			}
+			default:
+				this.transcript.addSystemMessage(`Unknown setting: ${settingName}`);
+		}
+
+		this.tui.removeOverlay(this.settingsSelector);
+		this.statusPanel.update({ phase: "ready" });
+		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.tui.requestRender();
 	}
 
 	private getGitBranch(): string {

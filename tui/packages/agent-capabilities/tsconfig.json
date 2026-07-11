@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"outDir": "dist",
+		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"declaration": true,
+		"sourceMap": true,
+		"resolveJsonModule": true,
+		"forceConsistentCasingInFileNames": true,
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"types": ["node"]
+	},
+	"include": ["src/**/*", "../agent-core/src/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

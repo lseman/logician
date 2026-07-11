@@ -50,16 +50,27 @@ import {
 } from "./skills.ts";
 import {
 	type AgentDefinition,
-	createSpawnAgentTool,
 	loadAgentDefinitions,
-} from "./subagents/subagent.ts";
+} from "@logician/agent-capabilities/subagents/subagent.ts";
+import {
+	getBuiltInSubagentTools,
+	type SubagentToolDeps,
+} from "@logician/agent-capabilities/tools";
+import type { ParallelSpawnOptions } from "@logician/agent-capabilities/subagents/parallel-subagent.ts";
 import { buildDefaultSystemPrompt } from "./system-prompt.ts";
 import { createReadSkillTool } from "./tools/read-skill.ts";
 import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
-import { onTodosChanged } from "@logician/agent-core/tools/todos/todo.ts";
+import { onTodosChanged } from "@logician/agent-core/core/todo-state.ts";
+import { ExtensionEventBus } from "@logician/agent-core/hooks/extension-event-bus.ts";
 import { findLogicianConfig } from "./config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
-import { get_reasoner, getReasonerMeta } from "./reasoners/registry.ts";
+import {
+	createMemorySystem,
+	type MemoryStore,
+	createRecallTool,
+	RECALL_TOOL_NAME,
+	hashId,
+} from "@logician/observational-memory";
 
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
@@ -170,6 +181,21 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				level: event.success ? "success" : "warn",
 				label: `Retry ${event.attempt}`,
 				text: event.success ? "succeeded" : "failed",
+			};
+		case "run_outcome":
+			if (event.status === "completed" && event.source === "heuristic") {
+				return null;
+			}
+			return {
+				type: "notice",
+				level:
+					event.status === "completed"
+						? "success"
+						: event.status === "failed"
+							? "error"
+							: "warn",
+				label: `Run ${event.status.replace("_", " ")}`,
+				text: event.summary || `Run ended with status: ${event.status}`,
 			};
 		case "model_select":
 			return {
@@ -413,6 +439,8 @@ export class AgentCoreBridge {
 	private callbacks: EventCallback[] = [];
 	private errorCb: ErrorCallback | null = null;
 	private running = false;
+	private sendTail: Promise<void> = Promise.resolve();
+	private pendingAutoContinue = false;
 	private cwd: string;
 	private defaultTools: Tool[];
 	private mcpManager = new McpManager();
@@ -435,6 +463,7 @@ export class AgentCoreBridge {
 	private configPath: string | null;
 	private mcpEager: boolean;
 	private agentDefs: AgentDefinition[] = [];
+	private parallelSpawnOptions: ParallelSpawnOptions = {};
 	private loadedSkills: Skill[] = [];
 	private permissionManager: PermissionManager;
 	// Pending interactive permission requests, keyed by tool_call_id; resolved
@@ -450,6 +479,10 @@ export class AgentCoreBridge {
 		string,
 		{ allow: (answer: string) => void; deny: () => void }
 	>();
+
+	// ── Observational memory (V3) ───────────────────────────────────────
+	private memoryStore: MemoryStore | null = null;
+	private memoryEventBus = new ExtensionEventBus({ defaultTimeoutMs: 30_000 });
 
 	constructor(
 		opts: AgentBridgeOptions = {
@@ -569,6 +602,19 @@ export class AgentCoreBridge {
 		this.errorCb = callback;
 	}
 
+	/** Surface an asynchronous caller-side failure through the normal UI path. */
+	reportError(error: unknown): void {
+		const normalized =
+			error instanceof Error ? error : new Error(String(error));
+		this.emit({
+			type: "notice",
+			level: "error",
+			label: "Error",
+			text: normalized.message,
+		});
+		this.errorCb?.(normalized);
+	}
+
 	private emit(event: ParsedBridgeEvent): void {
 		for (const cb of this.callbacks) {
 			try {
@@ -590,20 +636,27 @@ export class AgentCoreBridge {
 			this.emit({ type: "steered", message });
 			return;
 		}
+		const run = this.sendTail.then(() => this.runMessage(message));
+		// Keep the queue usable after a failed startup/provider boundary while
+		// returning the original rejection to this caller.
+		this.sendTail = run.catch(() => {});
+		return run;
+	}
 
-		await this.runStartupHooksOnce();
-		await this.loadMcpToolsOnce();
+	private async runMessage(message: string): Promise<void> {
 		this.running = true;
-		// Reuse one harness across messages so conversation history (and thus
-		// "continue" / "go on" follow-ups) persists. Created lazily once.
-		const harness = this.ensureHarness();
-
-		// Emit turn start
-		const turnId = `turn_${Date.now()}`;
-		// turnId tracked via turn lifecycle, no separate field needed
-		this.emit({ type: "turn_start", turn_id: turnId });
-
 		try {
+			await this.runStartupHooksOnce();
+			await this.loadMcpToolsOnce();
+			// Reuse one harness across messages so conversation history (and thus
+			// "continue" / "go on" follow-ups) persists. Created lazily once.
+			const harness = this.ensureHarness();
+
+			// Emit turn start
+			const turnId = `turn_${Date.now()}`;
+			// turnId tracked via turn lifecycle, no separate field needed
+			this.emit({ type: "turn_start", turn_id: turnId });
+
 			await harness.prompt(message);
 		} catch (e: unknown) {
 			const error = e as Error;
@@ -618,9 +671,14 @@ export class AgentCoreBridge {
 			this.errorCb?.(error);
 		} finally {
 			this.running = false;
+			this.publishContextUsage();
 			// Keep the harness alive to retain history across turns.
 			// turn lifecycle ended
 			this.emit({ type: "phase", state: "ready" });
+			if (this.pendingAutoContinue) {
+				this.pendingAutoContinue = false;
+				void this.sendMessage("continue");
+			}
 		}
 	}
 
@@ -632,20 +690,10 @@ export class AgentCoreBridge {
 				backend: this.backend,
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
-				preReasoner: async (reasonerId, promptText, backend) => {
-					const meta = getReasonerMeta(reasonerId);
-					if (!meta) return undefined;
-					const reasoner = get_reasoner(
-						reasonerId,
-						backend,
-						meta.defaultConfig,
-					);
-					const trace = await reasoner.solve(promptText);
-					return trace.reasoning || undefined;
-				},
 			});
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
+			this.harness.setExtensionBus(this.memoryEventBus);
 			// Surface harness phase transitions the loop can't see — compaction
 			// and branch_summary. turn/idle are already covered by the
 			// streaming/ready phase emits around prompt().
@@ -655,9 +703,7 @@ export class AgentCoreBridge {
 			// continues without requiring user input. The nextTurn items are
 			// injected before the trigger message by the transformContext hook.
 			this.harness.setOnSettled((nextTurnCount) => {
-				if (nextTurnCount > 0 && !this.running) {
-					void this.sendMessage("continue");
-				}
+				if (nextTurnCount > 0) this.pendingAutoContinue = true;
 			});
 			// Emit a save_point event after every completed turn so the UI can
 			// show autosave status and know a rewind point exists.
@@ -667,8 +713,111 @@ export class AgentCoreBridge {
 			// Apply compaction settings from user settings (~/.logician/settings.json).
 			const userSettings = loadUserSettings();
 			applyCompactionSettings(this.harness, userSettings);
+
+			// ── Observational memory (V3) ────────────────────────────────
+			this.initObservationalMemory();
 		}
 		return this.harness;
+	}
+
+	/** Initialize the V3 observational memory system. */
+	private initObservationalMemory(): void {
+		try {
+			const model = this.config.model || "gpt-4o";
+			const apiKey = process.env.OPENAI_API_KEY || "";
+
+			const memorySystem = createMemorySystem({
+				model,
+				apiKey,
+				baseUrl: this.config.baseUrl,
+				persistencePath: path.join(
+					this.cwd,
+					".logician/observational-memory",
+					"memory.json",
+				),
+			});
+
+			this.memoryStore = memorySystem.store;
+
+			// Load persisted memory
+			this.memoryStore.load();
+			const unsubscribeStore = this.memoryStore.subscribe((event) => {
+				if (event.type === "observations_added") {
+					this.emit({
+						type: "memory_update",
+						kind: event.type,
+						count: event.observations.length,
+						items: event.observations.map((observation) => ({
+							id: observation.id,
+							content: observation.content,
+							relevance: observation.relevance,
+						})),
+					});
+				} else if (event.type === "reflections_added") {
+					this.emit({
+						type: "memory_update",
+						kind: event.type,
+						count: event.reflections.length,
+					});
+				} else if (event.type === "observations_dropped") {
+					this.emit({
+						type: "memory_update",
+						kind: event.type,
+						count: event.observationIds.length,
+					});
+				} else {
+					this.emit({ type: "memory_update", kind: "cleared", count: 0 });
+				}
+			});
+
+			// Wire up the consolidation pipeline
+			const unsubHooks = memorySystem.registerHooks(this.memoryEventBus, {
+				currentTokens: () => this.contextTokens,
+				getSourceEntries: () =>
+					(this.harness?.messages ?? [])
+						.filter(
+							(message) =>
+								typeof message.content === "string" && message.content.trim(),
+						)
+						.map((message, index) => ({
+							id: hashId(`${index}:${message.role}:${message.content}`),
+							role: message.role,
+							content: String(message.content),
+						})),
+			});
+
+			// Add recall tool to agent's tool registry
+			const recallHandler = createRecallTool({
+				memoryStore: this.memoryStore,
+				sourceEntries: [],
+			});
+			const recallTool: Tool = {
+				name: RECALL_TOOL_NAME,
+				description: "Recover exact evidence for an observational memory ID",
+				parameters: {
+					type: "object",
+					properties: { id: { type: "string", pattern: "^[a-f0-9]{12}$" } },
+				},
+				execute: async (args: Record<string, unknown>) => {
+					const result = recallHandler(args.id as string);
+					return JSON.stringify(result);
+				},
+			};
+			if (!this.defaultTools.some((tool) => tool.name === RECALL_TOOL_NAME)) {
+				this.defaultTools = [...this.defaultTools, recallTool];
+				this.config.tools = this.defaultTools;
+				this.harness?.setTools(this.defaultTools);
+			}
+
+			// Cleanup on harness destroy
+			this.harness!.setOnShutdown(() => {
+				this.memoryStore?.save();
+				unsubHooks();
+				unsubscribeStore();
+			});
+		} catch (error) {
+			console.error("[observational-memory] init failed:", error);
+		}
 	}
 
 	/**
@@ -680,7 +829,7 @@ export class AgentCoreBridge {
 	restoreHistory(messages: Message[]): boolean {
 		try {
 			this.ensureHarness().setHistory(messages);
-			this.contextTokens = estimateChatPayloadTokens(messages);
+			this.publishContextUsage();
 			return true;
 		} catch {
 			return false;
@@ -798,8 +947,19 @@ export class AgentCoreBridge {
 
 	/** Execute a slash command (sends as chat message to the agent). */
 	sendSlash(raw: string): void {
-		// /jb — inject jb.md content as user prompt
 		const trimmed = raw.trim();
+		// /om:status — show observational memory status
+		if (trimmed === "/om:status") {
+			const status =
+				this.getMemoryStatus() || "Observational memory not available.";
+			this.emit({
+				type: "turn_end",
+				turn_id: "om:status",
+				message: status,
+			} as ParsedBridgeEvent);
+			return;
+		}
+		// /jb — inject jb.md content as user prompt
 		if (trimmed === "/jb" || trimmed.startsWith("/jb ")) {
 			const jbPath = path.join(this.cwd, "tui", "jb.md");
 			try {
@@ -992,7 +1152,8 @@ export class AgentCoreBridge {
 	getModels(): string[] {
 		return (
 			this.harness?.getModels() ??
-			(this.config.model ? [this.config.model] : [])
+			(this.config.models?.map((m) => m.name) ??
+				(this.config.model ? [this.config.model] : []))
 		);
 	}
 
@@ -1020,6 +1181,7 @@ export class AgentCoreBridge {
 
 	async getState(): Promise<Record<string, unknown>> {
 		await this.loadMcpToolsOnce();
+		this.contextTokens = this.measureContextTokens();
 		const state = {
 			agent_name: "logician",
 			model: this.config.model,
@@ -1034,6 +1196,12 @@ export class AgentCoreBridge {
 			mcp_errors: this.mcpErrors,
 			context_tokens: this.contextTokens,
 			context_max_tokens: this.contextMaxTokens,
+			runtime_state: this.harness?.runtimeState ?? {
+				phase: "idle",
+				isStreaming: false,
+				pendingToolCalls: [],
+				abortRequested: false,
+			},
 			config_path: this.configPath || "",
 			connected: true,
 		};
@@ -1123,12 +1291,73 @@ export class AgentCoreBridge {
 		);
 	}
 
-	setReasonerId(reasonerId: string): void {
-		this.config.reasonerId = reasonerId;
+	setTemperature(temperature: number): void {
+		this.config.temperature = temperature;
+		this.harness?.setTemperature(temperature);
 	}
 
-	getReasonerStatus(): string {
-		return this.config.reasonerId || "none";
+	setMaxTokens(maxTokens: number): void {
+		this.config.maxTokens = maxTokens;
+		this.harness?.setMaxTokens(maxTokens);
+	}
+
+	setMaxIterations(maxIterations: number): void {
+		this.config.maxIterations = maxIterations;
+		this.harness?.setMaxIterations(maxIterations);
+	}
+
+	setRuntimeToggle(
+		key:
+			| "loopDetectionEnabled"
+			| "guardsEnabled"
+			| "proactiveCompactionEnabled",
+		enabled: boolean,
+	): void {
+		this.config[key] = enabled;
+		if (key === "proactiveCompactionEnabled") {
+			this.harness?.enableAutoCompaction(enabled);
+		}
+	}
+
+	getSettingsText(): string {
+		return [
+			"Runtime settings",
+			`  Model: ${this.config.model}`,
+			`  Temperature: ${this.config.temperature ?? 0.5}`,
+			`  Max tokens: ${this.config.maxTokens ?? 4096}`,
+			`  Max iterations: ${this.config.maxIterations ?? 30}`,
+			`  Context window: ${this.config.contextWindowTokens ?? "unset"}`,
+			`  Thinking: ${this.config.thinkingLevel ?? "off"}`,
+			`  Permission mode: ${this.getPermissionMode()}`,
+			`  Loop detection: ${this.config.loopDetectionEnabled ? "on" : "off"}`,
+			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
+			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
+		].join("\n");
+	}
+
+	/** Return structured settings data for the overlay UI. */
+	getSettingsData(): {
+		model: string;
+		temperature: number;
+		maxTokens: number;
+		maxIterations: number;
+		thinkingLevel: string;
+		permissionMode: string;
+		loopDetectionEnabled: boolean;
+		guardsEnabled: boolean;
+		proactiveCompactionEnabled: boolean;
+	} {
+		return {
+			model: this.config.model,
+			temperature: this.config.temperature ?? 0.5,
+			maxTokens: this.config.maxTokens ?? 4096,
+			maxIterations: this.config.maxIterations ?? 30,
+			thinkingLevel: this.config.thinkingLevel ?? "off",
+			permissionMode: this.getPermissionMode(),
+			loopDetectionEnabled: this.config.loopDetectionEnabled ?? false,
+			guardsEnabled: this.config.guardsEnabled ?? false,
+			proactiveCompactionEnabled: this.config.proactiveCompactionEnabled ?? false,
+		};
 	}
 
 	reset(): void {
@@ -1148,6 +1377,8 @@ export class AgentCoreBridge {
 		this.startupHooksRan = false;
 		this.pluginSystemContext = "";
 		this.rebuildBaseSystemPrompt();
+		this.contextTokens = 0;
+		this.publishContextUsage();
 		this.emit({
 			type: "turn_end",
 			turn_id: "reset",
@@ -1184,6 +1415,109 @@ export class AgentCoreBridge {
 		return { tokensSaved: saved, tokensBefore: before, tokensAfter: after };
 	}
 
+	// ── Observational memory ─────────────────────────────────────────────
+
+	/** Get the current memory status (for /om:status). */
+	getMemoryStatus(): string | null {
+		if (!this.memoryStore) return "Observational memory is not initialized.";
+		const status = this.memoryStore.getStatus();
+		return [
+			`Observational Memory`,
+			`  Observations: ${status.observationCount} (${status.droppedCount} dropped)`,
+			`  Reflections: ${status.reflectionCount}`,
+			`  Active tokens: ${status.activeObservationTokens.toLocaleString()} / ${status.observationPoolTargetTokens.toLocaleString()} target`,
+		].join("\n");
+	}
+
+	/** Execute the local `/memory` command family. */
+	memoryCommand(raw = ""): string {
+		if (!this.memoryStore) return "Observational memory is not initialized.";
+		const [action = "status", ...rest] = raw
+			.trim()
+			.split(/\s+/)
+			.filter(Boolean);
+		const query = rest.join(" ").toLowerCase();
+		if (action === "status")
+			return this.getMemoryStatus() ?? "Memory unavailable.";
+		if (action === "clear") {
+			this.memoryStore.clear();
+			return "Observational memory cleared.";
+		}
+		if (action === "add") {
+			const content = rest.join(" ").trim();
+			if (!content) return "Usage: /memory add <text>";
+			const id = hashId(content.trim().replace(/\s+/g, " ").toLowerCase());
+			this.memoryStore.recordObservations(
+				[
+					{
+						id,
+						content,
+						timestamp: new Date().toISOString(),
+						relevance: "high",
+						sourceEntryIds: ["manual"],
+						tokenCount: Math.ceil(content.length / 4),
+					},
+				],
+				"manual",
+			);
+			return `Memory pinned: [${id}] ${content}`;
+		}
+		if (action === "drop") {
+			const id = rest[0];
+			if (!id) return "Usage: /memory drop <id>";
+			this.memoryStore.recordDrops([id], "manual");
+			return this.memoryStore.isDropped(id)
+				? `Memory archived: ${id}`
+				: `Active memory not found: ${id}`;
+		}
+		const observations = this.memoryStore.getActiveObservations();
+		const reflections = this.memoryStore.getReflections();
+		if (action === "list" || action === "search") {
+			const filtered = query
+				? observations.filter((item) =>
+						item.content.toLowerCase().includes(query),
+					)
+				: observations;
+			if (!filtered.length)
+				return query
+					? `No memories match "${query}".`
+					: "No active observations.";
+			return filtered
+				.slice(-20)
+				.map((item) => `[${item.id}] ${item.relevance}: ${item.content}`)
+				.join("\n");
+		}
+		if (action === "reflections") {
+			return reflections.length
+				? reflections
+						.slice(-20)
+						.map((item) => `[${item.id}] ${item.content}`)
+						.join("\n")
+				: "No reflections.";
+		}
+		if (action === "show") {
+			const id = rest[0];
+			const observation = this.memoryStore
+				.getAllObservations()
+				.find((item) => item.id === id);
+			const reflection = reflections.find((item) => item.id === id);
+			if (observation)
+				return `[${observation.id}] ${observation.relevance}\n${observation.content}\nSources: ${observation.sourceEntryIds.join(", ")}`;
+			if (reflection)
+				return `[${reflection.id}] reflection\n${reflection.content}\nSupports: ${reflection.supportingObservationIds.join(", ")}`;
+			return `Memory not found: ${id ?? "missing id"}`;
+		}
+		return "Usage: /memory [status|list|search <text>|show <id>|add <text>|drop <id>|reflections|clear]";
+	}
+
+	/** Recall a memory item by ID (for the `recall` tool). */
+	recall(_memoryId: string): { content: string; status: string } | null {
+		if (!this.memoryStore) return null;
+		// This is handled by the agent's tool system, not the bridge directly.
+		// The bridge just exposes the store to the tool.
+		return null;
+	}
+
 	// ── Conversation branching ─────────────────────────────────────────────
 
 	/** Fork the conversation; returns the new branch id, or null if no harness. */
@@ -1199,7 +1533,7 @@ export class AgentCoreBridge {
 		if (!this.harness) return null;
 		const summary = await this.harness.branchSummary();
 		// Token count changed (branch tail collapsed into one message).
-		this.contextTokens = estimateChatPayloadTokens(this.harness.messages);
+		this.publishContextUsage();
 		return summary;
 	}
 
@@ -1213,7 +1547,7 @@ export class AgentCoreBridge {
 		try {
 			const restored = this.harness?.rewind() ?? null;
 			if (restored !== null && this.harness) {
-				this.contextTokens = estimateChatPayloadTokens(this.harness.messages);
+				this.publishContextUsage();
 			}
 			return restored;
 		} catch {
@@ -1224,8 +1558,7 @@ export class AgentCoreBridge {
 	/** Discard the active branch without merging. Returns true if one was discarded. */
 	discardBranch(): boolean {
 		const discarded = this.harness?.discardBranch() ?? false;
-		if (discarded && this.harness)
-			this.contextTokens = estimateChatPayloadTokens(this.harness.messages);
+		if (discarded && this.harness) this.publishContextUsage();
 		return discarded;
 	}
 
@@ -1252,6 +1585,12 @@ export class AgentCoreBridge {
 			context_tokens: this.contextTokens,
 			context_max_tokens:
 				this.contextMaxTokens || this.config.contextWindowTokens,
+			runtime_state: this.harness?.runtimeState ?? {
+				phase: "idle",
+				isStreaming: false,
+				pendingToolCalls: [],
+				abortRequested: false,
+			},
 			config_path: this.configPath || "",
 			hooks_enabled: this.config.runtimeHooksEnabled !== false,
 			hook_transcript_path: this.config.hookTranscriptPath || "",
@@ -1313,6 +1652,8 @@ export class AgentCoreBridge {
 	getContext(): string {
 		const msgs = this.getMessages();
 		if (!msgs.length) return "No messages yet.";
+		const contextTokens = this.measureContextTokens();
+		this.contextTokens = contextTokens;
 
 		const lines: string[] = [];
 
@@ -1355,7 +1696,25 @@ export class AgentCoreBridge {
 			lines.push("");
 		}
 
-		return `## Context (${msgs.length} messages)\n\n${lines.join("\n")}`;
+		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;
+	}
+
+	/** Canonical size used by /context, /status, and the status bar. */
+	private measureContextTokens(): number {
+		const messages = this.getMessages();
+		return messages.length > 0 ? estimateChatPayloadTokens(messages) : 0;
+	}
+
+	private publishContextUsage(): void {
+		this.contextTokens = this.measureContextTokens();
+		this.contextMaxTokens =
+			this.contextMaxTokens || this.config.contextWindowTokens;
+		this.emit({
+			type: "context_update",
+			tokens: this.contextTokens,
+			max_tokens: this.contextMaxTokens,
+			compacted: false,
+		});
 	}
 
 	getTools(): ToolRegistry {
@@ -1500,25 +1859,32 @@ export class AgentCoreBridge {
 	}
 
 	/**
-	 * Register the spawn_agent tool bound to discovered agent definitions
-	 * (.logician/agents/*.md + built-ins). Subagent events are forwarded into
-	 * the normal event stream as subagent_* envelopes.
+	 * Register the spawn_agent and spawn_agent_parallel tools bound to discovered
+	 * agent definitions (.logician/agents/*.md + built-ins). Subagent events are
+	 * forwarded into the normal event stream as subagent_* envelopes.
 	 */
 	private async injectSubagents(): Promise<void> {
-		if (this.defaultTools.some((t) => t.name === "spawn_agent")) return;
 		const cwd = this.config.cwd || process.cwd();
 		this.agentDefs = await loadAgentDefinitions([
 			path.join(cwd, ".logician", "agents"),
 		]);
-		const spawn = createSpawnAgentTool({
+
+		// Inject subagent tools
+		const subagentDeps: SubagentToolDeps = {
 			config: () => this.config,
 			backend: this.backend,
 			cwd,
 			agents: () => this.agentDefs,
 			emit: (event) => this.config.onEvent?.(event),
-			defaultMaxIterations: this.config.maxIterations,
-		});
-		this.defaultTools = [...this.defaultTools, spawn];
+			parallelOptions: this.parallelSpawnOptions,
+		};
+		const subagentTools = getBuiltInSubagentTools(subagentDeps);
+		for (const tool of subagentTools) {
+			if (!this.defaultTools.some((t) => t.name === tool.name)) {
+				this.defaultTools = [...this.defaultTools, tool];
+			}
+		}
+
 		this.config.tools = this.defaultTools;
 		this.harness?.setTools(this.defaultTools);
 		this.rebuildBaseSystemPrompt();

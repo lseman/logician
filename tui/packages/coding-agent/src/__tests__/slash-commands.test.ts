@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+	createSlashCommands,
+	filterSlashCommands,
+	formatSlashHelp,
+} from "../slash-commands.ts";
+
+const bridge = { sendSlash: () => {}, cancel: () => {}, reset: () => {} };
+
+void test("bare slash returns the complete command catalog", () => {
+	const commands = createSlashCommands(bridge, {});
+	assert.ok(commands.length > 10);
+	assert.equal(filterSlashCommands(commands, "/").length, commands.length);
+});
+
+void test("memory command is discoverable with management actions", () => {
+	const commands = createSlashCommands(bridge, {});
+	const memory = commands.find((command) => command.command === "/memory");
+	assert.ok(memory);
+	assert.equal(memory.acceptsArgs, true);
+	assert.match(memory.argHint ?? "", /status.*list.*search.*show.*add.*drop.*clear/);
+});
+
+void test("help renders the live registry and supports topics", () => {
+	const commands = createSlashCommands(bridge, {});
+	const help = commands.find((command) => command.command === "/help");
+	const alias = commands.find((command) => command.command === "/?");
+	const full = help?.handler?.("") ?? "";
+	assert.match(full, new RegExp(`Available commands \\(${commands.length}\\)`));
+	assert.match(full, /\/context/);
+	assert.match(full, /\/settings/);
+	assert.match(alias?.handler?.("") ?? "", /Available commands/);
+
+	const sessionHelp = formatSlashHelp(commands, "session");
+	assert.match(sessionHelp, /SESSION/);
+	assert.match(sessionHelp, /\/sessions/);
+	assert.doesNotMatch(sessionHelp, /\/rag\s/);
+});

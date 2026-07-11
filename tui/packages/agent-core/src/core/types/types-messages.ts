@@ -41,6 +41,10 @@ export interface CompactionSummaryMessage {
 	summary: string;
 	tokensBefore: number;
 	timestamp: number;
+	/** Files read in the compacted history. */
+	readFiles?: string[];
+	/** Files modified in the compacted history. */
+	modifiedFiles?: string[];
 }
 
 /** Branch summary text — emitted after branch recovery. */

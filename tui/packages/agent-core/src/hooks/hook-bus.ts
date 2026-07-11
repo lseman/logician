@@ -24,6 +24,10 @@ import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
 	AgentHooks,
+	BeforeAgentStartContext,
+	BeforeAgentStartResult,
+	BeforeCompactContext,
+	BeforeCompactResult,
 	BeforeProviderPayloadContext,
 	BeforeProviderPayloadResult,
 	BeforeProviderRequestContext,
@@ -75,6 +79,8 @@ type AfterProviderHandler = NonNullable<AgentHooks["afterProviderResponse"]>;
 type StopHandler = NonNullable<AgentHooks["shouldStopAfterTurn"]>;
 type SteeringHandler = NonNullable<AgentHooks["getSteeringMessages"]>;
 type FollowUpHandler = NonNullable<AgentHooks["getFollowUpMessages"]>;
+type AgentStartHandler = NonNullable<AgentHooks["beforeAgentStart"]>;
+type CompactHandler = NonNullable<AgentHooks["beforeCompact"]>;
 
 // Read-only observer: sees every event with its name, return ignored.
 export type HookObserver = (
@@ -93,6 +99,8 @@ export class HookBus {
 	private stop: Entry<StopHandler>[] = [];
 	private steering: Entry<SteeringHandler>[] = [];
 	private followUp: Entry<FollowUpHandler>[] = [];
+	private agentStart: Entry<AgentStartHandler>[] = [];
+	private compact: Entry<CompactHandler>[] = [];
 	private observers: HookObserver[] = [];
 	private metrics = new HookMetricsCollector();
 
@@ -129,6 +137,8 @@ export class HookBus {
 	// Register a whole AgentHooks object at once (each present handler).
 	register(hooks: AgentHooks, reg: HookRegistration = {}): () => void {
 		const offs: Array<() => void> = [];
+		if (hooks.beforeAgentStart)
+			offs.push(this.on("beforeAgentStart", hooks.beforeAgentStart, reg));
 		if (hooks.beforeToolCall)
 			offs.push(this.on("beforeToolCall", hooks.beforeToolCall, reg));
 		if (hooks.afterToolCall)
@@ -155,6 +165,8 @@ export class HookBus {
 			offs.push(this.on("getSteeringMessages", hooks.getSteeringMessages, reg));
 		if (hooks.getFollowUpMessages)
 			offs.push(this.on("getFollowUpMessages", hooks.getFollowUpMessages, reg));
+		if (hooks.beforeCompact)
+			offs.push(this.on("beforeCompact", hooks.beforeCompact, reg));
 		return () =>
 			offs.forEach((off) => {
 				off();
@@ -180,6 +192,8 @@ export class HookBus {
 		this.stop = [];
 		this.steering = [];
 		this.followUp = [];
+		this.agentStart = [];
+		this.compact = [];
 		this.observers = [];
 	}
 
@@ -187,6 +201,7 @@ export class HookBus {
 	// reducer over all registered handlers.
 	toHooks(): AgentHooks {
 		return {
+			beforeAgentStart: (ctx) => this.runAgentStart(ctx),
 			beforeToolCall: (ctx) => this.runBefore(ctx),
 			afterToolCall: (ctx) => this.runAfter(ctx),
 			prepareNextTurn: (ctx) => this.runPrepare(ctx),
@@ -197,10 +212,36 @@ export class HookBus {
 			shouldStopAfterTurn: (ctx) => this.runStop(ctx),
 			getSteeringMessages: (ctx) => this.runSteering(ctx),
 			getFollowUpMessages: (ctx) => this.runFollowUp(ctx),
+			beforeCompact: (ctx) => this.runCompact(ctx),
 		};
 	}
 
 	// ── Reducers ───────────────────────────────────────────────────────────
+	private async runAgentStart(
+		ctx: BeforeAgentStartContext,
+	): Promise<BeforeAgentStartResult | undefined> {
+		await this.notify("beforeAgentStart", ctx);
+		let messages = ctx.messages;
+		let systemPrompt = ctx.systemPrompt;
+		let changed = false;
+		for (const { handler, source, timeoutMs } of this.agentStart) {
+			const result = await this.guard(
+				() => handler({ ...ctx, messages, systemPrompt }),
+				"beforeAgentStart",
+				source,
+				timeoutMs,
+			);
+			if (result?.messages) {
+				messages = result.messages;
+				changed = true;
+			}
+			if (result?.systemPrompt !== undefined) {
+				systemPrompt = result.systemPrompt;
+				changed = true;
+			}
+		}
+		return changed ? { messages, systemPrompt } : undefined;
+	}
 
 	private async runBefore(
 		ctx: BeforeToolCallContext,
@@ -301,8 +342,12 @@ export class HookBus {
 	): Promise<BeforeProviderRequestResult | undefined> {
 		await this.notify("beforeProviderRequest", ctx);
 		if (!this.providerRequest.length) return undefined;
-		const collectedHeaders: Record<string, string> = {};
+		const collectedHeaders: Record<string, string | undefined> = {};
 		let timeoutMs: number | undefined;
+		let maxRetries: number | undefined;
+		let cacheRetention: string | undefined;
+		let metadata: Record<string, unknown> | undefined;
+		let transport: string | undefined;
 		for (const { handler, source, timeoutMs: hookTimeoutMs } of this
 			.providerRequest) {
 			const r = await this.guard(
@@ -314,13 +359,30 @@ export class HookBus {
 			if (!r) continue;
 			if (r.headers) {
 				for (const [k, v] of Object.entries(r.headers)) {
-					if (v !== undefined) collectedHeaders[k] = v;
+					collectedHeaders[k] = v;
 				}
 			}
 			if (r.timeoutMs !== undefined) timeoutMs = r.timeoutMs;
+			if (r.maxRetries !== undefined) maxRetries = r.maxRetries;
+			if (r.cacheRetention !== undefined) cacheRetention = r.cacheRetention;
+			if (r.metadata !== undefined)
+				metadata = { ...(metadata ?? {}), ...r.metadata };
+			if (r.transport !== undefined) transport = r.transport;
 		}
-		return Object.keys(collectedHeaders).length || timeoutMs !== undefined
-			? { headers: collectedHeaders, timeoutMs }
+		return Object.keys(collectedHeaders).length ||
+			timeoutMs !== undefined ||
+			maxRetries !== undefined ||
+			cacheRetention !== undefined ||
+			metadata !== undefined ||
+			transport !== undefined
+			? {
+					headers: collectedHeaders,
+					timeoutMs,
+					maxRetries,
+					cacheRetention,
+					metadata,
+					transport,
+				}
 			: undefined;
 	}
 
@@ -403,10 +465,30 @@ export class HookBus {
 		return out.length ? out : undefined;
 	}
 
+	private async runCompact(
+		ctx: BeforeCompactContext,
+	): Promise<BeforeCompactResult | undefined> {
+		await this.notify("beforeCompact", ctx);
+		let summary: string | undefined;
+		for (const { handler, source, timeoutMs } of this.compact) {
+			const result = await this.guard(
+				() => handler(ctx),
+				"beforeCompact",
+				source,
+				timeoutMs,
+			);
+			if (result?.cancel) return { cancel: true };
+			if (result?.summary !== undefined) summary = result.summary;
+		}
+		return summary === undefined ? undefined : { summary };
+	}
+
 	// ── Internals ──────────────────────────────────────────────────────────
 
 	private listFor(event: HookEventName): Entry<unknown>[] {
 		switch (event) {
+			case "beforeAgentStart":
+				return this.agentStart as Entry<unknown>[];
 			case "beforeToolCall":
 				return this.before as Entry<unknown>[];
 			case "afterToolCall":
@@ -427,6 +509,8 @@ export class HookBus {
 				return this.steering as Entry<unknown>[];
 			case "getFollowUpMessages":
 				return this.followUp as Entry<unknown>[];
+			case "beforeCompact":
+				return this.compact as Entry<unknown>[];
 		}
 		return [];
 	}

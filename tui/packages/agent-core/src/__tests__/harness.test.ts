@@ -7,6 +7,7 @@ import { AgentHarness, HarnessBusyError } from "../core/harness.ts";
 import { Session } from "../core/session.ts";
 import type { AgentConfig } from "../core/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
+import { BackendError } from "../core/backend.ts";
 
 function makeHarness(backend: FakeBackend): AgentHarness {
 	const config: AgentConfig = {
@@ -45,6 +46,104 @@ void test("prompt persists history; setHistory replaces it and drops system mess
 		harness.messages.map((m) => m.role),
 		["user", "assistant"],
 	);
+});
+
+void test("context-full recovery compacts inside an active turn and persists it", async () => {
+	const backend = new FakeBackend([
+		() => {
+			throw new BackendError({ category: "context_full", message: "too long" });
+		},
+		() => textResponse("recovered"),
+	]);
+	const config: AgentConfig = {
+		baseUrl: "http://fake",
+		model: "fake",
+		systemPrompt: "test",
+		contextWindowTokens: 4096,
+		runtimeHooksEnabled: false,
+		proactiveCompactionEnabled: false,
+		continuationEnabled: false,
+		tools: [],
+	};
+	const harness = new AgentHarness({ config, backend, maxIterations: 1 });
+	harness.setHistory(
+		Array.from({ length: 12 }, (_, index) => ({
+			role: "user" as const,
+			content: `old ${index} ${"x".repeat(2000)}`,
+		})),
+	);
+	await harness.prompt("current prompt");
+	assert.equal(backend.calls, 2);
+	assert.ok(
+		harness.messages.some((message) =>
+			String(message.content).includes("context-compaction"),
+		),
+	);
+	assert.equal(harness.messages.at(-1)?.content, "recovered");
+});
+
+void test("runtimeState is canonical across streaming, tools, and settlement", async () => {
+	let harness!: AgentHarness;
+	const phases: Array<[string, string]> = [];
+	const tool = {
+		name: "inspect",
+		description: "inspect runtime state",
+		parameters: { type: "object", properties: {} },
+		execute: async () => {
+			assert.equal(harness.runtimeState.isStreaming, true);
+			assert.deepEqual(harness.runtimeState.pendingToolCalls, ["call_1"]);
+			return "ok";
+		},
+	};
+	const backend = new FakeBackend([
+		(_messages, options) => {
+			options.callbacks?.onDelta?.("partial");
+			assert.equal(harness.runtimeState.streamingMessage?.content, "partial");
+			options.callbacks?.onToolCallStart?.("call_1", "inspect", "{}");
+			return {
+				content: "",
+				toolCalls: [{ id: "call_1", name: "inspect", arguments: "{}" }],
+				stopReason: "stop",
+			};
+		},
+		() => textResponse("done"),
+	]);
+	harness = new AgentHarness({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			systemPrompt: "test",
+			runtimeHooksEnabled: false,
+			proactiveCompactionEnabled: false,
+			continuationEnabled: false,
+			tools: [tool],
+		},
+		backend,
+	});
+	harness.setOnPhaseChange((phase, previous) => {
+		phases.push([phase, previous]);
+	});
+	await harness.prompt("hello");
+	assert.deepEqual(phases, [
+		["turn", "idle"],
+		["idle", "turn"],
+	]);
+	const settled = harness.runtimeState;
+	assert.equal(settled.phase, "idle");
+	assert.equal(settled.isStreaming, false);
+	assert.equal(settled.turnId, undefined);
+	assert.equal(settled.streamingMessage, undefined);
+	assert.deepEqual(settled.pendingToolCalls, []);
+	assert.equal(settled.retry, undefined);
+	assert.equal(settled.abortRequested, false);
+	assert.deepEqual(settled.outcome, {
+		status: "completed",
+		summary: "done",
+		source: "heuristic",
+	});
+	assert.ok((settled.lastEventSeq ?? 0) > 0);
+	assert.ok((settled.lastTurnDurationMs ?? -1) >= 0);
+	assert.ok((settled.lastRunDurationMs ?? -1) >= 0);
 });
 
 void test("steer outside a turn throws HarnessBusyError", () => {

@@ -8,6 +8,7 @@
 		".": "./src/index.ts",
 		"./core/*": "./src/core/*",
 		"./tools/*": "./src/tools/*",
+		"./builtins/*": "./src/builtins/*",
 		"./extensions/*": "./src/extensions/*",
 		"./hooks/*": "./src/hooks/*",
 		"./compaction/*": "./src/compaction/*",

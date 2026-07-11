@@ -73,6 +73,10 @@
     "jsonNumber": 179,
     "jsonKeyword": 213,
     "jsonPunctuation": 244,
-    "pluginStartup": "#888888"
+    "pluginStartup": "#888888",
+    "memoryTag": 141,
+    "memoryId": 213,
+    "memoryContent": 250,
+    "memoryCount": 111
   }
 }

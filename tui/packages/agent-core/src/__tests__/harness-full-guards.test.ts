@@ -44,15 +44,27 @@ test("setup", () => {
 	});
 });
 
-function describe(name: string, fn: () => void) { fn(); }
-function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }
+function describe(name: string, fn: () => void) {
+	fn();
+}
+function it(name: string, fn: () => void | Promise<void>) {
+	test(name, fn);
+}
 function expect<T>(actual: T) {
 	return {
-		toBe(expected: unknown) { assert.equal(actual, expected); },
-		toBeDefined() { assert.notEqual(actual, undefined); },
+		toBe(expected: unknown) {
+			assert.equal(actual, expected);
+		},
+		toBeDefined() {
+			assert.notEqual(actual, undefined);
+		},
 		toThrow() {
 			let threw = false;
-			try { (actual as () => void)(); } catch { threw = true; }
+			try {
+				(actual as () => void)();
+			} catch {
+				threw = true;
+			}
 			assert.ok(threw, "expected function to throw");
 		},
 	};
@@ -138,15 +150,5 @@ void describe("harness with full guards", () => {
 				new AgentHarness({ config: badCfg, backend });
 			}).toThrow();
 		}
-	});
-
-	void it("respects deprecation: reasonerId ignored", () => {
-		const legacyConfig: AgentConfig = {
-			...config,
-			reasonerId: "some-reasoner", // deprecated, should not error
-		};
-
-		const harness = new AgentHarness({ config: legacyConfig, backend });
-		expect(harness.phase).toBe("idle");
 	});
 });

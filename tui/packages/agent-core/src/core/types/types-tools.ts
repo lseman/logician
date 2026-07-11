@@ -10,6 +10,8 @@ export interface ToolCall {
 export interface ToolResult {
 	content: string;
 	details?: Record<string, unknown>;
+	isError?: boolean;
+	terminate?: boolean;
 }
 
 export type ToolExecutionMode = "sequential" | "parallel";

@@ -1,5 +1,6 @@
 // ── Tool registry ──────────────────────────────────────────────────────────────────
 // Manages tool registration and execution. Mirrors Python ToolRegistry.
+// Adds LRU result caching (P0-1) with mtime-based invalidation for file-based tools.
 
 import { parseToolInput } from "./parser.ts";
 import type {
@@ -8,6 +9,13 @@ import type {
 	ToolContext,
 	ToolResult,
 } from "../../core/types.ts";
+import type { AskUserContext } from "../../core/types/types-tools.ts";
+import {
+	ToolResultCache,
+	computeContentFingerprint,
+} from "../../core/tool-cache.ts";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
 
 export interface PreparedToolCall {
 	call: ToolCall;
@@ -15,12 +23,24 @@ export interface PreparedToolCall {
 	error?: string;
 }
 
+export interface ToolRegistryOptions {
+	cwd?: string;
+	signal?: AbortSignal;
+	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
+	/** Cache for tool results (P0-1). Pass null to disable caching. */
+	cache?: ToolResultCache | null;
+}
+
 export class ToolRegistry {
 	private tools = new Map<string, Tool>();
 	private ctx: ToolContext;
+	private cache: ToolResultCache | null;
+	private cwd: string;
 
-	constructor(ctx?: ToolContext) {
-		this.ctx = ctx || {};
+	constructor(options?: ToolRegistryOptions) {
+		this.ctx = options || {};
+		this.cwd = options?.cwd ?? process.cwd();
+		this.cache = options?.cache ?? new ToolResultCache(2000, 60_000);
 	}
 
 	register(tool: Tool): void {
@@ -88,15 +108,116 @@ export class ToolRegistry {
 			return { content: `Error: Unknown tool: ${call.name}` };
 		}
 
+		const args = preparedArgs ?? this.prepare(call).args;
+
+		// ── P0-1: Cache lookup ───────────────────────────────────────
+		if (this.cache && !call.arguments?.includes("__nocache__")) {
+			const cacheArgs = JSON.stringify(args);
+			let contentFp: string | undefined;
+			if (call.name === "read_file") {
+				const p = (args as any).path;
+				if (p) {
+					// Compute fingerprint from resolved path + args for semantic matching
+					contentFp = computeContentFingerprint(`${p}:${cacheArgs}`);
+				}
+			}
+			const cached = this.cache.get(call.name, cacheArgs, contentFp);
+			if (cached) {
+				return { content: cached.result };
+			}
+		}
+
 		try {
-			const args = preparedArgs ?? this.prepare(call).args;
 			const raw = await tool.execute(args, { ...this.ctx, ...context });
 			// Normalize the string | ToolResult union to a ToolResult.
-			return typeof raw === "string" ? { content: raw } : raw;
+			const result: ToolResult =
+				typeof raw === "string" ? { content: raw } : raw;
+
+			// ── P0-1: Cache successful results ───────────────────────
+			if (this.cache && !result.isError) {
+				const mtimeKey = this.extractMtimeKey(call.name, args);
+				let contentFp: string | undefined;
+				if (call.name === "read_file") {
+					contentFp = computeContentFingerprint(result.content);
+				}
+				if (mtimeKey) {
+					this.cache.put(
+						call.name,
+						JSON.stringify(args),
+						result.content,
+						false,
+						mtimeKey,
+						contentFp,
+					);
+				} else {
+					this.cache.put(
+						call.name,
+						JSON.stringify(args),
+						result.content,
+						false,
+						undefined,
+						contentFp,
+					);
+				}
+			}
+
+			return result;
 		} catch (e: unknown) {
 			const error = e as Error;
-			return { content: `Error executing ${call.name}: ${error.message}` };
+			return {
+				content: `Error executing ${call.name}: ${error.message}`,
+				isError: true,
+			};
 		}
+	}
+
+	/** Extract mtime-based cache key for file-based tools. Returns null for non-file tools. */
+	private extractMtimeKey(
+		toolName: string,
+		args: Record<string, unknown>,
+	): string | null {
+		const paths: string[] = [];
+
+		if (
+			toolName === "read_file" ||
+			toolName === "edit_file" ||
+			toolName === "write_file"
+		) {
+			const p = (args as any).path;
+			if (p) paths.push(p);
+		} else if (toolName === "list_files") {
+			const p = (args as any).path;
+			if (p) paths.push(p);
+		} else if (toolName === "file_diff") {
+			const p = (args as any).path;
+			if (p) paths.push(p);
+		}
+
+		if (paths.length === 0) return null;
+
+		// Build mtime-based key: "mtime:<file1>:<file2>:..."
+		const mtimeParts: string[] = [];
+		for (const p of paths) {
+			try {
+				const absolute = resolve(this.cwd, p);
+				const st = statSync(absolute);
+				mtimeParts.push(`${st.mtimeMs}`);
+			} catch {
+				// File doesn't exist — use "0" as sentinel
+				mtimeParts.push("0");
+			}
+		}
+		return `mtime:${mtimeParts.join(":")}`;
+	}
+
+	/** Get cache statistics for observability. */
+	getCacheStats() {
+		return this.cache ? this.cache.stats() : null;
+	}
+
+	/** Clear the tool result cache. */
+	clearCache() {
+		this.cache?.clear();
 	}
 
 	toToolDefinitions(): Record<string, unknown>[] {

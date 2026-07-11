@@ -4,7 +4,6 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { access } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -92,15 +91,6 @@ function fileExists(filePath: string): boolean {
 	}
 }
 
-export async function pathExists(filePath: string): Promise<boolean> {
-	try {
-		await access(filePath, fs.constants.F_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
 function tryMacOSScreenshotPath(filePath: string): string {
 	return filePath.replace(/ (AM|PM)\./gi, `${NARROW_NO_BREAK_SPACE}$1.`);
 }
@@ -136,20 +126,6 @@ export function resolveReadPath(filePath: string, cwd: string): string {
 
 	for (const variant of readPathVariants(resolved)) {
 		if (variant !== resolved && fileExists(variant)) return variant;
-	}
-
-	return resolved;
-}
-
-export async function resolveReadPathAsync(
-	filePath: string,
-	cwd: string,
-): Promise<string> {
-	const resolved = resolveToCwd(filePath, cwd);
-	if (await pathExists(resolved)) return resolved;
-
-	for (const variant of readPathVariants(resolved)) {
-		if (variant !== resolved && (await pathExists(variant))) return variant;
 	}
 
 	return resolved;

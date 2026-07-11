@@ -16,11 +16,7 @@
 		"./mcp": "./src/mcp/index.ts",
 		"./mcp/*": "./src/mcp/*",
 		"./skills": "./src/skills.ts",
-		"./subagents": "./src/subagents/subagent.ts",
-		"./subagents/*": "./src/subagents/*",
 		"./system-prompt": "./src/system-prompt.ts",
-		"./reasoners": "./src/reasoners/index.ts",
-		"./reasoners/*": "./src/reasoners/*",
 		"./context-files": "./src/context-files/index.ts",
 		"./context-files/*": "./src/context-files/*",
 		"./prompts": "./src/prompts/index.ts",
@@ -35,7 +31,9 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/agent-core": "0.2.0"
+		"@logician/agent-core": "0.2.0",
+		"@logician/agent-capabilities": "0.2.0",
+		"@logician/observational-memory": "0.2.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

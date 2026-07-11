@@ -135,7 +135,24 @@ export interface BeforeCompactResult {
 	summary?: string;
 }
 
+export interface BeforeAgentStartContext {
+	prompt: string;
+	systemPrompt: string;
+	messages: AgentMessage[];
+}
+
+export interface BeforeAgentStartResult {
+	messages?: AgentMessage[];
+	systemPrompt?: string;
+}
+
 export interface AgentHooks {
+	beforeAgentStart?: (
+		ctx: BeforeAgentStartContext,
+	) =>
+		| Promise<BeforeAgentStartResult | undefined>
+		| BeforeAgentStartResult
+		| undefined;
 	beforeToolCall?: (
 		ctx: BeforeToolCallContext,
 	) =>

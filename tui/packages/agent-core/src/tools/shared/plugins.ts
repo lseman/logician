@@ -163,13 +163,6 @@ export async function runHookEvent(
 	return runPluginBackend("hook", [eventType, JSON.stringify(payload)]);
 }
 
-export function runHookEventBackground(
-	eventType: string,
-	payload: Record<string, unknown> = {},
-): void {
-	runHookEvent(eventType, payload).catch(() => undefined);
-}
-
 function parseJsonArg(raw?: string): Record<string, unknown> {
 	if (!raw) return {};
 	try {
