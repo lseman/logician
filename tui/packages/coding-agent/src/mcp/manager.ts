@@ -11,6 +11,7 @@ import {
 	type McpServerConfig,
 } from "./client.ts";
 import { parseJsonWithComments } from "@logician/agent-core/tools/shared/json-utils.ts";
+import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
 
 export interface McpLoadResult {
 	tools: Tool[];
@@ -70,6 +71,88 @@ function findMcpConfig(cwd: string): string | null {
 	return null;
 }
 
+/** Recursively expand ${CLAUDE_PLUGIN_ROOT} in a plugin's server config. */
+function expandPluginRoot<T>(value: T, root: string): T {
+	if (typeof value === "string") {
+		return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", root) as T;
+	}
+	if (Array.isArray(value)) {
+		return value.map((item) => expandPluginRoot(item, root)) as T;
+	}
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+			out[k] = expandPluginRoot(v, root);
+		}
+		return out as T;
+	}
+	return value;
+}
+
+/**
+ * Collect MCP servers declared by enabled Claude Code plugins — from the
+ * plugin's .mcp.json and/or its manifest's mcpServers map. Servers are
+ * namespaced plugin_<plugin>_<server> (Claude Code convention) and get
+ * CLAUDE_PLUGIN_ROOT in their environment.
+ */
+async function loadPluginMcpServerConfigs(): Promise<
+	Record<string, McpServerConfig>
+> {
+	const out: Record<string, McpServerConfig> = {};
+	try {
+		const registry = await runPluginBackend("list", []);
+		for (const plugin of registry.plugins || []) {
+			if (plugin.enabled === false || plugin.on_disk === false) continue;
+			const installPath = String(plugin.install_path || "");
+			const pluginName = String(plugin.name || plugin.plugin_id || "");
+			if (!installPath || !pluginName) continue;
+
+			const servers: Record<string, unknown> = {};
+			try {
+				const raw = parseJsonWithComments(
+					readFileSync(join(installPath, ".mcp.json"), "utf8"),
+				) as Record<string, unknown>;
+				const map =
+					raw?.mcpServers && typeof raw.mcpServers === "object"
+						? raw.mcpServers
+						: raw;
+				if (map && typeof map === "object") Object.assign(servers, map);
+			} catch {
+				// No .mcp.json — fine.
+			}
+			try {
+				const manifest = parseJsonWithComments(
+					readFileSync(
+						join(installPath, ".claude-plugin", "plugin.json"),
+						"utf8",
+					),
+				) as Record<string, unknown>;
+				if (manifest?.mcpServers && typeof manifest.mcpServers === "object") {
+					Object.assign(servers, manifest.mcpServers);
+				}
+			} catch {
+				// No manifest — fine.
+			}
+
+			for (const [name, config] of Object.entries(servers)) {
+				if (!config || typeof config !== "object") continue;
+				const expanded = expandPluginRoot(
+					config as McpServerConfig,
+					installPath,
+				);
+				expanded.env = {
+					CLAUDE_PLUGIN_ROOT: installPath,
+					...(expanded.env || {}),
+				};
+				out[`plugin_${pluginName}_${name}`] = expanded;
+			}
+		}
+	} catch {
+		// Plugin registry unavailable — plugin servers simply don't load.
+	}
+	return out;
+}
+
 function loadMcpServerConfigs(cwd: string): Record<string, McpServerConfig> {
 	const configPath = findMcpConfig(cwd);
 	if (!configPath) return {};
@@ -104,7 +187,11 @@ export class McpManager {
 		}
 		this.loaded = true;
 
-		const configs = loadMcpServerConfigs(cwd);
+		// Project/user config wins over plugin-declared servers on name clash.
+		const configs = {
+			...(await loadPluginMcpServerConfigs()),
+			...loadMcpServerConfigs(cwd),
+		};
 		for (const [name, config] of Object.entries(configs)) {
 			if (config.enabled === false) continue;
 			let client: McpClient | null = null;

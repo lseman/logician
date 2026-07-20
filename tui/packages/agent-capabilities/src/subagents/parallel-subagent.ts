@@ -11,11 +11,8 @@
 // refactor A, add B, fix C — concurrently.
 
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LLMBackend } from "@logician/agent-core/core/backend.ts";
-import { runAgentLoop } from "@logician/agent-core/core/agent-loop-runner.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -23,6 +20,12 @@ import type {
 	Tool,
 } from "@logician/agent-core";
 import type { AgentDefinition } from "./subagent.ts";
+import {
+	budgetFromArgs,
+	contractFromArgs,
+	DELEGATION_CONTRACT_PROPERTIES,
+	runDelegatedAgent,
+} from "./delegation-runtime.ts";
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -74,7 +77,6 @@ async function createWorktree(
 	const dir = join(base, branch);
 
 	// Ensure the worktree base dir exists
-	const { execFile: exec } = await import("node:child_process");
 	await new Promise<void>((resolve, reject) => {
 		execFile("mkdir", ["-p", base], (err) => {
 			if (err) reject(err);
@@ -111,30 +113,24 @@ async function createWorktree(
 }
 
 /**
- * Remove a worktree and its branch from the repo.
+ * Remove a worktree while preserving its branch. Successful child changes are
+ * committed to that branch before cleanup so the parent can inspect or merge it.
  */
 async function pruneWorktree(
 	repoDir: string,
 	dir: string,
-	branch: string,
 ): Promise<void> {
 	try {
-		await new Promise<void>((resolve, reject) => {
+		await new Promise<void>((resolve) => {
 			execFile(
 				"git",
 				["worktree", "remove", "--force", dir],
 				(err) => {
 					if (err) {
-						// Fall back to git worktree prune + branch delete.
-						execFile("git", ["worktree", "prune"], { cwd: repoDir }, (err2) => {
-							execFile(
-								"git",
-								["branch", "-D", branch],
-								{ cwd: repoDir },
-								(err3) => {
-									resolve();
-								},
-							);
+						// Fall back to pruning stale worktree metadata. Never delete the
+						// branch: it is the durable hand-off from child to parent.
+						execFile("git", ["worktree", "prune"], { cwd: repoDir }, () => {
+							resolve();
 						});
 					} else {
 						resolve();
@@ -163,6 +159,19 @@ export function createParallelSpawnAgentTool(
 	deps: ParallelSpawnAgentDeps,
 ): Tool {
 	const repoDir = deps.cwd || process.cwd();
+	const maxConcurrent = Math.max(1, deps.options.maxConcurrent ?? 2);
+	let active = 0;
+	const waiters: Array<() => void> = [];
+	const acquire = async (): Promise<void> => {
+		if (active >= maxConcurrent) {
+			await new Promise<void>((resolve) => waiters.push(resolve));
+		}
+		active++;
+	};
+	const release = (): void => {
+		active--;
+		waiters.shift()?.();
+	};
 
 	return {
 		name: "spawn_agent_parallel",
@@ -190,10 +199,11 @@ export function createParallelSpawnAgentTool(
 					type: "string",
 					description: "Agent definition to use (default: general).",
 				},
+				...DELEGATION_CONTRACT_PROPERTIES,
 			},
 			required: ["task"],
 		},
-		execute: async (args, ctx) => {
+			execute: async (args, ctx) => {
 			const task = typeof args.task === "string" ? args.task : "";
 			if (!task.trim()) return "Error: spawn_agent_parallel requires a task.";
 
@@ -210,6 +220,7 @@ export function createParallelSpawnAgentTool(
 
 			const agentId = `par_${++parallelAgentSeq}`;
 			const parent = deps.config();
+			await acquire();
 
 			deps.emit({ type: "subagent_start", agentId, agent: def.name, task });
 
@@ -221,6 +232,7 @@ export function createParallelSpawnAgentTool(
 				worktreeDir = wt.dir;
 				worktreeBranch = wt.branch;
 			} catch (e: unknown) {
+				release();
 				const msg = `Error: failed to create worktree: ${(e as Error).message}`;
 				deps.emit({
 					type: "subagent_end",
@@ -264,46 +276,65 @@ export function createParallelSpawnAgentTool(
 			const backend = def.model
 				? deps.backend.withModel(def.model)
 				: deps.backend;
-			let turns = 0;
-
 			try {
-				const newMessages = await runAgentLoop(
-					{
-						systemPrompt: childConfig.systemPrompt,
-						messages: [],
-						tools: childConfig.tools,
-						cwd: worktreeDir,
-					},
-					[{ role: "user", content: task } satisfies Message],
-					{
-						...childConfig,
-						backend,
-						maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
-						signal: ctx.signal,
-					},
-					(event) => {
-						if (event.type === "turn_start") turns++;
-						childConfig.onEvent?.(event);
-					},
-				);
-				const final = [...newMessages]
-					.reverse()
-					.find((m) => m.role === "assistant" && m.content?.trim());
-				const result = truncateResult(
-					final?.content?.trim() ||
-						"(parallel subagent produced no final message)",
-				);
+				const run = await runDelegatedAgent({
+					task,
+					config: childConfig,
+					backend,
+					tools: childConfig.tools ?? [],
+					maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
+					signal: ctx.signal,
+					contract: contractFromArgs(args),
+					budget: budgetFromArgs(args, {
+						timeoutMs: def.maxExecutionTimeMs,
+						maxToolCalls: def.maxToolCalls,
+						toolLimits: def.toolLimits,
+					}),
+					onEvent: (event) => childConfig.onEvent?.(event),
+				});
+				const result = truncateResult(run.content);
 
-				// Capture worktree diff for the caller to review/apply later.
+				// Commit every tracked and untracked child change so removing the
+				// worktree cannot destroy the result. The branch is the hand-off.
+				let commit: string | undefined;
+				try {
+					await new Promise<void>((resolve, reject) => {
+						execFile("git", ["add", "-A"], { cwd: worktreeDir }, (error) =>
+							error ? reject(error) : resolve(),
+						);
+					});
+					await new Promise<void>((resolve, reject) => {
+						execFile(
+							"git",
+							[
+								"-c", "user.name=Logician Agent",
+								"-c", "user.email=logician@local",
+								"commit", "--allow-empty", "-m", `logician: parallel agent ${agentId}`,
+							],
+							{ cwd: worktreeDir },
+							(error) => error ? reject(error) : resolve(),
+						);
+					});
+					commit = await new Promise<string>((resolve, reject) => {
+						execFile("git", ["rev-parse", "HEAD"], { cwd: worktreeDir }, (error, stdout) =>
+							error ? reject(error) : resolve(stdout.trim()),
+						);
+					});
+				} catch {
+					// Leave the worktree registered if durable hand-off failed. Cleanup
+					// below only runs after the result has been assembled successfully.
+				}
+
+				// Capture committed change summary for the caller.
 				let diff = "";
 				try {
 					const { stdout } = await new Promise<{ stdout: string }>(
 						(resolve, reject) => {
 							execFile(
 								"git",
-								["diff", "--stat", "HEAD"],
+								["diff", "--stat", "HEAD^", "HEAD"],
 								{ cwd: worktreeDir, maxBuffer: 10 * 1024 * 1024 },
-								(err, stdout, stderr) => {
+								(err, stdout) => {
 									if (err) reject(err);
 									else resolve({ stdout });
 								},
@@ -320,7 +351,8 @@ export function createParallelSpawnAgentTool(
 					agentId,
 					agent: def.name,
 					result,
-					turns,
+					turns: run.turns,
+					isError: run.status !== "completed",
 				});
 
 				return {
@@ -330,7 +362,16 @@ export function createParallelSpawnAgentTool(
 						agentId,
 						worktree: worktreeDir,
 						branch: worktreeBranch,
-						metrics: { turns },
+						commit,
+						status: run.status,
+						metrics: {
+							turns: run.turns,
+							durationMs: run.durationMs,
+							toolCalls: run.toolCalls,
+							toolCallsByName: run.toolCallsByName,
+							validationAttempts: run.validationAttempts,
+						},
+						acceptance: run.acceptance,
 						changes: diff || "(no diff)",
 					},
 				};
@@ -345,8 +386,18 @@ export function createParallelSpawnAgentTool(
 				});
 				return message;
 			} finally {
-				// Always clean up the worktree.
-				await pruneWorktree(repoDir, worktreeDir, worktreeBranch);
+				// Only remove worktrees whose changes reached a durable branch.
+				// A failed commit leaves the worktree available for recovery.
+				try {
+					const clean = await new Promise<boolean>((resolve) => {
+						execFile("git", ["status", "--porcelain"], { cwd: worktreeDir }, (error, stdout) =>
+							resolve(!error && stdout.trim().length === 0),
+						);
+					});
+					if (clean) await pruneWorktree(repoDir, worktreeDir);
+				} finally {
+					release();
+				}
 			}
 		},
 	};

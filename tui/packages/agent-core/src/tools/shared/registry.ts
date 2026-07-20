@@ -1,6 +1,9 @@
 // ── Tool registry ──────────────────────────────────────────────────────────────────
 // Manages tool registration and execution. Mirrors Python ToolRegistry.
-// Adds LRU result caching (P0-1) with mtime-based invalidation for file-based tools.
+// Adds opt-in LRU result caching (tools must set cacheable: true — most tools
+// have side effects or time-varying output, so caching is never applied by
+// default), a per-tool execution timeout, and a result size cap so a
+// misbehaving tool (MCP/extension) cannot flood the conversation context.
 
 import { parseToolInput } from "./parser.ts";
 import type {
@@ -10,12 +13,26 @@ import type {
 	ToolResult,
 } from "../../core/types.ts";
 import type { AskUserContext } from "../../core/types/types-tools.ts";
-import {
-	ToolResultCache,
-	computeContentFingerprint,
-} from "../../core/tool-cache.ts";
+import { ToolResultCache } from "../../core/tool-cache.ts";
+import { withTimeout } from "./async-utils.ts";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
+
+/** Default cap on tool execution time. Tools can override via timeoutMs. */
+const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
+
+/** Default cap on tool result size appended to context (~25k tokens). */
+const DEFAULT_MAX_RESULT_CHARS = 100_000;
+
+function truncateResultMiddle(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const half = Math.max(1, Math.floor((maxChars - 64) / 2));
+	return (
+		`${text.slice(0, half)}\n` +
+		`...[tool result truncated: ${text.length - half * 2} chars elided]...\n` +
+		`${text.slice(-half)}`
+	);
+}
 
 export interface PreparedToolCall {
 	call: ToolCall;
@@ -29,6 +46,10 @@ export interface ToolRegistryOptions {
 	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
 	/** Cache for tool results (P0-1). Pass null to disable caching. */
 	cache?: ToolResultCache | null;
+	/** Per-tool execution timeout (default 10 min). 0 disables. Tools override via timeoutMs. */
+	defaultToolTimeoutMs?: number;
+	/** Cap on result content appended to context (default 100k chars). 0 disables. */
+	maxResultChars?: number;
 }
 
 export class ToolRegistry {
@@ -36,11 +57,16 @@ export class ToolRegistry {
 	private ctx: ToolContext;
 	private cache: ToolResultCache | null;
 	private cwd: string;
+	private defaultToolTimeoutMs: number;
+	private maxResultChars: number;
 
 	constructor(options?: ToolRegistryOptions) {
 		this.ctx = options || {};
 		this.cwd = options?.cwd ?? process.cwd();
 		this.cache = options?.cache ?? new ToolResultCache(2000, 60_000);
+		this.defaultToolTimeoutMs =
+			options?.defaultToolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+		this.maxResultChars = options?.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
 	}
 
 	register(tool: Tool): void {
@@ -110,55 +136,54 @@ export class ToolRegistry {
 
 		const args = preparedArgs ?? this.prepare(call).args;
 
-		// ── P0-1: Cache lookup ───────────────────────────────────────
-		if (this.cache && !call.arguments?.includes("__nocache__")) {
-			const cacheArgs = JSON.stringify(args);
-			let contentFp: string | undefined;
-			if (call.name === "read_file") {
-				const p = (args as any).path;
-				if (p) {
-					// Compute fingerprint from resolved path + args for semantic matching
-					contentFp = computeContentFingerprint(`${p}:${cacheArgs}`);
-				}
-			}
-			const cached = this.cache.get(call.name, cacheArgs, contentFp);
+		// ── Cache lookup — opt-in only. Tools with side effects (edits, bash,
+		// read_file's read-tracking) or time-varying output must never be
+		// served from cache, so caching requires an explicit cacheable: true.
+		const useCache =
+			this.cache != null &&
+			tool.cacheable === true &&
+			!call.arguments?.includes("__nocache__");
+		if (useCache) {
+			const cached = this.cache!.get(
+				call.name,
+				JSON.stringify(args),
+				this.extractMtimeKey(call.name, args) ?? undefined,
+			);
 			if (cached) {
 				return { content: cached.result };
 			}
 		}
 
 		try {
-			const raw = await tool.execute(args, { ...this.ctx, ...context });
+			const timeoutMs =
+				tool.resolveTimeoutMs?.(args) ??
+				tool.timeoutMs ??
+				this.defaultToolTimeoutMs;
+			const run = tool.execute(args, { ...this.ctx, ...context });
+			const raw = timeoutMs > 0 ? await withTimeout(run, timeoutMs) : await run;
 			// Normalize the string | ToolResult union to a ToolResult.
 			const result: ToolResult =
 				typeof raw === "string" ? { content: raw } : raw;
 
-			// ── P0-1: Cache successful results ───────────────────────
-			if (this.cache && !result.isError) {
-				const mtimeKey = this.extractMtimeKey(call.name, args);
-				let contentFp: string | undefined;
-				if (call.name === "read_file") {
-					contentFp = computeContentFingerprint(result.content);
-				}
-				if (mtimeKey) {
-					this.cache.put(
-						call.name,
-						JSON.stringify(args),
-						result.content,
-						false,
-						mtimeKey,
-						contentFp,
-					);
-				} else {
-					this.cache.put(
-						call.name,
-						JSON.stringify(args),
-						result.content,
-						false,
-						undefined,
-						contentFp,
-					);
-				}
+			// Cap result size so a misbehaving tool cannot flood the context.
+			if (
+				this.maxResultChars > 0 &&
+				result.content.length > this.maxResultChars
+			) {
+				result.content = truncateResultMiddle(
+					result.content,
+					this.maxResultChars,
+				);
+			}
+
+			if (useCache && !result.isError) {
+				this.cache!.put(
+					call.name,
+					JSON.stringify(args),
+					result.content,
+					false,
+					this.extractMtimeKey(call.name, args) ?? undefined,
+				);
 			}
 
 			return result;

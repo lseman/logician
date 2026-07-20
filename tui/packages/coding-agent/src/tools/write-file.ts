@@ -1,24 +1,29 @@
 // ── write_file tool ───────────────────────────────────────────────────────────────
-// Create or overwrite a complete file. Creates parent directories and returns the highlighted new file content.
+// Create or overwrite a complete file. Creates parent directories. Overwriting an
+// existing file requires it to have been read first (and not modified since), so the
+// model can never blind-clobber content. Returns the new content with syntax
+// highlighting and line numbers.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Tool } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/core/types.ts";
 import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
+import { atomicWriteFile } from "./shared/atomic-write.ts";
 import {
 	ensureInsideCwd,
 	readUtf8IfExists,
 	resolvePath,
 } from "@logician/agent-core/tools/shared/path-utils.ts";
-import { refreshAfterWrite } from "./read-tracker.ts";
-import { highlight } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import { hasBeenRead, isStaleSinceRead, refreshAfterWrite } from "./read-tracker.ts";
+import { highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 
 export const write_file: Tool = {
 	name: "write_file",
 	label: "Write File",
 	hookAliases: ["Write"],
 	description:
-		"Create or overwrite a complete file. Creates parent directories and returns the highlighted new file content.",
+		"Create or overwrite a complete file. Creates parent directories. " +
+		"Overwriting an existing file requires reading it with read_file first.",
 	promptSnippet:
 		"Create or overwrite files; automatically create parent directories",
 	promptGuidelines: ["Use write_file for new files or complete rewrites"],
@@ -39,7 +44,7 @@ export const write_file: Tool = {
 			content: args.content ?? args.text,
 		};
 	},
-	execute: async (args, ctx): Promise<string> => {
+	execute: async (args, ctx): Promise<string | ToolResult> => {
 		const filePath = String(args.path);
 		const content = String(args.content ?? "");
 		const resolved = resolvePath(ctx.cwd, filePath);
@@ -47,58 +52,43 @@ export const write_file: Tool = {
 
 		return withFileMutationQueue(resolved, async () => {
 			const before = readUtf8IfExists(resolved);
+			if (before !== null) {
+				if (!hasBeenRead(resolved)) {
+					return `${resolved} already exists but has not been read. ` +
+						"Read it with read_file before overwriting, or use edit_file for targeted changes.";
+				}
+				if (isStaleSinceRead(resolved)) {
+					return `${resolved} has been modified since it was last read. ` +
+						"Read it again before overwriting.";
+				}
+			}
 			if (before === content) {
 				return `No changes made: ${resolved}`;
 			}
 
 			fs.mkdirSync(path.dirname(resolved), { recursive: true });
-			fs.writeFileSync(resolved, content, "utf-8");
+			await atomicWriteFile(resolved, content, {
+				expectedContent: before ?? undefined,
+				expectedMissing: before === null,
+			});
 			refreshAfterWrite(resolved);
 
-			// Determine language for syntax highlighting based on file extension
-			const ext = path.extname(resolved).slice(1).toLowerCase();
-			const languageMap: Record<string, string> = {
-				ts: "typescript",
-				js: "javascript",
-				tsx: "typescript",
-				jsx: "javascript",
-				py: "python",
-				rb: "ruby",
-				rs: "rust",
-				go: "go",
-				java: "java",
-				cs: "csharp",
-				cpp: "cpp",
-				c: "c",
-				h: "cpp",
-				hpp: "cpp",
-				php: "php",
-				html: "html",
-				css: "css",
-				scss: "scss",
-				less: "less",
-				json: "json",
-				md: "markdown",
-				yaml: "yaml",
-				yml: "yaml",
-				sh: "bash",
-				bash: "bash",
-				sql: "sql",
-				xml: "xml",
-				dockerfile: "dockerfile",
-				docker: "dockerfile",
-			};
-			const language = languageMap[ext] || "plaintext";
+			const lineCount = content === "" ? 0 : content.split("\n").length;
+			const byteLen = Buffer.byteLength(content, "utf-8");
+			if (before === null) {
+				return `Created ${resolved} (${lineCount} lines, ${byteLen} bytes)`;
+			}
 
-			// Syntax-highlight the content for display
-			const highlighted = highlight(content, language);
-			const langLabel = highlighted.language ? ` (${highlighted.language})` : "";
-
-			return (
-				`${before === null ? "Created" : "Wrote"} ${resolved}${langLabel}` +
-				"\n\n" +
-				highlighted.value
-			);
+			const highlighted = highlightAuto(content);
+			const hlLines = highlighted.value.split("\n");
+			const gutterWidth = String(lineCount).length + 1;
+			const header = `Wrote ${resolved} (${lineCount} lines, ${byteLen} bytes)`;
+			const out: string[] = [header];
+			for (let i = 0; i < hlLines.length; i++) {
+				const num = String(i + 1).padStart(gutterWidth, " ");
+				out.push(`${num}|${hlLines[i]}`);
+			}
+			return out.join("\n");
 		});
 	},
 };

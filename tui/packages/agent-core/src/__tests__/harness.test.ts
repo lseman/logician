@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -191,6 +191,52 @@ void test("nextTurn queue survives until the next prompt and is injected before 
 	assert.deepEqual(harness.getQueues().nextTurn, []);
 });
 
+void test("nextTurn queued during a run waits for the following user prompt", async () => {
+	let harness!: AgentHarness;
+	const backend = new FakeBackend([
+		() => {
+			harness.nextTurn("future guidance");
+			return textResponse("first answer");
+		},
+		(messages) => {
+			const contents = messages.map((message) => String(message.content ?? ""));
+			assert.ok(contents.includes("future guidance"));
+			assert.ok(contents.indexOf("future guidance") < contents.indexOf("second prompt"));
+			return textResponse("second answer");
+		},
+	]);
+	harness = makeHarness(backend);
+
+	await harness.prompt("first prompt");
+	assert.deepEqual(harness.getQueues().nextTurn, ["future guidance"]);
+	await harness.prompt("second prompt");
+	assert.deepEqual(harness.getQueues().nextTurn, []);
+});
+
+void test("abort preserves nextTurn messages and waits for settlement", async () => {
+	let providerSettled = false;
+	const backend = new FakeBackend([
+		(_messages, options) =>
+			new Promise((resolve) => {
+				options.signal?.addEventListener("abort", () => {
+					providerSettled = true;
+					resolve(textResponse("aborted"));
+				});
+			}),
+	]);
+	const harness = makeHarness(backend);
+	const run = harness.prompt("work");
+	await new Promise((resolve) => setImmediate(resolve));
+	harness.nextTurn("keep me");
+
+	const cleared = await harness.abort();
+	await run;
+	assert.equal(providerSettled, true);
+	assert.deepEqual(cleared.clearedNextTurn, []);
+	assert.deepEqual(harness.getQueues().nextTurn, ["keep me"]);
+	assert.equal(harness.phase, "idle");
+});
+
 void test("fork + discardBranch restores the parent conversation", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("base")]));
 	await harness.prompt("q");
@@ -223,6 +269,27 @@ void test("enabled session persists real turn messages without placeholders", as
 		resumed.messages.map((m) => `${m.role}:${m.content ?? ""}`),
 		["user:question", "assistant:answer"],
 	);
+});
+
+void test("enabled sessions journal operation and turn boundaries", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-journal-"));
+	const harness = makeHarness(new FakeBackend([() => textResponse("answer")]));
+	await harness.enableSession(dir);
+	await harness.prompt("question");
+
+	const sessionInfo = harness.listSessions()[0];
+	const session = new Session(sessionInfo.id, { baseDir: dir, enabled: true });
+	const events = session.loadJournalEvents();
+	assert.deepEqual(events.map((event) => event.type), [
+		"operation_start",
+		"turn_start",
+		"turn_end",
+		"operation_finish",
+	]);
+	assert.equal(new Set(events.map((event) => event.operationId)).size, 1);
+
+	appendFileSync(join(session.dirPath, "operations.jsonl"), '{"incomplete":', "utf8");
+	assert.equal(session.loadJournalEvents().length, events.length);
 });
 
 void test("session typed entries build deterministic context", () => {

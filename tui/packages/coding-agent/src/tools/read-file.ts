@@ -64,7 +64,14 @@ export const read_file: Tool = {
 		const offset = Number(args.offset) || 0;
 		const limit = Number(args.limit) || 0;
 
-		const text = fs.readFileSync(resolved, "utf-8");
+		const buffer = fs.readFileSync(resolved);
+		if (buffer.subarray(0, 8192).includes(0)) {
+			return (
+				`Error: ${resolved} appears to be a binary file ` +
+				`(${formatSize(stat.size)}). Use bash tools (file, xxd, strings) to inspect it.`
+			);
+		}
+		const text = buffer.toString("utf-8");
 		recordRead(resolved);
 		const allLines = text.split("\n");
 		const totalLines = allLines.length;

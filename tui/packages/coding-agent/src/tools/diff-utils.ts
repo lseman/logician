@@ -1,8 +1,193 @@
 // ── Diff Utilities ─────────────────────────────────────────────────────────────
-// Diff generation and patch utilities for the edit_file tool.
-// Extracted from helpers.ts to reduce its size.
+// Line-level diff and unified-patch generation for the edit_file / write_file
+// tools. Uses an LCS-based line diff so disjoint changes produce separate
+// hunks — a naive common-prefix/suffix diff renders everything between the
+// first and last change as removed+re-added, which reads as "the whole file
+// changed" for multi-edits and replaceAll.
 
 import * as path from "node:path";
+
+// ============================================================================
+// Line diff (LCS)
+// ============================================================================
+
+interface DiffOp {
+	type: "equal" | "del" | "add";
+	line: string;
+}
+
+// Above this many DP cells, fall back to the cheap prefix/suffix diff rather
+// than risk memory/CPU blowups on pathological inputs.
+const MAX_LCS_CELLS = 4_000_000;
+
+/**
+ * Diff two line arrays into equal/del/add operations. Trims the common
+ * prefix/suffix first (typical edits leave a small middle), then runs an LCS
+ * over the remainder. Falls back to a whole-block replace when the middle is
+ * too large for the DP table.
+ */
+function diffOps(before: string[], after: string[]): DiffOp[] {
+	let prefix = 0;
+	while (
+		prefix < before.length &&
+		prefix < after.length &&
+		before[prefix] === after[prefix]
+	) {
+		prefix++;
+	}
+	let suffix = 0;
+	while (
+		suffix < before.length - prefix &&
+		suffix < after.length - prefix &&
+		before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+	) {
+		suffix++;
+	}
+
+	const a = before.slice(prefix, before.length - suffix);
+	const b = after.slice(prefix, after.length - suffix);
+
+	const ops: DiffOp[] = [];
+	for (let i = 0; i < prefix; i++) ops.push({ type: "equal", line: before[i] });
+	ops.push(...diffMiddle(a, b));
+	for (let i = before.length - suffix; i < before.length; i++) {
+		ops.push({ type: "equal", line: before[i] });
+	}
+	return ops;
+}
+
+function diffMiddle(a: string[], b: string[]): DiffOp[] {
+	if (a.length === 0 && b.length === 0) return [];
+	if (a.length === 0) return b.map((line) => ({ type: "add" as const, line }));
+	if (b.length === 0) return a.map((line) => ({ type: "del" as const, line }));
+
+	// Fallback: whole-block replace when LCS would be too expensive.
+	if (a.length * b.length > MAX_LCS_CELLS) {
+		return [
+			...a.map((line) => ({ type: "del" as const, line })),
+			...b.map((line) => ({ type: "add" as const, line })),
+		];
+	}
+
+	// LCS lengths table (rows a, cols b), then backtrack into ops.
+	const cols = b.length + 1;
+	const table = new Int32Array((a.length + 1) * cols);
+	for (let i = a.length - 1; i >= 0; i--) {
+		for (let j = b.length - 1; j >= 0; j--) {
+			table[i * cols + j] =
+				a[i] === b[j]
+					? table[(i + 1) * cols + j + 1] + 1
+					: Math.max(table[(i + 1) * cols + j], table[i * cols + j + 1]);
+		}
+	}
+
+	const ops: DiffOp[] = [];
+	let i = 0;
+	let j = 0;
+	while (i < a.length && j < b.length) {
+		if (a[i] === b[j]) {
+			ops.push({ type: "equal", line: a[i] });
+			i++;
+			j++;
+		} else if (table[(i + 1) * cols + j] >= table[i * cols + j + 1]) {
+			ops.push({ type: "del", line: a[i] });
+			i++;
+		} else {
+			ops.push({ type: "add", line: b[j] });
+			j++;
+		}
+	}
+	for (; i < a.length; i++) ops.push({ type: "del", line: a[i] });
+	for (; j < b.length; j++) ops.push({ type: "add", line: b[j] });
+	return ops;
+}
+
+// ============================================================================
+// Unified format
+// ============================================================================
+
+const CONTEXT_LINES = 3;
+
+/** Render diff ops as unified hunks with headers. */
+function renderUnified(
+	beforeLabel: string,
+	afterLabel: string,
+	ops: DiffOp[],
+): string {
+	// Identify changed-op indices; group into hunks when gaps exceed 2*context.
+	const changed: number[] = [];
+	for (let i = 0; i < ops.length; i++) {
+		if (ops[i].type !== "equal") changed.push(i);
+	}
+	if (changed.length === 0) return "";
+
+	interface Hunk {
+		start: number; // first op index (inclusive)
+		end: number; // last op index (inclusive)
+	}
+	const hunks: Hunk[] = [];
+	let current: Hunk = {
+		start: Math.max(0, changed[0] - CONTEXT_LINES),
+		end: Math.min(ops.length - 1, changed[0] + CONTEXT_LINES),
+	};
+	for (let c = 1; c < changed.length; c++) {
+		const start = Math.max(0, changed[c] - CONTEXT_LINES);
+		if (start <= current.end + 1) {
+			current.end = Math.min(ops.length - 1, changed[c] + CONTEXT_LINES);
+		} else {
+			hunks.push(current);
+			current = {
+				start,
+				end: Math.min(ops.length - 1, changed[c] + CONTEXT_LINES),
+			};
+		}
+	}
+	hunks.push(current);
+
+	const out = [`--- ${beforeLabel}`, `+++ ${afterLabel}`];
+	// Track line numbers: oldLine/newLine are 1-based positions of the NEXT op.
+	let oldLine = 1;
+	let newLine = 1;
+	let opIndex = 0;
+	for (const hunk of hunks) {
+		// Advance counters over ops before the hunk.
+		for (; opIndex < hunk.start; opIndex++) {
+			const op = ops[opIndex];
+			if (op.type !== "add") oldLine++;
+			if (op.type !== "del") newLine++;
+		}
+		const oldStart = oldLine;
+		const newStart = newLine;
+		let oldCount = 0;
+		let newCount = 0;
+		const body: string[] = [];
+		for (; opIndex <= hunk.end; opIndex++) {
+			const op = ops[opIndex];
+			if (op.type === "equal") {
+				body.push(` ${op.line}`);
+				oldCount++;
+				newCount++;
+				oldLine++;
+				newLine++;
+			} else if (op.type === "del") {
+				body.push(`-${op.line}`);
+				oldCount++;
+				oldLine++;
+			} else {
+				body.push(`+${op.line}`);
+				newCount++;
+				newLine++;
+			}
+		}
+		out.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+		out.push(...body);
+	}
+	return out.join("\n");
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
 
 export interface EditDiffResult {
 	diff: string;
@@ -18,27 +203,18 @@ export function generateDiffString(
 		return { diff: "", firstChangedLine: undefined };
 	}
 
-	const diff = syntheticUnifiedDiff("/dev/edit", before, after);
+	const ops = diffOps(before.split("\n"), after.split("\n"));
+	const diff = renderUnified("a/edit", "b/edit", ops);
 
-	const beforeLines = before.split("\n");
-	const afterLines = after.split("\n");
+	// First changed line, numbered in the AFTER content.
 	let firstChangedLine: number | undefined;
-
-	let i = 0;
-	let j = 0;
-	let found = false;
-	while (i < beforeLines.length && j < afterLines.length && !found) {
-		if (beforeLines[i] !== afterLines[j]) {
-			firstChangedLine = j + 1;
-			found = true;
-		} else {
-			i++;
-			j++;
+	let newLine = 1;
+	for (const op of ops) {
+		if (op.type !== "equal") {
+			firstChangedLine = newLine;
+			break;
 		}
-	}
-
-	if (!found && beforeLines.length !== afterLines.length) {
-		firstChangedLine = Math.min(afterLines.length, beforeLines.length + 1);
+		newLine++;
 	}
 
 	return { diff, firstChangedLine };
@@ -54,68 +230,24 @@ export function generateUnifiedPatch(
 	return syntheticUnifiedDiff(filePath, before, after);
 }
 
-/** Generate a minimal unified diff (no file headers beyond the basic ones). */
+/** Generate a unified diff between two file states (multi-hunk, 3 context lines). */
 export function syntheticUnifiedDiff(
 	filePath: string,
 	before: string | null,
 	after: string,
 ): string {
-	const beforeLines = (before ?? "").split("\n");
-	const afterLines = after.split("\n");
 	const beforeLabel =
 		before === null ? "/dev/null" : `a/${path.basename(filePath)}`;
 	const afterLabel = `b/${path.basename(filePath)}`;
-
-	let prefix = 0;
-	while (
-		prefix < beforeLines.length &&
-		prefix < afterLines.length &&
-		beforeLines[prefix] === afterLines[prefix]
-	) {
-		prefix++;
-	}
-
-	let beforeSuffix = beforeLines.length - 1;
-	let afterSuffix = afterLines.length - 1;
-	while (
-		beforeSuffix >= prefix &&
-		afterSuffix >= prefix &&
-		beforeLines[beforeSuffix] === afterLines[afterSuffix]
-	) {
-		beforeSuffix--;
-		afterSuffix--;
-	}
-
-	const contextBefore = Math.max(0, prefix - 3);
-	const contextAfterBefore = Math.min(beforeLines.length - 1, beforeSuffix + 3);
-	const contextAfterAfter = Math.min(afterLines.length - 1, afterSuffix + 3);
-	const oldStart = contextBefore + 1;
-	const newStart = contextBefore + 1;
-	const oldCount = Math.max(0, contextAfterBefore - contextBefore + 1);
-	const newCount = Math.max(0, contextAfterAfter - contextBefore + 1);
-
-	const out = [
-		`--- ${beforeLabel}`,
-		`+++ ${afterLabel}`,
-		`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
-	];
-
-	for (let i = contextBefore; i < prefix; i++)
-		out.push(` ${beforeLines[i] ?? ""}`);
-	for (let i = prefix; i <= beforeSuffix; i++)
-		out.push(`-${beforeLines[i] ?? ""}`);
-	for (let i = prefix; i <= afterSuffix; i++)
-		out.push(`+${afterLines[i] ?? ""}`);
-
-	const afterContextStart = Math.max(prefix, afterSuffix + 1);
-	for (let i = afterContextStart; i <= contextAfterAfter; i++)
-		out.push(` ${afterLines[i] ?? ""}`);
-
-	return out.join("\n");
+	const ops: DiffOp[] =
+		before === null
+			? after.split("\n").map((line) => ({ type: "add" as const, line }))
+			: diffOps(before.split("\n"), after.split("\n"));
+	return renderUnified(beforeLabel, afterLabel, ops);
 }
 
 /** Summarize a diff for display when it's too large. */
-export function summarizeDiff(diff: string, maxChars = 12000): string {
+export function summarizeDiff(diff: string, maxChars = 512000): string {
 	if (!diff.trim()) return "(no diff)";
 	if (diff.length <= maxChars) return diff;
 	return diff.slice(0, maxChars) + "\n\n...(truncated)";

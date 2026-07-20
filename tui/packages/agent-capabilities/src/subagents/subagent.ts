@@ -12,7 +12,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LLMBackend } from "@logician/agent-core/core/backend.ts";
-import { runAgentLoop } from "@logician/agent-core/core/agent-loop-runner.ts";
 import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import type {
 	AgentConfig,
@@ -20,6 +19,12 @@ import type {
 	Message,
 	Tool,
 } from "@logician/agent-core";
+import {
+	budgetFromArgs,
+	contractFromArgs,
+	DELEGATION_CONTRACT_PROPERTIES,
+	runDelegatedAgent,
+} from "./delegation-runtime.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────
 
@@ -33,6 +38,9 @@ export interface AgentDefinition {
 	/** Model override (must be in the parent's model list to take effect). */
 	model?: string;
 	maxIterations?: number;
+	maxExecutionTimeMs?: number;
+	maxToolCalls?: number;
+	toolLimits?: Record<string, number>;
 }
 
 const GENERIC_SUBAGENT_PROMPT =
@@ -69,6 +77,9 @@ interface AgentFrontmatter {
 	tools?: string[] | string;
 	model?: string;
 	"max-turns"?: number;
+	"max-execution-seconds"?: number;
+	"max-tool-calls"?: number;
+	"tool-limits"?: Record<string, number>;
 	[key: string]: unknown;
 }
 
@@ -124,6 +135,19 @@ export async function loadAgentDefinitions(
 					maxIterations:
 						typeof frontmatter["max-turns"] === "number"
 							? frontmatter["max-turns"]
+							: undefined,
+					maxExecutionTimeMs:
+						typeof frontmatter["max-execution-seconds"] === "number"
+							? frontmatter["max-execution-seconds"] * 1000
+							: undefined,
+					maxToolCalls:
+						typeof frontmatter["max-tool-calls"] === "number"
+							? frontmatter["max-tool-calls"]
+							: undefined,
+					toolLimits:
+						typeof frontmatter["tool-limits"] === "object" &&
+						frontmatter["tool-limits"] !== null
+							? frontmatter["tool-limits"]
 							: undefined,
 				});
 			} catch {
@@ -194,6 +218,7 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 						"Agent definition to use (default: general). Use explorer for " +
 						"read-only research.",
 				},
+				...DELEGATION_CONTRACT_PROPERTIES,
 			},
 			required: ["task"],
 		},
@@ -254,47 +279,46 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 			const backend = def.model
 				? deps.backend.withModel(def.model)
 				: deps.backend;
-			let turns = 0;
 
 			try {
-				const newMessages = await runAgentLoop(
-					{
-						systemPrompt: childConfig.systemPrompt,
-						messages: [],
-						tools: childConfig.tools,
-						cwd: childConfig.cwd,
-					},
-					[{ role: "user", content: task } satisfies Message],
-					{
-						...childConfig,
-						backend,
-						maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
-						signal: ctx.signal,
-					},
-					(event) => {
-						if (event.type === "turn_start") turns++;
-						childConfig.onEvent?.(event);
-					},
-				);
-				const final = [...newMessages]
-					.reverse()
-					.find((m) => m.role === "assistant" && m.content?.trim());
-				const result = truncateResult(
-					final?.content?.trim() || "(subagent produced no final message)",
-				);
+				const run = await runDelegatedAgent({
+					task,
+					config: childConfig,
+					backend,
+					tools: childConfig.tools ?? [],
+					maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
+					signal: ctx.signal,
+					contract: contractFromArgs(args),
+					budget: budgetFromArgs(args, {
+						timeoutMs: def.maxExecutionTimeMs,
+						maxToolCalls: def.maxToolCalls,
+						toolLimits: def.toolLimits,
+					}),
+					onEvent: (event) => childConfig.onEvent?.(event),
+				});
+				const result = truncateResult(run.content);
 				deps.emit({
 					type: "subagent_end",
 					agentId,
 					agent: def.name,
 					result,
-					turns,
+					turns: run.turns,
+					isError: run.status !== "completed",
 				});
 				return {
 					content: result,
 					details: {
 						agent: def.name,
 						agentId,
-						metrics: { turns },
+						status: run.status,
+						metrics: {
+							turns: run.turns,
+							durationMs: run.durationMs,
+							toolCalls: run.toolCalls,
+							toolCallsByName: run.toolCallsByName,
+							validationAttempts: run.validationAttempts,
+						},
+						acceptance: run.acceptance,
 					},
 				};
 			} catch (e: unknown) {

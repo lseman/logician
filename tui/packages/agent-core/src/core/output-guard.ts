@@ -32,6 +32,8 @@ export interface OutputGuardConfig {
 	maxEmptyResponses?: number;
 	/** Max consecutive non-committal assistant responses before aborting (default 3). */
 	maxNonCommittalResponses?: number;
+	/** Context-usage fraction that triggers budget_exhausted (default 0.95). */
+	budgetThreshold?: number;
 	/** Hook to trigger compaction. Returns tokens saved, or null if no compaction. */
 	onCompact?: () => Promise<number | null>;
 	/** Emit events to the UI/event bus. */
@@ -65,6 +67,7 @@ const DEFAULT_CONFIG: Required<
 	autoCompactOnContextFull: true,
 	maxEmptyResponses: 3,
 	maxNonCommittalResponses: 3,
+	budgetThreshold: 0.95,
 };
 
 export class OutputGuard {
@@ -290,7 +293,7 @@ export class OutputGuard {
 			});
 
 			// Budget guard: if usage exceeds threshold, stop
-			if (tokensUsed > maxTokens * 0.95) {
+			if (tokensUsed > maxTokens * (this.config.budgetThreshold ?? 0.95)) {
 				this.emitEvent({
 					type: "budget_exhausted",
 					usedTokens: tokensUsed,

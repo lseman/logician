@@ -4,7 +4,6 @@ import type { AgentConfig, AgentEvent, AgentHooks, Message } from "../core/types
 
 export interface HarnessQueueHookDependencies {
 	messageDelivery: MessageDeliveryManager;
-	nextTurnQueue: string[];
 	onQueueChange(): void;
 	onSavePoint?(): void;
 	subscribers: ReadonlySet<(event: AgentEvent) => void>;
@@ -20,13 +19,6 @@ export function withHarnessQueueHooks(
 		return texts.map(createUserMessage);
 	};
 	const internalHooks: AgentHooks = {
-		transformContext: ({ messages }) => {
-			const pending = deps.nextTurnQueue.splice(0);
-			if (!pending.length) return undefined;
-			deps.onQueueChange();
-			const last = Math.max(0, messages.length - 1);
-			return { messages: [...messages.slice(0, last), ...pending.map(createUserMessage), ...messages.slice(last)] };
-		},
 		getSteeringMessages: async () => inject(deps.messageDelivery.afterTurn().map((message) => message.content)),
 		getFollowUpMessages: async () => inject(deps.messageDelivery.onIdle().map((message) => message.content)),
 	};

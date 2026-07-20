@@ -120,6 +120,27 @@ export interface LabelSessionEntry {
 	label?: string;
 }
 
+export type OperationJournalEventType =
+	| "operation_start"
+	| "operation_finish"
+	| "operation_interrupted"
+	| "turn_start"
+	| "turn_end"
+	| "tool_start"
+	| "tool_end";
+
+export interface OperationJournalEvent {
+	version: 1;
+	id: string;
+	type: OperationJournalEventType;
+	operationId: string;
+	timestamp: number;
+	turnId?: string;
+	toolCallId?: string;
+	toolName?: string;
+	status?: string;
+}
+
 export type SessionEntry =
 	| MessageSessionEntry
 	| ModelChangeSessionEntry
@@ -253,6 +274,41 @@ export class Session {
 				"utf8",
 			);
 		}
+	}
+
+	appendJournalEvent(
+		event: Omit<OperationJournalEvent, "version" | "id" | "timestamp">,
+	): OperationJournalEvent {
+		const persisted: OperationJournalEvent = {
+			version: 1,
+			id: randomUUID(),
+			timestamp: Date.now(),
+			...event,
+		};
+		appendFileSync(
+			join(this.dir, "operations.jsonl"),
+			`${JSON.stringify(persisted)}\n`,
+			"utf8",
+		);
+		return persisted;
+	}
+
+	/** Load durable lifecycle records, ignoring only an incomplete final line. */
+	loadJournalEvents(): OperationJournalEvent[] {
+		const journalPath = join(this.dir, "operations.jsonl");
+		if (!existsSync(journalPath)) return [];
+		const lines = readFileSync(journalPath, "utf8").split("\n");
+		const events: OperationJournalEvent[] = [];
+		for (let index = 0; index < lines.length; index++) {
+			const line = lines[index].trim();
+			if (!line) continue;
+			try {
+				events.push(JSON.parse(line) as OperationJournalEvent);
+			} catch (error) {
+				if (index !== lines.length - 1) throw error;
+			}
+		}
+		return events;
 	}
 
 	// ── Core operations ─────────────────────────────────────────────────

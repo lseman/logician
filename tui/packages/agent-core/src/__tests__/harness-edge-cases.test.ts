@@ -74,6 +74,36 @@ void test("setSystemPrompt takes effect on the next turn", async () => {
 	assert.ok(systemPrompts[1].includes("new system prompt"));
 });
 
+void test("runtime config changes take effect at the next save point", async () => {
+	let harness!: AgentHarness;
+	const temperatures: number[] = [];
+	const prompts: string[] = [];
+	const backend = new FakeBackend([
+		(messages, options) => {
+			temperatures.push(options.temperature ?? -1);
+			prompts.push(String(messages.find((message) => message.role === "system")?.content ?? ""));
+			harness.setTemperature(1.25);
+			harness.setSystemPrompt("refreshed prompt");
+			return {
+				content: "",
+				toolCalls: [{ id: "call_1", name: "noop", arguments: "{}" }],
+				stopReason: "stop",
+			};
+		},
+		(messages, options) => {
+			temperatures.push(options.temperature ?? -1);
+			prompts.push(String(messages.find((message) => message.role === "system")?.content ?? ""));
+			return textResponse("done");
+		},
+	]);
+	harness = makeHarness(backend);
+
+	await harness.prompt("work");
+	assert.deepEqual(temperatures, [0.7, 1.25]);
+	assert.equal(prompts[0], "test");
+	assert.equal(prompts[1], "refreshed prompt");
+});
+
 void test("steer outside a turn throws HarnessBusyError", () => {
 	const harness = makeHarness(new FakeBackend([]));
 	assert.throws(() => harness.steer("now"), HarnessBusyError);

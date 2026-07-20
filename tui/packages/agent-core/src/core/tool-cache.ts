@@ -2,11 +2,12 @@
 // LRU cache for tool execution results. Skips re-executing identical tool calls
 // (same name + same parsed arguments). Only caches successful results.
 //
-// Supports mtime-based invalidation: when a file changes on disk, all cached
-// results that depend on that file are automatically invalidated.
+// Caching is opt-in per tool (Tool.cacheable) — the registry never consults
+// this cache for tools with side effects or time-varying output.
 //
-// Supports semantic caching: for read operations, uses content fingerprinting
-// to detect similar file content and reuse cached results.
+// Entries can carry an mtime sentinel; the registry passes the current
+// sentinel on lookup and a mismatch (file changed on disk) invalidates the
+// entry.
 
 type Sortable = unknown;
 
@@ -33,45 +34,6 @@ function canonicalizeArgs(args: string): string {
 	}
 }
 
-// ── Semantic Cache for Read Operations ──────────────────────────────────────
-// Simple content fingerprinting using rolling hash + n-gram signature.
-// Used for read_file and similar operations to detect similar content.
-
-export function computeContentFingerprint(content: string): string {
-	if (content.length === 0) return "empty";
-	// Normalize: strip trailing whitespace per line, normalize newlines
-	const normalized = content
-		.split("\n")
-		.map((line) => line.trimEnd())
-		.join("\n");
-	// Compute simple hash of first/last 500 chars + length
-	const head = normalized.slice(0, 500);
-	const tail = normalized.slice(Math.max(0, normalized.length - 500));
-	const len = normalized.length;
-	// Simple hash function
-	let hash = 0;
-	const combined = `${len}:${head}:${tail}`;
-	for (let i = 0; i < combined.length; i++) {
-		const char = combined.charCodeAt(i);
-		hash = ((hash << 5) - hash + char) | 0;
-	}
-	return `fp:${Math.abs(hash).toString(16).padStart(8, "0")}:${len}`;
-}
-
-function computeSimilarityScore(fp1: string, fp2: string): number {
-	// Extract length from fingerprints
-	const match1 = fp1.match(/fp:[a-f0-9]{8}:(\d+)/);
-	const match2 = fp2.match(/fp:[a-f0-9]{8}:(\d+)/);
-	if (!match1 || !match2) return 0;
-	const len1 = parseInt(match1[1], 10);
-	const len2 = parseInt(match2[1], 10);
-	if (len1 === 0 || len2 === 0) return 0;
-	// Jaccard-like similarity based on length ratio
-	const minLen = Math.min(len1, len2);
-	const maxLen = Math.max(len1, len2);
-	return minLen / maxLen;
-}
-
 export interface CacheEntry {
 	result: string;
 	isError: boolean;
@@ -86,32 +48,29 @@ export interface CacheStats {
 	misses: number;
 	evictions: number;
 	hitRate: number;
-	semanticHits: number;
 }
 
 export class ToolResultCache {
 	private cache = new Map<string, CacheEntry>();
-	private semanticCache = new Map<
-		string,
-		{ fingerprint: string; key: string }[]
-	>();
 	private maxSize: number;
 	private defaultTtlMs: number;
 	private hits = 0;
 	private misses = 0;
 	private evictions = 0;
-	private semanticHits = 0;
 
 	constructor(maxSize = 2000, defaultTtlMs = 60_000) {
 		this.maxSize = maxSize;
 		this.defaultTtlMs = defaultTtlMs;
 	}
 
-	/** Look up a cached result. Returns null if not found, expired, or error. */
+	/**
+	 * Look up a cached result. Returns null if not found, expired, error, or
+	 * stale (stored mtime sentinel differs from `currentMtimeKey`).
+	 */
 	get(
 		toolName: string,
 		args: string,
-		contentFingerprint?: string,
+		currentMtimeKey?: string,
 	): CacheEntry | null {
 		const key = `${toolName}::${canonicalizeArgs(args)}`;
 		const entry = this.cache.get(key);
@@ -128,30 +87,14 @@ export class ToolResultCache {
 				this.misses++;
 				return null;
 			}
+			// Mtime check: the underlying file changed since the entry was stored
+			if (entry.mtimeKey && entry.mtimeKey !== currentMtimeKey) {
+				this.cache.delete(key);
+				this.misses++;
+				return null;
+			}
 			this.hits++;
 			return entry;
-		}
-
-		// Semantic cache fallback for read operations
-		if (toolName === "read_file" && contentFingerprint) {
-			const candidates = this.semanticCache.get(toolName) || [];
-			for (const candidate of candidates) {
-				const sim = computeSimilarityScore(
-					contentFingerprint,
-					candidate.fingerprint,
-				);
-				if (sim >= 0.85) {
-					const entry = this.cache.get(candidate.key);
-					if (
-						entry &&
-						!entry.isError &&
-						!(entry.expiresAt && Date.now() > entry.expiresAt)
-					) {
-						this.semanticHits++;
-						return entry;
-					}
-				}
-			}
 		}
 
 		this.misses++;
@@ -165,7 +108,6 @@ export class ToolResultCache {
 		result: string,
 		isError: boolean,
 		mtimeKey?: string,
-		contentFingerprint?: string,
 	): void {
 		if (isError) return; // never cache errors
 		const key = `${toolName}::${canonicalizeArgs(args)}`;
@@ -175,12 +117,6 @@ export class ToolResultCache {
 			if (firstKey) {
 				this.cache.delete(firstKey);
 				this.evictions++;
-				// Also remove from semantic cache
-				const semCache = this.semanticCache.get(firstKey.split("::")[0]);
-				if (semCache) {
-					const idx = semCache.findIndex((c) => c.key === firstKey);
-					if (idx !== -1) semCache.splice(idx, 1);
-				}
 			}
 		}
 		this.cache.set(key, {
@@ -189,30 +125,6 @@ export class ToolResultCache {
 			expiresAt: Date.now() + this.defaultTtlMs,
 			mtimeKey,
 		});
-		// Index for semantic cache if read operation
-		if (toolName === "read_file" && contentFingerprint) {
-			if (!this.semanticCache.has(toolName)) {
-				this.semanticCache.set(toolName, []);
-			}
-			const entries = this.semanticCache.get(toolName)!;
-			entries.push({ fingerprint: contentFingerprint, key });
-			// Keep semantic cache size bounded
-			if (entries.length > this.maxSize / 2) {
-				entries.shift();
-			}
-		}
-	}
-
-	/** Invalidate all entries that share the same mtime sentinel. */
-	invalidByMtime(mtimeKey: string): number {
-		let invalidated = 0;
-		for (const [key, entry] of this.cache) {
-			if (entry.mtimeKey === mtimeKey) {
-				this.cache.delete(key);
-				invalidated++;
-			}
-		}
-		return invalidated;
 	}
 
 	/** Clear the entire cache. */
@@ -233,7 +145,6 @@ export class ToolResultCache {
 			misses: this.misses,
 			evictions: this.evictions,
 			hitRate: total > 0 ? (this.hits / total) * 100 : 0,
-			semanticHits: this.semanticHits,
 		};
 	}
 
@@ -242,6 +153,5 @@ export class ToolResultCache {
 		this.hits = 0;
 		this.misses = 0;
 		this.evictions = 0;
-		this.semanticHits = 0;
 	}
 }

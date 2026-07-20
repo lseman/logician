@@ -8,7 +8,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LLMBackend } from "@logician/agent-core/core/backend.ts";
-import { runAgentLoop } from "@logician/agent-core/core/agent-loop-runner.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -16,6 +15,12 @@ import type {
 	Tool,
 } from "@logician/agent-core";
 import type { AgentDefinition } from "./subagent.ts";
+import {
+	budgetFromArgs,
+	contractFromArgs,
+	DELEGATION_CONTRACT_PROPERTIES,
+	runDelegatedAgent,
+} from "./delegation-runtime.ts";
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
@@ -186,6 +191,7 @@ export function createCoordinateSubagentsTool(
 								type: "string",
 								description: "Unique identifier for this task (e.g., 'task-a', 'task-b').",
 							},
+							...DELEGATION_CONTRACT_PROPERTIES,
 						},
 						required: ["task", "id"],
 					},
@@ -284,35 +290,23 @@ export function createCoordinateSubagentsTool(
 					const backend = def.model
 						? deps.backend.withModel(def.model)
 						: deps.backend;
-					let turns = 0;
-
 					try {
-						const newMessages = await runAgentLoop(
-							{
-								systemPrompt: childConfig.systemPrompt,
-								messages: [],
-								tools: childConfig.tools,
-								cwd: worktreeDir,
-							},
-							[{ role: "user", content: task } satisfies Message],
-							{
-								...childConfig,
-								backend,
-								maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
-								signal: ctx.signal,
-							},
-							(event) => {
-								if (event.type === "turn_start") turns++;
-								childConfig.onEvent?.(event);
-							},
-						);
-						const final = [...newMessages]
-							.reverse()
-							.find((m) => m.role === "assistant" && m.content?.trim());
-						const result = truncateResult(
-							final?.content?.trim() ||
-								`(coordinated subagent ${taskId} produced no final message)`,
-						);
+						const run = await runDelegatedAgent({
+							task,
+							config: childConfig,
+							backend,
+							tools: childConfig.tools ?? [],
+							maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
+							signal: ctx.signal,
+							contract: contractFromArgs(taskArg),
+							budget: budgetFromArgs(taskArg, {
+								timeoutMs: def.maxExecutionTimeMs,
+								maxToolCalls: def.maxToolCalls,
+								toolLimits: def.toolLimits,
+							}),
+							onEvent: (event) => childConfig.onEvent?.(event),
+						});
+						const result = truncateResult(run.content);
 
 						// Capture worktree diff for the caller to review/apply later.
 						let diff = "";
@@ -340,7 +334,8 @@ export function createCoordinateSubagentsTool(
 							agentId,
 							agent: def.name,
 							result,
-							turns,
+							turns: run.turns,
+							isError: run.status !== "completed",
 						});
 
 						return {
@@ -349,8 +344,15 @@ export function createCoordinateSubagentsTool(
 							result,
 							worktree: worktreeDir,
 							branch: worktreeBranch,
-							turns,
+							turns: run.turns,
 							changes: diff || "(no diff)",
+							status: run.status,
+							metrics: {
+								durationMs: run.durationMs,
+								toolCalls: run.toolCalls,
+								toolCallsByName: run.toolCallsByName,
+								validationAttempts: run.validationAttempts,
+							},
 						};
 					} catch (e: unknown) {
 						const message = `Error: coordinated subagent ${taskId} failed: ${(e as Error).message}`;
@@ -367,7 +369,7 @@ export function createCoordinateSubagentsTool(
 							result: message,
 							worktree: worktreeDir,
 							branch: worktreeBranch,
-							turns,
+							turns: 0,
 							errors: message,
 						};
 					}

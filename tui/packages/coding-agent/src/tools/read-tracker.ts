@@ -3,9 +3,16 @@
 // tool can detect a file that changed underneath it since it was read and refuse
 // to clobber the change. Inspired by openclaude's FILE_UNEXPECTEDLY_MODIFIED_ERROR.
 
-import { realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 
-const lastReadMtime = new Map<string, number>();
+interface ReadSnapshot {
+	mtimeMs: number;
+	size: number;
+	sha256: string;
+}
+
+const lastReadSnapshot = new Map<string, ReadSnapshot>();
 
 function keyFor(absolutePath: string): string {
 	try {
@@ -18,10 +25,21 @@ function keyFor(absolutePath: string): string {
 /** Record that the model just read this file at its current mtime. */
 export function recordRead(absolutePath: string): void {
 	try {
-		lastReadMtime.set(keyFor(absolutePath), statSync(absolutePath).mtimeMs);
+		const info = statSync(absolutePath);
+		const sha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+		lastReadSnapshot.set(keyFor(absolutePath), {
+			mtimeMs: info.mtimeMs,
+			size: info.size,
+			sha256,
+		});
 	} catch {
 		// File vanished between read and stat; nothing to record.
 	}
+}
+
+/** Returns true if the model has read (or written) this file this session. */
+export function hasBeenRead(absolutePath: string): boolean {
+	return lastReadSnapshot.has(keyFor(absolutePath));
 }
 
 /**
@@ -31,10 +49,13 @@ export function recordRead(absolutePath: string): void {
  */
 export function isStaleSinceRead(absolutePath: string): boolean {
 	const key = keyFor(absolutePath);
-	const recorded = lastReadMtime.get(key);
+	const recorded = lastReadSnapshot.get(key);
 	if (recorded === undefined) return false;
 	try {
-		return statSync(absolutePath).mtimeMs > recorded;
+		const info = statSync(absolutePath);
+		if (info.mtimeMs !== recorded.mtimeMs || info.size !== recorded.size) return true;
+		const sha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+		return sha256 !== recorded.sha256;
 	} catch {
 		return false;
 	}

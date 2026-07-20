@@ -4,7 +4,11 @@ import { envNumber, tableRow } from "../tui-utils.ts";
 // Translates agent-core events to the same shapes the transcript expects.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { readdir as readdirAsync } from "node:fs/promises";
+import {
+	readFile as readFileAsync,
+	readdir as readdirAsync,
+} from "node:fs/promises";
+import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import os from "node:os";
 import path from "node:path";
 import { OpenAIBackend } from "@logician/agent-core/core/backend.ts";
@@ -445,6 +449,7 @@ export class AgentCoreBridge {
 	private defaultTools: Tool[];
 	private mcpManager = new McpManager();
 	private mcpLoaded = false;
+	private mcpLoadPromise: Promise<void> | null = null;
 	private mcpServerCount = 0;
 	private mcpErrors: string[] = [];
 	private baseSystemPrompt: string;
@@ -465,6 +470,7 @@ export class AgentCoreBridge {
 	private agentDefs: AgentDefinition[] = [];
 	private parallelSpawnOptions: ParallelSpawnOptions = {};
 	private loadedSkills: Skill[] = [];
+	private enabledPluginRoots: Array<{ name: string; installPath: string }> = [];
 	private permissionManager: PermissionManager;
 	// Pending interactive permission requests, keyed by tool_call_id; resolved
 	// by respondToPermission() from the UI.
@@ -950,9 +956,9 @@ export class AgentCoreBridge {
 	}
 
 	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
-	abort(): void {
+	async abort(): Promise<void> {
 		// harness.abort() clears steering/follow-up and emits onQueueChange.
-		this.harness?.abort();
+		await this.harness?.abort();
 	}
 
 	/** Execute a slash command (sends as chat message to the agent). */
@@ -1072,10 +1078,17 @@ export class AgentCoreBridge {
 	invokeSkill(name: string, args: string): boolean {
 		const skill = findSkillByName(this.loadedSkills, name);
 		if (!skill) return false;
+		const trimmedArgs = args.trim();
+		// Claude Code command convention: $ARGUMENTS in the body is replaced with
+		// the user's arguments instead of appending an instructions line.
+		const substitutes = skill.content.includes("$ARGUMENTS");
+		const effective = substitutes
+			? { ...skill, content: skill.content.replaceAll("$ARGUMENTS", trimmedArgs) }
+			: skill;
 		const message = formatSkillInvocation(
-			skill,
-			args.trim()
-				? `User arguments for this skill invocation: ${args.trim()}`
+			effective,
+			trimmedArgs && !substitutes
+				? `User arguments for this skill invocation: ${trimmedArgs}`
 				: undefined,
 		);
 		this.sendMessage(message).catch((err) => this.errorCb?.(err));
@@ -1454,7 +1467,7 @@ export class AgentCoreBridge {
 	cancel(): void {
 		// A turn blocked on an approval must unblock to abort cleanly.
 		this.denyPendingPermissions();
-		this.harness?.abort();
+		void this.harness?.abort().catch((error) => this.errorCb?.(error));
 	}
 
 	/** Manual context compaction. Returns { tokensSaved, tokensBefore, tokensAfter } or null if nothing to compact. */
@@ -1632,13 +1645,27 @@ export class AgentCoreBridge {
 	async init(): Promise<Record<string, unknown>> {
 		await this.runStartupHooksOnce();
 		if (this.mcpEager) {
-			await this.loadMcpToolsOnce();
+			// MCP transports can take seconds to connect. Do not hold the opening
+			// screen behind external servers; the first turn still awaits this same
+			// promise before building its tool snapshot.
+			void this.loadMcpToolsOnce().then(
+				() => {
+					this.emit({
+						type: "notice",
+						level: this.mcpErrors.length ? "warn" : "info",
+						label: "MCP",
+						text: `Loaded ${this.mcpServerCount} server(s).`,
+					});
+				},
+				(error) => this.reportError(error),
+			);
 		}
 		const info: Record<string, unknown> = {
 			agent_name: "logician",
 			model: this.config.model,
 			base_url: this.config.baseUrl,
 			mcp_deferred: !this.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
+			mcp_loading: this.mcpLoadPromise !== null && !this.mcpLoaded,
 			tools:
 				this.harness?.tools?.list().map((t: Tool) => t.name) ||
 				this.defaultTools.map((t) => t.name),
@@ -1660,6 +1687,7 @@ export class AgentCoreBridge {
 			hooks_enabled: this.config.runtimeHooksEnabled !== false,
 			hook_transcript_path: this.config.hookTranscriptPath || "",
 			startup_plugins_loaded: this.startupPluginCount,
+			startup_plugins: this.enabledPluginRoots.map((plugin) => plugin.name),
 			startup_hooks_loaded: this.startupHookResult?.hook_count || 0,
 			startup_hook_contexts: this.startupHookResult?.additional_contexts || [],
 			startup_hook_messages: this.startupHookResult?.context_messages || [],
@@ -1670,6 +1698,12 @@ export class AgentCoreBridge {
 				? await this.countInstalledSkills()
 				: 0,
 			skills_visible: !!this.skillsContext,
+			loaded_skills: this.loadedSkills.map((skill) => ({
+				name: skill.name,
+				slash_name: skill.slashName,
+				description: skill.description,
+				model_visible: !skill.disableModelInvocation,
+			})),
 		};
 		// Explicitly signal ready so the TUI status bar doesn't get stuck in
 		// streaming after init.
@@ -1792,17 +1826,22 @@ export class AgentCoreBridge {
 
 	private async loadMcpToolsOnce(): Promise<void> {
 		if (this.mcpLoaded || process.env.LOGICIAN_MCP === "0") return;
-		this.mcpLoaded = true;
-		const result = await this.mcpManager.load(this.config.cwd || process.cwd());
-		this.mcpServerCount = result.servers;
-		this.mcpErrors = result.errors;
-		if (result.tools.length) {
-			const existing = new Set(this.defaultTools.map((tool) => tool.name));
-			const newTools = result.tools.filter((tool) => !existing.has(tool.name));
-			this.defaultTools = [...this.defaultTools, ...newTools];
-			this.config.tools = this.defaultTools;
-			this.rebuildBaseSystemPrompt();
+		if (!this.mcpLoadPromise) {
+			this.mcpLoadPromise = (async () => {
+				const result = await this.mcpManager.load(this.config.cwd || process.cwd());
+				this.mcpServerCount = result.servers;
+				this.mcpErrors = result.errors;
+				if (result.tools.length) {
+					const existing = new Set(this.defaultTools.map((tool) => tool.name));
+					const newTools = result.tools.filter((tool) => !existing.has(tool.name));
+					this.defaultTools = [...this.defaultTools, ...newTools];
+					this.config.tools = this.defaultTools;
+					this.rebuildBaseSystemPrompt();
+				}
+				this.mcpLoaded = true;
+			})();
 		}
+		await this.mcpLoadPromise;
 	}
 
 	private rebuildBaseSystemPrompt(): void {
@@ -1852,13 +1891,21 @@ export class AgentCoreBridge {
 
 		// Collect skills directories from all enabled, on-disk plugins.
 		const skillsDirs: string[] = [];
+		const enabledPlugins: Array<{ name: string; installPath: string }> = [];
 		for (const plugin of plugins) {
 			const enabled = plugin.enabled !== false;
 			const onDisk = plugin.on_disk !== false;
 			const installPath = String(plugin.install_path || "");
+			const pluginName = String(plugin.name || plugin.plugin_id || "");
 			if (!enabled || !onDisk || !installPath) continue;
+			enabledPlugins.push({ name: pluginName, installPath });
 			skillsDirs.push(path.join(installPath, "skills"));
 		}
+		this.enabledPluginRoots = enabledPlugins;
+
+		// Load user-global skills independently of installed plugins.
+		// This is the shared agents convention used by Codex and other harnesses.
+		skillsDirs.push(path.join(os.homedir(), ".agents", "skills"));
 
 		// Also discover project-local skills by walking cwd ancestors.
 		// Missing directories are skipped silently by loadSkills.
@@ -1867,7 +1914,28 @@ export class AgentCoreBridge {
 
 		if (!skillsDirs.length) return;
 
-		const { skills, diagnostics } = await loadSkills(skillsDirs);
+		const { skills: rawSkills, diagnostics } = await loadSkills(skillsDirs);
+
+		// Namespace plugin skills as plugin:skill (Claude Code convention); the
+		// bare name stays available as an alias when unambiguous.
+		const skills = rawSkills.map((skill) => {
+			const owner = enabledPlugins.find((p) =>
+				skill.filePath.startsWith(p.installPath + path.sep),
+			);
+			if (!owner || !owner.name || skill.name.startsWith(`${owner.name}:`)) {
+				return skill;
+			}
+			return {
+				...skill,
+				name: `${owner.name}:${skill.name}`,
+				slashName: `${owner.name}:${skill.slashName}`,
+				aliases: [...(skill.aliases ?? []), skill.name],
+			};
+		});
+
+		// Claude Code plugin commands (commands/*.md) become user-invocable
+		// skills: /plugin:command or /command, never advertised to the model.
+		skills.push(...(await this.loadPluginCommands(enabledPlugins)));
 
 		// Log diagnostics to transcript for visibility.
 		for (const diag of diagnostics) {
@@ -1900,25 +1968,79 @@ export class AgentCoreBridge {
 		this.rebuildBaseSystemPrompt();
 	}
 
+	/**
+	 * Load Claude Code plugin commands (commands/*.md) as user-invocable
+	 * skill entries. Command bodies are prompt templates; $ARGUMENTS is
+	 * substituted at invocation time by invokeSkill.
+	 */
+	private async loadPluginCommands(
+		plugins: Array<{ name: string; installPath: string }>,
+	): Promise<Skill[]> {
+		const out: Skill[] = [];
+		for (const { name: pluginName, installPath } of plugins) {
+			const dir = path.join(installPath, "commands");
+			let entries: string[];
+			try {
+				entries = await readdirAsync(dir);
+			} catch {
+				continue;
+			}
+			for (const entry of entries) {
+				if (!entry.endsWith(".md")) continue;
+				const filePath = path.join(dir, entry);
+				let raw: string;
+				try {
+					raw = await readFileAsync(filePath, "utf8");
+				} catch {
+					continue;
+				}
+				const parsed = parseFrontmatter<Record<string, unknown>>(raw);
+				const frontmatter = parsed.ok ? parsed.value.frontmatter : {};
+				const body = parsed.ok ? parsed.value.body : raw;
+				const cmdName = entry.slice(0, -3);
+				const description =
+					typeof frontmatter.description === "string" &&
+					frontmatter.description.trim()
+						? frontmatter.description
+						: `Command from the ${pluginName} plugin.`;
+				out.push({
+					name: `${pluginName}:${cmdName}`,
+					displayName: cmdName,
+					description,
+					content: body,
+					filePath,
+					baseDir: dir,
+					slashName: `${pluginName}:${cmdName}`,
+					disableModelInvocation: true,
+					aliases: [cmdName],
+					source: "path",
+				});
+			}
+		}
+		return out;
+	}
+
 	private async runStartupHooksOnce(source = "startup"): Promise<void> {
-		if (this.startupHooksRan || this.config.runtimeHooksEnabled === false)
-			return;
+		if (this.startupHooksRan) return;
 		this.startupHooksRan = true;
 		const snapshot = await runPluginBackend("list", []);
 		this.startupPluginCount = (snapshot.plugins || []).filter((plugin) => {
 			return plugin.enabled !== false && plugin.on_disk !== false;
 		}).length;
-		const result = await runSessionStartHooks({
-			source,
-			session_id: this.sessionId,
-			transcript_path: this.config.hookTranscriptPath,
-			cwd: this.config.cwd || process.cwd(),
-		});
-		this.startupHookResult = result;
-		if (result.status !== "error") {
-			this.applyPluginHookContext(result);
+		if (this.config.runtimeHooksEnabled !== false) {
+			const result = await runSessionStartHooks({
+				source,
+				session_id: this.sessionId,
+				transcript_path: this.config.hookTranscriptPath,
+				cwd: this.config.cwd || process.cwd(),
+			});
+			this.startupHookResult = result;
+			if (result.status !== "error") {
+				this.applyPluginHookContext(result);
+			}
 		}
-		// Inject skills from plugins as a fallback when hooks produce no context
+		// Skills and agents are runtime resources, independent of whether command
+		// hooks are enabled.
 		await this.injectSkillsFromPlugins();
 		await this.injectSubagents();
 	}
@@ -1932,6 +2054,10 @@ export class AgentCoreBridge {
 		const cwd = this.config.cwd || process.cwd();
 		this.agentDefs = await loadAgentDefinitions([
 			path.join(cwd, ".logician", "agents"),
+			// Claude Code plugin agents (agents/*.md in each enabled plugin).
+			...this.enabledPluginRoots.map((p) =>
+				path.join(p.installPath, "agents"),
+			),
 		]);
 
 		// Inject subagent tools
@@ -2175,9 +2301,10 @@ export async function getSkillsDirs(cwd: string): Promise<string[]> {
 		// Plugin backend may not be ready during early reload
 	}
 
+	dirs.push(path.join(os.homedir(), ".agents", "skills"));
 	dirs.push(...getProjectSkillDirs(cwd));
 
-	return dirs;
+	return Array.from(new Set(dirs));
 }
 
 function getProjectSkillDirs(cwd: string): string[] {

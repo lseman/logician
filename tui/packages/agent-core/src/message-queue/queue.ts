@@ -72,11 +72,25 @@ export class MessageQueue {
 		return steering;
 	}
 
+	/** Remove and return the oldest steering message. */
+	dequeueOneSteering(): QueuedMessage[] {
+		const index = this.queue.findIndex((message) => message.type === "steering");
+		if (index < 0) return [];
+		return this.queue.splice(index, 1);
+	}
+
 	/** Remove and return all follow-up messages. */
 	dequeueFollowUp(): QueuedMessage[] {
 		const followUp = this.queue.filter((m) => m.type === "followUp");
 		this.queue = this.queue.filter((m) => m.type !== "followUp");
 		return followUp;
+	}
+
+	/** Remove and return the oldest follow-up message. */
+	dequeueOneFollowUp(): QueuedMessage[] {
+		const index = this.queue.findIndex((message) => message.type === "followUp");
+		if (index < 0) return [];
+		return this.queue.splice(index, 1);
 	}
 
 	remove(id: string): QueuedMessage | undefined {

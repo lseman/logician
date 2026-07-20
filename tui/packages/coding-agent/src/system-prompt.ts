@@ -272,7 +272,7 @@ In addition to the tools above, you may have access to other custom tools depend
 - Inspect before editing. Use list_files, find, grep, read_file, git status/diff, or bash as needed.
 - Use find to locate files by glob pattern (e.g. '**/*.test.ts'); use grep to search file contents.
 - For multi-step tasks, call the 'todo' tool to track the plan. Use 'create' action to add tasks, 'update' with 'id' and 'status' to progress work. Mark exactly one task 'in_progress' while working on it, complete it immediately when done. Use 'list' to check current state. Never start work without creating the task first.
-- For targeted changes, prefer edit_file with exact unique context.
+- For targeted changes, prefer edit_file with exact unique context. Read the file with read_file before editing or overwriting it. To rename a symbol throughout a file, set replaceAll: true on the edit.
 - For new files or complete rewrites, use write_file.
 - After writing or editing, read the changed area or use file_diff to verify the result. Mutation tools already return diffs; use those diffs to explain what changed.
 - Run the narrowest useful verification command after risky changes, such as tests, type checks, linters, or a smoke command.

@@ -28,7 +28,16 @@ export interface Tool {
 	parameters: Record<string, unknown>;
 	prepareArguments?: (args: unknown) => Record<string, unknown>;
 	executionMode?: ToolExecutionMode;
+	/** Opt-in result caching. Only pure, side-effect-free tools should set this. */
 	cacheable?: boolean;
+	/** Execution timeout in ms. Overrides the registry default; 0 disables. */
+	timeoutMs?: number;
+	/**
+	 * Per-call timeout in ms derived from the call's arguments (e.g. bash's
+	 * timeout parameter). Takes precedence over timeoutMs; return undefined to
+	 * fall through.
+	 */
+	resolveTimeoutMs?: (args: Record<string, unknown>) => number | undefined;
 	hookAliases?: string[];
 	readOnly?: boolean;
 	execute: (

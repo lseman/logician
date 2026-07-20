@@ -10,6 +10,11 @@ import type {
 	Message,
 	CompactableMessage,
 } from "./types.ts";
+import {
+	microCompactMessages as microCompactCompactable,
+	microCompactMaxChars,
+	truncateMiddle,
+} from "../compaction/compaction.ts";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -563,26 +568,21 @@ export function compactMessagesForContext(
 	};
 }
 
+// Delegates to the single micro-compaction implementation in
+// compaction/compaction.ts (role-aware caps, keeps recent messages intact).
 export function microCompactMessages(messages: Message[]): CompactionResult {
-	const tokensBefore = estimateMessageTokens(messages);
-	const out = messages.map((message) => compactLargeMessageContent(message));
-	const tokensAfter = estimateMessageTokens(out);
+	const result = microCompactCompactable(messages);
 	return {
-		messages: out,
-		tokensBefore,
-		tokensAfter,
-		changed: tokensAfter < tokensBefore,
+		messages: result.messages as Message[],
+		tokensBefore: result.tokensBefore,
+		tokensAfter: result.tokensAfter,
+		changed: result.changed,
 	};
 }
 
 function compactLargeMessageContent(message: Message): Message {
 	if (typeof message.content !== "string") return message;
-	const maxChars =
-		message.role === "tool"
-			? 6000
-			: message.role === "assistant"
-				? 10000
-				: 14000;
+	const maxChars = microCompactMaxChars(message.role);
 	if (message.content.length <= maxChars) return message;
 	return {
 		...message,
@@ -638,12 +638,6 @@ function messageToText(message: Message): string {
 	if (typeof message.content === "string") return message.content.trim();
 	if (message.content === null || message.content === undefined) return "";
 	return String(message.content).trim();
-}
-
-function truncateMiddle(text: string, maxChars: number): string {
-	if (text.length <= maxChars) return text;
-	const half = Math.max(1, Math.floor((maxChars - 32) / 2));
-	return `${text.slice(0, half)}\n...[compacted ${text.length - half * 2} chars]...\n${text.slice(-half)}`;
 }
 
 // ── File operations tracking ──────────────────────────────────────────

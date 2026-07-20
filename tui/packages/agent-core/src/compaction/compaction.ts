@@ -771,19 +771,37 @@ export function compactToFit(
 	return compactToFitSync(micro.messages, effectiveSettings);
 }
 
+// How many trailing messages micro-compaction leaves untouched — the model is
+// usually still acting on them.
+const MICRO_COMPACT_KEEP_RECENT = 6;
+
+export function microCompactMaxChars(role: string): number {
+	// Tool results tolerate the most trimming; user prompts the least — losing
+	// part of the task statement is worse than a long context.
+	if (role === "tool") return 4000;
+	if (role === "assistant") return 10000;
+	return 14000;
+}
+
+export function truncateMiddle(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const half = Math.max(1, Math.floor((maxChars - 32) / 2));
+	return `${text.slice(0, half)}\n...[compacted ${text.length - half * 2} chars]...\n${text.slice(-half)}`;
+}
+
 export function microCompactMessages(
 	messages: CompactableMessage[],
 ): CompactToFitResult {
 	const tokensBefore = estimateContextTokens(messages).tokens;
-	// Micro-compaction: trim oversized message bodies (up to 4000 chars each)
-	const trimmed = messages.map((m) => {
-		if (typeof m.content === "string" && m.content.length > 4000) {
-			return {
-				...m,
-				content: m.content.slice(0, 4000) + "\n\n[... truncated]",
-			};
-		}
-		return m;
+	// Micro-compaction: trim oversized bodies, role-aware. Recent messages are
+	// left intact; middle-truncation keeps both the head and the tail of long
+	// bodies (tool output tails often carry the error/summary).
+	const trimmed = messages.map((m, index) => {
+		if (index >= messages.length - MICRO_COMPACT_KEEP_RECENT) return m;
+		if (typeof m.content !== "string") return m;
+		const maxChars = microCompactMaxChars(m.role);
+		if (m.content.length <= maxChars) return m;
+		return { ...m, content: truncateMiddle(m.content, maxChars) };
 	});
 	const tokensAfter = estimateContextTokens(trimmed).tokens;
 	return {

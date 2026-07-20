@@ -1020,6 +1020,20 @@ export class LogicianTUI {
 		const hookCount = Number(state.startup_hooks_loaded || 0);
 		const mcpServerCount = Number(state.mcp_servers_loaded || 0);
 		const mcpToolCount = Number(state.mcp_tools_loaded || 0);
+		const plugins = Array.isArray(state.startup_plugins)
+			? state.startup_plugins.map((item) => String(item || "").trim()).filter(Boolean)
+			: [];
+		const skills = Array.isArray(state.loaded_skills)
+			? state.loaded_skills
+					.map((item) => {
+						if (!item || typeof item !== "object") return null;
+						const skill = item as Record<string, unknown>;
+						const slashName = String(skill.slash_name || skill.name || "").trim();
+						const description = String(skill.description || "").trim();
+						return slashName ? { slashName, description } : null;
+					})
+					.filter((item): item is { slashName: string; description: string } => item !== null)
+			: [];
 		const contexts = Array.isArray(state.startup_hook_contexts)
 			? state.startup_hook_contexts
 					.map((item) => String(item || "").trim())
@@ -1073,7 +1087,9 @@ export class LogicianTUI {
 			"## Startup",
 			`Plugins loaded: ${pluginCount}`,
 			`Startup hooks: ${hookCount}`,
-			state.mcp_deferred
+			state.mcp_loading
+				? "MCP: loading in background"
+				: state.mcp_deferred
 				? "MCP: deferred until first agent turn or /status"
 				: `MCP: ${mcpServerCount} server(s), ${mcpToolCount} tool(s)`,
 		];
@@ -1106,6 +1122,19 @@ export class LogicianTUI {
 		if (mcpErrors.length) {
 			lines.push("", "## MCP errors", ...mcpErrors.map((err) => `- ${err}`));
 		}
+
+		// Keep the inventory last so the transcript's initial scroll position shows
+		// what was loaded instead of ending on verbose startup-hook context.
+		lines.push(
+			"",
+			`## Plugins (${plugins.length})`,
+			plugins.length ? plugins.join(" · ") : "None",
+			"",
+			`## Skills (${skills.length})`,
+			skills.length
+				? skills.map((skill) => `/${skill.slashName}`).join(" · ")
+				: "None",
+		);
 
 		return lines.join("\n");
 	}

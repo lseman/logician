@@ -7,7 +7,6 @@ import {
 	convertToChatFormat,
 	createAssistantMessage,
 	createSystemMessage,
-	createToolResultMessage,
 	convertToLlm as defaultConvertToLlm,
 	compactMessagesForContext,
 	estimateChatPayloadTokens,
@@ -99,6 +98,8 @@ export interface RunAgentLoopConfig extends AgentConfig {
 		| Promise<{ messages?: Message[] } | undefined>
 		| { messages?: Message[] }
 		| undefined;
+	/** Refresh mutable harness configuration after a completed turn. */
+	refreshNextTurnConfig?: () => Promise<AgentConfig> | AgentConfig;
 	shouldStopAfterTurn?: (ctx: {
 		messages: Message[];
 		iteration: number;
@@ -428,13 +429,17 @@ export async function runAgentLoop(
 	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 	// ── P0-1: Shared tool result cache ─────────────────────────────────
 	const cache = new ToolResultCache(2000, 60_000);
-	const registry = new ToolRegistry({
-		cwd: context.cwd ?? config.cwd,
-		signal: config.signal,
-		onQuestionRequest: config.onQuestionRequest,
-		cache,
-	});
-	registry.registerMany(context.tools ?? config.tools ?? []);
+	const createRegistry = (tools: Tool[]): ToolRegistry => {
+		const next = new ToolRegistry({
+			cwd: context.cwd ?? config.cwd,
+			signal: config.signal,
+			onQuestionRequest: config.onQuestionRequest,
+			cache,
+		});
+		next.registerMany(tools);
+		return next;
+	};
+	let registry = createRegistry(context.tools ?? config.tools ?? []);
 
 	const outputGuard = config.outputGuard;
 	let iteration = 0;
@@ -599,10 +604,16 @@ export async function runAgentLoop(
 	if (shouldRunAcceptanceFinalization(resolved)) {
 		const accPrompt = formatAcceptancePrompt(resolved);
 		if (accPrompt) {
+			const existingSystem = messages
+				.filter((m) => m.role === "system")
+				.map((m) => m.content)
+				.join("\n\n");
 			messages = [
 				{
 					role: "system" as const,
-					content: accPrompt,
+					content: existingSystem
+						? `${existingSystem}\n\n${accPrompt}`
+						: accPrompt,
 					timestamp: Date.now(),
 				},
 				...messages.filter((m) => m.role !== "system"),
@@ -991,6 +1002,19 @@ export async function runAgentLoop(
 			// Reset output guard after each completed turn
 			outputGuard?.reset();
 
+			const refreshedConfig = await config.refreshNextTurnConfig?.();
+			if (refreshedConfig) {
+				Object.assign(config, refreshedConfig);
+				context.systemPrompt = refreshedConfig.systemPrompt;
+				messages = [
+					createSystemMessage(
+						refreshedConfig.systemPrompt ?? "You are a helpful assistant.",
+					),
+					...messages.filter((message) => message.role !== "system"),
+				];
+				registry = createRegistry(refreshedConfig.tools ?? []);
+			}
+
 			const prepared = await prepareMessages(
 				[
 					config.prepareNextTurn,
@@ -1314,7 +1338,8 @@ export async function runAgentLoop(
 			const satisfied = report?.criteriaSatisfied?.some(
 				(cs) =>
 					cs.id === c.id &&
-					(cs.status === "satisfied" || cs.status === "partial"),
+					(cs.status === "satisfied" ||
+						(c.severity === "recommended" && cs.status === "partial")),
 			);
 			return {
 				id: c.id,

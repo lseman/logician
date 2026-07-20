@@ -37,8 +37,7 @@ export class MessageDeliveryManager {
 			return this.queue.dequeueSteering();
 		}
 		// one-at-a-time: take the oldest message
-		const msgs = this.queue.dequeueSteering();
-		return msgs.length > 0 ? [msgs[0]] : [];
+		return this.queue.dequeueOneSteering();
 	}
 
 	/**
@@ -53,16 +52,14 @@ export class MessageDeliveryManager {
 		if (this.steeringMode === "all") {
 			results.push(...this.queue.dequeueSteering());
 		} else {
-			const msgs = this.queue.dequeueSteering();
-			if (msgs.length > 0) results.push(msgs[0]);
+			results.push(...this.queue.dequeueOneSteering());
 		}
 
 		// Then drain follow-up.
 		if (this.followUpMode === "all") {
 			results.push(...this.queue.dequeueFollowUp());
 		} else {
-			const msgs = this.queue.dequeueFollowUp();
-			if (msgs.length > 0) results.push(msgs[0]);
+			results.push(...this.queue.dequeueOneFollowUp());
 		}
 
 		return results;

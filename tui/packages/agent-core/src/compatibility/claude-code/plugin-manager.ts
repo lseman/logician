@@ -55,6 +55,8 @@ type PluginSettingsEntry = boolean | { enabled?: boolean };
 
 interface UserSettingsData {
 	plugins?: Record<string, PluginSettingsEntry>;
+	/** Claude Code's own enablement map (~/.claude/settings.json). */
+	enabledPlugins?: Record<string, boolean>;
 }
 
 export interface PluginCommandResult {
@@ -609,6 +611,10 @@ export class TsPluginManager {
 		) {
 			return configured.enabled;
 		}
+		// Fall back to Claude Code's own enablement map so plugins toggled in
+		// Claude Code behave the same here without re-configuring.
+		const claudeCode = this.loadClaudeCodeSettings().enabledPlugins?.[pluginId];
+		if (typeof claudeCode === "boolean") return claudeCode;
 		return undefined;
 	}
 
@@ -617,8 +623,17 @@ export class TsPluginManager {
 	}
 
 	private loadUserSettings(): UserSettingsData {
+		return this.readSettingsFile(this.settingsPath());
+	}
+
+	private loadClaudeCodeSettings(): UserSettingsData {
+		return this.readSettingsFile(
+			path.join(os.homedir(), ".claude", "settings.json"),
+		);
+	}
+
+	private readSettingsFile(settingsPath: string): UserSettingsData {
 		try {
-			const settingsPath = this.settingsPath();
 			if (!existsSync(settingsPath)) return {};
 			const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as unknown;
 			return raw && typeof raw === "object" ? (raw as UserSettingsData) : {};

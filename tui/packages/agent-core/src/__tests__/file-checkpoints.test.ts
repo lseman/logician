@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,8 +14,10 @@ import {
 	beginFileFrame,
 	clearFileFrames,
 	currentFrameSize,
+	recordBashMutations,
 	recordFileBeforeWrite,
 	restoreFileFrame,
+	snapshotBeforeBash,
 } from "../core/file-checkpoints.ts";
 
 void test("restore rewrites a modified file and deletes a created one", () => {
@@ -53,4 +62,63 @@ void test("restore with no frame returns null; recording without a frame is a no
 	assert.equal(restoreFileFrame(), null);
 	recordFileBeforeWrite("/tmp/whatever.txt");
 	assert.equal(currentFrameSize(), 0);
+});
+
+void test("bash mutations are captured via git snapshots and restored", () => {
+	clearFileFrames();
+	const dir = mkdtempSync(join(tmpdir(), "fcp-git-"));
+	execFileSync("git", ["init", "-q"], { cwd: dir });
+	const tracked = join(dir, "tracked.txt");
+	const doomed = join(dir, "doomed.txt");
+	writeFileSync(tracked, "original\n", "utf8");
+	writeFileSync(doomed, "delete me\n", "utf8");
+
+	beginFileFrame();
+	const before = snapshotBeforeBash(dir);
+	assert.ok(before, "snapshot must work inside a git repo");
+
+	// Simulate what a bash command did: modify, create, delete.
+	writeFileSync(tracked, "mutated by bash\n", "utf8");
+	writeFileSync(join(dir, "created.txt"), "new file\n", "utf8");
+	rmSync(doomed);
+
+	recordBashMutations(before);
+	assert.equal(currentFrameSize(), 3);
+
+	const restored = restoreFileFrame();
+	assert.equal(restored, 3);
+	assert.equal(readFileSync(tracked, "utf8"), "original\n");
+	assert.equal(existsSync(join(dir, "created.txt")), false);
+	assert.equal(readFileSync(doomed, "utf8"), "delete me\n");
+});
+
+void test("bash capture is a silent no-op outside git repositories", () => {
+	clearFileFrames();
+	const dir = mkdtempSync(join(tmpdir(), "fcp-nogit-"));
+	// Guard against tmpdir being inside a repo (it is not on typical systems).
+	beginFileFrame();
+	const before = snapshotBeforeBash(dir);
+	if (before !== null) return; // environment has a repo above tmpdir; skip
+	recordBashMutations(before);
+	assert.equal(currentFrameSize(), 0);
+	restoreFileFrame();
+});
+
+void test("bash capture never overrides an earlier write-tool record", () => {
+	clearFileFrames();
+	const dir = mkdtempSync(join(tmpdir(), "fcp-git2-"));
+	execFileSync("git", ["init", "-q"], { cwd: dir });
+	const file = join(dir, "a.txt");
+	writeFileSync(file, "v1\n", "utf8");
+
+	beginFileFrame();
+	// write tool touches it first (records v1), then bash mutates it again.
+	recordFileBeforeWrite(file, dir);
+	writeFileSync(file, "v2\n", "utf8");
+	const before = snapshotBeforeBash(dir);
+	writeFileSync(file, "v3\n", "utf8");
+	recordBashMutations(before);
+
+	restoreFileFrame();
+	assert.equal(readFileSync(file, "utf8"), "v1\n");
 });

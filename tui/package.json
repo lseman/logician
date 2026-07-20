@@ -11,8 +11,8 @@
 		"start": "tsx packages/tui/src/index.ts",
 		"lint": "eslint packages/",
 		"lint:fix": "eslint packages/ --fix",
-		"test": "tsx --test packages/agent-core/src/__tests__/*.test.ts packages/builtins/src/__tests__/*.test.ts packages/coding-agent/src/__tests__/*.test.ts packages/observational-memory/src/__tests__/*.test.ts",
-		"typecheck": "tsc --noEmit -p packages/agent-core/tsconfig.json -p packages/builtins/tsconfig.json -p packages/coding-agent/tsconfig.json -p packages/tui/tsconfig.json"
+		"test": "tsx --test packages/agent-core/src/__tests__/*.test.ts packages/agent-capabilities/src/__tests__/*.test.ts packages/builtins/src/__tests__/*.test.ts packages/coding-agent/src/__tests__/*.test.ts packages/observational-memory/src/__tests__/*.test.ts",
+		"typecheck": "tsc --noEmit -p packages/agent-core/tsconfig.json -p packages/agent-capabilities/tsconfig.json -p packages/builtins/tsconfig.json -p packages/coding-agent/tsconfig.json -p packages/tui/tsconfig.json"
 	},
 	"engines": {
 		"node": ">=22.19.0"

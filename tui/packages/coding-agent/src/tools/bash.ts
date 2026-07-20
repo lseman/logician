@@ -20,9 +20,6 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "./shell.ts";
-import { ToolResultCache } from "@logician/agent-core/core/tool-cache.ts";
-
-const bashCache = new ToolResultCache();
 
 const bashSchema = {
 	type: "object",
@@ -98,6 +95,12 @@ export const bash: Tool = {
 	],
 	parameters: bashSchema,
 	prepareArguments,
+	// The registry enforces a default execution timeout; when the model passes
+	// an explicit timeout, allow it plus grace for the tool's own kill+cleanup.
+	resolveTimeoutMs: (args) => {
+		const timeout = Number(args.timeout);
+		return timeout > 0 ? timeout * 1000 + 30_000 : undefined;
+	},
 	execute: async (args, ctx): Promise<string | ToolResult> => {
 		const { command, timeout } = args as BashArgs;
 
@@ -118,18 +121,6 @@ export const bash: Tool = {
 		const output = new OutputAccumulator({ tempFilePrefix: "logician-bash" });
 		const timeoutSeconds = timeout;
 		const throttledUpdate = makeUpdateThrottler();
-
-		// Check cache first
-		const argsStr = JSON.stringify({ command, timeout, cwd });
-		const cachedEntry = bashCache.get("bash", argsStr);
-		if (cachedEntry) {
-			try {
-				const cachedResult = JSON.parse(cachedEntry.result);
-				return cachedResult;
-			} catch {
-				// fall through
-			}
-		}
 
 		return new Promise<string | ToolResult>((resolve) => {
 			let settled = false;
@@ -264,8 +255,6 @@ export const bash: Tool = {
 						output.getLastLineBytes(),
 					);
 					const result = { content: text, details };
-					// Cache the result
-					bashCache.put("bash", argsStr, JSON.stringify(result), false);
 					resolve(result);
 				});
 			});

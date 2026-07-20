@@ -1,10 +1,10 @@
 // ── Session Store ──────────────────────────────────────────────────────────────
-// Persistent session storage using bun:sqlite.
+// Persistent session storage using the host runtime's built-in SQLite driver.
 // One SQLite DB per project workspace in ~/.logician/tui/sessions/.
 // Auto-save on turn_end; crash-safe via WAL mode.
 
-import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -12,6 +12,29 @@ import type { Turn } from "./transcript.ts";
 import { markPathIgnoredByCloudSync } from "@logician/agent-core/tools/shared/path-utils.ts";
 
 const SCHEMA_VERSION = 2;
+
+interface SqliteStatement {
+	run: (...args: unknown[]) => unknown;
+	get: (...args: unknown[]) => unknown;
+	all: (...args: unknown[]) => unknown[];
+}
+
+interface SqliteDatabase {
+	exec(sql: string): unknown;
+	prepare(sql: string): SqliteStatement;
+	close(): void;
+}
+
+type SqliteDatabaseConstructor = new (path: string) => SqliteDatabase;
+
+function resolveSqliteDatabase(): SqliteDatabaseConstructor {
+	const runtimeRequire = createRequire(import.meta.url);
+	const isBun = "Bun" in globalThis;
+	const module = isBun
+		? runtimeRequire("bun:sqlite")
+		: runtimeRequire("node:sqlite");
+	return (isBun ? module.Database : module.DatabaseSync) as SqliteDatabaseConstructor;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -116,7 +139,7 @@ function serializeTools(
 // ── SessionStore ──────────────────────────────────────────────────────────────
 
 export class SessionStore {
-	private db: Database;
+	private db: SqliteDatabase;
 	private statements: Record<
 		string,
 		{
@@ -139,6 +162,7 @@ export class SessionStore {
 		}
 		markPathIgnoredByCloudSync(dir);
 
+		const Database = resolveSqliteDatabase();
 		this.db = new Database(dbPath);
 		this.db.exec("PRAGMA journal_mode = WAL");
 		this.db.exec("PRAGMA synchronous = normal");

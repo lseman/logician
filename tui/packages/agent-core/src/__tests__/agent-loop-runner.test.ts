@@ -384,6 +384,48 @@ void test("runAgentLoop executes independent tool calls in parallel and preserve
 	assert.deepEqual(messages.filter((m) => m.role === "tool").map((m) => m.tool_call_id), ["slow", "fast"]);
 });
 
+void test("cancelled sequential batches produce a result for every tool call", async () => {
+	const controller = new AbortController();
+	const calls: string[] = [];
+	const tools: Tool[] = ["one", "two", "three"].map((name, index) => ({
+		name,
+		description: name,
+		parameters: { type: "object", properties: {} },
+		execute: async () => {
+			calls.push(name);
+			if (index === 0) controller.abort();
+			return name;
+		},
+	}));
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools },
+		[user("prompt")],
+		{
+			...makeConfig({ tools, toolExecution: "sequential" }),
+			backend: new FakeBackend([
+				() => ({
+					content: "",
+					toolCalls: tools.map((tool, index) => ({
+						id: `call_${index}`,
+						name: tool.name,
+						arguments: "{}",
+					})),
+					stopReason: "stop",
+				}),
+			]),
+			signal: controller.signal,
+			maxIterations: 1,
+		},
+		() => {},
+	);
+
+	const results = messages.filter((message) => message.role === "tool");
+	assert.equal(results.length, 3);
+	assert.deepEqual(calls, ["one"]);
+	assert.match(String(results[1].content), /cancelled/);
+	assert.match(String(results[2].content), /cancelled/);
+});
+
 void test("parallel tool batches complete deterministic preflight before execution", async () => {
 	const order: string[] = [];
 	const tool: Tool = {

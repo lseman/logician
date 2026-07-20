@@ -23,6 +23,9 @@ export interface ToolBatchResult {
 	terminated: boolean;
 }
 
+const CANCELLED_TOOL_RESULT =
+	"Tool call was not executed because the operation was cancelled.";
+
 export async function executeToolBatch(options: ToolBatchControllerOptions): Promise<ToolBatchResult> {
 	const { registry, toolCalls, rawStopReason, iteration, signal, emit, emitExtension } = options;
 	type Plan = { prepared: ReturnType<ToolRegistry["prepare"]>; args: Record<string, unknown>; immediateContent?: string; immediateError: boolean };
@@ -32,9 +35,20 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
 		await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
 		const context = { toolCall: prepared.call, args: prepared.args, iteration };
-		const before = await (options.internalHooks?.beforeToolCall?.(context, signal) ?? options.hooks?.beforeToolCall?.(context, signal));
-		plans.push({ prepared, args: before?.args ?? prepared.args, immediateContent: before?.content ?? prepared.error, immediateError: before?.isError === true || prepared.error !== undefined });
-		if (signal?.aborted) break;
+		const before = signal?.aborted
+			? undefined
+			: await (options.internalHooks?.beforeToolCall?.(context, signal) ?? options.hooks?.beforeToolCall?.(context, signal));
+		const immediateContent =
+			before?.content ?? prepared.error ?? (signal?.aborted ? CANCELLED_TOOL_RESULT : undefined);
+		plans.push({
+			prepared,
+			args: before?.args ?? prepared.args,
+			immediateContent,
+			immediateError:
+				before?.isError === true ||
+				prepared.error !== undefined ||
+				immediateContent === CANCELLED_TOOL_RESULT,
+		});
 	}
 
 	const execute = async (plan: Plan): Promise<{ message: Message; terminate: boolean }> => {
@@ -81,9 +95,13 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 	const sequential = options.toolExecution !== "parallel" || toolCalls.some((call) => registry.get(call.name)?.executionMode === "sequential");
 	const outcomes: Array<{ message: Message; terminate: boolean }> = [];
 	if (sequential) {
-		for (const plan of plans) {
+		for (let index = 0; index < plans.length; index++) {
+			const plan = plans[index];
+			if (signal?.aborted && plan.immediateContent === undefined) {
+				plan.immediateContent = CANCELLED_TOOL_RESULT;
+				plan.immediateError = true;
+			}
 			outcomes.push(await execute(plan));
-			if (signal?.aborted) break;
 		}
 	} else outcomes.push(...await Promise.all(plans.map(execute)));
 	return { messages: outcomes.map((outcome) => outcome.message), terminated: outcomes.length > 0 && outcomes.every((outcome) => outcome.terminate) };

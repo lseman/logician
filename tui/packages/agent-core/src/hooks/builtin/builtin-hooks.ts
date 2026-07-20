@@ -5,7 +5,12 @@
 
 import { BudgetTracker } from "./budget.ts";
 import { ThinkingLoopDetector } from "../../core/thinking-loop-detector.ts";
-import { recordFileBeforeWrite } from "../../core/file-checkpoints.ts";
+import {
+	recordBashMutations,
+	recordFileBeforeWrite,
+	snapshotBeforeBash,
+	type WorkspaceSnapshot,
+} from "../../core/file-checkpoints.ts";
 import type { LoopDetector } from "../../core/loop-detector.ts";
 import { HookBus } from "../native/hook-bus.ts";
 import {
@@ -83,14 +88,21 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 
 	const hooks: AgentHooks = {};
 
+	// Pre-bash workspace snapshots keyed by tool call id, so the afterToolCall
+	// hook can diff and record the paths the command mutated.
+	const bashSnapshots = new Map<string, WorkspaceSnapshot | null>();
+
 	hooks.beforeToolCall = ({ toolCall, args }) => {
-		// Snapshot a file's pre-write state for /rewind (write tools only; bash
-		// mutations are out of scope — see file-checkpoints.ts).
+		// Snapshot pre-write state for /rewind: file tools record the target
+		// path directly; bash records a workspace tree to diff afterwards.
 		if (toolCall.name === "write_file" || toolCall.name === "edit_file") {
 			const p = args.path ?? args.file_path ?? args.filename;
 			if (typeof p === "string" && p) {
 				recordFileBeforeWrite(p, config.cwd);
 			}
+		}
+		if (toolCall.name === "bash") {
+			bashSnapshots.set(toolCall.id, snapshotBeforeBash(config.cwd));
 		}
 		if (guardThresholds) {
 			const decision = loopDetector.checkToolCall(
@@ -108,6 +120,10 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// batch (the loop applies the all-tools-in-batch gate, and task_status is
 	// documented as a final, standalone call).
 	hooks.afterToolCall = ({ toolCall, result, isError }) => {
+		if (toolCall.name === "bash" && bashSnapshots.has(toolCall.id)) {
+			recordBashMutations(bashSnapshots.get(toolCall.id) ?? null);
+			bashSnapshots.delete(toolCall.id);
+		}
 		if (guardThresholds && isError) {
 			loopDetector.recordFailure(toolCall.name, toolCall.arguments, result);
 		}

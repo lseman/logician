@@ -9,6 +9,7 @@ import {
 	clearFileFrames,
 	restoreFileFrame,
 } from "./file-checkpoints.ts";
+import { randomUUID } from "node:crypto";
 import type { LLMBackend } from "./backend.ts";
 import {
 	runAgentLoop,
@@ -185,12 +186,13 @@ export class AgentHarness {
 	// ── Output Guard ─────────────────────────────────────────────────────
 	private outputGuard: OutputGuard | null = null;
 	private _streamOptions: AgentHarnessStreamOptions = {};
-	private _hooksEnabled = true;
+	private _hooksEnabled: boolean;
 	private _session?: Session;
 	private _sessionBaseDir?: string;
 	private _sessionId?: string;
 	private _transcriptPath?: string;
 	private _hasStartedSession = false;
+	private _activeOperationId?: string;
 	private _runPromise?: Promise<void>;
 	private _runResolve?: () => void;
 	private _subscribers: Set<EventHandler> = new Set();
@@ -209,6 +211,7 @@ export class AgentHarness {
 		throwOnValidationErrors(errors);
 
 		this.config = options.config;
+		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
 		this.maxIterations = options.maxIterations;
@@ -415,6 +418,13 @@ export class AgentHarness {
 				promptText,
 				this.abortController.signal,
 			);
+			const operationId = randomUUID();
+			this._activeOperationId = operationId;
+			this._session?.appendJournalEvent({
+				type: "operation_start",
+				operationId,
+				status: "prompt",
+			});
 
 			try {
 				this.loopConfig = snapshot.config;
@@ -434,6 +444,8 @@ export class AgentHarness {
 						maxIterations: this.maxIterations,
 						outputGuard: this.outputGuard,
 						extensionBus: this._extensionBus,
+						refreshNextTurnConfig: () =>
+							this.withExtensionRuntime(this.snapshotConfig()),
 						onContextCompacted: (messages) => {
 							compactedContext = messages;
 						},
@@ -456,6 +468,12 @@ export class AgentHarness {
 				this.history = result;
 				return result;
 			} finally {
+				this._session?.appendJournalEvent({
+					type: "operation_finish",
+					operationId,
+					status: this.runtime.outcome?.status ?? "unknown",
+				});
+				this._activeOperationId = undefined;
 				this.abortController = null;
 				this.msgManager.queue.clear();
 				this.emitQueueChange();
@@ -513,6 +531,13 @@ export class AgentHarness {
 			const snapshot = await this.createContinueSnapshot(
 				this.abortController.signal,
 			);
+			const operationId = randomUUID();
+			this._activeOperationId = operationId;
+			this._session?.appendJournalEvent({
+				type: "operation_start",
+				operationId,
+				status: "continue",
+			});
 
 			try {
 				this.loopConfig = snapshot.config;
@@ -531,6 +556,8 @@ export class AgentHarness {
 						maxIterations: this.maxIterations,
 						outputGuard: this.outputGuard,
 						extensionBus: this._extensionBus,
+						refreshNextTurnConfig: () =>
+							this.withExtensionRuntime(this.snapshotConfig()),
 						onContextCompacted: (messages) => {
 							compactedContext = messages;
 						},
@@ -551,6 +578,12 @@ export class AgentHarness {
 				this.history = result;
 				return result;
 			} finally {
+				this._session?.appendJournalEvent({
+					type: "operation_finish",
+					operationId,
+					status: this.runtime.outcome?.status ?? "unknown",
+				});
+				this._activeOperationId = undefined;
 				this.abortController = null;
 				this.msgManager.queue.clear();
 				this.emitQueueChange();
@@ -601,6 +634,14 @@ export class AgentHarness {
 		];
 		if (injectedMessages.length) {
 			initialMessages = [...injectedMessages, ...initialMessages];
+		}
+
+		// nextTurn guidance belongs to the next user-initiated prompt. Consume it
+		// exactly once here, never from an iteration of the currently active run.
+		const nextTurnMessages = this._nextTurnQueue.splice(0).map(createUserMessage);
+		if (nextTurnMessages.length > 0) {
+			initialMessages = [...initialMessages, ...nextTurnMessages];
+			this.emitQueueChange();
 		}
 
 		const systemPrompt =
@@ -758,7 +799,36 @@ export class AgentHarness {
 		if (event.type === "message_end" && event.message) {
 			this.persistTurnMessages([event.message]);
 		}
+		this.persistJournalEvent(event);
 		await this.emitExtensionAgentEvent(event);
+	}
+
+	private persistJournalEvent(event: AgentEvent): void {
+		if (!this._session || !this._activeOperationId) return;
+		const operationId = this._activeOperationId;
+		if (event.type === "turn_start" || event.type === "turn_end") {
+			this._session.appendJournalEvent({
+				type: event.type,
+				operationId,
+				turnId: event.turnId,
+				status: event.type === "turn_end" ? event.stopReason : undefined,
+			});
+		} else if (event.type === "tool_execution_start") {
+			this._session.appendJournalEvent({
+				type: "tool_start",
+				operationId,
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+			});
+		} else if (event.type === "tool_execution_end") {
+			this._session.appendJournalEvent({
+				type: "tool_end",
+				operationId,
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				status: event.isError ? "error" : "completed",
+			});
+		}
 	}
 
 	private reduceRuntimeEvent(event: AgentEvent): void {
@@ -916,24 +986,31 @@ export class AgentHarness {
 		this.emitQueueChange();
 	}
 
-	abort(): AbortResult {
+	async abort(): Promise<AbortResult> {
 		const q = this.msgManager.queue;
 		const clearedSteering = q.getSteering().map((m) => m.content);
 		const clearedFollowUp = q.getFollowUp().map((m) => m.content);
-		const clearedNextTurn = [...this._nextTurnQueue];
+		const interruptedOperationId = this._activeOperationId;
 		this.runtime = { ...this.runtime, abortRequested: true };
+		if (interruptedOperationId) {
+			this._session?.appendJournalEvent({
+				type: "operation_interrupted",
+				operationId: interruptedOperationId,
+				status: "aborted",
+			});
+		}
 		this.abortController?.abort();
 		this.msgManager.queue.clear();
-		this._nextTurnQueue = [];
 		this.emitQueueChange();
+		await this.waitForIdle();
 		this.emitToSubscribers({
 			type: "abort",
 			clearedSteering,
 			clearedFollowUp,
-			clearedNextTurn,
+			clearedNextTurn: [],
 		});
-		this.emitSessionEnd("abort").catch(() => {});
-		return { clearedSteering, clearedFollowUp, clearedNextTurn };
+		await this.emitSessionEnd("abort");
+		return { clearedSteering, clearedFollowUp, clearedNextTurn: [] };
 	}
 
 	// ── Queue state ────────────────────────────────────────────────────────
@@ -1631,7 +1708,6 @@ export class AgentHarness {
 	private withDrainHook(config: AgentConfig): AgentConfig {
 		return withHarnessQueueHooks(config, {
 			messageDelivery: this.msgManager,
-			nextTurnQueue: this._nextTurnQueue,
 			onQueueChange: () => this.emitQueueChange(),
 			onSavePoint: this.onSavePoint,
 			subscribers: this._subscribers,
