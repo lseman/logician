@@ -257,7 +257,7 @@ function formatJsonLine(rawLine: string): string[] | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(trimmed);
-	} catch (e: unknown) {
+	} catch {
 		return null;
 	}
 	if (parsed === null || typeof parsed !== "object") return null;
@@ -323,7 +323,7 @@ function streamedStringArg(json: string | undefined, key: string): string | unde
 	if (!match) return undefined;
 	try {
 		return JSON.parse(`"${match[1]}"`) as string;
-	} catch (e: unknown) {
+	} catch {
 		return match[1];
 	}
 }
@@ -352,7 +352,7 @@ function parseJsonMaybe(value: string): unknown | null {
 	if (!trimmed || !/^[[{]/.test(trimmed)) return null;
 	try {
 		return JSON.parse(trimmed);
-	} catch (e: unknown) {
+	} catch {
 		return null;
 	}
 }
@@ -385,7 +385,7 @@ function normalizeEditArgs(
 	if (typeof rawEdits === "string") {
 		try {
 			rawEdits = JSON.parse(rawEdits);
-		} catch (e: unknown) {
+		} catch {
 			rawEdits = undefined;
 		}
 	}
@@ -694,7 +694,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 		let visibleBuffer = renderedLines;
 		const newestAssistant = this.turns.at(-1)?.assistantMessage;
 		const newestTurnIsStreaming =
-			newestAssistant != null &&
+			newestAssistant !== null &&
+			newestAssistant !== undefined &&
 			(!newestAssistant.isComplete ||
 				hasStreamingChunk(newestAssistant.chunks));
 		if (
@@ -905,12 +906,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 		let prevEmptyLine = false;
 		const bg = theme.bg("mdCodeBlockBg", "");
 		const bgReset = RESET;
-		const inPluginStartup = false;
-		const pluginStartupColor = theme.fg("pluginStartup", "");
-
-		const getEffectiveColor = (): string =>
-			inPluginStartup ? pluginStartupColor : baseColor;
-
 		for (let li = 0; li < rawLines.length; li++) {
 			const rawLine = rawLines[li];
 
@@ -1003,7 +998,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				continue;
 			}
 
-			const effectiveColor = getEffectiveColor();
+			const effectiveColor = baseColor;
 			const rendered = renderMarkdownLine(rawLine, effectiveColor);
 			const wrapped = this.wrapText(rendered, maxLen);
 			if (wrapped.length === 0 || (wrapped.length === 1 && wrapped[0] === "")) {
@@ -1271,7 +1266,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			? theme.fg("toolError", "error")
 			: tool.isComplete
 				? theme.fg("toolSuccess", "done")
-				: tool.partialResult
+				: tool.partialResult || tool.streamOutput
 					? theme.fg("toolStreaming", "streaming")
 					: theme.fg("toolRunning", "running");
 
@@ -1318,9 +1313,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			["edit_file", "write_file"].includes(tool.tool_name) &&
 			!!tool.result;
 		if (showDiffResult) {
-			const resultText = tool.result!.startsWith("Error:")
-				? tool.result!
-				: tool.result!;
+			const resultText = tool.result ?? "";
 			const label = tool.isError ? "error" : "result";
 			if (tool.isError) {
 				const resultLines = resultText.split("\n");
@@ -1343,6 +1336,23 @@ export class TranscriptDisplay implements Component, Scrollable {
 				}
 			}
 		}
+		const compactPreview =
+			!showDiffResult && !this.toolsExpanded
+				? this.collapsedToolPreview(tool)
+				: "";
+		if (compactPreview) {
+			const label = tool.isError
+				? theme.fg("toolError", "error")
+				: !tool.isComplete
+					? theme.fg("toolRunning", "live")
+					: theme.fg("muted", "output");
+			lines.push(
+				clampLineToWidth(
+					`${theme.fg("dim", "└─")} ${label} ${compactPreview}${RESET}`,
+					Math.max(1, width - 4),
+				),
+			);
+		}
 		for (const block of postEdit.blocks) {
 			lines.push(
 				...this.renderPostEditDiagnostics(
@@ -1364,6 +1374,20 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 
 		return lines;
+	}
+
+	private collapsedToolPreview(tool: ToolExecution): string {
+		const raw = tool.streamOutput || tool.result || "";
+		if (!raw.trim()) return "";
+		const firstLine = raw
+			.split("\n")
+			.map((line) => line.trim())
+			.find(Boolean);
+		if (!firstLine) return "";
+		const preview = compactText(firstLine);
+		const summary = this.toolSummary(tool);
+		if (!tool.isError && preview === summary) return "";
+		return clampLineToWidth(preview, 120);
 	}
 
 	private renderPostEditDiagnostics(
@@ -1670,9 +1694,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		// Show error result only (skip diff — content is already rendered above).
 		if (tool.result) {
-			const resultText = tool.result.startsWith("Error:")
-				? tool.result
-				: tool.result;
+			const resultText = tool.result;
 			if (tool.isError) {
 				lines.push(this.detailSection("error"));
 				lines.push(...this.previewBlock(resultText, width));

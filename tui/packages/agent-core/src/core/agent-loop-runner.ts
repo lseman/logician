@@ -1022,6 +1022,7 @@ async function runAgentLoopInTaskScope(
 					type: "context_update",
 					tokens: contextTokens,
 					maxTokens: config.contextWindowTokens,
+					cachedTokens: response?.usage?.cachedTokens ?? null,
 				});
 			}
 

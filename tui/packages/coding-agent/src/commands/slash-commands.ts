@@ -362,25 +362,6 @@ export function createSlashCommands(
 			},
 		),
 		cmd(
-			"/cache",
-			"Toggle prompt caching",
-			"local",
-			true,
-			{
-				category: "display",
-				argHint: "[on|off]",
-				examples: ["/cache", "/cache disable"],
-			},
-			(args: string) => {
-				const enabled =
-					args.trim().toLowerCase() !== "disable" &&
-					args.trim().toLowerCase() !== "off" &&
-					args.trim().toLowerCase() !== "0";
-				localHandlers.setCache?.(enabled);
-				return `Cache: ${enabled ? "enabled" : "disabled"}`;
-			},
-		),
-		cmd(
 			"/trace",
 			"Toggle trace messages",
 			"local",

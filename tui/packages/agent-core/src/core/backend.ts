@@ -141,6 +141,58 @@ export interface LLMResponse {
 		promptTokens?: number;
 		completionTokens?: number;
 		totalTokens?: number;
+		/** Prompt tokens served from the provider's cache, when reported. */
+		cachedTokens?: number;
+	};
+}
+
+interface ProviderUsage {
+	prompt_tokens?: unknown;
+	completion_tokens?: unknown;
+	total_tokens?: unknown;
+	cached_tokens?: unknown;
+	cache_read_input_tokens?: unknown;
+	prompt_tokens_details?: { cached_tokens?: unknown };
+	input_tokens_details?: { cached_tokens?: unknown };
+}
+
+interface ProviderTimings {
+	cache_n?: unknown;
+}
+
+function tokenCount(value: unknown): number | undefined {
+	return typeof value === "number" &&
+		Number.isFinite(value) &&
+		value >= 0
+		? Math.floor(value)
+		: undefined;
+}
+
+/** Normalize OpenAI-compatible (including llama.cpp) usage telemetry. */
+export function parseProviderUsage(
+	raw: unknown,
+	rawTimings?: unknown,
+): LLMResponse["usage"] {
+	if ((!raw || typeof raw !== "object") &&
+		(!rawTimings || typeof rawTimings !== "object")) {
+		return undefined;
+	}
+	const usage = (raw && typeof raw === "object" ? raw : {}) as ProviderUsage;
+	const timings = (rawTimings && typeof rawTimings === "object"
+		? rawTimings
+		: {}) as ProviderTimings;
+	const cachedTokens = tokenCount(
+		usage.prompt_tokens_details?.cached_tokens ??
+			usage.input_tokens_details?.cached_tokens ??
+			usage.cache_read_input_tokens ??
+			usage.cached_tokens ??
+			timings.cache_n,
+	);
+	return {
+		promptTokens: tokenCount(usage.prompt_tokens),
+		completionTokens: tokenCount(usage.completion_tokens),
+		totalTokens: tokenCount(usage.total_tokens),
+		...(cachedTokens !== undefined && { cachedTokens }),
 	};
 }
 
@@ -384,12 +436,8 @@ export class OpenAIBackend implements LLMBackend {
 					// (notably the trailing usage-only chunk), so read them first.
 					const chunkFinish = chunk.choices?.[0]?.finish_reason;
 					if (chunkFinish) finishReason = chunkFinish;
-					if (chunk.usage) {
-						usage = {
-							promptTokens: chunk.usage.prompt_tokens,
-							completionTokens: chunk.usage.completion_tokens,
-							totalTokens: chunk.usage.total_tokens,
-						};
+					if (chunk.usage || chunk.timings) {
+						usage = parseProviderUsage(chunk.usage, chunk.timings);
 					}
 					const delta = chunk.choices?.[0]?.delta;
 					if (!delta) continue;

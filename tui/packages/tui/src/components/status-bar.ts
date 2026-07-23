@@ -1,5 +1,5 @@
 // ── Status bar (compact single-line footer) ────────────────────────────────────
-// Example: ⏸ ready | Qwen | think:off | dir logician | ⎇ main *18 +1 ?4 | ◫ 49.4%/150k | cache in: 46M | reasoner: none
+// Example: ⏸ ready | Qwen | think:off | dir logician | ⎇ main *18 +1 ?4 | ◫ 49.4%/150k | cache read: 12.4k | reasoner: none
 //
 // Sections (separated by |):
 //   phase | model | thinking | dir/git | context | cache | reasoner
@@ -13,8 +13,7 @@ const DIM = "\x1b[2m";
 interface StatusInfo {
 	thinkingLevel: string;
 	inferenceMode: string;
-	cacheEnabled: boolean;
-	cacheSize?: number;
+	cacheReadTokens?: number;
 	turnCount: number;
 	messageCount: number;
 	phase: string;
@@ -37,8 +36,7 @@ interface StatusInfo {
 const DEFAULT_INFO: StatusInfo = {
 	thinkingLevel: "off",
 	inferenceMode: "instruct-general",
-	cacheEnabled: true,
-	cacheSize: 0,
+	cacheReadTokens: undefined,
 	turnCount: 0,
 	messageCount: 0,
 	phase: "ready",
@@ -288,14 +286,12 @@ export class StatusBar implements Component {
 	}
 
 	private formatCache(): string {
-		const size = this.info.cacheSize || 0;
-		if (size === 0) {
-			return this.info.cacheEnabled
-				? `${DIM}cache in:${RESET} ${theme.fg("success", "on")}`
-				: `${DIM}cache in:${RESET} ${theme.fg("dim", "off")}`;
-		}
-		const sizeStr = formatCacheSize(size);
-		return `${DIM}cache in:${RESET} ${theme.fg("accent", sizeStr)}`;
+		const tokens = this.info.cacheReadTokens;
+		const value =
+			tokens === undefined
+				? theme.fg("dim", "unknown")
+				: theme.fg("accent", formatTokenCountClean(tokens));
+		return `${DIM}cache read:${RESET} ${value}`;
 	}
 
 	private formatReasoner(): string {
@@ -356,10 +352,4 @@ function formatTokenCountClean(tokens: number): string {
 		return v % 1 === 0 ? `${Math.round(v)}k` : `${v.toFixed(1)}k`;
 	}
 	return String(tokens);
-}
-
-function formatCacheSize(bytes: number): string {
-	if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(0)}M`;
-	if (bytes >= 1000) return `${(bytes / 1000).toFixed(0)}K`;
-	return `${bytes}B`;
 }

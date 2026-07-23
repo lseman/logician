@@ -15,6 +15,7 @@ export interface TurnState {
 	phase: TurnPhase;
 	turnId?: string;
 	runningTools: number;
+	runningToolIds: readonly string[];
 	startedAt?: number;
 	settledAt?: number;
 }
@@ -22,7 +23,20 @@ export interface TurnState {
 export const INITIAL_TURN_STATE: TurnState = {
 	phase: "idle",
 	runningTools: 0,
+	runningToolIds: [],
 };
+
+function toolCallId(event: ParsedBridgeEvent): string | undefined {
+	if (
+		event.type !== "tool_start" &&
+		event.type !== "tool_execution_start" &&
+		event.type !== "tool_end" &&
+		event.type !== "tool_execution_end"
+	) {
+		return undefined;
+	}
+	return event.tool_call_id || undefined;
+}
 
 const VERIFY_PATTERN =
 	/\b(test|check|lint|typecheck|pytest|cargo test|go test|ctest|make check)\b/i;
@@ -48,6 +62,7 @@ export function reduceTurnState(
 				phase: "thinking",
 				turnId: event.turn_id,
 				runningTools: 0,
+				runningToolIds: [],
 				startedAt: now,
 			};
 		case "thinking_token":
@@ -59,21 +74,39 @@ export function reduceTurnState(
 				? state
 				: { ...state, phase: "streaming" };
 		case "tool_start":
-		case "tool_execution_start":
+		case "tool_execution_start": {
+			const id = toolCallId(event);
+			const duplicate = id !== undefined && state.runningToolIds.includes(id);
 			return {
 				...state,
 				phase: isVerificationTool(event) ? "verifying" : "tool",
-				runningTools: state.runningTools + 1,
+				runningTools: duplicate
+					? state.runningTools
+					: state.runningTools + 1,
+				runningToolIds:
+					id === undefined || duplicate
+						? state.runningToolIds
+						: [...state.runningToolIds, id],
 			};
+		}
 		case "tool_end":
 		case "tool_execution_end": {
-			const runningTools = Math.max(0, state.runningTools - 1);
+			const id = toolCallId(event);
+			const knownId = id !== undefined && state.runningToolIds.includes(id);
+			const runningTools =
+				id === undefined || knownId
+					? Math.max(0, state.runningTools - 1)
+					: state.runningTools;
+			const runningToolIds = knownId
+				? state.runningToolIds.filter((runningId) => runningId !== id)
+				: state.runningToolIds;
 			return {
 				...state,
 				phase: event.is_error
 					? "failed"
 					: runningTools > 0 ? state.phase : "thinking",
 				runningTools,
+				runningToolIds,
 			};
 		}
 		case "permission_request":
@@ -81,19 +114,48 @@ export function reduceTurnState(
 		case "question_request":
 			return { ...state, phase: "waiting" };
 		case "turn_end":
-			return { ...state, phase: "complete", runningTools: 0, settledAt: now };
+			return {
+				...state,
+				phase: "complete",
+				runningTools: 0,
+				runningToolIds: [],
+				settledAt: now,
+			};
 		case "notice":
 			return event.level === "error"
-				? { ...state, phase: "failed", runningTools: 0, settledAt: now }
+				? {
+						...state,
+						phase: "failed",
+						runningTools: 0,
+						runningToolIds: [],
+						settledAt: now,
+					}
 				: state;
 		case "phase":
 			if (event.state === "ready") {
 				return state.startedAt
-					? { ...state, phase: "complete", runningTools: 0, settledAt: now }
-					: { ...state, phase: "idle", runningTools: 0 };
+					? {
+							...state,
+							phase: "complete",
+							runningTools: 0,
+							runningToolIds: [],
+							settledAt: now,
+						}
+					: {
+							...state,
+							phase: "idle",
+							runningTools: 0,
+							runningToolIds: [],
+						};
 			}
 			if (event.state === "error") {
-				return { ...state, phase: "failed", runningTools: 0, settledAt: now };
+				return {
+					...state,
+					phase: "failed",
+					runningTools: 0,
+					runningToolIds: [],
+					settledAt: now,
+				};
 			}
 			return state;
 		default:

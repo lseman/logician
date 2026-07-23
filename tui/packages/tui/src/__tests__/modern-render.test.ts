@@ -52,8 +52,44 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	assert.match(output, /╭─ YOU/);
 	assert.match(output, /◆ LOGICIAN/);
 	assert.match(output, /✓ read_file done/);
+	assert.match(output, /output ok/);
 	assert.match(output, /18ms/);
 	assert.ok(lines.every((line) => visibleWidth(line) <= 80));
+});
+
+void test("collapsed running tools show live output without expanding details", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([
+		{
+			id: "turn-live-tool",
+			userMessage: { type: "user", content: "Run the build." },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: false,
+				chunks: [
+					{
+						seq: 0,
+						type: "tool",
+						tool: {
+							tool: "bash",
+							tool_name: "bash",
+							tool_call_id: "build-1",
+							args: { command: "npm test" },
+							streamOutput: "compiling packages...\nsecond line",
+							isError: false,
+							isComplete: false,
+						},
+						isComplete: false,
+					},
+				],
+			},
+			isComplete: false,
+		},
+	]);
+	const output = plain(display.render(100).join("\n"));
+	assert.match(output, /bash streaming/);
+	assert.match(output, /live compiling packages\.\.\./);
+	assert.doesNotMatch(output, /second line/);
 });
 
 void test("status bar drops optional sections instead of clipping ANSI text", () => {
@@ -78,6 +114,22 @@ void test("status bar drops optional sections instead of clipping ANSI text", ()
 		assert.doesNotMatch(plain(line), /…/);
 	}
 	assert.match(plain(status.render(120)[0]), /feature\/modern-ui/);
+});
+
+void test("status bar renders cached tokens and unknown telemetry", () => {
+	const status = new StatusBar();
+	status.update({
+		contextTokens: 20_000,
+		contextMaxTokens: 32_768,
+		cacheReadTokens: 12_400,
+	});
+	assert.match(plain(status.render(160)[0]), /cache read: 12\.4k/);
+
+	status.update({ contextTokens: 21_000 });
+	assert.match(plain(status.render(160)[0]), /cache read: 12\.4k/);
+
+	status.update({ cacheReadTokens: undefined });
+	assert.match(plain(status.render(160)[0]), /cache read: unknown/);
 });
 
 void test("input prompt has stable inset modern chrome", () => {

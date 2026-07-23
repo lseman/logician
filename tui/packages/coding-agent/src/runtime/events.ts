@@ -158,6 +158,8 @@ export interface ContextUpdateEvent {
 	tokens: number;
 	max_tokens?: number;
 	compacted?: boolean;
+	/** null means the provider supplied no cache telemetry. */
+	cached_tokens?: number | null;
 }
 
 export interface CompactionEvent {

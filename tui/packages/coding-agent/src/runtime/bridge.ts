@@ -179,6 +179,9 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				tokens: event.tokens,
 				max_tokens: event.maxTokens,
 				compacted: event.compacted,
+				...(event.cachedTokens !== undefined && {
+					cached_tokens: event.cachedTokens,
+				}),
 			};
 		case "compaction":
 			return {

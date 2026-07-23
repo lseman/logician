@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyHttpError } from "../core/backend.ts";
+import { classifyHttpError, parseProviderUsage } from "../core/backend.ts";
 
 void test("429 with numeric Retry-After carries retryAfterMs", () => {
 	const err = classifyHttpError(429, "rate limited", "2");
@@ -36,4 +36,38 @@ void test("malformed assistant message is client, not context_full", () => {
 	);
 	assert.equal(err.category, "client");
 	assert.equal(err.retryable, false);
+});
+
+void test("llama.cpp cached prompt tokens are normalized from usage details", () => {
+	assert.deepEqual(
+		parseProviderUsage({
+			prompt_tokens: 20_000,
+			completion_tokens: 50,
+			total_tokens: 20_050,
+			prompt_tokens_details: { cached_tokens: 12_400 },
+		}),
+		{
+			promptTokens: 20_000,
+			completionTokens: 50,
+			totalTokens: 20_050,
+			cachedTokens: 12_400,
+		},
+	);
+});
+
+void test("missing provider cache telemetry remains unknown", () => {
+	assert.deepEqual(parseProviderUsage({ prompt_tokens: 42 }), {
+		promptTokens: 42,
+		completionTokens: undefined,
+		totalTokens: undefined,
+	});
+});
+
+void test("llama.cpp timings cache_n is accepted as a legacy fallback", () => {
+	assert.deepEqual(parseProviderUsage(undefined, { cache_n: 236 }), {
+		promptTokens: undefined,
+		completionTokens: undefined,
+		totalTokens: undefined,
+		cachedTokens: 236,
+	});
 });

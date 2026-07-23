@@ -147,6 +147,8 @@ export interface ContextUpdateEvent {
 	tokens: number;
 	maxTokens?: number;
 	compacted?: boolean;
+	/** null means the provider supplied no cache telemetry. */
+	cachedTokens?: number | null;
 }
 
 export interface ContextUpdateResult {}

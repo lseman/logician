@@ -142,6 +142,36 @@ void test("runAgentLoop estimates context usage when provider usage is absent", 
 	assert.ok(update && update.type === "context_update");
 	assert.ok(update.tokens > 0);
 	assert.equal(update.maxTokens, 4096);
+	assert.equal(
+		events.filter((event) => event.type === "context_update").at(-1)
+			?.cachedTokens,
+		null,
+	);
+});
+
+void test("runAgentLoop propagates provider cache reads through context_update", async () => {
+	const backend = new FakeBackend([
+		() => ({
+			...textResponse("done"),
+			usage: {
+				promptTokens: 20_000,
+				completionTokens: 50,
+				totalTokens: 20_050,
+				cachedTokens: 12_400,
+			},
+		}),
+	]);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{ ...makeConfig({ contextWindowTokens: 32_768 }), backend },
+		(event) => {
+			events.push(event);
+		},
+	);
+	const updates = events.filter((event) => event.type === "context_update");
+	assert.equal(updates.at(-1)?.cachedTokens, 12_400);
 });
 
 void test("structured run outcomes take precedence and reset between runs", async () => {

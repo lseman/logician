@@ -54,3 +54,34 @@ void test("approval and failures are explicit states", () => {
 		text: "failed",
 	})).phase, "failed");
 });
+
+void test("duplicate provider and execution starts count one running tool", () => {
+	const started = reduceTurnState(
+		INITIAL_TURN_STATE,
+		event({ type: "turn_start", turn_id: "turn-1" }),
+	);
+	const toolStart = event({
+		type: "tool_execution_start",
+		tool: "read_file",
+		tool_name: "read_file",
+		tool_call_id: "call-1",
+		tool_args: { path: "file.ts" },
+	});
+	const first = reduceTurnState(started, toolStart);
+	const duplicate = reduceTurnState(first, toolStart);
+	assert.equal(duplicate.runningTools, 1);
+	assert.deepEqual(duplicate.runningToolIds, ["call-1"]);
+
+	const ended = reduceTurnState(
+		duplicate,
+		event({
+			type: "tool_execution_end",
+			tool: "read_file",
+			tool_name: "read_file",
+			tool_call_id: "call-1",
+			result: "done",
+		}),
+	);
+	assert.equal(ended.runningTools, 0);
+	assert.equal(ended.phase, "thinking");
+});

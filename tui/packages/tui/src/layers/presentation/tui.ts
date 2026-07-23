@@ -2,8 +2,6 @@
 // Wires agent-core, transcript, and components together.
 import { formatContextSize } from "@logician/coding-agent";
 
-// Re-export markdownTableCell (same as escapeTable for table use)
-
 import { execSync } from "node:child_process";
 import { AgentCoreBridge } from "@logician/coding-agent/bridge";
 import { InputBar } from "../../components/input-bar.ts";
@@ -45,15 +43,15 @@ import { TodoBar } from "../../components/todo/todo-bar.ts";
 import { WorkSurface } from "../../components/work-surface.ts";
 import { TranscriptDisplay } from "../../components/transcript-display.ts";
 import { SessionStore } from "@logician/coding-agent/session-store";
+import { saveConfigField } from "@logician/coding-agent/config";
 import {
-	configNumber,
-	saveConfigField,
-} from "@logician/coding-agent/config";
-import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
+	GoalManager,
+	resolveRuntimeConfig,
+	type GoalState,
+} from "@logician/coding-agent/runtime";
 import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
 import { KillRing } from "../input/kill-ring.ts";
 import { LoopManager } from "@logician/coding-agent/loop-manager";
-import { GoalManager, type GoalState } from "@logician/coding-agent/runtime";
 import {
 	getReasonerIds,
 	getReasonerMeta,
@@ -112,7 +110,6 @@ export class LogicianTUI {
 	private thinkingLevel = "off";
 	private inferenceMode: "thinking-general" | "thinking-coding" | "instruct-general" | "instruct-reasoning" =
 		"instruct-general";
-	private cacheEnabled = true;
 	private thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
 		"expanded";
 	private traceOn = false;
@@ -438,13 +435,7 @@ export class LogicianTUI {
 		};
 
 		// Setup keyboard shortcuts
-		this.setupInputHandler(
-			handleStatus,
-			handlePlugins,
-			handleMcp,
-			handleReasoner,
-			handleTheme,
-		);
+		this.setupInputHandler();
 
 		// Focus input bar by default
 		this.tui.setFocus(this.inputBar);
@@ -453,7 +444,7 @@ export class LogicianTUI {
 		const gitStatus = this.getGitStatus();
 		this.statusPanel.update({
 			thinkingLevel: this.thinkingLevel,
-			cacheEnabled: this.cacheEnabled,
+			cacheReadTokens: undefined,
 			phase: "ready",
 			model: runtimeConfig.bridge.model || "local",
 			cwd: process.cwd(),
@@ -478,17 +469,6 @@ export class LogicianTUI {
 		setInferenceMode: (mode: unknown) => {
 				const m = typeof mode === "string" ? mode : String(mode);
 				this.setInferenceMode(m);
-				setStatusPhase("ready");
-			},
-			setCache: (enabled: unknown) => {
-				const en =
-					typeof enabled === "boolean"
-						? enabled
-						: enabled === "true" || enabled === true;
-				this.cacheEnabled = en;
-				this.transcript.setCacheEnabled(en);
-				this.bridge.sendSlash(`/cache ${en ? "enable" : "disable"}`);
-				this.statusPanel.update({ cacheEnabled: en });
 				setStatusPhase("ready");
 			},
 			setThinkingMode: (mode: unknown) => {
@@ -518,7 +498,7 @@ export class LogicianTUI {
 			settings: (raw: unknown) => {
 				const args = String(raw ?? "").trim();
 				if (!args) {
-					this.openSettingsSelector();
+					void this.openSettingsSelector();
 					return "";
 				}
 				const [key, value = ""] = args.split(/\s+/, 2);
@@ -825,7 +805,9 @@ export class LogicianTUI {
 						if (!state) {
 							this.transcript.addSystemMessage("No goal set.");
 						} else if (state.status === "achieved") {
-							const dur = Math.round((state.achievedAt! - state.startedAt) / 1000);
+							const dur = Math.round(
+								((state.achievedAt ?? Date.now()) - state.startedAt) / 1000,
+							);
 							this.transcript.addSystemMessage(
 								`Goal achieved: "${state.condition}"\n` +
 								`Duration: ${dur}s, Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
@@ -1072,6 +1054,12 @@ export class LogicianTUI {
 					contextTokens: Number(event.tokens || 0),
 					contextMaxTokens: Number(event.max_tokens || 0) || undefined,
 					contextCompacted: event.compacted === true,
+					...("cached_tokens" in event && {
+						cacheReadTokens:
+							typeof event.cached_tokens === "number"
+								? event.cached_tokens
+								: undefined,
+					}),
 				});
 				break;
 			case "compaction":
@@ -1268,13 +1256,7 @@ export class LogicianTUI {
 
 	// ── Input handling ─────────────────────────────────────────────────────
 
-	private setupInputHandler(
-		handleStatus: () => Promise<void>,
-		handlePlugins: (args: string) => Promise<void>,
-		handleMcp: (args: string) => Promise<void>,
-		handleReasoner: (args: string) => Promise<void>,
-		handleTheme: (args: string) => Promise<void>,
-	): void {
+	private setupInputHandler(): void {
 		// ── Choice popup handlers ──────────────────────────────────────
 		const handleChoicePopupSubmit = (): void => {
 			const qid = this.choicePopup.getQuestionId();
@@ -2290,7 +2272,7 @@ export class LogicianTUI {
 				encoding: "utf8",
 				stdio: ["ignore", "pipe", "ignore"],
 			}).trim();
-		} catch (e: unknown) {
+		} catch {
 			return "";
 		}
 	}
@@ -2333,7 +2315,7 @@ export class LogicianTUI {
 						stdio: ["ignore", "pipe", "ignore"],
 					}).trim(),
 				) || 0;
-		} catch (e: unknown) {
+		} catch {
 			// ignore
 		}
 		return { branch, modified, staged, untracked };
@@ -2359,11 +2341,11 @@ export class LogicianTUI {
 					cwd: process.cwd(),
 					stdio: "ignore",
 				});
-			} catch (e: unknown) {
+			} catch {
 				dirty = " dirty";
 			}
 			return `${branch}@${sha}${dirty}`;
-		} catch (e: unknown) {
+		} catch {
 			return "";
 		}
 	}
@@ -2518,10 +2500,6 @@ function normalizeStartupHookMessage(item: unknown): {
 		title: `${label}${suffix}${matcherText}`,
 		content: String(raw.content || "").trim(),
 	};
-}
-
-function markdownTableCell(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 // Convert stored transcript turns into agent-core messages so a restored

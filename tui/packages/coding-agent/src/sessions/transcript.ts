@@ -80,7 +80,6 @@ export interface SessionState {
 	currentTurnId: string | null;
 	thinkingDisplayMode: ThinkingDisplayStyle;
 	thinkingLevel: string;
-	cacheEnabled: boolean;
 }
 
 const DEFAULT_STATE: SessionState = {
@@ -88,7 +87,6 @@ const DEFAULT_STATE: SessionState = {
 	currentTurnId: null,
 	thinkingDisplayMode: "expanded",
 	thinkingLevel: "off",
-	cacheEnabled: true,
 };
 
 export class Transcript {
@@ -173,15 +171,49 @@ export class Transcript {
 		chunks: AssistantChunk[],
 		event: ToolStartEvent,
 	): AssistantChunk | undefined {
+		const sameName: AssistantChunk[] = [];
 		for (let i = chunks.length - 1; i >= 0; i--) {
 			const c = chunks[i];
 			if (c.type !== "tool" || c.isComplete || !c.tool) continue;
 			if (event.tool_call_id && c.tool.tool_call_id === event.tool_call_id) {
 				return c;
 			}
-			if (c.tool.tool_name === event.tool_name) return c;
+			if (c.tool.tool_name === event.tool_name) sameName.push(c);
 		}
-		return undefined;
+		// A name-only match is safe only when it is unambiguous. Parallel calls
+		// to the same tool must remain separate and are reconciled by id.
+		if (sameName.length !== 1) return undefined;
+		const candidateId = sameName[0].tool?.tool_call_id;
+		const candidateIsPlaceholder =
+			typeof candidateId === "string" && /^tool_\d+$/.test(candidateId);
+		return !event.tool_call_id || !candidateId || candidateIsPlaceholder
+			? sameName[0]
+			: undefined;
+	}
+
+	private findToolChunk(
+		chunks: AssistantChunk[],
+		toolCallId?: string,
+		toolName?: string,
+	): AssistantChunk | undefined {
+		if (toolCallId) {
+			const exact = chunks
+				.slice()
+				.reverse()
+				.find(
+					(chunk) =>
+						chunk.type === "tool" &&
+						chunk.tool?.tool_call_id === toolCallId,
+				);
+			if (exact) return exact;
+		}
+		const incomplete = chunks.filter(
+			(chunk) =>
+				chunk.type === "tool" &&
+				!chunk.isComplete &&
+				(!toolName || chunk.tool?.tool_name === toolName),
+		);
+		return incomplete.length === 1 ? incomplete[0] : undefined;
 	}
 
 	private ensureAssistant(turn: Turn): AssistantMessage {
@@ -441,10 +473,10 @@ export class Transcript {
 		const turn = this.getCurrentTurn();
 		if (!turn?.assistantMessage) return;
 
-		// Find the streaming tool chunk (last incomplete tool chunk)
-		const toolChunk = this.lastStreamingChunkOfType(
-			"tool",
+		const toolChunk = this.findToolChunk(
 			turn.assistantMessage.chunks,
+			event.tool_call_id,
+			event.tool_name || event.tool,
 		);
 		if (!toolChunk?.tool) return;
 
@@ -466,26 +498,11 @@ export class Transcript {
 
 		const assistant = turn.assistantMessage;
 
-		// Find the tool chunk matching this event
-		let toolChunk: AssistantChunk | undefined;
-		if (event.tool_call_id) {
-			toolChunk = assistant.chunks
-				.slice()
-				.reverse()
-				.find(
-					(c) =>
-						c.type === "tool" && c.tool?.tool_call_id === event.tool_call_id,
-				);
-		}
-		if (!toolChunk) {
-			// Fallback: only mark the last *incomplete* tool chunk as done.
-			// Grabbing any tool chunk (including completed ones) could
-			// silently mark the wrong chunk or create stale display state.
-			toolChunk = assistant.chunks
-				.slice()
-				.reverse()
-				.find((c) => c.type === "tool" && !c.isComplete);
-		}
+		const toolChunk = this.findToolChunk(
+			assistant.chunks,
+			event.tool_call_id,
+			event.tool_name || event.tool,
+		);
 		if (!toolChunk?.tool) return;
 
 		// Mark the tool as finished
@@ -496,7 +513,7 @@ export class Transcript {
 				if (streamedArgs && typeof streamedArgs === "object" && !Array.isArray(streamedArgs)) {
 					tool.args = { ...(tool.args ?? {}), ...(streamedArgs as Record<string, unknown>) };
 				}
-			} catch (e: unknown) {
+			} catch {
 				// A provider may finish without a complete argument stream. The renderer
 				// can still recover paths from the textual tool result.
 			}
@@ -604,15 +621,6 @@ export class Transcript {
 		return this.state.thinkingLevel;
 	}
 
-	setCacheEnabled(enabled: boolean): void {
-		this.state.cacheEnabled = enabled;
-		this.notify();
-	}
-
-	getCacheEnabled(): boolean {
-		return this.state.cacheEnabled;
-	}
-
 	// ── Chunk accessors (for thinking panel & display) ───────────────────
 
 	/** Get thinking chunks from the current (streaming) turn. */
@@ -713,7 +721,7 @@ export class Transcript {
 		for (const cb of this.listeners) {
 			try {
 				cb();
-			} catch (e: unknown) {
+			} catch {
 				// Don't crash on bad listeners
 			}
 		}

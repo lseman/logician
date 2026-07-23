@@ -49,4 +49,4 @@ Cross-session memory in `.logician/memory/`. Record when something is LEARNED, F
 If stuck:
 1. Check available tools against startup context
 2. Fix arguments and retry once
-3. Report the exact blocker and least-bad fallback
+3. Report the exact blocker and least-bad fallback.

@@ -45,6 +45,8 @@ export type AgentEventBody =
 			tokens: number;
 			maxTokens?: number;
 			compacted?: boolean;
+			/** null means the provider supplied no cache telemetry. */
+			cachedTokens?: number | null;
 	  }
 	| {
 			type: "compaction";
