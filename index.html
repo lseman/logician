@@ -146,10 +146,10 @@
 
                 <div class="hero-tags reveal reveal-d4">
                     <span class="tag">🛠️ Tool-driven agents</span>
-                    <span class="tag">📚 Repo indexing</span>
-                    <span class="tag">📝 Structured traces</span>
-                    <span class="tag">🐍 llama.cpp backend</span>
-                    <span class="tag">🔌 Extensible skills</span>
+                    <span class="tag">📚 Repo grounding</span>
+                    <span class="tag">📝 Streaming traces</span>
+                    <span class="tag">🔌 MCP & skills</span>
+                    <span class="tag">🧠 Persistent memory</span>
                 </div>
             </div>
         </div>
@@ -193,8 +193,8 @@
                 <div class="feat reveal reveal-d1">
                     <span class="feat-icon">🖥️</span>
                     <div class="feat-title">Local-first design</div>
-                    <div class="feat-desc">Runs entirely on your machine with llama.cpp. Swap in alternative backends
-                        without changing any workflow code.</div>
+                    <div class="feat-desc">Runs entirely on your machine. Connect to any OpenAI-compatible backend
+                        or swap providers with a single config change.</div>
                 </div>
                 <div class="feat reveal reveal-d2">
                     <span class="feat-icon">📊</span>
@@ -221,9 +221,9 @@
         <div class="container">
             <div class="reveal">
                 <div class="section-tag">02 — Quick start</div>
-                <h2 class="section-title">Up in <span class="grad">four commands</span></h2>
-                <p class="section-copy">Clone, ingest a repo, and you're ready. Each runner is a focused entry point —
-                    no global state, no hidden config.</p>
+                <h2 class="section-title">Up in <span class="grad">three commands</span></h2>
+                <p class="section-copy">Clone, install, launch. The TUI connects to any OpenAI-compatible backend —
+                    configure once, start reasoning.</p>
             </div>
 
             <div class="commands-wrap reveal reveal-d1">
@@ -246,10 +246,6 @@
                     <div class="command-code">npm start</div>
                     <div class="command-desc">Launch the TUI</div>
                 </div>
-                <div class="command-item">
-                    <div class="command-code">npm run dev</div>
-                    <div class="command-desc">Start dev server with hot reload</div>
-                </div>
             </div>
         </div>
     </section>
@@ -262,24 +258,24 @@
     <section class="section">
         <div class="container">
             <div class="reveal">
-                <div class="section-tag">03 — API</div>
-                <h2 class="section-title">Write <span class="grad">agents</span> in TypeScript</h2>
-                <p class="section-copy">Define tools, compose agents, and run them with full type safety and structured output.</p>
+                <div class="section-tag">03 — Skills</div>
+                <h2 class="section-title">Extend with <span class="grad">SKILL.md</span></h2>
+                <p class="section-copy">Skills are plain Markdown with YAML frontmatter. Add domain expertise without touching the agent core.</p>
             </div>
 
             <div class="code-block reveal reveal-d1">
                 <div class="code-header">
-                    <span>agent.ts</span>
+                    <span>SKILL.md</span>
                     <button class="copy-btn" onclick="copyCode(this)">copy</button>
                 </div>
-                <pre><code>{
-  "name": "code-review",
-  "role": "Senior reviewer who catches bugs and suggests improvements",
-  "goal": "Review PRs for correctness, security, and maintainability",
-  "tools": ["read_file", "grep", "git", "file_diff"],
-  "max_iterations": 15,
-  "output_format": "structured"
-}</code></pre>
+                <pre><code>---
+name: code-review
+description: Review code changes for correctness, risks, and missing tests.
+allowed-tools: [read_file, grep, git]
+argument-hint: &lt;diff-or-topic&gt;
+---
+
+Inspect the change as a reviewer. Prioritize bugs and regressions before style.</code></pre>
             </div>
         </div>
     </section>
@@ -292,7 +288,7 @@
     <section class="section">
         <div class="container">
             <div class="reveal">
-                <div class="section-tag">03 — Design principles</div>
+                <div class="section-tag">04 — Design principles</div>
                 <h2 class="section-title">Built for <span class="grad">developers</span></h2>
                 <p class="section-copy">Every design decision prioritises inspectability, local operation, and
                     composability over convenience magic.</p>
