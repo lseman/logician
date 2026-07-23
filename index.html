@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description"
-        content="Logician is a local AI agent framework for code, research, and reproducible workflows." />
+        content="Logician is a local-first coding agent with a streaming terminal UI. SSH-ready, thinking-visible, and built for real code editing workflows." />
     <title>Logician — Local AI Agent Framework</title>
 
     <!-- Preconnect for fonts -->
@@ -96,7 +96,6 @@
                     </svg>
                     GitHub
                 </a>
-                <a class="btn btn-primary" href="README.md">Get Started</a>
             </div>
         </div>
     </nav>
@@ -127,13 +126,12 @@
                 </h1>
 
                 <p class="hero-desc reveal reveal-d2">
-                    Logician is a tool-first local agent framework built for code review, research synthesis,
-                    and reproducible workflows — with structured execution, persistent context, repo grounding,
-                    and audit-ready traces. Runs entirely on your machine.
+                    Logician is a local-first coding agent with a streaming terminal UI. SSH-ready,
+                    thinking-visible, and built for real code editing workflows.
                 </p>
 
                 <div class="hero-actions reveal reveal-d3">
-                    <a class="btn btn-primary btn-large" href="README.md">Explore the docs</a>
+                    <a class="btn btn-primary btn-large" href="https://github.com/lseman/logician/blob/main/README.md">Explore the docs</a>
                     <a class="btn btn-ghost btn-large" href="https://github.com/lseman/logician" target="_blank"
                         rel="noopener">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
@@ -268,14 +266,43 @@
                     <span>SKILL.md</span>
                     <button class="copy-btn" onclick="copyCode(this)">copy</button>
                 </div>
-                <pre><code>---
-name: code-review
-description: Review code changes for correctness, risks, and missing tests.
-allowed-tools: [read_file, grep, git]
-argument-hint: &lt;diff-or-topic&gt;
----
+                <pre><code><span class="kw">---</span>
+<span class="key">name</span>: code-review
+<span class="key">description</span>: <span class="str">Review code changes for correctness, risks, and missing tests.</span>
+<span class="key">aliases</span>:
+  <span class="kw">-</span> <span class="str">code review</span>
+  <span class="kw">-</span> <span class="str">review code</span>
+<span class="key">triggers</span>:
+  <span class="kw">-</span> <span class="str">review the code</span>
+  <span class="kw">-</span> <span class="str">review changes</span>
+  <span class="kw">-</span> <span class="str">check this PR</span>
+  <span class="kw">-</span> <span class="str">code review</span>
+<span class="key">preferred_tools</span>:
+  <span class="kw">-</span> <span class="str">read_file</span>
+  <span class="kw">-</span> <span class="str">grep</span>
+  <span class="kw">-</span> <span class="str">git</span>
+  <span class="kw">-</span> <span class="str">file_diff</span>
+<span class="key">example_queries</span>:
+  <span class="kw">-</span> <span class="str">review the latest changes</span>
+  <span class="kw">-</span> <span class="str">check this PR for bugs</span>
+<span class="key">when_not_to_use</span>:
+  <span class="kw">-</span> <span class="str">the user wants a style/formatting review only</span>
+<span class="key">next_skills</span>:
+  <span class="kw">-</span> <span class="str">cpp-code-review</span>
+  <span class="kw">-</span> <span class="str">python-code-review</span>
+  <span class="kw">-</span> <span class="str">javascript-code-review</span>
+<span class="kw">---</span>
 
-Inspect the change as a reviewer. Prioritize bugs and regressions before style.</code></pre>
+<span class="kw">#</span> Code Review
+
+Inspect changed files for bugs, regressions, and quality issues.
+
+<span class="kw">##</span> Workflow
+
+<span class="num">1</span>. Identify changed files using <span class="str">`git diff`</span> or <span class="str">`file_diff`</span>
+<span class="num">2</span>. Read each changed file to understand context
+<span class="num">3</span>. Check for logic errors, missing error handling, and performance issues
+<span class="num">4</span>. Report findings prioritized by severity</code></pre>
             </div>
         </div>
     </section>
