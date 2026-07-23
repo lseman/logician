@@ -7,6 +7,7 @@ import {
 	highlightAuto,
 } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
+import { stripAcceptanceReport } from "@logician/agent-core/core/acceptance-contract.ts";
 import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 import { theme } from "../layers/theme/theme.ts";
 import type {
@@ -67,6 +68,15 @@ function stripThinkingToolMarkup(text: string): string {
 		.trimEnd();
 }
 
+function stripAcceptanceForDisplay(text: string): string {
+	const marker = text.indexOf("```acceptance-report");
+	if (marker < 0) return text;
+	const stripped = stripAcceptanceReport(text);
+	// While the report is still streaming there is no closing fence to strip.
+	// Hide the internal report from its opening marker onward.
+	return stripped === text ? text.slice(0, marker).trimEnd() : stripped.trimEnd();
+}
+
 function stripInternalHookGuidance(text: string | undefined): string | undefined {
 	if (!text?.includes("-hook>")) return text;
 	const visible = text
@@ -83,7 +93,7 @@ function stripInternalHookGuidance(text: string | undefined): string | undefined
 
 interface ChildToolCall {
 	agentId: string;
-	toolCallId: string;
+	toolCallId?: string;
 	toolName: string;
 	args: string;
 	status?: "running" | "completed" | "failed";
@@ -342,6 +352,10 @@ function compactText(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
 }
 
+function formatDurationMs(ms: number): string {
+	return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 function diffLineColor(line: string): string {
 	if (line.startsWith("@@")) return theme.fgRaw("diffHunk");
 	if (
@@ -475,6 +489,17 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private maxTurns: number;
 	private maxRenderedLines: number;
 	private turns: Turn[] = [];
+	private spinnerTick = 0;
+	private spinnerTimer: ReturnType<typeof setInterval> | null = null;
+	private onAnimationTick: (() => void) | null = null;
+	/**
+	 * Wall-clock timing for spawn_agents per-task rows, keyed by the batch
+	 * tool's call id then task index. The batch tool only reports per-task
+	 * status via a `▶/✓/×` marker stream with no timestamps, so the first
+	 * time a task is observed running/finished here we stamp it ourselves —
+	 * this is a rendering-side approximation, not the tool's real timing.
+	 */
+	private batchTaskTiming = new Map<string, Map<number, { startedAt: number; endedAt?: number }>>();
 
 	constructor(options: TranscriptDisplayOptions = {}) {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
@@ -482,6 +507,36 @@ export class TranscriptDisplay implements Component, Scrollable {
 			options.maxMessageLength ?? DEFAULT_TRUNCATION.transcriptMessageMaxChars;
 		this.maxTurns = options.maxTurns ?? 200;
 		this.maxRenderedLines = options.maxRenderedLines ?? 2000;
+	}
+
+	private static readonly SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+
+	private spinnerFrame(): string {
+		return TranscriptDisplay.SPINNER_FRAMES[
+			this.spinnerTick % TranscriptDisplay.SPINNER_FRAMES.length
+		];
+	}
+
+	/** Called once, wiring a redraw request for each spinner animation frame. */
+	setOnAnimationTick(cb: () => void): void {
+		this.onAnimationTick = cb;
+	}
+
+	/** Start ticking the running-tool spinner. Idempotent while already running. */
+	startAnimation(): void {
+		if (this.spinnerTimer) return;
+		this.spinnerTimer = setInterval(() => {
+			this.spinnerTick = (this.spinnerTick + 1) % TranscriptDisplay.SPINNER_FRAMES.length;
+			this.invalidate();
+			this.onAnimationTick?.();
+		}, 150);
+	}
+
+	stopAnimation(): void {
+		if (this.spinnerTimer) {
+			clearInterval(this.spinnerTimer);
+			this.spinnerTimer = null;
+		}
 	}
 
 	setThinkingMode(mode: ThinkingDisplayStyle): void {
@@ -797,7 +852,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 					// Flush code block with syntax highlighting
 					const lang = codeBlockLang || null;
 					if (lang) {
-						const highlighted = highlightAuto(codeContent);
+						let highlighted;
+						try {
+							highlighted = highlight(codeContent, lang);
+						} catch {
+							highlighted = highlightAuto(codeContent);
+						}
 						const langLabel = highlighted.language
 							? ` ${highlighted.language} · ${codeContent.split("\n").length} lines`
 							: "";
@@ -923,29 +983,30 @@ export class TranscriptDisplay implements Component, Scrollable {
 				if (inCodeBlock) {
 					// Flush code block with syntax highlighting
 					const lang = codeBlockLang || null;
-					if (lang) {
-						const highlighted = highlightAuto(codeContent);
-						const langLabel = highlighted.language
-							? ` ${highlighted.language} · ${codeContent.split("\n").length} lines`
-							: "";
-						lines.push(`${bg}${DIM}  ${rawLine}${langLabel}${bgReset}`);
-						for (const cl of highlighted.value.split("\n")) {
-							lines.push(`${bg}${DIM}  ${cl}${bgReset}`);
-						}
-					} else {
-						const codeLines = codeContent.split("\n");
-						for (const cl of codeLines) {
-							lines.push(`${bg}${DIM}  ${cl}${bgReset}`);
-						}
+					let renderedCode = codeContent;
+					try {
+						renderedCode = lang
+							? highlight(codeContent, lang).value
+							: highlightAuto(codeContent).value;
+					} catch {
+						// Fall back to the original code when no grammar matches.
 					}
-					lines.push(`${bg}${DIM}  \x60\x60\x60${bgReset}`);
+					for (const cl of renderedCode.split("\n")) {
+						lines.push(`${bg}  ${cl}${bgReset}`);
+					}
+					const count = codeContent.split("\n").length;
+					lines.push(
+						`${bg}${DIM}  └─ ${count} line${count === 1 ? "" : "s"}${bgReset}`,
+					);
 					codeContent = "";
 					codeBlockLang = null;
 					inCodeBlock = false;
 				} else {
 					inCodeBlock = true;
 					codeBlockLang = extractLangFromFence(rawLine);
-					lines.push(`${bg}${DIM}  ${rawLine}${bgReset}`);
+					lines.push(
+						`${bg}${DIM}  ┌─ ${codeBlockLang || "code"}${bgReset}`,
+					);
 				}
 				continue;
 			}
@@ -1031,10 +1092,18 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 
 		if (inCodeBlock && codeContent) {
-			lines.push(`${bg}${DIM}  [code block open]${bgReset}`);
-			for (const cl of codeContent.split("\n")) {
-				lines.push(`${bg}${DIM}  ${cl}${bgReset}`);
+			let renderedCode = codeContent;
+			try {
+				renderedCode = codeBlockLang
+					? highlight(codeContent, codeBlockLang).value
+					: highlightAuto(codeContent).value;
+			} catch {
+				// Keep incomplete streaming code readable when its grammar is unknown.
 			}
+			for (const cl of renderedCode.split("\n")) {
+				lines.push(`${bg}  ${cl}${bgReset}`);
+			}
+			lines.push(`${bg}${DIM}  └─ streaming${bgReset}`);
 		}
 
 		return lines;
@@ -1267,19 +1336,33 @@ export class TranscriptDisplay implements Component, Scrollable {
 			partialResult: stripInternalHookGuidance(tool.partialResult),
 		};
 		const lines: string[] = [];
+		const subagent = tool.tool_name === "spawn_agent";
+		const subagentBatch = tool.tool_name === "spawn_agents";
+		const batchTally = subagentBatch ? this.computeBatchTally(tool) : null;
+		const batchFailed = batchTally?.failed ?? 0;
 		const glyph = tool.isError
 			? theme.fg("toolError", "×")
+			: tool.isComplete && batchFailed > 0
+				? theme.fg("warning", "!")
 			: tool.isComplete
 				? theme.fg("toolSuccess", "✓")
-				: theme.fg("toolRunning", "◌");
+				: theme.fg("toolRunning", this.spinnerFrame());
 		const status = tool.isError
 			? theme.fg("toolError", "error")
+			: tool.isComplete && batchFailed > 0
+				? theme.fg("warning", `partial · ${batchFailed} failed`)
 			: tool.isComplete
 				? theme.fg("toolSuccess", "done")
-				: tool.partialResult || tool.streamOutput
-					? theme.fg("toolStreaming", "streaming")
-					: theme.fg("toolRunning", "running");
-		const subagent = tool.tool_name === "spawn_agent";
+				: batchTally
+					? theme.fg(
+							"toolStreaming",
+							`${batchTally.completed + batchTally.running}/${batchTally.total} running${
+								batchTally.failed > 0 ? ` · ${batchTally.failed} failed` : ""
+							}`,
+						)
+					: tool.partialResult || tool.streamOutput
+						? theme.fg("toolStreaming", "streaming")
+						: theme.fg("toolRunning", "running");
 		const subagentAgent = subagent
 			? String(tool.details?.agent || tool.args?.agent || "general")
 			: "";
@@ -1303,13 +1386,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 		})();
 
 		const summary = this.toolSummary(tool);
-		const elapsed = tool.durationMs !== undefined
-			? tool.durationMs < 1000
-				? `${tool.durationMs}ms`
-				: `${(tool.durationMs / 1000).toFixed(1)}s`
-			: "";
+		const elapsed =
+			tool.durationMs !== undefined ? formatDurationMs(tool.durationMs) : "";
 		const base = subagent
 			? `${glyph} ${theme.fg("toolTitle", "subagent")} ${theme.fg("active", subagentAgent)} ${status}`
+			: subagentBatch
+				? `${glyph} ${theme.fg("toolTitle", "subagents")} ${status}`
 			: filePath
 				? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
 				: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
@@ -1353,7 +1435,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		const compactPreview =
-			!showDiffResult && !this.toolsExpanded && !subagent
+			!showDiffResult &&
+				!this.toolsExpanded &&
+				!subagent &&
+				!subagentBatch
 				? this.collapsedToolPreview(tool)
 				: "";
 		if (compactPreview) {
@@ -1377,8 +1462,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 				),
 			);
 		}
-		if (!this.toolsExpanded && !subagent) return lines;
-		if (!subagent) {
+		if (!this.toolsExpanded && !subagent && !subagentBatch) return lines;
+		if (!subagent && !subagentBatch) {
 			lines.push(
 				`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`,
 			);
@@ -1477,6 +1562,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (tool.tool_name === "spawn_agent") {
 			return compactText(stringArg(args, "task") || "").slice(0, 80);
 		}
+		if (tool.tool_name === "spawn_agents") {
+			const tasks = Array.isArray(args.tasks) ? args.tasks.length : 0;
+			return tasks ? `${tasks} tasks` : "";
+		}
 		if (path) return path;
 		const result = tool.result ?? tool.partialResult;
 		return result ? compactText(result).slice(0, 80) : "";
@@ -1489,6 +1578,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		if (tool.tool_name === "spawn_agent") {
 			return this.renderSubagentDetails(tool, width);
+		}
+		if (tool.tool_name === "spawn_agents") {
+			return this.renderSubagentBatchDetails(tool, width);
 		}
 
 		if (tool.isError && result && isPermissionRejection(result)) {
@@ -1530,6 +1622,212 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return lines;
 	}
 
+	/**
+	 * Live progress tally for a spawn_agents batch. Before completion the only
+	 * signal available is the `▶/✓/×` marker stream on streamOutput (the tool
+	 * only reports structured total/completed/failed once every task
+	 * finishes), so this is the single place that parses it — reused by both
+	 * the collapsed header and the expanded per-task breakdown.
+	 */
+	private computeBatchTally(tool: ToolExecution): {
+		total: number;
+		completed: number;
+		failed: number;
+		running: number;
+		liveStatus: Map<number, "running" | "completed" | "failed">;
+		taskElapsedMs: Map<number, number>;
+	} {
+		const tasks = Array.isArray(tool.args?.tasks)
+			? tool.args.tasks.filter(
+					(task): task is Record<string, unknown> =>
+						typeof task === "object" && task !== null,
+				)
+			: [];
+		const details = tool.details ?? {};
+		const liveStatus = new Map<number, "running" | "completed" | "failed">();
+		for (const line of (tool.streamOutput ?? "").split("\n")) {
+			const match = /^([▶✓×])\s+(\d+)\s+/.exec(line.trim());
+			if (!match) continue;
+			liveStatus.set(
+				Number(match[2]),
+				match[1] === "▶"
+					? "running"
+					: match[1] === "✓"
+						? "completed"
+						: "failed",
+			);
+		}
+
+		const timingKey = tool.tool_call_id ?? "";
+		let timing = this.batchTaskTiming.get(timingKey);
+		if (!timing) {
+			timing = new Map();
+			this.batchTaskTiming.set(timingKey, timing);
+		}
+		const now = Date.now();
+		const taskElapsedMs = new Map<number, number>();
+		for (const [index, status] of liveStatus) {
+			let entry = timing.get(index);
+			if (!entry) {
+				entry = { startedAt: now };
+				timing.set(index, entry);
+			}
+			if (status !== "running" && entry.endedAt === undefined) {
+				entry.endedAt = now;
+			}
+			taskElapsedMs.set(index, (entry.endedAt ?? now) - entry.startedAt);
+		}
+
+		const total =
+			typeof details.total === "number" ? details.total : tasks.length;
+		const completed =
+			typeof details.completed === "number"
+				? details.completed
+				: [...liveStatus.values()].filter((s) => s === "completed").length;
+		const failed =
+			typeof details.failed === "number"
+				? details.failed
+				: [...liveStatus.values()].filter((s) => s === "failed").length;
+		const running = [...liveStatus.values()].filter(
+			(status) => status === "running",
+		).length;
+		return { total, completed, failed, running, liveStatus, taskElapsedMs };
+	}
+
+	private batchAgentStreams(tool: ToolExecution): Map<number, string> {
+		const streams = new Map<number, string>();
+		const stored = tool.details?.streamTranscript;
+		const source =
+			typeof stored === "string" ? stored : (tool.streamOutput ?? "");
+		for (const line of source.split("\n")) {
+			const match = /^↳\s+(\d+)\s+(.+)$/.exec(line);
+			if (!match) continue;
+			try {
+				const delta = JSON.parse(match[2]) as unknown;
+				if (typeof delta !== "string") continue;
+				const index = Number(match[1]);
+				streams.set(index, (streams.get(index) ?? "") + delta);
+			} catch {
+				// Ignore an incomplete update line while it is still streaming.
+			}
+		}
+		return streams;
+	}
+
+	private renderSubagentText(
+		text: string,
+		width: number,
+		streaming: boolean,
+	): string[] {
+		const visibleText = stripAcceptanceForDisplay(text);
+		if (!visibleText) return [];
+		const markdown =
+			!this.toolsExpanded && visibleText.length > 800
+				? this.withTruncationMarker(visibleText.slice(0, 800))
+				: visibleText;
+		return this.renderMarkdownLines(
+			markdown,
+			Math.max(16, width),
+			streaming,
+			theme.fg("assistantText", ""),
+		);
+	}
+
+	private distinctSubagentOutputs(liveText: string, finalText: string): string[] {
+		const live = stripAcceptanceForDisplay(liveText).trim();
+		const final = stripAcceptanceForDisplay(finalText).trim();
+		if (!live) return final ? [final] : [];
+		if (!final || live === final || live.includes(final)) return [live];
+		return [live, final];
+	}
+
+	private renderSubagentBatchDetails(
+		tool: ToolExecution,
+		width: number,
+	): string[] {
+		const tasks = Array.isArray(tool.args?.tasks)
+			? tool.args.tasks.filter(
+					(task): task is Record<string, unknown> =>
+						typeof task === "object" && task !== null,
+				)
+			: [];
+		const details = tool.details ?? {};
+		const results = Array.isArray(details.results)
+			? details.results.filter(
+					(result): result is Record<string, unknown> =>
+						typeof result === "object" && result !== null,
+				)
+			: [];
+		const resultByIndex = new Map(
+			results.map((result) => [Number(result.index), result]),
+		);
+		const { total, completed, failed, running, liveStatus, taskElapsedMs } =
+			this.computeBatchTally(tool);
+		const agentStreams = this.batchAgentStreams(tool);
+		const summary = tool.isComplete
+			? `${total} agents · ${completed} completed · ${failed} failed`
+			: `${total} agents · ${running} running`;
+		const lines = [`${DIM}${summary}${RESET}`];
+
+		for (let index = 0; index < tasks.length; index++) {
+			const task = tasks[index];
+			const result = resultByIndex.get(index);
+			const resultError = result?.isError === true;
+			const state = result
+				? resultError
+					? "failed"
+					: "completed"
+				: liveStatus.get(index) ?? "queued";
+			const icon =
+				state === "failed"
+					? theme.fg("toolError", "×")
+					: state === "completed"
+						? theme.fg("toolSuccess", "✓")
+						: state === "running"
+							? theme.fg("toolRunning", this.spinnerFrame())
+							: theme.fg("dim", "·");
+			const agent =
+				typeof task.agent === "string" && task.agent
+					? task.agent
+					: "general";
+			const taskText =
+				typeof task.task === "string" ? compactText(task.task) : `Task ${index + 1}`;
+			const elapsedMs = taskElapsedMs.get(index);
+			const elapsed =
+				elapsedMs !== undefined ? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}` : "";
+			lines.push(
+				clampLineToWidth(
+					`${icon} ${theme.fg("active", `${index + 1}. ${agent}`)} ${DIM}${taskText}${RESET}${elapsed}`,
+					Math.max(20, width),
+				),
+			);
+			if (this.toolsExpanded) {
+				const liveText = agentStreams.get(index) ?? "";
+				const resultText =
+					typeof result?.content === "string" ? result.content : "";
+				const texts = this.distinctSubagentOutputs(liveText, resultText);
+				for (const text of texts) {
+					for (const preview of this.renderSubagentText(
+						text,
+						Math.max(16, width - 4),
+						!result,
+					)) {
+						lines.push(`  ${preview}`);
+					}
+				}
+			}
+		}
+		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
+		lines.push(
+			...this.renderSubagentActivity(
+				childToolCalls,
+				width,
+				this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
+			),
+		);
+		return lines;
+	}
+
 	private renderSubagentDetails(tool: ToolExecution, width: number): string[] {
 		const lines: string[] = [];
 		const args = tool.args || {};
@@ -1544,58 +1842,67 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? `${metrics.toolCalls} tool call(s)`
 				: "",
 			typeof metrics.durationMs === "number"
-				? metrics.durationMs < 1000
-					? `${metrics.durationMs}ms`
-					: `${(metrics.durationMs / 1000).toFixed(1)}s`
+				? formatDurationMs(metrics.durationMs)
 				: "",
 		]
 			.filter(Boolean)
 			.join(" · ");
 		if (metadata) {
-			lines.push(
-				`${theme.fg("dim", "│ ")}${DIM}${metadata}${RESET}`,
-			);
+			lines.push(`${DIM}${metadata}${RESET}`);
 		}
 
 		const branch = typeof details.branch === "string" ? details.branch : "";
 		const commit = typeof details.commit === "string" ? details.commit : "";
 		if (branch || commit) {
 			lines.push(
-				`${theme.fg("dim", "│ ")}${DIM}${[branch && `branch ${branch}`, commit && `commit ${commit.slice(0, 12)}`].filter(Boolean).join(" · ")}${RESET}`,
+				`${DIM}${[branch && `branch ${branch}`, commit && `commit ${commit.slice(0, 12)}`].filter(Boolean).join(" · ")}${RESET}`,
 			);
 		}
 
 		const task = stringArg(args, "task");
 		if (task) {
-			lines.push(this.detailSection("task"));
-			lines.push(...this.previewBlock(task, width, 800));
+			for (const line of this.previewBlock(task, Math.max(16, width - 4), 800)) {
+				lines.push(`${theme.fg("dim", "→ ")}${line}`);
+			}
 		}
 
-		// Render child tool calls when expanded.
-		if (this.toolsExpanded) {
-			const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
-			lines.push(...this.renderSubagentActivity(childToolCalls, width));
-		} else {
-			const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
-			lines.push(...this.renderSubagentActivity(childToolCalls, width, 4));
-		}
+		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
+		lines.push(
+			...this.renderSubagentActivity(
+				childToolCalls,
+				width,
+				this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
+				false,
+				false,
+			),
+		);
 
-		const output = tool.isComplete ? tool.result : tool.streamOutput;
-		if (output) {
-			lines.push(this.detailSection(tool.isComplete ? "result" : "live progress"));
+		const storedTranscript =
+			typeof details.streamTranscript === "string"
+				? details.streamTranscript
+				: "";
+		const liveOutput = tool.isComplete ? storedTranscript : (tool.streamOutput ?? "");
+		const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
+		const outputs =
+			this.toolsExpanded
+				? this.distinctSubagentOutputs(liveOutput, finalOutput)
+				: tool.isComplete && finalOutput
+					? [finalOutput]
+					: [];
+		if (outputs.length > 0) {
 			// Ctrl+O is the explicit full-detail view. Keep collapsed tool rows
 			// compact, but never discard child-agent progress or the final report here.
-			lines.push(
-				...this.previewBlock(
+			for (const output of outputs) {
+				for (const line of this.renderSubagentText(
 					output,
-					width,
-					!tool.isComplete || this.toolsExpanded
-						? Number.POSITIVE_INFINITY
-						: 800,
-				),
-			);
-		} else if (!tool.isComplete) {
-			lines.push(`${DIM}waiting for agent output…${RESET}`);
+					Math.max(16, width - 4),
+					!tool.isComplete,
+				)) {
+					lines.push(`  ${line}`);
+				}
+			}
+		} else if (!tool.isComplete && this.toolsExpanded) {
+			lines.push(`${theme.fg("dim", "  waiting for agent output…")}${RESET}`);
 		}
 
 		return lines;
@@ -1605,16 +1912,20 @@ export class TranscriptDisplay implements Component, Scrollable {
 		calls: ChildToolCall[] | undefined,
 		width: number,
 		limit = Number.POSITIVE_INFINITY,
+		showHeading = true,
+		showAgent = true,
 	): string[] {
 		if (!calls?.length) return [];
 		const visible = calls.slice(-limit);
 		const hidden = calls.length - visible.length;
-		const lines = [
-			this.detailSection(
+		const lines = showHeading
+			? [this.detailSection(
 				"activity",
 				`${calls.length} tool call${calls.length === 1 ? "" : "s"}${hidden ? ` · latest ${visible.length}` : ""}`,
-			),
-		];
+			)]
+			: hidden
+				? [`${theme.fg("dim", `${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`]
+				: [];
 		const bg = theme.bg("mdCodeBlockBg", "");
 		for (const call of visible) {
 			const status =
@@ -1623,11 +1934,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 				status === "failed"
 					? theme.fg("toolError", "×")
 					: status === "running"
-						? theme.fg("toolRunning", "◌")
+						? theme.fg("toolRunning", this.spinnerFrame())
 						: theme.fg("toolSuccess", "✓");
 			const summary = this.subagentCallSummary(call.args);
 			const row = [
 				`${icon} ${theme.fg("toolTitle", call.toolName)}`,
+				showAgent && call.agentId ? `${DIM}${call.agentId}${RESET}` : "",
 				summary ? `${DIM}${summary}${RESET}` : "",
 			]
 				.filter(Boolean)

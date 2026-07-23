@@ -38,6 +38,16 @@ void test("queue management commands are discoverable", () => {
 	assert.equal(drop?.argHint, "<number>");
 });
 
+void test("file-backed EoH is discoverable", () => {
+	const commands = createSlashCommands(bridge, {
+		eoh: (args: unknown) => `eoh:${String(args)}`,
+	});
+	const command = commands.find((item) => item.command === "/eoh");
+	assert.ok(command);
+	assert.equal(command.handler?.("heuristic.py"), "eoh:heuristic.py");
+	assert.match(command.argHint ?? "", /heuristic\.py/);
+});
+
 void test("help renders the live registry and supports topics", () => {
 	const commands = createSlashCommands(bridge, {});
 	const help = commands.find((command) => command.command === "/help");

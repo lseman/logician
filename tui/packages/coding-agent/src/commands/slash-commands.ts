@@ -309,6 +309,24 @@ export function createSlashCommands(
 			argHint: "<mode>",
 			examples: ["/reasoner none", "/reasoner tot", "/reasoner reflexion"],
 		}),
+		cmd(
+			"/eoh",
+			"Evolve a self-evaluating Python heuristic",
+			"local",
+			true,
+			{
+				category: "reasoning",
+				argHint: "<heuristic.py> [generations] | status | stop | best | reset",
+				examples: [
+					"/eoh heuristic.py",
+					"/eoh heuristic.py 10",
+					"/eoh status",
+					"/eoh stop",
+				],
+			},
+			(args: string) =>
+				String(localHandlers.eoh?.(args) ?? "EoH unavailable."),
+		),
 
 		// ── Display ──────────────────────────────────────────────────────────
 		cmd(

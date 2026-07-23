@@ -81,6 +81,17 @@ import {
 import { createPostEditDiagnosticHooks } from "./post-edit-diagnostics.ts";
 import { LspManager } from "./lsp-manager.ts";
 import { killAllTrackedChildren } from "../tools/shell.ts";
+import {
+	EohEngine,
+	type EohProgressEvent,
+} from "@logician/agent-capabilities/eoh/engine.ts";
+import { populationStats } from "@logician/agent-capabilities/eoh/population.ts";
+import {
+	applyEohCandidate,
+	evaluateEohCandidate,
+	loadEohFile,
+	type EohFileTarget,
+} from "./eoh-file.ts";
 
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
@@ -521,6 +532,238 @@ export class AgentCoreBridge {
 	// ── Observational memory (V3) ───────────────────────────────────────
 	private memoryStore: MemoryStore | null = null;
 	private memoryEventBus = new ExtensionEventBus({ defaultTimeoutMs: 30_000 });
+
+	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
+	private eohEngine: EohEngine | null = null;
+	private eohProgressHandler: ((event: EohProgressEvent) => void) | null = null;
+	private eohTarget: EohFileTarget | null = null;
+	private eohAppliedFitness = Number.NEGATIVE_INFINITY;
+	private eohGenerationImproved = false;
+	private eohStaleGenerations = 0;
+	private eohPreparing = false;
+	private eohRunId = 0;
+
+	/** Initialize EoH engine if not already created. */
+	private getEohEngine(): EohEngine {
+		if (!this.eohEngine) {
+			this.eohEngine = new EohEngine();
+		}
+		if (!this.eohProgressHandler) {
+			this.eohProgressHandler = (event: EohProgressEvent) => {
+				if (event.type === "generation_start") {
+					this.eohGenerationImproved = false;
+				}
+				if (
+					event.type === "heuristic_evaluated" &&
+					this.eohTarget &&
+					event.heuristic.fitness > this.eohAppliedFitness
+				) {
+					try {
+						applyEohCandidate(this.eohTarget, event.heuristic.code);
+						this.eohAppliedFitness = event.heuristic.fitness;
+						this.eohGenerationImproved = true;
+						this.emit({
+							type: "notice",
+							level: "success",
+							label: "EoH",
+							text: `Applied fitness ${event.heuristic.fitness.toFixed(6)} · ${path.relative(this.cwd, this.eohTarget.path)}`,
+						});
+					} catch (error) {
+						this.emit({
+							type: "notice",
+							level: "error",
+							label: "EoH",
+							text: `Could not apply candidate: ${error instanceof Error ? error.message : String(error)}`,
+						});
+					}
+				}
+				if (event.type === "generation_end") {
+					this.eohStaleGenerations = this.eohGenerationImproved
+						? 0
+						: this.eohStaleGenerations + 1;
+					if (this.eohStaleGenerations >= 3) {
+						this.eohEngine?.stop();
+						this.emit({
+							type: "notice",
+							level: "info",
+							label: "EoH",
+							text: "Converged: no improvement for 3 generations.",
+						});
+					}
+				}
+				this.emit({
+					...event,
+				} as unknown as ParsedBridgeEvent);
+			};
+		}
+		this.eohEngine.setProgressHandler(this.eohProgressHandler);
+		return this.eohEngine;
+	}
+
+	private async startEohFile(rawPath: string, generations: number): Promise<void> {
+		const runId = ++this.eohRunId;
+		this.eohPreparing = true;
+		try {
+			const target = await loadEohFile(rawPath, this.cwd);
+			if (runId !== this.eohRunId) return;
+			this.eohEngine = new EohEngine({
+				populationSize: 6,
+				numParents: 3,
+				maxGenerations: generations,
+				evalTimeoutMs: 30_000,
+			});
+			this.eohTarget = target;
+			this.eohAppliedFitness = Number.NEGATIVE_INFINITY;
+			this.eohGenerationImproved = false;
+			this.eohStaleGenerations = 0;
+			this.eohProgressHandler = null;
+			const engine = this.getEohEngine();
+			engine.setProblem({
+				name: path.basename(target.path),
+				description:
+					`${target.description}\n\nImprove only the heuristic function. ` +
+					"The file's evaluate(heuristic) function returns fitness; higher is better.",
+				functionSignature: target.functionSignature,
+				instances: [null],
+				evaluateInstance: (code) =>
+					evaluateEohCandidate(target, code, 30_000),
+			});
+			const initialFitness = await evaluateEohCandidate(
+				target,
+				target.heuristicCode,
+				30_000,
+			);
+			if (runId !== this.eohRunId) return;
+			engine.seedHeuristic(
+				target.heuristicCode,
+				initialFitness,
+				"Current file implementation",
+			);
+			this.eohAppliedFitness = initialFitness;
+			this.emit({
+				type: "notice",
+				level: "info",
+				label: "EoH",
+				text: `Baseline fitness ${initialFitness.toFixed(6)} · evolving ${path.relative(this.cwd, target.path)}`,
+			});
+			const model = this.getCurrentModel() || this.config.model;
+			if (!model) throw new Error("No model configured for EoH");
+			await engine.run(this.config.baseUrl, model);
+		} catch (error) {
+			this.emit({
+				type: "notice",
+				level: "error",
+				label: "EoH",
+				text: error instanceof Error ? error.message : String(error),
+			});
+		} finally {
+			if (runId === this.eohRunId) this.eohPreparing = false;
+		}
+	}
+
+	/** EoH command: /eoh <file.py> [generations] | stop | status | best | reset */
+	eohCommand(raw: string): string {
+		const trimmed = raw.trim();
+		if (!trimmed) {
+			return [
+				"EoH: Evolution of Heuristics (arxiv 2401.02051)",
+				"Usage:",
+				"  /eoh <heuristic.py> [generations] - Start/resume file evolution",
+				"  /eoh stop                       - Stop evolution",
+				"  /eoh status                     - Show current status",
+				"  /eoh best                       - Show best heuristic",
+				"  /eoh reset                      - Reset EoH state",
+				"",
+				"The file must wrap def heuristic(...) in # EOH-BEGIN / # EOH-END",
+				"and define evaluate(heuristic) -> float after that region.",
+			].join("\n");
+		}
+
+		const [action, ...rest] = trimmed.split(/\s+/);
+		const args = rest.join(" ");
+
+		switch (action.toLowerCase()) {
+			case "start": {
+				const [file, generationArg] = rest;
+				if (!file) return "Usage: /eoh <heuristic.py> [generations]";
+				const generations = Number.parseInt(generationArg ?? "", 10) || 20;
+				if (this.eohPreparing || this.eohEngine?.getState().running) {
+					return "EoH evolution already running";
+				}
+				void this.startEohFile(file, generations);
+				return `Preparing ${file} · max ${generations} generations · convergence patience 3`;
+			}
+
+			case "stop": {
+				this.eohRunId++;
+				this.eohPreparing = false;
+				const engine = this.getEohEngine();
+				engine.stop();
+				return "EoH stop signal sent";
+			}
+
+			case "status": {
+				const engine = this.getEohEngine();
+				const state = engine.getState();
+				const stats = populationStats(state.population);
+				return [
+					`EoH Status`,
+					`  Running: ${state.running || this.eohPreparing}`,
+					`  Generation: ${state.generation}`,
+					`  LLM calls: ${state.totalLLMCalls}`,
+					`  Population: ${stats.size}`,
+					`  Best fitness: ${stats.best.toFixed(4)}`,
+					`  Mean fitness: ${stats.mean.toFixed(4)}`,
+					`  Worst fitness: ${stats.worst.toFixed(4)}`,
+					this.eohTarget
+						? `  File: ${path.relative(this.cwd, this.eohTarget.path)}`
+						: "  File: none",
+					`  Convergence: ${this.eohStaleGenerations}/3 stale generations`,
+				].join("\n");
+			}
+
+			case "best": {
+				const engine = this.getEohEngine();
+				const best = engine.getBestHeuristic();
+				if (!best) return "No heuristics yet — run /eoh start first";
+				return [
+					`Best heuristic (fitness=${best.fitness.toFixed(4)}, gen=${best.generation}, by=${best.createdBy}):`,
+					``,
+					`Thought:`,
+					best.thought,
+					``,
+					`Code:`,
+					`\`\`\`python`,
+					best.code,
+					`\`\`\``,
+				].join("\n");
+			}
+
+			case "reset": {
+				this.eohRunId++;
+				this.eohEngine?.stop();
+				this.eohEngine = null;
+				this.eohProgressHandler = null;
+				this.eohTarget = null;
+				this.eohAppliedFitness = Number.NEGATIVE_INFINITY;
+				this.eohStaleGenerations = 0;
+				this.eohPreparing = false;
+				return "EoH state reset";
+			}
+
+			default: {
+				if (!action.toLowerCase().endsWith(".py")) {
+					return `Unknown EoH action: ${action}. Use /eoh for usage.`;
+				}
+				const generations = Number.parseInt(args, 10) || 20;
+				if (this.eohPreparing || this.eohEngine?.getState().running) {
+					return "EoH evolution already running";
+				}
+				void this.startEohFile(action, generations);
+				return `Preparing ${action} · max ${generations} generations · convergence patience 3`;
+			}
+		}
+	}
 
 	constructor(
 		opts: AgentBridgeOptions = {

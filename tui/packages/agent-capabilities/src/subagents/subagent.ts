@@ -616,15 +616,41 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 			const runOne = async (item: typeof taskArgs[number]) => {
 				try {
 					const result = await limiterFor(deps).run(
-						() => _runSpawn(item.spawnArgs, { signal: ctx.signal }, deps),
+						() => {
+							ctx.onUpdate?.(
+								`▶ ${item.taskIndex} ${item.task.agent || "general"}\n`,
+							);
+							return _runSpawn(
+								item.spawnArgs,
+								{
+									signal: ctx.signal,
+									onUpdate: (delta) => {
+										// One JSON string per line keeps concurrent agent
+										// streams lossless and attributable in the TUI.
+										ctx.onUpdate?.(
+											`↳ ${item.taskIndex} ${JSON.stringify(delta)}\n`,
+										);
+									},
+								},
+								deps,
+							);
+						},
 						ctx.signal,
+					);
+					const isError =
+						typeof result !== "string" && result.isError === true;
+					ctx.onUpdate?.(
+						`${isError ? "×" : "✓"} ${item.taskIndex} ${item.task.agent || "general"}\n`,
 					);
 					results.push({
 						index: item.taskIndex,
 						result,
-						isError: typeof result !== "string" && result.isError === true,
+						isError,
 					});
 				} catch (error) {
+					ctx.onUpdate?.(
+						`× ${item.taskIndex} ${item.task.agent || "general"}\n`,
+					);
 					results.push({
 						index: item.taskIndex,
 						result: `Error: ${error instanceof Error ? error.message : String(error)}`,

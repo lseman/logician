@@ -75,6 +75,29 @@ export class EohEngine {
 		return ranked[0] ?? null;
 	}
 
+	setMaxGenerations(maxGenerations: number): void {
+		if (!Number.isInteger(maxGenerations) || maxGenerations < 0) {
+			throw new Error("maxGenerations must be a non-negative integer");
+		}
+		this.state.config.maxGenerations = maxGenerations;
+	}
+
+	/** Seed evolution from an existing, already evaluated heuristic. */
+	seedHeuristic(code: string, fitness: number, thought = "Current implementation"): Heuristic {
+		if (!Number.isFinite(fitness)) throw new Error("Seed fitness must be finite");
+		const heuristic: Heuristic = {
+			id: newId(),
+			thought,
+			code,
+			fitness,
+			generation: 0,
+			createdBy: "init",
+			parentIds: [],
+		};
+		this.state.population = [heuristic];
+		return heuristic;
+	}
+
 	stop(): void {
 		this.stopRequested = true;
 	}

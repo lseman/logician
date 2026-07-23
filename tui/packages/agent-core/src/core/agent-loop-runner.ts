@@ -1191,12 +1191,16 @@ async function runAgentLoopInTaskScope(
 			const text = lastAssistantContent(newMessages);
 			const hadTools = lastHadToolCalls(newMessages);
 			const hasStructuredStop = getTaskStatus() !== null;
+			const hasAcceptanceReport =
+				shouldRunAcceptanceFinalization(resolved) &&
+				parseAcceptanceReport(text).report !== undefined;
 
 			const requiresStructuredConclusion =
 				performedToolWork && registry.has("task_status");
 
 			if (
 				!hadTools &&
+				!hasAcceptanceReport &&
 				(looksNonCommittal(text) || requiresStructuredConclusion) &&
 				!hasStructuredStop &&
 				consecutiveRunnerNudges < MAX_CONSECUTIVE_RUNNER_NUDGES

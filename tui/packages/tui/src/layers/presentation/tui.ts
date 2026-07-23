@@ -176,6 +176,7 @@ export class LogicianTUI {
 			thinkingMode: this.thinkingDisplayMode,
 			maxMessageLength: runtimeConfig.source.truncation?.transcriptMessageMaxChars,
 		});
+		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.
 		if (runtimeConfig.source.inferenceMode) {
 			this.setInferenceMode(runtimeConfig.source.inferenceMode);
@@ -491,6 +492,7 @@ export class LogicianTUI {
 			},
 			version: () => "Logician 0.2.0 (TypeScript runtime)",
 			memory: (raw: unknown) => this.bridge.memoryCommand(String(raw ?? "")),
+			eoh: (raw: unknown) => this.bridge.eohCommand(String(raw ?? "")),
 			settings: (raw: unknown) => {
 				const args = String(raw ?? "").trim();
 				if (!args) {
@@ -953,8 +955,10 @@ export class LogicianTUI {
 		this.statusPanel.update({ phase: turnPhaseLabel(this.turnState.phase) });
 		if (turnPhaseIsActive(this.turnState.phase)) {
 			this.statusPanel.startAnimation();
+			this.transcriptDisplay.startAnimation();
 		} else {
 			this.statusPanel.stopAnimation();
+			this.transcriptDisplay.stopAnimation();
 		}
 
 		switch (event.type) {

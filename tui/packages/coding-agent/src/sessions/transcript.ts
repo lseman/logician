@@ -82,15 +82,17 @@ export interface SessionState {
 	thinkingLevel: string;
 }
 
-const DEFAULT_STATE: SessionState = {
-	turns: [],
-	currentTurnId: null,
-	thinkingDisplayMode: "expanded",
-	thinkingLevel: "off",
-};
+function createDefaultState(): SessionState {
+	return {
+		turns: [],
+		currentTurnId: null,
+		thinkingDisplayMode: "expanded",
+		thinkingLevel: "off",
+	};
+}
 
 export class Transcript {
-	private state: SessionState = { ...DEFAULT_STATE };
+	private state: SessionState = createDefaultState();
 	private listeners: Array<() => void> = [];
 
 	// ── Event handling ─────────────────────────────────────────────────────
@@ -283,17 +285,26 @@ export class Transcript {
 		// sanitized prose, so replace the streamed content instead of trying to
 		// append a suffix to markup that no longer shares the same prefix.
 		if (event.message.tool_calls?.length && full !== rendered) {
-			message.chunks = message.chunks.filter(
-				(chunk) => chunk.type !== "content",
-			);
+			// A turn may contain several provider messages separated by tools.
+			// Reconcile only the latest contiguous content run, at its original
+			// position. Removing every content chunk would pull completed tools
+			// above prose that was emitted before those tools.
+			let end = message.chunks.length;
+			while (end > 0 && message.chunks[end - 1].type !== "content") end--;
+			let start = end;
+			while (start > 0 && message.chunks[start - 1].type === "content") start--;
+			if (start < end) message.chunks.splice(start, end - start);
 			if (full) {
-				message.chunks.push({
-					seq: message.chunks.length,
+				message.chunks.splice(start, 0, {
+					seq: start,
 					type: "content",
 					contentText: full,
 					isComplete: true,
 				});
 			}
+			message.chunks.forEach((chunk, index) => {
+				chunk.seq = index;
+			});
 			return;
 		}
 		if (!full) return;
@@ -353,11 +364,23 @@ export class Transcript {
 			.find(
 				(chunk) =>
 					chunk.type === "tool" &&
-					chunk.tool?.tool_name === "spawn_agent" &&
+					["spawn_agent", "spawn_agents"].includes(
+						chunk.tool?.tool_name ?? "",
+					) &&
 					!chunk.isComplete,
 			)?.tool;
 		if (!parent) return false;
 		const details = (parent.details ??= {});
+		if (parent.tool_name === "spawn_agents") {
+			const lifecycle = (details.lifecycle as Array<{
+				agent: string;
+				level: NoticeLevel;
+				text: string;
+			}> | undefined) ?? [];
+			lifecycle.push({ agent: match[1], level: event.level, text: event.text });
+			details.lifecycle = lifecycle;
+			return true;
+		}
 		details.agent = details.agent || match[1];
 		if (event.level === "success") details.status = "completed";
 		if (event.level === "warn" || event.level === "error") {
@@ -375,11 +398,18 @@ export class Transcript {
 		const turn = this.getCurrentTurn();
 		if (!turn?.assistantMessage) return;
 
-		// Find the most recent incomplete spawn_agent tool chunk.
+		// Find the most recent incomplete singular or batch subagent tool chunk.
 		const toolChunk = turn.assistantMessage.chunks
 			.slice()
 			.reverse()
-			.find((c) => c.type === "tool" && c.tool?.tool_name === "spawn_agent" && !c.isComplete);
+			.find(
+				(c) =>
+					c.type === "tool" &&
+					["spawn_agent", "spawn_agents"].includes(
+						c.tool?.tool_name ?? "",
+					) &&
+					!c.isComplete,
+			);
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
@@ -397,8 +427,11 @@ export class Transcript {
 		// toolCallId is threaded through so completions attach to the exact
 		// call that started, not just the most recent running call with the
 		// same name — subagents run concurrently and can call the same tool
-		// more than once in flight.
-		const match = /^([▶✓✗])\s+(\S+)\s+(\S+)(?:\s+(.*))?$/.exec(text);
+		// more than once in flight. The payload group uses [\s\S]* (not .*)
+		// because child.result can contain newlines (e.g. multi-line file
+		// listings) — .* stops at the first \n and the whole match silently
+		// fails, falling back to a raw text.slice() that leaks markers/ids.
+		const match = /^([▶✓✗])\s+(\S+)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
 		const marker = match?.[1];
 		const toolCallId = match?.[2] ?? "";
 		const toolName = match?.[3] ?? text.slice(0, 40);
@@ -550,7 +583,16 @@ export class Transcript {
 			}
 		}
 		tool.result = event.result !== undefined ? String(event.result) : "";
-		tool.details = event.details;
+		tool.details = {
+			...(tool.details ?? {}),
+			...(event.details ?? {}),
+		};
+		if (
+			["spawn_agent", "spawn_agents"].includes(tool.tool_name) &&
+			tool.streamOutput
+		) {
+			tool.details.streamTranscript = tool.streamOutput;
+		}
 		tool.partialResult = undefined;
 		tool.streamOutput = undefined;
 		const isError = (event as unknown as Record<string, unknown>).is_error;
@@ -597,7 +639,7 @@ export class Transcript {
 	}
 
 	clear(): void {
-		this.state = { ...DEFAULT_STATE };
+		this.state = createDefaultState();
 		this.notify();
 	}
 

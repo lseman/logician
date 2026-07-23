@@ -204,11 +204,42 @@ void test("expanded agent tools separate task arguments from live output", () =>
 	const output = plain(display.render(100).join("\n"));
 
 	assert.match(output, /subagent explorer streaming/);
-	assert.match(output, /TASK/);
 	assert.match(output, /Inspect architecture and tests/);
-	assert.match(output, /LIVE PROGRESS/);
 	assert.match(output, /I am inspecting the core files now/);
+	assert.doesNotMatch(output, /TASK|ACTIVITY|LIVE PROGRESS/);
 	assert.doesNotMatch(output, /\{"task":/);
+});
+
+void test("expanded subagent streams render fenced code with syntax highlighting", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "agent-code-stream",
+		userMessage: { type: "user", content: "Inspect code" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: false,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Inspect code", agent: "explorer" },
+					streamOutput: "Found this:\n```typescript\nconst answer = 42;\n```",
+					isError: false,
+					isComplete: false,
+				},
+			}],
+		},
+		isComplete: false,
+	}]);
+	const rendered = display.render(100).join("\n");
+
+	assert.match(plain(rendered), /Found this/);
+	assert.match(plain(rendered), /const answer = 42/);
+	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
 });
 
 void test("expanded agent progress is never character-truncated", () => {
@@ -244,7 +275,7 @@ void test("expanded agent progress is never character-truncated", () => {
 	assert.doesNotMatch(output, /truncated|earlier progress hidden/i);
 });
 
-void test("collapsed agent streaming is never character or line truncated", () => {
+void test("collapsed agent card hides its stream until expanded", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 14 });
 	const longProgress = `BEGIN\n${Array.from(
 		{ length: 80 },
@@ -274,10 +305,119 @@ void test("collapsed agent streaming is never character or line truncated", () =
 	}]);
 
 	const output = plain(display.render(100).join("\n"));
-	assert.match(output, /BEGIN/);
-	assert.match(output, /stream-line-79/);
-	assert.match(output, /END/);
-	assert.doesNotMatch(output, /truncated|earlier lines not shown/i);
+	assert.match(output, /subagent explorer streaming/);
+	assert.doesNotMatch(output, /BEGIN|stream-line-79|END/);
+});
+
+void test("expanded completed subagent keeps its streaming transcript", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "completed-agent-stream",
+		userMessage: { type: "user", content: "Run an audit" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Audit everything", agent: "explorer" },
+					result: "Audit complete.",
+					details: {
+						streamTranscript: "Inspecting files...\n```ts\nconst ok = true;\n```",
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+	const rendered = display.render(100).join("\n");
+	const output = plain(rendered);
+
+	assert.match(output, /Inspecting files/);
+	assert.match(output, /const ok = true/);
+	assert.match(output, /Audit complete/);
+	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+});
+
+void test("expanded completed subagent does not repeat its final report", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "deduplicated-agent-report",
+		userMessage: { type: "user", content: "Review it" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Review it", agent: "reviewer" },
+					result: "**Final report:** all checks passed.",
+					details: {
+						streamTranscript:
+							"Inspecting files...\n\n**Final report:** all checks passed.\n\n" +
+							"```acceptance-report\n{\"criteriaSatisfied\":[]}\n```",
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+	const output = plain(display.render(100).join("\n"));
+
+	assert.equal(output.match(/Final report:/g)?.length, 1);
+	assert.match(output, /Inspecting files/);
+});
+
+void test("collapsed completed subagent formats its final report as markdown", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "markdown-agent-report",
+		userMessage: { type: "user", content: "Review it" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Review it", agent: "reviewer" },
+					result:
+						"**Approved** with `zero errors`.\n\n```ts\nconst valid = true;\n```",
+					details: {
+						streamTranscript:
+							"Working...\n```acceptance-report\n{\"criteriaSatisfied\":[]}\n```",
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+	const rendered = display.render(100).join("\n");
+	const output = plain(rendered);
+
+	assert.match(output, /Approved.*zero errors/);
+	assert.match(rendered, /\x1b\[1mApproved/);
+	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.doesNotMatch(output, /acceptance-report|criteriaSatisfied/);
 });
 
 void test("post-edit diagnostics render as a dedicated formatted block", () => {
@@ -514,8 +654,7 @@ void test("expanded subagent details show child tool calls", () => {
 	}]);
 	const output = plain(display.render(120).join("\n"));
 
-	assert.match(output, /tool calls/i);
-	assert.match(output, /3 tool calls/);
+	assert.match(output, /3 tool call\(s\)/);
 	assert.match(output, /read_file/);
 	assert.match(output, /grep/);
 	assert.match(output, /bash/);
@@ -557,8 +696,9 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 	}]);
 	const output = plain(display.render(120).join("\n"));
 
-	assert.match(output, /ACTIVITY.*1 tool call/);
 	assert.match(output, /read_file.*path=src\/index\.ts/);
+	assert.doesNotMatch(output, /ACTIVITY/);
+	assert.equal(output.match(/explorer/g)?.length, 1);
 });
 
 void test("completed subagent card has one parent success indicator", () => {
@@ -601,6 +741,149 @@ void test("completed subagent card has one parent success indicator", () => {
 		"the final report should render once",
 	);
 	assert.doesNotMatch(output, /◆ subagent|◆ agent/);
+});
+
+void test("spawn_agents renders ordered live task status", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "running-agent-batch",
+		userMessage: { type: "user", content: "Inspect in parallel" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: false,
+				tool: {
+					tool: "spawn_agents",
+					tool_name: "spawn_agents",
+					args: {
+						tasks: [
+							{ agent: "explorer", task: "Inspect the API" },
+							{ agent: "reviewer", task: "Review the tests" },
+							{ agent: "general", task: "Check documentation" },
+						],
+					},
+					streamOutput: "▶ 0 explorer\n✓ 0 explorer\n▶ 1 reviewer\n",
+					isError: false,
+					isComplete: false,
+				},
+			}],
+		},
+		isComplete: false,
+	}]);
+	const output = plain(display.render(120).join("\n"));
+
+	assert.match(output, /subagents 2\/3 running.*3 tasks/);
+	assert.match(output, /3 agents · 1 running/);
+	assert.match(output, /✓ 1\. explorer.*Inspect the API/);
+	assert.match(output, /⠋ 2\. reviewer.*Review the tests/);
+	assert.match(output, /· 3\. general.*Check documentation/);
+});
+
+void test("expanded spawn_agents keeps concurrent text streams attributed", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "streaming-agent-batch",
+		userMessage: { type: "user", content: "Inspect in parallel" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: false,
+				tool: {
+					tool: "spawn_agents",
+					tool_name: "spawn_agents",
+					args: {
+						tasks: [
+							{ agent: "explorer", task: "Inspect API" },
+							{ agent: "reviewer", task: "Inspect tests" },
+						],
+					},
+					streamOutput: [
+						"▶ 0 explorer",
+						'↳ 0 "API stream\\n```ts\\nconst api = true;\\n```"',
+						"▶ 1 reviewer",
+						'↳ 1 "Test stream"',
+						"",
+					].join("\n"),
+					isError: false,
+					isComplete: false,
+				},
+			}],
+		},
+		isComplete: false,
+	}]);
+	const rendered = display.render(120).join("\n");
+	const output = plain(rendered);
+
+	assert.match(output, /1\. explorer.*Inspect API[\s\S]*API stream/);
+	assert.match(output, /2\. reviewer.*Inspect tests[\s\S]*Test stream/);
+	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+});
+
+void test("spawn_agents shows partial failures and expanded reports", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "completed-agent-batch",
+		userMessage: { type: "user", content: "Inspect in parallel" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agents",
+					tool_name: "spawn_agents",
+					args: {
+						tasks: [
+							{ agent: "explorer", task: "Inspect the API" },
+							{ agent: "reviewer", task: "Review the tests" },
+						],
+					},
+					result: "",
+					details: {
+						total: 2,
+						completed: 1,
+						failed: 1,
+						results: [
+							{ index: 0, content: "API looks good.", isError: false },
+							{ index: 1, content: "Tests failed.", isError: true },
+						],
+						childToolCalls: [
+							{
+								agentId: "agent-reviewer",
+								toolName: "bash",
+								args: "{\"command\":\"npm test\"}",
+								status: "failed",
+								isError: true,
+								resultPreview: "1 test failed",
+							},
+						],
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+	const output = plain(display.render(120).join("\n"));
+
+	assert.match(output, /! subagents partial · 1 failed/);
+	assert.match(output, /2 agents · 1 completed · 1 failed/);
+	assert.match(output, /✓ 1\. explorer/);
+	assert.match(output, /× 2\. reviewer/);
+	assert.match(output, /API looks good/);
+	assert.match(output, /Tests failed/);
+	assert.match(output, /bash.*agent-reviewer.*command=npm test/);
 });
 
 void test("edited TypeScript previews are syntax highlighted", () => {
