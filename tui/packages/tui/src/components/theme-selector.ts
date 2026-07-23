@@ -6,15 +6,14 @@
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import { SelectorController } from "./selector-controller.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-
-// Lazy getters to avoid accessing theme before initTheme() is called
-const HEADER = (): string => theme.fg("header", "");
-const SELECTED = (): string => theme.fg("selected", "");
-const MUTED = (): string => theme.fg("muted", "");
+import {
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface ThemeInfo {
 	name: string;
@@ -101,66 +100,70 @@ export class ThemeSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, overlayWidth - 4);
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 		const lines: string[] = [];
 
-		lines.push(`${HEADER()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
-		lines.push(
-			boxLine(
-				`${BOLD}Theme${RESET}${DIM} (${this.themes.length})${RESET}`,
-				"↑↓ select · enter confirm · esc close",
-				innerWidth,
-			),
-		);
-		lines.push(`${HEADER()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		const headerFg = theme.fg("header", "");
 
+		// ── Top rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		// ── Title row ──
+		const titleText = "Theme";
+		const subtitleText = ` (${this.themes.length})`;
+		const hintsText = " ↑↓ select · enter confirm · esc close";
+		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+		const titleVisible = visibleWidth(titleLine);
+		const titlePad = Math.max(0, innerWidth - titleVisible);
+		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth));
+
+		// ── Theme list ──
 		if (!this.themes.length) {
 			lines.push(
-				boxLine(`${MUTED()}No themes available.${RESET}`, "", innerWidth),
+				renderStatusLine(
+					"No themes available.",
+					innerWidth,
+					theme.fg("warning", ""),
+				),
 			);
 		} else {
 			const maxRows = 10;
 			const { start, end } = this.selection.window(this.themes.length, maxRows);
 			if (start > 0) {
-				lines.push(
-					boxLine(`${MUTED()}↑ ${start} more${RESET}`, "", innerWidth),
-				);
+				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const t = this.themes[i];
-				const selected = i === this.selection.index;
-				const cursor = selected ? "▸" : " ";
-				const name = selected
-					? `${SELECTED()}${BOLD}${t.name}${RESET}`
-					: t.name;
-				const desc = `${DIM}${t.description}${RESET}`;
-				lines.push(boxLine(`${cursor} ${name}`, desc, innerWidth));
+				const isSelected = i === this.selection.index;
+
+				const item: ListItem = {
+					label: t.name,
+					metadata: t.description,
+					selected: isSelected,
+				};
+
+				lines.push(renderListItem(item, innerWidth));
 			}
 			if (end < this.themes.length) {
-				lines.push(
-					boxLine(
-						`${MUTED()}↓ ${this.themes.length - end} more${RESET}`,
-						"",
-						innerWidth,
-					),
-				);
+				lines.push(renderStatusLine(`↓ ${this.themes.length - end} more`, innerWidth));
 			}
 		}
 
-		lines.push(`${HEADER()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
-		lines.push(
-			boxLine(
-				this.message
-					? `${DIM}${this.message}${RESET}`
-					: `${MUTED()}Select a color theme.${RESET}`,
-				"",
-				innerWidth,
-			),
-		);
-		lines.push(`${HEADER()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		// ── Bottom bar ──
+		lines.push(renderSeparator(popupWidth));
+		const bottomText = this.message
+			? this.message
+			: "Select a color theme.";
+		lines.push(renderStatusLine(bottomText, innerWidth));
 
-		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
+		// ── Bottom rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
@@ -170,13 +173,4 @@ export class ThemeSelectorOverlay implements Component {
 		this.selection.move(delta, n);
 		this.invalidate();
 	}
-}
-
-function boxLine(left: string, right: string, width: number): string {
-	const leftWidth = visibleWidth(left);
-	const rightWidth = visibleWidth(right);
-	const gap = Math.max(1, width - leftWidth - rightWidth);
-	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
-	const pad = Math.max(0, width - visibleWidth(content));
-	return ` ${content}${" ".repeat(pad)} `;
 }

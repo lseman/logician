@@ -120,7 +120,7 @@ export function createMemoryStore(): MemoryStore {
 					entries.push(entry);
 				}
 			} catch (e: unknown) {
-				// Ignore corrupt data
+				console.error('[memory] deserialize failed:', e);
 			}
 		},
 
@@ -174,7 +174,7 @@ export function createMemoryStore(): MemoryStore {
 					}
 				}
 			} catch (e: unknown) {
-				// Ignore corrupt embedding data
+				console.error('[memory] deserializeEmbeddings failed:', e);
 			}
 		},
 	};

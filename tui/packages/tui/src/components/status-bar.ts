@@ -10,6 +10,9 @@ import { theme } from "../layers/theme/theme.ts";
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 
+/** Max chars for a free-text label before it's ellipsis-truncated. */
+const LABEL_TRUNCATE_LENGTH = 24;
+
 interface StatusInfo {
 	thinkingLevel: string;
 	inferenceMode: string;
@@ -156,7 +159,9 @@ export class StatusBar implements Component {
 	private formatSession(): string {
 		const title = this.info.sessionTitle?.trim();
 		if (!title || title === "New Session") return "";
-		const compact = title.length > 24 ? `${title.slice(0, 23)}…` : title;
+		const compact = title.length > LABEL_TRUNCATE_LENGTH
+			? `${title.slice(0, LABEL_TRUNCATE_LENGTH - 1)}…`
+			: title;
 		return `${DIM}◇${RESET} ${theme.fg("muted", compact)}`;
 	}
 
@@ -307,7 +312,9 @@ export class StatusBar implements Component {
 		const mins = Math.floor(elapsed / 60);
 		const secs = elapsed % 60;
 		const timeStr = mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
-		const truncated = cond.length > 30 ? cond.slice(0, 30) + "…" : cond;
+		const truncated = cond.length > LABEL_TRUNCATE_LENGTH
+			? cond.slice(0, LABEL_TRUNCATE_LENGTH) + "…"
+			: cond;
 		return `${theme.fg("accent", `◎ ${truncated}`)} ${DIM}(${turns} turns, ${timeStr})${RESET}`;
 	}
 

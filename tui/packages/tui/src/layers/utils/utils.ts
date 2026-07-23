@@ -1,6 +1,8 @@
 // ── Utility primitives ────────────────────────────────────────────────────────
 // Grapheme segmentation, visible width, text wrapping, fuzzy matching
 
+import { visibleWidth } from "../core/tui-core.ts";
+
 // ── Grapheme segmenter (Unicode-aware) ────────────────────────────────────────
 
 export const getGraphemeSegmenter = (): Intl.Segmenter => {
@@ -26,90 +28,6 @@ export const getGraphemeSegmenter = (): Intl.Segmenter => {
 		} as unknown as Intl.Segmenter;
 	}
 };
-
-// ── Visible width ─────────────────────────────────────────────────────────────
-
-export function visibleWidth(text: string): number {
-	let width = 0;
-	let inEscape = false;
-
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i];
-		if (ch === "\x1b" && text[i + 1] === "[") {
-			inEscape = true;
-			i += 1;
-		} else if (inEscape) {
-			const c = ch.charCodeAt(0);
-			if (c >= 0x40 && c <= 0x7e) inEscape = false;
-		} else {
-			const code = ch.charCodeAt(0);
-			width +=
-				code >= 0x1100 &&
-				(code <= 0x115f ||
-					code === 0x2329 ||
-					code === 0x232a ||
-					(code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-					(code >= 0xac00 && code <= 0xd7a3) ||
-					(code >= 0xf900 && code <= 0xfaff) ||
-					(code >= 0xfe10 && code <= 0xfe19) ||
-					(code >= 0xfe30 && code <= 0xfe6f) ||
-					(code >= 0xff00 && code <= 0xff60) ||
-					(code >= 0xffe0 && code <= 0xffe6) ||
-					(code >= 0x20000 && code <= 0x2fffd) ||
-					(code >= 0x30000 && code <= 0x3fffd))
-					? 2
-					: 1;
-		}
-	}
-	return width;
-}
-
-// ── Slice by column width ─────────────────────────────────────────────────────
-
-export function sliceByColumn(
-	text: string,
-	startCol: number,
-	endCol: number,
-	byGrapheme = false,
-): string {
-	const segmenter = byGrapheme ? getGraphemeSegmenter() : null;
-	const _segments = segmenter
-		? [...segmenter.segment(text)].map((s) => s.segment)
-		: [...text];
-	const _col = 0;
-	let inEscape = false;
-
-	// We need character-level control to strip ANSI codes, so work on chars
-	// but measure width properly.
-	let result = "";
-	let currentCol = 0;
-	const started = false;
-	let i = 0;
-	const chars = [...text];
-
-	while (i < chars.length) {
-		const ch = chars[i];
-		if (ch === "\x1b" && chars[i + 1] === "[") {
-			if (!started) result += ch;
-			i += 1;
-			inEscape = true;
-		} else if (inEscape) {
-			if (!started) result += ch;
-			if (ch.charCodeAt(0) >= 0x40 && ch.charCodeAt(0) <= 0x7e)
-				inEscape = false;
-			i += 1;
-		} else {
-			const w = visibleWidth(ch);
-			if (currentCol >= endCol) break;
-			if (currentCol >= startCol) {
-				result += ch;
-			}
-			currentCol += w;
-			i += 1;
-		}
-	}
-	return result;
-}
 
 // ── Word navigation ───────────────────────────────────────────────────────────
 

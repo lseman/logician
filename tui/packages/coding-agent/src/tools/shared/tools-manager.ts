@@ -76,8 +76,3 @@ export async function ensureTool(tool: "fd" | "rg", required = false): Promise<s
 	}
 	return path;
 }
-
-/** Clear the path cache (useful in tests). */
-export function clearToolPathCache(): void {
-	toolPathCache.clear();
-}

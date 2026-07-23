@@ -16,8 +16,12 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
 
 	const apiKey = process.env.ANTHROPIC_API_KEY
 		?? process.env.OPENAI_API_KEY
-		?? process.env.LLM_API_KEY
-		?? "sk-no-key";
+		?? process.env.LLM_API_KEY;
+	if (!apiKey) {
+		throw new Error(
+			"No API key configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or LLM_API_KEY.",
+		);
+	}
 
 	const res = await fetch(url, {
 		method: "POST",

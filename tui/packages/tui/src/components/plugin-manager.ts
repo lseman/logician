@@ -1,13 +1,13 @@
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const getHeader = (): string => theme.fg("header", "");
-const getSelected = (): string => theme.fg("selected", "");
-const getMuted = (): string => theme.fg("muted", "");
-const getWarn = (): string => theme.fg("active", "");
+import {
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface PluginListItem {
 	pluginId: string;
@@ -133,26 +133,38 @@ export class PluginManagerOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, overlayWidth - 4);
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 		const lines: string[] = [];
 
-		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
-		lines.push(
-			boxLine(
-				`${BOLD}Plugins${RESET}${DIM} (${this.plugins.length})${RESET}`,
-				"space toggle · r refresh · enter/esc close",
-				innerWidth,
-			),
-		);
-		if (this.pluginsDir) {
-			lines.push(boxLine(`${DIM}${this.pluginsDir}${RESET}`, "", innerWidth));
-		}
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		const headerFg = theme.fg("header", "");
 
+		// ── Top rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		// ── Title row ──
+		const titleText = "Plugins";
+		const subtitleText = ` (${this.plugins.length})`;
+		const hintsText = " space toggle · r refresh · enter/esc close";
+		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+		const titleVisible = visibleWidth(titleLine);
+		const titlePad = Math.max(0, innerWidth - titleVisible);
+		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+		if (this.pluginsDir) {
+			lines.push(renderStatusLine(this.pluginsDir, innerWidth));
+		}
+
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth));
+
+		// ── Plugin list ──
 		if (!this.plugins.length) {
 			lines.push(
-				boxLine(`${getMuted()}No plugins installed.${RESET}`, "", innerWidth),
+				renderStatusLine(
+					"No plugins installed.",
+					innerWidth,
+					theme.fg("warning", ""),
+				),
 			);
 		} else {
 			const maxRows = 10;
@@ -165,15 +177,11 @@ export class PluginManagerOverlay implements Component {
 			);
 			const end = Math.min(this.plugins.length, start + maxRows);
 			if (start > 0) {
-				lines.push(
-					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
-				);
+				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const plugin = this.plugins[i];
-				const selected = i === this.selectedIndex;
-				const checkbox = plugin.enabled ? "[x]" : "[ ]";
-				const cursor = selected ? "▸" : " ";
+				const isSelected = i === this.selectedIndex;
 				const hookText = plugin.hookCount
 					? `hooks:${plugin.hookCount}`
 					: "hooks:-";
@@ -183,41 +191,41 @@ export class PluginManagerOverlay implements Component {
 				const metaParts = [hookText];
 				if (skillText) metaParts.push(skillText);
 				const metaStr = metaParts.join(" · ");
-				const diskText = plugin.onDisk ? "" : ` ${getWarn()}missing${RESET}`;
-				const busy =
-					this.busyPluginId === plugin.pluginId
-						? ` ${DIM}updating...${RESET}`
-						: "";
-				const name = selected
-					? `${getSelected()}${BOLD}${plugin.pluginId}${RESET}`
-					: plugin.pluginId;
-				const meta = `${DIM}v${plugin.version || "?"} · ${metaStr}${RESET}${diskText}${busy}`;
-				lines.push(boxLine(`${cursor} ${checkbox} ${name}`, meta, innerWidth));
+				const diskText = plugin.onDisk ? "" : "  missing";
+				const busy = this.busyPluginId === plugin.pluginId ? "  updating…" : "";
+				const meta = `v${plugin.version || "?"} · ${metaStr}${diskText}${busy}`;
+
+				const item: ListItem = {
+					label: plugin.pluginId,
+					metadata: meta,
+					selected: isSelected,
+					statusDot: !plugin.onDisk
+						? "red"
+						: this.busyPluginId === plugin.pluginId
+							? "yellow"
+							: plugin.enabled
+								? "green"
+								: "gray",
+				};
+
+				lines.push(renderListItem(item, innerWidth));
 			}
 			if (end < this.plugins.length) {
-				lines.push(
-					boxLine(
-						`${getMuted()}↓ ${this.plugins.length - end} more${RESET}`,
-						"",
-						innerWidth,
-					),
-				);
+				lines.push(renderStatusLine(`↓ ${this.plugins.length - end} more`, innerWidth));
 			}
 		}
 
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
-		lines.push(
-			boxLine(
-				this.message
-					? `${DIM}${this.message}${RESET}`
-					: `${getMuted()}Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.${RESET}`,
-				"",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		// ── Bottom bar ──
+		lines.push(renderSeparator(popupWidth));
+		const bottomText = this.message
+			? this.message
+			: `Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.`;
+		lines.push(renderStatusLine(bottomText, innerWidth));
 
-		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
+		// ── Bottom rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
@@ -227,13 +235,4 @@ export class PluginManagerOverlay implements Component {
 		this.selectedIndex = (this.selectedIndex + delta + n) % n;
 		this.invalidate();
 	}
-}
-
-function boxLine(left: string, right: string, width: number): string {
-	const leftWidth = visibleWidth(left);
-	const rightWidth = visibleWidth(right);
-	const gap = Math.max(1, width - leftWidth - rightWidth);
-	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
-	const pad = Math.max(0, width - visibleWidth(content));
-	return ` ${content}${" ".repeat(pad)} `;
 }

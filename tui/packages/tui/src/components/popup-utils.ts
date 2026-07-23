@@ -45,6 +45,11 @@ const getSuccess = (): string => theme.fg("success", "");
 const getError = (): string => theme.fg("error", "");
 const getWarning = (): string => theme.fg("warning", "");
 
+// ── Shared layout constants ─────────────────────────────────────────────────
+
+/** Columns consumed by the popup border + 1-col padding on each side. */
+export const POPUP_FRAME_OVERHEAD = 4;
+
 // ── Popup design config ─────────────────────────────────────────────────────
 
 export interface PopupConfig {
@@ -111,12 +116,20 @@ export function renderPopupFrame(
 
 // ── Render a separator line ─────────────────────────────────────────────────
 
-export function renderSeparator(
-	popupWidth: number,
-	_pad: number = 1,
-): string {
+export function renderSeparator(popupWidth: number): string {
 	const sep = getMuted();
 	return `${sep}${BOX.sepHoriz.repeat(popupWidth)}${RESET}`;
+}
+
+// ── Render a left/right justified line, padded and clamped to width ─────────
+
+export function boxLine(left: string, right: string, width: number): string {
+	const leftWidth = visibleWidth(left);
+	const rightWidth = visibleWidth(right);
+	const gap = Math.max(1, width - leftWidth - rightWidth);
+	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
+	const pad = Math.max(0, width - visibleWidth(content));
+	return ` ${content}${" ".repeat(pad)} `;
 }
 
 // ── Render a single list item ───────────────────────────────────────────────
@@ -296,30 +309,6 @@ export function renderChoiceOption(
 
 export function clampPopupLines(lines: string[], width: number): string[] {
 	return lines.map((line) => clampLineToWidth(line, width));
-}
-
-// ── Category badge colors ───────────────────────────────────────────────────
-
-export const CATEGORY_BADGE_COLORS: Record<string, string> = {
-	help: "\x1b[36m",
-	session: "\x1b[33m",
-	agent: "\x1b[35m",
-	context: "\x1b[34m",
-	rag: "\x1b[32m",
-	skills: "\x1b[95m",
-	reasoning: "\x1b[37m",
-	display: "\x1b[93m",
-	permissions: "\x1b[31m",
-	shortcuts: "\x1b[36m",
-	loop: "\x1b[94m",
-	misc: "\x1b[90m",
-};
-
-// ── Render a category badge ─────────────────────────────────────────────────
-
-export function renderCategoryBadge(cat: string): string {
-	const color = CATEGORY_BADGE_COLORS[cat] ?? "\x1b[90m";
-	return `${color}[${cat}]${RESET}`;
 }
 
 // ── Render a section divider ────────────────────────────────────────────────

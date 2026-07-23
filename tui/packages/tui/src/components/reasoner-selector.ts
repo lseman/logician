@@ -6,14 +6,14 @@
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import { SelectorController } from "./selector-controller.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const getHeader = (): string => theme.fg("header", "");
-const getSelected = (): string => theme.fg("selected", "");
-const getMuted = (): string => theme.fg("muted", "");
-const getActive = (): string => theme.fg("active", "");
+import {
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface ReasonerInfo {
 	id: string;
@@ -100,72 +100,71 @@ export class ReasonerSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, overlayWidth - 4);
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 		const lines: string[] = [];
 
-		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
-		lines.push(
-			boxLine(
-				`${BOLD}Reasoning Mode${RESET}${DIM} (${this.reasoners.length})${RESET}`,
-				"↑↓ select · enter confirm · esc close",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		const headerFg = theme.fg("header", "");
 
+		// ── Top rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		// ── Title row ──
+		const titleText = "Reasoning Mode";
+		const subtitleText = ` (${this.reasoners.length})`;
+		const hintsText = " ↑↓ select · enter confirm · esc close";
+		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+		const titleVisible = visibleWidth(titleLine);
+		const titlePad = Math.max(0, innerWidth - titleVisible);
+		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth));
+
+		// ── Reasoner list ──
 		if (!this.reasoners.length) {
 			lines.push(
-				boxLine(
-					`${getMuted()}No reasoning modes available.${RESET}`,
-					"",
+				renderStatusLine(
+					"No reasoning modes available.",
 					innerWidth,
+					theme.fg("warning", ""),
 				),
 			);
 		} else {
 			const maxRows = 10;
 			const { start, end } = this.selection.window(this.reasoners.length, maxRows);
 			if (start > 0) {
-				lines.push(
-					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
-				);
+				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const r = this.reasoners[i];
-				const selected = i === this.selection.index;
-				const cursor = selected ? "▸" : " ";
-				const activeMark = r.active ? `${getActive()}● active${RESET}` : "";
-				const name = selected
-					? `${getSelected()}${BOLD}${r.name}${RESET}`
-					: r.name;
-				const desc = `${DIM}${r.description}${RESET}`;
-				const meta = activeMark ? `${desc}  ${activeMark}` : desc;
-				lines.push(boxLine(`${cursor} ${name}`, meta, innerWidth));
+				const isSelected = i === this.selection.index;
+
+				const item: ListItem = {
+					label: r.name,
+					metadata: r.active ? `${r.description}  active` : r.description,
+					selected: isSelected,
+					statusDot: r.active ? "active" : undefined,
+				};
+
+				lines.push(renderListItem(item, innerWidth));
 			}
 			if (end < this.reasoners.length) {
-				lines.push(
-					boxLine(
-						`${getMuted()}↓ ${this.reasoners.length - end} more${RESET}`,
-						"",
-						innerWidth,
-					),
-				);
+				lines.push(renderStatusLine(`↓ ${this.reasoners.length - end} more`, innerWidth));
 			}
 		}
 
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
-		lines.push(
-			boxLine(
-				this.message
-					? `${DIM}${this.message}${RESET}`
-					: `${getMuted()}Select a reasoning mode for the next turn.${RESET}`,
-				"",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		// ── Bottom bar ──
+		lines.push(renderSeparator(popupWidth));
+		const bottomText = this.message
+			? this.message
+			: "Select a reasoning mode for the next turn.";
+		lines.push(renderStatusLine(bottomText, innerWidth));
 
-		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
+		// ── Bottom rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
@@ -175,13 +174,4 @@ export class ReasonerSelectorOverlay implements Component {
 		this.selection.move(delta, n);
 		this.invalidate();
 	}
-}
-
-function boxLine(left: string, right: string, width: number): string {
-	const leftWidth = visibleWidth(left);
-	const rightWidth = visibleWidth(right);
-	const gap = Math.max(1, width - leftWidth - rightWidth);
-	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
-	const pad = Math.max(0, width - visibleWidth(content));
-	return ` ${content}${" ".repeat(pad)} `;
 }

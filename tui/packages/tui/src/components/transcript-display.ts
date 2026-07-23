@@ -81,6 +81,16 @@ function stripInternalHookGuidance(text: string | undefined): string | undefined
 
 // ── Inline markdown renderer ──────────────────────────────────────────────────
 
+interface ChildToolCall {
+	agentId: string;
+	toolCallId: string;
+	toolName: string;
+	args: string;
+	status?: "running" | "completed" | "failed";
+	isError?: boolean;
+	resultPreview?: string;
+}
+
 interface ParsedPostEditDiagnostic {
 	line: number;
 	column: number;
@@ -1269,6 +1279,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 				: tool.partialResult || tool.streamOutput
 					? theme.fg("toolStreaming", "streaming")
 					: theme.fg("toolRunning", "running");
+		const subagent = tool.tool_name === "spawn_agent";
+		const subagentAgent = subagent
+			? String(tool.details?.agent || tool.args?.agent || "general")
+			: "";
 
 		// Extract file path for write_file / edit_file to show in header
 		const filePath = (() => {
@@ -1294,9 +1308,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? `${tool.durationMs}ms`
 				: `${(tool.durationMs / 1000).toFixed(1)}s`
 			: "";
-		const base = filePath
-			? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
-			: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
+		const base = subagent
+			? `${glyph} ${theme.fg("toolTitle", "subagent")} ${theme.fg("active", subagentAgent)} ${status}`
+			: filePath
+				? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
+				: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
 		const middle = summary ? `${DIM}${summary}${RESET}` : "";
 		const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
 		let row = [base, middle].filter(Boolean).join(` ${DIM}·${RESET} `);
@@ -1318,10 +1334,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 			if (tool.isError) {
 				const resultLines = resultText.split("\n");
 				lines.push(
-					`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET} ${resultLines[0]}`,
+					`${theme.fg("toolError", "│ ")}${BOLD}${theme.fg("toolError", label)}${RESET} ${resultLines[0]}`,
 				);
 				for (let ri = 1; ri < resultLines.length; ri++) {
-					lines.push(`${theme.fg("dim", "│ ")}${resultLines[ri]}`);
+					lines.push(`${theme.fg("toolError", "│ ")}${resultLines[ri]}`);
 				}
 			} else {
 				// Syntax-highlight the diff in collapsed view.
@@ -1337,7 +1353,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		const compactPreview =
-			!showDiffResult && !this.toolsExpanded
+			!showDiffResult && !this.toolsExpanded && !subagent
 				? this.collapsedToolPreview(tool)
 				: "";
 		if (compactPreview) {
@@ -1361,11 +1377,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 				),
 			);
 		}
-		if (!this.toolsExpanded && tool.tool_name !== "spawn_agent") return lines;
-
-		lines.push(
-			`${theme.fg("dim", "│ ")}${theme.fg("active", tool.tool_name === "spawn_agent" ? "◆ subagent" : "◆ details")}`,
-		);
+		if (!this.toolsExpanded && !subagent) return lines;
+		if (!subagent) {
+			lines.push(
+				`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`,
+			);
+		}
 		for (const detailLine of this.toolDetailLines(tool, width - 2)) {
 			const wrapped = this.wrapText(detailLine, Math.max(20, width - 4));
 			for (const line of wrapped) {
@@ -1458,12 +1475,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				.join(" · ");
 		}
 		if (tool.tool_name === "spawn_agent") {
-			return [
-				stringArg(args, "agent") || "general",
-				compactText(tool.streamOutput || tool.result || "").slice(0, 80),
-			]
-				.filter(Boolean)
-				.join(" · ");
+			return compactText(stringArg(args, "task") || "").slice(0, 80);
 		}
 		if (path) return path;
 		const result = tool.result ?? tool.partialResult;
@@ -1526,13 +1538,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			details.metrics && typeof details.metrics === "object"
 				? (details.metrics as Record<string, unknown>)
 				: {};
-		const agent = String(details.agent || args.agent || "general");
-		const status = String(
-			details.status || (tool.isError ? "failed" : tool.isComplete ? "completed" : "running"),
-		);
 		const metadata = [
-			`agent ${agent}`,
-			status,
 			typeof metrics.turns === "number" ? `${metrics.turns} turn(s)` : "",
 			typeof metrics.toolCalls === "number"
 				? `${metrics.toolCalls} tool call(s)`
@@ -1545,7 +1551,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 		]
 			.filter(Boolean)
 			.join(" · ");
-		lines.push(`${theme.fg("active", "◆ agent")}  ${DIM}${metadata}${RESET}`);
+		if (metadata) {
+			lines.push(
+				`${theme.fg("dim", "│ ")}${DIM}${metadata}${RESET}`,
+			);
+		}
 
 		const branch = typeof details.branch === "string" ? details.branch : "";
 		const commit = typeof details.commit === "string" ? details.commit : "";
@@ -1563,24 +1573,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		// Render child tool calls when expanded.
 		if (this.toolsExpanded) {
-			const childToolCalls = details.childToolCalls as Array<{
-				agentId: string;
-				toolName: string;
-				args: string;
-				status?: "running" | "completed" | "failed";
-				isError?: boolean;
-				resultPreview?: string;
-			}> | undefined;
+			const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
 			lines.push(...this.renderSubagentActivity(childToolCalls, width));
 		} else {
-			const childToolCalls = details.childToolCalls as Array<{
-				agentId: string;
-				toolName: string;
-				args: string;
-				status?: "running" | "completed" | "failed";
-				isError?: boolean;
-				resultPreview?: string;
-			}> | undefined;
+			const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
 			lines.push(...this.renderSubagentActivity(childToolCalls, width, 4));
 		}
 
@@ -1606,16 +1602,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 	}
 
 	private renderSubagentActivity(
-		calls:
-			| Array<{
-					agentId: string;
-					toolName: string;
-					args: string;
-					status?: "running" | "completed" | "failed";
-					isError?: boolean;
-					resultPreview?: string;
-			  }>
-			| undefined,
+		calls: ChildToolCall[] | undefined,
 		width: number,
 		limit = Number.POSITIVE_INFINITY,
 	): string[] {
@@ -1727,12 +1714,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 			const newText = edits[i].newText;
 
 			if (oldText) {
-				lines.push(`${theme.fgRaw("diffRemoved")}- old${RESET}`);
 				const oldLineCount = oldText.split("\n").length;
 				const oldMeta = streaming
-					? `${DIM}${oldText.length} bytes · ${oldLineCount} lines · streaming${RESET}`
-					: `${DIM}${oldText.length} bytes · ${oldLineCount} lines${RESET}`;
-				lines.push(`${DIM}${oldMeta}${RESET}`);
+					? `${oldText.length} bytes · ${oldLineCount} lines · streaming`
+					: `${oldText.length} bytes · ${oldLineCount} lines`;
+				lines.push(
+					`${theme.fgRaw("diffRemoved")}── - OLD${RESET}  ${DIM}${oldMeta}${RESET}`,
+				);
 				lines.push(
 					...this.renderFileContent(
 						oldText,
@@ -1743,12 +1731,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 				);
 			}
 			if (newText) {
-				lines.push(`${theme.fgRaw("diffAdded")}+ new${RESET}`);
 				const newLineCount = newText.split("\n").length;
 				const newMeta = streaming
-					? `${DIM}${newText.length} bytes · ${newLineCount} lines · streaming${RESET}`
-					: `${DIM}${newText.length} bytes · ${newLineCount} lines${RESET}`;
-				lines.push(`${DIM}${newMeta}${RESET}`);
+					? `${newText.length} bytes · ${newLineCount} lines · streaming`
+					: `${newText.length} bytes · ${newLineCount} lines`;
+				lines.push(
+					`${theme.fgRaw("diffAdded")}── + NEW${RESET}  ${DIM}${newMeta}${RESET}`,
+				);
 				lines.push(
 					...this.renderFileContent(
 						newText,
@@ -1955,7 +1944,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (!text) return [`${DIM}(empty)${RESET}`];
 		const preview =
 			text.length > maxChars
-				? `${text.slice(0, maxChars)}\n… [truncated]`
+				? this.withTruncationMarker(text.slice(0, maxChars))
 				: text;
 		const rawLines = preview.split("\n");
 		const lines: string[] = [];
@@ -2281,6 +2270,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 	private truncateText(text: string): string {
 		if (text.length <= this.maxMessageLength) return text;
-		return `${text.slice(0, this.maxMessageLength)}\n\n\x1b[2m[truncated]\x1b[0m`;
+		return this.withTruncationMarker(text.slice(0, this.maxMessageLength));
+	}
+
+	/** Appends the shared "content cut off" marker used by every truncation path. */
+	private withTruncationMarker(text: string): string {
+		return `${text}\n\n${DIM}[truncated]${RESET}`;
 	}
 }

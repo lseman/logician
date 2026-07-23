@@ -128,7 +128,7 @@ export class ModelSelectorOverlay implements Component {
 		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
 
 		// ── Separator ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 
 		// ── Model list ──
 		if (!this.models.length) {
@@ -165,7 +165,7 @@ export class ModelSelectorOverlay implements Component {
 		}
 
 		// ── Bottom bar ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 		const bottomText = this.message
 			? this.message
 			: "Select a model for this session.";

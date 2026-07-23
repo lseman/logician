@@ -313,6 +313,8 @@ export class Transcript {
 		label: string;
 		text: string;
 	}): void {
+		if (this.integrateSubagentLifecycleNotice(event)) return;
+
 		// Detect subagent tool call notices (label starts with "↳") and
 		// store them on the parent spawn_agent ToolExecution so the expanded
 		// view can render the child's tool activity.
@@ -337,6 +339,34 @@ export class Transcript {
 		});
 	}
 
+	private integrateSubagentLifecycleNotice(event: {
+		level: NoticeLevel;
+		label: string;
+		text: string;
+	}): boolean {
+		const match = /^Subagent (.+)$/.exec(event.label);
+		if (!match) return false;
+		const turn = this.getCurrentTurn();
+		const parent = turn?.assistantMessage?.chunks
+			.slice()
+			.reverse()
+			.find(
+				(chunk) =>
+					chunk.type === "tool" &&
+					chunk.tool?.tool_name === "spawn_agent" &&
+					!chunk.isComplete,
+			)?.tool;
+		if (!parent) return false;
+		const details = (parent.details ??= {});
+		details.agent = details.agent || match[1];
+		if (event.level === "success") details.status = "completed";
+		if (event.level === "warn" || event.level === "error") {
+			details.status = "failed";
+		}
+		details.lifecycleSummary = event.text;
+		return true;
+	}
+
 	/** Store a child tool call on the parent spawn_agent ToolExecution. */
 	private storeChildToolCall(
 		agentId: string,
@@ -355,6 +385,7 @@ export class Transcript {
 		const details = (toolChunk.tool.details ??= {});
 		const childToolCalls = (details.childToolCalls as Array<{
 			agentId: string;
+			toolCallId: string;
 			toolName: string;
 			args: string;
 			status?: "running" | "completed" | "failed";
@@ -363,21 +394,20 @@ export class Transcript {
 		}>) ?? (details.childToolCalls = []);
 
 		const text = event.text.trim();
-		const match = /^([▶✓✗])\s+(\S+)(?:\s+(.*))?$/.exec(text);
+		// toolCallId is threaded through so completions attach to the exact
+		// call that started, not just the most recent running call with the
+		// same name — subagents run concurrently and can call the same tool
+		// more than once in flight.
+		const match = /^([▶✓✗])\s+(\S+)\s+(\S+)(?:\s+(.*))?$/.exec(text);
 		const marker = match?.[1];
-		const toolName = match?.[2] ?? text.slice(0, 40);
-		const payload = match?.[3] ?? "";
+		const toolCallId = match?.[2] ?? "";
+		const toolName = match?.[3] ?? text.slice(0, 40);
+		const payload = match?.[4] ?? "";
 
 		if (marker === "✓" || marker === "✗") {
-			const running = childToolCalls
-				.slice()
-				.reverse()
-				.find(
-					(call) =>
-						call.agentId === agentId &&
-						call.toolName === toolName &&
-						call.status === "running",
-				);
+			const running = childToolCalls.find(
+				(call) => call.toolCallId === toolCallId && call.status === "running",
+			);
 			if (running) {
 				running.status = marker === "✗" ? "failed" : "completed";
 				running.isError = marker === "✗";
@@ -388,6 +418,7 @@ export class Transcript {
 
 		childToolCalls.push({
 			agentId,
+			toolCallId,
 			toolName,
 			args: marker === "▶" ? payload : "",
 			status:

@@ -187,7 +187,7 @@ export class ChoicePopup implements Component {
 		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
 
 		// ── Separator ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 
 		// ── Question text ──
 		if (this.question) {
@@ -197,7 +197,7 @@ export class ChoicePopup implements Component {
 		}
 
 		// ── Separator ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 
 		// ── Choices ──
 		if (this.choices.length > 0) {
@@ -231,7 +231,7 @@ export class ChoicePopup implements Component {
 		}
 
 		// ── Bottom hint ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 		const bottomText = this.question
 			? "Select an option to answer."
 			: "";

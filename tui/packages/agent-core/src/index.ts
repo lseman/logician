@@ -50,7 +50,6 @@ export { getTasks, onTodosChanged } from "./core/todo-state.ts";
 // The messages.ts versions are exported through the barrel; the
 // compaction.ts versions are internal (no export) to avoid collisions.
 export {
-	compact,
 	estimateContextTokens,
 	shouldCompact,
 	type CompactionSettings,

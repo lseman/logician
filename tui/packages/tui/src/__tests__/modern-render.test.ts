@@ -203,7 +203,7 @@ void test("expanded agent tools separate task arguments from live output", () =>
 	}]);
 	const output = plain(display.render(100).join("\n"));
 
-	assert.match(output, /agent explorer · running/);
+	assert.match(output, /subagent explorer streaming/);
 	assert.match(output, /TASK/);
 	assert.match(output, /Inspect architecture and tests/);
 	assert.match(output, /LIVE PROGRESS/);
@@ -559,6 +559,48 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 
 	assert.match(output, /ACTIVITY.*1 tool call/);
 	assert.match(output, /read_file.*path=src\/index\.ts/);
+});
+
+void test("completed subagent card has one parent success indicator", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "completed-subagent",
+		userMessage: { type: "user", content: "Delegate inspection" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Inspect files", agent: "explorer" },
+					result: "Inspection complete.",
+					details: {
+						agent: "explorer",
+						status: "completed",
+						metrics: { turns: 2, toolCalls: 0, durationMs: 1400 },
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+	const output = plain(display.render(120).join("\n"));
+
+	assert.equal(output.match(/✓/g)?.length, 1);
+	assert.match(output, /✓ subagent explorer done/);
+	assert.match(output, /2 turn.*0 tool call.*1\.4s/);
+	assert.equal(
+		output.match(/Inspection complete\./g)?.length,
+		1,
+		"the final report should render once",
+	);
+	assert.doesNotMatch(output, /◆ subagent|◆ agent/);
 });
 
 void test("edited TypeScript previews are syntax highlighted", () => {

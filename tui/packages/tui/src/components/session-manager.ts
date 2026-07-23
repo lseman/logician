@@ -4,21 +4,19 @@
 import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import type { SessionStore } from "@logician/coding-agent/session-store";
-
-const BORDERS = {
-	top: "┌",
-	topRight: "┐",
-	bottom: "└",
-	bottomRight: "┘",
-	h: "─",
-	v: "│",
-};
+import {
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	type ListItem,
+} from "./popup-utils.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const getHeaderColor = (): string => theme.fg("header", "");
-const getSelectedColor = (): string => theme.fg("selected", "");
 const getYellow = (): string => theme.fg("levelHigh", "");
 const getRed = (): string => theme.fg("error", "");
 
@@ -343,113 +341,96 @@ export class SessionManager implements Component {
 
 		if (!this.visible) return [];
 
-		const contentWidth = Math.max(1, width - 2);
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 		const lines: string[] = [];
 
 		// ── List mode ────────────────────────────────────────────────────────
 		if (this.mode === "list") {
-			lines.push(
-				`${getHeaderColor()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
-			);
-			lines.push(
-				`${BORDERS.v} ${BOLD}Sessions${DIM} (${this.sessions.length} total)${RESET}`,
-			);
-			lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
+			const headerFg = getHeaderColor();
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
 
-			// Filter bar
+			const titleText = "Sessions";
+			const subtitleText = ` (${this.sessions.length} total)`;
+			const hintsText = " enter switch · ' filter · ^R rename · ^D delete · ^N new";
+			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+			const titleVisible = visibleWidth(titleLine);
+			const titlePad = Math.max(0, innerWidth - titleVisible);
+			lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+
 			if (this.filter) {
-				const filterLine = `${BORDERS.v} ${DIM}/filter: ${this.filter}${RESET}`;
-				lines.push(filterLine);
-				lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
+				lines.push(renderStatusLine(`/filter: ${this.filter}`, innerWidth));
 			}
+			lines.push(renderSeparator(popupWidth));
 
 			// Session list
 			const maxListItems = Math.min(12, this.sessions.length);
+			if (this.sessions.length === 0) {
+				lines.push(
+					renderStatusLine("No sessions found.", innerWidth, theme.fg("warning", "")),
+				);
+			}
 			for (let i = 0; i < maxListItems; i++) {
 				const s = this.sessions[i];
 				const isSelected = i === this.selectedIndex;
-				const prefix = isSelected ? "▸ " : "  ";
+				const label = s.name ? `${s.name}  (${s.title})` : s.title;
 
-				let line = "";
-				const title = s.name ? `${s.name}${DIM} (${s.title})${RESET}` : s.title;
-				if (isSelected) {
-					line = `${BORDERS.v} ${getSelectedColor()}${prefix}${BOLD}${title}${RESET}${getSelectedColor()}`;
-				} else {
-					line = `${BORDERS.v}  ${title}`;
-				}
+				const item: ListItem = {
+					label,
+					metadata: `${s.messageCount}msg`,
+					selected: isSelected,
+					dim: !!s.name,
+				};
 
-				// Metadata
-				const meta = `${DIM}${s.messageCount}msg${RESET}`;
-				const metaStart = visibleWidth(line) + 2;
-				if (metaStart < contentWidth) {
-					line += meta;
-				}
-
-				lines.push(line);
+				lines.push(renderListItem(item, innerWidth));
 			}
 
 			if (this.sessions.length > maxListItems) {
 				lines.push(
-					`${BORDERS.v}  ${DIM}... and ${this.sessions.length - maxListItems} more${RESET}`,
+					renderStatusLine(
+						`… and ${this.sessions.length - maxListItems} more`,
+						innerWidth,
+					),
 				);
 			}
 
-			// Footer with shortcuts
-			const shortcuts = [
-				`${BOLD}Enter${DIM}: switch`,
-				`${BOLD}'${DIM}: filter`,
-				`${BOLD}Ctrl+R${DIM}: rename`,
-				`${BOLD}Ctrl+D${DIM}: delete`,
-				`${BOLD}Ctrl+N${DIM}: new`,
-			];
-			const shortcutText = shortcuts.join("  ");
-			const padded = `${BORDERS.v}  ${shortcutText}${RESET}`;
-			lines.push(padded);
+			lines.push(renderSeparator(popupWidth));
 			lines.push(
-				`${BORDERS.bottom}${BORDERS.h.repeat(contentWidth)}${BORDERS.bottomRight}`,
+				renderStatusLine(
+					"Enter switch · ' filter · Ctrl+R rename · Ctrl+D delete · Ctrl+N new",
+					innerWidth,
+				),
 			);
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
 		}
 
 		// ── Rename mode ──────────────────────────────────────────────────────
 		if (this.mode === "rename") {
+			const headerFg = getHeaderColor();
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
 			if (this.renameSessionId !== null) {
-				// Rename dialog
 				const title =
 					this.sessions.find((s) => s.id === this.renameSessionId)?.title ||
 					"Untitled";
-				lines.push(
-					`${getHeaderColor()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
-				);
-				lines.push(
-					`${BORDERS.v} ${BOLD}Rename:${RESET} ${DIM}${title}${RESET}`,
-				);
-				lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
-				const cursor = this.renameInput;
-				const display = `${getYellow()}${cursor}${RESET}_`;
-				lines.push(`${BORDERS.v}  ${display}`);
-				lines.push(
-					`${BORDERS.v}  ${DIM}Enter to confirm, Esc to cancel${RESET}`,
-				);
-				lines.push(
-					`${BORDERS.bottom}${BORDERS.h.repeat(contentWidth)}${BORDERS.bottomRight}`,
-				);
+				const titleLine = `Rename: ${title}`;
+				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
+				lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+				lines.push(renderSeparator(popupWidth));
+				const display = `${getYellow()}${this.renameInput}${RESET}_`;
+				lines.push(renderStatusLine(display, innerWidth));
+				lines.push(renderStatusLine("Enter to confirm, Esc to cancel", innerWidth));
 			} else {
-				// Filter input (renameSessionId === null means we're filtering)
-				lines.push(
-					`${getHeaderColor()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
-				);
-				lines.push(
-					`${BORDERS.v} ${BOLD}Filter:${RESET} ${DIM}${this.sessions.length} matches${RESET}`,
-				);
-				lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
-				const cursor = this.renameInput;
-				const display = `${getYellow()}${cursor}${RESET}_`;
-				lines.push(`${BORDERS.v}  ${display}`);
-				lines.push(`${BORDERS.v}  ${DIM}Enter to apply, Esc to cancel${RESET}`);
-				lines.push(
-					`${BORDERS.bottom}${BORDERS.h.repeat(contentWidth)}${BORDERS.bottomRight}`,
-				);
+				const titleLine = `Filter: ${this.sessions.length} matches`;
+				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
+				lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+				lines.push(renderSeparator(popupWidth));
+				const display = `${getYellow()}${this.renameInput}${RESET}_`;
+				lines.push(renderStatusLine(display, innerWidth));
+				lines.push(renderStatusLine("Enter to apply, Esc to cancel", innerWidth));
 			}
+			lines.push(renderSeparator(popupWidth));
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
 		}
 
 		// ── Delete confirm mode ──────────────────────────────────────────────
@@ -458,20 +439,17 @@ export class SessionManager implements Component {
 				this.selectedIndex < this.sessions.length
 					? this.sessions[this.selectedIndex]
 					: null;
-			lines.push(
-				`${getRed()}${BORDERS.top}${BORDERS.h.repeat(contentWidth)}${BORDERS.topRight}${RESET}`,
-			);
-			lines.push(
-				`${BORDERS.v} ${BOLD}${getRed()}Delete session?${RESET}${DIM}${session ? `: ${session.title}` : ""}${RESET}`,
-			);
-			lines.push(`${BORDERS.v}${BORDERS.h.repeat(contentWidth)}${BORDERS.v}`);
-			lines.push(`${BORDERS.v}  ${DIM}Y to confirm, Esc to cancel${RESET}`);
-			lines.push(
-				`${BORDERS.bottom}${BORDERS.h.repeat(contentWidth)}${BORDERS.bottomRight}`,
-			);
+			const redFg = getRed();
+			lines.push(`${redFg}${"─".repeat(popupWidth)}${RESET}`);
+			const titleLine = `${BOLD}${redFg}Delete session?${RESET}${session ? `: ${session.title}` : ""}`;
+			const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
+			lines.push(`${redFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+			lines.push(renderSeparator(popupWidth));
+			lines.push(renderStatusLine("Y to confirm, Esc to cancel", innerWidth));
+			lines.push(`${redFg}${"─".repeat(popupWidth)}${RESET}`);
 		}
 
-		this.cachedLines = lines;
-		return lines;
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
 	}
 }

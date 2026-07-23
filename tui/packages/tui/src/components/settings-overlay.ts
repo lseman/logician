@@ -221,7 +221,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 
 		// ── Separator ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 
 		// ── Content ──
 		if (!this.inDetailView) {
@@ -231,7 +231,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 
 		// ── Bottom bar ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 		const bottomText = this.message
 			? this.message
 			: this.inDetailView
@@ -304,7 +304,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 
 		// ── Separator before options ──
-		lines.push(renderSeparator(popupWidth, 1));
+		lines.push(renderSeparator(popupWidth));
 
 		const maxRows = 10;
 		const start = Math.max(

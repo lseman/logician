@@ -80,6 +80,7 @@ import {
 } from "@logician/observational-memory";
 import { createPostEditDiagnosticHooks } from "./post-edit-diagnostics.ts";
 import { LspManager } from "./lsp-manager.ts";
+import { killAllTrackedChildren } from "../tools/shell.ts";
 
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
@@ -259,7 +260,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					type: "notice",
 					level: "info",
 					label: `↳ ${event.agentId}`,
-					text: `▶ ${child.toolName}${truncateArgs(child.args)}`,
+					text: `▶ ${child.toolCallId} ${child.toolName}${truncateArgs(child.args)}`,
 				};
 			}
 			if (child.type === "tool_call_end") {
@@ -267,7 +268,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					type: "notice",
 					level: child.isError ? "warn" : "success",
 					label: `↳ ${event.agentId}`,
-					text: `${child.isError ? "✗" : "✓"} ${child.toolName} ${child.result.slice(0, 240)}`,
+					text: `${child.isError ? "✗" : "✓"} ${child.toolCallId} ${child.toolName} ${child.result.slice(0, 240)}`,
 				};
 			}
 			if (child.type === "error") {
@@ -1847,6 +1848,7 @@ export class AgentCoreBridge {
 		await this.fireSessionEnd("shutdown");
 		this.lspManager.close();
 		await this.mcpManager.close();
+		killAllTrackedChildren();
 		this.running = false;
 	}
 

@@ -30,5 +30,4 @@ export * from "./mcp/index.ts";
 export * from "./skills.ts";
 export * from "./system-prompt.ts";
 export * from "./context-files/index.ts";
-export * from "./prompts/index.ts";
 export * from "./trust/index.ts";

@@ -1,12 +1,13 @@
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const getHeader = (): string => theme.fg("header", "");
-const getSelected = (): string => theme.fg("selected", "");
-const getMuted = (): string => theme.fg("muted", "");
+import {
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface McpServerItem {
 	serverName: string;
@@ -137,31 +138,37 @@ export class McpManagerOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, overlayWidth - 4);
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 		const lines: string[] = [];
 
-		lines.push(`${getHeader()}┌${"─".repeat(overlayWidth - 2)}┐${RESET}`);
-		lines.push(
-			boxLine(
-				`${BOLD}MCP Servers${RESET}${DIM} (${this.servers.length})${RESET}`,
-				"space toggle · r refresh · enter/esc close",
-				innerWidth,
-			),
-		);
-		if (this.configPath) {
-			lines.push(
-				boxLine(`${DIM}Config: ${this.configPath}${RESET}`, "", innerWidth),
-			);
-		}
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
+		const headerFg = theme.fg("header", "");
 
+		// ── Top rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		// ── Title row ──
+		const titleText = "MCP Servers";
+		const subtitleText = ` (${this.servers.length})`;
+		const hintsText = " space toggle · r refresh · enter/esc close";
+		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+		const titleVisible = visibleWidth(titleLine);
+		const titlePad = Math.max(0, innerWidth - titleVisible);
+		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+		if (this.configPath) {
+			lines.push(renderStatusLine(`Config: ${this.configPath}`, innerWidth));
+		}
+
+		// ── Separator ──
+		lines.push(renderSeparator(popupWidth));
+
+		// ── Server list ──
 		if (!this.servers.length) {
 			lines.push(
-				boxLine(
-					`${getMuted()}No MCP servers configured.${RESET}`,
-					"",
+				renderStatusLine(
+					"No MCP servers configured.",
 					innerWidth,
+					theme.fg("warning", ""),
 				),
 			);
 		} else {
@@ -175,68 +182,55 @@ export class McpManagerOverlay implements Component {
 			);
 			const end = Math.min(this.servers.length, start + maxRows);
 			if (start > 0) {
-				lines.push(
-					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
-				);
+				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const server = this.servers[i];
-				const selected = i === this.selectedIndex;
-				const checkbox = server.enabled ? "[x]" : "[ ]";
-				const cursor = selected ? "▸" : " ";
+				const isSelected = i === this.selectedIndex;
 				const typeIcon =
 					server.type === "http" || server.type === "streamable-http"
 						? "http"
 						: "cmd";
-				const typeStr = `${DIM}(${typeIcon})${RESET}`;
 				const toolText =
-					server.toolCount > 0
-						? `${DIM}${server.toolCount} tool(s)${RESET}`
-						: `${DIM}0 tools${RESET}`;
+					server.toolCount > 0 ? `${server.toolCount} tool(s)` : "0 tools";
 				const urlText = server.url
 					? server.url.slice(0, 50)
 					: server.command
 						? server.command.split(" ").slice(0, 3).join(" ") + "..."
 						: "-";
 				const busy =
-					this.busyServerName === server.serverName
-						? ` ${DIM}updating...${RESET}`
-						: "";
-				const name = selected
-					? `${getSelected()}${BOLD}${server.serverName}${RESET}`
-					: server.serverName;
-				lines.push(
-					boxLine(
-						`${cursor} ${checkbox} ${name} ${typeStr}`,
-						`${toolText} · ${urlText}${busy}`,
-						innerWidth,
-					),
-				);
+					this.busyServerName === server.serverName ? "  updating…" : "";
+
+				const item: ListItem = {
+					label: `${server.serverName} (${typeIcon})`,
+					metadata: `${toolText} · ${urlText}${busy}`,
+					selected: isSelected,
+					statusDot:
+						this.busyServerName === server.serverName
+							? "yellow"
+							: server.enabled
+								? "green"
+								: "gray",
+				};
+
+				lines.push(renderListItem(item, innerWidth));
 			}
 			if (end < this.servers.length) {
-				lines.push(
-					boxLine(
-						`${getMuted()}↓ ${this.servers.length - end} more${RESET}`,
-						"",
-						innerWidth,
-					),
-				);
+				lines.push(renderStatusLine(`↓ ${this.servers.length - end} more`, innerWidth));
 			}
 		}
 
-		lines.push(`${getHeader()}├${"─".repeat(overlayWidth - 2)}┤${RESET}`);
-		lines.push(
-			boxLine(
-				this.message
-					? `${DIM}${this.message}${RESET}`
-					: `${getMuted()}Toggle enables/disables MCP servers in config. Changes apply on next reconnect.${RESET}`,
-				"",
-				innerWidth,
-			),
-		);
-		lines.push(`${getHeader()}└${"─".repeat(overlayWidth - 2)}┘${RESET}`);
+		// ── Bottom bar ──
+		lines.push(renderSeparator(popupWidth));
+		const bottomText = this.message
+			? this.message
+			: "Toggle enables/disables MCP servers in config. Changes apply on next reconnect.";
+		lines.push(renderStatusLine(bottomText, innerWidth));
 
-		this.cachedLines = lines.map((line) => clampLineToWidth(line, width));
+		// ── Bottom rule ──
+		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
@@ -246,13 +240,4 @@ export class McpManagerOverlay implements Component {
 		this.selectedIndex = (this.selectedIndex + delta + n) % n;
 		this.invalidate();
 	}
-}
-
-function boxLine(left: string, right: string, width: number): string {
-	const leftWidth = visibleWidth(left);
-	const rightWidth = visibleWidth(right);
-	const gap = Math.max(1, width - leftWidth - rightWidth);
-	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
-	const pad = Math.max(0, width - visibleWidth(content));
-	return ` ${content}${" ".repeat(pad)} `;
 }

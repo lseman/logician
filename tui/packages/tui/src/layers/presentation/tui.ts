@@ -38,7 +38,6 @@ import {
 import { SlashPopup } from "../../components/slash-popup.ts";
 import { StatusBar } from "../../components/status-bar.ts";
 import { SteerQueue } from "../../components/steer-queue.ts";
-import { ThinkingPanel } from "../../components/thinking-panel.ts";
 import { TodoBar } from "../../components/todo/todo-bar.ts";
 import { WorkSurface } from "../../components/work-surface.ts";
 import { TranscriptDisplay } from "../../components/transcript-display.ts";
@@ -85,7 +84,6 @@ export class LogicianTUI {
 	private todoBar: TodoBar;
 	private workSurface: WorkSurface;
 	private steerQueue: SteerQueue;
-	private thinkingPanel: ThinkingPanel;
 	private inputBar: InputBar;
 	private slashPopup: SlashPopup;
 	private choicePopup: ChoicePopup;
@@ -165,7 +163,6 @@ export class LogicianTUI {
 		this.todoBar = new TodoBar();
 		this.workSurface = new WorkSurface();
 		this.steerQueue = new SteerQueue();
-		this.thinkingPanel = new ThinkingPanel();
 		this.inputBar = new InputBar();
 		this.slashPopup = new SlashPopup();
 		this.choicePopup = new ChoicePopup();
@@ -490,7 +487,6 @@ export class LogicianTUI {
 			},
 			clear: () => {
 				this.transcript.clear();
-				this.thinkingPanel.clear();
 				setStatusPhase("ready");
 			},
 			version: () => "Logician 0.2.0 (TypeScript runtime)",
