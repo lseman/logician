@@ -6,6 +6,8 @@
 
 A local-first coding agent with a streaming terminal UI. SSH-ready, thinking-visible, and built for real code editing workflows.
 
+Logician turns natural-language instructions into verified code changes — with full reasoning trace, session persistence, and skill-based extensibility. No cloud dependency, no black-box prompts.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="logo/logician-banner.svg">
   <img src="logo/logician-banner-light.svg" alt="Logician" width="800">
@@ -63,43 +65,62 @@ reasoning tokens are not included in the stream.
 
 ## Architecture
 
-Logician is a monorepo with four packages:
+Logician is a monorepo with five packages:
 
 ```
 tui/
-├── packages/agent-core/       Generic agent engine: loop, harness, hooks, types
-├── packages/agent-capabilities/  Capabilities: todo, ask-user, subagents, reasoners
-├── packages/coding-agent/     Coding tools, skills, MCP, prompts, session store
-└── packages/tui/              Terminal rendering, input, themes, overlays
+├── packages/agent-core/           Generic agent engine: loop, harness, hooks, types
+├── packages/agent-capabilities/     Capabilities: todo, ask-user, subagents, reasoners
+├── packages/coding-agent/           Coding tools, skills, MCP, prompts, session store
+├── packages/observational-memory/   Persistent cross-session memory
+└── packages/tui/                    Terminal rendering, input, themes, overlays
 ```
 
 | Package | Exports |
 |---|---|
 | `@logician/agent-core` | `core/*`, `hooks/*`, `tools/*`, `compaction/*`, `message-queue/*` |
-| `@logician/agent-capabilities` | `todo/*`, `ask-user/*`, `subagents/*`, `reasoners/*`, `tools` |
-| `@logician/coding-agent` | `tools`, `skills`, `mcp`, `context-files`, `prompts`, `trust` |
+| `@logician/agent-capabilities` | `todo/*`, `ask-user/*`, `subagents/*`, `reasoners/*`, `eoh/*` |
+| `@logician/coding-agent` | `tools`, `skills`, `mcp`, `context-files`, `prompts`, `trust`, `sessions` |
+| `@logician/observational-memory` | Cross-session memory store |
 | `@logician/tui` | Terminal UI layer |
 
 ## Tools
 
+**File operations**
+| Tool | Purpose |
+|---|---|
+| `read_file` | Read files with path normalization |
+| `write_file` | Create/replace files (auto-creates dirs) |
+| `edit_file` | Strict text edits with unique-match guarantee |
+| `file_diff` | Show file diffs |
+| `list_files` | Safe directory listing |
+
+**Search**
+| Tool | Purpose |
+|---|---|
+| `grep` | Content search via ripgrep |
+| `find` | File location via fd/find |
+
+**System**
 | Tool | Purpose |
 |---|---|
 | `bash` | Run shell commands with timeout/abort |
-| `read_file` | Read files with path normalization |
-| `write_file` | Create/replace files |
-| `edit_file` | Strict text edits with fuzzy fallback |
-| `file_diff` | Show file diffs |
-| `grep` | Content search via ripgrep |
-| `find` | File location via fd/find |
-| `list_files` | Safe directory listing |
 | `git` | Git status/diff/log |
+
+**Agent primitives**
+| Tool | Purpose |
+|---|---|
+| `todo` | Task tracking with status transitions |
+| `task_status` | Structured completion/delegation |
+| `ask_user` | User input prompts |
+| `spawn_agent` | Child agent runner (isolated context) |
+
+**Web & docs**
+| Tool | Purpose |
+|---|---|
 | `web_search` | Search via SearXNG |
 | `web_fetch` | Fetch web content |
 | `read_skill` | Load skill instructions |
-| `todo` | Task tracking |
-| `task_status` | Structured completion |
-| `ask_user` | User input prompts |
-| `spawn_agent` | Child agent runner (one at a time) |
 
 ## Configuration
 
