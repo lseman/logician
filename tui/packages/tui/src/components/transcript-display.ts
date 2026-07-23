@@ -1335,6 +1335,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				const diffLines = this.renderDiffBlock(
 					resultText,
 					Math.max(20, width - 4),
+					this.detectLanguage(filePath),
 				);
 				lines.push(`${theme.fg("dim", "│ ")}${BOLD}${label}${RESET}`);
 				for (const dl of diffLines) {
@@ -1678,7 +1679,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			} else if (!content) {
 				// No content shown above; show the diff result.
 				lines.push(this.detailSection("result"));
-				lines.push(...this.renderDiffBlock(resultText, width));
+				lines.push(...this.renderDiffBlock(resultText, width, this.detectLanguage(path)));
 			}
 		} else if (!streaming && !content) {
 			lines.push(`${DIM}no output${RESET}`);
@@ -1749,7 +1750,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			if (tool.isError) {
 				lines.push(...this.previewBlock(resultText, width));
 			} else {
-				lines.push(...this.renderDiffBlock(resultText, width));
+				lines.push(...this.renderDiffBlock(resultText, width, language));
 			}
 		}
 
@@ -1763,7 +1764,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (path) lines.push(this.detailSection("file", path));
 		if (args.staged) lines.push(`${DIM}staged changes${RESET}`);
 		const result = tool.result ?? tool.partialResult;
-		if (result) lines.push(...this.renderDiffBlock(result, width));
+		if (result) {
+			lines.push(...this.renderDiffBlock(result, width, this.detectLanguage(path)));
+		}
 		return lines;
 	}
 
@@ -1848,15 +1851,46 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return this.previewBlock(JSON.stringify(parsed, null, 2), width);
 	}
 
-	private renderDiffBlock(diff: string, width: number): string[] {
+	private renderDiffBlock(
+		diff: string,
+		width: number,
+		language?: string,
+	): string[] {
 		if (!diff.trim()) return [`${DIM}(no diff)${RESET}`];
 		const rawLines = this.truncateText(diff).split("\n");
 		const lines: string[] = [];
 		const bg = theme.bg("mdCodeBlockBg", "");
 		const bgReset = RESET;
+
 		for (const raw of rawLines) {
 			const color = diffLineColor(raw);
 			const content = raw.length ? raw.replace(/\t/g, "    ") : " ";
+
+			// Keep the diff marker in its semantic color, but highlight the code
+			// after it with the grammar selected from the edited file's path.
+			if (
+				(raw.startsWith("+") && !raw.startsWith("+++")) ||
+				(raw.startsWith("-") && !raw.startsWith("---"))
+			) {
+				const prefix = raw[0];
+				const codeText = raw.slice(1).replace(/\t/g, "    ");
+				try {
+					const highlighted = language
+						? highlight(codeText, language)
+						: highlightAuto(codeText);
+					if (highlighted.value && highlighted.value !== codeText) {
+						if (visibleWidth(content) <= width) {
+							lines.push(
+								`${bg}${color}${prefix}${RESET}${bg}${highlighted.value}${bgReset}`,
+							);
+							continue;
+						}
+					}
+				} catch {
+					// No highlighting available, fall through to plain rendering.
+				}
+			}
+
 			if (visibleWidth(content) <= width) {
 				lines.push(`${bg}${color}${content}${bgReset}`);
 			} else {
@@ -1865,6 +1899,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				}
 			}
 		}
+
 		return lines;
 	}
 

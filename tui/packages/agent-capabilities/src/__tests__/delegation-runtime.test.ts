@@ -7,7 +7,12 @@ import type {
 } from "@logician/agent-core/core/backend.ts";
 import type { AgentConfig, Tool } from "@logician/agent-core";
 import { runDelegatedAgent } from "../subagents/delegation-runtime.ts";
-import { BUILTIN_AGENTS, createSpawnAgentTool } from "../subagents/subagent.ts";
+import {
+	BUILTIN_AGENTS,
+	createSubagentConcurrencyLimiter,
+	createSpawnAgentTool,
+	createSpawnAgentsTool,
+} from "../subagents/subagent.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake";
@@ -155,4 +160,96 @@ void test("subagent progress callbacks emit deltas rather than accumulated prefi
 	);
 
 	assert.deepEqual(updates, ["I", " finished."]);
+});
+
+void test("spawn_agents honors maxParallelAgents and preserves its plural API", async () => {
+	let active = 0;
+	let peak = 0;
+	const backend: LLMBackend = {
+		model: "concurrent",
+		withModel() {
+			return this;
+		},
+		async generate() {
+			active++;
+			peak = Math.max(peak, active);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			active--;
+			return { content: "done", toolCalls: [], stopReason: "stop" };
+		},
+	};
+	const tool = createSpawnAgentsTool({
+		config: () => ({ ...baseConfig, tools: [] }),
+		backend,
+		agents: () => BUILTIN_AGENTS,
+		emit: () => {},
+		concurrencyLimiter: createSubagentConcurrencyLimiter(2),
+	});
+
+	assert.equal(tool.name, "spawn_agents");
+	const result = await tool.execute(
+		{
+			tasks: Array.from({ length: 5 }, (_, index) => ({
+				task: `Task ${index}`,
+			})),
+		},
+		{},
+	);
+
+	assert.equal(peak, 2);
+	if (typeof result === "string") {
+		assert.fail(`Expected a structured batch result, got: ${result}`);
+	}
+	assert.equal(result.details?.total, 5);
+	assert.equal(result.details?.completed, 5);
+});
+
+void test("spawn_agents requires more than one task", async () => {
+	const tool = createSpawnAgentsTool({
+		config: () => ({ ...baseConfig, tools: [] }),
+		backend: new FakeBackend([]),
+		agents: () => BUILTIN_AGENTS,
+		emit: () => {},
+	});
+
+	assert.equal(
+		await tool.execute({ tasks: [{ task: "Use spawn_agent instead" }] }, {}),
+		"Error: spawn_agents requires at least two tasks.",
+	);
+});
+
+void test("subagent concurrency limits are isolated between sessions", async () => {
+	let active = 0;
+	let peak = 0;
+	const backend: LLMBackend = {
+		model: "session-isolation",
+		withModel() {
+			return this;
+		},
+		async generate() {
+			active++;
+			peak = Math.max(peak, active);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			active--;
+			return { content: "done", toolCalls: [], stopReason: "stop" };
+		},
+	};
+	const createSessionTool = () =>
+		createSpawnAgentsTool({
+			config: () => ({ ...baseConfig, tools: [] }),
+			backend,
+			agents: () => BUILTIN_AGENTS,
+			emit: () => {},
+			concurrencyLimiter: createSubagentConcurrencyLimiter(1),
+		});
+	const tasks = {
+		tasks: [{ task: "First" }, { task: "Second" }],
+	};
+
+	await Promise.all([
+		createSessionTool().execute(tasks, {}),
+		createSessionTool().execute(tasks, {}),
+	]);
+
+	assert.equal(peak, 2);
 });

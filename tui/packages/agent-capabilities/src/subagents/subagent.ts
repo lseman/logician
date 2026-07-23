@@ -13,13 +13,13 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LLMBackend } from "@logician/agent-core/core/backend.ts";
 import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
-import type {
-	AgentConfig,
-	AgentEvent,
-	Message,
-	Tool,
+import {
+	DEFAULT_TRUNCATION,
+	type AgentConfig,
+	type AgentEvent,
+	type Tool,
+	type ToolResult,
 } from "@logician/agent-core";
-import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 import {
 	budgetFromArgs,
 	contractFromArgs,
@@ -63,7 +63,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 		name: "explorer",
 		description:
 			"Read-only researcher. Locates code, maps structure, answers " +
-			'"where/how is X done" questions without modifying anything.',
+			"\"where/how is X done\" questions without modifying anything.",
 		prompt:
 			`${GENERIC_SUBAGENT_PROMPT}\n\nYou are read-only: explore and report, ` +
 			"never modify. Report concrete file paths and line references.",
@@ -100,7 +100,7 @@ export async function loadAgentDefinitions(
 		let entries: string[];
 		try {
 			entries = await readdir(dir);
-		} catch (e: unknown) {
+		} catch {
 			continue;
 		}
 		for (const entry of entries.sort()) {
@@ -151,7 +151,7 @@ export async function loadAgentDefinitions(
 							? frontmatter["tool-limits"]
 							: undefined,
 				});
-			} catch (e: unknown) {
+			} catch {
 				// Skip unreadable definitions.
 			}
 		}
@@ -172,13 +172,221 @@ export interface SpawnAgentDeps {
 	emit: (event: AgentEvent) => void;
 	/** Cap on the child's loop iterations when the definition sets none. */
 	defaultMaxIterations?: number;
+	/** Session-local concurrency limiter shared by both subagent tools. */
+	concurrencyLimiter?: SubagentConcurrencyLimiter;
 }
 
 let agentSeq = 0;
 
-/** Resolve the child tool set: allowlist (or all), never spawn_agent itself. */
+// ── Session-local concurrency limiter ───────────────────────────────────────
+
+interface _SpawnCtx {
+	signal?: AbortSignal;
+	onUpdate?: (delta: string) => void;
+}
+
+interface _PendingSpawn {
+	resolve: () => void;
+	reject: (error: Error) => void;
+	signal?: AbortSignal;
+	onAbort?: () => void;
+}
+
+const _DEFAULT_MAX = 4;
+
+export interface SubagentConcurrencyLimiter {
+	run<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T>;
+}
+
+export function createSubagentConcurrencyLimiter(
+	maxParallelAgents = _DEFAULT_MAX,
+): SubagentConcurrencyLimiter {
+	const limit =
+		Number.isInteger(maxParallelAgents) && maxParallelAgents > 0
+			? maxParallelAgents
+			: _DEFAULT_MAX;
+	let activeCount = 0;
+	const pendingQueue: _PendingSpawn[] = [];
+
+	const drainQueue = (): void => {
+		while (pendingQueue.length > 0 && activeCount < limit) {
+			const next = pendingQueue.shift();
+			if (!next) return;
+			if (next.signal?.aborted) {
+				next.reject(new DOMException("Subagent spawn cancelled.", "AbortError"));
+				continue;
+			}
+			if (next.onAbort && next.signal) {
+				next.signal.removeEventListener("abort", next.onAbort);
+			}
+			activeCount++;
+			next.resolve();
+		}
+	};
+
+	const acquire = async (signal?: AbortSignal): Promise<void> => {
+		if (signal?.aborted) {
+			throw new DOMException("Subagent spawn cancelled.", "AbortError");
+		}
+		if (activeCount < limit) {
+			activeCount++;
+			return;
+		}
+		await new Promise<void>((resolve, reject) => {
+			const pending: _PendingSpawn = { resolve, reject, signal };
+			if (signal) {
+				pending.onAbort = () => {
+					const index = pendingQueue.indexOf(pending);
+					if (index >= 0) pendingQueue.splice(index, 1);
+					reject(new DOMException("Subagent spawn cancelled.", "AbortError"));
+				};
+				signal.addEventListener("abort", pending.onAbort, { once: true });
+			}
+			pendingQueue.push(pending);
+		});
+	};
+
+	return {
+		async run<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+			await acquire(signal);
+			try {
+				return await work();
+			} finally {
+				activeCount--;
+				drainQueue();
+			}
+		},
+	};
+}
+
+function limiterFor(deps: SpawnAgentDeps): SubagentConcurrencyLimiter {
+	deps.concurrencyLimiter ??= createSubagentConcurrencyLimiter();
+	return deps.concurrencyLimiter;
+}
+
+async function _runSpawn(
+	args: Record<string, unknown>,
+	ctx: _SpawnCtx,
+	deps: SpawnAgentDeps,
+): Promise<string | ToolResult> {
+	const task = typeof args.task === "string" ? args.task : "";
+	const agentName =
+		typeof args.agent === "string" && args.agent ? args.agent : "general";
+	const def = deps.agents().find((a) => a.name === agentName);
+	if (!def) {
+		const names = deps
+			.agents()
+			.map((a) => a.name)
+			.join(", ");
+		return `Error: Unknown agent "${agentName}". Available: ${names}`;
+	}
+
+	const agentId = `agent_${++agentSeq}`;
+	const parent = deps.config();
+	deps.emit({ type: "subagent_start", agentId, agent: def.name, task });
+
+	// Child config: parent's provider settings, but its own prompt, scoped
+	// tools, and NO parent hooks/queues/events — the child is isolated.
+	const childConfig: AgentConfig = {
+		baseUrl: parent.baseUrl,
+		model: def.model || parent.model,
+		cwd: deps.cwd ?? parent.cwd,
+		temperature: parent.temperature,
+		maxTokens: parent.maxTokens,
+		contextWindowTokens: parent.contextWindowTokens,
+		systemPrompt: def.prompt,
+		tools: resolveChildTools(def, parent.tools ?? []),
+		toolExecution: parent.toolExecution,
+		thinkingLevel: parent.thinkingLevel,
+		autoRetryEnabled: parent.autoRetryEnabled,
+		maxRetries: parent.maxRetries,
+		turnTimeoutMs: parent.turnTimeoutMs,
+		webSearch: parent.webSearch,
+		truncation: parent.truncation,
+		// External settings-hooks (PreToolUse shell hooks etc.) stay enabled
+		// so safety hooks also govern subagent tool use.
+		runtimeHooksEnabled: parent.runtimeHooksEnabled,
+		// Enable continuation so the child model doesn't abandon mid-task.
+		// Subagents frequently get a premature "stop" — the default nudge
+		// "You stopped without completing your work. Continue." is enough
+		// to push them past that. Bounded by maxIterations on the child.
+		continuationEnabled: true,
+		onEvent: (event) => {
+			if (event.type === "text_delta") {
+				ctx.onUpdate?.(event.delta);
+			}
+			deps.emit({ type: "subagent_event", agentId, event });
+		},
+	};
+
+	const backend = def.model
+		? deps.backend.withModel(def.model)
+		: deps.backend;
+
+	try {
+		const run = await runDelegatedAgent({
+			task,
+			config: childConfig,
+			backend,
+			tools: childConfig.tools ?? [],
+			maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
+			signal: ctx.signal,
+			contract: contractFromArgs(args),
+			budget: budgetFromArgs(args, {
+				timeoutMs: def.maxExecutionTimeMs,
+				maxToolCalls: def.maxToolCalls,
+				toolLimits: def.toolLimits,
+			}),
+			onEvent: (event) => childConfig.onEvent?.(event),
+		});
+		const result = truncateResult(
+			run.content,
+			parent.truncation?.subagentResultMaxChars ??
+				DEFAULT_TRUNCATION.subagentResultMaxChars,
+		);
+		deps.emit({
+			type: "subagent_end",
+			agentId,
+			agent: def.name,
+			result,
+			turns: run.turns,
+			isError: run.status !== "completed",
+		});
+		return {
+			content: result,
+			isError: run.status !== "completed",
+			details: {
+				agent: def.name,
+				agentId,
+				status: run.status,
+				metrics: {
+					turns: run.turns,
+					durationMs: run.durationMs,
+					toolCalls: run.toolCalls,
+					toolCallsByName: run.toolCallsByName,
+					validationAttempts: run.validationAttempts,
+				},
+				acceptance: run.acceptance,
+			},
+		};
+	} catch (e: unknown) {
+		const message = `Error: subagent failed: ${(e as Error).message}`;
+		deps.emit({
+			type: "subagent_end",
+			agentId,
+			agent: def.name,
+			result: message,
+			isError: true,
+		});
+		return { content: message, isError: true };
+	}
+}
+
+/** Resolve the child tool set: allowlist (or all), never subagent spawners. */
 function resolveChildTools(def: AgentDefinition, parentTools: Tool[]): Tool[] {
-	const base = parentTools.filter((t) => t.name !== "spawn_agent");
+	const base = parentTools.filter(
+		(t) => t.name !== "spawn_agent" && t.name !== "spawn_agents",
+	);
 	if (!def.tools?.length) return base;
 	if (def.tools.includes("__read_only__")) {
 		return base.filter((t) => t.readOnly === true);
@@ -221,6 +429,7 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 			required: ["task"],
 		},
 		execute: async (args, ctx) => {
+			// Fast path: validation before any queuing.
 			const task = typeof args.task === "string" ? args.task : "";
 			if (!task.trim()) return "Error: spawn_agent requires a task.";
 			const agentName =
@@ -234,104 +443,15 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 				return `Error: Unknown agent "${agentName}". Available: ${names}`;
 			}
 
-			const agentId = `agent_${++agentSeq}`;
-			const parent = deps.config();
-			deps.emit({ type: "subagent_start", agentId, agent: def.name, task });
-
-			// Child config: parent's provider settings, but its own prompt, scoped
-			// tools, and NO parent hooks/queues/events — the child is isolated.
-			const childConfig: AgentConfig = {
-				baseUrl: parent.baseUrl,
-				model: def.model || parent.model,
-				cwd: deps.cwd ?? parent.cwd,
-				temperature: parent.temperature,
-				maxTokens: parent.maxTokens,
-				contextWindowTokens: parent.contextWindowTokens,
-				systemPrompt: def.prompt,
-				tools: resolveChildTools(def, parent.tools ?? []),
-				toolExecution: parent.toolExecution,
-				thinkingLevel: parent.thinkingLevel,
-				autoRetryEnabled: parent.autoRetryEnabled,
-				maxRetries: parent.maxRetries,
-				turnTimeoutMs: parent.turnTimeoutMs,
-				webSearch: parent.webSearch,
-				truncation: parent.truncation,
-				// External settings-hooks (PreToolUse shell hooks etc.) stay enabled
-				// so safety hooks also govern subagent tool use.
-				runtimeHooksEnabled: parent.runtimeHooksEnabled,
-				// Enable continuation so the child model doesn't abandon mid-task.
-				// Subagents frequently get a premature "stop" — the default nudge
-				// "You stopped without completing your work. Continue." is enough
-				// to push them past that. Bounded by maxIterations on the child.
-				continuationEnabled: true,
-				onEvent: (event) => {
-					if (event.type === "text_delta") {
-						ctx.onUpdate?.(event.delta);
-					}
-					deps.emit({ type: "subagent_event", agentId, event });
-				},
-			};
-
-			const backend = def.model
-				? deps.backend.withModel(def.model)
-				: deps.backend;
-
-			try {
-				const run = await runDelegatedAgent({
-					task,
-					config: childConfig,
-					backend,
-					tools: childConfig.tools ?? [],
-					maxIterations: def.maxIterations ?? deps.defaultMaxIterations ?? 15,
-					signal: ctx.signal,
-					contract: contractFromArgs(args),
-					budget: budgetFromArgs(args, {
-						timeoutMs: def.maxExecutionTimeMs,
-						maxToolCalls: def.maxToolCalls,
-						toolLimits: def.toolLimits,
-					}),
-					onEvent: (event) => childConfig.onEvent?.(event),
-				});
-				const result = truncateResult(
-					run.content,
-					parent.truncation?.subagentResultMaxChars ??
-						DEFAULT_TRUNCATION.subagentResultMaxChars,
-				);
-				deps.emit({
-					type: "subagent_end",
-					agentId,
-					agent: def.name,
-					result,
-					turns: run.turns,
-					isError: run.status !== "completed",
-				});
-				return {
-					content: result,
-					details: {
-						agent: def.name,
-						agentId,
-						status: run.status,
-						metrics: {
-							turns: run.turns,
-							durationMs: run.durationMs,
-							toolCalls: run.toolCalls,
-							toolCallsByName: run.toolCallsByName,
-							validationAttempts: run.validationAttempts,
-						},
-						acceptance: run.acceptance,
-					},
-				};
-			} catch (e: unknown) {
-				const message = `Error: subagent failed: ${(e as Error).message}`;
-				deps.emit({
-					type: "subagent_end",
-					agentId,
-					agent: def.name,
-					result: message,
-					isError: true,
-				});
-				return message;
-			}
+			return limiterFor(deps).run(
+				() =>
+					_runSpawn(
+						args,
+						{ signal: ctx.signal, onUpdate: ctx.onUpdate },
+						deps,
+					),
+				ctx.signal,
+			);
 		},
 	};
 }
@@ -340,4 +460,209 @@ function truncateResult(text: string, maxChars: number): string {
 	return text.length > maxChars
 		? `${text.slice(0, maxChars)}\n… [subagent report truncated]`
 		: text;
+}
+
+// ── spawn_agents tool ────────────────────────────────────────────────────────
+// Spawns multiple subagents concurrently, bounded by maxParallelAgents.
+
+export interface SpawnAgentsTask {
+	task: string;
+	agent?: string;
+	expected_output?: string;
+	success_criteria?: string[];
+	max_validation_retries?: number;
+	timeout_ms?: number;
+	max_tool_calls?: number;
+}
+
+export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
+	return {
+		name: "spawn_agents",
+		description:
+			"Spawn multiple subagents concurrently, bounded by maxParallelAgents. " +
+			"Returns results in the same order as the input tasks. " +
+			"Agents: " +
+			deps
+				.agents()
+				.map((a) => `${a.name} (${a.description})`)
+				.join("; "),
+		parameters: {
+			type: "object",
+			properties: {
+				tasks: {
+					type: "array",
+					minItems: 2,
+					items: {
+						type: "object",
+						properties: {
+							task: {
+								type: "string",
+								description:
+									"Complete, self-contained task prompt.",
+							},
+							agent: {
+								type: "string",
+								description:
+									"Agent definition to use (default: general).",
+							},
+							expected_output: {
+								type: "string",
+								description:
+									"Concrete shape and contents required in the final result.",
+							},
+							success_criteria: {
+								type: "array",
+								items: { type: "string" },
+								description:
+									"Criteria the subagent must explicitly satisfy with evidence.",
+							},
+							max_validation_retries: {
+								type: "integer",
+								minimum: 0,
+								maximum: 5,
+								description:
+									"Correction attempts after contract validation fails (default: 2).",
+							},
+							timeout_ms: {
+								type: "integer",
+								minimum: 1000,
+								description:
+									"Whole-task deadline including tools and validation retries.",
+							},
+							max_tool_calls: {
+								type: "integer",
+								minimum: 1,
+								description:
+									"Maximum total tool calls allowed for this delegated task.",
+							},
+						},
+						required: ["task"],
+					},
+					description:
+						"Array of tasks to execute concurrently.",
+				},
+			},
+			required: ["tasks"],
+		},
+		execute: async (args, ctx) => {
+			const rawTasks = args.tasks;
+			if (
+				!Array.isArray(rawTasks) ||
+				rawTasks.length < 2
+			) {
+				return "Error: spawn_agents requires at least two tasks.";
+			}
+
+			// Validate all tasks first.
+			const agents = deps.agents();
+			const parsedTasks: SpawnAgentsTask[] = [];
+			for (let i = 0; i < rawTasks.length; i++) {
+				const raw = rawTasks[i];
+				if (
+					typeof raw !== "object" ||
+					raw === null ||
+					typeof raw.task !== "string" ||
+					!raw.task.trim()
+				) {
+					return `Error: tasks[${i}] is invalid. Each task must have a non-empty 'task' string.`;
+				}
+				const agentName =
+					typeof raw.agent === "string" && raw.agent
+						? raw.agent
+						: "general";
+				if (!agents.find((a) => a.name === agentName)) {
+					const names = agents
+						.map((a) => a.name)
+						.join(", ");
+					return `Error: tasks[${i}] uses unknown agent "${agentName}". Available: ${names}`;
+				}
+				parsedTasks.push({
+					task: raw.task,
+					agent: agentName,
+					expected_output: raw.expected_output,
+					success_criteria: raw.success_criteria,
+					max_validation_retries: raw.max_validation_retries,
+					timeout_ms: raw.timeout_ms,
+					max_tool_calls: raw.max_tool_calls,
+				});
+			}
+
+			// Build per-task spawn args for _runSpawn.
+			const taskArgs: Array<{
+				spawnArgs: Record<string, unknown>;
+				taskIndex: number;
+				task: SpawnAgentsTask;
+			}> = parsedTasks.map((task, i) => ({
+				spawnArgs: {
+					task: task.task,
+					agent: task.agent,
+					expected_output: task.expected_output,
+					success_criteria: task.success_criteria,
+					max_validation_retries: task.max_validation_retries,
+					timeout_ms: task.timeout_ms,
+					max_tool_calls: task.max_tool_calls,
+				},
+				taskIndex: i,
+				task,
+			}));
+
+			// Execute through the limiter owned by this runtime/session.
+			const results: Array<{
+				index: number;
+				result: string | ToolResult;
+				isError: boolean;
+			}> = [];
+
+			const runOne = async (item: typeof taskArgs[number]) => {
+				try {
+					const result = await limiterFor(deps).run(
+						() => _runSpawn(item.spawnArgs, { signal: ctx.signal }, deps),
+						ctx.signal,
+					);
+					results.push({
+						index: item.taskIndex,
+						result,
+						isError: typeof result !== "string" && result.isError === true,
+					});
+				} catch (error) {
+					results.push({
+						index: item.taskIndex,
+						result: `Error: ${error instanceof Error ? error.message : String(error)}`,
+						isError: true,
+					});
+				}
+			};
+
+			// Launch all tasks; the session-local limiter enforces the cap.
+			await Promise.all(taskArgs.map(runOne));
+
+			// Sort results by original index and return.
+			results.sort((a, b) => a.index - b.index);
+			const toolResults = results.map((r) => {
+				if (typeof r.result === "string") {
+					return {
+						index: r.index,
+						content: r.result,
+						isError: r.isError,
+					};
+				}
+				const tr = r.result as ToolResult;
+				return {
+					index: r.index,
+					content: tr.content,
+					isError: tr.isError,
+					details: tr.details,
+				};
+			});
+			return {
+				content: "",
+				details: {
+					results: toolResults,
+					total: results.length,
+					completed: results.filter((r) => !r.isError).length,
+					failed: results.filter((r) => r.isError).length,
+				},
+			};
+		},
+	};
 }

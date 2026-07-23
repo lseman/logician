@@ -543,6 +543,48 @@ void test("edited TypeScript previews are syntax highlighted", () => {
 	assert.match(plain(rendered), /const answer = "yes";/);
 });
 
+void test("edit_file result highlights code inside the diff", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(false);
+	display.setTurns([{
+		id: "highlight-edit-result",
+		userMessage: { type: "user", content: "Edit the file" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "edit_file",
+					tool_name: "edit_file",
+					args: { path: "src/example.ts" },
+					result: [
+						"Successfully replaced 1 occurrence.",
+						"Diff:",
+						"--- a/edit",
+						"+++ b/edit",
+						"@@ -1 +1 @@",
+						"-const answer = \"no\";",
+						"+const answer = \"yes\";",
+					].join("\n"),
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+	const rendered = display.render(100).join("\n");
+
+	assert.match(
+		rendered,
+		/\x1b\[38;5;\d+m\+\x1b\[0m\x1b\[48;5;\d+m\x1b\[0m\x1b\[38;5;141mconst/,
+	);
+	assert.match(plain(rendered), /\+const answer = "yes";/);
+});
+
 void test("internal post-tool hook guidance stays out of the transcript", () => {
 	const display = new TranscriptDisplay();
 	display.setToolsExpanded(true);

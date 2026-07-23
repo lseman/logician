@@ -7,7 +7,9 @@ import { ask_user } from "./ask-user/ask-user.ts";
 import { task_status } from "./todo/task-status.ts";
 import { todo_tool } from "./todo/todo.ts";
 import {
+	createSubagentConcurrencyLimiter,
 	createSpawnAgentTool,
+	createSpawnAgentsTool,
 	type SpawnAgentDeps,
 } from "./subagents/subagent.ts";
 
@@ -17,6 +19,8 @@ export interface SubagentToolDeps {
 	cwd: string;
 	agents: () => import("./subagents/subagent.ts").AgentDefinition[];
 	emit: (event: AgentEvent) => void;
+	/** Max concurrent subagent executions (default: 4). */
+	maxParallelAgents?: number;
 }
 
 /** Get all built-in tools as an array. */
@@ -33,8 +37,12 @@ export function getBuiltInSubagentTools(deps: SubagentToolDeps): Tool[] {
 		agents: deps.agents,
 		emit: deps.emit,
 		defaultMaxIterations: deps.config().maxIterations || 30,
+		concurrencyLimiter: createSubagentConcurrencyLimiter(
+			deps.maxParallelAgents,
+		),
 	};
 	const spawn = createSpawnAgentTool(spawnDeps);
+	const spawnMany = createSpawnAgentsTool(spawnDeps);
 
-	return [spawn];
+	return [spawn, spawnMany];
 }

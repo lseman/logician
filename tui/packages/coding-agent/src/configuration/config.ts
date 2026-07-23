@@ -43,6 +43,7 @@ const KNOWN_KEYS = new Set([
 	"inferenceMode",
 	"allowedPaths",
 	"allowAllPaths",
+	"maxParallelAgents",
 	"cwd",
 	"truncation",
 ]);

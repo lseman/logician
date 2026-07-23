@@ -2185,7 +2185,7 @@ export class AgentCoreBridge {
 	}
 
 	/**
-	 * Register the spawn_agent tool bound to discovered agent definitions
+	 * Register the spawn_agent and spawn_agents tools bound to discovered definitions
 	 * (.logician/agents/*.md + built-ins). Subagent events are forwarded into
 	 * the normal event stream as subagent_* envelopes.
 	 */
@@ -2200,12 +2200,19 @@ export class AgentCoreBridge {
 		]);
 
 		// Inject subagent tools
+		const userSettings = loadUserSettings();
+		const maxParallelAgents =
+			userSettings.subagents?.maxParallelAgents ??
+			(typeof userSettings.maxParallelAgents === "number"
+				? userSettings.maxParallelAgents
+				: undefined);
 		const subagentDeps: SubagentToolDeps = {
 			config: () => this.config,
 			backend: this.backend,
 			cwd,
 			agents: () => this.agentDefs,
 			emit: (event) => this.config.onEvent?.(event),
+			maxParallelAgents,
 		};
 		const subagentTools = getBuiltInSubagentTools(subagentDeps);
 		for (const tool of subagentTools) {
@@ -2368,6 +2375,10 @@ interface UserSettings {
 		enabled?: boolean;
 		reserveTokens?: number;
 		keepRecentTokens?: number;
+	};
+	maxParallelAgents?: number;
+	subagents?: {
+		maxParallelAgents?: number;
 	};
 	[key: string]: unknown;
 }
