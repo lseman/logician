@@ -162,6 +162,12 @@ export interface GenerateOptions {
 	tools?: Record<string, unknown>[];
 	temperature?: number;
 	maxTokens?: number;
+	// Additional sampling params (populated when an inference mode is active).
+	topP?: number;
+	topK?: number;
+	minP?: number;
+	presencePenalty?: number;
+	repetitionPenalty?: number;
 	signal?: AbortSignal;
 	thinkingLevel?: ThinkingLevel;
 	callbacks?: GenerateCallbacks;
@@ -251,6 +257,11 @@ export class OpenAIBackend implements LLMBackend {
 			tools,
 			temperature = 0.5,
 			maxTokens = 4096,
+			topP,
+			topK,
+			minP,
+			presencePenalty,
+			repetitionPenalty,
 			signal,
 			thinkingLevel,
 			callbacks = {},
@@ -277,6 +288,12 @@ export class OpenAIBackend implements LLMBackend {
 			// loop can report real token counts instead of a local estimate.
 			stream_options: { include_usage: true },
 			...(this.stop && { stop: this.stop }),
+			// Additional sampling params (populated when an inference mode is active).
+			...(topP !== undefined && { top_p: topP }),
+			...(topK !== undefined && { top_k: topK }),
+			...(minP !== undefined && { min_p: minP }),
+			...(presencePenalty !== undefined && { presence_penalty: presencePenalty }),
+			...(repetitionPenalty !== undefined && { repetition_penalty: repetitionPenalty }),
 		};
 
 		// Pass reasoning/thinking level to OpenAI-compatible providers.
@@ -433,7 +450,7 @@ export class OpenAIBackend implements LLMBackend {
 							}
 						}
 					}
-				} catch {
+				} catch (e: unknown) {
 					// Skip parse errors (partial JSON is normal in streaming)
 				}
 			}

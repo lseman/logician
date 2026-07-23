@@ -70,7 +70,7 @@ function callSignature(name: string, args: string): string {
 	let argsKey = args || "";
 	try {
 		argsKey = JSON.stringify(sortKeys(JSON.parse(args || "{}")));
-	} catch {
+	} catch (e: unknown) {
 		// Non-JSON args: use the raw string.
 	}
 	return `${name} ${argsKey}`;
@@ -94,7 +94,7 @@ function callPath(args: string): string {
 		const parsed = JSON.parse(args) as Record<string, unknown>;
 		const raw = parsed.path ?? parsed.file_path ?? parsed.filename ?? "";
 		return String(raw).trim();
-	} catch {
+	} catch (e: unknown) {
 		return "";
 	}
 }
@@ -292,7 +292,7 @@ export class LoopDetector {
 				.sort()
 				.join(",");
 			return `{${parts}}`;
-		} catch {
+		} catch (e: unknown) {
 			return "malformed";
 		}
 	}

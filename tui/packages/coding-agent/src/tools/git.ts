@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 
 export const git: Tool = {
 	name: "git",
+	executionMode: "sequential",
 	label: "Git",
 	description: "Execute a git command (safe subset of git operations).",
 	promptSnippet: "Run git commands for version control operations",

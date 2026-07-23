@@ -72,7 +72,7 @@ export class CoVeReasoner extends BaseReasoner {
 			if (Array.isArray(data)) {
 				verificationSteps = data.map((item: any) => item.step || JSON.stringify(item));
 			}
-		} catch {
+		} catch (e: unknown) {
 			// Fallback to default verification steps if parsing fails
 			verificationSteps = [
 				"Verify factual accuracy of claims",

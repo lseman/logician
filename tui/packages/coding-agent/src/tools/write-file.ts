@@ -19,6 +19,7 @@ import { highlightAuto } from "@logician/agent-core/tools/shared/syntax-highligh
 
 export const write_file: Tool = {
 	name: "write_file",
+	executionMode: "parallel",
 	label: "Write File",
 	hookAliases: ["Write"],
 	description:
@@ -48,7 +49,7 @@ export const write_file: Tool = {
 		const filePath = String(args.path);
 		const content = String(args.content ?? "");
 		const resolved = resolvePath(ctx.cwd, filePath);
-		ensureInsideCwd(ctx.cwd, resolved);
+		ensureInsideCwd(ctx.cwd, resolved, undefined, ctx.allowAllPaths);
 
 		return withFileMutationQueue(resolved, async () => {
 			const before = readUtf8IfExists(resolved);

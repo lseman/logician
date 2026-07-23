@@ -19,6 +19,13 @@ import { findWordBackward, findWordForward } from "../layers/input/word-navigati
 
 const segmenter = getGraphemeSegmenter();
 
+function isArrow(data: string, direction: "A" | "B" | "C" | "D"): boolean {
+	return (
+		data === `\x1bO${direction}` ||
+		new RegExp(`^\\x1b\\[(?:1(?:;\\d+)?)?${direction}$`).test(data)
+	);
+}
+
 // ── Input bar ─────────────────────────────────────────────────────────────────
 
 export interface InputBarOptions {
@@ -38,7 +45,7 @@ export class InputBar implements Component, Focusable {
 	private _prompt: string | undefined;
 	private get _promptResolved(): string {
 		if (this._prompt === undefined) {
-			this._prompt = theme.fg("prompt", "") + BOLD + "› " + RESET;
+			this._prompt = "  " + theme.fg("prompt", "") + BOLD + "› " + RESET;
 		}
 		return this._prompt;
 	}
@@ -53,6 +60,7 @@ export class InputBar implements Component, Focusable {
 	// Bracketed paste
 	private pasteBuffer = "";
 	private isInPaste = false;
+	private escapeArmed = false;
 
 	// Rendering cache
 	private cachedLines: string[] | null = null;
@@ -156,6 +164,17 @@ export class InputBar implements Component, Focusable {
 	// ── Input handling ─────────────────────────────────────────────────────
 
 	handleInput(data: string): void {
+		if (data !== "\x1b") this.escapeArmed = false;
+
+		// Some terminals batch multiple navigation keys into one stdin chunk.
+		// Replay a pure arrow-key batch one key at a time instead of treating the
+		// entire chunk as unknown input.
+		const arrowBatch = data.match(/\x1b(?:O[ABCD]|\[(?:1(?:;\d+)?)?[ABCD])/g);
+		if (arrowBatch && arrowBatch.length > 1 && arrowBatch.join("") === data) {
+			for (const key of arrowBatch) this.handleInput(key);
+			return;
+		}
+
 		// ── Bracketed paste ──────────────────────────────────────────────────
 		if (data.includes("\x1b[200~")) {
 			this.isInPaste = true;
@@ -227,21 +246,40 @@ export class InputBar implements Component, Focusable {
 			return;
 		}
 
+		// ── Left arrow — character left ──────────────────────────────────────
+		if (isArrow(data, "D")) {
+			if (this.cursor > 0) {
+				this.cursor--;
+				this._invalidate();
+			}
+			return;
+		}
+
+		// ── Right arrow — character right ────────────────────────────────────
+		if (isArrow(data, "C")) {
+			const totalGraphemes = this._graphemeCount(this.value);
+			if (this.cursor < totalGraphemes) {
+				this.cursor++;
+				this._invalidate();
+			}
+			return;
+		}
+
 		// ── Up arrow — history prev ──────────────────────────────────────────
-		if (data === "\x1b[A" || data === "\x1bOA") {
-			this.historyPrev();
+		if (isArrow(data, "A")) {
+			if (!this._moveToAdjacentLine(-1)) this.historyPrev();
 			return;
 		}
 
 		// ── Down arrow — history next ────────────────────────────────────────
-		if (data === "\x1b[B" || data === "\x1bOB") {
-			this.historyNext();
+		if (isArrow(data, "B")) {
+			if (!this._moveToAdjacentLine(1)) this.historyNext();
 			return;
 		}
 
 		// ── Escape ───────────────────────────────────────────────────────────
 		if (data === "\x1b") {
-			this._cancel();
+			this._handleEscape();
 			return;
 		}
 
@@ -355,6 +393,36 @@ export class InputBar implements Component, Focusable {
 		this._invalidate();
 	}
 
+	/** Move vertically through pasted/multiline input while preserving column. */
+	private _moveToAdjacentLine(direction: -1 | 1): boolean {
+		const segments = [...segmenter.segment(this.value)].map((item) => item.segment);
+		const beforeCursor = segments.slice(0, this.cursor);
+		const previousBreak = beforeCursor.lastIndexOf("\n");
+		const lineStart = previousBreak + 1;
+		const column = this.cursor - lineStart;
+
+		if (direction < 0) {
+			if (lineStart === 0) return false;
+			const previousLineEnd = lineStart - 1;
+			const previousLineStart =
+				segments.slice(0, previousLineEnd).lastIndexOf("\n") + 1;
+			this.cursor = Math.min(previousLineStart + column, previousLineEnd);
+		} else {
+			const nextBreakOffset = segments.slice(this.cursor).indexOf("\n");
+			if (nextBreakOffset < 0) return false;
+			const nextLineStart = this.cursor + nextBreakOffset + 1;
+			const followingBreakOffset = segments.slice(nextLineStart).indexOf("\n");
+			const nextLineEnd =
+				followingBreakOffset < 0
+					? segments.length
+					: nextLineStart + followingBreakOffset;
+			this.cursor = Math.min(nextLineStart + column, nextLineEnd);
+		}
+
+		this._invalidate();
+		return true;
+	}
+
 	private _deleteWordBackward(): void {
 		if (this.cursor === 0) return;
 		this._pushUndo();
@@ -420,6 +488,25 @@ export class InputBar implements Component, Focusable {
 			this._invalidate();
 		}
 		this.onCancel?.();
+	}
+
+	private _handleEscape(): void {
+		if (this.escapeArmed) {
+			this.escapeArmed = false;
+			this.onCancel?.();
+			return;
+		}
+		this.escapeArmed = true;
+		if (this.value.length > 0) {
+			this.value = "";
+			this.cursor = 0;
+			this._invalidate();
+		}
+		if (this.historyIndex !== null) {
+			this.historyIndex = null;
+			this.historyUnsaved = null;
+			this._invalidate();
+		}
 	}
 
 	// ── Undo / Redo ──────────────────────────────────────────────────────
@@ -543,8 +630,30 @@ export class InputBar implements Component, Focusable {
 		const lineWidth = visibleWidth(cleanLine);
 		const finalLine = rawLine + " ".repeat(Math.max(0, width - lineWidth));
 
-		this.cachedLines = [finalLine];
+		// Give the composer a quiet visual boundary on normal-width terminals.
+		// Narrow terminals keep the compact one-line editor.
+		const header = width >= 36 ? this._renderComposerHeader(width) : null;
+		this.cachedLines = header ? [header, finalLine] : [finalLine];
 		return this.cachedLines;
+	}
+
+	private _renderComposerHeader(width: number): string {
+		const label = ` ${theme.fg("header", "MESSAGE")} `;
+		const hintText = this.value
+			? "Enter send  ·  Esc clear"
+			: "Enter send  ·  / commands";
+		const hint = ` ${theme.fg("muted", hintText)} `;
+		const used = visibleWidth(label) + visibleWidth(hint) + 2;
+		const ruleWidth = Math.max(1, width - used);
+		const leftRule = Math.max(1, Math.floor(ruleWidth * 0.55));
+		const rightRule = Math.max(0, ruleWidth - leftRule);
+		return (
+			theme.fg("borderMuted", `─${"─".repeat(leftRule)}`) +
+			label +
+			theme.fg("borderMuted", "─".repeat(rightRule)) +
+			hint +
+			theme.fg("borderMuted", "─")
+		);
 	}
 
 	private _inputViewport(

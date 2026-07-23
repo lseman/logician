@@ -17,12 +17,13 @@ import { ToolResultCache } from "../../core/tool-cache.ts";
 import { withTimeout } from "./async-utils.ts";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
+import { DEFAULT_TRUNCATION } from "../../core/types/types-truncation.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
 
 /** Default cap on tool result size appended to context (~25k tokens). */
-const DEFAULT_MAX_RESULT_CHARS = 100_000;
+const DEFAULT_MAX_RESULT_CHARS = DEFAULT_TRUNCATION.toolResultMaxChars;
 
 function truncateResultMiddle(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
@@ -42,6 +43,7 @@ export interface PreparedToolCall {
 
 export interface ToolRegistryOptions {
 	cwd?: string;
+	allowAllPaths?: boolean;
 	signal?: AbortSignal;
 	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
 	/** Cache for tool results (P0-1). Pass null to disable caching. */
@@ -227,7 +229,7 @@ export class ToolRegistry {
 				const absolute = resolve(this.cwd, p);
 				const st = statSync(absolute);
 				mtimeParts.push(`${st.mtimeMs}`);
-			} catch {
+			} catch (e: unknown) {
 				// File doesn't exist — use "0" as sentinel
 				mtimeParts.push("0");
 			}

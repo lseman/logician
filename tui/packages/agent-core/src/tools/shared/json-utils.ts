@@ -74,7 +74,7 @@ export function parseJsonWithCommentsSafe<T = unknown>(
 ): T {
 	try {
 		return parseJsonWithComments<T>(input);
-	} catch {
+	} catch (e: unknown) {
 		return defaultValue;
 	}
 }

@@ -41,7 +41,7 @@ export const web_fetch: Tool = {
 		// Basic URL validation
 		try {
 			new URL(url);
-		} catch {
+		} catch (e: unknown) {
 			return `Error: Invalid URL: ${url}`;
 		}
 

@@ -17,12 +17,12 @@ export interface Task {
 	metadata?: Record<string, unknown>;
 }
 
-let tasks: Task[] = [];
-let nextId = 1;
+import { currentRunTaskState } from "./run-task-state.ts";
+
 const listeners = new Set<(tasks: Task[]) => void>();
 
 function snapshotTasks(): Task[] {
-	return tasks.map((task) => ({
+	return currentRunTaskState().tasks.map((task) => ({
 		...task,
 		blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
 		metadata: task.metadata ? { ...task.metadata } : undefined,
@@ -40,16 +40,17 @@ export function onTodosChanged(cb: (tasks: Task[]) => void): () => void {
 
 /** Read the live (mutable) task array. For use by the todo Tool's action handlers only. */
 export function getTasksMutable(): Task[] {
-	return tasks;
+	return currentRunTaskState().tasks;
 }
 
 export function allocateTaskId(): number {
-	return nextId++;
+	return currentRunTaskState().nextTaskId++;
 }
 
 export function replaceTasks(next: Task[]): void {
-	tasks = next;
-	nextId = 1;
+	const state = currentRunTaskState();
+	state.tasks = next;
+	state.nextTaskId = 1;
 }
 
 export function notifyTodosChanged(): void {

@@ -68,7 +68,7 @@ export function primaryArgString(args: Record<string, unknown>): string {
 	}
 	try {
 		return JSON.stringify(args);
-	} catch {
+	} catch (e: unknown) {
 		return "";
 	}
 }

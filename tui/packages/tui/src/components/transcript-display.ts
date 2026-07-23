@@ -2,7 +2,12 @@
 // Renders the full conversation history with streaming support and markdown.
 // Chunks are interleaved in chronological order: thinking → content → tool → ...
 
-import { highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import {
+	highlight,
+	highlightAuto,
+} from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
+import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 import { theme } from "../layers/theme/theme.ts";
 import type {
 	AssistantChunk,
@@ -25,10 +30,10 @@ const RESET = "\x1b[0m";
 // Heading palette — distinct color + weight per level.
 const getHeadingStyles = (): Array<{ color: string; deco: string }> => [
 	{ color: theme.fgRaw("mdHeading") + RESET, deco: BOLD + UNDERLINE },
-	{ color: "\x1b[38;5;81m", deco: BOLD },
+	{ color: theme.fgRaw("accent") + RESET, deco: BOLD },
 	{ color: theme.fgRaw("mdHeading") + RESET, deco: BOLD },
-	{ color: "\x1b[38;5;179m", deco: "" },
-	{ color: "\x1b[38;5;146m", deco: "" },
+	{ color: theme.fgRaw("warning") + RESET, deco: "" },
+	{ color: theme.fgRaw("muted") + RESET, deco: "" },
 	{ color: theme.fgRaw("dim") + DIM + RESET, deco: DIM },
 ];
 
@@ -48,7 +53,79 @@ function stripThinkTags(text: string): string {
 		.trimStart();
 }
 
+function unwrapThinkingChannel(text: string): string {
+	return text.replace(/<\/?think(?:ing)?>/gi, "").trim();
+}
+
+function stripThinkingToolMarkup(text: string): string {
+	if (!/<(?:tool\\?_call|function\s*=)/i.test(text)) return text;
+	return stripTextToolCalls(text)
+		.replace(
+			/\n*\**\s*<(?:tool\\?_call|function\s*=\s*[a-zA-Z_][\w.-]*)[^>]*>[\s\S]*$/i,
+			"",
+		)
+		.trimEnd();
+}
+
+function stripInternalHookGuidance(text: string | undefined): string | undefined {
+	if (!text?.includes("-hook>")) return text;
+	const visible = text
+		.replace(
+			/\n*<(?:post-tool-use|pre-tool-use|stop)-hook>[\s\S]*?<\/(?:post-tool-use|pre-tool-use|stop)-hook>\n*/gi,
+			"\n",
+		)
+		.replace(/\n{3,}/g, "\n\n")
+		.trimEnd();
+	return visible || undefined;
+}
+
 // ── Inline markdown renderer ──────────────────────────────────────────────────
+
+interface ParsedPostEditDiagnostic {
+	line: number;
+	column: number;
+	code?: number;
+	message: string;
+}
+
+interface PostEditDiagnosticBlock {
+	file: string;
+	diagnostics: ParsedPostEditDiagnostic[];
+}
+
+function extractPostEditDiagnostics(text: string | undefined): {
+	text: string | undefined;
+	blocks: PostEditDiagnosticBlock[];
+} {
+	if (!text?.includes("<post_edit_diagnostics")) {
+		return { text, blocks: [] };
+	}
+	const blocks: PostEditDiagnosticBlock[] = [];
+	const cleaned = text.replace(
+		/\n*<post_edit_diagnostics\s+file="([^"]*)">([\s\S]*?)<\/post_edit_diagnostics>\n*/gi,
+		(_match, fileValue: string, body: string) => {
+			const diagnostics = body
+				.split("\n")
+				.flatMap((line): ParsedPostEditDiagnostic[] => {
+					const parsed =
+						/^-\s+.*?:(\d+):(\d+)(?:\s+TS(\d+))?:\s+(.+)$/.exec(
+							line.trim(),
+						);
+					if (!parsed) return [];
+					return [{
+						line: Number(parsed[1]),
+						column: Number(parsed[2]),
+						code: parsed[3] ? Number(parsed[3]) : undefined,
+						message: parsed[4].trim(),
+					}];
+				});
+			blocks.push({ file: fileValue, diagnostics });
+			return "\n";
+		},
+	);
+	const visible = cleaned.replace(/\n{3,}/g, "\n\n").trimEnd();
+	return { text: visible || undefined, blocks };
+}
 
 function matchTagAt(text: string, i: number): number {
 	const m = /^<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/.exec(text.slice(i, i + 200));
@@ -180,7 +257,7 @@ function formatJsonLine(rawLine: string): string[] | null {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(trimmed);
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 	if (parsed === null || typeof parsed !== "object") return null;
@@ -246,7 +323,7 @@ function streamedStringArg(json: string | undefined, key: string): string | unde
 	if (!match) return undefined;
 	try {
 		return JSON.parse(`"${match[1]}"`) as string;
-	} catch {
+	} catch (e: unknown) {
 		return match[1];
 	}
 }
@@ -275,7 +352,7 @@ function parseJsonMaybe(value: string): unknown | null {
 	if (!trimmed || !/^[[{]/.test(trimmed)) return null;
 	try {
 		return JSON.parse(trimmed);
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 }
@@ -308,7 +385,7 @@ function normalizeEditArgs(
 	if (typeof rawEdits === "string") {
 		try {
 			rawEdits = JSON.parse(rawEdits);
-		} catch {
+		} catch (e: unknown) {
 			rawEdits = undefined;
 		}
 	}
@@ -391,20 +468,26 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 	constructor(options: TranscriptDisplayOptions = {}) {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
-		this.maxMessageLength = options.maxMessageLength ?? 4000;
+		this.maxMessageLength =
+			options.maxMessageLength ?? DEFAULT_TRUNCATION.transcriptMessageMaxChars;
 		this.maxTurns = options.maxTurns ?? 200;
 		this.maxRenderedLines = options.maxRenderedLines ?? 2000;
 	}
 
 	setThinkingMode(mode: ThinkingDisplayStyle): void {
+		if (this.thinkingMode === mode) return;
+		const keepBottomAnchored = this._atBottom;
 		this.thinkingMode = mode;
 		this.invalidate();
+		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 
 	setToolsExpanded(expanded: boolean): void {
 		if (this.toolsExpanded === expanded) return;
+		const keepBottomAnchored = this._atBottom;
 		this.toolsExpanded = expanded;
 		this.invalidate();
+		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 
 	toggleToolsExpanded(): boolean {
@@ -455,6 +538,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 	scrollToBottom(): void {
 		this._pendingScrollBottom = true;
 		this._atBottom = true;
+		// Apply offset immediately so isAtBottom reflects the new position
+		// right away — the TUI checks isAtBottom in the same frame loop.
+		const maxScroll = Math.max(
+			0,
+			this._totalHeight - (this._viewportHeight || 0),
+		);
+		this._scrollOffset = maxScroll;
 	}
 
 	set scrollOffset(offset: number) {
@@ -477,6 +567,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		this.cachedWidth = width;
 
 		const renderedLines: string[] = [];
+		const turnStartLines: number[] = [];
 		const frameWidth = Math.max(1, width - 2);
 		const contentWidth = Math.max(1, frameWidth - 2);
 
@@ -486,22 +577,15 @@ export class TranscriptDisplay implements Component, Scrollable {
 			return clipped + " ".repeat(Math.max(0, frameWidth - w));
 		};
 
+		// Render oldest-to-newest so the newest turns always end up at the
+		// bottom of the buffer — the viewport slices from scrollOffset and
+		// shows the bottom, meaning new messages are always visible even when
+		// maxRenderedLines truncates older content.
 		const emptyLine = " ".repeat(frameWidth);
 		renderedLines.push(padToWidth(emptyLine));
 
 		for (let ti = 0; ti < this.turns.length; ti++) {
-			// Stop rendering once we exceed the line budget.
-			if (renderedLines.length > this.maxRenderedLines) {
-				if (renderedLines.length > this.maxRenderedLines + 20) {
-					renderedLines.push(
-						padToWidth(
-							`${theme.fgRaw("dim")}… ${this.turns.length - ti - 1} older turn(s) not shown (scroll up or resize to see more)${RESET}`,
-						),
-					);
-				}
-				break;
-			}
-
+			turnStartLines.push(renderedLines.length);
 			const turn = this.turns[ti];
 			if (ti > 0) renderedLines.push(padToWidth(emptyLine));
 
@@ -509,6 +593,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 			if (turn.userMessage) {
 				const content = turn.userMessage.content;
 				if (content.startsWith("[System] ")) {
+					renderedLines.push(
+						padToWidth(`${theme.fgRaw("systemText")}◇ SYSTEM${RESET}`),
+					);
 					const sysLines = this.renderMarkdownLines(
 						content.slice(9),
 						contentWidth - 2,
@@ -516,17 +603,23 @@ export class TranscriptDisplay implements Component, Scrollable {
 						theme.fgRaw("systemText") + RESET,
 						"",
 					);
-					for (const line of sysLines) renderedLines.push(padToWidth(line));
+					for (const line of sysLines)
+						renderedLines.push(padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`));
 				} else {
-					const lines = this.wrapText(
-						theme.fgRaw("userText") +
-							BOLD +
-							"YOU " +
-							RESET +
-							this.truncateText(content),
-						contentWidth,
+					renderedLines.push(
+						padToWidth(`${theme.fgRaw("userText")}╭─ ${BOLD}YOU${RESET}`),
 					);
-					for (const line of lines) renderedLines.push(padToWidth(line));
+					const lines = this.wrapText(
+						theme.fgRaw("userText") + this.truncateText(content) + RESET,
+						Math.max(1, contentWidth - 2),
+					);
+					for (const line of lines)
+						renderedLines.push(
+							padToWidth(`${theme.fgRaw("userText")}│${RESET} ${line}`),
+						);
+					renderedLines.push(
+						padToWidth(`${theme.fgRaw("userText")}╰─${RESET}`),
+					);
 				}
 			}
 
@@ -536,6 +629,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 				const chunks = msg.chunks;
 				const streaming = !msg.isComplete || hasStreamingChunk(chunks);
 				let lastThinkingSection = false;
+				renderedLines.push(
+					padToWidth(`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`),
+				);
 
 				// Buffer consecutive content chunks so block-level markdown
 				// (tables, code fences) that spans chunk boundaries renders whole.
@@ -559,7 +655,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 							streaming,
 						);
 						for (const line of contentLines)
-							renderedLines.push(padToWidth(line));
+							renderedLines.push(padToWidth(`  ${line}`));
 					}
 				};
 
@@ -572,13 +668,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 					if (chunk.type === "thinking") {
 						// Render thinking block
 						const thinkLines = this.renderThinkingChunk(chunk, streaming);
-						for (const line of thinkLines) renderedLines.push(padToWidth(line));
+						for (const line of thinkLines)
+							renderedLines.push(padToWidth(`  ${line}`));
 						lastThinkingSection = true;
 					} else if (chunk.type === "tool" && chunk.tool) {
 						lastThinkingSection = false;
 						const toolLines = this.renderTool(chunk.tool, width);
-						for (const line of toolLines) renderedLines.push(padToWidth(line));
-						renderedLines.push(padToWidth(emptyLine));
+						for (const line of toolLines)
+							renderedLines.push(padToWidth(`  ${line}`));
 					}
 				}
 				flushContent();
@@ -588,11 +685,49 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 
 		renderedLines.push(padToWidth(emptyLine));
-		this._totalHeight = renderedLines.length;
 
-		this.cachedLines = renderedLines;
+		// Bound the render buffer from the *front*. The previous early-break
+		// implementation retained old turns and discarded the newest ones while
+		// labelling them as "older", which became especially visible after Ctrl+O
+		// expanded tool output. Prefer a complete recent-turn boundary; if the
+		// newest turn alone exceeds the budget, retain its tail.
+		let visibleBuffer = renderedLines;
+		const newestAssistant = this.turns.at(-1)?.assistantMessage;
+		const newestTurnIsStreaming =
+			newestAssistant != null &&
+			(!newestAssistant.isComplete ||
+				hasStreamingChunk(newestAssistant.chunks));
+		if (
+			!newestTurnIsStreaming &&
+			renderedLines.length > this.maxRenderedLines
+		) {
+			const desiredStart = renderedLines.length - (this.maxRenderedLines - 1);
+			const firstCompleteTurn = turnStartLines.findIndex(
+				(line) => line >= desiredStart,
+			);
+			const sliceStart =
+				firstCompleteTurn >= 0
+					? turnStartLines[firstCompleteTurn]
+					: desiredStart;
+			const olderCount =
+				firstCompleteTurn >= 0 ? firstCompleteTurn : Math.max(0, this.turns.length - 1);
+			const omittedLabel =
+				olderCount > 0
+					? `${olderCount} older turn(s) not shown`
+					: "earlier lines not shown";
+			visibleBuffer = [
+				padToWidth(
+					`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`,
+				),
+				...renderedLines.slice(sliceStart),
+			];
+		}
+
+		this._totalHeight = visibleBuffer.length;
+
+		this.cachedLines = visibleBuffer;
 		this.resolvePendingScroll();
-		return this.renderViewport(renderedLines, width);
+		return this.renderViewport(visibleBuffer, width);
 	}
 
 	// ── Chunk rendering ──────────────────────────────────────────────────────
@@ -601,8 +736,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		chunk: AssistantChunk,
 		_streaming: boolean,
 	): string[] {
-		const text = chunk.contentText || "";
-		if (text.trim().length === 0) return [];
+		const text = stripThinkingToolMarkup(
+			unwrapThinkingChannel(chunk.contentText || ""),
+		);
+		if (!text) return [];
 
 		const lines: string[] = [];
 
@@ -741,6 +878,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 	}
 
 	setTurns(turns: Turn[]): void {
+		const keepBottomAnchored = this._atBottom;
 		// Drop oldest turns beyond the cap to keep memory and render time bounded.
 		if (turns.length > this.maxTurns) {
 			this.turns = turns.slice(turns.length - this.maxTurns);
@@ -748,6 +886,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			this.turns = turns;
 		}
 		this.invalidate();
+		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 	private _viewportHeight: number = 0;
 
@@ -1113,19 +1252,28 @@ export class TranscriptDisplay implements Component, Scrollable {
 	}
 
 	private renderTool(tool: ToolExecution, width: number): string[] {
+		// Hook guidance is part of the model-visible tool result. Strip it only
+		// from this local display copy so internal instructions never leak into
+		// the user-facing transcript.
+		const postEdit = extractPostEditDiagnostics(tool.result);
+		tool = {
+			...tool,
+			result: stripInternalHookGuidance(postEdit.text),
+			partialResult: stripInternalHookGuidance(tool.partialResult),
+		};
 		const lines: string[] = [];
-		const prefix = tool.isError
-			? theme.fgRaw("toolError") + "✗ " + RESET
-			: theme.fgRaw("toolTitle") + "TOOL " + RESET;
-		const isError = tool.isError ? prefix : prefix;
-		// write_file / edit_file: no "TOOL" prefix, just the name
+		const glyph = tool.isError
+			? theme.fg("toolError", "×")
+			: tool.isComplete
+				? theme.fg("toolSuccess", "✓")
+				: theme.fg("toolRunning", "◌");
 		const status = tool.isError
 			? theme.fg("toolError", "error")
 			: tool.isComplete
-				? theme.fg("toolSuccess", "✓ done")
+				? theme.fg("toolSuccess", "done")
 				: tool.partialResult
-					? theme.fg("toolStreaming", "▸ streaming")
-					: theme.fg("toolRunning", "▸ running");
+					? theme.fg("toolStreaming", "streaming")
+					: theme.fg("toolRunning", "running");
 
 		// Extract file path for write_file / edit_file to show in header
 		const filePath = (() => {
@@ -1151,23 +1299,18 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? `${tool.durationMs}ms`
 				: `${(tool.durationMs / 1000).toFixed(1)}s`
 			: "";
-		const hint = this.toolsExpanded
-			? `${DIM}ctrl+o collapse${RESET}`
-			: `${DIM}ctrl+o expand${RESET}`;
-		const fileTool =
-			tool.tool_name === "write_file" || tool.tool_name === "edit_file";
-		const toolPrefix = fileTool ? "" : isError;
 		const base = filePath
-			? `${toolPrefix}${BOLD}${tool.tool_name}${RESET} ${DIM}(${RESET}${filePath}${DIM})${RESET} ` +
-				`${DIM}(${RESET}${status}${DIM})${RESET}`
-			: `${toolPrefix}${BOLD}${tool.tool_name}${RESET} ` +
-				`${DIM}(${RESET}${status}${DIM})${RESET}`;
-
-		lines.push(
-			[base, summary ? `${DIM}${summary}${RESET}` : "", elapsed ? `${DIM}· ${elapsed}${RESET}` : "", hint]
-				.filter(Boolean)
-				.join(" "),
-		);
+			? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
+			: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
+		const middle = summary ? `${DIM}${summary}${RESET}` : "";
+		const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
+		let row = [base, middle].filter(Boolean).join(` ${DIM}·${RESET} `);
+		if (right) {
+			const available = Math.max(1, width - 4);
+			const gap = available - visibleWidth(row) - visibleWidth(right);
+			row = gap >= 2 ? `${row}${" ".repeat(gap)}${right}` : `${row} ${right}`;
+		}
+		lines.push(clampLineToWidth(row, Math.max(1, width - 4)) + RESET);
 
 		// Always show the result (diff) for edit_file and write_file even when collapsed.
 		const showDiffResult =
@@ -1199,9 +1342,19 @@ export class TranscriptDisplay implements Component, Scrollable {
 				}
 			}
 		}
-		if (!this.toolsExpanded) return lines;
+		for (const block of postEdit.blocks) {
+			lines.push(
+				...this.renderPostEditDiagnostics(
+					block,
+					Math.max(20, width - 4),
+				),
+			);
+		}
+		if (!this.toolsExpanded && tool.tool_name !== "spawn_agent") return lines;
 
-		lines.push(`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`);
+		lines.push(
+			`${theme.fg("dim", "│ ")}${theme.fg("active", tool.tool_name === "spawn_agent" ? "◆ subagent" : "◆ details")}`,
+		);
 		for (const detailLine of this.toolDetailLines(tool, width - 2)) {
 			const wrapped = this.wrapText(detailLine, Math.max(20, width - 4));
 			for (const line of wrapped) {
@@ -1209,6 +1362,37 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 
+		return lines;
+	}
+
+	private renderPostEditDiagnostics(
+		block: PostEditDiagnosticBlock,
+		width: number,
+	): string[] {
+		const count = block.diagnostics.length;
+		const lines = [
+			`${theme.fg("dim", "│ ")}${theme.fg("warning", "◆")} ${BOLD}${theme.fg("warning", "DIAGNOSTICS")}${RESET} ${DIM}${count} issue${count === 1 ? "" : "s"}${RESET}`,
+			`${theme.fg("dim", "│ ")}${theme.fg("muted", block.file)}${RESET}`,
+		];
+		if (count === 0) {
+			lines.push(
+				`${theme.fg("dim", "│ ")}${DIM}Diagnostics were reported but could not be parsed.${RESET}`,
+			);
+			return lines;
+		}
+		for (const diagnostic of block.diagnostics) {
+			const code =
+				diagnostic.code === undefined ? "" : ` TS${diagnostic.code}`;
+			lines.push(
+				`${theme.fg("dim", "│ ")}${theme.fg("toolError", "×")} ${theme.fg("active", `${diagnostic.line}:${diagnostic.column}`)}${theme.fg("muted", code)}${RESET}`,
+			);
+			for (const messageLine of this.wrapText(
+				diagnostic.message,
+				Math.max(16, width - 6),
+			)) {
+				lines.push(`${theme.fg("dim", "│   ")}${messageLine}${RESET}`);
+			}
+		}
 		return lines;
 	}
 
@@ -1248,6 +1432,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 				.filter(Boolean)
 				.join(" · ");
 		}
+		if (tool.tool_name === "spawn_agent") {
+			return [
+				stringArg(args, "agent") || "general",
+				compactText(tool.streamOutput || tool.result || "").slice(0, 80),
+			]
+				.filter(Boolean)
+				.join(" · ");
+		}
 		if (path) return path;
 		const result = tool.result ?? tool.partialResult;
 		return result ? compactText(result).slice(0, 80) : "";
@@ -1257,6 +1449,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const args = tool.args || {};
 		const lines: string[] = [];
 		const result = tool.result ?? tool.partialResult;
+
+		if (tool.tool_name === "spawn_agent") {
+			return this.renderSubagentDetails(tool, width);
+		}
 
 		if (tool.isError && result && isPermissionRejection(result)) {
 			lines.push(...this.renderPermissionBlock(result, width));
@@ -1290,11 +1486,164 @@ export class TranscriptDisplay implements Component, Scrollable {
 		) {
 			lines.push(this.detailSection(tool.isError ? "error" : "result"));
 			lines.push(...this.previewBlock(result, width));
-		} else if (!result) {
+		} else if (!result && !tool.isComplete) {
 			lines.push(`${DIM}waiting for result...${RESET}`);
 		}
 
 		return lines;
+	}
+
+	private renderSubagentDetails(tool: ToolExecution, width: number): string[] {
+		const lines: string[] = [];
+		const args = tool.args || {};
+		const details = tool.details || {};
+		const metrics =
+			details.metrics && typeof details.metrics === "object"
+				? (details.metrics as Record<string, unknown>)
+				: {};
+		const agent = String(details.agent || args.agent || "general");
+		const status = String(
+			details.status || (tool.isError ? "failed" : tool.isComplete ? "completed" : "running"),
+		);
+		const metadata = [
+			`agent ${agent}`,
+			status,
+			typeof metrics.turns === "number" ? `${metrics.turns} turn(s)` : "",
+			typeof metrics.toolCalls === "number"
+				? `${metrics.toolCalls} tool call(s)`
+				: "",
+			typeof metrics.durationMs === "number"
+				? metrics.durationMs < 1000
+					? `${metrics.durationMs}ms`
+					: `${(metrics.durationMs / 1000).toFixed(1)}s`
+				: "",
+		]
+			.filter(Boolean)
+			.join(" · ");
+		lines.push(`${theme.fg("active", "◆ agent")}  ${DIM}${metadata}${RESET}`);
+
+		const branch = typeof details.branch === "string" ? details.branch : "";
+		const commit = typeof details.commit === "string" ? details.commit : "";
+		if (branch || commit) {
+			lines.push(
+				`${theme.fg("dim", "│ ")}${DIM}${[branch && `branch ${branch}`, commit && `commit ${commit.slice(0, 12)}`].filter(Boolean).join(" · ")}${RESET}`,
+			);
+		}
+
+		const task = stringArg(args, "task");
+		if (task) {
+			lines.push(this.detailSection("task"));
+			lines.push(...this.previewBlock(task, width, 800));
+		}
+
+		// Render child tool calls when expanded.
+		if (this.toolsExpanded) {
+			const childToolCalls = details.childToolCalls as Array<{
+				agentId: string;
+				toolName: string;
+				args: string;
+				status?: "running" | "completed" | "failed";
+				isError?: boolean;
+				resultPreview?: string;
+			}> | undefined;
+			lines.push(...this.renderSubagentActivity(childToolCalls, width));
+		} else {
+			const childToolCalls = details.childToolCalls as Array<{
+				agentId: string;
+				toolName: string;
+				args: string;
+				status?: "running" | "completed" | "failed";
+				isError?: boolean;
+				resultPreview?: string;
+			}> | undefined;
+			lines.push(...this.renderSubagentActivity(childToolCalls, width, 4));
+		}
+
+		const output = tool.isComplete ? tool.result : tool.streamOutput;
+		if (output) {
+			lines.push(this.detailSection(tool.isComplete ? "result" : "live progress"));
+			// Ctrl+O is the explicit full-detail view. Keep collapsed tool rows
+			// compact, but never discard child-agent progress or the final report here.
+			lines.push(
+				...this.previewBlock(
+					output,
+					width,
+					!tool.isComplete || this.toolsExpanded
+						? Number.POSITIVE_INFINITY
+						: 800,
+				),
+			);
+		} else if (!tool.isComplete) {
+			lines.push(`${DIM}waiting for agent output…${RESET}`);
+		}
+
+		return lines;
+	}
+
+	private renderSubagentActivity(
+		calls:
+			| Array<{
+					agentId: string;
+					toolName: string;
+					args: string;
+					status?: "running" | "completed" | "failed";
+					isError?: boolean;
+					resultPreview?: string;
+			  }>
+			| undefined,
+		width: number,
+		limit = Number.POSITIVE_INFINITY,
+	): string[] {
+		if (!calls?.length) return [];
+		const visible = calls.slice(-limit);
+		const hidden = calls.length - visible.length;
+		const lines = [
+			this.detailSection(
+				"activity",
+				`${calls.length} tool call${calls.length === 1 ? "" : "s"}${hidden ? ` · latest ${visible.length}` : ""}`,
+			),
+		];
+		const bg = theme.bg("mdCodeBlockBg", "");
+		for (const call of visible) {
+			const status =
+				call.status ?? (call.isError ? "failed" : "completed");
+			const icon =
+				status === "failed"
+					? theme.fg("toolError", "×")
+					: status === "running"
+						? theme.fg("toolRunning", "◌")
+						: theme.fg("toolSuccess", "✓");
+			const summary = this.subagentCallSummary(call.args);
+			const row = [
+				`${icon} ${theme.fg("toolTitle", call.toolName)}`,
+				summary ? `${DIM}${summary}${RESET}` : "",
+			]
+				.filter(Boolean)
+				.join(` ${DIM}·${RESET} `);
+			lines.push(`${bg}${clampLineToWidth(row, Math.max(20, width))}${RESET}`);
+			if (this.toolsExpanded && call.resultPreview) {
+				const result = compactText(call.resultPreview);
+				lines.push(
+					`${bg}${DIM}  └ ${clampLineToWidth(result, Math.max(16, width - 4))}${RESET}`,
+				);
+			}
+		}
+		return lines;
+	}
+
+	private subagentCallSummary(raw: string): string {
+		const text = raw.trim();
+		if (!text || text === "{}") return "";
+		const parsed = parseJsonMaybe(text);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			const args = parsed as Record<string, unknown>;
+			for (const key of ["path", "file_path", "pattern", "command", "query"]) {
+				if (typeof args[key] === "string") {
+					return `${key}=${compactText(args[key] as string).slice(0, 96)}`;
+				}
+			}
+		}
+		return compactText(text).slice(0, 100);
 	}
 
 	private renderWriteDetails(tool: ToolExecution, width: number): string[] {
@@ -1345,6 +1694,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const path = stringArg(args, "path") || stringArg(args, "file_path");
 		const streaming = !tool.isComplete;
 		const edits = normalizeEditArgs(args);
+		const language = this.detectLanguage(path);
 
 		if (path) lines.push(this.detailSection("file", path));
 
@@ -1360,7 +1710,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 					? `${DIM}${oldText.length} bytes · ${oldLineCount} lines · streaming${RESET}`
 					: `${DIM}${oldText.length} bytes · ${oldLineCount} lines${RESET}`;
 				lines.push(`${DIM}${oldMeta}${RESET}`);
-				lines.push(...this.renderPiContent(oldText, width, oldLineCount));
+				lines.push(
+					...this.renderFileContent(
+						oldText,
+						width,
+						oldLineCount,
+						language,
+					),
+				);
 			}
 			if (newText) {
 				lines.push(`${theme.fgRaw("diffAdded")}+ new${RESET}`);
@@ -1369,7 +1726,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 					? `${DIM}${newText.length} bytes · ${newLineCount} lines · streaming${RESET}`
 					: `${DIM}${newText.length} bytes · ${newLineCount} lines${RESET}`;
 				lines.push(`${DIM}${newMeta}${RESET}`);
-				lines.push(...this.renderPiContent(newText, width, newLineCount));
+				lines.push(
+					...this.renderFileContent(
+						newText,
+						width,
+						newLineCount,
+						language,
+					),
+				);
 			}
 		}
 
@@ -1526,9 +1890,17 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return lines;
 	}
 
-	private previewBlock(text: string, width: number): string[] {
+	private previewBlock(
+		text: string,
+		width: number,
+		maxChars = this.maxMessageLength,
+	): string[] {
 		if (!text) return [`${DIM}(empty)${RESET}`];
-		const rawLines = this.truncateText(text).split("\n");
+		const preview =
+			text.length > maxChars
+				? `${text.slice(0, maxChars)}\n… [truncated]`
+				: text;
+		const rawLines = preview.split("\n");
 		const lines: string[] = [];
 		const bg = theme.bg("mdCodeBlockBg", "");
 		const bgReset = RESET;
@@ -1612,31 +1984,66 @@ export class TranscriptDisplay implements Component, Scrollable {
 	}
 
 	wrapText(text: string, maxLineLength: number): string[] {
+		const width = Math.max(1, Math.floor(maxLineLength));
 		const lines: string[] = [];
 		const rawLines = text.split("\n");
 		for (const rawLine of rawLines) {
-			if (visibleWidth(rawLine) <= maxLineLength) {
+			if (visibleWidth(rawLine) <= width) {
 				lines.push(rawLine);
 			} else {
 				const words = rawLine.split(/\s+/);
 				let current = "";
 				for (const word of words) {
+					// A streamed tool result can contain hashes, minified JSON, or
+					// other tokens with no whitespace. Split those tokens as well so
+					// the frame-level width clamp does not silently discard their tail.
+					const chunks = this.hardWrapVisible(word, width);
+					for (let i = 0; i < chunks.length; i++) {
+						const chunk = chunks[i];
+						if (i > 0) {
+							if (current) lines.push(current);
+							current = chunk;
+							continue;
+						}
 					if (current.length === 0) {
-						current = word;
+						current = chunk;
 					} else if (
-						visibleWidth(current) + 1 + visibleWidth(word) <=
-						maxLineLength
+						visibleWidth(current) + 1 + visibleWidth(chunk) <= width
 					) {
-						current += ` ${word}`;
+						current += ` ${chunk}`;
 					} else {
 						lines.push(current);
-						current = word;
+						current = chunk;
+					}
+						if (visibleWidth(current) === width && i < chunks.length - 1) {
+							lines.push(current);
+							current = "";
+						}
 					}
 				}
 				if (current) lines.push(current);
 			}
 		}
 		return lines;
+	}
+
+	private hardWrapVisible(text: string, width: number): string[] {
+		if (visibleWidth(text) <= width) return [text];
+		const chunks: string[] = [];
+		let chunk = "";
+		let chunkWidth = 0;
+		for (const char of text) {
+			const charWidth = visibleWidth(char);
+			if (chunk && chunkWidth + charWidth > width) {
+				chunks.push(chunk);
+				chunk = "";
+				chunkWidth = 0;
+			}
+			chunk += char;
+			chunkWidth += charWidth;
+		}
+		if (chunk) chunks.push(chunk);
+		return chunks;
 	}
 
 	/** Detect language from file extension. */
@@ -1719,7 +2126,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		if (language) {
 			// Highlighted rendering: split each line by ANSI sequences, apply line numbers
-			const highlighted = highlightAuto(text);
+			const highlighted = language
+				? highlight(text, language)
+				: highlightAuto(text);
 
 			// Parse highlighted output into lines, each line may have ANSI color spans
 			const hlLines = highlighted.value.split("\n");

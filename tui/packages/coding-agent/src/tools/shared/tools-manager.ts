@@ -45,7 +45,7 @@ export async function getToolPath(tool: string): Promise<string | null> {
 			toolPathCache.set(tool, found);
 			return found;
 		}
-	} catch {
+	} catch (e: unknown) {
 		// not on PATH
 	}
 

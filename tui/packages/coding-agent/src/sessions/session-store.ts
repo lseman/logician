@@ -589,7 +589,7 @@ export class SessionStore {
 							contentText: row.assistant_content,
 						});
 					}
-				} catch {
+				} catch (e: unknown) {
 					// Not JSON — store as plain content
 					chunks.push({
 						type: "content" as const,

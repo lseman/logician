@@ -27,7 +27,7 @@ function parseLooseJson(
 	if (!text) return { ok: false };
 	try {
 		return { ok: true, value: JSON.parse(text) };
-	} catch {
+	} catch (e: unknown) {
 		// Fall through to a conservative repair pass for common model slips.
 	}
 	try {
@@ -38,7 +38,7 @@ function parseLooseJson(
 				JSON.stringify(body.replace(/\\'/g, "'")),
 			);
 		return { ok: true, value: JSON.parse(repaired) };
-	} catch {
+	} catch (e: unknown) {
 		return { ok: false };
 	}
 }

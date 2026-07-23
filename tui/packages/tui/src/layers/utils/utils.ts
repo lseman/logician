@@ -10,7 +10,7 @@ export const getGraphemeSegmenter = (): Intl.Segmenter => {
 		).Segmenter(undefined, {
 			segmenter: "grapheme",
 		} as unknown as Intl.SegmenterOptions);
-	} catch {
+	} catch (e: unknown) {
 		// Fallback: Intl.Segmenter not available — BMP-only splitter
 		return {
 			segment(text: string): Iterable<{ segment: string; segmented: boolean }> {

@@ -40,7 +40,12 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-_arxiv_mod = importlib.import_module("arxiv.scripts.arxiv")
+_arxiv_spec = importlib.util.spec_from_file_location(
+    "arxiv_scripts_arxiv",
+    Path(__file__).resolve().parents[2] / "arxiv" / "scripts" / "arxiv.py",
+)
+_arxiv_mod = importlib.util.module_from_spec(_arxiv_spec)
+_arxiv_spec.loader.exec_module(_arxiv_mod)
 ArxivSource = _arxiv_mod.ArxivSource
 
 _crossref_mod = importlib.import_module("crossref.scripts.crossref")

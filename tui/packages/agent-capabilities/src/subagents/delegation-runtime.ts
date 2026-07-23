@@ -200,7 +200,12 @@ export async function runDelegatedAgent(params: {
 				tools,
 				maxIterations: remainingIterations,
 				signal,
-				acceptance,
+				// Delegation owns its cross-run retry loop so it can keep aggregate
+				// budgets and return only the clean final result. Disable the runner's
+				// in-run corrective turn here to avoid stacking both retry mechanisms.
+				acceptance: acceptance
+					? { ...acceptance, maxFinalizationTurns: 0 }
+					: undefined,
 			},
 			(event) => {
 				if (event.type === "turn_start") turns++;

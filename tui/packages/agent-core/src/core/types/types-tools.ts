@@ -53,6 +53,7 @@ export interface AskUserContext {
 
 export interface ToolContext {
 	cwd?: string;
+	allowAllPaths?: boolean;
 	maxOutputChars?: number;
 	signal?: AbortSignal;
 	onUpdate?: (partialResult: string) => void;

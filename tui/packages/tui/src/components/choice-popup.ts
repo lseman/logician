@@ -169,8 +169,8 @@ export class ChoicePopup implements Component {
 
 		if (!this.visible) return [];
 
-		const popupWidth = Math.max(48, Math.min(width, 110));
-		const innerWidth = popupWidth - 4;
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - 4);
 		const lines: string[] = [];
 
 		// ── Top rounded corner ──

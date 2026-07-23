@@ -24,7 +24,7 @@ export function parseFrontmatter<T extends Record<string, unknown>>(
 		let frontmatter: T;
 		try {
 			frontmatter = (parse(yamlString) ?? {}) as T;
-		} catch {
+		} catch (e: unknown) {
 			frontmatter = parseLenientFrontmatter(yamlString) as T;
 		}
 		return {

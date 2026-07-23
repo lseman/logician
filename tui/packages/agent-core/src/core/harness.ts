@@ -31,6 +31,7 @@ import {
 	type HookLayer,
 } from "../hooks/builtin/builtin-hooks.ts";
 import {
+	claudeToolMatcherName,
 	createClaudeCodeHookLayer,
 	type ClaudeCodeHookLayer,
 } from "../compatibility/claude-code/hook-layer.ts";
@@ -706,7 +707,7 @@ export class AgentHarness {
 			sessionId: this._sessionId || "",
 			transcriptPath: this._transcriptPath || "",
 			cwd: this.cwd || process.cwd(),
-			getMatcherValue: (toolName) => toolName,
+			getMatcherValue: claudeToolMatcherName,
 		});
 	}
 
@@ -785,8 +786,9 @@ export class AgentHarness {
 					name: message.name,
 					timestamp: message.timestamp ?? Date.now(),
 				});
-			} catch {
+			} catch (e: unknown) {
 				// Session persistence must never break a completed turn.
+				console.error('[harness] session append failed:', e);
 			}
 		}
 	}
@@ -915,6 +917,16 @@ export class AgentHarness {
 		this.config.temperature = temperature;
 	}
 
+	setInferenceMode(mode: string): void {
+		// Validate mode name before accepting it.
+		const valid = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+		if (!valid.includes(mode)) {
+			// Silently ignore invalid mode — the caller (TUI) should handle this.
+			return;
+		}
+		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
+	}
+
 	setMaxTokens(maxTokens: number): void {
 		this.config.maxTokens = maxTokens;
 	}
@@ -936,7 +948,9 @@ export class AgentHarness {
 	private createToolRegistry(tools: Tool[]): ToolRegistry {
 		const registry = new ToolRegistry({
 			cwd: this.cwd,
+			allowAllPaths: this.config.allowAllPaths,
 			onQuestionRequest: this.config.onQuestionRequest,
+			maxResultChars: this.config.truncation?.toolResultMaxChars,
 		});
 		registry.registerMany(tools);
 		return registry;
@@ -1163,8 +1177,9 @@ export class AgentHarness {
 		try {
 			const fs = require("node:fs");
 			fs.writeFileSync(path, this.memoryStore.serialize());
-		} catch {
+		} catch (e: unknown) {
 			// Ignore persistence errors
+			console.error('[harness] saveMemory failed:', e);
 		}
 	}
 
@@ -1174,8 +1189,9 @@ export class AgentHarness {
 			const fs = require("node:fs");
 			const data = fs.readFileSync(path, "utf-8");
 			this.memoryStore.deserialize(data);
-		} catch {
+		} catch (e: unknown) {
 			// Ignore load errors
+			console.error('[harness] loadMemory failed:', e);
 		}
 	}
 

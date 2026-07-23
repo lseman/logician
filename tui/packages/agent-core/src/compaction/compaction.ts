@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { AgentMessage, CompactableMessage } from "../core/types.ts";
+import { DEFAULT_TRUNCATION } from "../core/types/types-truncation.ts";
 import {
 	SUMMARIZATION_PROMPT,
 	TURN_PREFIX_SUMMARIZATION_PROMPT,
@@ -778,9 +779,10 @@ const MICRO_COMPACT_KEEP_RECENT = 6;
 export function microCompactMaxChars(role: string): number {
 	// Tool results tolerate the most trimming; user prompts the least — losing
 	// part of the task statement is worse than a long context.
-	if (role === "tool") return 4000;
-	if (role === "assistant") return 10000;
-	return 14000;
+	const limits = DEFAULT_TRUNCATION.microCompactMaxChars;
+	if (role === "tool") return limits.tool;
+	if (role === "assistant") return limits.assistant;
+	return limits.default;
 }
 
 export function truncateMiddle(text: string, maxChars: number): string {

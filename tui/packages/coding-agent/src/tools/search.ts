@@ -94,6 +94,7 @@ const defaultOps: SearchOperations = {
 
 export const grep: Tool = {
 	readOnly: true,
+	executionMode: "parallel",
 	name: "grep",
 	label: "Search Files",
 	hookAliases: ["Grep"],
@@ -122,12 +123,12 @@ export const grep: Tool = {
 		const searchPath = searchDir
 			? resolvePath(ctx.cwd, searchDir)
 			: ctx.cwd || ".";
-		ensureInsideCwd(ctx.cwd, searchPath);
+		ensureInsideCwd(ctx.cwd, searchPath, undefined, ctx.allowAllPaths);
 		const ops = defaultOps;
 		let isDirectory: boolean;
 		try {
 			isDirectory = await ops.isDirectory(searchPath);
-		} catch {
+		} catch (e: unknown) {
 			return `Error: Path not found: ${searchPath}`;
 		}
 
@@ -153,7 +154,7 @@ export const grep: Tool = {
 						.replace(/\r\n/g, "\n")
 						.replace(/\r/g, "\n")
 						.split("\n");
-				} catch {
+				} catch (e: unknown) {
 					lines = [];
 				}
 				fileCache.set(filePath, lines);
@@ -200,7 +201,7 @@ export const grep: Tool = {
 				let event: unknown;
 				try {
 					event = JSON.parse(line);
-				} catch {
+				} catch (e: unknown) {
 					return;
 				}
 				if (

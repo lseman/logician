@@ -2,12 +2,12 @@
 
 import test, { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { initTheme } from "../../../layers/theme/theme.ts";
+import { initTheme } from "../src/layers/theme/theme.ts";
 import {
 	SettingsSelectorOverlay,
 	type SettingDef,
 	type SettingsSelectorAction,
-} from "../../../components/settings-overlay.ts";
+} from "../src/components/settings-overlay.ts";
 
 // Initialize theme before any overlay rendering.
 const setupTheme = (): void => {
@@ -65,8 +65,8 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.show();
 		const lines = overlay.render(80);
 		assert.ok(lines.length > 5);
-		assert.ok(lines[0].includes("┌"));
-		assert.ok(lines.at(-1)?.includes("┘"));
+		assert.ok(lines[0].includes("─"));
+		assert.ok(lines.at(-1)?.includes("─"));
 	});
 
 	it("navigates menu with arrow keys", () => {
@@ -105,13 +105,10 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.setSettings(makeSettings());
 		overlay.show();
 
-		// Should not return an action, just change view
+		// Model opens the dedicated model selector instead of inline options.
 		const action = overlay.handleInput("\r");
-		assert.strictEqual(action, null);
-		// Detail view should be active
-		assert.strictEqual(overlay["inDetailView"], true);
-		// Selected option should be the one marked current
-		assert.strictEqual(overlay["selectedOptionIndex"], 0); // Model is first, claude-sonnet-4 is current
+		assert.deepStrictEqual(action, { type: "open", settingName: "Model" });
+		assert.strictEqual(overlay["inDetailView"], false);
 	});
 
 	it("applies option in detail view on enter", () => {
@@ -120,16 +117,17 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.setSettings(makeSettings());
 		overlay.show();
 
-		// Open detail view
+		// Open the inline options for Thinking Level.
+		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r");
-		// Select a different option
-		overlay.handleInput("\x1b[B"); // Move to gpt-4
+		// Select a different option.
+		overlay.handleInput("\x1b[B");
 		// Apply
 		const action = overlay.handleInput("\r");
 		assert.strictEqual(action?.type, "change");
 		if (action?.type === "change") {
-			assert.strictEqual(action.settingName, "Model");
-			assert.strictEqual(action.value, "gpt-4");
+			assert.strictEqual(action.settingName, "Thinking Level");
+			assert.strictEqual(action.value, "high");
 		}
 	});
 
@@ -139,7 +137,8 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.setSettings(makeSettings());
 		overlay.show();
 
-		// Open detail view
+		// Open a setting with inline options (Model has a dedicated selector).
+		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r");
 		assert.strictEqual(overlay["inDetailView"], true);
 

@@ -52,7 +52,7 @@ export async function runReflector(
 			thinkingLevel,
 		});
 		return parseReflections(response);
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }
@@ -123,7 +123,7 @@ function parseReflections(raw: string): Reflection[] | undefined {
 			});
 		}
 		return reflections;
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }

@@ -335,8 +335,8 @@ function loadThemeJson(name: string, path: string): ThemeJson {
 	let json: unknown;
 	try {
 		json = JSON.parse(content);
-	} catch {
-		throw new Error(`Failed to parse theme file: ${path}`);
+	} catch (e: unknown) {
+		throw new Error(`Failed to parse theme file: ${path}: ${e}`);
 	}
 	if (
 		!json ||
@@ -469,7 +469,7 @@ export function getAvailableThemes(): string[] {
 				}
 			}
 		}
-	} catch {
+	} catch (e: unknown) {
 		// themes dir doesn't exist
 	}
 
@@ -492,8 +492,9 @@ export function initTheme(name?: string): void {
 	try {
 		const t = loadTheme(themeName);
 		setGlobalTheme(t);
-	} catch {
+	} catch (e: unknown) {
 		// Fallback to dark
+		console.error('[theme] initTheme failed:', e);
 		setGlobalTheme(loadTheme("dark"));
 	}
 }
@@ -503,7 +504,7 @@ export function setTheme(name: string): boolean {
 		const t = loadTheme(name);
 		setGlobalTheme(t);
 		return true;
-	} catch {
+	} catch (e: unknown) {
 		return false;
 	}
 }

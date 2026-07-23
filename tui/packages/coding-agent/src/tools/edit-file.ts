@@ -459,7 +459,7 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		try {
 			const parsed = JSON.parse(rawEdits);
 			if (Array.isArray(parsed)) rawEdits = parsed;
-		} catch {
+		} catch (e: unknown) {
 			// Leave as-is
 		}
 	}
@@ -499,6 +499,7 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 
 export const edit_file: Tool = {
 	name: "edit_file",
+	executionMode: "parallel",
 	label: "Edit File",
 	hookAliases: ["Edit"],
 	description:
@@ -529,7 +530,7 @@ export const edit_file: Tool = {
 		}
 
 		const resolved = resolveReadPath(path, ctx.cwd || process.cwd());
-		ensureInsideCwd(ctx.cwd, resolved);
+		ensureInsideCwd(ctx.cwd, resolved, undefined, ctx.allowAllPaths);
 
 		try {
 			await defaultEditOperations.access(resolved);

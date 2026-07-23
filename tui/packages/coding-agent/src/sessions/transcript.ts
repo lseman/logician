@@ -22,6 +22,9 @@ export interface ToolExecution {
 	args?: Record<string, unknown>;
 	result?: string;
 	partialResult?: string;
+	/** Human-readable progress emitted while the tool executes. */
+	streamOutput?: string;
+	details?: Record<string, unknown>;
 	isError: boolean;
 	isComplete: boolean;
 	startedAt?: number;
@@ -236,7 +239,6 @@ export class Transcript {
 	private handleMessageUpdate(event: MessageUpdateEvent): void {
 		if (event.message.role !== "assistant") return;
 		const full = event.message.content ?? "";
-		if (!full) return;
 		const turn = this.getCurrentTurn();
 		if (!turn) return;
 		const message = this.ensureAssistant(turn);
@@ -244,6 +246,25 @@ export class Transcript {
 			.filter((chunk) => chunk.type === "content")
 			.map((chunk) => chunk.contentText ?? "")
 			.join("");
+		// Textual tool calls stream as ordinary content before agent-core can
+		// promote them. The final snapshot contains structured tool_calls and
+		// sanitized prose, so replace the streamed content instead of trying to
+		// append a suffix to markup that no longer shares the same prefix.
+		if (event.message.tool_calls?.length && full !== rendered) {
+			message.chunks = message.chunks.filter(
+				(chunk) => chunk.type !== "content",
+			);
+			if (full) {
+				message.chunks.push({
+					seq: message.chunks.length,
+					type: "content",
+					contentText: full,
+					isComplete: true,
+				});
+			}
+			return;
+		}
+		if (!full) return;
 		// Streaming backends already delivered this prefix. Append only the
 		// missing suffix; non-streaming backends append the complete response.
 		if (full.startsWith(rendered)) {
@@ -260,6 +281,17 @@ export class Transcript {
 		label: string;
 		text: string;
 	}): void {
+		// Detect subagent tool call notices (label starts with "↳") and
+		// store them on the parent spawn_agent ToolExecution so the expanded
+		// view can render the child's tool activity.
+		const subagentMatch = event.label.match(/^↳ (.+)$/);
+		if (subagentMatch) {
+			this.storeChildToolCall(subagentMatch[1], event);
+			// Child activity belongs to the integrated spawn_agent card. Avoid
+			// duplicating every call as a top-level transcript notice.
+			return;
+		}
+
 		const turn = this.getCurrentTurn();
 		if (!turn) return;
 		const msg = this.ensureAssistant(turn);
@@ -270,6 +302,70 @@ export class Transcript {
 			type: "notice",
 			notice: { level: event.level, label: event.label, text: event.text },
 			isComplete: true,
+		});
+	}
+
+	/** Store a child tool call on the parent spawn_agent ToolExecution. */
+	private storeChildToolCall(
+		agentId: string,
+		event: { level: NoticeLevel; label: string; text: string },
+	): void {
+		const turn = this.getCurrentTurn();
+		if (!turn?.assistantMessage) return;
+
+		// Find the most recent incomplete spawn_agent tool chunk.
+		const toolChunk = turn.assistantMessage.chunks
+			.slice()
+			.reverse()
+			.find((c) => c.type === "tool" && c.tool?.tool_name === "spawn_agent" && !c.isComplete);
+		if (!toolChunk?.tool) return;
+
+		const details = (toolChunk.tool.details ??= {});
+		const childToolCalls = (details.childToolCalls as Array<{
+			agentId: string;
+			toolName: string;
+			args: string;
+			status?: "running" | "completed" | "failed";
+			isError?: boolean;
+			resultPreview?: string;
+		}>) ?? (details.childToolCalls = []);
+
+		const text = event.text.trim();
+		const match = /^([▶✓✗])\s+(\S+)(?:\s+(.*))?$/.exec(text);
+		const marker = match?.[1];
+		const toolName = match?.[2] ?? text.slice(0, 40);
+		const payload = match?.[3] ?? "";
+
+		if (marker === "✓" || marker === "✗") {
+			const running = childToolCalls
+				.slice()
+				.reverse()
+				.find(
+					(call) =>
+						call.agentId === agentId &&
+						call.toolName === toolName &&
+						call.status === "running",
+				);
+			if (running) {
+				running.status = marker === "✗" ? "failed" : "completed";
+				running.isError = marker === "✗";
+				running.resultPreview = payload;
+				return;
+			}
+		}
+
+		childToolCalls.push({
+			agentId,
+			toolName,
+			args: marker === "▶" ? payload : "",
+			status:
+				marker === "▶"
+					? "running"
+					: marker === "✗"
+						? "failed"
+						: "completed",
+			isError: marker === "✗" || event.level === "warn",
+			resultPreview: marker === "▶" ? undefined : payload,
 		});
 	}
 
@@ -353,10 +449,14 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		if (event.partial_result !== undefined) {
-			// Append delta fragments (not overwrite) so partialResult
-			// accumulates the full JSON args as the model streams them.
-			toolChunk.tool.partialResult =
-				(toolChunk.tool.partialResult || "") + String(event.partial_result);
+			if (event.update_kind === "output") {
+				toolChunk.tool.streamOutput =
+					(toolChunk.tool.streamOutput || "") + String(event.partial_result);
+			} else {
+				// Argument fragments are kept separately from human-readable progress.
+				toolChunk.tool.partialResult =
+					(toolChunk.tool.partialResult || "") + String(event.partial_result);
+			}
 		}
 	}
 
@@ -396,13 +496,15 @@ export class Transcript {
 				if (streamedArgs && typeof streamedArgs === "object" && !Array.isArray(streamedArgs)) {
 					tool.args = { ...(tool.args ?? {}), ...(streamedArgs as Record<string, unknown>) };
 				}
-			} catch {
+			} catch (e: unknown) {
 				// A provider may finish without a complete argument stream. The renderer
 				// can still recover paths from the textual tool result.
 			}
 		}
 		tool.result = event.result !== undefined ? String(event.result) : "";
+		tool.details = event.details;
 		tool.partialResult = undefined;
+		tool.streamOutput = undefined;
 		const isError = (event as unknown as Record<string, unknown>).is_error;
 		if (isError !== undefined) {
 			tool.isError = Boolean(isError);
@@ -611,7 +713,7 @@ export class Transcript {
 		for (const cb of this.listeners) {
 			try {
 				cb();
-			} catch {
+			} catch (e: unknown) {
 				// Don't crash on bad listeners
 			}
 		}

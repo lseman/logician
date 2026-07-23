@@ -27,7 +27,8 @@ export async function emitSessionStart(
 			cwd: ctx.cwd,
 		});
 		return true;
-	} catch {
+	} catch (e: unknown) {
+		console.error('[harness-session] emitSessionStart failed:', e);
 		return false;
 	}
 }
@@ -45,8 +46,9 @@ export async function emitSessionEnd(
 			cwd: ctx.cwd,
 			reason,
 		});
-	} catch {
+	} catch (e: unknown) {
 		// must not block cleanup
+		console.error('[harness-session] emitSessionEnd failed:', e);
 	}
 }
 
@@ -61,8 +63,9 @@ export async function emitPreCompact(
 	if (compactCtx) {
 		try {
 			hookResult = (await internalHook?.(compactCtx)) ?? (await userHook?.(compactCtx)) ?? undefined;
-		} catch {
+		} catch (e: unknown) {
 			// must not block compaction
+			console.error('[harness-session] emitPreCompact internalHook failed:', e);
 		}
 	}
 	if (!hooksEnabled) return hookResult;
@@ -72,8 +75,9 @@ export async function emitPreCompact(
 			transcript_path: ctx.transcriptPath,
 			cwd: ctx.cwd,
 		});
-	} catch {
+	} catch (e: unknown) {
 		// must not block compaction
+		console.error('[harness-session] emitPreCompact hookEvent failed:', e);
 	}
 	return hookResult;
 }
@@ -86,8 +90,9 @@ export async function emitPostCompact(hooksEnabled: boolean, ctx: HookContext): 
 			transcript_path: ctx.transcriptPath,
 			cwd: ctx.cwd,
 		});
-	} catch {
+	} catch (e: unknown) {
 		// must not block compaction
+		console.error('[harness-session] emitPostCompact failed:', e);
 	}
 }
 
@@ -114,7 +119,8 @@ export function loadSessionMessages(
 			timestamp: m.timestamp,
 		}));
 		return { session, messages };
-	} catch {
+	} catch (e: unknown) {
+		console.error('[harness-session] loadSessionMessages failed:', e);
 		return null;
 	}
 }
@@ -135,7 +141,8 @@ export function listSessions(baseDir: string | undefined): Array<{
 				messageCount: m.messageCount,
 				lastActivity: m.lastActivity,
 			}));
-	} catch {
+	} catch (e: unknown) {
+		console.error('[harness-session] listSessions failed:', e);
 		return [];
 	}
 }

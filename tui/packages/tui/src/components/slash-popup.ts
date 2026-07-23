@@ -288,7 +288,7 @@ export class SlashPopup implements Component {
 		if (!this.visible) return [];
 
 		const state = this._prepareRenderState();
-		const contentWidth = Math.min(80, Math.max(40, width - 4));
+		const contentWidth = Math.max(1, width - 2);
 		const lines: string[] = [];
 
 		// Title row

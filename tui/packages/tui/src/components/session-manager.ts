@@ -343,7 +343,7 @@ export class SessionManager implements Component {
 
 		if (!this.visible) return [];
 
-		const contentWidth = Math.max(40, width - 4);
+		const contentWidth = Math.max(1, width - 2);
 		const lines: string[] = [];
 
 		// ── List mode ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import type { AgentModelConfig } from "@logician/agent-core";
+import { dirname, join, resolve, isAbsolute } from "node:path";
+import type { AgentModelConfig, TruncationConfig } from "@logician/agent-core";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
@@ -36,14 +36,31 @@ const KNOWN_KEYS = new Set([
 	"loopDetectionEnabled",
 	"guardsEnabled",
 	"continuationEnabled",
+	"postEditDiagnostics",
+	"lsp",
 	"compaction",
 	"plugins",
+	"inferenceMode",
+	"allowedPaths",
+	"allowAllPaths",
+	"cwd",
+	"truncation",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
 	"reserveTokens",
 	"keepRecentTokens",
 ]);
+const TRUNCATION_KEYS = new Set([
+	"toolResultMaxChars",
+	"maxLines",
+	"grepLineMaxChars",
+	"subagentResultMaxChars",
+	"compactionSummaryMaxChars",
+	"microCompactMaxChars",
+	"transcriptMessageMaxChars",
+]);
+const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(["tool", "assistant", "default"]);
 
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
@@ -235,9 +252,120 @@ export function validateConfig(
 	cfg.hooks = configBool(obj.hooks);
 	cfg.mcpEager = configBool(obj.mcpEager);
 	cfg.steeringInterrupt = configBool(obj.steeringInterrupt);
+
+	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
+	if (obj.inferenceMode !== undefined) {
+		const im = configString(obj.inferenceMode);
+		const validModes = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+		if (im && !validModes.includes(im)) {
+			warn(
+				warnings,
+				`"inferenceMode" must be one of: ${validModes.join(", ")}, got: "${im}".`,
+			);
+		} else if (im) {
+			cfg.inferenceMode = im as LogicianTuiConfig["inferenceMode"];
+		}
+	}
 	cfg.loopDetectionEnabled = configBool(obj.loopDetectionEnabled);
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
+	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
+
+	// allowedPaths: array of absolute paths allowed outside CWD.
+	if (obj.allowedPaths !== undefined) {
+		if (Array.isArray(obj.allowedPaths)) {
+			const paths: string[] = [];
+			for (const p of obj.allowedPaths) {
+				if (typeof p === "string" && p.trim()) {
+					const trimmed = p.trim();
+					if (!isAbsolute(trimmed)) {
+						warn(warnings, `"allowedPaths" entry must be an absolute path: "${trimmed}". Ignored.`);
+					} else {
+						paths.push(trimmed);
+					}
+				}
+			}
+			if (paths.length > 0) cfg.allowedPaths = paths;
+		} else {
+			warn(warnings, '"allowedPaths" must be an array.');
+		}
+	}
+
+	// allowAllPaths: when true, skip CWD/allowedPaths enforcement.
+	if (obj.allowAllPaths !== undefined) {
+		cfg.allowAllPaths = configBool(obj.allowAllPaths);
+	}
+
+	// cwd: explicit project root.
+	if (obj.cwd !== undefined) {
+		const cwd = configString(obj.cwd);
+		if (cwd !== undefined) {
+			const resolved = resolve(cwd);
+			if (existsSync(resolved)) {
+				cfg.cwd = resolved;
+			} else {
+				warn(warnings, `"cwd" path does not exist: "${cwd}". Ignored.`);
+			}
+		}
+	}
+
+	// lsp sub-object.
+	if (obj.lsp !== undefined) {
+		if (typeof obj.lsp !== "object" || obj.lsp === null) {
+			warn(warnings, '"lsp" must be an object.');
+		} else {
+			const l = obj.lsp as Record<string, unknown>;
+			const lc: {
+				enabled?: boolean;
+				timeoutMs?: number;
+				serverOverrides?: Record<string, {
+					command: string;
+					args?: string[];
+					languageId: string;
+				}>;
+			} = {};
+			for (const key of Object.keys(l)) {
+				if (key !== "enabled" && key !== "timeoutMs" && key !== "serverOverrides") {
+					warn(warnings, `Unknown lsp key: "${key}".`);
+				}
+			}
+			const le = configBool(l.enabled);
+			if (le !== undefined) lc.enabled = le;
+			const lt = configNumber(l.timeoutMs);
+			if (lt !== undefined && lt > 0) lc.timeoutMs = lt;
+			if (l.serverOverrides !== undefined && typeof l.serverOverrides === "object" && l.serverOverrides !== null) {
+				const overrides = l.serverOverrides as Record<string, unknown>;
+				const parsedOverrides: NonNullable<typeof lc.serverOverrides> = {};
+				for (const [ext, def] of Object.entries(overrides)) {
+					if (typeof def !== "object" || def === null) {
+						warn(warnings, `"lsp.serverOverrides.${ext}" must be an object.`);
+						continue;
+					}
+					const d = def as Record<string, unknown>;
+					if (typeof d.command !== "string" || !d.command.trim()) {
+						warn(warnings, `"lsp.serverOverrides.${ext}.command" must be a non-empty string.`);
+						continue;
+					}
+					if (typeof d.languageId !== "string" || !d.languageId.trim()) {
+						warn(warnings, `"lsp.serverOverrides.${ext}.languageId" must be a non-empty string.`);
+						continue;
+					}
+					const args = Array.isArray(d.args)
+						? d.args.filter((a): a is string => typeof a === "string")
+						: undefined;
+					parsedOverrides[ext] = {
+						command: d.command.trim(),
+						args,
+						languageId: d.languageId.trim(),
+					};
+				}
+				if (Object.keys(parsedOverrides).length > 0) {
+					lc.serverOverrides = parsedOverrides;
+				}
+			}
+			if (Object.keys(lc).length > 0) cfg.lsp = lc;
+		}
+	}
 
 	// compaction sub-object.
 	if (obj.compaction !== undefined) {
@@ -262,6 +390,69 @@ export function validateConfig(
 			const krt = configNumber(c.keepRecentTokens);
 			if (krt !== undefined && krt > 0) ccfg.keepRecentTokens = krt;
 			if (Object.keys(ccfg).length > 0) cfg.compaction = ccfg;
+		}
+	}
+
+	// truncation sub-object: universal output/result size caps.
+	if (obj.truncation !== undefined) {
+		if (typeof obj.truncation !== "object" || obj.truncation === null) {
+			warn(warnings, '"truncation" must be an object.');
+		} else {
+			const t = obj.truncation as Record<string, unknown>;
+			const tcfg: TruncationConfig = {};
+			for (const key of Object.keys(t)) {
+				if (!TRUNCATION_KEYS.has(key)) {
+					warn(warnings, `Unknown truncation key: "${key}".`);
+				}
+			}
+			for (const key of [
+				"toolResultMaxChars",
+				"maxLines",
+				"grepLineMaxChars",
+				"subagentResultMaxChars",
+				"compactionSummaryMaxChars",
+				"transcriptMessageMaxChars",
+			] as const) {
+				const n = configNumber(t[key]);
+				if (n !== undefined) {
+					if (n <= 0) {
+						warn(warnings, `"truncation.${key}" must be > 0, got ${n}. Ignored.`);
+					} else {
+						tcfg[key] = n;
+					}
+				}
+			}
+			if (t.microCompactMaxChars !== undefined) {
+				if (
+					typeof t.microCompactMaxChars !== "object" ||
+					t.microCompactMaxChars === null
+				) {
+					warn(warnings, '"truncation.microCompactMaxChars" must be an object.');
+				} else {
+					const m = t.microCompactMaxChars as Record<string, unknown>;
+					const mcfg: NonNullable<TruncationConfig["microCompactMaxChars"]> = {};
+					for (const key of Object.keys(m)) {
+						if (!MICRO_COMPACT_MAX_CHARS_KEYS.has(key)) {
+							warn(warnings, `Unknown truncation.microCompactMaxChars key: "${key}".`);
+						}
+					}
+					for (const key of ["tool", "assistant", "default"] as const) {
+						const n = configNumber(m[key]);
+						if (n !== undefined) {
+							if (n <= 0) {
+								warn(
+									warnings,
+									`"truncation.microCompactMaxChars.${key}" must be > 0, got ${n}. Ignored.`,
+								);
+							} else {
+								mcfg[key] = n;
+							}
+						}
+					}
+					if (Object.keys(mcfg).length > 0) tcfg.microCompactMaxChars = mcfg;
+				}
+			}
+			if (Object.keys(tcfg).length > 0) cfg.truncation = tcfg;
 		}
 	}
 
@@ -382,12 +573,37 @@ export interface LogicianTuiConfig {
 	loopDetectionEnabled?: boolean; // OFF by default
 	guardsEnabled?: boolean; // OFF by default
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
+	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
+	// Absolute paths the agent may read/write outside CWD.
+	allowedPaths?: string[];
+	// When true, skip CWD/allowedPaths enforcement entirely.
+	allowAllPaths?: boolean;
+	// Explicit project root (overrides auto-detected CWD).
+	cwd?: string;
+	// LSP (language server protocol) settings.
+	lsp?: {
+		enabled?: boolean;
+		timeoutMs?: number;
+		serverOverrides?: Record<string, {
+			command: string;
+			args?: string[];
+			languageId: string;
+		}>;
+	};
 	// Compaction settings.
 	compaction?: {
 		enabled?: boolean;
 		reserveTokens?: number;
 		keepRecentTokens?: number;
 	};
+	// Inference mode — pre-defined sampling parameter set, cycled via Alt+M.
+	inferenceMode?:
+		| "thinking-general"
+		| "thinking-coding"
+		| "instruct-general"
+		| "instruct-reasoning";
+	// Universal output/result truncation limits.
+	truncation?: TruncationConfig;
 }
 
 export function loadLogicianConfig(
@@ -490,7 +706,7 @@ export function saveConfigField(key: string, value: unknown): boolean {
 		raw[key] = value;
 		writeFileSync(configPath, JSON.stringify(raw, null, 2) + "\n");
 		return true;
-	} catch {
+	} catch (e: unknown) {
 		return false;
 	}
 }

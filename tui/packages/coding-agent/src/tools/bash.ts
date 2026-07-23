@@ -85,11 +85,12 @@ function makeUpdateThrottler(): (callback: () => void) => void {
 
 export const bash: Tool = {
 	name: "bash",
+	executionMode: "sequential",
 	label: "Bash",
 	hookAliases: ["Bash"],
 	description: `Execute bash commands with timeout. Output is streamed and truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB. Uses process tree tracking for proper cleanup.`,
 	promptSnippet:
-		"Execute shell commands in a sandboxed subprocess with timeout",
+		"Execute shell commands in a managed subprocess with timeout and approval policy",
 	promptGuidelines: [
 		"Use bash for file operations like ls, grep, find; use read for file content instead of cat",
 	],
@@ -113,7 +114,7 @@ export const bash: Tool = {
 		const cwd = ctx.cwd || process.cwd();
 		try {
 			await fsAccess(cwd, constants.F_OK);
-		} catch {
+		} catch (e: unknown) {
 			return `Error: Working directory does not exist: ${cwd}`;
 		}
 

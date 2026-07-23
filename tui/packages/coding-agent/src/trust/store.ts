@@ -25,7 +25,7 @@ function readTrustFile(): TrustFile {
 			}
 		}
 		return data;
-	} catch {
+	} catch (e: unknown) {
 		return {};
 	}
 }

@@ -119,7 +119,7 @@ export function createMemoryStore(): MemoryStore {
 					entry.recency = 0;
 					entries.push(entry);
 				}
-			} catch {
+			} catch (e: unknown) {
 				// Ignore corrupt data
 			}
 		},
@@ -173,7 +173,7 @@ export function createMemoryStore(): MemoryStore {
 							map[entry.id];
 					}
 				}
-			} catch {
+			} catch (e: unknown) {
 				// Ignore corrupt embedding data
 			}
 		},

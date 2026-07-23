@@ -133,7 +133,7 @@ export class PluginManagerOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(48, Math.min(width, 110));
+		const overlayWidth = Math.max(1, width);
 		const innerWidth = Math.max(1, overlayWidth - 4);
 		const lines: string[] = [];
 

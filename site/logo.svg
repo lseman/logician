@@ -7,37 +7,65 @@
     xmlns="http://www.w3.org/2000/svg">
   <title>Logician Logo</title>
   <defs>
-    <linearGradient id="bg-glow" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.20"/>
-      <stop offset="100%" stop-color="#06B6D4" stop-opacity="0.10"/>
-    </linearGradient>
+    <!-- Aura gradient -->
+    <radialGradient id="aura" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#6D28D9" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#06B6D4" stop-opacity="0"/>
+    </radialGradient>
 
-    <linearGradient id="bulb-fill" x1="0" y1="80" x2="0" y2="380" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#F5F3FF"/>
-      <stop offset="55%" stop-color="#DDD6FE"/>
-      <stop offset="100%" stop-color="#A78BFA"/>
-    </linearGradient>
+    <!-- Bulb body gradient — brighter center for glass feel -->
+    <radialGradient id="bulb-glass" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="25%" stop-color="#EDE9FE"/>
+      <stop offset="60%" stop-color="#C4B5FD"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </radialGradient>
 
+    <!-- Bulb outline gradient -->
     <linearGradient id="bulb-stroke" x1="120" y1="90" x2="380" y2="360" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="0%" stop-color="#A78BFA"/>
       <stop offset="100%" stop-color="#5B21B6"/>
     </linearGradient>
 
+    <!-- Glass reflection highlight -->
+    <linearGradient id="glass-highlight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.7"/>
+      <stop offset="40%" stop-color="#FFFFFF" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Base gradient -->
     <linearGradient id="base-fill" x1="0" y1="330" x2="0" y2="460" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#C4B5FD"/>
       <stop offset="100%" stop-color="#6D28D9"/>
     </linearGradient>
 
+    <!-- Node glow -->
+    <radialGradient id="node-glow">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="60%" stop-color="#DDD6FE"/>
+      <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0.6"/>
+    </radialGradient>
+
+    <!-- Inner glow filter -->
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Soft shadow -->
     <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#6D28D9" flood-opacity="0.20"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#6D28D9" flood-opacity="0.25"/>
     </filter>
   </defs>
 
-  <!-- subtle aura -->
-  <circle cx="256" cy="205" r="170" fill="url(#bg-glow)"/>
+  <!-- Outer aura glow -->
+  <circle cx="256" cy="205" r="200" fill="url(#aura)"/>
 
-  <!-- bulb body -->
+  <!-- ═══ BULB BODY ═══ -->
   <g filter="url(#soft-shadow)">
+    <!-- Main glass body -->
     <path
       d="M256 78
          C177 78 118 136 118 215
@@ -47,25 +75,49 @@
          C289 384 301 365 319 351
          C361 319 394 274 394 215
          C394 136 335 78 256 78 Z"
-      fill="url(#bulb-fill)"
+      fill="url(#bulb-glass)"
       stroke="url(#bulb-stroke)"
-      stroke-width="14"
+      stroke-width="12"
       stroke-linejoin="round"/>
+
+    <!-- Glass reflection — upper-left crescent -->
+    <path
+      d="M152 180
+         C148 165 152 148 165 135
+         C178 122 198 115 220 112
+         C200 118 180 130 170 148
+         C162 162 160 175 162 190
+         Z"
+      fill="url(#glass-highlight)"
+      opacity="0.6"/>
+
+    <!-- Secondary reflection — right side subtle -->
+    <path
+      d="M360 170
+         C358 158 352 148 342 140
+         C335 134 325 130 314 128
+         C325 135 338 145 344 158
+         C350 168 353 175 354 185
+         Z"
+      fill="url(#glass-highlight)"
+      opacity="0.25"/>
   </g>
 
-  <!-- top highlight -->
+  <!-- ═══ ENERGY FILAMENT ═══ -->
+  <!-- Thin glowing line from top to graph center -->
   <path
-    d="M181 132
-       C156 152 142 180 142 212"
+    d="M256 100
+       C256 140 256 170 256 200"
     fill="none"
-    stroke="#FFFFFF"
-    stroke-opacity="0.80"
-    stroke-width="12"
-    stroke-linecap="round"/>
+    stroke="#A78BFA"
+    stroke-width="2"
+    stroke-linecap="round"
+    opacity="0.5"
+    filter="url(#glow)"/>
 
-  <!-- inner logic / graph mark -->
+  <!-- ═══ INNER LOGIC GRAPH ═══ -->
   <g transform="translate(256 224)">
-    <!-- logic frame -->
+    <!-- Logic frame — slightly softer -->
     <path
       d="M-72 -48
          H10
@@ -73,35 +125,47 @@
          C70 46 44 72 10 72
          H-72"
       fill="none"
-      stroke="#5B21B6"
-      stroke-width="14"
+      stroke="#7C3AED"
+      stroke-width="10"
       stroke-linecap="round"
-      stroke-linejoin="round"/>
+      stroke-linejoin="round"
+      opacity="0.7"/>
 
-    <!-- reasoning rails -->
-    <line x1="-72" y1="-20" x2="4" y2="-20" stroke="#6D28D9" stroke-width="10" stroke-linecap="round"/>
-    <line x1="-72" y1="12" x2="20" y2="12" stroke="#6D28D9" stroke-width="10" stroke-linecap="round"/>
-    <line x1="-72" y1="44" x2="4" y2="44" stroke="#6D28D9" stroke-width="10" stroke-linecap="round"/>
+    <!-- Reasoning rails -->
+    <line x1="-72" y1="-20" x2="4" y2="-20" stroke="#8B5CF6" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+    <line x1="-72" y1="12" x2="20" y2="12" stroke="#8B5CF6" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+    <line x1="-72" y1="44" x2="4" y2="44" stroke="#8B5CF6" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
 
-    <!-- nodes -->
-    <circle cx="-26" cy="-20" r="9" fill="#FFFFFF" stroke="#5B21B6" stroke-width="5"/>
-    <circle cx="20" cy="12" r="9" fill="#FFFFFF" stroke="#5B21B6" stroke-width="5"/>
-    <circle cx="-8" cy="44" r="9" fill="#FFFFFF" stroke="#5B21B6" stroke-width="5"/>
-    <circle cx="46" cy="12" r="10" fill="#FFFFFF" stroke="#5B21B6" stroke-width="5"/>
+    <!-- Glowing nodes -->
+    <g filter="url(#glow)">
+      <circle cx="-26" cy="-20" r="10" fill="url(#node-glow)"/>
+      <circle cx="20" cy="12" r="10" fill="url(#node-glow)"/>
+      <circle cx="-8" cy="44" r="10" fill="url(#node-glow)"/>
+      <circle cx="46" cy="12" r="11" fill="url(#node-glow)"/>
+    </g>
 
-    <!-- inference edges -->
-    <line x1="-26" y1="-20" x2="20" y2="12" stroke="#7C3AED" stroke-width="5" stroke-linecap="round"/>
-    <line x1="20" y1="12" x2="-8" y2="44" stroke="#7C3AED" stroke-width="5" stroke-linecap="round"/>
-    <line x1="20" y1="12" x2="46" y2="12" stroke="#06B6D4" stroke-width="6" stroke-linecap="round"/>
+    <!-- Inference edges -->
+    <line x1="-26" y1="-20" x2="20" y2="12" stroke="#A78BFA" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+    <line x1="20" y1="12" x2="-8" y2="44" stroke="#A78BFA" stroke-width="4" stroke-linecap="round" opacity="0.8"/>
+    <line x1="20" y1="12" x2="46" y2="12" stroke="#06B6D4" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+
+    <!-- Node connection dots -->
+    <circle cx="-26" cy="-20" r="3" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="20" cy="12" r="3" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="-8" cy="44" r="3" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="46" cy="12" r="3.5" fill="#FFFFFF" opacity="0.9"/>
   </g>
 
-  <!-- neck rings -->
+  <!-- ═══ NECK RINGS ═══ -->
   <g>
-    <rect x="214" y="401" width="84" height="18" rx="9" fill="#7C3AED"/>
-    <rect x="206" y="421" width="100" height="18" rx="9" fill="#8B5CF6"/>
+    <rect x="214" y="401" width="84" height="16" rx="8" fill="#7C3AED"/>
+    <rect x="206" y="421" width="100" height="16" rx="8" fill="#8B5CF6"/>
+    <!-- Metallic highlight on rings -->
+    <rect x="216" y="403" width="80" height="4" rx="2" fill="#FFFFFF" opacity="0.15"/>
+    <rect x="208" y="423" width="96" height="4" rx="2" fill="#FFFFFF" opacity="0.15"/>
   </g>
 
-  <!-- bulb base -->
+  <!-- ═══ BULB BASE ═══ -->
   <path
     d="M196 440
        H316
@@ -110,13 +174,24 @@
        H228
        C210 498 196 486 196 468 Z"
     fill="url(#base-fill)"
-    stroke="#5B21B6"
-    stroke-width="10"
+    stroke="#6D28D9"
+    stroke-width="8"
     stroke-linejoin="round"/>
 
-  <!-- small terminal / spark -->
-  <rect x="236" y="490" width="40" height="10" rx="5" fill="#4C1D95"/>
+  <!-- Thread lines on base -->
+  <line x1="210" y1="452" x2="302" y2="452" stroke="#5B21B6" stroke-width="2" opacity="0.4"/>
+  <line x1="206" y1="460" x2="306" y2="460" stroke="#5B21B6" stroke-width="2" opacity="0.4"/>
+  <line x1="202" y1="468" x2="310" y2="468" stroke="#5B21B6" stroke-width="2" opacity="0.3"/>
 
-  <!-- accent point -->
-  <circle cx="344" cy="132" r="8" fill="#FFFFFF" fill-opacity="0.85"/>
+  <!-- Terminal spark -->
+  <rect x="236" y="490" width="40" height="8" rx="4" fill="#4C1D95"/>
+
+  <!-- ═══ ACCENT SPARK ═══ -->
+  <!-- Top-right sparkle -->
+  <circle cx="344" cy="132" r="10" fill="#A78BFA" opacity="0.3" filter="url(#glow)"/>
+  <circle cx="344" cy="132" r="6" fill="#FFFFFF" opacity="0.7"/>
+
+  <!-- Bottom-left sparkle -->
+  <circle cx="168" cy="310" r="5" fill="#06B6D4" opacity="0.25" filter="url(#glow)"/>
+  <circle cx="168" cy="310" r="3" fill="#FFFFFF" opacity="0.5"/>
 </svg>

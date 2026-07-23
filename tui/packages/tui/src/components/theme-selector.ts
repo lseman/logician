@@ -5,6 +5,7 @@
 
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -27,16 +28,14 @@ export type ThemeSelectorAction =
 export class ThemeSelectorOverlay implements Component {
 	public visible = false;
 	private themes: ThemeInfo[] = [];
-	private selectedIndex = 0;
+	private selection = new SelectorController();
 	private message = "";
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
 
 	setThemes(themes: ThemeInfo[]): void {
 		this.themes = themes;
-		if (this.selectedIndex >= this.themes.length) {
-			this.selectedIndex = Math.max(0, this.themes.length - 1);
-		}
+		this.selection.set(this.selection.index, this.themes.length);
 		this.invalidate();
 	}
 
@@ -66,7 +65,7 @@ export class ThemeSelectorOverlay implements Component {
 			return { type: "close" };
 		}
 		if (data === "\r" || data === "\n") {
-			const themeInfo = this.themes[this.selectedIndex];
+			const themeInfo = this.themes[this.selection.index];
 			return themeInfo
 				? { type: "select", theme: themeInfo }
 				: { type: "close" };
@@ -102,7 +101,7 @@ export class ThemeSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(48, Math.min(width, 110));
+		const overlayWidth = Math.max(1, width);
 		const innerWidth = Math.max(1, overlayWidth - 4);
 		const lines: string[] = [];
 
@@ -122,14 +121,7 @@ export class ThemeSelectorOverlay implements Component {
 			);
 		} else {
 			const maxRows = 10;
-			const start = Math.max(
-				0,
-				Math.min(
-					this.selectedIndex - Math.floor(maxRows / 2),
-					Math.max(0, this.themes.length - maxRows),
-				),
-			);
-			const end = Math.min(this.themes.length, start + maxRows);
+			const { start, end } = this.selection.window(this.themes.length, maxRows);
 			if (start > 0) {
 				lines.push(
 					boxLine(`${MUTED()}↑ ${start} more${RESET}`, "", innerWidth),
@@ -137,7 +129,7 @@ export class ThemeSelectorOverlay implements Component {
 			}
 			for (let i = start; i < end; i++) {
 				const t = this.themes[i];
-				const selected = i === this.selectedIndex;
+				const selected = i === this.selection.index;
 				const cursor = selected ? "▸" : " ";
 				const name = selected
 					? `${SELECTED()}${BOLD}${t.name}${RESET}`
@@ -175,7 +167,7 @@ export class ThemeSelectorOverlay implements Component {
 	private moveSelection(delta: number): void {
 		const n = this.themes.length;
 		if (!n) return;
-		this.selectedIndex = (this.selectedIndex + delta + n) % n;
+		this.selection.move(delta, n);
 		this.invalidate();
 	}
 }

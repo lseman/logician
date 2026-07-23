@@ -92,9 +92,8 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		return { messages, terminated: false };
 	}
 
-	const sequential = options.toolExecution !== "parallel" || toolCalls.some((call) => registry.get(call.name)?.executionMode === "sequential");
 	const outcomes: Array<{ message: Message; terminate: boolean }> = [];
-	if (sequential) {
+	if (options.toolExecution !== "parallel") {
 		for (let index = 0; index < plans.length; index++) {
 			const plan = plans[index];
 			if (signal?.aborted && plan.immediateContent === undefined) {
@@ -103,6 +102,27 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 			}
 			outcomes.push(await execute(plan));
 		}
-	} else outcomes.push(...await Promise.all(plans.map(execute)));
+	} else {
+		// Sequential tools are ordering barriers, not a reason to serialize the
+		// entire model-issued batch. Parallel-safe calls on either side still run
+		// concurrently, while their results remain in the original call order.
+		let parallelStage: Plan[] = [];
+		const flushParallelStage = async () => {
+			if (parallelStage.length === 0) return;
+			outcomes.push(...await Promise.all(parallelStage.map(execute)));
+			parallelStage = [];
+		};
+		for (let index = 0; index < plans.length; index++) {
+			const plan = plans[index];
+			const mode = registry.get(toolCalls[index].name)?.executionMode;
+			if (mode !== "sequential") {
+				parallelStage.push(plan);
+				continue;
+			}
+			await flushParallelStage();
+			outcomes.push(await execute(plan));
+		}
+		await flushParallelStage();
+	}
 	return { messages: outcomes.map((outcome) => outcome.message), terminated: outcomes.length > 0 && outcomes.every((outcome) => outcome.terminate) };
 }

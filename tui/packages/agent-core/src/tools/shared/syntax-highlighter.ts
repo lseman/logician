@@ -77,7 +77,7 @@ let instance: ReturnType<typeof createEmphasize>;
 
 try {
 	instance = createEmphasize(GRAMMARS);
-} catch {
+} catch (e: unknown) {
 	// Fallback: no highlighting if emphasize fails to initialize.
 	instance = {
 		highlightAuto: () => ({ value: "", language: undefined, relevance: 0 }),

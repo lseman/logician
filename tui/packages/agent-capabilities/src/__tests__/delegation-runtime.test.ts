@@ -7,6 +7,7 @@ import type {
 } from "@logician/agent-core/core/backend.ts";
 import type { AgentConfig, Tool } from "@logician/agent-core";
 import { runDelegatedAgent } from "../subagents/delegation-runtime.ts";
+import { BUILTIN_AGENTS, createSpawnAgentTool } from "../subagents/subagent.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake";
@@ -125,4 +126,33 @@ void test("whole-task deadlines cancel a delegated run", async () => {
 
 	assert.equal(result.status, "cancelled");
 	assert.ok(result.durationMs < 1_000);
+});
+
+void test("subagent progress callbacks emit deltas rather than accumulated prefixes", async () => {
+	const backend: LLMBackend = {
+		model: "streaming",
+		withModel() {
+			return this;
+		},
+		generate: async (_messages, options = {}) => {
+			options.callbacks?.onTextStart?.();
+			options.callbacks?.onDelta?.("I");
+			options.callbacks?.onDelta?.(" finished.");
+			options.callbacks?.onTextEnd?.();
+			return { content: "Task complete.", toolCalls: [], stopReason: "stop" };
+		},
+	};
+	const tool = createSpawnAgentTool({
+		config: () => ({ ...baseConfig, tools: [] }),
+		backend,
+		agents: () => BUILTIN_AGENTS,
+		emit: () => {},
+	});
+	const updates: string[] = [];
+	await tool.execute(
+		{ task: "Complete it", agent: "general" },
+		{ onUpdate: (value) => updates.push(value) },
+	);
+
+	assert.deepEqual(updates, ["I", " finished."]);
 });

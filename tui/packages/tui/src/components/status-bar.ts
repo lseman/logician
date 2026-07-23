@@ -12,6 +12,7 @@ const DIM = "\x1b[2m";
 
 interface StatusInfo {
 	thinkingLevel: string;
+	inferenceMode: string;
 	cacheEnabled: boolean;
 	cacheSize?: number;
 	turnCount: number;
@@ -28,10 +29,14 @@ interface StatusInfo {
 	contextCompacted: boolean;
 	reasoner: string;
 	sessionTitle?: string;
+	goalCondition?: string;
+	goalTurnCount?: number;
+	goalElapsed?: number;
 }
 
 const DEFAULT_INFO: StatusInfo = {
 	thinkingLevel: "off",
+	inferenceMode: "instruct-general",
 	cacheEnabled: true,
 	cacheSize: 0,
 	turnCount: 0,
@@ -113,65 +118,71 @@ export class StatusBar implements Component {
 	// ── Compact single-line render ──────────────────────────────────────────
 
 	private renderCompact(width: number): string {
-		const parts: string[] = [];
-
-		// 1. Phase indicator
+		const separator = ` ${DIM}│${RESET} `;
 		const phase = this.formatPhase();
-		if (phase) parts.push(phase);
-
-		// 2. Model
 		const model = this.formatModel();
-		if (model) parts.push(model);
+		const context = this.formatContext();
+		const parts = [phase, model, context].filter(Boolean);
+		const fits = (candidate: string[]): boolean =>
+			visibleWidth(candidate.join(separator)) <= width;
+		const insertIfFits = (part: string, index = parts.length): void => {
+			if (!part) return;
+			const candidate = [...parts];
+			candidate.splice(index, 0, part);
+			if (fits(candidate)) parts.splice(index, 0, part);
+		};
 
-		// 3. Thinking
-		const think = this.formatThinking();
-		if (think) parts.push(think);
+		// Add detail by usefulness. Narrow terminals retain phase/model/context.
+		insertIfFits(this.formatDirWithGit(), 2);
+		insertIfFits(this.formatSession(), 2);
+		insertIfFits(this.formatThinking());
+		insertIfFits(this.formatCache());
+		insertIfFits(this.formatGoal());
+		insertIfFits(this.formatInferenceMode());
+		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
 
-		// 4. Directory + Git
-		const dirGit = this.formatDirWithGit();
-		if (dirGit) parts.push(dirGit);
-
-		// 5. Context
-		const ctx = this.formatContext();
-		if (ctx) parts.push(ctx);
-
-		// 6. Cache
-		const cache = this.formatCache();
-		if (cache) parts.push(cache);
-
-		// 7. Reasoner
-		const reasoner = this.formatReasoner();
-		if (reasoner) parts.push(reasoner);
-
-		// Join with |
-		let line = parts.join(` ${DIM}|${RESET} `);
-
-		// Truncate if too wide
+		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {
-			line = this.truncateVisible(line, width);
+			const compact = [phase, context].filter(Boolean).join(separator);
+			line = visibleWidth(compact) <= width
+				? compact
+				: this.truncateVisible(phase, width);
 		}
-
-		return line;
+		return line + RESET;
 	}
 
 	private formatModel(): string {
 		return theme.fg("text", this.info.model || "local");
 	}
 
+	private formatSession(): string {
+		const title = this.info.sessionTitle?.trim();
+		if (!title || title === "New Session") return "";
+		const compact = title.length > 24 ? `${title.slice(0, 23)}…` : title;
+		return `${DIM}◇${RESET} ${theme.fg("muted", compact)}`;
+	}
+
 	private formatPhase(): string {
 		const phase = this.info.phase || "ready";
+		const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"][
+			this.tick % 8
+		];
 		const phaseLabels: Record<string, string> = {
-			ready: "⏸ ready",
-			thinking: "🧠 thinking",
-			tool: "🔧 tool",
-			streaming: "⚡ streaming",
-			compacting: "📦 compacting",
-			branching: "🌿 branching",
-			error: "❌ error",
+			ready: "● READY",
+			thinking: `${spinner} THINKING`,
+			tool: `${spinner} TOOL`,
+			verifying: `${spinner} VERIFYING`,
+			streaming: `${spinner} STREAMING`,
+			waiting: "◆ WAITING",
+			approval: "◆ APPROVAL",
+			failed: "× FAILED",
+			compacting: `${spinner} COMPACTING`,
+			branching: `${spinner} BRANCHING`,
+			error: "× ERROR",
 		};
-		const label = phaseLabels[phase] || `⏸ ${phase}`;
+		const label = phaseLabels[phase] || `● ${phase.toUpperCase()}`;
 		const color =
-			this.info.phase === "error"
+			this.info.phase === "error" || this.info.phase === "failed"
 				? theme.fg("error", "")
 				: this.info.phase === "streaming"
 					? theme.fg("accent", "")
@@ -196,6 +207,18 @@ export class StatusBar implements Component {
 		};
 		const color = levelColors[lvl] ?? theme.fg("accent", "");
 		return `${DIM}think:${RESET} ${color}${lvl.toUpperCase()}`;
+	}
+
+	private formatInferenceMode(): string {
+		const mode = this.info.inferenceMode;
+		const modeLabels: Record<string, string> = {
+			"thinking-general": "THINK GEN",
+			"thinking-coding": "THINK CODE",
+			"instruct-general": "INSTRUCT",
+			"instruct-reasoning": "REASON",
+		};
+		const label = modeLabels[mode] ?? mode.toUpperCase();
+		return `${DIM}mode:${RESET} ${theme.fg("accent", label)}`;
 	}
 
 	private formatDir(): string {
@@ -235,7 +258,7 @@ export class StatusBar implements Component {
 		const dir = this.formatDir();
 		const git = this.formatGit();
 		if (dir && git) {
-			return `${dir} ${DIM}|${RESET} ${git}`;
+			return `${dir} ${DIM}│${RESET} ${git}`;
 		}
 		return dir || git || "";
 	}
@@ -257,8 +280,11 @@ export class StatusBar implements Component {
 					: theme.fg("contextGood", "");
 
 		const maxStr = formatTokenCountClean(maxTokens);
+		const cells = 5;
+		const filled = Math.min(cells, Math.max(0, Math.round(ratio * cells)));
+		const meter = filled > 0 ? `${"▰".repeat(filled)}` : "";
 
-		return `${DIM}◫${RESET} ${color}${pct}%/${maxStr}${RESET} AC`;
+		return `${DIM}ctx${RESET} ${color}${meter} ${pct}%${RESET}${DIM}/${maxStr}${RESET}`;
 	}
 
 	private formatCache(): string {
@@ -275,6 +301,18 @@ export class StatusBar implements Component {
 	private formatReasoner(): string {
 		const reasoner = this.info.reasoner || "none";
 		return `${DIM}reasoner:${RESET} ${theme.fg("muted", reasoner)}`;
+	}
+
+	private formatGoal(): string {
+		const cond = this.info.goalCondition;
+		if (!cond) return "";
+		const turns = this.info.goalTurnCount || 0;
+		const elapsed = this.info.goalElapsed || 0;
+		const mins = Math.floor(elapsed / 60);
+		const secs = elapsed % 60;
+		const timeStr = mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
+		const truncated = cond.length > 30 ? cond.slice(0, 30) + "…" : cond;
+		return `${theme.fg("accent", `◎ ${truncated}`)} ${DIM}(${turns} turns, ${timeStr})${RESET}`;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────

@@ -28,7 +28,7 @@ function canonicalizeArgs(args: string): string {
 	try {
 		const parsed = JSON.parse(args);
 		return JSON.stringify(sortKeys(parsed));
-	} catch {
+	} catch (e: unknown) {
 		// Non-JSON args: use raw string (rare, but safe fallback)
 		return args;
 	}

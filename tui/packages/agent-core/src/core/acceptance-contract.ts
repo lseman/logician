@@ -225,7 +225,7 @@ export function parseAcceptanceReport(output: string): {
 	try {
 		const report = JSON.parse(jsonStr) as AcceptanceReport;
 		return { report };
-	} catch {
+	} catch (e: unknown) {
 		return { error: "Malformed acceptance report JSON" };
 	}
 }

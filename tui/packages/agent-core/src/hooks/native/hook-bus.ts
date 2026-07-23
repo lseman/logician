@@ -600,8 +600,9 @@ export class HookBus {
 		for (const observer of this.observers) {
 			try {
 				await observer(event, ctx, signal);
-			} catch {
+			} catch (e: unknown) {
 				// Observers are read-only; their failures never affect a turn.
+				console.error('[hook-bus] observer error:', e);
 			}
 		}
 	}

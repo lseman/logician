@@ -468,6 +468,22 @@ export function createSlashCommands(
 			argHint: "<count|duration> <prompt>",
 			examples: ["/loop 5m check deploy", "/loop 10 build"],
 		}),
+		cmd(
+			"/goal",
+			"Set a completion condition; agent loops until met",
+			"local",
+			true,
+			{
+				category: "loop",
+				argHint: "<condition | clear>",
+				examples: [
+					"/goal all tests in test/auth pass and lint is clean",
+					"/goal implement feature X or stop after 20 turns",
+					"/goal",
+					"/goal clear",
+				],
+			},
+		),
 
 		// ── Misc ─────────────────────────────────────────────────────────────
 		cmd(

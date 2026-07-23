@@ -56,7 +56,7 @@ export async function runObserver(
 			thinkingLevel,
 		});
 		return parseObservations(response, allowedSourceEntryIds);
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }
@@ -138,7 +138,7 @@ function parseObservations(
 			});
 		}
 		return observations;
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }

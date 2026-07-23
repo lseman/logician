@@ -71,7 +71,7 @@ function loadAgentInstructions(
 			if (content) {
 				sections.push({ path: file, content });
 			}
-		} catch {
+		} catch (e: unknown) {
 			// Ignore unreadable context files
 		}
 	}
@@ -130,7 +130,7 @@ function findPackageRootFromModule(): string | null {
 			if (parent === dir) return null;
 			dir = parent;
 		}
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 }

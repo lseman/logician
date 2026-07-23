@@ -47,7 +47,7 @@ function createStateWrapper(extId: string): ExtensionState {
 			if (raw === null) return undefined;
 			try {
 				return JSON.parse(raw) as T;
-			} catch {
+			} catch (e: unknown) {
 				return raw as unknown as T;
 			}
 		},
@@ -206,8 +206,9 @@ export class ExtensionRunner {
 				if (firstResult === undefined && result !== undefined) {
 					firstResult = result;
 				}
-			} catch {
+			} catch (e: unknown) {
 				// Swallow extension errors so one extension cannot break the runner.
+				console.error('[extensions] handler error:', e);
 			}
 		}
 		return firstResult;

@@ -1,6 +1,6 @@
 // Config schema validation and defaults.
 
-import type { AgentConfig, ThinkingLevel, QueueMode } from "./types.ts";
+import type { AgentConfig, ThinkingLevel, QueueMode, InferenceMode } from "./types.ts";
 
 const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
 	"off",
@@ -13,6 +13,12 @@ const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
 
 const VALID_QUEUE_MODES: ReadonlySet<QueueMode> = new Set(["all", "one-at-a-time"]);
 const VALID_TOOL_EXECUTION = new Set(["sequential", "parallel"]);
+const VALID_INFERENCE_MODES: ReadonlySet<InferenceMode> = new Set([
+	"thinking-general",
+	"thinking-coding",
+	"instruct-general",
+	"instruct-reasoning",
+]);
 
 interface ValidationError {
 	field: string;
@@ -66,6 +72,13 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 		errors.push({
 			field: "toolExecution",
 			message: `must be one of: ${[...VALID_TOOL_EXECUTION].join(", ")}`,
+		});
+	}
+
+	if (config.inferenceMode && !VALID_INFERENCE_MODES.has(config.inferenceMode)) {
+		errors.push({
+			field: "inferenceMode",
+			message: `must be one of: ${[...VALID_INFERENCE_MODES].join(", ")}`,
 		});
 	}
 

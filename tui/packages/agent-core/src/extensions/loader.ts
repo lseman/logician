@@ -28,7 +28,7 @@ function addIgnoreRules(dir: string, matcher: ReturnType<typeof ignore>, rootDir
 				})
 				.filter((p): p is string => Boolean(p));
 			if (patterns.length > 0) matcher.add(patterns);
-		} catch {
+		} catch (e: unknown) {
 			// ignore parse errors
 		}
 	}
@@ -65,7 +65,7 @@ function discoverFiles(dir: string, rootDir: string, matcher: ReturnType<typeof 
 				const s = statSync(fullPath);
 				isFile = s.isFile();
 				isDir = s.isDirectory();
-			} catch {
+			} catch (e: unknown) {
 				continue;
 			}
 		}

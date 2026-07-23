@@ -191,8 +191,8 @@ export class SettingsSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const popupWidth = Math.max(56, Math.min(width, 120));
-		const innerWidth = popupWidth - 4;
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - 4);
 		const lines: string[] = [];
 
 		const headerFg = theme.fg("header", "");

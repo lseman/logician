@@ -19,6 +19,7 @@ import type {
 	Message,
 	Tool,
 } from "@logician/agent-core";
+import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 import {
 	budgetFromArgs,
 	contractFromArgs,
@@ -99,7 +100,7 @@ export async function loadAgentDefinitions(
 		let entries: string[];
 		try {
 			entries = await readdir(dir);
-		} catch {
+		} catch (e: unknown) {
 			continue;
 		}
 		for (const entry of entries.sort()) {
@@ -150,7 +151,7 @@ export async function loadAgentDefinitions(
 							? frontmatter["tool-limits"]
 							: undefined,
 				});
-			} catch {
+			} catch (e: unknown) {
 				// Skip unreadable definitions.
 			}
 		}
@@ -174,9 +175,6 @@ export interface SpawnAgentDeps {
 }
 
 let agentSeq = 0;
-
-// Cap what a child can return into the parent context.
-const MAX_RESULT_CHARS = 16_000;
 
 /** Resolve the child tool set: allowlist (or all), never spawn_agent itself. */
 function resolveChildTools(def: AgentDefinition, parentTools: Tool[]): Tool[] {
@@ -242,7 +240,6 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 
 			// Child config: parent's provider settings, but its own prompt, scoped
 			// tools, and NO parent hooks/queues/events — the child is isolated.
-			let lastText = "";
 			const childConfig: AgentConfig = {
 				baseUrl: parent.baseUrl,
 				model: def.model || parent.model,
@@ -258,6 +255,7 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 				maxRetries: parent.maxRetries,
 				turnTimeoutMs: parent.turnTimeoutMs,
 				webSearch: parent.webSearch,
+				truncation: parent.truncation,
 				// External settings-hooks (PreToolUse shell hooks etc.) stay enabled
 				// so safety hooks also govern subagent tool use.
 				runtimeHooksEnabled: parent.runtimeHooksEnabled,
@@ -268,10 +266,8 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 				continuationEnabled: true,
 				onEvent: (event) => {
 					if (event.type === "text_delta") {
-						lastText += event.delta;
-						ctx.onUpdate?.(truncateResult(lastText));
+						ctx.onUpdate?.(event.delta);
 					}
-					if (event.type === "message_start") lastText = "";
 					deps.emit({ type: "subagent_event", agentId, event });
 				},
 			};
@@ -296,7 +292,11 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 					}),
 					onEvent: (event) => childConfig.onEvent?.(event),
 				});
-				const result = truncateResult(run.content);
+				const result = truncateResult(
+					run.content,
+					parent.truncation?.subagentResultMaxChars ??
+						DEFAULT_TRUNCATION.subagentResultMaxChars,
+				);
 				deps.emit({
 					type: "subagent_end",
 					agentId,
@@ -336,8 +336,8 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 	};
 }
 
-function truncateResult(text: string): string {
-	return text.length > MAX_RESULT_CHARS
-		? `${text.slice(0, MAX_RESULT_CHARS)}\n… [subagent report truncated]`
+function truncateResult(text: string, maxChars: number): string {
+	return text.length > maxChars
+		? `${text.slice(0, maxChars)}\n… [subagent report truncated]`
 		: text;
 }

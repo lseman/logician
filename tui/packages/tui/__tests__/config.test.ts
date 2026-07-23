@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateConfig } from "../../../layers/config/config.ts";
+import { validateConfig } from "@logician/coding-agent/config";
 
 void test("validateConfig rejects non-object input", () => {
 	const w: string[] = [];
@@ -191,10 +191,13 @@ void test("validateConfig rejects non-object permissions", () => {
 	assert.ok(w.length > 0);
 });
 
-void test("validateConfig empty config returns empty object with no warnings", () => {
+void test("validateConfig empty config applies defaults with no warnings", () => {
 	const w: string[] = [];
 	const cfg = validateConfig({}, w);
-	assert.deepEqual(cfg, {});
+	assert.deepEqual(cfg, {
+		continuationEnabled: true,
+		postEditDiagnostics: true,
+	});
 	assert.equal(w.length, 0);
 });
 

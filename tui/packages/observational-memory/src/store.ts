@@ -193,7 +193,7 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 		for (const listener of this.listeners) {
 			try {
 				listener(event);
-			} catch {
+			} catch (e: unknown) {
 				// Observers must never make an already-persisted memory write fail.
 			}
 		}

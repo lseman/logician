@@ -51,7 +51,7 @@ export const read_file: Tool = {
 	execute: async (args, ctx): Promise<string> => {
 		const filePath = String(args.path);
 		const resolved = resolveReadPath(filePath, ctx.cwd || process.cwd());
-		ensureInsideCwd(ctx.cwd, resolved);
+		ensureInsideCwd(ctx.cwd, resolved, undefined, ctx.allowAllPaths);
 
 		if (!fs.existsSync(resolved)) {
 			return `Error: File not found: ${resolved}`;

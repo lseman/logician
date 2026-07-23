@@ -26,3 +26,15 @@ next_skills:
   - academic/systematic
 implementation:
   - The executable code lives in `skills/academic/arxiv/scripts/arxiv.py`.
+
+## Usage
+
+Run from the repository root with its Python environment:
+
+```bash
+.venv/bin/python skills/academic/arxiv/scripts/arxiv.py search "multimodal transformers" --limit 10
+.venv/bin/python skills/academic/arxiv/scripts/arxiv.py get 2301.00001
+```
+
+The command returns JSON. `search` accepts natural-language terms or explicit
+arXiv query syntax such as `ti:"graph neural networks" AND cat:cs.LG`.

@@ -364,9 +364,10 @@ export function createMcpTool(client: McpClient, def: McpToolDefinition): unknow
 // ── JSON-RPC message helpers ─────────────────────────────────────────────
 
 export function encodeMcpMessage(message: JsonRpcRequest): Buffer {
-	const body = Buffer.from(JSON.stringify(message), "utf8");
-	const header = Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, "utf8");
-	return Buffer.concat([header, body]);
+	// MCP stdio uses one JSON-RPC message per line. Content-Length framing is
+	// the old LSP convention and current SDK servers (including Context Mode)
+	// wait forever for a JSON line when they receive it.
+	return Buffer.from(`${JSON.stringify(message)}\n`, "utf8");
 }
 
 export function tryDecodeMcpMessage(
@@ -488,6 +489,10 @@ function expandEnvMap(values: Record<string, string>): Record<string, string> {
 }
 
 function safeToolName(value: string): string {
-	const safe = value.replace(/[^a-zA-Z0-9_]/g, "_");
+	// OpenAI/Anthropic tool names allow hyphens. Preserve them because plugin
+	// startup hooks refer to the Claude MCP namespace verbatim (for example
+	// plugin_context-mode_context-mode); rewriting it makes valid guidance call
+	// a tool name that does not exist.
+	const safe = value.replace(/[^a-zA-Z0-9_-]/g, "_");
 	return /^[a-zA-Z_]/.test(safe) ? safe : `_${safe}`;
 }

@@ -21,6 +21,7 @@ import type {
 	Tool,
 	ToolCall,
 } from "./types.ts";
+import type { InferenceMode as InferenceModeType } from "./types.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import { ToolResultCache } from "./tool-cache.ts";
 import {
@@ -39,6 +40,14 @@ import {
 	type AcceptanceReport,
 } from "./acceptance-contract.ts";
 import {
+	parseTextToolCalls,
+	stripTextToolCalls,
+} from "../tools/shared/text-to-tool-calls.ts";
+import {
+	getInferenceMode,
+	type InferenceMode,
+} from "./inference-modes.ts";
+import {
 	emitConclusion,
 	lastAssistantContent,
 	lastHadToolCalls,
@@ -46,6 +55,7 @@ import {
 	looksNonCommittal,
 } from "../runtime/conclusion-policy.ts";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
+import { runWithTaskState } from "./run-task-state.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -349,7 +359,7 @@ async function runReflection(
 			.replace(/^reflection-report\s*/, "");
 		try {
 			reflectionReport = JSON.parse(jsonStr) as ReflectionResult;
-		} catch {
+		} catch (e: unknown) {
 			// Fallback: parse as free text
 			const needsWork =
 				/needsMoreWork|incomplete|not done|continue|more work/i.test(
@@ -395,7 +405,7 @@ async function runReflection(
 	};
 }
 
-export async function runAgentLoop(
+async function runAgentLoopInTaskScope(
 	context: RunAgentLoopContext,
 	prompts: Message[],
 	config: RunAgentLoopConfig,
@@ -432,9 +442,11 @@ export async function runAgentLoop(
 	const createRegistry = (tools: Tool[]): ToolRegistry => {
 		const next = new ToolRegistry({
 			cwd: context.cwd ?? config.cwd,
+			allowAllPaths: config.allowAllPaths,
 			signal: config.signal,
 			onQuestionRequest: config.onQuestionRequest,
 			cache,
+			maxResultChars: config.truncation?.toolResultMaxChars,
 		});
 		next.registerMany(tools);
 		return next;
@@ -444,12 +456,18 @@ export async function runAgentLoop(
 	const outputGuard = config.outputGuard;
 	let iteration = 0;
 	let consecutiveRunnerNudges = 0;
+	let performedToolWork = false;
 	let contextWasCompacted = false;
+	const reflectionEnabled = config.reflectionConfig?.enabled === true;
+	const maxReflections = config.reflectionConfig?.maxReflections ?? 2;
+	let reflectionCount = 0;
+	let reflectionFailed = false;
 
 	// ── Acceptance contract tracking ─────────────────────────────────────
 	let resolvedAcceptance: ResolvedAcceptance | null = null;
 	let acceptanceReported = false;
 	let acceptanceFailed = false;
+	let acceptanceFinalizationTurns = 0;
 
 	function resolveAcceptance(): ResolvedAcceptance {
 		if (!resolvedAcceptance) {
@@ -727,10 +745,20 @@ export async function runAgentLoop(
 				];
 
 				try {
+					// Resolve inference mode params — they override individual config values.
+					const modeParams = config.inferenceMode
+						? getInferenceMode(config.inferenceMode)?.params
+						: undefined;
+					const effectiveTemp = modeParams?.temperature ?? config.temperature ?? 0.5;
 					response = await config.backend.generate(chatMessages, {
 						tools: registry.toToolDefinitions(),
-						temperature: config.temperature ?? 0.5,
+						temperature: effectiveTemp,
 						maxTokens: config.maxTokens ?? 4096,
+						topP: modeParams?.top_p,
+						topK: modeParams?.top_k,
+						minP: modeParams?.min_p,
+						presencePenalty: modeParams?.presence_penalty,
+						repetitionPenalty: modeParams?.repetition_penalty,
 						signal: config.signal,
 						thinkingLevel: config.thinkingLevel,
 						callbacks: {
@@ -865,7 +893,20 @@ export async function runAgentLoop(
 				}
 			}
 
-			const toolCalls = response?.toolCalls ?? [];
+			let toolCalls = response?.toolCalls ?? [];
+			let assistantContent = response?.content ?? "";
+			// Fallback: when LLM emits tool calls as text instead of structured
+			// tool_calls array, extract them from the response content.
+			if (toolCalls.length === 0 && response?.content) {
+				const textCalls = parseTextToolCalls(response.content);
+				if (textCalls.length > 0) {
+					toolCalls = textCalls;
+					assistantContent = stripTextToolCalls(response.content);
+				}
+			}
+			if (toolCalls.some((call) => call.name !== "task_status")) {
+				performedToolWork = true;
+			}
 			const rawStopReason =
 				(response?.stopReason as "stop" | "length" | "error") ?? "stop";
 			const stopReason = stopReasonFor(rawStopReason, toolCalls);
@@ -878,7 +919,7 @@ export async function runAgentLoop(
 			for (const hook of responseHooks) {
 				await hook?.({
 					model: config.model ?? "",
-					content: response?.content ?? "",
+					content: assistantContent,
 					toolCallCount: toolCalls.length,
 					stopReason,
 					usageTokens: response?.usage?.totalTokens,
@@ -889,7 +930,7 @@ export async function runAgentLoop(
 			// Output guard: check for empty/degenerate responses
 			if (outputGuard) {
 				const guardCheck = outputGuard.checkResponse(
-					response?.content ?? null,
+					assistantContent || null,
 					toolCalls.length,
 				);
 				if (guardCheck.action === "abort") {
@@ -906,7 +947,7 @@ export async function runAgentLoop(
 			}
 
 			const assistant = createAssistantMessage(
-				(response?.content as string) ?? "",
+				assistantContent,
 				toolCalls,
 			);
 			messages.push(assistant);
@@ -1150,17 +1191,23 @@ export async function runAgentLoop(
 			const hadTools = lastHadToolCalls(newMessages);
 			const hasStructuredStop = getTaskStatus() !== null;
 
+			const requiresStructuredConclusion =
+				performedToolWork && registry.has("task_status");
+
 			if (
 				!hadTools &&
-				!looksComplete(text) &&
+				(looksNonCommittal(text) || requiresStructuredConclusion) &&
 				!hasStructuredStop &&
 				consecutiveRunnerNudges < MAX_CONSECUTIVE_RUNNER_NUDGES
 			) {
 				followUps.push({
 					role: "user" as const,
-					content:
-						"Continue with the next step. If the task is fully complete, " +
-						"say so explicitly. Otherwise keep working — do not stop prematurely.",
+					content: requiresStructuredConclusion
+						? "Do not stop yet without a structured conclusion. Verify that every requested step is complete. " +
+							"If work remains, continue with the next step. If the task is complete, blocked, failed, or needs user input, " +
+							"call task_status with the accurate status as your final action."
+						: "Continue with the next step. If the task is fully complete, " +
+							"say so explicitly. Otherwise keep working — do not stop prematurely.",
 				});
 				consecutiveRunnerNudges++;
 			} else {
@@ -1173,75 +1220,94 @@ export async function runAgentLoop(
 			pendingMessages = followUps;
 			continue;
 		}
+
+		// A failed acceptance report is actionable feedback, not an immediate
+		// terminal failure. Give the provider a bounded number of real turns to
+		// correct the report (and, when needed, the underlying work).
+		if (shouldRunAcceptanceFinalization(resolved) && !acceptanceReported) {
+			const verificationResults = await runAcceptanceVerification(
+				resolved,
+				config.signal,
+			);
+			const report = parsedReportOrReview(
+				lastAssistantContent(newMessages),
+				resolved,
+				verificationResults,
+				config,
+				emit,
+			);
+			if (report.status === "passed") {
+				acceptanceReported = true;
+				await emit({
+					type: "acceptance_complete",
+					status: report.status,
+					report: report.ledger as unknown as Record<string, unknown>,
+				});
+				break;
+			} else if (
+				acceptanceFinalizationTurns < (resolved.maxFinalizationTurns ?? 3) &&
+				iteration < maxIterations
+			) {
+				acceptanceFinalizationTurns++;
+				pendingMessages = [{
+					role: "user",
+					content:
+						`Acceptance validation failed (attempt ${acceptanceFinalizationTurns}/${resolved.maxFinalizationTurns ?? 3}). ` +
+						"Review the acceptance contract, fix any unmet criteria or verification failures, and finish with a valid acceptance-report block.",
+				}];
+				continue;
+			} else {
+				acceptanceReported = true;
+				acceptanceFailed = true;
+				await emit({
+					type: "acceptance_complete",
+					status: report.status,
+					report: report.ledger as unknown as Record<string, unknown>,
+				});
+				break;
+			}
+		}
+
+		// Reflection is a verifier, not a synthetic assistant turn. When it finds
+		// unfinished work, feed its findings back through the normal provider/tool
+		// loop so the agent can actually correct the result.
+		if (
+			reflectionEnabled &&
+			!looksComplete(lastAssistantContent(newMessages))
+		) {
+			if (reflectionCount >= maxReflections) {
+				reflectionFailed = true;
+				await emit({
+					type: "task_failed",
+					reason: `Agent reached the ${maxReflections}-reflection safety limit without completing the task.`,
+					iteration: reflectionCount,
+					lastContent: lastAssistantContent(newMessages),
+				});
+				break;
+			}
+			const reflection = await runReflection(
+				newMessages,
+				config.backend,
+				config.reflectionConfig ?? { enabled: true },
+				emit,
+				config.signal,
+			);
+			reflectionCount++;
+			if (reflection.result.needsMoreWork) {
+				const suggested = reflection.result.suggestedSteps.join("; ");
+				pendingMessages = [{
+					role: "user",
+					content: reflection.result.issues.length > 0
+						? `Reflection found issues: ${reflection.result.issues.join(", ")}. Address them and continue working.`
+						: `Reflection found the task incomplete. ${suggested ? `Suggested next steps: ${suggested}. ` : ""}Continue working.`,
+				}];
+				continue;
+			}
+		}
 		break;
 	}
 
-	// ── Reflection step ─────────────────────────────────────────────
-	// Reflection is an additional provider call and must be explicitly enabled.
-	// Keeping it opt-in makes the core loop deterministic and avoids surprising
-	// latency/cost for callers that did not request an evaluator pass.
-	const reflectionEnabled = config.reflectionConfig?.enabled === true;
-	const maxReflections = config.reflectionConfig?.maxReflections ?? 2;
-	let reflectionCount = 0;
-	let reflectionMessages = [...newMessages];
-
-	while (
-		reflectionEnabled &&
-		reflectionCount < maxReflections &&
-		!looksComplete(lastAssistantContent(reflectionMessages))
-	) {
-		const reflectionResult = await runReflection(
-			reflectionMessages,
-			config.backend,
-			config.reflectionConfig ?? { enabled: true },
-			emit,
-			config.signal,
-		);
-
-		if (!reflectionResult.result.needsMoreWork) {
-			// Model says task is complete — break out
-			break;
-		}
-
-		// Model wants to continue — inject a user message with suggested steps
-		const suggestedSteps = reflectionResult.result.suggestedSteps.join("\n");
-		const nudgeMessage: Message = {
-			role: "user",
-			content:
-				reflectionResult.result.issues.length > 0
-					? `Reflection found issues: ${reflectionResult.result.issues.join(", ")}. Address these and continue.`
-					: `Task incomplete. ${suggestedSteps ? `Suggested: ${suggestedSteps}. ` : ""}Continue with the next step.`,
-			timestamp: Date.now(),
-		};
-
-		reflectionMessages = [
-			...reflectionMessages,
-			{ role: "user", content: nudgeMessage.content, timestamp: Date.now() },
-			{
-				role: "assistant",
-				content: reflectionResult.result.reasoning,
-				timestamp: Date.now(),
-			},
-		];
-
-		reflectionCount++;
-	}
-
-	if (reflectionCount >= maxReflections) {
-		// Max reflections reached without clear completion
-		await emit({
-			type: "task_failed",
-			reason: `Agent reached the ${maxReflections}-reflection safety limit without completing the task.`,
-			iteration: reflectionCount,
-			lastContent: lastAssistantContent(reflectionMessages),
-		});
-	}
-
-	// Use reflection-enriched messages for final conclusion
-	const finalMessagesForConclusion =
-		reflectionMessages.length > newMessages.length
-			? reflectionMessages
-			: newMessages;
+	const finalMessagesForConclusion = newMessages;
 
 	if (iteration >= maxIterations) {
 		const lastText = lastAssistantContent(newMessages);
@@ -1384,6 +1450,15 @@ export async function runAgentLoop(
 
 	// Final output guard reset when agent ends
 	outputGuard?.reset();
+	// Acceptance failure must take precedence over a model-declared `done`.
+	if (acceptanceFailed) {
+		return finish({
+			status: "failed",
+			summary:
+				"Acceptance contract not satisfied after the configured finalization turns.",
+			source: "runtime",
+		});
+	}
 	const declared = getTaskStatus();
 	if (declared) {
 		return finish({
@@ -1400,28 +1475,29 @@ export async function runAgentLoop(
 		});
 	}
 
-	// If acceptance was required but not satisfied, mark as failed
-	if (acceptanceFailed) {
-		return finish({
-			status: "failed",
-			summary:
-				"Acceptance contract not satisfied: no valid acceptance report produced.",
-			source: "runtime",
-		});
-	}
-
 	// Replace newMessages with reflection-enriched messages so finish() returns them
 	newMessages.splice(0, newMessages.length, ...finalMessagesForConclusion);
 
 	const finalText = lastAssistantContent(finalMessagesForConclusion);
 	return finish({
 		status:
-			iteration >= maxIterations || looksNonCommittal(finalText)
+			iteration >= maxIterations || reflectionFailed || looksNonCommittal(finalText)
 				? "failed"
 				: "completed",
 		summary: finalText || undefined,
 		source: iteration >= maxIterations ? "runtime" : "heuristic",
 	});
+}
+
+export function runAgentLoop(
+	context: RunAgentLoopContext,
+	prompts: Message[],
+	config: RunAgentLoopConfig,
+	emit: AgentEventSink,
+): Promise<Message[]> {
+	return runWithTaskState(() =>
+		runAgentLoopInTaskScope(context, prompts, config, emit),
+	);
 }
 
 /**

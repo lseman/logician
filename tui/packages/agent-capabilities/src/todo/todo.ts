@@ -363,7 +363,7 @@ const normalizeInput = (
 	if (typeof raw === "string") {
 		try {
 			return JSON.parse(raw);
-		} catch {
+		} catch (e: unknown) {
 			return {};
 		}
 	}
@@ -373,6 +373,7 @@ const normalizeInput = (
 
 export const todo_tool: Tool = {
 	readOnly: false,
+	executionMode: "sequential",
 	name: "todo",
 	label: "Todo",
 	hookAliases: ["Todo"],

@@ -6,7 +6,10 @@
 
 A local-first coding agent with a streaming terminal UI. SSH-ready, thinking-visible, and built for real code editing workflows.
 
-![Logician TUI](logo/logo.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo/logician-banner.svg">
+  <img src="logo/logician-banner-light.svg" alt="Logician" width="800">
+</picture>
 
 ## At a glance
 
@@ -46,7 +49,17 @@ cd tui
 npm run dev        # start dev server
 npm run typecheck  # TypeScript check
 npm test           # run tests
+npm start -- doctor --json  # read-only readiness report
+npm start -- exec --jsonl "fix the failing test"  # headless JSONL stream
 ```
+
+`doctor` inspects configuration, local dependencies, MCP declarations, skills,
+permissions, and sandbox capability without contacting the configured model or
+starting MCP servers. Omit `--json` for a compact human-readable report.
+
+`exec --jsonl` keeps stdout machine-readable with versioned content, tool,
+error, terminal metadata, and `done` records. Diagnostics go to stderr, and
+reasoning tokens are not included in the stream.
 
 ## Architecture
 
@@ -86,9 +99,7 @@ tui/
 | `todo` | Task tracking |
 | `task_status` | Structured completion |
 | `ask_user` | User input prompts |
-| `spawn_agent` | Child agent runner |
-| `spawn_agent_parallel` | Parallel child agents |
-| `coordinate_subagents` | Multi-agent coordination |
+| `spawn_agent` | Child agent runner (one at a time) |
 
 ## Configuration
 
@@ -99,6 +110,7 @@ Config is read in order: `LOGICIAN_CONFIG` → `.logician.json` → `~/.logician
   "baseUrl": "http://127.0.0.1:8080",
   "model": "local-model",
   "theme": "dark",
+	"webSearch": { "baseUrl": "http://127.0.0.1:8090", "maxResults": 10 },
   "permissionMode": "acceptEdits",
   "compaction": { "enabled": true, "reserveTokens": 16384 },
   "mcpServers": {
@@ -106,6 +118,14 @@ Config is read in order: `LOGICIAN_CONFIG` → `.logician.json` → `~/.logician
   }
 }
 ```
+
+`web_search` uses SearXNG's JSON endpoint. Override the default local endpoint
+with `webSearch.baseUrl` or `LOGICIAN_SEARXNG_URL`; use
+`LOGICIAN_SEARXNG_MAX_RESULTS` to change the default result count.
+
+Successful JavaScript, TypeScript, and JSON edits receive a fast syntax check
+before the next model turn. Set `LOGICIAN_POST_EDIT_DIAGNOSTICS=0` to disable
+this advisory check.
 
 ### Permission modes
 

@@ -24,6 +24,25 @@ export function isFocusable(c: Component | null): c is Component & Focusable {
 	return c !== null && "focused" in c;
 }
 
+/**
+ * Translate Kitty CSI-u Ctrl+letter reports back to the C0 bytes consumed by
+ * existing keybindings. Ctrl+M stays encoded so it remains distinguishable
+ * from Enter and can be handled by the inference-mode binding.
+ */
+export function normalizeKeyboardInput(data: string): string {
+	return data.replace(
+		/\x1b\[(\d+);([56])u/g,
+		(sequence, codepointText: string) => {
+			const codepoint = Number(codepointText);
+			const lowerCodepoint =
+				codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
+			if (lowerCodepoint === 109) return sequence;
+			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
+			return String.fromCharCode(lowerCodepoint & 0x1f);
+		},
+	);
+}
+
 // ── Cursor marker ────────────────────────────────────────────────────────────
 
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
@@ -426,7 +445,7 @@ export class TUI extends Container {
 		if (process.stdin.setRawMode) {
 			try {
 				process.stdin.setRawMode(true);
-			} catch {
+			} catch (e: unknown) {
 				// raw mode unavailable (e.g. piped stdin) — keys won't work but the UI
 				// still renders; degrade gracefully rather than crash.
 			}
@@ -434,16 +453,21 @@ export class TUI extends Container {
 		process.stdin.resume();
 		this.stdinHandler = (data: string | Buffer) => {
 			const str = Buffer.isBuffer(data) ? data.toString("utf-8") : data;
-			this.handleInput(str);
+			this.handleInput(normalizeKeyboardInput(str));
 			this.requestRender();
 		};
 		process.stdin.on("data", this.stdinHandler);
 
 		// Enter alternate screen buffer + hide cursor + enable bracketed paste.
+		// Push Kitty's disambiguate-escape-codes keyboard mode when supported.
+		// Unsupported terminals safely ignore it; supporting terminals can then
+		// report Ctrl+M separately from Enter as CSI 109;5u.
 		// The alt screen gives us a fixed canvas to redraw each frame from the
 		// home position. Bracketed paste makes the terminal wrap pasted text in
 		// \x1b[200~ … \x1b[201~ so the app can distinguish paste from typed input.
-		this.write("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[?2004h");
+		this.write(
+			"\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[?2004h\x1b[>1u",
+		);
 
 		this.requestRender(true);
 	}
@@ -456,7 +480,7 @@ export class TUI extends Container {
 		}
 		// Show cursor + leave alternate screen + disable bracketed paste,
 		// restoring the user's terminal.
-		this.write("\x1b[?25h\x1b[?1049l\x1b[?2004l");
+		this.write("\x1b[<u\x1b[?25h\x1b[?1049l\x1b[?2004l");
 
 		if (this.stdinHandler) {
 			process.stdin.removeListener("data", this.stdinHandler);
@@ -465,7 +489,7 @@ export class TUI extends Container {
 		if (process.stdin.setRawMode) {
 			try {
 				process.stdin.setRawMode(this.wasRaw);
-			} catch {
+			} catch (e: unknown) {
 				// ignore
 			}
 		}
@@ -641,7 +665,7 @@ export class TUI extends Container {
 			inputLines = this.inputBarComponent
 				? this.inputBarComponent.render(termWidth)
 				: [" ".repeat(termWidth)];
-		} catch {
+		} catch (e: unknown) {
 			inputLines = [" ".repeat(termWidth)];
 		}
 
@@ -650,7 +674,7 @@ export class TUI extends Container {
 			statusLines = this.fixedBottomComponent
 				? this.fixedBottomComponent.render(termWidth)
 				: [" ".repeat(termWidth)];
-		} catch {
+		} catch (e: unknown) {
 			statusLines = [" ".repeat(termWidth)];
 		}
 
@@ -663,9 +687,13 @@ export class TUI extends Container {
 			aboveInputLines = this.fixedAboveInputComponent
 				? this.fixedAboveInputComponent.render(termWidth)
 				: [];
-		} catch {
+		} catch (e: unknown) {
 			aboveInputLines = [];
 		}
+		// Interactive selectors participate in the fixed composer stack instead
+		// of floating over transcript content. This matches pinned TODO/queue
+		// behavior and keeps the selector physically attached to the input.
+		aboveInputLines.push(...this.renderAboveInputOverlays(termWidth));
 		const aboveInputHeight = aboveInputLines.length;
 		const aboveInputSeparatorHeight = aboveInputHeight > 0 ? 1 : 0;
 
@@ -695,7 +723,7 @@ export class TUI extends Container {
 			let transcriptLines: string[];
 			try {
 				transcriptLines = this.scrollableComponent.render(transcriptWidth);
-			} catch {
+			} catch (e: unknown) {
 				// Component render failed — fill with safe placeholder
 				transcriptLines = Array(transcriptHeight)
 					.fill(0)
@@ -826,6 +854,7 @@ export class TUI extends Container {
 		const result = [...lines];
 
 		const visibleEntries = this.overlayStack.filter((e) => {
+			if (e.options?.anchor === "aboveInput") return false;
 			if (e.hidden) return false;
 			// Also check component's visible property if it has one
 			if (
@@ -840,7 +869,7 @@ export class TUI extends Container {
 		for (const entry of visibleEntries) {
 			const leftAligned = entry.options?.align === "left";
 			const overlayWidth = leftAligned
-				? Math.max(40, termWidth - 1)
+				? Math.max(1, termWidth)
 				: Math.max(
 						40,
 						Math.min(
@@ -892,10 +921,36 @@ export class TUI extends Container {
 		return result;
 	}
 
+	private renderAboveInputOverlays(termWidth: number): string[] {
+		const entries = this.overlayStack.filter((entry) => {
+			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
+			if (
+				"visible" in entry.component &&
+				typeof (entry.component as { visible?: unknown }).visible === "boolean"
+			) {
+				return (entry.component as { visible: boolean }).visible;
+			}
+			return true;
+		});
+		if (entries.length === 0) return [];
+
+		// Only the most recently focused selector owns the composer region.
+		const entry = entries.reduce((latest, candidate) =>
+			candidate.focusOrder > latest.focusOrder ? candidate : latest,
+		);
+		const width = Math.max(1, termWidth - 1);
+		const rendered = entry.component.render(width);
+		const maxHeight = entry.options?.maxHeight ?? rendered.length;
+		return rendered.slice(0, maxHeight).map((line) => {
+			const clamped = clampLineToWidth(line, width);
+			return clamped + " ".repeat(Math.max(0, termWidth - visibleWidth(clamped)));
+		});
+	}
+
 	private write(data: string): void {
 		try {
 			process.stdout.write(data);
-		} catch {
+		} catch (e: unknown) {
 			// Silently ignore write errors
 		}
 	}
@@ -974,7 +1029,7 @@ function isImageLine(line: string): boolean {
 // ── Overlay options ──────────────────────────────────────────────────────────
 
 export interface OverlayOptions {
-	anchor?: "center" | "top" | "bottom";
+	anchor?: "center" | "top" | "bottom" | "aboveInput";
 	align?: "center" | "left";
 	maxHeight?: number;
 	nonCapturing?: boolean;

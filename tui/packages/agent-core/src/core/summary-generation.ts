@@ -43,7 +43,7 @@ export async function generateCompactionSummary(
 		});
 
 		return response.content?.trim() || null;
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 }
@@ -136,7 +136,7 @@ Preserve exact file paths, function names, and error messages. Be concise.`;
 			nextSteps: parsed.nextSteps || [],
 			full,
 		};
-	} catch {
+	} catch (e: unknown) {
 		const fallback = `Branch ${messages.length} messages explored.`;
 		return {
 			goal: "Branch exploration",

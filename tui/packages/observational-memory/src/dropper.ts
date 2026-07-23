@@ -49,7 +49,7 @@ export async function runDropper(
 			thinkingLevel,
 		});
 		return parseDropIds(response);
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }
@@ -113,7 +113,7 @@ function parseDropIds(raw: string): string[] | undefined {
 		return parsed.filter(
 			(id: unknown) => typeof id === "string" && /^[a-f0-9]{12}$/.test(id),
 		) as string[];
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }

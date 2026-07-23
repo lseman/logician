@@ -135,6 +135,7 @@ export interface ToolUpdateEvent {
 	tool: string;
 	tool_name: string;
 	partial_result?: string;
+	update_kind?: "arguments" | "output";
 	turn_id?: string;
 	tool_call_id?: string;
 }

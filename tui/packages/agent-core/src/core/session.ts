@@ -668,7 +668,7 @@ export class Session {
 		for (const cp of toRemove) {
 			try {
 				rmSync(cp.dataFile, { force: true });
-			} catch {
+			} catch (e: unknown) {
 				// Best-effort cleanup
 			}
 		}
@@ -678,7 +678,7 @@ export class Session {
 		if (!existsSync(this.metaPath)) return null;
 		try {
 			return JSON.parse(readFileSync(this.metaPath, "utf8")) as SessionMeta;
-		} catch {
+		} catch (e: unknown) {
 			return null;
 		}
 	}

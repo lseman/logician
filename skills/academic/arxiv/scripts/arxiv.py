@@ -1,17 +1,26 @@
-"""arXiv academic provider helper.
+"""arXiv academic provider helper — raw HTTP (no arxiv pip package).
 
-This module contains the arXiv source implementation extracted from the
-academic systematic review script.
+Uses the arXiv Atom API directly via httpx. No external arxiv package needed.
+See https://info.arxiv.org/help/api/basics.html
+
+Atom namespaces used:
+  atom   — http://www.w3.org/2005/Atom
+  arxiv  — http://arxiv.org/schemas/atom
+  opensearch — http://a9.com/-/spec/opensearch/1.1/
 """
 
 from __future__ import annotations
 
-import asyncio
+import argparse
 import importlib
-import inspect
+import json
+import re
+import shlex
 import sys
+import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -24,22 +33,31 @@ _norm_arxiv_id = _common._norm_arxiv_id
 _norm_space = _common._norm_space
 _year_from_any = _common._year_from_any
 
-try:
-    import arxiv
-
-    HAS_ARXIV = True
-except Exception:
-    HAS_ARXIV = False
-
 __tools__ = ["arxiv_search"]
 
 __skill__ = {
     "name": "arXiv",
-    "description": "Provider-specific arXiv academic search helper.",
+    "description": "Provider-specific arXiv academic search helper (raw HTTP).",
 }
 
+# ── XML namespaces ──────────────────────────────────────────────────
+_NS = {
+    "atom": "http://www.w3.org/2005/Atom",
+    "arxiv": "http://arxiv.org/schemas/atom",
+    "opensearch": "http://a9.com/-/spec/opensearch/1.1/",
+}
 
-def arxiv_search(query: str, limit: int = 10, sort: str = "submitted") -> dict[str, Any]:
+# ── API constants ───────────────────────────────────────────────────
+API_URL = "https://export.arxiv.org/api/query"
+# arXiv asks clients making repeated calls to wait three seconds.
+_RATE_MIN_GAP = 3.0
+
+
+def arxiv_search(
+    query: str,
+    limit: int = 10,
+    sort: str = "submitted",
+) -> dict[str, Any]:
     """Search arXiv for preprints matching a query."""
     source = ArxivSource()
     papers = source.search(query=query, limit=limit, sort=sort)
@@ -51,115 +69,288 @@ def arxiv_search(query: str, limit: int = 10, sort: str = "submitted") -> dict[s
     }
 
 
-def _run_async(awaitable: Any) -> Any:
-    try:
-        return asyncio.run(awaitable)
-    except RuntimeError as exc:
-        if "cannot be called from a running event loop" in str(exc):
-            loop = asyncio.get_event_loop()
-            if not loop.is_running():
-                return loop.run_until_complete(awaitable)
-        raise
+# ── Rate-limited client ─────────────────────────────────────────────
+_last_request_time: float = 0.0
 
 
-def _iterable_to_list(iterator: Any) -> list[Any]:
-    if inspect.isawaitable(iterator):
-        return list(_run_async(iterator))
-    if inspect.isasyncgen(iterator):
+def _rate_limited_get(
+    client: Any,
+    url: str,
+    params: dict[str, Any],
+    *,
+    max_retries: int = 3,
+    base_backoff: float = 1.0,
+) -> bytes:
+    """GET with per-request backoff + retry on 429/5xx.
 
-        async def _drain() -> list[Any]:
-            return [item async for item in iterator]
+    arXiv asks clients to wait three seconds between repeated calls.
+    On transient failures we back off exponentially up to max_retries.
+    """
+    global _last_request_time
+    for attempt in range(max_retries + 1):
+        # Enforce minimum gap between requests
+        now = time.monotonic()
+        elapsed = now - _last_request_time
+        if elapsed < _RATE_MIN_GAP:
+            time.sleep(_RATE_MIN_GAP - elapsed)
 
-        return _run_async(_drain())
-    return list(iterator)
+        try:
+            r = client.get(url, params=params)
+            _last_request_time = time.monotonic()
+        except Exception:
+            _last_request_time = time.monotonic()
+            if attempt >= max_retries:
+                raise
+            time.sleep(base_backoff * (2 ** attempt))
+            continue
+
+        if r.status_code == 200:
+            return r.content
+
+        if r.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+            backoff = base_backoff * (2 ** attempt)
+            time.sleep(backoff)
+            continue
+
+        r.raise_for_status()
+        return r.content  # unreachable but keeps type checker happy
 
 
+# ── XML helpers ─────────────────────────────────────────────────────
+def _xml_text(el: Optional[ET.Element]) -> Optional[str]:
+    if el is None:
+        return None
+    return (el.text or "").strip() or None
+
+
+def _xml_children(el: Optional[ET.Element], tag: str, ns: str) -> list[ET.Element]:
+    if el is None:
+        return []
+    return el.findall(f"{{{ns}}}{tag}")
+
+
+# ── Source ──────────────────────────────────────────────────────────
 class ArxivSource(BaseHTTPSource):
     name = "arxiv"
 
     def __init__(self, *, timeout: float = 25.0):
         super().__init__(timeout=timeout)
-        if not HAS_ARXIV:
-            raise RuntimeError("arxiv is not installed. pip install arxiv")
 
-    def search(self, query: str, *, limit: int = 50, sort: str = "submitted") -> list[Paper]:
+    # ── sort mapping ──────────────────────────────────────────────
+    _SORT_MAP = {
+        "relevance": ("relevance", "descending"),
+        "lastupdateddate": ("lastUpdatedDate", "descending"),
+        "submitteddate": ("submittedDate", "descending"),
+    }
+
+    # ── search ────────────────────────────────────────────────────
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 50,
+        sort: str = "submitted",
+    ) -> list[Paper]:
         max_r = max(1, min(int(limit), 200))
+        sort_key, sort_order = self._SORT_MAP.get(
+            sort.lower(),
+            ("submittedDate", "descending"),
+        )
 
-        sort_by = None
-        if hasattr(arxiv, "SortCriterion"):
-            sc = arxiv.SortCriterion
-            sort_by = {
-                "submitted": getattr(sc, "SubmittedDate", None),
-                "updated": getattr(sc, "LastUpdatedDate", None),
-                "relevance": getattr(sc, "Relevance", None),
-            }.get(sort, getattr(sc, "SubmittedDate", None))
+        # Build search_query parameter per arXiv spec
+        # "all:term" searches title/abstract/keywords/comments
+        sq = self._build_search_query(query)
 
-        if hasattr(arxiv, "Search"):
-            search = (
-                arxiv.Search(query=query, max_results=max_r, sort_by=sort_by)
-                if sort_by
-                else arxiv.Search(query=query, max_results=max_r)
-            )
+        params: dict[str, Any] = {
+            "search_query": sq,
+            "start": 0,
+            "max_results": max_r,
+            "sortBy": sort_key,
+            "sortOrder": sort_order,
+        }
 
-            try:
-                if hasattr(arxiv, "Client"):
-                    client = arxiv.Client()
-                    results = _iterable_to_list(client.results(search))
-                else:
-                    results = _iterable_to_list(search.results())
-            except Exception:
-                results = _iterable_to_list(search.results())
-        else:
-            query_fn = getattr(arxiv, "query", None) or getattr(arxiv, "search", None)
-            if query_fn is None:
-                raise RuntimeError(
-                    "Unsupported arxiv package version. Install the maintained `arxiv` package."
-                )
+        return self._fetch_and_parse(params, max_r)
 
-            try:
-                results = query_fn(query=query, max_results=max_r, sort_by=sort_by)
-            except TypeError:
-                results = query_fn(query=query, max_results=max_r)
-            results = _iterable_to_list(results)
+    # ── get by ID ─────────────────────────────────────────────────
+    def get_by_id(self, arxiv_id: str) -> Optional[Paper]:
+        normalized = _norm_arxiv_id(arxiv_id)
+        if not normalized:
+            return None
+        params = {"id_list": normalized, "start": 0, "max_results": 1}
+        results = self._fetch_and_parse(params, 1)
+        return results[0] if results else None
 
-        out: list[Paper] = []
-        for r in results[:max_r]:
-            title = _norm_space(getattr(r, "title", "") or "")
-            year = getattr(getattr(r, "published", None), "year", None) or _year_from_any(
-                getattr(r, "published", None)
-            )
-            entry_id = getattr(r, "entry_id", None) or None
-            arx = _norm_arxiv_id(entry_id.split("/")[-1] if entry_id else None) or _norm_arxiv_id(
-                getattr(r, "arxiv_id", None)
-            )
-            authors_obj = getattr(r, "authors", []) or []
-            authors = [
-                (getattr(a, "name", None) or str(a)).strip()
-                for a in authors_obj
-                if (getattr(a, "name", None) or str(a)).strip()
-            ]
+    # ── internal ──────────────────────────────────────────────────
+    def _build_search_query(self, query: str) -> str:
+        """Convert a natural-language query into arXiv search_query syntax.
 
-            pdf_url = getattr(r, "pdf_url", None)
-            if not pdf_url and arx:
-                pdf_url = f"https://arxiv.org/pdf/{arx}.pdf"
+        arXiv supports: all:term, ti:term, au:term, co:term, jr:term, cat:term,
+        and boolean operators (AND, OR, NOT). We wrap each word in all: for broad
+        recall, then fall back to simple term matching.
+        """
+        normalized = _norm_space(query)
+        if not normalized:
+            raise ValueError("arXiv query must not be empty")
+        # Preserve callers' explicit arXiv field/boolean syntax.
+        if re.search(r"\b(?:all|ti|au|abs|co|jr|cat|rn|id):", normalized, re.I):
+            return normalized
+        terms = shlex.split(normalized)
+        return " AND ".join(
+            f'all:"{term}"' if " " in term else f"all:{term}"
+            for term in terms
+        )
 
-            url = entry_id or (f"https://arxiv.org/abs/{arx}" if arx else None)
+    def _fetch_and_parse(
+        self,
+        params: dict[str, Any],
+        max_results: int,
+    ) -> list[Paper]:
+        """Execute the HTTP request and parse Atom XML into Paper list."""
+        content = _rate_limited_get(self._client, API_URL, params)
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            return []
 
-            out.append(
-                Paper(
-                    title=title,
-                    authors=authors,
-                    year=year,
-                    venue="arXiv",
-                    abstract=getattr(r, "summary", None),
-                    doi=None,
-                    arxiv_id=arx,
-                    url=url,
-                    pdf_url=pdf_url,
-                    source="arxiv",
-                    is_open_access=True,
-                    citation_count=None,
-                    extra={},
-                )
-            )
-        return out
+        entries = root.findall("atom:entry", _NS)
+        if len(entries) == 1:
+            title = _xml_text(entries[0].find("atom:title", _NS)) or ""
+            entry_id = _xml_text(entries[0].find("atom:id", _NS)) or ""
+            if title.lower() == "error" or "/api/errors" in entry_id:
+                detail = _xml_text(entries[0].find("atom:summary", _NS))
+                raise ValueError(detail or "arXiv API rejected the query")
+        papers: list[Paper] = []
+
+        for entry in entries[:max_results]:
+            paper = self._parse_entry(entry)
+            if paper and paper.title:
+                papers.append(paper)
+
+        return papers
+
+    def _parse_entry(self, entry: ET.Element) -> Optional[Paper]:
+        """Parse a single Atom <entry> into a Paper."""
+        # id: http://arxiv.org/abs/2301.00001v1 → 2301.00001v1
+        id_el = entry.find("atom:id", _NS)
+        id_text = _xml_text(id_el)
+        arxiv_id = None
+        if id_text:
+            candidate = id_text.split("/abs/", 1)[-1].rstrip("/")
+            candidate = re.sub(r"v\d+$", "", candidate)
+            arxiv_id = _norm_arxiv_id(candidate)
+
+        title_el = entry.find("atom:title", _NS)
+        title = _norm_space(_xml_text(title_el) or "")
+        if not title:
+            return None
+
+        # Summary (abstract)
+        summary_el = entry.find("atom:summary", _NS)
+        abstract = _norm_space(_xml_text(summary_el))
+        if abstract:
+            # Strip LaTeX formatting artifacts for readability
+            abstract = abstract.replace("\n", " ").replace("\\", "")
+
+        # Published year
+        published_el = entry.find("atom:published", _NS)
+        pub_text = _xml_text(published_el)
+        year = _year_from_any(pub_text) if pub_text else None
+
+        # Authors
+        authors: list[str] = []
+        author_elems = entry.findall("atom:author", _NS)
+        for author_el in author_elems:
+            name_el = author_el.find("atom:name", _NS)
+            name = _xml_text(name_el)
+            if name:
+                authors.append(name)
+
+        # Links: alternate (=abs page), related (=pdf)
+        # arXiv Atom format: pdf links look like
+        #   <link rel="related" href="http://arxiv.org/pdf/1706.03762v1" type="application/pdf"/>
+        # No .pdf extension — detect via /pdf/ path segment
+        url = None
+        pdf_url = None
+        links = entry.findall("atom:link", _NS)
+        for link in links:
+            href = link.get("href")
+            rel = link.get("rel", "")
+            if rel == "alternate" and href:
+                url = href
+            elif rel == "related" and href and "/pdf/" in href:
+                pdf_url = href
+
+        # Fallback URL / PDF if not in links
+        if not url and arxiv_id:
+            url = f"https://arxiv.org/abs/{arxiv_id}"
+        if not pdf_url and arxiv_id:
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+        # Categories
+        categories: list[str] = []
+        for cat in entry.findall("atom:category", _NS):
+            term = cat.get("term")
+            if term:
+                categories.append(term)
+        primary = entry.find("arxiv:primary_category", _NS)
+        # term is an ATTRIBUTE on arxiv:primary_category, not a child element
+        primary_cat = primary.get("term") if primary is not None else None
+
+        # arXiv-specific metadata
+        comment = _xml_text(entry.find("arxiv:comment", _NS))
+        journal_ref = _xml_text(entry.find("arxiv:journal_ref", _NS))
+        doi = _xml_text(entry.find("arxiv:doi", _NS))
+
+        return Paper(
+            title=title,
+            authors=authors,
+            year=year,
+            venue="arXiv",
+            abstract=abstract,
+            doi=doi,
+            arxiv_id=arxiv_id,
+            url=url,
+            pdf_url=pdf_url,
+            source="arxiv",
+            is_open_access=True,
+            citation_count=None,
+            extra={
+                "categories": categories,
+                "primary_category": primary_cat,
+                "comment": comment,
+                "journal_ref": journal_ref,
+            },
+        )
+
+
+def _main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Search the official arXiv Atom API")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    search_parser = subparsers.add_parser("search", help="search arXiv")
+    search_parser.add_argument("query")
+    search_parser.add_argument("--limit", type=int, default=10)
+    search_parser.add_argument(
+        "--sort",
+        choices=["submitted", "submittedDate", "lastUpdatedDate", "relevance"],
+        default="submitted",
+    )
+    get_parser = subparsers.add_parser("get", help="retrieve one arXiv ID")
+    get_parser.add_argument("arxiv_id")
+    args = parser.parse_args(argv)
+
+    if args.command == "search":
+        payload = arxiv_search(args.query, limit=args.limit, sort=args.sort)
+    else:
+        paper = ArxivSource().get_by_id(args.arxiv_id)
+        payload = {
+            "status": "ok",
+            "source": "arxiv",
+            "query": args.arxiv_id,
+            "results": [paper.to_dict()] if paper else [],
+        }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

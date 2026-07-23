@@ -2,6 +2,8 @@
 // Merged: Pi's serializeConversation (with thinking blocks) + Logician's
 // file operation tracking.
 
+import { DEFAULT_TRUNCATION } from "../core/types/types-truncation.ts";
+
 // ============================================================================
 // File Operation Tracking
 // ============================================================================
@@ -100,12 +102,12 @@ export function formatFileOperations(
 // Message Serialization — Pi's version with thinking block support
 // ============================================================================
 
-const TOOL_RESULT_MAX_CHARS = 2000;
+const TOOL_RESULT_MAX_CHARS = DEFAULT_TRUNCATION.compactionSummaryMaxChars;
 
 function safeJsonStringify(value: unknown): string {
 	try {
 		return JSON.stringify(value) ?? "undefined";
-	} catch {
+	} catch (e: unknown) {
 		return "[unserializable]";
 	}
 }

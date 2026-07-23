@@ -111,17 +111,17 @@ export function killProcessTree(pid: number): void {
 				detached: true,
 				windowsHide: true,
 			});
-		} catch {
+		} catch (e: unknown) {
 			// Ignore errors if taskkill fails
 		}
 	} else {
 		try {
 			process.kill(-pid, "SIGKILL");
-		} catch {
+		} catch (e: unknown) {
 			// Fallback to killing just the child if process group kill fails
 			try {
 				process.kill(pid, "SIGKILL");
-			} catch {
+			} catch (e: unknown) {
 				// Process already dead
 			}
 		}
@@ -155,7 +155,7 @@ export function killAllTrackedChildren(): void {
 	for (const pid of trackedDetachedPids) {
 		try {
 			killProcessTree(pid);
-		} catch {
+		} catch (e: unknown) {
 			// Ignore errors for already-dead processes
 		}
 	}

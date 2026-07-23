@@ -8,6 +8,7 @@ import {
 	visibleWidth,
 } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
+import { SelectorController } from "./selector-controller.ts";
 import {
 	BOX,
 	renderListItem,
@@ -35,7 +36,7 @@ export type ModelSelectorAction =
 export class ModelSelectorOverlay implements Component {
 	public visible = false;
 	private models: ModelInfo[] = [];
-	private selectedIndex = 0;
+	private selection = new SelectorController();
 	private message = "";
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
@@ -43,9 +44,9 @@ export class ModelSelectorOverlay implements Component {
 	setModels(models: ModelInfo[]): void {
 		this.models = models;
 		const activeIndex = this.models.findIndex((model) => model.active);
-		this.selectedIndex = activeIndex >= 0
+		this.selection.set(activeIndex >= 0
 			? activeIndex
-			: Math.min(this.selectedIndex, Math.max(0, this.models.length - 1));
+			: this.selection.index, this.models.length);
 		this.invalidate();
 	}
 
@@ -75,7 +76,7 @@ export class ModelSelectorOverlay implements Component {
 			return { type: "close" };
 		}
 		if (data === "\r" || data === "\n") {
-			const model = this.models[this.selectedIndex];
+			const model = this.models[this.selection.index];
 			return model ? { type: "select", model } : { type: "close" };
 		}
 		if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
@@ -109,8 +110,8 @@ export class ModelSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const popupWidth = Math.max(48, Math.min(width, 120));
-		const innerWidth = popupWidth - 4;
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - 4);
 		const lines: string[] = [];
 
 		// ── Top rounded corner ──
@@ -140,20 +141,13 @@ export class ModelSelectorOverlay implements Component {
 			);
 		} else {
 			const maxRows = 10;
-			const start = Math.max(
-				0,
-				Math.min(
-					this.selectedIndex - Math.floor(maxRows / 2),
-					Math.max(0, this.models.length - maxRows),
-				),
-			);
-			const end = Math.min(this.models.length, start + maxRows);
+			const { start, end } = this.selection.window(this.models.length, maxRows);
 			if (start > 0) {
 				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const m = this.models[i];
-				const isSelected = i === this.selectedIndex;
+				const isSelected = i === this.selection.index;
 
 				// Build the item
 				const item: ListItem = {
@@ -187,7 +181,7 @@ export class ModelSelectorOverlay implements Component {
 	private moveSelection(delta: number): void {
 		const n = this.models.length;
 		if (!n) return;
-		this.selectedIndex = (this.selectedIndex + delta + n) % n;
+		this.selection.move(delta, n);
 		this.invalidate();
 	}
 }

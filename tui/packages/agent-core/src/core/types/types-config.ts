@@ -5,6 +5,7 @@ import type { EventHandler } from "./types-events.ts";
 import type { Tool } from "./types-tools.ts";
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
 import type { AcceptanceConfig } from "../acceptance-contract.ts";
+import type { TruncationConfig } from "./types-truncation.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
 
@@ -25,6 +26,12 @@ export type ThinkingLevel =
 	| "medium"
 	| "high"
 	| "xhigh";
+
+export type InferenceMode =
+	| "thinking-general"
+	| "thinking-coding"
+	| "instruct-general"
+	| "instruct-reasoning";
 
 /** Curated provider request options owned by the harness and snapshotted per turn. */
 export interface AgentHarnessStreamOptions {
@@ -121,6 +128,12 @@ export interface AgentConfig {
 	thinkingLoopEscalationRatio?: number;
 	thinkingLoopMaxTotalThinkingTokens?: number;
 	thinkingLoopMetaReasoningThreshold?: number;
+	// Inference mode (Ctrl+M)
+	inferenceMode?: InferenceMode;
+	/** When true, skip CWD/allowedPaths enforcement for all file tools. */
+	allowAllPaths?: boolean;
+	/** Universal output/result truncation limits. Unset fields fall back to DEFAULT_TRUNCATION. */
+	truncation?: TruncationConfig;
 }
 
 export interface WebSearchConfig {

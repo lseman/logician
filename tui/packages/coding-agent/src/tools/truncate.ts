@@ -9,12 +9,13 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-export const DEFAULT_MAX_LINES = 2000;
+export const DEFAULT_MAX_LINES = DEFAULT_TRUNCATION.maxLines;
 export const DEFAULT_MAX_BYTES = 50 * 1024; // 50KB
-export const GREP_MAX_LINE_LENGTH = 500; // Max chars per match line
+export const GREP_MAX_LINE_LENGTH = DEFAULT_TRUNCATION.grepLineMaxChars;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

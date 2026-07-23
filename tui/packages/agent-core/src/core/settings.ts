@@ -20,6 +20,7 @@ export function buildSettingsSnapshot(opts: {
 	maxIterations: number;
 	contextWindowTokens: number | undefined;
 	thinkingLevel: string;
+	inferenceMode: string;
 	proactiveCompactionEnabled: boolean | undefined;
 	proactiveCompactionFraction: number | undefined;
 	loopDetectionEnabled: boolean | undefined;
@@ -50,6 +51,7 @@ export function buildSettingsSnapshot(opts: {
 	lines.push("");
 	lines.push("── Reasoning ──");
 	lines.push(fmtSetting("Thinking Level", opts.thinkingLevel));
+	lines.push(fmtSetting("Inference Mode", opts.inferenceMode));
 
 	lines.push("");
 	lines.push("── Guardrails ──");
@@ -97,6 +99,7 @@ export function buildSettingsSnapshot(opts: {
 	lines.push("  /settings guards [on]          → toggle output guards");
 	lines.push("  /settings compaction [on]      → toggle proactive compaction");
 	lines.push("  /settings permissions <mode>   → acceptAll|acceptEdits|ask|plan");
+	lines.push("  /settings inference-mode <m>   → thinking-general|thinking-coding|instruct-general|instruct-reasoning");
 
 	return lines.join("\n");
 }
@@ -231,6 +234,30 @@ export function parseSettingsCommand(
 				};
 			}
 			return { type: "change", key: "permissions", value: mode };
+		}
+
+		case "inference-mode":
+		case "inference_mode": {
+			const mode = parts[1]?.trim().toLowerCase();
+			const valid = [
+				"thinking-general",
+				"thinking-coding",
+				"instruct-general",
+				"instruct-reasoning",
+			];
+			if (!mode) {
+				return {
+					type: "error",
+					message: `Usage: /settings inference-mode <mode>\n\nValid modes: ${valid.join(", ")}`,
+				};
+			}
+			if (!valid.includes(mode)) {
+				return {
+					type: "error",
+					message: `Invalid mode "${mode}". Valid: ${valid.join(", ")}`,
+				};
+			}
+			return { type: "change", key: "inference_mode", value: mode };
 		}
 
 		default:

@@ -25,6 +25,7 @@ import {
 	type Message,
 	type Tool,
 	type WebSearchConfig,
+	type TruncationConfig,
 } from "@logician/agent-core";
 import {
 	type McpSnapshotResult,
@@ -36,7 +37,10 @@ import {
 	PermissionManager,
 	type PermissionRules,
 } from "@logician/agent-core/tools/shared/permissions.ts";
-import { estimateChatPayloadTokens } from "@logician/agent-core/core/messages.ts";
+import {
+	estimateChatPayloadTokens,
+	estimateTokens,
+} from "@logician/agent-core/core/messages.ts";
 import {
 	configurePluginRuntimeEnv,
 	type PluginCommandResult,
@@ -60,13 +64,12 @@ import {
 	getBuiltInSubagentTools,
 	type SubagentToolDeps,
 } from "@logician/agent-capabilities/tools";
-import type { ParallelSpawnOptions } from "@logician/agent-capabilities/subagents/parallel-subagent.ts";
 import { buildDefaultSystemPrompt } from "../system-prompt.ts";
 import { createReadSkillTool } from "../tools/read-skill.ts";
 import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
 import { onTodosChanged } from "@logician/agent-core/core/todo-state.ts";
 import { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
-import { findLogicianConfig } from "../configuration/config.ts";
+import { findLogicianConfig, loadLogicianConfig } from "../configuration/config.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
 import {
 	createMemorySystem,
@@ -75,9 +78,26 @@ import {
 	RECALL_TOOL_NAME,
 	hashId,
 } from "@logician/observational-memory";
+import { createPostEditDiagnosticHooks } from "./post-edit-diagnostics.ts";
+import { LspManager } from "./lsp-manager.ts";
 
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
+
+export function findJbPrompt(cwd: string): string | null {
+	for (const candidate of [
+		path.join(cwd, "jb.md"),
+		path.join(cwd, "tui", "jb.md"),
+	]) {
+		try {
+			return readFileSync(candidate, "utf8");
+		} catch (error: unknown) {
+			const code = (error as { code?: string }).code;
+			if (code !== "ENOENT") throw error;
+		}
+	}
+	return null;
+}
 
 // ── Event shape mapping ─────────────────────────────────────────────────────────
 
@@ -127,6 +147,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				tool: "",
 				tool_name: "",
 				partial_result: event.delta,
+				update_kind: "arguments",
 				tool_call_id: event.toolCallId,
 			} as ParsedBridgeEvent;
 		case "tool_call_update":
@@ -135,6 +156,7 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				tool: event.toolName,
 				tool_name: event.toolName,
 				partial_result: event.partialResult,
+				update_kind: "output",
 				tool_call_id: event.toolCallId,
 			} as ParsedBridgeEvent;
 		case "repair_nudge":
@@ -234,15 +256,15 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					type: "notice",
 					level: "info",
 					label: `↳ ${event.agentId}`,
-					text: `${child.toolName}${truncateArgs(child.args)}`,
+					text: `▶ ${child.toolName}${truncateArgs(child.args)}`,
 				};
 			}
-			if (child.type === "tool_call_end" && child.isError) {
+			if (child.type === "tool_call_end") {
 				return {
 					type: "notice",
-					level: "warn",
+					level: child.isError ? "warn" : "success",
 					label: `↳ ${event.agentId}`,
-					text: `${child.toolName} ✗ ${child.result.slice(0, 120)}`,
+					text: `${child.isError ? "✗" : "✓"} ${child.toolName} ${child.result.slice(0, 240)}`,
 				};
 			}
 			if (child.type === "error") {
@@ -337,7 +359,7 @@ function parseToolArgs(args: string): Record<string, unknown> | undefined {
 	try {
 		const parsed = JSON.parse(args || "{}");
 		return parsed && typeof parsed === "object" ? parsed : undefined;
-	} catch {
+	} catch (e: unknown) {
 		return undefined;
 	}
 }
@@ -367,7 +389,7 @@ function createHookTranscriptPath(cwd: string, sessionId: string): string {
 			})}\n`,
 			"utf8",
 		);
-	} catch {
+	} catch (e: unknown) {
 		return "";
 	}
 	return transcriptPath;
@@ -432,6 +454,10 @@ export interface AgentBridgeOptions {
 	loopDetectionEnabled?: boolean;
 	guardsEnabled?: boolean;
 	continuationEnabled?: boolean;
+	postEditDiagnostics?: boolean;
+	allowedPaths?: string[];
+	allowAllPaths?: boolean;
+	truncation?: TruncationConfig;
 }
 
 // ── AgentCoreBridge ─────────────────────────────────────────────────────────────
@@ -467,8 +493,10 @@ export class AgentCoreBridge {
 	private contextMaxTokens?: number;
 	private configPath: string | null;
 	private mcpEager: boolean;
+	private postEditDiagnosticsEnabled: boolean;
+	private lspManagerEnabled: boolean;
+	private lspManager: LspManager;
 	private agentDefs: AgentDefinition[] = [];
-	private parallelSpawnOptions: ParallelSpawnOptions = {};
 	private loadedSkills: Skill[] = [];
 	private enabledPluginRoots: Array<{ name: string; installPath: string }> = [];
 	private permissionManager: PermissionManager;
@@ -501,6 +529,32 @@ export class AgentCoreBridge {
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
 		this.mcpEager =
 			process.env.LOGICIAN_MCP === "0" ? false : opts.mcpEager !== false;
+		this.postEditDiagnosticsEnabled =
+			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
+				? false
+				: opts.postEditDiagnostics !== false;
+		// LSP config from settings.json.
+		let lspEnabled = true;
+		let lspTimeoutMs = 2_000;
+		const serverOverrides: Record<string, { command: string; args: string[]; languageId: string }> = {};
+		try {
+			const resolved = loadLogicianConfig(this.cwd);
+			const lspCfg = resolved.config.lsp;
+			if (lspCfg !== undefined) {
+				if (lspCfg.enabled === false) lspEnabled = false;
+				if (lspCfg.timeoutMs !== undefined && lspCfg.timeoutMs > 0) lspTimeoutMs = lspCfg.timeoutMs;
+				if (lspCfg.serverOverrides) {
+					Object.assign(serverOverrides, lspCfg.serverOverrides);
+				}
+			}
+		} catch {
+			// Config load failure is non-fatal; LSP stays on with defaults.
+		}
+		this.lspManager = new LspManager(this.cwd, {
+			timeoutMs: lspTimeoutMs,
+			servers: Object.keys(serverOverrides).length > 0 ? serverOverrides : undefined,
+		});
+		this.lspManagerEnabled = lspEnabled;
 		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		const defaultWebSearch = resolveWebSearchConfig();
 		const webSearch = {
@@ -535,7 +589,9 @@ export class AgentCoreBridge {
 			maxIterations: opts.maxIterations || 30,
 			temperature: opts.temperature,
 			maxTokens: opts.maxTokens,
-			toolExecution: opts.toolExecution,
+			// Parallel scheduling is transparent to the model. Tools that require
+			// exclusivity declare executionMode: "sequential" and become barriers.
+			toolExecution: opts.toolExecution ?? "parallel",
 			contextWindowTokens:
 				envNumber("LOGICIAN_CONTEXT_WINDOW") ||
 				envNumber("LOGICIAN_CTX_SIZE") ||
@@ -551,6 +607,7 @@ export class AgentCoreBridge {
 			loopDetectionEnabled: opts.loopDetectionEnabled,
 			guardsEnabled: opts.guardsEnabled,
 			continuationEnabled: opts.continuationEnabled,
+			truncation: opts.truncation,
 			onPermissionRequest: (ctx) =>
 				new Promise((resolve) => {
 					this.permissionResolvers.set(ctx.toolCallId, resolve);
@@ -575,6 +632,11 @@ export class AgentCoreBridge {
 						choices: ctx.choices,
 					});
 				}),
+			hooks: createPostEditDiagnosticHooks(
+				this.cwd,
+				() => this.postEditDiagnosticsEnabled,
+				this.lspManager,
+			),
 			turnEndCallback: (turnId: string) => {
 				this.emit({ type: "turn_end", turn_id: turnId, message: "" });
 			},
@@ -625,7 +687,7 @@ export class AgentCoreBridge {
 		for (const cb of this.callbacks) {
 			try {
 				cb(event);
-			} catch {
+			} catch (e: unknown) {
 				// Don't let a bad handler kill the bridge
 			}
 		}
@@ -653,7 +715,12 @@ export class AgentCoreBridge {
 		this.running = true;
 		try {
 			await this.runStartupHooksOnce();
-			await this.loadMcpToolsOnce();
+			// MCP discovery is opportunistic. A slow or broken external server must
+			// never hold the user's prompt before it reaches the model. Tools that
+			// finish loading are added to the live harness for subsequent turns.
+			if (!this.mcpLoaded && !this.mcpLoadPromise) {
+				void this.loadMcpToolsOnce().catch((error) => this.reportError(error));
+			}
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
 			const harness = this.ensureHarness();
@@ -837,7 +904,7 @@ export class AgentCoreBridge {
 			this.ensureHarness().setHistory(messages);
 			this.publishContextUsage();
 			return true;
-		} catch {
+		} catch (e: unknown) {
 			return false;
 		}
 	}
@@ -876,6 +943,11 @@ export class AgentCoreBridge {
 
 	getSteeringInterrupt(): boolean {
 		return this.config.steeringInterrupt === true;
+	}
+
+	/** Return config snapshot for external LLM calls (goal evaluator, etc.). */
+	getConfig(): { baseUrl: string; model: string } {
+		return { baseUrl: this.config.baseUrl, model: this.config.model };
 	}
 
 	/** Controls how queued follow-up messages are drained. */
@@ -1008,16 +1080,26 @@ export class AgentCoreBridge {
 		}
 		// /jb — inject jb.md content as user prompt
 		if (trimmed === "/jb" || trimmed.startsWith("/jb ")) {
-			const jbPath = path.join(this.cwd, "tui", "jb.md");
 			try {
-				const content = readFileSync(jbPath, "utf-8");
-				this.sendMessage(content).catch((err) => this.errorCb?.(err));
-			} catch (e: unknown) {
-				const nodeErr = e as { code?: string };
-				if (nodeErr.code !== "ENOENT") {
-					this.errorCb?.(e as Error);
+				const content = findJbPrompt(this.cwd);
+				if (!content) {
+					this.emit({
+						type: "notice",
+						level: "warn",
+						label: "JB prompt",
+						text: `jb.md was not found in ${this.cwd} or ${path.join(this.cwd, "tui")}.`,
+					});
+					return;
 				}
-				// Silently fail for missing jb.md — it's optional.
+				this.sendMessage(content).catch((err) => this.errorCb?.(err));
+				this.emit({
+					type: "notice",
+					level: "info",
+					label: "JB prompt",
+					text: `Injected jb.md as the user prompt (${content.length.toLocaleString()} characters).`,
+				});
+			} catch (e: unknown) {
+				this.errorCb?.(e as Error);
 			}
 			return;
 		}
@@ -1258,15 +1340,22 @@ export class AgentCoreBridge {
 	}
 
 	async getState(): Promise<Record<string, unknown>> {
-		await this.loadMcpToolsOnce();
+		// Status is a snapshot, not a synchronization barrier for external MCP
+		// transports. The manager UI provides explicit awaited refresh operations.
+		if (!this.mcpLoaded && !this.mcpLoadPromise) {
+			void this.loadMcpToolsOnce().catch((error) => this.reportError(error));
+		}
 		this.contextTokens = this.measureContextTokens();
+		const toolNames =
+			this.harness?.tools?.list().map((t: Tool) => t.name) ||
+			this.defaultTools.map((t) => t.name);
 		const state = {
 			agent_name: "logician",
 			model: this.config.model,
 			base_url: this.config.baseUrl,
-			tools:
-				this.harness?.tools?.list().map((t: Tool) => t.name) ||
-				this.defaultTools.map((t) => t.name),
+			web_search_url: this.config.webSearch?.baseUrl || "",
+			web_search_enabled: toolNames.includes("web_search"),
+			tools: toolNames,
 			mcp_servers: this.mcpServerCount,
 			mcp_tools: this.defaultTools.filter((tool) =>
 				tool.name.startsWith("mcp__"),
@@ -1374,6 +1463,11 @@ export class AgentCoreBridge {
 		this.harness?.setTemperature(temperature);
 	}
 
+	setInferenceMode(mode: string): void {
+		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
+		this.harness?.setInferenceMode(mode);
+	}
+
 	setMaxTokens(maxTokens: number): void {
 		this.config.maxTokens = maxTokens;
 		this.harness?.setMaxTokens(maxTokens);
@@ -1388,9 +1482,14 @@ export class AgentCoreBridge {
 		key:
 			| "loopDetectionEnabled"
 			| "guardsEnabled"
-			| "proactiveCompactionEnabled",
+			| "proactiveCompactionEnabled"
+			| "postEditDiagnostics",
 		enabled: boolean,
 	): void {
+		if (key === "postEditDiagnostics") {
+			this.postEditDiagnosticsEnabled = enabled;
+			return;
+		}
 		this.config[key] = enabled;
 		if (key === "proactiveCompactionEnabled") {
 			this.harness?.enableAutoCompaction(enabled);
@@ -1410,6 +1509,7 @@ export class AgentCoreBridge {
 			`  Loop detection: ${this.config.loopDetectionEnabled ? "on" : "off"}`,
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
+			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
 		].join("\n");
 	}
 
@@ -1420,10 +1520,12 @@ export class AgentCoreBridge {
 		maxTokens: number;
 		maxIterations: number;
 		thinkingLevel: string;
+		inferenceMode: string;
 		permissionMode: string;
 		loopDetectionEnabled: boolean;
 		guardsEnabled: boolean;
 		proactiveCompactionEnabled: boolean;
+		postEditDiagnostics: boolean;
 	} {
 		return {
 			model: this.config.model,
@@ -1431,10 +1533,12 @@ export class AgentCoreBridge {
 			maxTokens: this.config.maxTokens ?? 4096,
 			maxIterations: this.config.maxIterations ?? 30,
 			thinkingLevel: this.config.thinkingLevel ?? "off",
+			inferenceMode: this.config.inferenceMode ?? "instruct-general",
 			permissionMode: this.getPermissionMode(),
 			loopDetectionEnabled: this.config.loopDetectionEnabled ?? false,
 			guardsEnabled: this.config.guardsEnabled ?? false,
 			proactiveCompactionEnabled: this.config.proactiveCompactionEnabled ?? false,
+			postEditDiagnostics: this.postEditDiagnosticsEnabled,
 		};
 	}
 
@@ -1628,7 +1732,7 @@ export class AgentCoreBridge {
 				this.publishContextUsage();
 			}
 			return restored;
-		} catch {
+		} catch (e: unknown) {
 			return null;
 		}
 	}
@@ -1660,15 +1764,18 @@ export class AgentCoreBridge {
 				(error) => this.reportError(error),
 			);
 		}
+		const toolNames =
+			this.harness?.tools?.list().map((t: Tool) => t.name) ||
+			this.defaultTools.map((t) => t.name);
 		const info: Record<string, unknown> = {
 			agent_name: "logician",
 			model: this.config.model,
 			base_url: this.config.baseUrl,
+			web_search_url: this.config.webSearch?.baseUrl || "",
+			web_search_enabled: toolNames.includes("web_search"),
 			mcp_deferred: !this.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
 			mcp_loading: this.mcpLoadPromise !== null && !this.mcpLoaded,
-			tools:
-				this.harness?.tools?.list().map((t: Tool) => t.name) ||
-				this.defaultTools.map((t) => t.name),
+			tools: toolNames,
 			mcp_servers_loaded: this.mcpServerCount,
 			mcp_tools_loaded: this.defaultTools.filter((tool) =>
 				tool.name.startsWith("mcp__"),
@@ -1725,7 +1832,7 @@ export class AgentCoreBridge {
 				count += entries.filter(
 					(e) => e !== ".git" && !e.startsWith("."),
 				).length;
-			} catch {
+			} catch (e: unknown) {
 				// no skills dir
 			}
 		}
@@ -1735,6 +1842,7 @@ export class AgentCoreBridge {
 	async stop(): Promise<void> {
 		this.cancel();
 		await this.fireSessionEnd("shutdown");
+		this.lspManager.close();
 		await this.mcpManager.close();
 		this.running = false;
 	}
@@ -1750,11 +1858,22 @@ export class AgentCoreBridge {
 	/** Return full context as formatted text for /context command. */
 	getContext(): string {
 		const msgs = this.getMessages();
-		if (!msgs.length) return "No messages yet.";
 		const contextTokens = this.measureContextTokens();
 		this.contextTokens = contextTokens;
 
-		const lines: string[] = [];
+		const sourceMap = this.getContextSourceMap();
+		const sourceLines = sourceMap.map(
+			(zone) => `- ${zone.name}: ~${zone.tokens} tokens${zone.detail ? ` — ${zone.detail}` : ""}`,
+		);
+		const lines: string[] = [
+			"## Prompt source map",
+			"",
+			...sourceLines,
+			"",
+			"## Conversation",
+			"",
+		];
+		if (!msgs.length) lines.push("No messages yet.");
 
 		for (const msg of msgs) {
 			const role = msg.role.toUpperCase();
@@ -1798,6 +1917,21 @@ export class AgentCoreBridge {
 		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;
 	}
 
+	getContextSourceMap(): Array<{ name: string; tokens: number; detail: string }> {
+		const messages = this.getMessages();
+		const conversation = messages.filter((message) => message.role !== "tool");
+		const toolEvidence = messages.filter((message) => message.role === "tool");
+		const memory = this.harness?.getMemoryPrompt() ?? "";
+		return [
+			{ name: "Base instructions", tokens: estimateTokens(this.baseSystemPrompt), detail: "system zone" },
+			{ name: "Plugin context", tokens: estimateTokens(this.pluginSystemContext), detail: "startup hooks" },
+			{ name: "Skill catalog", tokens: estimateTokens(this.skillsContext ?? ""), detail: `${this.loadedSkills.length} loaded` },
+			{ name: "Memory", tokens: estimateTokens(memory), detail: memory ? "active" : "empty" },
+			{ name: "Conversation", tokens: conversation.length ? estimateChatPayloadTokens(conversation) : 0, detail: `${conversation.length} messages` },
+			{ name: "Tool evidence", tokens: toolEvidence.length ? estimateChatPayloadTokens(toolEvidence) : 0, detail: `${toolEvidence.length} results` },
+		].filter((zone) => zone.tokens > 0 || zone.name === "Conversation");
+	}
+
 	/** Canonical size used by /context, /status, and the status bar. */
 	private measureContextTokens(): number {
 		const messages = this.getMessages();
@@ -1819,7 +1953,11 @@ export class AgentCoreBridge {
 	getTools(): ToolRegistry {
 		const live = this.harness?.tools;
 		if (live) return live;
-		const registry = new ToolRegistry({ cwd: this.config.cwd });
+		const registry = new ToolRegistry({
+			cwd: this.config.cwd,
+			allowAllPaths: this.config.allowAllPaths,
+			maxResultChars: this.config.truncation?.toolResultMaxChars,
+		});
 		registry.registerMany(this.defaultTools);
 		return registry;
 	}
@@ -1836,6 +1974,7 @@ export class AgentCoreBridge {
 					const newTools = result.tools.filter((tool) => !existing.has(tool.name));
 					this.defaultTools = [...this.defaultTools, ...newTools];
 					this.config.tools = this.defaultTools;
+					this.harness?.setTools(this.defaultTools);
 					this.rebuildBaseSystemPrompt();
 				}
 				this.mcpLoaded = true;
@@ -1982,7 +2121,7 @@ export class AgentCoreBridge {
 			let entries: string[];
 			try {
 				entries = await readdirAsync(dir);
-			} catch {
+			} catch (e: unknown) {
 				continue;
 			}
 			for (const entry of entries) {
@@ -1991,7 +2130,7 @@ export class AgentCoreBridge {
 				let raw: string;
 				try {
 					raw = await readFileAsync(filePath, "utf8");
-				} catch {
+				} catch (e: unknown) {
 					continue;
 				}
 				const parsed = parseFrontmatter<Record<string, unknown>>(raw);
@@ -2046,9 +2185,9 @@ export class AgentCoreBridge {
 	}
 
 	/**
-	 * Register the spawn_agent and spawn_agent_parallel tools bound to discovered
-	 * agent definitions (.logician/agents/*.md + built-ins). Subagent events are
-	 * forwarded into the normal event stream as subagent_* envelopes.
+	 * Register the spawn_agent tool bound to discovered agent definitions
+	 * (.logician/agents/*.md + built-ins). Subagent events are forwarded into
+	 * the normal event stream as subagent_* envelopes.
 	 */
 	private async injectSubagents(): Promise<void> {
 		const cwd = this.config.cwd || process.cwd();
@@ -2067,7 +2206,6 @@ export class AgentCoreBridge {
 			cwd,
 			agents: () => this.agentDefs,
 			emit: (event) => this.config.onEvent?.(event),
-			parallelOptions: this.parallelSpawnOptions,
 		};
 		const subagentTools = getBuiltInSubagentTools(subagentDeps);
 		for (const tool of subagentTools) {
@@ -2090,7 +2228,7 @@ export class AgentCoreBridge {
 				cwd: this.config.cwd || process.cwd(),
 				reason,
 			});
-		} catch {
+		} catch (e: unknown) {
 			// SessionEnd hooks are best-effort during shutdown/reset.
 		}
 	}
@@ -2243,7 +2381,7 @@ function loadUserSettings(): UserSettings {
 		return typeof parsed === "object" && parsed !== null
 			? (parsed as UserSettings)
 			: {};
-	} catch {
+	} catch (e: unknown) {
 		return {};
 	}
 }
@@ -2297,7 +2435,7 @@ export async function getSkillsDirs(cwd: string): Promise<string[]> {
 			if (!enabled || !onDisk || !installPath) continue;
 			dirs.push(path.join(installPath, "skills"));
 		}
-	} catch {
+	} catch (e: unknown) {
 		// Plugin backend may not be ready during early reload
 	}
 

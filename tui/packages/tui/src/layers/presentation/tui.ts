@@ -1,6 +1,6 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
-import { formatContextSize, envNumber } from "@logician/coding-agent";
+import { formatContextSize } from "@logician/coding-agent";
 
 // Re-export markdownTableCell (same as escapeTable for table use)
 
@@ -42,18 +42,18 @@ import { StatusBar } from "../../components/status-bar.ts";
 import { SteerQueue } from "../../components/steer-queue.ts";
 import { ThinkingPanel } from "../../components/thinking-panel.ts";
 import { TodoBar } from "../../components/todo/todo-bar.ts";
+import { WorkSurface } from "../../components/work-surface.ts";
 import { TranscriptDisplay } from "../../components/transcript-display.ts";
 import { SessionStore } from "@logician/coding-agent/session-store";
 import {
-	configBool,
 	configNumber,
-	configString,
-	loadLogicianConfig,
 	saveConfigField,
 } from "@logician/coding-agent/config";
+import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
 import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
 import { KillRing } from "../input/kill-ring.ts";
 import { LoopManager } from "@logician/coding-agent/loop-manager";
+import { GoalManager, type GoalState } from "@logician/coding-agent/runtime";
 import {
 	getReasonerIds,
 	getReasonerMeta,
@@ -69,6 +69,13 @@ import { setTheme, getAvailableThemes, theme } from "../theme/theme.ts";
 import { Transcript, type Turn } from "@logician/coding-agent/transcript";
 import { Container, TUI } from "../core/tui-core.ts";
 import { UndoStack } from "../input/undo-stack.ts";
+import {
+	INITIAL_TURN_STATE,
+	reduceTurnState,
+	turnPhaseIsActive,
+	turnPhaseLabel,
+	type TurnState,
+} from "../../state/turn-state.ts";
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +85,7 @@ export class LogicianTUI {
 	private transcript: Transcript;
 	private statusPanel: StatusBar;
 	private todoBar: TodoBar;
+	private workSurface: WorkSurface;
 	private steerQueue: SteerQueue;
 	private thinkingPanel: ThinkingPanel;
 	private inputBar: InputBar;
@@ -95,10 +103,15 @@ export class LogicianTUI {
 	private killRing: KillRing;
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
 	private loopManager: LoopManager;
-	private streaming = false;
+	private goalManager: GoalManager;
+	private turnState: TurnState = INITIAL_TURN_STATE;
 	private loopActive = false;
+	private goalActive = false;
+	private goalEvaluationPending = false;
 	private configPath?: string;
 	private thinkingLevel = "off";
+	private inferenceMode: "thinking-general" | "thinking-coding" | "instruct-general" | "instruct-reasoning" =
+		"instruct-general";
 	private cacheEnabled = true;
 	private thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
 		"expanded";
@@ -108,76 +121,52 @@ export class LogicianTUI {
 	private pendingPermission: { toolCallId: string; toolName: string } | null =
 		null;
 
+	// Inference mode helper — used by the keyboard shortcut and /settings.
+	private setInferenceMode(mode: string): void {
+		const valid = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+		if (!valid.includes(mode)) return;
+		const oldMode = this.inferenceMode;
+		this.inferenceMode = mode as typeof this.inferenceMode;
+		this.bridge.setInferenceMode(mode);
+		this.statusPanel.update({ inferenceMode: mode });
+		if (oldMode !== mode) {
+			const labels: Record<string, string> = {
+				"thinking-general": "Thinking (General)",
+				"thinking-coding": "Thinking (Precise Code)",
+				"instruct-general": "Instruct (General)",
+				"instruct-reasoning": "Instruct (Reasoning)",
+			};
+			this.transcript.addSystemMessage(`Inference mode: ${labels[mode] ?? mode}`);
+			saveConfigField("inferenceMode", mode);
+		}
+	}
+
+	private cycleInferenceMode(): void {
+		const modes: Array<
+			| "thinking-general"
+			| "thinking-coding"
+			| "instruct-general"
+			| "instruct-reasoning"
+		> = [
+			"thinking-general",
+			"thinking-coding",
+			"instruct-general",
+			"instruct-reasoning",
+		];
+		const currentIndex = modes.indexOf(this.inferenceMode);
+		this.setInferenceMode(modes[(currentIndex + 1) % modes.length]);
+		this.tui.requestRender();
+	}
+
 	// eslint-disable-next-line max-lines-per-function -- wires up entire TUI (bridge, transcript, components, keybindings, overlays)
 	constructor() {
-		const loadedConfig = loadLogicianConfig(process.cwd());
-		this.configPath = loadedConfig.path;
-		const config = loadedConfig.config;
-		const modelName =
-			process.env.LOGICIAN_MODEL || configString(config.model) || "";
-		this.bridge = new AgentCoreBridge({
-			baseUrl:
-				process.env.LOGICIAN_LLM_URL ||
-				configString(config.baseUrl) ||
-				configString(config.llmUrl) ||
-				"http://127.0.0.1:8080",
-			model: modelName,
-			models: config.models,
-			systemPrompt:
-				process.env.LOGICIAN_SYSTEM_PROMPT || configString(config.systemPrompt),
-			chatTemplate: configString(config.chatTemplate),
-			temperature: configNumber(config.temperature),
-			maxTokens: configNumber(config.maxTokens),
-			maxIterations: configNumber(config.maxIterations),
-			toolExecution:
-				configString(config.toolExecution) === "sequential"
-					? "sequential"
-					: configString(config.toolExecution) === "parallel"
-						? "parallel"
-						: undefined,
-			contextWindowTokens:
-				envNumber("LOGICIAN_CONTEXT_WINDOW") ||
-				envNumber("LOGICIAN_CTX_SIZE") ||
-				configNumber(config.contextWindowTokens) ||
-				configNumber(config.contextWindow),
-			runtimeHooksEnabled:
-				process.env.LOGICIAN_HOOKS !== undefined
-					? process.env.LOGICIAN_HOOKS !== "0"
-					: configBool(config.hooks),
-			mcpEager:
-				process.env.LOGICIAN_MCP_EAGER !== undefined
-					? process.env.LOGICIAN_MCP_EAGER !== "0"
-					: configBool(config.mcpEager),
-			webSearch: config.webSearch
-				? {
-						baseUrl: configString(config.webSearch.baseUrl),
-						maxResults: configNumber(config.webSearch.maxResults),
-					}
-				: undefined,
-			permissionMode: configString(config.permissionMode) as
-				| "acceptAll"
-				| "acceptEdits"
-				| "ask"
-				| "plan"
-				| undefined,
-			permissionRules:
-				config.permissions &&
-				typeof config.permissions === "object" &&
-				!Array.isArray(config.permissions)
-					? (config.permissions as { allow?: string[]; deny?: string[] })
-					: undefined,
-			steeringInterrupt: configBool(config.steeringInterrupt),
-			maxTotalTokens: configNumber(config.maxTotalTokens),
-			// Safeguard options: loop detection and guards default OFF (match pi's trust-model).
-			// Continuation defaults ON — prevents premature stopping when model says "done" mid-task.
-			loopDetectionEnabled: configBool(config.loopDetectionEnabled),
-			guardsEnabled: configBool(config.guardsEnabled),
-			continuationEnabled: configBool(config.continuationEnabled),
-			cwd: process.cwd(),
-		});
+		const runtimeConfig = resolveRuntimeConfig(process.cwd());
+		this.configPath = runtimeConfig.configPath;
+		this.bridge = new AgentCoreBridge(runtimeConfig.bridge);
 		this.transcript = new Transcript();
 		this.statusPanel = new StatusBar();
 		this.todoBar = new TodoBar();
+		this.workSurface = new WorkSurface();
 		this.steerQueue = new SteerQueue();
 		this.thinkingPanel = new ThinkingPanel();
 		this.inputBar = new InputBar();
@@ -191,7 +180,12 @@ export class LogicianTUI {
 		this.settingsSelector = new SettingsSelectorOverlay();
 		this.transcriptDisplay = new TranscriptDisplay({
 			thinkingMode: this.thinkingDisplayMode,
+			maxMessageLength: runtimeConfig.source.truncation?.transcriptMessageMaxChars,
 		});
+		// Apply inference mode only after its transcript/status dependencies exist.
+		if (runtimeConfig.source.inferenceMode) {
+			this.setInferenceMode(runtimeConfig.source.inferenceMode);
+		}
 		this.killRing = new KillRing();
 		this.undoStack = new UndoStack();
 		this.loopManager = new LoopManager();
@@ -216,10 +210,37 @@ export class LogicianTUI {
 			}
 		});
 
+		this.goalManager = new GoalManager();
+		this.goalManager.setOnStateChange((state: Readonly<GoalState> | null) => {
+			if (state?.lastReason?.startsWith("Evaluation error:")) {
+				this.transcript.addSystemMessage(
+					`Goal evaluation #${state.turnCount} failed: ${state.lastReason}`,
+				);
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				this.tui.requestRender();
+			}
+			// Update status bar with goal indicator
+			if (state && state.status === "active") {
+				const elapsed = Math.round((Date.now() - state.startedAt) / 1000);
+				this.statusPanel.update({
+					goalCondition: state.condition,
+					goalTurnCount: state.turnCount,
+					goalElapsed: elapsed,
+				});
+			} else if (state && state.status === "achieved") {
+				this.statusPanel.update({
+					goalCondition: undefined,
+					goalTurnCount: undefined,
+					goalElapsed: undefined,
+				});
+			}
+		});
+
 		// Create the TUI with hardware cursor support
 		this.tui = new TUI(process.stdout, true);
 		this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
 		this.todoBar.setOnInvalidate(() => this.tui.requestRender());
+		this.workSurface.setOnInvalidate(() => this.tui.requestRender());
 
 		// ── Session store ────────────────────────────────────────────────────
 		this.sessionStore = new SessionStore(process.cwd());
@@ -434,7 +455,7 @@ export class LogicianTUI {
 			thinkingLevel: this.thinkingLevel,
 			cacheEnabled: this.cacheEnabled,
 			phase: "ready",
-			model: modelName || "local",
+			model: runtimeConfig.bridge.model || "local",
 			cwd: process.cwd(),
 			branch: gitStatus.branch,
 			gitModified: gitStatus.modified,
@@ -442,11 +463,7 @@ export class LogicianTUI {
 			gitUntracked: gitStatus.untracked,
 			contextTokens: 0,
 			reasoner: "none",
-			contextMaxTokens:
-				envNumber("LOGICIAN_CONTEXT_WINDOW") ||
-				envNumber("LOGICIAN_CTX_SIZE") ||
-				configNumber(config.contextWindowTokens) ||
-				configNumber(config.contextWindow),
+			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
 		});
 
 		// Setup slash commands
@@ -456,6 +473,11 @@ export class LogicianTUI {
 				this.thinkingLevel = lvl;
 				this.bridge.setThinkingLevel(lvl);
 				this.statusPanel.update({ thinkingLevel: lvl });
+				setStatusPhase("ready");
+			},
+		setInferenceMode: (mode: unknown) => {
+				const m = typeof mode === "string" ? mode : String(mode);
+				this.setInferenceMode(m);
 				setStatusPhase("ready");
 			},
 			setCache: (enabled: unknown) => {
@@ -551,6 +573,28 @@ export class LogicianTUI {
 					case "compaction":
 						this.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
 						return `Compaction: ${on ? "on" : "off"}`;
+					case "diagnostics":
+					case "post-edit-diagnostics":
+						this.bridge.setRuntimeToggle("postEditDiagnostics", on);
+						saveConfigField("postEditDiagnostics", on);
+						return `Post-edit diagnostics: ${on ? "on" : "off"}`;
+					case "inference-mode":
+					case "inference_mode": {
+						const modes = [
+							"thinking-general",
+							"thinking-coding",
+							"instruct-general",
+							"instruct-reasoning",
+						];
+						if (!value) {
+							return `Usage: /settings inference-mode <mode>\n\nValid: ${modes.join(", ")}`;
+						}
+						if (!modes.includes(value.toLowerCase())) {
+							return `Invalid mode "${value}". Valid: ${modes.join(", ")}`;
+						}
+						this.setInferenceMode(value);
+						return `Inference mode: ${value}`;
+					}
 					default:
 						return `Unknown setting "${key}". Use /settings to list available settings.`;
 				}
@@ -765,6 +809,56 @@ export class LogicianTUI {
 					this.tui.requestRender();
 					return;
 				}
+				if (match && match.command === "/goal") {
+					const args = command.trim().split(/\s+/).slice(1).join(" ");
+					if (args.toLowerCase() === "clear") {
+						this.goalManager.cancel();
+						this.goalActive = false;
+						this.transcript.addSystemMessage("Goal cleared.");
+						this.transcriptDisplay.setTurns(this.transcript.getTurns());
+						this.tui.requestRender();
+						return;
+					}
+					if (!args) {
+						// Show goal status
+						const state = this.goalManager.getState();
+						if (!state) {
+							this.transcript.addSystemMessage("No goal set.");
+						} else if (state.status === "achieved") {
+							const dur = Math.round((state.achievedAt! - state.startedAt) / 1000);
+							this.transcript.addSystemMessage(
+								`Goal achieved: "${state.condition}"\n` +
+								`Duration: ${dur}s, Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
+							);
+						} else if (state.status === "cancelled") {
+							this.transcript.addSystemMessage(
+								`Goal cancelled: "${state.condition}"\n` +
+								`Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
+							);
+						} else {
+							const elapsed = Math.round((Date.now() - state.startedAt) / 1000);
+							this.transcript.addSystemMessage(
+								`Goal active: "${state.condition}"\n` +
+								`Running: ${elapsed}s, Turns: ${state.turnCount}${state.maxTurns ? ` / ${state.maxTurns}` : ""}\n` +
+								`Last: ${state.lastReason || "evaluating..."}`,
+							);
+						}
+						this.transcriptDisplay.setTurns(this.transcript.getTurns());
+						this.tui.requestRender();
+						return;
+					}
+					// Parse condition, extracting optional turn limit
+					const parsed = GoalManager.parseCondition(args);
+					this.goalManager.set(parsed.condition, parsed.maxTurns);
+					this.goalActive = true;
+					const info = parsed.maxTurns ? ` (max ${parsed.maxTurns} turns)` : "";
+					this.transcript.addSystemMessage(
+						`◎ Goal set: "${parsed.condition}"${info}`,
+					);
+					this.transcriptDisplay.setTurns(this.transcript.getTurns());
+					this.tui.requestRender();
+					return;
+				}
 				if (match && match.command === "/new") {
 					this._autoSaveTurn();
 					this.currentSessionId = this.sessionStore.createSession({
@@ -876,6 +970,14 @@ export class LogicianTUI {
 	private handleEvent(event: ParsedBridgeEvent): void {
 		// Update transcript state
 		this.transcript.handleEvent(event);
+		this.turnState = reduceTurnState(this.turnState, event);
+		this.workSurface.setPhase(this.turnState.phase);
+		this.statusPanel.update({ phase: turnPhaseLabel(this.turnState.phase) });
+		if (turnPhaseIsActive(this.turnState.phase)) {
+			this.statusPanel.startAnimation();
+		} else {
+			this.statusPanel.stopAnimation();
+		}
 
 		switch (event.type) {
 			case "todos":
@@ -908,7 +1010,8 @@ export class LogicianTUI {
 				this.choicePopup.setChoices(event.choices);
 				this.choicePopup.show();
 				const overlay = this.tui.showOverlay(this.choicePopup, {
-					anchor: "center",
+					anchor: "aboveInput",
+					align: "left",
 					maxHeight: 18,
 				});
 				overlay.focus();
@@ -916,39 +1019,44 @@ export class LogicianTUI {
 				break;
 			}
 			case "token":
-				if (!this.streaming) {
-					this.streaming = true;
-					this.statusPanel.update({ phase: "streaming" });
-					this.statusPanel.startAnimation();
-				}
 				break;
 			case "tool_start":
 			case "tool_execution_start":
-				this.statusPanel.update({ phase: "tool" });
-				this.statusPanel.startAnimation();
+				this.workSurface.recordToolStart(
+					event.tool_call_id,
+					event.tool_name || event.tool,
+					event.tool_args,
+				);
+				break;
+			case "tool_end":
+			case "tool_execution_end":
+				this.workSurface.recordToolEnd(
+					event.tool_call_id,
+					event.tool_name || event.tool,
+					event.result,
+					event.is_error,
+				);
 				break;
 			case "turn_end":
-				this.streaming = false;
-				this.statusPanel.stopAnimation();
 				// Auto-save the completed turn
 				this._autoSaveTurn();
 				this.statusPanel.update({
-					phase: "ready",
 					turnCount: this.transcript.getTurns().length,
 					messageCount: this.transcript.getMessageCount(),
 				});
+				// Goal evaluation: if a goal is active, evaluate after each turn
+				if (this.goalActive && this.goalManager.isSet()) {
+					const goalState = this.goalManager.getState();
+					if (goalState && goalState.status === "active") {
+						void this.evaluateGoal(goalState);
+					}
+				}
 				break;
 			case "turn_start":
-				this.statusPanel.update({ phase: "thinking" });
-				this.statusPanel.startAnimation();
+				this.workSurface.startTurn();
 				break;
 			case "phase":
-				this.statusPanel.update({ phase: event.state });
-				if (event.state !== "ready") {
-					this.statusPanel.startAnimation();
-				} else {
-					this.streaming = false;
-					this.statusPanel.stopAnimation();
+				if (event.state === "ready") {
 					this.statusPanel.update({
 						turnCount: this.transcript.getTurns().length,
 						messageCount: this.transcript.getMessageCount(),
@@ -956,6 +1064,10 @@ export class LogicianTUI {
 				}
 				break;
 			case "context_update":
+				this.workSurface.setContext(
+					Number(event.tokens || 0),
+					Number(event.max_tokens || 0) || undefined,
+				);
 				this.statusPanel.update({
 					contextTokens: Number(event.tokens || 0),
 					contextMaxTokens: Number(event.max_tokens || 0) || undefined,
@@ -1007,8 +1119,13 @@ export class LogicianTUI {
 				break;
 			}
 			case "steered":
-				// No inline confirmation — the SteerQueue widget already reflects
-				// pending messages, and the injected content shows up in the turn.
+				// Steering is part of the active run rather than a new turn, but it must
+				// remain visible after the transient queue widget drains. Otherwise a
+				// successfully queued user message looks as though it was discarded.
+				this.transcript.addSystemMessage(
+					`You steered the active turn:\n${String(event.message || "")}`,
+				);
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
 				break;
 		}
 
@@ -1058,40 +1175,31 @@ export class LogicianTUI {
 					.filter(Boolean)
 			: [];
 
-		const runtimeRows: Array<[string, string]> = [
-			["Agent", String(state.agent_name || "logician")],
-			["Model", String(state.model || "unknown")],
-			["Theme", theme.name],
-			["Base URL", String(state.base_url || "unknown")],
-			["Project", this.getGitVersion() || "-"],
-			["Config", this.configPath || "-"],
-		];
-
 		const dim = "\x1b[2m";
 		const reset = "\x1b[0m";
-		const tableHeader = `${dim}| Runtime | Value |${reset}`;
-		const tableSep = `${dim}| --- | --- |${reset}`;
-		const tableRows = runtimeRows.map(
-			([label, value]) =>
-				`| ${dim}${markdownTableCell(label)}${reset} | ${markdownTableCell(value)} |`,
-		);
+		const model = String(state.model || "unknown");
+		const agent = String(state.agent_name || "logician");
+		const project = this.getGitVersion() || "-";
+		const mcpState = state.mcp_loading
+			? "MCP loading"
+			: state.mcp_deferred
+				? "MCP deferred"
+				: `MCP ${mcpServerCount}/${mcpToolCount}`;
+		const searchUrl = String(state.web_search_url || "");
+		const searchEnabled =
+			state.web_search_enabled === true ||
+			(Array.isArray(state.tools) && state.tools.includes("web_search"));
+		const searchState = searchEnabled
+			? searchUrl || "enabled"
+			: "disabled";
 
 		const lines = [
 			"# Logician",
-			"Runtime ready.",
+			`${agent} is ready · ${model}`,
 			"",
-			tableHeader,
-			tableSep,
-			...tableRows,
-			"",
-			"## Startup",
-			`Plugins loaded: ${pluginCount}`,
-			`Startup hooks: ${hookCount}`,
-			state.mcp_loading
-				? "MCP: loading in background"
-				: state.mcp_deferred
-				? "MCP: deferred until first agent turn or /status"
-				: `MCP: ${mcpServerCount} server(s), ${mcpToolCount} tool(s)`,
+			`${dim}${project} · theme ${theme.name} · plugins ${pluginCount} · skills ${skills.length} · hooks ${hookCount} · ${mcpState}${reset}`,
+			`${dim}web search ${searchState}${reset}`,
+			`${dim}config ${this.configPath || "-"} · ${String(state.base_url || "unknown")}${reset}`,
 		];
 
 		if (initialMessage) {
@@ -1125,15 +1233,15 @@ export class LogicianTUI {
 
 		// Keep the inventory last so the transcript's initial scroll position shows
 		// what was loaded instead of ending on verbose startup-hook context.
+		lines.push("", "## Loaded resources");
 		lines.push(
+			`${dim}Plugins (${plugins.length})${reset}`,
+			plugins.length ? plugins.join(" · ") : `${dim}None${reset}`,
 			"",
-			`## Plugins (${plugins.length})`,
-			plugins.length ? plugins.join(" · ") : "None",
-			"",
-			`## Skills (${skills.length})`,
+			`${dim}Skills (${skills.length})${reset}`,
 			skills.length
 				? skills.map((skill) => `/${skill.slashName}`).join(" · ")
-				: "None",
+				: `${dim}None${reset}`,
 		);
 
 		return lines.join("\n");
@@ -1284,10 +1392,13 @@ export class LogicianTUI {
 					}
 					return { consume: true };
 				}
-				// Escape — dismiss the menu but keep what was typed;
-				// if a loop is active, stop it
+				// Escape — dismiss the menu, clear/arm the composer, and stop an
+				// active loop. A following Escape cancels the active model turn.
 				if (data === "\x1b") {
 					this.slashPopup.hide();
+					// Let the composer consume the first Escape too: it clears the
+					// slash draft and arms the second Escape for turn cancellation.
+					this.inputBar.handleInput(data);
 					if (this.loopActive) {
 						this.loopManager.stop();
 						this.loopActive = false;
@@ -1345,6 +1456,20 @@ export class LogicianTUI {
 			// Ctrl+S — open session manager
 			if (data === "\x13") {
 				this.openSessionManager();
+				return { consume: true };
+			}
+
+			// Ctrl+M requires an enhanced keyboard protocol because legacy
+			// terminals encode it exactly like Enter. TUI.start() requests CSI-u;
+			// Alt+M remains the portable fallback for terminals that ignore it.
+			if (
+				data === "\x1bm" ||
+				data === "\x1bM" ||
+				data === "\x1b[109;5u" ||
+				data === "\x1b[109;6u" ||
+				data === "\x1b[13;5u"
+			) {
+				this.cycleInferenceMode();
 				return { consume: true };
 			}
 
@@ -1582,7 +1707,8 @@ export class LogicianTUI {
 		this.sessionManager.refresh();
 		this.sessionManager.show();
 		const overlay = this.tui.showOverlay(this.sessionManager, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		overlay.focus();
@@ -1601,31 +1727,36 @@ export class LogicianTUI {
 		// space when active).
 		const pinnedContainer = new Container();
 		pinnedContainer.addChild(this.todoBar);
+		pinnedContainer.addChild(this.workSurface);
 		pinnedContainer.addChild(this.steerQueue);
 		this.tui.setFixedAboveInputComponent(pinnedContainer);
 
-		// Slash popup as overlay anchored to the bottom of the transcript area, so
-		// the suggestion list sits directly above the input bar like an inline
-		// autocomplete menu.
+		// Interactive pickers join the fixed composer stack. They consume layout
+		// space above the input like the TODO/queue region instead of floating
+		// over transcript content.
 		this.tui.showOverlay(this.slashPopup, {
-			anchor: "bottom",
+			anchor: "aboveInput",
 			align: "left",
 			maxHeight: 12,
 		});
 		this.tui.showOverlay(this.pluginManager, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		this.tui.showOverlay(this.mcpManager, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		this.tui.showOverlay(this.sessionManager, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		this.tui.showOverlay(this.settingsSelector, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 	}
@@ -1798,7 +1929,8 @@ export class LogicianTUI {
 		);
 		this.reasonerSelector.show();
 		const overlay = this.tui.showOverlay(this.reasonerSelector, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		overlay.focus();
@@ -1838,7 +1970,8 @@ export class LogicianTUI {
 		);
 		this.modelSelector.show();
 		const overlay = this.tui.showOverlay(this.modelSelector, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		overlay.focus();
@@ -1880,7 +2013,8 @@ export class LogicianTUI {
 		this.themeSelector.setMessage("Enter selects a color theme.");
 		this.themeSelector.show();
 		const overlay = this.tui.showOverlay(this.themeSelector, {
-			anchor: "center",
+			anchor: "aboveInput",
+			align: "left",
 			maxHeight: 18,
 		});
 		overlay.focus();
@@ -2005,12 +2139,33 @@ export class LogicianTUI {
 						{ label: "off", value: "false", current: !data.proactiveCompactionEnabled, toggleOn: false },
 					],
 				},
+				{
+					name: "Inference mode",
+					currentValue: data.inferenceMode,
+					description: "Pre-defined sampling parameter set (Alt+M to cycle)",
+					options: [
+						{ label: "Think General", value: "thinking-general", current: data.inferenceMode === "thinking-general" },
+						{ label: "Think Code", value: "thinking-coding", current: data.inferenceMode === "thinking-coding" },
+						{ label: "Instruct", value: "instruct-general", current: data.inferenceMode === "instruct-general" },
+						{ label: "Reason", value: "instruct-reasoning", current: data.inferenceMode === "instruct-reasoning" },
+					],
+				},
+				{
+					name: "Post-edit diagnostics",
+					currentValue: data.postEditDiagnostics ? "on" : "off",
+					description: "Check edited files against the project",
+					options: [
+						{ label: "on", value: "true", current: data.postEditDiagnostics, toggleOn: true },
+						{ label: "off", value: "false", current: !data.postEditDiagnostics, toggleOn: false },
+					],
+				},
 			];
 			this.settingsSelector.setSettings(settings);
 			this.settingsSelector.setMessage("Enter selects a setting · Enter in detail applies");
 			this.settingsSelector.show();
 			const overlay = this.tui.showOverlay(this.settingsSelector, {
-				anchor: "center",
+				anchor: "aboveInput",
+				align: "left",
 				maxHeight: 18,
 			});
 			overlay.focus();
@@ -2102,6 +2257,22 @@ export class LogicianTUI {
 				this.transcript.addSystemMessage(`Compaction: ${on ? "on" : "off"}`);
 				break;
 			}
+			case "post-edit diagnostics": {
+				const on = value === "true";
+				this.bridge.setRuntimeToggle("postEditDiagnostics", on);
+				saveConfigField("postEditDiagnostics", on);
+				this.transcript.addSystemMessage(`Post-edit diagnostics: ${on ? "on" : "off"}`);
+				break;
+			}
+			case "inference mode": {
+				const valid = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+				if (!valid.includes(value)) {
+					this.transcript.addSystemMessage(`Invalid inference mode: ${value}. Valid: ${valid.join(", ")}`);
+				} else {
+					this.setInferenceMode(value);
+				}
+				break;
+			}
 			default:
 				this.transcript.addSystemMessage(`Unknown setting: ${settingName}`);
 		}
@@ -2119,7 +2290,7 @@ export class LogicianTUI {
 				encoding: "utf8",
 				stdio: ["ignore", "pipe", "ignore"],
 			}).trim();
-		} catch {
+		} catch (e: unknown) {
 			return "";
 		}
 	}
@@ -2162,7 +2333,7 @@ export class LogicianTUI {
 						stdio: ["ignore", "pipe", "ignore"],
 					}).trim(),
 				) || 0;
-		} catch {
+		} catch (e: unknown) {
 			// ignore
 		}
 		return { branch, modified, staged, untracked };
@@ -2188,11 +2359,11 @@ export class LogicianTUI {
 					cwd: process.cwd(),
 					stdio: "ignore",
 				});
-			} catch {
+			} catch (e: unknown) {
 				dirty = " dirty";
 			}
 			return `${branch}@${sha}${dirty}`;
-		} catch {
+		} catch (e: unknown) {
 			return "";
 		}
 	}
@@ -2218,6 +2389,113 @@ export class LogicianTUI {
 	async stop(): Promise<void> {
 		this.tui.stop();
 		await this.bridge.stop();
+	}
+
+	// ── Goal evaluation ──────────────────────────────────────────────────
+
+	private async evaluateGoal(goalState: Readonly<GoalState>): Promise<void> {
+		if (this.goalEvaluationPending) return;
+		this.goalEvaluationPending = true;
+		// Build conversation snapshot from transcript turns
+		const turns = this.transcript.getTurns();
+		const snapshot = turns
+			.map((t) => {
+				const parts: string[] = [];
+				if (t.userMessage) parts.push(`User: ${t.userMessage}`);
+				if (t.assistantMessage) parts.push(`Assistant: ${t.assistantMessage}`);
+				return parts.join("\n");
+			})
+			.filter(Boolean)
+			.join("\n\n");
+
+		const evaluatorPrompt = GoalManager.buildEvaluatorPrompt(
+			goalState.condition,
+			snapshot,
+		);
+
+		this.transcript.addSystemMessage(
+			`◎ Goal evaluation #${goalState.turnCount}: "${goalState.condition}"`,
+		);
+		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.tui.requestRender();
+
+		// Call LLM directly for evaluation (like dropper.ts does)
+		const { baseUrl, model } = this.bridge.getConfig();
+		const apiKey =
+			process.env.ANTHROPIC_API_KEY
+				?? process.env.OPENAI_API_KEY
+				?? process.env.LLM_API_KEY
+				?? "sk-no-key";
+
+		let response: string;
+		try {
+			const res = await fetch(`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${apiKey}`,
+					"x-api-key": apiKey,
+				},
+				body: JSON.stringify({
+					model: model || "gpt-4o",
+					messages: [
+						{ role: "system", content: evaluatorPrompt },
+					],
+					max_tokens: 256,
+					temperature: 0,
+				}),
+			});
+
+			if (!res.ok) {
+				const errText = await res.text().catch(() => "");
+				throw new Error(`LLM API error ${res.status}: ${errText.slice(0, 200)}`);
+			}
+
+			const data = await res.json() as {
+				choices: Array<{ message: { content: string } }>;
+			};
+			response = data.choices?.[0]?.message?.content ?? "";
+		} catch (e: unknown) {
+			const err = e instanceof Error ? e.message : String(e);
+			this.goalManager.handleAction({ type: "clear" });
+			this.goalActive = false;
+			this.transcript.addSystemMessage(
+				`Goal evaluation failed: ${err}. Goal cancelled.`,
+			);
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.tui.requestRender();
+			this.goalEvaluationPending = false;
+			return;
+		}
+
+		const { met, reason } = GoalManager.parseEvaluatorResponse(response);
+
+		if (met) {
+			this.goalManager.recordEvaluation(true, reason);
+			this.goalActive = false;
+			this.transcript.addSystemMessage(
+				`✓ Goal achieved: "${goalState.condition}" — ${reason}`,
+			);
+		} else {
+			this.goalManager.recordEvaluation(false, reason);
+			const stillActive = this.goalManager.isActive();
+			this.goalActive = stillActive;
+			this.transcript.addSystemMessage(
+				stillActive
+					? `◎ Goal not yet met: ${reason} — continuing...`
+					: `Goal stopped: ${this.goalManager.getState()?.lastReason || reason}`,
+			);
+			if (stillActive) {
+				const reminder = `Goal reminder: "${goalState.condition}". ${reason}. Continue working toward the goal.`;
+				void this.bridge.sendMessage(reminder).catch((error: unknown) => {
+					this.bridge.reportError(error);
+				});
+			}
+		}
+
+		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.tui.requestRender();
+		this.goalEvaluationPending = false;
 	}
 }
 

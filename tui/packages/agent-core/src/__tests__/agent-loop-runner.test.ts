@@ -201,6 +201,67 @@ void test("structured run outcomes take precedence and reset between runs", asyn
 	);
 });
 
+void test("concurrent loops isolate structured task status", async () => {
+	let arrivals = 0;
+	let release!: () => void;
+	const bothRecorded = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const makeStatusTool = (): Tool => ({
+		name: "task_status",
+		description: "concurrent status fixture",
+		parameters: { type: "object", properties: {} },
+		execute: async (args) => {
+			recordTaskStatus({
+				status: args.status as "done" | "blocked",
+				summary: String(args.summary),
+				ts: Date.now(),
+			});
+			arrivals++;
+			if (arrivals === 2) release();
+			await bothRecorded;
+			return "recorded";
+		},
+	});
+	const run = async (status: "done" | "blocked") => {
+		const tool = makeStatusTool();
+		const events: AgentEvent[] = [];
+		await runAgentLoop(
+			{ systemPrompt: "test", messages: [], tools: [tool] },
+			[user(status)],
+			{
+				...makeConfig({
+					tools: [tool],
+					hooks: {
+						afterToolCall: () => ({ terminate: true }),
+					},
+				}),
+				backend: new FakeBackend([
+					() => ({
+						content: "",
+						toolCalls: [{
+							id: `status-${status}`,
+							name: "task_status",
+							arguments: JSON.stringify({ status, summary: status }),
+						}],
+						stopReason: "stop",
+					}),
+				]),
+			},
+			(event) => {
+				events.push(event);
+			},
+		);
+		return events.find((event) => event.type === "run_outcome");
+	};
+
+	const [done, blocked] = await Promise.all([run("done"), run("blocked")]);
+	assert.ok(done?.type === "run_outcome");
+	assert.equal(done.status, "completed");
+	assert.ok(blocked?.type === "run_outcome");
+	assert.equal(blocked.status, "blocked");
+});
+
 void test("provider retry stays within one iteration and ends only after success", async () => {
 	const backend = new FakeBackend([
 		() => {
@@ -350,6 +411,52 @@ void test("runAgentLoop executes a tool batch and returns ordered tool results",
 	);
 });
 
+void test("runAgentLoop promotes textual XML tool calls and hides their markup", async () => {
+	let received: Record<string, unknown> | undefined;
+	const grepTool: Tool = {
+		name: "grep",
+		description: "search",
+		parameters: { type: "object", properties: {} },
+		execute: async (args) => {
+			received = args;
+			return "match";
+		},
+	};
+	const textualCall = [
+		"Searching now.",
+		"<tool_call>",
+		"<function=grep>",
+		"<parameter=pattern>notice|NoticeEvent</parameter>",
+		"<parameter=path>/tmp/bridge.ts</parameter>",
+		"<parameter=limit>50</parameter>",
+		"</function>",
+		"</tool_call>",
+	].join("\n");
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [grepTool] },
+		[user("search")],
+		{
+			...makeConfig({ tools: [grepTool] }),
+			backend: new FakeBackend([
+				() => textResponse(textualCall),
+				() => textResponse("Search complete."),
+			]),
+		},
+		() => {},
+	);
+
+	assert.deepEqual(received, {
+		pattern: "notice|NoticeEvent",
+		path: "/tmp/bridge.ts",
+		limit: 50,
+	});
+	const promoted = messages.find(
+		(message) => message.role === "assistant" && message.tool_calls?.length,
+	);
+	assert.equal(promoted?.content, "Searching now.");
+	assert.doesNotMatch(String(promoted?.content), /tool_call|function=grep/);
+});
+
 void test("runAgentLoop executes independent tool calls in parallel and preserves result order", async () => {
 	const completions: string[] = [];
 	const tool: Tool = {
@@ -382,6 +489,65 @@ void test("runAgentLoop executes independent tool calls in parallel and preserve
 	);
 	assert.deepEqual(completions, ["fast", "slow"]);
 	assert.deepEqual(messages.filter((m) => m.role === "tool").map((m) => m.tool_call_id), ["slow", "fast"]);
+});
+
+void test("sequential tools are barriers without disabling parallel stages", async () => {
+	const events: string[] = [];
+	let releaseReads!: () => void;
+	const readsDone = new Promise<void>((resolve) => {
+		releaseReads = resolve;
+	});
+	let completedReads = 0;
+	const read: Tool = {
+		name: "read",
+		description: "parallel read",
+		parameters: { type: "object", properties: {} },
+		executionMode: "parallel",
+		execute: async (args) => {
+			events.push(`start:${String(args.id)}`);
+			completedReads++;
+			if (completedReads === 2) releaseReads();
+			await readsDone;
+			events.push(`end:${String(args.id)}`);
+			return "read";
+		},
+	};
+	const write: Tool = {
+		name: "write",
+		description: "sequential write",
+		parameters: { type: "object", properties: {} },
+		executionMode: "sequential",
+		execute: async () => {
+			events.push("write");
+			return "written";
+		},
+	};
+	const backend = new FakeBackend([
+		() => ({
+			content: "",
+			toolCalls: [
+				{ id: "a", name: "read", arguments: '{"id":"a"}' },
+				{ id: "b", name: "read", arguments: '{"id":"b"}' },
+				{ id: "w", name: "write", arguments: "{}" },
+				{ id: "c", name: "read", arguments: '{"id":"c"}' },
+			],
+			stopReason: "stop",
+		}),
+		() => textResponse("done"),
+	]);
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [read, write] },
+		[user("prompt")],
+		{ ...makeConfig({ tools: [read, write], toolExecution: "parallel" }), backend },
+		() => {},
+	);
+	assert.ok(events.indexOf("start:b") < events.indexOf("end:a"));
+	assert.ok(events.indexOf("write") > events.indexOf("end:a"));
+	assert.ok(events.indexOf("start:c") > events.indexOf("write"));
+	assert.deepEqual(
+		messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id),
+		["a", "b", "w", "c"],
+	);
 });
 
 void test("cancelled sequential batches produce a result for every tool call", async () => {
@@ -572,4 +738,211 @@ void test("runAgentLoop stops before provider call when aborted", async () => {
 	assert.equal(backend.calls, 0);
 	assert.deepEqual(newMessages.map((m) => `${m.role}:${m.content ?? ""}`), ["user:prompt"]);
 	assert.ok(events.some((event) => event.type === "error" && event.message.includes("aborted")));
+});
+
+void test("continuation does not turn a conversational reply into hidden extra turns", async () => {
+	const backend = new FakeBackend([
+		() => textResponse("Hi! How can I help you today?"),
+	]);
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("hi")],
+		{ ...makeConfig({ continuationEnabled: true }), backend },
+		() => {},
+	);
+
+	assert.equal(backend.calls, 1);
+	assert.equal(messages.at(-1)?.content, "Hi! How can I help you today?");
+});
+
+void test("continuation still nudges an explicitly unfinished response", async () => {
+	const backend = new FakeBackend([
+		() => textResponse("I still need to check the test output."),
+		(messages) => {
+			assert.ok(
+				messages.some(
+					(message) =>
+						message.role === "user" &&
+						String(message.content).includes("Continue with the next step"),
+				),
+			);
+			return textResponse("Task complete.");
+		},
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("check it")],
+		{ ...makeConfig({ continuationEnabled: true }), backend },
+		() => {},
+	);
+
+	assert.equal(backend.calls, 2);
+});
+
+void test("continuation requires a structured conclusion after tool work", async () => {
+	const backend = new FakeBackend([
+		() => ({
+			content: "",
+			toolCalls: [{ id: "work", name: "noop", arguments: "{}" }],
+			stopReason: "stop",
+		}),
+		(messages) => {
+			assert.ok(messages.some((message) => message.role === "tool"));
+			return textResponse("I changed the file and the result looks good.");
+		},
+		(messages) => {
+			assert.ok(
+				messages.some(
+					(message) =>
+						message.role === "user" &&
+						String(message.content).includes("call task_status"),
+				),
+			);
+			return {
+				content: "",
+				toolCalls: [
+					{
+						id: "status",
+						name: "task_status",
+						arguments: JSON.stringify({ status: "done", summary: "Verified." }),
+					},
+				],
+				stopReason: "stop",
+			};
+		},
+	]);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
+		[user("make the change")],
+		{
+			...makeConfig({
+				continuationEnabled: true,
+				tools: [noop, task_status],
+				hooks: {
+					afterToolCall: ({ toolCall, isError }) =>
+						toolCall.name === "task_status" && !isError
+							? { terminate: true }
+							: undefined,
+				},
+			}),
+			backend,
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+
+	assert.equal(backend.calls, 3);
+	assert.ok(
+		events.some(
+			(event) =>
+				event.type === "run_outcome" &&
+				event.status === "completed" &&
+				event.source === "structured",
+		),
+	);
+});
+
+void test("reflection feedback re-enters the real provider loop", async () => {
+	const backend = new FakeBackend([
+		() => textResponse("I implemented the first part."),
+		() => textResponse(
+			"```reflection-report\n" +
+				JSON.stringify({
+					assessment: "incomplete",
+					reasoning: "Verification is missing.",
+					issues: ["Tests were not run"],
+					needsMoreWork: true,
+					suggestedSteps: ["Run tests"],
+				}) +
+				"\n```",
+		),
+		(messages) => {
+			assert.ok(
+				messages.some(
+					(message) =>
+						message.role === "user" &&
+						String(message.content).includes("Tests were not run"),
+				),
+			);
+			return textResponse("Task complete.");
+		},
+	]);
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("implement and verify")],
+		{
+			...makeConfig({
+				reflectionConfig: { enabled: true, maxReflections: 2 },
+			}),
+			backend,
+		},
+		() => {},
+	);
+
+	assert.equal(backend.calls, 3);
+	assert.equal(messages.at(-1)?.content, "Task complete.");
+	assert.equal(
+		messages.some((message) =>
+			String(message.content).includes("reflection-report")),
+		false,
+	);
+});
+
+void test("failed acceptance gets a bounded corrective provider turn", async () => {
+	const validReport = [
+		"Task complete.",
+		"```acceptance-report",
+		JSON.stringify({
+			criteriaSatisfied: [{
+				id: "criterion-1",
+				status: "satisfied",
+				evidence: "verified",
+			}],
+			residualRisks: [],
+		}),
+		"```",
+	].join("\n");
+	const backend = new FakeBackend([
+		() => textResponse("Task complete, but no report."),
+		(messages) => {
+			assert.ok(
+				messages.some(
+					(message) =>
+						message.role === "user" &&
+						String(message.content).includes("Acceptance validation failed"),
+				),
+			);
+			return textResponse(validReport);
+		},
+	]);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend,
+			maxIterations: 3,
+			acceptance: {
+				criteria: ["finish the task"],
+				maxFinalizationTurns: 1,
+			},
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+	assert.equal(backend.calls, 2);
+	assert.ok(
+		events.some(
+			(event) => event.type === "acceptance_complete" && event.status === "passed",
+		),
+	);
+	assert.ok(
+		events.some(
+			(event) => event.type === "run_outcome" && event.status === "completed",
+		),
+	);
 });

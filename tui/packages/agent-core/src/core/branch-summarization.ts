@@ -90,7 +90,7 @@ export function extractFileOpsFromMessages(messages: Message[]): FileOperations 
 						for (const p of paths) ops.read.add(p);
 					}
 				}
-			} catch {
+			} catch (e: unknown) {
 				// Malformed JSON — skip
 			}
 		}

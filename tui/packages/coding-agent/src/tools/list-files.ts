@@ -57,7 +57,7 @@ const defaultOps: LsOperations = {
 		try {
 			await fsStat(p);
 			return true;
-		} catch {
+		} catch (e: unknown) {
 			return false;
 		}
 	},
@@ -67,6 +67,7 @@ const defaultOps: LsOperations = {
 
 export const list_files: Tool = {
 	readOnly: true,
+	executionMode: "parallel",
 	name: "list_files",
 	label: "List Files",
 	hookAliases: ["LS"],
@@ -81,7 +82,7 @@ export const list_files: Tool = {
 		const { path: dirPathStr, limit } = args as ListFilesArgs;
 
 		const safePath = resolvePath(ctx.cwd, dirPathStr || ".");
-		ensureInsideCwd(ctx.cwd, safePath);
+		ensureInsideCwd(ctx.cwd, safePath, undefined, ctx.allowAllPaths);
 		const effectiveLimit = Math.max(1, Number(limit) || DEFAULT_LIMIT);
 
 		// Check if path exists.
@@ -93,7 +94,7 @@ export const list_files: Tool = {
 		let isDir: boolean;
 		try {
 			isDir = (await ops.stat(safePath)).isDirectory();
-		} catch {
+		} catch (e: unknown) {
 			return `Error: Not a directory: ${safePath}`;
 		}
 		if (!isDir) {
@@ -127,7 +128,7 @@ export const list_files: Tool = {
 			try {
 				const entryStat = await ops.stat(fullPath);
 				if (entryStat.isDirectory()) suffix = "/";
-			} catch {
+			} catch (e: unknown) {
 				// Skip entries we cannot stat.
 				continue;
 			}

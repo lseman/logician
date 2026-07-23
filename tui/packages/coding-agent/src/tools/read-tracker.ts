@@ -17,7 +17,7 @@ const lastReadSnapshot = new Map<string, ReadSnapshot>();
 function keyFor(absolutePath: string): string {
 	try {
 		return realpathSync(absolutePath);
-	} catch {
+	} catch (e: unknown) {
 		return absolutePath;
 	}
 }
@@ -32,7 +32,7 @@ export function recordRead(absolutePath: string): void {
 			size: info.size,
 			sha256,
 		});
-	} catch {
+	} catch (e: unknown) {
 		// File vanished between read and stat; nothing to record.
 	}
 }
@@ -56,7 +56,7 @@ export function isStaleSinceRead(absolutePath: string): boolean {
 		if (info.mtimeMs !== recorded.mtimeMs || info.size !== recorded.size) return true;
 		const sha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
 		return sha256 !== recorded.sha256;
-	} catch {
+	} catch (e: unknown) {
 		return false;
 	}
 }

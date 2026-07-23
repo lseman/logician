@@ -30,7 +30,7 @@ export function toError(error: unknown): Error {
 	if (typeof error === "string") return new Error(error);
 	try {
 		return new Error(JSON.stringify(error));
-	} catch {
+	} catch (e: unknown) {
 		return new Error(String(error));
 	}
 }

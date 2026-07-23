@@ -6,6 +6,7 @@ import type { Tool, ToolContext } from "@logician/agent-core/core/types.ts";
 
 export const ask_user: Tool = {
 	readOnly: true,
+	executionMode: "sequential",
 	name: "ask_user",
 	label: "Ask User",
 	hookAliases: ["AskUser"],
@@ -48,7 +49,7 @@ export const ask_user: Tool = {
 		if (typeof raw === "string") {
 			try {
 				return JSON.parse(raw);
-			} catch {
+			} catch (e: unknown) {
 				return {};
 			}
 		}

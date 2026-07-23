@@ -74,11 +74,11 @@ function gitSnapshotTree(cwd: string): WorkspaceSnapshot | null {
 		} finally {
 			try {
 				unlinkSync(indexFile);
-			} catch {
+			} catch (e: unknown) {
 				// Temp index may not exist when add failed early.
 			}
 		}
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 }
@@ -104,7 +104,7 @@ function readBlobFromTree(
 				maxBuffer: 64 * 1024 * 1024,
 			},
 		).toString("utf8");
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 }
@@ -133,7 +133,7 @@ export function recordFileBeforeWrite(path: string, cwd?: string): void {
 		const content = readFileSync(absolute, "utf8");
 		if (Buffer.byteLength(content, "utf8") > MAX_SNAPSHOT_BYTES) return;
 		frame.files.set(absolute, content);
-	} catch {
+	} catch (e: unknown) {
 		// File doesn't exist yet — record null so rewind deletes it.
 		frame.files.set(absolute, null);
 	}
@@ -186,7 +186,7 @@ export function recordBashMutations(before: WorkspaceSnapshot | null): void {
 				if (content !== null) frame.files.set(absolute, content);
 			}
 		}
-	} catch {
+	} catch (e: unknown) {
 		// Best-effort: bash capture must never break tool execution.
 	}
 }
@@ -206,7 +206,7 @@ export function restoreFileFrame(): number | null {
 			if (content === null) rmSync(path, { force: true });
 			else writeFileSync(path, content, "utf8");
 			restored++;
-		} catch {
+		} catch (e: unknown) {
 			// Best-effort: a vanished directory or permission change must not
 			// abort the remaining restores.
 		}

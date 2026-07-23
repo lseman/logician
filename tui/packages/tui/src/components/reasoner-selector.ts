@@ -5,6 +5,7 @@
 
 import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -28,16 +29,14 @@ export type ReasonerSelectorAction =
 export class ReasonerSelectorOverlay implements Component {
 	public visible = false;
 	private reasoners: ReasonerInfo[] = [];
-	private selectedIndex = 0;
+	private selection = new SelectorController();
 	private message = "";
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
 
 	setReasoners(reasoners: ReasonerInfo[]): void {
 		this.reasoners = reasoners;
-		if (this.selectedIndex >= this.reasoners.length) {
-			this.selectedIndex = Math.max(0, this.reasoners.length - 1);
-		}
+		this.selection.set(this.selection.index, this.reasoners.length);
 		this.invalidate();
 	}
 
@@ -67,7 +66,7 @@ export class ReasonerSelectorOverlay implements Component {
 			return { type: "close" };
 		}
 		if (data === "\r" || data === "\n") {
-			const reasoner = this.reasoners[this.selectedIndex];
+			const reasoner = this.reasoners[this.selection.index];
 			return reasoner ? { type: "select", reasoner } : { type: "close" };
 		}
 		if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
@@ -101,7 +100,7 @@ export class ReasonerSelectorOverlay implements Component {
 
 		if (!this.visible) return [];
 
-		const overlayWidth = Math.max(48, Math.min(width, 110));
+		const overlayWidth = Math.max(1, width);
 		const innerWidth = Math.max(1, overlayWidth - 4);
 		const lines: string[] = [];
 
@@ -125,14 +124,7 @@ export class ReasonerSelectorOverlay implements Component {
 			);
 		} else {
 			const maxRows = 10;
-			const start = Math.max(
-				0,
-				Math.min(
-					this.selectedIndex - Math.floor(maxRows / 2),
-					Math.max(0, this.reasoners.length - maxRows),
-				),
-			);
-			const end = Math.min(this.reasoners.length, start + maxRows);
+			const { start, end } = this.selection.window(this.reasoners.length, maxRows);
 			if (start > 0) {
 				lines.push(
 					boxLine(`${getMuted()}↑ ${start} more${RESET}`, "", innerWidth),
@@ -140,7 +132,7 @@ export class ReasonerSelectorOverlay implements Component {
 			}
 			for (let i = start; i < end; i++) {
 				const r = this.reasoners[i];
-				const selected = i === this.selectedIndex;
+				const selected = i === this.selection.index;
 				const cursor = selected ? "▸" : " ";
 				const activeMark = r.active ? `${getActive()}● active${RESET}` : "";
 				const name = selected
@@ -180,7 +172,7 @@ export class ReasonerSelectorOverlay implements Component {
 	private moveSelection(delta: number): void {
 		const n = this.reasoners.length;
 		if (!n) return;
-		this.selectedIndex = (this.selectedIndex + delta + n) % n;
+		this.selection.move(delta, n);
 		this.invalidate();
 	}
 }

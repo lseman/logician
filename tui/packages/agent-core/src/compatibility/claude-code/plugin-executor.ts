@@ -110,7 +110,7 @@ export async function mergeManifestHooks(
 	try {
 		const hookJson = await readJson(path.join(pluginDir, "hooks", "hooks.json"));
 		mergeHooks(merged, parseHooksDict(hookJson.hooks || hookJson));
-	} catch {
+	} catch (e: unknown) {
 		// No hooks directory — that's fine.
 	}
 }
@@ -238,7 +238,7 @@ export function parseHookResponse(rawOutput: string): HookExecutionResult {
 		if (!isRecord(data)) return result;
 		applyHookResponseObject(result, data);
 		return result;
-	} catch {
+	} catch (e: unknown) {
 		// Some hooks emit JSONL control records.
 	}
 
@@ -259,7 +259,7 @@ export function parseHookResponse(rawOutput: string): HookExecutionResult {
 			}
 			parsedJsonLine = true;
 			applyHookResponseObject(result, data);
-		} catch {
+		} catch (e: unknown) {
 			plainLines.push(line);
 		}
 	}
@@ -485,7 +485,7 @@ export function matcherMatches(
 		const regex = new RegExp(clean, "i");
 		if (regex.test(sourceClean)) return true;
 		if (sourceParts.some((part) => regex.test(part))) return true;
-	} catch {
+	} catch (e: unknown) {
 		// Fall back to legacy substring matching.
 	}
 	const lowerSource = sourceClean.toLowerCase();
@@ -587,7 +587,7 @@ export async function readJson(
 		const content = await fs.readFile(file, "utf8");
 		const stripped = stripJsonComments(content);
 		return JSON.parse(stripped);
-	} catch {
+	} catch (e: unknown) {
 		return {};
 	}
 }
@@ -596,7 +596,7 @@ export async function isDir(p: string): Promise<boolean> {
 	if (!p) return false;
 	try {
 		return (await fs.stat(p)).isDirectory();
-	} catch {
+	} catch (e: unknown) {
 		return false;
 	}
 }
@@ -607,7 +607,7 @@ export async function childDirNames(dir: string): Promise<string[]> {
 			.filter((d) => d.isDirectory())
 			.map((d) => d.name)
 			.sort();
-	} catch {
+	} catch (e: unknown) {
 		return [];
 	}
 }
@@ -646,7 +646,7 @@ export async function fileExists(file: string): Promise<boolean> {
 	try {
 		await fs.access(file);
 		return true;
-	} catch {
+	} catch (e: unknown) {
 		return false;
 	}
 }
@@ -670,7 +670,7 @@ export async function gitHead(cwd: string): Promise<string> {
 		});
 		const sha = String(stdout).trim();
 		return /^[a-f0-9]{40}$/i.test(sha) ? sha : "";
-	} catch {
+	} catch (e: unknown) {
 		return "";
 	}
 }

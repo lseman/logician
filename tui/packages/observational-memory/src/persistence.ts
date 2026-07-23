@@ -30,7 +30,7 @@ export class FilePersistence {
 			const raw = fs.readFileSync(this.filePath, "utf-8");
 			const parsed = JSON.parse(raw) as unknown;
 			return this.validateFolded(parsed);
-		} catch {
+		} catch (e: unknown) {
 			return undefined;
 		}
 	}
@@ -43,7 +43,7 @@ export class FilePersistence {
 				fs.mkdirSync(dir, { recursive: true });
 			}
 			fs.writeFileSync(this.filePath, JSON.stringify(memory, null, 2));
-		} catch {
+		} catch (e: unknown) {
 			// Ignore persistence errors
 		}
 	}
@@ -54,7 +54,7 @@ export class FilePersistence {
 			if (fs.existsSync(this.filePath)) {
 				fs.unlinkSync(this.filePath);
 			}
-		} catch {
+		} catch (e: unknown) {
 			// Ignore
 		}
 	}

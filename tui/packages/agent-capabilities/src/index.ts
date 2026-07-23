@@ -7,7 +7,6 @@ export * from "./todo/todo.ts";
 export * from "./todo/task-status.ts";
 export * from "./ask-user/ask-user.ts";
 export * from "./subagents/subagent.ts";
-export * from "./subagents/parallel-subagent.ts";
 export * from "./reasoners/index.ts";
 export {
 	getBuiltInTools,

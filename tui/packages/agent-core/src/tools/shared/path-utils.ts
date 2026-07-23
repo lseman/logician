@@ -63,30 +63,47 @@ export function resolveToCwd(filePath: string, cwd: string): string {
 	return resolvePath(cwd, filePath);
 }
 
-/** Ensure a resolved path is inside the CWD. Throws if outside. */
+/** Ensure a resolved path is inside the CWD or an allowed path. Throws if outside. */
 export function ensureInsideCwd(
 	cwd: string | undefined,
 	resolvedPath: string,
+	allowedPaths?: string[],
+	allowAllPaths?: boolean,
 ): void {
+	if (allowAllPaths) return;
+
 	const resolvedCwd = path.resolve(cwd ?? process.cwd());
-	const relative = path.relative(resolvedCwd, path.resolve(resolvedPath));
+	const resolved = path.resolve(resolvedPath);
+
+	// Check CWD first.
+	const relative = path.relative(resolvedCwd, resolved);
 	const isInside =
 		relative === "" ||
 		(relative !== ".." &&
 			!relative.startsWith(`..${path.sep}`) &&
 			!path.isAbsolute(relative));
-	if (!isInside) {
-		throw new Error(
-			`Path is outside CWD: ${resolvedPath} (CWD: ${resolvedCwd})`,
-		);
+	if (isInside) return;
+
+	// Check allowed paths.
+	if (allowedPaths) {
+		for (const ap of allowedPaths) {
+			const resolvedAp = path.resolve(ap);
+			if (resolved === resolvedAp || resolved.startsWith(resolvedAp + path.sep)) {
+				return;
+			}
+		}
 	}
+
+	throw new Error(
+		`Path is outside CWD: ${resolvedPath} (CWD: ${resolvedCwd})`,
+	);
 }
 
 function fileExists(filePath: string): boolean {
 	try {
 		fs.accessSync(filePath, fs.constants.F_OK);
 		return true;
-	} catch {
+	} catch (e: unknown) {
 		return false;
 	}
 }
@@ -135,7 +152,7 @@ export function resolveReadPath(filePath: string, cwd: string): string {
 export function readUtf8IfExists(filePath: string): string | null {
 	try {
 		return fs.readFileSync(filePath, "utf-8");
-	} catch {
+	} catch (e: unknown) {
 		return null;
 	}
 }
@@ -165,7 +182,7 @@ export function markPathIgnoredByCloudSync(dirPath: string): void {
 			const noindex = path.join(dirPath, ".noindex");
 			if (!fs.existsSync(noindex)) fs.writeFileSync(noindex, "");
 		}
-	} catch {
+	} catch (e: unknown) {
 		// best-effort
 	}
 }

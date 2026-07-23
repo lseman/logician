@@ -10,14 +10,6 @@ import {
 	createSpawnAgentTool,
 	type SpawnAgentDeps,
 } from "./subagents/subagent.ts";
-import {
-	createParallelSpawnAgentTool,
-	type ParallelSpawnAgentDeps,
-} from "./subagents/parallel-subagent.ts";
-import {
-	createCoordinateSubagentsTool,
-	type CoordinateSubagentsDeps,
-} from "./subagents/coordinate-subagents.ts";
 
 export interface SubagentToolDeps {
 	config: () => AgentConfig;
@@ -25,8 +17,6 @@ export interface SubagentToolDeps {
 	cwd: string;
 	agents: () => import("./subagents/subagent.ts").AgentDefinition[];
 	emit: (event: AgentEvent) => void;
-	parallelOptions?: import("./subagents/parallel-subagent.ts").ParallelSpawnOptions;
-	coordinateOptions?: import("./subagents/coordinate-subagents.ts").CoordinateSubagentsOptions;
 }
 
 /** Get all built-in tools as an array. */
@@ -46,26 +36,5 @@ export function getBuiltInSubagentTools(deps: SubagentToolDeps): Tool[] {
 	};
 	const spawn = createSpawnAgentTool(spawnDeps);
 
-	const parallelDeps: ParallelSpawnAgentDeps = {
-		config: deps.config,
-		backend: deps.backend,
-		cwd: deps.cwd,
-		agents: deps.agents,
-		emit: deps.emit,
-		options: deps.parallelOptions || {},
-	};
-	const parallelSpawn = createParallelSpawnAgentTool(parallelDeps);
-
-	const coordinateDeps: CoordinateSubagentsDeps = {
-		config: deps.config,
-		backend: deps.backend,
-		cwd: deps.cwd,
-		agents: deps.agents,
-		emit: deps.emit,
-		options: deps.coordinateOptions || {},
-		defaultMaxIterations: deps.config().maxIterations || 30,
-	};
-	const coordinateSpawn = createCoordinateSubagentsTool(coordinateDeps);
-
-	return [spawn, parallelSpawn, coordinateSpawn];
+	return [spawn];
 }

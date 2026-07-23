@@ -67,6 +67,7 @@ export type {
 export type {
 	QueueMode,
 	ThinkingLevel,
+	InferenceMode,
 	AgentConfig,
 	AgentModelConfig,
 	AgentHarnessStreamOptions,
@@ -77,6 +78,8 @@ export type {
 	AcceptanceReview,
 } from "./types/types-config.ts";
 export type { AcceptanceConfig } from "./acceptance-contract.ts";
+export type { TruncationConfig } from "./types/types-truncation.ts";
+export { DEFAULT_TRUNCATION, resolveTruncationConfig } from "./types/types-truncation.ts";
 
 export {
 	AgentErrorType,

@@ -24,6 +24,7 @@ export { Transcript, type Turn } from "./sessions/transcript.ts";
 export { type ParsedBridgeEvent } from "./runtime/events.ts";
 export { formatContextSize, envNumber, tableRow } from "./tui-utils.ts";
 export { LoopManager } from "./runtime/loop-manager.ts";
+export { GoalManager } from "./runtime/goal-manager.ts";
 export * from "./tools/index.ts";
 export * from "./mcp/index.ts";
 export * from "./skills.ts";
