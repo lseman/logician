@@ -20,8 +20,6 @@ export interface ConsolidationConfig {
 	hasUI?: boolean;
 	/** Observation pool target (tokens below which no drops occur) */
 	observationsPoolTargetTokens?: number;
-	/** Max turns per agent stage */
-	maxTurns?: number;
 	/** Thinking level for LLM calls */
 	thinkingLevel?: string;
 }
@@ -79,6 +77,15 @@ export class ConsolidationPipeline {
 	/**
 	 * Check if consolidation should launch and run it asynchronously.
 	 * Non-blocking: returns immediately.
+	 *
+	 * Returns undefined (no-op) while a run is already in flight, instead of
+	 * queuing. This is safe only because the caller (hooks.ts) re-derives
+	 * "is a stage due" from live token/observation counts on every turn_end,
+	 * rather than tracking a queue of missed triggers — so a skipped call
+	 * here just means the same due-check re-fires, with up-to-date state, on
+	 * the next turn_end. A caller that does NOT re-derive due-state the same
+	 * way would lose data on a skipped call; do not call this directly
+	 * without that guarantee.
 	 */
 	async maybeLaunch(
 		params: LaunchParams,
@@ -178,7 +185,6 @@ export class ConsolidationPipeline {
 			priorReflections: priorRefs,
 			chunk,
 			allowedSourceEntryIds: (params.sourceEntries ?? []).map((entry) => entry.id),
-			maxTurns: this.config.maxTurns,
 			thinkingLevel: this.config.thinkingLevel,
 		});
 
@@ -218,7 +224,6 @@ export class ConsolidationPipeline {
 			headers: this.config.headers,
 			observations: obsWithCoverage,
 			reflections: refList,
-			maxTurns: this.config.maxTurns,
 			thinkingLevel: this.config.thinkingLevel,
 		});
 
@@ -245,7 +250,6 @@ export class ConsolidationPipeline {
 			observations: params.observations,
 			reflections: params.reflections,
 			targetTokens,
-			maxTurns: this.config.maxTurns,
 			thinkingLevel: this.config.thinkingLevel,
 		});
 

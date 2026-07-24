@@ -5,6 +5,7 @@
 import { estimateTokens } from "./tokens.ts";
 import type { Reflection } from "./types.ts";
 import { REFLECTOR_SYSTEM_PROMPT } from "./prompts.ts";
+import { callLLM, extractJsonArray } from "./llm-client.ts";
 
 export interface ReflectorConfig {
 	model: unknown;
@@ -16,7 +17,6 @@ export interface ReflectorConfig {
 		coverage: "none" | "partial" | "strong";
 	}>;
 	reflections: Reflection[];
-	maxTurns?: number;
 	thinkingLevel?: string;
 }
 
@@ -30,7 +30,6 @@ export async function runReflector(
 		headers,
 		observations,
 		reflections: _existingReflections,
-		maxTurns: _maxTurns,
 		thinkingLevel = "off",
 	} = config;
 
@@ -57,75 +56,19 @@ export async function runReflector(
 	}
 }
 
-async function callLLM(
-	systemPrompt: string,
-	userMessage: string,
-	config: {
-		model: unknown;
-		apiKey: string;
-		baseUrl?: string;
-		headers?: Record<string, string>;
-		thinkingLevel?: string;
-	},
-): Promise<string> {
-	const { model: modelName, apiKey: key, baseUrl, headers: h, thinkingLevel } = config;
-
-	const body: Record<string, unknown> = {
-		model: typeof modelName === "string" ? modelName : "gpt-4o",
-		messages: [
-			{ role: "system", content: systemPrompt },
-			{ role: "user", content: userMessage },
-		],
-		response_format: { type: "json_object" },
-		max_tokens: 2048,
-	};
-
-	if (thinkingLevel && thinkingLevel !== "off") {
-		body["thinking"] = thinkingLevel;
-	}
-
-	const response = await fetch(`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			...(key ? { Authorization: `Bearer ${key}` } : {}),
-			...(h ?? {}),
-		},
-		body: JSON.stringify(body),
-	});
-
-	if (!response.ok) {
-		throw new Error(
-			`LLM call failed: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const data = (await response.json()) as {
-		choices: Array<{ message: { content: string } }>;
-	};
-	return data.choices[0]?.message?.content ?? "";
-}
-
 function parseReflections(raw: string): Reflection[] | undefined {
-	const jsonMatch = raw.match(/\[[\s\S]*\]/);
-	if (!jsonMatch) return undefined;
+	const parsed = extractJsonArray(raw);
+	if (!parsed) return undefined;
 
-	try {
-		const parsed = JSON.parse(jsonMatch[0]) as unknown;
-		if (!Array.isArray(parsed)) return undefined;
-
-		const reflections: Reflection[] = [];
-		for (const item of parsed) {
-			if (!isReflection(item)) continue;
-			reflections.push({
-				...item,
-				tokenCount: item.tokenCount ?? estimateTokens(item.content),
-			});
-		}
-		return reflections;
-	} catch (e: unknown) {
-		return undefined;
+	const reflections: Reflection[] = [];
+	for (const item of parsed) {
+		if (!isReflection(item)) continue;
+		reflections.push({
+			...item,
+			tokenCount: item.tokenCount ?? estimateTokens(item.content),
+		});
 	}
+	return reflections;
 }
 
 function isReflection(value: unknown): value is Reflection {

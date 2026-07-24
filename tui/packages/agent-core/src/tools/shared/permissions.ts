@@ -61,16 +61,28 @@ function globToRegExp(glob: string): RegExp {
 	return new RegExp(`^${escaped}`, "s");
 }
 
-/** The most command-like argument of a call, for rule pattern matching. */
-export function primaryArgString(args: Record<string, unknown>): string {
+function primaryArgStrings(args: Record<string, unknown>): string[] {
+	if (Array.isArray(args.commands)) {
+		const commands = args.commands.flatMap((entry) => {
+			if (!entry || typeof entry !== "object") return [];
+			const command = (entry as Record<string, unknown>).command;
+			return typeof command === "string" ? [command] : [];
+		});
+		if (commands.length > 0) return commands;
+	}
 	for (const key of ["command", "path", "file_path", "url", "query"]) {
-		if (typeof args[key] === "string") return args[key] as string;
+		if (typeof args[key] === "string") return [args[key] as string];
 	}
 	try {
-		return JSON.stringify(args);
-	} catch (e: unknown) {
-		return "";
+		return [JSON.stringify(args)];
+	} catch {
+		return [""];
 	}
+}
+
+/** The most command-like argument of a call, for display and compatibility. */
+export function primaryArgString(args: Record<string, unknown>): string {
+	return primaryArgStrings(args).join("\n");
 }
 
 export class PermissionManager {
@@ -109,8 +121,10 @@ export class PermissionManager {
 		args: Record<string, unknown>,
 		tool?: Tool,
 	): PermissionVerdict {
-		const arg = primaryArgString(args);
-		const denied = this.matchRules(this.denyRules, call.name, arg);
+		const commandArgs = primaryArgStrings(args);
+		const denied = commandArgs
+			.map((arg) => this.matchRules(this.denyRules, call.name, arg))
+			.find((rule) => rule !== undefined);
 		if (denied) {
 			return {
 				decision: "deny",
@@ -118,10 +132,9 @@ export class PermissionManager {
 				reason: `denied by rule "${denied.raw}"`,
 			};
 		}
-		const allowed = this.matchRules(
-			[...this.allowRules, ...this.sessionAllow],
-			call.name,
-			arg,
+		const allowRules = [...this.allowRules, ...this.sessionAllow];
+		const allowed = commandArgs.every(
+			(arg) => this.matchRules(allowRules, call.name, arg) !== undefined,
 		);
 		if (allowed) return { decision: "allow", source: "rule" };
 

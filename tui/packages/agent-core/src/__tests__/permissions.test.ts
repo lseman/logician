@@ -86,3 +86,29 @@ void test("primaryArgString prefers command, then path, then JSON", () => {
 	assert.equal(primaryArgString({ path: "src/a.ts" }), "src/a.ts");
 	assert.equal(primaryArgString({ n: 1 }), "{\"n\":1}");
 });
+
+void test("batch bash permissions deny if any command is denied", () => {
+	const pm = new PermissionManager({
+		mode: "acceptAll",
+		rules: { deny: ["bash(rm *)"] },
+	});
+	const args = {
+		commands: [{ command: "printf safe" }, { command: "rm file.txt" }],
+	};
+	assert.equal(pm.evaluate(call("bash", args), args).decision, "deny");
+});
+
+void test("batch bash permissions require every command to match allow rules", () => {
+	const pm = new PermissionManager({
+		mode: "ask",
+		rules: { allow: ["bash(npm test*)"] },
+	});
+	const allowed = {
+		commands: [{ command: "npm test" }, { command: "npm test -- --runInBand" }],
+	};
+	const mixed = {
+		commands: [{ command: "npm test" }, { command: "npm publish" }],
+	};
+	assert.equal(pm.evaluate(call("bash", allowed), allowed).decision, "allow");
+	assert.equal(pm.evaluate(call("bash", mixed), mixed).decision, "ask");
+});

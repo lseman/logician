@@ -47,6 +47,13 @@ export function normalizeKeyboardInput(data: string): string {
 
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
 
+// ── Shared ANSI codes ─────────────────────────────────────────────────────────
+// Every component previously redeclared these identically — single source now.
+
+export const RESET = "\x1b[0m";
+export const BOLD = "\x1b[1m";
+export const DIM = "\x1b[2m";
+
 // ── Width utilities ──────────────────────────────────────────────────────────
 
 // Simple visible width calculator (handles ANSI escape codes)

@@ -2,11 +2,11 @@ import {
 	clampLineToWidth,
 	type Component,
 	visibleWidth,
+	RESET,
 } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import type { TurnPhase } from "../state/turn-state.ts";
 
-const RESET = "\x1b[0m";
 const MUTATING_TOOLS = new Set(["edit_file", "write_file"]);
 const FILE_TOOLS = new Set(["read_file", "edit_file", "write_file"]);
 

@@ -204,6 +204,11 @@ const CHECKPOINT_DIR = "checkpoints";
 const META_FILE = "meta.json";
 
 // ── Session class ───────────────────────────────────────────────────────
+// Append-only JSONL crash-recovery journal for one harness run (messages,
+// checkpoints, operation log). Not the same concept as coding-agent's
+// SessionStore (SQLite-backed session browser/rename/switch UI) or tui's
+// SessionManager component (the overlay for that browser) — this one is
+// internal to the agent loop and has no user-facing UI of its own.
 
 export class Session {
 	private readonly dir: string;
@@ -697,7 +702,10 @@ export class Session {
 }
 
 // ── Session Manager ─────────────────────────────────────────────────────
-// Manages multiple sessions: listing, loading, creating, forking.
+// Manages multiple JSONL Session journals (above): listing, loading,
+// creating, forking. Unrelated to tui's SessionManager component (same
+// name, different package) — that one is a UI overlay over coding-agent's
+// SQLite SessionStore, not this file's journal system.
 
 export class SessionManager {
 	private baseDir: string;

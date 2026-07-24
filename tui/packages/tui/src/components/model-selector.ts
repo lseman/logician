@@ -6,6 +6,9 @@ import {
 	type Component,
 	clampLineToWidth,
 	visibleWidth,
+	RESET,
+	BOLD,
+	DIM,
 } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import { SelectorController } from "./selector-controller.ts";
@@ -17,10 +20,6 @@ import {
 	clampPopupLines,
 	type ListItem,
 } from "./popup-utils.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 
 export interface ModelInfo {
 	id: string;

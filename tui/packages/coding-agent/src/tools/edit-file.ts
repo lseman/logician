@@ -220,17 +220,47 @@ function lineNumberAt(content: string, offset: number): number {
 	return line;
 }
 
-/** Best-effort hint pointing at where the first line of a failed oldText appears. */
+/**
+ * Best-effort hint pointing at where the first line of a failed oldText
+ * appears, and — if a block starting there almost matches — which line
+ * inside the block is the first to diverge.
+ */
 function closestLineHint(content: string, oldText: string): string {
-	const firstLine = oldText.split("\n").find((l) => l.trim() !== "");
+	const searchLines = oldText.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && arr[i] === ""));
+	const firstLine = searchLines.find((l) => l.trim() !== "");
 	if (!firstLine) return "";
 	const needle = normalizeForFuzzyMatch(firstLine.trim());
-	const hits: number[] = [];
 	const lines = content.split("\n");
+	const hits: number[] = [];
 	for (let i = 0; i < lines.length && hits.length < 3; i++) {
 		if (normalizeForFuzzyMatch(lines[i].trim()) === needle) hits.push(i + 1);
 	}
 	if (hits.length === 0) return "";
+
+	// For the first hit, check how far a line-by-line match extends before
+	// diverging — tells the caller which line of oldText is actually wrong,
+	// rather than just "later lines likely differ".
+	if (searchLines.length > 1) {
+		const start = hits[0] - 1;
+		let matched = 0;
+		while (
+			matched < searchLines.length &&
+			start + matched < lines.length &&
+			normalizeForFuzzyMatch(lines[start + matched].trim()) ===
+				normalizeForFuzzyMatch(searchLines[matched].trim())
+		) {
+			matched++;
+		}
+		if (matched < searchLines.length) {
+			return (
+				` oldText's first ${matched} line(s) match starting at line ${hits[0]}, ` +
+				`but oldText line ${matched + 1} ("${searchLines[matched].trim().slice(0, 80)}") ` +
+				`does not match file line ${start + matched + 1} ` +
+				`("${(lines[start + matched] ?? "").trim().slice(0, 80)}"). Re-read that region.`
+			);
+		}
+	}
+
 	return (
 		` The first line of oldText matches line${hits.length > 1 ? "s" : ""} ` +
 		`${hits.join(", ")} — later lines likely differ; re-read that region.`

@@ -4,6 +4,7 @@
 
 import type { Observation, Reflection } from "./types.ts";
 import { DROPPER_SYSTEM_PROMPT } from "./prompts.ts";
+import { callLLM, extractJsonArray } from "./llm-client.ts";
 
 export interface DropperConfig {
 	model: unknown;
@@ -13,7 +14,6 @@ export interface DropperConfig {
 	observations: Observation[];
 	reflections: Reflection[];
 	targetTokens: number;
-	maxTurns?: number;
 	thinkingLevel?: string;
 }
 
@@ -28,7 +28,6 @@ export async function runDropper(
 		observations,
 		reflections: _reflections,
 		targetTokens: _targetTokens,
-		maxTurns: _maxTurns,
 		thinkingLevel = "off",
 	} = config;
 
@@ -54,66 +53,10 @@ export async function runDropper(
 	}
 }
 
-async function callLLM(
-	systemPrompt: string,
-	userMessage: string,
-	config: {
-		model: unknown;
-		apiKey: string;
-		baseUrl?: string;
-		headers?: Record<string, string>;
-		thinkingLevel?: string;
-	},
-): Promise<string> {
-	const { model: modelName, apiKey: key, baseUrl, headers: h, thinkingLevel } = config;
-
-	const body: Record<string, unknown> = {
-		model: typeof modelName === "string" ? modelName : "gpt-4o",
-		messages: [
-			{ role: "system", content: systemPrompt },
-			{ role: "user", content: userMessage },
-		],
-		response_format: { type: "json_object" },
-		max_tokens: 2048,
-	};
-
-	if (thinkingLevel && thinkingLevel !== "off") {
-		body["thinking"] = thinkingLevel;
-	}
-
-	const response = await fetch(`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			...(key ? { Authorization: `Bearer ${key}` } : {}),
-			...(h ?? {}),
-		},
-		body: JSON.stringify(body),
-	});
-
-	if (!response.ok) {
-		throw new Error(
-			`LLM call failed: ${response.status} ${response.statusText}`,
-		);
-	}
-
-	const data = (await response.json()) as {
-		choices: Array<{ message: { content: string } }>;
-	};
-	return data.choices[0]?.message?.content ?? "";
-}
-
 function parseDropIds(raw: string): string[] | undefined {
-	const jsonMatch = raw.match(/\[[\s\S]*\]/);
-	if (!jsonMatch) return undefined;
-
-	try {
-		const parsed = JSON.parse(jsonMatch[0]) as unknown;
-		if (!Array.isArray(parsed)) return undefined;
-		return parsed.filter(
-			(id: unknown) => typeof id === "string" && /^[a-f0-9]{12}$/.test(id),
-		) as string[];
-	} catch (e: unknown) {
-		return undefined;
-	}
+	const parsed = extractJsonArray(raw);
+	if (!parsed) return undefined;
+	return parsed.filter(
+		(id: unknown) => typeof id === "string" && /^[a-f0-9]{12}$/.test(id),
+	) as string[];
 }

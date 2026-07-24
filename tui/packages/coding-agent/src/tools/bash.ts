@@ -25,18 +25,75 @@ const bashSchema = {
 	type: "object",
 	properties: {
 		command: { type: "string", description: "Bash command to execute" },
+		commands: {
+			type: "array",
+			description: "Structured commands to execute as a batch",
+			minItems: 1,
+			maxItems: 32,
+			items: {
+				type: "object",
+				properties: {
+					id: { type: "string", description: "Optional identifier used in results" },
+					command: { type: "string", description: "Bash command to execute" },
+					timeout: { type: "number", description: "Timeout in seconds" },
+				},
+				required: ["command"],
+			},
+		},
+		mode: {
+			type: "string",
+			enum: ["sequential", "parallel"],
+			description: "Batch execution mode (default: sequential)",
+		},
+		stopOnFailure: {
+			type: "boolean",
+			description: "Skip remaining sequential commands after a failure",
+		},
+		maxConcurrency: {
+			type: "number",
+			description: "Parallel concurrency (default: 4, maximum: 16)",
+		},
 		timeout: {
 			type: "number",
-			description: "Timeout in seconds (optional, no default timeout)",
+			description: "Timeout for a single command, or default for batch entries",
 		},
 	},
-	required: ["command"],
+	anyOf: [{ required: ["command"] }, { required: ["commands"] }],
 } as const;
 
-type BashArgs = {
+type SingleBashArgs = {
 	command: string;
 	timeout?: number;
 };
+
+type BashBatchEntry = SingleBashArgs & { id?: string };
+
+type BashArgs = {
+	command?: string;
+	commands?: BashBatchEntry[];
+	mode?: "sequential" | "parallel";
+	stopOnFailure?: boolean;
+	maxConcurrency?: number;
+	timeout?: number;
+};
+
+interface CommandExecutionResult {
+	content: string;
+	details?: BashDetails;
+	exitCode: number | null;
+	signal: string | null;
+	status: "completed" | "failed" | "timed_out" | "aborted";
+}
+
+interface BashBatchResult {
+	id: string;
+	command: string;
+	content: string;
+	exitCode: number | null;
+	signal: string | null;
+	status: CommandExecutionResult["status"] | "skipped";
+	details?: BashDetails;
+}
 
 export interface BashDetails {
 	truncation?: {
@@ -58,10 +115,10 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (typeof raw === "string") return { command: raw };
 	if (!raw || typeof raw !== "object") return {};
 	const args = raw as Record<string, unknown>;
-	const command = args.command ?? args.cmd ?? args.script ?? args.input ?? "";
+	const command = args.command ?? args.cmd ?? args.script ?? args.input;
 	return {
 		...args,
-		command: String(command),
+		...(command === undefined ? {} : { command: String(command) }),
 	};
 }
 
@@ -99,14 +156,34 @@ export const bash: Tool = {
 	// The registry enforces a default execution timeout; when the model passes
 	// an explicit timeout, allow it plus grace for the tool's own kill+cleanup.
 	resolveTimeoutMs: (args) => {
-		const timeout = Number(args.timeout);
+		const entries = Array.isArray(args.commands) ? args.commands : [];
+		const entryTimeouts = entries.map((entry) =>
+			typeof entry === "object" && entry !== null
+				? Number((entry as Record<string, unknown>).timeout)
+				: 0,
+		);
+		const timeout = Math.max(Number(args.timeout) || 0, ...entryTimeouts);
 		return timeout > 0 ? timeout * 1000 + 30_000 : undefined;
 	},
 	execute: async (args, ctx): Promise<string | ToolResult> => {
-		const { command, timeout } = args as BashArgs;
+		const parsed = args as BashArgs;
+		if (parsed.command !== undefined && parsed.commands !== undefined) {
+			return "Error: provide either command or commands, not both.";
+		}
+		if (parsed.commands !== undefined) return executeBatch(parsed, ctx);
+		if (!parsed.command) return "Error: command or commands is required.";
+		const result = await executeSingleCommand(
+			{ command: parsed.command, timeout: parsed.timeout },
+			ctx,
+		);
+		return { content: result.content, details: result.details };
+	},
+};
 
-		if (!command) return "Error: command is required.";
-
+async function executeSingleCommand(
+	{ command, timeout }: SingleBashArgs,
+	ctx: Parameters<Tool["execute"]>[1],
+): Promise<CommandExecutionResult> {
 		// Resolve shell
 		const { shell, args: shellArgs } = getShellConfig();
 
@@ -114,8 +191,13 @@ export const bash: Tool = {
 		const cwd = ctx.cwd || process.cwd();
 		try {
 			await fsAccess(cwd, constants.F_OK);
-		} catch (e: unknown) {
-			return `Error: Working directory does not exist: ${cwd}`;
+		} catch {
+			return {
+				content: `Error: Working directory does not exist: ${cwd}`,
+				exitCode: null,
+				signal: null,
+				status: "failed",
+			};
 		}
 
 		const shellEnv = getShellEnv();
@@ -123,7 +205,7 @@ export const bash: Tool = {
 		const timeoutSeconds = timeout;
 		const throttledUpdate = makeUpdateThrottler();
 
-		return new Promise<string | ToolResult>((resolve) => {
+		return new Promise<CommandExecutionResult>((resolve) => {
 			let settled = false;
 			const settle = (fn: () => void) => {
 				if (!settled) {
@@ -194,7 +276,12 @@ export const bash: Tool = {
 				settle(() => {
 					if (timeoutHandle) clearTimeout(timeoutHandle);
 					ctx.signal?.removeEventListener("abort", onAbort);
-					resolve(`Error: ${err.message || "Command failed"}`);
+					resolve({
+						content: `Error: ${err.message || "Command failed"}`,
+						exitCode: null,
+						signal: null,
+						status: "failed",
+					});
 				});
 			});
 
@@ -226,6 +313,9 @@ export const bash: Tool = {
 								"Command aborted",
 							),
 							details,
+							exitCode: code,
+							signal,
+							status: "aborted",
 						});
 						return;
 					}
@@ -244,6 +334,9 @@ export const bash: Tool = {
 								`Command timed out after ${timeoutSeconds} seconds`,
 							),
 							details,
+							exitCode: code,
+							signal,
+							status: "timed_out",
 						});
 						return;
 					}
@@ -255,13 +348,158 @@ export const bash: Tool = {
 						signal,
 						output.getLastLineBytes(),
 					);
-					const result = { content: text, details };
-					resolve(result);
+					resolve({
+						content: text,
+						details,
+						exitCode: code,
+						signal,
+						status: code === 0 ? "completed" : "failed",
+					});
 				});
 			});
 		});
-	},
-};
+}
+
+async function executeBatch(
+	args: BashArgs,
+	ctx: Parameters<Tool["execute"]>[1],
+): Promise<ToolResult> {
+	const entries = validateBatchEntries(args.commands);
+	if (typeof entries === "string") return { content: entries, isError: true };
+	const mode = args.mode ?? "sequential";
+	if (mode !== "sequential" && mode !== "parallel") {
+		return { content: "Error: mode must be \"sequential\" or \"parallel\".", isError: true };
+	}
+	const concurrency = normalizeConcurrency(args.maxConcurrency);
+	if (typeof concurrency === "string") return { content: concurrency, isError: true };
+	const normalized = entries.map((entry, index) => ({
+		id: entry.id ?? `command-${index + 1}`,
+		command: entry.command,
+		timeout: entry.timeout ?? args.timeout,
+	}));
+	const results: BashBatchResult[] = [];
+
+	if (mode === "sequential") {
+		for (const entry of normalized) {
+			if (ctx.signal?.aborted || (args.stopOnFailure && results.some(isBatchFailure))) {
+				results.push(skippedResult(entry, ctx.signal?.aborted ? "Batch aborted" : "Skipped after failure"));
+			} else {
+				results.push(toBatchResult(entry, await executeSingleCommand(entry, ctx)));
+			}
+		}
+	} else {
+		let nextIndex = 0;
+		const ordered = new Array<BashBatchResult>(normalized.length);
+		const worker = async () => {
+			while (nextIndex < normalized.length) {
+				const index = nextIndex++;
+				const entry = normalized[index];
+				if (ctx.signal?.aborted) {
+					ordered[index] = skippedResult(entry, "Batch aborted");
+				} else {
+					ordered[index] = toBatchResult(entry, await executeSingleCommand(entry, ctx));
+				}
+			}
+		};
+		await Promise.all(
+			Array.from({ length: Math.min(concurrency, normalized.length) }, () => worker()),
+		);
+		results.push(...ordered);
+	}
+
+	return {
+		content: results
+			.map((result) => `[${result.id}] ${result.status}: ${result.command}\n${result.content}`)
+			.join("\n\n"),
+		details: {
+			mode,
+			commands: results,
+			summary: {
+				total: results.length,
+				completed: results.filter((result) => result.status === "completed").length,
+				failed: results.filter(isBatchFailure).length,
+				skipped: results.filter((result) => result.status === "skipped").length,
+			},
+		},
+	};
+}
+
+function validateBatchEntries(value: unknown): BashBatchEntry[] | string {
+	if (!Array.isArray(value) || value.length === 0) {
+		return "Error: commands must be a non-empty array.";
+	}
+	if (value.length > 32) return "Error: commands supports at most 32 entries.";
+	const entries: BashBatchEntry[] = [];
+	const ids = new Set<string>();
+	for (let index = 0; index < value.length; index++) {
+		const raw = value[index];
+		if (!raw || typeof raw !== "object") return `Error: commands[${index}] must be an object.`;
+		const entry = raw as Record<string, unknown>;
+		if (typeof entry.command !== "string" || entry.command.trim() === "") {
+			return `Error: commands[${index}].command must be a non-empty string.`;
+		}
+		if (entry.id !== undefined && (typeof entry.id !== "string" || entry.id.trim() === "")) {
+			return `Error: commands[${index}].id must be a non-empty string.`;
+		}
+		if (typeof entry.id === "string") {
+			if (ids.has(entry.id)) return `Error: duplicate command id "${entry.id}".`;
+			ids.add(entry.id);
+		}
+		if (
+			entry.timeout !== undefined &&
+			(!Number.isFinite(entry.timeout) || Number(entry.timeout) <= 0)
+		) {
+			return `Error: commands[${index}].timeout must be a positive number.`;
+		}
+		entries.push({
+			command: entry.command,
+			...(typeof entry.id === "string" ? { id: entry.id } : {}),
+			...(entry.timeout === undefined ? {} : { timeout: Number(entry.timeout) }),
+		});
+	}
+	return entries;
+}
+
+function normalizeConcurrency(value: unknown): number | string {
+	if (value === undefined) return 4;
+	const concurrency = Number(value);
+	return Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 16
+		? concurrency
+		: "Error: maxConcurrency must be an integer between 1 and 16.";
+}
+
+function skippedResult(
+	entry: { id: string; command: string },
+	content: string,
+): BashBatchResult {
+	return {
+		id: entry.id,
+		command: entry.command,
+		content,
+		exitCode: null,
+		signal: null,
+		status: "skipped",
+	};
+}
+
+function toBatchResult(
+	entry: { id: string; command: string },
+	result: CommandExecutionResult,
+): BashBatchResult {
+	return {
+		id: entry.id,
+		command: entry.command,
+		content: result.content,
+		exitCode: result.exitCode,
+		signal: result.signal,
+		status: result.status,
+		...(result.details ? { details: result.details } : {}),
+	};
+}
+
+function isBatchFailure(result: BashBatchResult): boolean {
+	return ["failed", "timed_out", "aborted"].includes(result.status);
+}
 
 function formatOutput(
 	snapshot: {

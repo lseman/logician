@@ -4,8 +4,10 @@
 
 import type { MemoryStore } from "./store.ts";
 import { recallMemory, formatRecallResult, isValidMemoryId } from "./recall.ts";
+import { searchMemoryStore, type MemorySearchMatch } from "./search.ts";
 
 export const RECALL_TOOL_NAME = "recall";
+export const MEMORY_SEARCH_TOOL_NAME = "memory_search";
 
 export interface RecallToolOptions {
 	memoryStore: MemoryStore;
@@ -16,7 +18,13 @@ export interface RecallToolOptions {
 		origin: string;
 		timestamp: string;
 		content?: string;
-	}>;
+	}> | (() => Array<{
+		id: string;
+		type: string;
+		origin: string;
+		timestamp: string;
+		content?: string;
+	}>);
 }
 
 export interface RecallToolResult {
@@ -56,7 +64,7 @@ export function createRecallTool(ctx: RecallToolOptions) {
 			memoryStore.getAllObservations(),
 			memoryStore.getReflections(),
 			dropped,
-			sourceEntries,
+			typeof sourceEntries === "function" ? sourceEntries() : sourceEntries,
 		);
 
 		if (result.status === "not_found") {
@@ -74,6 +82,29 @@ export function createRecallTool(ctx: RecallToolOptions) {
 			status: result.partial ? "partial" : "ok",
 			memoryId,
 			content: formatRecallResult(result),
+		};
+	};
+}
+
+export interface MemorySearchToolResult {
+	status: "ok" | "invalid_query";
+	query: string;
+	matches: MemorySearchMatch[];
+}
+
+export function createMemorySearchTool(memoryStore: MemoryStore) {
+	return function search(query: string, limit?: number): MemorySearchToolResult {
+		if (typeof query !== "string" || query.trim().length === 0) {
+			return {
+				status: "invalid_query",
+				query: typeof query === "string" ? query : "",
+				matches: [],
+			};
+		}
+		return {
+			status: "ok",
+			query,
+			matches: searchMemoryStore(memoryStore, query, { limit }),
 		};
 	};
 }

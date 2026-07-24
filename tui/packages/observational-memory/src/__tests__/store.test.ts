@@ -46,6 +46,7 @@ void test("drop tombstones survive persistence reload", () => {
 		});
 		store.recordObservations([observation("aaaaaaaaaaaa", "Persistent fact")], "one");
 		store.recordDrops(["aaaaaaaaaaaa"], "one");
+		store.flush();
 		const restored = new MemoryStoreImpl({
 			persistence: new FilePersistence({ path: memoryPath }),
 		});

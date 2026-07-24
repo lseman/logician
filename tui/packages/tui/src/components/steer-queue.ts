@@ -4,10 +4,9 @@
 // there are pending steering messages.
 // Mirrors Pi's updatePendingMessagesDisplay() pattern.
 
-import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth, RESET } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 
-const RESET = "\x1b[0m";
 export class SteerQueue implements Component {
 	private steering: string[] = [];
 	private followUp: string[] = [];

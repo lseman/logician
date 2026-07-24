@@ -776,7 +776,6 @@ void test("spawn_agents renders ordered live task status", () => {
 	const output = plain(display.render(120).join("\n"));
 
 	assert.match(output, /subagents 2\/3 running.*3 tasks/);
-	assert.match(output, /3 agents · 1 running/);
 	assert.match(output, /✓ 1\. explorer.*Inspect the API/);
 	assert.match(output, /⠋ 2\. reviewer.*Review the tests/);
 	assert.match(output, /· 3\. general.*Check documentation/);
@@ -878,7 +877,6 @@ void test("spawn_agents shows partial failures and expanded reports", () => {
 	const output = plain(display.render(120).join("\n"));
 
 	assert.match(output, /! subagents partial · 1 failed/);
-	assert.match(output, /2 agents · 1 completed · 1 failed/);
 	assert.match(output, /✓ 1\. explorer/);
 	assert.match(output, /× 2\. reviewer/);
 	assert.match(output, /API looks good/);

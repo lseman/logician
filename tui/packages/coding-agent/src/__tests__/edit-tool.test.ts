@@ -137,7 +137,7 @@ void test("edit_file not-found error hints at the closest matching line", async 
 			},
 			{ cwd },
 		),
-		/matches line 2/,
+		/first 1 line\(s\) match starting at line 2.*oldText line 2 \("wrong following line"\) does not match file line 3 \("bbb"\)/s,
 	);
 });
 

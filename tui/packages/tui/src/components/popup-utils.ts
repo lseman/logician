@@ -7,13 +7,10 @@
 //   - Action bar with keyboard hints
 
 import { theme } from "../layers/theme/theme.ts";
-import { visibleWidth, clampLineToWidth } from "../layers/core/tui-core.ts";
+import { visibleWidth, clampLineToWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 
 // ── ANSI codes ──────────────────────────────────────────────────────────────
 
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
 const BG_HIGHLIGHT = "\x1b[48;2;";
 const FG_OVERRIDE = "\x1b[38;2;";
 

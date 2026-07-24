@@ -36,10 +36,20 @@ export {
 } from "./recall.ts";
 export {
 	createRecallTool,
+	createMemorySearchTool,
 	type RecallToolOptions,
 	type RecallToolResult,
+	type MemorySearchToolResult,
 	RECALL_TOOL_NAME,
+	MEMORY_SEARCH_TOOL_NAME,
 } from "./tool.ts";
+export {
+	searchMemory,
+	searchMemoryStore,
+	formatMemoryContext,
+	type MemorySearchMatch,
+	type MemorySearchOptions,
+} from "./search.ts";
 export { hashId } from "./ids.ts";
 export {
 	estimateTokens,
@@ -87,8 +97,6 @@ export const DEFAULT_CONFIG = {
 	observationsPoolTargetTokens: 10_000,
 	/** Maximum token count before forced compaction */
 	observationsPoolMaxTokens: 20_000,
-	/** Max LLM turns per consolidation stage */
-	agentMaxTurns: 4,
 } as const;
 
 // ── Factory ──────────────────────────────────────────────────────────────
@@ -132,7 +140,6 @@ export function createMemorySystem(opts: MemoryFactoryOptions) {
 			baseUrl: opts.baseUrl,
 			headers: opts.headers,
 			observationsPoolTargetTokens: config.observationsPoolTargetTokens,
-			maxTurns: config.agentMaxTurns,
 		},
 		{
 			observeAfterTokens: config.observeAfterTokens,

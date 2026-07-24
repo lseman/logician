@@ -1,6 +1,12 @@
 // ── Knowledge Graph for RAG ────────────────────────────────────────────────
 // Provides graph-based relationships between documents, concepts, and code entities.
 // Enhances RAG with semantic relationships and contextual understanding.
+//
+// NOT WIRED UP: nothing in this package constructs a KnowledgeGraphManager —
+// it's only re-exported from index.ts. No caller feeds it observations/
+// reflections, and its graph is never persisted via FilePersistence. Either
+// finish integrating it (populate from observer/reflector output, persist
+// alongside FoldedMemory, expose via recall) or remove it.
 
 import type { Observation, Reflection } from "./types.ts";
 

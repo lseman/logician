@@ -2,7 +2,7 @@
 // Interactive TUI overlay for controlling EoH evolution.
 // Shows population, best heuristic, and provides action buttons.
 
-import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, clampLineToWidth, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 
 // ── EoH data shapes ──────────────────────────────────────────────────────────
@@ -46,9 +46,6 @@ export type EohPanelAction =
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const BLUE = "\x1b[34m";

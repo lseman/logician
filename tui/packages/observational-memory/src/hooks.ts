@@ -5,12 +5,15 @@
 import type { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
 import type { MemoryStore } from "./store.ts";
 import type { ConsolidationPipeline } from "./consolidation.ts";
+import { formatMemoryContext } from "./search.ts";
 
 export interface HookOptions {
 	/** Token thresholds */
 	observeAfterTokens?: number;
 	reflectAfterTokens?: number;
 	compactAfterTokens?: number;
+	/** Maximum observational-memory tokens injected before a turn. */
+	memoryContextMaxTokens?: number;
 }
 
 export interface HookContext {
@@ -87,9 +90,14 @@ export function registerConsolidationHooks(ctx: HookContext): () => void {
 	});
 
 	// Register on before_agent_start (session boundary)
-	const unsubBeforeAgentStart = extensionBus.on("before_agent_start", () => {
-		// Reset thresholds at session boundary
-		return undefined;
+	const unsubBeforeAgentStart = extensionBus.on("before_agent_start", (event) => {
+		const memoryContext = formatMemoryContext(ctx.memoryStore, event.prompt, {
+			maxTokens: options?.memoryContextMaxTokens ?? 1_000,
+		});
+		if (!memoryContext) return undefined;
+		return {
+			systemPrompt: `${event.systemPrompt}\n\n${memoryContext}`,
+		};
 	});
 
 	return () => {

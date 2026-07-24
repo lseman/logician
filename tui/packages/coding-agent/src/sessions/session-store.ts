@@ -137,6 +137,10 @@ function serializeTools(
 }
 
 // ── SessionStore ──────────────────────────────────────────────────────────────
+// SQLite-backed store for the session browser UI (list/rename/switch/delete
+// past sessions), rendered by tui's SessionManager overlay component. Not
+// the same concept as agent-core's Session/SessionManager, which is an
+// internal JSONL crash-recovery journal with no user-facing browser.
 
 export class SessionStore {
 	private db: SqliteDatabase;

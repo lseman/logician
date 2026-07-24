@@ -9,10 +9,9 @@ import {
 	CURSOR_MARKER,
 	type Focusable,
 	visibleWidth,
+	RESET,
+	BOLD,
 } from "../layers/core/tui-core.ts";
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
 import type { UndoStack } from "../layers/input/undo-stack.ts";
 import { getGraphemeSegmenter } from "../layers/utils/utils.ts";
 import { findWordBackward, findWordForward } from "../layers/input/word-navigation.ts";

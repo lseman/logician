@@ -9,11 +9,8 @@ import {
 	type SlashCommandDef,
 	type SlashCommandCategory,
 } from "@logician/coding-agent/slash-commands";
-import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 const MAX_VISIBLE_ENTRIES = 8;
 const getHeaderColor = (): string => theme.fg("header", "");
 const getSelectedColor = (): string => theme.fg("selected", "");

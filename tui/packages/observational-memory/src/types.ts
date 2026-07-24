@@ -140,8 +140,10 @@ export interface MemoryStore {
 	getStatus(): MemoryStatus;
 	/** Load from file. */
 	load(path?: string): void;
-	/** Persist to file. */
+	/** Persist to file immediately (bypasses write coalescing). */
 	save(path?: string): void;
+	/** Force any pending coalesced write to happen immediately. */
+	flush(): void;
 	/** Clear all memory. */
 	clear(): void;
 	/** Get all observations including dropped (for recall). */

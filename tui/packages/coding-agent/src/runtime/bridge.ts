@@ -74,7 +74,9 @@ import type { ParsedBridgeEvent } from "./events.ts";
 import {
 	createMemorySystem,
 	type MemoryStore,
+	createMemorySearchTool,
 	createRecallTool,
+	MEMORY_SEARCH_TOOL_NAME,
 	RECALL_TOOL_NAME,
 	hashId,
 } from "@logician/observational-memory";
@@ -1106,27 +1108,73 @@ export class AgentCoreBridge {
 						})),
 			});
 
-			// Add recall tool to agent's tool registry
+			const currentSourceEntries = () =>
+				(this.harness?.messages ?? [])
+					.filter(
+						(message) =>
+							typeof message.content === "string" && message.content.trim(),
+					)
+					.map((message, index) => ({
+						id: hashId(`${index}:${message.role}:${message.content}`),
+						type: "message",
+						origin: message.role,
+						timestamp: new Date(message.timestamp ?? Date.now()).toISOString(),
+						content: String(message.content),
+					}));
+
+			// Add memory discovery and exact recall tools to the agent registry.
 			const recallHandler = createRecallTool({
 				memoryStore: this.memoryStore,
-				sourceEntries: [],
+				sourceEntries: currentSourceEntries,
 			});
-			const recallTool: Tool = {
-				name: RECALL_TOOL_NAME,
-				description: "Recover exact evidence for an observational memory ID",
-				parameters: {
-					type: "object",
-					properties: { id: { type: "string", pattern: "^[a-f0-9]{12}$" } },
+			const memorySearchHandler = createMemorySearchTool(this.memoryStore);
+			const memoryTools: Tool[] = [
+				{
+					name: MEMORY_SEARCH_TOOL_NAME,
+					readOnly: true,
+					executionMode: "parallel",
+					description: "Search active observational memories and reflections by topic",
+					parameters: {
+						type: "object",
+						properties: {
+							query: { type: "string", minLength: 1 },
+							limit: { type: "number", minimum: 1, maximum: 20 },
+						},
+						required: ["query"],
+					},
+					execute: async (args: Record<string, unknown>) =>
+						JSON.stringify(
+							memorySearchHandler(
+								typeof args.query === "string" ? args.query : "",
+								typeof args.limit === "number" ? args.limit : undefined,
+							),
+						),
 				},
-				execute: async (args: Record<string, unknown>) => {
-					const result = recallHandler(args.id as string);
-					return JSON.stringify(result);
+				{
+					name: RECALL_TOOL_NAME,
+					readOnly: true,
+					executionMode: "parallel",
+					description: "Recover exact evidence for an observational memory ID",
+					parameters: {
+						type: "object",
+						properties: { id: { type: "string", pattern: "^[a-f0-9]{12}$" } },
+						required: ["id"],
+					},
+					execute: async (args: Record<string, unknown>) =>
+						JSON.stringify(
+							recallHandler(typeof args.id === "string" ? args.id : ""),
+						),
 				},
-			};
-			if (!this.defaultTools.some((tool) => tool.name === RECALL_TOOL_NAME)) {
-				this.defaultTools = [...this.defaultTools, recallTool];
+			];
+			const registeredTools = new Set(this.defaultTools.map((tool) => tool.name));
+			const newMemoryTools = memoryTools.filter(
+				(tool) => !registeredTools.has(tool.name),
+			);
+			if (newMemoryTools.length > 0) {
+				this.defaultTools = [...this.defaultTools, ...newMemoryTools];
 				this.config.tools = this.defaultTools;
 				this.harness?.setTools(this.defaultTools);
+				this.rebuildBaseSystemPrompt();
 			}
 
 			// Cleanup on harness destroy
@@ -2370,6 +2418,11 @@ export class AgentCoreBridge {
 			try {
 				entries = await readdirAsync(dir);
 			} catch (e: unknown) {
+				// Most plugins have no commands/ dir at all — only a real error
+				// (permissions, etc.) is worth surfacing.
+				if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
+					console.error(`[plugins] failed to read commands dir for "${pluginName}":`, e);
+				}
 				continue;
 			}
 			for (const entry of entries) {
@@ -2379,6 +2432,9 @@ export class AgentCoreBridge {
 				try {
 					raw = await readFileAsync(filePath, "utf8");
 				} catch (e: unknown) {
+					// The file was just listed by readdir, so a read failure here
+					// is a genuine anomaly (permissions, race), not "expected".
+					console.error(`[plugins] failed to read command file "${filePath}":`, e);
 					continue;
 				}
 				const parsed = parseFrontmatter<Record<string, unknown>>(raw);
@@ -2634,13 +2690,24 @@ interface UserSettings {
 /** Load user settings from ~/.logician/settings.json. Returns empty object on failure. */
 function loadUserSettings(): UserSettings {
 	const settingsPath = path.join(os.homedir(), ".logician", "settings.json");
+	let raw: string;
 	try {
-		const raw = readFileSync(settingsPath, "utf8");
+		raw = readFileSync(settingsPath, "utf8");
+	} catch (e: unknown) {
+		// A missing settings.json is the common case (no user settings yet) —
+		// only a real read error (permissions, etc.) is worth surfacing.
+		if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
+			console.error("[settings] failed to read settings.json:", e);
+		}
+		return {};
+	}
+	try {
 		const parsed = JSON.parse(raw) as Record<string, unknown>;
 		return typeof parsed === "object" && parsed !== null
 			? (parsed as UserSettings)
 			: {};
 	} catch (e: unknown) {
+		console.error("[settings] settings.json is not valid JSON:", e);
 		return {};
 	}
 }

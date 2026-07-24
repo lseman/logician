@@ -38,6 +38,7 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 	private persistence: FilePersistence;
 	private targetTokens: number;
 	private listeners = new Set<(event: MemoryStoreEvent) => void>();
+	private persistScheduled = false;
 
 	constructor(options: StoreOptions = {}) {
 		this.persistence = options.persistence ?? new FilePersistence();
@@ -156,10 +157,31 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 		if (path) {
 			this.persistence = new FilePersistence({ path });
 		}
-		this.persist();
+		this.flush();
 	}
 
+	/**
+	 * Schedule a persist on the next microtask, coalescing writes that happen
+	 * within the same synchronous burst (e.g. recordObservations +
+	 * recordReflections + recordDrops from one consolidation cycle) into a
+	 * single file write instead of one per call.
+	 */
 	private persist(): void {
+		if (this.persistScheduled) return;
+		this.persistScheduled = true;
+		queueMicrotask(() => {
+			this.persistScheduled = false;
+			this.writeNow();
+		});
+	}
+
+	/** Force an immediate, non-debounced write of the current state. */
+	flush(): void {
+		this.persistScheduled = false;
+		this.writeNow();
+	}
+
+	private writeNow(): void {
 		const folded = this.fold();
 		this.persistence.save(folded);
 	}
@@ -170,6 +192,7 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 		this.dropped.clear();
 		this.records = [];
 		this.dropRecords = [];
+		this.persistScheduled = false;
 		this.persistence.clear();
 		this.emit({ type: "cleared" });
 	}

@@ -9,6 +9,17 @@ export interface AtomicWriteOptions {
 	expectedMissing?: boolean;
 }
 
+/** First 1-indexed line where two texts diverge, or null if identical. */
+function firstDifferingLine(expected: string, actual: string): number | null {
+	const a = expected.split("\n");
+	const b = actual.split("\n");
+	const max = Math.max(a.length, b.length);
+	for (let i = 0; i < max; i++) {
+		if (a[i] !== b[i]) return i + 1;
+	}
+	return null;
+}
+
 /**
  * Replace a regular file through a same-directory temporary file and rename.
  * Existing permissions are preserved. Symbolic links are rejected explicitly
@@ -50,8 +61,12 @@ export async function atomicWriteFile(
 		if (options.expectedContent !== undefined) {
 			const current = await readFile(filePath, "utf8");
 			if (current !== options.expectedContent) {
+				const line = firstDifferingLine(options.expectedContent, current);
+				const where = line !== null ? ` First difference at line ${line}.` : "";
 				throw new Error(
-					`${filePath} changed while the edit was being prepared. Read it again before editing.`,
+					`${filePath} changed on disk after it was read but before this write ` +
+					`landed — likely another edit or an external process ran concurrently.${where} ` +
+					"Read it again before editing.",
 				);
 			}
 		}

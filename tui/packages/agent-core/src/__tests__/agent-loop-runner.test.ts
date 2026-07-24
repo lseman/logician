@@ -6,6 +6,7 @@ import { OutputGuard } from "../core/output-guard.ts";
 import { recordTaskStatus } from "../core/task-status-state.ts";
 import type { AgentConfig, AgentEvent, Message, Tool } from "../core/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
+import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 
 const noop: Tool = {
 	name: "noop",
@@ -74,6 +75,35 @@ void test("runAgentLoop injects steering before the next assistant call", async 
 		"user:steer",
 		"assistant:done",
 	]);
+});
+
+void test("typed before_agent_start results augment provider context", async () => {
+	const extensionBus = new ExtensionEventBus();
+	extensionBus.on("before_agent_start", (event) => ({
+		systemPrompt: `${event.systemPrompt}\n\nretained memory`,
+		messages: [user("extension context")],
+	}));
+	const backend = new FakeBackend([
+		(messages) => {
+			assert.ok(messages.some(
+				(message) =>
+					message.role === "system" &&
+					String(message.content).includes("retained memory"),
+			));
+			assert.ok(messages.some(
+				(message) =>
+					message.role === "user" &&
+					message.content === "extension context",
+			));
+			return textResponse("done");
+		},
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "base", messages: [], tools: [noop] },
+		[user("prompt")],
+		{ ...makeConfig(), backend, extensionBus },
+		() => {},
+	);
 });
 
 void test("provider payload hooks preserve transport fields", async () => {

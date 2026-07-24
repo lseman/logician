@@ -1,7 +1,9 @@
 // ── Session manager overlay ──────────────────────────────────────────────────
 // List, search, rename, and switch sessions. Powered by SessionStore.
+// Same class name as agent-core's SessionManager, but unrelated — that one
+// manages an internal JSONL crash-recovery journal, not this UI.
 
-import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import type { SessionStore } from "@logician/coding-agent/session-store";
 import {
@@ -13,9 +15,6 @@ import {
 	type ListItem,
 } from "./popup-utils.ts";
 
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 const getHeaderColor = (): string => theme.fg("header", "");
 const getYellow = (): string => theme.fg("levelHigh", "");
 const getRed = (): string => theme.fg("error", "");

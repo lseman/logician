@@ -4,7 +4,7 @@
 // (show available options for a selected setting, with enter to apply).
 // Uses the shared popup-utils design system.
 
-import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, clampLineToWidth, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import {
 	BOX,
@@ -14,10 +14,6 @@ import {
 	clampPopupLines,
 	type ListItem,
 } from "./popup-utils.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 
 // ── Data types ──────────────────────────────────────────────────────────────
 

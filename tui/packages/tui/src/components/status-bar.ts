@@ -4,11 +4,8 @@
 // Sections (separated by |):
 //   phase | model | thinking | dir/git | context | cache | reasoner
 
-import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth, RESET, DIM } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
-
-const RESET = "\x1b[0m";
-const DIM = "\x1b[2m";
 
 /** Max chars for a free-text label before it's ellipsis-truncated. */
 const LABEL_TRUNCATE_LENGTH = 24;

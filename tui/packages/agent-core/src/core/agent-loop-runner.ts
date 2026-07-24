@@ -593,12 +593,30 @@ async function runAgentLoopInTaskScope(
 			};
 	}
 
-	// Emit typed before_agent_start event
-	await emitTyped(config.extensionBus, {
-		type: "before_agent_start",
-		prompt: prompts.map((p) => p.content).join("\n"),
-		systemPrompt: context.systemPrompt ?? "",
-	});
+	// Typed extensions may augment the prompt just like native hooks.
+	const extensionBeforeStart = config.extensionBus
+		? await config.extensionBus.emit({
+				type: "before_agent_start",
+				prompt: prompts.map((p) => p.content).join("\n"),
+				systemPrompt:
+					beforeAgentStartResult?.systemPrompt ?? context.systemPrompt ?? "",
+			})
+		: undefined;
+	if (extensionBeforeStart?.messages) {
+		beforeAgentStartResult = {
+			...beforeAgentStartResult,
+			messages: [
+				...(beforeAgentStartResult?.messages ?? []),
+				...extensionBeforeStart.messages,
+			],
+		};
+	}
+	if (extensionBeforeStart?.systemPrompt) {
+		beforeAgentStartResult = {
+			...beforeAgentStartResult,
+			systemPrompt: extensionBeforeStart.systemPrompt,
+		};
+	}
 
 	await emit({ type: "agent_start" });
 	const promptTurnId = "turn_0";

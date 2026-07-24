@@ -21,12 +21,12 @@ import {
 	clampLineToWidth,
 	type Scrollable,
 	visibleWidth,
+	RESET,
+	BOLD,
+	DIM,
 } from "../layers/core/tui-core.ts";
 
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
 const UNDERLINE = "\x1b[4m";
-const RESET = "\x1b[0m";
 
 // Heading palette — distinct color + weight per level.
 const getHeadingStyles = (): Array<{ color: string; deco: string }> => [
@@ -956,8 +956,30 @@ export class TranscriptDisplay implements Component, Scrollable {
 		} else {
 			this.turns = turns;
 		}
+		this.pruneBatchTaskTiming();
 		this.invalidate();
 		if (keepBottomAnchored) this._pendingScrollBottom = true;
+	}
+
+	/**
+	 * batchTaskTiming is keyed by a spawn_agents tool_call_id and grows one
+	 * entry per batch call for the life of the session — evict entries whose
+	 * batch tool is no longer present in the retained turns (dropped by the
+	 * maxTurns cap above, or the batch simply scrolled out).
+	 */
+	private pruneBatchTaskTiming(): void {
+		if (this.batchTaskTiming.size === 0) return;
+		const liveIds = new Set<string>();
+		for (const turn of this.turns) {
+			for (const chunk of turn.assistantMessage?.chunks ?? []) {
+				if (chunk.type === "tool" && chunk.tool?.tool_name === "spawn_agents" && chunk.tool.tool_call_id) {
+					liveIds.add(chunk.tool.tool_call_id);
+				}
+			}
+		}
+		for (const key of this.batchTaskTiming.keys()) {
+			if (!liveIds.has(key)) this.batchTaskTiming.delete(key);
+		}
 	}
 	private _viewportHeight: number = 0;
 
@@ -1761,13 +1783,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const resultByIndex = new Map(
 			results.map((result) => [Number(result.index), result]),
 		);
-		const { total, completed, failed, running, liveStatus, taskElapsedMs } =
-			this.computeBatchTally(tool);
+		const { liveStatus, taskElapsedMs } = this.computeBatchTally(tool);
 		const agentStreams = this.batchAgentStreams(tool);
-		const summary = tool.isComplete
-			? `${total} agents · ${completed} completed · ${failed} failed`
-			: `${total} agents · ${running} running`;
-		const lines = [`${DIM}${summary}${RESET}`];
+		// The N/M tally already appears in the collapsed header row above this
+		// detail block — repeating it here as its own line was pure duplication.
+		const lines: string[] = [];
 
 		for (let index = 0; index < tasks.length; index++) {
 			const task = tasks[index];
@@ -1791,13 +1811,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 					? task.agent
 					: "general";
 			const taskText =
-				typeof task.task === "string" ? compactText(task.task) : `Task ${index + 1}`;
+				typeof task.task === "string"
+					? compactText(task.task).slice(0, 100)
+					: `Task ${index + 1}`;
 			const elapsedMs = taskElapsedMs.get(index);
 			const elapsed =
 				elapsedMs !== undefined ? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}` : "";
+			const queuedTag = state === "queued" ? ` ${DIM}queued${RESET}` : "";
 			lines.push(
 				clampLineToWidth(
-					`${icon} ${theme.fg("active", `${index + 1}. ${agent}`)} ${DIM}${taskText}${RESET}${elapsed}`,
+					`${icon} ${theme.fg("active", `${index + 1}. ${agent}`)} ${DIM}${taskText}${RESET}${queuedTag}${elapsed}`,
 					Math.max(20, width),
 				),
 			);
@@ -1836,6 +1859,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 			details.metrics && typeof details.metrics === "object"
 				? (details.metrics as Record<string, unknown>)
 				: {};
+		const liveElapsedMs =
+			!tool.isComplete && tool.startedAt !== undefined
+				? Date.now() - tool.startedAt
+				: undefined;
 		const metadata = [
 			typeof metrics.turns === "number" ? `${metrics.turns} turn(s)` : "",
 			typeof metrics.toolCalls === "number"
@@ -1843,7 +1870,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 				: "",
 			typeof metrics.durationMs === "number"
 				? formatDurationMs(metrics.durationMs)
-				: "",
+				: liveElapsedMs !== undefined
+					? `${formatDurationMs(liveElapsedMs)} elapsed`
+					: "",
 		]
 			.filter(Boolean)
 			.join(" · ");
@@ -1924,7 +1953,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				`${calls.length} tool call${calls.length === 1 ? "" : "s"}${hidden ? ` · latest ${visible.length}` : ""}`,
 			)]
 			: hidden
-				? [`${theme.fg("dim", `${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`]
+				? [`  ${theme.fg("dim", `⋯ ${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`]
 				: [];
 		const bg = theme.bg("mdCodeBlockBg", "");
 		for (const call of visible) {
