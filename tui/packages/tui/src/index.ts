@@ -5,6 +5,8 @@ import { createInterface } from "node:readline/promises";
 import { initTheme, theme, getAvailableThemes } from "./layers/theme/theme.ts";
 import {
 	AgentCoreBridge,
+	buildDoctorReport,
+	formatDoctorReport,
 	resolveRuntimeConfig,
 } from "@logician/coding-agent/runtime";
 import { resolveTrust } from "@logician/coding-agent/trust";
@@ -46,6 +48,16 @@ async function main(): Promise<void> {
 			process.stderr.write(`${message}\n`);
 			process.exitCode = 2;
 		}
+		return;
+	}
+	if (args[0] === "doctor" || args.includes("--doctor")) {
+		const report = await buildDoctorReport(cwd);
+		process.stdout.write(
+			args.includes("--json")
+				? `${JSON.stringify(report, null, 2)}\n`
+				: `${formatDoctorReport(report)}\n`,
+		);
+		process.exitCode = report.config.valid && report.workspace.present ? 0 : 1;
 		return;
 	}
 	const trust = await resolveTrust({
