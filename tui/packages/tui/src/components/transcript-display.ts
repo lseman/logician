@@ -1700,19 +1700,32 @@ export class TranscriptDisplay implements Component, Scrollable {
 			taskElapsedMs.set(index, (entry.endedAt ?? now) - entry.startedAt);
 		}
 
-		const total =
-			typeof details.total === "number" ? details.total : tasks.length;
 		const completed =
-			typeof details.completed === "number"
-				? details.completed
+			typeof details.completed === "number" && Number.isFinite(details.completed)
+				? Math.max(0, Math.trunc(details.completed))
 				: [...liveStatus.values()].filter((s) => s === "completed").length;
 		const failed =
-			typeof details.failed === "number"
-				? details.failed
+			typeof details.failed === "number" && Number.isFinite(details.failed)
+				? Math.max(0, Math.trunc(details.failed))
 				: [...liveStatus.values()].filter((s) => s === "failed").length;
 		const running = [...liveStatus.values()].filter(
 			(status) => status === "running",
 		).length;
+		const reportedTotal =
+			typeof details.total === "number" && Number.isFinite(details.total)
+				? Math.max(0, Math.trunc(details.total))
+				: 0;
+		const observedTotal =
+			liveStatus.size > 0 ? Math.max(...liveStatus.keys()) + 1 : 0;
+		// Tool arguments can still be streaming when the first progress marker
+		// arrives. Never render an impossible ratio such as "1/0", and also
+		// defend against stale or malformed structured totals.
+		const total = Math.max(
+			reportedTotal,
+			tasks.length,
+			observedTotal,
+			completed + failed + running,
+		);
 		return { total, completed, failed, running, liveStatus, taskElapsedMs };
 	}
 

@@ -781,6 +781,66 @@ void test("spawn_agents renders ordered live task status", () => {
 	assert.match(output, /· 3\. general.*Check documentation/);
 });
 
+void test("spawn_agents never renders a positive count over zero while arguments stream", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "streaming-agent-batch-args",
+		userMessage: { type: "user", content: "Inspect in parallel" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: false,
+				tool: {
+					tool: "spawn_agents",
+					tool_name: "spawn_agents",
+					partialResult: "{\"tasks\":[{\"agent\":\"explorer\"",
+					streamOutput: "▶ 0 explorer\n",
+					isError: false,
+					isComplete: false,
+				},
+			}],
+		},
+		isComplete: false,
+	}]);
+	const output = plain(display.render(120).join("\n"));
+
+	assert.match(output, /subagents 1\/1 running/);
+	assert.doesNotMatch(output, /\/0 running/);
+});
+
+void test("spawn_agents repairs an inconsistent structured total", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "inconsistent-agent-batch-total",
+		userMessage: { type: "user", content: "Inspect in parallel" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: false,
+				tool: {
+					tool: "spawn_agents",
+					tool_name: "spawn_agents",
+					streamOutput: "▶ 2 explorer\n",
+					details: { total: 0 },
+					isError: false,
+					isComplete: false,
+				},
+			}],
+		},
+		isComplete: false,
+	}]);
+	const output = plain(display.render(120).join("\n"));
+
+	assert.match(output, /subagents 1\/3 running/);
+	assert.doesNotMatch(output, /\/0 running/);
+});
+
 void test("expanded spawn_agents keeps concurrent text streams attributed", () => {
 	const display = new TranscriptDisplay();
 	display.setToolsExpanded(true);
