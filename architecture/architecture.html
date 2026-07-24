@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description"
+        content="How Logician is built: the five-package layout, the agent harness loop, and how TUI, capabilities, coding tools, and memory fit together." />
+    <title>Architecture — Logician</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+    <link rel="stylesheet" href="../style.css" />
+    <link rel="stylesheet" href="architecture.css" />
+</head>
+
+<body>
+
+    <div class="bg-mesh" aria-hidden="true">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-grain" aria-hidden="true"></div>
+
+    <!-- ══════════════════════════
+     NAV
+══════════════════════════ -->
+    <nav id="main-nav">
+        <div class="nav-inner">
+            <a href="../index.html" class="brand">
+                <svg class="brand-logo" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <defs>
+                        <radialGradient id="nav-aura" cx="50%" cy="40%" r="50%">
+                            <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.30" />
+                            <stop offset="100%" stop-color="#06B6D4" stop-opacity="0" />
+                        </radialGradient>
+                        <radialGradient id="nav-glass" cx="40%" cy="35%" r="65%">
+                            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9" />
+                            <stop offset="50%" stop-color="#C4B5FD" />
+                            <stop offset="100%" stop-color="#8B5CF6" />
+                        </radialGradient>
+                        <linearGradient id="nav-stroke" x1="120" y1="90" x2="380" y2="360" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#A78BFA" />
+                            <stop offset="100%" stop-color="#5B21B6" />
+                        </linearGradient>
+                        <linearGradient id="nav-base" x1="0" y1="330" x2="0" y2="460" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#C4B5FD" />
+                            <stop offset="100%" stop-color="#6D28D9" />
+                        </linearGradient>
+                    </defs>
+                    <circle cx="256" cy="205" r="170" fill="url(#nav-aura)" />
+                    <path d="M256 78 C177 78 118 136 118 215 C118 274 151 319 193 351 C211 365 223 384 226 404 L286 404 C289 384 301 365 319 351 C361 319 394 274 394 215 C394 136 335 78 256 78 Z"
+                        fill="url(#nav-glass)" stroke="url(#nav-stroke)" stroke-width="12" stroke-linejoin="round" />
+                    <g transform="translate(256 224)">
+                        <path d="M-72 -48 H10 C44 -48 70 -22 70 12 C70 46 44 72 10 72 H-72" fill="none" stroke="#7C3AED"
+                            stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" />
+                        <line x1="-72" y1="-20" x2="4" y2="-20" stroke="#8B5CF6" stroke-width="8" stroke-linecap="round" opacity="0.6" />
+                        <line x1="-72" y1="12" x2="20" y2="12" stroke="#8B5CF6" stroke-width="8" stroke-linecap="round" opacity="0.6" />
+                        <line x1="-72" y1="44" x2="4" y2="44" stroke="#8B5CF6" stroke-width="8" stroke-linecap="round" opacity="0.6" />
+                        <circle cx="-26" cy="-20" r="8" fill="#DDD6FE" />
+                        <circle cx="20" cy="12" r="8" fill="#DDD6FE" />
+                        <circle cx="-8" cy="44" r="8" fill="#DDD6FE" />
+                        <circle cx="46" cy="12" r="9" fill="#DDD6FE" />
+                        <line x1="-26" y1="-20" x2="20" y2="12" stroke="#A78BFA" stroke-width="4" stroke-linecap="round" opacity="0.8" />
+                        <line x1="20" y1="12" x2="-8" y2="44" stroke="#A78BFA" stroke-width="4" stroke-linecap="round" opacity="0.8" />
+                        <line x1="20" y1="12" x2="46" y2="12" stroke="#06B6D4" stroke-width="5" stroke-linecap="round" opacity="0.9" />
+                    </g>
+                    <rect x="214" y="401" width="84" height="16" rx="8" fill="#7C3AED" />
+                    <rect x="206" y="421" width="100" height="16" rx="8" fill="#8B5CF6" />
+                    <path d="M196 440 H316 V468 C316 486 302 498 284 498 H228 C210 498 196 486 196 468 Z"
+                        fill="url(#nav-base)" stroke="#6D28D9" stroke-width="8" stroke-linejoin="round" />
+                    <rect x="236" y="490" width="40" height="8" rx="4" fill="#4C1D95" />
+                    <circle cx="344" cy="132" r="7" fill="#A78BFA" opacity="0.3" />
+                    <circle cx="344" cy="132" r="4" fill="#FFFFFF" opacity="0.6" />
+                </svg>
+                <span class="brand-name">Logician</span>
+                <span class="brand-version">architecture</span>
+            </a>
+
+            <div class="nav-actions">
+                <a class="btn btn-ghost" href="../index.html">Home</a>
+                <a class="btn btn-ghost" href="https://github.com/lseman/logician" target="_blank" rel="noopener">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+                    </svg>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ══════════════════════════
+     HEADER
+══════════════════════════ -->
+    <header class="arch-hero">
+        <div class="container">
+            <div class="reveal">
+                <div class="hero-kicker">System design</div>
+                <h1 class="arch-title">How <span class="grad">Logician</span> is built</h1>
+                <p class="section-copy arch-lede">
+                    A TypeScript monorepo of five packages arranged as a fan-in: everything sits on a
+                    minimal agent engine, capabilities and memory build on that engine independently, and the
+                    coding agent + terminal UI pull the rest together into one running process.
+                </p>
+            </div>
+        </div>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════
+     DIAGRAM
+══════════════════════════ -->
+    <section class="section">
+        <div class="container">
+            <div class="reveal">
+                <div class="section-tag">01 — Package map</div>
+                <h2 class="section-title">Five packages, <span class="grad">one process</span></h2>
+                <p class="section-copy">Everything runs locally in a single Node process. No services to
+                    orchestrate — packages are TypeScript workspaces, not network boundaries.</p>
+            </div>
+
+            <div class="diagram-frame reveal reveal-d1">
+                <img src="logician-architecture.svg" alt="Logician package architecture: TUI on top of the agent-core harness, with agent-capabilities and coding-agent alongside it, observational-memory underneath, and external LLM backend / MCP / SearXNG / filesystem connected via a tool bus." />
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════
+     LAYERING / DEPENDENCY SHAPE
+══════════════════════════ -->
+    <section class="section">
+        <div class="container">
+            <div class="reveal">
+                <div class="section-tag">02 — Dependency shape</div>
+                <h2 class="section-title">A <span class="grad">fan-in</span>, not a stack</h2>
+                <p class="section-copy">Package.json dependencies form a diamond, not a strict top-to-bottom
+                    layer cake:</p>
+            </div>
+
+            <div class="dep-graph reveal reveal-d1">
+                <div class="dep-row dep-row-top">
+                    <div class="dep-node dep-tui">tui</div>
+                </div>
+                <div class="dep-row dep-row-mid">
+                    <div class="dep-node dep-coding">coding-agent</div>
+                </div>
+                <div class="dep-row dep-row-sib">
+                    <div class="dep-node dep-cap">agent-capabilities</div>
+                    <div class="dep-node dep-mem">observational-memory</div>
+                </div>
+                <div class="dep-row dep-row-bottom">
+                    <div class="dep-node dep-core">agent-core</div>
+                </div>
+            </div>
+
+            <ul class="dep-list reveal reveal-d2">
+                <li><code>agent-core</code> has no internal dependencies — it's the foundation every other
+                    package builds on.</li>
+                <li><code>agent-capabilities</code> and <code>observational-memory</code> are siblings: both
+                    depend only on <code>agent-core</code>, not on each other.</li>
+                <li><code>coding-agent</code> is the orchestration layer — it pulls together
+                    <code>agent-core</code>, <code>agent-capabilities</code>, and
+                    <code>observational-memory</code> into one bridge.</li>
+                <li><code>tui</code> sits on top of everything: <code>agent-core</code>,
+                    <code>agent-capabilities</code>, and <code>coding-agent</code>.</li>
+            </ul>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════
+     PACKAGE DETAIL CARDS
+══════════════════════════ -->
+    <section class="section">
+        <div class="container">
+            <div class="reveal">
+                <div class="section-tag">03 — Package detail</div>
+                <h2 class="section-title">What each <span class="grad">package</span> owns</h2>
+            </div>
+
+            <div class="pkg-grid reveal reveal-d1">
+
+                <div class="pkg-card" style="--accent:#58a6ff">
+                    <div class="pkg-head">
+                        <span class="pkg-dot"></span>
+                        <code class="pkg-name">@logician/agent-core</code>
+                    </div>
+                    <div class="pkg-desc">Lean agent engine: loop, harness, hooks, types. Zero internal
+                        dependencies — the foundation layer.</div>
+                    <ul class="pkg-facts">
+                        <li><code>AgentHarness</code> and <code>runAgentLoop()</code> drive the turn loop:
+                            intake → model call → tool execution → hooks → next turn.</li>
+                        <li><code>hooks/{builtin,extensions,native}</code> — pre/post-tool hook chains,
+                            budget tracking, hook metrics.</li>
+                        <li><code>message-queue/</code> — steering, follow-ups, and queued input between
+                            turns.</li>
+                        <li><code>compaction/</code> — context compaction and recovery when a session
+                            approaches its token budget.</li>
+                        <li><code>compatibility/claude-code/</code> — a Claude Code compatibility layer
+                            (hooks, plugin executor/manager).</li>
+                        <li><code>tools/shared/</code> — permissions, tool-call parsing, plugin loading, the
+                            tool registry.</li>
+                        <li>Backend abstraction over any OpenAI-compatible API (<code>OpenAIBackend</code>),
+                            with typed, retryable <code>BackendError</code>.</li>
+                    </ul>
+                </div>
+
+                <div class="pkg-card" style="--accent:#d29922">
+                    <div class="pkg-head">
+                        <span class="pkg-dot"></span>
+                        <code class="pkg-name">@logician/agent-capabilities</code>
+                    </div>
+                    <div class="pkg-desc">Behaviors layered on the core loop: task tracking, user prompts,
+                        subagents, and reasoning strategies.</div>
+                    <ul class="pkg-facts">
+                        <li><code>todo/</code> — task tracking with status transitions.</li>
+                        <li><code>ask-user/</code> — structured prompts back to the user mid-turn.</li>
+                        <li><code>subagents/</code> — child-agent spawning and delegation, isolated
+                            worktrees/context.</li>
+                        <li><code>reasoners/</code> — nine strategies: SSR, Tree of Thoughts, Graph of
+                            Thoughts, Reflexion, Best-of-N, Self-Consistency, Auto-CoT, In-Context CoT, plus a
+                            shared base + registry.</li>
+                        <li><code>eoh/</code> — an evolutionary optimization engine (population, evaluator).
+                            Opt-in: not re-exported from the package's main entry point.</li>
+                    </ul>
+                </div>
+
+                <div class="pkg-card" style="--accent:#56d364">
+                    <div class="pkg-head">
+                        <span class="pkg-dot"></span>
+                        <code class="pkg-name">@logician/coding-agent</code>
+                    </div>
+                    <div class="pkg-desc">Orchestration layer: sessions, config, skills, slash commands, and
+                        model resolution — where everything else gets wired together.</div>
+                    <ul class="pkg-facts">
+                        <li><code>runtime/bridge.ts</code> (<code>AgentCoreBridge</code>) — the largest file
+                            in the repo; connects harness, capabilities, memory, and tools into one runtime.
+                        </li>
+                        <li><code>runtime/</code> also holds <code>LoopManager</code>,
+                            <code>GoalManager</code>, an LSP manager for language-server integration, and
+                            post-edit diagnostics.</li>
+                        <li><code>tools/</code> — file ops, search, system, and web tools (see tool table
+                            below).</li>
+                        <li><code>mcp/</code> — an MCP client with both <code>StdioMcpClient</code> and
+                            <code>HttpMcpClient</code> (streamable HTTP) transports, plus a connection
+                            manager.</li>
+                        <li><code>sessions/</code> — <code>SessionStore</code> and transcript persistence,
+                            including bookmarks and rewind.</li>
+                        <li><code>context-files/</code>, <code>trust/</code>,
+                            <code>commands/slash-commands.ts</code> — repo context loading, permission
+                            trust, and the slash-command registry.</li>
+                    </ul>
+                </div>
+
+                <div class="pkg-card" style="--accent:#bc8cff">
+                    <div class="pkg-head">
+                        <span class="pkg-dot"></span>
+                        <code class="pkg-name">@logician/observational-memory</code>
+                    </div>
+                    <div class="pkg-desc">Structured, file-persisted memory: observations, reflections, and
+                        drops — not a chat-log cache.</div>
+                    <ul class="pkg-facts">
+                        <li><code>observer.ts</code> / <code>reflector.ts</code> / <code>dropper.ts</code> —
+                            capture, reflect on, and prune memory entries.</li>
+                        <li><code>consolidation.ts</code> (<code>ConsolidationPipeline</code>) — merges and
+                            compresses observations over time.</li>
+                        <li><code>knowledge-graph.ts</code> + <code>recall.ts</code> — structured retrieval
+                            across sessions.</li>
+                        <li><code>store.ts</code> / <code>persistence.ts</code> — <code>MemoryStoreImpl</code>
+                            over <code>FilePersistence</code>, local-first, no external DB.</li>
+                        <li>Session bookmarks and rewind checkpoints live in <code>coding-agent/sessions</code>
+                            and <code>agent-core</code>'s file-checkpoints, not here.</li>
+                    </ul>
+                </div>
+
+                <div class="pkg-card pkg-card-wide" style="--accent:#f778ba">
+                    <div class="pkg-head">
+                        <span class="pkg-dot"></span>
+                        <code class="pkg-name">@logician/tui</code>
+                    </div>
+                    <div class="pkg-desc">The terminal UI. Streams model output, tool traces, and reasoning
+                        live to any VT100-compatible terminal — local, SSH, or tmux.</div>
+                    <ul class="pkg-facts pkg-facts-cols">
+                        <li><code>layers/presentation</code> — rendering pipeline.</li>
+                        <li><code>layers/input</code> — keybindings, input bar, steering queue.</li>
+                        <li><code>layers/theme</code> — theme system, theme selector.</li>
+                        <li><code>layers/events</code> / <code>layers/core</code> — event plumbing, TUI core
+                            state machine.</li>
+                        <li><code>components/</code> — status bar, transcript display, MCP manager, reasoner
+                            selector, EOH panel, popups/overlays.</li>
+                        <li>Entry point handles <code>exec</code> and <code>doctor</code> CLI modes before
+                            booting the interactive TUI.</li>
+                    </ul>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════
+     HARNESS LOOP DETAIL
+══════════════════════════ -->
+    <section class="section">
+        <div class="container">
+            <div class="reveal">
+                <div class="section-tag">04 — The turn loop</div>
+                <h2 class="section-title">Inside the <span class="grad">harness</span></h2>
+                <p class="section-copy">Every turn moves through the same pipeline, whether it's a plain
+                    chat message, a tool call, or a subagent delegating back to its parent.</p>
+            </div>
+
+            <div class="diagram-frame reveal reveal-d1">
+                <img src="logician-harness-detail.svg" alt="Logician agent-core harness detail: intake of user input, steering, and follow-ups; context assembly; permission gate; model call; response parsing; pre-tool hooks; permission gate; tool execution; post-tool hooks; compaction check; loop back to next turn or final response, streamed live to the TUI." />
+            </div>
+
+            <ul class="dep-list reveal reveal-d2">
+                <li><strong>Intake</strong> — merges user input, steering interrupts, and queued follow-ups
+                    from the message queue before the turn starts.</li>
+                <li><strong>Context assembly</strong> — builds the message list, running compaction first if
+                    the session is near its token budget.</li>
+                <li><strong>Permission gate</strong> — checked both before the model call and before tool
+                    execution, per the active <code>permissionMode</code> (<code>acceptAll</code>,
+                    <code>acceptEdits</code>, <code>ask</code>, <code>plan</code>).</li>
+                <li><strong>Model call → parse → hooks → tools</strong> — pre-tool hooks can veto or rewrite
+                    a call; tool execution covers file ops, search, system, agent primitives, and web; post-tool
+                    hooks run result formatting and post-edit diagnostics for JS/TS/JSON.</li>
+                <li><strong>Loop or finish</strong> — either another turn starts, or a final response streams
+                    to the TUI and the turn completes.</li>
+            </ul>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════
+     TOOL BUS / EXTERNAL SURFACES
+══════════════════════════ -->
+    <section class="section">
+        <div class="container">
+            <div class="reveal">
+                <div class="section-tag">05 — Outside the process</div>
+                <h2 class="section-title">The <span class="grad">tool bus</span></h2>
+                <p class="section-copy">Everything the agent can touch outside its own memory goes through a
+                    typed tool call — visible, loggable, and gated by the permission mode.</p>
+            </div>
+
+            <div class="ext-grid reveal reveal-d1">
+                <div class="ext-card">
+                    <div class="ext-title">LLM backend</div>
+                    <div class="ext-sub">Any OpenAI-compatible API — local (llama.cpp) or hosted, swappable
+                        with a single config change.</div>
+                </div>
+                <div class="ext-card">
+                    <div class="ext-title">MCP servers</div>
+                    <div class="ext-sub">stdio and streamable-HTTP transports via <code>coding-agent/mcp</code>.
+                    </div>
+                </div>
+                <div class="ext-card">
+                    <div class="ext-title">SearXNG</div>
+                    <div class="ext-sub"><code>web_search</code> / <code>web_fetch</code> against a local or
+                        remote SearXNG instance.</div>
+                </div>
+                <div class="ext-card">
+                    <div class="ext-title">Filesystem · Git</div>
+                    <div class="ext-sub"><code>bash</code>, ripgrep-backed <code>grep</code>, fd/find-backed
+                        <code>find</code>, and <code>git</code> status/diff/log.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════
+     FOOTER
+══════════════════════════ -->
+    <footer>
+        <div class="footer-inner">
+            <div>
+                <div class="footer-brand">
+                    <span class="footer-name">Logician</span>
+                </div>
+                <div class="footer-desc">Local AI agent framework for code, research, and reproducible
+                    workflows.</div>
+            </div>
+            <div class="footer-links">
+                <a class="btn btn-ghost" href="../index.html">Home</a>
+                <a class="btn btn-ghost" href="https://github.com/lseman/logician" target="_blank"
+                    rel="noopener">GitHub</a>
+                <a class="btn btn-ghost" href="https://github.com/lseman/logician/blob/main/README.md"
+                    target="_blank" rel="noopener">README</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <span>Logician — MIT License</span>
+            <span>github.com/lseman/logician</span>
+        </div>
+    </footer>
+
+    <script src="../app.js" defer></script>
+</body>
+
+</html>
