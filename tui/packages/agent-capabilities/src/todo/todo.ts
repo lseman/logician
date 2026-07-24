@@ -11,10 +11,10 @@ import {
 	replaceTasks,
 	type Task,
 	type TaskStatus,
-} from "@logician/agent-core/core/todo-state.ts";
+} from "@logician/agent-core/core/tasks/todo-state.ts";
 
-export type { Task, TaskStatus } from "@logician/agent-core/core/todo-state.ts";
-export { getTasks, onTodosChanged } from "@logician/agent-core/core/todo-state.ts";
+export type { Task, TaskStatus } from "@logician/agent-core/core/tasks/todo-state.ts";
+export { getTasks, onTodosChanged } from "@logician/agent-core/core/tasks/todo-state.ts";
 
 export type TaskAction =
 	| "create"

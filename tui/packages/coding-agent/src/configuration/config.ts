@@ -21,6 +21,12 @@ const KNOWN_KEYS = new Set([
 	"temperature",
 	"maxTokens",
 	"maxIterations",
+	"autoRetryEnabled",
+	"maxRetries",
+	"retryBaseDelayMs",
+	"turnTimeoutMs",
+	"cacheSize",
+	"cacheTtlMs",
 	"toolExecution",
 	"contextWindow",
 	"contextWindowTokens",
@@ -271,6 +277,28 @@ export function validateConfig(
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
+	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
+
+	for (const [key, minimum, inclusive] of [
+		["maxRetries", 0, true],
+		["retryBaseDelayMs", 0, true],
+		["turnTimeoutMs", 0, false],
+		["cacheSize", 0, false],
+		["cacheTtlMs", 0, false],
+	] as const) {
+		if (obj[key] === undefined) continue;
+		const value = configNumber(obj[key]);
+		const valid =
+			value !== undefined && (inclusive ? value >= minimum : value > minimum);
+		if (!valid) {
+			warn(
+				warnings,
+				`"${key}" must be ${inclusive ? ">=" : ">"} ${minimum}. Ignored.`,
+			);
+		} else {
+			cfg[key] = value;
+		}
+	}
 
 	// allowedPaths: array of absolute paths allowed outside CWD.
 	if (obj.allowedPaths !== undefined) {
@@ -575,6 +603,12 @@ export interface LogicianTuiConfig {
 	guardsEnabled?: boolean; // OFF by default
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
+	autoRetryEnabled?: boolean;
+	maxRetries?: number;
+	retryBaseDelayMs?: number;
+	turnTimeoutMs?: number;
+	cacheSize?: number;
+	cacheTtlMs?: number;
 	// Absolute paths the agent may read/write outside CWD.
 	allowedPaths?: string[];
 	// When true, skip CWD/allowedPaths enforcement entirely.

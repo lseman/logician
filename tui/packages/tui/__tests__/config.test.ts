@@ -195,6 +195,7 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 	const w: string[] = [];
 	const cfg = validateConfig({}, w);
 	assert.deepEqual(cfg, {
+		autoRetryEnabled: true,
 		continuationEnabled: true,
 		postEditDiagnostics: true,
 	});

@@ -2,10 +2,11 @@
 // Extracts structured observations from a chunk of session entries.
 // Called by the consolidation pipeline on turn_end.
 
+import { hashId } from "./ids.ts";
+import { callStructuredLLM } from "./llm-client.ts";
+import { OBSERVER_SYSTEM_PROMPT } from "./prompts.ts";
 import { estimateTokens } from "./tokens.ts";
 import type { Observation } from "./types.ts";
-import { OBSERVER_SYSTEM_PROMPT } from "./prompts.ts";
-import { callLLM, extractJsonArray } from "./llm-client.ts";
 
 export interface ObserverConfig {
 	model: unknown;
@@ -17,6 +18,7 @@ export interface ObserverConfig {
 	chunk: string;
 	allowedSourceEntryIds: string[];
 	thinkingLevel?: string;
+	signal?: AbortSignal;
 }
 
 export async function runObserver(
@@ -46,49 +48,88 @@ export async function runObserver(
 
 	const userMessage = `Extract observations from the following source entries.\n\nSource entries:\n${chunk}`;
 
-	try {
-		const response = await callLLM(systemPrompt, userMessage, {
+	const response = await callStructuredLLM(
+		systemPrompt,
+		userMessage,
+		{
 			model,
 			apiKey,
 			baseUrl,
 			headers,
 			thinkingLevel,
-		});
-		return parseObservations(response, allowedSourceEntryIds);
-	} catch (e: unknown) {
-		return undefined;
-	}
+			signal: config.signal,
+		},
+		{
+			name: "record_observations",
+			description:
+				"Record validated observations from the supplied source entries.",
+			parameters: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					observations: {
+						type: "array",
+						items: {
+							type: "object",
+							additionalProperties: false,
+							properties: {
+								content: { type: "string" },
+								timestamp: { type: "string" },
+								relevance: {
+									type: "string",
+									enum: ["low", "medium", "high", "critical"],
+								},
+								sourceEntryIds: {
+									type: "array",
+									items: { type: "string" },
+								},
+							},
+							required: ["content", "timestamp", "relevance", "sourceEntryIds"],
+						},
+					},
+				},
+				required: ["observations"],
+			},
+		},
+	);
+	return parseObservations(response, allowedSourceEntryIds);
 }
 
-function parseObservations(
-	raw: string,
+export function parseObservations(
+	raw: unknown,
 	allowedIds: string[],
 ): Observation[] | undefined {
-	const parsed = extractJsonArray(raw);
-	if (!parsed) return undefined;
+	if (!raw || typeof raw !== "object") return undefined;
+	const parsed = (raw as Record<string, unknown>).observations;
+	if (!Array.isArray(parsed)) return undefined;
+	const allowed = new Set(allowedIds);
 
 	const observations: Observation[] = [];
 	for (const item of parsed) {
-		if (!isObservation(item)) continue;
+		if (!isObservationProposal(item)) continue;
 		// Validate sourceEntryIds against allowed set
-		const validIds = item.sourceEntryIds.filter((id) =>
-			allowedIds.includes(id),
-		);
+		const validIds = item.sourceEntryIds.filter((id) => allowed.has(id));
 		if (validIds.length === 0) continue;
 
+		const content = item.content.trim().replace(/\s+/g, " ");
+		if (!content) continue;
 		observations.push({
-			...item,
+			id: hashId(content),
+			content,
+			timestamp: item.timestamp,
+			relevance: item.relevance,
 			sourceEntryIds: validIds,
-			tokenCount: item.tokenCount ?? estimateTokens(item.content),
+			tokenCount: estimateTokens(content),
 		});
 	}
 	return observations;
 }
 
-function isObservation(value: unknown): value is Observation {
+type ObservationProposal = Omit<Observation, "id" | "tokenCount">;
+
+function isObservationProposal(value: unknown): value is ObservationProposal {
 	if (!value || typeof value !== "object") return false;
 	const o = value as Record<string, unknown>;
-	if (typeof o.id !== "string" || !/^[a-f0-9]{12}$/.test(o.id)) return false;
 	if (typeof o.content !== "string" || !o.content) return false;
 	if (typeof o.timestamp !== "string" || !o.timestamp) return false;
 	if (!["low", "medium", "high", "critical"].includes(String(o.relevance)))

@@ -67,6 +67,65 @@ void test("registry times out hung tools", async () => {
 	assert.match(result.content, /timed out/);
 });
 
+void test("registry aborts a tool when its timeout expires", async () => {
+	let aborted = false;
+	const registry = new ToolRegistry();
+	registry.register(
+		makeTool({
+			name: "abortable",
+			timeoutMs: 20,
+			execute: async (_args, ctx) =>
+				new Promise<string>((resolve) => {
+					ctx.signal?.addEventListener(
+						"abort",
+						() => {
+							aborted = true;
+							resolve("aborted");
+						},
+						{ once: true },
+					);
+				}),
+		}),
+	);
+
+	const result = await registry.execute(call("abortable"));
+	assert.equal(result.isError, true);
+	assert.equal(aborted, true);
+});
+
+void test("registry disables caching when cache is null", async () => {
+	let executions = 0;
+	const registry = new ToolRegistry({ cache: null });
+	registry.register(
+		makeTool({
+			name: "uncached",
+			cacheable: true,
+			execute: async () => `run ${++executions}`,
+		}),
+	);
+
+	await registry.execute(call("uncached"));
+	await registry.execute(call("uncached"));
+	assert.equal(executions, 2);
+});
+
+void test("registry honors the configured cache size", async () => {
+	let executions = 0;
+	const registry = new ToolRegistry({ cacheSize: 1 });
+	registry.register(
+		makeTool({
+			name: "bounded",
+			cacheable: true,
+			execute: async () => `run ${++executions}`,
+		}),
+	);
+
+	await registry.execute(call("bounded", { key: "a" }));
+	await registry.execute(call("bounded", { key: "b" }));
+	await registry.execute(call("bounded", { key: "a" }));
+	assert.equal(executions, 3);
+});
+
 void test("registry caps oversized tool results with middle truncation", async () => {
 	const registry = new ToolRegistry({ maxResultChars: 1000 });
 	const big = "A".repeat(600) + "MIDDLE".repeat(200) + "Z".repeat(600);
@@ -77,6 +136,32 @@ void test("registry caps oversized tool results with middle truncation", async (
 	assert.match(result.content, /truncated/);
 	assert.ok(result.content.startsWith("A"));
 	assert.ok(result.content.endsWith("Z"));
+});
+
+void test("registry propagates path policy to tool contexts", async () => {
+	const registry = new ToolRegistry({
+		cwd: "/workspace",
+		allowedPaths: ["/shared"],
+		allowAllPaths: true,
+	});
+	registry.register(
+		makeTool({
+			name: "context",
+			execute: async (_args, ctx) =>
+				JSON.stringify({
+					cwd: ctx.cwd,
+					allowedPaths: ctx.allowedPaths,
+					allowAllPaths: ctx.allowAllPaths,
+				}),
+		}),
+	);
+
+	const result = await registry.execute(call("context"));
+	assert.deepEqual(JSON.parse(result.content), {
+		cwd: "/workspace",
+		allowedPaths: ["/shared"],
+		allowAllPaths: true,
+	});
 });
 
 void test("micro-compaction spares recent messages and user prompts", () => {

@@ -82,7 +82,7 @@ export const list_files: Tool = {
 		const { path: dirPathStr, limit } = args as ListFilesArgs;
 
 		const safePath = resolvePath(ctx.cwd, dirPathStr || ".");
-		ensureInsideCwd(ctx.cwd, safePath, undefined, ctx.allowAllPaths);
+		ensureInsideCwd(ctx.cwd, safePath, ctx.allowedPaths, ctx.allowAllPaths);
 		const effectiveLimit = Math.max(1, Number(limit) || DEFAULT_LIMIT);
 
 		// Check if path exists.

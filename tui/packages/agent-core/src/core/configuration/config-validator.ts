@@ -1,6 +1,6 @@
 // Config schema validation and defaults.
 
-import type { AgentConfig, ThinkingLevel, QueueMode, InferenceMode } from "./types.ts";
+import type { AgentConfig, ThinkingLevel, QueueMode, InferenceMode } from "../types.ts";
 
 const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
 	"off",
@@ -96,6 +96,14 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 
 	if (config.turnTimeoutMs !== undefined && config.turnTimeoutMs <= 0) {
 		errors.push({ field: "turnTimeoutMs", message: "must be > 0" });
+	}
+
+	if (config.cacheSize !== undefined && config.cacheSize <= 0) {
+		errors.push({ field: "cacheSize", message: "must be > 0" });
+	}
+
+	if (config.cacheTtlMs !== undefined && config.cacheTtlMs <= 0) {
+		errors.push({ field: "cacheTtlMs", message: "must be > 0" });
 	}
 
 	if (config.loopDetectionWindow !== undefined && config.loopDetectionWindow <= 0) {

@@ -1,15 +1,41 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
-import { formatContextSize } from "@logician/coding-agent";
 
 import { execSync } from "node:child_process";
+import {
+	getReasonerIds,
+	getReasonerMeta,
+	type ReasonerMeta,
+} from "@logician/agent-capabilities/reasoners/registry";
+import type { Message as CoreMessage } from "@logician/agent-core";
+import { formatContextSize } from "@logician/coding-agent";
 import { AgentCoreBridge } from "@logician/coding-agent/bridge";
-import { InputBar } from "../../components/input-bar.ts";
+import { saveConfigField } from "@logician/coding-agent/config";
+import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
+import { LoopManager } from "@logician/coding-agent/loop-manager";
+import {
+	GoalManager,
+	type GoalState,
+	resolveRuntimeConfig,
+} from "@logician/coding-agent/runtime";
+import { SessionStore } from "@logician/coding-agent/session-store";
+import {
+	createSlashCommands,
+	filterSlashCommands,
+	type SlashCommandDef,
+} from "@logician/coding-agent/slash-commands";
+import { Transcript, type Turn } from "@logician/coding-agent/transcript";
 import { ChoicePopup } from "../../components/choice-popup.ts";
+import { InputBar } from "../../components/input-bar.ts";
 import {
 	type McpManagerAction,
 	McpManagerOverlay,
 } from "../../components/mcp-manager.ts";
+import {
+	type ModelInfo,
+	type ModelSelectorAction,
+	ModelSelectorOverlay,
+} from "../../components/model-selector.ts";
 import {
 	type PluginManagerAction,
 	PluginManagerOverlay,
@@ -19,17 +45,7 @@ import {
 	type ReasonerSelectorAction,
 	ReasonerSelectorOverlay,
 } from "../../components/reasoner-selector.ts";
-import {
-	type ModelInfo,
-	type ModelSelectorAction,
-	ModelSelectorOverlay,
-} from "../../components/model-selector.ts";
 import { SessionManager } from "../../components/session-manager.ts";
-import {
-	type ThemeInfo,
-	type ThemeSelectorAction,
-	ThemeSelectorOverlay,
-} from "../../components/theme-selector.ts";
 import {
 	type SettingDef,
 	type SettingsSelectorAction,
@@ -38,41 +54,26 @@ import {
 import { SlashPopup } from "../../components/slash-popup.ts";
 import { StatusBar } from "../../components/status-bar.ts";
 import { SteerQueue } from "../../components/steer-queue.ts";
+import {
+	type ThemeInfo,
+	type ThemeSelectorAction,
+	ThemeSelectorOverlay,
+} from "../../components/theme-selector.ts";
 import { TodoBar } from "../../components/todo/todo-bar.ts";
-import { WorkSurface } from "../../components/work-surface.ts";
 import { TranscriptDisplay } from "../../components/transcript-display.ts";
-import { SessionStore } from "@logician/coding-agent/session-store";
-import { saveConfigField } from "@logician/coding-agent/config";
-import {
-	GoalManager,
-	resolveRuntimeConfig,
-	type GoalState,
-} from "@logician/coding-agent/runtime";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
-import { KillRing } from "../input/kill-ring.ts";
-import { LoopManager } from "@logician/coding-agent/loop-manager";
-import {
-	getReasonerIds,
-	getReasonerMeta,
-	type ReasonerMeta,
-} from "@logician/agent-capabilities/reasoners/registry";
-import type { Message as CoreMessage } from "@logician/agent-core";
-import {
-	createSlashCommands,
-	filterSlashCommands,
-	type SlashCommandDef,
-} from "@logician/coding-agent/slash-commands";
-import { setTheme, getAvailableThemes, theme } from "../theme/theme.ts";
-import { Transcript, type Turn } from "@logician/coding-agent/transcript";
-import { Container, TUI } from "../core/tui-core.ts";
-import { UndoStack } from "../input/undo-stack.ts";
+import { WorkSurface } from "../../components/work-surface.ts";
 import {
 	INITIAL_TURN_STATE,
 	reduceTurnState,
+	type TurnState,
 	turnPhaseIsActive,
 	turnPhaseLabel,
-	type TurnState,
 } from "../../state/turn-state.ts";
+import { Container, TUI } from "../core/tui-core.ts";
+import { KillRing } from "../input/kill-ring.ts";
+import { UndoStack } from "../input/undo-stack.ts";
+import { getAvailableThemes, setTheme, theme } from "../theme/theme.ts";
+import { formatStartupMemory } from "./startup-memory.ts";
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
@@ -106,8 +107,11 @@ export class LogicianTUI {
 	private goalEvaluationPending = false;
 	private configPath?: string;
 	private thinkingLevel = "off";
-	private inferenceMode: "thinking-general" | "thinking-coding" | "instruct-general" | "instruct-reasoning" =
-		"instruct-general";
+	private inferenceMode:
+		| "thinking-general"
+		| "thinking-coding"
+		| "instruct-general"
+		| "instruct-reasoning" = "instruct-general";
 	private thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
 		"expanded";
 	private traceOn = false;
@@ -118,7 +122,12 @@ export class LogicianTUI {
 
 	// Inference mode helper — used by the keyboard shortcut and /settings.
 	private setInferenceMode(mode: string): void {
-		const valid = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+		const valid = [
+			"thinking-general",
+			"thinking-coding",
+			"instruct-general",
+			"instruct-reasoning",
+		];
 		if (!valid.includes(mode)) return;
 		const oldMode = this.inferenceMode;
 		this.inferenceMode = mode as typeof this.inferenceMode;
@@ -131,7 +140,9 @@ export class LogicianTUI {
 				"instruct-general": "Instruct (General)",
 				"instruct-reasoning": "Instruct (Reasoning)",
 			};
-			this.transcript.addSystemMessage(`Inference mode: ${labels[mode] ?? mode}`);
+			this.transcript.addSystemMessage(
+				`Inference mode: ${labels[mode] ?? mode}`,
+			);
 			saveConfigField("inferenceMode", mode);
 		}
 	}
@@ -154,8 +165,11 @@ export class LogicianTUI {
 	}
 
 	// eslint-disable-next-line max-lines-per-function -- wires up entire TUI (bridge, transcript, components, keybindings, overlays)
-	constructor() {
-		const runtimeConfig = resolveRuntimeConfig(process.cwd());
+	constructor(
+		runtimeConfig = resolveRuntimeConfig(process.cwd(), process.env, {
+			loadProjectConfig: false,
+		}),
+	) {
 		this.configPath = runtimeConfig.configPath;
 		this.bridge = new AgentCoreBridge(runtimeConfig.bridge);
 		this.transcript = new Transcript();
@@ -174,7 +188,8 @@ export class LogicianTUI {
 		this.settingsSelector = new SettingsSelectorOverlay();
 		this.transcriptDisplay = new TranscriptDisplay({
 			thinkingMode: this.thinkingDisplayMode,
-			maxMessageLength: runtimeConfig.source.truncation?.transcriptMessageMaxChars,
+			maxMessageLength:
+				runtimeConfig.source.truncation?.transcriptMessageMaxChars,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.
@@ -464,7 +479,7 @@ export class LogicianTUI {
 				this.statusPanel.update({ thinkingLevel: lvl });
 				setStatusPhase("ready");
 			},
-		setInferenceMode: (mode: unknown) => {
+			setInferenceMode: (mode: unknown) => {
 				const m = typeof mode === "string" ? mode : String(mode);
 				this.setInferenceMode(m);
 				setStatusPhase("ready");
@@ -808,19 +823,19 @@ export class LogicianTUI {
 							);
 							this.transcript.addSystemMessage(
 								`Goal achieved: "${state.condition}"\n` +
-								`Duration: ${dur}s, Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
+									`Duration: ${dur}s, Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
 							);
 						} else if (state.status === "cancelled") {
 							this.transcript.addSystemMessage(
 								`Goal cancelled: "${state.condition}"\n` +
-								`Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
+									`Turns: ${state.turnCount}, Reason: ${state.lastReason || "N/A"}`,
 							);
 						} else {
 							const elapsed = Math.round((Date.now() - state.startedAt) / 1000);
 							this.transcript.addSystemMessage(
 								`Goal active: "${state.condition}"\n` +
-								`Running: ${elapsed}s, Turns: ${state.turnCount}${state.maxTurns ? ` / ${state.maxTurns}` : ""}\n` +
-								`Last: ${state.lastReason || "evaluating..."}`,
+									`Running: ${elapsed}s, Turns: ${state.turnCount}${state.maxTurns ? ` / ${state.maxTurns}` : ""}\n` +
+									`Last: ${state.lastReason || "evaluating..."}`,
 							);
 						}
 						this.transcriptDisplay.setTurns(this.transcript.getTurns());
@@ -1126,18 +1141,25 @@ export class LogicianTUI {
 		const mcpServerCount = Number(state.mcp_servers_loaded || 0);
 		const mcpToolCount = Number(state.mcp_tools_loaded || 0);
 		const plugins = Array.isArray(state.startup_plugins)
-			? state.startup_plugins.map((item) => String(item || "").trim()).filter(Boolean)
+			? state.startup_plugins
+					.map((item) => String(item || "").trim())
+					.filter(Boolean)
 			: [];
 		const skills = Array.isArray(state.loaded_skills)
 			? state.loaded_skills
 					.map((item) => {
 						if (!item || typeof item !== "object") return null;
 						const skill = item as Record<string, unknown>;
-						const slashName = String(skill.slash_name || skill.name || "").trim();
+						const slashName = String(
+							skill.slash_name || skill.name || "",
+						).trim();
 						const description = String(skill.description || "").trim();
 						return slashName ? { slashName, description } : null;
 					})
-					.filter((item): item is { slashName: string; description: string } => item !== null)
+					.filter(
+						(item): item is { slashName: string; description: string } =>
+							item !== null,
+					)
 			: [];
 		const contexts = Array.isArray(state.startup_hook_contexts)
 			? state.startup_hook_contexts
@@ -1177,9 +1199,7 @@ export class LogicianTUI {
 		const searchEnabled =
 			state.web_search_enabled === true ||
 			(Array.isArray(state.tools) && state.tools.includes("web_search"));
-		const searchState = searchEnabled
-			? searchUrl || "enabled"
-			: "disabled";
+		const searchState = searchEnabled ? searchUrl || "enabled" : "disabled";
 
 		const lines = [
 			"# Logician",
@@ -1218,6 +1238,8 @@ export class LogicianTUI {
 		if (mcpErrors.length) {
 			lines.push("", "## MCP errors", ...mcpErrors.map((err) => `- ${err}`));
 		}
+
+		lines.push(...formatStartupMemory(state));
 
 		// Keep the inventory last so the transcript's initial scroll position shows
 		// what was loaded instead of ending on verbose startup-hook context.
@@ -1940,12 +1962,14 @@ export class LogicianTUI {
 
 	private openModelSelector(): void {
 		this.statusPanel.update({ phase: "model" });
-		const modelInfos: ModelInfo[] = this.bridge.getModelOptions().map((option) => ({
-			id: option.key,
-			name: option.name,
-			active: option.active,
-			url: `${option.model} · ${option.url}`,
-		}));
+		const modelInfos: ModelInfo[] = this.bridge
+			.getModelOptions()
+			.map((option) => ({
+				id: option.key,
+				name: option.name,
+				active: option.active,
+				url: `${option.model} · ${option.url}`,
+			}));
 		this.modelSelector.setModels(modelInfos);
 		this.modelSelector.setMessage(
 			"Enter selects model for the current session.",
@@ -2035,7 +2059,14 @@ export class LogicianTUI {
 	private async openSettingsSelector(): Promise<void> {
 		try {
 			const data = this.bridge.getSettingsData();
-			const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+			const thinkingLevels = [
+				"off",
+				"minimal",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+			];
 			const permissionModes = ["acceptAll", "acceptEdits", "ask", "plan"];
 			const settings: SettingDef[] = [
 				{
@@ -2099,8 +2130,18 @@ export class LogicianTUI {
 					currentValue: data.loopDetectionEnabled ? "on" : "off",
 					description: "Detect and break infinite agent loops",
 					options: [
-						{ label: "on", value: "true", current: data.loopDetectionEnabled, toggleOn: true },
-						{ label: "off", value: "false", current: !data.loopDetectionEnabled, toggleOn: false },
+						{
+							label: "on",
+							value: "true",
+							current: data.loopDetectionEnabled,
+							toggleOn: true,
+						},
+						{
+							label: "off",
+							value: "false",
+							current: !data.loopDetectionEnabled,
+							toggleOn: false,
+						},
 					],
 				},
 				{
@@ -2108,8 +2149,18 @@ export class LogicianTUI {
 					currentValue: data.guardsEnabled ? "on" : "off",
 					description: "Safety guards against harmful tool use",
 					options: [
-						{ label: "on", value: "true", current: data.guardsEnabled, toggleOn: true },
-						{ label: "off", value: "false", current: !data.guardsEnabled, toggleOn: false },
+						{
+							label: "on",
+							value: "true",
+							current: data.guardsEnabled,
+							toggleOn: true,
+						},
+						{
+							label: "off",
+							value: "false",
+							current: !data.guardsEnabled,
+							toggleOn: false,
+						},
 					],
 				},
 				{
@@ -2117,8 +2168,18 @@ export class LogicianTUI {
 					currentValue: data.proactiveCompactionEnabled ? "on" : "off",
 					description: "Auto-compact context to save tokens",
 					options: [
-						{ label: "on", value: "true", current: data.proactiveCompactionEnabled, toggleOn: true },
-						{ label: "off", value: "false", current: !data.proactiveCompactionEnabled, toggleOn: false },
+						{
+							label: "on",
+							value: "true",
+							current: data.proactiveCompactionEnabled,
+							toggleOn: true,
+						},
+						{
+							label: "off",
+							value: "false",
+							current: !data.proactiveCompactionEnabled,
+							toggleOn: false,
+						},
 					],
 				},
 				{
@@ -2126,10 +2187,26 @@ export class LogicianTUI {
 					currentValue: data.inferenceMode,
 					description: "Pre-defined sampling parameter set (Alt+M to cycle)",
 					options: [
-						{ label: "Think General", value: "thinking-general", current: data.inferenceMode === "thinking-general" },
-						{ label: "Think Code", value: "thinking-coding", current: data.inferenceMode === "thinking-coding" },
-						{ label: "Instruct", value: "instruct-general", current: data.inferenceMode === "instruct-general" },
-						{ label: "Reason", value: "instruct-reasoning", current: data.inferenceMode === "instruct-reasoning" },
+						{
+							label: "Think General",
+							value: "thinking-general",
+							current: data.inferenceMode === "thinking-general",
+						},
+						{
+							label: "Think Code",
+							value: "thinking-coding",
+							current: data.inferenceMode === "thinking-coding",
+						},
+						{
+							label: "Instruct",
+							value: "instruct-general",
+							current: data.inferenceMode === "instruct-general",
+						},
+						{
+							label: "Reason",
+							value: "instruct-reasoning",
+							current: data.inferenceMode === "instruct-reasoning",
+						},
 					],
 				},
 				{
@@ -2137,13 +2214,25 @@ export class LogicianTUI {
 					currentValue: data.postEditDiagnostics ? "on" : "off",
 					description: "Check edited files against the project",
 					options: [
-						{ label: "on", value: "true", current: data.postEditDiagnostics, toggleOn: true },
-						{ label: "off", value: "false", current: !data.postEditDiagnostics, toggleOn: false },
+						{
+							label: "on",
+							value: "true",
+							current: data.postEditDiagnostics,
+							toggleOn: true,
+						},
+						{
+							label: "off",
+							value: "false",
+							current: !data.postEditDiagnostics,
+							toggleOn: false,
+						},
 					],
 				},
 			];
 			this.settingsSelector.setSettings(settings);
-			this.settingsSelector.setMessage("Enter selects a setting · Enter in detail applies");
+			this.settingsSelector.setMessage(
+				"Enter selects a setting · Enter in detail applies",
+			);
 			this.settingsSelector.show();
 			const overlay = this.tui.showOverlay(this.settingsSelector, {
 				anchor: "aboveInput",
@@ -2166,7 +2255,10 @@ export class LogicianTUI {
 			this.tui.requestRender();
 			return;
 		}
-		if (action.type === "open" && action.settingName.toLowerCase() === "model") {
+		if (
+			action.type === "open" &&
+			action.settingName.toLowerCase() === "model"
+		) {
 			this.tui.removeOverlay(this.settingsSelector);
 			this.openModelSelector();
 			return;
@@ -2189,7 +2281,9 @@ export class LogicianTUI {
 					this.bridge.setTemperature(num);
 					this.transcript.addSystemMessage(`Temperature: ${num}`);
 				} else {
-					this.transcript.addSystemMessage("Temperature must be between 0 and 2.");
+					this.transcript.addSystemMessage(
+						"Temperature must be between 0 and 2.",
+					);
 				}
 				break;
 			}
@@ -2199,7 +2293,9 @@ export class LogicianTUI {
 					this.bridge.setMaxTokens(num);
 					this.transcript.addSystemMessage(`Max tokens: ${num}`);
 				} else {
-					this.transcript.addSystemMessage("Max tokens must be a positive integer.");
+					this.transcript.addSystemMessage(
+						"Max tokens must be a positive integer.",
+					);
 				}
 				break;
 			}
@@ -2209,7 +2305,9 @@ export class LogicianTUI {
 					this.bridge.setMaxIterations(num);
 					this.transcript.addSystemMessage(`Max iterations: ${num}`);
 				} else {
-					this.transcript.addSystemMessage("Max iterations must be a positive integer.");
+					this.transcript.addSystemMessage(
+						"Max iterations must be a positive integer.",
+					);
 				}
 				break;
 			}
@@ -2218,13 +2316,17 @@ export class LogicianTUI {
 				this.transcript.addSystemMessage(`Thinking level: ${value}`);
 				break;
 			case "permission mode":
-				this.bridge.setPermissionMode(value as "acceptAll" | "acceptEdits" | "ask" | "plan");
+				this.bridge.setPermissionMode(
+					value as "acceptAll" | "acceptEdits" | "ask" | "plan",
+				);
 				this.transcript.addSystemMessage(`Permission mode: ${value}`);
 				break;
 			case "loop detection": {
 				const on = value === "true";
 				this.bridge.setRuntimeToggle("loopDetectionEnabled", on);
-				this.transcript.addSystemMessage(`Loop detection: ${on ? "on" : "off"}`);
+				this.transcript.addSystemMessage(
+					`Loop detection: ${on ? "on" : "off"}`,
+				);
 				break;
 			}
 			case "guards": {
@@ -2243,13 +2345,22 @@ export class LogicianTUI {
 				const on = value === "true";
 				this.bridge.setRuntimeToggle("postEditDiagnostics", on);
 				saveConfigField("postEditDiagnostics", on);
-				this.transcript.addSystemMessage(`Post-edit diagnostics: ${on ? "on" : "off"}`);
+				this.transcript.addSystemMessage(
+					`Post-edit diagnostics: ${on ? "on" : "off"}`,
+				);
 				break;
 			}
 			case "inference mode": {
-				const valid = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+				const valid = [
+					"thinking-general",
+					"thinking-coding",
+					"instruct-general",
+					"instruct-reasoning",
+				];
 				if (!valid.includes(value)) {
-					this.transcript.addSystemMessage(`Invalid inference mode: ${value}. Valid: ${valid.join(", ")}`);
+					this.transcript.addSystemMessage(
+						`Invalid inference mode: ${value}. Valid: ${valid.join(", ")}`,
+					);
 				} else {
 					this.setInferenceMode(value);
 				}
@@ -2404,36 +2515,39 @@ export class LogicianTUI {
 		// Call LLM directly for evaluation (like dropper.ts does)
 		const { baseUrl, model } = this.bridge.getConfig();
 		const apiKey =
-			process.env.ANTHROPIC_API_KEY
-				?? process.env.OPENAI_API_KEY
-				?? process.env.LLM_API_KEY
-				?? "sk-no-key";
+			process.env.ANTHROPIC_API_KEY ??
+			process.env.OPENAI_API_KEY ??
+			process.env.LLM_API_KEY ??
+			"sk-no-key";
 
 		let response: string;
 		try {
-			const res = await fetch(`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					Authorization: `Bearer ${apiKey}`,
-					"x-api-key": apiKey,
+			const res = await fetch(
+				`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`,
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${apiKey}`,
+						"x-api-key": apiKey,
+					},
+					body: JSON.stringify({
+						model: model || "gpt-4o",
+						messages: [{ role: "system", content: evaluatorPrompt }],
+						max_tokens: 256,
+						temperature: 0,
+					}),
 				},
-				body: JSON.stringify({
-					model: model || "gpt-4o",
-					messages: [
-						{ role: "system", content: evaluatorPrompt },
-					],
-					max_tokens: 256,
-					temperature: 0,
-				}),
-			});
+			);
 
 			if (!res.ok) {
 				const errText = await res.text().catch(() => "");
-				throw new Error(`LLM API error ${res.status}: ${errText.slice(0, 200)}`);
+				throw new Error(
+					`LLM API error ${res.status}: ${errText.slice(0, 200)}`,
+				);
 			}
 
-			const data = await res.json() as {
+			const data = (await res.json()) as {
 				choices: Array<{ message: { content: string } }>;
 			};
 			response = data.choices?.[0]?.message?.content ?? "";

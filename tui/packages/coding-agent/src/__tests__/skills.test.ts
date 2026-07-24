@@ -184,3 +184,20 @@ void test("skill without a description is rejected with a diagnostic", async () 
 	assert.equal(skills.length, 0);
 	assert.ok(diagnostics.some((d) => d.code === "invalid_metadata"));
 });
+
+void test("skill catalog is bounded while retaining every skill name", () => {
+	const skills = Array.from({ length: 40 }, (_, index) => ({
+		name: `skill-${index}`,
+		displayName: `Skill ${index}`,
+		description: `A deliberately long description for skill ${index} `.repeat(8),
+		content: "body",
+		filePath: `/skills/${index}/SKILL.md`,
+		baseDir: `/skills/${index}`,
+		slashName: `skill-${index}`,
+		disableModelInvocation: false,
+		source: "user" as const,
+	}));
+	const catalog = formatSkillCatalog(skills, { maxChars: 4_000 });
+	assert.ok(catalog.length <= 4_000);
+	for (const skill of skills) assert.match(catalog, new RegExp(`name="${skill.name}"`));
+});

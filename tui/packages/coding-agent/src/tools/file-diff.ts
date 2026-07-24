@@ -35,7 +35,7 @@ export const file_diff: Tool = {
 
 		if (args.path) {
 			const resolved = resolveReadPath(String(args.path), cwd);
-			ensureInsideCwd(ctx.cwd, resolved, undefined, ctx.allowAllPaths);
+			ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 			cmd.push("--", path.relative(cwd, resolved));
 		}
 

@@ -1,7 +1,7 @@
 // ── Model cycling + thinking-level clamping for AgentHarness ──────────────
 // Pure helpers; the harness still owns config mutation and event emission.
 
-import type { AgentModelConfig, ThinkingLevel } from "./types.ts";
+import type { AgentModelConfig, ThinkingLevel } from "../types.ts";
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 

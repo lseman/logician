@@ -3,9 +3,9 @@
 // session list/resume helpers. Failures here must never break a turn, so
 // every call swallows its own errors — matches prior harness behavior.
 
-import { runHookEvent, runSessionStartHooks } from "../tools/shared/plugins.ts";
-import { Session, SessionManager } from "./session.ts";
-import type { BeforeCompactContext, BeforeCompactResult, Message } from "./types.ts";
+import { runHookEvent, runSessionStartHooks } from "../../tools/shared/plugins.ts";
+import { Session, SessionManager } from "../session.ts";
+import type { BeforeCompactContext, BeforeCompactResult, Message } from "../types.ts";
 
 export interface HookContext {
 	sessionId: string;

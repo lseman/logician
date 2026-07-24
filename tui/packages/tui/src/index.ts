@@ -1,29 +1,45 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
+import { createInterface } from "node:readline/promises";
 import { initTheme, theme, getAvailableThemes } from "./layers/theme/theme.ts";
-import { loadLogicianConfig } from "@logician/coding-agent/config";
 import {
 	AgentCoreBridge,
 	buildDoctorReport,
 	formatDoctorReport,
 	resolveRuntimeConfig,
 } from "@logician/coding-agent/runtime";
+import { resolveTrust } from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./headless-exec.ts";
+
+function defaultProjectTrust(): "ask" | "always" | "never" {
+	const value = process.env.LOGICIAN_TRUST?.trim().toLowerCase();
+	if (value === "always" || value === "1" || value === "true") return "always";
+	if (value === "never" || value === "0" || value === "false") return "never";
+	return "ask";
+}
 
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
+	const cwd = process.cwd();
 	if (args[0] === "exec") {
 		try {
 			const execArgs = parseExecArgs(args.slice(1));
-			const runtimeConfig = resolveRuntimeConfig(process.cwd());
+			const trust = await resolveTrust({
+				cwd,
+				hasUI: false,
+				defaultProjectTrust: defaultProjectTrust(),
+			});
+			const runtimeConfig = resolveRuntimeConfig(cwd, process.env, {
+				loadProjectConfig: trust.trusted,
+			});
 			for (const warning of runtimeConfig.warnings) {
 				process.stderr.write(`warning: ${warning}\n`);
 			}
 			const bridge = new AgentCoreBridge(runtimeConfig.bridge);
 			process.exitCode = await runHeadlessExec(bridge, {
 				...execArgs,
-				cwd: process.cwd(),
+				cwd,
 				stdout: process.stdout,
 				stderr: process.stderr,
 			});
@@ -35,7 +51,7 @@ async function main(): Promise<void> {
 		return;
 	}
 	if (args[0] === "doctor" || args.includes("--doctor")) {
-		const report = await buildDoctorReport(process.cwd());
+		const report = await buildDoctorReport(cwd);
 		process.stdout.write(
 			args.includes("--json")
 				? `${JSON.stringify(report, null, 2)}\n`
@@ -45,9 +61,36 @@ async function main(): Promise<void> {
 		return;
 	}
 
+	const trust = await resolveTrust({
+		cwd,
+		hasUI: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+		defaultProjectTrust: defaultProjectTrust(),
+		onSelectTrust: async (prompt) => {
+			const readline = createInterface({
+				input: process.stdin,
+				output: process.stdout,
+			});
+			try {
+				const answer = (
+					await readline.question(
+						`${prompt}\n\n[y] trust  [p] trust parent  [s] session only  [n] deny: `,
+					)
+				).trim().toLowerCase();
+				if (answer === "y" || answer === "yes") return "trust";
+				if (answer === "p" || answer === "parent") return "trust-parent";
+				if (answer === "s" || answer === "session") return "session-only";
+				return "deny-session";
+			} finally {
+				readline.close();
+			}
+		},
+	});
+	const runtimeConfig = resolveRuntimeConfig(cwd, process.env, {
+		loadProjectConfig: trust.trusted,
+	});
+
 	// Initialize theme before any component rendering
-	const config = loadLogicianConfig(process.cwd()).config;
-	initTheme(config.theme);
+	initTheme(runtimeConfig.source.theme);
 
 	// Display theme info at startup
 	const themes = getAvailableThemes();
@@ -57,7 +100,7 @@ async function main(): Promise<void> {
 	}
 
 	const { LogicianTUI } = await import("./layers/presentation/tui.ts");
-	const tui = new LogicianTUI();
+	const tui = new LogicianTUI(runtimeConfig);
 
 	// Graceful shutdown
 	let stopping = false;

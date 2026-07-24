@@ -43,6 +43,37 @@ export type DropRecord = {
 	coversUpToId: string;
 };
 
+export type MemoryProgress = {
+	observationCoverageId?: string;
+	reflectionCoverageId?: string;
+	dropCoverageId?: string;
+};
+
+export type MemoryWorkerDiagnostics = {
+	lastStage?: "observer" | "reflector" | "dropper";
+	lastRunAt?: string;
+	lastError?: string;
+	lastPersistenceError?: string;
+	recoveredFromBackup?: boolean;
+};
+
+export type PersistedKnowledgeGraph = {
+	nodes: Array<{
+		id: string;
+		type: "observation" | "reflection";
+		content: string;
+		metadata: Record<string, unknown>;
+		tokens: number;
+	}>;
+	edges: Array<{
+		source: string;
+		target: string;
+		relationship: "supported_by";
+		weight: number;
+		metadata: Record<string, unknown>;
+	}>;
+};
+
 export type FoldedMemory = {
 	type: typeof OM_FOLDED;
 	version: 1;
@@ -51,6 +82,12 @@ export type FoldedMemory = {
 	reflections: Reflection[];
 	/** Tombstones are persisted so dropped observations stay inactive after restart. */
 	droppedObservationIds?: string[];
+	/** Durable source-entry watermarks for background worker scheduling. */
+	progress?: MemoryProgress;
+	/** Last background-worker state for diagnostics across restarts. */
+	diagnostics?: MemoryWorkerDiagnostics;
+	/** Deterministic projection of validated memory relationships. */
+	knowledgeGraph?: PersistedKnowledgeGraph;
 };
 
 export type MemoryStoreEvent =
@@ -150,6 +187,14 @@ export interface MemoryStore {
 	getAllObservations(): Observation[];
 	/** Get all dropped observation IDs (for recall). */
 	getAllDroppedIds(): Set<string>;
+	/** Get durable worker source-entry watermarks. */
+	getProgress(): MemoryProgress;
+	/** Update durable worker source-entry watermarks. */
+	setProgress(progress: Partial<MemoryProgress>): void;
+	/** Get persisted background-worker diagnostics. */
+	getDiagnostics(): MemoryWorkerDiagnostics;
+	/** Update persisted background-worker diagnostics. */
+	setDiagnostics(diagnostics: MemoryWorkerDiagnostics): void;
 	/** Subscribe to durable memory changes. */
 	subscribe(listener: (event: MemoryStoreEvent) => void): () => void;
 }

@@ -152,9 +152,11 @@ function collectJsonDiagnostics(
 export async function diagnoseEditedFile(
 	cwd: string,
 	fileName: string,
+	allowedPaths?: string[],
+	allowAllPaths?: boolean,
 ): Promise<PostEditDiagnostic[]> {
 	const resolved = path.resolve(cwd, fileName);
-	ensureInsideCwd(cwd, resolved, undefined, false);
+	ensureInsideCwd(cwd, resolved, allowedPaths, allowAllPaths);
 	const extension = path.extname(resolved).toLowerCase();
 	if (!TS_EXTENSIONS.has(extension) && extension !== ".json") return [];
 
@@ -191,6 +193,10 @@ export function createPostEditDiagnosticHooks(
 	cwd: string,
 	isEnabled: () => boolean = () => true,
 	lspManager?: LspManager,
+	pathPolicy?: {
+		allowedPaths?: string[];
+		allowAllPaths?: boolean;
+	},
 ): AgentHooks {
 	return {
 		afterToolCall: async ({ toolCall, args, result, isError }) => {
@@ -210,7 +216,12 @@ export function createPostEditDiagnosticHooks(
 				const lspDiagnostics = await lspManager?.diagnosticsFor(resolved);
 				const diagnostics = lspDiagnostics?.length
 					? lspDiagnostics
-					: await diagnoseEditedFile(cwd, fileName);
+					: await diagnoseEditedFile(
+							cwd,
+							fileName,
+							pathPolicy?.allowedPaths,
+							pathPolicy?.allowAllPaths,
+						);
 				if (diagnostics.length === 0) return undefined;
 				return { content: result + formatDiagnostics(fileName, diagnostics) };
 			} catch {

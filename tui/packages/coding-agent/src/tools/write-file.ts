@@ -49,7 +49,7 @@ export const write_file: Tool = {
 		const filePath = String(args.path);
 		const content = String(args.content ?? "");
 		const resolved = resolvePath(ctx.cwd, filePath);
-		ensureInsideCwd(ctx.cwd, resolved, undefined, ctx.allowAllPaths);
+		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
 		return withFileMutationQueue(resolved, async () => {
 			const before = readUtf8IfExists(resolved);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -53,6 +53,48 @@ void test("drop tombstones survive persistence reload", () => {
 		restored.load();
 		assert.equal(restored.isDropped("aaaaaaaaaaaa"), true);
 		assert.equal(restored.getActiveObservations().length, 0);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+void test("corrupt primary memory recovers from the last atomic backup", () => {
+	const dir = mkdtempSync(join(tmpdir(), "memory-store-"));
+	const memoryPath = join(dir, "memory.json");
+	try {
+		const store = new MemoryStoreImpl({
+			persistence: new FilePersistence({ path: memoryPath }),
+		});
+		store.recordObservations([observation("aaaaaaaaaaaa", "First durable fact")], "one");
+		store.flush();
+		store.recordObservations([observation("bbbbbbbbbbbb", "Second durable fact")], "two");
+		store.flush();
+		writeFileSync(memoryPath, "{truncated", "utf8");
+
+		const restored = new MemoryStoreImpl({
+			persistence: new FilePersistence({ path: memoryPath }),
+		});
+		restored.load();
+		assert.deepEqual(
+			restored.getActiveObservations().map((item) => item.id),
+			["aaaaaaaaaaaa"],
+		);
+		assert.equal(restored.getDiagnostics().recoveredFromBackup, true);
+		assert.match(
+			restored.getDiagnostics().lastPersistenceError ?? "",
+			/JSON|Unexpected|position/i,
+		);
+		assert.equal(
+			readdirSync(dir).some((entry) => entry.includes(".tmp-")),
+			false,
+		);
+		restored.flush();
+		assert.equal(restored.getDiagnostics().recoveredFromBackup, undefined);
+		const repaired = new MemoryStoreImpl({
+			persistence: new FilePersistence({ path: memoryPath }),
+		});
+		repaired.load();
+		assert.equal(repaired.getDiagnostics().lastPersistenceError, undefined);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

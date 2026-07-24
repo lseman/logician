@@ -123,7 +123,7 @@ export const grep: Tool = {
 		const searchPath = searchDir
 			? resolvePath(ctx.cwd, searchDir)
 			: ctx.cwd || ".";
-		ensureInsideCwd(ctx.cwd, searchPath, undefined, ctx.allowAllPaths);
+		ensureInsideCwd(ctx.cwd, searchPath, ctx.allowedPaths, ctx.allowAllPaths);
 		const ops = defaultOps;
 		let isDirectory: boolean;
 		try {

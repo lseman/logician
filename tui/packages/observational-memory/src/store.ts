@@ -5,17 +5,21 @@
 
 import type {
 	FoldedMemory,
+	MemoryProgress,
 	MemoryStatus,
+	MemoryStoreEvent,
 	MemoryStore as MemoryStoreInterface,
+	MemoryWorkerDiagnostics,
 	Observation,
 	ObservationRecord,
 	Reflection,
 	ReflectionRecord,
-	MemoryStoreEvent,
 } from "./types.ts";
 
 // Re-export MemoryStore interface for consumers
 export type MemoryStore = MemoryStoreInterface;
+
+import { KnowledgeGraphManager } from "./knowledge-graph.ts";
 import { FilePersistence } from "./persistence.ts";
 import { OM_FOLDED } from "./types.ts";
 
@@ -34,6 +38,8 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 	private dropped: Set<string> = new Set();
 	private records: Array<ObservationRecord | ReflectionRecord> = [];
 	private dropRecords: string[][] = [];
+	private progress: MemoryProgress = {};
+	private diagnostics: MemoryWorkerDiagnostics = {};
 
 	private persistence: FilePersistence;
 	private targetTokens: number;
@@ -50,11 +56,16 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 
 	recordObservations(observations: Observation[], coversUpToId: string): void {
 		const existingContent = new Set(
-			Array.from(this.observations.values(), (item) => normalizeContent(item.content)),
+			Array.from(this.observations.values(), (item) =>
+				normalizeContent(item.content),
+			),
 		);
 		const added = observations.filter((observation) => {
 			const normalized = normalizeContent(observation.content);
-			if (this.observations.has(observation.id) || existingContent.has(normalized)) {
+			if (
+				this.observations.has(observation.id) ||
+				existingContent.has(normalized)
+			) {
 				return false;
 			}
 			existingContent.add(normalized);
@@ -70,7 +81,15 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 	}
 
 	recordReflections(reflections: Reflection[], coversUpToId: string): void {
-		const added = reflections.filter((reflection) => !this.reflections.has(reflection.id));
+		const observationIds = new Set(this.observations.keys());
+		const added = reflections.filter(
+			(reflection) =>
+				!this.reflections.has(reflection.id) &&
+				reflection.supportingObservationIds.length > 0 &&
+				reflection.supportingObservationIds.every((id) =>
+					observationIds.has(id),
+				),
+		);
 		if (added.length === 0) return;
 		for (const ref of added) {
 			this.reflections.set(ref.id, ref);
@@ -103,6 +122,12 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 			observations: Array.from(this.observations.values()),
 			reflections: Array.from(this.reflections.values()),
 			droppedObservationIds: Array.from(this.dropped),
+			progress: { ...this.progress },
+			diagnostics: { ...this.diagnostics },
+			knowledgeGraph: KnowledgeGraphManager.fromMemory(
+				Array.from(this.observations.values()),
+				Array.from(this.reflections.values()),
+			).exportGraph(),
 		};
 	}
 
@@ -139,7 +164,16 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 			this.persistence = new FilePersistence({ path });
 		}
 		const folded = this.persistence.load();
-		if (!folded) return;
+		const persistenceDiagnostic = this.persistence.getDiagnostic();
+		if (!folded) {
+			if (persistenceDiagnostic.lastError) {
+				this.diagnostics = {
+					...this.diagnostics,
+					lastPersistenceError: persistenceDiagnostic.lastError,
+				};
+			}
+			return;
+		}
 		this.observations.clear();
 		this.reflections.clear();
 		this.dropped.clear();
@@ -151,6 +185,14 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 			this.reflections.set(ref.id, ref);
 		}
 		for (const id of folded.droppedObservationIds ?? []) this.dropped.add(id);
+		this.progress = { ...(folded.progress ?? {}) };
+		this.diagnostics = { ...(folded.diagnostics ?? {}) };
+		if (persistenceDiagnostic.lastError) {
+			this.diagnostics.lastPersistenceError = persistenceDiagnostic.lastError;
+		}
+		if (persistenceDiagnostic.recoveredFromBackup) {
+			this.diagnostics.recoveredFromBackup = true;
+		}
 	}
 
 	save(path?: string): void {
@@ -182,8 +224,22 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 	}
 
 	private writeNow(): void {
+		const previousDiagnostics = this.diagnostics;
+		const {
+			lastPersistenceError: _previousError,
+			recoveredFromBackup: _previousRecovery,
+			...healthyDiagnostics
+		} = previousDiagnostics;
+		this.diagnostics = healthyDiagnostics;
 		const folded = this.fold();
 		this.persistence.save(folded);
+		const persistenceDiagnostic = this.persistence.getDiagnostic();
+		if (persistenceDiagnostic.lastError) {
+			this.diagnostics = {
+				...previousDiagnostics,
+				lastPersistenceError: persistenceDiagnostic.lastError,
+			};
+		}
 	}
 
 	clear(): void {
@@ -192,6 +248,8 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 		this.dropped.clear();
 		this.records = [];
 		this.dropRecords = [];
+		this.progress = {};
+		this.diagnostics = {};
 		this.persistScheduled = false;
 		this.persistence.clear();
 		this.emit({ type: "cleared" });
@@ -207,6 +265,24 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 		return new Set(this.dropped);
 	}
 
+	getProgress(): MemoryProgress {
+		return { ...this.progress };
+	}
+
+	setProgress(progress: Partial<MemoryProgress>): void {
+		this.progress = { ...this.progress, ...progress };
+		this.persist();
+	}
+
+	getDiagnostics(): MemoryWorkerDiagnostics {
+		return { ...this.diagnostics };
+	}
+
+	setDiagnostics(diagnostics: MemoryWorkerDiagnostics): void {
+		this.diagnostics = { ...diagnostics };
+		this.persist();
+	}
+
 	subscribe(listener: (event: MemoryStoreEvent) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
@@ -216,7 +292,7 @@ export class MemoryStoreImpl implements MemoryStoreInterface {
 		for (const listener of this.listeners) {
 			try {
 				listener(event);
-			} catch (e: unknown) {
+			} catch {
 				// Observers must never make an already-persisted memory write fail.
 			}
 		}

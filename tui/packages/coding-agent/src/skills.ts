@@ -198,17 +198,39 @@ export function formatSkillInvocation(
  * injection. The model reads a skill's full body on demand via the read_skill
  * tool, so the prompt stays small regardless of how many skills are installed.
  */
-export function formatSkillCatalog(skills: Skill[]): string {
-	const entries = skills
-		.map((s) => formatCatalogEntry(s))
-		.join("\n");
-	return (
+export function formatSkillCatalog(
+	skills: Skill[],
+	options: { maxChars?: number } = {},
+): string {
+	const maxChars = options.maxChars ?? 8_000;
+	const fullEntries = skills.map((skill) => formatCatalogEntry(skill));
+	const nameEntries = skills.map(
+		(skill) =>
+			`  <skill name="${escapeXml(skill.name)}" slash_command="/${escapeXml(skill.slashName)}" />`,
+	);
+	const header =
 		"<available-skills>\n" +
-		"The following skills are available. To use one, call the read_skill " +
-		"tool with its name to load its full instructions, then follow them. " +
-		"Names may be path-like, such as coding/quality.\n" +
-		`${entries}\n` +
-		"</available-skills>"
+		"The following skills are available. Matching skills are activated automatically. " +
+		"Use read_skill with an exact name to load another skill.\n";
+	const footer = "\n</available-skills>";
+	const entries: string[] = [];
+	let used = header.length + footer.length;
+	for (let index = 0; index < skills.length; index++) {
+		const remainingNames = nameEntries
+			.slice(index + 1)
+			.reduce((sum, entry) => sum + entry.length + 1, 0);
+		const full = fullEntries[index];
+		const entry =
+			used + full.length + 1 + remainingNames <= maxChars
+				? full
+				: nameEntries[index];
+		entries.push(entry);
+		used += entry.length + 1;
+	}
+	return (
+		header +
+		entries.join("\n") +
+		footer
 	);
 }
 

@@ -27,8 +27,8 @@ import { ToolResultCache } from "./tool-cache.ts";
 import {
 	getTaskStatus,
 	resetTaskStatus,
-} from "./task-status-state.ts";
-import type { OutputGuard } from "./output-guard.ts";
+} from "./tasks/task-status-state.ts";
+import type { OutputGuard } from "./guards/output-guard.ts";
 import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 import {
 	resolveEffectiveAcceptance,
@@ -38,7 +38,7 @@ import {
 	type AcceptanceConfig,
 	type ResolvedAcceptance,
 	type AcceptanceReport,
-} from "./acceptance-contract.ts";
+} from "./guards/acceptance-contract.ts";
 import {
 	parseTextToolCalls,
 	stripTextToolCalls,
@@ -46,7 +46,7 @@ import {
 import {
 	getInferenceMode,
 	type InferenceMode,
-} from "./inference-modes.ts";
+} from "./configuration/inference-modes.ts";
 import {
 	emitConclusion,
 	lastAssistantContent,
@@ -55,7 +55,7 @@ import {
 	looksNonCommittal,
 } from "../runtime/conclusion-policy.ts";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
-import { runWithTaskState } from "./run-task-state.ts";
+import { runWithTaskState } from "./tasks/run-task-state.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -358,28 +358,37 @@ async function runReflection(
 			.trim()
 			.replace(/^reflection-report\s*/, "");
 		try {
-			reflectionReport = JSON.parse(jsonStr) as ReflectionResult;
-		} catch (e: unknown) {
-			// Fallback: parse as free text
-			const needsWork =
-				/needsMoreWork|incomplete|not done|continue|more work/i.test(
-					reflectionContent,
-				);
-			reflectionReport = {
-				assessment: needsWork ? "incomplete" : "complete",
-				reasoning: reflectionContent.slice(0, 200),
-				issues: [],
-				needsMoreWork: needsWork,
+			const parsed = JSON.parse(jsonStr) as Partial<ReflectionResult>;
+			if (
+				(parsed.assessment !== "complete" &&
+					parsed.assessment !== "incomplete") ||
+				typeof parsed.needsMoreWork !== "boolean" ||
+				typeof parsed.reasoning !== "string" ||
+				!Array.isArray(parsed.issues) ||
+				!parsed.issues.every((issue) => typeof issue === "string") ||
+				!Array.isArray(parsed.suggestedSteps) ||
+				!parsed.suggestedSteps.every((step) => typeof step === "string")
+			) {
+				throw new Error("Invalid reflection report");
+			}
+			reflectionReport = parsed as ReflectionResult;
+			} catch {
+				// A malformed structured report is inconclusive and must fail closed.
+				reflectionReport = {
+					assessment: "incomplete",
+					reasoning: reflectionContent.slice(0, 200),
+					issues: ["Reflection output could not be validated."],
+					needsMoreWork: true,
 				suggestedSteps: [],
 			};
 		}
 	}
 
 	const finalReport: ReflectionResult = reflectionReport ?? {
-		assessment: "complete",
-		reasoning: "No structured reflection produced; assuming complete.",
-		issues: [],
-		needsMoreWork: false,
+		assessment: "incomplete",
+		reasoning: "No valid structured reflection was produced.",
+		issues: ["Reflection output could not be validated."],
+		needsMoreWork: true,
 		suggestedSteps: [],
 	};
 
@@ -438,10 +447,14 @@ async function runAgentLoopInTaskScope(
 	};
 	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 	// ── P0-1: Shared tool result cache ─────────────────────────────────
-	const cache = new ToolResultCache(2000, 60_000);
+	const cache = new ToolResultCache(
+		config.cacheSize ?? 2000,
+		config.cacheTtlMs ?? 60_000,
+	);
 	const createRegistry = (tools: Tool[]): ToolRegistry => {
 		const next = new ToolRegistry({
 			cwd: context.cwd ?? config.cwd,
+			allowedPaths: config.allowedPaths,
 			allowAllPaths: config.allowAllPaths,
 			signal: config.signal,
 			onQuestionRequest: config.onQuestionRequest,
@@ -729,9 +742,12 @@ async function runAgentLoopInTaskScope(
 					config.hooks?.beforeProviderRequest,
 				];
 				let requestHeaders = config.streamOptions?.headers;
-				let requestTimeoutMs = config.streamOptions?.timeoutMs;
+				let requestTimeoutMs =
+					config.streamOptions?.timeoutMs ?? config.turnTimeoutMs;
 				let requestMaxRetries =
-					config.streamOptions?.maxRetries ?? config.maxRetries ?? 3;
+					config.autoRetryEnabled === false
+						? 0
+						: (config.streamOptions?.maxRetries ?? config.maxRetries ?? 3);
 				let requestCacheRetention = config.streamOptions?.cacheRetention;
 				let requestMetadata = config.streamOptions?.metadata;
 

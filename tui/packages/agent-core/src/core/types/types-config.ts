@@ -4,7 +4,7 @@ import type { AgentHooks } from "./types-hooks.ts";
 import type { EventHandler } from "./types-events.ts";
 import type { Tool } from "./types-tools.ts";
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
-import type { AcceptanceConfig } from "../acceptance-contract.ts";
+import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
@@ -130,6 +130,8 @@ export interface AgentConfig {
 	thinkingLoopMetaReasoningThreshold?: number;
 	// Inference mode (Ctrl+M)
 	inferenceMode?: InferenceMode;
+	/** Absolute paths allowed in addition to CWD for file tools. */
+	allowedPaths?: string[];
 	/** When true, skip CWD/allowedPaths enforcement for all file tools. */
 	allowAllPaths?: boolean;
 	/** Universal output/result truncation limits. Unset fields fall back to DEFAULT_TRUNCATION. */
@@ -154,4 +156,4 @@ export type {
 	ResolvedAcceptance,
 	AcceptanceReport,
 	AcceptanceLedger,
-} from "../acceptance-contract.ts";
+} from "../guards/acceptance-contract.ts";

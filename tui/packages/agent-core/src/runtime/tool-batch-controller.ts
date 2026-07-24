@@ -28,6 +28,21 @@ const CANCELLED_TOOL_RESULT =
 
 export async function executeToolBatch(options: ToolBatchControllerOptions): Promise<ToolBatchResult> {
 	const { registry, toolCalls, rawStopReason, iteration, signal, emit, emitExtension } = options;
+	if (rawStopReason === "length") {
+		const messages: Message[] = [];
+		for (const call of toolCalls) {
+			const prepared = registry.prepare(call);
+			await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
+			await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
+			const text = `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
+			await emit({ type: "tool_call_end", toolName: call.name, toolCallId: call.id, result: text, isError: true });
+			await emit({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: text, isError: true });
+			await emitExtension({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: text, isError: true });
+			messages.push(createToolResultMessage(call.id, call.name, text, true));
+		}
+		return { messages, terminated: false };
+	}
+
 	type Plan = { prepared: ReturnType<ToolRegistry["prepare"]>; args: Record<string, unknown>; immediateContent?: string; immediateError: boolean };
 	const plans: Plan[] = [];
 	for (const toolCall of toolCalls) {
@@ -35,9 +50,12 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
 		await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
 		const context = { toolCall: prepared.call, args: prepared.args, iteration };
-		const before = signal?.aborted
+		let before = signal?.aborted
 			? undefined
-			: await (options.internalHooks?.beforeToolCall?.(context, signal) ?? options.hooks?.beforeToolCall?.(context, signal));
+			: await options.internalHooks?.beforeToolCall?.(context, signal);
+		if (!signal?.aborted && before === undefined) {
+			before = await options.hooks?.beforeToolCall?.(context, signal);
+		}
 		const immediateContent =
 			before?.content ?? prepared.error ?? (signal?.aborted ? CANCELLED_TOOL_RESULT : undefined);
 		plans.push({
@@ -73,7 +91,10 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		accepting = false;
 		await Promise.all(updates);
 		const context = { toolCall: prepared.call, args, result: resultText, isError, iteration };
-		const after = await (options.internalHooks?.afterToolCall?.(context, signal) ?? options.hooks?.afterToolCall?.(context, signal));
+		let after = await options.internalHooks?.afterToolCall?.(context, signal);
+		if (after === undefined) {
+			after = await options.hooks?.afterToolCall?.(context, signal);
+		}
 		if (after?.content !== undefined) resultText = after.content;
 		if (after?.isError !== undefined) isError = after.isError;
 		await emit({ type: "tool_call_end", toolName: prepared.call.name, toolCallId: prepared.call.id, result: resultText, isError });
@@ -81,16 +102,6 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		await emitExtension({ type: "tool_execution_end", toolCallId: prepared.call.id, toolName: prepared.call.name, result: resultText, isError });
 		return { message: createToolResultMessage(prepared.call.id, prepared.call.name, resultText, isError), terminate: after?.terminate ?? terminate };
 	};
-
-	if (rawStopReason === "length") {
-		const messages: Message[] = [];
-		for (const call of toolCalls) {
-			const text = `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
-			await emit({ type: "tool_call_end", toolName: call.name, toolCallId: call.id, result: text, isError: true });
-			messages.push(createToolResultMessage(call.id, call.name, text, true));
-		}
-		return { messages, terminated: false };
-	}
 
 	const outcomes: Array<{ message: Message; terminate: boolean }> = [];
 	if (options.toolExecution !== "parallel") {

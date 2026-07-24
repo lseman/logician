@@ -6,7 +6,7 @@ import {
 	getInferenceMode,
 	INFERENCE_MODES,
 	isValidInferenceMode,
-} from "../core/inference-modes.ts";
+} from "../core/configuration/inference-modes.ts";
 
 void test("INFERENCE_MODES has exactly 4 entries", () => {
 	assert.equal(INFERENCE_MODES.size, 4);

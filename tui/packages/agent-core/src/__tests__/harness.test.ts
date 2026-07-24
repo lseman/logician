@@ -48,6 +48,90 @@ void test("prompt persists history; setHistory replaces it and drops system mess
 	);
 });
 
+void test("constructor stream options reach the first provider request", async () => {
+	const backend = new FakeBackend([
+		(_messages, options) => {
+			assert.equal(options.timeoutMs, 1234);
+			assert.equal(options.maxRetries, 7);
+			assert.deepEqual(options.headers, { "x-test": "yes" });
+			assert.equal(options.cacheRetention, "persistent");
+			return textResponse("done");
+		},
+	]);
+	const harness = new AgentHarness({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			systemPrompt: "test",
+			continuationEnabled: false,
+			streamOptions: {
+				timeoutMs: 1234,
+				maxRetries: 7,
+				headers: { "x-test": "yes" },
+				cacheRetention: "persistent",
+			},
+		},
+		backend,
+		maxIterations: 1,
+	});
+
+	await harness.prompt("hello");
+});
+
+void test("legacy turn timeout and disabled retries reach the provider", async () => {
+	const backend = new FakeBackend([
+		(_messages, options) => {
+			assert.equal(options.timeoutMs, 4321);
+			assert.equal(options.maxRetries, 0);
+			return textResponse("done");
+		},
+	]);
+	const harness = new AgentHarness({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			systemPrompt: "test",
+			continuationEnabled: false,
+			turnTimeoutMs: 4321,
+			autoRetryEnabled: false,
+		},
+		backend,
+		maxIterations: 1,
+	});
+
+	await harness.prompt("hello");
+});
+
+void test("retryBaseDelayMs configures output-guard retry events", async () => {
+	const backend = new FakeBackend([
+		() => {
+			throw new BackendError({ category: "transient", message: "temporary" });
+		},
+		() => textResponse("recovered"),
+	]);
+	const harness = new AgentHarness({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			systemPrompt: "test",
+			contextWindowTokens: 4096,
+			continuationEnabled: false,
+			maxRetries: 1,
+			retryBaseDelayMs: 0,
+		},
+		backend,
+		maxIterations: 1,
+	});
+	const delays: number[] = [];
+	harness.subscribe((event) => {
+		if (event.type === "auto_retry_start") delays.push(event.delayMs);
+	});
+
+	await harness.prompt("hello");
+	assert.deepEqual(delays, [0]);
+	assert.equal(backend.calls, 2);
+});
+
 void test("context-full recovery compacts inside an active turn and persists it", async () => {
 	const backend = new FakeBackend([
 		() => {

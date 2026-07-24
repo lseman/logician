@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateConfig, throwOnValidationErrors } from "../core/config-validator.ts";
+import { validateConfig, throwOnValidationErrors } from "../core/configuration/config-validator.ts";
 import type { AgentConfig } from "../core/types.ts";
 
 function describe(name: string, fn: () => void) { fn(); }
@@ -73,5 +73,15 @@ void describe("config validator", () => {
 		};
 		const errors = validateConfig(config);
 		expect(errors).toHaveLength(0);
+	});
+
+	void it("rejects non-positive cache settings", () => {
+		const errors = validateConfig({
+			...validConfig,
+			cacheSize: 0,
+			cacheTtlMs: -1,
+		});
+		expect(errors.some((e) => e.field === "cacheSize")).toBeTrue();
+		expect(errors.some((e) => e.field === "cacheTtlMs")).toBeTrue();
 	});
 });

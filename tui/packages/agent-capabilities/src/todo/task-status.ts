@@ -8,7 +8,7 @@ import type { Tool } from "@logician/agent-core/core/types.ts";
 import {
 	recordTaskStatus,
 	type TaskStatusRecord,
-} from "@logician/agent-core/core/task-status-state.ts";
+} from "@logician/agent-core/core/tasks/task-status-state.ts";
 
 export const task_status: Tool = {
 	name: "task_status",

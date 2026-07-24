@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
 import { ConsolidationPipeline } from "../consolidation.ts";
-import { FilePersistence } from "../persistence.ts";
 import { registerConsolidationHooks } from "../hooks.ts";
+import { FilePersistence } from "../persistence.ts";
 import { searchMemoryStore } from "../search.ts";
 import { MemoryStoreImpl } from "../store.ts";
 import { createMemorySearchTool, createRecallTool } from "../tool.ts";
@@ -64,13 +64,15 @@ void test("recall resolves source entries at call time", () => {
 	let sourceContent = "first";
 	const recall = createRecallTool({
 		memoryStore: store,
-		sourceEntries: () => [{
-			id: "bbbbbbbbbbbb",
-			type: "message",
-			origin: "user",
-			timestamp: "2026-07-24T00:00:00.000Z",
-			content: sourceContent,
-		}],
+		sourceEntries: () => [
+			{
+				id: "bbbbbbbbbbbb",
+				type: "message",
+				origin: "user",
+				timestamp: "2026-07-24T00:00:00.000Z",
+				content: sourceContent,
+			},
+		],
 	});
 	sourceContent = "live source evidence";
 	const result = recall("aaaaaaaaaaaa");
@@ -82,15 +84,11 @@ void test("before_agent_start injects only query-relevant bounded memory", async
 	const store = createStore();
 	store.recordObservations([observation], "source");
 	const bus = new ExtensionEventBus();
-	const pipeline = new ConsolidationPipeline(
-		{ model: "unused", apiKey: "" },
-		{ observeAfterTokens: 10_000, reflectAfterTokens: 20_000 },
-	);
+	const pipeline = new ConsolidationPipeline({ model: "unused", apiKey: "" });
 	const unsubscribe = registerConsolidationHooks({
 		extensionBus: bus,
 		memoryStore: store,
 		pipeline,
-		currentTokens: () => 0,
 		options: { memoryContextMaxTokens: 100 },
 	});
 	const matching = await bus.emit({

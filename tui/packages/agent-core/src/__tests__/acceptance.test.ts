@@ -7,8 +7,8 @@ import {
 	parseAcceptanceReport,
 	validateAcceptanceInput,
 	stripAcceptanceReport,
-} from "../core/acceptance-contract.ts";
-import type { AcceptanceConfig } from "../core/acceptance-contract.ts";
+} from "../core/guards/acceptance-contract.ts";
+import type { AcceptanceConfig } from "../core/guards/acceptance-contract.ts";
 
 function reportFence(report: Record<string, unknown>): string {
 	const bt = "`";

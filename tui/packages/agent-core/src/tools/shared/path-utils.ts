@@ -63,6 +63,44 @@ export function resolveToCwd(filePath: string, cwd: string): string {
 	return resolvePath(cwd, filePath);
 }
 
+/**
+ * Resolve symlinks in the existing portion of a path while preserving any
+ * missing suffix. This keeps containment checks meaningful for both reads and
+ * writes to files that do not exist yet.
+ */
+function canonicalizeForContainment(filePath: string): string {
+	const resolved = path.resolve(filePath);
+	const missing: string[] = [];
+	let current = resolved;
+
+	while (true) {
+		try {
+			const canonical = fs.realpathSync.native(current);
+			return path.resolve(canonical, ...missing.reverse());
+		} catch (error: unknown) {
+			const code =
+				error && typeof error === "object" && "code" in error
+					? String((error as { code: unknown }).code)
+					: "";
+			if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+			const parent = path.dirname(current);
+			if (parent === current) return resolved;
+			missing.push(path.basename(current));
+			current = parent;
+		}
+	}
+}
+
+function isWithin(root: string, candidate: string): boolean {
+	const relative = path.relative(root, candidate);
+	return (
+		relative === "" ||
+		(relative !== ".." &&
+			!relative.startsWith(`..${path.sep}`) &&
+			!path.isAbsolute(relative))
+	);
+}
+
 /** Ensure a resolved path is inside the CWD or an allowed path. Throws if outside. */
 export function ensureInsideCwd(
 	cwd: string | undefined,
@@ -72,25 +110,17 @@ export function ensureInsideCwd(
 ): void {
 	if (allowAllPaths) return;
 
-	const resolvedCwd = path.resolve(cwd ?? process.cwd());
-	const resolved = path.resolve(resolvedPath);
+	const resolvedCwd = canonicalizeForContainment(cwd ?? process.cwd());
+	const resolved = canonicalizeForContainment(resolvedPath);
 
 	// Check CWD first.
-	const relative = path.relative(resolvedCwd, resolved);
-	const isInside =
-		relative === "" ||
-		(relative !== ".." &&
-			!relative.startsWith(`..${path.sep}`) &&
-			!path.isAbsolute(relative));
-	if (isInside) return;
+	if (isWithin(resolvedCwd, resolved)) return;
 
 	// Check allowed paths.
 	if (allowedPaths) {
 		for (const ap of allowedPaths) {
-			const resolvedAp = path.resolve(ap);
-			if (resolved === resolvedAp || resolved.startsWith(resolvedAp + path.sep)) {
-				return;
-			}
+			const resolvedAp = canonicalizeForContainment(ap);
+			if (isWithin(resolvedAp, resolved)) return;
 		}
 	}
 

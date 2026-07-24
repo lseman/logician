@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runAgentLoop } from "../core/agent-loop-runner.ts";
 import { BackendError } from "../core/backend.ts";
-import { OutputGuard } from "../core/output-guard.ts";
-import { recordTaskStatus } from "../core/task-status-state.ts";
+import { OutputGuard } from "../core/guards/output-guard.ts";
+import { recordTaskStatus } from "../core/tasks/task-status-state.ts";
 import type { AgentConfig, AgentEvent, Message, Tool } from "../core/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
@@ -737,6 +737,7 @@ void test("tool progress and thrown failures produce accurate lifecycle events",
 
 void test("runAgentLoop does not execute tool calls from a length-truncated response", async () => {
 	let executions = 0;
+	let preflights = 0;
 	const tool: Tool = {
 		name: "write",
 		description: "writes",
@@ -757,11 +758,61 @@ void test("runAgentLoop does not execute tool calls from a length-truncated resp
 	const messages = await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [tool] },
 		[user("prompt")],
-		{ ...makeConfig({ tools: [tool] }), backend },
+		{
+			...makeConfig({ tools: [tool] }),
+			backend,
+			hooks: {
+				beforeToolCall: () => {
+					preflights++;
+					return undefined;
+				},
+			},
+		},
 		() => {},
 	);
 	assert.equal(executions, 0);
+	assert.equal(preflights, 0);
 	assert.match(String(messages.find((m) => m.role === "tool")?.content), /not executed.*truncated/i);
+});
+
+void test("async internal tool hooks fall through to user hooks", async () => {
+	let beforeCalls = 0;
+	let afterCalls = 0;
+	const backend = new FakeBackend([
+		() => ({
+			content: "",
+			toolCalls: [{ id: "noop", name: "noop", arguments: "{}" }],
+			stopReason: "stop",
+		}),
+		() => textResponse("done"),
+	]);
+
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend,
+			internalHooks: {
+				beforeToolCall: async () => undefined,
+				afterToolCall: async () => undefined,
+			},
+			hooks: {
+				beforeToolCall: () => {
+					beforeCalls++;
+					return undefined;
+				},
+				afterToolCall: () => {
+					afterCalls++;
+					return undefined;
+				},
+			},
+		},
+		() => {},
+	);
+
+	assert.equal(beforeCalls, 1);
+	assert.equal(afterCalls, 1);
 });
 
 void test("runAgentLoop reports provider errors as terminal new messages", async () => {
@@ -948,6 +999,40 @@ void test("reflection feedback re-enters the real provider loop", async () => {
 			String(message.content).includes("reflection-report")),
 		false,
 	);
+});
+
+void test("malformed reflection fails closed and re-enters the provider loop", async () => {
+	const backend = new FakeBackend([
+		() => textResponse("I implemented the first part."),
+		() => textResponse("```reflection-report\n{\"assessment\":\"complete\"}\n```"),
+		(messages) => {
+			assert.ok(
+				messages.some(
+					(message) =>
+						message.role === "user" &&
+						String(message.content).includes(
+							"Reflection output could not be validated",
+						),
+				),
+			);
+			return textResponse("Task complete.");
+		},
+	]);
+
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("implement and verify")],
+		{
+			...makeConfig({
+				reflectionConfig: { enabled: true, maxReflections: 2 },
+			}),
+			backend,
+		},
+		() => {},
+	);
+
+	assert.equal(backend.calls, 3);
+	assert.equal(messages.at(-1)?.content, "Task complete.");
 });
 
 void test("failed acceptance gets a bounded corrective provider turn", async () => {

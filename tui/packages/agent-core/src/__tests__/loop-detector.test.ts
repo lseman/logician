@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LoopDetector } from "../core/loop-detector.ts";
+import { LoopDetector } from "../core/guards/loop-detector.ts";
 
 // Helper to create a signature the way the loop does.
 function record(

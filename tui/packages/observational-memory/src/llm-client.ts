@@ -7,14 +7,26 @@ export interface LLMCallConfig {
 	baseUrl?: string;
 	headers?: Record<string, string>;
 	thinkingLevel?: string;
+	signal?: AbortSignal;
 }
 
-export async function callLLM(
+export async function callStructuredLLM(
 	systemPrompt: string,
 	userMessage: string,
 	config: LLMCallConfig,
-): Promise<string> {
-	const { model: modelName, apiKey: key, baseUrl, headers: h, thinkingLevel } = config;
+	tool: {
+		name: string;
+		description: string;
+		parameters: Record<string, unknown>;
+	},
+): Promise<unknown> {
+	const {
+		model: modelName,
+		apiKey: key,
+		baseUrl,
+		headers: h,
+		thinkingLevel,
+	} = config;
 
 	const body: Record<string, unknown> = {
 		model: typeof modelName === "string" ? modelName : "gpt-4o",
@@ -22,23 +34,28 @@ export async function callLLM(
 			{ role: "system", content: systemPrompt },
 			{ role: "user", content: userMessage },
 		],
-		response_format: { type: "json_object" },
+		tools: [{ type: "function", function: tool }],
+		tool_choice: { type: "function", function: { name: tool.name } },
 		max_tokens: 2048,
 	};
 
 	if (thinkingLevel && thinkingLevel !== "off") {
-		body["thinking"] = thinkingLevel;
+		body.thinking = thinkingLevel;
 	}
 
-	const response = await fetch(`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			...(key ? { Authorization: `Bearer ${key}` } : {}),
-			...(h ?? {}),
+	const response = await fetch(
+		`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`,
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...(key ? { Authorization: `Bearer ${key}` } : {}),
+				...(h ?? {}),
+			},
+			body: JSON.stringify(body),
+			signal: config.signal,
 		},
-		body: JSON.stringify(body),
-	});
+	);
 
 	if (!response.ok) {
 		throw new Error(
@@ -47,18 +64,34 @@ export async function callLLM(
 	}
 
 	const data = (await response.json()) as {
-		choices: Array<{ message: { content: string } }>;
+		choices?: Array<{
+			message?: {
+				content?: string;
+				tool_calls?: Array<{
+					function?: { name?: string; arguments?: string };
+				}>;
+			};
+		}>;
 	};
-	return data.choices[0]?.message?.content ?? "";
+	const message = data.choices?.[0]?.message;
+	const call = message?.tool_calls?.find(
+		(item) => item.function?.name === tool.name,
+	);
+	const raw = call?.function?.arguments ?? message?.content;
+	if (!raw) return undefined;
+	try {
+		return JSON.parse(raw) as unknown;
+	} catch {
+		return extractJsonValue(raw);
+	}
 }
 
-/** Extract the first JSON array from a raw LLM response, tolerating markdown fences. */
-export function extractJsonArray(raw: string): unknown[] | undefined {
-	const jsonMatch = raw.match(/\[[\s\S]*\]/);
+/** Extract the first JSON object or array, tolerating markdown fences. */
+export function extractJsonValue(raw: string): unknown {
+	const jsonMatch = raw.match(/(?:\{[\s\S]*\}|\[[\s\S]*\])/);
 	if (!jsonMatch) return undefined;
 	try {
-		const parsed = JSON.parse(jsonMatch[0]) as unknown;
-		return Array.isArray(parsed) ? parsed : undefined;
+		return JSON.parse(jsonMatch[0]) as unknown;
 	} catch {
 		return undefined;
 	}

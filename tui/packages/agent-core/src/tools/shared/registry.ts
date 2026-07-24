@@ -43,11 +43,16 @@ export interface PreparedToolCall {
 
 export interface ToolRegistryOptions {
 	cwd?: string;
+	allowedPaths?: string[];
 	allowAllPaths?: boolean;
 	signal?: AbortSignal;
 	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
 	/** Cache for tool results (P0-1). Pass null to disable caching. */
 	cache?: ToolResultCache | null;
+	/** Maximum entries for the default cache. */
+	cacheSize?: number;
+	/** TTL in milliseconds for the default cache. */
+	cacheTtlMs?: number;
 	/** Per-tool execution timeout (default 10 min). 0 disables. Tools override via timeoutMs. */
 	defaultToolTimeoutMs?: number;
 	/** Cap on result content appended to context (default 100k chars). 0 disables. */
@@ -65,7 +70,13 @@ export class ToolRegistry {
 	constructor(options?: ToolRegistryOptions) {
 		this.ctx = options || {};
 		this.cwd = options?.cwd ?? process.cwd();
-		this.cache = options?.cache ?? new ToolResultCache(2000, 60_000);
+		this.cache =
+			options && Object.prototype.hasOwnProperty.call(options, "cache")
+				? (options.cache ?? null)
+				: new ToolResultCache(
+						options?.cacheSize ?? 2000,
+						options?.cacheTtlMs ?? 60_000,
+					);
 		this.defaultToolTimeoutMs =
 			options?.defaultToolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
 		this.maxResultChars = options?.maxResultChars ?? DEFAULT_MAX_RESULT_CHARS;
@@ -161,8 +172,30 @@ export class ToolRegistry {
 				tool.resolveTimeoutMs?.(args) ??
 				tool.timeoutMs ??
 				this.defaultToolTimeoutMs;
-			const run = tool.execute(args, { ...this.ctx, ...context });
-			const raw = timeoutMs > 0 ? await withTimeout(run, timeoutMs) : await run;
+			const parentSignal = context?.signal ?? this.ctx.signal;
+			const executionController = new AbortController();
+			const abortFromParent = () =>
+				executionController.abort(parentSignal?.reason);
+			if (parentSignal?.aborted) abortFromParent();
+			else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+			let raw: string | ToolResult;
+			try {
+				const run = tool.execute(args, {
+					...this.ctx,
+					...context,
+					signal: executionController.signal,
+				});
+				raw =
+					timeoutMs > 0
+						? await withTimeout(run, timeoutMs, () =>
+								executionController.abort(
+									new Error(`Tool execution timed out after ${timeoutMs}ms`),
+								),
+							)
+						: await run;
+			} finally {
+				parentSignal?.removeEventListener("abort", abortFromParent);
+			}
 			// Normalize the string | ToolResult union to a ToolResult.
 			const result: ToolResult =
 				typeof raw === "string" ? { content: raw } : raw;

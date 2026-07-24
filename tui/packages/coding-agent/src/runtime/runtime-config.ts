@@ -17,8 +17,11 @@ export interface ResolvedRuntimeConfig {
 export function resolveRuntimeConfig(
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
+	options: { loadProjectConfig?: boolean } = {},
 ): ResolvedRuntimeConfig {
-	const loaded = loadLogicianConfig(cwd);
+	const loaded = options.loadProjectConfig === false
+		? { config: {}, warnings: [] }
+		: loadLogicianConfig(cwd);
 	const config = loaded.config;
 
 	return {
@@ -74,10 +77,17 @@ export function resolveRuntimeConfig(
 			guardsEnabled: configBool(config.guardsEnabled),
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),
+			autoRetryEnabled: configBool(config.autoRetryEnabled, true),
+			maxRetries: configNumber(config.maxRetries),
+			retryBaseDelayMs: configNumber(config.retryBaseDelayMs),
+			turnTimeoutMs: configNumber(config.turnTimeoutMs),
+			cacheSize: configNumber(config.cacheSize),
+			cacheTtlMs: configNumber(config.cacheTtlMs),
 			cwd: config.cwd ?? cwd,
 			allowedPaths: config.allowedPaths,
 			allowAllPaths: configBool(config.allowAllPaths),
 			truncation: config.truncation,
+			projectTrusted: options.loadProjectConfig !== false,
 		},
 	};
 }

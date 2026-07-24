@@ -2,8 +2,8 @@
 // Shared by compaction (condense old messages) and branch summarization
 // (structured goal/progress/decisions summary for an abandoned branch).
 
-import type { LLMBackend } from "./backend.ts";
-import { convertToChatFormat } from "./messages.ts";
+import type { LLMBackend } from "../backend.ts";
+import { convertToChatFormat } from "../messages.ts";
 import {
 	computeFileLists,
 	extractFileOpsFromMessages,
@@ -12,8 +12,8 @@ import {
 	serializeMessages,
 	type FileOperations,
 } from "./branch-summarization.ts";
-import type { BranchSummaryData, BranchProgress } from "./harness-types.ts";
-import type { Message, ThinkingLevel } from "./types.ts";
+import type { BranchSummaryData, BranchProgress } from "./types.ts";
+import type { Message, ThinkingLevel } from "../types.ts";
 
 /** Condense older messages into a short plain-text summary for compaction. */
 export async function generateCompactionSummary(

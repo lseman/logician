@@ -11,7 +11,7 @@ import {
 	collectMessagesForBranchSummary,
 	parseBranchSummary,
 	serializeMessages,
-} from "../core/branch-summarization.ts";
+} from "../core/summaries/branch-summarization.ts";
 
 describe("createFileOps", () => {
 	it("creates empty ops", () => {

@@ -58,7 +58,7 @@ export const find: Tool = {
 	execute: async (args, ctx): Promise<string> => {
 		const pattern = String(args.pattern);
 		const searchPath = resolvePath(ctx.cwd, String(args.path || "."));
-		ensureInsideCwd(ctx.cwd, searchPath, undefined, ctx.allowAllPaths);
+		ensureInsideCwd(ctx.cwd, searchPath, ctx.allowedPaths, ctx.allowAllPaths);
 		const limit = Math.max(1, Number(args.limit) || DEFAULT_LIMIT);
 
 		// Resolve fd path before entering the Promise so errors surface cleanly.

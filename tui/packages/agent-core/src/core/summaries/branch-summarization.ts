@@ -2,7 +2,7 @@
 // Generates structured summaries of abandoned branches when navigating
 // back to a previous conversation point.
 
-import type { Message } from "./types.ts";
+import type { Message } from "../types.ts";
 
 // ============================================================================
 // Types

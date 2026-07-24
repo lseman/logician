@@ -33,6 +33,30 @@ void test("diagnoseEditedFile reports malformed JSON", async () => {
 	assert.equal(diagnostics[0]?.line, 1);
 });
 
+void test("diagnoseEditedFile honors configured paths outside CWD", async () => {
+	const cwd = workspace();
+	const allowed = workspace();
+	const file = path.join(allowed, "broken.json");
+	writeFileSync(file, "{\"ok\": true,}", "utf8");
+
+	const diagnostics = await diagnoseEditedFile(cwd, file, [allowed]);
+
+	assert.ok(diagnostics.length > 0);
+	assert.equal(diagnostics[0]?.line, 1);
+});
+
+void test("diagnoseEditedFile honors allowAllPaths outside CWD", async () => {
+	const cwd = workspace();
+	const outside = workspace();
+	const file = path.join(outside, "broken.json");
+	writeFileSync(file, "{\"ok\": true,}", "utf8");
+
+	const diagnostics = await diagnoseEditedFile(cwd, file, undefined, true);
+
+	assert.ok(diagnostics.length > 0);
+	assert.equal(diagnostics[0]?.line, 1);
+});
+
 void test("diagnoseEditedFile uses the nearest project for semantic errors", async () => {
 	const cwd = workspace();
 	writeFileSync(

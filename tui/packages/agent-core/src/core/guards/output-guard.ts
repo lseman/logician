@@ -15,8 +15,8 @@
 //
 // Usage: create one per harness/loop invocation, feed each response + error.
 
-import type { EventHandler } from "./types.ts";
-import { BackendError, type BackendErrorCategory } from "./backend.ts";
+import type { EventHandler } from "../types.ts";
+import { BackendError, type BackendErrorCategory } from "../backend.ts";
 import type { LoopDetector } from "./loop-detector.ts";
 
 export interface OutputGuardConfig {
@@ -101,6 +101,13 @@ export class OutputGuard {
 		// malformed assistant message (empty content, no tool_calls).  The
 		// fix is to compact (which drops the bad message) and retry.
 		if (this.isMalformedAssistantMessageError(error)) {
+			if (this.config.maxRetries === 0) {
+				return {
+					action: "abort",
+					message: "Malformed assistant message and automatic retries are disabled.",
+					isRetryable: false,
+				};
+			}
 			this.retryCount = 0;
 			this.emitEvent({
 				type: "auto_retry_start",
@@ -124,7 +131,10 @@ export class OutputGuard {
 		// Context-full: auto-compact and retry
 		if (category === "context_full") {
 			this.retryCount = 0; // Reset retry count for context errors
-			if (this.config.autoCompactOnContextFull) {
+			if (
+				this.config.autoCompactOnContextFull &&
+				this.config.maxRetries > 0
+			) {
 				this.emitEvent({
 					type: "auto_retry_start",
 					attempt: 1,
@@ -183,7 +193,11 @@ export class OutputGuard {
 		}
 
 		// Unknown/unclassified error: single retry as safety net
-		if (!backendErr && this.retryCount === 0) {
+		if (
+			!backendErr &&
+			this.retryCount === 0 &&
+			this.config.maxRetries > 0
+		) {
 			this.retryCount = 1;
 			return {
 				action: "retry",

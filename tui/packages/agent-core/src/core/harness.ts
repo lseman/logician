@@ -35,8 +35,8 @@ import {
 	createClaudeCodeHookLayer,
 	type ClaudeCodeHookLayer,
 } from "../compatibility/claude-code/hook-layer.ts";
-import { LoopDetector } from "./loop-detector.ts";
-import { ThinkingLoopDetector } from "./thinking-loop-detector.ts";
+import { LoopDetector } from "./guards/loop-detector.ts";
+import { ThinkingLoopDetector } from "./guards/thinking-loop-detector.ts";
 import {
 	forkBranch,
 	summarizeAndMergeBranch,
@@ -44,9 +44,9 @@ import {
 	renderBranchTree,
 	listBranches as listBranchesHelper,
 	type Branch,
-} from "./harness-branching.ts";
-import { runCompaction, shouldAutoCompact } from "./harness-compaction.ts";
-import { cycleModel as cycleModelHelper, resolveModelUrl } from "./harness-model.ts";
+} from "./harness/branching.ts";
+import { runCompaction, shouldAutoCompact } from "./harness/compaction.ts";
+import { cycleModel as cycleModelHelper, resolveModelUrl } from "./harness/model.ts";
 import {
 	emitSessionStart as emitSessionStartHelper,
 	emitSessionEnd as emitSessionEndHelper,
@@ -54,8 +54,8 @@ import {
 	emitPostCompact as emitPostCompactHelper,
 	loadSessionMessages,
 	listSessions as listSessionsHelper,
-} from "./harness-session.ts";
-import type { BranchSummaryData, BranchInfo } from "./harness-types.ts";
+} from "./harness/session-lifecycle.ts";
+import type { BranchSummaryData, BranchInfo } from "./summaries/types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -71,8 +71,8 @@ import type {
 	Tool,
 } from "./types.ts";
 import type { CompactionSettings } from "../compaction/index.ts";
-import { OutputGuard } from "./output-guard.ts";
-import { validateConfig, throwOnValidationErrors } from "./config-validator.ts";
+import { OutputGuard } from "./guards/output-guard.ts";
+import { validateConfig, throwOnValidationErrors } from "./configuration/config-validator.ts";
 import {
 	createMemoryStore,
 	extractMemoriesFromText,
@@ -88,7 +88,7 @@ import {
 } from "./runtime-state.ts";
 import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
 
-export type { BranchSummaryData, BranchInfo } from "./harness-types.ts";
+export type { BranchSummaryData, BranchInfo } from "./summaries/types.ts";
 
 export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
 
@@ -212,6 +212,14 @@ export class AgentHarness {
 		throwOnValidationErrors(errors);
 
 		this.config = options.config;
+		this._streamOptions = {
+			...options.config.streamOptions,
+			...(options.config.streamOptions?.timeoutMs === undefined &&
+			options.config.turnTimeoutMs !== undefined
+				? { timeoutMs: options.config.turnTimeoutMs }
+				: {}),
+		};
+		this.config.streamOptions = this._streamOptions;
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
@@ -390,16 +398,23 @@ export class AgentHarness {
 			if (compacted) {
 				return this.prompt(userMessage);
 			}
-		}
+			}
 
-		// Initialize output guard if not already done
-		if (!this.outputGuard && this.config.contextWindowTokens) {
-			this.setOutputGuardConfig({
-				maxRetries: this.config.streamOptions?.maxRetries ?? 3,
-				retryBaseDelayMs: 500,
-				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
-			});
-		}
+			// Initialize output guard if not already done
+			if (!this.outputGuard && this.config.contextWindowTokens) {
+				this.setOutputGuardConfig({
+					maxRetries:
+						this.config.autoRetryEnabled === false
+							? 0
+							: (this.config.streamOptions?.maxRetries ??
+								this.config.maxRetries ??
+								3),
+					retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
+					maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
+					autoCompactOnContextFull:
+						this.config.autoRetryEnabled !== false,
+				});
+			}
 
 		return this.runInPhase("turn", "prompt", async () => {
 			this.abortController = new AbortController();
@@ -510,9 +525,16 @@ export class AgentHarness {
 
 		if (!this.outputGuard && this.config.contextWindowTokens) {
 			this.setOutputGuardConfig({
-				maxRetries: this.config.streamOptions?.maxRetries ?? 3,
-				retryBaseDelayMs: 500,
+				maxRetries:
+					this.config.autoRetryEnabled === false
+						? 0
+						: (this.config.streamOptions?.maxRetries ??
+							this.config.maxRetries ??
+							3),
+				retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
 				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
+				autoCompactOnContextFull:
+					this.config.autoRetryEnabled !== false,
 			});
 		}
 
@@ -876,6 +898,14 @@ export class AgentHarness {
 				return result ?? null;
 			},
 			onEvent: (event) => {
+				if (
+					event.type === "auto_retry_start" ||
+					event.type === "auto_retry_end" ||
+					event.type === "error" ||
+					event.type === "context_update"
+				) {
+					return;
+				}
 				this.emitToSubscribers(event);
 			},
 		});
@@ -948,7 +978,10 @@ export class AgentHarness {
 	private createToolRegistry(tools: Tool[]): ToolRegistry {
 		const registry = new ToolRegistry({
 			cwd: this.cwd,
+			allowedPaths: this.config.allowedPaths,
 			allowAllPaths: this.config.allowAllPaths,
+			cacheSize: this.config.cacheSize,
+			cacheTtlMs: this.config.cacheTtlMs,
 			onQuestionRequest: this.config.onQuestionRequest,
 			maxResultChars: this.config.truncation?.toolResultMaxChars,
 		});

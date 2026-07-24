@@ -2,10 +2,11 @@
 // Synthesizes higher-level reflections from observations.
 // Called by the consolidation pipeline when reflection threshold is reached.
 
-import { estimateTokens } from "./tokens.ts";
-import type { Reflection } from "./types.ts";
+import { hashId } from "./ids.ts";
+import { callStructuredLLM } from "./llm-client.ts";
 import { REFLECTOR_SYSTEM_PROMPT } from "./prompts.ts";
-import { callLLM, extractJsonArray } from "./llm-client.ts";
+import { estimateTokens } from "./tokens.ts";
+import type { Reflection, Relevance } from "./types.ts";
 
 export interface ReflectorConfig {
 	model: unknown;
@@ -13,11 +14,15 @@ export interface ReflectorConfig {
 	baseUrl?: string;
 	headers?: Record<string, string>;
 	observations: Array<{
+		id: string;
 		content: string;
+		timestamp: string;
+		relevance: Relevance;
 		coverage: "none" | "partial" | "strong";
 	}>;
 	reflections: Reflection[];
 	thinkingLevel?: string;
+	signal?: AbortSignal;
 }
 
 export async function runReflector(
@@ -34,7 +39,10 @@ export async function runReflector(
 	} = config;
 
 	const obsList = observations
-		.map((o) => `[${o.coverage}] ${o.content}`)
+		.map(
+			(o) =>
+				`[${o.id}] ${o.timestamp} [${o.relevance}] [coverage:${o.coverage}] ${o.content}`,
+		)
 		.join("\n");
 
 	const systemPrompt = `${REFLECTOR_SYSTEM_PROMPT}\n\n## Active observations to reflect on:\n${obsList}`;
@@ -42,39 +50,81 @@ export async function runReflector(
 	const userMessage =
 		"Analyze the observations above and produce higher-level reflections. Return only JSON.";
 
-	try {
-		const response = await callLLM(systemPrompt, userMessage, {
+	const response = await callStructuredLLM(
+		systemPrompt,
+		userMessage,
+		{
 			model,
 			apiKey,
 			baseUrl,
 			headers,
 			thinkingLevel,
-		});
-		return parseReflections(response);
-	} catch (e: unknown) {
-		return undefined;
-	}
+			signal: config.signal,
+		},
+		{
+			name: "record_reflections",
+			description:
+				"Record durable reflections with valid supporting observation IDs.",
+			parameters: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					reflections: {
+						type: "array",
+						items: {
+							type: "object",
+							additionalProperties: false,
+							properties: {
+								content: { type: "string" },
+								supportingObservationIds: {
+									type: "array",
+									items: { type: "string" },
+								},
+							},
+							required: ["content", "supportingObservationIds"],
+						},
+					},
+				},
+				required: ["reflections"],
+			},
+		},
+	);
+	return parseReflections(
+		response,
+		observations.map((item) => item.id),
+	);
 }
 
-function parseReflections(raw: string): Reflection[] | undefined {
-	const parsed = extractJsonArray(raw);
-	if (!parsed) return undefined;
+export function parseReflections(
+	raw: unknown,
+	allowedObservationIds: readonly string[],
+): Reflection[] | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	const parsed = (raw as Record<string, unknown>).reflections;
+	if (!Array.isArray(parsed)) return undefined;
+	const allowed = new Set(allowedObservationIds);
 
 	const reflections: Reflection[] = [];
 	for (const item of parsed) {
-		if (!isReflection(item)) continue;
+		if (!isReflectionProposal(item)) continue;
+		if (item.supportingObservationIds.some((id) => !allowed.has(id))) continue;
+		const content = item.content.trim().replace(/\s+/g, " ");
+		if (!content || /\r|\n/.test(content)) continue;
 		reflections.push({
-			...item,
-			tokenCount: item.tokenCount ?? estimateTokens(item.content),
+			id: hashId(content),
+			content,
+			supportingObservationIds: [...new Set(item.supportingObservationIds)],
+			tokenCount: estimateTokens(content),
 		});
 	}
 	return reflections;
 }
 
-function isReflection(value: unknown): value is Reflection {
+type ReflectionProposal = Omit<Reflection, "id" | "tokenCount">;
+
+function isReflectionProposal(value: unknown): value is ReflectionProposal {
 	if (!value || typeof value !== "object") return false;
 	const r = value as Record<string, unknown>;
-	if (typeof r.id !== "string" || !/^[a-f0-9]{12}$/.test(r.id)) return false;
 	if (typeof r.content !== "string" || !r.content) return false;
 	if (/\r|\n/.test(r.content)) return false;
 	if (

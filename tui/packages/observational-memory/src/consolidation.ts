@@ -1,112 +1,88 @@
-// ── Consolidation pipeline ───────────────────────────────────────────────
-// Observer → Reflector → Dropper pipeline, triggered on turn_end.
-// Runs as a background task (non-blocking).
-
-import type { Observation, Reflection } from "./types.ts";
+import { runDropper } from "./dropper.ts";
 import { runObserver } from "./observer.ts";
 import { runReflector } from "./reflector.ts";
-import { runDropper } from "./dropper.ts";
+import type { Observation, Reflection } from "./types.ts";
 
 export interface ConsolidationConfig {
-	/** Model name or identifier */
 	model: string;
-	/** API key for LLM calls */
 	apiKey: string;
-	/** OpenAI-compatible API base URL. */
 	baseUrl?: string;
-	/** Optional request headers */
 	headers?: Record<string, string>;
-	/** Whether a UI is available for notifications */
 	hasUI?: boolean;
-	/** Observation pool target (tokens below which no drops occur) */
 	observationsPoolTargetTokens?: number;
-	/** Thinking level for LLM calls */
 	thinkingLevel?: string;
 }
 
-export interface LaunchParams {
-	/** Current raw token count in session */
-	currentTokens: number;
-	/** Token threshold to trigger observer */
-	observeThreshold: number;
-	/** Token threshold to trigger reflector */
-	reflectThreshold: number;
-	/** Current active observations */
-	observations: Observation[];
-	/** Current reflections */
-	reflections: Reflection[];
-	/** Real session entries that have not yet been observed. */
-	sourceEntries?: Array<{ id: string; role: string; content: string }>;
+export interface SourceEntry {
+	id: string;
+	role: string;
+	content: string;
+	tokenCount?: number;
 }
 
+export interface LaunchParams {
+	observeDue: boolean;
+	reflectDue: boolean;
+	observations: Observation[];
+	reflections: Reflection[];
+	sourceEntries?: SourceEntry[];
+}
+
+export type ConsolidationStage = "observer" | "reflector" | "dropper";
+
 export interface ConsolidationResult {
-	/** Whether any stage ran */
 	ran: boolean;
-	/** Observations recorded (0 if observer didn't run or returned empty) */
+	stage?: ConsolidationStage;
 	observationsRecorded: number;
-	/** Reflections recorded (0 if reflector didn't run or returned empty) */
 	reflectionsRecorded: number;
-	/** Observation IDs dropped (0 if dropper didn't run or returned empty) */
 	droppedCount: number;
 	observations: Observation[];
 	reflections: Reflection[];
 	droppedObservationIds: string[];
 }
 
-export class ConsolidationPipeline {
-	private config: ConsolidationConfig;
-	private inFlight: boolean = false;
-	private observeThreshold: number;
-	private reflectThreshold: number;
+export interface ConsolidationStatus {
+	inFlight: boolean;
+	stage?: ConsolidationStage;
+	lastRunAt?: string;
+	lastError?: string;
+}
 
-	constructor(
-		config: ConsolidationConfig,
-		thresholds?: { observeAfterTokens: number; reflectAfterTokens: number },
-	) {
+const RELEVANCE_DROP_RANK = {
+	low: 0,
+	medium: 1,
+	high: 2,
+	critical: 3,
+} as const;
+
+export class ConsolidationPipeline {
+	private readonly config: ConsolidationConfig;
+	private inFlight = false;
+	private abortController?: AbortController;
+	private status: ConsolidationStatus = { inFlight: false };
+
+	constructor(config: ConsolidationConfig) {
 		this.config = config;
-		this.observeThreshold =
-			thresholds?.observeAfterTokens ??
-			config.observationsPoolTargetTokens ??
-			10_000;
-		this.reflectThreshold =
-			thresholds?.reflectAfterTokens ??
-			config.observationsPoolTargetTokens ??
-			20_000;
 	}
 
-	/**
-	 * Check if consolidation should launch and run it asynchronously.
-	 * Non-blocking: returns immediately.
-	 *
-	 * Returns undefined (no-op) while a run is already in flight, instead of
-	 * queuing. This is safe only because the caller (hooks.ts) re-derives
-	 * "is a stage due" from live token/observation counts on every turn_end,
-	 * rather than tracking a queue of missed triggers — so a skipped call
-	 * here just means the same due-check re-fires, with up-to-date state, on
-	 * the next turn_end. A caller that does NOT re-derive due-state the same
-	 * way would lose data on a skipped call; do not call this directly
-	 * without that guarantee.
-	 */
+	getStatus(): ConsolidationStatus {
+		return { ...this.status };
+	}
+
+	cancel(): void {
+		this.abortController?.abort();
+	}
+
 	async maybeLaunch(
 		params: LaunchParams,
 	): Promise<ConsolidationResult | undefined> {
 		if (this.inFlight) return undefined;
-
-		const {
-			currentTokens,
-			observeThreshold,
-			reflectThreshold,
-			observations: _observations,
-			reflections: _reflections,
-		} = params;
-
-		// Check if any stage is due
-		const observerDue = currentTokens >= observeThreshold;
-		const reflectorDue = currentTokens >= reflectThreshold;
-
+		const observerDue = params.observeDue;
+		const reflectorDue = params.reflectDue;
 		if (!observerDue && !reflectorDue) return undefined;
 
 		this.inFlight = true;
+		this.abortController = new AbortController();
 		const result: ConsolidationResult = {
 			ran: true,
 			observationsRecorded: 0,
@@ -118,158 +94,229 @@ export class ConsolidationPipeline {
 		};
 
 		try {
-			// Stage 1: Observer
-			const observerResult = observerDue
-				? await this.runObserverStage(params)
-				: undefined;
-			if (observerResult) {
-				result.observationsRecorded = observerResult.length;
-				result.observations = observerResult;
-			}
-
-			// Stage 2: Reflector
-			const reflectorResult = reflectorDue
-				? await this.runReflectorStage(params, observerResult)
-				: undefined;
-			if (reflectorResult) {
-				result.reflectionsRecorded = reflectorResult.length;
-				result.reflections = reflectorResult;
-			}
-
-			// Stage 3: Dropper (only after reflector)
-			if (reflectorResult && reflectorResult.length > 0) {
-				const dropperResult = await this.runDropperStage(params);
-				if (dropperResult) {
-					result.droppedCount = dropperResult.length;
-					result.droppedObservationIds = dropperResult;
+			// Observation has priority so reflection never works from a stale pool.
+			if (observerDue) {
+				result.stage = "observer";
+				this.status = { inFlight: true, stage: "observer" };
+				const observations = await this.runObserverStage(params);
+				if (observations) {
+					result.observations = observations;
+					result.observationsRecorded = observations.length;
 				}
+				return result;
 			}
-		} catch (error) {
-			console.error(
-				"[observational-memory] Consolidation pipeline error:",
-				error,
+
+			result.stage = "reflector";
+			this.status = { inFlight: true, stage: "reflector" };
+			const reflections = await this.runReflectorStage(params);
+			if (!reflections?.length) return result;
+			result.reflections = reflections;
+			result.reflectionsRecorded = reflections.length;
+
+			const currentReflections = mergeReflections(
+				params.reflections,
+				reflections,
 			);
+			const maxDrops = maxDropCountForPool(
+				params.observations,
+				this.config.observationsPoolTargetTokens ?? 10_000,
+			);
+			if (maxDrops === 0) return result;
+
+			result.stage = "dropper";
+			this.status = { inFlight: true, stage: "dropper" };
+			const proposals = await runDropper({
+				model: this.config.model,
+				apiKey: this.config.apiKey,
+				baseUrl: this.config.baseUrl,
+				headers: this.config.headers,
+				observations: params.observations,
+				reflections: currentReflections,
+				targetTokens: this.config.observationsPoolTargetTokens ?? 10_000,
+				thinkingLevel: this.config.thinkingLevel,
+				signal: this.abortController.signal,
+			});
+			result.droppedObservationIds = selectDropCandidates(
+				proposals ?? [],
+				params.observations,
+				currentReflections,
+				maxDrops,
+			);
+			result.droppedCount = result.droppedObservationIds.length;
+			return result;
+		} catch (error) {
+			if (this.abortController.signal.aborted) return result;
+			const message = error instanceof Error ? error.message : String(error);
+			this.status = {
+				inFlight: false,
+				stage: result.stage,
+				lastRunAt: new Date().toISOString(),
+				lastError: message,
+			};
+			throw error;
 		} finally {
 			this.inFlight = false;
+			if (!this.status.lastError) {
+				this.status = {
+					inFlight: false,
+					stage: result.stage,
+					lastRunAt: new Date().toISOString(),
+				};
+			}
+			this.abortController = undefined;
 		}
-
-		return result;
 	}
 
 	private async runObserverStage(
 		params: LaunchParams,
 	): Promise<Observation[] | undefined> {
-		const {
-			currentTokens,
-			observations: priorObsRaw,
-			reflections: priorRefsRaw,
-		} = params;
-		if (currentTokens < this.observeThreshold) return undefined;
-
-		// Prepare prior observation/reflection summaries
-		const priorObs = priorObsRaw
-			.map((o: Observation) => `[${o.relevance}] ${o.content}`)
-			.slice(-20);
-		const priorRefs =
-			priorRefsRaw?.map((r: Reflection) => r.content).slice(-10) ?? [];
-
-		// Build source-addressed chunk (simplified — in production, this would use actual session entries)
-		const chunk = this.buildSourceChunk(params);
-
-		const result = await runObserver({
+		const chunk = (params.sourceEntries ?? [])
+			.map(
+				(entry) =>
+					`[Source entry id: ${entry.id}]\n[${entry.role}] ${entry.content}`,
+			)
+			.join("\n\n");
+		if (!chunk) return undefined;
+		return runObserver({
 			model: this.config.model,
 			apiKey: this.config.apiKey,
 			baseUrl: this.config.baseUrl,
 			headers: this.config.headers,
-			priorObservations: priorObs,
-			priorReflections: priorRefs,
+			priorObservations: params.observations
+				.slice(-20)
+				.map((item) => `[${item.relevance}] ${item.content}`),
+			priorReflections: params.reflections
+				.slice(-10)
+				.map((item) => item.content),
 			chunk,
-			allowedSourceEntryIds: (params.sourceEntries ?? []).map((entry) => entry.id),
+			allowedSourceEntryIds: (params.sourceEntries ?? []).map(
+				(entry) => entry.id,
+			),
 			thinkingLevel: this.config.thinkingLevel,
+			signal: this.abortController?.signal,
 		});
-
-		if (!result || result.length === 0) return undefined;
-		return result;
 	}
 
 	private async runReflectorStage(
 		params: LaunchParams,
-		_newObservations: Observation[] | undefined,
 	): Promise<Reflection[] | undefined> {
-		const {
-			currentTokens,
-			observations: priorObservations,
-			reflections: refList,
-		} = params;
-		if (currentTokens < this.reflectThreshold) return undefined;
-
-		// Compute coverage tiers
-		const coveredObs = new Set<string>();
-		for (const ref of refList) {
-			for (const obsId of ref.supportingObservationIds) {
-				coveredObs.add(obsId);
-			}
-		}
-
-		const refObs = [...priorObservations, ...(_newObservations ?? [])];
-		const obsWithCoverage = refObs.map((o: Observation) => ({
-			content: o.content,
-			coverage: coveredObs.has(o.id) ? ("partial" as const) : ("none" as const),
-		}));
-
-		const result = await runReflector({
-			model: this.config.model,
-			apiKey: this.config.apiKey,
-			baseUrl: this.config.baseUrl,
-			headers: this.config.headers,
-			observations: obsWithCoverage,
-			reflections: refList,
-			thinkingLevel: this.config.thinkingLevel,
-		});
-
-		if (!result || result.length === 0) return undefined;
-		return result;
-	}
-
-	private async runDropperStage(
-		params: LaunchParams,
-	): Promise<string[] | undefined> {
-		const targetTokens = this.config.observationsPoolTargetTokens ?? 10_000;
-		const activeTokens = params.observations.reduce(
-			(sum, o) => sum + o.tokenCount,
-			0,
+		const coverage = reflectionCoverage(
+			params.observations,
+			params.reflections,
 		);
-
-		if (activeTokens <= targetTokens) return undefined;
-
-		const result = await runDropper({
+		return runReflector({
 			model: this.config.model,
 			apiKey: this.config.apiKey,
 			baseUrl: this.config.baseUrl,
 			headers: this.config.headers,
-			observations: params.observations,
+			observations: params.observations.map((item) => ({
+				id: item.id,
+				content: item.content,
+				timestamp: item.timestamp,
+				relevance: item.relevance,
+				coverage: coverage.get(item.id) ?? "none",
+			})),
 			reflections: params.reflections,
-			targetTokens,
 			thinkingLevel: this.config.thinkingLevel,
+			signal: this.abortController?.signal,
 		});
-
-		return result;
 	}
+}
 
-	private buildSourceChunk(params: LaunchParams): string {
-		if (params.sourceEntries?.length) {
-			return params.sourceEntries
-				.map((entry) =>
-					`[Source entry id: ${entry.id}]\n[${entry.role}] ${entry.content}`,
-				)
-				.join("\n\n");
+export function maxDropCountForPool(
+	observations: readonly Observation[],
+	targetTokens: number,
+): number {
+	const total = observations.reduce((sum, item) => sum + item.tokenCount, 0);
+	if (observations.length === 0 || targetTokens < 0 || total <= targetTokens)
+		return 0;
+	const average = total / observations.length;
+	return Math.min(
+		observations.length,
+		Math.max(1, Math.ceil((total - targetTokens) / average)),
+	);
+}
+
+export function selectDropCandidates(
+	proposedIds: readonly string[],
+	observations: readonly Observation[],
+	reflections: readonly Reflection[],
+	maxDrops: number,
+): string[] {
+	if (maxDrops <= 0) return [];
+	const byId = new Map(observations.map((item) => [item.id, item]));
+	const coverage = reflectionCoverage(observations, reflections);
+	const unique = Array.from(new Set(proposedIds))
+		.map((id, proposalIndex) => ({
+			id,
+			proposalIndex,
+			observation: byId.get(id),
+		}))
+		.filter(
+			(
+				item,
+			): item is {
+				id: string;
+				proposalIndex: number;
+				observation: Observation;
+			} => item.observation !== undefined,
+		);
+	return unique
+		.sort((a, b) => {
+			const coverageDelta =
+				coverageRank(coverage.get(a.id)) - coverageRank(coverage.get(b.id));
+			const relevanceDelta =
+				RELEVANCE_DROP_RANK[a.observation.relevance] -
+				RELEVANCE_DROP_RANK[b.observation.relevance];
+			const ageDelta =
+				timestampRank(a.observation.timestamp) -
+				timestampRank(b.observation.timestamp);
+			return (
+				coverageDelta ||
+				relevanceDelta ||
+				ageDelta ||
+				a.proposalIndex - b.proposalIndex
+			);
+		})
+		.slice(0, maxDrops)
+		.map((item) => item.id);
+}
+
+function reflectionCoverage(
+	observations: readonly Observation[],
+	reflections: readonly Reflection[],
+): Map<string, "partial" | "strong"> {
+	const valid = new Set(observations.map((item) => item.id));
+	const counts = new Map<string, number>();
+	for (const reflection of reflections) {
+		for (const id of new Set(reflection.supportingObservationIds)) {
+			if (valid.has(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
 		}
-		const lines: string[] = [];
-		for (const obs of params.observations.slice(-50)) {
-			lines.push(`[Source entry id: ${obs.id}]`);
-			lines.push(obs.content);
-			lines.push("");
-		}
-		return lines.join("\n") || "No source entries available.";
 	}
+	return new Map(
+		Array.from(counts, ([id, count]) => [
+			id,
+			count >= 2 ? "strong" : "partial",
+		]),
+	);
+}
+
+function mergeReflections(
+	existing: readonly Reflection[],
+	additional: readonly Reflection[],
+): Reflection[] {
+	const merged = new Map(existing.map((item) => [item.id, item]));
+	for (const item of additional) merged.set(item.id, item);
+	return Array.from(merged.values());
+}
+
+function coverageRank(value: "partial" | "strong" | undefined): number {
+	if (value === "strong") return 2;
+	if (value === "partial") return 1;
+	return 0;
+}
+
+function timestampRank(value: string): number {
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }

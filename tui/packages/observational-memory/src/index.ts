@@ -2,85 +2,85 @@
 // Structured memory: observations, reflections, drops with file-based persistence.
 // Replaces the legacy in-process MemoryStore.
 
-import { MemoryStoreImpl } from "./store.ts";
-import { FilePersistence } from "./persistence.ts";
 import { ConsolidationPipeline } from "./consolidation.ts";
 import { registerConsolidationHooks } from "./hooks.ts";
+import { FilePersistence } from "./persistence.ts";
+import { MemoryStoreImpl } from "./store.ts";
 
 export {
-	MemoryStoreImpl,
-	type MemoryStore,
-	type StoreOptions,
-} from "./store.ts";
-export { FilePersistence, type PersistenceOptions } from "./persistence.ts";
-export {
-	ConsolidationPipeline,
 	type ConsolidationConfig,
-	type LaunchParams,
+	ConsolidationPipeline,
 	type ConsolidationResult,
+	type LaunchParams,
 } from "./consolidation.ts";
 export {
-	registerConsolidationHooks,
-	registerCompactionHook,
 	type HookContext,
 	type HookOptions,
+	registerCompactionHook,
+	registerConsolidationHooks,
 } from "./hooks.ts";
+export { hashId } from "./ids.ts";
 export {
-	recallMemory,
+	type KnowledgeEdge,
+	type KnowledgeGraph,
+	KnowledgeGraphManager,
+	type KnowledgeNode,
+} from "./knowledge-graph.ts";
+export { FilePersistence, type PersistenceOptions } from "./persistence.ts";
+export {
+	DROPPER_SYSTEM_PROMPT,
+	OBSERVER_SYSTEM_PROMPT,
+	REFLECTOR_SYSTEM_PROMPT,
+} from "./prompts.ts";
+export {
 	formatRecallResult,
 	isValidMemoryId,
-	type RecallResult,
-	type RecallSourceEntry,
 	type RecalledObservation,
 	type RecalledReflection,
+	type RecallResult,
+	type RecallSourceEntry,
+	recallMemory,
 } from "./recall.ts";
 export {
-	createRecallTool,
-	createMemorySearchTool,
-	type RecallToolOptions,
-	type RecallToolResult,
-	type MemorySearchToolResult,
-	RECALL_TOOL_NAME,
-	MEMORY_SEARCH_TOOL_NAME,
-} from "./tool.ts";
-export {
-	searchMemory,
-	searchMemoryStore,
 	formatMemoryContext,
 	type MemorySearchMatch,
 	type MemorySearchOptions,
+	searchMemory,
+	searchMemoryStore,
 } from "./search.ts";
-export { hashId } from "./ids.ts";
 export {
-	estimateTokens,
+	type MemoryStore,
+	MemoryStoreImpl,
+	type StoreOptions,
+} from "./store.ts";
+export {
 	estimateObservationTokens,
 	estimateReflectionTokens,
+	estimateTokens,
 } from "./tokens.ts";
 export {
-	OBSERVER_SYSTEM_PROMPT,
-	REFLECTOR_SYSTEM_PROMPT,
-	DROPPER_SYSTEM_PROMPT,
-} from "./prompts.ts";
+	createMemorySearchTool,
+	createRecallTool,
+	MEMORY_SEARCH_TOOL_NAME,
+	type MemorySearchToolResult,
+	RECALL_TOOL_NAME,
+	type RecallToolOptions,
+	type RecallToolResult,
+} from "./tool.ts";
 export type {
-	Observation,
-	Reflection,
-	Relevance,
 	FoldedMemory,
 	MemoryStatus,
 	MemoryStoreEvent,
+	Observation,
+	Reflection,
+	Relevance,
 } from "./types.ts";
 export {
-	KnowledgeGraphManager,
-	type KnowledgeNode,
-	type KnowledgeEdge,
-	type KnowledgeGraph,
-} from "./knowledge-graph.ts";
-export {
+	MEMORY_ID_PATTERN,
+	OM_FOLDED,
+	OM_OBSERVATIONS_DROPPED,
 	OM_OBSERVATIONS_RECORDED,
 	OM_REFLECTIONS_RECORDED,
-	OM_OBSERVATIONS_DROPPED,
-	OM_FOLDED,
-	MEMORY_ID_PATTERN,
 	RELEVANCE_VALUES,
 } from "./types.ts";
 
@@ -133,29 +133,33 @@ export function createMemorySystem(opts: MemoryFactoryOptions) {
 	});
 
 	// Consolidation pipeline
-	const pipeline = new ConsolidationPipeline(
-		{
-			model: opts.model,
-			apiKey: opts.apiKey,
-			baseUrl: opts.baseUrl,
-			headers: opts.headers,
-			observationsPoolTargetTokens: config.observationsPoolTargetTokens,
-		},
-		{
-			observeAfterTokens: config.observeAfterTokens,
-			reflectAfterTokens: config.reflectAfterTokens,
-		},
-	);
+	const pipeline = new ConsolidationPipeline({
+		model: opts.model,
+		apiKey: opts.apiKey,
+		baseUrl: opts.baseUrl,
+		headers: opts.headers,
+		observationsPoolTargetTokens: config.observationsPoolTargetTokens,
+	});
 
 	return {
 		store,
 		pipeline,
 		config,
 		/** Register hooks on an extension event bus */
-		registerHooks: (extensionBus: Parameters<typeof registerConsolidationHooks>[0]["extensionBus"], runtime?: {
-			currentTokens?: () => number;
-			getSourceEntries?: () => Array<{ id: string; role: string; content: string }>;
-		}) =>
+		registerHooks: (
+			extensionBus: Parameters<
+				typeof registerConsolidationHooks
+			>[0]["extensionBus"],
+			runtime?: {
+				getSourceEntries?: () => Array<{
+					id: string;
+					role: string;
+					content: string;
+					tokenCount?: number;
+				}>;
+				getRetrievalContext?: () => string;
+			},
+		) =>
 			registerConsolidationHooks({
 				extensionBus,
 				memoryStore: store,
@@ -165,8 +169,8 @@ export function createMemorySystem(opts: MemoryFactoryOptions) {
 					reflectAfterTokens: config.reflectAfterTokens,
 					compactAfterTokens: config.compactAfterTokens,
 				},
-				currentTokens: runtime?.currentTokens ?? (() => 0),
 				getSourceEntries: runtime?.getSourceEntries,
+				getRetrievalContext: runtime?.getRetrievalContext,
 			}),
 	};
 }

@@ -2,11 +2,11 @@
 // Pulled out of harness.ts: manual compact(), auto-compaction threshold
 // check, and the shared before/after-compact event + hook plumbing.
 
-import type { LLMBackend } from "./backend.ts";
-import { compactMessages, estimateChatPayloadTokens } from "./messages.ts";
-import { generateCompactionSummary } from "./summary-generation.ts";
-import type { CompactionSettings } from "../compaction/index.ts";
-import type { Message, ThinkingLevel } from "./types.ts";
+import type { LLMBackend } from "../backend.ts";
+import { compactMessages, estimateChatPayloadTokens } from "../messages.ts";
+import { generateCompactionSummary } from "../summaries/summary-generation.ts";
+import type { CompactionSettings } from "../../compaction/index.ts";
+import type { Message, ThinkingLevel } from "../types.ts";
 
 export interface CompactionOutcome {
 	changed: boolean;

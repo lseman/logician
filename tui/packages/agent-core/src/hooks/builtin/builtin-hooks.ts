@@ -4,22 +4,22 @@
 // user-supplied hooks via the typed HookBus so both run.
 
 import { BudgetTracker } from "./budget.ts";
-import { ThinkingLoopDetector } from "../../core/thinking-loop-detector.ts";
+import { ThinkingLoopDetector } from "../../core/guards/thinking-loop-detector.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
 } from "../../core/file-checkpoints.ts";
-import type { LoopDetector } from "../../core/loop-detector.ts";
+import type { LoopDetector } from "../../core/guards/loop-detector.ts";
 import { HookBus } from "../native/hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
 } from "../../core/messages.ts";
 import { compactToFit } from "../../compaction/compaction.ts";
-import { getTaskStatus } from "../../core/task-status-state.ts";
-import { getTasks } from "../../core/todo-state.ts";
+import { getTaskStatus } from "../../core/tasks/task-status-state.ts";
+import { getTasks } from "../../core/tasks/todo-state.ts";
 import type {
 	AgentConfig,
 	AgentHooks,

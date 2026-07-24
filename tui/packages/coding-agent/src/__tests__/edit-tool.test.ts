@@ -73,6 +73,36 @@ void test("edit_file requires the file to have been read first", async () => {
 	assert.match(String(result), /has not been read yet/);
 });
 
+void test("edit_file accepts a configured path outside CWD", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-edit-cwd-"));
+	const { cwd: allowedRoot, file } = setup("edit-allowed", "before\n");
+
+	await edit_file.execute(
+		{
+			path: file,
+			edits: [{ oldText: "before", newText: "after" }],
+		},
+		{ cwd, allowedPaths: [allowedRoot] },
+	);
+
+	assert.equal(readFileSync(file, "utf8"), "after\n");
+});
+
+void test("edit_file accepts any path outside CWD with allowAllPaths", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-edit-cwd-"));
+	const { file } = setup("edit-allow-all", "before\n");
+
+	await edit_file.execute(
+		{
+			path: file,
+			edits: [{ oldText: "before", newText: "after" }],
+		},
+		{ cwd, allowAllPaths: true },
+	);
+
+	assert.equal(readFileSync(file, "utf8"), "after\n");
+});
+
 void test("edit_file replaceAll replaces every occurrence", async () => {
 	const { cwd, file } = setup("edit", "foo(1)\nbar\nfoo(2)\nfoo(3)\n");
 

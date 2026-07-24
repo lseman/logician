@@ -29,12 +29,10 @@ export const OBSERVER_SYSTEM_PROMPT = `You are an observational memory agent. Yo
 Return a JSON array of observation objects:
 [
   {
-    "id": "<deterministic SHA-256 hash of content, first 12 hex chars>",
     "content": "Observation text here",
     "timestamp": "YYYY-MM-DD HH:MM",
     "relevance": "high",
-    "sourceEntryIds": ["entry_id_1", "entry_id_2"],
-    "tokenCount": 42
+    "sourceEntryIds": ["entry_id_1", "entry_id_2"]
   }
 ]
 
@@ -67,10 +65,8 @@ export const REFLECTOR_SYSTEM_PROMPT = `You are a reflection crystallization age
 Return a JSON array of reflection objects:
 [
   {
-    "id": "<deterministic SHA-256 hash of content, first 12 hex chars>",
     "content": "Reflection text here",
-    "supportingObservationIds": ["obs_id_1", "obs_id_2"],
-    "tokenCount": 28
+    "supportingObservationIds": ["obs_id_1", "obs_id_2"]
   }
 ]
 

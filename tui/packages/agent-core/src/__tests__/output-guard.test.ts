@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { OutputGuard } from "../core/output-guard.ts";
+import { OutputGuard } from "../core/guards/output-guard.ts";
 import { BackendError } from "../core/backend.ts";
 
 describe("OutputGuard", () => {
@@ -187,6 +187,13 @@ describe("OutputGuard", () => {
 
 		const r2 = guard.handleError(err);
 		assert.strictEqual(r2.retryDelayMs, 2000);
+	});
+
+	it("maxRetries zero disables the unknown-error safety retry", () => {
+		const guard = makeGuard({ maxRetries: 0 });
+		const result = guard.handleError(new Error("unclassified failure"));
+
+		assert.strictEqual(result.action, "abort");
 	});
 
 	// ── Malformed assistant message recovery ───────────────────────────────

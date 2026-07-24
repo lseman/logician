@@ -560,7 +560,7 @@ export const edit_file: Tool = {
 		}
 
 		const resolved = resolveReadPath(path, ctx.cwd || process.cwd());
-		ensureInsideCwd(ctx.cwd, resolved, undefined, ctx.allowAllPaths);
+		ensureInsideCwd(ctx.cwd, resolved, ctx.allowedPaths, ctx.allowAllPaths);
 
 		try {
 			await defaultEditOperations.access(resolved);

@@ -23,6 +23,7 @@ const TRUST_REQUIRING_NAMES = new Set([
 	...TRUST_RESOURCES,
 	...CONFIG_DIR,
 	".agents",
+	".logician.json",
 ]);
 
 function hasTrustRequiringResourcesInDir(dir: string): boolean {
@@ -47,8 +48,7 @@ function hasAgentsSkills(cwd: string): boolean {
 		const agentsSkills = join(currentDir, ".agents", "skills");
 		if (existsSync(agentsSkills)) {
 			// Don't flag the user's global .agents/skills
-			if (agentsSkills.startsWith(home)) continue;
-			return true;
+			if (currentDir !== home) return true;
 		}
 		const parent = dirname(currentDir);
 		if (parent === currentDir) break;
@@ -62,11 +62,18 @@ function hasAgentsSkills(cwd: string): boolean {
  */
 export function hasTrustRequiringProjectResources(cwd: string): boolean {
 	let currentDir = cwd.replace(/\/+$/, "");
+	const home = homedir();
 
 	// Check for .logician directory with trust-requiring resources
 	while (true) {
+		const projectConfig = join(currentDir, ".logician.json");
+		if (currentDir !== home && existsSync(projectConfig)) return true;
 		const configDir = join(currentDir, CONFIG_DIR);
-		if (existsSync(configDir) && hasTrustRequiringResourcesInDir(configDir)) {
+		if (
+			currentDir !== home &&
+			existsSync(configDir) &&
+			hasTrustRequiringResourcesInDir(configDir)
+		) {
 			return true;
 		}
 		const parent = dirname(currentDir);
@@ -83,10 +90,15 @@ export function hasTrustRequiringProjectResources(cwd: string): boolean {
 export function getTrustRequiringPaths(cwd: string): string[] {
 	const paths: string[] = [];
 	let currentDir = cwd.replace(/\/+$/, "");
+	const home = homedir();
 
 	while (true) {
+		const projectConfig = join(currentDir, ".logician.json");
+		if (currentDir !== home && existsSync(projectConfig)) {
+			paths.push(projectConfig);
+		}
 		const configDir = join(currentDir, CONFIG_DIR);
-		if (existsSync(configDir)) {
+		if (currentDir !== home && existsSync(configDir)) {
 			for (const resource of TRUST_RESOURCES) {
 				const resourcePath = join(configDir, resource);
 				if (existsSync(resourcePath)) {
@@ -94,15 +106,13 @@ export function getTrustRequiringPaths(cwd: string): string[] {
 				}
 			}
 		}
+		const agentsSkills = join(currentDir, ".agents", "skills");
+		if (currentDir !== home && existsSync(agentsSkills)) {
+			paths.push(agentsSkills);
+		}
 		const parent = dirname(currentDir);
 		if (parent === currentDir) break;
 		currentDir = parent;
-	}
-
-	// Check for .agents/skills
-	const agentsSkills = join(cwd, ".agents", "skills");
-	if (existsSync(agentsSkills)) {
-		paths.push(agentsSkills);
 	}
 
 	return paths;

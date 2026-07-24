@@ -4,7 +4,7 @@ import {
 	stripAcceptanceReport,
 	type AcceptanceConfig,
 	type AcceptanceLedger,
-} from "@logician/agent-core/core/acceptance-contract.ts";
+} from "@logician/agent-core/core/guards/acceptance-contract.ts";
 import type {
 	AgentConfig,
 	AgentEvent,

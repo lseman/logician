@@ -7,7 +7,7 @@ export * from "./core/backend.ts";
 export * from "./core/agent-loop-runner.ts";
 export * from "./core/file-checkpoints.ts";
 export * from "./core/harness.ts";
-export * from "./core/loop-detector.ts";
+export * from "./core/guards/loop-detector.ts";
 export * from "./core/messages.ts";
 export * from "./core/runtime-state.ts";
 export * from "./core/session.ts";
@@ -39,10 +39,10 @@ export * from "./tools/shared/json-utils.ts";
 export {
 	getTaskStatus,
 	resetTaskStatus,
-} from "./core/task-status-state.ts";
-export type { TaskStatusRecord } from "./core/task-status-state.ts";
-export type { Task, TaskStatus } from "./core/todo-state.ts";
-export { getTasks, onTodosChanged } from "./core/todo-state.ts";
+} from "./core/tasks/task-status-state.ts";
+export type { TaskStatusRecord } from "./core/tasks/task-status-state.ts";
+export type { Task, TaskStatus } from "./core/tasks/todo-state.ts";
+export { getTasks, onTodosChanged } from "./core/tasks/todo-state.ts";
 
 // Compaction (kept at top level for backwards compat).
 // Note: core/messages.ts and compaction/compaction.ts both define

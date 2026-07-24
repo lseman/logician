@@ -7,7 +7,7 @@ import {
 	highlightAuto,
 } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
-import { stripAcceptanceReport } from "@logician/agent-core/core/acceptance-contract.ts";
+import { stripAcceptanceReport } from "@logician/agent-core/core/guards/acceptance-contract.ts";
 import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 import { theme } from "../layers/theme/theme.ts";
 import type {

@@ -3,9 +3,10 @@
 // the consolidation pipeline.
 
 import type { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
-import type { MemoryStore } from "./store.ts";
-import type { ConsolidationPipeline } from "./consolidation.ts";
+import type { ConsolidationPipeline, SourceEntry } from "./consolidation.ts";
 import { formatMemoryContext } from "./search.ts";
+import type { MemoryStore } from "./store.ts";
+import { estimateTokens } from "./tokens.ts";
 
 export interface HookOptions {
 	/** Token thresholds */
@@ -25,9 +26,9 @@ export interface HookContext {
 	pipeline: ConsolidationPipeline;
 	/** Optional token thresholds */
 	options?: HookOptions;
-	/** Current raw token count in session */
-	currentTokens: () => number;
-	getSourceEntries?: () => Array<{ id: string; role: string; content: string }>;
+	getSourceEntries?: () => SourceEntry[];
+	/** Recent conversation text to enrich memory retrieval beyond the latest prompt. */
+	getRetrievalContext?: () => string;
 }
 
 /**
@@ -39,45 +40,74 @@ export function registerConsolidationHooks(ctx: HookContext): () => void {
 
 	const observeThreshold = options?.observeAfterTokens ?? 10_000;
 	const reflectThreshold = options?.reflectAfterTokens ?? 20_000;
-	let lastObservationRunTokens = 0;
-	let lastReflectedObservationCount = ctx.memoryStore.getActiveObservations().length;
-	const processedSourceIds = new Set<string>();
-
 	const launchConsolidation = async () => {
 		try {
-			const currentTokens = ctx.currentTokens();
-			const observationDue =
-				currentTokens - lastObservationRunTokens >= observeThreshold;
+			const progress = ctx.memoryStore.getProgress();
+			const allSources = ctx.getSourceEntries?.() ?? [];
+			const observationSources = entriesAfter(
+				allSources,
+				progress.observationCoverageId,
+			);
+			const reflectionSources = entriesAfter(
+				allSources,
+				progress.reflectionCoverageId,
+			);
+			const observationTokens = sourceTokens(observationSources);
+			const reflectionTokens = sourceTokens(reflectionSources);
+			const observationDue = observationTokens >= observeThreshold;
 			const activeObservations = ctx.memoryStore.getActiveObservations();
 			const reflectionDue =
-				currentTokens >= reflectThreshold &&
-				activeObservations.length > lastReflectedObservationCount;
+				!observationDue &&
+				reflectionTokens >= reflectThreshold &&
+				activeObservations.length > 0;
 			if (!observationDue && !reflectionDue) return undefined;
-			const sourceEntries = (ctx.getSourceEntries?.() ?? []).filter(
-				(entry) => !processedSourceIds.has(entry.id),
-			);
 			const result = await pipeline.maybeLaunch({
-				observeThreshold: observationDue ? 0 : Number.POSITIVE_INFINITY,
-				reflectThreshold: reflectionDue ? 0 : Number.POSITIVE_INFINITY,
-				currentTokens,
+				observeDue: observationDue,
+				reflectDue: reflectionDue,
 				observations: activeObservations,
 				reflections: ctx.memoryStore.getReflections(),
-				sourceEntries,
+				sourceEntries: observationSources,
 			});
 			if (!result?.ran) return undefined;
-			const coverageId = sourceEntries.at(-1)?.id ?? "unknown";
-			ctx.memoryStore.recordObservations(result.observations, coverageId);
-			ctx.memoryStore.recordReflections(result.reflections, coverageId);
-			ctx.memoryStore.recordDrops(result.droppedObservationIds, coverageId);
-			if (observationDue) {
-				lastObservationRunTokens = currentTokens;
-				for (const entry of sourceEntries) processedSourceIds.add(entry.id);
+			const observationCoverageId = observationSources.at(-1)?.id;
+			if (result.observations.length > 0 && observationCoverageId) {
+				ctx.memoryStore.recordObservations(
+					result.observations,
+					observationCoverageId,
+				);
+				ctx.memoryStore.setProgress({ observationCoverageId });
 			}
-			if (reflectionDue) {
-				lastReflectedObservationCount = ctx.memoryStore.getActiveObservations().length;
+			const reflectionCoverageId =
+				ctx.memoryStore.getProgress().observationCoverageId;
+			if (result.reflections.length > 0 && reflectionCoverageId) {
+				ctx.memoryStore.recordReflections(
+					result.reflections,
+					reflectionCoverageId,
+				);
+				ctx.memoryStore.setProgress({ reflectionCoverageId });
 			}
+			if (result.droppedObservationIds.length > 0 && reflectionCoverageId) {
+				ctx.memoryStore.recordDrops(
+					result.droppedObservationIds,
+					reflectionCoverageId,
+				);
+				ctx.memoryStore.setProgress({ dropCoverageId: reflectionCoverageId });
+			}
+			const status = pipeline.getStatus();
+			ctx.memoryStore.setDiagnostics({
+				lastStage: status.stage,
+				lastRunAt: status.lastRunAt,
+			});
 		} catch (error) {
 			console.error("[observational-memory] Consolidation error:", error);
+			const status = pipeline.getStatus();
+			ctx.memoryStore.setDiagnostics({
+				lastStage: status.stage,
+				lastRunAt: status.lastRunAt ?? new Date().toISOString(),
+				lastError:
+					status.lastError ??
+					(error instanceof Error ? error.message : String(error)),
+			});
 		}
 		// Return undefined — no result type modification needed
 		return undefined;
@@ -90,20 +120,43 @@ export function registerConsolidationHooks(ctx: HookContext): () => void {
 	});
 
 	// Register on before_agent_start (session boundary)
-	const unsubBeforeAgentStart = extensionBus.on("before_agent_start", (event) => {
-		const memoryContext = formatMemoryContext(ctx.memoryStore, event.prompt, {
-			maxTokens: options?.memoryContextMaxTokens ?? 1_000,
-		});
-		if (!memoryContext) return undefined;
-		return {
-			systemPrompt: `${event.systemPrompt}\n\n${memoryContext}`,
-		};
-	});
+	const unsubBeforeAgentStart = extensionBus.on(
+		"before_agent_start",
+		(event) => {
+			const query = [event.prompt, ctx.getRetrievalContext?.() ?? ""]
+				.filter(Boolean)
+				.join("\n");
+			const memoryContext = formatMemoryContext(ctx.memoryStore, query, {
+				maxTokens: options?.memoryContextMaxTokens ?? 1_000,
+			});
+			if (!memoryContext) return undefined;
+			return {
+				systemPrompt: `${event.systemPrompt}\n\n${memoryContext}`,
+			};
+		},
+	);
 
 	return () => {
+		pipeline.cancel();
 		unsubTurnEnd();
 		unsubBeforeAgentStart();
 	};
+}
+
+function entriesAfter(
+	entries: readonly SourceEntry[],
+	coverageId: string | undefined,
+): SourceEntry[] {
+	if (!coverageId) return [...entries];
+	const index = entries.findIndex((entry) => entry.id === coverageId);
+	return index < 0 ? [...entries] : entries.slice(index + 1);
+}
+
+function sourceTokens(entries: readonly SourceEntry[]): number {
+	return entries.reduce(
+		(sum, entry) => sum + (entry.tokenCount ?? estimateTokens(entry.content)),
+		0,
+	);
 }
 
 /**

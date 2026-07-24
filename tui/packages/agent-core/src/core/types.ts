@@ -77,7 +77,7 @@ export type {
 	AcceptanceVerification,
 	AcceptanceReview,
 } from "./types/types-config.ts";
-export type { AcceptanceConfig } from "./acceptance-contract.ts";
+export type { AcceptanceConfig } from "./guards/acceptance-contract.ts";
 export type { TruncationConfig } from "./types/types-truncation.ts";
 export { DEFAULT_TRUNCATION, resolveTruncationConfig } from "./types/types-truncation.ts";
 

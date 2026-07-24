@@ -29,7 +29,10 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 		},
-		actions: [{ afterMs: 400, send: "\x1b[109;5u" }],
+		actions: [
+			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 500, send: "\x1b[109;5u" },
+		],
 		timeoutMs: 4_000,
 		columns: 120,
 		rows: 32,
@@ -102,7 +105,10 @@ void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 		},
-		actions: [{ afterMs: 400, send: "\x1b[111;5u" }],
+		actions: [
+			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 500, send: "\x1b[111;5u" },
+		],
 		timeoutMs: 4_000,
 		columns: 120,
 		rows: 32,

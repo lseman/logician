@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -21,6 +21,60 @@ void test("ensureInsideCwd rejects sibling directories with shared prefixes", ()
 	const cwd = resolve(tmpdir(), "logician-path-root");
 	const sibling = `${cwd}-sibling/file.ts`;
 	assert.throws(() => ensureInsideCwd(cwd, sibling), /outside CWD/);
+});
+
+void test("ensureInsideCwd accepts configured paths outside CWD", () => {
+	const cwd = resolve(tmpdir(), "logician-path-root");
+	const allowed = resolve(tmpdir(), "logician-allowed-root");
+
+	assert.doesNotThrow(() =>
+		ensureInsideCwd(cwd, resolve(allowed, "nested/file.ts"), [allowed]),
+	);
+	assert.throws(
+		() =>
+			ensureInsideCwd(
+				cwd,
+				resolve(tmpdir(), "logician-other-root/file.ts"),
+				[allowed],
+			),
+		/outside CWD/,
+	);
+});
+
+void test("ensureInsideCwd accepts any path when allowAllPaths is true", () => {
+	const cwd = resolve(tmpdir(), "logician-path-root");
+	const outside = resolve(tmpdir(), "logician-anywhere/file.ts");
+
+	assert.doesNotThrow(() => ensureInsideCwd(cwd, outside, undefined, true));
+});
+
+void test("ensureInsideCwd rejects existing paths through an escaping symlink", () => {
+	const root = mkdtempSync(join(tmpdir(), "logician-path-symlink-"));
+	const cwd = join(root, "cwd");
+	const outside = join(root, "outside");
+	mkdirSync(cwd);
+	mkdirSync(outside);
+	writeFileSync(join(outside, "secret.txt"), "secret", "utf8");
+	symlinkSync(outside, join(cwd, "link"));
+
+	assert.throws(
+		() => ensureInsideCwd(cwd, join(cwd, "link", "secret.txt")),
+		/outside CWD/,
+	);
+});
+
+void test("ensureInsideCwd rejects new paths through an escaping symlink", () => {
+	const root = mkdtempSync(join(tmpdir(), "logician-path-symlink-"));
+	const cwd = join(root, "cwd");
+	const outside = join(root, "outside");
+	mkdirSync(cwd);
+	mkdirSync(outside);
+	symlinkSync(outside, join(cwd, "link"));
+
+	assert.throws(
+		() => ensureInsideCwd(cwd, join(cwd, "link", "new.txt")),
+		/outside CWD/,
+	);
 });
 
 void test("resolveReadPath falls back to macOS-style filename variants", () => {
