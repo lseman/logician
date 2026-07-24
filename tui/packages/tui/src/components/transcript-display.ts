@@ -741,6 +741,23 @@ export class TranscriptDisplay implements Component, Scrollable {
 						const toolLines = this.renderTool(chunk.tool, width);
 						for (const line of toolLines)
 							renderedLines.push(padToWidth(`  ${line}`));
+					} else if (chunk.type === "notice" && chunk.notice) {
+						const n = chunk.notice;
+						const icon = n.level === "error"
+							? "✗"
+							: n.level === "warn"
+								? "⚠"
+									: n.level === "success"
+										? "✓"
+											: "●";
+						const color = n.level === "error"
+							? theme.fgRaw("error")
+							: n.level === "warn"
+								? theme.fgRaw("warning")
+									: theme.fgRaw("systemText");
+						renderedLines.push(
+							padToWidth(`${color}${icon} ${n.label}: ${n.text}${RESET}`),
+						);
 					}
 				}
 				flushContent();
