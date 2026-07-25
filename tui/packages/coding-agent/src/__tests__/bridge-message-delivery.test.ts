@@ -253,3 +253,26 @@ void test("sendMessage rejects when the turn fails", async () => {
 	};
 	await assert.rejects(bridge.sendMessage("hello"), /provider failed/);
 });
+
+void test("setObservationalMemoryEnabled toggles the feature at runtime", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+		observationalMemoryEnabled: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.startupHooksRan = true;
+
+	assert.equal(bridge.getSettingsData().observationalMemoryEnabled, false);
+	assert.match(bridge.getSettingsText(), /Observational memory: off/);
+
+	bridge.setObservationalMemoryEnabled(true);
+	assert.equal(bridge.getSettingsData().observationalMemoryEnabled, true);
+	assert.match(bridge.getSettingsText(), /Observational memory: on/);
+
+	bridge.setObservationalMemoryEnabled(false);
+	assert.equal(bridge.getSettingsData().observationalMemoryEnabled, false);
+	assert.match(bridge.getSettingsText(), /Observational memory: off/);
+});
