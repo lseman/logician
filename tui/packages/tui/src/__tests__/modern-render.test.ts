@@ -690,6 +690,224 @@ void test("expanded subagent details show child tool calls", () => {
 	assert.match(output, /explorer/);
 });
 
+void test("expanded subagent renders thinking, tools, and responses in call order", () => {
+	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "ordered-child-flow",
+		userMessage: { type: "user", content: "Run a subagent" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Inspect files", agent: "explorer" },
+					result: "Summary: implementation verified successfully.",
+					details: {
+						agent: "explorer",
+						status: "completed",
+						childChunks: [
+							{
+								seq: 1,
+								agentId: "explorer-1",
+								type: "thinking",
+								contentText: "I should inspect the entry point.",
+								isComplete: true,
+							},
+							{
+								seq: 2,
+								agentId: "explorer-1",
+								type: "content",
+								contentText: "I am checking the implementation.",
+								isComplete: true,
+							},
+							{
+								seq: 3,
+								agentId: "explorer-1",
+								type: "tool",
+								tool: {
+									agentId: "explorer-1",
+									toolCallId: "child-tool-1",
+									toolName: "read_file",
+									args: "{\"path\":\"src/index.ts\"}",
+									status: "completed",
+									resultPreview: "export const ready = true;",
+								},
+								isComplete: true,
+							},
+							{
+								seq: 4,
+								agentId: "explorer-1",
+								type: "content",
+								contentText: "The implementation is correct.",
+								isComplete: true,
+							},
+						],
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const output = plain(display.render(120).join("\n"));
+	const thinking = output.indexOf("I should inspect the entry point.");
+	const progress = output.indexOf("I am checking the implementation.");
+	const tool = output.indexOf("read_file");
+	const result = output.indexOf("export const ready = true;");
+	const response = output.indexOf("The implementation is correct.");
+
+	assert.ok(thinking >= 0);
+	assert.ok(progress > thinking);
+	assert.ok(tool > progress);
+	assert.ok(result > tool);
+	assert.ok(response > result);
+	assert.equal(output.match(/The implementation is correct\./g)?.length, 1);
+	assert.doesNotMatch(output, /Summary: implementation verified successfully\./);
+	assert.doesNotMatch(output, /ACTIVITY/);
+});
+
+void test("collapsed completed subagent shows its final summary", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "collapsed-child-summary",
+		userMessage: { type: "user", content: "Run a subagent" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Inspect files", agent: "explorer" },
+					result: "Summary: the implementation is correct.",
+					details: {
+						agent: "explorer",
+						status: "completed",
+						childChunks: [
+							{
+								seq: 1,
+								agentId: "explorer-1",
+								type: "thinking",
+								contentText: "Private reasoning.",
+								isComplete: true,
+							},
+							{
+								seq: 2,
+								agentId: "explorer-1",
+								type: "content",
+								contentText: "Intermediate progress.",
+								isComplete: true,
+							},
+						],
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const output = plain(display.render(120).join("\n"));
+
+	assert.match(output, /Summary: the implementation is correct\./);
+	assert.match(output, /Private reasoning/);
+	assert.match(output, /Intermediate progress/);
+});
+
+void test("collapsed subagent shows ordered flow with child tools collapsed", () => {
+	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
+	display.setTurns([{
+		id: "collapsed-child-flow",
+		userMessage: { type: "user", content: "Run a subagent" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					args: { task: "Inspect files", agent: "explorer" },
+					result: "Inspection complete.",
+					details: {
+						agent: "explorer",
+						status: "completed",
+						childChunks: [
+							{
+								seq: 1,
+								agentId: "explorer-1",
+								type: "thinking",
+								contentText: "I should inspect first.",
+								isComplete: true,
+							},
+							{
+								seq: 2,
+								agentId: "explorer-1",
+								type: "content",
+								contentText: "Inspecting now.",
+								isComplete: true,
+							},
+							{
+								seq: 3,
+								agentId: "explorer-1",
+								type: "tool",
+								tool: {
+									agentId: "explorer-1",
+									toolCallId: "read-1",
+									toolName: "read_file",
+									args: "{\"path\":\"src/index.ts\"}",
+									status: "completed",
+									resultPreview: "private file contents",
+								},
+								isComplete: true,
+							},
+							{
+								seq: 4,
+								agentId: "explorer-1",
+								type: "content",
+								contentText: "Inspection complete.",
+								isComplete: true,
+							},
+						],
+					},
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const collapsed = plain(display.render(120).join("\n"));
+	assert.match(collapsed, /I should inspect first\./);
+	assert.match(collapsed, /Inspecting now\./);
+	assert.match(collapsed, /read_file/);
+	assert.match(collapsed, /Inspection complete\./);
+	assert.match(collapsed, /SUBAGENT · explorer-1/);
+	assert.match(collapsed, /RETURN TO PARENT/);
+	assert.match(collapsed, /output private file contents/);
+	assert.equal(collapsed.match(/Inspection complete\./g)?.length, 1);
+
+	display.setToolsExpanded(true);
+	const expanded = plain(display.render(120).join("\n"));
+	assert.match(expanded, /private file contents/);
+	assert.equal(expanded.match(/Inspection complete\./g)?.length, 1);
+});
+
 void test("collapsed subagent card shows a compact recent tool timeline", () => {
 	const display = new TranscriptDisplay();
 	// toolsExpanded defaults to false

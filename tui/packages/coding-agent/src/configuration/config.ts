@@ -646,6 +646,23 @@ export function loadLogicianConfig(
 ): ResolvedLogicianConfig {
 	const configPath = findLogicianConfig(cwd);
 	if (!configPath) return { config: {}, warnings: [] };
+	return loadLogicianConfigFile(configPath);
+}
+
+/**
+ * Load trusted per-user settings without consulting project-local config.
+ * Project trust gates .logician.json, never ~/.logician/settings.json.
+ */
+export function loadGlobalLogicianConfig(
+	home = process.env.HOME,
+): ResolvedLogicianConfig {
+	if (!home) return { config: {}, warnings: [] };
+	const configPath = join(home, ".logician", "settings.json");
+	if (!existsSync(configPath)) return { config: {}, warnings: [] };
+	return loadLogicianConfigFile(configPath);
+}
+
+function loadLogicianConfigFile(configPath: string): ResolvedLogicianConfig {
 	try {
 		const raw = JSON.parse(readFileSync(configPath, "utf8"));
 		const warnings: string[] = [];

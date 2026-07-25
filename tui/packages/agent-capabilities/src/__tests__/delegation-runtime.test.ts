@@ -254,6 +254,9 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 	}
 	assert.equal(result.details?.total, 5);
 	assert.equal(result.details?.completed, 5);
+	assert.match(result.content, /## Subagent 1: general \(completed\)/);
+	assert.match(result.content, /## Subagent 5: general \(completed\)/);
+	assert.equal(result.content.match(/\bdone\b/g)?.length, 5);
 	assert.equal(updates.filter((update) => update.startsWith("▶")).length, 5);
 	assert.equal(updates.filter((update) => update.startsWith("✓")).length, 5);
 	assert.equal(updates.filter((update) => update.startsWith("↳")).length, 5);

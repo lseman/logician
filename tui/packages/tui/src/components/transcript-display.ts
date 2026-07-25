@@ -12,6 +12,8 @@ import { DEFAULT_TRUNCATION } from "@logician/agent-core";
 import { theme } from "../layers/theme/theme.ts";
 import type {
 	AssistantChunk,
+	ChildChunk,
+	ChildToolCall,
 	ThinkingDisplayStyle,
 	ToolExecution,
 	Turn,
@@ -90,16 +92,6 @@ function stripInternalHookGuidance(text: string | undefined): string | undefined
 }
 
 // ── Inline markdown renderer ──────────────────────────────────────────────────
-
-interface ChildToolCall {
-	agentId: string;
-	toolCallId?: string;
-	toolName: string;
-	args: string;
-	status?: "running" | "completed" | "failed";
-	isError?: boolean;
-	resultPreview?: string;
-}
 
 interface ParsedPostEditDiagnostic {
 	line: number;
@@ -1801,6 +1793,129 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return [live, final];
 	}
 
+	private childToolExecution(call: ChildToolCall): ToolExecution {
+		const parsedArgs = parseJsonMaybe(call.args);
+		const args =
+			parsedArgs &&
+			typeof parsedArgs === "object" &&
+			!Array.isArray(parsedArgs)
+				? (parsedArgs as Record<string, unknown>)
+				: call.args
+					? { input: call.args }
+					: {};
+		const status =
+			call.status ?? (call.isError ? "failed" : "completed");
+		return {
+			tool: call.toolName,
+			tool_name: call.toolName,
+			tool_call_id: call.toolCallId,
+			args,
+			result: call.resultPreview,
+			isError: status === "failed" || call.isError === true,
+			isComplete: status !== "running",
+		};
+	}
+
+	/**
+	 * Render a child agent's stream using the same chronological model as the
+	 * parent transcript: thinking → response → tool → response, in arrival
+	 * order. Tool rows stay where they were called instead of being collected
+	 * into a separate activity section.
+	 */
+	private renderSubagentFlow(
+		chunks: ChildChunk[],
+		width: number,
+		showAgent: boolean,
+	): string[] {
+		const lines: string[] = [];
+		const agentIds = [...new Set(
+			chunks.map((chunk) => chunk.agentId).filter(Boolean),
+		)];
+		const plural = showAgent || agentIds.length > 1;
+		const runLabel = plural
+			? `SUBAGENTS · ${agentIds.length || "?"} CHILD RUNS`
+			: `SUBAGENT${agentIds[0] ? ` · ${agentIds[0]}` : ""}`;
+		lines.push(
+			`${theme.fg("active", `╭─ ${runLabel}`)}${RESET}`,
+		);
+		let contentBuffer = "";
+		let contentAgent = "";
+		let lastAgent = "";
+		let lastWasThinking = false;
+
+		const showAgentBoundary = (agentId: string) => {
+			if (!showAgent || !agentId || agentId === lastAgent) return;
+			lines.push(
+				`${theme.fg("active", `◇ CHILD · ${agentId}`)}${RESET}`,
+			);
+			lastAgent = agentId;
+		};
+		const flushContent = () => {
+			if (!contentBuffer) return;
+			showAgentBoundary(contentAgent);
+			if (lastWasThinking) {
+				lines.push(
+					`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`,
+				);
+			}
+			const visible = stripAcceptanceForDisplay(
+				stripThinkTags(contentBuffer),
+			);
+			for (const line of this.renderMarkdownLines(
+				visible,
+				Math.max(16, width),
+				true,
+			)) {
+				lines.push(line);
+			}
+			contentBuffer = "";
+			contentAgent = "";
+			lastWasThinking = false;
+		};
+
+		for (const chunk of chunks) {
+			if (chunk.type === "content") {
+				if (contentBuffer && contentAgent !== chunk.agentId) {
+					flushContent();
+				}
+				contentAgent = chunk.agentId;
+				contentBuffer += chunk.contentText ?? "";
+				continue;
+			}
+
+			flushContent();
+			showAgentBoundary(chunk.agentId);
+			if (chunk.type === "thinking") {
+				const thinkingLines = this.renderThinkingChunk(
+					{
+						seq: chunk.seq,
+						type: "thinking",
+						contentText: chunk.contentText,
+						isComplete: chunk.isComplete,
+					},
+					!chunk.isComplete,
+				);
+				lines.push(...thinkingLines);
+				lastWasThinking = thinkingLines.length > 0;
+				continue;
+			}
+			if (chunk.type === "tool" && chunk.tool) {
+				lines.push(
+					...this.renderTool(
+						this.childToolExecution(chunk.tool),
+						Math.max(20, width),
+					),
+				);
+				lastWasThinking = false;
+			}
+		}
+		flushContent();
+		lines.push(
+			`${theme.fg("active", "╰─ RETURN TO PARENT")}${RESET}`,
+		);
+		return lines;
+	}
+
 	private renderSubagentBatchDetails(
 		tool: ToolExecution,
 		width: number,
@@ -1823,6 +1938,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		);
 		const { liveStatus, taskElapsedMs } = this.computeBatchTally(tool);
 		const agentStreams = this.batchAgentStreams(tool);
+		const childChunks = Array.isArray(details.childChunks)
+			? (details.childChunks as ChildChunk[])
+			: [];
+		const hasOrderedFlow = childChunks.length > 0;
 		// The N/M tally already appears in the collapsed header row above this
 		// detail block — repeating it here as its own line was pure duplication.
 		const lines: string[] = [];
@@ -1862,7 +1981,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 					Math.max(20, width),
 				),
 			);
-			if (this.toolsExpanded) {
+			if (this.toolsExpanded && !hasOrderedFlow) {
 				const liveText = agentStreams.get(index) ?? "";
 				const resultText =
 					typeof result?.content === "string" ? result.content : "";
@@ -1878,14 +1997,19 @@ export class TranscriptDisplay implements Component, Scrollable {
 				}
 			}
 		}
-		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
-		lines.push(
-			...this.renderSubagentActivity(
-				childToolCalls,
-				width,
-				this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
-			),
-		);
+		if (hasOrderedFlow) {
+			lines.push(...this.renderSubagentFlow(childChunks, width, true));
+		} else {
+			const childToolCalls =
+				details.childToolCalls as ChildToolCall[] | undefined;
+			lines.push(
+				...this.renderSubagentActivity(
+					childToolCalls,
+					width,
+					this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
+				),
+			);
+		}
 		return lines;
 	}
 
@@ -1933,16 +2057,24 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 
-		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
-		lines.push(
-			...this.renderSubagentActivity(
-				childToolCalls,
-				width,
-				this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
-				false,
-				false,
-			),
-		);
+		const childChunks = Array.isArray(details.childChunks)
+			? (details.childChunks as ChildChunk[])
+			: [];
+		if (childChunks.length > 0) {
+			lines.push(...this.renderSubagentFlow(childChunks, width, false));
+		} else {
+			const childToolCalls =
+				details.childToolCalls as ChildToolCall[] | undefined;
+			lines.push(
+				...this.renderSubagentActivity(
+					childToolCalls,
+					width,
+					this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
+					false,
+					false,
+				),
+			);
+		}
 
 		const storedTranscript =
 			typeof details.streamTranscript === "string"
@@ -1950,10 +2082,17 @@ export class TranscriptDisplay implements Component, Scrollable {
 				: "";
 		const liveOutput = tool.isComplete ? storedTranscript : (tool.streamOutput ?? "");
 		const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
+		const orderedContent = childChunks
+			.filter((chunk) => chunk.type === "content")
+			.map((chunk) => chunk.contentText ?? "")
+			.join("");
 		const outputs =
-			this.toolsExpanded
+			this.toolsExpanded && childChunks.length === 0
 				? this.distinctSubagentOutputs(liveOutput, finalOutput)
-				: tool.isComplete && finalOutput
+				: !this.toolsExpanded &&
+						tool.isComplete &&
+						finalOutput &&
+						!orderedContent.includes(finalOutput)
 					? [finalOutput]
 					: [];
 		if (outputs.length > 0) {

@@ -680,8 +680,21 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 					details: tr.details,
 				};
 			});
+			const content = toolResults
+				.map((result) => {
+					const task = parsedTasks[result.index];
+					const agent = task?.agent || "general";
+					const status = result.isError ? "failed" : "completed";
+					const report = result.content.trim() ||
+						"(No final report returned.)";
+					return [
+						`## Subagent ${result.index + 1}: ${agent} (${status})`,
+						report,
+					].join("\n");
+				})
+				.join("\n\n");
 			return {
-				content: "",
+				content,
 				details: {
 					results: toolResults,
 					total: results.length,

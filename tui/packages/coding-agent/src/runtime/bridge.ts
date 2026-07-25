@@ -258,24 +258,52 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					: `done${event.turns ? ` in ${event.turns} turn(s)` : ""}`,
 			};
 		case "subagent_event": {
-			// Render the child's tool activity as compact notice lines so the user
-			// can follow what a subagent is doing; its streamed text already flows
-			// through the parent spawn_agent tool cell via onUpdate.
+			// Forward the child's own tool calls and text/thinking deltas as
+			// ordered chunks, carrying its emit-time seq, so the transcript can
+			// interleave them in true chronological order (same as the parent
+			// agent's own chunk stream) instead of grouping tools separately
+			// from text.
 			const child = event.event;
+			const seq = child.seq ?? 0;
 			if (child.type === "tool_call_start") {
 				return {
-					type: "notice",
-					level: "info",
-					label: `↳ ${event.agentId}`,
-					text: `▶ ${child.toolCallId} ${child.toolName}${truncateArgs(child.args)}`,
+					type: "subagent_chunk",
+					agentId: event.agentId,
+					seq,
+					kind: "tool_start",
+					toolCallId: child.toolCallId,
+					toolName: child.toolName,
+					args: child.args,
 				};
 			}
 			if (child.type === "tool_call_end") {
 				return {
-					type: "notice",
-					level: child.isError ? "warn" : "success",
-					label: `↳ ${event.agentId}`,
-					text: `${child.isError ? "✗" : "✓"} ${child.toolCallId} ${child.toolName} ${child.result.slice(0, 240)}`,
+					type: "subagent_chunk",
+					agentId: event.agentId,
+					seq,
+					kind: "tool_end",
+					toolCallId: child.toolCallId,
+					toolName: child.toolName,
+					result: child.result,
+					isError: child.isError === true,
+				};
+			}
+			if (child.type === "text_delta") {
+				return {
+					type: "subagent_chunk",
+					agentId: event.agentId,
+					seq,
+					kind: "content",
+					delta: child.delta,
+				};
+			}
+			if (child.type === "thinking_delta") {
+				return {
+					type: "subagent_chunk",
+					agentId: event.agentId,
+					seq,
+					kind: "thinking",
+					delta: child.delta,
 				};
 			}
 			if (child.type === "error") {
@@ -319,46 +347,6 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		default:
 			return null;
 	}
-}
-
-// One-line argument preview for subagent tool notices.
-// Extracts the most meaningful key (path, pattern, command) from JSON args
-// so subagent tool lines are human-readable instead of raw JSON fragments.
-function truncateArgs(args: string): string {
-	const flat = (args || "").replace(/\s+/g, " ").trim();
-	if (!flat || flat === "{}" || flat === "{") return "";
-	// Always try to extract the most meaningful single key for common tools.
-	const key = pickArgKey(args, flat);
-	return key ? ` ${key}` : ` ${flat}`;
-}
-
-/** Pick the most meaningful key-value pair for a tool argument string. */
-function pickArgKey(_raw: string, flat: string): string | null {
-	const priorities = [
-		// File operations
-		"path",
-		"file_path",
-		// Search
-		"pattern",
-		"glob",
-		// Bash
-		"command",
-		// MCP / generic
-	];
-	for (const key of priorities) {
-		// Match "key":"value" or "key": "value" (handle escaped quotes in value).
-		const re = new RegExp(
-			`"${key}"\\s*:\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|([^,}\\s]+))`,
-		);
-		const m = re.exec(flat);
-		if (m) {
-			const val = m[1] || m[2] || "";
-			return `${key}=${val}`;
-		}
-	}
-	// Fallback: first string value.
-	const sm = flat.match(/"([^"]{1,80})"/);
-	return sm ? sm[1].slice(0, 80) : null;
 }
 
 // Humanize a backoff delay for retry notices: "500ms", "1.0s", "4.0s".

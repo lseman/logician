@@ -5,6 +5,7 @@
 import type {
 	ParsedBridgeEvent,
 	MessageUpdateEvent,
+	SubagentChunkEvent,
 	ToolEndEvent,
 	ToolStartEvent,
 	ToolUpdateEvent,
@@ -35,6 +36,31 @@ export interface ToolExecution {
 // Ordered, typed chunks replace the old clustered [thinking[], content, tools[]].
 
 export type NoticeLevel = "info" | "warn" | "error" | "success";
+
+// ── Subagent child chunks ───────────────────────────────────────────────────
+// Mirrors AssistantChunk's interleaving model for a spawn_agent/spawn_agents
+// child: thinking/content deltas and tool calls stored in true chronological
+// order (by the child's own emit-time seq), instead of the two disjoint
+// buckets (tool list + accumulated text string) used before.
+
+export interface ChildToolCall {
+	agentId: string;
+	toolCallId: string;
+	toolName: string;
+	args: string;
+	status?: "running" | "completed" | "failed";
+	isError?: boolean;
+	resultPreview?: string;
+}
+
+export interface ChildChunk {
+	seq: number;
+	agentId: string;
+	type: "thinking" | "content" | "tool";
+	contentText?: string; // for 'thinking' and 'content'
+	tool?: ChildToolCall; // for 'tool'
+	isComplete: boolean;
+}
 
 export interface AssistantChunk {
 	seq: number; // insertion sequence — defines display order
@@ -110,6 +136,9 @@ export class Transcript {
 				break;
 			case "notice":
 				this.handleNotice(event as ParsedBridgeEvent & { type: "notice" });
+				break;
+			case "subagent_chunk":
+				this.handleSubagentChunk(event);
 				break;
 			case "thinking_token":
 				this.handleThinkingToken(String(event.token || ""));
@@ -390,47 +419,22 @@ export class Transcript {
 		return true;
 	}
 
-	/** Store a child tool call on the parent spawn_agent ToolExecution. */
+	/**
+	 * Preserve child-tool notices from older/replayed event streams. New live
+	 * streams use subagent_chunk events, but saved sessions may still contain
+	 * the former notice representation.
+	 */
 	private storeChildToolCall(
 		agentId: string,
 		event: { level: NoticeLevel; label: string; text: string },
 	): void {
-		const turn = this.getCurrentTurn();
-		if (!turn?.assistantMessage) return;
-
-		// Find the most recent incomplete singular or batch subagent tool chunk.
-		const toolChunk = turn.assistantMessage.chunks
-			.slice()
-			.reverse()
-			.find(
-				(c) =>
-					c.type === "tool" &&
-					["spawn_agent", "spawn_agents"].includes(
-						c.tool?.tool_name ?? "",
-					) &&
-					!c.isComplete,
-			);
+		const toolChunk = this.findOpenSubagentToolChunk();
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
-		const childToolCalls = (details.childToolCalls as Array<{
-			agentId: string;
-			toolCallId: string;
-			toolName: string;
-			args: string;
-			status?: "running" | "completed" | "failed";
-			isError?: boolean;
-			resultPreview?: string;
-		}>) ?? (details.childToolCalls = []);
-
+		const childToolCalls = (details.childToolCalls as ChildToolCall[]) ??
+			(details.childToolCalls = []);
 		const text = event.text.trim();
-		// toolCallId is threaded through so completions attach to the exact
-		// call that started, not just the most recent running call with the
-		// same name — subagents run concurrently and can call the same tool
-		// more than once in flight. The payload group uses [\s\S]* (not .*)
-		// because child.result can contain newlines (e.g. multi-line file
-		// listings) — .* stops at the first \n and the whole match silently
-		// fails, falling back to a raw text.slice() that leaks markers/ids.
 		const match = /^([▶✓✗])\s+(\S+)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
 		const marker = match?.[1];
 		const toolCallId = match?.[2] ?? "";
@@ -439,7 +443,9 @@ export class Transcript {
 
 		if (marker === "✓" || marker === "✗") {
 			const running = childToolCalls.find(
-				(call) => call.toolCallId === toolCallId && call.status === "running",
+				(call) =>
+					call.toolCallId === toolCallId &&
+					call.status === "running",
 			);
 			if (running) {
 				running.status = marker === "✗" ? "failed" : "completed";
@@ -462,6 +468,107 @@ export class Transcript {
 						: "completed",
 			isError: marker === "✗" || event.level === "warn",
 			resultPreview: marker === "▶" ? undefined : payload,
+		});
+	}
+
+	/** Find the most recent incomplete singular or batch subagent tool chunk. */
+	private findOpenSubagentToolChunk(): AssistantChunk | undefined {
+		const turn = this.getCurrentTurn();
+		return turn?.assistantMessage?.chunks
+			.slice()
+			.reverse()
+			.find(
+				(c) =>
+					c.type === "tool" &&
+					["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? "") &&
+					!c.isComplete,
+			);
+	}
+
+	/**
+	 * Store one ordered chunk (thinking/content delta or tool call) from a
+	 * subagent onto its parent spawn_agent/spawn_agents ToolExecution. Chunks
+	 * are kept in the child's own emit-time seq order so the expanded view can
+	 * interleave text and tool calls exactly as they happened, the same way
+	 * the parent agent's own AssistantChunk stream is interleaved.
+	 */
+	private handleSubagentChunk(event: SubagentChunkEvent): void {
+		const toolChunk = this.findOpenSubagentToolChunk();
+		if (!toolChunk?.tool) return;
+
+		const details = (toolChunk.tool.details ??= {});
+		const childChunks = (details.childChunks as ChildChunk[]) ??
+			(details.childChunks = []);
+
+		if (event.kind === "thinking" || event.kind === "content") {
+			const last = childChunks[childChunks.length - 1];
+			if (last && last.type === event.kind && !last.isComplete && last.agentId === event.agentId) {
+				last.contentText = (last.contentText ?? "") + event.delta;
+				last.seq = event.seq;
+				return;
+			}
+			childChunks.push({
+				seq: event.seq,
+				agentId: event.agentId,
+				type: event.kind,
+				contentText: event.delta,
+				isComplete: false,
+			});
+			return;
+		}
+
+		if (event.kind === "tool_start") {
+			childChunks.push({
+				seq: event.seq,
+				agentId: event.agentId,
+				type: "tool",
+				tool: {
+					agentId: event.agentId,
+					toolCallId: event.toolCallId,
+					toolName: event.toolName,
+					args: event.args,
+					status: "running",
+				},
+				isComplete: false,
+			});
+			return;
+		}
+		if (event.kind !== "tool_end") return;
+
+		// tool_end
+		const running = childChunks
+			.slice()
+			.reverse()
+			.find(
+				(c) =>
+					c.type === "tool" &&
+					c.tool?.toolCallId === event.toolCallId &&
+					c.tool?.status === "running",
+			);
+		if (running?.tool) {
+			running.tool.status = event.isError ? "failed" : "completed";
+			running.tool.isError = event.isError;
+			running.tool.resultPreview = event.result;
+			running.isComplete = true;
+			running.seq = event.seq;
+			return;
+		}
+		// Completion arrived without a matching start (e.g. truncated replay) —
+		// record it standalone rather than dropping the result.
+		childChunks.push({
+			seq: event.seq,
+			agentId: event.agentId,
+			type: "tool",
+			tool: {
+				agentId: event.agentId,
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				args: "",
+				status: event.isError ? "failed" : "completed",
+				isError: event.isError,
+				resultPreview: event.result,
+			},
+			isComplete: true,
 		});
 	}
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -53,13 +53,67 @@ void test("runtime resolver applies shared environment precedence", () => {
 });
 
 void test("untrusted runtime resolution ignores project configuration", () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-runtime-home-"));
+	const settingsDir = path.join(home, ".logician");
+	mkdirSync(settingsDir, { recursive: true });
+	writeFileSync(
+		path.join(settingsDir, "settings.json"),
+		JSON.stringify({
+			baseUrl: "http://global.test:7000",
+			model: "global-model",
+			permissionMode: "acceptEdits",
+		}),
+		"utf8",
+	);
 	const resolved = resolveRuntimeConfig(
 		configuredWorkspace(),
-		{},
+		{ HOME: home },
 		{ loadProjectConfig: false },
 	);
-	assert.equal(resolved.source.model, undefined);
-	assert.equal(resolved.bridge.model, "");
-	assert.equal(resolved.bridge.permissionMode, undefined);
+	assert.equal(resolved.source.model, "global-model");
+	assert.equal(resolved.bridge.model, "global-model");
+	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
+	assert.equal(resolved.bridge.permissionMode, "acceptEdits");
 	assert.equal(resolved.bridge.projectTrusted, false);
+});
+
+void test("trusted runtime resolution overlays project config on global settings", () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-runtime-home-"));
+	const settingsDir = path.join(home, ".logician");
+	const workspace = path.join(home, "workspace");
+	mkdirSync(settingsDir, { recursive: true });
+	mkdirSync(workspace, { recursive: true });
+	writeFileSync(
+		path.join(settingsDir, "settings.json"),
+		JSON.stringify({
+			baseUrl: "http://global.test:7000",
+			model: "global-model",
+			permissionMode: "acceptEdits",
+		}),
+		"utf8",
+	);
+	writeFileSync(
+		path.join(workspace, ".logician.json"),
+		JSON.stringify({
+			mcpServers: {
+				project: { command: "project-mcp" },
+			},
+		}),
+		"utf8",
+	);
+
+	const resolved = resolveRuntimeConfig(
+		workspace,
+		{ HOME: home },
+		{ loadProjectConfig: true },
+	);
+
+	assert.equal(resolved.configPath, path.join(workspace, ".logician.json"));
+	assert.equal(resolved.bridge.model, "global-model");
+	assert.equal(resolved.bridge.baseUrl, "http://global.test:7000");
+	assert.equal(resolved.bridge.permissionMode, "acceptEdits");
+	assert.deepEqual(resolved.source.mcpServers, {
+		project: { command: "project-mcp" },
+	});
+	assert.equal(resolved.bridge.projectTrusted, true);
 });

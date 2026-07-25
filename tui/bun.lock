@@ -41,7 +41,6 @@
       "dependencies": {
         "@logician/agent-capabilities": "0.2.0",
         "@logician/agent-core": "0.2.0",
-        "@logician/observational-memory": "0.2.0",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
@@ -50,7 +49,7 @@
         "typescript": "^5.5.0",
       },
     },
-    "packages/observational-memory": {
+    "packages/legacy-observational-memory": {
       "name": "@logician/observational-memory",
       "version": "0.2.0",
       "dependencies": {
@@ -182,7 +181,7 @@
 
     "@logician/coding-agent": ["@logician/coding-agent@workspace:packages/coding-agent"],
 
-    "@logician/observational-memory": ["@logician/observational-memory@workspace:packages/observational-memory"],
+    "@logician/observational-memory": ["@logician/observational-memory@workspace:packages/legacy-observational-memory"],
 
     "@logician/tui": ["@logician/tui@workspace:packages/tui"],
 

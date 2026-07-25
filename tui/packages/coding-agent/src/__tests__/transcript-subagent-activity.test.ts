@@ -260,3 +260,72 @@ void test("completed subagents retain their live transcript", () => {
 	assert.equal(tool.streamOutput, undefined);
 	assert.equal(tool.result, "Implemented successfully.");
 });
+
+void test("subagent chunks retain thinking, tool calls, and responses in order", () => {
+	const transcript = new Transcript();
+	transcript.addTurn("Delegate");
+	transcript.handleEvent({
+		type: "tool_execution_start",
+		tool: "spawn_agent",
+		tool_name: "spawn_agent",
+		tool_call_id: "agent",
+		tool_args: { agent: "explorer", task: "Inspect it" },
+	});
+	transcript.handleEvent({
+		type: "subagent_chunk",
+		agentId: "explorer-1",
+		seq: 1,
+		kind: "thinking",
+		delta: "I should inspect first.",
+	});
+	transcript.handleEvent({
+		type: "subagent_chunk",
+		agentId: "explorer-1",
+		seq: 2,
+		kind: "content",
+		delta: "Inspecting now.",
+	});
+	transcript.handleEvent({
+		type: "subagent_chunk",
+		agentId: "explorer-1",
+		seq: 3,
+		kind: "tool_start",
+		toolCallId: "read-1",
+		toolName: "read_file",
+		args: "{\"path\":\"src/index.ts\"}",
+	});
+	transcript.handleEvent({
+		type: "subagent_chunk",
+		agentId: "explorer-1",
+		seq: 4,
+		kind: "tool_end",
+		toolCallId: "read-1",
+		toolName: "read_file",
+		result: "file contents",
+		isError: false,
+	});
+	transcript.handleEvent({
+		type: "subagent_chunk",
+		agentId: "explorer-1",
+		seq: 5,
+		kind: "content",
+		delta: "Inspection complete.",
+	});
+
+	const tool = transcript.getAssistantTools(transcript.getTurns()[0])[0];
+	const chunks = tool.details?.childChunks as Array<{
+		type: string;
+		contentText?: string;
+		tool?: { toolName: string; resultPreview?: string };
+	}>;
+	assert.deepEqual(chunks.map((chunk) => chunk.type), [
+		"thinking",
+		"content",
+		"tool",
+		"content",
+	]);
+	assert.equal(chunks[0].contentText, "I should inspect first.");
+	assert.equal(chunks[2].tool?.toolName, "read_file");
+	assert.equal(chunks[2].tool?.resultPreview, "file contents");
+	assert.equal(chunks[3].contentText, "Inspection complete.");
+});

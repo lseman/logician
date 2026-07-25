@@ -240,6 +240,38 @@ export interface NoticeEvent {
 	text: string;
 }
 
+// One ordered chunk of a subagent's activity — thinking/response text or a
+// tool call — carrying the child event's own emit-time sequence number so the
+// transcript can interleave text and tool calls in true chronological order,
+// the same way the parent agent's own AssistantChunk stream is interleaved.
+export type SubagentChunkEvent =
+	| {
+			type: "subagent_chunk";
+			agentId: string;
+			seq: number;
+			kind: "thinking" | "content";
+			delta: string;
+	  }
+	| {
+			type: "subagent_chunk";
+			agentId: string;
+			seq: number;
+			kind: "tool_start";
+			toolCallId: string;
+			toolName: string;
+			args: string;
+	  }
+	| {
+			type: "subagent_chunk";
+			agentId: string;
+			seq: number;
+			kind: "tool_end";
+			toolCallId: string;
+			toolName: string;
+			result: string;
+			isError: boolean;
+	  };
+
 // A tool call is paused waiting for the user's allow/deny decision. The UI
 // answers via bridge.respondToPermission(tool_call_id, decision).
 export interface PermissionRequestEvent {
@@ -287,6 +319,7 @@ export type ParsedBridgeEvent =
 	| SteeredEvent
 	| ModelSelectEvent
 	| NoticeEvent
+	| SubagentChunkEvent
 	| PermissionRequestEvent
 	| QuestionRequestEvent
 	| MemoryUpdateEvent

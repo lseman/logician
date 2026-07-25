@@ -3,6 +3,7 @@ import {
 	configBool,
 	configNumber,
 	configString,
+	loadGlobalLogicianConfig,
 	loadLogicianConfig,
 	type LogicianTuiConfig,
 } from "../configuration/config.ts";
@@ -19,9 +20,17 @@ export function resolveRuntimeConfig(
 	environment: NodeJS.ProcessEnv = process.env,
 	options: { loadProjectConfig?: boolean } = {},
 ): ResolvedRuntimeConfig {
-	const loaded = options.loadProjectConfig === false
-		? { config: {}, warnings: [] }
+	const global = loadGlobalLogicianConfig(environment.HOME);
+	const project = options.loadProjectConfig === false
+		? undefined
 		: loadLogicianConfig(cwd);
+	const loaded = !project || project.path === global.path
+		? global
+		: {
+				path: project.path ?? global.path,
+				config: { ...global.config, ...project.config },
+				warnings: [...global.warnings, ...project.warnings],
+			};
 	const config = loaded.config;
 
 	return {
