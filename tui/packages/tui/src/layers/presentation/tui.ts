@@ -941,7 +941,7 @@ export class LogicianTUI {
 						);
 					} else {
 						// Check if first word is a profile name
-						const profileNames = ["none", "code", "file", "dev", "full"];
+						const profileNames = ["none", "code", "full"];
 						const firstWord = cmd.split(/\s+/)[0]?.toLowerCase();
 						let actualCommand = cmd;
 						let profileHint = "code";

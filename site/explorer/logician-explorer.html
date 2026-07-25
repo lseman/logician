@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logician — Agent Architecture Explorer</title>
+<link rel="stylesheet" href="logician-explorer.css">
+</head>
+<body>
+
+<div id="bgfx"></div>
+
+<div id="boot">
+  <div>
+    <div class="line" id="bootline">&gt; booting logician_</div>
+    <div class="skip">click or press any key to skip</div>
+  </div>
+</div>
+
+<div id="chrome">
+  <div class="dots"><span></span><span></span><span></span></div>
+  <div id="breadcrumb"></div>
+  <div id="hints">
+    <kbd>Ctrl+K</kbd> search &nbsp; <kbd>1-5</kbd> open &nbsp; <kbd>&larr;/&rarr;</kbd> next &nbsp; <kbd>esc</kbd> back &nbsp; <kbd>?</kbd> help
+  </div>
+</div>
+
+<div id="stage">
+  <div id="view"></div>
+</div>
+
+<div id="flip"></div>
+
+<div id="tooltip"></div>
+
+<div id="help">
+  <div class="panel">
+    <div class="row"><span><kbd>click</kbd></span><span>a box: zoom into its diagram</span></div>
+    <div class="row"><span><kbd>click</kbd></span><span>an item: open its tooltip</span></div>
+    <div class="row"><span><kbd>1</kbd>-<kbd>5</kbd></span><span>open item N (zoom or tooltip)</span></div>
+    <div class="row"><span><kbd>Ctrl+K</kbd></span><span>search nodes by name or description</span></div>
+    <div class="row"><span><kbd>&rarr;</kbd> / <kbd>&larr;</kbd></span><span>step tooltip to next / prev item</span></div>
+    <div class="row"><span><kbd>click</kbd></span><span>related chips in tooltip: navigate</span></div>
+    <div class="row"><span><kbd>esc</kbd></span><span>close tooltip, then cd .. (back)</span></div>
+    <div class="row"><span><kbd>home</kbd></span><span>jump to ~ (root)</span></div>
+    <div class="row"><span><kbd>?</kbd></span><span>toggle this panel</span></div>
+  </div>
+</div>
+
+<script src="logician-explorer.js"></script>
+</body>
+</html>

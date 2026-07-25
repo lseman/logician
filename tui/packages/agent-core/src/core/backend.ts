@@ -20,6 +20,11 @@ export type BackendErrorCategory =
 	| "transient"
 	// Client error (HTTP 4xx other than 429): malformed request. Not retryable.
 	| "client"
+	// A tool call already stored in history has arguments the provider can't
+	// parse as JSON. Retrying resends the identical unparseable history and
+	// fails identically every time; compaction doesn't help either since it
+	// never inspects/repairs individual tool_calls. Not retryable.
+	| "poisoned_history"
 	// Anything the backend couldn't classify.
 	| "unknown";
 
@@ -56,6 +61,23 @@ export function classifyHttpError(
 	retryAfterHeader?: string | null,
 ): BackendError {
 	const lower = body.toLowerCase();
+	// "Failed to parse tool call arguments as JSON" means a previously-stored
+	// assistant message has a tool_call whose arguments are malformed (usually
+	// truncated by the output token limit before it was saved). Resending the
+	// same history always fails the same way — this must not be treated as
+	// transient/retryable.
+	const looksPoisonedHistory = [
+		"failed to parse tool call arguments",
+		"failed to parse tool calls",
+		"invalid tool call arguments",
+	].some((p) => lower.includes(p));
+	if (looksPoisonedHistory) {
+		return new BackendError({
+			category: "poisoned_history",
+			message: `LLM request failed: ${status} ${body}`,
+			status,
+		});
+	}
 	// "Assistant message must contain either 'content' or 'tool_calls'" is
 	// NOT a context-full error — it means a previously-stored assistant message
 	// is malformed (empty content, no tool_calls).  Compaction won't fix it;

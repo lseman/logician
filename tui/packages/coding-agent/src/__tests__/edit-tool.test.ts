@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { edit_file } from "../tools/edit-file.ts";
 import { write_file } from "../tools/write-file.ts";
+import { write_file_append } from "../tools/write-file-append.ts";
 import { read_file } from "../tools/read-file.ts";
 import { isStaleSinceRead, recordRead } from "../tools/read-tracker.ts";
 
@@ -248,6 +249,52 @@ void test("atomic edits reject symbolic-link targets", async () => {
 	);
 	assert.equal(lstatSync(link).isSymbolicLink(), true);
 	assert.equal(readFileSync(target, "utf8"), "before\n");
+});
+
+void test("write_file_append creates a new file without requiring a read", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-append-"));
+
+	const result = await write_file_append.execute(
+		{ path: "sub/new.txt", content: "hello " },
+		{ cwd },
+	);
+	assert.match(String(result), /Created /);
+	assert.equal(readFileSync(join(cwd, "sub", "new.txt"), "utf8"), "hello ");
+});
+
+void test("write_file_append appends across multiple chunked calls in order", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-append-"));
+	const file = join(cwd, "file.txt");
+
+	await write_file_append.execute({ path: "file.txt", content: "part1 " }, { cwd });
+	const second = await write_file_append.execute(
+		{ path: "file.txt", content: "part2 " },
+		{ cwd },
+	);
+	await write_file_append.execute({ path: "file.txt", content: "part3" }, { cwd });
+
+	assert.match(String(second), /Appended to /);
+	assert.equal(readFileSync(file, "utf8"), "part1 part2 part3");
+});
+
+void test("write_file_append refuses to append to an unread existing file", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-append-"));
+	writeFileSync(join(cwd, "file.txt"), "original\n", "utf8");
+
+	const result = await write_file_append.execute(
+		{ path: "file.txt", content: "more\n" },
+		{ cwd },
+	);
+	assert.match(String(result), /has not been read/);
+	assert.equal(readFileSync(join(cwd, "file.txt"), "utf8"), "original\n");
+});
+
+void test("write_file_append appends to an existing file once it has been read", async () => {
+	const { cwd, file } = setup("append", "original\n");
+
+	await write_file_append.execute({ path: "file.txt", content: "more\n" }, { cwd });
+
+	assert.equal(readFileSync(file, "utf8"), "original\nmore\n");
 });
 
 void test("read_file rejects binary files", async () => {

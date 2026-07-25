@@ -13,7 +13,7 @@ Logician turns natural-language instructions into verified code changes — with
   <img src="logo/logician-banner-light.svg" alt="Logician" width="800">
 </picture>
 
-## At a glance
+## Features
 
 - **Terminal-native** — works over SSH, in tmux, in any VT100-compatible terminal
 - **Streaming responses** — see reasoning, tool progress, and results as they happen
@@ -22,7 +22,9 @@ Logician turns natural-language instructions into verified code changes — with
 - **Subagents** — delegate to child agents with isolated worktrees
 - **Structured reasoning** — SSR, Tree of Thoughts, Reflexion, and more
 - **Session management** — persistence, bookmarks, branching, rewind checkpoints, compaction
+- **Cross-session memory** — persistent observations, lessons, and action tracking
 - **MCP support** — stdio and streamable HTTP MCP servers
+- **Permission modes** — `acceptAll`, `acceptEdits`, `ask`, `plan`
 
 ## Quick Start
 
@@ -65,15 +67,15 @@ reasoning tokens are not included in the stream.
 
 ## Architecture
 
-Logician is a monorepo with five packages:
+Logician is a monorepo with five packages under `tui/packages/`:
 
 ```
-tui/
-├── packages/agent-core/           Generic agent engine: loop, harness, hooks, types
-├── packages/agent-capabilities/     Capabilities: todo, ask-user, subagents, reasoners
-├── packages/coding-agent/           Coding tools, skills, MCP, prompts, session store
-├── packages/observational-memory/   Persistent cross-session memory
-└── packages/tui/                    Terminal rendering, input, themes, overlays
+tui/packages/
+├── agent-core/              Agent engine: loop, harness, hooks, types
+├── agent-capabilities/      Capabilities: todo, ask-user, subagents, reasoners
+├── coding-agent/            Orchestration: sessions, config, skills, MCP, prompts
+├── legacy-observational-memory/  Structured observations with file-based persistence
+└── tui/                     Terminal rendering, input, themes, overlays
 ```
 
 | Package | Exports |
@@ -81,8 +83,11 @@ tui/
 | `@logician/agent-core` | `core/*`, `hooks/*`, `tools/*`, `compaction/*`, `message-queue/*` |
 | `@logician/agent-capabilities` | `todo/*`, `ask-user/*`, `subagents/*`, `reasoners/*`, `eoh/*` |
 | `@logician/coding-agent` | `tools`, `skills`, `mcp`, `context-files`, `prompts`, `trust`, `sessions` |
-| `@logician/observational-memory` | Cross-session memory store |
+| `@logician/legacy-observational-memory` | Structured observations with file-based persistence |
 | `@logician/tui` | Terminal UI layer |
+
+The `@logician/observational-memory` npm package (published separately) provides
+the cross-session memory store used by the agent at runtime.
 
 ## Tools
 
@@ -106,6 +111,7 @@ tui/
 |---|---|
 | `bash` | Run shell commands with timeout/abort |
 | `git` | Git status/diff/log |
+| `sandbox` | Execute commands in Bubblewrap-isolated sandbox |
 
 **Agent primitives**
 | Tool | Purpose |
@@ -114,6 +120,7 @@ tui/
 | `task_status` | Structured completion/delegation |
 | `ask_user` | User input prompts |
 | `spawn_agent` | Child agent runner (isolated context) |
+| `spawn_agents` | Parallel child agent runners |
 
 **Web & docs**
 | Tool | Purpose |
@@ -121,6 +128,11 @@ tui/
 | `web_search` | Search via SearXNG |
 | `web_fetch` | Fetch web content |
 | `read_skill` | Load skill instructions |
+
+**MCP tools**
+| Tool | Purpose |
+|---|---|
+| `mcp_*` | External MCP server tools (configured in `.logician.json`) |
 
 ## Configuration
 

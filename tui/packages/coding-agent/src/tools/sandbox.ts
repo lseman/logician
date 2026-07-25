@@ -31,7 +31,7 @@ export interface SandboxDetails {
 	fullOutputPath?: string;
 }
 
-export type SandboxProfile = "none" | "code" | "file" | "dev" | "full";
+export type SandboxProfile = "none" | "code" | "full";
 
 // ── Session default profile ─────────────────────────────────────────────────
 // Applied when a tool call omits `profile`. Cycled by the UI (Ctrl+K); a
@@ -471,7 +471,7 @@ const sandboxSchema = {
 		},
 		profile: {
 			type: "string",
-			enum: ["none", "code", "file", "dev", "full"],
+			enum: ["none", "code", "full"],
 			description:
 				"Sandbox isolation profile. 'code' = read-only host fs, writable /tmp, no network, no devices. 'full' = adds user namespace + mount namespace.",
 			default: "code",
@@ -498,7 +498,7 @@ export const sandbox: Tool = {
 	label: "Sandbox",
 	description:
 		`Execute a command inside a Bubblewrap-isolated sandbox. Linux-only; falls back to regular bash when bwrap is unavailable. ` +
-		`Profiles: none (no isolation), code (read-only host fs, writable /tmp, no network), file (code + bind mounts), dev (code + /dev), full (code + namespaces). ` +
+		`Profiles: none (no isolation), code (read-only host fs, writable /tmp, no network), full (code + namespaces). ` +
 		`Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 	promptSnippet:
 		"Execute shell commands in a Bubblewrap-isolated sandbox with configurable isolation profiles",

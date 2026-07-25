@@ -36,6 +36,57 @@ describe("OutputGuard", () => {
 		assert.strictEqual(result.isRetryable, false);
 	});
 
+	it("aborts immediately (no retries) on poisoned_history, never blind-retries as transient", () => {
+		const guard = makeGuard();
+		const err = new BackendError({
+			category: "poisoned_history",
+			message: "Failed to parse tool call arguments as JSON",
+			status: 500,
+		});
+
+		const result = guard.handleError(err);
+
+		assert.strictEqual(result.action, "abort");
+		assert.strictEqual(result.isRetryable, false);
+	});
+
+	it("classifies raw 'failed to parse tool call' errors as poisoned_history via string fallback", () => {
+		const guard = makeGuard();
+		const err = new Error("500 Failed to parse tool call arguments as JSON");
+
+		const result = guard.handleError(err);
+
+		assert.strictEqual(result.action, "abort");
+		assert.strictEqual(result.isRetryable, false);
+	});
+
+	it("aborts after repeated context_full cycles instead of compacting forever", () => {
+		const guard = makeGuard({ maxConsecutiveCompactions: 2 });
+		const err = new Error("context is too long for model");
+
+		let result = guard.handleError(err);
+		assert.strictEqual(result.action, "compact_then_retry");
+		result = guard.handleError(err);
+		assert.strictEqual(result.action, "compact_then_retry");
+		result = guard.handleError(err);
+
+		assert.strictEqual(result.action, "abort");
+		assert.strictEqual(result.isRetryable, false);
+		assert.ok(result.message?.includes("compaction attempts"));
+	});
+
+	it("resets the context_full cycle counter after a successful response", () => {
+		const guard = makeGuard({ maxConsecutiveCompactions: 2 });
+		const err = new Error("context is too long for model");
+
+		guard.handleError(err);
+		guard.handleError(err);
+		guard.checkResponse("ok, continuing", 1);
+
+		const result = guard.handleError(err);
+		assert.strictEqual(result.action, "compact_then_retry");
+	});
+
 	it("handles rate_limit with backoff retry", () => {
 		const guard = makeGuard();
 		const err = new BackendError({

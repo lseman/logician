@@ -38,7 +38,7 @@ void test("sandbox tool requires a command parameter", () => {
 void test("sandbox tool exposes the full profile enum", () => {
 	const props = sandbox.parameters.properties as Record<string, unknown>;
 	const profileProp = props.profile as { enum: string[] };
-	assert.deepEqual(profileProp.enum, ["none", "code", "file", "dev", "full"]);
+	assert.deepEqual(profileProp.enum, ["none", "code", "full"]);
 });
 
 void test("sandbox tool has a timeout parameter", () => {

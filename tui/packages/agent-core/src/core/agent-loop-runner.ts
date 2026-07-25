@@ -9,6 +9,7 @@ import {
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
 	compactMessagesForContext,
+	sanitizeToolCallArguments,
 	estimateChatPayloadTokens,
 } from "./messages.ts";
 import type {
@@ -981,9 +982,15 @@ async function runAgentLoopInTaskScope(
 				}
 			}
 
+			// Persist sanitized arguments (invalid JSON replaced with "{}") so a
+			// call truncated by the output token limit never poisons history with
+			// a tool_call the backend can never re-parse on a later turn. The
+			// *execution* path below still uses the original `toolCalls`, whose
+			// ids the executor's own truncation handling (tool-batch-controller's
+			// "length" branch) depends on for tool_call/tool_result pairing.
 			const assistant = createAssistantMessage(
 				assistantContent,
-				toolCalls,
+				sanitizeToolCallArguments(toolCalls),
 			);
 			messages.push(assistant);
 			newMessages.push(assistant);

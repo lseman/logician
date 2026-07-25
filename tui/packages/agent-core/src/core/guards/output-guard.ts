@@ -34,6 +34,8 @@ export interface OutputGuardConfig {
 	maxNonCommittalResponses?: number;
 	/** Context-usage fraction that triggers budget_exhausted (default 0.95). */
 	budgetThreshold?: number;
+	/** Max consecutive context_full→compact_then_retry cycles before aborting (default 3). */
+	maxConsecutiveCompactions?: number;
 	/** Hook to trigger compaction. Returns tokens saved, or null if no compaction. */
 	onCompact?: () => Promise<number | null>;
 	/** Emit events to the UI/event bus. */
@@ -68,6 +70,7 @@ const DEFAULT_CONFIG: Required<
 	maxEmptyResponses: 3,
 	maxNonCommittalResponses: 3,
 	budgetThreshold: 0.95,
+	maxConsecutiveCompactions: 3,
 };
 
 export class OutputGuard {
@@ -79,6 +82,7 @@ export class OutputGuard {
 	private retryCount = 0;
 	private consecutiveEmptyResponses = 0;
 	private consecutiveNonCommittalResponses = 0;
+	private consecutiveCompactions = 0;
 
 	constructor(config: OutputGuardConfig = {}) {
 		this.config = { ...DEFAULT_CONFIG, ...config };
@@ -128,6 +132,28 @@ export class OutputGuard {
 
 		const category = backendErr?.category ?? "unknown";
 
+		// Poisoned history: a stored tool_call has unparseable arguments. Retrying
+		// resends the identical history and fails identically every time, and
+		// compaction can't help since it never inspects individual tool_calls —
+		// so unlike context_full, there is nothing productive left to try here.
+		if (category === "poisoned_history") {
+			this.emitEvent({
+				type: "error",
+				message:
+					"A tool call in this conversation's history has malformed arguments " +
+					"and the backend can't parse it — the request can't be retried or " +
+					"compacted around. Start a new conversation to continue.",
+			});
+			return {
+				action: "abort",
+				message:
+					"A tool call in this conversation's history has malformed arguments " +
+					"and the backend can't parse it — the request can't be retried or " +
+					"compacted around. Start a new conversation to continue.",
+				isRetryable: false,
+			};
+		}
+
 		// Context-full: auto-compact and retry
 		if (category === "context_full") {
 			this.retryCount = 0; // Reset retry count for context errors
@@ -135,6 +161,21 @@ export class OutputGuard {
 				this.config.autoCompactOnContextFull &&
 				this.config.maxRetries > 0
 			) {
+				this.consecutiveCompactions++;
+				if (this.consecutiveCompactions > this.config.maxConsecutiveCompactions) {
+					this.emitEvent({
+						type: "auto_retry_end",
+						attempt: this.consecutiveCompactions,
+						success: false,
+					});
+					return {
+						action: "abort",
+						message:
+							`Context kept overflowing after ${this.config.maxConsecutiveCompactions} compaction attempts — ` +
+							"likely a single oversized tool call. Aborting instead of compacting again.",
+						isRetryable: false,
+					};
+				}
 				this.emitEvent({
 					type: "auto_retry_start",
 					attempt: 1,
@@ -288,6 +329,7 @@ export class OutputGuard {
 			}
 		}
 
+		this.consecutiveCompactions = 0;
 		return { action: "proceed" };
 	}
 
@@ -326,6 +368,7 @@ export class OutputGuard {
 		this.retryCount = 0;
 		this.consecutiveEmptyResponses = 0;
 		this.consecutiveNonCommittalResponses = 0;
+		this.consecutiveCompactions = 0;
 	}
 
 	/**
@@ -380,6 +423,14 @@ export class OutputGuard {
 			patterns: string[];
 			category: BackendErrorCategory;
 		}> = [
+			{
+				patterns: [
+					"failed to parse tool call arguments",
+					"failed to parse tool calls",
+					"invalid tool call arguments",
+				],
+				category: "poisoned_history",
+			},
 			{
 				patterns: [
 					"context",

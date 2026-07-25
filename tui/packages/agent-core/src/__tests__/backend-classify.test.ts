@@ -38,6 +38,15 @@ void test("malformed assistant message is client, not context_full", () => {
 	assert.equal(err.retryable, false);
 });
 
+void test("failed tool-call JSON parse is poisoned_history, not transient", () => {
+	const err = classifyHttpError(
+		500,
+		'{"error":{"code":500,"message":"Failed to parse tool call arguments as JSON"}}',
+	);
+	assert.equal(err.category, "poisoned_history");
+	assert.equal(err.retryable, false);
+});
+
 void test("llama.cpp cached prompt tokens are normalized from usage details", () => {
 	assert.deepEqual(
 		parseProviderUsage({

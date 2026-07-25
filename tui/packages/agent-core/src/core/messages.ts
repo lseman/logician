@@ -113,6 +113,33 @@ export function createUserMessage(content: string): Message {
 	return { role: "user", content, timestamp: Date.now() };
 }
 
+/**
+ * Replace unparseable `arguments` strings with "{}" before persisting to
+ * history. A call gets truncated mid-argument when the completion hits the
+ * output token limit (stopReason "length"); if that raw string is ever saved,
+ * every future turn resends unparseable JSON and the backend fails on it
+ * forever — history can't be fixed retroactively once saved. This repairs
+ * rather than drops the call so its `id` still matches the tool-result
+ * message already generated for it elsewhere (e.g. the executor's own
+ * "not executed, truncated" result) — dropping it would orphan that result
+ * and trip the provider's tool_call/tool_result pairing check instead.
+ */
+export function sanitizeToolCallArguments<
+	T extends { arguments: string },
+>(toolCalls: T[]): T[] {
+	let changed = false;
+	const sanitized = toolCalls.map((call) => {
+		try {
+			JSON.parse(call.arguments);
+			return call;
+		} catch {
+			changed = true;
+			return { ...call, arguments: "{}" };
+		}
+	});
+	return changed ? sanitized : toolCalls;
+}
+
 export function createSystemMessage(content: string): Message {
 	return { role: "system", content, timestamp: Date.now() };
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, open, readFile, rename, stat, chmod, unlink } from "node:fs/promises";
+import { appendFile, lstat, open, readFile, rename, stat, chmod, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 export interface AtomicWriteOptions {
@@ -89,4 +89,34 @@ export async function atomicWriteFile(
 	} finally {
 		if (tempCreated) await unlink(tempPath).catch(() => {});
 	}
+}
+
+/**
+ * Append content to a file, creating it (and parent directories) if missing.
+ * Not atomic across the whole file the way atomicWriteFile is — intended for
+ * incrementally streaming a large file across multiple tool calls, each call
+ * appending the byte-length it actually wrote to `expectedSizeBefore` so a
+ * concurrent writer racing the same path is still detected.
+ */
+export async function appendToFile(
+	filePath: string,
+	chunk: string,
+	options: { expectedSizeBefore?: number } = {},
+): Promise<{ newSize: number }> {
+	const linkInfo = await lstat(filePath).catch(() => null);
+	if (linkInfo?.isSymbolicLink()) {
+		throw new Error(`Refusing to append to symbolic link: ${filePath}`);
+	}
+	if (options.expectedSizeBefore !== undefined) {
+		const currentSize = linkInfo?.size ?? 0;
+		if (currentSize !== options.expectedSizeBefore) {
+			throw new Error(
+				`${filePath} size changed on disk (expected ${options.expectedSizeBefore} bytes, found ${currentSize}) ` +
+				"— another writer touched this file. Re-read it before continuing to append.",
+			);
+		}
+	}
+	await appendFile(filePath, chunk, "utf8");
+	const after = await stat(filePath);
+	return { newSize: after.size };
 }

@@ -35,7 +35,10 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 			const prepared = registry.prepare(call);
 			await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
 			await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
-			const text = `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
+			const text = call.name === "write_file"
+				? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
+					"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
+				: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
 			await emit({ type: "tool_call_end", toolName: call.name, toolCallId: call.id, result: text, isError: true });
 			await emit({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: text, isError: true });
 			await emitExtension({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: text, isError: true });

@@ -24,10 +24,14 @@ export const write_file: Tool = {
 	hookAliases: ["Write"],
 	description:
 		"Create or overwrite a complete file. Creates parent directories. " +
-		"Overwriting an existing file requires reading it with read_file first.",
+		"Overwriting an existing file requires reading it with read_file first. " +
+		"For very large files, use write_file_append in chunks instead.",
 	promptSnippet:
 		"Create or overwrite files; automatically create parent directories",
-	promptGuidelines: ["Use write_file for new files or complete rewrites"],
+	promptGuidelines: [
+		"Use write_file for new files or complete rewrites",
+		"For very large files, prefer write_file_append in chunks over one huge write_file call",
+	],
 	parameters: {
 		type: "object",
 		properties: {

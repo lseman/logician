@@ -1091,3 +1091,41 @@ void test("failed acceptance gets a bounded corrective provider turn", async () 
 		),
 	);
 });
+
+void test("a tool call with unparseable JSON arguments is sanitized before it reaches history", async () => {
+	const backend = new FakeBackend([
+		() => ({
+			content: "writing the file",
+			toolCalls: [
+				{
+					id: "call1",
+					name: "write_file",
+					// Truncated mid-argument, as happens when stopReason is "length".
+					arguments: '{"path":"big.txt","content":"start of a huge file that got cut off',
+				},
+			],
+			stopReason: "length",
+		}),
+		() => textResponse("done"),
+	]);
+	const newMessages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{ ...makeConfig(), backend },
+		() => {},
+	);
+
+	// The persisted assistant message keeps the call (so its id still pairs
+	// with the tool-result below), but its arguments must always be valid
+	// JSON so the backend never fails to re-parse it on a later turn.
+	const persistedCall = newMessages
+		.find((m) => m.role === "assistant" && m.tool_calls?.some((tc) => tc.id === "call1"))
+		?.tool_calls?.find((tc) => tc.id === "call1");
+	assert.ok(persistedCall, "tool_call must still be present for id pairing");
+	assert.doesNotThrow(() => JSON.parse(persistedCall!.arguments));
+
+	// The executor's own truncation handling still produces the paired
+	// "not executed" tool-result using the real call id.
+	const toolResult = newMessages.find((m) => m.role === "tool" && m.tool_call_id === "call1");
+	assert.match(String(toolResult?.content), /not executed.*truncated/i);
+});
