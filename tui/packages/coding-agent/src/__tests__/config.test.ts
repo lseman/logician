@@ -132,19 +132,8 @@ void test("validateConfig applies default booleans (continuationEnabled, postEdi
 	assert.equal(cfg.continuationEnabled, true);
 	assert.equal(cfg.postEditDiagnostics, true);
 	assert.equal(cfg.autoRetryEnabled, true);
-	assert.equal(cfg.observationalMemoryEnabled, true);
 	assert.equal(cfg.loopDetectionEnabled, undefined);
 	assert.equal(cfg.guardsEnabled, undefined);
-});
-
-void test("validateConfig accepts disabling observational memory", () => {
-	const warnings: string[] = [];
-	const cfg = validateConfig(
-		{ observationalMemoryEnabled: false },
-		warnings,
-	);
-	assert.equal(cfg.observationalMemoryEnabled, false);
-	assert.equal(warnings.length, 0);
 });
 
 void test("validateConfig enforces bounds for maxRetries/retryBaseDelayMs/turnTimeoutMs/cacheSize/cacheTtlMs", () => {

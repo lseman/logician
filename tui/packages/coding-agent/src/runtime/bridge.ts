@@ -35,7 +35,6 @@ import {
 	estimateTokens,
 } from "@logician/agent-core/core/messages.ts";
 import { onTodosChanged } from "@logician/agent-core/core/tasks/todo-state.ts";
-import { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
 import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import {
 	PermissionManager,
@@ -51,11 +50,6 @@ import {
 	splitPluginArgs,
 } from "@logician/agent-core/tools/shared/plugins.ts";
 import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
-import {
-	hashId,
-	type MemoryStore,
-	type MemoryStoreEvent,
-} from "@logician/observational-memory";
 import {
 	findLogicianConfig,
 	loadLogicianConfig,
@@ -95,8 +89,6 @@ import type { ParsedBridgeEvent } from "./events.ts";
 import { formatPluginResult } from "./plugin-result-formatter.ts";
 import { LspManager } from "./lsp-manager.ts";
 import { createPostEditDiagnosticHooks } from "./post-edit-diagnostics.ts";
-import { createObservationalMemoryRuntime } from "./observational-memory-runtime.ts";
-
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
 
@@ -465,7 +457,6 @@ export interface AgentBridgeOptions {
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
 	mcpEager?: boolean;
-	observationalMemoryEnabled?: boolean;
 	tools?: Tool[];
 	cwd?: string;
 	systemPrompt?: string;
@@ -523,7 +514,6 @@ export class AgentCoreBridge {
 	private contextMaxTokens?: number;
 	private configPath: string | null;
 	private mcpEager: boolean;
-	private observationalMemoryEnabled: boolean;
 	private postEditDiagnosticsEnabled: boolean;
 	private lspManagerEnabled: boolean;
 	private lspManager: LspManager;
@@ -545,10 +535,6 @@ export class AgentCoreBridge {
 		string,
 		{ allow: (answer: string) => void; deny: () => void }
 	>();
-
-	// ── Observational memory (V3) ───────────────────────────────────────
-	private memoryStore: MemoryStore | null = null;
-	private memoryEventBus = new ExtensionEventBus({ defaultTimeoutMs: 30_000 });
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 	private eohController!: EohController;
@@ -578,8 +564,6 @@ export class AgentCoreBridge {
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
 		this.mcpEager =
 			process.env.LOGICIAN_MCP === "0" ? false : opts.mcpEager !== false;
-		this.observationalMemoryEnabled =
-			opts.observationalMemoryEnabled !== false;
 		this.postEditDiagnosticsEnabled =
 			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
 				? false
@@ -861,7 +845,6 @@ export class AgentCoreBridge {
 			});
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
-			this.harness.setExtensionBus(this.memoryEventBus);
 			// Surface harness phase transitions the loop can't see — compaction
 			// and branch_summary. turn/idle are already covered by the
 			// streaming/ready phase emits around prompt().
@@ -881,75 +864,8 @@ export class AgentCoreBridge {
 			// Apply compaction settings from user settings (~/.logician/settings.json).
 			const userSettings = loadUserSettings();
 			applyCompactionSettings(this.harness, userSettings);
-
-			// ── Observational memory (V3) ────────────────────────────────
-			if (this.observationalMemoryEnabled) {
-				this.initObservationalMemory();
-			}
 		}
 		return this.harness;
-	}
-
-	/** Initialize the V3 observational memory system. */
-	private initObservationalMemory(): void {
-		try {
-			const runtime = createObservationalMemoryRuntime({
-				model: this.config.model || "gpt-4o",
-				apiKey: process.env.OPENAI_API_KEY || "",
-				baseUrl: this.config.baseUrl,
-				cwd: this.cwd,
-				eventBus: this.memoryEventBus,
-				getMessages: () => this.harness?.messages ?? [],
-				onStoreEvent: (event) => this.emitMemoryStoreEvent(event),
-			});
-			this.memoryStore = runtime.store;
-			const registeredTools = new Set(
-				this.defaultTools.map((tool) => tool.name),
-			);
-			const newMemoryTools = runtime.tools.filter(
-				(tool) => !registeredTools.has(tool.name),
-			);
-			if (newMemoryTools.length > 0) {
-				this.defaultTools = [...this.defaultTools, ...newMemoryTools];
-				this.config.tools = this.defaultTools;
-				this.harness?.setTools(this.defaultTools);
-				this.rebuildBaseSystemPrompt();
-			}
-
-			// Cleanup on harness destroy
-			this.harness!.setOnShutdown(runtime.dispose);
-		} catch (error) {
-			console.error("[observational-memory] init failed:", error);
-		}
-	}
-
-	private emitMemoryStoreEvent(event: MemoryStoreEvent): void {
-		if (event.type === "observations_added") {
-			this.emit({
-				type: "memory_update",
-				kind: event.type,
-				count: event.observations.length,
-				items: event.observations.map((observation) => ({
-					id: observation.id,
-					content: observation.content,
-					relevance: observation.relevance,
-				})),
-			});
-		} else if (event.type === "reflections_added") {
-			this.emit({
-				type: "memory_update",
-				kind: event.type,
-				count: event.reflections.length,
-			});
-		} else if (event.type === "observations_dropped") {
-			this.emit({
-				type: "memory_update",
-				kind: event.type,
-				count: event.observationIds.length,
-			});
-		} else {
-			this.emit({ type: "memory_update", kind: "cleared", count: 0 });
-		}
 	}
 
 	/**
@@ -1154,17 +1070,6 @@ export class AgentCoreBridge {
 				label: "Queue",
 				text: removed ? `Removed: ${removed}` : "Usage: /queue-drop <number>",
 			});
-			return;
-		}
-		// /om:status — show observational memory status
-		if (trimmed === "/om:status") {
-			const status =
-				this.getMemoryStatus() || "Observational memory not available.";
-			this.emit({
-				type: "turn_end",
-				turn_id: "om:status",
-				message: status,
-			} as ParsedBridgeEvent);
 			return;
 		}
 		// /jb — inject jb.md content as user prompt
@@ -1639,10 +1544,6 @@ export class AgentCoreBridge {
 		}
 	}
 
-	setObservationalMemoryEnabled(enabled: boolean): void {
-		this.observationalMemoryEnabled = enabled;
-	}
-
 	getSettingsText(): string {
 		return [
 			"Runtime settings",
@@ -1657,7 +1558,6 @@ export class AgentCoreBridge {
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
 			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
-			`  Observational memory: ${this.observationalMemoryEnabled ? "on" : "off"} (restart required to change)`,
 		].join("\n");
 	}
 
@@ -1674,7 +1574,6 @@ export class AgentCoreBridge {
 		guardsEnabled: boolean;
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
-		observationalMemoryEnabled: boolean;
 	} {
 		return {
 			model: this.config.model,
@@ -1689,7 +1588,6 @@ export class AgentCoreBridge {
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? false,
 			postEditDiagnostics: this.postEditDiagnosticsEnabled,
-			observationalMemoryEnabled: this.observationalMemoryEnabled,
 		};
 	}
 
@@ -1749,114 +1647,6 @@ export class AgentCoreBridge {
 		return { tokensSaved: saved, tokensBefore: before, tokensAfter: after };
 	}
 
-	// ── Observational memory ─────────────────────────────────────────────
-
-	/** Get the current memory status (for /om:status). */
-	getMemoryStatus(): string | null {
-		if (!this.memoryStore) return "Observational memory is not initialized.";
-		const status = this.memoryStore.getStatus();
-		const progress = this.memoryStore.getProgress();
-		const diagnostics = this.memoryStore.getDiagnostics();
-		return [
-			`Observational Memory`,
-			`  Observations: ${status.observationCount} (${status.droppedCount} dropped)`,
-			`  Reflections: ${status.reflectionCount}`,
-			`  Active tokens: ${status.activeObservationTokens.toLocaleString()} / ${status.observationPoolTargetTokens.toLocaleString()} target`,
-			`  Coverage: observe ${progress.observationCoverageId ?? "-"} · reflect ${progress.reflectionCoverageId ?? "-"} · drop ${progress.dropCoverageId ?? "-"}`,
-			`  Last worker: ${diagnostics.lastStage ?? "-"}${diagnostics.lastRunAt ? ` at ${diagnostics.lastRunAt}` : ""}${diagnostics.lastError ? ` · error: ${diagnostics.lastError}` : ""}`,
-			`  Persistence: ${diagnostics.recoveredFromBackup ? "recovered from backup" : diagnostics.lastPersistenceError ? `error: ${diagnostics.lastPersistenceError}` : "healthy"}`,
-		].join("\n");
-	}
-
-	/** Execute the local `/memory` command family. */
-	memoryCommand(raw = ""): string {
-		if (!this.memoryStore) return "Observational memory is not initialized.";
-		const [action = "status", ...rest] = raw
-			.trim()
-			.split(/\s+/)
-			.filter(Boolean);
-		const query = rest.join(" ").toLowerCase();
-		if (action === "status")
-			return this.getMemoryStatus() ?? "Memory unavailable.";
-		if (action === "clear") {
-			this.memoryStore.clear();
-			return "Observational memory cleared.";
-		}
-		if (action === "add") {
-			const content = rest.join(" ").trim();
-			if (!content) return "Usage: /memory add <text>";
-			const id = hashId(content.trim().replace(/\s+/g, " ").toLowerCase());
-			this.memoryStore.recordObservations(
-				[
-					{
-						id,
-						content,
-						timestamp: new Date().toISOString(),
-						relevance: "high",
-						sourceEntryIds: ["manual"],
-						tokenCount: Math.ceil(content.length / 4),
-					},
-				],
-				"manual",
-			);
-			return `Memory pinned: [${id}] ${content}`;
-		}
-		if (action === "drop") {
-			const id = rest[0];
-			if (!id) return "Usage: /memory drop <id>";
-			this.memoryStore.recordDrops([id], "manual");
-			return this.memoryStore.isDropped(id)
-				? `Memory archived: ${id}`
-				: `Active memory not found: ${id}`;
-		}
-		const observations = this.memoryStore.getActiveObservations();
-		const reflections = this.memoryStore.getReflections();
-		if (action === "list" || action === "search") {
-			const filtered = query
-				? observations.filter((item) =>
-						item.content.toLowerCase().includes(query),
-					)
-				: observations;
-			if (!filtered.length)
-				return query
-					? `No memories match "${query}".`
-					: "No active observations.";
-			return filtered
-				.slice(-20)
-				.map((item) => `[${item.id}] ${item.relevance}: ${item.content}`)
-				.join("\n");
-		}
-		if (action === "reflections") {
-			return reflections.length
-				? reflections
-						.slice(-20)
-						.map((item) => `[${item.id}] ${item.content}`)
-						.join("\n")
-				: "No reflections.";
-		}
-		if (action === "show") {
-			const id = rest[0];
-			const observation = this.memoryStore
-				.getAllObservations()
-				.find((item) => item.id === id);
-			const reflection = reflections.find((item) => item.id === id);
-			if (observation)
-				return `[${observation.id}] ${observation.relevance}\n${observation.content}\nSources: ${observation.sourceEntryIds.join(", ")}`;
-			if (reflection)
-				return `[${reflection.id}] reflection\n${reflection.content}\nSupports: ${reflection.supportingObservationIds.join(", ")}`;
-			return `Memory not found: ${id ?? "missing id"}`;
-		}
-		return "Usage: /memory [status|list|search <text>|show <id>|add <text>|drop <id>|reflections|clear]";
-	}
-
-	/** Recall a memory item by ID (for the `recall` tool). */
-	recall(_memoryId: string): { content: string; status: string } | null {
-		if (!this.memoryStore) return null;
-		// This is handled by the agent's tool system, not the bridge directly.
-		// The bridge just exposes the store to the tool.
-		return null;
-	}
-
 	// ── Conversation branching ─────────────────────────────────────────────
 
 	/** Fork the conversation; returns the new branch id, or null if no harness. */
@@ -1905,9 +1695,6 @@ export class AgentCoreBridge {
 
 	async init(): Promise<Record<string, unknown>> {
 		await this.runStartupHooksOnce();
-		// The harness owns project-scoped observational memory. Initialize it
-		// while opening the project so persisted history is available to the
-		// startup screen instead of waiting for the first user message.
 		this.ensureHarness();
 		if (this.mcpEager) {
 			// MCP transports can take seconds to connect. Do not hold the opening
@@ -1928,9 +1715,6 @@ export class AgentCoreBridge {
 		const toolNames =
 			this.harness?.tools?.list().map((t: Tool) => t.name) ||
 			this.defaultTools.map((t) => t.name);
-		const memoryStatus = this.memoryStore?.getStatus();
-		const activeObservations = this.memoryStore?.getActiveObservations() ?? [];
-		const reflections = this.memoryStore?.getReflections() ?? [];
 		const info: Record<string, unknown> = {
 			agent_name: "logician",
 			model: this.config.model,
@@ -1975,25 +1759,6 @@ export class AgentCoreBridge {
 				description: skill.description,
 				model_visible: !skill.disableModelInvocation,
 			})),
-			observational_memory: memoryStatus
-				? {
-						observation_count: memoryStatus.observationCount,
-						active_observation_count: activeObservations.length,
-						reflection_count: memoryStatus.reflectionCount,
-						dropped_count: memoryStatus.droppedCount,
-						observations: activeObservations.slice(-10).map((observation) => ({
-							id: observation.id,
-							content: observation.content,
-							relevance: observation.relevance,
-							timestamp: observation.timestamp,
-						})),
-						reflections: reflections.slice(-5).map((reflection) => ({
-							id: reflection.id,
-							content: reflection.content,
-						})),
-						diagnostics: this.memoryStore?.getDiagnostics() ?? {},
-					}
-				: null,
 		};
 		// Explicitly signal ready so the TUI status bar doesn't get stuck in
 		// streaming after init.

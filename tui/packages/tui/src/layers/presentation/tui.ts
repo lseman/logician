@@ -571,14 +571,6 @@ export class LogicianTUI {
 						this.bridge.setRuntimeToggle("postEditDiagnostics", on);
 						saveConfigField("postEditDiagnostics", on);
 						return `Post-edit diagnostics: ${on ? "on" : "off"}`;
-					case "observational-memory":
-					case "observational_memory":
-						if (value !== "on" && value !== "off") {
-							return "Usage: /settings observational-memory <on|off>";
-						}
-						this.bridge.setObservationalMemoryEnabled(on);
-						saveConfigField("observationalMemoryEnabled", on);
-						return `Observational memory: ${on ? "on" : "off"} (restart required)`;
 					case "inference-mode":
 					case "inference_mode": {
 						const modes = [
@@ -2356,25 +2348,6 @@ export class LogicianTUI {
 						},
 					],
 				},
-				{
-					name: "Observational memory",
-					currentValue: data.observationalMemoryEnabled ? "on" : "off",
-					description: "Persist and retrieve conversation observations (restart required)",
-					options: [
-						{
-							label: "on",
-							value: "true",
-							current: data.observationalMemoryEnabled,
-							toggleOn: true,
-						},
-						{
-							label: "off",
-							value: "false",
-							current: !data.observationalMemoryEnabled,
-							toggleOn: false,
-						},
-					],
-				},
 			];
 			this.settingsSelector.setSettings(settings);
 			this.settingsSelector.setMessage(
@@ -2494,15 +2467,6 @@ export class LogicianTUI {
 				saveConfigField("postEditDiagnostics", on);
 				this.transcript.addSystemMessage(
 					`Post-edit diagnostics: ${on ? "on" : "off"}`,
-				);
-				break;
-			}
-			case "observational memory": {
-				const on = value === "true";
-				this.bridge.setObservationalMemoryEnabled(on);
-				saveConfigField("observationalMemoryEnabled", on);
-				this.transcript.addSystemMessage(
-					`Observational memory: ${on ? "on" : "off"} (restart required)`,
 				);
 				break;
 			}

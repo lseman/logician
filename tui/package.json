@@ -11,7 +11,7 @@
 		"start": "tsx packages/tui/src/index.ts",
 		"lint": "eslint packages/",
 		"lint:fix": "eslint packages/ --fix",
-		"test": "tsx --test packages/agent-core/src/__tests__/*.test.ts packages/agent-capabilities/src/__tests__/*.test.ts packages/coding-agent/src/__tests__/*.test.ts packages/observational-memory/src/__tests__/*.test.ts packages/tui/src/__tests__/*.test.ts packages/tui/__tests__/*.test.ts",
+		"test": "tsx --test packages/agent-core/src/__tests__/*.test.ts packages/agent-capabilities/src/__tests__/*.test.ts packages/coding-agent/src/__tests__/*.test.ts packages/tui/src/__tests__/*.test.ts packages/tui/__tests__/*.test.ts",
 		"typecheck": "npm run typecheck --workspaces --if-present"
 	},
 	"engines": {

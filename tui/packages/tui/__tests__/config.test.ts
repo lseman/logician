@@ -198,7 +198,6 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 		autoRetryEnabled: true,
 		continuationEnabled: true,
 		postEditDiagnostics: true,
-		observationalMemoryEnabled: true,
 	});
 	assert.equal(w.length, 0);
 });

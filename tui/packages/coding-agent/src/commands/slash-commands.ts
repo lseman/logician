@@ -116,18 +116,7 @@ export function createSlashCommands(
 		cmd("/save", "Save current session", "local", false, {
 			category: "session",
 		}),
-		cmd(
-			"/memory",
-			"Inspect and manage observational memory",
-			"local",
-			true,
-			{
-				category: "context",
-				argHint: "[status|list|search|show|add|drop|reflections|clear]",
-				examples: ["/memory", "/memory list", "/memory add Prefer immutable state"],
-			},
-			(args) => String(localHandlers.memory?.(args) ?? "Memory unavailable."),
-		),
+
 		cmd("/rename", "Rename current session", "local", true, {
 			category: "session",
 			argHint: "<name>",
@@ -249,9 +238,6 @@ export function createSlashCommands(
 			category: "context",
 		}),
 		cmd("/changes", "Show git status and diff preview", "bridge", false, {
-			category: "context",
-		}),
-		cmd("/om:status", "Show observational memory status", "bridge", false, {
 			category: "context",
 		}),
 

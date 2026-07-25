@@ -16,5 +16,5 @@
 		"baseUrl": ".",
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*", "../agent-core/src/**/*", "../agent-capabilities/src/**/*", "../observational-memory/src/**/*"]
+	"include": ["src/**/*", "../agent-core/src/**/*", "../agent-capabilities/src/**/*"]
 }

@@ -36,8 +36,7 @@
 	},
 	"dependencies": {
 		"@logician/agent-core": "0.2.0",
-		"@logician/agent-capabilities": "0.2.0",
-		"@logician/observational-memory": "0.2.0"
+		"@logician/agent-capabilities": "0.2.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",
