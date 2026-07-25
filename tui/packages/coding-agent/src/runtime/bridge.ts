@@ -460,6 +460,7 @@ export interface AgentBridgeOptions {
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
 	mcpEager?: boolean;
+	observationalMemoryEnabled?: boolean;
 	tools?: Tool[];
 	cwd?: string;
 	systemPrompt?: string;
@@ -517,6 +518,7 @@ export class AgentCoreBridge {
 	private contextMaxTokens?: number;
 	private configPath: string | null;
 	private mcpEager: boolean;
+	private observationalMemoryEnabled: boolean;
 	private postEditDiagnosticsEnabled: boolean;
 	private lspManagerEnabled: boolean;
 	private lspManager: LspManager;
@@ -571,6 +573,8 @@ export class AgentCoreBridge {
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
 		this.mcpEager =
 			process.env.LOGICIAN_MCP === "0" ? false : opts.mcpEager !== false;
+		this.observationalMemoryEnabled =
+			opts.observationalMemoryEnabled !== false;
 		this.postEditDiagnosticsEnabled =
 			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
 				? false
@@ -874,7 +878,9 @@ export class AgentCoreBridge {
 			applyCompactionSettings(this.harness, userSettings);
 
 			// ── Observational memory (V3) ────────────────────────────────
-			this.initObservationalMemory();
+			if (this.observationalMemoryEnabled) {
+				this.initObservationalMemory();
+			}
 		}
 		return this.harness;
 	}
@@ -1596,6 +1602,10 @@ export class AgentCoreBridge {
 		}
 	}
 
+	setObservationalMemoryEnabled(enabled: boolean): void {
+		this.observationalMemoryEnabled = enabled;
+	}
+
 	getSettingsText(): string {
 		return [
 			"Runtime settings",
@@ -1610,6 +1620,7 @@ export class AgentCoreBridge {
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
 			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
+			`  Observational memory: ${this.observationalMemoryEnabled ? "on" : "off"} (restart required to change)`,
 		].join("\n");
 	}
 
@@ -1626,6 +1637,7 @@ export class AgentCoreBridge {
 		guardsEnabled: boolean;
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
+		observationalMemoryEnabled: boolean;
 	} {
 		return {
 			model: this.config.model,
@@ -1640,6 +1652,7 @@ export class AgentCoreBridge {
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? false,
 			postEditDiagnostics: this.postEditDiagnosticsEnabled,
+			observationalMemoryEnabled: this.observationalMemoryEnabled,
 		};
 	}
 

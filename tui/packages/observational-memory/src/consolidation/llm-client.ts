@@ -35,7 +35,7 @@ export async function callStructuredLLM(
 			{ role: "user", content: userMessage },
 		],
 		tools: [{ type: "function", function: tool }],
-		tool_choice: { type: "function", function: { name: tool.name } },
+		tool_choice: "required",
 		max_tokens: 2048,
 	};
 

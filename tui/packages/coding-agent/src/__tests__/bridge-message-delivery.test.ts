@@ -93,6 +93,29 @@ void test("startup state includes persisted project observational memory", async
 	}
 });
 
+void test("observational memory can be disabled", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+		observationalMemoryEnabled: false,
+	});
+	const internal = bridge as unknown as Record<string, unknown>;
+	internal.startupHooksRan = true;
+
+	const state = await bridge.init();
+	assert.equal(state.observational_memory, null);
+	assert.ok(Array.isArray(state.tools));
+	assert.ok(!state.tools.includes("memory_search"));
+	assert.ok(!state.tools.includes("recall"));
+	assert.equal(
+		bridge.getSettingsData().observationalMemoryEnabled,
+		false,
+	);
+	assert.match(bridge.getSettingsText(), /Observational memory: off/);
+});
+
 void test("an in-flight MCP connection never blocks delivery of a user message", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

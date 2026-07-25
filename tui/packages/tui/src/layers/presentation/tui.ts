@@ -571,6 +571,14 @@ export class LogicianTUI {
 						this.bridge.setRuntimeToggle("postEditDiagnostics", on);
 						saveConfigField("postEditDiagnostics", on);
 						return `Post-edit diagnostics: ${on ? "on" : "off"}`;
+					case "observational-memory":
+					case "observational_memory":
+						if (value !== "on" && value !== "off") {
+							return "Usage: /settings observational-memory <on|off>";
+						}
+						this.bridge.setObservationalMemoryEnabled(on);
+						saveConfigField("observationalMemoryEnabled", on);
+						return `Observational memory: ${on ? "on" : "off"} (restart required)`;
 					case "inference-mode":
 					case "inference_mode": {
 						const modes = [
@@ -1092,6 +1100,15 @@ export class LogicianTUI {
 				break;
 			case "model_select":
 				this.statusPanel.update({ model: event.model });
+				break;
+			case "notice":
+				if (event.label === "MCP") {
+					void this.bridge.getState().then((state) => {
+						this.statusPanel.update({
+							mcpServerCount: Number(state.mcp_servers || 0),
+						});
+					});
+				}
 				break;
 			case "repair_nudge":
 				this.transcript.addSystemMessage(
@@ -1753,16 +1770,6 @@ export class LogicianTUI {
 			align: "left",
 			maxHeight: 18,
 		});
-		this.tui.showOverlay(this.sessionManager, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 18,
-		});
-		this.tui.showOverlay(this.settingsSelector, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 18,
-		});
 	}
 
 	private async openPluginManager(): Promise<void> {
@@ -1791,7 +1798,8 @@ export class LogicianTUI {
 
 	private handlePluginManagerAction(action: PluginManagerAction): void {
 		if (action.type === "close") {
-			this.tui.removeOverlay(this.pluginManager);
+			// The plugin manager is registered once in buildLayout().
+			this.pluginManager.hide();
 			return;
 		}
 		if (action.type === "refresh") {
@@ -1867,7 +1875,9 @@ export class LogicianTUI {
 
 	private handleMcpManagerAction(action: McpManagerAction): void {
 		if (action.type === "close") {
-			this.tui.removeOverlay(this.mcpManager);
+			// The MCP manager is registered once in buildLayout(). Keep it in the
+			// overlay stack so a later `/mcp list` can show the same component.
+			this.mcpManager.hide();
 			return;
 		}
 		if (action.type === "refresh") {
@@ -2228,6 +2238,25 @@ export class LogicianTUI {
 						},
 					],
 				},
+				{
+					name: "Observational memory",
+					currentValue: data.observationalMemoryEnabled ? "on" : "off",
+					description: "Persist and retrieve conversation observations (restart required)",
+					options: [
+						{
+							label: "on",
+							value: "true",
+							current: data.observationalMemoryEnabled,
+							toggleOn: true,
+						},
+						{
+							label: "off",
+							value: "false",
+							current: !data.observationalMemoryEnabled,
+							toggleOn: false,
+						},
+					],
+				},
 			];
 			this.settingsSelector.setSettings(settings);
 			this.settingsSelector.setMessage(
@@ -2347,6 +2376,15 @@ export class LogicianTUI {
 				saveConfigField("postEditDiagnostics", on);
 				this.transcript.addSystemMessage(
 					`Post-edit diagnostics: ${on ? "on" : "off"}`,
+				);
+				break;
+			}
+			case "observational memory": {
+				const on = value === "true";
+				this.bridge.setObservationalMemoryEnabled(on);
+				saveConfigField("observationalMemoryEnabled", on);
+				this.transcript.addSystemMessage(
+					`Observational memory: ${on ? "on" : "off"} (restart required)`,
 				);
 				break;
 			}

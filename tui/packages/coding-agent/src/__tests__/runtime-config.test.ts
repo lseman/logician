@@ -15,6 +15,7 @@ function configuredWorkspace(): string {
 			permissionMode: "ask",
 			toolExecution: "sequential",
 			mcpEager: true,
+			observationalMemoryEnabled: false,
 			hooks: true,
 			autoRetryEnabled: false,
 			maxRetries: 2,
@@ -44,6 +45,7 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.toolExecution, "sequential");
 	assert.equal(resolved.bridge.permissionMode, "ask");
 	assert.equal(resolved.bridge.mcpEager, true);
+	assert.equal(resolved.bridge.observationalMemoryEnabled, false);
 	assert.equal(resolved.bridge.autoRetryEnabled, false);
 	assert.equal(resolved.bridge.maxRetries, 2);
 	assert.equal(resolved.bridge.retryBaseDelayMs, 25);

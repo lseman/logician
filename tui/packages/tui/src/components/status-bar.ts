@@ -1,8 +1,8 @@
 // ── Status bar (compact single-line footer) ────────────────────────────────────
-// Example: ⏸ ready | Qwen | think:off | dir logician | ⎇ main *18 +1 ?4 | ◫ 49.4%/150k | cache read: 12.4k | reasoner: none
+// Example: ⏸ ready | Qwen | think:off | dir logician | ⎇ main *18 +1 ?4 | ◫ 49.4%/150k | cache read: 12.4k | reasoner: none | mcp: 3
 //
 // Sections (separated by |):
-//   phase | model | thinking | dir/git | context | cache | reasoner
+//   phase | model | thinking | dir/git | context | cache | reasoner | mcp
 
 import { type Component, visibleWidth, RESET, DIM } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
@@ -31,6 +31,7 @@ interface StatusInfo {
 	goalCondition?: string;
 	goalTurnCount?: number;
 	goalElapsed?: number;
+	mcpServerCount?: number;
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -51,6 +52,7 @@ const DEFAULT_INFO: StatusInfo = {
 	contextCompacted: false,
 	reasoner: "none",
 	sessionTitle: "",
+	mcpServerCount: 0,
 };
 
 export class StatusBar implements Component {
@@ -138,6 +140,7 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatGoal());
 		insertIfFits(this.formatInferenceMode());
 		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
+		if (this.info.mcpServerCount) insertIfFits(this.formatMcp());
 
 		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {
@@ -313,6 +316,11 @@ export class StatusBar implements Component {
 			? cond.slice(0, LABEL_TRUNCATE_LENGTH) + "…"
 			: cond;
 		return `${theme.fg("accent", `◎ ${truncated}`)} ${DIM}(${turns} turns, ${timeStr})${RESET}`;
+	}
+
+	private formatMcp(): string {
+		const count = this.info.mcpServerCount || 0;
+		return `${DIM}mcp${RESET} ${theme.fg("accent", `${count}`)}${RESET}`;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────

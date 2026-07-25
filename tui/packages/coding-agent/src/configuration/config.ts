@@ -34,6 +34,7 @@ const KNOWN_KEYS = new Set([
 	"mcp",
 	"mcpServers",
 	"mcpEager",
+	"observationalMemoryEnabled",
 	"webSearch",
 	"permissionMode",
 	"permissions",
@@ -258,6 +259,10 @@ export function validateConfig(
 	// Boolean fields.
 	cfg.hooks = configBool(obj.hooks);
 	cfg.mcpEager = configBool(obj.mcpEager);
+	cfg.observationalMemoryEnabled = configBool(
+		obj.observationalMemoryEnabled,
+		true,
+	);
 	cfg.steeringInterrupt = configBool(obj.steeringInterrupt);
 
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
@@ -587,6 +592,8 @@ export interface LogicianTuiConfig {
 	mcpServers?: Record<string, unknown>;
 	plugins?: Record<string, unknown>;
 	mcpEager?: boolean;
+	/** Enables persisted observational memory, its hooks, and memory tools. */
+	observationalMemoryEnabled?: boolean;
 	webSearch?: {
 		baseUrl?: string;
 		maxResults?: number;

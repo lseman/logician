@@ -63,6 +63,10 @@ export function resolveRuntimeConfig(
 				environment.LOGICIAN_MCP_EAGER !== undefined
 					? environment.LOGICIAN_MCP_EAGER !== "0"
 					: configBool(config.mcpEager),
+			observationalMemoryEnabled: configBool(
+				config.observationalMemoryEnabled,
+				true,
+			),
 			webSearch: config.webSearch
 				? {
 						baseUrl: configString(config.webSearch.baseUrl),
