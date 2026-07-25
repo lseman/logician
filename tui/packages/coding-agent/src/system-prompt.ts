@@ -277,7 +277,19 @@ In addition to the tools above, you may have access to other custom tools depend
 - After writing or editing, read the changed area or use file_diff to verify the result. Mutation tools already return diffs; use those diffs to explain what changed.
 - Run the narrowest useful verification command after risky changes, such as tests, type checks, linters, or a smoke command.
 - Keep changes scoped to the user's request. Do not revert unrelated user changes.
-- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}${appendSection}`;
+- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.
+
+Agent memory workflow:
+- Use memory_save after every meaningful decision, fix, or finding. Capture: content (what happened), type (pattern/bug/preference/architecture/workflow/fact), concepts (comma-separated keywords), files (affected file paths).
+- Use memory_recall or memory_smart_search before starting work on a new area — check if past sessions already solved related problems.
+- Use memory_lesson_save after verifying a fix works or after a failure that reveals a root cause. Include confidence (0.0-1.0) and context (when/where the lesson applies).
+- Use memory_file_history when working with files that have been modified across sessions.
+- Use memory_frontier or memory_next when managing multi-step work to find the highest-priority unblocked action.
+- Use memory_slot_* for persistent state that survives sessions (persona, pending items, project notes).
+- Use memory_crystallize when completing a chain of actions to compress them into a digest.
+- Use memory_reflect periodically to synthesize higher-order insights from related memories.
+
+Agent memory is not optional — it is the agent's long-term memory. Every session starts fresh; without saving, knowledge is lost forever.${webSection}${appendSection}`;
 
 	// Custom prompt overrides everything
 	if (customPrompt) {
