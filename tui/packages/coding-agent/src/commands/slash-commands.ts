@@ -501,6 +501,24 @@ export function createSlashCommands(
 		}),
 		cmd("/jb", "Inject jb.md prompt", "bridge", false, { category: "misc" }),
 
+		// ── Sandbox ──────────────────────────────────────────────────────
+		cmd(
+			"/sandbox",
+			"Run a command in a Bubblewrap-isolated sandbox (Linux only)",
+			"local",
+			true,
+			{
+				category: "misc",
+				argHint: "<command> | profile <none|code|file|dev|full> | status",
+				examples: [
+					"/sandbox echo hello",
+					"/sandbox code echo secure",
+					"/sandbox profile code",
+					"/sandbox status",
+				],
+			},
+		),
+
 		// ── Settings ─────────────────────────────────────────────────────
 		cmd(
 			"/settings",

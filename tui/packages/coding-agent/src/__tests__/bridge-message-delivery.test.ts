@@ -23,6 +23,32 @@ void test("startup state reports the registered web_search capability", async ()
 	assert.ok(state.tools.includes("web_search"));
 });
 
+void test("sandbox mode cycles off -> code -> full -> off and updates the tool default", async () => {
+	const { getDefaultSandboxProfile, setDefaultSandboxProfile } = await import(
+		"../tools/sandbox.ts"
+	);
+	const prev = getDefaultSandboxProfile();
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	try {
+		setDefaultSandboxProfile("code");
+		assert.equal(bridge.getSandboxMode(), "code");
+
+		assert.equal(bridge.cycleSandboxMode(), "full");
+		assert.equal(bridge.getSandboxMode(), "full");
+		assert.equal(getDefaultSandboxProfile(), "full");
+
+		assert.equal(bridge.cycleSandboxMode(), "none");
+		assert.equal(bridge.cycleSandboxMode(), "code");
+	} finally {
+		setDefaultSandboxProfile(prev);
+	}
+});
+
 void test("startup state includes persisted project observational memory", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-startup-memory-"));
 	const memoryDir = join(cwd, ".logician", "observational-memory");

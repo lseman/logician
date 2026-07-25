@@ -32,6 +32,7 @@ interface StatusInfo {
 	goalTurnCount?: number;
 	goalElapsed?: number;
 	mcpServerCount?: number;
+	sandboxMode?: "none" | "code" | "file" | "dev" | "full";
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -53,6 +54,7 @@ const DEFAULT_INFO: StatusInfo = {
 	reasoner: "none",
 	sessionTitle: "",
 	mcpServerCount: 0,
+	sandboxMode: "code",
 };
 
 export class StatusBar implements Component {
@@ -141,6 +143,7 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatInferenceMode());
 		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
 		if (this.info.mcpServerCount) insertIfFits(this.formatMcp());
+		insertIfFits(this.formatSandbox());
 
 		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {
@@ -321,6 +324,14 @@ export class StatusBar implements Component {
 	private formatMcp(): string {
 		const count = this.info.mcpServerCount || 0;
 		return `${DIM}mcp${RESET} ${theme.fg("accent", `${count}`)}${RESET}`;
+	}
+
+	private formatSandbox(): string {
+		const mode = this.info.sandboxMode ?? "code";
+		if (mode === "none") {
+			return `${DIM}sandbox:${RESET} ${theme.fg("levelOff", "off")}`;
+		}
+		return `${DIM}sandbox:${RESET} ${theme.fg("accent", mode)}`;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────

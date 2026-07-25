@@ -8,6 +8,7 @@ import { git } from "./git.ts";
 import { list_files } from "./list-files.ts";
 import { read_file } from "./read-file.ts";
 import { grep } from "./search.ts";
+import { sandbox } from "./sandbox.ts";
 import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
 import { write_file } from "./write-file.ts";
@@ -31,6 +32,7 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 		write_file,
 		file_diff,
 		bash,
+		sandbox,
 		git,
 		...getBuiltInTools(),
 		web_fetch,

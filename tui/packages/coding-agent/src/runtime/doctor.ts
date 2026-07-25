@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -26,7 +26,12 @@ export interface DoctorReport {
 	skills: { roots: string[]; loaded: number; warnings: number };
 	permissions: { mode: string };
 	diagnostics: { postEditEnabled: boolean };
-	sandbox: { enforced: false; kind: null };
+	sandbox: {
+		enforced: false;
+		kind: "none" | "bubblewrap";
+		bwrapAvailable: boolean;
+		bwrapPath: string | null;
+	};
 }
 
 async function canAccess(target: string, mode: number): Promise<boolean> {
@@ -84,6 +89,42 @@ export async function buildDoctorReport(
 		canAccess(workspacePath, constants.W_OK),
 	]);
 
+	// Detect bubblewrap
+	const pathEnv = process.env.PATH ?? "";
+	const pathEntries = pathEnv.split(path.delimiter);
+	let bwrapPath: string | null = null;
+	for (const dir of pathEntries) {
+		const fullPath = path.join(dir, "bwrap");
+		if (existsSync(fullPath)) {
+			bwrapPath = fullPath;
+			break;
+		}
+	}
+	let bwrapAvailable = false;
+	if (bwrapPath && process.platform === "linux") {
+		try {
+			const { spawnSync } = await import("node:child_process");
+			const result = spawnSync(bwrapPath, ["--version"], {
+				timeout: 5000,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			if (result.status === 0 && result.stdout) {
+				const versionStr = result.stdout.toString().trim();
+				const match = versionStr.match(/bubblewrap\s+([\d.]+)/);
+				if (match) {
+					const version = match[1].split(".").map(Number);
+					bwrapAvailable =
+						version.length >= 3 &&
+						(version[0] > 0 ||
+							(version[0] === 0 && version[1] > 4) ||
+							(version[0] === 0 && version[1] === 4 && version[2] >= 1));
+				}
+			}
+		} catch {
+			// best effort
+		}
+	}
+
 	return {
 		version: "0.2.0",
 		workspace: { path: workspacePath, present, readable, writable },
@@ -120,7 +161,12 @@ export async function buildDoctorReport(
 		diagnostics: {
 			postEditEnabled: process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS !== "0",
 		},
-		sandbox: { enforced: false, kind: null },
+		sandbox: {
+			enforced: false,
+			kind: bwrapAvailable ? "bubblewrap" : "none",
+			bwrapAvailable,
+			bwrapPath,
+		},
 	};
 }
 
@@ -249,8 +295,18 @@ export function formatDoctorReport(report: DoctorReport): string {
 	lines.push(
 		`    ${pad("post-edit diagnostics:", 23)}${report.diagnostics.postEditEnabled ? "enabled" : "disabled"}`,
 	);
+	const sbOk = report.sandbox.bwrapAvailable;
+	const sbKind = report.sandbox.kind;
+	const sbExtra =
+		sbKind === "bubblewrap" && report.sandbox.bwrapPath
+			? ` (${report.sandbox.bwrapPath})`
+			: "";
+	const sbInfo =
+		sbKind === "bubblewrap"
+			? `bubblewrap${sbExtra}`
+			: `none (approval & path policy)`;
 	lines.push(
-		`    ${pad("sandbox:", 23)}none (approval & path policy)`,
+		`    ${pad("sandbox:", 23)}${sbInfo}${sbKind === "bubblewrap" ? `  ${icon(sbOk)}` : ``}`,
 	);
 
 	// Footer

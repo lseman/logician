@@ -687,7 +687,7 @@ export class LogicianTUI {
 		this.slashPopup.setCommands(slashCommands);
 
 		// Wire up slash popup submit to handle quit dispatch
-		this.slashPopup.setOnSubmit((result, dispatch, command) => {
+		this.slashPopup.setOnSubmit(async (result, dispatch, command) => {
 			if (dispatch === "quit") {
 				void this.stop().then(() => process.exit(0));
 				return;
@@ -862,6 +862,115 @@ export class LogicianTUI {
 					this.tui.requestRender();
 					return;
 				}
+				if (match && match.command === "/sandbox") {
+					const parts = args.trim().split(/\s+/);
+					const sub = parts[0]?.toLowerCase() ?? "";
+					const subArgs = parts.slice(1).join(" ");
+
+					// /sandbox status
+					if (sub === "status") {
+						const { spawnSync } = await import("node:child_process");
+						const { existsSync } = await import("node:fs");
+						const pathMod = await import("node:path");
+						const bwrapPath = process.env.PATH?.split(pathMod.delimiter)
+							.find((d) => existsSync(pathMod.join(d, "bwrap")))
+							? pathMod.join(
+								process.env.PATH?.split(pathMod.delimiter).find((d) =>
+									existsSync(pathMod.join(d, "bwrap")),
+								)!,
+								"bwrap",
+							)
+							: null;
+
+						let bwrapVersion = "unknown";
+						if (bwrapPath) {
+							const result = spawnSync(bwrapPath, ["--version"], {
+								timeout: 5000,
+								stdio: ["ignore", "pipe", "pipe"],
+							});
+							if (result.status === 0 && result.stdout) {
+								bwrapVersion = result.stdout.toString().trim();
+							}
+						}
+
+						const isLinux = process.platform === "linux";
+						const available = !!bwrapPath && isLinux;
+
+						this.transcript.addSystemMessage(
+							`Sandbox availability: ${available ? "OK" : "unavailable"}` +
+								`${bwrapPath ? ` (bwrap found at ${bwrapPath})` : " (bwrap not found)"}` +
+								`${!isLinux ? ` (not on Linux: ${process.platform})` : ""}` +
+								`${bwrapVersion !== "unknown" ? ` — ${bwrapVersion}` : ""}` +
+								"\n\nProfiles: none (no isolation), code (read-only host fs, writable /tmp, no network/devices), file (code + bind mounts), dev (code + /dev), full (code + namespaces)",
+						);
+						this.transcriptDisplay.setTurns(this.transcript.getTurns());
+						this.tui.requestRender();
+						return;
+					}
+
+					// /sandbox profile <level>
+					if (sub === "profile") {
+						const profiles = {
+							none: "No isolation — chroot to tmpdir only",
+							code: "Read-only host fs, writable /tmp, no network, no devices",
+							file: "CODE + read-only bind-mount of specified directories",
+							dev: "CODE + limited /dev (null, zero, random, tty)",
+							full: "CODE + user namespace + mount namespace + no new privs",
+						};
+						if (!subArgs) {
+							this.transcript.addSystemMessage(
+								`Available profiles:\n` +
+									Object.entries(profiles)
+										.map(([k, v]) => `  ${k}: ${v}`)
+										.join("\n"),
+							);
+						} else if (profiles[subArgs as keyof typeof profiles]) {
+							this.transcript.addSystemMessage(
+								`${subArgs}: ${profiles[subArgs as keyof typeof profiles]}`,
+							);
+						} else {
+							this.transcript.addSystemMessage(
+								`Unknown profile: ${subArgs}. Use one of: ${Object.keys(profiles).join(", ")}`,
+							);
+						}
+						this.transcriptDisplay.setTurns(this.transcript.getTurns());
+						this.tui.requestRender();
+						return;
+					}
+
+					// /sandbox <command> — dispatch to sandbox tool via bridge
+					const cmd = subArgs || args.trim();
+					if (!cmd) {
+						this.transcript.addSystemMessage(
+							`Usage:\n` +
+								`  /sandbox <command>       — run with CODE profile\n` +
+								`  /sandbox profile <level> — show profile info\n` +
+								`  /sandbox status          — check sandbox availability`,
+						);
+					} else {
+						// Check if first word is a profile name
+						const profileNames = ["none", "code", "file", "dev", "full"];
+						const firstWord = cmd.split(/\s+/)[0]?.toLowerCase();
+						let actualCommand = cmd;
+						let profileHint = "code";
+
+						if (firstWord && profileNames.includes(firstWord)) {
+							profileHint = firstWord;
+							actualCommand = cmd.slice(firstWord.length).trim();
+						}
+
+						this.transcript.addSystemMessage(
+							`Running in sandbox (profile: ${profileHint}): ${actualCommand}`,
+						);
+						// Dispatch to the sandbox tool via the bridge
+						void this.bridge.sendSlash(
+							`/sandbox ${actualCommand}`,
+						);
+					}
+					this.transcriptDisplay.setTurns(this.transcript.getTurns());
+					this.tui.requestRender();
+					return;
+				}
 				if (match && match.command === "/new") {
 					this._autoSaveTurn();
 					this.currentSessionId = this.sessionStore.createSession({
@@ -928,6 +1037,7 @@ export class LogicianTUI {
 				this.statusPanel.update({
 					contextTokens: Number(state.context_tokens || 0),
 					contextMaxTokens: Number(state.context_max_tokens || 0) || undefined,
+					sandboxMode: this.bridge.getSandboxMode(),
 				});
 				const message = this.formatStartupMessage(state);
 				if (message) {
@@ -1477,6 +1587,14 @@ export class LogicianTUI {
 			// Ctrl+S — open session manager
 			if (data === "\x13") {
 				this.openSessionManager();
+				return { consume: true };
+			}
+
+			// Ctrl+K — cycle sandbox mode (off / code / full)
+			if (data === "\x0b") {
+				const mode = this.bridge.cycleSandboxMode();
+				this.statusPanel.update({ sandboxMode: mode });
+				this.tui.requestRender();
 				return { consume: true };
 			}
 

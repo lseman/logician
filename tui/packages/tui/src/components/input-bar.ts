@@ -203,12 +203,6 @@ export class InputBar implements Component, Focusable {
 			return;
 		}
 
-		// ── Ctrl+K — delete to line end ──────────────────────────────────────
-		if (data === "\x0b") {
-			this._deleteToLineEnd();
-			return;
-		}
-
 		// ── Ctrl+W — delete word before cursor ───────────────────────────────
 		if (data === "\x17") {
 			this._deleteWordBackward();
@@ -444,17 +438,6 @@ export class InputBar implements Component, Focusable {
 		segs.splice(0, this.cursor);
 		this.value = segs.map((s) => s.segment).join("");
 		this.cursor = 0;
-		this._invalidate();
-	}
-
-	private _deleteToLineEnd(): void {
-		if (this.cursor >= this._graphemeCount(this.value)) return;
-		this._pushUndo();
-		const deleted = this._graphemeSlice(this.value, this.cursor);
-		this._killRing?.push(deleted, { accumulate: true });
-		const segs = [...segmenter.segment(this.value)];
-		segs.splice(this.cursor);
-		this.value = segs.map((s) => s.segment).join("");
 		this._invalidate();
 	}
 

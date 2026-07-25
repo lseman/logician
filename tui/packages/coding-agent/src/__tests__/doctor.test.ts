@@ -48,5 +48,6 @@ void test("doctor text states that backend and sandbox are not verified", async 
 	const text = formatDoctorReport(await buildDoctorReport(cwd));
 
 	assert.match(text, /not probed/);
-	assert.match(text, /sandbox:\s*none/);
+	// sandbox line shows either "none" or "bubblewrap" depending on platform
+	assert.match(text, /sandbox:\s*(none|bubblewrap)/);
 });

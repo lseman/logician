@@ -37,3 +37,10 @@ export {
 export { createWebSearchTool } from "./web-search.ts";
 export { web_fetch } from "./web-fetch.ts";
 export { write_file } from "./write-file.ts";
+export {
+	sandbox,
+	getDefaultSandboxProfile,
+	setDefaultSandboxProfile,
+	type SandboxDetails,
+	type SandboxProfile,
+} from "./sandbox.ts";

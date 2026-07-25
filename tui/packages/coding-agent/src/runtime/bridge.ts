@@ -84,6 +84,11 @@ import {
 	DEFAULT_SEARXNG_URL,
 } from "../tools/default-tools.ts";
 import { createReadSkillTool } from "../tools/read-skill.ts";
+import {
+	getDefaultSandboxProfile,
+	setDefaultSandboxProfile,
+	type SandboxProfile,
+} from "../tools/sandbox.ts";
 import { killAllTrackedChildren } from "../tools/shell.ts";
 import { EohController } from "./eoh-controller.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
@@ -1346,6 +1351,38 @@ export class AgentCoreBridge {
 
 	getPermissionMode(): PermissionMode {
 		return this.permissionManager.getMode();
+	}
+
+	// ── Sandbox mode ─────────────────────────────────────────────────────
+	// Default profile applied by the sandbox tool when a call omits one.
+	// Cycled by the UI (Ctrl+K); "none" is exposed to the user as "off".
+
+	private static readonly SANDBOX_CYCLE: SandboxProfile[] = [
+		"none",
+		"code",
+		"full",
+	];
+
+	getSandboxMode(): SandboxProfile {
+		return getDefaultSandboxProfile();
+	}
+
+	setSandboxMode(mode: SandboxProfile): void {
+		setDefaultSandboxProfile(mode);
+		this.emit({
+			type: "notice",
+			level: "info",
+			label: "Sandbox",
+			text: `mode: ${mode === "none" ? "off" : mode}`,
+		});
+	}
+
+	cycleSandboxMode(): SandboxProfile {
+		const cycle = AgentCoreBridge.SANDBOX_CYCLE;
+		const currentIndex = cycle.indexOf(this.getSandboxMode());
+		const next = cycle[(currentIndex + 1) % cycle.length];
+		this.setSandboxMode(next);
+		return next;
 	}
 
 	// ── Model cycling ──────────────────────────────────────────────────
