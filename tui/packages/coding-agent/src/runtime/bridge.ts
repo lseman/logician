@@ -487,6 +487,7 @@ export class AgentCoreBridge {
 	private mcpLoadPromise: Promise<void> | null = null;
 	private mcpServerCount = 0;
 	private mcpErrors: string[] = [];
+	private mcpSystemContext = "";
 	private baseSystemPrompt: string;
 	private additionalSystemPrompt?: string;
 	private pluginSystemContext = "";
@@ -1798,7 +1799,7 @@ export class AgentCoreBridge {
 			const header = `[${role}]${ts ? ` ${ts}` : ""}`;
 
 			if (msg.role === "tool" && msg.content) {
-				// Tool result: show name + truncated result
+				// Tool result: show the originating tool name alongside its content.
 				const callId = msg.tool_call_id || "";
 				const name =
 					msgs
@@ -1808,11 +1809,7 @@ export class AgentCoreBridge {
 								m.tool_calls?.some((tc) => tc.id === callId),
 						)
 						?.tool_calls?.find((tc) => tc.id === callId)?.name || "tool";
-				const truncated =
-					msg.content.length > 2000
-						? `${msg.content.slice(0, 2000)}\n... [truncated]`
-						: msg.content;
-				lines.push(`${header} (${name})\n${truncated}`);
+				lines.push(`${header} (${name})\n${msg.content}`);
 			} else if (msg.role === "assistant" && msg.tool_calls?.length) {
 				// Assistant with tool calls
 				lines.push(
@@ -1822,11 +1819,7 @@ export class AgentCoreBridge {
 					lines.push(`  - ${tc.name}(${tc.arguments || ""})`);
 				}
 			} else {
-				const truncated =
-					msg.content && msg.content.length > 2000
-						? `${msg.content.slice(0, 2000)}\n... [truncated]`
-						: msg.content || "";
-				lines.push(`${header}\n${truncated}`);
+				lines.push(`${header}\n${msg.content || ""}`);
 			}
 			lines.push("");
 		}
@@ -1923,7 +1916,15 @@ export class AgentCoreBridge {
 				);
 				this.mcpServerCount = result.servers;
 				this.mcpErrors = result.errors;
-				if (result.tools.length) {
+				// Tool presence alone doesn't tell the model whether a missing
+				// capability was never configured or failed to connect — surface
+				// connection failures in the system prompt so it can explain a gap
+				// instead of silently working around it or guessing.
+				this.mcpSystemContext = result.errors.length
+					? `<mcp-status>\n${result.errors.length} MCP server(s) failed to load:\n${result.errors.map((e) => `- ${e}`).join("\n")}\n` +
+						"Tools from these servers are unavailable this session.\n</mcp-status>"
+					: "";
+				if (result.tools.length || this.mcpSystemContext) {
 					const existing = new Set(this.defaultTools.map((tool) => tool.name));
 					const newTools = result.tools.filter(
 						(tool) => !existing.has(tool.name),
@@ -1941,14 +1942,18 @@ export class AgentCoreBridge {
 
 	private rebuildBaseSystemPrompt(): void {
 		this.baseSystemPrompt = this.buildBaseSystemPrompt();
+		this.applyContextLayers();
+	}
+
+	/** Recombine base prompt + plugin/MCP/skills context layers into config.systemPrompt. */
+	private applyContextLayers(): void {
 		const contexts: string[] = [];
 		if (this.pluginSystemContext) contexts.push(this.pluginSystemContext);
+		if (this.mcpSystemContext) contexts.push(this.mcpSystemContext);
 		if (this.skillsContext) contexts.push(this.skillsContext);
-		if (contexts.length) {
-			this.config.systemPrompt = `${this.baseSystemPrompt}\n\n${contexts.join("\n\n")}`;
-		} else {
-			this.config.systemPrompt = this.baseSystemPrompt;
-		}
+		this.config.systemPrompt = contexts.length
+			? `${this.baseSystemPrompt}\n\n${contexts.join("\n\n")}`
+			: this.baseSystemPrompt;
 	}
 
 	private buildBaseSystemPrompt(): string {
@@ -1959,17 +1964,21 @@ export class AgentCoreBridge {
 	}
 
 	private applyPluginHookContext(result: PluginCommandResult): void {
-		const contexts = (result.additional_contexts || [])
+		const contexts = [
+			...(result.additional_contexts || []),
+			...(result.context_messages || []).map((message) => message.content),
+			result.initial_user_message || "",
+		]
 			.map((item) => String(item || "").trim())
-			.filter(Boolean);
-		if (!contexts.length) {
-			this.pluginSystemContext = "";
-			this.config.systemPrompt = this.baseSystemPrompt;
-			return;
-		}
-
-		this.pluginSystemContext = `<startup-hook-context>\n${contexts.join("\n\n")}\n</startup-hook-context>`;
-		this.config.systemPrompt = `${this.baseSystemPrompt}\n\n${this.pluginSystemContext}`;
+			.filter((item, index, all) => Boolean(item) && all.indexOf(item) === index);
+		this.pluginSystemContext = contexts.length
+			? `<startup-hook-context>\n${contexts.join("\n\n")}\n</startup-hook-context>`
+			: "";
+		// Recombine via applyContextLayers (not a standalone reset) so
+		// mcpSystemContext/skillsContext survive regardless of whether MCP load
+		// or skill discovery finished before or after this hook —
+		// loadMcpToolsOnce runs fire-and-forget and can resolve on either side.
+		this.applyContextLayers();
 	}
 
 	/**

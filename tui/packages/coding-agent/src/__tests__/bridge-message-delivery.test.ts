@@ -78,6 +78,122 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 	assert.equal(bridge.isActive(), false);
 });
 
+void test("MCP load failures are injected into the system prompt", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.mcpManager = {
+		load: async () => ({
+			tools: [],
+			servers: 0,
+			errors: ["github: connection refused"],
+		}),
+	};
+
+	await internal.loadMcpToolsOnce();
+
+	assert.match(
+		internal.config.systemPrompt,
+		/<mcp-status>\n1 MCP server\(s\) failed to load:/,
+	);
+	assert.match(internal.config.systemPrompt, /- github: connection refused/);
+	assert.match(
+		internal.config.systemPrompt,
+		/Tools from these servers are unavailable this session\./,
+	);
+});
+
+void test("plugin hook updates preserve MCP and skills system context", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.skillsContext = "<available-skills>skill catalog</available-skills>";
+	internal.mcpManager = {
+		load: async () => ({
+			tools: [],
+			servers: 0,
+			errors: ["github: authentication failed"],
+		}),
+	};
+
+	await internal.loadMcpToolsOnce();
+	internal.applyPluginHookContext({
+		additional_contexts: ["startup instructions"],
+		context_messages: [
+			{
+				plugin_id: "test-plugin",
+				plugin_name: "Test Plugin",
+				matcher: "startup",
+				content: "startup instructions",
+			},
+			{
+				plugin_id: "other-plugin",
+				plugin_name: "Other Plugin",
+				matcher: "startup",
+				content: "separate displayed plugin message",
+			},
+		],
+		initial_user_message: "plugin welcome message",
+	});
+
+	assert.match(internal.config.systemPrompt, /<startup-hook-context>/);
+	assert.match(
+		internal.config.systemPrompt,
+		/separate displayed plugin message/,
+	);
+	assert.match(internal.config.systemPrompt, /plugin welcome message/);
+	assert.equal(
+		internal.config.systemPrompt.match(/startup instructions/g)?.length,
+		1,
+	);
+	assert.match(internal.config.systemPrompt, /<mcp-status>/);
+	assert.match(internal.config.systemPrompt, /<available-skills>/);
+
+	internal.applyPluginHookContext({ additional_contexts: [] });
+
+	assert.doesNotMatch(internal.config.systemPrompt, /<startup-hook-context>/);
+	assert.match(internal.config.systemPrompt, /<mcp-status>/);
+	assert.match(internal.config.systemPrompt, /<available-skills>/);
+});
+
+void test("/context preserves complete long messages and tool results", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	const longUserMessage = `user-start\n${"u".repeat(2500)}\nuser-end`;
+	const longToolResult = `tool-start\n${"t".repeat(2500)}\ntool-end`;
+	internal.harness = {
+		messages: [
+			{ role: "user", content: longUserMessage },
+			{
+				role: "assistant",
+				content: "",
+				tool_calls: [{ id: "call-1", name: "read_file", arguments: "{}" }],
+			},
+			{ role: "tool", tool_call_id: "call-1", content: longToolResult },
+		],
+		getMemoryPrompt: () => "",
+	};
+
+	const context = bridge.getContext();
+
+	assert.match(context, /user-start[\s\S]*user-end/);
+	assert.match(context, /\[TOOL\] \(read_file\)\ntool-start[\s\S]*tool-end/);
+	assert.doesNotMatch(context, /\.\.\. \[truncated\]/);
+});
+
 void test("matching skills are injected only for the selected turn", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
@@ -186,5 +302,3 @@ void test("sendMessage rejects when the turn fails", async () => {
 	};
 	await assert.rejects(bridge.sendMessage("hello"), /provider failed/);
 });
-
-
