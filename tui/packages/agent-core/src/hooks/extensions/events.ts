@@ -30,6 +30,11 @@ export interface BeforeAgentStartResult {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: Message[];
+	outcome?: {
+		status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
+		summary?: string;
+		source: "structured" | "heuristic" | "runtime";
+	};
 }
 
 /** No result — extensions may inspect messages for diagnostics */

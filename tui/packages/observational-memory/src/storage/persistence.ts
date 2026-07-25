@@ -11,7 +11,7 @@ import {
 	type MemoryProgress,
 	type MemoryWorkerDiagnostics,
 	type PersistedKnowledgeGraph,
-} from "./types.ts";
+} from "../types.ts";
 
 const DEFAULT_DIR = ".logician/observational-memory";
 
@@ -101,8 +101,8 @@ export class FilePersistence {
 				fs.unlinkSync(this.backupPath());
 			}
 			this.diagnostic = {};
-		} catch {
-			// Ignore
+		} catch (error) {
+			this.diagnostic = { lastError: errorMessage(error) };
 		}
 	}
 

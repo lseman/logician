@@ -2,36 +2,39 @@
 // Structured memory: observations, reflections, drops with file-based persistence.
 // Replaces the legacy in-process MemoryStore.
 
-import { ConsolidationPipeline } from "./consolidation.ts";
-import { registerConsolidationHooks } from "./hooks.ts";
-import { FilePersistence } from "./persistence.ts";
-import { MemoryStoreImpl } from "./store.ts";
+import { ConsolidationPipeline } from "./consolidation/pipeline.ts";
+import { registerConsolidationHooks } from "./integration/hooks.ts";
+import { FilePersistence } from "./storage/persistence.ts";
+import { MemoryStoreImpl } from "./storage/store.ts";
 
 export {
 	type ConsolidationConfig,
 	ConsolidationPipeline,
 	type ConsolidationResult,
 	type LaunchParams,
-} from "./consolidation.ts";
+} from "./consolidation/pipeline.ts";
 export {
 	type HookContext,
 	type HookOptions,
 	registerCompactionHook,
 	registerConsolidationHooks,
-} from "./hooks.ts";
+} from "./integration/hooks.ts";
 export { hashId } from "./ids.ts";
 export {
 	type KnowledgeEdge,
 	type KnowledgeGraph,
 	KnowledgeGraphManager,
 	type KnowledgeNode,
-} from "./knowledge-graph.ts";
-export { FilePersistence, type PersistenceOptions } from "./persistence.ts";
+} from "./storage/knowledge-graph.ts";
+export {
+	FilePersistence,
+	type PersistenceOptions,
+} from "./storage/persistence.ts";
 export {
 	DROPPER_SYSTEM_PROMPT,
 	OBSERVER_SYSTEM_PROMPT,
 	REFLECTOR_SYSTEM_PROMPT,
-} from "./prompts.ts";
+} from "./consolidation/prompts.ts";
 export {
 	formatRecallResult,
 	isValidMemoryId,
@@ -40,19 +43,19 @@ export {
 	type RecallResult,
 	type RecallSourceEntry,
 	recallMemory,
-} from "./recall.ts";
+} from "./retrieval/recall.ts";
 export {
 	formatMemoryContext,
 	type MemorySearchMatch,
 	type MemorySearchOptions,
 	searchMemory,
 	searchMemoryStore,
-} from "./search.ts";
+} from "./retrieval/search.ts";
 export {
 	type MemoryStore,
 	MemoryStoreImpl,
 	type StoreOptions,
-} from "./store.ts";
+} from "./storage/store.ts";
 export {
 	estimateObservationTokens,
 	estimateReflectionTokens,
@@ -66,7 +69,7 @@ export {
 	RECALL_TOOL_NAME,
 	type RecallToolOptions,
 	type RecallToolResult,
-} from "./tool.ts";
+} from "./integration/tools.ts";
 export type {
 	FoldedMemory,
 	MemoryStatus,

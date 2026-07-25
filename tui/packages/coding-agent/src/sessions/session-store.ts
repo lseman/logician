@@ -296,7 +296,7 @@ export class SessionStore {
 
 	private prepareStatements(): void {
 		const p = (key: string, sql: string): void => {
-			this.statements[key] = this.db.prepare(sql) as any;
+			this.statements[key] = this.db.prepare(sql);
 		};
 
 		// ── Sessions ──

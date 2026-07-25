@@ -2,7 +2,7 @@ import type {
 	Observation,
 	PersistedKnowledgeGraph,
 	Reflection,
-} from "./types.ts";
+} from "../types.ts";
 
 export type KnowledgeNode = PersistedKnowledgeGraph["nodes"][number];
 export type KnowledgeEdge = PersistedKnowledgeGraph["edges"][number];

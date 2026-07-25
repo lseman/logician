@@ -2,11 +2,11 @@
 // Extracts structured observations from a chunk of session entries.
 // Called by the consolidation pipeline on turn_end.
 
-import { hashId } from "./ids.ts";
+import { hashId } from "../ids.ts";
 import { callStructuredLLM } from "./llm-client.ts";
 import { OBSERVER_SYSTEM_PROMPT } from "./prompts.ts";
-import { estimateTokens } from "./tokens.ts";
-import type { Observation } from "./types.ts";
+import { estimateTokens } from "../tokens.ts";
+import type { Observation } from "../types.ts";
 
 export interface ObserverConfig {
 	model: unknown;

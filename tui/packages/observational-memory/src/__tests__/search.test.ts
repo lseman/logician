@@ -4,12 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
-import { ConsolidationPipeline } from "../consolidation.ts";
-import { registerConsolidationHooks } from "../hooks.ts";
-import { FilePersistence } from "../persistence.ts";
-import { searchMemoryStore } from "../search.ts";
-import { MemoryStoreImpl } from "../store.ts";
-import { createMemorySearchTool, createRecallTool } from "../tool.ts";
+import { ConsolidationPipeline } from "../consolidation/pipeline.ts";
+import { registerConsolidationHooks } from "../integration/hooks.ts";
+import {
+	createMemorySearchTool,
+	createRecallTool,
+} from "../integration/tools.ts";
+import { searchMemoryStore } from "../retrieval/search.ts";
+import { FilePersistence } from "../storage/persistence.ts";
+import { MemoryStoreImpl } from "../storage/store.ts";
 
 const observation = {
 	id: "aaaaaaaaaaaa",

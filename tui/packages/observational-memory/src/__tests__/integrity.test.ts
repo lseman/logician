@@ -8,13 +8,13 @@ import {
 	ConsolidationPipeline,
 	maxDropCountForPool,
 	selectDropCandidates,
-} from "../consolidation.ts";
-import { registerConsolidationHooks } from "../hooks.ts";
-import { parseObservations } from "../observer.ts";
-import { FilePersistence } from "../persistence.ts";
-import { parseReflections } from "../reflector.ts";
-import { searchMemoryStore } from "../search.ts";
-import { MemoryStoreImpl } from "../store.ts";
+} from "../consolidation/pipeline.ts";
+import { parseObservations } from "../consolidation/observer.ts";
+import { parseReflections } from "../consolidation/reflector.ts";
+import { registerConsolidationHooks } from "../integration/hooks.ts";
+import { searchMemoryStore } from "../retrieval/search.ts";
+import { FilePersistence } from "../storage/persistence.ts";
+import { MemoryStoreImpl } from "../storage/store.ts";
 import type { Observation, Reflection } from "../types.ts";
 
 function observation(

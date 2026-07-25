@@ -42,7 +42,7 @@ export interface BuiltinHookDeps {
 	// Loop detector instance for guard integration (merged from GuardEngine).
 	loopDetector: LoopDetector;
 	// Typed event emitter for structured events (optional).
-	eventBus?: { emit: (event: Record<string, unknown>) => void };
+	eventBus?: { emit: (event: { type: string; [key: string]: unknown }) => void };
 }
 
 // Build the default safeguard hooks. Returns undefined per-event when a

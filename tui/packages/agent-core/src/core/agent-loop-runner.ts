@@ -30,6 +30,7 @@ import {
 } from "./tasks/task-status-state.ts";
 import type { OutputGuard } from "./guards/output-guard.ts";
 import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
 import {
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
@@ -62,10 +63,10 @@ export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 /** Emit a typed extension event if the bus is available. */
 async function emitTyped(
 	emitter: ExtensionEventBus | undefined,
-	event: { type: string; [key: string]: unknown },
+	event: TypedExtensionEvent,
 ): Promise<void> {
 	if (!emitter) return;
-	await emitter.emit(event as any);
+	await emitter.emit(event);
 }
 
 export interface RunAgentLoopContext {

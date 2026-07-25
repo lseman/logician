@@ -1,6 +1,6 @@
-import { KnowledgeGraphManager } from "./knowledge-graph.ts";
-import type { MemoryStore } from "./store.ts";
-import type { Observation, Reflection, Relevance } from "./types.ts";
+import { KnowledgeGraphManager } from "../storage/knowledge-graph.ts";
+import type { MemoryStore } from "../storage/store.ts";
+import type { Observation, Reflection, Relevance } from "../types.ts";
 
 export type MemorySearchMatch =
 	| {

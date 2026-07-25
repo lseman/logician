@@ -1,7 +1,6 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
 
-import { execSync } from "node:child_process";
 import {
 	getReasonerIds,
 	getReasonerMeta,
@@ -45,7 +44,8 @@ import {
 	type ReasonerSelectorAction,
 	ReasonerSelectorOverlay,
 } from "../../components/reasoner-selector.ts";
-import { SessionManager } from "../../components/session-manager.ts";
+import { SessionBrowserOverlay } from "../../components/session-manager.ts";
+import { getGitStatus, getGitVersion } from "./git-status.ts";
 import {
 	type SettingDef,
 	type SettingsSelectorAction,
@@ -95,7 +95,7 @@ export class LogicianTUI {
 	private themeSelector: ThemeSelectorOverlay;
 	private settingsSelector: SettingsSelectorOverlay;
 	private transcriptDisplay: TranscriptDisplay;
-	private sessionManager: SessionManager;
+	private sessionManager: SessionBrowserOverlay;
 	private sessionStore: SessionStore;
 	private killRing: KillRing;
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
@@ -254,7 +254,7 @@ export class LogicianTUI {
 
 		// ── Session store ────────────────────────────────────────────────────
 		this.sessionStore = new SessionStore(process.cwd());
-		this.sessionManager = new SessionManager();
+		this.sessionManager = new SessionBrowserOverlay();
 		this.sessionManager.setStore(this.sessionStore);
 		this.sessionManager.setActionCallback((action) =>
 			this.handleSessionAction(action),
@@ -315,7 +315,7 @@ export class LogicianTUI {
 					`Agent: ${state.agent_name || "unknown"}`,
 					`Model: ${state.model || "unknown"}`,
 					`Base URL: ${state.base_url || "unknown"}`,
-					`Project: ${this.getGitVersion() || "-"}`,
+					`Project: ${getGitVersion() || "-"}`,
 					`Tools: ${(state.tools as string[])?.length || 0} loaded`,
 					`MCP: ${state.mcp_servers || 0} server(s), ${state.mcp_tools || 0} tool(s)`,
 					`Context: ${formatContextSize(
@@ -454,7 +454,7 @@ export class LogicianTUI {
 		this.tui.setFocus(this.inputBar);
 
 		// Initial state
-		const gitStatus = this.getGitStatus();
+		const gitStatus = getGitStatus();
 		this.statusPanel.update({
 			thinkingLevel: this.thinkingLevel,
 			cacheReadTokens: undefined,
@@ -1189,7 +1189,7 @@ export class LogicianTUI {
 		const reset = "\x1b[0m";
 		const model = String(state.model || "unknown");
 		const agent = String(state.agent_name || "logician");
-		const project = this.getGitVersion() || "-";
+		const project = getGitVersion() || "-";
 		const mcpState = state.mcp_loading
 			? "MCP loading"
 			: state.mcp_deferred
@@ -2374,91 +2374,6 @@ export class LogicianTUI {
 		this.statusPanel.update({ phase: "ready" });
 		this.transcriptDisplay.setTurns(this.transcript.getTurns());
 		this.tui.requestRender();
-	}
-
-	private getGitBranch(): string {
-		try {
-			return execSync("git branch --show-current", {
-				cwd: process.cwd(),
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-			}).trim();
-		} catch {
-			return "";
-		}
-	}
-
-	private getGitStatus(): {
-		branch: string;
-		modified: number;
-		staged: number;
-		untracked: number;
-	} {
-		const branch = this.getGitBranch();
-		let modified = 0;
-		let staged = 0;
-		let untracked = 0;
-		try {
-			modified =
-				parseInt(
-					execSync("git diff --quiet || git diff --name-only | wc -l", {
-						cwd: process.cwd(),
-						encoding: "utf8",
-						stdio: ["ignore", "pipe", "ignore"],
-					}).trim(),
-				) || 0;
-			staged =
-				parseInt(
-					execSync(
-						"git diff --cached --quiet || git diff --cached --name-only | wc -l",
-						{
-							cwd: process.cwd(),
-							encoding: "utf8",
-							stdio: ["ignore", "pipe", "ignore"],
-						},
-					).trim(),
-				) || 0;
-			untracked =
-				parseInt(
-					execSync("git ls-files --others --exclude-standard | wc -l", {
-						cwd: process.cwd(),
-						encoding: "utf8",
-						stdio: ["ignore", "pipe", "ignore"],
-					}).trim(),
-				) || 0;
-		} catch {
-			// ignore
-		}
-		return { branch, modified, staged, untracked };
-	}
-
-	private getGitVersion(): string {
-		try {
-			const branch =
-				this.getGitBranch() ||
-				execSync("git rev-parse --short HEAD", {
-					cwd: process.cwd(),
-					encoding: "utf8",
-					stdio: ["ignore", "pipe", "ignore"],
-				}).trim();
-			const sha = execSync("git rev-parse --short HEAD", {
-				cwd: process.cwd(),
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-			}).trim();
-			let dirty = "";
-			try {
-				execSync("git diff --quiet && git diff --cached --quiet", {
-					cwd: process.cwd(),
-					stdio: "ignore",
-				});
-			} catch {
-				dirty = " dirty";
-			}
-			return `${branch}@${sha}${dirty}`;
-		} catch {
-			return "";
-		}
 	}
 
 	// ── Start ──────────────────────────────────────────────────────────────

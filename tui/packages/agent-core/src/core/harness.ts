@@ -751,8 +751,11 @@ export class AgentHarness {
 			loopDetector: this.loopDetector,
 			eventBus: this._extensionBus
 				? {
-						emit: (event: Record<string, unknown>) => {
-							void this._extensionBus?.emit(event as any);
+						// Builtin hooks emit ad-hoc diagnostic shapes (e.g. thinking_loop_detected)
+						// that aren't part of the typed ExtensionEvent contract, so this bridges
+						// through the legacy untyped emit rather than the strict typed bus.
+						emit: (event: { type: string; [key: string]: unknown }) => {
+							void this._extensionBus?.emitLegacy(event);
 						},
 					}
 				: undefined,

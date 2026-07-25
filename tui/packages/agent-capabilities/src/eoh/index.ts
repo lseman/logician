@@ -215,7 +215,7 @@ export default function register(api: ExtensionAPI): void {
 						return { content: "Evolution already running", isError: true };
 					}
 					const gens = Number(params.generations ?? 5);
-					(engine as any).state.config.maxGenerations = gens;
+					engine.setMaxGenerations(gens);
 					evolutionTask = engine.run(baseUrl, model).catch((e) => {
 						logLine(`Error: ${e instanceof Error ? e.message : String(e)}`);
 					});
@@ -293,7 +293,7 @@ ${best.code}
 
 			const baseUrl = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
 			const model = process.env.EOH_MODEL ?? "claude-haiku-4-5-20251001";
-			(engine as any).state.config.maxGenerations = gens;
+			engine.setMaxGenerations(gens);
 			engine.run(baseUrl, model).catch((e) => logLine(`Error: ${e instanceof Error ? e.message : String(e)}`));
 			return `EoH evolution started: ${gens} generations, model=${model}`;
 		},

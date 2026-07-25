@@ -241,16 +241,12 @@ export class ToolRegistry {
 		if (
 			toolName === "read_file" ||
 			toolName === "edit_file" ||
-			toolName === "write_file"
+			toolName === "write_file" ||
+			toolName === "list_files" ||
+			toolName === "file_diff"
 		) {
-			const p = (args as any).path;
-			if (p) paths.push(p);
-		} else if (toolName === "list_files") {
-			const p = (args as any).path;
-			if (p) paths.push(p);
-		} else if (toolName === "file_diff") {
-			const p = (args as any).path;
-			if (p) paths.push(p);
+			const p = args.path;
+			if (typeof p === "string") paths.push(p);
 		}
 
 		if (paths.length === 0) return null;

@@ -3,10 +3,13 @@
 // the consolidation pipeline.
 
 import type { ExtensionEventBus } from "@logician/agent-core/hooks/extensions";
-import type { ConsolidationPipeline, SourceEntry } from "./consolidation.ts";
-import { formatMemoryContext } from "./search.ts";
-import type { MemoryStore } from "./store.ts";
-import { estimateTokens } from "./tokens.ts";
+import type {
+	ConsolidationPipeline,
+	SourceEntry,
+} from "../consolidation/pipeline.ts";
+import { formatMemoryContext } from "../retrieval/search.ts";
+import type { MemoryStore } from "../storage/store.ts";
+import { estimateTokens } from "../tokens.ts";
 
 export interface HookOptions {
 	/** Token thresholds */

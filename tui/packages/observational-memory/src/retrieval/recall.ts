@@ -6,7 +6,7 @@ import {
 	MEMORY_ID_PATTERN,
 	type Observation,
 	type Reflection,
-} from "./types.ts";
+} from "../types.ts";
 
 export type RecallStatus =
 	| "ok"

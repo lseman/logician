@@ -1,7 +1,7 @@
 import { runDropper } from "./dropper.ts";
 import { runObserver } from "./observer.ts";
 import { runReflector } from "./reflector.ts";
-import type { Observation, Reflection } from "./types.ts";
+import type { Observation, Reflection } from "../types.ts";
 
 export interface ConsolidationConfig {
 	model: string;

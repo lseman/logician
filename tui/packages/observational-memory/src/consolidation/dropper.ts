@@ -4,7 +4,7 @@
 
 import { callStructuredLLM } from "./llm-client.ts";
 import { DROPPER_SYSTEM_PROMPT } from "./prompts.ts";
-import type { Observation, Reflection } from "./types.ts";
+import type { Observation, Reflection } from "../types.ts";
 
 export interface DropperConfig {
 	model: unknown;

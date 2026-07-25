@@ -22,7 +22,7 @@ import { createEventBus, type EventBus } from "./event-bus.ts";
 import { createExtensionState } from "./state.ts";
 import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 import { createExtensionContext } from "../hooks/extensions/context.ts";
-import type { ExtensionEventName } from "../hooks/extensions/events.ts";
+import type { ExtensionEventName, ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
 
 // ============================================================================
 // No-op UI (for headless/non-TUI contexts)
@@ -219,10 +219,10 @@ export class ExtensionRunner {
 	 * Bridges to the legacy ExtensionEvent format for backward-compatible handlers.
 	 */
 	async emitTyped<T extends ExtensionEventName>(
-		event: Extract<{ type: T }, any>,
+		event: Extract<TypedExtensionEvent, { type: T }>,
 	): Promise<unknown> {
 		// First, notify typed event bus
-		await this.typedBus.emit(event as any);
+		await this.typedBus.emit(event);
 
 		// Bridge to legacy event format for backward-compatible handlers
 		const legacyEventType = this.mapToLegacyEvent(event.type);
@@ -231,15 +231,15 @@ export class ExtensionRunner {
 		const ctx: ExtensionEventContext = {
 			sessionId: this.options.sessionId,
 			cwd: this.options.cwd,
-			...(event as any).toolName ? { tool_name: (event as any).toolName } : {},
-			...(event as any).toolCallId ? { tool_call_id: (event as any).toolCallId } : {},
-			...(event as any).turnIndex !== undefined ? { turn_index: (event as any).turnIndex } : {},
+			...("toolName" in event ? { tool_name: event.toolName } : {}),
+			...("toolCallId" in event ? { tool_call_id: event.toolCallId } : {}),
+			...("turnIndex" in event ? { turn_index: event.turnIndex } : {}),
 		};
 
 		const legacyEvent: ExtensionEvent = {
+			...(event as unknown as Record<string, unknown>),
 			type: legacyEventType,
 			context: ctx,
-			...(event as any),
 		};
 
 		return this.emit(legacyEvent);

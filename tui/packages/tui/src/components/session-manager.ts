@@ -1,7 +1,7 @@
-// ── Session manager overlay ──────────────────────────────────────────────────
+// ── Session browser overlay ──────────────────────────────────────────────────
 // List, search, rename, and switch sessions. Powered by SessionStore.
-// Same class name as agent-core's SessionManager, but unrelated — that one
-// manages an internal JSONL crash-recovery journal, not this UI.
+// Not to be confused with agent-core's SessionManager, which manages an
+// internal JSONL crash-recovery journal, not this UI.
 
 import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
@@ -41,7 +41,7 @@ export type SessionManagerAction =
 
 type InputMode = "list" | "rename" | "delete-confirm" | "new";
 
-export class SessionManager implements Component {
+export class SessionBrowserOverlay implements Component {
 	private store: SessionStore | null = null;
 	private sessions: SessionInfo[] = [];
 	private selectedIndex = 0;

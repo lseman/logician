@@ -91,6 +91,22 @@ export class ExtensionEventBus {
 		return (results.length > 0 ? results[results.length - 1] : undefined) as ExtensionEventResult<T>;
 	}
 
+	/**
+	 * Emit an ad-hoc diagnostic event that isn't part of the typed ExtensionEvent
+	 * contract (e.g. builtin-hook internals like thinking_loop_detected). Delivered
+	 * only to handlers registered for that exact type string; skipped if none.
+	 */
+	async emitLegacy(event: { type: string; [key: string]: unknown }): Promise<void> {
+		const registrations = this.handlers.get(event.type as ExtensionEventName) ?? [];
+		for (const { handler, timeoutMs } of registrations) {
+			await this.guardHandler(
+				handler,
+				event as unknown as Extract<ExtensionEvent, { type: ExtensionEventName }>,
+				timeoutMs,
+			);
+		}
+	}
+
 	/** Get all registered event types. */
 	getRegisteredEvents(): ExtensionEventName[] {
 		return Array.from(this.handlers.keys());

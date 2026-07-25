@@ -3,8 +3,8 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { FilePersistence } from "../persistence.ts";
-import { MemoryStoreImpl } from "../store.ts";
+import { FilePersistence } from "../storage/persistence.ts";
+import { MemoryStoreImpl } from "../storage/store.ts";
 import type { Observation } from "../types.ts";
 
 function observation(id: string, content: string): Observation {

@@ -1,9 +1,10 @@
 import { createToolResultMessage } from "../core/messages.ts";
 import type { AgentEvent, AgentHooks, Message, ToolCall } from "../core/types.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
+import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
 
 type Emit = (event: AgentEvent) => void | Promise<void>;
-type EmitExtension = (event: { type: string; [key: string]: unknown }) => Promise<void>;
+type EmitExtension = (event: TypedExtensionEvent) => Promise<void>;
 
 export interface ToolBatchControllerOptions {
 	registry: ToolRegistry;

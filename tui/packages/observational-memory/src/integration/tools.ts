@@ -2,9 +2,16 @@
 // Provides the `recall` tool that agents use to recover exact evidence
 // for a memory ID.
 
-import type { MemoryStore } from "./store.ts";
-import { recallMemory, formatRecallResult, isValidMemoryId } from "./recall.ts";
-import { searchMemoryStore, type MemorySearchMatch } from "./search.ts";
+import {
+	formatRecallResult,
+	isValidMemoryId,
+	recallMemory,
+} from "../retrieval/recall.ts";
+import {
+	type MemorySearchMatch,
+	searchMemoryStore,
+} from "../retrieval/search.ts";
+import type { MemoryStore } from "../storage/store.ts";
 
 export const RECALL_TOOL_NAME = "recall";
 export const MEMORY_SEARCH_TOOL_NAME = "memory_search";

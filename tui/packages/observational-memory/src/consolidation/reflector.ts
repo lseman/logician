@@ -2,11 +2,11 @@
 // Synthesizes higher-level reflections from observations.
 // Called by the consolidation pipeline when reflection threshold is reached.
 
-import { hashId } from "./ids.ts";
+import { hashId } from "../ids.ts";
 import { callStructuredLLM } from "./llm-client.ts";
 import { REFLECTOR_SYSTEM_PROMPT } from "./prompts.ts";
-import { estimateTokens } from "./tokens.ts";
-import type { Reflection, Relevance } from "./types.ts";
+import { estimateTokens } from "../tokens.ts";
+import type { Reflection, Relevance } from "../types.ts";
 
 export interface ReflectorConfig {
 	model: unknown;

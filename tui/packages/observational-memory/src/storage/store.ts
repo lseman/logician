@@ -3,25 +3,25 @@
 // Manages observations, reflections, and drops in-memory.
 // Persists to file via FilePersistence.
 
-import type {
-	FoldedMemory,
-	MemoryProgress,
-	MemoryStatus,
-	MemoryStoreEvent,
-	MemoryStore as MemoryStoreInterface,
-	MemoryWorkerDiagnostics,
-	Observation,
-	ObservationRecord,
-	Reflection,
-	ReflectionRecord,
-} from "./types.ts";
+import {
+	type FoldedMemory,
+	type MemoryProgress,
+	type MemoryStatus,
+	type MemoryStoreEvent,
+	type MemoryStore as MemoryStoreInterface,
+	type MemoryWorkerDiagnostics,
+	OM_FOLDED,
+	type Observation,
+	type ObservationRecord,
+	type Reflection,
+	type ReflectionRecord,
+} from "../types.ts";
 
 // Re-export MemoryStore interface for consumers
 export type MemoryStore = MemoryStoreInterface;
 
 import { KnowledgeGraphManager } from "./knowledge-graph.ts";
 import { FilePersistence } from "./persistence.ts";
-import { OM_FOLDED } from "./types.ts";
 
 export interface StoreOptions {
 	/** Persistence backend. Defaults to file-based. */
