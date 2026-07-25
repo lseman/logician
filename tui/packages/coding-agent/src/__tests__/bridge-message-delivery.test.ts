@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ParsedBridgeEvent } from "../runtime/events.ts";
 import { AgentCoreBridge } from "../runtime/bridge.ts";
 
 void test("startup state reports the registered web_search capability", async () => {
@@ -301,4 +302,50 @@ void test("sendMessage rejects when the turn fails", async () => {
 		},
 	};
 	await assert.rejects(bridge.sendMessage("hello"), /provider failed/);
+});
+
+void test("core iterations reconcile output without completing the UI turn early", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.startupHooksRan = true;
+	internal.mcpLoaded = true;
+	internal.harness = {
+		messages: [],
+		prompt: async () => {
+			internal.config.onEvent({
+				type: "turn_end",
+				turnId: "iteration_1",
+				message: { role: "assistant", content: "First iteration" },
+			});
+			internal.config.onEvent({
+				type: "turn_end",
+				turnId: "iteration_2",
+				message: { role: "assistant", content: "Final response" },
+			});
+		},
+	};
+	const events: ParsedBridgeEvent[] = [];
+	bridge.on((event) => events.push(event));
+
+	await bridge.sendMessage("do work");
+
+	assert.deepEqual(
+		events
+			.filter((event) =>
+				event.type === "turn_start" ||
+				event.type === "message_update" ||
+				event.type === "turn_end"
+			)
+			.map((event) => event.type),
+		["turn_start", "message_update", "message_update", "turn_end"],
+	);
+	assert.equal(
+		events.filter((event) => event.type === "turn_end").length,
+		1,
+	);
 });

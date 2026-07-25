@@ -107,6 +107,7 @@ export interface TurnEndEvent {
 	type: "turn_end";
 	turn_id: string;
 	message: string;
+	final_message?: MessageUpdateEvent["message"];
 }
 
 export interface ToolStartEvent {

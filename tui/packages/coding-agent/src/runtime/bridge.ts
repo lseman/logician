@@ -176,7 +176,22 @@ function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				message: event.message,
 			};
 		case "turn_start":
+			return null; // The bridge owns the user-visible turn lifecycle.
 		case "turn_end":
+			// Core turn_end is per model/tool iteration, not per user-visible turn.
+			// Reconcile its final assistant snapshot without completing the UI card;
+			// runMessage emits the single terminal turn_end after prompt() settles.
+			return event.message?.role === "assistant"
+				? {
+						type: "message_update",
+						turnId: event.turnId,
+						message: {
+							role: event.message.role,
+							content: event.message.content,
+							tool_calls: event.message.tool_calls,
+						},
+					}
+				: null;
 		case "agent_start":
 		case "agent_end":
 		case "phase":
@@ -757,6 +772,7 @@ export class AgentCoreBridge {
 
 	private async runMessage(message: string): Promise<void> {
 		this.running = true;
+		const turnId = `turn_${Date.now()}`;
 		let persistentSystemPrompt: string | undefined;
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
 		try {
@@ -788,11 +804,7 @@ export class AgentCoreBridge {
 				});
 			}
 
-			// Emit turn start
-			const turnId = `turn_${Date.now()}`;
-			// turnId tracked via turn lifecycle, no separate field needed
 			this.emit({ type: "turn_start", turn_id: turnId });
-
 			await harness.prompt(message);
 		} catch (e: unknown) {
 			const error = e as Error;
@@ -812,8 +824,8 @@ export class AgentCoreBridge {
 			}
 			this.running = false;
 			this.publishContextUsage();
+			this.emit({ type: "turn_end", turn_id: turnId, message: "" });
 			// Keep the harness alive to retain history across turns.
-			// turn lifecycle ended
 			this.emit({ type: "phase", state: "ready" });
 			if (this.pendingAutoContinue) {
 				this.pendingAutoContinue = false;

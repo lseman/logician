@@ -167,7 +167,7 @@ export class Transcript {
 		if (!event.turn_id) return;
 		const pending = [...this.state.turns]
 			.reverse()
-			.find((t) => !t.isComplete && t.assistantMessage === null);
+			.find((t) => !t.isComplete);
 		if (pending) {
 			pending.id = event.turn_id;
 			this.state.currentTurnId = event.turn_id;
@@ -712,6 +712,13 @@ export class Transcript {
 	}
 
 	private handleTurnEnd(event: TurnEndEvent): void {
+		if (event.final_message?.role === "assistant") {
+			this.handleMessageUpdate({
+				type: "message_update",
+				turnId: event.turn_id,
+				message: event.final_message,
+			});
+		}
 		const turn = this.getTurnById(event.turn_id);
 		if (turn) {
 			if (turn.assistantMessage) {

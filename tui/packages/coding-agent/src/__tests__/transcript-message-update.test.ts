@@ -27,6 +27,46 @@ void test("full message updates do not duplicate streamed prefixes", () => {
 	assert.equal(chunks.map((chunk) => chunk.contentText ?? "").join(""), "Hello back");
 });
 
+void test("terminal snapshot restores output missed after a Skills notice", () => {
+	const transcript = new Transcript();
+	const turn = transcript.addTurn("list tools with ctx batch");
+	transcript.handleEvent({
+		type: "notice",
+		level: "info",
+		label: "Skills",
+		text: "context-mode · relevant to this request",
+	});
+	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
+	transcript.handleEvent({
+		type: "turn_end",
+		turn_id: "turn_1",
+		message: "",
+		final_message: {
+			role: "assistant",
+			content: "ctx_batch_execute — run multiple commands in one call.",
+		},
+	});
+
+	assert.equal(turn.id, "turn_1");
+	assert.equal(turn.isComplete, true);
+	assert.equal(turn.assistantMessage?.isComplete, true);
+	assert.deepEqual(
+		turn.assistantMessage?.chunks.map((chunk) => ({
+			type: chunk.type,
+			text: chunk.contentText,
+			label: chunk.notice?.label,
+		})),
+		[
+			{ type: "notice", text: undefined, label: "Skills" },
+			{
+				type: "content",
+				text: "ctx_batch_execute — run multiple commands in one call.",
+				label: undefined,
+			},
+		],
+	);
+});
+
 void test("promoted textual tool calls replace their streamed markup", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("inspect the file");
