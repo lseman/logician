@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	formatActivatedSkills,
+	formatSkillActivationNotice,
+	SkillActivationSession,
 	selectSkillsForPrompt,
 } from "../skill-activation.ts";
 import type { Skill } from "../skills.ts";
@@ -44,7 +46,7 @@ void test("selects a specialist from routing metadata", () => {
 	assert.deepEqual(result.map(({ skill: selected }) => selected.name), [
 		"typescript-code-review",
 	]);
-	assert.match(result[0].reason, /trigger|description|name/);
+	assert.match(result[0].reason, /matched|relevant/);
 });
 
 void test("explicit skill references force activation", () => {
@@ -101,4 +103,41 @@ void test("formats full selected skill bodies for the turn", () => {
 	assert.match(formatted, /<activated-skills>/);
 	assert.match(formatted, /Instructions for typescript-debugging\./);
 	assert.match(formatted, /<skill name="typescript-debugging"/);
+});
+
+void test("formats concise human-facing activation reasons", () => {
+	const selected = skill("typescript-debugging", "Diagnose TypeScript errors.", {
+		displayName: "TypeScript Debugging",
+	});
+	assert.equal(
+		formatSkillActivationNotice([
+			{ skill: selected, score: 20, reason: "matched “TypeScript error”" },
+		]),
+		"TypeScript Debugging · matched “TypeScript error”",
+	);
+	assert.equal(
+		formatSkillActivationNotice([
+			{ skill: selected, score: 100, reason: "explicitly requested" },
+			{
+				skill: skill("ariadne", "Trace code dependencies."),
+				score: 100,
+				reason: "explicitly requested",
+			},
+		]),
+		"TypeScript Debugging · explicitly requested  +  ariadne · explicitly requested",
+	);
+});
+
+void test("continued activations are identified as continued", () => {
+	const selected = skill("typescript-debugging", "Diagnose TypeScript errors.", {
+		triggers: ["TypeScript error"],
+	});
+	const session = new SkillActivationSession();
+	const initial = session.select([selected], "Diagnose this TypeScript error.");
+	session.continueWith(initial);
+
+	assert.equal(
+		session.select([selected], "continue")[0].reason,
+		"continuing from the previous turn",
+	);
 });

@@ -92,6 +92,35 @@ void test("collapsed running tools show live output without expanding details", 
 	assert.doesNotMatch(output, /second line/);
 });
 
+void test("skill activations render as a compact dedicated status line", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "skill-activation",
+		userMessage: { type: "user", content: "Debug this TypeScript error" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "notice",
+				notice: {
+					level: "info",
+					label: "Skills",
+					text: "TypeScript Debugging · matched “TypeScript error”",
+				},
+				isComplete: true,
+			}],
+		},
+		isComplete: false,
+	}]);
+	const rendered = display.render(100).join("\n");
+	const output = plain(rendered);
+
+	assert.match(output, /✦ Skills  TypeScript Debugging · matched “TypeScript error”/);
+	assert.doesNotMatch(output, /Skills:/);
+	assert.match(rendered, /\x1b\[/);
+});
+
 void test("status bar drops optional sections instead of clipping ANSI text", () => {
 	const status = new StatusBar();
 	status.update({

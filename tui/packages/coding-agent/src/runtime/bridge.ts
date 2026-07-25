@@ -80,6 +80,7 @@ import {
 import {
 	formatActivatedSkills,
 	SkillActivationSession,
+	formatSkillActivationNotice,
 	selectSkillsForPrompt,
 } from "../skill-activation.ts";
 import { buildDefaultSystemPrompt } from "../system-prompt.ts";
@@ -1026,17 +1027,11 @@ export class AgentCoreBridge {
 				harness.setSystemPrompt(
 					`${persistentSystemPrompt}\n\n${formatActivatedSkills(activations)}`,
 				);
-				const skillList = activations
-					.map(({ skill, reason }) => {
-						const label = skill.displayName || skill.name;
-						return reason ? `${label} (${reason})` : label;
-					})
-					.join(" · ");
 				this.emit({
 					type: "notice",
 					level: "info",
 					label: "Skills",
-					text: `Activated: ${skillList}`,
+					text: formatSkillActivationNotice(activations),
 				});
 			}
 

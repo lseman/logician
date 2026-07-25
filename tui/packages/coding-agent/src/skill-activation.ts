@@ -24,7 +24,10 @@ export class SkillActivationSession {
 	select(skills: Skill[], prompt: string): SkillActivation[] {
 		if (this.reuseOnNextTurn) {
 			this.reuseOnNextTurn = false;
-			const inherited = this.continuation;
+			const inherited = this.continuation.map((activation) => ({
+				...activation,
+				reason: "continuing from the previous turn",
+			}));
 			this.continuation = [];
 			return inherited;
 		}
@@ -102,6 +105,18 @@ export function formatActivatedSkills(activations: SkillActivation[]): string {
 	].join("\n\n");
 }
 
+/** Compact, user-facing explanation for the transcript activation notice. */
+export function formatSkillActivationNotice(
+	activations: SkillActivation[],
+): string {
+	return activations
+		.map(({ skill, reason }) => {
+			const label = skill.displayName || skill.name;
+			return reason ? `${label} · ${reason}` : label;
+		})
+		.join("  +  ");
+}
+
 function scoreSkill(
 	skill: Skill,
 	prompt: string,
@@ -124,7 +139,7 @@ function scoreSkill(
 			explicitPrompt.includes(`$${normalizedName}`) ||
 			explicitPrompt.includes(`/${normalizedName}`)
 		) {
-			return { skill, score: 100, reason: `explicitly named ${name}` };
+			return { skill, score: 100, reason: "explicitly requested" };
 		}
 	}
 
@@ -135,28 +150,29 @@ function scoreSkill(
 
 	for (const name of lookupNames) {
 		if (phraseMatches(prompt, promptTokens, name, 0.66)) {
-			consider(24, `name or alias matched "${name}"`);
+			consider(24, `matched “${name}”`);
 		}
 	}
 	for (const trigger of skill.triggers ?? []) {
 		if (phraseMatches(prompt, promptTokens, trigger, 0.66)) {
-			consider(20, `trigger matched "${trigger}"`);
+			consider(20, `matched “${trigger}”`);
 		}
 	}
 	for (const example of skill.exampleQueries ?? []) {
 		if (phraseMatches(prompt, promptTokens, example, 0.7)) {
-			consider(16, `example matched "${example}"`);
+			consider(16, `similar to “${example}”`);
 		}
 	}
 
 	const descriptionTokens = tokens(skill.description);
 	const overlap = descriptionTokens.filter((token) => promptTokens.has(token)).length;
-	if (overlap >= 3) consider(Math.min(15, 6 + overlap * 2), "description matched");
+	if (overlap >= 3) {
+		consider(Math.min(15, 6 + overlap * 2), "relevant to this request");
+	}
 	const family = tokens(skill.name)[0];
 	const matched = best as SkillActivation | null;
 	if (matched && family && promptTokens.has(family)) {
 		matched.score += 12;
-		matched.reason += `; ${family} task`;
 	}
 	return matched;
 }

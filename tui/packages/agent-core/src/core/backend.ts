@@ -339,6 +339,8 @@ export class OpenAIBackend implements LLMBackend {
 			// Ask OpenAI-compatible providers to emit a final usage chunk so the
 			// loop can report real token counts instead of a local estimate.
 			stream_options: { include_usage: true },
+			// llama.cpp: reuse KV cache across turns instead of recomputing the prefix.
+			cache_prompt: true,
 			...(this.stop && { stop: this.stop }),
 			// Additional sampling params (populated when an inference mode is active).
 			...(topP !== undefined && { top_p: topP }),

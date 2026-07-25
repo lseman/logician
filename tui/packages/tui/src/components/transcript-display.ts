@@ -743,6 +743,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 							renderedLines.push(padToWidth(`  ${line}`));
 					} else if (chunk.type === "notice" && chunk.notice) {
 						const n = chunk.notice;
+						if (n.label === "Skills" && n.level === "info") {
+							renderedLines.push(
+								padToWidth(
+									`${theme.fg("active", "✦")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
+								),
+							);
+							continue;
+						}
 						const icon = n.level === "error"
 							? "✗"
 							: n.level === "warn"
