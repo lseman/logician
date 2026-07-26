@@ -3,7 +3,7 @@
 // Not to be confused with agent-core's SessionManager, which manages an
 // internal JSONL crash-recovery journal, not this UI.
 
-import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth, RESET, BOLD } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import type { SessionStore } from "@logician/coding-agent/session-store";
 import {

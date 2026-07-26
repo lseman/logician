@@ -75,6 +75,7 @@ void test("setSystemPrompt takes effect on the next turn", async () => {
 });
 
 void test("runtime config changes take effect at the next save point", async () => {
+	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
 	let harness!: AgentHarness;
 	const temperatures: number[] = [];
 	const prompts: string[] = [];

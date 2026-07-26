@@ -15,11 +15,6 @@ import { randomUUID } from "node:crypto";
 import type { AgentMessage, CompactableMessage } from "../core/types.ts";
 import { DEFAULT_TRUNCATION } from "../core/types/types-truncation.ts";
 import {
-	type FileOperations,
-	createFileOps,
-	extractFileOpsFromMessage,
-	computeFileLists,
-	formatFileOperations,
 	serializeConversation,
 } from "./utils";
 

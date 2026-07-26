@@ -489,7 +489,7 @@ function prepareArguments(raw: unknown): Record<string, unknown> {
 		try {
 			const parsed = JSON.parse(rawEdits);
 			if (Array.isArray(parsed)) rawEdits = parsed;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			// Leave as-is
 		}
 	}

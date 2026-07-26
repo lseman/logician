@@ -363,7 +363,7 @@ const normalizeInput = (
 	if (typeof raw === "string") {
 		try {
 			return JSON.parse(raw);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return {};
 		}
 	}

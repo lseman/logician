@@ -637,7 +637,7 @@ export class TsPluginManager {
 			if (!existsSync(settingsPath)) return {};
 			const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as unknown;
 			return raw && typeof raw === "object" ? (raw as UserSettingsData) : {};
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return {};
 		}
 	}

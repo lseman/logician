@@ -522,7 +522,7 @@ export class OpenAIBackend implements LLMBackend {
 							}
 						}
 					}
-				} catch (e: unknown) {
+				} catch (_e: unknown) {
 					// Skip parse errors (partial JSON is normal in streaming)
 				}
 			}

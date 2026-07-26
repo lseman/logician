@@ -4,12 +4,10 @@
 
 import {
 	type Component,
-	clampLineToWidth,
 	visibleWidth,
 } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import {
-	BOX,
 	renderQuestion,
 	renderChoiceOption,
 	renderSeparator,

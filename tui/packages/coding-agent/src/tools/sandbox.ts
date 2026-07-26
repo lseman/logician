@@ -497,8 +497,8 @@ export const sandbox: Tool = {
 	executionMode: "sequential",
 	label: "Sandbox",
 	description:
-		`Execute a command inside a Bubblewrap-isolated sandbox. Linux-only; falls back to regular bash when bwrap is unavailable. ` +
-		`Profiles: none (no isolation), code (read-only host fs, writable /tmp, no network), full (code + namespaces). ` +
+		"Execute a command inside a Bubblewrap-isolated sandbox. Linux-only; falls back to regular bash when bwrap is unavailable. " +
+		"Profiles: none (no isolation), code (read-only host fs, writable /tmp, no network), full (code + namespaces). " +
 		`Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 	promptSnippet:
 		"Execute shell commands in a Bubblewrap-isolated sandbox with configurable isolation profiles",
@@ -554,7 +554,7 @@ export const sandbox: Tool = {
 		if (result.status === "timed_out") {
 			content += `\n\n[Command timed out after ${(args.timeout as number) ?? 60} seconds]`;
 		} else if (result.status === "aborted") {
-			content += `\n\n[Command aborted]`;
+			content += "\n\n[Command aborted]";
 		} else if (
 			result.exitCode !== null &&
 			result.exitCode !== 0 &&

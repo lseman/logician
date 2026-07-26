@@ -195,7 +195,7 @@ async function resolveFallback(
 		if (all.length > limit) out += `\n\n[${limit} results limit reached. Use limit=${limit * 2} or refine pattern]`;
 		if (t.truncated) out += `\n\n[${formatSize(DEFAULT_MAX_BYTES)} limit reached]`;
 		return out;
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		const err = e as { name?: string; code?: number | string; stderr?: string };
 		if (err.name === "AbortError" || err.code === "ABORT_ERR") return "Error: Command aborted";
 		if (err.code === 1) return "No files found matching pattern.";

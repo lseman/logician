@@ -140,7 +140,7 @@ export class SSRReasoner extends BaseReasoner {
 						samples: null,
 					}) as SocraticStep,
 			);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return [
 				{
 					index: 1,

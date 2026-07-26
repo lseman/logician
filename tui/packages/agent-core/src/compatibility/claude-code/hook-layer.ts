@@ -155,7 +155,7 @@ class RuntimeClaudeCodeHookLayer implements ClaudeCodeHookLayer {
 				cwd: this.options.cwd,
 				...payload,
 			});
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return null;
 		}
 	}

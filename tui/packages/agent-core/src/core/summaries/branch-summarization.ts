@@ -90,7 +90,7 @@ export function extractFileOpsFromMessages(messages: Message[]): FileOperations 
 						for (const p of paths) ops.read.add(p);
 					}
 				}
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// Malformed JSON — skip
 			}
 		}
@@ -276,7 +276,7 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 			const colonIdx = item.indexOf(":");
 			if (colonIdx > 0) {
 				// Extract decision, stripping markdown bold markers
-				let decision = item.slice(0, colonIdx).replace(/^[-*]?\s*/, "").replace(/[*`]/g, "").trim();
+				const decision = item.slice(0, colonIdx).replace(/^[-*]?\s*/, "").replace(/[*`]/g, "").trim();
 				const rationale = item.slice(colonIdx + 1).trim();
 				return { decision, rationale };
 			}

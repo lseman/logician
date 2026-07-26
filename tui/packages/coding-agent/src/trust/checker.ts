@@ -34,7 +34,7 @@ function hasTrustRequiringResourcesInDir(dir: string): boolean {
 			if (entry.isDirectory()) return true;
 			if (entry.isFile() && TRUST_RESOURCES.includes(entry.name)) return true;
 		}
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// directory unreadable — skip
 	}
 	return false;

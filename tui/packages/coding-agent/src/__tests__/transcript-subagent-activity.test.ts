@@ -30,7 +30,7 @@ void test("subagent tool notices become one integrated lifecycle entry", () => {
 		type: "notice",
 		level: "info",
 		label: "↳ explorer-1",
-		text: '▶ call-1 read_file path=src/index.ts',
+		text: "▶ call-1 read_file path=src/index.ts",
 	});
 	transcript.handleEvent({
 		type: "notice",

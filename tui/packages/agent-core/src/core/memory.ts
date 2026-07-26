@@ -119,8 +119,8 @@ export function createMemoryStore(): MemoryStore {
 					entry.recency = 0;
 					entries.push(entry);
 				}
-			} catch (e: unknown) {
-				console.error('[memory] deserialize failed:', e);
+			} catch (_e: unknown) {
+				console.error("[memory] deserialize failed:", _e);
 			}
 		},
 
@@ -173,8 +173,8 @@ export function createMemoryStore(): MemoryStore {
 							map[entry.id];
 					}
 				}
-			} catch (e: unknown) {
-				console.error('[memory] deserializeEmbeddings failed:', e);
+			} catch (_e: unknown) {
+				console.error("[memory] deserializeEmbeddings failed:", _e);
 			}
 		},
 	};

@@ -4,16 +4,11 @@
 
 import {
 	type Component,
-	clampLineToWidth,
 	visibleWidth,
-	RESET,
-	BOLD,
-	DIM,
 } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import { SelectorController } from "./selector-controller.ts";
 import {
-	BOX,
 	renderListItem,
 	renderSeparator,
 	renderStatusLine,

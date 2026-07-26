@@ -385,7 +385,7 @@ export class SlashPopup implements Component {
 		// Details panel for selected command (examples, arg info)
 		if (state.selectedCmd && (state.selectedCmd.examples || state.selectedCmd.argHint)) {
 			const sel = state.selectedCmd;
-			lines.push(``);
+			lines.push("");
 			const detailsColor = getCategoryColor(sel.category ?? "misc");
 			if (sel.argHint) {
 				lines.push(`${DIM}Usage:${RESET} ${detailsColor}${sel.command}${RESET} ${BOLD}${sel.argHint}${RESET}`);

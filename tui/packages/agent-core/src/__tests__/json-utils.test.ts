@@ -54,7 +54,7 @@ void describe("json-utils", () => {
     }`;
 		const stripped = stripJsonComments(input);
 		const parsed = JSON.parse(stripped);
-		expect(parsed.key).toBe('value with "escaped" quotes');
+		expect(parsed.key).toBe("value with \"escaped\" quotes");
 	});
 
 	void it("parseJsonWithComments works", () => {
@@ -79,7 +79,7 @@ void describe("json-utils", () => {
 	});
 
 	void it("parseJsonWithCommentsSafe parses valid JSON", () => {
-		const input = `{ "key": "value" // comment }`;
+		const input = "{ \"key\": \"value\" // comment }";
 		const result = parseJsonWithCommentsSafe<{ key: string }>(input, { key: "default" });
 		expect(result.key).toBe("value");
 	});

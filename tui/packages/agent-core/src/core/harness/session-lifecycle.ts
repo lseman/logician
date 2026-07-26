@@ -27,8 +27,8 @@ export async function emitSessionStart(
 			cwd: ctx.cwd,
 		});
 		return true;
-	} catch (e: unknown) {
-		console.error('[harness-session] emitSessionStart failed:', e);
+	} catch (_e: unknown) {
+		console.error("[harness-session] emitSessionStart failed:", _e);
 		return false;
 	}
 }
@@ -46,9 +46,9 @@ export async function emitSessionEnd(
 			cwd: ctx.cwd,
 			reason,
 		});
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// must not block cleanup
-		console.error('[harness-session] emitSessionEnd failed:', e);
+		console.error("[harness-session] emitSessionEnd failed:", _e);
 	}
 }
 
@@ -63,9 +63,9 @@ export async function emitPreCompact(
 	if (compactCtx) {
 		try {
 			hookResult = (await internalHook?.(compactCtx)) ?? (await userHook?.(compactCtx)) ?? undefined;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			// must not block compaction
-			console.error('[harness-session] emitPreCompact internalHook failed:', e);
+			console.error("[harness-session] emitPreCompact internalHook failed:", _e);
 		}
 	}
 	if (!hooksEnabled) return hookResult;
@@ -75,9 +75,9 @@ export async function emitPreCompact(
 			transcript_path: ctx.transcriptPath,
 			cwd: ctx.cwd,
 		});
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// must not block compaction
-		console.error('[harness-session] emitPreCompact hookEvent failed:', e);
+		console.error("[harness-session] emitPreCompact hookEvent failed:", _e);
 	}
 	return hookResult;
 }
@@ -90,9 +90,9 @@ export async function emitPostCompact(hooksEnabled: boolean, ctx: HookContext): 
 			transcript_path: ctx.transcriptPath,
 			cwd: ctx.cwd,
 		});
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// must not block compaction
-		console.error('[harness-session] emitPostCompact failed:', e);
+		console.error("[harness-session] emitPostCompact failed:", _e);
 	}
 }
 
@@ -119,8 +119,8 @@ export function loadSessionMessages(
 			timestamp: m.timestamp,
 		}));
 		return { session, messages };
-	} catch (e: unknown) {
-		console.error('[harness-session] loadSessionMessages failed:', e);
+	} catch (_e: unknown) {
+		console.error("[harness-session] loadSessionMessages failed:", _e);
 		return null;
 	}
 }
@@ -141,8 +141,8 @@ export function listSessions(baseDir: string | undefined): Array<{
 				messageCount: m.messageCount,
 				lastActivity: m.lastActivity,
 			}));
-	} catch (e: unknown) {
-		console.error('[harness-session] listSessions failed:', e);
+	} catch (_e: unknown) {
+		console.error("[harness-session] listSessions failed:", _e);
 		return [];
 	}
 }

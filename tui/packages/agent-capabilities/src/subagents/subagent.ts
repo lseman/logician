@@ -369,7 +369,7 @@ async function _runSpawn(
 				acceptance: run.acceptance,
 			},
 		};
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		const message = `Error: subagent failed: ${(e as Error).message}`;
 		deps.emit({
 			type: "subagent_end",

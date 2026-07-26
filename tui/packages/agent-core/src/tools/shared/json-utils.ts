@@ -20,13 +20,13 @@ export function stripJsonComments(input: string): string {
 				i += 2;
 				continue;
 			}
-			if (ch === '"') inString = false;
+			if (ch === "\"") inString = false;
 			output += ch;
 			i++;
 			continue;
 		}
 
-		if (ch === '"') {
+		if (ch === "\"") {
 			inString = true;
 			output += ch;
 			i++;
@@ -74,7 +74,7 @@ export function parseJsonWithCommentsSafe<T = unknown>(
 ): T {
 	try {
 		return parseJsonWithComments<T>(input);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return defaultValue;
 	}
 }

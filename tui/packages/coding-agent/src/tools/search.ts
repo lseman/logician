@@ -128,7 +128,7 @@ export const grep: Tool = {
 		let isDirectory: boolean;
 		try {
 			isDirectory = await ops.isDirectory(searchPath);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return `Error: Path not found: ${searchPath}`;
 		}
 
@@ -154,7 +154,7 @@ export const grep: Tool = {
 						.replace(/\r\n/g, "\n")
 						.replace(/\r/g, "\n")
 						.split("\n");
-				} catch (e: unknown) {
+				} catch (_e: unknown) {
 					lines = [];
 				}
 				fileCache.set(filePath, lines);
@@ -201,7 +201,7 @@ export const grep: Tool = {
 				let event: unknown;
 				try {
 					event = JSON.parse(line);
-				} catch (e: unknown) {
+				} catch (_e: unknown) {
 					return;
 				}
 				if (

@@ -679,6 +679,7 @@ export class LogicianTUI {
 		this.slashPopup.setCommands(slashCommands);
 
 		// Wire up slash popup submit to handle quit dispatch
+		// eslint-disable-next-line @typescript-eslint/no-misused-promises -- callback body uses await import() for dynamic imports
 		this.slashPopup.setOnSubmit(async (result, dispatch, command) => {
 			if (dispatch === "quit") {
 				void this.stop().then(() => process.exit(0));
@@ -911,7 +912,7 @@ export class LogicianTUI {
 						};
 						if (!subArgs) {
 							this.transcript.addSystemMessage(
-								`Available profiles:\n` +
+								"Available profiles:\n" +
 									Object.entries(profiles)
 										.map(([k, v]) => `  ${k}: ${v}`)
 										.join("\n"),
@@ -934,10 +935,10 @@ export class LogicianTUI {
 					const cmd = subArgs || args.trim();
 					if (!cmd) {
 						this.transcript.addSystemMessage(
-							`Usage:\n` +
-								`  /sandbox <command>       — run with CODE profile\n` +
-								`  /sandbox profile <level> — show profile info\n` +
-								`  /sandbox status          — check sandbox availability`,
+							"Usage:\n" +
+								"  /sandbox <command>       — run with CODE profile\n" +
+								"  /sandbox profile <level> — show profile info\n" +
+								"  /sandbox status          — check sandbox availability",
 						);
 					} else {
 						// Check if first word is a profile name

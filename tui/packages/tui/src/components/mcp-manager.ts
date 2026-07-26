@@ -1,4 +1,4 @@
-import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import {
 	renderListItem,

@@ -14,8 +14,8 @@ import { populationStats } from "./population.ts";
 
 const BIN_PACKING_PROBLEM: EohProblem = {
 	name: "Online Bin Packing",
-	description: `Given items of various sizes (0 < size ≤ 1) arriving online, pack them into bins of capacity 1.0 using a heuristic function. The heuristic selects which existing open bin to place the current item in, or opens a new bin.`,
-	functionSignature: `def select_bin(item_size: float, bins: list[float]) -> int:`,
+	description: "Given items of various sizes (0 < size ≤ 1) arriving online, pack them into bins of capacity 1.0 using a heuristic function. The heuristic selects which existing open bin to place the current item in, or opens a new bin.",
+	functionSignature: "def select_bin(item_size: float, bins: list[float]) -> int:",
 	instances: generateBinPackingInstances(10),
 	evaluateInstance: async (code: string, instance: unknown) => {
 		return evalBinPackingHeuristic(code, instance as number[]);
@@ -181,13 +181,13 @@ export default function register(api: ExtensionAPI): void {
 	api.registerTool({
 		name: "evolve_heuristics",
 		label: "EoH: Evolve Heuristics",
-		description: `Evolve algorithmic heuristics using the Evolution of Heuristics (EoH) framework. Actions: start, stop, status, best, run_generation.`,
+		description: "Evolve algorithmic heuristics using the Evolution of Heuristics (EoH) framework. Actions: start, stop, status, best, run_generation.",
 		parameters: {
 			type: "object",
 			properties: {
 				action: {
 					type: "string",
-					description: `One of: "start" (begin evolution), "stop" (halt), "status" (get stats), "best" (get best heuristic), "run_generation" (run single generation)`,
+					description: "One of: \"start\" (begin evolution), \"stop\" (halt), \"status\" (get stats), \"best\" (get best heuristic), \"run_generation\" (run single generation)",
 					required: true,
 				},
 				baseUrl: {

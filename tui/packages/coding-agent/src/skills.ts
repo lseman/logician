@@ -388,7 +388,7 @@ function loadIgnorePatterns(
 		let content: string;
 		try {
 			content = readFileSync(ignorePath, "utf8");
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			continue;
 		}
 
@@ -664,7 +664,7 @@ function listResourceFiles(dir: string, base = dir): string[] {
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return [];
 	}
 	const files: string[] = [];
@@ -691,7 +691,7 @@ function escapeXml(s: string): string {
 async function safeStat(p: string): Promise<ReturnType<typeof stat> | null> {
 	try {
 		return await stat(p);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return null;
 	}
 }
@@ -699,7 +699,7 @@ async function safeStat(p: string): Promise<ReturnType<typeof stat> | null> {
 async function safeReaddir(p: string): Promise<string[] | null> {
 	try {
 		return await readdir(p);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return null;
 	}
 }
@@ -707,7 +707,7 @@ async function safeReaddir(p: string): Promise<string[] | null> {
 async function safeReadFile(p: string): Promise<string | null> {
 	try {
 		return await readFile(p, "utf8");
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return null;
 	}
 }
@@ -715,7 +715,7 @@ async function safeReadFile(p: string): Promise<string | null> {
 async function safeRealpath(p: string): Promise<string> {
 	try {
 		return await realpath(p);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return p;
 	}
 }
@@ -723,7 +723,7 @@ async function safeRealpath(p: string): Promise<string> {
 function safeStatSync(p: string): ReturnType<typeof statSync> | null {
 	try {
 		return statSync(p);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return null;
 	}
 }

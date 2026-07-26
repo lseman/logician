@@ -11,8 +11,8 @@ import { visibleWidth, clampLineToWidth, RESET, BOLD, DIM } from "../layers/core
 
 // ── ANSI codes ──────────────────────────────────────────────────────────────
 
-const BG_HIGHLIGHT = "\x1b[48;2;";
-const FG_OVERRIDE = "\x1b[38;2;";
+const _BG_HIGHLIGHT = "\x1b[48;2;";
+const _FG_OVERRIDE = "\x1b[38;2;";
 
 // ── Box-drawing characters ──────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ const getSelectedBg = (): string => theme.fgAsBg("selected");
 const BLACK_FG = "\x1b[38;5;16m";
 
 const getHeaderFg = (): string => theme.fg("header", "");
-const getSelectedFg = (): string => theme.fg("selected", "");
+const _getSelectedFg = (): string => theme.fg("selected", "");
 const getMuted = (): string => theme.fg("muted", "");
 const getActive = (): string => theme.fg("active", "");
 const getSuccess = (): string => theme.fg("success", "");
@@ -88,11 +88,11 @@ export function renderPopupFrame(
 	const hintsText = config.hints ? `  ${DIM}${config.hints}${RESET}` : "";
 	const headerContent = `${BOLD}${titleText}${RESET}${subtitleText}${hintsText}`;
 	const headerVisible = visibleWidth(headerContent);
-	const headerPad = Math.max(0, innerWidth - headerVisible);
+	const _headerPad = Math.max(0, innerWidth - headerVisible);
 
 	const topLine = `${headerFg}${BOX.horiz.repeat(popupWidth)}${RESET}`;
 
-	const headerLine = `${headerFg}${" ".repeat(pad)}${headerContent}${" ".repeat(
+	const _headerLine = `${headerFg}${" ".repeat(pad)}${headerContent}${" ".repeat(
 		innerWidth - headerVisible + pad,
 	)}${" ".repeat(pad)}${headerFg}${BOX.vert}${RESET}`;
 

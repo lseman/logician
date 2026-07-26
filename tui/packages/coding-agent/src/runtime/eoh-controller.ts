@@ -200,7 +200,7 @@ export class EohController {
 				const state = engine.getState();
 				const stats = populationStats(state.population);
 				return [
-					`EoH Status`,
+					"EoH Status",
 					`  Running: ${state.running || this.preparing}`,
 					`  Generation: ${state.generation}`,
 					`  LLM calls: ${state.totalLLMCalls}`,
@@ -221,14 +221,14 @@ export class EohController {
 				if (!best) return "No heuristics yet — run /eoh start first";
 				return [
 					`Best heuristic (fitness=${best.fitness.toFixed(4)}, gen=${best.generation}, by=${best.createdBy}):`,
-					``,
-					`Thought:`,
+					"",
+					"Thought:",
 					best.thought,
-					``,
-					`Code:`,
-					`\`\`\`python`,
+					"",
+					"Code:",
+					"```python",
 					best.code,
-					`\`\`\``,
+					"```",
 				].join("\n");
 			}
 

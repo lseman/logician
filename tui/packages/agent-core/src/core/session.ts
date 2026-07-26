@@ -588,7 +588,7 @@ export class Session {
 
 		const path: SessionEntry[] = [];
 		let currentId: string | undefined = entries[entries.length - 1].id;
-		let seen = new Set<string>();
+		const seen = new Set<string>();
 
 		while (currentId && !seen.has(currentId)) {
 			seen.add(currentId);
@@ -673,7 +673,7 @@ export class Session {
 		for (const cp of toRemove) {
 			try {
 				rmSync(cp.dataFile, { force: true });
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// Best-effort cleanup
 			}
 		}
@@ -683,7 +683,7 @@ export class Session {
 		if (!existsSync(this.metaPath)) return null;
 		try {
 			return JSON.parse(readFileSync(this.metaPath, "utf8")) as SessionMeta;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return null;
 		}
 	}

@@ -34,7 +34,7 @@ void test("validateConfig warns on unknown top-level keys but keeps known ones",
 	const warnings: string[] = [];
 	const cfg = validateConfig({ model: "gpt", bogusKey: 1 }, warnings);
 	assert.equal(cfg.model, "gpt");
-	assert.ok(warnings.some((w) => w.includes('Unknown config key: "bogusKey"')));
+	assert.ok(warnings.some((w) => w.includes("Unknown config key: \"bogusKey\"")));
 });
 
 void test("validateConfig accepts valid baseUrl and llmUrl", () => {
@@ -52,7 +52,7 @@ void test("validateConfig rejects an invalid baseUrl", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ baseUrl: "not-a-url" }, warnings);
 	assert.equal(cfg.baseUrl, undefined);
-	assert.ok(warnings.some((w) => w.includes('"baseUrl" must be a valid http/https URL')));
+	assert.ok(warnings.some((w) => w.includes("\"baseUrl\" must be a valid http/https URL")));
 });
 
 void test("validateConfig parses legacy string entries and object entries in models", () => {
@@ -72,14 +72,14 @@ void test("validateConfig parses legacy string entries and object entries in mod
 		{ name: "legacy-model", model: "legacy-model" },
 		{ name: "Named", model: "named-model", url: "http://x" },
 	]);
-	assert.ok(warnings.some((w) => w.includes('"models" entry invalid')));
+	assert.ok(warnings.some((w) => w.includes("\"models\" entry invalid")));
 });
 
 void test("validateConfig clamps out-of-range temperature and warns", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ temperature: 5 }, warnings);
 	assert.equal(cfg.temperature, 2);
-	assert.ok(warnings.some((w) => w.includes('"temperature" out of range')));
+	assert.ok(warnings.some((w) => w.includes("\"temperature\" out of range")));
 });
 
 void test("validateConfig accepts in-range temperature without warning", () => {
@@ -105,7 +105,7 @@ void test("validateConfig rejects invalid toolExecution enum", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ toolExecution: "bogus" }, warnings);
 	assert.equal(cfg.toolExecution, undefined);
-	assert.ok(warnings.some((w) => w.includes('"toolExecution" must be')));
+	assert.ok(warnings.some((w) => w.includes("\"toolExecution\" must be")));
 });
 
 void test("validateConfig accepts valid toolExecution and permissionMode", () => {
@@ -123,7 +123,7 @@ void test("validateConfig rejects invalid inferenceMode", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ inferenceMode: "bogus-mode" }, warnings);
 	assert.equal(cfg.inferenceMode, undefined);
-	assert.ok(warnings.some((w) => w.includes('"inferenceMode" must be one of')));
+	assert.ok(warnings.some((w) => w.includes("\"inferenceMode\" must be one of")));
 });
 
 void test("validateConfig applies default booleans (continuationEnabled, postEditDiagnostics, autoRetryEnabled ON by default)", () => {
@@ -178,7 +178,7 @@ void test("validateConfig rejects a cwd that does not exist", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ cwd: "/definitely/does/not/exist/xyz" }, warnings);
 	assert.equal(cfg.cwd, undefined);
-	assert.ok(warnings.some((w) => w.includes('"cwd" path does not exist')));
+	assert.ok(warnings.some((w) => w.includes("\"cwd\" path does not exist")));
 });
 
 void test("validateConfig accepts an existing cwd, resolved to an absolute path", () => {
@@ -212,7 +212,7 @@ void test("validateConfig parses lsp sub-object and warns on unknown lsp keys", 
 		languageId: "typescript",
 	});
 	assert.equal(cfg.lsp?.serverOverrides?.bad, undefined);
-	assert.ok(warnings.some((w) => w.includes('Unknown lsp key: "bogus"')));
+	assert.ok(warnings.some((w) => w.includes("Unknown lsp key: \"bogus\"")));
 	assert.ok(warnings.some((w) => w.includes("command")));
 });
 
@@ -243,7 +243,7 @@ void test("validateConfig parses truncation sub-object including nested microCom
 	assert.equal(cfg.truncation?.maxLines, undefined);
 	assert.equal(cfg.truncation?.microCompactMaxChars?.tool, 100);
 	assert.equal(cfg.truncation?.microCompactMaxChars?.assistant, undefined);
-	assert.ok(warnings.some((w) => w.includes('"truncation.maxLines" must be > 0')));
+	assert.ok(warnings.some((w) => w.includes("\"truncation.maxLines\" must be > 0")));
 	assert.ok(warnings.some((w) => w.includes("Unknown truncation.microCompactMaxChars key")));
 });
 
@@ -260,7 +260,7 @@ void test("validateConfig passes through mcp/mcpServers objects and rejects non-
 	assert.deepEqual(cfg.mcp, { foo: "bar" });
 	assert.deepEqual(cfg.mcpServers, { srv: {} });
 	assert.equal(cfg.plugins, undefined);
-	assert.ok(warnings.some((w) => w.includes('"plugins" must be an object')));
+	assert.ok(warnings.some((w) => w.includes("\"plugins\" must be an object")));
 });
 
 void test("validateConfig validates webSearch.baseUrl and clamps maxResults range", () => {
@@ -271,8 +271,8 @@ void test("validateConfig validates webSearch.baseUrl and clamps maxResults rang
 	);
 	assert.equal(cfg.webSearch?.baseUrl, undefined);
 	assert.equal(cfg.webSearch?.maxResults, undefined);
-	assert.ok(warnings.some((w) => w.includes('"webSearch.baseUrl" must be a valid')));
-	assert.ok(warnings.some((w) => w.includes('"webSearch.maxResults" must be 1')));
+	assert.ok(warnings.some((w) => w.includes("\"webSearch.baseUrl\" must be a valid")));
+	assert.ok(warnings.some((w) => w.includes("\"webSearch.maxResults\" must be 1")));
 });
 
 void test("validateConfig filters non-string entries from permissions.allow/deny", () => {

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	cycleInferenceMode,
-	DEFAULT_MODE,
 	getInferenceMode,
 	INFERENCE_MODES,
 	isValidInferenceMode,

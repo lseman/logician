@@ -452,7 +452,7 @@ export class TUI extends Container {
 		if (process.stdin.setRawMode) {
 			try {
 				process.stdin.setRawMode(true);
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// raw mode unavailable (e.g. piped stdin) — keys won't work but the UI
 				// still renders; degrade gracefully rather than crash.
 			}
@@ -496,7 +496,7 @@ export class TUI extends Container {
 		if (process.stdin.setRawMode) {
 			try {
 				process.stdin.setRawMode(this.wasRaw);
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// ignore
 			}
 		}
@@ -672,7 +672,7 @@ export class TUI extends Container {
 			inputLines = this.inputBarComponent
 				? this.inputBarComponent.render(termWidth)
 				: [" ".repeat(termWidth)];
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			inputLines = [" ".repeat(termWidth)];
 		}
 
@@ -681,7 +681,7 @@ export class TUI extends Container {
 			statusLines = this.fixedBottomComponent
 				? this.fixedBottomComponent.render(termWidth)
 				: [" ".repeat(termWidth)];
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			statusLines = [" ".repeat(termWidth)];
 		}
 
@@ -694,7 +694,7 @@ export class TUI extends Container {
 			aboveInputLines = this.fixedAboveInputComponent
 				? this.fixedAboveInputComponent.render(termWidth)
 				: [];
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			aboveInputLines = [];
 		}
 		// Interactive selectors participate in the fixed composer stack instead
@@ -730,7 +730,7 @@ export class TUI extends Container {
 			let transcriptLines: string[];
 			try {
 				transcriptLines = this.scrollableComponent.render(transcriptWidth);
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// Component render failed — fill with safe placeholder
 				transcriptLines = Array(transcriptHeight)
 					.fill(0)
@@ -957,7 +957,7 @@ export class TUI extends Container {
 	private write(data: string): void {
 		try {
 			process.stdout.write(data);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			// Silently ignore write errors
 		}
 	}

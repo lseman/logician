@@ -127,8 +127,8 @@ export class ToolRegistry {
 				call: { ...call, arguments: JSON.stringify(args) },
 				args,
 			};
-		} catch (e: unknown) {
-			const error = e as Error;
+		} catch (_e: unknown) {
+			const error = _e as Error;
 			return {
 				call,
 				args: parseToolInput(call.arguments),
@@ -153,7 +153,7 @@ export class ToolRegistry {
 		// read_file's read-tracking) or time-varying output must never be
 		// served from cache, so caching requires an explicit cacheable: true.
 		const useCache =
-			this.cache != null &&
+			this.cache !== null &&
 			tool.cacheable === true &&
 			!call.arguments?.includes("__nocache__");
 		if (useCache) {
@@ -222,8 +222,8 @@ export class ToolRegistry {
 			}
 
 			return result;
-		} catch (e: unknown) {
-			const error = e as Error;
+		} catch (_e: unknown) {
+			const error = _e as Error;
 			return {
 				content: `Error executing ${call.name}: ${error.message}`,
 				isError: true,
@@ -258,7 +258,7 @@ export class ToolRegistry {
 				const absolute = resolve(this.cwd, p);
 				const st = statSync(absolute);
 				mtimeParts.push(`${st.mtimeMs}`);
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// File doesn't exist — use "0" as sentinel
 				mtimeParts.push("0");
 			}

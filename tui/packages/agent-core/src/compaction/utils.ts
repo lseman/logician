@@ -107,7 +107,7 @@ const TOOL_RESULT_MAX_CHARS = DEFAULT_TRUNCATION.compactionSummaryMaxChars;
 function safeJsonStringify(value: unknown): string {
 	try {
 		return JSON.stringify(value) ?? "undefined";
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return "[unserializable]";
 	}
 }

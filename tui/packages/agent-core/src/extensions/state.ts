@@ -31,7 +31,7 @@ function openStateDB(extId: string): StateDB {
 			return parsed && typeof parsed === "object" && !Array.isArray(parsed)
 				? parsed as Record<string, string>
 				: {};
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return {};
 		}
 	};

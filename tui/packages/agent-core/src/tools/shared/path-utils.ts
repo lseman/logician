@@ -133,7 +133,7 @@ function fileExists(filePath: string): boolean {
 	try {
 		fs.accessSync(filePath, fs.constants.F_OK);
 		return true;
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return false;
 	}
 }
@@ -182,7 +182,7 @@ export function resolveReadPath(filePath: string, cwd: string): string {
 export function readUtf8IfExists(filePath: string): string | null {
 	try {
 		return fs.readFileSync(filePath, "utf-8");
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return null;
 	}
 }
@@ -212,7 +212,7 @@ export function markPathIgnoredByCloudSync(dirPath: string): void {
 			const noindex = path.join(dirPath, ".noindex");
 			if (!fs.existsSync(noindex)) fs.writeFileSync(noindex, "");
 		}
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// best-effort
 	}
 }

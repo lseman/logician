@@ -1,6 +1,6 @@
 // ── Branching enhancement tests ──────────────────────────────────────────────
 
-import test, { describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 
 describe("BranchInfo type", () => {
@@ -95,7 +95,7 @@ describe("BranchProgress", () => {
 
 describe("BranchSummaryData with file ops", () => {
 	it("includes file info in full summary", () => {
-		const full = `Branch conversation\n\nRead files: src/main.ts, config.json\nModified files: src/main.ts`;
+		const full = "Branch conversation\n\nRead files: src/main.ts, config.json\nModified files: src/main.ts";
 		const summary = {
 			goal: "Refactor main module",
 			constraints: [],

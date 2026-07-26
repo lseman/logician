@@ -22,7 +22,6 @@ import type {
 	Tool,
 	ToolCall,
 } from "./types.ts";
-import type { InferenceMode as InferenceModeType } from "./types.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import { ToolResultCache } from "./tool-cache.ts";
 import {
@@ -45,10 +44,7 @@ import {
 	parseTextToolCalls,
 	stripTextToolCalls,
 } from "../tools/shared/text-to-tool-calls.ts";
-import {
-	getInferenceMode,
-	type InferenceMode,
-} from "./configuration/inference-modes.ts";
+import { getInferenceMode } from "./configuration/inference-modes.ts";
 import {
 	emitConclusion,
 	lastAssistantContent,

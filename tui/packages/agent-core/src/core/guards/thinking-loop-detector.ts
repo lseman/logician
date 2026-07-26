@@ -192,7 +192,7 @@ export class ThinkingLoopDetector {
 		return (
 			`Thinking loop detected: ${consecutive} consecutive turns with no tool calls. ` +
 			`You kept reasoning (${lastText.slice(0, 120)}...) instead of taking action. ` +
-			`Stop thinking and either act on what you know or say you're done.`
+			"Stop thinking and either act on what you know or say you're done."
 		);
 	}
 
@@ -204,14 +204,14 @@ export class ThinkingLoopDetector {
 		return (
 			`Thinking spiral detected: your response grew ${ratio}x this turn ` +
 			`(${previousLength} → ${currentLength} chars) with no tool calls. ` +
-			`You're writing longer thoughts but not making progress. Act now.`
+			"You're writing longer thoughts but not making progress. Act now."
 		);
 	}
 
 	private buildMetaReasoningDiagnostic(hits: number, lastText: string): string {
 		return (
 			`Meta-reasoning loop detected: ${hits} turns with meta-reasoning patterns ` +
-			`("let me think", "I need to consider", etc.). You're reasoning about reasoning ` +
+			"(\"let me think\", \"I need to consider\", etc.). You're reasoning about reasoning " +
 			`instead of acting. ${lastText.slice(0, 100)}... Stop and decide: what's the next action?`
 		);
 	}
@@ -219,8 +219,8 @@ export class ThinkingLoopDetector {
 	private buildBudgetDiagnostic(total: number, limit: number): string {
 		return (
 			`Thinking budget exhausted: ${total} total thinking tokens used (limit: ${limit}). ` +
-			`You've consumed too many tokens on reasoning without completing the task. ` +
-			`Stop and produce actionable output immediately.`
+			"You've consumed too many tokens on reasoning without completing the task. " +
+			"Stop and produce actionable output immediately."
 		);
 	}
 

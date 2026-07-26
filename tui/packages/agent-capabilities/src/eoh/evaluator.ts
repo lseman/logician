@@ -71,7 +71,7 @@ export async function evaluateHeuristic(
 				),
 			]);
 			scores.push(score);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return -Infinity;
 		}
 	}

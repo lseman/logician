@@ -169,7 +169,7 @@ function parseJsonArg(raw?: string): Record<string, unknown> {
 		const parsed = JSON.parse(raw);
 		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
 			? parsed : {};
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return {};
 	}
 }

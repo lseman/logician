@@ -57,7 +57,7 @@ const defaultOps: LsOperations = {
 		try {
 			await fsStat(p);
 			return true;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return false;
 		}
 	},
@@ -94,7 +94,7 @@ export const list_files: Tool = {
 		let isDir: boolean;
 		try {
 			isDir = (await ops.stat(safePath)).isDirectory();
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return `Error: Not a directory: ${safePath}`;
 		}
 		if (!isDir) {
@@ -105,7 +105,7 @@ export const list_files: Tool = {
 		let entries: string[];
 		try {
 			entries = await ops.readdir(safePath);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			const message = e instanceof Error ? e.message : String(e);
 			return `Error: Cannot read directory: ${message}`;
 		}
@@ -128,7 +128,7 @@ export const list_files: Tool = {
 			try {
 				const entryStat = await ops.stat(fullPath);
 				if (entryStat.isDirectory()) suffix = "/";
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// Skip entries we cannot stat.
 				continue;
 			}

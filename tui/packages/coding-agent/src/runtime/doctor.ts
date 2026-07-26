@@ -187,22 +187,22 @@ export function formatDoctorReport(report: DoctorReport): string {
 	// Header
 	const lines: string[] = [
 		`\x1b[1m${sep}\x1b[0m`,
-		`\x1b[1m  Logician Doctor \u2014 System Diagnostics\x1b[0m`,
+		"\x1b[1m  Logician Doctor \u2014 System Diagnostics\x1b[0m",
 		`\x1b[1m${sep}\x1b[0m`,
-		``,
+		"",
 	];
 
 	// Version
 	lines.push(
-		`  \x1b[1mVersion\x1b[0m` +
+		"  \x1b[1mVersion\x1b[0m" +
 			`  ${dim("v" + report.version)}`,
 	);
 
 	// Workspace
 	const wsOk = report.workspace.present && report.workspace.readable;
 	lines.push(
-		``,
-		`  \x1b[1mWorkspace\x1b[0m` +
+		"",
+		"  \x1b[1mWorkspace\x1b[0m" +
 			`  ${icon(wsOk)} ${tag(wsOk)}` +
 			`  ${report.workspace.path}`,
 	);
@@ -219,8 +219,8 @@ export function formatDoctorReport(report: DoctorReport): string {
 	// Config
 	const cfgOk = report.config.valid;
 	lines.push(
-		``,
-		`  \x1b[1mConfiguration\x1b[0m` +
+		"",
+		"  \x1b[1mConfiguration\x1b[0m" +
 			`  ${icon(cfgOk)} ${tag(cfgOk)}` +
 			`  ${report.config.path ?? dim("defaults only")}`,
 	);
@@ -233,8 +233,8 @@ export function formatDoctorReport(report: DoctorReport): string {
 
 	// Backend
 	lines.push(
-		``,
-		`  \x1b[1mBackend\x1b[0m` +
+		"",
+		"  \x1b[1mBackend\x1b[0m" +
 			`  ${dim("not probed")}` +
 			`  ${report.backend.baseUrl}`,
 	);
@@ -250,8 +250,8 @@ export function formatDoctorReport(report: DoctorReport): string {
 		{ name: "fd", ver: report.dependencies.fd ? "found" : "missing", ok: report.dependencies.fd },
 	];
 	lines.push(
-		``,
-		`  \x1b[1mDependencies\x1b[0m` +
+		"",
+		"  \x1b[1mDependencies\x1b[0m" +
 			`  ${deps.every((d) => d.ok) ? tag(true) : tag(false)}`,
 	);
 	for (const d of deps) {
@@ -263,16 +263,16 @@ export function formatDoctorReport(report: DoctorReport): string {
 
 	// MCP
 	lines.push(
-		``,
-		`  \x1b[1mMCP Servers\x1b[0m` +
+		"",
+		"  \x1b[1mMCP Servers\x1b[0m" +
 			`  ${dim("not probed")}` +
 			`  ${report.mcp.configured} configured`,
 	);
 
 	// Skills
 	lines.push(
-		``,
-		`  \x1b[1mSkills\x1b[0m` +
+		"",
+		"  \x1b[1mSkills\x1b[0m" +
 			`  ${icon(report.skills.warnings === 0)} ${warnTag(report.skills.warnings)}` +
 			`  ${report.skills.loaded} loaded`,
 	);
@@ -285,8 +285,8 @@ export function formatDoctorReport(report: DoctorReport): string {
 
 	// Policies
 	lines.push(
-		``,
-		`  \x1b[1mPolicies\x1b[0m` +
+		"",
+		"  \x1b[1mPolicies\x1b[0m" +
 			`  ${tag(report.permissions.mode !== "denyAll")}`,
 	);
 	lines.push(
@@ -304,14 +304,14 @@ export function formatDoctorReport(report: DoctorReport): string {
 	const sbInfo =
 		sbKind === "bubblewrap"
 			? `bubblewrap${sbExtra}`
-			: `none (approval & path policy)`;
+			: "none (approval & path policy)";
 	lines.push(
-		`    ${pad("sandbox:", 23)}${sbInfo}${sbKind === "bubblewrap" ? `  ${icon(sbOk)}` : ``}`,
+		`    ${pad("sandbox:", 23)}${sbInfo}${sbKind === "bubblewrap" ? `  ${icon(sbOk)}` : ""}`,
 	);
 
 	// Footer
 	lines.push(
-		``,
+		"",
 		`\x1b[1m${thin}\x1b[0m`,
 	);
 

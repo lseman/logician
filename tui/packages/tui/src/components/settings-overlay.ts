@@ -4,10 +4,9 @@
 // (show available options for a selected setting, with enter to apply).
 // Uses the shared popup-utils design system.
 
-import { type Component, clampLineToWidth, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth, RESET } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import {
-	BOX,
 	renderListItem,
 	renderSeparator,
 	renderStatusLine,
@@ -242,7 +241,7 @@ export class SettingsSelectorOverlay implements Component {
 		return this.cachedLines;
 	}
 
-	private renderMainMenu(lines: string[], innerWidth: number, popupWidth: number): void {
+	private renderMainMenu(lines: string[], innerWidth: number, _popupWidth: number): void {
 		if (!this.settings.length) {
 			lines.push(renderStatusLine("No settings available.", innerWidth));
 			return;

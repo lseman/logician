@@ -3,7 +3,7 @@
 // Mirrors PluginManagerOverlay pattern: list, select, confirm, close.
 // Reasoner selection applies to the next turn (never mutates an in-flight run).
 
-import { type Component, clampLineToWidth, visibleWidth } from "../layers/core/tui-core.ts";
+import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import { SelectorController } from "./selector-controller.ts";
 import {

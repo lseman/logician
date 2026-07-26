@@ -586,10 +586,10 @@ void test("sequential tools are barriers without disabling parallel stages", asy
 		() => ({
 			content: "",
 			toolCalls: [
-				{ id: "a", name: "read", arguments: '{"id":"a"}' },
-				{ id: "b", name: "read", arguments: '{"id":"b"}' },
+				{ id: "a", name: "read", arguments: "{\"id\":\"a\"}" },
+				{ id: "b", name: "read", arguments: "{\"id\":\"b\"}" },
 				{ id: "w", name: "write", arguments: "{}" },
-				{ id: "c", name: "read", arguments: '{"id":"c"}' },
+				{ id: "c", name: "read", arguments: "{\"id\":\"c\"}" },
 			],
 			stopReason: "stop",
 		}),
@@ -1101,7 +1101,7 @@ void test("a tool call with unparseable JSON arguments is sanitized before it re
 					id: "call1",
 					name: "write_file",
 					// Truncated mid-argument, as happens when stopReason is "length".
-					arguments: '{"path":"big.txt","content":"start of a huge file that got cut off',
+					arguments: "{\"path\":\"big.txt\",\"content\":\"start of a huge file that got cut off",
 				},
 			],
 			stopReason: "length",

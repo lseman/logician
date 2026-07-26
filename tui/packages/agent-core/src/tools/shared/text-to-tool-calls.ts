@@ -152,7 +152,7 @@ export function parseTextToolCalls(
 					value = argMatch[4];
 				}
 				if (key) {
-					args[key] = parseParameterValue(value || '');
+					args[key] = parseParameterValue(value || "");
 				}
 			}
 			if (Object.keys(args).length > 0) {

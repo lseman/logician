@@ -1,6 +1,6 @@
 // ── Extension event system tests ─────────────────────────────────────────
 
-import test, { describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 import { createExtensionContext } from "../hooks/extensions/context.ts";

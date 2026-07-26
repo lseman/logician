@@ -60,14 +60,12 @@ import type {
 	AgentConfig,
 	AgentEvent,
 	AgentHarnessStreamOptions,
-	AgentHooks,
 	AgentModelConfig,
 	BeforeCompactContext,
 	BeforeCompactResult,
 	EventHandler,
 	Message,
 	QueueMode,
-	ThinkingLevel,
 	Tool,
 } from "./types.ts";
 import type { CompactionSettings } from "../compaction/index.ts";
@@ -75,9 +73,7 @@ import { OutputGuard } from "./guards/output-guard.ts";
 import { validateConfig, throwOnValidationErrors } from "./configuration/config-validator.ts";
 import {
 	createMemoryStore,
-	extractMemoriesFromText,
 	formatMemoryPrompt,
-	retrieveForPrompt,
 	type MemoryStore,
 } from "./memory.ts";
 import {
@@ -811,9 +807,9 @@ export class AgentHarness {
 					name: message.name,
 					timestamp: message.timestamp ?? Date.now(),
 				});
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// Session persistence must never break a completed turn.
-				console.error('[harness] session append failed:', e);
+				console.error("[harness] session append failed:", _e);
 			}
 		}
 	}
@@ -1213,9 +1209,9 @@ export class AgentHarness {
 		try {
 			const fs = require("node:fs");
 			fs.writeFileSync(path, this.memoryStore.serialize());
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			// Ignore persistence errors
-			console.error('[harness] saveMemory failed:', e);
+			console.error("[harness] saveMemory failed:", _e);
 		}
 	}
 
@@ -1225,9 +1221,9 @@ export class AgentHarness {
 			const fs = require("node:fs");
 			const data = fs.readFileSync(path, "utf-8");
 			this.memoryStore.deserialize(data);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			// Ignore load errors
-			console.error('[harness] loadMemory failed:', e);
+			console.error("[harness] loadMemory failed:", _e);
 		}
 	}
 

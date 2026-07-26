@@ -117,7 +117,7 @@ async function loadPluginMcpServerConfigs(): Promise<
 						? raw.mcpServers
 						: raw;
 				if (map && typeof map === "object") Object.assign(servers, map);
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// No .mcp.json — fine.
 			}
 			try {
@@ -130,7 +130,7 @@ async function loadPluginMcpServerConfigs(): Promise<
 				if (manifest?.mcpServers && typeof manifest.mcpServers === "object") {
 					Object.assign(servers, manifest.mcpServers);
 				}
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// No manifest — fine.
 			}
 
@@ -147,7 +147,7 @@ async function loadPluginMcpServerConfigs(): Promise<
 				out[`plugin_${pluginName}_${name}`] = expanded;
 			}
 		}
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// Plugin registry unavailable — plugin servers simply don't load.
 	}
 	return out;

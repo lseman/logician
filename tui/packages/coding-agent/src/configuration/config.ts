@@ -115,14 +115,14 @@ export function validateConfig(
 		if (isValidUrl(obj.baseUrl)) {
 			cfg.baseUrl = configString(obj.baseUrl);
 		} else {
-			warn(warnings, '"baseUrl" must be a valid http/https URL.');
+			warn(warnings, "\"baseUrl\" must be a valid http/https URL.");
 		}
 	}
 	if (obj.llmUrl !== undefined) {
 		if (isValidUrl(obj.llmUrl)) {
 			cfg.llmUrl = configString(obj.llmUrl);
 		} else {
-			warn(warnings, '"llmUrl" must be a valid http/https URL.');
+			warn(warnings, "\"llmUrl\" must be a valid http/https URL.");
 		}
 	}
 
@@ -164,7 +164,7 @@ export function validateConfig(
 				cfg.models = parsed as LogicianTuiConfig["models"];
 			}
 		} else {
-			warn(warnings, '"models" must be an array.');
+			warn(warnings, "\"models\" must be an array.");
 		}
 	}
 	cfg.theme = configString(obj.theme);
@@ -316,7 +316,7 @@ export function validateConfig(
 			}
 			if (paths.length > 0) cfg.allowedPaths = paths;
 		} else {
-			warn(warnings, '"allowedPaths" must be an array.');
+			warn(warnings, "\"allowedPaths\" must be an array.");
 		}
 	}
 
@@ -341,7 +341,7 @@ export function validateConfig(
 	// lsp sub-object.
 	if (obj.lsp !== undefined) {
 		if (typeof obj.lsp !== "object" || obj.lsp === null) {
-			warn(warnings, '"lsp" must be an object.');
+			warn(warnings, "\"lsp\" must be an object.");
 		} else {
 			const l = obj.lsp as Record<string, unknown>;
 			const lc: {
@@ -399,7 +399,7 @@ export function validateConfig(
 	// compaction sub-object.
 	if (obj.compaction !== undefined) {
 		if (typeof obj.compaction !== "object" || obj.compaction === null) {
-			warn(warnings, '"compaction" must be an object.');
+			warn(warnings, "\"compaction\" must be an object.");
 		} else {
 			const c = obj.compaction as Record<string, unknown>;
 			const ccfg: {
@@ -425,7 +425,7 @@ export function validateConfig(
 	// truncation sub-object: universal output/result size caps.
 	if (obj.truncation !== undefined) {
 		if (typeof obj.truncation !== "object" || obj.truncation === null) {
-			warn(warnings, '"truncation" must be an object.');
+			warn(warnings, "\"truncation\" must be an object.");
 		} else {
 			const t = obj.truncation as Record<string, unknown>;
 			const tcfg: TruncationConfig = {};
@@ -456,7 +456,7 @@ export function validateConfig(
 					typeof t.microCompactMaxChars !== "object" ||
 					t.microCompactMaxChars === null
 				) {
-					warn(warnings, '"truncation.microCompactMaxChars" must be an object.');
+					warn(warnings, "\"truncation.microCompactMaxChars\" must be an object.");
 				} else {
 					const m = t.microCompactMaxChars as Record<string, unknown>;
 					const mcfg: NonNullable<TruncationConfig["microCompactMaxChars"]> = {};
@@ -499,7 +499,7 @@ export function validateConfig(
 			obj.plugins === null ||
 			Array.isArray(obj.plugins)
 		) {
-			warn(warnings, '"plugins" must be an object.');
+			warn(warnings, "\"plugins\" must be an object.");
 		} else {
 			cfg.plugins = obj.plugins as Record<string, unknown>;
 		}
@@ -508,7 +508,7 @@ export function validateConfig(
 	// webSearch sub-object.
 	if (obj.webSearch !== undefined) {
 		if (typeof obj.webSearch !== "object" || obj.webSearch === null) {
-			warn(warnings, '"webSearch" must be an object.');
+			warn(warnings, "\"webSearch\" must be an object.");
 		} else {
 			const ws = obj.webSearch as Record<string, unknown>;
 			const wscfg: NonNullable<LogicianTuiConfig["webSearch"]> = {};
@@ -519,7 +519,7 @@ export function validateConfig(
 			}
 			if (ws.baseUrl !== undefined) {
 				if (!isValidUrl(ws.baseUrl)) {
-					warn(warnings, '"webSearch.baseUrl" must be a valid http/https URL.');
+					warn(warnings, "\"webSearch.baseUrl\" must be a valid http/https URL.");
 				} else {
 					wscfg.baseUrl = configString(ws.baseUrl);
 				}
@@ -539,7 +539,7 @@ export function validateConfig(
 	// permissions sub-object.
 	if (obj.permissions !== undefined) {
 		if (typeof obj.permissions !== "object" || obj.permissions === null) {
-			warn(warnings, '"permissions" must be an object.');
+			warn(warnings, "\"permissions\" must be an object.");
 		} else {
 			const perms = obj.permissions as Record<string, unknown>;
 			const percfg: NonNullable<LogicianTuiConfig["permissions"]> = {};
@@ -758,7 +758,7 @@ export function saveConfigField(key: string, value: unknown): boolean {
 		raw[key] = value;
 		writeFileSync(configPath, JSON.stringify(raw, null, 2) + "\n");
 		return true;
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return false;
 	}
 }

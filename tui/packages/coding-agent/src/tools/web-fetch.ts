@@ -41,7 +41,7 @@ export const web_fetch: Tool = {
 		// Basic URL validation
 		try {
 			new URL(url);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return `Error: Invalid URL: ${url}`;
 		}
 
@@ -81,7 +81,7 @@ export const web_fetch: Tool = {
 			const extracted = extractTextFromHtml(html, maxLength);
 
 			return extracted;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			const error = e as Error;
 			if (error.name === "AbortError") {
 				return `Error: Request timed out after ${timeout}ms`;

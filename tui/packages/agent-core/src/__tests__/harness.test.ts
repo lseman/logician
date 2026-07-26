@@ -167,6 +167,7 @@ void test("context-full recovery compacts inside an active turn and persists it"
 });
 
 void test("runtimeState is canonical across streaming, tools, and settlement", async () => {
+	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
 	let harness!: AgentHarness;
 	const phases: Array<[string, string]> = [];
 	const tool = {
@@ -276,6 +277,7 @@ void test("nextTurn queue survives until the next prompt and is injected before 
 });
 
 void test("nextTurn queued during a run waits for the following user prompt", async () => {
+	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
 	let harness!: AgentHarness;
 	const backend = new FakeBackend([
 		() => {
@@ -372,7 +374,7 @@ void test("enabled sessions journal operation and turn boundaries", async () => 
 	]);
 	assert.equal(new Set(events.map((event) => event.operationId)).size, 1);
 
-	appendFileSync(join(session.dirPath, "operations.jsonl"), '{"incomplete":', "utf8");
+	appendFileSync(join(session.dirPath, "operations.jsonl"), "{\"incomplete\":", "utf8");
 	assert.equal(session.loadJournalEvents().length, events.length);
 });
 

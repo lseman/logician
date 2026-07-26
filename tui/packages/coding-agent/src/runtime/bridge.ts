@@ -373,7 +373,7 @@ function parseToolArgs(args: string): Record<string, unknown> | undefined {
 	try {
 		const parsed = JSON.parse(args || "{}");
 		return parsed && typeof parsed === "object" ? parsed : undefined;
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return undefined;
 	}
 }
@@ -403,7 +403,7 @@ function createHookTranscriptPath(cwd: string, sessionId: string): string {
 			})}\n`,
 			"utf8",
 		);
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		return "";
 	}
 	return transcriptPath;
@@ -746,7 +746,7 @@ export class AgentCoreBridge {
 		for (const cb of this.callbacks) {
 			try {
 				cb(event);
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				// Don't let a bad handler kill the bridge
 			}
 		}
@@ -806,7 +806,7 @@ export class AgentCoreBridge {
 
 			this.emit({ type: "turn_start", turn_id: turnId });
 			await harness.prompt(message);
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			const error = e as Error;
 			// Emit a visible error notice so the user sees connection/server
 			// failures in the transcript rather than only in the console.
@@ -880,7 +880,7 @@ export class AgentCoreBridge {
 			this.ensureHarness().setHistory(messages);
 			this.publishContextUsage();
 			return true;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return false;
 		}
 	}
@@ -1093,7 +1093,7 @@ export class AgentCoreBridge {
 					label: "JB prompt",
 					text: `Injected jb.md as the user prompt (${content.length.toLocaleString()} characters).`,
 				});
-			} catch (e: unknown) {
+			} catch (_e: unknown) {
 				this.errorCb?.(e as Error);
 			}
 			return;
@@ -1680,7 +1680,7 @@ export class AgentCoreBridge {
 				this.publishContextUsage();
 			}
 			return restored;
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			return null;
 		}
 	}
@@ -2100,13 +2100,13 @@ export class AgentCoreBridge {
 			let entries: string[];
 			try {
 				entries = await readdirAsync(dir);
-			} catch (e: unknown) {
+			} catch (err: unknown) {
 				// Most plugins have no commands/ dir at all — only a real error
 				// (permissions, etc.) is worth surfacing.
-				if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
+				if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
 					console.error(
 						`[plugins] failed to read commands dir for "${pluginName}":`,
-						e,
+						err,
 					);
 				}
 				continue;
@@ -2117,12 +2117,12 @@ export class AgentCoreBridge {
 				let raw: string;
 				try {
 					raw = await readFileAsync(filePath, "utf8");
-				} catch (e: unknown) {
+				} catch (err: unknown) {
 					// The file was just listed by readdir, so a read failure here
 					// is a genuine anomaly (permissions, race), not "expected".
 					console.error(
 						`[plugins] failed to read command file "${filePath}":`,
-						e,
+						err,
 					);
 					continue;
 				}
@@ -2228,7 +2228,7 @@ export class AgentCoreBridge {
 				cwd: this.config.cwd || process.cwd(),
 				reason,
 			});
-		} catch (e: unknown) {
+		} catch (_e: unknown) {
 			// SessionEnd hooks are best-effort during shutdown/reset.
 		}
 	}
@@ -2261,11 +2261,11 @@ function loadUserSettings(): UserSettings {
 	let raw: string;
 	try {
 		raw = readFileSync(settingsPath, "utf8");
-	} catch (e: unknown) {
+	} catch (err: unknown) {
 		// A missing settings.json is the common case (no user settings yet) —
 		// only a real read error (permissions, etc.) is worth surfacing.
-		if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") {
-			console.error("[settings] failed to read settings.json:", e);
+		if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+			console.error("[settings] failed to read settings.json:", err);
 		}
 		return {};
 	}
@@ -2274,8 +2274,8 @@ function loadUserSettings(): UserSettings {
 		return typeof parsed === "object" && parsed !== null
 			? (parsed as UserSettings)
 			: {};
-	} catch (e: unknown) {
-		console.error("[settings] settings.json is not valid JSON:", e);
+	} catch (_e: unknown) {
+		console.error("[settings] settings.json is not valid JSON:", _e);
 		return {};
 	}
 }
@@ -2329,7 +2329,7 @@ export async function getSkillsDirs(cwd: string): Promise<string[]> {
 			if (!enabled || !onDisk || !installPath) continue;
 			dirs.push(path.join(installPath, "skills"));
 		}
-	} catch (e: unknown) {
+	} catch (_e: unknown) {
 		// Plugin backend may not be ready during early reload
 	}
 
