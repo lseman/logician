@@ -30,17 +30,17 @@ export function isFocusable(c: Component | null): c is Component & Focusable {
  * from Enter and can be handled by the inference-mode binding.
  */
 export function normalizeKeyboardInput(data: string): string {
-	return data.replace(
-		/\x1b\[(\d+);([56])u/g,
-		(sequence, codepointText: string) => {
+	return data
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal CSI escape sequence
+		.replace(/\x1b\[27(?:;1)?u/g, "\x1b")
+		.replace(/\x1b\[(\d+);([56])u/g, (sequence, codepointText: string) => {
 			const codepoint = Number(codepointText);
 			const lowerCodepoint =
 				codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
 			if (lowerCodepoint === 109) return sequence;
 			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
 			return String.fromCharCode(lowerCodepoint & 0x1f);
-		},
-	);
+		});
 }
 
 // ── Cursor marker ────────────────────────────────────────────────────────────
@@ -472,9 +472,7 @@ export class TUI extends Container {
 		// The alt screen gives us a fixed canvas to redraw each frame from the
 		// home position. Bracketed paste makes the terminal wrap pasted text in
 		// \x1b[200~ … \x1b[201~ so the app can distinguish paste from typed input.
-		this.write(
-			"\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[?2004h\x1b[>1u",
-		);
+		this.write("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[?2004h\x1b[>1u");
 
 		this.requestRender(true);
 	}
@@ -615,29 +613,30 @@ export class TUI extends Container {
 				}
 			}
 		}
-		// Handle escape key: close any visible overlay from the stack.
-		if (data === "\x1b") {
-			if (this.overlayStack.length > 0) {
-				const top = this.overlayStack[this.overlayStack.length - 1];
-				const comp = top.component;
-				if (
-					!top.hidden &&
-					"handleInput" in comp &&
-					typeof (comp as Record<string, unknown>).handleInput === "function"
-				) {
-					const action = ((comp as Record<string, unknown>).handleInput as (d: string) => unknown)(data);
-					const actionObj = action as { type?: string } | null;
-					if (actionObj?.type === "close" || actionObj?.type === "cancel") {
-						this.removeOverlay(top.component);
-						return;
-					}
-				}
-			}
-		}
-
 		for (const listener of this.inputListeners) {
 			const result = listener(data);
 			if (result?.consume) return;
+		}
+		// Fallback for overlays not owned by an application-level listener.
+		if (data === "\x1b" && this.overlayStack.length > 0) {
+			const top = this.overlayStack[this.overlayStack.length - 1];
+			const comp = top.component;
+			if (
+				!top.hidden &&
+				"handleInput" in comp &&
+				typeof (comp as Record<string, unknown>).handleInput === "function"
+			) {
+				const action = (
+					(comp as Record<string, unknown>).handleInput as (
+						d: string,
+					) => unknown
+				)(data);
+				const actionObj = action as { type?: string } | null;
+				if (actionObj?.type === "close" || actionObj?.type === "cancel") {
+					this.removeOverlay(top.component);
+					return;
+				}
+			}
 		}
 		if (this.focusedComponent && "handleInput" in this.focusedComponent) {
 			(
@@ -950,7 +949,9 @@ export class TUI extends Container {
 		const maxHeight = entry.options?.maxHeight ?? rendered.length;
 		return rendered.slice(0, maxHeight).map((line) => {
 			const clamped = clampLineToWidth(line, width);
-			return clamped + " ".repeat(Math.max(0, termWidth - visibleWidth(clamped)));
+			return (
+				clamped + " ".repeat(Math.max(0, termWidth - visibleWidth(clamped)))
+			);
 		});
 	}
 

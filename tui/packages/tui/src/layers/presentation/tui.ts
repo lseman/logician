@@ -11,6 +11,7 @@ import { formatContextSize } from "@logician/coding-agent";
 import { AgentCoreBridge } from "@logician/coding-agent/bridge";
 import { saveConfigField } from "@logician/coding-agent/config";
 import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
+import { listProjectFiles } from "@logician/coding-agent/file-mentions";
 import { LoopManager } from "@logician/coding-agent/loop-manager";
 import {
 	GoalManager,
@@ -25,6 +26,7 @@ import {
 } from "@logician/coding-agent/slash-commands";
 import { Transcript, type Turn } from "@logician/coding-agent/transcript";
 import { ChoicePopup } from "../../components/choice-popup.ts";
+import { FileMentionPopup } from "../../components/file-mention-popup.ts";
 import { InputBar } from "../../components/input-bar.ts";
 import {
 	type McpManagerAction,
@@ -35,6 +37,7 @@ import {
 	type ModelSelectorAction,
 	ModelSelectorOverlay,
 } from "../../components/model-selector.ts";
+import { PermissionPopup } from "../../components/permission-popup.ts";
 import {
 	type PluginManagerAction,
 	PluginManagerOverlay,
@@ -45,15 +48,12 @@ import {
 	ReasonerSelectorOverlay,
 } from "../../components/reasoner-selector.ts";
 import { SessionBrowserOverlay } from "../../components/session-manager.ts";
-import { getGitStatus, getGitVersion } from "./git-status.ts";
 import {
 	type SettingDef,
 	type SettingsSelectorAction,
 	SettingsSelectorOverlay,
 } from "../../components/settings-overlay.ts";
 import { SlashPopup } from "../../components/slash-popup.ts";
-import { FileMentionPopup } from "../../components/file-mention-popup.ts";
-import { listProjectFiles } from "@logician/coding-agent/file-mentions";
 import { StatusBar } from "../../components/status-bar.ts";
 import { SteerQueue } from "../../components/steer-queue.ts";
 import {
@@ -61,7 +61,6 @@ import {
 	type ThemeSelectorAction,
 	ThemeSelectorOverlay,
 } from "../../components/theme-selector.ts";
-import { PermissionPopup } from "../../components/permission-popup.ts";
 import { TodoBar } from "../../components/todo/todo-bar.ts";
 import { TranscriptDisplay } from "../../components/transcript-display.ts";
 import { WorkSurface } from "../../components/work-surface.ts";
@@ -76,6 +75,7 @@ import { Container, TUI } from "../core/tui-core.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { getAvailableThemes, setTheme, theme } from "../theme/theme.ts";
+import { getGitStatus, getGitVersion } from "./git-status.ts";
 import { formatStartupMemory } from "./startup-memory.ts";
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
@@ -92,6 +92,7 @@ export class LogicianTUI {
 	private slashPopup: SlashPopup;
 	private fileMentionPopup: FileMentionPopup;
 	private choicePopup: ChoicePopup;
+	private choicePopupPreview = false;
 	private permissionPopup: PermissionPopup;
 	private pluginManager: PluginManagerOverlay;
 	private mcpManager: McpManagerOverlay;
@@ -481,9 +482,7 @@ export class LogicianTUI {
 		const localHandlers: Record<string, (...args: unknown[]) => unknown> = {
 			setThinking: (level: unknown) => {
 				const lvl = typeof level === "string" ? level : String(level);
-				this.thinkingLevel = lvl;
-				this.bridge.setThinkingLevel(lvl);
-				this.statusPanel.update({ thinkingLevel: lvl });
+				this.applyThinkingLevel(lvl);
 				setStatusPhase("ready");
 			},
 			setInferenceMode: (mode: unknown) => {
@@ -512,6 +511,62 @@ export class LogicianTUI {
 				this.transcript.clear();
 				setStatusPhase("ready");
 			},
+			askPreview: () => {
+				this.choicePopupPreview = true;
+				this.choicePopup.setQuestionId("");
+				this.choicePopup.setQuestions([
+					{
+						id: "approach",
+						header: "Approach",
+						question: "How should we approach the next implementation?",
+						choices: [
+							{
+								value: "focused",
+								label: "Focused fix",
+								description:
+									"Make the smallest safe change and keep the current structure.",
+							},
+							{
+								value: "balanced",
+								label: "Balanced refactor",
+								description:
+									"Improve the design while keeping the scope practical.",
+							},
+							{
+								value: "redesign",
+								label: "Full redesign",
+								description:
+									"Rework the experience without preserving the current layout.",
+							},
+						],
+					},
+					{
+						id: "validation",
+						header: "Validation",
+						question: "How much validation should we run?",
+						choices: [
+							{
+								value: "focused",
+								label: "Focused tests",
+								description: "Run the tests closest to the changed behavior.",
+							},
+							{
+								value: "full",
+								label: "Full suite",
+								description: "Run all repository checks before handing off.",
+							},
+						],
+					},
+				]);
+				this.choicePopup.show();
+				const overlay = this.tui.showOverlay(this.choicePopup, {
+					anchor: "aboveInput",
+					align: "left",
+					maxHeight: 22,
+				});
+				overlay.focus();
+				this.tui.requestRender();
+			},
 			version: () => "Logician 0.2.0 (TypeScript runtime)",
 			eoh: (raw: unknown) => this.bridge.eohCommand(String(raw ?? "")),
 			settings: (raw: unknown) => {
@@ -525,7 +580,7 @@ export class LogicianTUI {
 				switch (key.toLowerCase()) {
 					case "thinking":
 						if (!value) return "Usage: /settings thinking <level>";
-						this.bridge.setThinkingLevel(value);
+						this.applyThinkingLevel(value);
 						return `Thinking level: ${value}`;
 					case "model":
 						if (!value) return "Usage: /settings model <name>";
@@ -869,14 +924,15 @@ export class LogicianTUI {
 						const { spawnSync } = await import("node:child_process");
 						const { existsSync } = await import("node:fs");
 						const pathMod = await import("node:path");
-						const bwrapPath = process.env.PATH?.split(pathMod.delimiter)
-							.find((d) => existsSync(pathMod.join(d, "bwrap")))
+						const bwrapPath = process.env.PATH?.split(pathMod.delimiter).find(
+							(d) => existsSync(pathMod.join(d, "bwrap")),
+						)
 							? pathMod.join(
-								process.env.PATH?.split(pathMod.delimiter).find((d) =>
-									existsSync(pathMod.join(d, "bwrap")),
-								)!,
-								"bwrap",
-							)
+									process.env.PATH?.split(pathMod.delimiter).find((d) =>
+										existsSync(pathMod.join(d, "bwrap")),
+									)!,
+									"bwrap",
+								)
 							: null;
 
 						let bwrapVersion = "unknown";
@@ -960,9 +1016,7 @@ export class LogicianTUI {
 							`Running in sandbox (profile: ${profileHint}): ${actualCommand}`,
 						);
 						// Dispatch to the sandbox tool via the bridge
-						void this.bridge.sendSlash(
-							`/sandbox ${actualCommand}`,
-						);
+						void this.bridge.sendSlash(`/sandbox ${actualCommand}`);
 					}
 					this.transcriptDisplay.setTurns(this.transcript.getTurns());
 					this.tui.requestRender();
@@ -1108,8 +1162,16 @@ export class LogicianTUI {
 				const preview = JSON.stringify(event.args ?? {}).slice(0, 500);
 				this.permissionPopup.setToolInfo(event.tool_name, preview);
 				this.permissionPopup.setChoices([
-					{ value: "allow", label: "Allow once", description: "Run this tool for this call only" },
-					{ value: "always", label: "Always allow", description: `Allow ${event.tool_name} without asking` },
+					{
+						value: "allow",
+						label: "Allow once",
+						description: "Run this tool for this call only",
+					},
+					{
+						value: "always",
+						label: "Always allow",
+						description: `Allow ${event.tool_name} without asking`,
+					},
 					{ value: "deny", label: "Deny", description: "Block this tool call" },
 				]);
 				this.permissionPopup.show();
@@ -1126,14 +1188,14 @@ export class LogicianTUI {
 				break;
 			}
 			case "question_request": {
+				this.choicePopupPreview = false;
 				this.choicePopup.setQuestionId(event.question_id);
-				this.choicePopup.setQuestion(event.question);
-				this.choicePopup.setChoices(event.choices);
+				this.choicePopup.setQuestions(event.questions);
 				this.choicePopup.show();
 				const overlay = this.tui.showOverlay(this.choicePopup, {
 					anchor: "aboveInput",
 					align: "left",
-					maxHeight: 18,
+					maxHeight: 24,
 				});
 				overlay.focus();
 				this.tui.requestRender();
@@ -1415,14 +1477,22 @@ export class LogicianTUI {
 		// ── Choice popup handlers ──────────────────────────────────────
 		const handleChoicePopupSubmit = (): void => {
 			const qid = this.choicePopup.getQuestionId();
-			const selected = this.choicePopup.getSelected();
+			const answers = this.choicePopup.getAnswers();
+			if (this.choicePopupPreview) {
+				this.choicePopupPreview = false;
+				this.transcript.addSystemMessage(
+					`Ask preview: ${JSON.stringify(answers)}`,
+				);
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				this.tui.requestRender();
+				return;
+			}
 			if (
 				qid &&
-				selected &&
-				this.bridge.respondToQuestion(qid, selected.value)
+				this.bridge.respondToQuestion(qid, this.choicePopup.getResponseValue())
 			) {
 				this.transcript.addSystemMessage(
-					`Question answered: ${selected.label}`,
+					`Questions answered: ${Object.keys(answers).length}`,
 				);
 			}
 			this.transcriptDisplay.setTurns(this.transcript.getTurns());
@@ -1430,6 +1500,11 @@ export class LogicianTUI {
 		};
 
 		const handleChoicePopupDismiss = (): void => {
+			if (this.choicePopupPreview) {
+				this.choicePopupPreview = false;
+				this.tui.requestRender();
+				return;
+			}
 			const qid = this.choicePopup.getQuestionId();
 			if (qid) {
 				this.bridge.respondToQuestion(qid, "__dismissed__");
@@ -1494,7 +1569,7 @@ export class LogicianTUI {
 			if (this.choicePopup.isVisibleOverlay()) {
 				const action = this.choicePopup.handleInput(data);
 				if (action) {
-					if (action.type === "select") {
+					if (action.type === "submit") {
 						handleChoicePopupSubmit();
 					} else {
 						handleChoicePopupDismiss();
@@ -2196,7 +2271,8 @@ export class LogicianTUI {
 		this.fileMentionPopup.setFiles(files);
 		this.fileMentionPopup.setQuery(query);
 		if (this.fileMentionPopup.hasMatches()) {
-			if (!this.fileMentionPopup.isVisibleOverlay()) this.fileMentionPopup.show();
+			if (!this.fileMentionPopup.isVisibleOverlay())
+				this.fileMentionPopup.show();
 		} else {
 			this.fileMentionPopup.hide();
 		}
@@ -2557,7 +2633,7 @@ export class LogicianTUI {
 				break;
 			}
 			case "thinking level":
-				this.bridge.setThinkingLevel(value);
+				this.applyThinkingLevel(value);
 				this.transcript.addSystemMessage(`Thinking level: ${value}`);
 				break;
 			case "permission mode":
@@ -2619,6 +2695,12 @@ export class LogicianTUI {
 		this.statusPanel.update({ phase: "ready" });
 		this.transcriptDisplay.setTurns(this.transcript.getTurns());
 		this.tui.requestRender();
+	}
+
+	private applyThinkingLevel(level: string): void {
+		this.thinkingLevel = level;
+		this.bridge.setThinkingLevel(level);
+		this.statusPanel.update({ thinkingLevel: level });
 	}
 
 	// ── Start ──────────────────────────────────────────────────────────────

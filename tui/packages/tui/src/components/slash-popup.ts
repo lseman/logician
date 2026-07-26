@@ -13,7 +13,7 @@ import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/t
 
 const MAX_VISIBLE_ENTRIES = 8;
 const getHeaderColor = (): string => theme.fg("header", "");
-const getSelectedColor = (): string => theme.fg("selected", "");
+const getSelectedColor = (): string => theme.fgRaw("selected");
 const getCategoryColor = (cat: SlashCommandCategory): string => {
 	const colors: Record<SlashCommandCategory, string> = {
 		help: "\x1b[36m", session: "\x1b[33m", agent: "\x1b[35m",

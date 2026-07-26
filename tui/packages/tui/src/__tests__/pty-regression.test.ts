@@ -3,12 +3,13 @@ import { cpSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import {
-	runInPty,
-	stripTerminalControls,
-} from "../testing/pty-harness.ts";
-import { normalizeKeyboardInput } from "../layers/core/tui-core.ts";
 import { InputBar } from "../components/input-bar.ts";
+import {
+	type Component,
+	normalizeKeyboardInput,
+	TUI,
+} from "../layers/core/tui-core.ts";
+import { runInPty, stripTerminalControls } from "../testing/pty-harness.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const tsx = path.join(tuiRoot, "node_modules", ".bin", "tsx");
@@ -44,6 +45,8 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 });
 
 void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => {
+	assert.equal(normalizeKeyboardInput("\x1b[27u"), "\x1b");
+	assert.equal(normalizeKeyboardInput("\x1b[27;1u"), "\x1b");
 	assert.equal(normalizeKeyboardInput("\x1b[111;5u"), "\x0f");
 	assert.equal(normalizeKeyboardInput("\x1b[99;5u"), "\x03");
 	assert.equal(normalizeKeyboardInput("\x1b[116;6u"), "\x14");
@@ -88,6 +91,38 @@ void test("Escape clears first and cancels the active turn on second press", () 
 		1,
 		"typing between Escape presses must disarm turn cancellation",
 	);
+});
+
+void test("Escape reaches the dialog owner before the core overlay fallback", () => {
+	const tui = new TUI({} as NodeJS.WriteStream);
+	const dialog: Component & {
+		visible: boolean;
+		handleInput(data: string): { type: "close" } | null;
+	} = {
+		visible: true,
+		render: () => [],
+		handleInput: (data) => (data === "\x1b" ? { type: "close" } : null),
+	};
+	let dismissed = false;
+	tui.showOverlay(dialog);
+	tui.addInputListener((data) => {
+		const action = dialog.handleInput(data);
+		if (action?.type === "close") {
+			dismissed = true;
+			tui.removeOverlay(dialog);
+			return { consume: true };
+		}
+		return undefined;
+	});
+
+	(
+		tui as unknown as {
+			handleInput(data: string): void;
+		}
+	).handleInput(normalizeKeyboardInput("\x1b[27u"));
+
+	assert.equal(dismissed, true);
+	assert.equal(dialog.visible, false);
 });
 
 void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {

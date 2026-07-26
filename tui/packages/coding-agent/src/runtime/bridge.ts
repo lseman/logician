@@ -60,18 +60,18 @@ import {
 	type McpToggleResult,
 } from "../mcp/index.ts";
 import {
+	formatActivatedSkills,
+	formatSkillActivationNotice,
+	SkillActivationSession,
+	type selectSkillsForPrompt,
+} from "../skill-activation.ts";
+import {
 	findSkillByName,
 	formatSkillCatalog,
 	formatSkillInvocation,
 	loadSkills,
 	type Skill,
 } from "../skills.ts";
-import {
-	formatActivatedSkills,
-	SkillActivationSession,
-	formatSkillActivationNotice,
-	selectSkillsForPrompt,
-} from "../skill-activation.ts";
 import { buildDefaultSystemPrompt } from "../system-prompt.ts";
 import {
 	createDefaultTools,
@@ -80,14 +80,14 @@ import {
 import { createReadSkillTool } from "../tools/read-skill.ts";
 import {
 	getDefaultSandboxProfile,
-	setDefaultSandboxProfile,
 	type SandboxProfile,
+	setDefaultSandboxProfile,
 } from "../tools/sandbox.ts";
 import { killAllTrackedChildren } from "../tools/shell.ts";
 import { EohController } from "./eoh-controller.ts";
 import type { ParsedBridgeEvent } from "./events.ts";
-import { formatPluginResult } from "./plugin-result-formatter.ts";
 import { LspManager } from "./lsp-manager.ts";
+import { formatPluginResult } from "./plugin-result-formatter.ts";
 import { createPostEditDiagnosticHooks } from "./post-edit-diagnostics.ts";
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
@@ -562,9 +562,7 @@ export class AgentCoreBridge {
 			getCurrentModel: () => this.getCurrentModel(),
 		});
 		this.projectTrusted = opts.projectTrusted === true;
-		this.configPath = this.projectTrusted
-			? findLogicianConfig(this.cwd)
-			: null;
+		this.configPath = this.projectTrusted ? findLogicianConfig(this.cwd) : null;
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
 		this.mcpEager =
 			process.env.LOGICIAN_MCP === "0" ? false : opts.mcpEager !== false;
@@ -683,8 +681,7 @@ export class AgentCoreBridge {
 					this.emit({
 						type: "question_request",
 						question_id: questionId,
-						question: ctx.question,
-						choices: ctx.choices,
+						questions: ctx.questions,
 					});
 				}),
 			hooks: createPostEditDiagnosticHooks(
@@ -1214,8 +1211,7 @@ export class AgentCoreBridge {
 		this.emit({
 			type: "question_request",
 			question_id: questionId,
-			question,
-			choices,
+			questions: [{ id: "answer", question, choices }],
 		});
 		return questionId;
 	}
@@ -1751,7 +1747,8 @@ export class AgentCoreBridge {
 				this.startupHookResult?.initial_user_message || "",
 			startup_hook_errors: this.startupHookResult?.errors || [],
 			skills_injected: this.skillsInjected
-				? this.loadedSkills.filter((skill) => !skill.disableModelInvocation).length
+				? this.loadedSkills.filter((skill) => !skill.disableModelInvocation)
+						.length
 				: 0,
 			skills_visible: !!this.skillsContext,
 			loaded_skills: this.loadedSkills.map((skill) => ({
@@ -1982,7 +1979,9 @@ export class AgentCoreBridge {
 			result.initial_user_message || "",
 		]
 			.map((item) => String(item || "").trim())
-			.filter((item, index, all) => Boolean(item) && all.indexOf(item) === index);
+			.filter(
+				(item, index, all) => Boolean(item) && all.indexOf(item) === index,
+			);
 		this.pluginSystemContext = contexts.length
 			? `<startup-hook-context>\n${contexts.join("\n\n")}\n</startup-hook-context>`
 			: "";
@@ -2185,9 +2184,7 @@ export class AgentCoreBridge {
 	private async injectSubagents(): Promise<void> {
 		const cwd = this.config.cwd || process.cwd();
 		this.agentDefs = await loadAgentDefinitions([
-			...(this.projectTrusted
-				? [path.join(cwd, ".logician", "agents")]
-				: []),
+			...(this.projectTrusted ? [path.join(cwd, ".logician", "agents")] : []),
 			// Claude Code plugin agents (agents/*.md in each enabled plugin).
 			...this.enabledPluginRoots.map((p) => path.join(p.installPath, "agents")),
 		]);

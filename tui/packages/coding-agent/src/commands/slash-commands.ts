@@ -396,6 +396,17 @@ export function createSlashCommands(
 				return "Transcript cleared.";
 			},
 		),
+		cmd(
+			"/ask-preview",
+			"Preview the interactive ask-user popup",
+			"local",
+			false,
+			{ category: "display", examples: ["/ask-preview"] },
+			() => {
+				localHandlers.askPreview?.();
+				return undefined;
+			},
+		),
 
 		// ── Permissions ──────────────────────────────────────────────────────
 		cmd(

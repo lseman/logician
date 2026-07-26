@@ -2,17 +2,17 @@
 // Rounded-corner overlay for selecting an active model from the configured list.
 // Uses the shared popup-utils design system.
 
-import { type Component } from "../layers/core/tui-core.ts";
-import { SelectorController } from "./selector-controller.ts";
+import type { Component } from "../layers/core/tui-core.ts";
 import {
-	renderListItem,
 	clampPopupLines,
+	type ListItem,
 	POPUP_FRAME_OVERHEAD,
 	parsePopupListNav,
-	renderListPopupFrame,
+	renderListItem,
 	renderListPopupBody,
-	type ListItem,
+	renderListPopupFrame,
 } from "./popup-utils.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 export interface ModelInfo {
 	id: string;
@@ -36,9 +36,10 @@ export class ModelSelectorOverlay implements Component {
 	setModels(models: ModelInfo[]): void {
 		this.models = models;
 		const activeIndex = this.models.findIndex((model) => model.active);
-		this.selection.set(activeIndex >= 0
-			? activeIndex
-			: this.selection.index, this.models.length);
+		this.selection.set(
+			activeIndex >= 0 ? activeIndex : this.selection.index,
+			this.models.length,
+		);
 		this.invalidate();
 	}
 
@@ -101,7 +102,7 @@ export class ModelSelectorOverlay implements Component {
 					label: m.name,
 					metadata: m.url ?? m.id,
 					selected: i === this.selection.index,
-					statusDot: m.active ? "active" : undefined,
+					current: m.active,
 				};
 				return renderListItem(item, innerWidth);
 			},

@@ -46,6 +46,20 @@ void test("file-backed EoH is discoverable", () => {
 	assert.match(command.argHint ?? "", /heuristic\.py/);
 });
 
+void test("ask-user popup preview is discoverable and invokes its local handler", () => {
+	let opened = false;
+	const commands = createSlashCommands(bridge, {
+		askPreview: () => {
+			opened = true;
+		},
+	});
+	const command = commands.find((item) => item.command === "/ask-preview");
+	assert.equal(command?.dispatch, "local");
+	assert.equal(command?.acceptsArgs, false);
+	command?.handler?.("");
+	assert.equal(opened, true);
+});
+
 void test("help renders the live registry and supports topics", () => {
 	const commands = createSlashCommands(bridge, {});
 	const help = commands.find((command) => command.command === "/help");

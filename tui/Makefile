@@ -11,15 +11,11 @@ binary:
 	@$(BUN) install
 	@mkdir -p dist
 	$(BUN) build --target=bun --compile $(ENTRY) --outfile $(BIN)
-	@cp -r themes dist/
 	@chmod +x $(BIN)
 	@echo "Built $(BIN)"
 
 install:
 	npm install
-	@mkdir -p "$${HOME}/.logician/themes"
-	@cp -r themes/* "$$HOME/.logician/themes/" 2>/dev/null || true
-	@echo "Installed themes to $$HOME/.logician/themes/"
 
 dev:
 	npm run dev

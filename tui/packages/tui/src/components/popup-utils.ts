@@ -6,8 +6,14 @@
 //   - Status indicator dots
 //   - Action bar with keyboard hints
 
+import {
+	BOLD,
+	clampLineToWidth,
+	DIM,
+	RESET,
+	visibleWidth,
+} from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
-import { visibleWidth, clampLineToWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
 
 // ── ANSI codes ──────────────────────────────────────────────────────────────
 
@@ -31,16 +37,13 @@ export const BOX = {
 
 // ── Theme helpers ───────────────────────────────────────────────────────────
 
-const getSelectedBg = (): string => theme.fgAsBg("selected");
-const BLACK_FG = "\x1b[38;5;16m";
-
-const getHeaderFg = (): string => theme.fg("header", "");
-const _getSelectedFg = (): string => theme.fg("selected", "");
-const getMuted = (): string => theme.fg("muted", "");
-const getActive = (): string => theme.fg("active", "");
-const getSuccess = (): string => theme.fg("success", "");
-const getError = (): string => theme.fg("error", "");
-const getWarning = (): string => theme.fg("warning", "");
+const getHeaderFg = (): string => theme.fgRaw("header");
+const getSelectedFg = (): string => theme.fgRaw("selected");
+const getMuted = (): string => theme.fgRaw("muted");
+const getActive = (): string => theme.fgRaw("active");
+const getSuccess = (): string => theme.fgRaw("success");
+const getError = (): string => theme.fgRaw("error");
+const getWarning = (): string => theme.fgRaw("warning");
 
 // ── Shared layout constants ─────────────────────────────────────────────────
 
@@ -76,15 +79,16 @@ export function renderPopupFrame(
 	bottomLine: string;
 	innerWidth: number;
 } {
-	const popupWidth =
-		config.width ?? Math.max(48, Math.min(width, 120));
+	const popupWidth = config.width ?? Math.max(48, Math.min(width, 120));
 	const pad = config.padding ?? 1;
 	const innerWidth = Math.max(1, popupWidth - 2 - pad * 2);
 
 	// Header bar with colored background
 	const headerFg = getHeaderFg();
 	const titleText = config.title;
-	const subtitleText = config.subtitle ? ` ${DIM}${config.subtitle}${RESET}` : "";
+	const subtitleText = config.subtitle
+		? ` ${DIM}${config.subtitle}${RESET}`
+		: "";
 	const hintsText = config.hints ? `  ${DIM}${config.hints}${RESET}` : "";
 	const headerContent = `${BOLD}${titleText}${RESET}${subtitleText}${hintsText}`;
 	const headerVisible = visibleWidth(headerContent);
@@ -98,9 +102,7 @@ export function renderPopupFrame(
 
 	// Bottom bar
 	const bottomFg = getMuted();
-	const bottomContent = config.showBottomBar
-		? config.bottomText ?? ""
-		: "";
+	const bottomContent = config.showBottomBar ? (config.bottomText ?? "") : "";
 	const bottomVisible = visibleWidth(bottomContent);
 	const bottomPad = Math.max(0, innerWidth - bottomVisible);
 
@@ -138,6 +140,8 @@ export interface ListItem {
 	metadata?: string;
 	/** Whether this item is selected */
 	selected?: boolean;
+	/** Whether this item is the currently applied value. */
+	current?: boolean;
 	/** Icon or bullet before the label */
 	bullet?: string;
 	/** Badge text with color */
@@ -148,35 +152,22 @@ export interface ListItem {
 	dim?: boolean;
 }
 
-export function renderListItem(
-	item: ListItem,
-	innerWidth: number,
-): string {
+export function renderListItem(item: ListItem, innerWidth: number): string {
 	const pad = 1;
 	const isSelected = !!item.selected;
-	// On a selected row every segment must re-assert the bg after any RESET,
-	// otherwise the background would cut out at the first inner reset.
-	const bg = isSelected ? getSelectedBg() : "";
-	const segReset = isSelected ? `${RESET}${bg}` : RESET;
-
-	// Build left side
 	let left = "";
-
-	// Bullet
-	const bullet = item.bullet ?? (isSelected ? "▸" : " ");
+	const bullet = item.bullet ?? (isSelected ? "❯" : " ");
 	left += isSelected
-		? `${bg}${BLACK_FG}${BOLD}${bullet}${segReset}`
+		? `${getSelectedFg()}${BOLD}${bullet}${RESET}`
 		: `${getMuted()}${bullet}${RESET}`;
 
-	// Badge (if present, render before label)
 	if (item.badge) {
 		const badgeText = `[${item.badge.text}]`;
 		left += isSelected
-			? ` ${bg}${BLACK_FG}${badgeText}${segReset}`
+			? ` ${getSelectedFg()}${badgeText}${RESET}`
 			: ` ${item.badge.color}${badgeText}${RESET}`;
 	}
 
-	// Status dot
 	if (item.statusDot) {
 		const dotColors: Record<string, string> = {
 			green: getSuccess(),
@@ -186,51 +177,40 @@ export function renderListItem(
 			gray: getMuted(),
 			active: getActive(),
 		};
-		const dot = isSelected ? BLACK_FG : (dotColors[item.statusDot] ?? getMuted());
-		left += isSelected ? ` ${bg}${dot}●${segReset}` : ` ${dot}●${RESET}`;
+		const dot = dotColors[item.statusDot] ?? getMuted();
+		left += ` ${dot}●${RESET}`;
 	}
 
 	left += " ";
-
-	// Label
 	if (isSelected) {
-		left += `${bg}${BLACK_FG}${BOLD}${item.label}${segReset}`;
+		left += `${getSelectedFg()}${BOLD}${item.label}${RESET}`;
 	} else {
 		const labelColor = item.dim ? DIM : "";
 		left += `${labelColor}${item.label}${RESET}`;
 	}
+	if (item.current) {
+		left += ` ${getActive()}${BOLD}✓${RESET}`;
+	}
 
-	// Right side (metadata)
 	let right = item.metadata ?? "";
 	if (right) {
 		right = isSelected
-			? `${bg}${BLACK_FG}${right}${segReset}`
+			? `${getActive()}${right}${RESET}`
 			: `${DIM}${right}${RESET}`;
 	}
 
-	// Combine with spacing
 	const leftVisible = visibleWidth(left);
 	const rightVisible = visibleWidth(right);
 	const gap = Math.max(1, innerWidth - leftVisible - rightVisible);
-	const gapFill = isSelected ? `${bg}${" ".repeat(gap)}` : " ".repeat(gap);
-	const content = right ? `${left}${gapFill}${right}` : left;
+	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
 	const padRight = Math.max(0, innerWidth - visibleWidth(content));
-
-	if (isSelected) {
-		return `${bg}${" ".repeat(pad)}${content}${bg}${" ".repeat(
-			padRight + pad,
-		)}${RESET}`;
-	}
 
 	return `${" ".repeat(pad)}${content}${" ".repeat(padRight + pad)}`;
 }
 
 // ── Render a question display ───────────────────────────────────────────────
 
-export function renderQuestion(
-	question: string,
-	innerWidth: number,
-): string {
+export function renderQuestion(question: string, innerWidth: number): string {
 	const pad = 1;
 	const icon = `${getHeaderFg()}❯${RESET}`;
 	const text = `${BOLD}${question}${RESET}`;
@@ -256,48 +236,33 @@ export function renderChoiceOption(
 ): string {
 	const pad = 1;
 	const isSelected = !!option.selected;
-	// On a selected row every segment must re-assert the bg after any RESET,
-	// otherwise the background would cut out at the first inner reset.
-	const bg = isSelected ? getSelectedBg() : "";
-	const segReset = isSelected ? `${RESET}${bg}` : RESET;
-
 	const numLabel = `${index + 1}`;
 
 	let left = "";
 	if (isSelected) {
-		left += `${bg}${BLACK_FG}${BOLD}▸${segReset} `;
+		left += `${getSelectedFg()}${BOLD}❯${RESET} `;
 	} else {
 		left += `${DIM}${numLabel}${RESET}  `;
 	}
 
-	// Label
 	if (isSelected) {
-		left += `${bg}${BLACK_FG}${BOLD}${option.label}${segReset}`;
+		left += `${getSelectedFg()}${BOLD}${option.label}${RESET}`;
 	} else {
 		left += `${option.label}${RESET}`;
 	}
 
-	// Description
 	let right = "";
 	if (option.description) {
 		right = isSelected
-			? `${bg}${BLACK_FG}${option.description}${segReset}`
+			? `${getActive()}${option.description}${RESET}`
 			: `${DIM}${option.description}${RESET}`;
 	}
 
-	// Combine
 	const leftVisible = visibleWidth(left);
 	const rightVisible = visibleWidth(right);
 	const gap = Math.max(1, innerWidth - leftVisible - rightVisible);
-	const gapFill = isSelected ? `${bg}${" ".repeat(gap)}` : " ".repeat(gap);
-	const content = right ? `${left}${gapFill}${right}` : left;
+	const content = right ? `${left}${" ".repeat(gap)}${right}` : left;
 	const padRight = Math.max(0, innerWidth - visibleWidth(content));
-
-	if (isSelected) {
-		return `${bg}${" ".repeat(pad)}${content}${bg}${" ".repeat(
-			padRight + pad,
-		)}${RESET}`;
-	}
 
 	return `${" ".repeat(pad)}${content}${" ".repeat(padRight + pad)}`;
 }
@@ -362,27 +327,41 @@ export interface ListPopupFrameOptions {
 /** Renders the shared top-rule/title/separator/body/bottom-bar/bottom-rule frame used by list popups. */
 export function renderListPopupFrame(opts: ListPopupFrameOptions): string[] {
 	const headerFg = getHeaderFg();
+	const border = theme.fg("borderMuted", "");
 	const lines: string[] = [];
+	const framed = (content = ""): string => {
+		const clipped = clampLineToWidth(content, Math.max(1, opts.popupWidth - 2));
+		return `${border}│${RESET}${clipped}${" ".repeat(
+			Math.max(0, opts.popupWidth - 2 - visibleWidth(clipped)),
+		)}${border}│${RESET}`;
+	};
 
-	lines.push(`${headerFg}${"─".repeat(opts.popupWidth)}${getMuted()}`);
+	lines.push(
+		`${border}╭${"─".repeat(Math.max(0, opts.popupWidth - 2))}╮${RESET}`,
+	);
 
 	const subtitleText = opts.subtitle ?? "";
-	const titleLine = `${opts.title}${getMuted()}${subtitleText}${opts.hints}`;
+	const titleLine = ` ${headerFg}${BOLD}${opts.title}${RESET}${getMuted()}${subtitleText}${RESET}`;
 	const titleVisible = visibleWidth(titleLine);
 	const titlePad = Math.max(0, opts.innerWidth - titleVisible);
-	lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+	lines.push(framed(`${titleLine}${" ".repeat(titlePad + 1)}`));
+	lines.push(framed());
 
 	if (opts.extraHeaderLines) {
 		for (const line of opts.extraHeaderLines) {
-			lines.push(renderStatusLine(line, opts.innerWidth));
+			lines.push(framed(renderStatusLine(line, opts.innerWidth)));
 		}
 	}
 
-	lines.push(renderSeparator(opts.popupWidth));
-	lines.push(...opts.bodyLines);
-	lines.push(renderSeparator(opts.popupWidth));
-	lines.push(renderStatusLine(opts.bottomText, opts.innerWidth));
-	lines.push(`${headerFg}${"─".repeat(opts.popupWidth)}${getMuted()}`);
+	for (const bodyLine of opts.bodyLines) lines.push(framed(bodyLine));
+	lines.push(framed());
+	if (opts.bottomText) {
+		lines.push(framed(renderStatusLine(opts.bottomText, opts.innerWidth)));
+	}
+	lines.push(framed(renderStatusLine(opts.hints.trim(), opts.innerWidth)));
+	lines.push(
+		`${border}╰${"─".repeat(Math.max(0, opts.popupWidth - 2))}╯${RESET}`,
+	);
 
 	return lines;
 }
@@ -390,7 +369,9 @@ export function renderListPopupFrame(opts: ListPopupFrameOptions): string[] {
 /** Renders a windowed list body (with "N more" indicators) using the shared SelectorController window. */
 export function renderListPopupBody<T>(
 	items: T[],
-	selection: { window(count: number, maxRows: number): { start: number; end: number } },
+	selection: {
+		window(count: number, maxRows: number): { start: number; end: number };
+	},
 	innerWidth: number,
 	maxRows: number,
 	renderItem: (item: T, index: number) => string,

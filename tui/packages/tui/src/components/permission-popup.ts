@@ -2,18 +2,15 @@
 // Rounded-corner overlay for tool permission requests with selectable
 // allow-once / always-allow / deny options.
 
+import type { Component } from "../layers/core/tui-core.ts";
 import {
-	type Component,
-	visibleWidth,
-} from "../layers/core/tui-core.ts";
-import { theme } from "../layers/theme/theme.ts";
-import {
+	type ChoiceOption,
+	clampPopupLines,
+	renderChoiceOption,
+	renderListPopupFrame,
 	renderQuestion,
 	renderSeparator,
 	renderStatusLine,
-	clampPopupLines,
-	type ChoiceOption,
-	renderChoiceOption,
 } from "./popup-utils.ts";
 
 export interface PermissionChoice {
@@ -120,22 +117,22 @@ export class PermissionPopup implements Component {
 		// Single-letter shortcuts: a=allow, v=always, n=deny
 		if (data.length === 1) {
 			const lower = data.toLowerCase();
-			if (lower === "a" && this.choices.some(c => c.value === "allow")) {
-				const idx = this.choices.findIndex(c => c.value === "allow");
+			if (lower === "a" && this.choices.some((c) => c.value === "allow")) {
+				const idx = this.choices.findIndex((c) => c.value === "allow");
 				if (idx !== -1) {
 					this.selectedIndex = idx;
 					return { type: "select", choice: this.choices[idx] };
 				}
 			}
-			if (lower === "v" && this.choices.some(c => c.value === "always")) {
-				const idx = this.choices.findIndex(c => c.value === "always");
+			if (lower === "v" && this.choices.some((c) => c.value === "always")) {
+				const idx = this.choices.findIndex((c) => c.value === "always");
 				if (idx !== -1) {
 					this.selectedIndex = idx;
 					return { type: "select", choice: this.choices[idx] };
 				}
 			}
-			if (lower === "n" && this.choices.some(c => c.value === "deny")) {
-				const idx = this.choices.findIndex(c => c.value === "deny");
+			if (lower === "n" && this.choices.some((c) => c.value === "deny")) {
+				const idx = this.choices.findIndex((c) => c.value === "deny");
 				if (idx !== -1) {
 					this.selectedIndex = idx;
 					return { type: "select", choice: this.choices[idx] };
@@ -161,43 +158,25 @@ export class PermissionPopup implements Component {
 
 		const popupWidth = Math.max(48, Math.min(width, 120));
 		const innerWidth = Math.max(1, popupWidth - 4);
-		const lines: string[] = [];
-
-		const headerFg = theme.fg("header", "");
-		const muted = theme.fg("muted", "");
+		const bodyLines: string[] = [];
 		const dim = "\x1b[2m";
 		const reset = "\x1b[0m";
-		const bold = "\x1b[1m";
-
-		// ── Top border ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${muted}`);
-
-		// ── Title row ──
-		const hintsText = " ↑↓ select · enter confirm · esc close";
-		const titleLine = `${bold}Permission${muted} (${this.choices.length})${hintsText}`;
-		const titleVisible = visibleWidth(titleLine);
-		const titlePad = Math.max(0, innerWidth - titleVisible);
-		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
-
-		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
 
 		// ── Tool name ──
-		lines.push(renderQuestion(this.toolName, innerWidth));
+		bodyLines.push(renderQuestion(this.toolName, innerWidth));
 
 		// ── Tool args preview ──
 		if (this.toolArgs) {
-			const argsPreview = this.toolArgs.length > innerWidth
-				? this.toolArgs.slice(0, innerWidth - 3) + "…"
-				: this.toolArgs;
+			const argsPreview =
+				this.toolArgs.length > innerWidth
+					? `${this.toolArgs.slice(0, innerWidth - 3)}…`
+					: this.toolArgs;
 			const argsLine = `${dim}${argsPreview}${reset}`;
-			const argsVisible = visibleWidth(argsLine);
-			const argsPad = Math.max(0, innerWidth - argsVisible);
-			lines.push(` ${argsLine}${" ".repeat(argsPad + 1)}`);
+			bodyLines.push(renderStatusLine(argsLine, innerWidth, ""));
 		}
 
 		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
+		bodyLines.push(renderSeparator(innerWidth + 2));
 
 		// ── Choices ──
 		if (this.choices.length > 0) {
@@ -211,7 +190,7 @@ export class PermissionPopup implements Component {
 			);
 			const end = Math.min(this.choices.length, start + maxRows);
 			if (start > 0) {
-				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
+				bodyLines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
 			}
 			for (let i = start; i < end; i++) {
 				const ch = this.choices[i];
@@ -221,24 +200,30 @@ export class PermissionPopup implements Component {
 					selected: i === this.selectedIndex,
 					description: ch.description,
 				};
-				lines.push(renderChoiceOption(option, innerWidth, i));
+				bodyLines.push(renderChoiceOption(option, innerWidth, i));
 			}
 			if (end < this.choices.length) {
-				lines.push(renderStatusLine(`↓ ${this.choices.length - end} more`, innerWidth));
+				bodyLines.push(
+					renderStatusLine(`↓ ${this.choices.length - end} more`, innerWidth),
+				);
 			}
 		} else {
-			lines.push("");
+			bodyLines.push("");
 		}
 
-		// ── Bottom hint ──
-		lines.push(renderSeparator(popupWidth));
-		const bottomText = this.choices.length > 0
-			? "Select an option to decide."
-			: "Deny by default.";
-		lines.push(renderStatusLine(bottomText, innerWidth));
-
-		// ── Bottom border ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${muted}`);
+		const bottomText =
+			this.choices.length > 0
+				? "Select an option to decide."
+				: "Deny by default.";
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
+			title: "Permission",
+			subtitle: ` (${this.choices.length})`,
+			hints: "↑↓ navigate · enter confirm · esc close",
+			bodyLines,
+			bottomText,
+		});
 
 		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;

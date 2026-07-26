@@ -47,8 +47,12 @@ export interface Tool {
 }
 
 export interface AskUserContext {
-	question: string;
-	choices: Array<{ value: string; label: string }>;
+	questions: Array<{
+		id: string;
+		header?: string;
+		question: string;
+		choices: Array<{ value: string; label: string; description?: string }>;
+	}>;
 }
 
 export interface ToolContext {

@@ -4,14 +4,15 @@
 // (show available options for a selected setting, with enter to apply).
 // Uses the shared popup-utils design system.
 
-import { type Component, visibleWidth, RESET } from "../layers/core/tui-core.ts";
+import { type Component, RESET } from "../layers/core/tui-core.ts";
 import { theme } from "../layers/theme/theme.ts";
 import {
-	renderListItem,
-	renderSeparator,
-	renderStatusLine,
 	clampPopupLines,
 	type ListItem,
+	renderListItem,
+	renderListPopupFrame,
+	renderSeparator,
+	renderStatusLine,
 } from "./popup-utils.ts";
 
 // ── Data types ──────────────────────────────────────────────────────────────
@@ -188,60 +189,45 @@ export class SettingsSelectorOverlay implements Component {
 
 		const popupWidth = Math.max(1, width);
 		const innerWidth = Math.max(1, popupWidth - 4);
-		const lines: string[] = [];
-
-		const headerFg = theme.fg("header", "");
-
-		// ── Top rounded corner ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
-
-		// ── Title row ──
-		if (!this.inDetailView) {
-			const titleText = "Runtime Settings";
-			const subtitleText = ` (${this.settings.length})`;
-			const hintsText = " ↑↓ select · enter detail · esc close";
-			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
-			const titleVisible = visibleWidth(titleLine);
-			const titlePad = Math.max(0, innerWidth - titleVisible);
-			lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
-		} else {
-			const s = this.settings[this.selectedIndex];
-			const subtitle = s ? ` (${s.options.length} options)` : "";
-			const titleText = s?.name ?? "Settings";
-			const hintsText = " ↑↓ select · enter apply · tab back";
-			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitle}${hintsText}`;
-			const titleVisible = visibleWidth(titleLine);
-			const titlePad = Math.max(0, innerWidth - titleVisible);
-			lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
-		}
-
-		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
+		const bodyLines: string[] = [];
 
 		// ── Content ──
 		if (!this.inDetailView) {
-			this.renderMainMenu(lines, innerWidth, popupWidth);
+			this.renderMainMenu(bodyLines, innerWidth, popupWidth);
 		} else {
-			this.renderDetailView(lines, innerWidth, popupWidth);
+			this.renderDetailView(bodyLines, innerWidth, popupWidth);
 		}
 
-		// ── Bottom bar ──
-		lines.push(renderSeparator(popupWidth));
-		const bottomText = this.message
-			? this.message
-			: this.inDetailView
-				? "Select an option to apply."
-				: "Press Enter to configure a setting.";
-		lines.push(renderStatusLine(bottomText, innerWidth));
-
-		// ── Bottom rounded corner ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+		const setting = this.settings[this.selectedIndex];
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
+			title: this.inDetailView
+				? (setting?.name ?? "Settings")
+				: "Runtime Settings",
+			subtitle: this.inDetailView
+				? ` (${setting?.options.length ?? 0} options)`
+				: ` (${this.settings.length})`,
+			hints: this.inDetailView
+				? "↑↓ navigate · enter apply · tab back · esc close"
+				: "↑↓ navigate · enter configure · esc close",
+			bodyLines,
+			bottomText:
+				this.message ||
+				(this.inDetailView
+					? "Select an option to apply."
+					: "Select a setting to configure."),
+		});
 
 		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
-	private renderMainMenu(lines: string[], innerWidth: number, _popupWidth: number): void {
+	private renderMainMenu(
+		lines: string[],
+		innerWidth: number,
+		_popupWidth: number,
+	): void {
 		if (!this.settings.length) {
 			lines.push(renderStatusLine("No settings available.", innerWidth));
 			return;
@@ -268,17 +254,22 @@ export class SettingsSelectorOverlay implements Component {
 				label: s.name,
 				metadata: `(${s.currentValue})`,
 				selected: isSelected,
-				bullet: isSelected ? "▸" : " ",
 			};
 
 			lines.push(renderListItem(item, innerWidth));
 		}
 		if (end < this.settings.length) {
-			lines.push(renderStatusLine(`↓ ${this.settings.length - end} more`, innerWidth));
+			lines.push(
+				renderStatusLine(`↓ ${this.settings.length - end} more`, innerWidth),
+			);
 		}
 	}
 
-	private renderDetailView(lines: string[], innerWidth: number, popupWidth: number): void {
+	private renderDetailView(
+		lines: string[],
+		innerWidth: number,
+		popupWidth: number,
+	): void {
 		const s = this.settings[this.selectedIndex];
 		if (!s) {
 			lines.push(renderStatusLine("No setting selected.", innerWidth));
@@ -294,7 +285,7 @@ export class SettingsSelectorOverlay implements Component {
 						? theme.fg("success", "")
 						: theme.fg("error", "")
 					: theme.fg("active", "");
-			const indicator = `${currentColor}● Current: ${currentMark.label}${RESET}`;
+			const indicator = `${currentColor}Current: ${currentMark.label} ✓${RESET}`;
 			lines.push(renderStatusLine(indicator, innerWidth, ""));
 		}
 
@@ -321,13 +312,8 @@ export class SettingsSelectorOverlay implements Component {
 			const item: ListItem = {
 				label: opt.label,
 				selected: isSelected,
-				bullet: isSelected ? "▸" : " ",
+				current: opt.current,
 			};
-
-			// Current dot
-			if (opt.current) {
-				item.statusDot = "active";
-			}
 
 			// Toggle mark
 			if (typeof opt.toggleOn === "boolean") {
@@ -340,7 +326,9 @@ export class SettingsSelectorOverlay implements Component {
 			lines.push(renderListItem(item, innerWidth));
 		}
 		if (end < s.options.length) {
-			lines.push(renderStatusLine(`↓ ${s.options.length - end} more`, innerWidth));
+			lines.push(
+				renderStatusLine(`↓ ${s.options.length - end} more`, innerWidth),
+			);
 		}
 	}
 

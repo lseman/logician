@@ -46,7 +46,11 @@ export type BridgeEventType =
 
 export interface MemoryUpdateEvent {
 	type: "memory_update";
-	kind: "observations_added" | "reflections_added" | "observations_dropped" | "cleared";
+	kind:
+		| "observations_added"
+		| "reflections_added"
+		| "observations_dropped"
+		| "cleared";
 	count: number;
 	items?: Array<{ id: string; content: string; relevance?: string }>;
 }
@@ -285,8 +289,12 @@ export interface PermissionRequestEvent {
 export interface QuestionRequestEvent {
 	type: "question_request";
 	question_id: string;
-	question: string;
-	choices: Array<{ value: string; label: string }>;
+	questions: Array<{
+		id: string;
+		header?: string;
+		question: string;
+		choices: Array<{ value: string; label: string; description?: string }>;
+	}>;
 }
 
 // Fired after every completed turn — a safe rewind point exists and the
