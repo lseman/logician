@@ -27,6 +27,78 @@ void test("full message updates do not duplicate streamed prefixes", () => {
 	assert.equal(chunks.map((chunk) => chunk.contentText ?? "").join(""), "Hello back");
 });
 
+void test("completed streamed response remains committed when the next turn starts", () => {
+	const transcript = new Transcript();
+	const firstTurn = transcript.addTurn("first question");
+	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
+	transcript.handleEvent({ type: "token", token: "Persistent streamed answer" });
+	transcript.handleEvent({
+		type: "turn_end",
+		turn_id: "turn_1",
+		message: "",
+	});
+
+	transcript.addTurn("second question");
+	transcript.handleEvent({ type: "turn_start", turn_id: "turn_2" });
+
+	assert.equal(
+		transcript.getAssistantContent(firstTurn),
+		"Persistent streamed answer",
+	);
+	assert.equal(firstTurn.assistantMessage?.isComplete, true);
+	assert.ok(
+		firstTurn.assistantMessage?.chunks.every((chunk) => chunk.isComplete),
+	);
+});
+
+void test("empty structured-tool snapshot preserves streamed assistant prose", () => {
+	const transcript = new Transcript();
+	const firstTurn = transcript.addTurn("inspect the project");
+	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
+	transcript.handleEvent({
+		type: "token",
+		token: "I found the relevant implementation.",
+	});
+	transcript.handleEvent({
+		type: "message_update",
+		turnId: "turn_1",
+		message: {
+			role: "assistant",
+			content: "",
+			tool_calls: [{
+				id: "call_1",
+				name: "read_file",
+				arguments: "{\"path\":\"implementation.ts\"}",
+			}],
+		},
+	});
+	transcript.handleEvent({
+		type: "tool_execution_start",
+		tool: "read_file",
+		tool_name: "read_file",
+		tool_call_id: "call_1",
+		tool_args: { path: "implementation.ts" },
+	});
+	transcript.handleEvent({
+		type: "tool_execution_end",
+		tool: "read_file",
+		tool_name: "read_file",
+		tool_call_id: "call_1",
+		result: "contents",
+	});
+	transcript.handleEvent({
+		type: "turn_end",
+		turn_id: "turn_1",
+		message: "",
+	});
+	transcript.addTurn("next question");
+
+	assert.equal(
+		transcript.getAssistantContent(firstTurn),
+		"I found the relevant implementation.",
+	);
+});
+
 void test("terminal snapshot restores output missed after a Skills notice", () => {
 	const transcript = new Transcript();
 	const turn = transcript.addTurn("list tools with ctx batch");

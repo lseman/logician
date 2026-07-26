@@ -117,6 +117,13 @@ function createDefaultState(): SessionState {
 	};
 }
 
+function containsTextualToolMarkup(content: string): boolean {
+	return (
+		/<(?:tool\\?_call|function|parameter)\b/i.test(content) ||
+		/\[\[\s*tool_call\s*\(/i.test(content)
+	);
+}
+
 export class Transcript {
 	private state: SessionState = createDefaultState();
 	private listeners: Array<() => void> = [];
@@ -309,23 +316,46 @@ export class Transcript {
 			.filter((chunk) => chunk.type === "content")
 			.map((chunk) => chunk.contentText ?? "")
 			.join("");
+		let latestContentEnd = message.chunks.length;
+		while (
+			latestContentEnd > 0 &&
+			message.chunks[latestContentEnd - 1].type !== "content"
+		) {
+			latestContentEnd--;
+		}
+		let latestContentStart = latestContentEnd;
+		while (
+			latestContentStart > 0 &&
+			message.chunks[latestContentStart - 1].type === "content"
+		) {
+			latestContentStart--;
+		}
+		const latestRendered = message.chunks
+			.slice(latestContentStart, latestContentEnd)
+			.map((chunk) => chunk.contentText ?? "")
+			.join("");
 		// Textual tool calls stream as ordinary content before agent-core can
 		// promote them. The final snapshot contains structured tool_calls and
 		// sanitized prose, so replace the streamed content instead of trying to
 		// append a suffix to markup that no longer shares the same prefix.
-		if (event.message.tool_calls?.length && full !== rendered) {
+		if (event.message.tool_calls?.length && full !== latestRendered) {
+			// Some providers stream useful prose but return an empty content
+			// snapshot alongside structured tool calls. Empty is not authoritative
+			// unless the streamed run actually contains textual tool-call markup.
+			if (!full && !containsTextualToolMarkup(latestRendered)) return;
 			// A turn may contain several provider messages separated by tools.
 			// Reconcile only the latest contiguous content run, at its original
 			// position. Removing every content chunk would pull completed tools
 			// above prose that was emitted before those tools.
-			let end = message.chunks.length;
-			while (end > 0 && message.chunks[end - 1].type !== "content") end--;
-			let start = end;
-			while (start > 0 && message.chunks[start - 1].type === "content") start--;
-			if (start < end) message.chunks.splice(start, end - start);
+			if (latestContentStart < latestContentEnd) {
+				message.chunks.splice(
+					latestContentStart,
+					latestContentEnd - latestContentStart,
+				);
+			}
 			if (full) {
-				message.chunks.splice(start, 0, {
-					seq: start,
+				message.chunks.splice(latestContentStart, 0, {
+					seq: latestContentStart,
 					type: "content",
 					contentText: full,
 					isComplete: true,
@@ -722,6 +752,12 @@ export class Transcript {
 		const turn = this.getTurnById(event.turn_id);
 		if (turn) {
 			if (turn.assistantMessage) {
+				for (const chunk of turn.assistantMessage.chunks) {
+					chunk.isComplete = true;
+					if (chunk.type === "tool" && chunk.tool) {
+						chunk.tool.isComplete = true;
+					}
+				}
 				turn.assistantMessage.isComplete = true;
 			}
 			turn.isComplete = true;

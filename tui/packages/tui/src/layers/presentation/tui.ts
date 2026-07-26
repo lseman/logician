@@ -61,6 +61,7 @@ import {
 	type ThemeSelectorAction,
 	ThemeSelectorOverlay,
 } from "../../components/theme-selector.ts";
+import { PermissionPopup } from "../../components/permission-popup.ts";
 import { TodoBar } from "../../components/todo/todo-bar.ts";
 import { TranscriptDisplay } from "../../components/transcript-display.ts";
 import { WorkSurface } from "../../components/work-surface.ts";
@@ -91,6 +92,7 @@ export class LogicianTUI {
 	private slashPopup: SlashPopup;
 	private fileMentionPopup: FileMentionPopup;
 	private choicePopup: ChoicePopup;
+	private permissionPopup: PermissionPopup;
 	private pluginManager: PluginManagerOverlay;
 	private mcpManager: McpManagerOverlay;
 	private reasonerSelector: ReasonerSelectorOverlay;
@@ -184,6 +186,7 @@ export class LogicianTUI {
 		this.slashPopup = new SlashPopup();
 		this.fileMentionPopup = new FileMentionPopup();
 		this.choicePopup = new ChoicePopup();
+		this.permissionPopup = new PermissionPopup();
 		this.pluginManager = new PluginManagerOverlay();
 		this.mcpManager = new McpManagerOverlay();
 		this.reasonerSelector = new ReasonerSelectorOverlay();
@@ -1102,11 +1105,20 @@ export class LogicianTUI {
 					toolCallId: event.tool_call_id,
 					toolName: event.tool_name,
 				};
-				const preview = JSON.stringify(event.args ?? {}).slice(0, 200);
-				this.transcript.addSystemMessage(
-					`Permission needed: ${event.tool_name} ${preview}\n` +
-						"Reply y (allow once), a (always allow this tool), or n (deny).",
-				);
+				const preview = JSON.stringify(event.args ?? {}).slice(0, 500);
+				this.permissionPopup.setToolInfo(event.tool_name, preview);
+				this.permissionPopup.setChoices([
+					{ value: "allow", label: "Allow once", description: "Run this tool for this call only" },
+					{ value: "always", label: "Always allow", description: `Allow ${event.tool_name} without asking` },
+					{ value: "deny", label: "Deny", description: "Block this tool call" },
+				]);
+				this.permissionPopup.show();
+				const overlay = this.tui.showOverlay(this.permissionPopup, {
+					anchor: "aboveInput",
+					align: "left",
+					maxHeight: 14,
+				});
+				overlay.focus();
 				this.statusPanel.update({ phase: "permission" });
 				this.statusPanel.stopAnimation();
 				this.transcriptDisplay.setTurns(this.transcript.getTurns());
@@ -1488,6 +1500,36 @@ export class LogicianTUI {
 						handleChoicePopupDismiss();
 					}
 					this.tui.removeOverlay(this.choicePopup);
+				}
+				this.tui.requestRender();
+				return { consume: true };
+			}
+
+			// PermissionPopup — tool permission overlay
+			if (this.permissionPopup.isVisibleOverlay()) {
+				const action = this.permissionPopup.handleInput(data);
+				if (action) {
+					if (action.type === "close") {
+						this.pendingPermission = null;
+						this.transcript.addSystemMessage("Permission request dismissed.");
+					} else {
+						this.bridge.respondToPermission(
+							this.pendingPermission?.toolCallId ?? "",
+							action.choice.value,
+						);
+						this.transcript.addSystemMessage(
+							`Permission ${action.choice.value}: ${this.pendingPermission?.toolName ?? "unknown"}`,
+						);
+					}
+					this.pendingPermission = null;
+					this.permissionPopup.hide();
+					this.tui.removeOverlay(this.permissionPopup);
+					if (action.type !== "close") {
+						this.statusPanel.update({ phase: "streaming" });
+					} else {
+						this.statusPanel.update({ phase: "ready" });
+					}
+					this.transcriptDisplay.setTurns(this.transcript.getTurns());
 				}
 				this.tui.requestRender();
 				return { consume: true };
