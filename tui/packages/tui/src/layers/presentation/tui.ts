@@ -506,7 +506,6 @@ export class LogicianTUI {
 				setStatusPhase("ready");
 			},
 			version: () => "Logician 0.2.0 (TypeScript runtime)",
-			memory: (raw: unknown) => this.bridge.memoryCommand(String(raw ?? "")),
 			eoh: (raw: unknown) => this.bridge.eohCommand(String(raw ?? "")),
 			settings: (raw: unknown) => {
 				const args = String(raw ?? "").trim();

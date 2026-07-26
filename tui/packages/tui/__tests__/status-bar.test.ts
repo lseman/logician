@@ -1,6 +1,6 @@
 // ── StatusBar tests ──────────────────────────────────────────────────────────
 
-import test, { describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import { initTheme } from "../src/layers/theme/theme.ts";
 import { StatusBar } from "../src/components/status-bar.ts";

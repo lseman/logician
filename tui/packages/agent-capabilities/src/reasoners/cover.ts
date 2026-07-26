@@ -29,7 +29,7 @@ export class CoVeReasoner extends BaseReasoner {
 
 	async solve(
 		query: string,
-		initialSolution?: string | undefined | null,
+		_initialSolution?: string | undefined | null,
 	): Promise<ReasoningTrace> {
 		const maxSteps = this.config.maxVerificationSteps ?? 3;
 		const temp = this.config.temperature ?? 0.3;
@@ -41,7 +41,7 @@ export class CoVeReasoner extends BaseReasoner {
 			maxTokens: this.config.maxTokens ?? 1024,
 		});
 
-		const [initialReasoning, initialAnswer] = this._split(initialResponse);
+		this._split(initialResponse);
 
 		// Step 2: Plan verification steps
 		const planPrompt = [

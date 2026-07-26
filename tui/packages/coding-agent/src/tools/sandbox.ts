@@ -12,9 +12,9 @@ import type { Tool, ToolResult } from "@logician/agent-core/core/types.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
+	OutputAccumulator,
 	type TruncationResult,
 } from "./truncate.ts";
-import { OutputAccumulator } from "./truncate.ts";
 import {
 	getShellConfig,
 	getShellEnv,

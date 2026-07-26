@@ -6,7 +6,7 @@
 
 import type { ExtensionAPI } from "@logician/agent-core/extensions/types.ts";
 import { EohEngine } from "./engine.ts";
-import type { EohProblem, EohConfig } from "./types.ts";
+import type { EohProblem } from "./types.ts";
 import { populationStats } from "./population.ts";
 
 // ── Built-in demo problem: Online Bin Packing ─────────────────────────────────
@@ -138,7 +138,6 @@ function buildSelectFn(code: string): (itemSize: number, bins: number[]) => numb
 
 export default function register(api: ExtensionAPI): void {
 	const engine = new EohEngine();
-	let evolutionTask: Promise<void> | null = null;
 	const log: string[] = [];
 
 	function logLine(msg: string): void {
@@ -216,7 +215,7 @@ export default function register(api: ExtensionAPI): void {
 					}
 					const gens = Number(params.generations ?? 5);
 					engine.setMaxGenerations(gens);
-					evolutionTask = engine.run(baseUrl, model).catch((e) => {
+					engine.run(baseUrl, model).catch((e) => {
 						logLine(`Error: ${e instanceof Error ? e.message : String(e)}`);
 					});
 					return { content: `Evolution started (${gens} generations, model=${model})` };
@@ -286,7 +285,7 @@ ${best.code}
 		description: "Start EoH evolution",
 		usage: "/eoh-start [generations]",
 		acceptsArgs: true,
-		handler: async (args, ctx) => {
+		handler: async (args, _ctx) => {
 			const gens = parseInt(args.trim()) || 5;
 			const state = engine.getState();
 			if (state.running) return "Evolution already running";
@@ -350,7 +349,7 @@ ${best.code}
 		description: "Set EoH problem definition from JSON",
 		usage: "/eoh-set-problem <json>",
 		acceptsArgs: true,
-		handler: async (args, ctx) => {
+		handler: async (args, _ctx) => {
 			try {
 				const def = JSON.parse(args.trim()) as {
 					name: string;

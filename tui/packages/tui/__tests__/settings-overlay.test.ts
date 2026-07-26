@@ -1,12 +1,11 @@
 // ── SettingsOverlay tests ────────────────────────────────────────────────────
 
-import test, { describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import { initTheme } from "../src/layers/theme/theme.ts";
 import {
 	SettingsSelectorOverlay,
 	type SettingDef,
-	type SettingsSelectorAction,
 } from "../src/components/settings-overlay.ts";
 
 // Initialize theme before any overlay rendering.
