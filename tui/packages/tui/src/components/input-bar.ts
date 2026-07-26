@@ -112,6 +112,38 @@ export class InputBar implements Component, Focusable {
 		this._invalidate();
 	}
 
+	// ── @-mention detection ────────────────────────────────────────────────
+
+	/**
+	 * The "@partial" token immediately before the cursor, if any (query text
+	 * only, without the "@"). Returns null when the cursor isn't inside an
+	 * active mention — e.g. after whitespace or when there's no "@" on the
+	 * current line segment.
+	 */
+	getActiveMentionQuery(): string | null {
+		const segs = [...segmenter.segment(this.value)].map((s) => s.segment);
+		const before = segs.slice(0, this.cursor).join("");
+		const at = before.lastIndexOf("@");
+		if (at === -1) return null;
+		const token = before.slice(at + 1);
+		if (/\s/.test(token)) return null;
+		return token;
+	}
+
+	/** Replace the active "@partial" token at the cursor with "@path ". */
+	insertMention(path: string): void {
+		const segs = [...segmenter.segment(this.value)].map((s) => s.segment);
+		const before = segs.slice(0, this.cursor).join("");
+		const after = segs.slice(this.cursor).join("");
+		const at = before.lastIndexOf("@");
+		if (at === -1) return;
+		this._pushUndo();
+		const newBefore = `${before.slice(0, at)}@${path} `;
+		this.value = newBefore + after;
+		this.cursor = this._graphemeCount(newBefore);
+		this._invalidate();
+	}
+
 	// ── History ────────────────────────────────────────────────────────────
 
 	pushHistory(text: string): void {

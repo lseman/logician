@@ -52,6 +52,8 @@ import {
 	SettingsSelectorOverlay,
 } from "../../components/settings-overlay.ts";
 import { SlashPopup } from "../../components/slash-popup.ts";
+import { FileMentionPopup } from "../../components/file-mention-popup.ts";
+import { listProjectFiles } from "@logician/coding-agent/file-mentions";
 import { StatusBar } from "../../components/status-bar.ts";
 import { SteerQueue } from "../../components/steer-queue.ts";
 import {
@@ -87,6 +89,7 @@ export class LogicianTUI {
 	private steerQueue: SteerQueue;
 	private inputBar: InputBar;
 	private slashPopup: SlashPopup;
+	private fileMentionPopup: FileMentionPopup;
 	private choicePopup: ChoicePopup;
 	private pluginManager: PluginManagerOverlay;
 	private mcpManager: McpManagerOverlay;
@@ -179,6 +182,7 @@ export class LogicianTUI {
 		this.steerQueue = new SteerQueue();
 		this.inputBar = new InputBar();
 		this.slashPopup = new SlashPopup();
+		this.fileMentionPopup = new FileMentionPopup();
 		this.choicePopup = new ChoicePopup();
 		this.pluginManager = new PluginManagerOverlay();
 		this.mcpManager = new McpManagerOverlay();
@@ -1489,6 +1493,37 @@ export class LogicianTUI {
 				return { consume: true };
 			}
 
+			// Inline @-mention autocomplete: same pattern as the slash popup below —
+			// the input bar keeps focus, we only intercept nav/accept keys.
+			if (this.fileMentionPopup.isVisibleOverlay()) {
+				if (data === "\x1b[A" || data === "\x1bOA") {
+					this.fileMentionPopup.moveSelection(-1);
+					this.tui.requestRender();
+					return { consume: true };
+				}
+				if (data === "\x1b[B" || data === "\x1bOB") {
+					this.fileMentionPopup.moveSelection(1);
+					this.tui.requestRender();
+					return { consume: true };
+				}
+				if (data === "\t" || data === "\r" || data === "\n") {
+					const file = this.fileMentionPopup.currentFile();
+					if (file) {
+						this.inputBar.insertMention(file);
+					}
+					this.fileMentionPopup.hide();
+					this.tui.requestRender();
+					return { consume: true };
+				}
+				if (data === "\x1b") {
+					this.fileMentionPopup.hide();
+					this.tui.requestRender();
+					return { consume: true };
+				}
+				// Everything else (typing, backspace, etc.) goes to the input bar; the
+				// onChange hook re-syncs the popup query afterwards.
+			}
+
 			// Inline slash autocomplete: while the popup is showing matches, the
 			// input bar keeps focus and ordinary typing flows through to it. We only
 			// intercept the navigation/accept keys here.
@@ -1631,6 +1666,14 @@ export class LogicianTUI {
 			} else if (this.slashPopup.isVisibleOverlay()) {
 				this.slashPopup.hide();
 			}
+
+			const mentionQuery = this.inputBar.getActiveMentionQuery();
+			if (mentionQuery !== null) {
+				void this.updateFileMentionPopup(mentionQuery);
+			} else if (this.fileMentionPopup.isVisibleOverlay()) {
+				this.fileMentionPopup.hide();
+			}
+
 			this.tui.requestRender();
 		};
 
@@ -1878,6 +1921,11 @@ export class LogicianTUI {
 			align: "left",
 			maxHeight: 12,
 		});
+		this.tui.showOverlay(this.fileMentionPopup, {
+			anchor: "aboveInput",
+			align: "left",
+			maxHeight: 12,
+		});
 		this.tui.showOverlay(this.pluginManager, {
 			anchor: "aboveInput",
 			align: "left",
@@ -2083,6 +2131,33 @@ export class LogicianTUI {
 		this.statusPanel.update({ phase: "ready" });
 		this.transcript.addSystemMessage(`Reasoning mode: ${reasoner.name}`);
 		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.tui.requestRender();
+	}
+
+	// ── File mention autocomplete ────────────────────────────────────────
+
+	private fileMentionListedCwd: string | null = null;
+	private fileMentionListing: Promise<string[]> | null = null;
+
+	private async updateFileMentionPopup(query: string): Promise<void> {
+		const cwd = process.cwd();
+		if (this.fileMentionListedCwd !== cwd || !this.fileMentionListing) {
+			this.fileMentionListedCwd = cwd;
+			this.fileMentionListing = listProjectFiles(cwd);
+		}
+		const files = await this.fileMentionListing;
+
+		// The user may have kept typing (or dismissed the mention) while the
+		// listing was in flight; only apply this result if still relevant.
+		if (this.inputBar.getActiveMentionQuery() !== query) return;
+
+		this.fileMentionPopup.setFiles(files);
+		this.fileMentionPopup.setQuery(query);
+		if (this.fileMentionPopup.hasMatches()) {
+			if (!this.fileMentionPopup.isVisibleOverlay()) this.fileMentionPopup.show();
+		} else {
+			this.fileMentionPopup.hide();
+		}
 		this.tui.requestRender();
 	}
 

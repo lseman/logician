@@ -1038,6 +1038,8 @@ async function runAgentLoopInTaskScope(
 				signal: config.signal,
 				internalHooks: config.internalHooks,
 				hooks: config.hooks,
+				permissions: config.permissions,
+				onPermissionRequest: config.onPermissionRequest,
 				emit,
 				emitExtension: (event) => emitTyped(config.extensionBus, event),
 			});

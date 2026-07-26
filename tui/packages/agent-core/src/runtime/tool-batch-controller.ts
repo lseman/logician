@@ -2,9 +2,15 @@ import { createToolResultMessage } from "../core/messages.ts";
 import type { AgentEvent, AgentHooks, Message, ToolCall } from "../core/types.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
+import type { PermissionManager } from "../tools/shared/permissions.ts";
 
 type Emit = (event: AgentEvent) => void | Promise<void>;
 type EmitExtension = (event: TypedExtensionEvent) => Promise<void>;
+type OnPermissionRequest = (ctx: {
+	toolName: string;
+	toolCallId: string;
+	args: Record<string, unknown>;
+}) => Promise<"allow" | "deny" | "always">;
 
 export interface ToolBatchControllerOptions {
 	registry: ToolRegistry;
@@ -15,9 +21,13 @@ export interface ToolBatchControllerOptions {
 	signal?: AbortSignal;
 	internalHooks?: AgentHooks;
 	hooks?: AgentHooks;
+	permissions?: PermissionManager;
+	onPermissionRequest?: OnPermissionRequest;
 	emit: Emit;
 	emitExtension: EmitExtension;
 }
+
+const PERMISSION_DENIED_PREFIX = "Tool call denied";
 
 export interface ToolBatchResult {
 	messages: Message[];
@@ -26,6 +36,41 @@ export interface ToolBatchResult {
 
 const CANCELLED_TOOL_RESULT =
 	"Tool call was not executed because the operation was cancelled.";
+
+/**
+ * Gate a single prepared call behind the permission engine. Returns denial
+ * text to short-circuit execution, or undefined to let it proceed.
+ *
+ * "ask" verdicts need `onPermissionRequest` to resolve interactively; with no
+ * handler wired up (e.g. headless run) an "ask" fails closed as a denial
+ * rather than silently executing.
+ */
+async function evaluatePermission(
+	permissions: PermissionManager,
+	onPermissionRequest: OnPermissionRequest | undefined,
+	call: ToolCall,
+	args: Record<string, unknown>,
+	tool: ReturnType<ToolRegistry["get"]>,
+): Promise<string | undefined> {
+	const verdict = permissions.evaluate(call, args, tool);
+	if (verdict.decision === "allow") return undefined;
+	if (verdict.decision === "deny") {
+		return `${PERMISSION_DENIED_PREFIX}: ${verdict.reason ?? `"${call.name}" is not permitted in the current mode.`}`;
+	}
+
+	// decision === "ask"
+	if (!onPermissionRequest) {
+		return `${PERMISSION_DENIED_PREFIX}: "${call.name}" requires approval, but no interactive handler is available.`;
+	}
+	const answer = await onPermissionRequest({ toolName: call.name, toolCallId: call.id, args });
+	if (answer === "deny") {
+		return `${PERMISSION_DENIED_PREFIX}: the user denied "${call.name}".`;
+	}
+	if (answer === "always") {
+		permissions.addSessionAllow(call.name);
+	}
+	return undefined;
+}
 
 export async function executeToolBatch(options: ToolBatchControllerOptions): Promise<ToolBatchResult> {
 	const { registry, toolCalls, rawStopReason, iteration, signal, emit, emitExtension } = options;
@@ -53,15 +98,30 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		const prepared = registry.prepare(toolCall);
 		await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
 		await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
+
+		let permissionDenial: string | undefined;
+		if (!signal?.aborted && prepared.error === undefined && options.permissions) {
+			permissionDenial = await evaluatePermission(
+				options.permissions,
+				options.onPermissionRequest,
+				prepared.call,
+				prepared.args,
+				registry.get(prepared.call.name),
+			);
+		}
+
 		const context = { toolCall: prepared.call, args: prepared.args, iteration };
-		let before = signal?.aborted
+		let before = signal?.aborted || permissionDenial !== undefined
 			? undefined
 			: await options.internalHooks?.beforeToolCall?.(context, signal);
-		if (!signal?.aborted && before === undefined) {
+		if (!signal?.aborted && permissionDenial === undefined && before === undefined) {
 			before = await options.hooks?.beforeToolCall?.(context, signal);
 		}
 		const immediateContent =
-			before?.content ?? prepared.error ?? (signal?.aborted ? CANCELLED_TOOL_RESULT : undefined);
+			before?.content ??
+			prepared.error ??
+			permissionDenial ??
+			(signal?.aborted ? CANCELLED_TOOL_RESULT : undefined);
 		plans.push({
 			prepared,
 			args: before?.args ?? prepared.args,
@@ -69,6 +129,7 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 			immediateError:
 				before?.isError === true ||
 				prepared.error !== undefined ||
+				permissionDenial !== undefined ||
 				immediateContent === CANCELLED_TOOL_RESULT,
 		});
 	}

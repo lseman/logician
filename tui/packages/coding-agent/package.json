@@ -28,7 +28,8 @@
 		"./trust": "./src/trust/index.ts",
 		"./trust/*": "./src/trust/*",
 		"./tools": "./src/tools/index.ts",
-		"./tools/*": "./src/tools/*"
+		"./tools/*": "./src/tools/*",
+		"./file-mentions": "./src/file-mentions.ts"
 	},
 	"scripts": {
 		"test": "tsx --test src/__tests__/*.test.ts",
