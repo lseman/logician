@@ -81,12 +81,12 @@ export const web_fetch: Tool = {
 			const extracted = extractTextFromHtml(html, maxLength);
 
 			return extracted;
-		} catch (_e: unknown) {
-			const error = e as Error;
+		} catch (err: unknown) {
+			const error = err as Error;
 			if (error.name === "AbortError") {
 				return `Error: Request timed out after ${timeout}ms`;
 			}
-			return `Error: ${error.message || String(e)}`;
+			return `Error: ${error.message || String(err)}`;
 		}
 	},
 };

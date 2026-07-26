@@ -62,8 +62,8 @@ export const git: Tool = {
 			});
 			const trimmed = stdout.trim().slice(0, maxOutput);
 			return trimmed + (stdout.length > maxOutput ? "\n... [truncated]" : "");
-		} catch (_e: unknown) {
-			const error = e as {
+		} catch (err: unknown) {
+			const error = err as {
 				name?: string;
 				code?: number | string;
 				message?: string;

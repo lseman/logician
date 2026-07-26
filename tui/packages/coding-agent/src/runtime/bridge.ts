@@ -806,8 +806,8 @@ export class AgentCoreBridge {
 
 			this.emit({ type: "turn_start", turn_id: turnId });
 			await harness.prompt(message);
-		} catch (_e: unknown) {
-			const error = e as Error;
+		} catch (err: unknown) {
+			const error = err as Error;
 			// Emit a visible error notice so the user sees connection/server
 			// failures in the transcript rather than only in the console.
 			this.emit({
@@ -1093,8 +1093,8 @@ export class AgentCoreBridge {
 					label: "JB prompt",
 					text: `Injected jb.md as the user prompt (${content.length.toLocaleString()} characters).`,
 				});
-			} catch (_e: unknown) {
-				this.errorCb?.(e as Error);
+			} catch (err: unknown) {
+				this.errorCb?.(err as Error);
 			}
 			return;
 		}

@@ -151,9 +151,9 @@ export function createWebSearchTool(
 				return t.truncated
 					? `${t.content}\n... [truncated, ${results.length} total results]`
 					: body;
-			} catch (_e: unknown) {
-				const error = e as Error;
-				return `Error: ${error.message || String(e)}`;
+			} catch (err: unknown) {
+				const error = err as Error;
+				return `Error: ${error.message || String(err)}`;
 			}
 		},
 	};

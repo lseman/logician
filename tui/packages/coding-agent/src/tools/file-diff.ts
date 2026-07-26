@@ -46,8 +46,8 @@ export const file_diff: Tool = {
 				maxBuffer: 1024 * 1024,
 			});
 			return summarizeDiff(stdout.trimEnd()) || "(no diff)";
-		} catch (_e: unknown) {
-			const error = e as { stderr?: string; message?: string };
+		} catch (err: unknown) {
+			const error = err as { stderr?: string; message?: string };
 			return `Error: ${error.stderr || error.message || "git diff failed"}`;
 		}
 	},

@@ -105,8 +105,8 @@ export const list_files: Tool = {
 		let entries: string[];
 		try {
 			entries = await ops.readdir(safePath);
-		} catch (_e: unknown) {
-			const message = e instanceof Error ? e.message : String(e);
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
 			return `Error: Cannot read directory: ${message}`;
 		}
 
