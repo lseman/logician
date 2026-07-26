@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
-import { createInterface } from "node:readline/promises";
 import { initTheme, theme, getAvailableThemes } from "./layers/theme/theme.ts";
 import {
 	AgentCoreBridge,
@@ -9,8 +8,56 @@ import {
 	formatDoctorReport,
 	resolveRuntimeConfig,
 } from "@logician/coding-agent/runtime";
-import { resolveTrust } from "@logician/coding-agent/trust";
+import {
+	applyTrustChoice,
+	resolveTrust,
+	resolveTrustInfo,
+	TrustStore,
+} from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./headless-exec.ts";
+import { TrustPromptOverlay, type TrustChoice } from "./components/trust-prompt-overlay.ts";
+import { LogicianTUI } from "./layers/presentation/tui.ts";
+
+/** Show the trust prompt overlay visually, then use readline for input. */
+async function showTrustOverlay(
+	cwd: string,
+	paths: string[],
+): Promise<TrustChoice> {
+	return new Promise((resolve) => {
+		// Initialize a default theme for overlay rendering
+		initTheme();
+
+		const { createInterface } = require("node:readline");
+		const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+		const overlay = new TrustPromptOverlay();
+		overlay.setOptions({ cwd, paths });
+		overlay.show();
+
+		const width = process.stdout.columns ?? 80;
+		const lines = overlay.render(width);
+
+		// Save terminal state and show the overlay
+		process.stdout.write(`\x1b[?25l\x1b[H${lines.join("\n")}\n`);
+
+		rl.question(
+			"\n[y] trust  [p] trust parent  [s] session  [n] deny  [N] deny session → ",
+			(answer: string) => {
+				const choice = parseTrustAnswer(answer.trim().toLowerCase());
+				// Restore terminal state
+				process.stdout.write(`\x1b[?25h\x1b[${lines.length + 2}A`);
+				resolve(choice);
+			},
+		);
+	});
+}
+
+function parseTrustAnswer(answer: string): TrustChoice {
+	if (answer === "y" || answer === "yes") return "trust";
+	if (answer === "p" || answer === "parent") return "trust-parent";
+	if (answer === "s" || answer === "session") return "session-only";
+	if (answer === "n" || answer === "no" || answer === "deny") return "deny";
+	return "deny-session";
+}
 
 function defaultProjectTrust(): "ask" | "always" | "never" {
 	const value = process.env.LOGICIAN_TRUST?.trim().toLowerCase();
@@ -60,32 +107,41 @@ async function main(): Promise<void> {
 		process.exitCode = report.config.valid && report.workspace.present ? 0 : 1;
 		return;
 	}
-	const trust = await resolveTrust({
-		cwd,
-		hasUI: Boolean(process.stdin.isTTY && process.stdout.isTTY),
-		defaultProjectTrust: defaultProjectTrust(),
-		onSelectTrust: async (prompt) => {
-			const readline = createInterface({
-				input: process.stdin,
-				output: process.stdout,
-			});
-			try {
-				const answer = (
-					await readline.question(
-						`${prompt}\n\n[y] trust  [p] trust parent  [s] session only  [n] deny: `,
-					)
-				).trim().toLowerCase();
-				if (answer === "y" || answer === "yes") return "trust";
-				if (answer === "p" || answer === "parent") return "trust-parent";
-				if (answer === "s" || answer === "session") return "session-only";
-				return "deny-session";
-			} finally {
-				readline.close();
+	// Detect terminal mode
+	const hasUI = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
+	// ── Resolve trust ─────────────────────────────────────────────────────
+
+	let loadProjectConfig = false;
+
+	if (hasUI) {
+		// ── TUI mode: show trust overlay ─────────────────────────────────
+		const trustInfo = resolveTrustInfo(cwd, defaultProjectTrust());
+
+		if (trustInfo.preDecided) {
+			loadProjectConfig = trustInfo.preDecidedResult!.trusted;
+		} else {
+			// Show trust overlay via readline (visually formatted)
+			const choice = await showTrustOverlay(cwd, trustInfo.paths);
+			const store = new TrustStore();
+			const result = applyTrustChoice(store, choice, cwd);
+			if (!result.trusted) {
+				process.exit(1);
 			}
-		},
-	});
+			loadProjectConfig = true;
+		}
+	} else {
+		// ── CLI mode: resolve trust silently or with readline ────────────
+		const trust = await resolveTrust({
+			cwd,
+			hasUI: false,
+			defaultProjectTrust: defaultProjectTrust(),
+		});
+		loadProjectConfig = trust.trusted;
+	}
+
 	const runtimeConfig = resolveRuntimeConfig(cwd, process.env, {
-		loadProjectConfig: trust.trusted,
+		loadProjectConfig,
 	});
 
 	// Initialize theme before any component rendering
@@ -98,7 +154,6 @@ async function main(): Promise<void> {
 		console.error(`Theme: ${theme.name} (available: ${themes.join(", ")})`);
 	}
 
-	const { LogicianTUI } = await import("./layers/presentation/tui.ts");
 	const tui = new LogicianTUI(runtimeConfig);
 
 	// Graceful shutdown

@@ -95,6 +95,43 @@ void test("does not activate on weak generic overlap", () => {
 	);
 });
 
+void test("fuzzy matches misspelled skill routing metadata", () => {
+	const debugging = skill(
+		"typescript-debugging",
+		"Diagnose TypeScript errors and runtime failures.",
+		{ triggers: ["TypeScript debugging", "runtime exception"] },
+	);
+	const review = skill(
+		"typescript-code-review",
+		"Review TypeScript code for correctness.",
+		{ triggers: ["TypeScript code review"] },
+	);
+
+	const result = selectSkillsForPrompt(
+		[review, debugging],
+		"Please help with this Typescrpit debuging failure.",
+	);
+
+	assert.deepEqual(result.map(({ skill: selected }) => selected.name), [
+		"typescript-debugging",
+	]);
+	assert.match(result[0].reason, /fuzzy matched.*\d+%/);
+});
+
+void test("fuzzy matching rejects unrelated routing metadata", () => {
+	const release = skill("release-maintenance", "Manage software releases.", {
+		triggers: ["publish release", "version maintenance"],
+	});
+
+	assert.deepEqual(
+		selectSkillsForPrompt(
+			[release],
+			"Please investigate a runtime rendering failure.",
+		),
+		[],
+	);
+});
+
 void test("formats full selected skill bodies for the turn", () => {
 	const selected = skill("typescript-debugging", "Diagnose TypeScript errors.");
 	const formatted = formatActivatedSkills([

@@ -151,16 +151,31 @@ function scoreSkill(
 	for (const name of lookupNames) {
 		if (phraseMatches(prompt, promptTokens, name, 0.66)) {
 			consider(24, `matched “${name}”`);
+		} else {
+			const similarity = fuzzyPhraseSimilarity(promptTokens, name);
+			if (similarity >= 0.86) {
+				consider(18, fuzzyReason(name, similarity));
+			}
 		}
 	}
 	for (const trigger of skill.triggers ?? []) {
 		if (phraseMatches(prompt, promptTokens, trigger, 0.66)) {
 			consider(20, `matched “${trigger}”`);
+		} else {
+			const similarity = fuzzyPhraseSimilarity(promptTokens, trigger);
+			if (similarity >= 0.84) {
+				consider(17, fuzzyReason(trigger, similarity));
+			}
 		}
 	}
 	for (const example of skill.exampleQueries ?? []) {
 		if (phraseMatches(prompt, promptTokens, example, 0.7)) {
 			consider(16, `similar to “${example}”`);
+		} else {
+			const similarity = fuzzyPhraseSimilarity(promptTokens, example);
+			if (similarity >= 0.82) {
+				consider(13, fuzzyReason(example, similarity));
+			}
 		}
 	}
 
@@ -190,6 +205,68 @@ function phraseMatches(
 	if (!meaningful.length) return false;
 	const overlap = meaningful.filter((token) => promptTokens.has(token)).length;
 	return overlap >= 2 && overlap / meaningful.length >= minCoverage;
+}
+
+/**
+ * Match authored routing phrases against prompt tokens while tolerating small
+ * insertions, deletions, and substitutions. Each phrase token must have a close
+ * prompt token; this keeps fuzzy matching useful for typos without turning it
+ * into broad semantic matching.
+ */
+function fuzzyPhraseSimilarity(
+	promptTokens: Set<string>,
+	value: string,
+): number {
+	const candidateTokens = tokens(value);
+	if (!candidateTokens.length || !promptTokens.size) return 0;
+
+	let total = 0;
+	for (const candidate of candidateTokens) {
+		let best = 0;
+		for (const promptToken of promptTokens) {
+			best = Math.max(best, normalizedLevenshtein(candidate, promptToken));
+			if (best === 1) break;
+		}
+		if (best < 0.7) return 0;
+		total += best;
+	}
+	return total / candidateTokens.length;
+}
+
+function normalizedLevenshtein(a: string, b: string): number {
+	if (a === b) return 1;
+	if (!a.length || !b.length) return 0;
+	const aCharacters = Array.from(a);
+	const bCharacters = Array.from(b);
+	let previous = Array.from(
+		{ length: bCharacters.length + 1 },
+		(_, index) => index,
+	);
+
+	for (let aIndex = 1; aIndex <= aCharacters.length; aIndex++) {
+		const current = [aIndex];
+		for (let bIndex = 1; bIndex <= bCharacters.length; bIndex++) {
+			const substitutionCost =
+				aCharacters[aIndex - 1] === bCharacters[bIndex - 1] ? 0 : 1;
+			const distance = Math.min(
+				previous[bIndex] + 1,
+				current[bIndex - 1] + 1,
+				previous[bIndex - 1] + substitutionCost,
+			);
+			current.push(distance);
+		}
+		previous = current;
+	}
+
+	return (
+		1 -
+		previous[bCharacters.length] /
+			Math.max(aCharacters.length, bCharacters.length)
+	);
+}
+
+function fuzzyReason(value: string, similarity: number): string {
+	return `fuzzy matched “${value}” (${Math.round(similarity * 100)}%)`;
 }
 
 function tokens(value: string): string[] {

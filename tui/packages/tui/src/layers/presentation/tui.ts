@@ -636,9 +636,7 @@ export class LogicianTUI {
 				const next =
 					this.bridge.getPermissionMode() === "plan" ? "acceptAll" : "plan";
 				this.bridge.setPermissionMode(next);
-				this.statusPanel.update({
-					phase: next === "plan" ? "plan" : "ready",
-				});
+				this.statusPanel.update({ permissionMode: next });
 				return next === "plan"
 					? "Plan mode ON — only read-only tools; the agent should present a plan."
 					: "Plan mode OFF — permission mode back to acceptAll.";
@@ -1586,6 +1584,16 @@ export class LogicianTUI {
 			if (data === "\x0b") {
 				const mode = this.bridge.cycleSandboxMode();
 				this.statusPanel.update({ sandboxMode: mode });
+				this.tui.requestRender();
+				return { consume: true };
+			}
+
+			// Ctrl+P — toggle plan mode (plan ↔ act)
+			if (data === "\x10") {
+				const next =
+					this.bridge.getPermissionMode() === "plan" ? "acceptAll" : "plan";
+				this.bridge.setPermissionMode(next);
+				this.statusPanel.update({ permissionMode: next });
 				this.tui.requestRender();
 				return { consume: true };
 			}

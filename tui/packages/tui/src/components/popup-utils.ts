@@ -302,6 +302,118 @@ export function renderChoiceOption(
 	return `${" ".repeat(pad)}${content}${" ".repeat(padRight + pad)}`;
 }
 
+// ── Shared list-popup navigation + frame ────────────────────────────────────
+// Common to the simple "list, select, confirm, close" overlays (theme/model/
+// reasoner selectors, mcp/plugin managers): identical cache-invalidation,
+// arrow/vim/page-key handling, and top-rule/title/separator/bottom-rule frame.
+
+/** Result of parsing a keypress against the standard list-popup key bindings. */
+export type PopupListNavResult =
+	| { type: "move"; delta: number }
+	| { type: "confirm" }
+	| { type: "close" }
+	| null;
+
+/**
+ * Parses a keypress against the shared list-popup bindings: ↑/k, ↓/j,
+ * PageUp/PageDown (±8), Enter/confirm, Esc/Ctrl-C/q/close. Returns null if
+ * the key isn't one of these — callers should fall through to their own
+ * handling (e.g. space-to-toggle, r-to-refresh) in that case.
+ */
+export function parsePopupListNav(data: string): PopupListNavResult {
+	if (data === "\x1b" || data === "\x03" || data.toLowerCase() === "q") {
+		return { type: "close" };
+	}
+	if (data === "\r" || data === "\n") {
+		return { type: "confirm" };
+	}
+	if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
+		return { type: "move", delta: -1 };
+	}
+	if (data === "\x1b[B" || data === "\x1bOB" || data === "j") {
+		return { type: "move", delta: 1 };
+	}
+	if (data === "\x1b[5~") {
+		return { type: "move", delta: -8 };
+	}
+	if (data === "\x1b[6~") {
+		return { type: "move", delta: 8 };
+	}
+	return null;
+}
+
+export interface ListPopupFrameOptions {
+	popupWidth: number;
+	innerWidth: number;
+	/** Title text, e.g. "Theme" */
+	title: string;
+	/** Subtitle appended after title in muted color, e.g. " (12)" */
+	subtitle?: string;
+	/** Keyboard hints appended after subtitle, e.g. " ↑↓ select · enter confirm · esc close" */
+	hints: string;
+	/** Extra line(s) rendered right after the title row (e.g. a config path), before the separator. */
+	extraHeaderLines?: string[];
+	/** Body lines: the rendered list (or an empty-state status line). */
+	bodyLines: string[];
+	/** Bottom status bar text. */
+	bottomText: string;
+}
+
+/** Renders the shared top-rule/title/separator/body/bottom-bar/bottom-rule frame used by list popups. */
+export function renderListPopupFrame(opts: ListPopupFrameOptions): string[] {
+	const headerFg = getHeaderFg();
+	const lines: string[] = [];
+
+	lines.push(`${headerFg}${"─".repeat(opts.popupWidth)}${getMuted()}`);
+
+	const subtitleText = opts.subtitle ?? "";
+	const titleLine = `${opts.title}${getMuted()}${subtitleText}${opts.hints}`;
+	const titleVisible = visibleWidth(titleLine);
+	const titlePad = Math.max(0, opts.innerWidth - titleVisible);
+	lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+
+	if (opts.extraHeaderLines) {
+		for (const line of opts.extraHeaderLines) {
+			lines.push(renderStatusLine(line, opts.innerWidth));
+		}
+	}
+
+	lines.push(renderSeparator(opts.popupWidth));
+	lines.push(...opts.bodyLines);
+	lines.push(renderSeparator(opts.popupWidth));
+	lines.push(renderStatusLine(opts.bottomText, opts.innerWidth));
+	lines.push(`${headerFg}${"─".repeat(opts.popupWidth)}${getMuted()}`);
+
+	return lines;
+}
+
+/** Renders a windowed list body (with "N more" indicators) using the shared SelectorController window. */
+export function renderListPopupBody<T>(
+	items: T[],
+	selection: { window(count: number, maxRows: number): { start: number; end: number } },
+	innerWidth: number,
+	maxRows: number,
+	renderItem: (item: T, index: number) => string,
+	emptyText: string,
+): string[] {
+	const lines: string[] = [];
+	if (!items.length) {
+		lines.push(renderStatusLine(emptyText, innerWidth, getWarning()));
+		return lines;
+	}
+	const { start, end } = selection.window(items.length, maxRows);
+	if (start > 0) {
+		lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
+	}
+	for (let i = start; i < end; i++) {
+		lines.push(renderItem(items[i], i));
+	}
+	if (end < items.length) {
+		lines.push(renderStatusLine(`↓ ${items.length - end} more`, innerWidth));
+	}
+	return lines;
+}
+
 // ── Clamp all lines to terminal width ───────────────────────────────────────
 
 export function clampPopupLines(lines: string[], width: number): string[] {
