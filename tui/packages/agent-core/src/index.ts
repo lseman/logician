@@ -44,17 +44,14 @@ export type { TaskStatusRecord } from "./core/tasks/task-status-state.ts";
 export type { Task, TaskStatus } from "./core/tasks/todo-state.ts";
 export { getTasks, onTodosChanged } from "./core/tasks/todo-state.ts";
 
-// Compaction (kept at top level for backwards compat).
-// Note: core/messages.ts and compaction/compaction.ts both define
-// estimateTokens (string→number vs message→number) and compactToFit.
-// The messages.ts versions are exported through the barrel; the
-// compaction.ts versions are internal (no export) to avoid collisions.
+// Compaction: single engine shared by harness compact, the loop's
+// context-full retry, and the builtin proactive hook.
 export {
+	compactToFit,
 	estimateContextTokens,
 	shouldCompact,
 	type CompactionSettings,
 	DEFAULT_COMPACTION_SETTINGS,
-	recoverFromContextFull,
 } from "./compaction/index.ts";
 
 // Extensions: TypeScript extension system

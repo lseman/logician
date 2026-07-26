@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { detectsCircling } from "../core/guards/response-patterns.ts";
+import {
+	awaitsUserInput,
+	detectsCircling,
+} from "../core/guards/response-patterns.ts";
 
 // ── detectsCircling ───────────────────────────────────────────────────────
 
@@ -32,4 +35,17 @@ void test("detectsCircling: does not flag non-circling text", () => {
 void test("detectsCircling: requires minimum length", () => {
 	assert.ok(!detectsCircling("ok"));
 	assert.ok(!detectsCircling("done"));
+});
+
+void test("awaitsUserInput: detects final questions and direct input requests", () => {
+	assert.ok(awaitsUserInput("I found two valid approaches. Which one do you prefer?"));
+	assert.ok(awaitsUserInput("Please choose one of the options below:"));
+	assert.ok(awaitsUserInput("I need your confirmation."));
+	assert.ok(awaitsUserInput("Which environment should I use?\n\n1. Staging\n2. Production"));
+});
+
+void test("awaitsUserInput: ignores questions followed by continued work", () => {
+	assert.ok(!awaitsUserInput("What caused this? I will inspect the stack trace next."));
+	assert.ok(!awaitsUserInput("The tests answer the question. Task complete."));
+	assert.ok(!awaitsUserInput(""));
 });

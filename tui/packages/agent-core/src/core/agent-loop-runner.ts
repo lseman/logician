@@ -8,10 +8,11 @@ import {
 	createAssistantMessage,
 	createSystemMessage,
 	convertToLlm as defaultConvertToLlm,
-	compactMessagesForContext,
 	sanitizeToolCallArguments,
 	estimateChatPayloadTokens,
 } from "./messages.ts";
+import { compactToFit } from "../compaction/index.ts";
+import type { CompactableMessage } from "./types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -45,13 +46,8 @@ import {
 	stripTextToolCalls,
 } from "../tools/shared/text-to-tool-calls.ts";
 import { getInferenceMode } from "./configuration/inference-modes.ts";
-import {
-	emitConclusion,
-	lastAssistantContent,
-	lastHadToolCalls,
-	looksComplete,
-	looksNonCommittal,
-} from "../runtime/conclusion-policy.ts";
+import { awaitsUserInput, looksComplete, looksNonCommittal } from "./guards/response-patterns.ts";
+import { emitConclusion, lastAssistantContent, lastHadToolCalls } from "../runtime/conclusion-policy.ts";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
 
@@ -869,11 +865,15 @@ async function runAgentLoopInTaskScope(
 					});
 
 					if (guardResult.action === "compact_then_retry") {
-						const compacted = compactMessagesForContext(messages, {
-							targetTokens: config.contextWindowTokens
-								? Math.floor(config.contextWindowTokens * 0.75)
-								: undefined,
-						});
+						const compacted = await compactToFit(
+							messages as CompactableMessage[],
+							{
+								triggerTokens: 0,
+								targetTokens: config.contextWindowTokens
+									? Math.floor(config.contextWindowTokens * 0.75)
+									: undefined,
+							},
+						);
 						if (!compacted.changed) {
 							await emit({
 								type: "auto_retry_end",
@@ -892,7 +892,7 @@ async function runAgentLoopInTaskScope(
 								source: "runtime",
 							});
 						}
-						messages = compacted.messages;
+						messages = compacted.messages as unknown as Message[];
 						contextWasCompacted = true;
 						config.onContextCompacted?.(messages);
 						await emit({
@@ -930,7 +930,10 @@ async function runAgentLoopInTaskScope(
 			// Fallback: when LLM emits tool calls as text instead of structured
 			// tool_calls array, extract them from the response content.
 			if (toolCalls.length === 0 && response?.content) {
-				const textCalls = parseTextToolCalls(response.content);
+				const textCalls = parseTextToolCalls(
+					response.content,
+					(name) => registry.has(name),
+				);
 				if (textCalls.length > 0) {
 					toolCalls = textCalls;
 					assistantContent = stripTextToolCalls(response.content);
@@ -1228,6 +1231,7 @@ async function runAgentLoopInTaskScope(
 		if (config.continuationEnabled === true && followUps.length === 0) {
 			const text = lastAssistantContent(newMessages);
 			const hadTools = lastHadToolCalls(newMessages);
+			const waitingForUser = awaitsUserInput(text);
 			const hasStructuredStop = getTaskStatus() !== null;
 			const hasAcceptanceReport =
 				shouldRunAcceptanceFinalization(resolved) &&
@@ -1238,6 +1242,7 @@ async function runAgentLoopInTaskScope(
 
 			if (
 				!hadTools &&
+				!waitingForUser &&
 				!hasAcceptanceReport &&
 				(looksNonCommittal(text) || requiresStructuredConclusion) &&
 				!hasStructuredStop &&
@@ -1262,6 +1267,17 @@ async function runAgentLoopInTaskScope(
 		if (followUps.length > 0) {
 			pendingMessages = followUps;
 			continue;
+		}
+
+		// A final question hands control back to the user. It must beat
+		// reflection, acceptance finalization, and all other synthetic turns;
+		// otherwise the loop fabricates an answer by prompting the model again.
+		if (awaitsUserInput(lastAssistantContent(newMessages))) {
+			return finish({
+				status: "needs_input",
+				summary: "Agent is waiting for the user's answer.",
+				source: "heuristic",
+			});
 		}
 
 		// A failed acceptance report is actionable feedback, not an immediate

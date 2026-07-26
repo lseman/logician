@@ -12,7 +12,10 @@ import {
 	type WorkspaceSnapshot,
 } from "../../core/file-checkpoints.ts";
 import type { LoopDetector } from "../../core/guards/loop-detector.ts";
-import { detectsCircling } from "../../core/guards/response-patterns.ts";
+import {
+	awaitsUserInput,
+	detectsCircling,
+} from "../../core/guards/response-patterns.ts";
 import { HookBus } from "../native/hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
@@ -135,7 +138,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	};
 
 	if (compactionEnabled) {
-		hooks.prepareNextTurn = ({ messages, iteration }) => {
+		hooks.prepareNextTurn = async ({ messages, iteration }) => {
 			const max = deps.contextWindowTokens();
 			if (!max || max <= 0) return undefined;
 			if (iteration - lastCompactionTurn < COMPACTION_COOLDOWN_TURNS) {
@@ -143,7 +146,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			}
 			// Shared ladder: estimate → micro → full-if-still-over. Fires at
 			// `fraction` of the window, targets COMPACTION_TARGET_FRACTION.
-			const result = compactToFit(messages as CompactableMessage[], {
+			const result = await compactToFit(messages as CompactableMessage[], {
 				triggerTokens: max * fraction,
 				settings: {
 					contextWindow: Math.round(max * COMPACTION_TARGET_FRACTION * 1.5),
@@ -231,6 +234,10 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// Structured stop beats everything: a task_status call this run is
 			// an explicit done/blocked declaration — never nudge past it.
 			if (getTaskStatus()) return undefined;
+
+			// A final question is an explicit transfer of control to the user.
+			// Pending todos do not authorize the harness to answer it itself.
+			if (awaitsUserInput(assistantText)) return undefined;
 
 			// Length-stop = provider truncated the response mid-output. The model
 			// did not choose to stop; always continue so it can finish its thought.

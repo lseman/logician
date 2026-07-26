@@ -23,7 +23,7 @@ export const NON_COMMITTAL_PATTERNS: ReadonlyArray<RegExp> = [
 // ── Completion patterns ─────────────────────────────────────────────────────
 // Patterns that indicate the model has declared task completion.
 
-export const COMPLETE_PATTERNS: ReadonlyArray<RegExp> = [
+const COMPLETE_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(task\s+complete|all\s+done|finished|completed\s+successfully|nothing\s+(else|more)\s+to\s+do|no\s+(further|more)\s+(steps?|action|work)|that('s|\s+is)\s+(all|done|complete))\b/i,
 	/^done\s*$/i,
 ];
@@ -60,7 +60,7 @@ export const META_REASONING_PATTERNS: ReadonlyArray<RegExp> = [
 // without success. Broader than stop declarations to escalate nudge tone.
 // Stricter to avoid false positives on legitimate multi-step work.
 
-export const CIRCLING_PATTERNS: ReadonlyArray<RegExp> = [
+const CIRCLING_PATTERNS: ReadonlyArray<RegExp> = [
 	// Future retry intent without evidence of a changed strategy.
 	/\b(?:i\s+will|i'll)\s+(?:try|attempt)(?:\s+to)?\b/i,
 	/\b(?:let\s+me|i(?:'m|\s+am)\s+going\s+to)\s+(?:try|attempt)\b/i,
@@ -98,6 +98,46 @@ export function looksNonCommittal(text: string): boolean {
  */
 export function looksComplete(text: string): boolean {
 	return Boolean(text) && COMPLETE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Check whether the assistant ended by handing control back to the user.
+ *
+ * Keep this deliberately focused on the end of the response. Questions used
+ * while explaining or reasoning should not suppress continuation, but a final
+ * question or an explicit request for information must always pause the loop.
+ */
+export function awaitsUserInput(text: string): boolean {
+	const trimmed = text.trim();
+	if (!trimmed) return false;
+
+	// A question at the end may be followed by markdown emphasis or a closing
+	// quote/bracket. Choice lists often follow the actual question, so inspect
+	// the final short block as well as the final character.
+	if (/\?[\s*_`"'”’)\]]*$/.test(trimmed)) return true;
+	const lastQuestion = trimmed.lastIndexOf("?");
+	if (lastQuestion >= 0) {
+		const trailingLines = trimmed
+			.slice(lastQuestion + 1)
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter(Boolean);
+		if (
+			trailingLines.length > 0 &&
+			trailingLines.every((line) =>
+				/^(?:[-*•]|\d+[.)]|[A-Za-z][.)])\s+\S/.test(line)
+			)
+		) {
+			return true;
+		}
+	}
+
+	const tail = trimmed.slice(-800);
+	return (
+		/\b(?:please|kindly)\s+(?:answer|choose|confirm|clarify|provide|select|share|tell me)\b[^.!?]*[.!:]?\s*$/i.test(tail) ||
+		/\b(?:let me know|tell me)\s+(?:which|whether|what|when|where|who|how|if)\b[^.!?]*[.!:]?\s*$/i.test(tail) ||
+		/\b(?:i need|we need)\s+(?:your|the user's)\s+(?:answer|choice|confirmation|decision|input|permission)\b[^.!?]*[.!:]?\s*$/i.test(tail)
+	);
 }
 
 /**

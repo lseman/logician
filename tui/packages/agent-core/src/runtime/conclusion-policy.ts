@@ -1,14 +1,7 @@
 import type { AgentEvent, Message } from "../core/types.ts";
-import {
-	looksComplete as _looksComplete,
-	looksNonCommittal as _looksNonCommittal,
-} from "../core/guards/response-patterns.ts";
+import { awaitsUserInput, looksComplete, looksNonCommittal } from "../core/guards/response-patterns.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
-
-// Re-export for backward compatibility.
-export const looksComplete = _looksComplete;
-export const looksNonCommittal = _looksNonCommittal;
 
 export function lastAssistantContent(messages: Message[]): string {
 	const assistant = [...messages].reverse().find((message) => message.role === "assistant");
@@ -29,7 +22,7 @@ export async function emitConclusion(
 ): Promise<void> {
 	const text = lastAssistantContent(messages);
 	const hadTools = lastHadToolCalls(messages);
-	if (hadTools || looksComplete(text)) return;
+	if (hadTools || looksComplete(text) || awaitsUserInput(text)) return;
 	if (looksNonCommittal(text) && !hadFollowUps) {
 		await emit({ type: "task_failed", reason: `Model stopped with non-committal text after ${iteration} iteration(s). It did not complete the task or produce actionable output.`, iteration, lastContent: text.slice(0, 300) });
 		return;

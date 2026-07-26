@@ -1,42 +1,52 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { compactToFit } from "../compaction/compaction.ts";
 import {
-	compactMessagesForContext,
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
 } from "../core/messages.ts";
-import type { Message } from "../core/types.ts";
+import type { CompactableMessage } from "../core/types.ts";
 
-void test("context compaction progressively tightens until it meets the target", () => {
-	const messages: Message[] = Array.from({ length: 20 }, (_, index) =>
+void test("context compaction progressively tightens until it meets the target", async () => {
+	const messages: CompactableMessage[] = Array.from({ length: 20 }, (_, index) =>
 		createUserMessage(`message ${index} ${"x".repeat(2000)}`),
 	);
-	const result = compactMessagesForContext(messages, { targetTokens: 1200 });
+	const result = await compactToFit(messages, {
+		triggerTokens: 0,
+		targetTokens: 1200,
+	});
 	assert.equal(result.changed, true);
 	assert.ok(result.tokensAfter <= 1200, `${result.tokensAfter} should fit target`);
 	assert.ok(
-		result.messages.some((message) =>
-			String(message.content).includes("context-compaction"),
+		result.messages.some(
+			(message) => message.role === "compactionSummary",
 		),
 	);
 });
 
-void test("context compaction never leaves an orphaned tool result", () => {
+void test("context compaction never leaves an orphaned tool result", async () => {
 	const call = { id: "call_1", name: "read_file", arguments: "{}" };
-	const messages: Message[] = [
+	const messages: CompactableMessage[] = [
 		...Array.from({ length: 8 }, (_, index) => createUserMessage(`old ${index}`)),
 		createAssistantMessage("", [call]),
 		createToolResultMessage(call.id, call.name, "result", false),
 	];
-	const result = compactMessagesForContext(messages, {
+	const result = await compactToFit(messages, {
+		triggerTokens: 0,
 		targetTokens: 1000,
 		keepRecentMessages: 1,
 	});
 	for (let index = 0; index < result.messages.length; index++) {
-		const message = result.messages[index];
+		const message = result.messages[index] as {
+			role: string;
+			tool_call_id?: string;
+		};
 		if (message.role !== "tool") continue;
-		const previous = result.messages[index - 1];
+		const previous = result.messages[index - 1] as {
+			role: string;
+			tool_calls?: Array<{ id: string }>;
+		};
 		assert.equal(previous?.role, "assistant");
 		assert.ok(previous?.tool_calls?.some((toolCall) => toolCall.id === message.tool_call_id));
 	}

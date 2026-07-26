@@ -52,6 +52,8 @@ function parseFunctionArguments(body: string): string {
  */
 export function parseTextToolCalls(
 	content: string,
+	/** When provided, discard candidates that are not registered tools. */
+	isKnownTool?: (name: string) => boolean,
 ): ToolCall[] {
 	if (!content || typeof content !== "string") return [];
 	content = normalizeTextToolMarkup(content);
@@ -168,6 +170,7 @@ export function parseTextToolCalls(
 	// Deduplicate by name+arguments
 	const seen = new Set<string>();
 	return calls.filter((call) => {
+		if (isKnownTool && !isKnownTool(call.name)) return false;
 		const key = `${call.name}:${call.arguments}`;
 		if (seen.has(key)) return false;
 		seen.add(key);

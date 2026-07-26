@@ -890,6 +890,61 @@ void test("continuation still nudges an explicitly unfinished response", async (
 	assert.equal(backend.calls, 2);
 });
 
+void test("continuation pauses when the agent ends in a question", async () => {
+	const backend = new FakeBackend([
+		() => textResponse("I need to inspect one of these environments. Which one should I use?"),
+	]);
+	const events: AgentEvent[] = [];
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("diagnose the issue")],
+		{ ...makeConfig({ continuationEnabled: true }), backend },
+		(event) => {
+			events.push(event);
+		},
+	);
+
+	assert.equal(backend.calls, 1);
+	assert.equal(messages.at(-1)?.role, "assistant");
+	assert.ok(events.some(
+		(event) =>
+			event.type === "run_outcome" &&
+			event.status === "needs_input" &&
+			event.source === "heuristic",
+	));
+});
+
+void test("question after tool work beats the structured-conclusion nudge", async () => {
+	const backend = new FakeBackend([
+		() => ({
+			content: "",
+			toolCalls: [{ id: "work", name: "noop", arguments: "{}" }],
+			stopReason: "stop",
+		}),
+		() => textResponse("The repository has two test suites. Which should I run?"),
+	]);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop, task_status] },
+		[user("make the change")],
+		{
+			...makeConfig({
+				continuationEnabled: true,
+				tools: [noop, task_status],
+			}),
+			backend,
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+
+	assert.equal(backend.calls, 2);
+	assert.ok(events.some(
+		(event) => event.type === "run_outcome" && event.status === "needs_input",
+	));
+});
+
 void test("continuation requires a structured conclusion after tool work", async () => {
 	const backend = new FakeBackend([
 		() => ({

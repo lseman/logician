@@ -109,3 +109,11 @@ void test("parses multiple XML-parameter tool calls with stray markers", () => {
 void test("strips stray markers when no surrounding prose exists", () => {
 	assert.equal(stripTextToolCalls(textualTwoReadFileCalls), "");
 });
+
+void test("does not promote source code that resembles an unknown tool call", () => {
+	const content =
+		'assert.match(catalog, new RegExp(`name="${skill.name}"`));';
+	const calls = parseTextToolCalls(content, (name) => name === "read_file");
+
+	assert.deepEqual(calls, []);
+});

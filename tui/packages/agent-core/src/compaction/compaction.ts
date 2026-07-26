@@ -328,7 +328,8 @@ function findCutPoint(
 	}
 
 	let accumulatedTokens = 0;
-	let cutIndex = cutPoints[0];
+	let cutIndex = endIndex; // No message old enough to cut unless found below.
+	let crossedBudget = false;
 
 	// Walk backwards accumulating tokens
 	for (let i = endIndex - 1; i >= startIndex; i--) {
@@ -336,7 +337,9 @@ function findCutPoint(
 		accumulatedTokens += msgTokens;
 
 		if (accumulatedTokens >= keepRecentTokens) {
+			crossedBudget = true;
 			// Find the nearest valid cut point >= this position
+			cutIndex = cutPoints[0];
 			for (const cp of cutPoints) {
 				if (cp >= i) {
 					cutIndex = cp;
@@ -345,6 +348,17 @@ function findCutPoint(
 			}
 			break;
 		}
+	}
+
+	// Entire range fits within the recent-token budget — nothing to compact.
+	if (!crossedBudget) {
+		return {
+			firstKeptIndex: startIndex,
+			turnStartIndex: -1,
+			isSplitTurn: false,
+			protectedStartIndex: startIndex,
+			protectedEndIndex: endIndex,
+		};
 	}
 
 	// Walk backward past non-message entries (metadata, labels, etc.)
@@ -386,27 +400,34 @@ export interface CompactToFitResult {
 	changed: boolean;
 }
 
+/** Produces the replacement summary text for the older (compacted-away) block. */
+export type CompactionSummarizer = (
+	messages: CompactableMessage[],
+) => Promise<string | null>;
+
 /**
- * Token-budget compaction using the new turn-aware system.
- * Sync version: uses synchronous full compaction with inline structured summary.
- * For LLM-based summarization, use the async `compact()` function directly.
+ * Single entry point for all compaction: harness manual/auto compact, the
+ * loop's context-full retry, and the builtin proactive hook all call this.
  *
  * Sequence:
  *  1. If already under `triggerTokens` and not `force`d, do nothing.
  *  2. Run the cheap micro pass (trim oversized bodies). If that brings the
  *     payload under `triggerTokens`, stop there.
- *  3. Otherwise run the full summarizing pass targeting `targetTokens`.
+ *  3. Otherwise run the full summarizing pass targeting `targetTokens`,
+ *     using `summarize` when supplied (LLM-quality) or falling back to the
+ *     local structured-text summary.
  */
-export function compactToFit(
+export async function compactToFit(
 	messages: CompactableMessage[],
 	opts: {
 		triggerTokens: number;
 		targetTokens?: number;
 		keepRecentMessages?: number;
 		settings?: Partial<CompactionSettings>;
+		summarize?: CompactionSummarizer;
 	},
-): CompactToFitResult {
-	const { triggerTokens, keepRecentMessages, settings } = opts;
+): Promise<CompactToFitResult> {
+	const { triggerTokens, keepRecentMessages, settings, summarize } = opts;
 	const force = triggerTokens <= 0;
 
 	// Estimate current tokens
@@ -440,8 +461,30 @@ export function compactToFit(
 		return { ...micro, changed: micro.tokensAfter < micro.tokensBefore };
 	}
 
-	// Full synchronous summarizing pass
-	return compactToFitSync(micro.messages, effectiveSettings);
+	// Full summarizing pass. Without an explicit target, one pass is enough.
+	const first = await compactToFitFull(micro.messages, effectiveSettings, summarize);
+	if (opts.targetTokens === undefined || first.tokensAfter <= opts.targetTokens) {
+		return first;
+	}
+
+	// Still over target — tighten the kept-recent-tokens budget and retry with
+	// a smaller tail until the target is met or there's nothing left to cut.
+	let best = first;
+	for (const keepRecentTokens of [
+		effectiveSettings.keepRecentTokens / 2,
+		effectiveSettings.keepRecentTokens / 4,
+		effectiveSettings.keepRecentTokens / 8,
+		0,
+	]) {
+		const attempt = await compactToFitFull(
+			micro.messages,
+			{ ...effectiveSettings, keepRecentTokens },
+			summarize,
+		);
+		if (attempt.tokensAfter < best.tokensAfter) best = attempt;
+		if (attempt.tokensAfter <= opts.targetTokens) return attempt;
+	}
+	return best;
 }
 
 // How many trailing messages micro-compaction leaves untouched — the model is
@@ -486,10 +529,11 @@ export function microCompactMessages(
 	};
 }
 
-function compactToFitSync(
+async function compactToFitFull(
 	messages: CompactableMessage[],
 	settings: CompactionSettings,
-): CompactToFitResult {
+	summarize: CompactionSummarizer | undefined,
+): Promise<CompactToFitResult> {
 	// Find the cut point using turn-boundary-aware logic
 	const cutPoint = findCutPoint(
 		messages,
@@ -498,7 +542,7 @@ function compactToFitSync(
 		settings.keepRecentTokens,
 	);
 
-	if (cutPoint.firstKeptIndex >= messages.length) {
+	if (cutPoint.firstKeptIndex >= messages.length || cutPoint.firstKeptIndex <= 0) {
 		return {
 			messages,
 			tokensBefore: estimateContextTokens(messages).tokens,
@@ -508,10 +552,13 @@ function compactToFitSync(
 	}
 
 	const messagesToKeep = messages.slice(cutPoint.firstKeptIndex);
-
-	// Generate a structured inline summary of the compacted portion
 	const messagesToSummarize = messages.slice(0, cutPoint.firstKeptIndex);
-	const summary = generateInlineSummary(messagesToSummarize, settings);
+
+	// Prefer the caller-supplied (typically LLM-based) summarizer; fall back
+	// to the local structured-text summary when omitted or it fails.
+	const summary =
+		(await summarize?.(messagesToSummarize)) ??
+		generateInlineSummary(messagesToSummarize, settings);
 
 	// Build compacted message list
 	const compacted: CompactableMessage[] = [
