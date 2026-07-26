@@ -1,11 +1,13 @@
-import { type Component, visibleWidth } from "../layers/core/tui-core.ts";
-import { theme } from "../layers/theme/theme.ts";
+import { type Component } from "../layers/core/tui-core.ts";
+import { SelectorController } from "./selector-controller.ts";
 import {
 	renderListItem,
-	renderSeparator,
 	renderStatusLine,
 	clampPopupLines,
 	POPUP_FRAME_OVERHEAD,
+	parsePopupListNav,
+	renderListPopupFrame,
+	renderListPopupBody,
 	type ListItem,
 } from "./popup-utils.ts";
 
@@ -29,7 +31,7 @@ export class PluginManagerOverlay implements Component {
 	public visible = false;
 	private plugins: PluginListItem[] = [];
 	private pluginsDir = "";
-	private selectedIndex = 0;
+	private selection = new SelectorController();
 	private busyPluginId: string | null = null;
 	private message = "";
 	private cachedLines: string[] | null = null;
@@ -55,9 +57,7 @@ export class PluginManagerOverlay implements Component {
 				onDisk: plugin.on_disk !== false,
 			};
 		});
-		if (this.selectedIndex >= this.plugins.length) {
-			this.selectedIndex = Math.max(0, this.plugins.length - 1);
-		}
+		this.selection.set(this.selection.index, this.plugins.length);
 		this.invalidate();
 	}
 
@@ -89,34 +89,20 @@ export class PluginManagerOverlay implements Component {
 	handleInput(data: string): PluginManagerAction | null {
 		if (!this.visible) return null;
 
-		if (data === "\x1b" || data === "\x03" || data.toLowerCase() === "q") {
-			return { type: "close" };
-		}
-		if (data === "\r" || data === "\n") {
-			return { type: "close" };
-		}
 		if (data === "r" || data === "R") {
 			return { type: "refresh" };
 		}
-		if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
-			this.moveSelection(-1);
-			return null;
-		}
-		if (data === "\x1b[B" || data === "\x1bOB" || data === "j") {
-			this.moveSelection(1);
-			return null;
-		}
-		if (data === "\x1b[5~") {
-			this.moveSelection(-8);
-			return null;
-		}
-		if (data === "\x1b[6~") {
-			this.moveSelection(8);
-			return null;
-		}
 		if (data === " ") {
-			const plugin = this.plugins[this.selectedIndex];
+			const plugin = this.plugins[this.selection.index];
 			return plugin ? { type: "toggle", plugin } : null;
+		}
+
+		const nav = parsePopupListNav(data);
+		if (nav?.type === "close" || nav?.type === "confirm") {
+			return { type: "close" };
+		}
+		if (nav?.type === "move") {
+			this.moveSelection(nav.delta);
 		}
 		return null;
 	}
@@ -135,53 +121,13 @@ export class PluginManagerOverlay implements Component {
 
 		const popupWidth = Math.max(1, width);
 		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
-		const lines: string[] = [];
 
-		const headerFg = theme.fg("header", "");
-
-		// ── Top rule ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
-
-		// ── Title row ──
-		const titleText = "Plugins";
-		const subtitleText = ` (${this.plugins.length})`;
-		const hintsText = " space toggle · r refresh · enter/esc close";
-		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
-		const titleVisible = visibleWidth(titleLine);
-		const titlePad = Math.max(0, innerWidth - titleVisible);
-		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
-		if (this.pluginsDir) {
-			lines.push(renderStatusLine(this.pluginsDir, innerWidth));
-		}
-
-		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
-
-		// ── Plugin list ──
-		if (!this.plugins.length) {
-			lines.push(
-				renderStatusLine(
-					"No plugins installed.",
-					innerWidth,
-					theme.fg("warning", ""),
-				),
-			);
-		} else {
-			const maxRows = 10;
-			const start = Math.max(
-				0,
-				Math.min(
-					this.selectedIndex - Math.floor(maxRows / 2),
-					Math.max(0, this.plugins.length - maxRows),
-				),
-			);
-			const end = Math.min(this.plugins.length, start + maxRows);
-			if (start > 0) {
-				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
-			}
-			for (let i = start; i < end; i++) {
-				const plugin = this.plugins[i];
-				const isSelected = i === this.selectedIndex;
+		const bodyLines = renderListPopupBody(
+			this.plugins,
+			this.selection,
+			innerWidth,
+			10,
+			(plugin, i) => {
 				const hookText = plugin.hookCount
 					? `hooks:${plugin.hookCount}`
 					: "hooks:-";
@@ -198,7 +144,7 @@ export class PluginManagerOverlay implements Component {
 				const item: ListItem = {
 					label: plugin.pluginId,
 					metadata: meta,
-					selected: isSelected,
+					selected: i === this.selection.index,
 					statusDot: !plugin.onDisk
 						? "red"
 						: this.busyPluginId === plugin.pluginId
@@ -208,31 +154,30 @@ export class PluginManagerOverlay implements Component {
 								: "gray",
 				};
 
-				lines.push(renderListItem(item, innerWidth));
-			}
-			if (end < this.plugins.length) {
-				lines.push(renderStatusLine(`↓ ${this.plugins.length - end} more`, innerWidth));
-			}
-		}
+				return renderListItem(item, innerWidth);
+			},
+			"No plugins installed.",
+		);
 
-		// ── Bottom bar ──
-		lines.push(renderSeparator(popupWidth));
-		const bottomText = this.message
-			? this.message
-			: `Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.`;
-		lines.push(renderStatusLine(bottomText, innerWidth));
-
-		// ── Bottom rule ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
+			title: "Plugins",
+			subtitle: ` (${this.plugins.length})`,
+			hints: " space toggle · r refresh · enter/esc close",
+			extraHeaderLines: this.pluginsDir ? [this.pluginsDir] : undefined,
+			bodyLines,
+			bottomText:
+				this.message ||
+				`Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.`,
+		});
 
 		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
 	}
 
 	private moveSelection(delta: number): void {
-		const n = this.plugins.length;
-		if (!n) return;
-		this.selectedIndex = (this.selectedIndex + delta + n) % n;
+		this.selection.move(delta, this.plugins.length);
 		this.invalidate();
 	}
 }

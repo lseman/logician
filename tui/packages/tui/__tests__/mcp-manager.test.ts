@@ -113,28 +113,28 @@ void describe("McpManagerOverlay rendering", () => {
 			],
 		});
 		overlay.show();
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 
 		// Move down
 		overlay.handleInput("\x1b[B");
-		assert.equal(overlay["selectedIndex"], 1);
+		assert.equal(overlay["selection"].index, 1);
 
 		// Move up
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 
 		// Wrap to bottom (2 down from 0 = index 2)
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\x1b[B");
-		assert.equal(overlay["selectedIndex"], 2);
+		assert.equal(overlay["selection"].index, 2);
 
 		// Wrap to top (1 up from 2 = index 1)
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selectedIndex"], 1);
+		assert.equal(overlay["selection"].index, 1);
 
 		// One more up = wrap to 0
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 	});
 
 	void it("handles page up/down", () => {
@@ -148,15 +148,15 @@ void describe("McpManagerOverlay rendering", () => {
 			})),
 		});
 		overlay.show();
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 
 		// Page down
 		overlay.handleInput("\x1b[6~");
-		assert.ok(overlay["selectedIndex"] >= 8);
+		assert.ok(overlay["selection"].index >= 8);
 
 		// Page up
 		overlay.handleInput("\x1b[5~");
-		assert.ok(overlay["selectedIndex"] < 8);
+		assert.ok(overlay["selection"].index < 8);
 	});
 
 	void it("handles j/k navigation", () => {
@@ -172,11 +172,11 @@ void describe("McpManagerOverlay rendering", () => {
 
 		// j moves down
 		overlay.handleInput("j");
-		assert.equal(overlay["selectedIndex"], 1);
+		assert.equal(overlay["selection"].index, 1);
 
 		// k moves up
 		overlay.handleInput("k");
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 	});
 
 	void it("handles refresh action", () => {
@@ -305,13 +305,13 @@ void describe("PluginManagerOverlay rendering", () => {
 			],
 		});
 		overlay.show();
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 
 		overlay.handleInput("\x1b[B");
-		assert.equal(overlay["selectedIndex"], 1);
+		assert.equal(overlay["selection"].index, 1);
 
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selectedIndex"], 0);
+		assert.equal(overlay["selection"].index, 0);
 	});
 
 	void it("handles refresh action", () => {

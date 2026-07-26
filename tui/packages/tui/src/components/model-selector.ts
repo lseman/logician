@@ -2,17 +2,15 @@
 // Rounded-corner overlay for selecting an active model from the configured list.
 // Uses the shared popup-utils design system.
 
-import {
-	type Component,
-	visibleWidth,
-} from "../layers/core/tui-core.ts";
-import { theme } from "../layers/theme/theme.ts";
+import { type Component } from "../layers/core/tui-core.ts";
 import { SelectorController } from "./selector-controller.ts";
 import {
 	renderListItem,
-	renderSeparator,
-	renderStatusLine,
 	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	parsePopupListNav,
+	renderListPopupFrame,
+	renderListPopupBody,
 	type ListItem,
 } from "./popup-utils.ts";
 
@@ -66,28 +64,14 @@ export class ModelSelectorOverlay implements Component {
 	handleInput(data: string): ModelSelectorAction | null {
 		if (!this.visible) return null;
 
-		if (data === "\x1b" || data === "\x03" || data.toLowerCase() === "q") {
-			return { type: "close" };
-		}
-		if (data === "\r" || data === "\n") {
+		const nav = parsePopupListNav(data);
+		if (nav?.type === "close") return { type: "close" };
+		if (nav?.type === "confirm") {
 			const model = this.models[this.selection.index];
 			return model ? { type: "select", model } : { type: "close" };
 		}
-		if (data === "\x1b[A" || data === "\x1bOA" || data === "k") {
-			this.moveSelection(-1);
-			return null;
-		}
-		if (data === "\x1b[B" || data === "\x1bOB" || data === "j") {
-			this.moveSelection(1);
-			return null;
-		}
-		if (data === "\x1b[5~") {
-			this.moveSelection(-8);
-			return null;
-		}
-		if (data === "\x1b[6~") {
-			this.moveSelection(8);
-			return null;
+		if (nav?.type === "move") {
+			this.moveSelection(nav.delta);
 		}
 		return null;
 	}
@@ -105,68 +89,34 @@ export class ModelSelectorOverlay implements Component {
 		if (!this.visible) return [];
 
 		const popupWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, popupWidth - 4);
-		const lines: string[] = [];
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 
-		// ── Top rounded corner ──
-		const headerFg = theme.fg("header", "");
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
-
-		// ── Title row ──
-		const titleText = "Model";
-		const subtitleText = ` (${this.models.length})`;
-		const hintsText = " ↑↓ select · enter confirm · esc close";
-		const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
-		const titleVisible = visibleWidth(titleLine);
-		const titlePad = Math.max(0, innerWidth - titleVisible);
-		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
-
-		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
-
-		// ── Model list ──
-		if (!this.models.length) {
-			lines.push(
-				renderStatusLine(
-					"No models configured. Add \"models\" array to settings.json.",
-					innerWidth,
-					theme.fg("warning", ""),
-				),
-			);
-		} else {
-			const maxRows = 10;
-			const { start, end } = this.selection.window(this.models.length, maxRows);
-			if (start > 0) {
-				lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
-			}
-			for (let i = start; i < end; i++) {
-				const m = this.models[i];
-				const isSelected = i === this.selection.index;
-
-				// Build the item
+		const bodyLines = renderListPopupBody(
+			this.models,
+			this.selection,
+			innerWidth,
+			10,
+			(m, i) => {
 				const item: ListItem = {
 					label: m.name,
 					metadata: m.url ?? m.id,
-					selected: isSelected,
+					selected: i === this.selection.index,
 					statusDot: m.active ? "active" : undefined,
 				};
+				return renderListItem(item, innerWidth);
+			},
+			'No models configured. Add "models" array to settings.json.',
+		);
 
-				lines.push(renderListItem(item, innerWidth));
-			}
-			if (end < this.models.length) {
-				lines.push(renderStatusLine(`↓ ${this.models.length - end} more`, innerWidth));
-			}
-		}
-
-		// ── Bottom bar ──
-		lines.push(renderSeparator(popupWidth));
-		const bottomText = this.message
-			? this.message
-			: "Select a model for this session.";
-		lines.push(renderStatusLine(bottomText, innerWidth));
-
-		// ── Bottom rounded corner ──
-		lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
+			title: "Model",
+			subtitle: ` (${this.models.length})`,
+			hints: " ↑↓ select · enter confirm · esc close",
+			bodyLines,
+			bottomText: this.message || "Select a model for this session.",
+		});
 
 		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;

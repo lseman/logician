@@ -33,6 +33,7 @@ interface StatusInfo {
 	goalElapsed?: number;
 	mcpServerCount?: number;
 	sandboxMode?: "none" | "code" | "file" | "dev" | "full";
+	permissionMode?: string;
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -55,6 +56,7 @@ const DEFAULT_INFO: StatusInfo = {
 	sessionTitle: "",
 	mcpServerCount: 0,
 	sandboxMode: "code",
+	permissionMode: "acceptAll",
 };
 
 export class StatusBar implements Component {
@@ -144,6 +146,7 @@ export class StatusBar implements Component {
 		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
 		if (this.info.mcpServerCount) insertIfFits(this.formatMcp());
 		insertIfFits(this.formatSandbox());
+		insertIfFits(this.formatPermissionMode());
 
 		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {
@@ -332,6 +335,14 @@ export class StatusBar implements Component {
 			return `${DIM}sandbox:${RESET} ${theme.fg("levelOff", "off")}`;
 		}
 		return `${DIM}sandbox:${RESET} ${theme.fg("accent", mode)}`;
+	}
+
+	private formatPermissionMode(): string {
+		const mode = this.info.permissionMode ?? "acceptAll";
+		if (mode === "acceptAll") {
+			return `${theme.fg("success", "act")}`;
+		}
+		return `${theme.fg("warning", "plan")}`;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
