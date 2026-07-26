@@ -12,6 +12,7 @@ import {
 	type WorkspaceSnapshot,
 } from "../../core/file-checkpoints.ts";
 import type { LoopDetector } from "../../core/guards/loop-detector.ts";
+import { detectsCircling } from "../../core/guards/response-patterns.ts";
 import { HookBus } from "../native/hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
@@ -292,36 +293,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	}
 
 	return hooks;
-}
-
-// Patterns that suggest the model is circling — retrying the same approach
-// without success. These are broader than stop declarations because we want
-// to escalate the nudge tone (not skip the nudge) when circling is detected.
-// Stricter patterns to avoid false positives on legitimate multi-step work.
-const CIRCLING_PATTERNS = [
-	// Future retry intent without evidence of a changed strategy.
-	/\b(?:i\s+will|i'll)\s+(?:try|attempt)(?:\s+to)?\b/i,
-	/\b(?:let\s+me|i(?:'m|\s+am)\s+going\s+to)\s+(?:try|attempt)\b/i,
-	// A failed attempt followed by an explicit failure clause.
-	/\bi\s+(?:tried|attempted)\b.*\b(?:but|however)\b.*\b(?:did(?:n't| not)\s+work|failed|unable)\b/i,
-	/\bi\s+(?:tried|attempted)\b.*\b(?:again|next|yet)\b/i,
-	// "I'll try again" (no X) — bare retry intent without specifying a new approach.
-	/\bi(?:\s+will|'ll|ll)\s+(?:try again|attempt again)\b/i,
-	// "I tried X again" — explicit past retry with "again".
-	/\bi\s+(?:tried|attempted)\s+.*\b(again|yet)\b/i,
-	// "Let me try again" (bare) — retry without new approach.
-	/\blet\s+me\s+(?:try again|attempt again)\b/i,
-	// "I've tried X again" — past retry with "again".
-	/\b(i'|ve|I've)\s+(?:tried|attempted)\s+.*\b(again|yet)\b/i,
-	// "cannot/can't X but try/attempt" — failed then retrying.
-	/\b(cannot|can't|unable)\s+.*\b(but\s+|however\s+|instead\s+)\b.*\b(try|attempt|do|make|go)\b/i,
-];
-
-// Inspects the full text (not just the tail) since circling patterns appear anywhere.
-export function detectsCircling(assistantText: string): boolean {
-	if (!assistantText || assistantText.trim().length < 10) return false;
-	const lower = assistantText.toLowerCase();
-	return CIRCLING_PATTERNS.some((re) => re.test(lower));
 }
 
 /** A named layer of hooks registered into the shared bus, in order. */

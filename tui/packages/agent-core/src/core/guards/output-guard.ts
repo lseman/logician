@@ -18,6 +18,7 @@
 import type { EventHandler } from "../types.ts";
 import { BackendError, type BackendErrorCategory } from "../backend.ts";
 import type { LoopDetector } from "./loop-detector.ts";
+import { NON_COMMITTAL_PATTERNS } from "./response-patterns.ts";
 
 export interface OutputGuardConfig {
 	/** Max retry attempts for transient/provider errors (default 3). */
@@ -294,20 +295,7 @@ export class OutputGuard {
 
 		// Track non-committal responses (has content but no tool calls, matches vague patterns)
 		if (content && content.trim().length > 0 && hasNoTools) {
-			const nonCommittalPatterns = [
-				/\b(i\s+(need|should|have|might|could|will)\s+(to\s+)?(?:check|look|think|consider|analyze|investigate|examine|review|verify))\b/i,
-				/\b(let\s+me\s+(think|see|check|try|consider))\b/i,
-				/\b(i'm\s+(going\s+to|thinking\s+about|not\s+sure|still\s+considering))\b/i,
-				/\b(i'll\s+(try|check|look|see|think))\b/i,
-				/\b(need\s+to\s+(check|think|verify|confirm))\b/i,
-				/\b(however|but|although)\s+(i\s+(need|should|have|might))\b/i,
-				/\b(this\s+(requires|needs|demands|warrants)\s+(further|more|additional))\b/i,
-				/\b(i\s+(don't|do\s+not)\s+(know|think\s+|certain))\b/i,
-				/\blet(?:'s|\s+me)\s+(?:step\s+back|circle\s+back|reconsider)\b/i,
-				/\b(at\s+this\s+point|so\s+far)\s+(i\s+(have|can|see)|we\s+(need|should))\b/i,
-			];
-
-			const isNonCommittal = nonCommittalPatterns.some((p) => p.test(content));
+			const isNonCommittal = NON_COMMITTAL_PATTERNS.some((p) => p.test(content));
 			if (isNonCommittal) {
 				this.consecutiveNonCommittalResponses++;
 				if (

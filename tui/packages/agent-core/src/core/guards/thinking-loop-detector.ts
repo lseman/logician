@@ -21,6 +21,8 @@
 //
 // Any single strategy tripping triggers a stop decision.
 
+import { META_REASONING_PATTERNS } from "./response-patterns.ts";
+
 export interface ThinkingTurnSnapshot {
 	iteration: number;
 	assistantTextLength: number;
@@ -49,31 +51,6 @@ const DEFAULT_THINKING_ONLY_THRESHOLD = 8;
 const DEFAULT_ESCALATION_RATIO = 2.0;
 const DEFAULT_MAX_TOTAL_THINKING_TOKENS = 120_000;
 const DEFAULT_META_REASONING_THRESHOLD = 5;
-
-// Patterns indicating the model is reasoning about its own reasoning rather
-// than taking action. These capture the "meta-loop" signature.
-const META_REASONING_PATTERNS = [
-	// "Let me think about how to approach..." — planning about planning.
-	/\blet\s+me\s+(think\s+(about|on|over)|consider)\s+(how\s+)?(?:to\s+)?(?:approach|handle|solve| tackle)\b/i,
-	// "I need to think about..." — pure meta-reasoning, no action.
-	/\bi\s+(need\s+to|should\s+to|must\s+to)\s+(think\s+about|consider|reflect\s+on|ponder)\b/i,
-	// "Before I do X, I need to think about Y..." — procrastination pattern.
-	/\b(?:before|while|when)\s+(?:i\s+)?(?:do|proceed|start|begin|move)\s+.*?\b,\s+(?:i\s+)?(?:need\s+to|should|have\s+to)\s+(think|consider|reflect)\b/i,
-	// "I'm not sure about X, let me think..." — hesitation loop.
-	/\b(?:i'm\s+not\s+sure|not\s+sure\s+about|i\s+don't\s+know\s+how)\b.*?(?:let\s+me\s+think|let\s+me\s+consider)\b/i,
-	// "I should first understand... then I can..." — endless analysis.
-	/\b(?:i\s+should\s+first|first\s+i\s+need\s+to)\s+(understand|comprehend|grasp|analyze)\b.*?\b(?:then|after\s+that|once\s+i.*)\b/i,
-	// "Upon further reflection..." — meta-reasoning escalation.
-	/\b(?:upon\s+further\s+reflection|after\s+considering|on\s+second\s+thought)\b/i,
-	// "This requires me to think..." — meta-reasoning declaration.
-	/\b(?:this\s+(?:requires|demands|needs)\s+(?:me\s+)?to\s+think)\b/i,
-	// "I need to step back and think..." — retreat into thinking.
-	/\b(?:step\s+back|pause)\s+(?:to\s+)?(?:think|consider|reflect)\b/i,
-	// "I realize I need to think..." — meta-realization loop.
-	/\b(?:i\s+realize|i\s+see\s+that|i\s+understand\s+now)\s+(?:that\s+)?(?:i\s+need\s+to|i\s+should|i\s+must)\s+(think|consider|rethink)\b/i,
-	// "Thinking through this... okay..." — self-talk spiral.
-	/\b(?:thinking\s+through\s+this|let\s+me\s+walk\s+through\s+this|working\s+through\s+this)\b.*?\b(?:okay|alright|right)\b/i,
-];
 
 export class ThinkingLoopDetector {
 	private options: Required<ThinkingLoopDetectorOptions>;
