@@ -16,47 +16,69 @@ import {
 } from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./headless-exec.ts";
 import { TrustPromptOverlay, type TrustChoice } from "./components/trust-prompt-overlay.ts";
+import { visibleWidth } from "./layers/core/tui-core.ts";
 import { LogicianTUI } from "./layers/presentation/tui.ts";
 
-/** Show the trust prompt overlay visually, then use readline for input. */
+/** Show the trust prompt as an interactive terminal card before the main TUI. */
 async function showTrustOverlay(
 	cwd: string,
 	paths: string[],
 ): Promise<TrustChoice> {
 	return new Promise((resolve) => {
-		// Initialize a default theme for overlay rendering
 		initTheme();
-
-		const { createInterface } = require("node:readline");
-		const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
 		const overlay = new TrustPromptOverlay();
 		overlay.setOptions({ cwd, paths });
 		overlay.show();
+		const stdin = process.stdin;
+		const wasRaw = stdin.isRaw === true;
 
-		const width = process.stdout.columns ?? 80;
-		const lines = overlay.render(width);
+		const render = (): void => {
+			const width = Math.max(24, process.stdout.columns ?? 80);
+			const height = Math.max(12, process.stdout.rows ?? 24);
+			const lines = overlay.render(width);
+			const left = Math.max(
+				0,
+				Math.floor((width - Math.max(...lines.map(visibleWidth))) / 2),
+			);
+			const top = Math.max(0, height - lines.length - 3);
+			const inset = " ".repeat(left);
+			process.stdout.write(
+				`\x1b[?25l\x1b[2J\x1b[H${"\n".repeat(top)}${lines
+					.map((line) => inset + line)
+					.join("\n")}`,
+			);
+		};
+		const cleanup = (): void => {
+			stdin.off("data", onData);
+			process.stdout.off("resize", render);
+			if (stdin.setRawMode) stdin.setRawMode(wasRaw);
+			process.stdout.write("\x1b[?25h\x1b[2J\x1b[H");
+		};
+		const onData = (chunk: Buffer | string): void => {
+			const input = String(chunk);
+			let action = overlay.handleInput(input);
+			// PTYs and some terminals batch a shortcut with Enter. Preserve
+			// escape sequences as one key, but replay ordinary character batches.
+			if (!action && input.length > 1 && !input.startsWith("\x1b[")) {
+				for (const character of input) {
+					action = overlay.handleInput(character);
+					if (action) break;
+				}
+			}
+			if (!action) {
+				render();
+				return;
+			}
+			cleanup();
+			resolve(action.choice);
+		};
 
-		// Save terminal state and show the overlay
-		process.stdout.write(`\x1b[?25l\x1b[H${lines.join("\n")}\n`);
-
-		rl.question(
-			"\n[y] trust  [p] trust parent  [s] session  [n] deny  [N] deny session → ",
-			(answer: string) => {
-				const choice = parseTrustAnswer(answer.trim().toLowerCase());
-				// Restore terminal state
-				process.stdout.write(`\x1b[?25h\x1b[${lines.length + 2}A`);
-				resolve(choice);
-			},
-		);
+		if (stdin.setRawMode) stdin.setRawMode(true);
+		stdin.resume();
+		stdin.on("data", onData);
+		process.stdout.on("resize", render);
+		render();
 	});
-}
-
-function parseTrustAnswer(answer: string): TrustChoice {
-	if (answer === "y" || answer === "yes") return "trust";
-	if (answer === "p" || answer === "parent") return "trust-parent";
-	if (answer === "s" || answer === "session") return "session-only";
-	if (answer === "n" || answer === "no" || answer === "deny") return "deny";
-	return "deny-session";
 }
 
 function defaultProjectTrust(): "ask" | "always" | "never" {

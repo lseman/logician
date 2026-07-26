@@ -3,7 +3,7 @@
 // detection) and provides a unified API for trust resolution.
 
 import { TrustStore } from "./store.ts";
-import { formatTrustPrompt, getTrustRequiringPaths, hasTrustRequiringProjectResources } from "./checker.ts";
+import { formatTrustPrompt, getTrustRequiringPaths } from "./checker.ts";
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
@@ -76,11 +76,6 @@ export async function resolveTrust(options: TrustOptions): Promise<TrustResult> 
 	const { cwd, defaultProjectTrust = "ask", hasUI, onSelectTrust } = options;
 	const store = options.trustStore ?? new TrustStore();
 
-	// If no trust-requiring resources, trust silently
-	if (!hasTrustRequiringProjectResources(cwd)) {
-		return { trusted: true, remember: false };
-	}
-
 	// Check persisted decision (walks up tree)
 	const decision = store.get(cwd);
 	if (decision.decision !== null) {
@@ -125,17 +120,6 @@ export function resolveTrustInfo(
 	cwd: string,
 	defaultProjectTrust: DefaultProjectTrust = "ask",
 ): TrustInfo {
-	// If no trust-requiring resources, no overlay needed
-	if (!hasTrustRequiringProjectResources(cwd)) {
-		return {
-			cwd,
-			paths: [],
-			preDecided: true,
-			preDecidedResult: { trusted: true, remember: false },
-			needsDecision: false,
-		};
-	}
-
 	// Check persisted decision (walks up tree)
 	const store = new TrustStore();
 	const decision = store.get(cwd);

@@ -165,9 +165,9 @@ void test("input prompt has stable inset modern chrome", () => {
 	const input = new InputBar();
 	input.focused = true;
 	const [header, line] = input.render(40);
-	assert.match(plain(header), /MESSAGE/);
+	assert.match(plain(header), /ASK LOGICIAN/);
 	assert.match(plain(header), /Enter send/);
-	assert.match(plain(line).replace(CURSOR_MARKER, ""), /^  › Type a message/);
+	assert.match(plain(line).replace(CURSOR_MARKER, ""), /^  › Ask Logician/);
 	assert.equal(visibleWidth(header), 40);
 	assert.equal(visibleWidth(line), 40);
 });

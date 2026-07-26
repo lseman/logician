@@ -38,7 +38,7 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 		rows: 32,
 	});
 	const output = stripTerminalControls(result.output);
-	assert.match(output, /MESSAGE/);
+	assert.match(output, /ASK LOGICIAN/);
 	assert.match(output, /mode: REASON|Inference mode: Instruct \(Reasoning\)/);
 	assert.doesNotMatch(output, /TypeError|TUI render error/);
 });

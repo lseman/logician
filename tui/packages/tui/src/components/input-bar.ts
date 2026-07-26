@@ -48,7 +48,7 @@ export class InputBar implements Component, Focusable {
 		}
 		return this._prompt;
 	}
-	private _placeholder = "Type a message…";
+	private _placeholder = "Ask Logician…";
 	private maxHistory = 100;
 
 	// Kill ring & undo (injected by parent or default instances)
@@ -652,10 +652,16 @@ export class InputBar implements Component, Focusable {
 	}
 
 	private _renderComposerHeader(width: number): string {
-		const label = ` ${theme.fg("header", "MESSAGE")} `;
-		const hintText = this.value
-			? "Enter send  ·  Esc clear"
-			: "Enter send  ·  / commands";
+		const label = ` ${theme.fg("header", "ASK LOGICIAN")} `;
+		const hintText = width >= 72
+			? this.value
+				? "Enter send  ·  Esc clear  ·  Ctrl+O tools"
+				: "Enter send  ·  / commands  ·  Ctrl+O tools"
+			: width >= 52
+				? this.value
+					? "Enter send  ·  Esc clear"
+					: "Enter send  ·  / commands"
+				: "Enter send";
 		const hint = ` ${theme.fg("muted", hintText)} `;
 		const used = visibleWidth(label) + visibleWidth(hint) + 2;
 		const ruleWidth = Math.max(1, width - used);

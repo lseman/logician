@@ -2,15 +2,15 @@
 // Shown at TUI startup when the current directory (or an ancestor) contains
 // trust-requiring resources (.logician/, extensions/, skills/, etc.).
 
-import { visibleWidth, BOLD, DIM, RESET } from "../layers/core/tui-core.ts";
-import { theme } from "../layers/theme/theme.ts";
 import {
-	BOX,
-	renderSeparator,
-	renderStatusLine,
-	clampPopupLines,
-	POPUP_FRAME_OVERHEAD,
-} from "./popup-utils.ts";
+	visibleWidth,
+	clampLineToWidth,
+	BOLD,
+	DIM,
+	RESET,
+} from "../layers/core/tui-core.ts";
+import { theme } from "../layers/theme/theme.ts";
+import { BOX, clampPopupLines } from "./popup-utils.ts";
 
 export type TrustChoice =
 	| "trust"
@@ -34,13 +34,39 @@ export interface TrustPromptAction {
 const OPTIONS: Array<{
 	value: TrustChoice;
 	label: string;
-	hint?: string;
+	description: string;
+	key: string;
 }> = [
-	{ value: "trust", label: "Trust", hint: "persist" },
-	{ value: "trust-parent", label: "Trust parent folder", hint: "persist" },
-	{ value: "session-only", label: "Trust (this session only)" },
-	{ value: "deny", label: "Do not trust", hint: "persist" },
-	{ value: "deny-session", label: "Do not trust (this session only)" },
+	{
+		value: "trust",
+		label: "Trust this folder",
+		description: "Remember this exact workspace",
+		key: "y",
+	},
+	{
+		value: "trust-parent",
+		label: "Trust parent folder",
+		description: "Remember the parent and its workspaces",
+		key: "p",
+	},
+	{
+		value: "session-only",
+		label: "Trust for this session",
+		description: "Allow now without saving",
+		key: "s",
+	},
+	{
+		value: "deny",
+		label: "Do not trust",
+		description: "Remember this folder as blocked",
+		key: "n",
+	},
+	{
+		value: "deny-session",
+		label: "Exit without saving",
+		description: "Keep the folder untrusted",
+		key: "esc",
+	},
 ];
 
 export class TrustPromptOverlay {
@@ -117,6 +143,21 @@ export class TrustPromptOverlay {
 				this.hide();
 				return { type: "trust-choice", choice };
 			}
+			const shortcut = data === "N"
+				? "deny-session"
+				: ({
+						y: "trust",
+						Y: "trust",
+						p: "trust-parent",
+						P: "trust-parent",
+						s: "session-only",
+						S: "session-only",
+						n: "deny",
+					} as Record<string, TrustChoice | undefined>)[data];
+			if (shortcut) {
+				this.hide();
+				return { type: "trust-choice", choice: shortcut };
+			}
 		}
 
 		return null;
@@ -136,108 +177,85 @@ export class TrustPromptOverlay {
 		this.cachedWidth = width;
 		if (!this.visible) return [];
 
-		const popupWidth = Math.max(48, Math.min(width, 90));
-		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
-		const headerFg = theme.fg("header", "");
+		const popupWidth = Math.max(24, Math.min(width, 78));
+		const innerWidth = Math.max(1, popupWidth - 4);
+		const border = theme.fg("border", "");
 		const lines: string[] = [];
+		const row = (content = ""): string => {
+			const clipped = clampLineToWidth(content, innerWidth);
+			const padding = " ".repeat(
+				Math.max(0, innerWidth - visibleWidth(clipped)),
+			);
+			return `${border}${BOX.vert}${RESET} ${clipped}${padding} ${border}${BOX.vert}${RESET}`;
+		};
+		const separator = (): string =>
+			`${border}${BOX.separator}${BOX.horiz.repeat(popupWidth - 2)}${BOX.sepRight}${RESET}`;
 
-		// ── Top border ──
-		lines.push(`${headerFg}${BOX.horiz.repeat(popupWidth)}${RESET}`);
+		lines.push(
+			`${border}${BOX.topLeft}${BOX.horiz.repeat(popupWidth - 2)}${BOX.topRight}${RESET}`,
+		);
+		lines.push(
+			row(
+				`${theme.fg("warning", "◆")} ${BOLD}${theme.fg("header", "TRUST THIS WORKSPACE?")}${RESET}`,
+			),
+		);
+		lines.push(row(`${theme.fg("muted", "Folder")}  ${theme.fg("text", this.cwd)}`));
+		lines.push(separator());
+		lines.push(
+			row(
+				"Local configuration can change agent instructions and permit project tools.",
+			),
+		);
+		lines.push(
+			row(
+				`${DIM}Only continue if you recognize and trust this folder.${RESET}`,
+			),
+		);
 
-		// ── Title row ──
-		const titleText = "Trust project folder";
-		const hintsText = " ↑↓ navigate · enter confirm · esc deny";
-		const titleLine = `${titleText}${theme.fg("muted", "")}${hintsText}`;
-		const titleVisible = visibleWidth(titleLine);
-		const titlePad = Math.max(0, innerWidth - titleVisible);
-		lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
-
-		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
-
-		// ── Question line ──
-		const icon = `${theme.fg("header", "")}❯${RESET}`;
-		const cwdLine = `${icon} ${BOLD}${this.cwd}${RESET}`;
-		const cwdVisible = visibleWidth(cwdLine);
-		const cwdPad = Math.max(0, innerWidth - cwdVisible);
-		lines.push(` ${cwdLine}${" ".repeat(cwdPad + 1)}`);
-
-		// ── Description ──
-		const desc =
-			"This allows Logician to load local settings, extensions, skills, and execute project resources.";
-		lines.push(renderStatusLine(desc, innerWidth, theme.fg("muted", "")));
-
-		// ── Resource paths (if any) ──
 		if (this.paths.length > 0) {
-			const maxPaths = 5;
+			const maxPaths = 3;
 			const shown = this.paths.slice(0, maxPaths);
-			lines.push(renderSeparator(popupWidth));
+			lines.push(separator());
+			lines.push(row(theme.fg("muted", "LOCAL RESOURCES")));
 			for (const p of shown) {
-				const pathText = `  ${DIM}•${RESET} ${p}`;
-				const pathVisible = visibleWidth(pathText);
-				const pathPad = Math.max(0, innerWidth - pathVisible);
-				lines.push(` ${pathText}${" ".repeat(pathPad + 1)}`);
+				lines.push(row(`${theme.fg("separator", "│")} ${p}`));
 			}
 			if (this.paths.length > maxPaths) {
-				const more = `  ${DIM}… ${this.paths.length - maxPaths} more${RESET}`;
-				lines.push(` ${more}${" ".repeat(innerWidth - visibleWidth(more) + 1)}`);
+				lines.push(
+					row(`${DIM}… and ${this.paths.length - maxPaths} more${RESET}`),
+				);
 			}
 		}
 
-		// ── Separator ──
-		lines.push(renderSeparator(popupWidth));
-
-		// ── Options ──
-		const maxRows = Math.min(5, popupWidth - 12);
-		const start = 0;
-		const end = Math.min(OPTIONS.length, start + maxRows);
-
-		for (let i = start; i < end; i++) {
+		lines.push(separator());
+		for (let i = 0; i < OPTIONS.length; i++) {
 			const opt = OPTIONS[i];
 			const isSelected = i === this.selectedIndex;
-			const bg = isSelected ? theme.fgAsBg("selected") : "";
-			const segReset = isSelected ? `${RESET}${bg}` : RESET;
-			const blackBg = "\x1b[38;5;16m";
-
-			let left = "";
-			if (isSelected) {
-				left += `${bg}${blackBg}${BOLD}▸${segReset} `;
-			} else {
-				left += `${DIM}${i + 1}${RESET}  `;
-			}
-
-			const label = isSelected ? `${bg}${blackBg}${BOLD}${opt.label}${segReset}` : opt.label;
-			left += label;
-
-			if (opt.hint && isSelected) {
-				const hint = `${bg}${blackBg} [${opt.hint}]${segReset}`;
-				const leftVisible = visibleWidth(left);
-				const hintVisible = visibleWidth(hint);
-				const gap = Math.max(1, innerWidth - leftVisible - hintVisible);
-				const content = `${left}${bg}${" ".repeat(gap)}${hint}${bg}${" ".repeat(2)}`;
-				lines.push(`${bg}${" ".repeat(1)}${content}${bg}${" ".repeat(1)}${RESET}`);
-			} else if (opt.hint && !isSelected) {
-				const leftVisible = visibleWidth(left);
-				const hint = `${DIM}[${opt.hint}]${RESET}`;
-				const hintVisible = visibleWidth(hint);
-				const gap = Math.max(1, innerWidth - leftVisible - hintVisible);
-				const content = `${left}${" ".repeat(gap)}${hint}`;
-				const padRight = Math.max(0, innerWidth - visibleWidth(content));
-				lines.push(` ${content}${" ".repeat(padRight + 1)}`);
-			} else {
-				const leftVisible = visibleWidth(left);
-				const padRight = Math.max(0, innerWidth - leftVisible);
-				lines.push(` ${left}${" ".repeat(padRight + 1)}`);
-			}
+			const marker = isSelected
+				? theme.fg("active", "›")
+				: theme.fg("dim", `${i + 1}`);
+			const label = isSelected
+				? `${BOLD}${theme.fg("text", opt.label)}${RESET}`
+				: theme.fg("muted", opt.label);
+			const shortcut = theme.fg("dim", opt.key);
+			const left = `${marker} ${label}`;
+			const right = `${opt.description}  ${shortcut}`;
+			const gap = Math.max(
+				1,
+				innerWidth - visibleWidth(left) - visibleWidth(right),
+			);
+			lines.push(row(`${left}${" ".repeat(gap)}${theme.fg("dim", right)}`));
 		}
 
-		// ── Bottom hint ──
-		lines.push(renderSeparator(popupWidth));
-		const defaultHint = "Default: Esc → deny for this session";
-		lines.push(renderStatusLine(defaultHint, innerWidth));
-
-		// ── Bottom border ──
-		lines.push(`${headerFg}${BOX.horiz.repeat(popupWidth)}${RESET}`);
+		lines.push(separator());
+		lines.push(
+			row(
+				`${theme.fg("muted", "↑↓ navigate")}  ·  ${theme.fg("muted", "Enter confirm")}  ·  ${theme.fg("muted", "Esc exit safely")}`,
+			),
+		);
+		lines.push(
+			`${border}${BOX.bottomLeft}${BOX.horiz.repeat(popupWidth - 2)}${BOX.bottomRight}${RESET}`,
+		);
 
 		this.cachedLines = clampPopupLines(lines, width);
 		return this.cachedLines;
