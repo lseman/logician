@@ -96,7 +96,7 @@ function stripInternalHookGuidance(text: string | undefined): string | undefined
 interface ParsedPostEditDiagnostic {
 	line: number;
 	column: number;
-	code?: number;
+	label?: string;
 	message: string;
 }
 
@@ -120,14 +120,14 @@ function extractPostEditDiagnostics(text: string | undefined): {
 				.split("\n")
 				.flatMap((line): ParsedPostEditDiagnostic[] => {
 					const parsed =
-						/^-\s+.*?:(\d+):(\d+)(?:\s+TS(\d+))?:\s+(.+)$/.exec(
+						/^-\s+.*?:(\d+):(\d+)(?:\s+(.+?))?:\s+(.+)$/.exec(
 							line.trim(),
 						);
 					if (!parsed) return [];
 					return [{
 						line: Number(parsed[1]),
 						column: Number(parsed[2]),
-						code: parsed[3] ? Number(parsed[3]) : undefined,
+						label: parsed[3]?.trim(),
 						message: parsed[4].trim(),
 					}];
 				});
@@ -1547,10 +1547,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 			return lines;
 		}
 		for (const diagnostic of block.diagnostics) {
-			const code =
-				diagnostic.code === undefined ? "" : ` TS${diagnostic.code}`;
+			const label = diagnostic.label ? ` ${diagnostic.label}` : "";
 			lines.push(
-				`${theme.fg("dim", "│ ")}${theme.fg("toolError", "×")} ${theme.fg("active", `${diagnostic.line}:${diagnostic.column}`)}${theme.fg("muted", code)}${RESET}`,
+				`${theme.fg("dim", "│ ")}${theme.fg("toolError", "×")} ${theme.fg("active", `${diagnostic.line}:${diagnostic.column}`)}${theme.fg("muted", label)}${RESET}`,
 			);
 			for (const messageLine of this.wrapText(
 				diagnostic.message,

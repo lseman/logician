@@ -488,6 +488,44 @@ void test("post-edit diagnostics render as a dedicated formatted block", () => {
 	assert.doesNotMatch(output, /post_edit_diagnostics|Fix these project diagnostics/);
 });
 
+void test("post-edit diagnostics render clangd source and symbolic codes", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "clang-diagnostic-turn",
+		userMessage: { type: "user", content: "Update native extension" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				isComplete: true,
+				tool: {
+					tool: "edit_file",
+					tool_name: "edit_file",
+					args: { path: "/data/dev/solvers/python/qp_ext.cpp", edits: [] },
+					result: [
+						"Successfully replaced 1 block.",
+						"<post_edit_diagnostics file=\"/data/dev/solvers/python/qp_ext.cpp\">",
+						"Fix these project diagnostics before continuing:",
+						"- /data/dev/solvers/python/qp_ext.cpp:42:7 clang ovl_no_viable_function_in_call: No matching function for call.",
+						"</post_edit_diagnostics>",
+					].join("\n"),
+					isError: false,
+					isComplete: true,
+				},
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const output = plain(display.render(100).join("\n"));
+	assert.match(output, /◆ DIAGNOSTICS 1 issue/);
+	assert.match(output, /× 42:7 clang ovl_no_viable_function_in_call/);
+	assert.match(output, /No matching function for call/);
+	assert.doesNotMatch(output, /could not be parsed/);
+});
+
 void test("transcript line limits discard oldest turns and retain newest messages", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 14 });
 	const turns: Turn[] = Array.from({ length: 8 }, (_, index) => ({

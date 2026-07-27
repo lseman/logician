@@ -174,11 +174,11 @@ function formatDiagnostics(
 	diagnostics: PostEditDiagnostic[],
 ): string {
 	const lines = diagnostics.map((diagnostic) => {
-		const source = diagnostic.source
-			? ` ${diagnostic.source}`
-			: diagnostic.code === undefined ? "" : " TS";
-		const code = diagnostic.code === undefined ? "" : `${diagnostic.code}`;
-		return `- ${fileName}:${diagnostic.line}:${diagnostic.column}${source}${code}: ${diagnostic.message}`;
+		const metadata = diagnostic.source
+			? [diagnostic.source, diagnostic.code].filter((item) => item !== undefined)
+			: diagnostic.code === undefined ? [] : [`TS${diagnostic.code}`];
+		const label = metadata.length > 0 ? ` ${metadata.join(" ")}` : "";
+		return `- ${fileName}:${diagnostic.line}:${diagnostic.column}${label}: ${diagnostic.message}`;
 	});
 	return [
 		"",

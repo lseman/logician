@@ -92,6 +92,42 @@ void test("post-edit hook appends diagnostics after a successful edit", async ()
 	assert.match(result?.content ?? "", /broken\.ts:1:/);
 });
 
+void test("post-edit hook separates LSP source and symbolic code", async () => {
+	const cwd = workspace();
+	writeFileSync(path.join(cwd, "broken.cpp"), "broken", "utf8");
+	const lspManager = {
+		diagnosticsFor: async () => [{
+			line: 4,
+			column: 2,
+			message: "No matching function for call.",
+			source: "clang",
+			code: "ovl_no_viable_function_in_call",
+		}],
+	};
+	const hook = createPostEditDiagnosticHooks(
+		cwd,
+		() => true,
+		lspManager as never,
+	).afterToolCall;
+	assert.ok(hook);
+
+	const result = await hook(
+		{
+			toolCall: { id: "call_cpp", name: "edit_file", arguments: "{}" },
+			args: { path: "broken.cpp" },
+			result: "Successfully replaced 1 block(s) in broken.cpp.",
+			isError: false,
+			iteration: 1,
+		},
+		undefined,
+	);
+
+	assert.match(
+		result?.content ?? "",
+		/broken\.cpp:4:2 clang ovl_no_viable_function_in_call:/,
+	);
+});
+
 void test("post-edit hook stays silent for valid and failed edits", async () => {
 	const cwd = workspace();
 	writeFileSync(path.join(cwd, "valid.ts"), "const value = 1;\n", "utf8");
