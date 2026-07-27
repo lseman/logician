@@ -766,7 +766,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 
-		renderedLines.push(padToWidth(emptyLine));
 
 		// Bound the render buffer from the *front*. The previous early-break
 		// implementation retained old turns and discarded the newest ones while

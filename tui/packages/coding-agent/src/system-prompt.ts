@@ -277,9 +277,7 @@ In addition to the tools above, you may have access to other custom tools depend
 - After writing or editing, read the changed area or use file_diff to verify the result. Mutation tools already return diffs; use those diffs to explain what changed.
 - Run the narrowest useful verification command after risky changes, such as tests, type checks, linters, or a smoke command.
 - Keep changes scoped to the user's request. Do not revert unrelated user changes.
-- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.
-
-${webSection}${appendSection}`;
+- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}${appendSection}`;
 
 	// Custom prompt overrides everything
 	if (customPrompt) {

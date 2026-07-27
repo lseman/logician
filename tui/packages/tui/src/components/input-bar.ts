@@ -652,27 +652,21 @@ export class InputBar implements Component, Focusable {
 	}
 
 	private _renderComposerHeader(width: number): string {
-		const label = ` ${theme.fg("header", "ASK LOGICIAN")} `;
 		const hintText = width >= 72
 			? this.value
 				? "Enter send  ·  Esc clear  ·  Ctrl+O tools"
-				: "Enter send  ·  / commands  ·  Ctrl+O tools"
+				: "/ Enter commands  ·  Ctrl+O tools"
 			: width >= 52
 				? this.value
 					? "Enter send  ·  Esc clear"
-					: "Enter send  ·  / commands"
+					: "/ Enter commands"
 				: "Enter send";
 		const hint = ` ${theme.fg("muted", hintText)} `;
-		const used = visibleWidth(label) + visibleWidth(hint) + 2;
-		const ruleWidth = Math.max(1, width - used);
-		const leftRule = Math.max(1, Math.floor(ruleWidth * 0.55));
-		const rightRule = Math.max(0, ruleWidth - leftRule);
+		const hintWidth = visibleWidth(hint);
+		const ruleWidth = Math.max(1, width - hintWidth);
 		return (
-			theme.fg("borderMuted", `─${"─".repeat(leftRule)}`) +
-			label +
-			theme.fg("borderMuted", "─".repeat(rightRule)) +
-			hint +
-			theme.fg("borderMuted", "─")
+			theme.fg("borderMuted", "─".repeat(ruleWidth)) +
+			hint
 		);
 	}
 

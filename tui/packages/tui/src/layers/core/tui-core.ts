@@ -701,7 +701,7 @@ export class TUI extends Container {
 		// behavior and keeps the selector physically attached to the input.
 		aboveInputLines.push(...this.renderAboveInputOverlays(termWidth));
 		const aboveInputHeight = aboveInputLines.length;
-		const aboveInputSeparatorHeight = aboveInputHeight > 0 ? 1 : 0;
+
 
 		// Fixed layout: transcript + divider + [pinned + divider] + input bar + divider + status footer.
 		const transcriptHeight = Math.max(
@@ -709,7 +709,6 @@ export class TUI extends Container {
 			termHeight -
 				2 -
 				aboveInputHeight -
-				aboveInputSeparatorHeight -
 				inputHeight -
 				statusHeight,
 		);
@@ -770,9 +769,7 @@ export class TUI extends Container {
 		for (let i = 0; i < aboveInputHeight; i++) {
 			lines.push(aboveInputLines[i] || " ".repeat(termWidth));
 		}
-		if (aboveInputSeparatorHeight > 0) {
-			lines.push(`\x1b[38;5;236m${"─".repeat(termWidth)}\x1b[0m`);
-		}
+
 
 		// 3. Input bar (fixed)
 		for (let i = 0; i < inputHeight; i++) {
