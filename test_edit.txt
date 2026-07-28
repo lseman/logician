@@ -1,5 +1,0 @@
-Hello, world!
-This is a test file.
-Line 3: successfully edited!
-Line 4: unchanged.
-Line 5: unchanged.

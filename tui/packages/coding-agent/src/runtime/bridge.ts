@@ -72,6 +72,7 @@ import {
 	loadSkills,
 	type Skill,
 } from "../skills.ts";
+import { findPromptByName, loadPrompts, type Prompt } from "../prompts.ts";
 import { buildDefaultSystemPrompt } from "../system-prompt.ts";
 import {
 	createDefaultTools,
@@ -465,8 +466,9 @@ export interface AgentBridgeOptions {
 	systemPrompt?: string;
 	webSearch?: Partial<WebSearchConfig>;
 	// Safeguard options: default OFF (match pi's trust-model approach).
-	loopDetectionEnabled?: boolean;
 	guardsEnabled?: boolean;
+	duplicateGuardEnabled?: boolean;
+	failureGuardEnabled?: boolean;
 	continuationEnabled?: boolean;
 	postEditDiagnostics?: boolean;
 	autoRetryEnabled?: boolean;
@@ -508,6 +510,7 @@ export class AgentCoreBridge {
 	private pluginSystemContext = "";
 	private skillsContext: string | null = null;
 	private skillsInjected: boolean = false;
+	private promptsInjected: boolean = false;
 	private sessionId =
 		`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 	private transcriptPath = "";
@@ -523,6 +526,7 @@ export class AgentCoreBridge {
 	private lspManager: LspManager;
 	private agentDefs: AgentDefinition[] = [];
 	private loadedSkills: Skill[] = [];
+	private loadedPrompts: Prompt[] = [];
 	private readonly projectTrusted: boolean;
 	private enabledPluginRoots: Array<{ name: string; installPath: string }> = [];
 	private permissionManager: PermissionManager;
@@ -648,8 +652,9 @@ export class AgentCoreBridge {
 			steeringInterrupt: opts.steeringInterrupt,
 			maxTotalTokens: opts.maxTotalTokens,
 			permissions: this.permissionManager,
-			loopDetectionEnabled: opts.loopDetectionEnabled,
 			guardsEnabled: opts.guardsEnabled,
+			duplicateGuardEnabled: opts.duplicateGuardEnabled,
+			failureGuardEnabled: opts.failureGuardEnabled,
 			continuationEnabled: opts.continuationEnabled,
 			autoRetryEnabled: opts.autoRetryEnabled,
 			maxRetries: opts.maxRetries,
@@ -1125,6 +1130,8 @@ export class AgentCoreBridge {
 		this.loadedSkills = [];
 		this.skillsContext = null;
 		this.skillsInjected = false;
+		this.loadedPrompts = [];
+		this.promptsInjected = false;
 		this.startupHooksRan = false;
 		this.startupHookResult = null;
 		this.pluginSystemContext = "";
@@ -1169,6 +1176,32 @@ export class AgentCoreBridge {
 				? `User arguments for this skill invocation: ${trimmedArgs}`
 				: undefined,
 		);
+		this.sendMessage(message).catch((err) => this.errorCb?.(err));
+		return true;
+	}
+
+	/** Prompts discovered at startup (for /<prompt-name> completion). */
+	getPrompts(): Prompt[] {
+		return this.loadedPrompts;
+	}
+
+	/**
+	 * Invoke a prompt by name as a user message: sends the prompt's body
+	 * (with $ARGUMENTS substituted, or arguments appended) directly — no XML
+	 * wrapping, unlike invokeSkill, since a prompt is meant to read exactly as
+	 * if the user had typed it. Returns false for unknown names so the caller
+	 * can fall back to normal slash handling.
+	 */
+	invokePrompt(name: string, args: string): boolean {
+		const prompt = findPromptByName(this.loadedPrompts, name);
+		if (!prompt) return false;
+		const trimmedArgs = args.trim();
+		const substitutes = prompt.content.includes("$ARGUMENTS");
+		const message = substitutes
+			? prompt.content.replaceAll("$ARGUMENTS", trimmedArgs)
+			: trimmedArgs
+				? `${prompt.content}\n\n${trimmedArgs}`
+				: prompt.content;
 		this.sendMessage(message).catch((err) => this.errorCb?.(err));
 		return true;
 	}
@@ -1525,7 +1558,6 @@ export class AgentCoreBridge {
 
 	setRuntimeToggle(
 		key:
-			| "loopDetectionEnabled"
 			| "guardsEnabled"
 			| "proactiveCompactionEnabled"
 			| "postEditDiagnostics",
@@ -1551,7 +1583,6 @@ export class AgentCoreBridge {
 			`  Context window: ${this.config.contextWindowTokens ?? "unset"}`,
 			`  Thinking: ${this.config.thinkingLevel ?? "off"}`,
 			`  Permission mode: ${this.getPermissionMode()}`,
-			`  Loop detection: ${this.config.loopDetectionEnabled ? "on" : "off"}`,
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
 			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
@@ -1567,7 +1598,6 @@ export class AgentCoreBridge {
 		thinkingLevel: string;
 		inferenceMode: string;
 		permissionMode: string;
-		loopDetectionEnabled: boolean;
 		guardsEnabled: boolean;
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
@@ -1580,7 +1610,6 @@ export class AgentCoreBridge {
 			thinkingLevel: this.config.thinkingLevel ?? "off",
 			inferenceMode: this.config.inferenceMode ?? "instruct-general",
 			permissionMode: this.getPermissionMode(),
-			loopDetectionEnabled: this.config.loopDetectionEnabled ?? false,
 			guardsEnabled: this.config.guardsEnabled ?? false,
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? false,
@@ -1599,9 +1628,10 @@ export class AgentCoreBridge {
 		this.config.hookSessionId = this.sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
-		// Reset skill injection state
+		// Reset skill/prompt injection state
 		this.skillsContext = null;
 		this.skillsInjected = false;
+		this.promptsInjected = false;
 		this.startupHooksRan = false;
 		this.pluginSystemContext = "";
 		this.skillActivation.reset();
@@ -2066,16 +2096,18 @@ export class AgentCoreBridge {
 		// not flagged disable-model-invocation are advertised to the model.
 		this.loadedSkills = skills;
 		const visible = skills.filter((s) => !s.disableModelInvocation);
-		if (!visible.length) return;
+		// Only skip catalog injection when there are no skills at all.
+		// Plugin commands (disableModelInvocation) still need read_skill.
 
 		// Inject a compact catalog (name + description), not full bodies. The
 		// model loads a skill's full instructions on demand via read_skill.
 		this.skillsContext = formatSkillCatalog(visible);
 
-		// Register the read_skill tool bound to the loaded skills so the model can
-		// pull full bodies. Append to the tool set (next loop turn picks it up) and
+		// Register the read_skill tool bound to ALL loaded skills so the model can
+		// pull full bodies for any skill, including plugin commands (disableModelInvocation).
+		// Append to the tool set (next loop turn picks it up) and
 		// patch the live harness registry if a run is already active.
-		const readSkill = createReadSkillTool(visible);
+		const readSkill = createReadSkillTool(skills);
 		if (readSkill && !this.defaultTools.some((t) => t.name === "read_skill")) {
 			this.defaultTools = [...this.defaultTools, readSkill];
 			this.config.tools = this.defaultTools;
@@ -2083,6 +2115,21 @@ export class AgentCoreBridge {
 		}
 
 		this.rebuildBaseSystemPrompt();
+	}
+
+	/**
+	 * Discover prompts/.logician/prompts markdown files and register them as
+	 * direct, user-typed /<name> slash commands. Unlike skills, prompts are
+	 * never surfaced to the model — they exist only to be typed by the user.
+	 */
+	private async injectPrompts(): Promise<void> {
+		if (this.promptsInjected) return;
+		this.promptsInjected = true;
+
+		if (!this.projectTrusted) return;
+		const cwd = this.config.cwd || process.cwd();
+		const promptDirs = getProjectPromptDirs(cwd);
+		this.loadedPrompts = await loadPrompts(promptDirs);
 	}
 
 	/**
@@ -2170,9 +2217,10 @@ export class AgentCoreBridge {
 				this.applyPluginHookContext(result);
 			}
 		}
-		// Skills and agents are runtime resources, independent of whether command
-		// hooks are enabled.
+		// Skills, prompts, and agents are runtime resources, independent of
+		// whether command hooks are enabled.
 		await this.injectSkillsFromPlugins();
+		await this.injectPrompts();
 		await this.injectSubagents();
 	}
 
@@ -2342,6 +2390,22 @@ function getProjectSkillDirs(cwd: string): string[] {
 	while (true) {
 		dirs.push(path.join(current, ".logician", "skills"));
 		dirs.push(path.join(current, "skills"));
+		const parent = path.dirname(current);
+		if (parent === current) break;
+		current = parent;
+	}
+	return Array.from(new Set(dirs));
+}
+
+// Prompts are user-typed slash commands (never surfaced to the model), kept
+// out of the skills scan above so a plain prompts/*.md file never ends up in
+// the model's read_skill catalog.
+function getProjectPromptDirs(cwd: string): string[] {
+	const dirs: string[] = [];
+	let current = path.resolve(cwd);
+	while (true) {
+		dirs.push(path.join(current, ".logician", "prompts"));
+		dirs.push(path.join(current, "prompts"));
 		const parent = path.dirname(current);
 		if (parent === current) break;
 		current = parent;

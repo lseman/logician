@@ -26,6 +26,7 @@ export interface McpServerInfo {
 	enabled: boolean;
 	toolCount: number;
 	loaded: boolean;
+	configPath?: string;
 	error?: string;
 }
 
@@ -44,12 +45,23 @@ export interface McpToggleResult {
 	loadedServers: Record<string, { toolCount: number }>;
 }
 
-function findMcpConfig(cwd: string): string | null {
+interface ResolvedMcpConfigs {
+	configs: Record<string, McpServerConfig>;
+	configPaths: Record<string, string | undefined>;
+	primaryConfigPath: string;
+}
+
+function findProjectMcpConfig(cwd: string): string | null {
 	const envPath =
 		process.env.LOGICIAN_MCP_CONFIG ||
 		process.env.MCP_CONFIG ||
 		process.env.LOGICIAN_CONFIG;
-	if (envPath && existsSync(envPath)) return envPath;
+	if (envPath) {
+		const resolved = resolve(
+			envPath.replace(/^~(?=$|\/)/, process.env.HOME || ""),
+		);
+		return existsSync(resolved) ? resolved : null;
+	}
 	let dir = resolve(cwd);
 	while (true) {
 		const logicianConfig = join(dir, ".logician.json");
@@ -60,15 +72,39 @@ function findMcpConfig(cwd: string): string | null {
 		if (parent === dir) break;
 		dir = parent;
 	}
+	return null;
+}
 
+function readMcpServerConfigs(
+	configPath: string,
+): Record<string, McpServerConfig> {
+	const raw = parseJsonWithComments<Record<string, unknown>>(
+		readFileSync(configPath, "utf8"),
+	);
+	const configs = raw.mcpServers ?? raw.mcp;
+	return configs && typeof configs === "object"
+		? configs as Record<string, McpServerConfig>
+		: {};
+}
+
+function fileMcpConfigPaths(cwd: string): string[] {
+	const envPath =
+		process.env.LOGICIAN_MCP_CONFIG ||
+		process.env.MCP_CONFIG ||
+		process.env.LOGICIAN_CONFIG;
+	const projectPath = findProjectMcpConfig(cwd);
+	if (envPath) return projectPath ? [projectPath] : [];
+
+	const paths: string[] = [];
 	const home = process.env.HOME;
 	if (home) {
+		const globalSettings = join(home, ".logician", "settings.json");
+		if (existsSync(globalSettings)) paths.push(globalSettings);
 		const userMcpJson = join(home, ".logician", "mcp.json");
-		if (existsSync(userMcpJson)) return userMcpJson;
-		const global = join(home, ".logician", "settings.json");
-		if (existsSync(global)) return global;
+		if (existsSync(userMcpJson)) paths.push(userMcpJson);
 	}
-	return null;
+	if (projectPath) paths.push(projectPath);
+	return paths;
 }
 
 /** Recursively expand ${CLAUDE_PLUGIN_ROOT} in a plugin's server config. */
@@ -153,29 +189,42 @@ async function loadPluginMcpServerConfigs(): Promise<
 	return out;
 }
 
-function loadMcpServerConfigs(cwd: string): Record<string, McpServerConfig> {
-	const configPath = findMcpConfig(cwd);
-	if (!configPath) return {};
-	const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<
-		string,
-		unknown
-	>;
-	const fromMcpJson = raw.mcpServers;
-	if (fromMcpJson && typeof fromMcpJson === "object") {
-		return fromMcpJson as Record<string, McpServerConfig>;
-	}
-	const fromAgentConfig = raw.mcp;
-	if (fromAgentConfig && typeof fromAgentConfig === "object") {
-		return fromAgentConfig as Record<string, McpServerConfig>;
-	}
-	return {};
-}
-
 export class McpManager {
 	private clients: McpClient[] = [];
 	private loaded = false;
 	private tools: Tool[] = [];
 	private errors: string[] = [];
+	private readonly pluginConfigLoader: () => Promise<
+		Record<string, McpServerConfig>
+	>;
+
+	constructor(
+		options: {
+			loadPluginConfigs?: () => Promise<Record<string, McpServerConfig>>;
+		} = {},
+	) {
+		this.pluginConfigLoader =
+			options.loadPluginConfigs ?? loadPluginMcpServerConfigs;
+	}
+
+	private async resolveConfigs(cwd: string): Promise<ResolvedMcpConfigs> {
+		const configs = { ...(await this.pluginConfigLoader()) };
+		const configPaths: Record<string, string | undefined> =
+			Object.fromEntries(Object.keys(configs).map((name) => [name, undefined]));
+		const paths = fileMcpConfigPaths(cwd);
+		for (const configPath of paths) {
+			const fromFile = readMcpServerConfigs(configPath);
+			for (const [name, config] of Object.entries(fromFile)) {
+				configs[name] = config;
+				configPaths[name] = configPath;
+			}
+		}
+		return {
+			configs,
+			configPaths,
+			primaryConfigPath: paths.at(-1) || "",
+		};
+	}
 
 	async load(cwd: string): Promise<McpLoadResult> {
 		if (this.loaded) {
@@ -187,11 +236,8 @@ export class McpManager {
 		}
 		this.loaded = true;
 
-		// Project/user config wins over plugin-declared servers on name clash.
-		const configs = {
-			...(await loadPluginMcpServerConfigs()),
-			...loadMcpServerConfigs(cwd),
-		};
+		// Project config wins over user and plugin-declared servers on name clash.
+		const { configs } = await this.resolveConfigs(cwd);
 		for (const [name, config] of Object.entries(configs)) {
 			if (config.enabled === false) continue;
 			let client: McpClient | null = null;
@@ -226,28 +272,23 @@ export class McpManager {
 	}
 
 	async getSnapshot(cwd: string): Promise<McpSnapshotResult> {
-		const configPath = findMcpConfig(cwd);
-		if (!configPath) {
-			return {
-				configPath: "",
-				servers: [],
-				loadedServers: {},
-				errors: [],
-			};
-		}
-
-		const raw = parseJsonWithComments<Record<string, unknown>>(readFileSync(configPath, "utf8"));
-		const config =
-			(raw.mcpServers as Record<string, McpServerConfig>) ||
-			(raw.mcp as Record<string, McpServerConfig>) ||
-			{};
+		const {
+			configs,
+			configPaths,
+			primaryConfigPath,
+		} = await this.resolveConfigs(cwd);
 
 		const loadedServers: Record<string, { toolCount: number }> = {};
 		for (const client of this.clients) {
-			loadedServers[client.name] = { toolCount: 0 };
+			try {
+				const tools = await client.listTools();
+				loadedServers[client.name] = { toolCount: tools.length };
+			} catch {
+				loadedServers[client.name] = { toolCount: 0 };
+			}
 		}
 
-		const servers: McpServerInfo[] = Object.entries(config).map(
+		const servers: McpServerInfo[] = Object.entries(configs).map(
 			([name, server]) => {
 				const enabled = server.enabled !== false;
 				const loadedInfo = loadedServers[name];
@@ -257,12 +298,13 @@ export class McpManager {
 					enabled,
 					toolCount: loadedInfo?.toolCount ?? 0,
 					loaded: !!loadedInfo,
+					configPath: configPaths[name],
 				};
 			},
 		);
 
 		return {
-			configPath,
+			configPath: primaryConfigPath,
 			servers,
 			loadedServers,
 			errors: this.errors,
@@ -274,9 +316,15 @@ export class McpManager {
 		enabled: boolean,
 		cwd: string,
 	): Promise<McpToggleResult> {
-		const configPath = findMcpConfig(cwd);
+		const resolved = await this.resolveConfigs(cwd);
+		const configPath = resolved.configPaths[serverName];
 		if (!configPath) {
-			throw new Error("No MCP config file found.");
+			if (serverName in resolved.configs) {
+				throw new Error(
+					`MCP server '${serverName}' is managed by a plugin; enable or disable the plugin instead.`,
+				);
+			}
+			throw new Error(`MCP server '${serverName}' not found in config.`);
 		}
 
 		const raw = parseJsonWithComments<Record<string, unknown>>(readFileSync(configPath, "utf8"));
@@ -293,22 +341,21 @@ export class McpManager {
 
 		const loadedServers: Record<string, { toolCount: number }> = {};
 		for (const client of this.clients) {
-			loadedServers[client.name] = { toolCount: 0 };
+			try {
+				const tools = await client.listTools();
+				loadedServers[client.name] = { toolCount: tools.length };
+			} catch {
+				loadedServers[client.name] = { toolCount: 0 };
+			}
 		}
 
-		const servers: McpServerInfo[] = Object.entries(config).map(
-			([name, server]) => {
-				const serverEnabled = server.enabled !== false;
-				const loadedInfo = loadedServers[name];
-				return {
-					serverName: name,
-					server,
-					enabled: serverEnabled,
-					toolCount: loadedInfo?.toolCount ?? 0,
-					loaded: !!loadedInfo,
-				};
-			},
-		);
+		const snapshot = await this.getSnapshot(cwd);
+		const servers: McpServerInfo[] = snapshot.servers.map((server) => ({
+			...server,
+			toolCount:
+				loadedServers[server.serverName]?.toolCount ?? server.toolCount,
+			loaded: server.serverName in loadedServers,
+		}));
 
 		return {
 			status: enabled ? "enabled" : "disabled",

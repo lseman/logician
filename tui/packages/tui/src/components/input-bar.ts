@@ -654,13 +654,13 @@ export class InputBar implements Component, Focusable {
 	private _renderComposerHeader(width: number): string {
 		const hintText = width >= 72
 			? this.value
-				? "Enter send  ·  Esc clear  ·  Ctrl+O tools"
-				: "/ Enter commands  ·  Ctrl+O tools"
+				? "Enter send  ·  Ctrl+Enter steer  ·  Esc clear  ·  Ctrl+O tools"
+				: "/ Enter commands  ·  Ctrl+Enter steer  ·  Ctrl+O tools"
 			: width >= 52
 				? this.value
-					? "Enter send  ·  Esc clear"
-					: "/ Enter commands"
-				: "Enter send";
+					? "Enter send  ·  Ctrl+Enter steer  ·  Esc clear"
+					: "/ Enter commands  ·  Ctrl+Enter steer"
+				: "Enter send  ·  Ctrl+Enter steer";
 		const hint = ` ${theme.fg("muted", hintText)} `;
 		const hintWidth = visibleWidth(hint);
 		const ruleWidth = Math.max(1, width - hintWidth);

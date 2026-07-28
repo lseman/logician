@@ -67,6 +67,7 @@ const defaultOps: LsOperations = {
 
 export const list_files: Tool = {
 	readOnly: true,
+	cacheable: true,
 	executionMode: "parallel",
 	name: "list_files",
 	label: "List Files",

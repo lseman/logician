@@ -82,7 +82,6 @@ export function resolveRuntimeConfig(
 			permissionRules: config.permissions,
 			steeringInterrupt: configBool(config.steeringInterrupt),
 			maxTotalTokens: configNumber(config.maxTotalTokens),
-			loopDetectionEnabled: configBool(config.loopDetectionEnabled),
 			guardsEnabled: configBool(config.guardsEnabled),
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),

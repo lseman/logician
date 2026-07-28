@@ -7,6 +7,7 @@ import {
 	convertToChatFormat,
 	createAssistantMessage,
 	createSystemMessage,
+	createUserMessage,
 	convertToLlm as defaultConvertToLlm,
 	sanitizeToolCallArguments,
 	estimateChatPayloadTokens,
@@ -1052,6 +1053,35 @@ async function runAgentLoopInTaskScope(
 				hasMoreToolCalls = true;
 			}
 
+			// Turn-level loop detection: exact-repeat / degenerate / stagnation
+			// across turns (e.g. re-reading the same file over and over without
+			// progress). Runs after every turn regardless of the duplicate-call
+			// guard, which only catches identical calls within a single turn.
+			// A detection is a nudge, not a hard stop — false positives here
+			// must not kill an otherwise-healthy run; the model gets a chance
+			// to course-correct on its own.
+			if (outputGuard && toolCalls.length > 0) {
+				const turnToolCalls = toolCalls.map((call, index) => ({
+					name: call.name,
+					args: call.arguments,
+					result: String(toolResults[index]?.content ?? ""),
+				}));
+				const diagnostic = outputGuard.checkLoopDetection(
+					assistantContent || "",
+					turnToolCalls,
+				);
+				if (diagnostic) {
+					// checkLoopDetection already emitted a "loop_detected" event with
+					// this diagnostic — inject it as a nudge and keep going.
+					const nudge = createUserMessage(
+						`${diagnostic} Stop and try a different approach, or explain why you're stuck.`,
+					);
+					messages.push(nudge);
+					newMessages.push(nudge);
+					await emitMessagePair(emit, turnId, nudge);
+				}
+			}
+
 			// The final usage-only SSE chunk is optional and many local providers
 			// omit it. Estimate the serialized conversation as a reliable fallback
 			// so context usage never remains stuck at zero.
@@ -1060,13 +1090,41 @@ async function runAgentLoopInTaskScope(
 					estimateChatPayloadTokens(messages),
 					response?.usage?.totalTokens ?? 0,
 				);
-				outputGuard?.processResponse(contextTokens, config.contextWindowTokens);
+				const budgetResult = outputGuard?.processResponse(
+					contextTokens,
+					config.contextWindowTokens,
+				);
 				await emit({
 					type: "context_update",
 					tokens: contextTokens,
 					maxTokens: config.contextWindowTokens,
 					cachedTokens: response?.usage?.cachedTokens ?? null,
 				});
+				// budget_exhausted is a harder threshold than proactive compaction's
+				// (95% vs 80%) — if we're here, proactive compaction already failed
+				// to keep up (e.g. cooldown window, or a single oversized turn).
+				// Compact immediately rather than waiting for the next request to
+				// fail with context_full.
+				if (budgetResult?.action === "budget_exhausted") {
+					const compacted = await compactToFit(
+						messages as CompactableMessage[],
+						{
+							triggerTokens: 0,
+							targetTokens: Math.floor(config.contextWindowTokens * 0.75),
+						},
+					);
+					if (compacted.changed) {
+						messages = compacted.messages as unknown as Message[];
+						contextWasCompacted = true;
+						config.onContextCompacted?.(messages);
+						await emit({
+							type: "context_update",
+							tokens: compacted.tokensAfter,
+							maxTokens: config.contextWindowTokens,
+							compacted: true,
+						});
+					}
+				}
 			}
 
 			await emitTyped(config.extensionBus, {

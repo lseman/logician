@@ -53,15 +53,25 @@ export interface BuiltinHookDeps {
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, loopDetector } = deps;
-	// Tool guards (duplicate + failure-loop, merged from GuardEngine). Default
-	// OFF — matching pi's trust-model approach. Guards that block tools after 3
-	// failures/dupe calls force the model to switch strategies mid-task, often
-	// causing more looping. Enable only when debugging specific failure loops.
+	// Tool guards (duplicate + failure-loop, merged from GuardEngine).
+	// Duplicate-call detection defaults ON: blocking exact same-args repeats
+	// (e.g. re-reading the same file over and over) is safe to force a
+	// strategy change. Failure-loop blocking stays default OFF — it can cut
+	// off a legitimate retry-with-variation sequence, matching pi's
+	// trust-model approach. `guardsEnabled` (legacy) forces both on when true.
+	const duplicateGuardOn =
+		config.guardsEnabled === true || config.duplicateGuardEnabled !== false;
+	const failureGuardOn =
+		config.guardsEnabled === true || config.failureGuardEnabled === true;
 	const guardThresholds =
-		config.guardsEnabled === true
+		duplicateGuardOn || failureGuardOn
 			? {
-					duplicateThreshold: config.duplicateToolThreshold,
-					failureThreshold: config.toolFailureLoopThreshold,
+					duplicateThreshold: duplicateGuardOn
+						? config.duplicateToolThreshold
+						: 0,
+					failureThreshold: failureGuardOn
+						? config.toolFailureLoopThreshold
+						: 0,
 				}
 			: undefined;
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step

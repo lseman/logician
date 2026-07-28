@@ -892,6 +892,7 @@ export class AgentHarness {
 	}): void {
 		this.outputGuard = new OutputGuard({
 			...config,
+			loopDetector: this.loopDetector,
 			onCompact: async () => {
 				const result = await this.compact();
 				return result ?? null;

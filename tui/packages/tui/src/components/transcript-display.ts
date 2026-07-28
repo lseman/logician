@@ -2594,15 +2594,56 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const chunks: string[] = [];
 		let chunk = "";
 		let chunkWidth = 0;
-		for (const char of text) {
-			const charWidth = visibleWidth(char);
+		let activeCodes = "";
+		let i = 0;
+		while (i < text.length) {
+			const ch = text[i];
+			// Escape sequences are atomic and zero-width — never split them
+			// across a wrap boundary, or the terminal (or downstream chunks)
+			// lose the color/style they were carrying.
+			if (ch === "\x1b") {
+				const start = i;
+				i++;
+				const next = text[i];
+				if (next === "[") {
+					i++;
+					while (i < text.length) {
+						const fc = text.charCodeAt(i);
+						i++;
+						if (fc >= 0x40 && fc <= 0x7e) break;
+					}
+				} else if (next === "]" || next === "_") {
+					i++;
+					while (i < text.length) {
+						if (text[i] === "\x07") {
+							i++;
+							break;
+						}
+						if (text[i] === "\x1b" && text[i + 1] === "\\") {
+							i += 2;
+							break;
+						}
+						i++;
+					}
+				}
+				const seq = text.slice(start, i);
+				chunk += seq;
+				if (/^\x1b\[0m$/.test(seq)) {
+					activeCodes = "";
+				} else if (seq.startsWith("\x1b[")) {
+					activeCodes += seq;
+				}
+				continue;
+			}
+			const charWidth = visibleWidth(ch);
 			if (chunk && chunkWidth + charWidth > width) {
-				chunks.push(chunk);
-				chunk = "";
+				chunks.push(chunk + (activeCodes ? RESET : ""));
+				chunk = activeCodes;
 				chunkWidth = 0;
 			}
-			chunk += char;
+			chunk += ch;
 			chunkWidth += charWidth;
+			i++;
 		}
 		if (chunk) chunks.push(chunk);
 		return chunks;

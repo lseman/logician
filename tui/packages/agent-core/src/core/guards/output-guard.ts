@@ -84,6 +84,12 @@ export class OutputGuard {
 	private consecutiveEmptyResponses = 0;
 	private consecutiveNonCommittalResponses = 0;
 	private consecutiveCompactions = 0;
+	// Set by processResponse when context usage crossed budgetThreshold on the
+	// last successful response. A subsequent rate_limit/quota error is often
+	// the provider's own context-size cap rather than a transient throttle —
+	// backoff-retrying the same oversized request would just fail again, so
+	// handleError compacts first in that case instead of blindly retrying.
+	private contextWasNearFull = false;
 
 	constructor(config: OutputGuardConfig = {}) {
 		this.config = { ...DEFAULT_CONFIG, ...config };
@@ -196,6 +202,48 @@ export class OutputGuard {
 				action: "abort",
 				message: "Context full and auto-compaction disabled.",
 				isRetryable: false,
+			};
+		}
+
+		// Rate-limit/quota errors that follow a near-full context are treated
+		// like context_full: the provider's 429 is plausibly its own
+		// context-size cap, not a transient throttle, and retrying the same
+		// oversized request would just repeat the failure. Compact first.
+		if (
+			category === "rate_limit" &&
+			this.contextWasNearFull &&
+			this.config.autoCompactOnContextFull &&
+			this.config.maxRetries > 0
+		) {
+			this.contextWasNearFull = false;
+			this.consecutiveCompactions++;
+			if (this.consecutiveCompactions > this.config.maxConsecutiveCompactions) {
+				this.emitEvent({
+					type: "auto_retry_end",
+					attempt: this.consecutiveCompactions,
+					success: false,
+				});
+				return {
+					action: "abort",
+					message:
+						`Rate-limited after ${this.config.maxConsecutiveCompactions} compaction attempts — ` +
+						"likely a single oversized tool call. Aborting instead of compacting again.",
+					isRetryable: false,
+				};
+			}
+			this.emitEvent({
+				type: "auto_retry_start",
+				attempt: 1,
+				maxRetries: 1,
+				delayMs: 0,
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return {
+				action: "compact_then_retry",
+				attempt: 1,
+				maxRetries: 1,
+				isRetryable: true,
+				message: "Rate limited near context capacity — compaction triggered before retry.",
 			};
 		}
 
@@ -338,6 +386,7 @@ export class OutputGuard {
 
 			// Budget guard: if usage exceeds threshold, stop
 			if (tokensUsed > maxTokens * (this.config.budgetThreshold ?? 0.95)) {
+				this.contextWasNearFull = true;
 				this.emitEvent({
 					type: "budget_exhausted",
 					usedTokens: tokensUsed,
@@ -345,6 +394,7 @@ export class OutputGuard {
 				});
 				return { action: "budget_exhausted" };
 			}
+			this.contextWasNearFull = false;
 		}
 		return { action: "proceed" };
 	}
@@ -357,6 +407,7 @@ export class OutputGuard {
 		this.consecutiveEmptyResponses = 0;
 		this.consecutiveNonCommittalResponses = 0;
 		this.consecutiveCompactions = 0;
+		this.contextWasNearFull = false;
 	}
 
 	/**
@@ -368,28 +419,29 @@ export class OutputGuard {
 
 	/**
 	 * Check if loop detector found a loop in the current turn.
-	 * Returns true if loop detected (and emits event).
+	 * Returns the diagnostic message if a loop is detected (and emits an
+	 * event), or null otherwise. Callers should nudge the model with the
+	 * diagnostic rather than abort — a false positive shouldn't kill the run.
 	 */
 	checkLoopDetection(
 		assistantContent: string,
 		toolCalls: Array<{ name: string; args: string; result: string }>,
-	): boolean {
-		if (!this.loopDetector) return false;
+	): string | null {
+		if (!this.loopDetector) return null;
 		const isLooping = this.loopDetector.recordAndDetect(
 			assistantContent,
 			toolCalls,
 		);
-		if (isLooping) {
-			const diag = this.loopDetector.getLoopDiagnostic();
-			if (diag) {
-				this.emitEvent({
-					type: "loop_detected",
-					message: diag,
-					attempt: this.retryCount,
-				});
-			}
+		if (!isLooping) return null;
+		const diag = this.loopDetector.getLoopDiagnostic();
+		if (diag) {
+			this.emitEvent({
+				type: "loop_detected",
+				message: diag,
+				attempt: this.retryCount,
+			});
 		}
-		return isLooping;
+		return diag;
 	}
 
 	// ── Internals ──────────────────────────────────────────────────────────

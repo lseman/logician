@@ -20,7 +20,6 @@ describe("buildSettingsSnapshot", () => {
 			inferenceMode: "instruct-general",
 			proactiveCompactionEnabled: true,
 			proactiveCompactionFraction: 0.8,
-			loopDetectionEnabled: true,
 			guardsEnabled: true,
 			continuationEnabled: false,
 			budgetStopEnabled: false,
@@ -55,7 +54,6 @@ describe("buildSettingsSnapshot", () => {
 			inferenceMode: "instruct-general",
 			proactiveCompactionEnabled: undefined,
 			proactiveCompactionFraction: undefined,
-			loopDetectionEnabled: undefined,
 			guardsEnabled: undefined,
 			continuationEnabled: undefined,
 			budgetStopEnabled: undefined,
@@ -85,7 +83,6 @@ describe("buildSettingsSnapshot", () => {
 			inferenceMode: "instruct-general",
 			proactiveCompactionEnabled: undefined,
 			proactiveCompactionFraction: undefined,
-			loopDetectionEnabled: undefined,
 			guardsEnabled: undefined,
 			continuationEnabled: undefined,
 			budgetStopEnabled: undefined,
@@ -114,7 +111,6 @@ describe("buildSettingsSnapshot", () => {
 			inferenceMode: "instruct-general",
 			proactiveCompactionEnabled: false,
 			proactiveCompactionFraction: 0.5,
-			loopDetectionEnabled: false,
 			guardsEnabled: false,
 			continuationEnabled: false,
 			budgetStopEnabled: false,
@@ -273,31 +269,6 @@ describe("parseSettingsCommand — max-iterations", () => {
 
 	it("rejects non-numeric", () => {
 		const result = parseSettingsCommand("max-iterations abc");
-		assert.strictEqual(result.type, "error");
-	});
-});
-
-describe("parseSettingsCommand — loop-detection", () => {
-	it("accepts on", () => {
-		const result = parseSettingsCommand("loop-detection on");
-		assert.strictEqual(result.type, "change");
-		assert.strictEqual(result.key, "loop_detection");
-		assert.strictEqual(result.value, "on");
-	});
-
-	it("accepts off", () => {
-		const result = parseSettingsCommand("loop-detection off");
-		assert.strictEqual(result.type, "change");
-		assert.strictEqual(result.value, "off");
-	});
-
-	it("rejects missing state", () => {
-		const result = parseSettingsCommand("loop-detection");
-		assert.strictEqual(result.type, "error");
-	});
-
-	it("rejects invalid state", () => {
-		const result = parseSettingsCommand("loop-detection maybe");
 		assert.strictEqual(result.type, "error");
 	});
 });

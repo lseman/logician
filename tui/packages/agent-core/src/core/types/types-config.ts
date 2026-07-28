@@ -86,13 +86,14 @@ export interface AgentConfig {
 	) => import("./types-messages.ts").Message[];
 	turnEndCallback?: (turnId: string) => void;
 	guardsEnabled?: boolean;
+	duplicateGuardEnabled?: boolean;
+	failureGuardEnabled?: boolean;
 	duplicateToolThreshold?: number;
 	toolFailureLoopThreshold?: number;
 	budgetStopEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	proactiveCompactionFraction?: number;
 	continuationEnabled?: boolean;
-	loopDetectionEnabled?: boolean;
 	toolExecution?: "sequential" | "parallel";
 	steeringQueueMode?: QueueMode;
 	followUpQueueMode?: QueueMode;

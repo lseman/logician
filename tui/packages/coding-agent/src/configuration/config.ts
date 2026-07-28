@@ -39,8 +39,9 @@ const KNOWN_KEYS = new Set([
 	"permissions",
 	"steeringInterrupt",
 	"maxTotalTokens",
-	"loopDetectionEnabled",
 	"guardsEnabled",
+	"duplicateGuardEnabled",
+	"failureGuardEnabled",
 	"continuationEnabled",
 	"postEditDiagnostics",
 	"lsp",
@@ -273,8 +274,9 @@ export function validateConfig(
 			cfg.inferenceMode = im as LogicianTuiConfig["inferenceMode"];
 		}
 	}
-	cfg.loopDetectionEnabled = configBool(obj.loopDetectionEnabled);
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
+	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
+	cfg.failureGuardEnabled = configBool(obj.failureGuardEnabled);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
@@ -599,8 +601,9 @@ export interface LogicianTuiConfig {
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
 	// Safeguard options (match pi's trust-model approach by default).
-	loopDetectionEnabled?: boolean; // OFF by default
-	guardsEnabled?: boolean; // OFF by default
+	guardsEnabled?: boolean; // legacy: forces both guards below on when true
+	duplicateGuardEnabled?: boolean; // ON by default — blocks exact-repeat tool calls (e.g. re-reading the same file)
+	failureGuardEnabled?: boolean; // OFF by default
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
 	autoRetryEnabled?: boolean;

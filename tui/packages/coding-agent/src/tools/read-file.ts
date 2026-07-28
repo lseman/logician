@@ -14,6 +14,7 @@ import {
 
 export const read_file: Tool = {
 	readOnly: true,
+	cacheable: true,
 	name: "read_file",
 	label: "Read File",
 	hookAliases: ["Read"],

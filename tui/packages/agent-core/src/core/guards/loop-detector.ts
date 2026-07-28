@@ -263,11 +263,16 @@ export class LoopDetector {
 		const fingerprints = toolCalls.map((tc) => ({
 			name: tc.name,
 			argHash: this.hashArgs(tc.args),
-			resultPrefix: tc.result
+			// Prefix alone collapses genuinely different results that happen to
+			// share the same opening words (e.g. every successful edit_file
+			// confirmation, or similarly-headered file reads). Bucket in the
+			// result length too so distinct-sized results don't fingerprint as
+			// the same "shape".
+			resultPrefix: `${this.lengthBucket(tc.result.length)}:${tc.result
 				.toLowerCase()
 				.slice(0, 60)
 				.replace(/\s+/g, " ")
-				.trim(),
+				.trim()}`,
 		}));
 
 		const contentDirection = assistantContent
@@ -279,6 +284,13 @@ export class LoopDetector {
 			.slice(0, 80);
 
 		return { signature, fingerprints, contentDirection };
+	}
+
+	// Coarse log2 bucket so results of similar size fingerprint the same but
+	// substantially different-sized results (e.g. a 40-char confirmation vs a
+	// 4000-char file dump) do not.
+	private lengthBucket(length: number): number {
+		return length <= 0 ? 0 : Math.floor(Math.log2(length + 1));
 	}
 
 	private hashArgs(args: string): string {

@@ -23,7 +23,6 @@ export function buildSettingsSnapshot(opts: {
 	inferenceMode: string;
 	proactiveCompactionEnabled: boolean | undefined;
 	proactiveCompactionFraction: number | undefined;
-	loopDetectionEnabled: boolean | undefined;
 	guardsEnabled: boolean | undefined;
 	continuationEnabled: boolean | undefined;
 	budgetStopEnabled: boolean | undefined;
@@ -55,7 +54,6 @@ export function buildSettingsSnapshot(opts: {
 
 	lines.push("");
 	lines.push("── Guardrails ──");
-	lines.push(fmtSetting("Loop Detection", boolStr(opts.loopDetectionEnabled)));
 	lines.push(fmtSetting("Guards", boolStr(opts.guardsEnabled)));
 	lines.push(fmtSetting("Continuation", boolStr(opts.continuationEnabled)));
 	lines.push(fmtSetting("Budget Stop", boolStr(opts.budgetStopEnabled)));
@@ -95,7 +93,6 @@ export function buildSettingsSnapshot(opts: {
 	lines.push("  /settings temp <n>             → set temperature (0.0–2.0)");
 	lines.push("  /settings max-tokens <n>       → set max tokens");
 	lines.push("  /settings max-iterations <n>   → set max iterations per turn");
-	lines.push("  /settings loop-detection [on]  → toggle loop detection");
 	lines.push("  /settings guards [on]          → toggle output guards");
 	lines.push("  /settings compaction [on]      → toggle proactive compaction");
 	lines.push("  /settings permissions <mode>   → acceptAll|acceptEdits|ask|plan");
@@ -188,18 +185,6 @@ export function parseSettingsCommand(
 				};
 			}
 			return { type: "change", key: "max_iterations", value: n.toString() };
-		}
-
-		case "loop-detection":
-		case "loop_detection": {
-			const state = parts[1]?.trim().toLowerCase();
-			if (state === "on" || state === "off") {
-				return { type: "change", key: "loop_detection", value: state };
-			}
-			return {
-				type: "error",
-				message: "Usage: /settings loop-detection [on|off]\n\nToggle loop detection safeguard.",
-			};
 		}
 
 		case "guards": {

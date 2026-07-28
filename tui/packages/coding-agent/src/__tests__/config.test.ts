@@ -132,7 +132,6 @@ void test("validateConfig applies default booleans (continuationEnabled, postEdi
 	assert.equal(cfg.continuationEnabled, true);
 	assert.equal(cfg.postEditDiagnostics, true);
 	assert.equal(cfg.autoRetryEnabled, true);
-	assert.equal(cfg.loopDetectionEnabled, undefined);
 	assert.equal(cfg.guardsEnabled, undefined);
 });
 

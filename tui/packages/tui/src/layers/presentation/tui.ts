@@ -395,8 +395,29 @@ export class LogicianTUI {
 			}
 		};
 
-		const handleMcp = async (_args: string) => {
+		const handleMcp = async (args: string) => {
 			try {
+				const normalized = args.trim().toLowerCase();
+				if (normalized === "list" || normalized === "") {
+					const snapshot = await this.bridge.getMcpSnapshot();
+					if (snapshot.servers.length === 0) {
+						this.transcript.addSystemMessage("No MCP servers configured.");
+					} else {
+						const lines = snapshot.servers.map((s) => {
+							const status = s.enabled ? "✓" : "✗";
+							const serverType = s.server.url ? "http" : "stdio";
+							const error = s.error ? ` (${s.error})` : "";
+							return `  ${status} ${s.serverName}  [${serverType}]  tools:${s.toolCount}${error}`;
+						});
+						lines.unshift(
+							`MCP servers (${snapshot.servers.length} configured, ${Object.keys(snapshot.loadedServers).length} loaded):`,
+						);
+						this.transcript.addSystemMessage(lines.join("\n"));
+					}
+					this.transcriptDisplay.setTurns(this.transcript.getTurns());
+					this.tui.requestRender();
+					return;
+				}
 				await this.openMcpManager();
 			} catch (e: unknown) {
 				this.transcript.addSystemMessage(
@@ -618,9 +639,6 @@ export class LogicianTUI {
 							value as "acceptAll" | "acceptEdits" | "ask" | "plan",
 						);
 						return `Permission mode: ${value}`;
-					case "loop-detection":
-						this.bridge.setRuntimeToggle("loopDetectionEnabled", on);
-						return `Loop detection: ${on ? "on" : "off"}`;
 					case "guards":
 						this.bridge.setRuntimeToggle("guardsEnabled", on);
 						return `Guards: ${on ? "on" : "off"}`;
@@ -1115,6 +1133,27 @@ export class LogicianTUI {
 						.filter((c) => !taken.has(c.command));
 					if (skillCmds.length) {
 						this.slashPopup.setCommands([...existing, ...skillCmds]);
+					}
+				}
+				// Surface discovered prompts as /<prompt-name> commands in the popup.
+				const prompts = this.bridge.getPrompts();
+				if (prompts.length) {
+					const existing = this.slashPopup.getCommands() as SlashCommandDef[];
+					const taken = new Set(existing.map((c) => c.command));
+					const promptCmds: SlashCommandDef[] = prompts
+						.map((p) => ({
+							command: `/${p.slashName}`,
+							usage: `/${p.slashName}${p.argumentHint ? ` ${p.argumentHint}` : ""}`,
+							description: `Prompt: ${p.description.slice(0, 80)}`,
+							dispatch: "local" as const,
+							acceptsArgs: true,
+							bridgeHandler: (args: string) => {
+								this.bridge.invokePrompt(p.name, args);
+							},
+						}))
+						.filter((c) => !taken.has(c.command));
+					if (promptCmds.length) {
+						this.slashPopup.setCommands([...existing, ...promptCmds]);
 					}
 				}
 			})
@@ -1750,6 +1789,21 @@ export class LogicianTUI {
 				return { consume: true };
 			}
 
+			// Ctrl+Enter — flush queued steering messages now
+			if (data === "\x1b[13;5u") {
+				const count = this.bridge.flushSteeringNow();
+				if (count > 0) {
+					this.transcript.addSystemMessage(
+						`Flushed ${count} steering message${count === 1 ? "" : "s"} to the active turn.`,
+					);
+				} else {
+					this.transcript.addSystemMessage("No queued steering messages to flush.");
+				}
+				this.transcriptDisplay.setTurns(this.transcript.getTurns());
+				this.tui.requestRender();
+				return { consume: true };
+			}
+
 			// Ctrl+M requires an enhanced keyboard protocol because legacy
 			// terminals encode it exactly like Enter. TUI.start() requests CSI-u;
 			// Alt+M remains the portable fallback for terminals that ignore it.
@@ -1757,8 +1811,7 @@ export class LogicianTUI {
 				data === "\x1bm" ||
 				data === "\x1bM" ||
 				data === "\x1b[109;5u" ||
-				data === "\x1b[109;6u" ||
-				data === "\x1b[13;5u"
+				data === "\x1b[109;6u"
 			) {
 				this.cycleInferenceMode();
 				return { consume: true };
@@ -2447,25 +2500,6 @@ export class LogicianTUI {
 					})),
 				},
 				{
-					name: "Loop detection",
-					currentValue: data.loopDetectionEnabled ? "on" : "off",
-					description: "Detect and break infinite agent loops",
-					options: [
-						{
-							label: "on",
-							value: "true",
-							current: data.loopDetectionEnabled,
-							toggleOn: true,
-						},
-						{
-							label: "off",
-							value: "false",
-							current: !data.loopDetectionEnabled,
-							toggleOn: false,
-						},
-					],
-				},
-				{
 					name: "Guards",
 					currentValue: data.guardsEnabled ? "on" : "off",
 					description: "Safety guards against harmful tool use",
@@ -2642,14 +2676,6 @@ export class LogicianTUI {
 				);
 				this.transcript.addSystemMessage(`Permission mode: ${value}`);
 				break;
-			case "loop detection": {
-				const on = value === "true";
-				this.bridge.setRuntimeToggle("loopDetectionEnabled", on);
-				this.transcript.addSystemMessage(
-					`Loop detection: ${on ? "on" : "off"}`,
-				);
-				break;
-			}
 			case "guards": {
 				const on = value === "true";
 				this.bridge.setRuntimeToggle("guardsEnabled", on);
