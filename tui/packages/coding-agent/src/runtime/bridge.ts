@@ -2402,6 +2402,8 @@ function getProjectSkillDirs(cwd: string): string[] {
 // the model's read_skill catalog.
 function getProjectPromptDirs(cwd: string): string[] {
 	const dirs: string[] = [];
+	// Home-level prompts — always checked first.
+	dirs.push(path.join(os.homedir(), ".logician", "prompts"));
 	let current = path.resolve(cwd);
 	while (true) {
 		dirs.push(path.join(current, ".logician", "prompts"));
