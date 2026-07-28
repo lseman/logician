@@ -15,22 +15,22 @@ binary:
 	@echo "Built $(BIN)"
 
 install:
-	npm install
+	$(BUN) install
 
 dev:
-	npm run dev
+	$(BUN) run dev
 
 start:
-	npm start
+	$(BUN) run start
 
 check:
-	npm run typecheck
+	$(BUN) run typecheck
 
 lint:
-	npm run lint
+	$(BUN) run lint
 
 lint-fix:
-	npm run lint:fix
+	$(BUN) run lint:fix
 
 format:
 	npx @biomejs/biome format --write packages/ "*.json"

@@ -1,7 +1,16 @@
+import { fileURLToPath } from "node:url";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 
+// This config lives in packages/tui/ (not repo root), alongside its ESLint
+// and typescript-eslint dependencies. `basePath` re-anchors file globs at the
+// repo root so this config still lints every package, not just tui.
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+
 export default [
+	{
+		basePath: repoRoot,
+	},
 	{
 		ignores: ["dist/**", "node_modules/**", "*.js"],
 	},
@@ -13,7 +22,7 @@ export default [
 				ecmaVersion: 2023,
 				sourceType: "module",
 				project: ["packages/*/tsconfig.json"],
-				tsconfigRootDir: import.meta.dirname,
+				tsconfigRootDir: repoRoot,
 			},
 		},
 		plugins: {
