@@ -76,6 +76,36 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 	assert.equal(bridge.isActive(), false);
 });
 
+void test("eager MCP discovery blocks the first tool snapshot until ready", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: true,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.startupHooksRan = true;
+	let resolveLoad!: () => void;
+	internal.mcpLoadPromise = new Promise<void>((resolve) => {
+		resolveLoad = resolve;
+	});
+	let delivered = false;
+	internal.harness = {
+		messages: [],
+		prompt: async () => {
+			delivered = true;
+		},
+	};
+
+	const sending = bridge.sendMessage("hello");
+	await Promise.resolve();
+	assert.equal(delivered, false);
+
+	resolveLoad();
+	await sending;
+	assert.equal(delivered, true);
+});
+
 void test("MCP load failures are injected into the system prompt", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

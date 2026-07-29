@@ -211,6 +211,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		customPrompt,
 		selectedTools,
 		toolSnippets,
+		toolGuidelines,
 		promptGuidelines: extraGuidelines,
 		appendSystemPrompt,
 		cwd,
@@ -244,7 +245,32 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		...options,
 		promptGuidelines: extraGuidelines,
 	});
+	for (const tool of selectedTools ?? []) {
+		for (const guideline of toolGuidelines?.[tool.name] ?? []) {
+			if (!guidelinesList.includes(guideline)) guidelinesList.push(guideline);
+		}
+	}
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
+
+	const mcpTools = tools.filter((tool) => tool.label?.startsWith("MCP:"));
+	const mcpToolNames = mcpTools.map((tool) => tool.name);
+	const contextToolNames = mcpToolNames.filter((name) =>
+		/^ctx_(?:execute|batch_execute|execute_file|search)/.test(name),
+	);
+	const mcpWorkflow =
+		mcpTools.length > 0
+			? [
+					"",
+					"MCP tool workflow:",
+					"- Prefer a specialized MCP tool over overlapping generic shell or file tools when it directly matches the task.",
+					...(contextToolNames.length > 0
+						? [
+								`- Prefer ${contextToolNames.join(", ")} for repository exploration, searches, and commands whose raw output would consume substantial context.`,
+							]
+						: []),
+					"- Use the exact concise MCP tool names shown in Available tools.",
+				]
+			: [];
 
 	// Web workflow (logician extension)
 	const hasWebSearch = tools.some((t) => t.name === "web_search");
@@ -277,7 +303,7 @@ In addition to the tools above, you may have access to other custom tools depend
 - After writing or editing, read the changed area or use file_diff to verify the result. Mutation tools already return diffs; use those diffs to explain what changed.
 - Run the narrowest useful verification command after risky changes, such as tests, type checks, linters, or a smoke command.
 - Keep changes scoped to the user's request. Do not revert unrelated user changes.
-- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}${appendSection}`;
+- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}${mcpWorkflow.join("\n")}${appendSection}`;
 
 	// Custom prompt overrides everything
 	if (customPrompt) {

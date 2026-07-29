@@ -218,25 +218,61 @@ Built-in themes live in `tui/packages/tui/src/layers/theme`. Custom themes go in
 
 Switch with `/theme dark` or `/theme light`.
 
-## Architecture Decisions
+## Architecture
+
+Logician is a monorepo with five packages under `tui/packages/`:
+
+```
+tui/packages/
+├── agent-core/              Agent engine: loop, harness, hooks, types
+├── agent-capabilities/      Capabilities: todo, ask-user, subagents, reasoners
+├── coding-agent/            Orchestration: sessions, config, skills, MCP, prompts
+├── legacy-observational-memory/  Structured observations with file-based persistence
+└── tui/                     Terminal rendering, input, themes, overlays
+```
 
 ### Agent loop
-The agent runs a single harness loop: receive user input → call backend → parse response → execute tools → repeat. Each iteration is a "turn" with full lifecycle events (turn_start, tool_call, tool_result, turn_end). The loop runner manages budget, compaction triggers, and guardrails.
+The agent runs a single harness loop: receive user input → call backend → parse response → execute tools → repeat. Each iteration is a "turn" with full lifecycle events (`turn_start`, `tool_call`, `tool_result`, `turn_end`). The `AgentHarness` orchestrates the loop via `runAgentLoop()`, which manages budget, compaction triggers, and guardrails. The `OutputGuard` watches for degenerate patterns (context-full errors, empty responses, provider errors) and triggers recovery (auto-compact, retry with backoff, turn abortion). The `LoopDetector` tracks tool-call-level patterns (duplicate calls, failure loops, circling) to detect when the agent is stuck.
 
 ### Hook system
-Hooks are lifecycle callbacks registered per event type (turn_start, tool_call, turn_end, etc.). They run in order within a hook bus. Each hook can read/write turn state, emit events, or short-circuit the loop. Extensions register hooks via `SKILL.md` or plugin manifests.
+Hooks are lifecycle callbacks registered per event type on a `HookBus`. The bus unifies single-handler contracts into a multi-handler system with per-event reducer semantics:
+
+| Event | Reducer | Behavior |
+|---|---|---|
+| `beforeToolCall` | early-block | First `{content}` short-circuits; `{args}` rewrites thread |
+| `afterToolCall` | patch-accumulate | Each handler sees prior patch; later non-undefined fields win |
+| `prepareNextTurn` | transform | Messages thread through all handlers |
+| `shouldStopAfterTurn` | first-true | Any handler returning `true` stops the loop |
+
+Handlers have `priority` (higher first), `timeoutMs` (per-handler, 0 = no timeout), and `source` metadata for diagnostics. The `errorMode` (default `continue`) controls whether a thrown handler aborts the chain or is skipped. Built-in hooks include: duplicate-call guard, failure-loop guard, thinking-loop detector, budget tracker, proactive compaction, and file checkpointing. Extensions (skills, plugins) register hooks via `AgentHooks` objects.
 
 ### Permission model
-Four modes control tool execution: `acceptAll` (no prompts), `acceptEdits` (auto-read, ask-write), `ask` (every tool prompts), `plan` (no execution). The permission resolver checks the mode, tool name, and configured allow/deny lists before each call. Blocked tools emit a `permission_denied` event.
+Four modes control tool execution: `acceptAll` (no prompts), `acceptEdits` (auto-read, ask-write), `ask` (every tool prompts), `plan` (no execution). The permission resolver checks the mode, tool name, and configured allow/deny lists before each call. Blocked tools emit a `permission_denied` event. The `permissions` config object maps tool names to `allowed`/`denied` arrays for fine-grained control. When `permissionMode` is `ask`, a popup overlay appears with accept/reject options.
 
 ### Session lifecycle
-Sessions persist to disk as JSONL transcript files. They support bookmarks (named checkpoints), branching (fork a session at any point), rewind (restore to a bookmark), and compaction (summarize old turns to free context). Compaction triggers at configurable token thresholds and preserves tool call results as summaries.
+Sessions persist to disk as JSONL transcript files. They support:
+- **Bookmarks** — named checkpoints at any turn
+- **Branching** — fork a session at any point; branches merge back via summarization
+- **Rewind** — restore to a bookmark checkpoint
+- **Compaction** — summarize old turns to free context. Triggers at `proactiveCompactionFraction` (default 0.8) of the context window. Preserves tool call results as summaries while collapsing content chunks.
+- **Cross-session memory** — structured observations (decisions, errors, plans) indexed in a BM25 knowledge base retrievable via `ctx_search`
 
 ### Trust model
-At startup, the TUI scans the working directory for trust-requiring resources (`.logician/`, skills, extensions). A prompt overlay appears with five choices: trust this folder, trust parent, session-only trust, deny, or exit. Trust decisions are persisted to `~/.logician/` and scoped to the workspace path.
+At startup, the TUI scans the working directory for trust-requiring resources (`.logician/`, skills, extensions). A prompt overlay appears with five choices: trust this folder, trust parent, session-only trust, deny, or exit. Trust decisions are persisted to `~/.logician/` and scoped to the workspace path. Skills with `allowed-tools` lists are gated by trust — untrusted workspaces cannot activate skill capabilities.
 
 ### Subagent isolation
-Child agents run in isolated Bun worktrees with their own `node_modules` and file system scope. They receive a subset of the parent's tools, a truncated context window, and their own session. Results flow back as structured reports with optional streaming transcripts and child tool call traces.
+Child agents run in isolated Bun worktrees (`worktree`) with their own `node_modules` and file system scope. They receive a subset of the parent's tools, a truncated context window, and their own session. Results flow back as structured reports with optional streaming transcripts and child tool call traces. The `spawn_agent` and `spawn_agents` capabilities handle delegation with configurable timeouts and validation retries.
+
+### Response guardrails
+The `response-patterns` module contains regex patterns for detecting degenerate model behavior:
+- **Non-committal patterns** — hedging language ("I need to check", "let me think")
+- **Completion patterns** — task-complete declarations
+- **Meta-reasoning patterns** — reasoning about reasoning without action
+- **Circling patterns** — retry intent without progress
+These patterns feed into the `OutputGuard` and `LoopDetector` for early intervention.
+
+### MCP integration
+Logician supports MCP (Model Context Protocol) servers via stdio and streamable HTTP. MCP tools are discovered at startup, registered in the `ToolRegistry`, and surfaced to the agent as native tools. Load failures are injected into the system prompt for transparency. Configuration lives in `.logician.json` under `mcpServers` or `mcp` (new format).
 
 ## License
 

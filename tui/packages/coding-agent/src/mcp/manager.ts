@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Tool } from "@logician/agent-core";
 import {
+	allocateMcpToolName,
 	createMcpClient,
 	createMcpTool,
 	type McpClient,
@@ -226,7 +227,10 @@ export class McpManager {
 		};
 	}
 
-	async load(cwd: string): Promise<McpLoadResult> {
+	async load(
+		cwd: string,
+		reservedToolNames: Iterable<string> = [],
+	): Promise<McpLoadResult> {
 		if (this.loaded) {
 			return {
 				tools: this.tools,
@@ -235,6 +239,7 @@ export class McpManager {
 			};
 		}
 		this.loaded = true;
+		const usedToolNames = new Set(reservedToolNames);
 
 		// Project config wins over user and plugin-declared servers on name clash.
 		const { configs } = await this.resolveConfigs(cwd);
@@ -246,7 +251,15 @@ export class McpManager {
 				await client.initialize();
 				const defs = await client.listTools();
 				for (const def of defs) {
-					this.tools.push(createMcpTool(client, def) as Tool);
+					const exposedName = allocateMcpToolName(
+						def.name,
+						client.name,
+						usedToolNames,
+					);
+					usedToolNames.add(exposedName);
+					this.tools.push(
+						createMcpTool(client, def, exposedName) as Tool,
+					);
 				}
 				this.clients.push(client);
 				client = null;

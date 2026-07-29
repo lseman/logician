@@ -340,25 +340,48 @@ export function createMcpClient(
 	return new StdioMcpClient(name, config, cwd);
 }
 
-export function createMcpTool(client: McpClient, def: McpToolDefinition): unknown {
+export function createMcpTool(
+	client: McpClient,
+	def: McpToolDefinition,
+	exposedName = safeToolName(def.name),
+): unknown {
 	const safeName = safeToolName(def.name);
-	const name = `mcp__${safeToolName(client.name)}__${safeName}`;
+	const qualifiedName = `mcp__${safeToolName(client.name)}__${safeName}`;
 	return {
-		name,
-		label: def.title || `MCP: ${def.name}`,
+		name: exposedName,
+		label: def.title
+			? `MCP: ${def.title}`
+			: `MCP: ${def.name} (${client.name})`,
 		description:
 			def.description || `MCP tool '${def.name}' from server '${client.name}'.`,
-		promptSnippet: def.description
-			? def.description.length > 80
-				? def.description.slice(0, 80) + "..."
-				: def.description
-			: `MCP tool '${def.name}'`,
+		promptSnippet:
+			def.description || `MCP tool '${def.name}' from server '${client.name}'.`,
+		promptGuidelines: [
+			`Prefer ${exposedName} when its specialized MCP capability directly matches the task.`,
+		],
+		hookAliases: [qualifiedName],
 		parameters: def.inputSchema,
 		execute: async (args: Record<string, unknown>) => {
 			const result = await client.callTool(def.name, args);
 			return formatMcpToolResult(result);
 		},
 	};
+}
+
+export function allocateMcpToolName(
+	requestedName: string,
+	serverName: string,
+	usedNames: ReadonlySet<string>,
+): string {
+	const shortName = safeToolName(requestedName);
+	if (!usedNames.has(shortName)) return shortName;
+
+	const qualifiedName = `${safeToolName(serverName)}__${shortName}`;
+	if (!usedNames.has(qualifiedName)) return qualifiedName;
+
+	let suffix = 2;
+	while (usedNames.has(`${qualifiedName}__${suffix}`)) suffix++;
+	return `${qualifiedName}__${suffix}`;
 }
 
 // ── JSON-RPC message helpers ─────────────────────────────────────────────

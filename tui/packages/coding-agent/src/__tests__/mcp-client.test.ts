@@ -1,25 +1,45 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	allocateMcpToolName,
 	createMcpTool,
 	encodeMcpMessage,
 	tryDecodeMcpMessage,
 } from "../mcp/client.ts";
 
-void test("plugin MCP tool names preserve Context Mode's declared namespace", () => {
+void test("MCP tools expose concise names and retain qualified hook aliases", () => {
 	const client = {
 		name: "plugin_context-mode_context-mode",
 		callTool: async () => ({}),
 	};
+	const description =
+		"Gather without flooding context. This full routing guidance must remain visible beyond eighty characters.";
 	const tool = createMcpTool(client as never, {
 		name: "ctx_batch_execute",
-		description: "Gather without flooding context",
+		description,
 		inputSchema: { type: "object", properties: {} },
-	}) as { name: string };
+	}) as {
+		name: string;
+		promptSnippet: string;
+		hookAliases: string[];
+	};
 
-	assert.equal(
-		tool.name,
+	assert.equal(tool.name, "ctx_batch_execute");
+	assert.deepEqual(tool.hookAliases, [
 		"mcp__plugin_context-mode_context-mode__ctx_batch_execute",
+	]);
+	assert.equal(tool.promptSnippet, description);
+});
+
+void test("MCP tool name allocation qualifies only collisions", () => {
+	const used = new Set(["read_file", "search", "server__search"]);
+	assert.equal(
+		allocateMcpToolName("ctx_execute", "context-mode", used),
+		"ctx_execute",
+	);
+	assert.equal(
+		allocateMcpToolName("search", "server", used),
+		"server__search__2",
 	);
 });
 

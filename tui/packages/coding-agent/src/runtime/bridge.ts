@@ -504,6 +504,7 @@ export class AgentCoreBridge {
 	private mcpLoadPromise: Promise<void> | null = null;
 	private mcpServerCount = 0;
 	private mcpErrors: string[] = [];
+	private mcpToolNames = new Set<string>();
 	private mcpSystemContext = "";
 	private baseSystemPrompt: string;
 	private additionalSystemPrompt?: string;
@@ -779,11 +780,15 @@ export class AgentCoreBridge {
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
 		try {
 			await this.runStartupHooksOnce();
-			// MCP discovery is opportunistic. A slow or broken external server must
-			// never hold the user's prompt before it reaches the model. Tools that
-			// finish loading are added to the live harness for subsequent turns.
-			if (!this.mcpLoaded && !this.mcpLoadPromise) {
-				void this.loadMcpToolsOnce().catch((error) => this.reportError(error));
+			// Eager discovery is a real first-turn barrier so the provider's tool
+			// snapshot includes MCP capabilities. Deferred mode remains non-blocking.
+			if (!this.mcpLoaded) {
+				const mcpLoad = this.loadMcpToolsOnce();
+				if (this.mcpEager) {
+					await mcpLoad;
+				} else {
+					void mcpLoad.catch((error) => this.reportError(error));
+				}
 			}
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
@@ -1435,9 +1440,7 @@ export class AgentCoreBridge {
 			web_search_enabled: toolNames.includes("web_search"),
 			tools: toolNames,
 			mcp_servers: this.mcpServerCount,
-			mcp_tools: this.defaultTools.filter((tool) =>
-				tool.name.startsWith("mcp__"),
-			).length,
+			mcp_tools: this.mcpToolNames.size,
 			mcp_errors: this.mcpErrors,
 			context_tokens: this.contextTokens,
 			context_max_tokens: this.contextMaxTokens,
@@ -1724,9 +1727,8 @@ export class AgentCoreBridge {
 		await this.runStartupHooksOnce();
 		this.ensureHarness();
 		if (this.mcpEager) {
-			// MCP transports can take seconds to connect. Do not hold the opening
-			// screen behind external servers; the first turn still awaits this same
-			// promise before building its tool snapshot.
+			// Start discovery during initialization. The first user turn awaits
+			// this same promise before taking its tool snapshot.
 			void this.loadMcpToolsOnce().then(
 				() => {
 					this.emit({
@@ -1752,9 +1754,7 @@ export class AgentCoreBridge {
 			mcp_loading: this.mcpLoadPromise !== null && !this.mcpLoaded,
 			tools: toolNames,
 			mcp_servers_loaded: this.mcpServerCount,
-			mcp_tools_loaded: this.defaultTools.filter((tool) =>
-				tool.name.startsWith("mcp__"),
-			).length,
+			mcp_tools_loaded: this.mcpToolNames.size,
 			mcp_errors: this.mcpErrors,
 			context_tokens: this.contextTokens,
 			context_max_tokens:
@@ -1950,11 +1950,15 @@ export class AgentCoreBridge {
 		if (this.mcpLoaded || process.env.LOGICIAN_MCP === "0") return;
 		if (!this.mcpLoadPromise) {
 			this.mcpLoadPromise = (async () => {
-				const result = await this.mcpManager.load(
-					this.config.cwd || process.cwd(),
-				);
-				this.mcpServerCount = result.servers;
-				this.mcpErrors = result.errors;
+					const result = await this.mcpManager.load(
+						this.config.cwd || process.cwd(),
+						this.defaultTools.map((tool) => tool.name),
+					);
+					this.mcpServerCount = result.servers;
+					this.mcpErrors = result.errors;
+					this.mcpToolNames = new Set(
+						result.tools.map((tool) => tool.name),
+					);
 				// Tool presence alone doesn't tell the model whether a missing
 				// capability was never configured or failed to connect — surface
 				// connection failures in the system prompt so it can explain a gap

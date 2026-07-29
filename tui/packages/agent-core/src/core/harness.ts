@@ -725,7 +725,13 @@ export class AgentHarness {
 			sessionId: this._sessionId || "",
 			transcriptPath: this._transcriptPath || "",
 			cwd: this.cwd || process.cwd(),
-			getMatcherValue: claudeToolMatcherName,
+				getMatcherValue: (toolName) => {
+					const tool = this.config.tools?.find(
+						(candidate) => candidate.name === toolName,
+					);
+					return tool?.hookAliases?.join("|") ||
+						claudeToolMatcherName(toolName);
+				},
 		});
 	}
 
