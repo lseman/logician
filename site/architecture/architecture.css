@@ -18,7 +18,7 @@
 }
 
 .arch-title .grad {
-    background: linear-gradient(125deg, #a78bfa 0%, #c084fc 40%, #f472b6 80%);
+    background: linear-gradient(125deg, #22d3ee 0%, #06b6d4 40%, #06b6d4 80%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -73,10 +73,10 @@
     color: var(--text);
 }
 
-.dep-tui { border-color: rgba(247, 120, 186, 0.5); color: #f778ba; }
+.dep-tui { border-color: rgba(139, 92, 246, 0.5); color: #8b5cf6; }
 .dep-coding { border-color: rgba(86, 211, 100, 0.5); color: #56d364; }
-.dep-cap { border-color: rgba(210, 153, 34, 0.5); color: #d29922; }
-.dep-mem { border-color: rgba(188, 140, 255, 0.5); color: #bc8cff; }
+.dep-cap { border-color: rgba(210, 153, 34, 0.5); color: #22d3ee; }
+.dep-mem { border-color: rgba(188, 140, 255, 0.5); color: #06b6d4; }
 .dep-core { border-color: rgba(88, 166, 255, 0.5); color: #58a6ff; }
 
 .dep-list {
@@ -108,7 +108,7 @@
 }
 
 .dep-list code {
-    color: #c4b5fd;
+    color: #22d3ee;
     font-size: 0.86em;
 }
 
@@ -204,7 +204,7 @@
 }
 
 .pkg-facts code {
-    color: #c4b5fd;
+    color: #22d3ee;
     font-size: 0.92em;
 }
 
@@ -245,7 +245,7 @@
 }
 
 .ext-sub code {
-    color: #c4b5fd;
+    color: #22d3ee;
     font-size: 0.92em;
 }
 
