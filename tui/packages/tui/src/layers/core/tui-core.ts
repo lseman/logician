@@ -26,8 +26,8 @@ export function isFocusable(c: Component | null): c is Component & Focusable {
 
 /**
  * Translate Kitty CSI-u Ctrl+letter reports back to the C0 bytes consumed by
- * existing keybindings. Ctrl+M stays encoded so it remains distinguishable
- * from Enter and can be handled by the inference-mode binding.
+ * existing keybindings. Ctrl+I and Ctrl+M stay encoded so they remain
+ * distinguishable from Tab and Enter and can reach their dedicated bindings.
  */
 export function normalizeKeyboardInput(data: string): string {
 	return data
@@ -37,7 +37,7 @@ export function normalizeKeyboardInput(data: string): string {
 			const codepoint = Number(codepointText);
 			const lowerCodepoint =
 				codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
-			if (lowerCodepoint === 109) return sequence;
+			if (lowerCodepoint === 105 || lowerCodepoint === 109) return sequence;
 			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
 			return String.fromCharCode(lowerCodepoint & 0x1f);
 		});

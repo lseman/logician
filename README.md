@@ -153,13 +153,40 @@ Config is read in order: `LOGICIAN_CONFIG` → `.logician.json` → `~/.logician
 }
 ```
 
-`executionProfile` controls where agent policy lives:
+### Execution profiles
 
-- `autonomous` (default) enables Logician's built-in continuation, loop-repair,
-  acceptance, reflection, and completion policies.
-- `minimal` keeps the provider/tool/queue mechanism, retries, cancellation, and
-  context handling, but leaves completion policy to explicit hooks or SDK
-  `stopPolicies`.
+`executionProfile` controls who owns continuation and termination policy. It
+does not change tool permissions or sandboxing; those remain controlled by
+`permissionMode` and the sandbox profile.
+
+| Capability | `autonomous` (default) | `minimal` |
+|---|---|---|
+| Provider calls and streaming | Enabled | Enabled |
+| Tool execution and result delivery | Enabled | Enabled |
+| Steering and follow-up queues | Enabled | Enabled |
+| Retries, cancellation, checkpoints, and compaction | Enabled | Enabled |
+| Caller hooks and SDK `stopPolicies` | Enabled | Enabled |
+| Built-in continuation and todo nudges | Enabled | Disabled |
+| Acceptance contracts and reflection | Enabled | Disabled |
+| Duplicate/failure, budget, and thinking-loop guards | Enabled | Disabled |
+| Heuristic completion, question, and non-committal stops | Enabled | Disabled |
+| Built-in `task_status` termination | Enabled | Disabled |
+
+Use `autonomous` for the interactive coding agent: Logician can notice
+unfinished work, inject corrective turns, validate acceptance criteria, and
+produce a structured conclusion.
+
+Use `minimal` when embedding the loop as a mechanism inside another agent or
+SDK. The loop still calls the provider, executes tools, drains queues, retries,
+compacts context, and honors cancellation, but it becomes idle after the
+provider has no pending work. The caller can then use `stopPolicies` to inject
+another turn or return a structured `completed`, `needs_input`, `blocked`,
+`failed`, or `cancelled` outcome.
+
+In the TUI, press **Ctrl+I** to toggle `autonomous ↔ minimal`. The status bar
+shows `exec: auto` or `exec: minimal`; the selected profile is persisted and
+takes effect on the next turn. It can also be changed through the settings
+overlay or `/settings execution-policy <autonomous|minimal>`.
 
 `web_search` uses SearXNG's JSON endpoint. Override the default local endpoint
 with `webSearch.baseUrl` or `LOGICIAN_SEARXNG_URL`; use

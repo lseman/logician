@@ -971,6 +971,12 @@ export class AgentHarness {
 		this.maxIterations = maxIterations;
 	}
 
+	setExecutionProfile(
+		profile: NonNullable<AgentConfig["executionProfile"]>,
+	): void {
+		this.config.executionProfile = profile;
+	}
+
 	setTools(tools: Tool[]): void {
 		this.config.tools = tools;
 		this.idleTools = this.createToolRegistry(tools);

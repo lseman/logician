@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -52,6 +52,11 @@ void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => 
 	assert.equal(normalizeKeyboardInput("\x1b[99;5u"), "\x03");
 	assert.equal(normalizeKeyboardInput("\x1b[116;6u"), "\x14");
 	assert.equal(
+		normalizeKeyboardInput("\x1b[105;5u"),
+		"\x1b[105;5u",
+		"Ctrl+I must remain distinct from Tab",
+	);
+	assert.equal(
 		normalizeKeyboardInput("\x1b[109;5u"),
 		"\x1b[109;5u",
 		"Ctrl+M must remain distinct from Enter",
@@ -66,6 +71,39 @@ void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => 
 	input.handleInput(normalizeKeyboardInput("\x1b[99;5u"));
 	assert.equal(input.valueText, "");
 	assert.equal(cancelled, 1);
+});
+
+void test("Ctrl+I changes and persists the execution profile", async () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
+	const themeDir = path.join(home, ".logician", "themes");
+	mkdirSync(themeDir, { recursive: true });
+	cpSync(themesSource, themeDir, { recursive: true });
+	const result = await runInPty({
+		command: tsx,
+		args: [entry],
+		cwd: tuiRoot,
+		env: {
+			HOME: home,
+			TERM: "xterm-256color",
+			LOGICIAN_MCP: "0",
+			LOGICIAN_HOOKS: "0",
+		},
+		actions: [
+			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 500, send: "\x1b[105;5u" },
+		],
+		timeoutMs: 4_000,
+		columns: 140,
+		rows: 32,
+	});
+	const output = stripTerminalControls(result.output);
+	const settings = JSON.parse(
+		readFileSync(path.join(home, ".logician", "settings.json"), "utf8"),
+	) as { executionProfile?: string };
+
+	assert.match(output, /Execution policy: minimal|exec: minimal/);
+	assert.equal(settings.executionProfile, "minimal");
+	assert.doesNotMatch(output, /TUI render error/);
 });
 
 void test("Escape clears first and cancels the active turn on second press", () => {

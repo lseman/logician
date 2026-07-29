@@ -1563,6 +1563,7 @@ export class AgentCoreBridge {
 
 	setExecutionProfile(profile: "autonomous" | "minimal"): void {
 		this.config.executionProfile = profile;
+		this.harness?.setExecutionProfile(profile);
 	}
 
 	setRuntimeToggle(

@@ -170,6 +170,21 @@ export class LogicianTUI {
 		this.tui.requestRender();
 	}
 
+	private setExecutionProfile(
+		profile: "autonomous" | "minimal",
+	): void {
+		this.bridge.setExecutionProfile(profile);
+		this.statusPanel.update({ executionProfile: profile });
+		saveConfigField("executionProfile", profile);
+	}
+
+	private cycleExecutionProfile(): "autonomous" | "minimal" {
+		const current = this.bridge.getSettingsData().executionProfile;
+		const next = current === "autonomous" ? "minimal" : "autonomous";
+		this.setExecutionProfile(next);
+		return next;
+	}
+
 	// eslint-disable-next-line max-lines-per-function -- wires up entire TUI (bridge, transcript, components, keybindings, overlays)
 	constructor(
 		runtimeConfig = resolveRuntimeConfig(process.cwd(), process.env, {
@@ -681,8 +696,9 @@ export class LogicianTUI {
 						if (!valid.includes(value.toLowerCase() as typeof valid[number])) {
 							return `Invalid policy "${value}". Valid: ${valid.join(", ")}`;
 						}
-						this.bridge.setExecutionProfile(value as "autonomous" | "minimal");
-						this.statusPanel.update({ executionProfile: value as "autonomous" | "minimal" });
+						this.setExecutionProfile(
+							value as "autonomous" | "minimal",
+						);
 						return `Execution policy: ${value}`;
 					}
 					default:
@@ -1837,13 +1853,10 @@ export class LogicianTUI {
 
 			// Ctrl+I — cycle execution policy (autonomous ↔ minimal)
 			if (
-				data === "\x1b[9;5u" ||
-				data === "\x1b[9;6u"
+				data === "\x1b[105;5u" ||
+				data === "\x1b[105;6u"
 			) {
-				const current = this.bridge.getSettingsData().executionProfile;
-				const next = current === "autonomous" ? "minimal" : "autonomous";
-				this.bridge.setExecutionProfile(next);
-				this.statusPanel.update({ executionProfile: next });
+				const next = this.cycleExecutionProfile();
 				this.transcript.addSystemMessage(
 					`Execution policy: ${next}`,
 				);
@@ -2620,7 +2633,7 @@ export class LogicianTUI {
 				{
 					name: "Execution policy",
 					currentValue: data.executionProfile,
-					description: "Agent autonomy level — autonomous runs freely, minimal requires approval for changes",
+					description: "Agent policy ownership — autonomous uses built-in policies, minimal leaves stop policy to the caller",
 					options: [
 						{
 							label: "autonomous",
@@ -2774,8 +2787,9 @@ export class LogicianTUI {
 						`Invalid execution policy: ${value}. Valid: ${valid.join(", ")}`,
 					);
 				} else {
-					this.bridge.setExecutionProfile(value as "autonomous" | "minimal");
-					this.statusPanel.update({ executionProfile: value as "autonomous" | "minimal" });
+					this.setExecutionProfile(
+						value as "autonomous" | "minimal",
+					);
 					this.transcript.addSystemMessage(
 						`Execution policy: ${value}`,
 					);
