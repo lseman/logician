@@ -13,12 +13,12 @@ import {
 	estimateChatPayloadTokens,
 } from "./messages.ts";
 import { compactToFit } from "../compaction/index.ts";
-import type { CompactableMessage } from "./types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
 	AgentHooks,
 	AgentMessage,
+	CompactableMessage,
 	Message,
 	StopReason,
 	Tool,

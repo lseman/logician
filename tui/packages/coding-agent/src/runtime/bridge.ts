@@ -1082,31 +1082,6 @@ export class AgentCoreBridge {
 			});
 			return;
 		}
-		// /jb — inject jb.md content as user prompt
-		if (trimmed === "/jb" || trimmed.startsWith("/jb ")) {
-			try {
-				const content = findJbPrompt(this.cwd);
-				if (!content) {
-					this.emit({
-						type: "notice",
-						level: "warn",
-						label: "JB prompt",
-						text: `jb.md was not found in ${this.cwd} or ${path.join(this.cwd, "tui")}.`,
-					});
-					return;
-				}
-				this.sendMessage(content).catch((err) => this.errorCb?.(err));
-				this.emit({
-					type: "notice",
-					level: "info",
-					label: "JB prompt",
-					text: `Injected jb.md as the user prompt (${content.length.toLocaleString()} characters).`,
-				});
-			} catch (err: unknown) {
-				this.errorCb?.(err as Error);
-			}
-			return;
-		}
 		// /reload — reload settings, skills, extensions, and MCP config
 		if (trimmed === "/reload") {
 			this.reload().catch((err) => this.errorCb?.(err));

@@ -106,7 +106,7 @@ export class ModelSelectorOverlay implements Component {
 				};
 				return renderListItem(item, innerWidth);
 			},
-			'No models configured. Add "models" array to settings.json.',
+			"No models configured. Add \"models\" array to settings.json.",
 		);
 
 		const lines = renderListPopupFrame({

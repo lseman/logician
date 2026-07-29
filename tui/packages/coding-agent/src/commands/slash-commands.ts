@@ -496,8 +496,6 @@ export function createSlashCommands(
 			argHint: "<provider>",
 			examples: ["/login anthropic"],
 		}),
-		cmd("/jb", "Inject jb.md prompt", "bridge", false, { category: "misc" }),
-
 		// ── Sandbox ──────────────────────────────────────────────────────
 		cmd(
 			"/sandbox",

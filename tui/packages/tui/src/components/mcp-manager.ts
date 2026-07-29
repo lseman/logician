@@ -2,7 +2,6 @@ import { type Component } from "../layers/core/tui-core.ts";
 import { SelectorController } from "./selector-controller.ts";
 import {
 	renderListItem,
-	renderStatusLine,
 	clampPopupLines,
 	POPUP_FRAME_OVERHEAD,
 	parsePopupListNav,

@@ -1,4 +1,4 @@
-import { describe, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SlashCommandDef } from "@logician/coding-agent/slash-commands";
 import { SlashPopup } from "../components/slash-popup.ts";
