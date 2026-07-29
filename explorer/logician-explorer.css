@@ -14,15 +14,15 @@
     --muted: #64748b;
     --dim: #475569;
 
-    --c-tui: #f472b6;
-    --c-tui-dim: #be185d;
-    --c-harness: #38bdf8;
+    --c-tui: #8b5cf6;
+    --c-tui-dim: #06b6d4;
+    --c-harness: #22d3ee;
     --c-harness-dim: #0369a1;
-    --c-cap: #fbbf24;
-    --c-cap-dim: #b45309;
+    --c-cap: #06b6d4;
+    --c-cap-dim: #6d28d9;
     --c-code: #34d399;
     --c-code-dim: #047857;
-    --c-mem: #a78bfa;
+    --c-mem: #22d3ee;
     --c-mem-dim: #6d28d9;
     --c-ext: #64748b;
     --c-ext-dim: #334155;
@@ -147,7 +147,7 @@
       display: inline-block;
       transition: box-shadow var(--transition-fast);
 
-      &:nth-child(1) { background: #f87171; }
+      &:nth-child(1) { background: #f472b6; }
       &:nth-child(2) { background: var(--c-cap); }
       &:nth-child(3) { background: var(--c-code); }
     }
@@ -614,7 +614,7 @@
       font-family: var(--mono);
       font-size: 10px;
       font-weight: 600;
-      color: color-mix(in srgb, var(--c-harness) 100%, var(--tt-accent, #38bdf8) 0%);
+      color: color-mix(in srgb, var(--c-harness) 100%, var(--tt-accent, #22d3ee) 0%);
       margin-bottom: 5px;
     }
 
@@ -652,7 +652,7 @@
         position: absolute;
         left: 0;
         top: 6px;
-        color: color-mix(in srgb, var(--c-harness) 100%, var(--tt-accent, #38bdf8) 0%);
+        color: color-mix(in srgb, var(--c-harness) 100%, var(--tt-accent, #22d3ee) 0%);
         font-weight: 700;
       }
     }
@@ -688,7 +688,7 @@
         }
 
         span.active {
-          background: color-mix(in srgb, var(--c-harness) 100%, var(--tt-accent, #38bdf8) 0%);
+          background: color-mix(in srgb, var(--c-harness) 100%, var(--tt-accent, #22d3ee) 0%);
           box-shadow: 0 0 4px currentColor;
         }
       }
