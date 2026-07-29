@@ -56,7 +56,11 @@ export function resolvePath(cwd: string | undefined, filePath: string): string {
 		stripAtPrefix: true,
 	});
 	if (path.isAbsolute(normalized)) return path.resolve(normalized);
-	return path.resolve(cwd ?? process.cwd(), normalized);
+	// If cwd is "/" (root) or empty, it's almost certainly a config bug —
+	// fall back to process.cwd() so relative paths resolve inside the
+	// actual working directory instead of the filesystem root.
+	const effectiveCwd = cwd && cwd !== "/" ? cwd : process.cwd();
+	return path.resolve(effectiveCwd, normalized);
 }
 
 export function resolveToCwd(filePath: string, cwd: string): string {

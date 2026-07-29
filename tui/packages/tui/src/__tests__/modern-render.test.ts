@@ -50,7 +50,8 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	const lines = display.render(80);
 	const output = plain(lines.join("\n"));
 
-	assert.match(output, /╭─ YOU/);
+	assert.match(output, /› YOU/);
+	assert.doesNotMatch(output, /╭─|╰─/);
 	assert.match(output, /◆ LOGICIAN/);
 	assert.match(output, /✓ read_file done/);
 	assert.match(output, /output ok/);
@@ -91,6 +92,237 @@ void test("collapsed running tools show live output without expanding details", 
 	assert.match(output, /bash streaming/);
 	assert.match(output, /live compiling packages\.\.\./);
 	assert.doesNotMatch(output, /second line/);
+});
+
+void test("clicking a tool card toggles only that tool's details", () => {
+	const display = new TranscriptDisplay();
+	display.setViewportHeight(20);
+	display.setTurns([{
+		id: "clickable-tools",
+		userMessage: { type: "user", content: "Run both commands." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [
+				{
+					seq: 1,
+					type: "tool",
+					tool: {
+						tool: "bash",
+						tool_name: "bash",
+						tool_call_id: "first-tool",
+						args: { command: "echo first" },
+						result: "first",
+						isComplete: true,
+						isError: false,
+					},
+					isComplete: true,
+				},
+				{
+					seq: 2,
+					type: "tool",
+					tool: {
+						tool: "bash",
+						tool_name: "bash",
+						tool_call_id: "second-tool",
+						args: { command: "echo second" },
+						result: "second",
+						isComplete: true,
+						isError: false,
+					},
+					isComplete: true,
+				},
+			],
+		},
+		isComplete: true,
+	}]);
+
+	const collapsed = display.render(100);
+	const firstToolRow = collapsed.findIndex((line) =>
+		plain(line).includes("echo first"),
+	);
+	assert.notEqual(firstToolRow, -1);
+	assert.equal(display.handleMouse(4, firstToolRow), true);
+
+	const expanded = plain(display.render(100).join("\n"));
+	assert.match(expanded, /COMMAND[\s\S]*echo first/);
+	assert.doesNotMatch(expanded, /COMMAND[\s\S]*echo second[\s\S]*OUTPUT/);
+
+	const rerendered = display.render(100);
+	const expandedFirstRow = rerendered.findIndex((line) =>
+		plain(line).includes("echo first"),
+	);
+	assert.equal(display.handleMouse(4, expandedFirstRow), true);
+	assert.doesNotMatch(plain(display.render(100).join("\n")), /◆ details/);
+});
+
+void test("write_file streams live line counts and expanded content", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "streaming-write-file",
+		userMessage: { type: "user", content: "Create the module." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				tool: {
+					tool: "write_file",
+					tool_name: "write_file",
+					tool_call_id: "live-write",
+					args: {},
+					partialResult:
+						"{\"path\":\"src/live.ts\",\"content\":\"const one = 1;\\nconst two = 2;\\nconst three",
+					isComplete: false,
+					isError: false,
+				},
+				isComplete: false,
+			}],
+		},
+		isComplete: false,
+	}]);
+
+	const collapsed = plain(display.render(100).join("\n"));
+	assert.match(collapsed, /write_file src\/live\.ts streaming/);
+	assert.match(collapsed, /3 lines written so far/);
+	assert.doesNotMatch(collapsed, /const one = 1/);
+	assert.doesNotMatch(collapsed, /"content"/);
+
+	display.setToolsExpanded(true);
+	const expanded = plain(display.render(100).join("\n"));
+	assert.match(expanded, /CONTENT.*3 lines · streaming/);
+	assert.match(expanded, /const one = 1/);
+	assert.match(expanded, /const two = 2/);
+	assert.match(expanded, /const three/);
+});
+
+void test("click-expanded write_file shows every line without a Ctrl+O hint", () => {
+	const content = Array.from({ length: 24 }, (_, index) => `line-${index + 1}`)
+		.join("\n");
+	const display = new TranscriptDisplay();
+	display.setViewportHeight(40);
+	display.setTurns([{
+		id: "large-clicked-write",
+		userMessage: { type: "user", content: "Write the fixture." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				tool: {
+					tool: "write_file",
+					tool_name: "write_file",
+					tool_call_id: "large-write",
+					args: { path: "fixture.txt", content },
+					result: "Created fixture.txt",
+					isComplete: true,
+					isError: false,
+				},
+				isComplete: true,
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const collapsed = display.render(100);
+	const toolRow = collapsed.findIndex((line) =>
+		plain(line).includes("write_file fixture.txt"),
+	);
+	assert.notEqual(toolRow, -1);
+	assert.match(plain(collapsed.join("\n")), /24 lines written/);
+	assert.equal(display.handleMouse(4, toolRow), true);
+
+	const expanded = plain(display.render(100).join("\n"));
+	assert.match(expanded, /24│line-24/);
+	assert.doesNotMatch(expanded, /more lines · ctrl\+o to expand/);
+});
+
+void test("write_file_append streams live line counts and expanded content", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "streaming-write-file-append",
+		userMessage: { type: "user", content: "Append the next chunk." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				tool: {
+					tool: "write_file_append",
+					tool_name: "write_file_append",
+					tool_call_id: "live-append",
+					args: {},
+					partialResult:
+						"{\"path\":\"src/live.ts\",\"content\":\"const four = 4;\\nconst five = 5;\\nconst six",
+					isComplete: false,
+					isError: false,
+				},
+				isComplete: false,
+			}],
+		},
+		isComplete: false,
+	}]);
+
+	const collapsed = plain(display.render(100).join("\n"));
+	assert.match(collapsed, /write_file_append src\/live\.ts streaming/);
+	assert.match(collapsed, /3 lines appended so far/);
+	assert.doesNotMatch(collapsed, /const four = 4/);
+	assert.doesNotMatch(collapsed, /"content"/);
+
+	display.setToolsExpanded(true);
+	const expanded = plain(display.render(100).join("\n"));
+	assert.match(expanded, /APPEND CONTENT.*3 lines · streaming/);
+	assert.match(expanded, /const four = 4/);
+	assert.match(expanded, /const five = 5/);
+	assert.match(expanded, /const six/);
+});
+
+void test("click-expanded write_file_append shows every appended line", () => {
+	const content = Array.from(
+		{ length: 24 },
+		(_, index) => `appended-${index + 1}`,
+	).join("\n");
+	const display = new TranscriptDisplay();
+	display.setViewportHeight(40);
+	display.setTurns([{
+		id: "large-clicked-append",
+		userMessage: { type: "user", content: "Append the fixture." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				tool: {
+					tool: "write_file_append",
+					tool_name: "write_file_append",
+					tool_call_id: "large-append",
+					args: { path: "fixture.txt", content },
+					result:
+						"Appended to fixture.txt (+279 bytes, 558 bytes total · 48 lines total).",
+					isComplete: true,
+					isError: false,
+				},
+				isComplete: true,
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const collapsed = display.render(100);
+	const toolRow = collapsed.findIndex((line) =>
+		plain(line).includes("write_file_append fixture.txt"),
+	);
+	assert.notEqual(toolRow, -1);
+	assert.match(plain(collapsed.join("\n")), /24 lines appended/);
+	assert.equal(display.handleMouse(4, toolRow), true);
+
+	const expanded = plain(display.render(100).join("\n"));
+	assert.match(expanded, /24│appended-24/);
+	assert.doesNotMatch(expanded, /more lines · ctrl\+o to expand/);
 });
 
 void test("skill activations render as a compact dedicated status line", () => {
@@ -168,6 +400,34 @@ void test("assistant chunks render as distinct semantic blocks", () => {
 	assert.match(output, /⚠ NOTICE Context  Near limit/);
 	assert.match(output, /RESPONSE/);
 	assert.match(output, /The minimal path delegates continuation/);
+});
+
+void test("expanded reasoning renders fenced code as one labeled block", () => {
+	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
+	display.setTurns([{
+		id: "reasoning-code-block",
+		userMessage: { type: "user", content: "Inspect this implementation." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "thinking",
+				contentText:
+					"Check the handler:\n```typescript\nconst value = 1;\nreturn value;\n```",
+				isComplete: true,
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const output = plain(display.render(100).join("\n"));
+	assert.match(output, /┌─ typescript · 2 lines/);
+	assert.match(output, /│ const value = 1;/);
+	assert.match(output, /│ return value;/);
+	assert.match(output, /└─/);
+	assert.equal(output.match(/typescript/g)?.length, 1);
+	assert.doesNotMatch(output, /```/);
 });
 
 void test("notifications are transient, bounded, and width-safe", () => {
@@ -290,7 +550,7 @@ void test("expanded agent tools separate task arguments from live output", () =>
 								task: "Inspect architecture and tests",
 								agent: "explorer",
 							},
-							partialResult: '{"task":"Inspect architecture and tests"}',
+							partialResult: "{\"task\":\"Inspect architecture and tests\"}",
 							streamOutput: "I am inspecting the core files now.",
 							isError: false,
 							isComplete: false,
@@ -487,7 +747,7 @@ void test("expanded completed subagent does not repeat its final report", () => 
 							details: {
 								streamTranscript:
 									"Inspecting files...\n\n**Final report:** all checks passed.\n\n" +
-									'```acceptance-report\n{"criteriaSatisfied":[]}\n```',
+									"```acceptance-report\n{\"criteriaSatisfied\":[]}\n```",
 							},
 							isError: false,
 							isComplete: true,
@@ -526,7 +786,7 @@ void test("collapsed completed subagent formats its final report as markdown", (
 								"**Approved** with `zero errors`.\n\n```ts\nconst valid = true;\n```",
 							details: {
 								streamTranscript:
-									'Working...\n```acceptance-report\n{"criteriaSatisfied":[]}\n```',
+									"Working...\n```acceptance-report\n{\"criteriaSatisfied\":[]}\n```",
 							},
 							isError: false,
 							isComplete: true,
@@ -566,7 +826,7 @@ void test("post-edit diagnostics render as a dedicated formatted block", () => {
 							args: { path: "src/runtime-config.ts", edits: [] },
 							result: [
 								"Successfully replaced 1 block.",
-								'<post_edit_diagnostics file="/workspace/src/runtime-config.ts">',
+								"<post_edit_diagnostics file=\"/workspace/src/runtime-config.ts\">",
 								"Fix these project diagnostics before continuing:",
 								"- /workspace/src/runtime-config.ts:78:4 TS2353: Object literal may only specify known properties.",
 								"</post_edit_diagnostics>",
@@ -612,7 +872,7 @@ void test("post-edit diagnostics render clangd source and symbolic codes", () =>
 							args: { path: "/data/dev/solvers/python/qp_ext.cpp", edits: [] },
 							result: [
 								"Successfully replaced 1 block.",
-								'<post_edit_diagnostics file="/data/dev/solvers/python/qp_ext.cpp">',
+								"<post_edit_diagnostics file=\"/data/dev/solvers/python/qp_ext.cpp\">",
 								"Fix these project diagnostics before continuing:",
 								"- /data/dev/solvers/python/qp_ext.cpp:42:7 clang ovl_no_viable_function_in_call: No matching function for call.",
 								"</post_edit_diagnostics>",
@@ -751,6 +1011,50 @@ void test("wheel-down reaches the new bottom while a streaming update awaits ren
 	assert.match(output, /NEWEST STREAMED LINE/);
 });
 
+void test("new streamed output is signaled while the user is scrolled up", () => {
+	const display = new TranscriptDisplay({ maxRenderedLines: 200 });
+	display.setViewportHeight(6);
+	const streamingTurn = (contentText: string): Turn => ({
+		id: "streaming-indicator",
+		userMessage: { type: "user", content: "Keep streaming" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 1,
+				type: "content",
+				contentText,
+				isComplete: false,
+			}],
+		},
+		isComplete: false,
+	});
+
+	display.setTurns([
+		streamingTurn(Array.from({ length: 18 }, (_, i) => `line-${i}`).join("\n")),
+	]);
+	display.render(80);
+	display.scroll(4);
+	assert.doesNotMatch(plain(display.render(80).join("\n")), /new output below/);
+
+	display.setTurns([
+		streamingTurn(
+			[
+				...Array.from({ length: 18 }, (_, i) => `line-${i}`),
+				"line-18",
+			].join("\n"),
+		),
+	]);
+	const scrolledOutput = plain(display.render(80).join("\n"));
+	assert.equal(display.isAtBottom, false);
+	assert.match(scrolledOutput, /↓ new output below/);
+
+	assert.equal(display.handleMouse(4, 5), true);
+	const bottomOutput = plain(display.render(80).join("\n"));
+	assert.doesNotMatch(bottomOutput, /new output below/);
+	assert.match(bottomOutput, /line-18/);
+});
+
 void test("empty think wrappers do not render a THINK section", () => {
 	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
 	display.setTurns([
@@ -880,19 +1184,19 @@ void test("expanded subagent details show child tool calls", () => {
 									{
 										agentId: "explorer",
 										toolName: "read_file",
-										args: '{"path":"src/index.ts"}',
+										args: "{\"path\":\"src/index.ts\"}",
 										isError: false,
 									},
 									{
 										agentId: "explorer",
 										toolName: "grep",
-										args: '{"pattern":"export"}',
+										args: "{\"pattern\":\"export\"}",
 										isError: false,
 									},
 									{
 										agentId: "explorer",
 										toolName: "bash",
-										args: '{"command":"ls"}',
+										args: "{\"command\":\"ls\"}",
 										isError: false,
 									},
 								],
@@ -961,7 +1265,7 @@ void test("expanded subagent renders thinking, tools, and responses in call orde
 											agentId: "explorer-1",
 											toolCallId: "child-tool-1",
 											toolName: "read_file",
-											args: '{"path":"src/index.ts"}',
+											args: "{\"path\":\"src/index.ts\"}",
 											status: "completed",
 											resultPreview: "export const ready = true;",
 										},
@@ -1107,7 +1411,7 @@ void test("collapsed subagent shows ordered flow with child tools collapsed", ()
 											agentId: "explorer-1",
 											toolCallId: "read-1",
 											toolName: "read_file",
-											args: '{"path":"src/index.ts"}',
+											args: "{\"path\":\"src/index.ts\"}",
 											status: "completed",
 											resultPreview: "private file contents",
 										},
@@ -1176,7 +1480,7 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 									{
 										agentId: "explorer",
 										toolName: "read_file",
-										args: '{"path":"src/index.ts"}',
+										args: "{\"path\":\"src/index.ts\"}",
 										status: "completed",
 										isError: false,
 									},
@@ -1303,7 +1607,7 @@ void test("spawn_agents never renders a positive count over zero while arguments
 						tool: {
 							tool: "spawn_agents",
 							tool_name: "spawn_agents",
-							partialResult: '{"tasks":[{"agent":"explorer"',
+							partialResult: "{\"tasks\":[{\"agent\":\"explorer\"",
 							streamOutput: "▶ 0 explorer\n",
 							isError: false,
 							isComplete: false,
@@ -1380,9 +1684,9 @@ void test("expanded spawn_agents keeps concurrent text streams attributed", () =
 							},
 							streamOutput: [
 								"▶ 0 explorer",
-								'↳ 0 "API stream\\n```ts\\nconst api = true;\\n```"',
+								"↳ 0 \"API stream\\n```ts\\nconst api = true;\\n```\"",
 								"▶ 1 reviewer",
-								'↳ 1 "Test stream"',
+								"↳ 1 \"Test stream\"",
 								"",
 							].join("\n"),
 							isError: false,
@@ -1439,7 +1743,7 @@ void test("spawn_agents shows partial failures and expanded reports", () => {
 									{
 										agentId: "agent-reviewer",
 										toolName: "bash",
-										args: '{"command":"npm test"}',
+										args: "{\"command\":\"npm test\"}",
 										status: "failed",
 										isError: true,
 										resultPreview: "1 test failed",
@@ -1485,8 +1789,8 @@ void test("edited TypeScript previews are syntax highlighted", () => {
 							tool_name: "edit_file",
 							args: {
 								path: "src/example.ts",
-								oldText: 'const answer = "no";',
-								newText: 'const answer = "yes";',
+								oldText: "const answer = \"no\";",
+								newText: "const answer = \"yes\";",
 							},
 							isError: false,
 							isComplete: true,
@@ -1528,8 +1832,8 @@ void test("edit_file result highlights code inside the diff", () => {
 								"--- a/edit",
 								"+++ b/edit",
 								"@@ -1 +1 @@",
-								'-const answer = "no";',
-								'+const answer = "yes";',
+								"-const answer = \"no\";",
+								"+const answer = \"yes\";",
 							].join("\n"),
 							isError: false,
 							isComplete: true,

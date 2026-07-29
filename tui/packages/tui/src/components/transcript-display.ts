@@ -350,6 +350,39 @@ function streamedStringArg(
 	}
 }
 
+/** Decode a JSON string field even while its closing quote has not arrived yet. */
+function streamedStringArgLive(
+	json: string | undefined,
+	key: string,
+): string | undefined {
+	if (!json) return undefined;
+	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const startMatch = new RegExp(`"${escapedKey}"\\s*:\\s*"`).exec(json);
+	if (!startMatch) return undefined;
+
+	const start = startMatch.index + startMatch[0].length;
+	let encoded = "";
+	let escaped = false;
+	for (let index = start; index < json.length; index++) {
+		const char = json[index];
+		if (char === "\"" && !escaped) break;
+		encoded += char;
+		if (char === "\\" && !escaped) escaped = true;
+		else escaped = false;
+	}
+	if (encoded.endsWith("\\")) encoded = encoded.slice(0, -1);
+	try {
+		return JSON.parse(`"${encoded}"`) as string;
+	} catch {
+		return encoded
+			.replace(/\\n/g, "\n")
+			.replace(/\\r/g, "\r")
+			.replace(/\\t/g, "\t")
+			.replace(/\\"/g, "\"")
+			.replace(/\\\\/g, "\\");
+	}
+}
+
 function compactText(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
 }
@@ -473,6 +506,11 @@ function hasStreamingChunk(chunks: AssistantChunk[]): boolean {
 	return chunks.some((c) => !c.isComplete);
 }
 
+function revisionText(value: string | undefined): string {
+	if (!value) return "0:";
+	return `${value.length}:${value.slice(-48)}`;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export class TranscriptDisplay implements Component, Scrollable {
@@ -484,9 +522,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private _totalHeight: number = 0;
 	private _atBottom: boolean = true;
 	private _pendingScrollBottom: boolean = false;
+	private _newOutputBelow = false;
+	private contentRevision = "";
 
 	private thinkingMode: ThinkingDisplayStyle;
 	private toolsExpanded = false;
+	private expandedToolKeys = new Set<string>();
+	private toolHitRegions: Array<{ start: number; end: number; key: string }> = [];
 	private maxMessageLength: number;
 	private maxTurns: number;
 	private maxRenderedLines: number;
@@ -579,6 +621,31 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return this.toolsExpanded;
 	}
 
+	handleMouse(_column: number, row: number): boolean {
+		if (
+			this._newOutputBelow &&
+			row === Math.max(0, this._viewportHeight - 1)
+		) {
+			this.scrollToBottom();
+			this.invalidate();
+			return true;
+		}
+		const contentRow = this._scrollOffset + row;
+		const region = this.toolHitRegions.find(
+			(candidate) => contentRow >= candidate.start && contentRow < candidate.end,
+		);
+		if (!region) return false;
+		const keepBottomAnchored = this._atBottom;
+		if (this.expandedToolKeys.has(region.key)) {
+			this.expandedToolKeys.delete(region.key);
+		} else {
+			this.expandedToolKeys.add(region.key);
+		}
+		this.invalidate();
+		if (keepBottomAnchored) this._pendingScrollBottom = true;
+		return true;
+	}
+
 	invalidate(): void {
 		this.cachedLines = null;
 	}
@@ -612,6 +679,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			Math.max(0, this._scrollOffset - delta),
 		);
 		this._atBottom = this._scrollOffset >= maxScroll;
+		if (this._atBottom) this._newOutputBelow = false;
 		// A streamed update may have invalidated the cached lines without being
 		// rendered yet. If the user reaches the bottom of the last committed
 		// layout, keep that intent through the next render as its height grows.
@@ -621,6 +689,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 	scrollToBottom(): void {
 		this._pendingScrollBottom = true;
 		this._atBottom = true;
+		this._newOutputBelow = false;
 		// Apply offset immediately so isAtBottom reflects the new position
 		// right away — the TUI checks isAtBottom in the same frame loop.
 		const maxScroll = Math.max(
@@ -637,6 +706,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			this._totalHeight - (this._viewportHeight || 0),
 		);
 		this._atBottom = offset >= maxScroll;
+		if (this._atBottom) this._newOutputBelow = false;
 	}
 
 	render(width: number): string[] {
@@ -651,6 +721,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		const renderedLines: string[] = [];
 		const turnStartLines: number[] = [];
+		const pendingToolRegions: Array<{
+			start: number;
+			end: number;
+			key: string;
+		}> = [];
 		const frameWidth = Math.max(1, width - 2);
 		const contentWidth = Math.max(1, frameWidth - 2);
 
@@ -692,19 +767,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 						);
 				} else {
 					renderedLines.push(
-						padToWidth(`${theme.fgRaw("userText")}╭─ ${BOLD}YOU${RESET}`),
+						padToWidth(
+							`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userText")}${BOLD}YOU${RESET}`,
+						),
 					);
 					const lines = this.wrapText(
 						theme.fgRaw("userText") + this.truncateText(content) + RESET,
-						Math.max(1, contentWidth - 2),
+						Math.max(1, contentWidth),
 					);
 					for (const line of lines)
-						renderedLines.push(
-							padToWidth(`${theme.fgRaw("userText")}│${RESET} ${line}`),
-						);
-					renderedLines.push(
-						padToWidth(`${theme.fgRaw("userText")}╰─${RESET}`),
-					);
+						renderedLines.push(padToWidth(`  ${line}`));
 				}
 			}
 
@@ -765,9 +837,21 @@ export class TranscriptDisplay implements Component, Scrollable {
 						lastThinkingSection = true;
 					} else if (chunk.type === "tool" && chunk.tool) {
 						lastThinkingSection = false;
-						const toolLines = this.renderTool(chunk.tool, width);
+						const toolKey =
+							chunk.tool.tool_call_id ?? `${turn.id}:${chunk.seq}`;
+						const regionStart = renderedLines.length;
+						const toolLines = this.renderTool(
+							chunk.tool,
+							width,
+							this.toolsExpanded || this.expandedToolKeys.has(toolKey),
+						);
 						for (const line of toolLines)
 							renderedLines.push(padToWidth(`  ${line}`));
+						pendingToolRegions.push({
+							start: regionStart,
+							end: renderedLines.length,
+							key: toolKey,
+						});
 					} else if (chunk.type === "notice" && chunk.notice) {
 						const n = chunk.notice;
 						if (n.label === "Skills" && n.level === "info") {
@@ -811,6 +895,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		// expanded tool output. Prefer a complete recent-turn boundary; if the
 		// newest turn alone exceeds the budget, retain its tail.
 		let visibleBuffer = renderedLines;
+		let visibleStart = 0;
 		const newestAssistant = this.turns.at(-1)?.assistantMessage;
 		const newestTurnIsStreaming =
 			newestAssistant !== null &&
@@ -841,7 +926,15 @@ export class TranscriptDisplay implements Component, Scrollable {
 				padToWidth(`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`),
 				...renderedLines.slice(sliceStart),
 			];
+			visibleStart = sliceStart - 1;
 		}
+		this.toolHitRegions = pendingToolRegions
+			.map((region) => ({
+				...region,
+				start: region.start - visibleStart,
+				end: region.end - visibleStart,
+			}))
+			.filter((region) => region.end > 0);
 
 		this._totalHeight = visibleBuffer.length;
 
@@ -901,35 +994,18 @@ export class TranscriptDisplay implements Component, Scrollable {
 		for (const rawLine of rawLines) {
 			if (rawLine.startsWith("```")) {
 				if (inCodeBlock) {
-					// Flush code block with syntax highlighting
-					const lang = codeBlockLang || null;
-					if (lang) {
-						let highlighted;
-						try {
-							highlighted = highlight(codeContent, lang);
-						} catch {
-							highlighted = highlightAuto(codeContent);
-						}
-						const langLabel = highlighted.language
-							? ` ${highlighted.language} · ${codeContent.split("\n").length} lines`
-							: "";
-						lines.push(`${fg}  \`${rawLine}\`${langLabel}${RESET}`);
-						for (const cl of highlighted.value.split("\n")) {
-							lines.push(`${fg}  ${cl}${RESET}`);
-						}
-					} else {
-						const codeLines = codeContent.split("\n");
-						for (const cl of codeLines) {
-							lines.push(`${fg}  ${cl}${RESET}`);
-						}
-					}
+					this.renderThinkingCodeBlock(
+						codeContent,
+						codeBlockLang,
+						lines,
+						false,
+					);
 					inCodeBlock = false;
 					codeContent = "";
 					codeBlockLang = null;
 				} else {
 					inCodeBlock = true;
 					codeBlockLang = extractLangFromFence(rawLine);
-					lines.push(`${fg}  ${rawLine}${RESET}`);
 				}
 				continue;
 			}
@@ -947,11 +1023,42 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		// Flush any unterminated code block
 		if (inCodeBlock && codeContent) {
-			lines.push(`${fg}  [code block open]${RESET}`);
-			for (const cl of codeContent.split("\n")) {
-				lines.push(`${fg}  ${cl}${RESET}`);
-			}
+			this.renderThinkingCodeBlock(codeContent, codeBlockLang, lines, true);
 		}
+	}
+
+	private renderThinkingCodeBlock(
+		content: string,
+		language: string | null,
+		lines: string[],
+		streaming: boolean,
+	): void {
+		const code = content.replace(/\n$/, "");
+		if (!code) return;
+
+		let highlightedCode = code;
+		let detectedLanguage = language;
+		try {
+			const highlighted = language
+				? highlight(code, language)
+				: highlightAuto(code);
+			highlightedCode = highlighted.value;
+			detectedLanguage = highlighted.language || language;
+		} catch {
+			// Unknown or incomplete languages remain readable as plain code.
+		}
+
+		const codeLines = highlightedCode.split("\n");
+		const label = detectedLanguage || "code";
+		const meta = `${label} · ${codeLines.length} line${codeLines.length === 1 ? "" : "s"}${streaming ? " · streaming" : ""}`;
+		const border = theme.fgRaw("separator");
+		lines.push(
+			`${border}  ┌─${RESET} ${theme.fg("mdCode", meta)}${RESET}`,
+		);
+		for (const line of codeLines) {
+			lines.push(`${border}  │${RESET} ${line}${RESET}`);
+		}
+		lines.push(`${border}  └─${RESET}`);
 	}
 
 	// ── Scroll helpers ───────────────────────────────────────────────────────
@@ -960,6 +1067,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (!this._pendingScrollBottom) return;
 		this._scrollOffset = Math.max(0, this._totalHeight - this._viewportHeight);
 		this._atBottom = true;
+		this._newOutputBelow = false;
 		this._pendingScrollBottom = false;
 	}
 
@@ -971,6 +1079,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const maxScroll = content.length - viewportHeight;
 		this._scrollOffset = Math.min(maxScroll, Math.max(0, this._scrollOffset));
 		this._atBottom = this._scrollOffset >= maxScroll;
+		if (this._atBottom) this._newOutputBelow = false;
 
 		const visible = content.slice(
 			this._scrollOffset,
@@ -997,11 +1106,28 @@ export class TranscriptDisplay implements Component, Scrollable {
 			const bar = isThumb ? `${thumbColor}█${reset}` : `${barColor}│${reset}`;
 			visible[i] = line + pad + bar;
 		}
+		if (this._newOutputBelow && !this._atBottom && visible.length > 0) {
+			const indicator = `${theme.fg("accent", "↓")} ${theme.fg("muted", "new output below")}`;
+			const clipped = clampLineToWidth(indicator, Math.max(1, width - 2));
+			visible[visible.length - 1] =
+				" ".repeat(Math.max(0, width - 2 - visibleWidth(clipped))) +
+				clipped +
+				`${barColor}│${reset}`;
+		}
 		return visible;
 	}
 
 	setTurns(turns: Turn[]): void {
 		const keepBottomAnchored = this._atBottom;
+		const nextRevision = this.revisionFor(turns);
+		if (
+			!keepBottomAnchored &&
+			this.contentRevision !== "" &&
+			nextRevision !== this.contentRevision
+		) {
+			this._newOutputBelow = true;
+		}
+		this.contentRevision = nextRevision;
 		// Drop oldest turns beyond the cap to keep memory and render time bounded.
 		if (turns.length > this.maxTurns) {
 			this.turns = turns.slice(turns.length - this.maxTurns);
@@ -1011,6 +1137,32 @@ export class TranscriptDisplay implements Component, Scrollable {
 		this.pruneBatchTaskTiming();
 		this.invalidate();
 		if (keepBottomAnchored) this._pendingScrollBottom = true;
+	}
+
+	private revisionFor(turns: Turn[]): string {
+		const turn = turns.at(-1);
+		const message = turn?.assistantMessage;
+		const chunks = message?.chunks ?? [];
+		const chunkRevision = chunks
+			.map((chunk) => {
+				const tool = chunk.tool;
+				return [
+					chunk.seq,
+					chunk.type,
+					chunk.isComplete ? 1 : 0,
+					revisionText(chunk.contentText),
+					revisionText(tool?.result),
+					revisionText(tool?.streamOutput),
+					tool?.isComplete ? 1 : 0,
+				].join(":");
+			})
+			.join("|");
+		return [
+			turns.length,
+			turn?.id ?? "",
+			message?.isComplete ? 1 : 0,
+			chunkRevision,
+		].join("/");
 	}
 
 	/**
@@ -1401,7 +1553,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return lines.length > 0 ? lines : [""];
 	}
 
-	private renderTool(tool: ToolExecution, width: number): string[] {
+	private renderTool(
+		tool: ToolExecution,
+		width: number,
+		expanded = this.toolsExpanded,
+	): string[] {
 		// Hook guidance is part of the model-visible tool result. Strip it only
 		// from this local display copy so internal instructions never leak into
 		// the user-facing transcript.
@@ -1457,7 +1613,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 						)?.[1]
 					: undefined);
 			if (!path) return "";
-			if (tool.tool_name === "write_file" || tool.tool_name === "edit_file") {
+			if (
+				["write_file", "write_file_append", "edit_file"].includes(
+					tool.tool_name,
+				)
+			) {
 				return path;
 			}
 			return "";
@@ -1483,13 +1643,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 		lines.push(clampLineToWidth(row, Math.max(1, width - 4)) + RESET);
 
-		// Always show the result (diff) for edit_file and write_file even when collapsed.
+		// Edits keep their compact diff preview. File writes and appends report
+		// their live line count in the header and reveal content on expand.
 		const showDiffResult =
-			!this.toolsExpanded &&
-			["edit_file", "write_file", "write_file_append"].includes(
-				tool.tool_name,
-			) &&
-			!!tool.result;
+			!expanded && tool.tool_name === "edit_file" && !!tool.result;
 		if (showDiffResult) {
 			const resultText = tool.result ?? "";
 			const label = tool.isError ? "error" : "result";
@@ -1515,7 +1672,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		const compactPreview =
-			!showDiffResult && !this.toolsExpanded && !subagent && !subagentBatch
+			!showDiffResult && !expanded && !subagent && !subagentBatch
 				? this.collapsedToolPreview(tool)
 				: "";
 		if (compactPreview) {
@@ -1536,11 +1693,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 				...this.renderPostEditDiagnostics(block, Math.max(20, width - 4)),
 			);
 		}
-		if (!this.toolsExpanded && !subagent && !subagentBatch) return lines;
+		if (!expanded && !subagent && !subagentBatch) return lines;
 		if (!subagent && !subagentBatch) {
 			lines.push(`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`);
 		}
-		for (const detailLine of this.toolDetailLines(tool, width - 2)) {
+		for (const detailLine of this.toolDetailLines(tool, width - 2, expanded)) {
 			const wrapped = this.wrapText(detailLine, Math.max(20, width - 4));
 			for (const line of wrapped) {
 				lines.push(`${theme.fg("dim", "│ ")}${line}`);
@@ -1551,6 +1708,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 	}
 
 	private collapsedToolPreview(tool: ToolExecution): string {
+		if (
+			tool.tool_name === "write_file" ||
+			tool.tool_name === "write_file_append"
+		) {
+			return "";
+		}
 		const raw = tool.streamOutput || tool.result || "";
 		if (!raw.trim()) return "";
 		const firstLine = raw
@@ -1601,13 +1764,17 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private toolSummary(tool: ToolExecution): string {
 		const args = tool.args || {};
 		const path = stringArg(args, "path") || stringArg(args, "file_path");
-		if (tool.tool_name === "write_file") {
-			const content = stringArg(args, "content") || "";
+		if (
+			tool.tool_name === "write_file" ||
+			tool.tool_name === "write_file_append"
+		) {
+			const content = this.writeFileContent(tool) || "";
 			const lineCount = content ? content.split("\n").length : 0;
-			const parts = [];
-			if (content) parts.push(`${content.length} bytes`);
-			if (lineCount) parts.push(`${lineCount} lines`);
-			return parts.join(" · ");
+			const verb =
+				tool.tool_name === "write_file_append" ? "appended" : "written";
+			return `${lineCount} line${lineCount === 1 ? "" : "s"} ${verb}${
+				tool.isComplete ? "" : " so far"
+			}`;
 		}
 		if (tool.tool_name === "edit_file") {
 			const editCount = Array.isArray(args.edits) ? args.edits.length : 1;
@@ -1642,16 +1809,20 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return result ? compactText(result).slice(0, 80) : "";
 	}
 
-	private toolDetailLines(tool: ToolExecution, width: number): string[] {
+	private toolDetailLines(
+		tool: ToolExecution,
+		width: number,
+		expanded: boolean,
+	): string[] {
 		const args = tool.args || {};
 		const lines: string[] = [];
 		const result = tool.result ?? tool.partialResult;
 
 		if (tool.tool_name === "spawn_agent") {
-			return this.renderSubagentDetails(tool, width);
+			return this.renderSubagentDetails(tool, width, expanded);
 		}
 		if (tool.tool_name === "spawn_agents") {
-			return this.renderSubagentBatchDetails(tool, width);
+			return this.renderSubagentBatchDetails(tool, width, expanded);
 		}
 
 		if (tool.isError && result && isPermissionRejection(result)) {
@@ -1659,10 +1830,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 			return lines;
 		}
 
-		if (tool.tool_name === "write_file") {
-			lines.push(...this.renderWriteDetails(tool, width));
+		if (
+			tool.tool_name === "write_file" ||
+			tool.tool_name === "write_file_append"
+		) {
+			lines.push(...this.renderWriteDetails(tool, width, expanded));
 		} else if (tool.tool_name === "edit_file") {
-			lines.push(...this.renderEditDetails(tool, width));
+			lines.push(...this.renderEditDetails(tool, width, expanded));
 		} else if (tool.tool_name === "file_diff") {
 			lines.push(...this.renderFileDiffDetails(tool, width));
 		} else if (tool.tool_name === "bash") {
@@ -1679,9 +1853,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		if (
 			result &&
-			!["write_file", "edit_file", "file_diff", "bash"].includes(
-				tool.tool_name,
-			) &&
+			![
+				"write_file",
+				"write_file_append",
+				"edit_file",
+				"file_diff",
+				"bash",
+			].includes(tool.tool_name) &&
 			!tool.tool_name.startsWith("mcp__")
 		) {
 			lines.push(this.detailSection(tool.isError ? "error" : "result"));
@@ -1803,11 +1981,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 		text: string,
 		width: number,
 		streaming: boolean,
+		expanded = this.toolsExpanded,
 	): string[] {
 		const visibleText = stripAcceptanceForDisplay(text);
 		if (!visibleText) return [];
 		const markdown =
-			!this.toolsExpanded && visibleText.length > 800
+			!expanded && visibleText.length > 800
 				? this.withTruncationMarker(visibleText.slice(0, 800))
 				: visibleText;
 		return this.renderMarkdownLines(
@@ -1859,6 +2038,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		chunks: ChildChunk[],
 		width: number,
 		showAgent: boolean,
+		expanded = this.toolsExpanded,
 	): string[] {
 		const lines: string[] = [];
 		const agentIds = [
@@ -1929,6 +2109,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 					...this.renderTool(
 						this.childToolExecution(chunk.tool),
 						Math.max(20, width),
+						expanded,
 					),
 				);
 				lastWasThinking = false;
@@ -1942,6 +2123,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private renderSubagentBatchDetails(
 		tool: ToolExecution,
 		width: number,
+		expanded: boolean,
 	): string[] {
 		const tasks = Array.isArray(tool.args?.tasks)
 			? tool.args.tasks.filter(
@@ -2004,7 +2186,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 					Math.max(20, width),
 				),
 			);
-			if (this.toolsExpanded && !hasOrderedFlow) {
+			if (expanded && !hasOrderedFlow) {
 				const liveText = agentStreams.get(index) ?? "";
 				const resultText =
 					typeof result?.content === "string" ? result.content : "";
@@ -2014,6 +2196,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 						text,
 						Math.max(16, width - 4),
 						!result,
+						expanded,
 					)) {
 						lines.push(`  ${preview}`);
 					}
@@ -2021,7 +2204,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		if (hasOrderedFlow) {
-			lines.push(...this.renderSubagentFlow(childChunks, width, true));
+			lines.push(...this.renderSubagentFlow(childChunks, width, true, expanded));
 		} else {
 			const childToolCalls = details.childToolCalls as
 				| ChildToolCall[]
@@ -2030,14 +2213,21 @@ export class TranscriptDisplay implements Component, Scrollable {
 				...this.renderSubagentActivity(
 					childToolCalls,
 					width,
-					this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
+					expanded ? Number.POSITIVE_INFINITY : 4,
+					true,
+					true,
+					expanded,
 				),
 			);
 		}
 		return lines;
 	}
 
-	private renderSubagentDetails(tool: ToolExecution, width: number): string[] {
+	private renderSubagentDetails(
+		tool: ToolExecution,
+		width: number,
+		expanded: boolean,
+	): string[] {
 		const lines: string[] = [];
 		const args = tool.args || {};
 		const details = tool.details || {};
@@ -2089,7 +2279,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			? (details.childChunks as ChildChunk[])
 			: [];
 		if (childChunks.length > 0) {
-			lines.push(...this.renderSubagentFlow(childChunks, width, false));
+			lines.push(...this.renderSubagentFlow(childChunks, width, false, expanded));
 		} else {
 			const childToolCalls = details.childToolCalls as
 				| ChildToolCall[]
@@ -2098,9 +2288,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 				...this.renderSubagentActivity(
 					childToolCalls,
 					width,
-					this.toolsExpanded ? Number.POSITIVE_INFINITY : 4,
+					expanded ? Number.POSITIVE_INFINITY : 4,
 					false,
 					false,
+					expanded,
 				),
 			);
 		}
@@ -2118,9 +2309,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 			.map((chunk) => chunk.contentText ?? "")
 			.join("");
 		const outputs =
-			this.toolsExpanded && childChunks.length === 0
+			expanded && childChunks.length === 0
 				? this.distinctSubagentOutputs(liveOutput, finalOutput)
-				: !this.toolsExpanded &&
+				: !expanded &&
 						tool.isComplete &&
 						finalOutput &&
 						!orderedContent.includes(finalOutput)
@@ -2134,11 +2325,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 					output,
 					Math.max(16, width - 4),
 					!tool.isComplete,
+					expanded,
 				)) {
 					lines.push(`  ${line}`);
 				}
 			}
-		} else if (!tool.isComplete && this.toolsExpanded) {
+		} else if (!tool.isComplete && expanded) {
 			lines.push(`${theme.fg("dim", "  waiting for agent output…")}${RESET}`);
 		}
 
@@ -2151,6 +2343,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		limit = Number.POSITIVE_INFINITY,
 		showHeading = true,
 		showAgent = true,
+		expanded = this.toolsExpanded,
 	): string[] {
 		if (!calls?.length) return [];
 		const visible = calls.slice(-limit);
@@ -2185,7 +2378,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				.filter(Boolean)
 				.join(` ${DIM}·${RESET} `);
 			lines.push(`${bg}${clampLineToWidth(row, Math.max(20, width))}${RESET}`);
-			if (this.toolsExpanded && call.resultPreview) {
+			if (expanded && call.resultPreview) {
 				const result = compactText(call.resultPreview);
 				lines.push(
 					`${bg}${DIM}  └ ${clampLineToWidth(result, Math.max(16, width - 4))}${RESET}`,
@@ -2210,12 +2403,21 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return compactText(text).slice(0, 100);
 	}
 
-	private renderWriteDetails(tool: ToolExecution, width: number): string[] {
+	private renderWriteDetails(
+		tool: ToolExecution,
+		width: number,
+		expanded: boolean,
+	): string[] {
 		const lines: string[] = [];
 		const args = tool.args || {};
-		const path = stringArg(args, "path") || stringArg(args, "file_path");
-		const content = stringArg(args, "content");
+		const path =
+			stringArg(args, "path") ||
+			stringArg(args, "file_path") ||
+			streamedStringArg(tool.partialResult, "path") ||
+			streamedStringArg(tool.partialResult, "file_path");
+		const content = this.writeFileContent(tool);
 		const streaming = !tool.isComplete;
+		const appending = tool.tool_name === "write_file_append";
 
 		if (path) lines.push(this.detailSection("file", path));
 
@@ -2224,11 +2426,15 @@ export class TranscriptDisplay implements Component, Scrollable {
 			const meta = streaming
 				? `${DIM}${content.length} bytes · ${lineCount} lines · streaming${RESET}`
 				: `${DIM}${content.length} bytes · ${lineCount} lines${RESET}`;
-			lines.push(this.detailSection("content", meta));
+			lines.push(
+				this.detailSection(appending ? "append content" : "content", meta),
+			);
 			const lang = this.detectLanguage(path);
-			lines.push(...this.renderFileContent(content, width, lineCount, lang));
+			lines.push(
+				...this.renderFileContent(content, width, lineCount, lang, expanded),
+			);
 		} else if (streaming) {
-			lines.push(`${DIM}writing…${RESET}`);
+			lines.push(`${DIM}${appending ? "appending" : "writing"}…${RESET}`);
 		}
 
 		// Show error result only (skip diff — content is already rendered above).
@@ -2251,8 +2457,19 @@ export class TranscriptDisplay implements Component, Scrollable {
 		return lines;
 	}
 
+	private writeFileContent(tool: ToolExecution): string | undefined {
+		return (
+			stringArg(tool.args || {}, "content") ??
+			streamedStringArgLive(tool.partialResult, "content")
+		);
+	}
+
 	/** Parse accumulated partialResult JSON to extract tool args. */
-	private renderEditDetails(tool: ToolExecution, width: number): string[] {
+	private renderEditDetails(
+		tool: ToolExecution,
+		width: number,
+		expanded: boolean,
+	): string[] {
 		const lines: string[] = [];
 		const args = tool.args || {};
 		const path = stringArg(args, "path") || stringArg(args, "file_path");
@@ -2278,7 +2495,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 					`${theme.fgRaw("diffRemoved")}── - OLD${RESET}  ${DIM}${oldMeta}${RESET}`,
 				);
 				lines.push(
-					...this.renderFileContent(oldText, width, oldLineCount, language),
+					...this.renderFileContent(
+						oldText,
+						width,
+						oldLineCount,
+						language,
+						expanded,
+					),
 				);
 			}
 			if (newText) {
@@ -2290,7 +2513,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 					`${theme.fgRaw("diffAdded")}── + NEW${RESET}  ${DIM}${newMeta}${RESET}`,
 				);
 				lines.push(
-					...this.renderFileContent(newText, width, newLineCount, language),
+					...this.renderFileContent(
+						newText,
+						width,
+						newLineCount,
+						language,
+						expanded,
+					),
 				);
 			}
 		}
@@ -2746,6 +2975,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		width: number,
 		totalLines: number,
 		language: string | undefined,
+		expanded: boolean,
 	): string[] {
 		const lines: string[] = [];
 		const bg = theme.bg("mdCodeBlockBg", "");
@@ -2754,7 +2984,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const plainColor = theme.fgRaw("assistantText");
 
 		const collapsedPreviewLines = 8;
-		const showAll = totalLines <= collapsedPreviewLines;
+		const showAll = expanded || totalLines <= collapsedPreviewLines;
 
 		const rawLines = text.split("\n");
 		const displayLines = showAll

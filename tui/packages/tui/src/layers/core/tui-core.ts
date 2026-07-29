@@ -18,6 +18,7 @@ export interface Scrollable extends Component {
 	scroll(delta: number): void;
 	scrollToBottom(): void;
 	isAtBottom: boolean;
+	handleMouse?(column: number, row: number): boolean;
 }
 
 export function isFocusable(c: Component | null): c is Component & Focusable {
@@ -483,6 +484,7 @@ export class TUI extends Container {
 			clearTimeout(this.renderTimer);
 			this.renderTimer = null;
 		}
+		this.disableMouse();
 		// Show cursor + leave alternate screen + disable bracketed paste,
 		// restoring the user's terminal.
 		this.write("\x1b[<u\x1b[?25h\x1b[?1049l\x1b[?2004l");
@@ -529,19 +531,44 @@ export class TUI extends Container {
 	private static readonly WHEEL_STEP = 4;
 
 	private handleInput(data: string): void {
+		const hasVisibleOverlay = this.overlayStack.some((entry) => {
+			if (entry.hidden) return false;
+			if (
+				"visible" in entry.component &&
+				typeof (entry.component as { visible?: unknown }).visible === "boolean"
+			) {
+				return (entry.component as { visible: boolean }).visible;
+			}
+			return true;
+		});
+
 		// Handle SGR mouse events: \x1b[<button;column;row(M|m). A single stdin read
 		// can batch several wheel ticks; coalesce them into one scroll so fast wheel
 		// spins move proportionally without queuing a render per tick.
 		if (data.startsWith("\x1b[<")) {
-			const re = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+			const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
 			let net = 0; // +down / -up, in wheel ticks
 			let consumed = 0;
+			let clicked = false;
 			let m: RegExpExecArray | null;
 			while ((m = re.exec(data)) !== null) {
 				const btn = parseInt(m[1], 10);
+				const column = parseInt(m[2], 10) - 1;
+				const row = parseInt(m[3], 10) - 1;
 				if (btn === 64)
 					net -= 1; // wheel up → older content
 				else if (btn === 65) net += 1; // wheel down → newer content
+				else if (
+					btn === 0 &&
+					m[4] === "M" &&
+					!hasVisibleOverlay &&
+					row >= 0 &&
+					row < this._viewportHeight
+				) {
+					clicked =
+						this.scrollableComponent?.handleMouse?.(column, row) === true ||
+						clicked;
+				}
 				consumed += m[0].length;
 			}
 			// Pure mouse chunk → apply coalesced scroll once, then stop.
@@ -550,6 +577,7 @@ export class TUI extends Container {
 				else this.scrollUp(-net * TUI.WHEEL_STEP);
 				return;
 			}
+			if (clicked && consumed === data.length) return;
 			if (consumed === data.length) return; // mouse-only chunk, nothing to scroll
 		}
 
@@ -557,17 +585,6 @@ export class TUI extends Container {
 		// the prompt keeps focus. Plain arrows remain input/history navigation.
 		// But if any overlay is visible, skip scrolling so the overlay gets first
 		// crack at the keys (e.g. reasoner selector, plugin manager).
-		const hasVisibleOverlay = this.overlayStack.some((e) => {
-			if (e.hidden) return false;
-			if (
-				"visible" in e.component &&
-				typeof (e.component as { visible?: unknown }).visible === "boolean"
-			) {
-				return (e.component as { visible: boolean }).visible;
-			}
-			return true;
-		});
-
 		if (!hasVisibleOverlay && this.scrollableComponent) {
 			if (data === "\x1b[5~") {
 				this.scrollUp(Math.max(4, Math.floor(this._viewportHeight * 0.8)));
