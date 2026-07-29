@@ -197,6 +197,7 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 	assert.deepEqual(cfg, {
 		autoRetryEnabled: true,
 		continuationEnabled: true,
+		duplicateGuardEnabled: true,
 		postEditDiagnostics: true,
 	});
 	assert.equal(w.length, 0);

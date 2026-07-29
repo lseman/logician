@@ -14,12 +14,13 @@ import { runInPty, stripTerminalControls } from "../testing/pty-harness.ts";
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const tsx = path.join(tuiRoot, "node_modules", ".bin", "tsx");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
+const themesSource = path.join(tuiRoot, "dist", "themes");
 
 void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
 	const themeDir = path.join(home, ".logician", "themes");
 	mkdirSync(themeDir, { recursive: true });
-	cpSync(path.join(tuiRoot, "themes"), themeDir, { recursive: true });
+	cpSync(themesSource, themeDir, { recursive: true });
 	const result = await runInPty({
 		command: tsx,
 		args: [entry],
@@ -39,7 +40,7 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 		rows: 32,
 	});
 	const output = stripTerminalControls(result.output);
-	assert.match(output, /ASK LOGICIAN/);
+	assert.match(output, /Ask Logician/);
 	assert.match(output, /mode: REASON|Inference mode: Instruct \(Reasoning\)/);
 	assert.doesNotMatch(output, /TypeError|TUI render error/);
 });
@@ -129,7 +130,7 @@ void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
 	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
 	const themeDir = path.join(home, ".logician", "themes");
 	mkdirSync(themeDir, { recursive: true });
-	cpSync(path.join(tuiRoot, "themes"), themeDir, { recursive: true });
+	cpSync(themesSource, themeDir, { recursive: true });
 	const result = await runInPty({
 		command: tsx,
 		args: [entry],

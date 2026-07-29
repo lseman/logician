@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
 import type { SlashCommandDef } from "@logician/coding-agent/slash-commands";
 import { SlashPopup } from "../components/slash-popup.ts";
 import { initTheme, theme } from "../layers/theme/theme.ts";
@@ -22,8 +23,7 @@ const commands: SlashCommandDef[] = [
 	},
 ];
 
-describe("SlashPopup", () => {
-	test("renders the active command using the theme selected color", () => {
+test("SlashPopup renders the active command using the theme selected color", () => {
 		const popup = new SlashPopup();
 		popup.setCommands(commands);
 		popup.setQuery("/");
@@ -31,10 +31,9 @@ describe("SlashPopup", () => {
 
 		const selectedColor = theme.fgRaw("selected");
 		let output = popup.render(80).join("\n");
-		expect(output).toContain(`${selectedColor}▸ \x1b[1m/help`);
+		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/help`));
 
 		popup.moveSelection(1);
 		output = popup.render(80).join("\n");
-		expect(output).toContain(`${selectedColor}▸ \x1b[1m/settings`);
+		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/settings`));
 	});
-});
