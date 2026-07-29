@@ -558,7 +558,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 	invalidate(): void {
 		this.cachedLines = null;
-		this._totalHeight = 0;
 	}
 
 	setViewportHeight(height: number): void {
@@ -590,6 +589,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 			Math.max(0, this._scrollOffset - delta),
 		);
 		this._atBottom = this._scrollOffset >= maxScroll;
+		// A streamed update may have invalidated the cached lines without being
+		// rendered yet. If the user reaches the bottom of the last committed
+		// layout, keep that intent through the next render as its height grows.
+		this._pendingScrollBottom = this._atBottom;
 	}
 
 	scrollToBottom(): void {

@@ -592,6 +592,45 @@ void test("Ctrl+O expansion keeps a bottom-anchored viewport on newest content",
 	assert.match(output, /LATEST RESPONSE/);
 });
 
+void test("wheel-down reaches the new bottom while a streaming update awaits render", () => {
+	const display = new TranscriptDisplay({ maxRenderedLines: 200 });
+	display.setViewportHeight(6);
+	const streamingTurn = (contentText: string): Turn => ({
+		id: "streaming-scroll",
+		userMessage: { type: "user", content: "Keep streaming" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 1,
+				type: "content",
+				contentText,
+				isComplete: false,
+			}],
+		},
+		isComplete: false,
+	});
+
+	display.setTurns([
+		streamingTurn(Array.from({ length: 16 }, (_, i) => `line-${i}`).join("\n")),
+	]);
+	display.render(80);
+	display.scroll(4);
+	assert.equal(display.isAtBottom, false);
+
+	display.setTurns([
+		streamingTurn([
+			...Array.from({ length: 16 }, (_, i) => `line-${i}`),
+			"NEWEST STREAMED LINE",
+		].join("\n")),
+	]);
+	display.scroll(-100);
+	const output = plain(display.render(80).join("\n"));
+
+	assert.equal(display.isAtBottom, true);
+	assert.match(output, /NEWEST STREAMED LINE/);
+});
+
 void test("empty think wrappers do not render a THINK section", () => {
 	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
 	display.setTurns([{

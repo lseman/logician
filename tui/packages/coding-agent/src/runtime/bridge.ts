@@ -1950,15 +1950,15 @@ export class AgentCoreBridge {
 		if (this.mcpLoaded || process.env.LOGICIAN_MCP === "0") return;
 		if (!this.mcpLoadPromise) {
 			this.mcpLoadPromise = (async () => {
-					const result = await this.mcpManager.load(
-						this.config.cwd || process.cwd(),
-						this.defaultTools.map((tool) => tool.name),
-					);
-					this.mcpServerCount = result.servers;
-					this.mcpErrors = result.errors;
-					this.mcpToolNames = new Set(
-						result.tools.map((tool) => tool.name),
-					);
+				const result = await this.mcpManager.load(
+					this.config.cwd || process.cwd(),
+					this.defaultTools.map((tool) => tool.name),
+				);
+				this.mcpServerCount = result.servers;
+				this.mcpErrors = result.errors;
+				this.mcpToolNames = new Set(
+					result.tools.map((tool) => tool.name),
+				);
 				// Tool presence alone doesn't tell the model whether a missing
 				// capability was never configured or failed to connect — surface
 				// connection failures in the system prompt so it can explain a gap
