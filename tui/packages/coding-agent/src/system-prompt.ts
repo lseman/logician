@@ -168,6 +168,23 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 	if (mcpTools.length === 0) return [];
 
 	const toolNames = mcpTools.map((tool) => tool.name);
+	const matchesCapability = (tool: Tool, pattern: RegExp): boolean =>
+		pattern.test(
+			`${tool.name} ${tool.label ?? ""} ${tool.description ?? ""}`,
+		);
+	const toolsFor = (pattern: RegExp): string[] =>
+		mcpTools
+			.filter((tool) => matchesCapability(tool, pattern))
+			.map((tool) => tool.name);
+	const contentSearchTools = toolsFor(
+		/(?:^|[_\s-])(?:grep|search|search_code|search_text|find_text)(?:$|[_\s-])/i,
+	);
+	const fileDiscoveryTools = toolsFor(
+		/(?:find_files?|list_files?|file_search|glob|repository_tree)/i,
+	);
+	const executionTools = toolsFor(
+		/(?:ctx_execute|execute|run_command|shell|command)/i,
+	);
 	const repositoryTools = mcpTools.filter((tool) =>
 		/(?:ctx|context|repository|codebase|search|query|execute|command|diff)/i.test(
 			`${tool.name} ${tool.label ?? ""} ${tool.description ?? ""}`,
@@ -181,6 +198,21 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 		`- MCP tools currently available: ${toolNames.join(", ")}.`,
 		"- Before choosing grep, find, bash, git, web, or generic file tools, check whether an available MCP tool provides the same capability with structured or server-owned context.",
 		"- Use the specialized MCP tool first when the task concerns the system, service, repository index, or data source it owns. Do not rediscover that information through shell commands.",
+		...(contentSearchTools.length > 0
+			? [
+					`- For repository content or symbol search, use ${contentSearchTools.join(", ")} before local grep, rg, git grep, or a shell search pipeline.`,
+				]
+			: []),
+		...(fileDiscoveryTools.length > 0
+			? [
+					`- For file discovery or repository-tree queries, use ${fileDiscoveryTools.join(", ")} before local find, fd, glob expansion, or ls.`,
+				]
+			: []),
+		...(executionTools.length > 0
+			? [
+					`- For repository commands whose output may be large, use ${executionTools.join(", ")} before bash so the MCP server can retain and filter context.`,
+				]
+			: []),
 		...(repositoryToolNames.length > 0
 			? [
 					`- For repository exploration, search, command execution, or large-output inspection, prefer ${repositoryToolNames.join(", ")} over raw grep/find/bash when they can answer the question.`,
@@ -310,8 +342,8 @@ ${mcpWorkflow.join("\n")}
 
 Default coding-agent workflow:
 - Inspect before editing. Choose the most specific available tool for the source of truth; follow the MCP-first workflow above whenever MCP tools are available.
-- Use local list_files, find, grep, read_file, git status/diff, or bash when the task is local and no MCP tool provides the needed capability.
-- When using local tools, use find to locate files by glob pattern (e.g. '**/*.test.ts') and grep to search file contents.
+- Local list_files, find, grep, read_file, git status/diff, and bash are fallback tools. Use them only when no available MCP tool covers the operation, or after the relevant MCP tool is unavailable or insufficient.
+- In that local fallback path, use find to locate files by glob pattern (e.g. '**/*.test.ts') and grep to search file contents.
 - For multi-step tasks, call the 'todo' tool to track the plan. Use 'create' action to add tasks, 'update' with 'id' and 'status' to progress work. Mark exactly one task 'in_progress' while working on it, complete it immediately when done. Use 'list' to check current state. Never start work without creating the task first.
 - For targeted changes, prefer edit_file with exact unique context. Read the file with read_file before editing or overwriting it. To rename a symbol throughout a file, set replaceAll: true on the edit.
 - For new files or complete rewrites, use write_file.

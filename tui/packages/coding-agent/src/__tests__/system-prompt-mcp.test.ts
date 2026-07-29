@@ -17,6 +17,14 @@ void test("system prompt makes MCP the primary tool-selection workflow", () => {
 		parameters: { type: "object", properties: {} },
 		execute: async () => "ok",
 	};
+	const fffGrepTool: Tool = {
+		name: "fff__grep",
+		label: "MCP: Grep (fff)",
+		description:
+			"Search repository file contents using the fff index and return focused matches.",
+		parameters: { type: "object", properties: {} },
+		execute: async () => "ok",
+	};
 	const grepTool: Tool = {
 		name: "grep",
 		label: "Grep",
@@ -36,6 +44,7 @@ void test("system prompt makes MCP the primary tool-selection workflow", () => {
 		grepTool,
 		bashTool,
 		mcpTool,
+		fffGrepTool,
 	]);
 
 	assert.match(prompt, new RegExp(fullDescription));
@@ -44,16 +53,27 @@ void test("system prompt makes MCP the primary tool-selection workflow", () => {
 		/Use ctx_execute for repository commands with potentially large output\./,
 	);
 	assert.match(prompt, /MCP-first tool workflow:/);
-	assert.match(prompt, /MCP tools currently available: ctx_execute\./);
 	assert.match(
 		prompt,
-		/For repository exploration, search, command execution, or large-output inspection, prefer ctx_execute over raw grep\/find\/bash/,
+		/MCP tools currently available: ctx_execute, fff__grep\./,
+	);
+	assert.match(
+		prompt,
+		/For repository content or symbol search, use fff__grep before local grep, rg, git grep, or a shell search pipeline\./,
+	);
+	assert.match(
+		prompt,
+		/For repository commands whose output may be large, use ctx_execute before bash/,
 	);
 	assert.match(
 		prompt,
 		/Before choosing grep, find, bash, git, web, or generic file tools/,
 	);
 	assert.match(prompt, /try the closest MCP alternative before abandoning MCP/);
+	assert.match(
+		prompt,
+		/Local list_files, find, grep, read_file, git status\/diff, and bash are fallback tools\./,
+	);
 	assert.ok(
 		prompt.indexOf("MCP-first tool workflow:") <
 			prompt.indexOf("Default coding-agent workflow:"),
@@ -72,5 +92,8 @@ void test("system prompt omits MCP policy when no MCP tools are available", () =
 	const prompt = buildDefaultSystemPrompt("/workspace", [localTool]);
 
 	assert.doesNotMatch(prompt, /MCP-first tool workflow:/);
-	assert.match(prompt, /Use local list_files, find, grep/);
+	assert.match(
+		prompt,
+		/Local list_files, find, grep, read_file, git status\/diff, and bash are fallback tools\./,
+	);
 });
