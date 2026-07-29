@@ -1,0 +1,255 @@
+/* Logician docs custom theme — dark, minimal, terminal-inspired */
+
+:root {
+  --lb-purple: #8b5cf6;
+  --lb-purple-soft: #a78bfa;
+  --lb-purple-light: #c9b2ff;
+  --lb-teal: #5eead4;
+  --lb-teal-deep: #0f766e;
+  --lb-cyan: #38bdf8;
+  --bg: rgb(15, 15, 20);
+  --bg-soft: rgba(30, 30, 40, 0.8);
+  --border: rgba(139, 92, 246, 0.16);
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --code-bg: rgba(15, 23, 42, 0.95);
+  --radius: 10px;
+}
+
+/* Base */
+body {
+  background: var(--bg) !important;
+}
+
+.Layout, .VPContent, .VPDoc, .VPDoc.has-aside .content-container,
+.VPDocAside, .VPSidebar {
+  background: transparent !important;
+}
+
+/* Typography */
+:root {
+  --vp-font-family-base: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* Nav */
+.VPNavBar {
+  background: rgba(15, 15, 20, 0.86) !important;
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Sidebar */
+.VPSidebar {
+  border-right: 1px solid var(--border);
+  background: transparent !important;
+}
+
+.VPSidebar .curtain {
+  background: transparent !important;
+}
+
+/* Nav links */
+.nav-link {
+  font-size: 0.82rem;
+  color: var(--text-muted) !important;
+  transition: color 0.15s ease;
+}
+
+.nav-link:hover, .nav-link.router-link-active {
+  color: var(--lb-purple-light) !important;
+}
+
+/* Content */
+.vp-doc {
+  max-width: 48rem;
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+}
+
+.vp-doc h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: -0.03em;
+  margin-bottom: 1rem;
+}
+
+.vp-doc h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+  margin-top: 2rem;
+}
+
+.vp-doc h3 {
+  font-size: 1.1rem;
+  color: var(--lb-purple-light);
+  margin-top: 1.5rem;
+}
+
+/* Links */
+.vp-doc a:not(.vp-doc .headerlink) {
+  color: var(--lb-purple-soft);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+  transition: border-color 0.15s ease;
+}
+
+.vp-doc a:hover {
+  border-bottom-color: var(--lb-purple-soft);
+}
+
+/* Code */
+.vp-doc :not(pre) > code {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--lb-purple-light);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 6px;
+  padding: 0.08em 0.35em;
+  font-size: 0.82em;
+}
+
+.vp-doc pre {
+  background: var(--code-bg) !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+}
+
+.vp-doc pre code {
+  font-size: 0.72rem;
+  line-height: 1.7;
+}
+
+/* Buttons */
+.vp-doc .md-button {
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1px solid rgba(139, 92, 246, 0.24);
+  color: #f8fafc;
+  background: transparent;
+  transition: all 0.15s ease;
+}
+
+.vp-doc .md-button:hover {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.4);
+}
+
+.vp-doc .md-button--primary {
+  background: linear-gradient(135deg, var(--lb-purple), #6d28d9);
+  border-color: transparent;
+  box-shadow: 0 5px 14px rgba(109, 40, 217, 0.32);
+}
+
+.vp-doc .md-button--primary:hover {
+  background: linear-gradient(135deg, var(--lb-purple-soft), var(--lb-purple));
+}
+
+/* Hero actions */
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
+}
+
+.hero-actions .md-button {
+  margin: 0;
+}
+
+/* Tables */
+.vp-doc table {
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.vp-doc table th {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--lb-purple-light);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  padding: 0.55rem 0.8rem;
+}
+
+.vp-doc table td {
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.vp-doc table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Admonitions */
+.vp-doc .tip, .vp-doc .note, .vp-doc .warning {
+  border-radius: var(--radius);
+  border-width: 1px;
+}
+
+.vp-doc .tip {
+  border-color: rgba(45, 212, 191, 0.32);
+  background: rgba(45, 212, 191, 0.05);
+}
+
+.vp-doc .tip > .title {
+  background: rgba(45, 212, 191, 0.1);
+  color: var(--lb-teal);
+}
+
+.vp-doc .warning {
+  border-color: rgba(245, 165, 36, 0.32);
+  background: rgba(245, 165, 36, 0.05);
+}
+
+.vp-doc .warning > .title {
+  background: rgba(245, 165, 36, 0.1);
+  color: #f5a524;
+}
+
+/* Mermaid */
+.mermaid {
+  background: rgba(15, 23, 42, 0.55);
+  padding: 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  text-align: center;
+  margin: 1rem 0;
+}
+
+/* Footer */
+.VPFooter {
+  border-top: 1px solid var(--border);
+  background: rgba(15, 15, 20, 0.72);
+}
+
+/* Search */
+.VPNavBarSearch {
+  .search-input {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .vp-doc {
+    padding-inline: 1rem;
+  }
+  .hero-actions {
+    flex-direction: column;
+  }
+  .hero-actions .md-button {
+    text-align: center;
+  }
+}
