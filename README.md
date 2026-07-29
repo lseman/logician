@@ -218,6 +218,26 @@ Built-in themes live in `tui/packages/tui/src/layers/theme`. Custom themes go in
 
 Switch with `/theme dark` or `/theme light`.
 
+## Architecture Decisions
+
+### Agent loop
+The agent runs a single harness loop: receive user input → call backend → parse response → execute tools → repeat. Each iteration is a "turn" with full lifecycle events (turn_start, tool_call, tool_result, turn_end). The loop runner manages budget, compaction triggers, and guardrails.
+
+### Hook system
+Hooks are lifecycle callbacks registered per event type (turn_start, tool_call, turn_end, etc.). They run in order within a hook bus. Each hook can read/write turn state, emit events, or short-circuit the loop. Extensions register hooks via `SKILL.md` or plugin manifests.
+
+### Permission model
+Four modes control tool execution: `acceptAll` (no prompts), `acceptEdits` (auto-read, ask-write), `ask` (every tool prompts), `plan` (no execution). The permission resolver checks the mode, tool name, and configured allow/deny lists before each call. Blocked tools emit a `permission_denied` event.
+
+### Session lifecycle
+Sessions persist to disk as JSONL transcript files. They support bookmarks (named checkpoints), branching (fork a session at any point), rewind (restore to a bookmark), and compaction (summarize old turns to free context). Compaction triggers at configurable token thresholds and preserves tool call results as summaries.
+
+### Trust model
+At startup, the TUI scans the working directory for trust-requiring resources (`.logician/`, skills, extensions). A prompt overlay appears with five choices: trust this folder, trust parent, session-only trust, deny, or exit. Trust decisions are persisted to `~/.logician/` and scoped to the workspace path.
+
+### Subagent isolation
+Child agents run in isolated Bun worktrees with their own `node_modules` and file system scope. They receive a subset of the parent's tools, a truncated context window, and their own session. Results flow back as structured reports with optional streaming transcripts and child tool call traces.
+
 ## License
 
 MIT
