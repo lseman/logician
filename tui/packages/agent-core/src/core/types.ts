@@ -80,6 +80,14 @@ export type {
 export type { AcceptanceConfig } from "./guards/acceptance-contract.ts";
 export type { TruncationConfig } from "./types/types-truncation.ts";
 export { DEFAULT_TRUNCATION, resolveTruncationConfig } from "./types/types-truncation.ts";
+export type {
+	AgentStopPolicy,
+	ExecutionProfile,
+	ResolvedExecutionPolicy,
+	RunOutcomeStatus,
+	StopPolicyContext,
+	StopPolicyDecision,
+} from "./execution-policy.ts";
 
 export {
 	AgentErrorType,

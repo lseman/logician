@@ -51,6 +51,10 @@ import { awaitsUserInput, looksComplete, looksNonCommittal } from "./guards/resp
 import { emitConclusion, lastAssistantContent, lastHadToolCalls } from "../runtime/conclusion-policy.ts";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
+import {
+	evaluateStopPolicies,
+	resolveExecutionPolicy,
+} from "./execution-policy.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -441,6 +445,7 @@ async function runAgentLoopInTaskScope(
 		return newMessages;
 	};
 	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	// ── P0-1: Shared tool result cache ─────────────────────────────────
 	const cache = new ToolResultCache(
 		config.cacheSize ?? 2000,
@@ -466,7 +471,9 @@ async function runAgentLoopInTaskScope(
 	let consecutiveRunnerNudges = 0;
 	let performedToolWork = false;
 	let contextWasCompacted = false;
-	const reflectionEnabled = config.reflectionConfig?.enabled === true;
+	const reflectionEnabled =
+		executionPolicy.embeddedPoliciesEnabled &&
+		config.reflectionConfig?.enabled === true;
 	const maxReflections = config.reflectionConfig?.maxReflections ?? 2;
 	let reflectionCount = 0;
 	let reflectionFailed = false;
@@ -644,7 +651,9 @@ async function runAgentLoopInTaskScope(
 	}
 
 	// ── Inject acceptance contract into system prompt ──────────────────
-	const resolved = resolveAcceptance();
+	const resolved = executionPolicy.embeddedPoliciesEnabled
+		? resolveAcceptance()
+		: resolveEffectiveAcceptance({ explicit: undefined });
 	if (shouldRunAcceptanceFinalization(resolved)) {
 		const accPrompt = formatAcceptancePrompt(resolved);
 		if (accPrompt) {
@@ -1060,7 +1069,11 @@ async function runAgentLoopInTaskScope(
 			// A detection is a nudge, not a hard stop — false positives here
 			// must not kill an otherwise-healthy run; the model gets a chance
 			// to course-correct on its own.
-			if (outputGuard && toolCalls.length > 0) {
+			if (
+				executionPolicy.embeddedPoliciesEnabled &&
+				outputGuard &&
+				toolCalls.length > 0
+			) {
 				const turnToolCalls = toolCalls.map((call, index) => ({
 					name: call.name,
 					args: call.arguments,
@@ -1288,7 +1301,11 @@ async function runAgentLoopInTaskScope(
 		// explicit completion signal AND no structured stop was issued.
 		// Capped to MAX_CONSECUTIVE_RUNNER_NUDGES to prevent infinite loops.
 		const MAX_CONSECUTIVE_RUNNER_NUDGES = 3;
-		if (config.continuationEnabled === true && followUps.length === 0) {
+		if (
+			executionPolicy.embeddedPoliciesEnabled &&
+			config.continuationEnabled === true &&
+			followUps.length === 0
+		) {
 			const text = lastAssistantContent(newMessages);
 			const hadTools = lastHadToolCalls(newMessages);
 			const waitingForUser = awaitsUserInput(text);
@@ -1332,13 +1349,37 @@ async function runAgentLoopInTaskScope(
 		// A final question hands control back to the user. It must beat
 		// reflection, acceptance finalization, and all other synthetic turns;
 		// otherwise the loop fabricates an answer by prompting the model again.
-		if (awaitsUserInput(lastAssistantContent(newMessages))) {
+		if (
+			executionPolicy.embeddedPoliciesEnabled &&
+			awaitsUserInput(lastAssistantContent(newMessages))
+		) {
 			return finish({
 				status: "needs_input",
 				summary: "Agent is waiting for the user's answer.",
 				source: "heuristic",
 			});
 		}
+
+		const policyDecision = await evaluateStopPolicies(config.stopPolicies, {
+			messages,
+			newMessages,
+			iteration,
+			signal: config.signal,
+		});
+		if (policyDecision?.action === "continue") {
+			if (policyDecision.messages.length > 0) {
+				pendingMessages = policyDecision.messages;
+				continue;
+			}
+		} else if (policyDecision?.action === "finish") {
+			return finish({
+				status: policyDecision.status,
+				summary: policyDecision.summary,
+				source: "structured",
+			});
+		}
+
+		if (!executionPolicy.embeddedPoliciesEnabled) break;
 
 		// A failed acceptance report is actionable feedback, not an immediate
 		// terminal failure. Give the provider a bounded number of real turns to
@@ -1444,14 +1485,16 @@ async function runAgentLoopInTaskScope(
 	}
 
 	// Emit conclusion / task_failed before agent_end
-	const hadFollowUps = iteration < maxIterations;
-	await emitConclusion(
-		emit,
-		finalMessagesForConclusion,
-		iteration,
-		maxIterations,
-		hadFollowUps,
-	);
+	if (executionPolicy.embeddedPoliciesEnabled) {
+		const hadFollowUps = iteration < maxIterations;
+		await emitConclusion(
+			emit,
+			finalMessagesForConclusion,
+			iteration,
+			maxIterations,
+			hadFollowUps,
+		);
+	}
 
 	// ── Acceptance finalization ────────────────────────────────────────
 	if (shouldRunAcceptanceFinalization(resolved) && !acceptanceReported) {
@@ -1578,7 +1621,9 @@ async function runAgentLoopInTaskScope(
 			source: "runtime",
 		});
 	}
-	const declared = getTaskStatus();
+	const declared = executionPolicy.embeddedPoliciesEnabled
+		? getTaskStatus()
+		: null;
 	if (declared) {
 		return finish({
 			status: declared.status === "done" ? "completed" : declared.status,
@@ -1600,11 +1645,16 @@ async function runAgentLoopInTaskScope(
 	const finalText = lastAssistantContent(finalMessagesForConclusion);
 	return finish({
 		status:
-			iteration >= maxIterations || reflectionFailed || looksNonCommittal(finalText)
+			iteration >= maxIterations ||
+			reflectionFailed ||
+			(executionPolicy.embeddedPoliciesEnabled && looksNonCommittal(finalText))
 				? "failed"
 				: "completed",
 		summary: finalText || undefined,
-		source: iteration >= maxIterations ? "runtime" : "heuristic",
+		source:
+			iteration >= maxIterations || !executionPolicy.embeddedPoliciesEnabled
+				? "runtime"
+				: "heuristic",
 	});
 }
 

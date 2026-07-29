@@ -34,6 +34,7 @@ interface StatusInfo {
 	mcpServerCount?: number;
 	sandboxMode?: "none" | "code" | "file" | "dev" | "full";
 	permissionMode?: string;
+	executionProfile?: "autonomous" | "minimal";
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -57,6 +58,7 @@ const DEFAULT_INFO: StatusInfo = {
 	mcpServerCount: 0,
 	sandboxMode: "code",
 	permissionMode: "acceptAll",
+	executionProfile: "autonomous",
 };
 
 export class StatusBar implements Component {
@@ -146,6 +148,7 @@ export class StatusBar implements Component {
 		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
 		if (this.info.mcpServerCount) insertIfFits(this.formatMcp());
 		insertIfFits(this.formatSandbox());
+		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
 
 		let line = parts.join(separator);
@@ -343,6 +346,13 @@ export class StatusBar implements Component {
 			return `${theme.fg("success", "act")}`;
 		}
 		return `${theme.fg("warning", "plan")}`;
+	}
+
+	private formatExecutionProfile(): string {
+		const profile = this.info.executionProfile ?? "autonomous";
+		return profile === "minimal"
+			? `${DIM}exec:${RESET} ${theme.fg("warning", "minimal")}`
+			: `${DIM}exec:${RESET} ${theme.fg("success", "auto")}`;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────

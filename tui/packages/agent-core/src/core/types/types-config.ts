@@ -6,6 +6,10 @@ import type { Tool } from "./types-tools.ts";
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
 import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
+import type {
+	AgentStopPolicy,
+	ExecutionProfile,
+} from "../execution-policy.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
 
@@ -68,6 +72,13 @@ export interface AgentConfig {
 	chatTemplate?: string;
 	stop?: string[];
 	maxIterations?: number;
+	/**
+	 * `minimal` keeps the provider/tool/queue mechanism while disabling the
+	 * runner's built-in completion, reflection, acceptance, and repair policies.
+	 */
+	executionProfile?: ExecutionProfile;
+	/** Policies evaluated externally when the agent loop naturally becomes idle. */
+	stopPolicies?: AgentStopPolicy[];
 	loopDetectionWindow?: number;
 	degenerateLoopThreshold?: number;
 	stagnationThreshold?: number;

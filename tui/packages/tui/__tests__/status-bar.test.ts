@@ -50,6 +50,21 @@ void describe("StatusBar", () => {
 		assert.ok(!lines[0].toLowerCase().includes("mcp"));
 	});
 
+	it("shows the resolved execution profile", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+			executionProfile: "minimal",
+		});
+		const plain = bar.render(160)[0]
+			.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		assert.ok(plain.includes("exec: minimal"));
+	});
+
 	it("drops optional sections on narrow terminals", () => {
 		setupTheme();
 		const bar = new StatusBar();

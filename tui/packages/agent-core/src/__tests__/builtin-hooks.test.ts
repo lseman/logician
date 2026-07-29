@@ -4,6 +4,8 @@ import {
 	awaitsUserInput,
 	detectsCircling,
 } from "../core/guards/response-patterns.ts";
+import { LoopDetector } from "../core/guards/loop-detector.ts";
+import { buildBuiltinHooks } from "../hooks/builtin/builtin-hooks.ts";
 
 // ── detectsCircling ───────────────────────────────────────────────────────
 
@@ -48,4 +50,28 @@ void test("awaitsUserInput: ignores questions followed by continued work", () =>
 	assert.ok(!awaitsUserInput("What caused this? I will inspect the stack trace next."));
 	assert.ok(!awaitsUserInput("The tests answer the question. Task complete."));
 	assert.ok(!awaitsUserInput(""));
+});
+
+void test("minimal profile keeps mechanism hooks and omits built-in policies", () => {
+	const hooks = buildBuiltinHooks({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			executionProfile: "minimal",
+			continuationEnabled: true,
+			budgetStopEnabled: true,
+			thinkingLoopDetectionEnabled: true,
+			proactiveCompactionEnabled: true,
+		},
+		contextWindowTokens: () => 4096,
+		toolDefs: () => [],
+		loopDetector: new LoopDetector(),
+	});
+
+	assert.equal(hooks.getFollowUpMessages, undefined);
+	assert.equal(hooks.shouldStopAfterTurn, undefined);
+	assert.equal(hooks.afterProviderResponse, undefined);
+	assert.equal(typeof hooks.prepareNextTurn, "function");
+	assert.equal(typeof hooks.beforeToolCall, "function");
+	assert.equal(typeof hooks.afterToolCall, "function");
 });

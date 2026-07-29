@@ -24,6 +24,7 @@ import {
 import { compactToFit } from "../../compaction/compaction.ts";
 import { getTaskStatus } from "../../core/tasks/task-status-state.ts";
 import { getTasks } from "../../core/tasks/todo-state.ts";
+import { resolveExecutionPolicy } from "../../core/execution-policy.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
@@ -53,6 +54,7 @@ export interface BuiltinHookDeps {
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, loopDetector } = deps;
+	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	// Tool guards (duplicate + failure-loop, merged from GuardEngine).
 	// Duplicate-call detection defaults ON: blocking exact same-args repeats
 	// (e.g. re-reading the same file over and over) is safe to force a
@@ -60,9 +62,11 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// off a legitimate retry-with-variation sequence, matching pi's
 	// trust-model approach. `guardsEnabled` (legacy) forces both on when true.
 	const duplicateGuardOn =
-		config.guardsEnabled === true || config.duplicateGuardEnabled !== false;
+		executionPolicy.embeddedPoliciesEnabled &&
+		(config.guardsEnabled === true || config.duplicateGuardEnabled !== false);
 	const failureGuardOn =
-		config.guardsEnabled === true || config.failureGuardEnabled === true;
+		executionPolicy.embeddedPoliciesEnabled &&
+		(config.guardsEnabled === true || config.failureGuardEnabled === true);
 	const guardThresholds =
 		duplicateGuardOn || failureGuardOn
 			? {
@@ -76,10 +80,14 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			: undefined;
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step
 	// run (e.g. one following a todo list) when per-turn token growth is small.
-	const budgetEnabled = config.budgetStopEnabled === true;
+	const budgetEnabled =
+		executionPolicy.embeddedPoliciesEnabled &&
+		config.budgetStopEnabled === true;
 	// Thinking loop detection: detects meta-reasoning spirals where the model
 	// keeps thinking without taking action. Default ON.
-	const thinkingLoopEnabled = config.thinkingLoopDetectionEnabled ?? true;
+	const thinkingLoopEnabled =
+		executionPolicy.embeddedPoliciesEnabled &&
+		(config.thinkingLoopDetectionEnabled ?? true);
 	// Proactive compaction: default ON but aggressive (80% window). Can lose
 	// context mid-task. Consider disabling for long-running tasks.
 	const compactionEnabled = config.proactiveCompactionEnabled !== false;
@@ -141,7 +149,11 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		if (guardThresholds && isError) {
 			loopDetector.recordFailure(toolCall.name, toolCall.arguments, result);
 		}
-		if (toolCall.name === "task_status" && !isError) {
+		if (
+			executionPolicy.embeddedPoliciesEnabled &&
+			toolCall.name === "task_status" &&
+			!isError
+		) {
 			return { terminate: true };
 		}
 		return undefined;
@@ -238,7 +250,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// continuations, so this cannot run away.
 	// Default OFF — matching pi's trust-model approach. Todo nudges often
 	// cause the model to retry the same failing approach.
-	const continuationEnabled = config.continuationEnabled === true;
+	const continuationEnabled =
+		executionPolicy.embeddedPoliciesEnabled &&
+		config.continuationEnabled === true;
 	if (continuationEnabled) {
 		hooks.getFollowUpMessages = ({ assistantText, stopReason }) => {
 			// Structured stop beats everything: a task_status call this run is

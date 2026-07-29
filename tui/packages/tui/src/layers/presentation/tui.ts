@@ -497,6 +497,8 @@ export class LogicianTUI {
 			contextTokens: 0,
 			reasoner: "none",
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
+			executionProfile:
+				runtimeConfig.bridge.executionProfile ?? "autonomous",
 		});
 
 		// Setup slash commands

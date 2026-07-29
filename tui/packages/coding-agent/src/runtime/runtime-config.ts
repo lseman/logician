@@ -55,6 +55,7 @@ export function resolveRuntimeConfig(
 			temperature: configNumber(config.temperature),
 			maxTokens: configNumber(config.maxTokens),
 			maxIterations: configNumber(config.maxIterations),
+			executionProfile: config.executionProfile,
 			toolExecution:
 				configString(config.toolExecution) === "sequential"
 					? "sequential"

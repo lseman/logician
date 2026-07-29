@@ -12,6 +12,7 @@ function configuredWorkspace(): string {
 		JSON.stringify({
 			baseUrl: "http://config.test:8000",
 			model: "config-model",
+			executionProfile: "minimal",
 			permissionMode: "ask",
 			toolExecution: "sequential",
 			mcpEager: true,
@@ -40,6 +41,7 @@ void test("runtime resolver applies shared environment precedence", () => {
 
 	assert.equal(resolved.bridge.baseUrl, "http://env.test:9000");
 	assert.equal(resolved.bridge.model, "env-model");
+	assert.equal(resolved.bridge.executionProfile, "minimal");
 	assert.equal(resolved.bridge.runtimeHooksEnabled, false);
 	assert.equal(resolved.bridge.toolExecution, "sequential");
 	assert.equal(resolved.bridge.permissionMode, "ask");

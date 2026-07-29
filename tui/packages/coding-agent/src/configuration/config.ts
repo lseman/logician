@@ -21,6 +21,7 @@ const KNOWN_KEYS = new Set([
 	"temperature",
 	"maxTokens",
 	"maxIterations",
+	"executionProfile",
 	"autoRetryEnabled",
 	"maxRetries",
 	"retryBaseDelayMs",
@@ -129,6 +130,17 @@ export function validateConfig(
 
 	// Simple strings.
 	cfg.model = configString(obj.model);
+	if (obj.executionProfile !== undefined) {
+		const profile = configString(obj.executionProfile);
+		if (profile === "autonomous" || profile === "minimal") {
+			cfg.executionProfile = profile;
+		} else {
+			warn(
+				warnings,
+				"\"executionProfile\" must be one of: autonomous, minimal.",
+			);
+		}
+	}
 
 	// models: array of model objects for cycling (Ctrl+L model selector)
 	if (obj.models !== undefined) {
@@ -581,6 +593,7 @@ export interface LogicianTuiConfig {
 	temperature?: number;
 	maxTokens?: number;
 	maxIterations?: number;
+	executionProfile?: "autonomous" | "minimal";
 	toolExecution?: "sequential" | "parallel";
 	contextWindow?: number;
 	contextWindowTokens?: number;

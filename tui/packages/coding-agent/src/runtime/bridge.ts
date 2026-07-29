@@ -453,6 +453,7 @@ export interface AgentBridgeOptions {
 	temperature?: number;
 	maxTokens?: number;
 	maxIterations?: number;
+	executionProfile?: AgentConfig["executionProfile"];
 	contextWindowTokens?: number;
 	toolExecution?: AgentConfig["toolExecution"];
 	runtimeHooksEnabled?: boolean;
@@ -636,6 +637,7 @@ export class AgentCoreBridge {
 			webSearch,
 			cwd: this.cwd,
 			maxIterations: opts.maxIterations || 30,
+			executionProfile: opts.executionProfile,
 			temperature: opts.temperature,
 			maxTokens: opts.maxTokens,
 			// Parallel scheduling is transparent to the model. Tools that require

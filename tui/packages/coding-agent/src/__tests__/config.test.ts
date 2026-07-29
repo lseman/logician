@@ -126,6 +126,24 @@ void test("validateConfig rejects invalid inferenceMode", () => {
 	assert.ok(warnings.some((w) => w.includes("\"inferenceMode\" must be one of")));
 });
 
+void test("validateConfig accepts execution profiles and rejects unknown profiles", () => {
+	const validWarnings: string[] = [];
+	const valid = validateConfig({ executionProfile: "minimal" }, validWarnings);
+	assert.equal(valid.executionProfile, "minimal");
+	assert.deepEqual(validWarnings, []);
+
+	const invalidWarnings: string[] = [];
+	const invalid = validateConfig(
+		{ executionProfile: "maximal" },
+		invalidWarnings,
+	);
+	assert.equal(invalid.executionProfile, undefined);
+	assert.ok(
+		invalidWarnings.some((warning) =>
+			warning.includes("\"executionProfile\" must be one of")),
+	);
+});
+
 void test("validateConfig applies default booleans (continuationEnabled, postEditDiagnostics, autoRetryEnabled ON by default)", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({}, warnings);

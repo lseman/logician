@@ -890,6 +890,128 @@ void test("continuation still nudges an explicitly unfinished response", async (
 	assert.equal(backend.calls, 2);
 });
 
+void test("minimal profile stops naturally without embedded completion policies", async () => {
+	const backend = new FakeBackend([
+		(messages) => {
+			assert.equal(
+				messages.some((message) =>
+					String(message.content).includes("acceptance-report")),
+				false,
+			);
+			return textResponse("I still need to check the test output.");
+		},
+	]);
+	const events: AgentEvent[] = [];
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("check it")],
+		{
+			...makeConfig({
+				executionProfile: "minimal",
+				continuationEnabled: true,
+				reflectionConfig: { enabled: true },
+				acceptance: { criteria: ["finish the task"] },
+			}),
+			backend,
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+
+	assert.equal(backend.calls, 1);
+	assert.equal(messages.at(-1)?.content, "I still need to check the test output.");
+	assert.ok(
+		events.some(
+			(event) =>
+				event.type === "run_outcome" &&
+				event.status === "completed" &&
+				event.source === "runtime",
+		),
+	);
+	assert.equal(
+		events.some(
+			(event) =>
+				event.type === "reflection_start" ||
+				event.type === "acceptance_complete",
+		),
+		false,
+	);
+});
+
+void test("external stop policy can continue the minimal mechanism", async () => {
+	const backend = new FakeBackend([
+		() => textResponse("first answer"),
+		(messages) => {
+			assert.ok(
+				messages.some(
+					(message) =>
+						message.role === "user" &&
+						message.content === "policy follow-up",
+				),
+			);
+			return textResponse("second answer");
+		},
+	]);
+	let policyCalls = 0;
+	const messages = await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig({ executionProfile: "minimal" }),
+			backend,
+			stopPolicies: [
+				() => {
+					policyCalls++;
+					return policyCalls === 1
+						? {
+								action: "continue" as const,
+								messages: [user("policy follow-up")],
+							}
+						: undefined;
+				},
+			],
+		},
+		() => {},
+	);
+
+	assert.equal(backend.calls, 2);
+	assert.equal(policyCalls, 2);
+	assert.equal(messages.at(-1)?.content, "second answer");
+});
+
+void test("external stop policy can return a structured minimal outcome", async () => {
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig({ executionProfile: "minimal" }),
+			backend: new FakeBackend([() => textResponse("waiting on access")]),
+			stopPolicies: [
+				() => ({
+					action: "finish",
+					status: "blocked",
+					summary: "Repository access is required.",
+				}),
+			],
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+
+	assert.ok(
+		events.some(
+			(event) =>
+				event.type === "run_outcome" &&
+				event.status === "blocked" &&
+				event.summary === "Repository access is required." &&
+				event.source === "structured",
+		),
+	);
+});
+
 void test("continuation pauses when the agent ends in a question", async () => {
 	const backend = new FakeBackend([
 		() => textResponse("I need to inspect one of these environments. Which one should I use?"),

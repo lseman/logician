@@ -143,6 +143,7 @@ Config is read in order: `LOGICIAN_CONFIG` → `.logician.json` → `~/.logician
   "baseUrl": "http://127.0.0.1:8080",
   "model": "local-model",
   "theme": "dark",
+  "executionProfile": "minimal",
 	"webSearch": { "baseUrl": "http://127.0.0.1:8090", "maxResults": 10 },
   "permissionMode": "acceptEdits",
   "compaction": { "enabled": true, "reserveTokens": 16384 },
@@ -151,6 +152,14 @@ Config is read in order: `LOGICIAN_CONFIG` → `.logician.json` → `~/.logician
   }
 }
 ```
+
+`executionProfile` controls where agent policy lives:
+
+- `autonomous` (default) enables Logician's built-in continuation, loop-repair,
+  acceptance, reflection, and completion policies.
+- `minimal` keeps the provider/tool/queue mechanism, retries, cancellation, and
+  context handling, but leaves completion policy to explicit hooks or SDK
+  `stopPolicies`.
 
 `web_search` uses SearXNG's JSON endpoint. Override the default local endpoint
 with `webSearch.baseUrl` or `LOGICIAN_SEARXNG_URL`; use

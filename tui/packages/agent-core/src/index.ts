@@ -5,6 +5,7 @@
 // Core: loop, harness, types, backend, messages, events, session
 export * from "./core/backend.ts";
 export * from "./core/agent-loop-runner.ts";
+export * from "./core/execution-policy.ts";
 export * from "./core/file-checkpoints.ts";
 export * from "./core/harness.ts";
 export * from "./core/guards/loop-detector.ts";
