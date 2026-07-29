@@ -1561,6 +1561,10 @@ export class AgentCoreBridge {
 		this.harness?.setMaxIterations(maxIterations);
 	}
 
+	setExecutionProfile(profile: "autonomous" | "minimal"): void {
+		this.config.executionProfile = profile;
+	}
+
 	setRuntimeToggle(
 		key:
 			| "guardsEnabled"
@@ -1603,6 +1607,7 @@ export class AgentCoreBridge {
 		thinkingLevel: string;
 		inferenceMode: string;
 		permissionMode: string;
+		executionProfile: string;
 		guardsEnabled: boolean;
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
@@ -1615,6 +1620,7 @@ export class AgentCoreBridge {
 			thinkingLevel: this.config.thinkingLevel ?? "off",
 			inferenceMode: this.config.inferenceMode ?? "instruct-general",
 			permissionMode: this.getPermissionMode(),
+			executionProfile: this.config.executionProfile ?? "autonomous",
 			guardsEnabled: this.config.guardsEnabled ?? false,
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? false,

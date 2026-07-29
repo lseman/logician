@@ -669,6 +669,22 @@ export class LogicianTUI {
 						this.setInferenceMode(value);
 						return `Inference mode: ${value}`;
 					}
+					case "execution-policy":
+					case "execution_policy": {
+						const valid: Array<"autonomous" | "minimal"> = [
+							"autonomous",
+							"minimal",
+						];
+						if (!value) {
+							return `Usage: /settings execution-policy <mode>\n\nValid: ${valid.join(", ")}`;
+						}
+						if (!valid.includes(value.toLowerCase() as typeof valid[number])) {
+							return `Invalid policy "${value}". Valid: ${valid.join(", ")}`;
+						}
+						this.bridge.setExecutionProfile(value as "autonomous" | "minimal");
+						this.statusPanel.update({ executionProfile: value as "autonomous" | "minimal" });
+						return `Execution policy: ${value}`;
+					}
 					default:
 						return `Unknown setting "${key}". Use /settings to list available settings.`;
 				}
@@ -1819,6 +1835,22 @@ export class LogicianTUI {
 				return { consume: true };
 			}
 
+			// Ctrl+I — cycle execution policy (autonomous ↔ minimal)
+			if (
+				data === "\x1b[9;5u" ||
+				data === "\x1b[9;6u"
+			) {
+				const current = this.bridge.getSettingsData().executionProfile;
+				const next = current === "autonomous" ? "minimal" : "autonomous";
+				this.bridge.setExecutionProfile(next);
+				this.statusPanel.update({ executionProfile: next });
+				this.transcript.addSystemMessage(
+					`Execution policy: ${next}`,
+				);
+				this.tui.requestRender();
+				return { consume: true };
+			}
+
 			// Ctrl+Backspace in input bar is handled by InputBar directly
 			return { consume: false };
 		});
@@ -2585,6 +2617,23 @@ export class LogicianTUI {
 						},
 					],
 				},
+				{
+					name: "Execution policy",
+					currentValue: data.executionProfile,
+					description: "Agent autonomy level — autonomous runs freely, minimal requires approval for changes",
+					options: [
+						{
+							label: "autonomous",
+							value: "autonomous",
+							current: data.executionProfile === "autonomous",
+						},
+						{
+							label: "minimal",
+							value: "minimal",
+							current: data.executionProfile === "minimal",
+						},
+					],
+				},
 			];
 			this.settingsSelector.setSettings(settings);
 			this.settingsSelector.setMessage(
@@ -2712,6 +2761,24 @@ export class LogicianTUI {
 					);
 				} else {
 					this.setInferenceMode(value);
+				}
+				break;
+			}
+			case "execution policy": {
+				const valid: Array<"autonomous" | "minimal"> = [
+					"autonomous",
+					"minimal",
+				];
+				if (!valid.includes(value as typeof valid[number])) {
+					this.transcript.addSystemMessage(
+						`Invalid execution policy: ${value}. Valid: ${valid.join(", ")}`,
+					);
+				} else {
+					this.bridge.setExecutionProfile(value as "autonomous" | "minimal");
+					this.statusPanel.update({ executionProfile: value as "autonomous" | "minimal" });
+					this.transcript.addSystemMessage(
+						`Execution policy: ${value}`,
+					);
 				}
 				break;
 			}
