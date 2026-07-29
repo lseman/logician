@@ -81,6 +81,7 @@ import { UndoStack } from "../input/undo-stack.ts";
 import { getAvailableThemes, setTheme, theme } from "../theme/theme.ts";
 import { getGitStatus, getGitVersion } from "./git-status.ts";
 import { formatStartupMemory } from "./startup-memory.ts";
+import { describeSandboxProfile, parseLoopInterval } from "./tui-helpers.ts";
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
@@ -887,16 +888,9 @@ export class LogicianTUI {
 						this.tui.requestRender();
 						return;
 					}
-					const intervalMatch = args.match(/^(\d+)(s|m|h|d)\s+(.+)$/);
-					if (intervalMatch) {
-						const [, value, unit, prompt] = intervalMatch;
-						const mult: Record<string, number> = {
-							s: 1000,
-							m: 60000,
-							h: 3600000,
-							d: 86400000,
-						};
-						const ms = parseInt(value, 10) * (mult[unit] ?? 60000);
+					const parsedInterval = parseLoopInterval(args);
+					if (parsedInterval) {
+						const { value, unit, prompt, ms } = parsedInterval;
 						this.loopManager.start(prompt, ms);
 						this.loopActive = true;
 						this.transcript.addSystemMessage(
@@ -1020,29 +1014,7 @@ export class LogicianTUI {
 
 					// /sandbox profile <level>
 					if (sub === "profile") {
-						const profiles = {
-							none: "No isolation — chroot to tmpdir only",
-							code: "Read-only host fs, writable /tmp, no network, no devices",
-							file: "CODE + read-only bind-mount of specified directories",
-							dev: "CODE + limited /dev (null, zero, random, tty)",
-							full: "CODE + user namespace + mount namespace + no new privs",
-						};
-						if (!subArgs) {
-							this.transcript.addSystemMessage(
-								"Available profiles:\n" +
-									Object.entries(profiles)
-										.map(([k, v]) => `  ${k}: ${v}`)
-										.join("\n"),
-							);
-						} else if (profiles[subArgs as keyof typeof profiles]) {
-							this.transcript.addSystemMessage(
-								`${subArgs}: ${profiles[subArgs as keyof typeof profiles]}`,
-							);
-						} else {
-							this.transcript.addSystemMessage(
-								`Unknown profile: ${subArgs}. Use one of: ${Object.keys(profiles).join(", ")}`,
-							);
-						}
+						this.transcript.addSystemMessage(describeSandboxProfile(subArgs));
 						this.transcriptDisplay.setTurns(this.transcript.getTurns());
 						this.tui.requestRender();
 						return;

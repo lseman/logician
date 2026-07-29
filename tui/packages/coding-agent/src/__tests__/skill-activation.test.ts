@@ -118,6 +118,23 @@ void test("fuzzy matches misspelled skill routing metadata", () => {
 	assert.match(result[0].reason, /fuzzy matched.*\d+%/);
 });
 
+void test("fuzzy matching tolerates stems, not just typos", () => {
+	const debugging = skill(
+		"typescript-debugging",
+		"Diagnose TypeScript errors and runtime failures.",
+		{ triggers: ["TypeScript debug"] },
+	);
+
+	const result = selectSkillsForPrompt(
+		[debugging],
+		"Help me with TypeScript debugging please.",
+	);
+
+	assert.deepEqual(result.map(({ skill: selected }) => selected.name), [
+		"typescript-debugging",
+	]);
+});
+
 void test("fuzzy matching rejects unrelated routing metadata", () => {
 	const release = skill("release-maintenance", "Manage software releases.", {
 		triggers: ["publish release", "version maintenance"],

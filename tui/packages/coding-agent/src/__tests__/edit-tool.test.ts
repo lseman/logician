@@ -157,6 +157,31 @@ void test("edit_file line-trimmed match re-indents newText to the file", async (
 	);
 });
 
+void test("edit_file line-trimmed match scales nested indentation, not just the first line", async () => {
+	// File uses one tab per level; model writes 2-space indentation.
+	const original = "function f() {\n\tif (x) {\n\t\tdoThing();\n\t}\n}\n";
+	const { cwd, file } = setup("edit", original);
+
+	await edit_file.execute(
+		{
+			path: "file.txt",
+			edits: [
+				{
+					oldText: "  if (x) {\n    doThing();\n  }\n",
+					newText: "  if (x) {\n    doOtherThing();\n  }\n",
+				},
+			],
+		},
+		{ cwd },
+	);
+
+	// The nested line must become two tabs, not "tab + 2 leftover spaces".
+	assert.equal(
+		readFileSync(file, "utf8"),
+		"function f() {\n\tif (x) {\n\t\tdoOtherThing();\n\t}\n}\n",
+	);
+});
+
 void test("edit_file not-found error hints at the closest matching line", async () => {
 	const { cwd } = setup("edit", "aaa\nunique line\nbbb\n");
 

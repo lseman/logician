@@ -224,13 +224,29 @@ function fuzzyPhraseSimilarity(
 	for (const candidate of candidateTokens) {
 		let best = 0;
 		for (const promptToken of promptTokens) {
-			best = Math.max(best, normalizedLevenshtein(candidate, promptToken));
+			best = Math.max(best, tokenSimilarity(candidate, promptToken));
 			if (best === 1) break;
 		}
 		if (best < 0.7) return 0;
 		total += best;
 	}
 	return total / candidateTokens.length;
+}
+
+/**
+ * Token similarity combining edit distance with stem/prefix tolerance, so
+ * "debug" ~ "debugging" and "auth" ~ "authentication" score as related
+ * rather than as near-unrelated strings under raw Levenshtein distance.
+ */
+function tokenSimilarity(a: string, b: string): number {
+	const edit = normalizedLevenshtein(a, b);
+	const shorter = a.length <= b.length ? a : b;
+	const longer = a.length <= b.length ? b : a;
+	if (shorter.length >= 4 && longer.startsWith(shorter)) {
+		const prefixScore = 0.7 + 0.3 * (shorter.length / longer.length);
+		return Math.max(edit, prefixScore);
+	}
+	return edit;
 }
 
 function normalizedLevenshtein(a: string, b: string): number {

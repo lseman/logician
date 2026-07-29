@@ -103,17 +103,31 @@ function leadingWhitespace(line: string): string {
 	return line.slice(0, line.length - line.trimStart().length);
 }
 
-/** Shift newText from the indentation the model wrote to the file's actual indentation. */
+/**
+ * Shift newText from the indentation the model wrote to the file's actual
+ * indentation. Lines nested deeper than the matched block's first line keep
+ * their *relative* depth, scaled by the ratio between the model's indent
+ * width and the file's — so a 2-space search indent mapping to a 1-tab file
+ * indent turns a 4-space nested line into two tabs, not "tab + 2 leftover
+ * spaces". Falls back to a flat prefix swap when depth can't be inferred
+ * (searchIndent is empty, so there's no unit to scale by).
+ */
 function reindent(newText: string, searchIndent: string, origIndent: string): string {
 	if (searchIndent === origIndent) return newText;
+	const ratio = searchIndent.length > 0 ? origIndent.length / searchIndent.length : 1;
 	return newText
 		.split("\n")
 		.map((line) => {
 			if (line.trim() === "") return line;
-			if (line.startsWith(searchIndent)) {
+			if (!line.startsWith(searchIndent)) return line;
+			const extra = leadingWhitespace(line).slice(searchIndent.length);
+			const rest = line.slice(searchIndent.length + extra.length);
+			if (extra.length === 0 || searchIndent.length === 0) {
 				return origIndent + line.slice(searchIndent.length);
 			}
-			return line;
+			const extraUnitChar = origIndent.length > 0 ? origIndent[origIndent.length - 1] : extra[0];
+			const scaledExtraLength = Math.max(0, Math.round(extra.length * ratio));
+			return origIndent + extraUnitChar.repeat(scaledExtraLength) + rest;
 		})
 		.join("\n");
 }
