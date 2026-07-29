@@ -1,10 +1,10 @@
 import {
-	clampLineToWidth,
 	type Component,
+	clampLineToWidth,
 	RESET,
 	visibleWidth,
 } from "../layers/core/tui-core.ts";
-import { theme, type ThemeColor } from "../layers/theme/theme.ts";
+import { type ThemeColor, theme } from "../layers/theme/theme.ts";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
@@ -36,7 +36,9 @@ export class NotificationCenter implements Component {
 		const normalized = message.trim();
 		if (!normalized) return;
 		const notification = { id: this.nextId++, level, message: normalized };
-		this.notifications = [...this.notifications, notification].slice(-MAX_VISIBLE);
+		this.notifications = [...this.notifications, notification].slice(
+			-MAX_VISIBLE,
+		);
 		const timer = setTimeout(() => this.dismiss(notification.id), durationMs);
 		timer.unref?.();
 		this.timers.set(notification.id, timer);
@@ -63,8 +65,7 @@ export class NotificationCenter implements Component {
 	render(width: number): string[] {
 		return this.notifications.map((notification) => {
 			const { icon, color } = notificationStyle(notification.level);
-			const content =
-				`${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
+			const content = `${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
 			const clipped = clampLineToWidth(content, Math.max(1, width - 2));
 			const line = ` ${clipped}`;
 			return line + " ".repeat(Math.max(0, width - visibleWidth(line)));

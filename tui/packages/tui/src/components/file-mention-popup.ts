@@ -3,7 +3,7 @@
 // after an "@". Mirrors SlashPopup's inline-autocomplete pattern (input bar
 // keeps focus; this popup renders below and only intercepts nav/accept keys).
 
-import { type Component } from "../layers/core/tui-core.ts";
+import type { Component } from "../layers/core/tui-core.ts";
 import {
 	clampPopupLines,
 	type ListItem,
@@ -28,7 +28,8 @@ function scoreFile(query: string, path: string): number {
 
 	if (base === query) return 3000;
 	if (base.startsWith(query)) return 2500 - (base.length - query.length);
-	if (lowerPath.startsWith(query)) return 2200 - (lowerPath.length - query.length);
+	if (lowerPath.startsWith(query))
+		return 2200 - (lowerPath.length - query.length);
 	if (base.includes(query)) return 2000 - base.indexOf(query) * 8;
 	if (lowerPath.includes(query)) return 1500 - lowerPath.indexOf(query) * 4;
 	if (subsequenceMatch(query, base)) return 800;
@@ -156,7 +157,7 @@ export class FileMentionPopup implements Component {
 			renderListPopupFrame({
 				popupWidth,
 				innerWidth,
-				title: "Files",
+				title: "files",
 				subtitle: ` (${this.matches.length})`,
 				hints: "↑↓ select · tab/enter insert · esc close",
 				bodyLines,

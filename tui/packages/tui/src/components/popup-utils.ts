@@ -384,13 +384,15 @@ export function renderListPopupBody<T>(
 	}
 	const { start, end } = selection.window(items.length, maxRows);
 	if (start > 0) {
-		lines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
+		lines.push(renderStatusLine(`↑ ${start} more above`, innerWidth));
 	}
 	for (let i = start; i < end; i++) {
 		lines.push(renderItem(items[i], i));
 	}
 	if (end < items.length) {
-		lines.push(renderStatusLine(`↓ ${items.length - end} more`, innerWidth));
+		lines.push(
+			renderStatusLine(`↓ ${items.length - end} more below`, innerWidth),
+		);
 	}
 	return lines;
 }

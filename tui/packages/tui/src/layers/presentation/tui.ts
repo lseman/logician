@@ -29,10 +29,6 @@ import { ChoicePopup } from "../../components/choice-popup.ts";
 import { FileMentionPopup } from "../../components/file-mention-popup.ts";
 import { InputBar } from "../../components/input-bar.ts";
 import {
-	NotificationCenter,
-	type NotificationLevel,
-} from "../../components/notification-center.ts";
-import {
 	type McpManagerAction,
 	McpManagerOverlay,
 } from "../../components/mcp-manager.ts";
@@ -41,6 +37,10 @@ import {
 	type ModelSelectorAction,
 	ModelSelectorOverlay,
 } from "../../components/model-selector.ts";
+import {
+	NotificationCenter,
+	type NotificationLevel,
+} from "../../components/notification-center.ts";
 import { PermissionPopup } from "../../components/permission-popup.ts";
 import {
 	type PluginManagerAction,
@@ -177,9 +177,7 @@ export class LogicianTUI {
 		this.tui.requestRender();
 	}
 
-	private setExecutionProfile(
-		profile: "autonomous" | "minimal",
-	): void {
+	private setExecutionProfile(profile: "autonomous" | "minimal"): void {
 		this.bridge.setExecutionProfile(profile);
 		this.statusPanel.update({ executionProfile: profile });
 		saveConfigField("executionProfile", profile);
@@ -520,8 +518,7 @@ export class LogicianTUI {
 			contextTokens: 0,
 			reasoner: "none",
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
-			executionProfile:
-				runtimeConfig.bridge.executionProfile ?? "autonomous",
+			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
 		});
 
 		// Setup slash commands
@@ -701,12 +698,12 @@ export class LogicianTUI {
 						if (!value) {
 							return `Usage: /settings execution-policy <mode>\n\nValid: ${valid.join(", ")}`;
 						}
-						if (!valid.includes(value.toLowerCase() as typeof valid[number])) {
+						if (
+							!valid.includes(value.toLowerCase() as (typeof valid)[number])
+						) {
 							return `Invalid policy "${value}". Valid: ${valid.join(", ")}`;
 						}
-						this.setExecutionProfile(
-							value as "autonomous" | "minimal",
-						);
+						this.setExecutionProfile(value as "autonomous" | "minimal");
 						return `Execution policy: ${value}`;
 					}
 					default:
@@ -1839,7 +1836,9 @@ export class LogicianTUI {
 						`Flushed ${count} steering message${count === 1 ? "" : "s"} to the active turn.`,
 					);
 				} else {
-					this.transcript.addSystemMessage("No queued steering messages to flush.");
+					this.transcript.addSystemMessage(
+						"No queued steering messages to flush.",
+					);
 				}
 				this.transcriptDisplay.setTurns(this.transcript.getTurns());
 				this.tui.requestRender();
@@ -1860,10 +1859,7 @@ export class LogicianTUI {
 			}
 
 			// Ctrl+I — cycle execution policy (autonomous ↔ minimal)
-			if (
-				data === "\x1b[105;5u" ||
-				data === "\x1b[105;6u"
-			) {
+			if (data === "\x1b[105;5u" || data === "\x1b[105;6u") {
 				const next = this.cycleExecutionProfile();
 				this.notify(`Execution policy: ${next}`, "success");
 				this.tui.requestRender();
@@ -2354,8 +2350,7 @@ export class LogicianTUI {
 		// reasoner removed;
 		this.tui.removeOverlay(this.reasonerSelector);
 		this.statusPanel.update({ phase: "ready" });
-		this.transcript.addSystemMessage(`Reasoning mode: ${reasoner.name}`);
-		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.notify(`Reasoning mode: ${reasoner.name}`, "success");
 		this.tui.requestRender();
 	}
 
@@ -2431,8 +2426,7 @@ export class LogicianTUI {
 		// Update status
 		this.tui.removeOverlay(this.modelSelector);
 		this.statusPanel.update({ phase: "ready", model: applied.model });
-		this.transcript.addSystemMessage(`Switched model: ${selected.name}`);
-		this.transcriptDisplay.setTurns(this.transcript.getTurns());
+		this.notify(`Model: ${selected.name}`, "success");
 		this.tui.requestRender();
 	}
 
@@ -2469,11 +2463,10 @@ export class LogicianTUI {
 		this.tui.removeOverlay(this.themeSelector);
 		this.statusPanel.update({ phase: "ready" });
 		if (ok) {
-			this.transcript.addSystemMessage(`Theme: ${themeInfo.name}`);
+			this.notify(`Theme: ${themeInfo.name}`, "success");
 		} else {
-			this.transcript.addSystemMessage(`Unknown theme: ${themeInfo.name}`);
+			this.notify(`Unknown theme: ${themeInfo.name}`, "error");
 		}
-		this.transcriptDisplay.setTurns(this.transcript.getTurns());
 		this.tui.requestRender();
 	}
 
@@ -2641,7 +2634,8 @@ export class LogicianTUI {
 				{
 					name: "Execution policy",
 					currentValue: data.executionProfile,
-					description: "Agent policy ownership — autonomous uses built-in policies, minimal leaves stop policy to the caller",
+					description:
+						"Agent policy ownership — autonomous uses built-in policies, minimal leaves stop policy to the caller",
 					options: [
 						{
 							label: "autonomous",
@@ -2700,17 +2694,15 @@ export class LogicianTUI {
 		switch (settingName.toLowerCase()) {
 			case "model":
 				this.bridge.setModel(value);
-				this.transcript.addSystemMessage(`Model: ${value}`);
+				this.notify(`Model: ${value}`, "success");
 				break;
 			case "temperature": {
 				const num = Number(value);
 				if (Number.isFinite(num) && num >= 0 && num <= 2) {
 					this.bridge.setTemperature(num);
-					this.transcript.addSystemMessage(`Temperature: ${num}`);
+					this.notify(`Temperature: ${num}`, "success");
 				} else {
-					this.transcript.addSystemMessage(
-						"Temperature must be between 0 and 2.",
-					);
+					this.notify("Temperature must be between 0 and 2.", "error");
 				}
 				break;
 			}
@@ -2718,11 +2710,9 @@ export class LogicianTUI {
 				const num = Number.parseInt(value, 10);
 				if (Number.isFinite(num) && num >= 1) {
 					this.bridge.setMaxTokens(num);
-					this.transcript.addSystemMessage(`Max tokens: ${num}`);
+					this.notify(`Max tokens: ${num}`, "success");
 				} else {
-					this.transcript.addSystemMessage(
-						"Max tokens must be a positive integer.",
-					);
+					this.notify("Max tokens must be a positive integer.", "error");
 				}
 				break;
 			}
@@ -2730,43 +2720,39 @@ export class LogicianTUI {
 				const num = Number.parseInt(value, 10);
 				if (Number.isFinite(num) && num >= 1) {
 					this.bridge.setMaxIterations(num);
-					this.transcript.addSystemMessage(`Max iterations: ${num}`);
+					this.notify(`Max iterations: ${num}`, "success");
 				} else {
-					this.transcript.addSystemMessage(
-						"Max iterations must be a positive integer.",
-					);
+					this.notify("Max iterations must be a positive integer.", "error");
 				}
 				break;
 			}
 			case "thinking level":
 				this.applyThinkingLevel(value);
-				this.transcript.addSystemMessage(`Thinking level: ${value}`);
+				this.notify(`Thinking level: ${value}`, "success");
 				break;
 			case "permission mode":
 				this.bridge.setPermissionMode(
 					value as "acceptAll" | "acceptEdits" | "ask" | "plan",
 				);
-				this.transcript.addSystemMessage(`Permission mode: ${value}`);
+				this.notify(`Permission mode: ${value}`, "success");
 				break;
 			case "guards": {
 				const on = value === "true";
 				this.bridge.setRuntimeToggle("guardsEnabled", on);
-				this.transcript.addSystemMessage(`Guards: ${on ? "on" : "off"}`);
+				this.notify(`Guards: ${on ? "on" : "off"}`, "success");
 				break;
 			}
 			case "compaction": {
 				const on = value === "true";
 				this.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
-				this.transcript.addSystemMessage(`Compaction: ${on ? "on" : "off"}`);
+				this.notify(`Compaction: ${on ? "on" : "off"}`, "success");
 				break;
 			}
 			case "post-edit diagnostics": {
 				const on = value === "true";
 				this.bridge.setRuntimeToggle("postEditDiagnostics", on);
 				saveConfigField("postEditDiagnostics", on);
-				this.transcript.addSystemMessage(
-					`Post-edit diagnostics: ${on ? "on" : "off"}`,
-				);
+				this.notify(`Post-edit diagnostics: ${on ? "on" : "off"}`, "success");
 				break;
 			}
 			case "inference mode": {
@@ -2777,8 +2763,9 @@ export class LogicianTUI {
 					"instruct-reasoning",
 				];
 				if (!valid.includes(value)) {
-					this.transcript.addSystemMessage(
+					this.notify(
 						`Invalid inference mode: ${value}. Valid: ${valid.join(", ")}`,
+						"error",
 					);
 				} else {
 					this.setInferenceMode(value);
@@ -2790,22 +2777,19 @@ export class LogicianTUI {
 					"autonomous",
 					"minimal",
 				];
-				if (!valid.includes(value as typeof valid[number])) {
-					this.transcript.addSystemMessage(
+				if (!valid.includes(value as (typeof valid)[number])) {
+					this.notify(
 						`Invalid execution policy: ${value}. Valid: ${valid.join(", ")}`,
+						"error",
 					);
 				} else {
-					this.setExecutionProfile(
-						value as "autonomous" | "minimal",
-					);
-					this.transcript.addSystemMessage(
-						`Execution policy: ${value}`,
-					);
+					this.setExecutionProfile(value as "autonomous" | "minimal");
+					this.notify(`Execution policy: ${value}`, "success");
 				}
 				break;
 			}
 			default:
-				this.transcript.addSystemMessage(`Unknown setting: ${settingName}`);
+				this.notify(`Unknown setting: ${settingName}`, "error");
 		}
 
 		this.tui.removeOverlay(this.settingsSelector);

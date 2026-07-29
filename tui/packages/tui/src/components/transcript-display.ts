@@ -2,14 +2,13 @@
 // Renders the full conversation history with streaming support and markdown.
 // Chunks are interleaved in chronological order: thinking → content → tool → ...
 
+import { DEFAULT_TRUNCATION } from "@logician/agent-core";
+import { stripAcceptanceReport } from "@logician/agent-core/core/guards/acceptance-contract.ts";
 import {
 	highlight,
 	highlightAuto,
 } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
-import { stripAcceptanceReport } from "@logician/agent-core/core/guards/acceptance-contract.ts";
-import { DEFAULT_TRUNCATION } from "@logician/agent-core";
-import { theme } from "../layers/theme/theme.ts";
 import type {
 	AssistantChunk,
 	ChildChunk,
@@ -19,14 +18,15 @@ import type {
 	Turn,
 } from "@logician/coding-agent/transcript";
 import {
+	BOLD,
 	type Component,
 	clampLineToWidth,
+	DIM,
+	RESET,
 	type Scrollable,
 	visibleWidth,
-	RESET,
-	BOLD,
-	DIM,
 } from "../layers/core/tui-core.ts";
+import { theme } from "../layers/theme/theme.ts";
 
 const UNDERLINE = "\x1b[4m";
 
@@ -76,10 +76,14 @@ function stripAcceptanceForDisplay(text: string): string {
 	const stripped = stripAcceptanceReport(text);
 	// While the report is still streaming there is no closing fence to strip.
 	// Hide the internal report from its opening marker onward.
-	return stripped === text ? text.slice(0, marker).trimEnd() : stripped.trimEnd();
+	return stripped === text
+		? text.slice(0, marker).trimEnd()
+		: stripped.trimEnd();
 }
 
-function stripInternalHookGuidance(text: string | undefined): string | undefined {
+function stripInternalHookGuidance(
+	text: string | undefined,
+): string | undefined {
 	if (!text?.includes("-hook>")) return text;
 	const visible = text
 		.replace(
@@ -119,17 +123,18 @@ function extractPostEditDiagnostics(text: string | undefined): {
 			const diagnostics = body
 				.split("\n")
 				.flatMap((line): ParsedPostEditDiagnostic[] => {
-					const parsed =
-						/^-\s+.*?:(\d+):(\d+)(?:\s+(.+?))?:\s+(.+)$/.exec(
-							line.trim(),
-						);
+					const parsed = /^-\s+.*?:(\d+):(\d+)(?:\s+(.+?))?:\s+(.+)$/.exec(
+						line.trim(),
+					);
 					if (!parsed) return [];
-					return [{
-						line: Number(parsed[1]),
-						column: Number(parsed[2]),
-						label: parsed[3]?.trim(),
-						message: parsed[4].trim(),
-					}];
+					return [
+						{
+							line: Number(parsed[1]),
+							column: Number(parsed[2]),
+							label: parsed[3]?.trim(),
+							message: parsed[4].trim(),
+						},
+					];
 				});
 			blocks.push({ file: fileValue, diagnostics });
 			return "\n";
@@ -328,10 +333,15 @@ function stringArg(
 }
 
 /** Read an early string field from streamed JSON before the full args parse. */
-function streamedStringArg(json: string | undefined, key: string): string | undefined {
+function streamedStringArg(
+	json: string | undefined,
+	key: string,
+): string | undefined {
 	if (!json) return undefined;
 	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const match = new RegExp(`"${escapedKey}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(json);
+	const match = new RegExp(
+		`"${escapedKey}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`,
+	).exec(json);
 	if (!match) return undefined;
 	try {
 		return JSON.parse(`"${match[1]}"`) as string;
@@ -491,7 +501,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 	 * time a task is observed running/finished here we stamp it ourselves —
 	 * this is a rendering-side approximation, not the tool's real timing.
 	 */
-	private batchTaskTiming = new Map<string, Map<number, { startedAt: number; endedAt?: number }>>();
+	private batchTaskTiming = new Map<
+		string,
+		Map<number, { startedAt: number; endedAt?: number }>
+	>();
 
 	constructor(options: TranscriptDisplayOptions = {}) {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
@@ -501,7 +514,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 		this.maxRenderedLines = options.maxRenderedLines ?? 2000;
 	}
 
-	private static readonly SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+	private static readonly SPINNER_FRAMES = [
+		"⠋",
+		"⠙",
+		"⠹",
+		"⠸",
+		"⠼",
+		"⠴",
+		"⠦",
+		"⠧",
+	];
 
 	private spinnerFrame(): string {
 		return TranscriptDisplay.SPINNER_FRAMES[
@@ -518,7 +540,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 	startAnimation(): void {
 		if (this.spinnerTimer) return;
 		this.spinnerTimer = setInterval(() => {
-			this.spinnerTick = (this.spinnerTick + 1) % TranscriptDisplay.SPINNER_FRAMES.length;
+			this.spinnerTick =
+				(this.spinnerTick + 1) % TranscriptDisplay.SPINNER_FRAMES.length;
 			this.invalidate();
 			this.onAnimationTick?.();
 		}, 150);
@@ -664,7 +687,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 						"",
 					);
 					for (const line of sysLines)
-						renderedLines.push(padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`));
+						renderedLines.push(
+							padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`),
+						);
 				} else {
 					renderedLines.push(
 						padToWidth(`${theme.fgRaw("userText")}╭─ ${BOLD}YOU${RESET}`),
@@ -690,7 +715,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 				const streaming = !msg.isComplete || hasStreamingChunk(chunks);
 				let lastThinkingSection = false;
 				renderedLines.push(
-					padToWidth(`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`),
+					padToWidth(
+						`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`,
+					),
 				);
 
 				// Buffer consecutive content chunks so block-level markdown
@@ -751,17 +778,19 @@ export class TranscriptDisplay implements Component, Scrollable {
 							);
 							continue;
 						}
-						const icon = n.level === "error"
-							? "✗"
-							: n.level === "warn"
-								? "⚠"
+						const icon =
+							n.level === "error"
+								? "✗"
+								: n.level === "warn"
+									? "⚠"
 									: n.level === "success"
 										? "✓"
-											: "●";
-						const color = n.level === "error"
-							? theme.fgRaw("error")
-							: n.level === "warn"
-								? theme.fgRaw("warning")
+										: "●";
+						const color =
+							n.level === "error"
+								? theme.fgRaw("error")
+								: n.level === "warn"
+									? theme.fgRaw("warning")
 									: theme.fgRaw("systemText");
 						renderedLines.push(
 							padToWidth(
@@ -775,7 +804,6 @@ export class TranscriptDisplay implements Component, Scrollable {
 				// No streaming cursor — messages display as-is
 			}
 		}
-
 
 		// Bound the render buffer from the *front*. The previous early-break
 		// implementation retained old turns and discarded the newest ones while
@@ -802,15 +830,15 @@ export class TranscriptDisplay implements Component, Scrollable {
 					? turnStartLines[firstCompleteTurn]
 					: desiredStart;
 			const olderCount =
-				firstCompleteTurn >= 0 ? firstCompleteTurn : Math.max(0, this.turns.length - 1);
+				firstCompleteTurn >= 0
+					? firstCompleteTurn
+					: Math.max(0, this.turns.length - 1);
 			const omittedLabel =
 				olderCount > 0
 					? `${olderCount} older turn(s) not shown`
 					: "earlier lines not shown";
 			visibleBuffer = [
-				padToWidth(
-					`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`,
-				),
+				padToWidth(`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`),
 				...renderedLines.slice(sliceStart),
 			];
 		}
@@ -850,9 +878,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				break;
 			}
 			case "expanded": {
-				lines.push(
-					`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET}`,
-				);
+				lines.push(`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET}`);
 				this.renderThinkingExpanded(text, lines);
 				break;
 			}
@@ -998,7 +1024,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const liveIds = new Set<string>();
 		for (const turn of this.turns) {
 			for (const chunk of turn.assistantMessage?.chunks ?? []) {
-				if (chunk.type === "tool" && chunk.tool?.tool_name === "spawn_agents" && chunk.tool.tool_call_id) {
+				if (
+					chunk.type === "tool" &&
+					chunk.tool?.tool_name === "spawn_agents" &&
+					chunk.tool.tool_call_id
+				) {
 					liveIds.add(chunk.tool.tool_call_id);
 				}
 			}
@@ -1052,9 +1082,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				} else {
 					inCodeBlock = true;
 					codeBlockLang = extractLangFromFence(rawLine);
-					lines.push(
-						`${bg}${DIM}  ┌─ ${codeBlockLang || "code"}${bgReset}`,
-					);
+					lines.push(`${bg}${DIM}  ┌─ ${codeBlockLang || "code"}${bgReset}`);
 				}
 				continue;
 			}
@@ -1392,25 +1420,25 @@ export class TranscriptDisplay implements Component, Scrollable {
 			? theme.fg("toolError", "×")
 			: tool.isComplete && batchFailed > 0
 				? theme.fg("warning", "!")
-			: tool.isComplete
-				? theme.fg("toolSuccess", "✓")
-				: theme.fg("toolRunning", this.spinnerFrame());
+				: tool.isComplete
+					? theme.fg("toolSuccess", "✓")
+					: theme.fg("toolRunning", this.spinnerFrame());
 		const status = tool.isError
 			? theme.fg("toolError", "error")
 			: tool.isComplete && batchFailed > 0
 				? theme.fg("warning", `partial · ${batchFailed} failed`)
-			: tool.isComplete
-				? theme.fg("toolSuccess", "done")
-				: batchTally
-					? theme.fg(
-							"toolStreaming",
-							`${batchTally.completed + batchTally.running}/${batchTally.total} running${
-								batchTally.failed > 0 ? ` · ${batchTally.failed} failed` : ""
-							}`,
-						)
-					: tool.partialResult || tool.streamOutput
-						? theme.fg("toolStreaming", "streaming")
-						: theme.fg("toolRunning", "running");
+				: tool.isComplete
+					? theme.fg("toolSuccess", "done")
+					: batchTally
+						? theme.fg(
+								"toolStreaming",
+								`${batchTally.completed + batchTally.running}/${batchTally.total} running${
+									batchTally.failed > 0 ? ` · ${batchTally.failed} failed` : ""
+								}`,
+							)
+						: tool.partialResult || tool.streamOutput
+							? theme.fg("toolStreaming", "streaming")
+							: theme.fg("toolRunning", "running");
 		const subagentAgent = subagent
 			? String(tool.details?.agent || tool.args?.agent || "general")
 			: "";
@@ -1424,7 +1452,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 				streamedStringArg(tool.partialResult, "path") ||
 				streamedStringArg(tool.partialResult, "file_path") ||
 				(tool.tool_name === "write_file"
-					? /^Created\s+(.+?)(?:\s+\([^\n]*\))?(?:\n|$)/.exec(tool.result ?? "")?.[1]
+					? /^Created\s+(.+?)(?:\s+\([^\n]*\))?(?:\n|$)/.exec(
+							tool.result ?? "",
+						)?.[1]
 					: undefined);
 			if (!path) return "";
 			if (tool.tool_name === "write_file" || tool.tool_name === "edit_file") {
@@ -1440,9 +1470,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 			? `${glyph} ${theme.fg("toolTitle", "subagent")} ${theme.fg("active", subagentAgent)} ${status}`
 			: subagentBatch
 				? `${glyph} ${theme.fg("toolTitle", "subagents")} ${status}`
-			: filePath
-				? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
-				: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
+				: filePath
+					? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
+					: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
 		const middle = summary ? `${DIM}${summary}${RESET}` : "";
 		const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
 		let row = [base, middle].filter(Boolean).join(` ${DIM}·${RESET} `);
@@ -1456,7 +1486,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 		// Always show the result (diff) for edit_file and write_file even when collapsed.
 		const showDiffResult =
 			!this.toolsExpanded &&
-			["edit_file", "write_file", "write_file_append"].includes(tool.tool_name) &&
+			["edit_file", "write_file", "write_file_append"].includes(
+				tool.tool_name,
+			) &&
 			!!tool.result;
 		if (showDiffResult) {
 			const resultText = tool.result ?? "";
@@ -1483,10 +1515,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		const compactPreview =
-			!showDiffResult &&
-				!this.toolsExpanded &&
-				!subagent &&
-				!subagentBatch
+			!showDiffResult && !this.toolsExpanded && !subagent && !subagentBatch
 				? this.collapsedToolPreview(tool)
 				: "";
 		if (compactPreview) {
@@ -1504,17 +1533,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 		for (const block of postEdit.blocks) {
 			lines.push(
-				...this.renderPostEditDiagnostics(
-					block,
-					Math.max(20, width - 4),
-				),
+				...this.renderPostEditDiagnostics(block, Math.max(20, width - 4)),
 			);
 		}
 		if (!this.toolsExpanded && !subagent && !subagentBatch) return lines;
 		if (!subagent && !subagentBatch) {
-			lines.push(
-				`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`,
-			);
+			lines.push(`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`);
 		}
 		for (const detailLine of this.toolDetailLines(tool, width - 2)) {
 			const wrapped = this.wrapText(detailLine, Math.max(20, width - 4));
@@ -1726,7 +1750,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 
 		const completed =
-			typeof details.completed === "number" && Number.isFinite(details.completed)
+			typeof details.completed === "number" &&
+			Number.isFinite(details.completed)
 				? Math.max(0, Math.trunc(details.completed))
 				: [...liveStatus.values()].filter((s) => s === "completed").length;
 		const failed =
@@ -1793,7 +1818,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		);
 	}
 
-	private distinctSubagentOutputs(liveText: string, finalText: string): string[] {
+	private distinctSubagentOutputs(
+		liveText: string,
+		finalText: string,
+	): string[] {
 		const live = stripAcceptanceForDisplay(liveText).trim();
 		const final = stripAcceptanceForDisplay(finalText).trim();
 		if (!live) return final ? [final] : [];
@@ -1804,15 +1832,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private childToolExecution(call: ChildToolCall): ToolExecution {
 		const parsedArgs = parseJsonMaybe(call.args);
 		const args =
-			parsedArgs &&
-			typeof parsedArgs === "object" &&
-			!Array.isArray(parsedArgs)
+			parsedArgs && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)
 				? (parsedArgs as Record<string, unknown>)
 				: call.args
 					? { input: call.args }
 					: {};
-		const status =
-			call.status ?? (call.isError ? "failed" : "completed");
+		const status = call.status ?? (call.isError ? "failed" : "completed");
 		return {
 			tool: call.toolName,
 			tool_name: call.toolName,
@@ -1836,16 +1861,14 @@ export class TranscriptDisplay implements Component, Scrollable {
 		showAgent: boolean,
 	): string[] {
 		const lines: string[] = [];
-		const agentIds = [...new Set(
-			chunks.map((chunk) => chunk.agentId).filter(Boolean),
-		)];
+		const agentIds = [
+			...new Set(chunks.map((chunk) => chunk.agentId).filter(Boolean)),
+		];
 		const plural = showAgent || agentIds.length > 1;
 		const runLabel = plural
 			? `SUBAGENTS · ${agentIds.length || "?"} CHILD RUNS`
 			: `SUBAGENT${agentIds[0] ? ` · ${agentIds[0]}` : ""}`;
-		lines.push(
-			`${theme.fg("active", `╭─ ${runLabel}`)}${RESET}`,
-		);
+		lines.push(`${theme.fg("active", `╭─ ${runLabel}`)}${RESET}`);
 		let contentBuffer = "";
 		let contentAgent = "";
 		let lastAgent = "";
@@ -1853,22 +1876,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		const showAgentBoundary = (agentId: string) => {
 			if (!showAgent || !agentId || agentId === lastAgent) return;
-			lines.push(
-				`${theme.fg("active", `◇ CHILD · ${agentId}`)}${RESET}`,
-			);
+			lines.push(`${theme.fg("active", `◇ CHILD · ${agentId}`)}${RESET}`);
 			lastAgent = agentId;
 		};
 		const flushContent = () => {
 			if (!contentBuffer) return;
 			showAgentBoundary(contentAgent);
 			if (lastWasThinking) {
-				lines.push(
-					`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`,
-				);
+				lines.push(`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`);
 			}
-			const visible = stripAcceptanceForDisplay(
-				stripThinkTags(contentBuffer),
-			);
+			const visible = stripAcceptanceForDisplay(stripThinkTags(contentBuffer));
 			for (const line of this.renderMarkdownLines(
 				visible,
 				Math.max(16, width),
@@ -1918,9 +1935,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 			}
 		}
 		flushContent();
-		lines.push(
-			`${theme.fg("active", "╰─ RETURN TO PARENT")}${RESET}`,
-		);
+		lines.push(`${theme.fg("active", "╰─ RETURN TO PARENT")}${RESET}`);
 		return lines;
 	}
 
@@ -1962,7 +1977,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 				? resultError
 					? "failed"
 					: "completed"
-				: liveStatus.get(index) ?? "queued";
+				: (liveStatus.get(index) ?? "queued");
 			const icon =
 				state === "failed"
 					? theme.fg("toolError", "×")
@@ -1972,16 +1987,16 @@ export class TranscriptDisplay implements Component, Scrollable {
 							? theme.fg("toolRunning", this.spinnerFrame())
 							: theme.fg("dim", "·");
 			const agent =
-				typeof task.agent === "string" && task.agent
-					? task.agent
-					: "general";
+				typeof task.agent === "string" && task.agent ? task.agent : "general";
 			const taskText =
 				typeof task.task === "string"
 					? compactText(task.task).slice(0, 100)
 					: `Task ${index + 1}`;
 			const elapsedMs = taskElapsedMs.get(index);
 			const elapsed =
-				elapsedMs !== undefined ? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}` : "";
+				elapsedMs !== undefined
+					? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}`
+					: "";
 			const queuedTag = state === "queued" ? ` ${DIM}queued${RESET}` : "";
 			lines.push(
 				clampLineToWidth(
@@ -2008,8 +2023,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (hasOrderedFlow) {
 			lines.push(...this.renderSubagentFlow(childChunks, width, true));
 		} else {
-			const childToolCalls =
-				details.childToolCalls as ChildToolCall[] | undefined;
+			const childToolCalls = details.childToolCalls as
+				| ChildToolCall[]
+				| undefined;
 			lines.push(
 				...this.renderSubagentActivity(
 					childToolCalls,
@@ -2060,7 +2076,11 @@ export class TranscriptDisplay implements Component, Scrollable {
 
 		const task = stringArg(args, "task");
 		if (task) {
-			for (const line of this.previewBlock(task, Math.max(16, width - 4), 800)) {
+			for (const line of this.previewBlock(
+				task,
+				Math.max(16, width - 4),
+				800,
+			)) {
 				lines.push(`${theme.fg("dim", "→ ")}${line}`);
 			}
 		}
@@ -2071,8 +2091,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (childChunks.length > 0) {
 			lines.push(...this.renderSubagentFlow(childChunks, width, false));
 		} else {
-			const childToolCalls =
-				details.childToolCalls as ChildToolCall[] | undefined;
+			const childToolCalls = details.childToolCalls as
+				| ChildToolCall[]
+				| undefined;
 			lines.push(
 				...this.renderSubagentActivity(
 					childToolCalls,
@@ -2088,7 +2109,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 			typeof details.streamTranscript === "string"
 				? details.streamTranscript
 				: "";
-		const liveOutput = tool.isComplete ? storedTranscript : (tool.streamOutput ?? "");
+		const liveOutput = tool.isComplete
+			? storedTranscript
+			: (tool.streamOutput ?? "");
 		const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
 		const orderedContent = childChunks
 			.filter((chunk) => chunk.type === "content")
@@ -2133,17 +2156,20 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const visible = calls.slice(-limit);
 		const hidden = calls.length - visible.length;
 		const lines = showHeading
-			? [this.detailSection(
-				"activity",
-				`${calls.length} tool call${calls.length === 1 ? "" : "s"}${hidden ? ` · latest ${visible.length}` : ""}`,
-			)]
+			? [
+					this.detailSection(
+						"activity",
+						`${calls.length} tool call${calls.length === 1 ? "" : "s"}${hidden ? ` · latest ${visible.length}` : ""}`,
+					),
+				]
 			: hidden
-				? [`  ${theme.fg("dim", `⋯ ${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`]
+				? [
+						`  ${theme.fg("dim", `⋯ ${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`,
+					]
 				: [];
 		const bg = theme.bg("mdCodeBlockBg", "");
 		for (const call of visible) {
-			const status =
-				call.status ?? (call.isError ? "failed" : "completed");
+			const status = call.status ?? (call.isError ? "failed" : "completed");
 			const icon =
 				status === "failed"
 					? theme.fg("toolError", "×")
@@ -2214,7 +2240,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 			} else if (!content) {
 				// No content shown above; show the diff result.
 				lines.push(this.detailSection("result"));
-				lines.push(...this.renderDiffBlock(resultText, width, this.detectLanguage(path)));
+				lines.push(
+					...this.renderDiffBlock(resultText, width, this.detectLanguage(path)),
+				);
 			}
 		} else if (!streaming && !content) {
 			lines.push(`${DIM}no output${RESET}`);
@@ -2235,7 +2263,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (path) lines.push(this.detailSection("file", path));
 
 		for (let i = 0; i < edits.length; i++) {
-			lines.push(this.detailSection(`edit ${i + 1}`, `${i + 1} of ${edits.length}`));
+			lines.push(
+				this.detailSection(`edit ${i + 1}`, `${i + 1} of ${edits.length}`),
+			);
 			const oldText = edits[i].oldText;
 			const newText = edits[i].newText;
 
@@ -2248,12 +2278,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 					`${theme.fgRaw("diffRemoved")}── - OLD${RESET}  ${DIM}${oldMeta}${RESET}`,
 				);
 				lines.push(
-					...this.renderFileContent(
-						oldText,
-						width,
-						oldLineCount,
-						language,
-					),
+					...this.renderFileContent(oldText, width, oldLineCount, language),
 				);
 			}
 			if (newText) {
@@ -2265,12 +2290,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 					`${theme.fgRaw("diffAdded")}── + NEW${RESET}  ${DIM}${newMeta}${RESET}`,
 				);
 				lines.push(
-					...this.renderFileContent(
-						newText,
-						width,
-						newLineCount,
-						language,
-					),
+					...this.renderFileContent(newText, width, newLineCount, language),
 				);
 			}
 		}
@@ -2302,7 +2322,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 		if (args.staged) lines.push(`${DIM}staged changes${RESET}`);
 		const result = tool.result ?? tool.partialResult;
 		if (result) {
-			lines.push(...this.renderDiffBlock(result, width, this.detectLanguage(path)));
+			lines.push(
+				...this.renderDiffBlock(result, width, this.detectLanguage(path)),
+			);
 		}
 		return lines;
 	}
@@ -2336,7 +2358,12 @@ export class TranscriptDisplay implements Component, Scrollable {
 		const args = tool.args || {};
 		const serverParts = tool.tool_name.replace(/^mcp__/, "").split("__");
 		if (serverParts.length >= 2) {
-			lines.push(this.detailSection("mcp", `${serverParts[0]} · ${serverParts.slice(1).join("__")}`));
+			lines.push(
+				this.detailSection(
+					"mcp",
+					`${serverParts[0]} · ${serverParts.slice(1).join("__")}`,
+				),
+			);
 		}
 		const argText = JSON.stringify(args, null, 2);
 		if (argText && argText !== "{}") {
@@ -2577,16 +2604,17 @@ export class TranscriptDisplay implements Component, Scrollable {
 							current = chunk;
 							continue;
 						}
-					if (current.length === 0) {
-						current = chunk;
-					} else if (
-						visibleWidth(current) + 1 + visibleWidth(chunk) <= width
-					) {
-						current += ` ${chunk}`;
-					} else {
-						lines.push(current);
-						current = chunk;
-					}
+						if (current.length === 0) {
+							current = chunk;
+						} else if (
+							visibleWidth(current) + 1 + visibleWidth(chunk) <=
+							width
+						) {
+							current += ` ${chunk}`;
+						} else {
+							lines.push(current);
+							current = chunk;
+						}
 						if (visibleWidth(current) === width && i < chunks.length - 1) {
 							lines.push(current);
 							current = "";

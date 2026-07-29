@@ -1,15 +1,21 @@
 // ── Slash command popup ───────────────────────────────────────────────────────
 // Overlay popup with fuzzy matching, category grouping, arg hints, and examples.
 
-import { theme } from "../layers/theme/theme.ts";
 import {
+	CATEGORY_ORDER,
 	filterSlashCommands,
 	groupByCategory,
-	CATEGORY_ORDER,
-	type SlashCommandDef,
 	type SlashCommandCategory,
+	type SlashCommandDef,
 } from "@logician/coding-agent/slash-commands";
-import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
+import {
+	BOLD,
+	type Component,
+	DIM,
+	RESET,
+	visibleWidth,
+} from "../layers/core/tui-core.ts";
+import { theme } from "../layers/theme/theme.ts";
 import {
 	clampPopupLines,
 	POPUP_FRAME_OVERHEAD,
@@ -20,10 +26,18 @@ const MAX_VISIBLE_ENTRIES = 8;
 const getSelectedColor = (): string => theme.fgRaw("selected");
 const getCategoryColor = (cat: SlashCommandCategory): string => {
 	const colors: Record<SlashCommandCategory, string> = {
-		help: "\x1b[36m", session: "\x1b[33m", agent: "\x1b[35m",
-		context: "\x1b[34m", rag: "\x1b[32m", skills: "\x1b[95m",
-		reasoning: "\x1b[37m", display: "\x1b[93m", permissions: "\x1b[31m",
-		shortcuts: "\x1b[36m", loop: "\x1b[94m", misc: "\x1b[90m",
+		help: "\x1b[36m",
+		session: "\x1b[33m",
+		agent: "\x1b[35m",
+		context: "\x1b[34m",
+		rag: "\x1b[32m",
+		skills: "\x1b[95m",
+		reasoning: "\x1b[37m",
+		display: "\x1b[93m",
+		permissions: "\x1b[31m",
+		shortcuts: "\x1b[36m",
+		loop: "\x1b[94m",
+		misc: "\x1b[90m",
 	};
 	return colors[cat] ?? "\x1b[90m";
 };
@@ -33,9 +47,17 @@ interface RenderState {
 	isFiltered: boolean;
 	selectedCmd: SlashCommandDef | null;
 	// For grouped display (when not filtered): ordered category headers with command indices
-	groups: Array<{ category: SlashCommandCategory; start: number; count: number }>;
+	groups: Array<{
+		category: SlashCommandCategory;
+		start: number;
+		count: number;
+	}>;
 	// Map from flat index to command (with group headers in between)
-	flatEntries: Array<{ cmd: SlashCommandDef; isHeader: boolean; category?: SlashCommandCategory }>;
+	flatEntries: Array<{
+		cmd: SlashCommandDef;
+		isHeader: boolean;
+		category?: SlashCommandCategory;
+	}>;
 	// Selection translated to flat index
 	flatSelection: number;
 }
@@ -79,7 +101,11 @@ export class SlashPopup implements Component {
 			const cmds = groupsMap.get(cat);
 			if (!cmds || cmds.length === 0) continue;
 			const start = idx;
-			flatEntries.push({ cmd: {} as SlashCommandDef, isHeader: true, category: cat });
+			flatEntries.push({
+				cmd: {} as SlashCommandDef,
+				isHeader: true,
+				category: cat,
+			});
 			idx++;
 			for (const cmd of cmds) {
 				if (commandIndex === this.selectedIndex) flatSelection = idx;
@@ -306,8 +332,9 @@ export class SlashPopup implements Component {
 			}
 			for (const entry of items) {
 				if (entry.isHeader) {
-					const catColor = getCategoryColor(entry.category!);
-					const catLabel = entry.category!.charAt(0).toUpperCase() + entry.category!.slice(1);
+					const category = entry.category ?? "misc";
+					const catColor = getCategoryColor(category);
+					const catLabel = category.charAt(0).toUpperCase() + category.slice(1);
 					lines.push(`${DIM}${catColor}── ${catLabel} ──${RESET}`);
 					continue;
 				}
@@ -383,12 +410,17 @@ export class SlashPopup implements Component {
 		}
 
 		// Details panel for selected command (examples, arg info)
-		if (state.selectedCmd && (state.selectedCmd.examples || state.selectedCmd.argHint)) {
+		if (
+			state.selectedCmd &&
+			(state.selectedCmd.examples || state.selectedCmd.argHint)
+		) {
 			const sel = state.selectedCmd;
 			lines.push("");
 			const detailsColor = getCategoryColor(sel.category ?? "misc");
 			if (sel.argHint) {
-				lines.push(`${DIM}Usage:${RESET} ${detailsColor}${sel.command}${RESET} ${BOLD}${sel.argHint}${RESET}`);
+				lines.push(
+					`${DIM}Usage:${RESET} ${detailsColor}${sel.command}${RESET} ${BOLD}${sel.argHint}${RESET}`,
+				);
 			}
 			if (sel.examples && sel.examples.length > 0) {
 				for (const ex of sel.examples) {
@@ -401,12 +433,11 @@ export class SlashPopup implements Component {
 			renderListPopupFrame({
 				popupWidth,
 				innerWidth: contentWidth,
-				title: "Commands",
+				title: "commands",
 				subtitle: ` (${count})`,
 				hints: "↑↓ select · tab complete · enter run · esc close",
 				bodyLines: lines,
-				bottomText:
-					state.selectedCmd?.description ?? "Run a Logician command.",
+				bottomText: state.selectedCmd?.description ?? "Run a Logician command.",
 			}),
 			width,
 		);
