@@ -10,9 +10,13 @@ import {
 	type SlashCommandCategory,
 } from "@logician/coding-agent/slash-commands";
 import { type Component, visibleWidth, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
+import {
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	renderListPopupFrame,
+} from "./popup-utils.ts";
 
 const MAX_VISIBLE_ENTRIES = 8;
-const getHeaderColor = (): string => theme.fg("header", "");
 const getSelectedColor = (): string => theme.fgRaw("selected");
 const getCategoryColor = (cat: SlashCommandCategory): string => {
 	const colors: Record<SlashCommandCategory, string> = {
@@ -285,15 +289,11 @@ export class SlashPopup implements Component {
 		if (!this.visible) return [];
 
 		const state = this._prepareRenderState();
-		const contentWidth = Math.max(1, width - 2);
+		const popupWidth = Math.max(1, width);
+		const contentWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
 		const lines: string[] = [];
 
-		// Title row
 		const count = state.filtered.length;
-		const hint = `${DIM}↑↓ select · Tab complete · ⏎ run · Esc close${RESET}`;
-		lines.push(
-			` ${getHeaderColor()}commands${RESET}${DIM} (${count})${RESET}  ${hint}`,
-		);
 
 		if (state.groups.length > 0) {
 			// Grouped display: category headers + commands
@@ -397,8 +397,20 @@ export class SlashPopup implements Component {
 			}
 		}
 
-		this.cachedLines = lines;
-		return lines;
+		this.cachedLines = clampPopupLines(
+			renderListPopupFrame({
+				popupWidth,
+				innerWidth: contentWidth,
+				title: "Commands",
+				subtitle: ` (${count})`,
+				hints: "↑↓ select · tab complete · enter run · esc close",
+				bodyLines: lines,
+				bottomText:
+					state.selectedCmd?.description ?? "Run a Logician command.",
+			}),
+			width,
+		);
+		return this.cachedLines;
 	}
 }
 

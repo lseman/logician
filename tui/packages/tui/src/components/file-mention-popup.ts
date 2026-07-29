@@ -3,13 +3,18 @@
 // after an "@". Mirrors SlashPopup's inline-autocomplete pattern (input bar
 // keeps focus; this popup renders below and only intercepts nav/accept keys).
 
-import { theme } from "../layers/theme/theme.ts";
-import { type Component, RESET, BOLD, DIM } from "../layers/core/tui-core.ts";
+import { type Component } from "../layers/core/tui-core.ts";
+import {
+	clampPopupLines,
+	type ListItem,
+	POPUP_FRAME_OVERHEAD,
+	renderListItem,
+	renderListPopupBody,
+	renderListPopupFrame,
+} from "./popup-utils.ts";
 
 const MAX_VISIBLE_ENTRIES = 8;
 const MAX_MATCHES = 50;
-const getHeaderColor = (): string => theme.fg("header", "");
-const getSelectedColor = (): string => theme.fg("selected", "");
 
 interface ScoredFile {
 	path: string;
@@ -119,61 +124,48 @@ export class FileMentionPopup implements Component {
 
 		if (!this.visible) return [];
 
-		const lines: string[] = [];
-
-		const hint = `${DIM}↑↓ select · Tab/⏎ insert · Esc close${RESET}`;
-		lines.push(
-			` ${getHeaderColor()}files${RESET}${DIM} (${this.matches.length})${RESET}  ${hint}`,
-		);
-
-		if (this.matches.length === 0) {
-			lines.push(`${DIM}  No matching files${RESET}`);
-			this.cachedLines = lines;
-			return lines;
-		}
-
-		const { items, start, hiddenAbove, hiddenBelow } = windowAroundSelection(
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
+		const selection = {
+			window: (count: number, maxRows: number) => {
+				const start = Math.max(
+					0,
+					Math.min(
+						this.selectedIndex - Math.floor(maxRows / 2),
+						Math.max(0, count - maxRows),
+					),
+				);
+				return { start, end: Math.min(count, start + maxRows) };
+			},
+		};
+		const bodyLines = renderListPopupBody(
 			this.matches,
-			this.selectedIndex,
+			selection,
+			innerWidth,
+			MAX_VISIBLE_ENTRIES,
+			(path, index) => {
+				const item: ListItem = {
+					label: path,
+					selected: index === this.selectedIndex,
+				};
+				return renderListItem(item, innerWidth);
+			},
+			"No matching files.",
 		);
-		if (hiddenAbove > 0) {
-			lines.push(`${DIM}  ↑ ${hiddenAbove} more above${RESET}`);
-		}
-		for (let i = 0; i < items.length; i++) {
-			const path = items[i];
-			const isSelected = start + i === this.selectedIndex;
-			const prefix = isSelected ? "▸ " : "  ";
-			const line = isSelected
-				? ` ${getSelectedColor()}${prefix}${BOLD}${path}${RESET}`
-				: ` ${prefix}${path}`;
-			lines.push(line);
-		}
-		if (hiddenBelow > 0) {
-			lines.push(`${DIM}  ↓ ${hiddenBelow} more below${RESET}`);
-		}
-
-		this.cachedLines = lines;
-		return lines;
+		this.cachedLines = clampPopupLines(
+			renderListPopupFrame({
+				popupWidth,
+				innerWidth,
+				title: "Files",
+				subtitle: ` (${this.matches.length})`,
+				hints: "↑↓ select · tab/enter insert · esc close",
+				bodyLines,
+				bottomText: this.query
+					? `Matching @${this.query}`
+					: "Mention a project file.",
+			}),
+			width,
+		);
+		return this.cachedLines;
 	}
-}
-
-function windowAroundSelection<T>(
-	items: T[],
-	selection: number,
-): { items: T[]; start: number; hiddenAbove: number; hiddenBelow: number } {
-	if (items.length <= MAX_VISIBLE_ENTRIES) {
-		return { items, start: 0, hiddenAbove: 0, hiddenBelow: 0 };
-	}
-	const half = Math.floor(MAX_VISIBLE_ENTRIES / 2);
-	const start = Math.max(
-		0,
-		Math.min(selection - half, items.length - MAX_VISIBLE_ENTRIES),
-	);
-	const end = Math.min(items.length, start + MAX_VISIBLE_ENTRIES);
-	return {
-		items: items.slice(start, end),
-		start,
-		hiddenAbove: start,
-		hiddenBelow: items.length - end,
-	};
 }

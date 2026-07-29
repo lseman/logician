@@ -75,8 +75,10 @@ export const write_file_append: Tool = {
 			refreshAfterWrite(resolved);
 
 			const chunkBytes = Buffer.byteLength(content, "utf-8");
+			const totalLines = fs.readFileSync(resolved, "utf-8").split("\n").length;
 			const verb = before === null ? "Created" : "Appended to";
-			return `${verb} ${resolved} (+${chunkBytes} bytes, ${newSize} bytes total). ` +
+			const lineInfo = totalLines > 0 ? ` · ${totalLines} lines total` : "";
+			return `${verb} ${resolved} (+${chunkBytes} bytes, ${newSize} bytes total${lineInfo}). ` +
 				"Call write_file_append again with the next chunk, or stop if this was the last one.";
 		});
 	},

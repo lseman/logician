@@ -703,12 +703,17 @@ export class TranscriptDisplay implements Component, Scrollable {
 					if (lastThinkingSection) {
 						renderedLines.push(
 							padToWidth(
-								`${theme.fgRaw("separator")}${DIM}  ─── response ───${RESET}`,
+								`${theme.fgRaw("separator")}${DIM}  ─────────────────${RESET}`,
 							),
 						);
 						lastThinkingSection = false;
 					}
 					if (answer) {
+						renderedLines.push(
+							padToWidth(
+								`  ${theme.fgRaw("assistantText")}${BOLD}RESPONSE${RESET}`,
+							),
+						);
 						const contentLines = this.renderMarkdownLines(
 							answer,
 							contentWidth - 2,
@@ -741,7 +746,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 						if (n.label === "Skills" && n.level === "info") {
 							renderedLines.push(
 								padToWidth(
-									`${theme.fg("active", "✦")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
+									`${theme.fg("active", "✦ NOTICE")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
 								),
 							);
 							continue;
@@ -759,7 +764,9 @@ export class TranscriptDisplay implements Component, Scrollable {
 								? theme.fgRaw("warning")
 									: theme.fgRaw("systemText");
 						renderedLines.push(
-							padToWidth(`${color}${icon} ${n.label}: ${n.text}${RESET}`),
+							padToWidth(
+								`${color}${icon} NOTICE${RESET} ${BOLD}${n.label}${RESET}  ${color}${n.text}${RESET}`,
+							),
 						);
 					}
 				}
@@ -832,19 +839,19 @@ export class TranscriptDisplay implements Component, Scrollable {
 			case "collapsed": {
 				const preview = text.trim().slice(0, 100);
 				lines.push(
-					`${theme.fgRaw("thinkingText")}THINK ${DIM}${preview ? `thinking · ${preview}...` : "thinking"}${RESET}`,
+					`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} ${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`,
 				);
 				break;
 			}
 			case "summary": {
 				lines.push(
-					`${theme.fgRaw("thinkingText")}THINK \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
+					`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
 				);
 				break;
 			}
 			case "expanded": {
 				lines.push(
-					`${theme.fgRaw("thinkingText")}THINK ${BOLD}reasoning${RESET}`,
+					`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET}`,
 				);
 				this.renderThinkingExpanded(text, lines);
 				break;
@@ -1449,7 +1456,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 		// Always show the result (diff) for edit_file and write_file even when collapsed.
 		const showDiffResult =
 			!this.toolsExpanded &&
-			["edit_file", "write_file"].includes(tool.tool_name) &&
+			["edit_file", "write_file", "write_file_append"].includes(tool.tool_name) &&
 			!!tool.result;
 		if (showDiffResult) {
 			const resultText = tool.result ?? "";

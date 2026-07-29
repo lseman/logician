@@ -29,6 +29,10 @@ import { ChoicePopup } from "../../components/choice-popup.ts";
 import { FileMentionPopup } from "../../components/file-mention-popup.ts";
 import { InputBar } from "../../components/input-bar.ts";
 import {
+	NotificationCenter,
+	type NotificationLevel,
+} from "../../components/notification-center.ts";
+import {
 	type McpManagerAction,
 	McpManagerOverlay,
 } from "../../components/mcp-manager.ts";
@@ -87,6 +91,7 @@ export class LogicianTUI {
 	private statusPanel: StatusBar;
 	private todoBar: TodoBar;
 	private workSurface: WorkSurface;
+	private notifications: NotificationCenter;
 	private steerQueue: SteerQueue;
 	private inputBar: InputBar;
 	private slashPopup: SlashPopup;
@@ -146,11 +151,13 @@ export class LogicianTUI {
 				"instruct-general": "Instruct (General)",
 				"instruct-reasoning": "Instruct (Reasoning)",
 			};
-			this.transcript.addSystemMessage(
-				`Inference mode: ${labels[mode] ?? mode}`,
-			);
+			this.notify(`Inference mode: ${labels[mode] ?? mode}`, "success");
 			saveConfigField("inferenceMode", mode);
 		}
+	}
+
+	private notify(message: string, level: NotificationLevel = "info"): void {
+		this.notifications.show(message, level);
 	}
 
 	private cycleInferenceMode(): void {
@@ -197,6 +204,7 @@ export class LogicianTUI {
 		this.statusPanel = new StatusBar();
 		this.todoBar = new TodoBar();
 		this.workSurface = new WorkSurface();
+		this.notifications = new NotificationCenter();
 		this.steerQueue = new SteerQueue();
 		this.inputBar = new InputBar();
 		this.slashPopup = new SlashPopup();
@@ -1857,9 +1865,7 @@ export class LogicianTUI {
 				data === "\x1b[105;6u"
 			) {
 				const next = this.cycleExecutionProfile();
-				this.transcript.addSystemMessage(
-					`Execution policy: ${next}`,
-				);
+				this.notify(`Execution policy: ${next}`, "success");
 				this.tui.requestRender();
 				return { consume: true };
 			}
@@ -2125,6 +2131,8 @@ export class LogicianTUI {
 		// (both render empty when there's nothing to show, so they only take
 		// space when active).
 		const pinnedContainer = new Container();
+		this.notifications.setOnInvalidate(() => this.tui.requestRender());
+		pinnedContainer.addChild(this.notifications);
 		pinnedContainer.addChild(this.todoBar);
 		pinnedContainer.addChild(this.workSurface);
 		pinnedContainer.addChild(this.steerQueue);
