@@ -1,24 +1,39 @@
-# Python cache/build
+# ── Python ──────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.so
+*.pyc
 .pytest_cache/
 .mypy_cache/
+.eggs/
+*.egg-info/
+dist/
+build/
 
-# Local environments
+# ── Virtual environments ────────────────────────────────
 .venv/
 venv/
+env/
+
+# ── Environment / secrets ───────────────────────────────
 .env
 .env.*
 
-# Jupyter
+# ── Jupyter ─────────────────────────────────────────────
 .ipynb_checkpoints/
+*.ipynb
 
-# OS/editor junk
-.DS_Store
-Thumbs.db
+# ── Rust ────────────────────────────────────────────────
+target/
+rust-cli/target/
+*.rs.bk
 
-# Runtime DB/state
+# ── Node.js ─────────────────────────────────────────────
+node_modules/
+*.tsbuildinfo
+dist/
+
+# ── Runtime DB / state ──────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
@@ -27,58 +42,41 @@ notebook_test_sessions*
 clean_test_sessions*
 repl_demo_sessions*
 
-# Vector/chroma stores
+# ── Vector / Chroma stores ──────────────────────────────
 *.chroma/
 *.vector/
-message_history.chroma/
-message_history.vector/
-rag_docs.chroma/
-rag_docs.vector/
 
-# Generated artifacts
+# ── OS / editor ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ── IDE ─────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Project-specific generated / scratch ────────────────
+.logician/
+.logician.json
+.log
+.agent_history
+.local/
+output/
+site/
+repos/
+wiki/
+
+# ── Generated artifacts ─────────────────────────────────
 lightning_logs/
 plots/
 skills/.skills_catalog_cache.json
 
-# Temp scratch files
-Untitled-1
+# ── Temp / scratch files ────────────────────────────────
+Untitled-*
 
-*.ipynb
-plugins/
-agent_config.json
-*.png
-
-# Rust / rust-cli
-target/
-rust-cli/target/
-*.rs.bk
-/logician
-
-*.png
-.agent_history
-.local/
-.logician/
-
+# ── AI tool configs (keep local) ────────────────────────
 .claudeignore
 .codex
-node_modules
-webui/dist/
-logician.egg-info/
-.vscode/
-docs/superpowers/specs/
-repos/
-CLAUDE.md
 .claude/
-skills/40_feynman/
-wiki/
-.vscode/
-lazy_timeseries/
-.mcp.json
-.pi/
-
-tui/dist/
-.logician.json
-tui/node_modules/
-
-# Legacy packages (moved aside, not deleted)
-tui/packages/legacy-*
