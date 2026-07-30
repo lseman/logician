@@ -63,11 +63,7 @@ Thumbs.db
 .agent_history
 .local/
 output/
-site/
-!site/
-site/*
-!site/docs/
-!site/docs/**
+site/docs/
 repos/
 wiki/
 

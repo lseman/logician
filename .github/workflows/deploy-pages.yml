@@ -7,27 +7,53 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy GitHub Pages
+  build:
+    name: Build site
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy site to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          publish_dir: ./site
-          publish_branch: gh-pages
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          user_name: github-actions[bot]
-          user_email: github-actions[bot]@users.noreply.github.com
-          commit_message: "Deploy site to GitHub Pages from main"
-          allow_empty_commit: true
-          keep_files: false
-          cname: logician.laioseman.com
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install documentation dependencies
+        run: npm ci --prefix docs
+
+      - name: Build documentation
+        run: npm run build --prefix docs
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy site to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
