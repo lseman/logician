@@ -52,6 +52,10 @@ import {
 } from "./text-utils.ts";
 import { detectLanguage } from "./file-language.ts";
 import { wrapText } from "./layout.ts";
+import {
+	sanitizeTerminalText,
+	sanitizeTerminalValue,
+} from "../terminal-sanitize.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +66,19 @@ interface TranscriptDisplayOptions {
 	maxTurns?: number;
 	/** Max rendered lines before cutting off older content. */
 	maxRenderedLines?: number;
+}
+
+interface SanitizedStringCache {
+	raw?: string;
+	safe?: string;
+}
+
+interface SanitizedToolCache {
+	result: SanitizedStringCache;
+	partialResult: SanitizedStringCache;
+	streamOutput: SanitizedStringCache;
+	argsSource?: ToolExecution["args"];
+	argsSafe?: ToolExecution["args"];
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -101,6 +118,8 @@ export class TranscriptDisplay implements Component, Scrollable {
 		string,
 		Map<number, { startedAt: number; endedAt?: number }>
 	>();
+	private sanitizedToolCache = new WeakMap<ToolExecution, SanitizedToolCache>();
+	private sanitizationMetrics = { cacheHits: 0, scannedCharacters: 0 };
 
 	constructor(options: TranscriptDisplayOptions = {}) {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
@@ -1157,6 +1176,10 @@ export class TranscriptDisplay implements Component, Scrollable {
 		width: number,
 		expanded = this.toolsExpanded,
 	): string[] {
+		// Tool results, streamed output, arguments, and nested subagent details
+		// are untrusted terminal input. Clone and remove every terminal control
+		// before any markdown, highlighting, wrapping, or ANSI styling is added.
+		tool = this.sanitizeToolForDisplay(tool);
 		// Hook guidance is part of the model-visible tool result. Strip it only
 		// from this local display copy so internal instructions never leak into
 		// the user-facing transcript.
@@ -1304,6 +1327,67 @@ export class TranscriptDisplay implements Component, Scrollable {
 		}
 
 		return lines;
+	}
+
+	private sanitizeToolForDisplay(tool: ToolExecution): ToolExecution {
+		let cache = this.sanitizedToolCache.get(tool);
+		if (!cache) {
+			cache = {
+				result: {},
+				partialResult: {},
+				streamOutput: {},
+			};
+			this.sanitizedToolCache.set(tool, cache);
+		}
+		const sanitizeString = (
+			value: string | undefined,
+			field: SanitizedStringCache,
+		): string | undefined => {
+			if (value === undefined) return undefined;
+			if (value === field.raw) {
+				this.sanitizationMetrics.cacheHits++;
+				return field.safe;
+			}
+			const incremental =
+				field.raw !== undefined &&
+				field.safe !== undefined &&
+				value.startsWith(field.raw) &&
+				!/[\r\x1b\x80-\x9f]/u.test(field.raw);
+			const pending = incremental ? value.slice(field.raw?.length ?? 0) : value;
+			this.sanitizationMetrics.scannedCharacters += pending.length;
+			const safe = incremental
+				? field.safe + sanitizeTerminalText(pending)
+				: sanitizeTerminalText(pending);
+			field.raw = value;
+			field.safe = safe;
+			return safe;
+		};
+		if (tool.args !== cache.argsSource) {
+			cache.argsSource = tool.args;
+			cache.argsSafe = sanitizeTerminalValue(tool.args);
+		}
+		return {
+			...tool,
+			tool: sanitizeTerminalText(tool.tool),
+			tool_name: sanitizeTerminalText(tool.tool_name),
+			tool_call_id: tool.tool_call_id
+				? sanitizeTerminalText(tool.tool_call_id)
+				: tool.tool_call_id,
+			result: sanitizeString(tool.result, cache.result),
+			partialResult: sanitizeString(tool.partialResult, cache.partialResult),
+			streamOutput: sanitizeString(tool.streamOutput, cache.streamOutput),
+			args: cache.argsSafe,
+			// Subagent detail objects mutate in place as child events arrive, so
+			// revalidate that structure rather than caching by object identity.
+			details: sanitizeTerminalValue(tool.details),
+		};
+	}
+
+	getSanitizationMetrics(): {
+		cacheHits: number;
+		scannedCharacters: number;
+	} {
+		return { ...this.sanitizationMetrics };
 	}
 
 	private collapsedToolPreview(tool: ToolExecution): string {

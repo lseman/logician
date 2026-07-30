@@ -25,6 +25,30 @@ export function isFocusable(c: Component | null): c is Component & Focusable {
 	return c !== null && "focused" in c;
 }
 
+export interface RendererMetrics {
+	bytesWritten: number;
+	changedCells: number;
+	cursorMoves: number;
+	diffTimeMs: number;
+	dirtyRegion: { top: number; bottom: number } | null;
+	dirtyRows: number;
+	frameTimeMs: number;
+	layoutTimeMs: number;
+	writeTimeMs: number;
+}
+
+const EMPTY_RENDERER_METRICS: RendererMetrics = {
+	bytesWritten: 0,
+	changedCells: 0,
+	cursorMoves: 0,
+	diffTimeMs: 0,
+	dirtyRegion: null,
+	dirtyRows: 0,
+	frameTimeMs: 0,
+	layoutTimeMs: 0,
+	writeTimeMs: 0,
+};
+
 /**
  * Translate Kitty CSI-u Ctrl+letter reports back to the C0 bytes consumed by
  * existing keybindings. Ctrl+I and Ctrl+M stay encoded so they remain
@@ -331,6 +355,10 @@ export class TUI extends Container {
 	private _scrollOffsetInternal: number = 0;
 	private _viewportHeight: number = 0;
 	private previousLines: string[] = [];
+	private previousCursorRow = -1;
+	private previousCursorCol = -1;
+	private previousCursorVisible: boolean | null = null;
+	private lastRenderMetrics: RendererMetrics = EMPTY_RENDERER_METRICS;
 	private scrollableComponent: Scrollable | null = null;
 	private inputBarComponent: Component | null = null;
 	private fixedBottomComponent: Component | null = null;
@@ -504,6 +532,9 @@ export class TUI extends Container {
 	requestRender(force = false): void {
 		if (force) {
 			this.previousLines = [];
+			this.previousCursorRow = -1;
+			this.previousCursorCol = -1;
+			this.previousCursorVisible = null;
 		}
 		if (this.renderRequested) return;
 		this.renderRequested = true;
@@ -667,8 +698,16 @@ export class TUI extends Container {
 			// screen so the terminal is left in a usable state rather than
 			// showing corrupted escape sequences.
 			const msg = err instanceof Error ? err.message : String(err);
+			this.previousLines = [];
+			this.previousCursorRow = -1;
+			this.previousCursorCol = -1;
+			this.previousCursorVisible = null;
+			// Close every state the renderer may have left open, clear the
+			// potentially partial frame, and leave a visible cursor. The next
+			// render starts from an invalidated cache and therefore repaints.
 			process.stderr.write(
-				`\x1b[?2026h\x1b[H\x1b[?2026l\x1b[?25l\n\x1b[38;5;203m[TUI render error]\x1b[0m ${msg}\n`,
+				`\x1b[?2026l\x1b]8;;\x1b\\\x1b[0m\x1b[2J\x1b[H\x1b[?25h` +
+					`\n\x1b[38;5;203m[TUI render error]\x1b[0m ${msg}\n`,
 			);
 			// eslint-disable-next-line no-console
 			console.error("TUI render crash:", err);
@@ -676,6 +715,7 @@ export class TUI extends Container {
 	}
 
 	private _doRenderInner(): void {
+		const frameStartedAt = performance.now();
 		const termWidth = Math.max(1, process.stdout.columns || 80);
 		const termHeight = Math.max(1, process.stdout.rows || 24);
 
@@ -809,11 +849,17 @@ export class TUI extends Container {
 			termHeight,
 			transcriptHeight,
 		);
+		const layoutFinishedAt = performance.now();
 
 		// Leave the physical last column unused: writing it can put terminals into
 		// pending-autowrap state and shift the next update down a row.
 		const renderWidth = Math.max(1, termWidth - 1);
-		let buffer = "\x1b[?2026h"; // begin synchronized update
+		let changes = "";
+		let dirtyRows = 0;
+		let changedCells = 0;
+		let cursorMoves = 0;
+		let dirtyTop = Number.POSITIVE_INFINITY;
+		let dirtyBottom = -1;
 
 		// The InputBar marks the edit position with CURSOR_MARKER. Find it so we
 		// can park the hardware cursor exactly there, and strip it from output.
@@ -840,19 +886,34 @@ export class TUI extends Container {
 			// those rows atomically instead of trying to split their payload.
 			if (isImageLine(cleanNew) || isImageLine(cleanPrev)) {
 				if (cleanNew !== cleanPrev) {
-					buffer += `\x1b[${row + 1};1H\x1b[0m\x1b[2K`;
-					buffer += isImageLine(cleanNew)
+					changes += `\x1b[${row + 1};1H\x1b[0m\x1b[2K`;
+					changes += isImageLine(cleanNew)
 						? cleanNew
 						: clampLineToWidth(cleanNew, renderWidth);
+					dirtyRows++;
+					dirtyTop = Math.min(dirtyTop, row);
+					dirtyBottom = Math.max(dirtyBottom, row);
+					changedCells += renderWidth;
+					cursorMoves++;
 				}
 				continue;
 			}
 
-			buffer += diffTerminalLine(cleanPrev, cleanNew, row, renderWidth);
+			const lineDiff = diffTerminalLineWithMetrics(
+				cleanPrev,
+				cleanNew,
+				row,
+				renderWidth,
+			);
+			changes += lineDiff.output;
+			if (lineDiff.changedCells > 0) {
+				dirtyRows++;
+				dirtyTop = Math.min(dirtyTop, row);
+				dirtyBottom = Math.max(dirtyBottom, row);
+			}
+			changedCells += lineDiff.changedCells;
+			cursorMoves += lineDiff.cursorMoves;
 		}
-
-		buffer += "\x1b[?2026l"; // end synchronized update
-		this.write(buffer);
 
 		this.previousLines = finalLines;
 		// Park the hardware cursor at the input's edit position (under the
@@ -863,9 +924,65 @@ export class TUI extends Container {
 			transcriptHeight + 2 + aboveInputHeight,
 		);
 		const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackRow;
-		const cursorCol = markerRow >= 0 ? markerCol + 1 : 1;
-		this.write(`\x1b[${cursorRow};${cursorCol}H`);
-		this.write(this._showHardwareCursor ? "\x1b[?25h" : "\x1b[?25l");
+		const cursorCol =
+			markerRow >= 0 ? Math.min(termWidth, markerCol + 1) : 1;
+		const cursorMoved =
+			changes.length > 0 ||
+			cursorRow !== this.previousCursorRow ||
+			cursorCol !== this.previousCursorCol;
+		const cursorUpdate = cursorMoved
+			? `\x1b[${cursorRow};${cursorCol}H`
+			: "";
+		const visibilityChanged =
+			this._showHardwareCursor !== this.previousCursorVisible;
+		const visibilityUpdate = visibilityChanged
+			? this._showHardwareCursor
+				? "\x1b[?25h"
+				: "\x1b[?25l"
+			: "";
+		const diffFinishedAt = performance.now();
+		const writeStartedAt = performance.now();
+		let bytesWritten = 0;
+		if (changes) {
+			// Cursor restoration is part of the synchronized frame, so the user
+			// never observes it parked on the last streamed cell.
+			const buffer =
+				`\x1b[?2026h${changes}${cursorUpdate}${visibilityUpdate}` +
+				"\x1b[?2026l";
+			this.write(buffer);
+			bytesWritten = Buffer.byteLength(buffer);
+		} else {
+			const terminalStateUpdate = cursorUpdate + visibilityUpdate;
+			if (terminalStateUpdate) {
+				this.write(terminalStateUpdate);
+				bytesWritten = Buffer.byteLength(terminalStateUpdate);
+			}
+		}
+		if (cursorMoved) {
+			cursorMoves++;
+			this.previousCursorRow = cursorRow;
+			this.previousCursorCol = cursorCol;
+		}
+		if (visibilityChanged) {
+			this.previousCursorVisible = this._showHardwareCursor;
+		}
+		const frameFinishedAt = performance.now();
+		this.lastRenderMetrics = {
+			bytesWritten,
+			changedCells,
+			cursorMoves,
+			diffTimeMs: diffFinishedAt - layoutFinishedAt,
+			dirtyRegion:
+				dirtyBottom >= 0 ? { top: dirtyTop, bottom: dirtyBottom } : null,
+			dirtyRows,
+			frameTimeMs: frameFinishedAt - frameStartedAt,
+			layoutTimeMs: layoutFinishedAt - frameStartedAt,
+			writeTimeMs: frameFinishedAt - writeStartedAt,
+		};
+	}
+
+	getLastRenderMetrics(): RendererMetrics {
+		return { ...this.lastRenderMetrics };
 	}
 
 	private composeOverlays(
@@ -1186,11 +1303,17 @@ function parseLineIntoCells(line: string, targetWidth: number): Cell[] {
  *      emit char; if both, emit attr then char
  *   3. If we reach a run of unchanged cells, jump cursor past them
  */
+export interface TerminalLineDiff {
+	output: string;
+	changedCells: number;
+	cursorMoves: number;
+}
+
 function cellLevelDiff(
 	prevCells: Cell[],
 	newCells: Cell[],
 	row: number,
-): string {
+): TerminalLineDiff {
 	let out = "";
 	const closeHyperlink = "\x1b]8;;\x1b\\";
 	const changed = new Array<boolean>(newCells.length).fill(false);
@@ -1215,6 +1338,8 @@ function cellLevelDiff(
 	}
 
 	let column = 0;
+	let changedCells = 0;
+	let cursorMoves = 0;
 	while (column < newCells.length) {
 		if (!changed[column]) {
 			column++;
@@ -1222,6 +1347,8 @@ function cellLevelDiff(
 		}
 		const start = column;
 		while (column < newCells.length && changed[column]) column++;
+		changedCells += column - start;
+		cursorMoves++;
 
 		out += `\x1b[${row + 1};${start + 1}H${closeHyperlink}\x1b[0m`;
 		let activeAttr = "";
@@ -1237,7 +1364,7 @@ function cellLevelDiff(
 		out += closeHyperlink;
 	}
 
-	return out;
+	return { output: out, changedCells, cursorMoves };
 }
 
 /** Build the terminal update for one printable row. Exported for regression tests. */
@@ -1247,6 +1374,15 @@ export function diffTerminalLine(
 	row: number,
 	width: number,
 ): string {
+	return diffTerminalLineWithMetrics(previousLine, nextLine, row, width).output;
+}
+
+export function diffTerminalLineWithMetrics(
+	previousLine: string,
+	nextLine: string,
+	row: number,
+	width: number,
+): TerminalLineDiff {
 	return cellLevelDiff(
 		parseLineIntoCells(previousLine, width),
 		parseLineIntoCells(nextLine, width),

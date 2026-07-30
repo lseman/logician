@@ -94,6 +94,77 @@ void test("collapsed running tools show live output without expanding details", 
 	assert.doesNotMatch(output, /second line/);
 });
 
+void test("tool output cannot inject terminal control sequences", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	display.setTurns([{
+		id: "terminal-injection",
+		userMessage: { type: "user", content: "Show the output." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				tool: {
+					tool: "bash",
+					tool_name: "bash",
+					args: { command: "printf untrusted" },
+					result:
+						"safe\x1b[2J text\x1b]0;owned title\x07 visible",
+					isComplete: true,
+					isError: false,
+				},
+				isComplete: true,
+			}],
+		},
+		isComplete: true,
+	}]);
+
+	const rendered = display.render(100).join("\n");
+	assert.doesNotMatch(rendered, /\x1b\[2J|\x1b\]0;/);
+	assert.match(plain(rendered), /safe text visible/);
+});
+
+void test("growing tool streams sanitize only the appended suffix", () => {
+	const display = new TranscriptDisplay();
+	const turn: Turn = {
+		id: "incremental-sanitize",
+		userMessage: { type: "user", content: "Compile." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 1,
+				type: "tool",
+				tool: {
+					tool: "bash",
+					tool_name: "bash",
+					args: { command: "compile" },
+					streamOutput: "x".repeat(100_000),
+					isComplete: false,
+					isError: false,
+				},
+				isComplete: false,
+			}],
+		},
+		isComplete: false,
+	};
+	display.setTurns([turn]);
+	display.render(100);
+	const before = display.getSanitizationMetrics().scannedCharacters;
+	const tool = turn.assistantMessage?.chunks[0].tool;
+	assert.ok(tool);
+	tool.streamOutput += "y";
+	display.setTurns([turn]);
+
+	display.render(100);
+
+	const scanned =
+		display.getSanitizationMetrics().scannedCharacters - before;
+	assert.equal(scanned, 1);
+});
+
 void test("clicking a tool card toggles only that tool's details", () => {
 	const display = new TranscriptDisplay();
 	display.setViewportHeight(20);

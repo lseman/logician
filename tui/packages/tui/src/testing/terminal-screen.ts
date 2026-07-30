@@ -6,6 +6,13 @@ export interface TerminalCursor {
 	visible: boolean;
 }
 
+export interface TerminalScreenDiagnostics {
+	cursorBoundsViolations: number;
+	lastColumnWrites: number;
+	printableWrites: number;
+	synchronizedUpdateDepth: number;
+}
+
 /**
  * Small VT screen model for integration tests. It intentionally models screen
  * behavior rather than terminal styling: cursor movement, erasing, wrapping,
@@ -19,6 +26,10 @@ export class TerminalScreen {
 	private savedRow = 0;
 	private savedColumn = 0;
 	private cursorVisible = true;
+	private cursorBoundsViolations = 0;
+	private lastColumnWrites = 0;
+	private printableWrites = 0;
+	private synchronizedUpdateDepth = 0;
 
 	constructor(
 		public readonly columns: number,
@@ -89,6 +100,15 @@ export class TerminalScreen {
 		};
 	}
 
+	diagnostics(): TerminalScreenDiagnostics {
+		return {
+			cursorBoundsViolations: this.cursorBoundsViolations,
+			lastColumnWrites: this.lastColumnWrites,
+			printableWrites: this.printableWrites,
+			synchronizedUpdateDepth: this.synchronizedUpdateDepth,
+		};
+	}
+
 	private blankScreen(): string[][] {
 		return Array.from({ length: this.rows }, () =>
 			Array<string>(this.columns).fill(" "),
@@ -133,6 +153,9 @@ export class TerminalScreen {
 
 		if (privateMode && (final === "h" || final === "l")) {
 			if (first === 25) this.cursorVisible = final === "h";
+			if (first === 2026) {
+				this.synchronizedUpdateDepth += final === "h" ? 1 : -1;
+			}
 			if (first === 1049 && final === "h") {
 				this.cells = this.blankScreen();
 				this.row = 0;
@@ -158,10 +181,21 @@ export class TerminalScreen {
 				this.column = this.clampColumn((first || 1) - 1);
 				break;
 			case "H":
-			case "f":
-				this.row = this.clampRow((parameters[0] || 1) - 1);
-				this.column = this.clampColumn((parameters[1] || 1) - 1);
+			case "f": {
+				const requestedRow = (parameters[0] || 1) - 1;
+				const requestedColumn = (parameters[1] || 1) - 1;
+				if (
+					requestedRow < 0 ||
+					requestedRow >= this.rows ||
+					requestedColumn < 0 ||
+					requestedColumn >= this.columns
+				) {
+					this.cursorBoundsViolations++;
+				}
+				this.row = this.clampRow(requestedRow);
+				this.column = this.clampColumn(requestedColumn);
 				break;
+			}
 			case "J":
 				if (first === 2 || first === 3) this.cells = this.blankScreen();
 				break;
@@ -202,6 +236,8 @@ export class TerminalScreen {
 			this.column = 0;
 			this.lineFeed();
 		}
+		this.printableWrites += width;
+		if (this.column + width >= this.columns) this.lastColumnWrites++;
 		this.cells[this.row][this.column] = char;
 		for (let offset = 1; offset < width && this.column + offset < this.columns; offset++) {
 			this.cells[this.row][this.column + offset] = "";
