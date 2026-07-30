@@ -32,6 +32,8 @@ export interface InputBarOptions {
 	placeholder?: string;
 }
 
+export type InputSubmitIntent = "default" | "steer-now";
+
 export class InputBar implements Component, Focusable {
 	public focused = false;
 
@@ -67,7 +69,7 @@ export class InputBar implements Component, Focusable {
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
-	onSubmit?: (text: string) => void;
+	onSubmit?: (text: string, intent: InputSubmitIntent) => void;
 	onCancel?: () => void;
 	onChange?: (text: string) => void;
 
@@ -190,6 +192,20 @@ export class InputBar implements Component, Focusable {
 	clearHistory(): void {
 		this.historyIndex = null;
 		this.historyUnsaved = null;
+	}
+
+	/** Submit the current composer value with an explicit delivery intent. */
+	submit(intent: InputSubmitIntent = "default"): boolean {
+		const text = this.value.trim();
+		if (!text && this.value.length === 0) return false;
+		this.pushHistory(text || this.value);
+		const textToSubmit = text || this.value;
+		this.value = "";
+		this.cursor = 0;
+		this._invalidate();
+		if (!textToSubmit) return false;
+		this.onSubmit?.(textToSubmit, intent);
+		return true;
 	}
 
 	// ── Input handling ─────────────────────────────────────────────────────
@@ -316,17 +332,7 @@ export class InputBar implements Component, Focusable {
 
 		// ── Enter — submit ───────────────────────────────────────────────────
 		if (data === "\r" || data === "\n") {
-			const text = this.value.trim();
-			if (text || this.value.length > 0) {
-				this.pushHistory(text || this.value);
-				const textToSubmit = text || this.value;
-				this.value = "";
-				this.cursor = 0;
-				this._invalidate();
-				if (textToSubmit) {
-					this.onSubmit?.(textToSubmit);
-				}
-			}
+			this.submit();
 			return;
 		}
 
@@ -654,13 +660,13 @@ export class InputBar implements Component, Focusable {
 	private _renderComposerHeader(width: number): string {
 		const hintText = width >= 72
 			? this.value
-				? "Enter send  ·  Ctrl+Enter steer  ·  Esc clear  ·  Ctrl+O tools"
-				: "/ Enter commands  ·  Ctrl+Enter steer  ·  Ctrl+O tools"
+				? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear  ·  Ctrl+O tools"
+				: "/ Enter commands  ·  Ctrl+Enter steer now  ·  Ctrl+O tools"
 			: width >= 52
 				? this.value
-					? "Enter send  ·  Ctrl+Enter steer  ·  Esc clear"
-					: "/ Enter commands  ·  Ctrl+Enter steer"
-				: "Enter send  ·  Ctrl+Enter steer";
+					? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear"
+					: "/ commands  ·  Ctrl+Enter steer now"
+				: "Enter send  ·  Ctrl+Enter now";
 		const hint = ` ${theme.fg("muted", hintText)} `;
 		const hintWidth = visibleWidth(hint);
 		const ruleWidth = Math.max(1, width - hintWidth);

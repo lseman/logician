@@ -1770,8 +1770,12 @@ export class LogicianTUI {
 				return { consume: true };
 			}
 
-			// Ctrl+Enter — flush queued steering messages now
+			// Ctrl+Enter — submit the composer as immediate steering. With an
+			// empty composer, retain the shortcut for flushing an existing queue.
 			if (data === "\x1b[13;5u") {
+				if (this.inputBar.submit("steer-now")) {
+					return { consume: true };
+				}
 				const count = this.bridge.flushSteeringNow();
 				if (count > 0) {
 					this.transcript.addSystemMessage(
@@ -1839,7 +1843,7 @@ export class LogicianTUI {
 		};
 
 		// Input bar handler
-		this.inputBar.onSubmit = (text: string) => {
+		this.inputBar.onSubmit = (text: string, intent) => {
 			// A pending permission request captures the next submission:
 			// y/a/n (or allow/always/deny) answers it instead of becoming a message.
 			if (this.pendingPermission) {
@@ -1916,6 +1920,13 @@ export class LogicianTUI {
 				this.bridge
 					.sendMessage(text)
 					.catch((err) => this.bridge.reportError(err));
+				if (intent === "steer-now") {
+					const count = this.bridge.flushSteeringNow();
+					this.notify(
+						`Steering now with ${count} message${count === 1 ? "" : "s"}.`,
+						"info",
+					);
+				}
 				return;
 			}
 

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Turn } from "@logician/coding-agent/sessions";
 import { InputBar } from "../input/input-bar.ts";
 import { NotificationCenter } from "../status/notification-center.ts";
+import { SteerQueue } from "../status/steer-queue.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { CURSOR_MARKER, visibleWidth } from "../terminal/core.ts";
@@ -615,6 +616,36 @@ void test("input prompt has stable inset modern chrome", () => {
 	assert.match(plain(line).replace(CURSOR_MARKER, ""), /^  › Ask Logician/);
 	assert.equal(visibleWidth(header), 40);
 	assert.equal(visibleWidth(line), 40);
+});
+
+void test("composer preserves explicit steer-now submission intent", () => {
+	const input = new InputBar();
+	let submitted: { text: string; intent: string } | undefined;
+	input.onSubmit = (text, intent) => {
+		submitted = { text, intent };
+	};
+	input.valueText = "change direction";
+
+	assert.equal(input.submit("steer-now"), true);
+	assert.deepEqual(submitted, {
+		text: "change direction",
+		intent: "steer-now",
+	});
+	assert.equal(input.valueText, "");
+	assert.equal(input.submit("steer-now"), false);
+});
+
+void test("steering queue distinguishes queued and later delivery", () => {
+	const queue = new SteerQueue();
+	queue.setItems(["inspect the parser"], ["run the complete test suite"]);
+	const lines = queue.render(72);
+	const rendered = plain(lines.join("\n"));
+
+	assert.match(rendered, /STEERING\s+1 queued · 1 follow-up/);
+	assert.match(rendered, /QUEUE\s+inspect the parser/);
+	assert.match(rendered, /LATER\s+run the complete test suite/);
+	assert.match(rendered, /Ctrl\+Enter steer now/);
+	assert.ok(lines.every((line) => visibleWidth(line) <= 72));
 });
 
 void test("input composer collapses to one line on narrow terminals", () => {

@@ -43,6 +43,7 @@
       "dependencies": {
         "@logician/agent-capabilities": "0.2.0",
         "@logician/agent-core": "0.2.0",
+        "ignore": "^7.0.5",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",

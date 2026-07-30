@@ -4,7 +4,12 @@
 // there are pending steering messages.
 // Mirrors Pi's updatePendingMessagesDisplay() pattern.
 
-import { type Component, visibleWidth, RESET } from "../terminal/core.ts";
+import {
+	clampLineToWidth,
+	type Component,
+	visibleWidth,
+	RESET,
+} from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 
 export class SteerQueue implements Component {
@@ -33,47 +38,66 @@ export class SteerQueue implements Component {
 		const lines: string[] = [];
 		lines.push(""); // blank spacer before the block
 
-		// Header: "Queued  2 steering · 1 follow-up"
+		// Header: "STEERING  2 queued · 1 follow-up"
 		const parts: string[] = [];
 		if (this.steering.length > 0) {
-			parts.push(`${this.steering.length} steering`);
+			parts.push(`${this.steering.length} queued`);
 		}
 		if (this.followUp.length > 0) {
 			parts.push(`${this.followUp.length} follow-up`);
 		}
 		const header =
-			`${getHeader()} Queued\x1b[0m  ` +
+			`${getHeader()} STEERING\x1b[0m  ` +
 			`${getCount()}${parts.join(" · ")}\x1b[0m`;
-		lines.push(pad(clampLine(header, width), width));
+		lines.push(pad(clampLineToWidth(header, width), width));
 
-		// Numbered rows, capped. Steering first (cyan), then follow-up (dim).
+		// Numbered rows, capped. Delivery labels make queue semantics visible
+		// without relying on color alone.
 		const rows: {
 			mark: string;
+			label: string;
 			style: (s: string) => string;
 			msg: string;
 		}[] = [];
 		this.steering.forEach((msg) =>
-			rows.push({ mark: STEER_MARK, style: steerStyle, msg }),
+			rows.push({ mark: STEER_MARK, label: "QUEUE", style: steerStyle, msg }),
 		);
 		this.followUp.forEach((msg) =>
-			rows.push({ mark: getFollowMark(), style: followStyle, msg }),
+			rows.push({
+				mark: getFollowMark(),
+				label: "LATER",
+				style: followStyle,
+				msg,
+			}),
 		);
 
 		const shown = rows.slice(0, MAX_ROWS);
 		shown.forEach((row, i) => {
 			const n = `${getNum()}${i + 1}.\x1b[0m`;
-			const text = `${row.mark} ${n} ${row.style(oneLine(row.msg))}`;
-			lines.push(pad(clampLine(text, width), width));
+			const label = `${getLabel()}${row.label}\x1b[0m`;
+			const text = `${row.mark} ${n} ${label}  ${row.style(oneLine(row.msg))}`;
+			lines.push(pad(clampLineToWidth(text, width), width));
 		});
 
 		const hidden = rows.length - shown.length;
 		if (hidden > 0) {
 			lines.push(
-				pad(clampLine(`   ${getCount()}… ${hidden} more\x1b[0m`, width), width),
+				pad(
+					clampLineToWidth(`   ${getCount()}… ${hidden} more\x1b[0m`, width),
+					width,
+				),
 			);
 		}
 
-		lines.push(pad(clampLine("   \x1b[2m/steer-now process · /queue-drop N remove · /queue-clear clear\x1b[0m", width), width));
+		lines.push(
+			pad(
+				clampLineToWidth(
+					"   \x1b[2mEnter queue · Ctrl+Enter steer now · /queue manage\x1b[0m",
+					width,
+				),
+				width,
+			),
+		);
 
 		return lines;
 	}
@@ -85,6 +109,7 @@ const MAX_ROWS = 6;
 const getHeader = (): string => theme.fg("muted", "");
 const getCount = (): string => theme.fg("dim", "");
 const getNum = (): string => theme.fg("muted", "");
+const getLabel = (): string => theme.fg("dim", "");
 const STEER_MARK = " \x1b[36m▸\x1b[0m"; // cyan triangle ▸
 const getFollowMark = (): string => " " + theme.fg("dim", "") + "↳" + RESET;
 const steerStyle = (s: string): string => theme.fg("text", "") + s + RESET;
@@ -94,18 +119,6 @@ const followStyle = (s: string): string => theme.fg("muted", "") + s + RESET;
 function oneLine(msg: string): string {
 	const flat = msg.replace(/\s+/g, " ").trim();
 	return flat.length > 120 ? `${flat.slice(0, 120)}…` : flat;
-}
-
-function clampLine(text: string, maxW: number): string {
-	let out = "";
-	let w = 0;
-	for (const ch of text) {
-		const cw = visibleWidth(ch);
-		if (w + cw > maxW) break;
-		out += ch;
-		w += cw;
-	}
-	return out;
 }
 
 function pad(line: string, width: number): string {
