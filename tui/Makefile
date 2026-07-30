@@ -8,7 +8,7 @@ build: binary
 
 binary:
 	@test -x "$(BUN)" || { echo "bun is required to build $(BIN)"; exit 1; }
-	@$(BUN) install
+	@$(BUN) install --cwd $(CURDIR)/..
 	@mkdir -p dist
 	$(BUN) build --target=bun --compile $(ENTRY) --outfile $(BIN)
 	@chmod +x $(BIN)
