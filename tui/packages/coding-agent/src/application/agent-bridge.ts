@@ -1555,6 +1555,7 @@ export class AgentCoreBridge {
 		detail: string;
 	}> {
 		const messages = this.getMessages();
+		const toolDefinitions = this.getTools().toToolDefinitions();
 		const conversation = messages.filter((message) => message.role !== "tool");
 		const toolEvidence = messages.filter((message) => message.role === "tool");
 		const memory = this.harness?.getMemoryPrompt() ?? "";
@@ -1580,6 +1581,11 @@ export class AgentCoreBridge {
 				detail: memory ? "active" : "empty",
 			},
 			{
+				name: "Tool definitions",
+				tokens: estimateChatPayloadTokens([], toolDefinitions),
+				detail: `${toolDefinitions.length} tools`,
+			},
+			{
 				name: "Conversation",
 				tokens: conversation.length
 					? estimateChatPayloadTokens(conversation)
@@ -1599,7 +1605,8 @@ export class AgentCoreBridge {
 	/** Canonical size used by /context, /status, and the status bar. */
 	private measureContextTokens(): number {
 		const messages = this.getMessages();
-		return messages.length > 0 ? estimateChatPayloadTokens(messages) : 0;
+		const toolDefinitions = this.getTools().toToolDefinitions();
+		return estimateChatPayloadTokens(messages, toolDefinitions);
 	}
 
 	private publishContextUsage(): void {

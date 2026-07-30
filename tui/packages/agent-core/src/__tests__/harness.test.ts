@@ -276,6 +276,34 @@ void test("nextTurn queue survives until the next prompt and is injected before 
 	assert.deepEqual(harness.getQueues().nextTurn, []);
 });
 
+void test("prompt hook messages remain adjacent to the prompt that produced them", async () => {
+	const harness = makeHarness(
+		new FakeBackend([
+			() => textResponse("first answer"),
+			() => textResponse("second answer"),
+		]),
+	);
+	harness.setBeforeAgentStart((prompt) => ({
+		messages: [{ role: "user", content: `hook for ${prompt}` }],
+	}));
+
+	await harness.prompt("first prompt");
+	await harness.prompt("second prompt");
+
+	assert.deepEqual(
+		harness.messages.map((message) => message.content),
+		[
+			"test",
+			"hook for first prompt",
+			"first prompt",
+			"first answer",
+			"hook for second prompt",
+			"second prompt",
+			"second answer",
+		],
+	);
+});
+
 void test("nextTurn queued during a run waits for the following user prompt", async () => {
 	// eslint-disable-next-line prefer-const -- harness used in closures before assignment
 	let harness!: AgentHarness;

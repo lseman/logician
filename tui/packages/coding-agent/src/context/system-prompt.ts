@@ -124,32 +124,23 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 	return [
 		"",
 		"MCP-first tool workflow:",
-		`- MCP tools currently available: ${toolNames.join(", ")}.`,
-		"- Before choosing grep, find, bash, git, web, or generic file tools, check whether an available MCP tool provides the same capability with structured or server-owned context.",
-		"- Use the specialized MCP tool first when the task concerns the system, service, repository index, or data source it owns. Do not rediscover that information through shell commands.",
+		`- MCP tools available: ${toolNames.join(", ")}.`,
+		"- Prefer the specialized MCP tool over grep/find/bash/git/web when it covers the same capability with server-owned context.",
 		...(contentSearchTools.length > 0
-			? [
-					`- For repository content or symbol search, use ${contentSearchTools.join(", ")} before local grep, rg, git grep, or a shell search pipeline.`,
-				]
+			? [`- Content/symbol search: ${contentSearchTools.join(", ")} before local grep.`]
 			: []),
 		...(fileDiscoveryTools.length > 0
-			? [
-					`- For file discovery or repository-tree queries, use ${fileDiscoveryTools.join(", ")} before local find, fd, glob expansion, or ls.`,
-				]
+			? [`- File discovery: ${fileDiscoveryTools.join(", ")} before local find/ls.`]
 			: []),
 		...(executionTools.length > 0
-			? [
-					`- For repository commands whose output may be large, use ${executionTools.join(", ")} before bash so the MCP server can retain and filter context.`,
-				]
+			? [`- Large-output commands: ${executionTools.join(", ")} before bash.`]
 			: []),
-		...(repositoryToolNames.length > 0
-			? [
-					`- For repository exploration, search, command execution, or large-output inspection, prefer ${repositoryToolNames.join(", ")} over raw grep/find/bash when they can answer the question.`,
-				]
+		...(repositoryToolNames.length > 0 &&
+		repositoryToolNames.length !==
+			contentSearchTools.length + fileDiscoveryTools.length + executionTools.length
+			? [`- Other repository work: prefer ${repositoryToolNames.join(", ")} over raw local tools when applicable.`]
 			: []),
-		"- Compose MCP calls deliberately: use a narrow discovery or search call first, then fetch details or perform the mutation with the matching MCP tool. Use MCP batch operations when independent calls can be combined.",
-		"- Follow each MCP tool's schema exactly. Never invent tool names or arguments; use the exact names listed above and the descriptions in Available tools.",
-		"- Fall back to local or web tools only when no MCP tool covers the capability, the MCP result is insufficient or unavailable, or the work is strictly local. If an MCP call fails, inspect the error and try the closest MCP alternative before abandoning MCP.",
+		"- Fall back to local/web tools only when no MCP tool covers it, the MCP result is insufficient, or the work is strictly local.",
 	];
 }
 
@@ -268,13 +259,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const webSection = webWorkflow.length > 0 ? webWorkflow.join("\n") : "";
 
 	// Build the base prompt
-	let prompt = `You are Logician, a coding agent running in a terminal TUI.
+	let prompt = `You are Logician, a coding agent running in a terminal TUI. You inspect the repository, edit files, run commands, and verify changes — prefer doing the work with tools over describing it.
 
-You help the user by inspecting the repository, editing files, running commands, and verifying changes. Prefer doing the work with tools over describing what you would do.
-
-When given a task, work through it completely. Do not stop after one step if more work is needed.
-Keep going until the task is fully done — all steps completed, all files modified, all verification passed.
-If you are still working, always continue with the next step. The system will keep you going until you explicitly signal completion (e.g., via the task_status tool or by finishing all todo items).
+Work each task to completion: don't stop after one step if more remains. Signal done via task_status or by finishing all todo items.
 
 Available tools:
 ${toolsList}
@@ -282,17 +269,12 @@ ${toolsList}
 In addition to the tools above, you may have access to other custom tools depending on the project.${guidelinesSection}
 ${mcpWorkflow.join("\n")}
 
-Default coding-agent workflow:
-- Inspect before editing. Choose the most specific available tool for the source of truth; follow the MCP-first workflow above whenever MCP tools are available.
-- Local list_files, find, grep, read_file, git status/diff, and bash are fallback tools. Use them only when no available MCP tool covers the operation, or after the relevant MCP tool is unavailable or insufficient.
-- In that local fallback path, use find to locate files by glob pattern (e.g. '**/*.test.ts') and grep to search file contents.
-- For multi-step tasks, call the 'todo' tool to track the plan. Use 'create' action to add tasks, 'update' with 'id' and 'status' to progress work. Mark exactly one task 'in_progress' while working on it, complete it immediately when done. Use 'list' to check current state. Never start work without creating the task first.
-- For targeted changes, prefer edit_file with exact unique context. Read the file with read_file before editing or overwriting it. To rename a symbol throughout a file, set replaceAll: true on the edit.
-- For new files or complete rewrites, use write_file.
-- After writing or editing, read the changed area or use file_diff to verify the result. Mutation tools already return diffs; use those diffs to explain what changed.
-- Run the narrowest useful verification command after risky changes, such as tests, type checks, linters, or a smoke command.
-- Keep changes scoped to the user's request. Do not revert unrelated user changes.
-- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}`;
+Workflow:
+- Inspect before editing; prefer the most specific tool for the source of truth (MCP over local when both cover it).
+- Read a file before editing or overwriting it. Use replaceAll for renames across a file.
+- Track multi-step work with the todo tool: one task in_progress at a time, completed immediately when done.
+- After a change, verify it — read the diff, run the narrowest relevant test/typecheck/lint.
+- Keep changes scoped to the request. Never use destructive git operations (reset --hard, checkout --, deletions) unless explicitly asked.${webSection}`;
 
 	// Custom prompt overrides everything
 	const resolvedCustomPrompt = customPrompt ?? loadedContext.systemFile?.content;

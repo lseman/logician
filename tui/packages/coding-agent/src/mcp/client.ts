@@ -452,8 +452,8 @@ export function formatMcpToolResult(result: unknown): string {
 			return isError ? `Error: ${text || JSON.stringify(result)}` : text;
 		}
 		return isError
-			? `Error: ${JSON.stringify(result, null, 2)}`
-			: JSON.stringify(result, null, 2);
+			? `Error: ${JSON.stringify(result)}`
+			: JSON.stringify(result);
 	}
 	return String(result ?? "");
 }

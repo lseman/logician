@@ -706,7 +706,7 @@ export class TUI extends Container {
 			// potentially partial frame, and leave a visible cursor. The next
 			// render starts from an invalidated cache and therefore repaints.
 			process.stderr.write(
-				`\x1b[?2026l\x1b]8;;\x1b\\\x1b[0m\x1b[2J\x1b[H\x1b[?25h` +
+				"\x1b[?2026l\x1b]8;;\x1b\\\x1b[0m\x1b[2J\x1b[H\x1b[?25h" +
 					`\n\x1b[38;5;203m[TUI render error]\x1b[0m ${msg}\n`,
 			);
 			// eslint-disable-next-line no-console

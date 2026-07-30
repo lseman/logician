@@ -796,7 +796,10 @@ async function runAgentLoopInTaskScope(
 			// so context usage never remains stuck at zero.
 			if (config.contextWindowTokens) {
 				const contextTokens = Math.max(
-					estimateChatPayloadTokens(messages),
+					estimateChatPayloadTokens(
+						messages,
+						registry.toToolDefinitions(),
+					),
 					response?.usage?.totalTokens ?? 0,
 				);
 				const budgetResult = outputGuard?.processResponse(

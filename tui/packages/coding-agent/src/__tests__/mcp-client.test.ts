@@ -4,6 +4,7 @@ import {
 	allocateMcpToolName,
 	createMcpTool,
 	encodeMcpMessage,
+	formatMcpToolResult,
 	tryDecodeMcpMessage,
 } from "../mcp/client.ts";
 
@@ -52,4 +53,18 @@ void test("stdio MCP requests use newline-delimited JSON-RPC", () => {
 	assert.equal(encoded.toString("utf8").endsWith("\n"), true);
 	assert.equal(encoded.toString("utf8").includes("Content-Length"), false);
 	assert.equal(tryDecodeMcpMessage(encoded)?.message.method, "initialize");
+});
+
+void test("MCP object results use compact JSON in model context", () => {
+	assert.equal(
+		formatMcpToolResult({
+			items: [{ path: "src/index.ts", line: 42 }],
+			more: 3,
+		}),
+		"{\"items\":[{\"path\":\"src/index.ts\",\"line\":42}],\"more\":3}",
+	);
+	assert.equal(
+		formatMcpToolResult({ isError: true, code: "failed" }),
+		"Error: {\"isError\":true,\"code\":\"failed\"}",
+	);
 });

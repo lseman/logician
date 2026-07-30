@@ -5,8 +5,29 @@ import {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
+	estimateChatPayloadTokens,
 } from "../agent/messages.ts";
 import type { CompactableMessage } from "../agent/types.ts";
+
+void test("context estimates include tool definition overhead", () => {
+	const messages = [createUserMessage("hello")];
+	const withoutTools = estimateChatPayloadTokens(messages);
+	const withTools = estimateChatPayloadTokens(messages, [
+		{
+			type: "function",
+			function: {
+				name: "search",
+				description: "Search project files",
+				parameters: {
+					type: "object",
+					properties: { query: { type: "string" } },
+				},
+			},
+		},
+	]);
+
+	assert.ok(withTools > withoutTools);
+});
 
 void test("context compaction progressively tightens until it meets the target", async () => {
 	const messages: CompactableMessage[] = Array.from({ length: 20 }, (_, index) =>

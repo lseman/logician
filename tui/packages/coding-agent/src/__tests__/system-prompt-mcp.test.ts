@@ -66,28 +66,24 @@ void test("system prompt makes MCP the primary tool-selection workflow", () => {
 	assert.match(prompt, /MCP-first tool workflow:/);
 	assert.match(
 		prompt,
-		/MCP tools currently available: ctx_execute, fff__grep\./,
+		/MCP tools available: ctx_execute, fff__grep\./,
 	);
 	assert.match(
 		prompt,
-		/For repository content or symbol search, use fff__grep before local grep, rg, git grep, or a shell search pipeline\./,
+		/Content\/symbol search: fff__grep before local grep\./,
 	);
 	assert.match(
 		prompt,
-		/For repository commands whose output may be large, use ctx_execute before bash/,
+		/Large-output commands: ctx_execute before bash\./,
 	);
 	assert.match(
 		prompt,
-		/Before choosing grep, find, bash, git, web, or generic file tools/,
+		/Prefer the specialized MCP tool over grep\/find\/bash\/git\/web/,
 	);
-	assert.match(prompt, /try the closest MCP alternative before abandoning MCP/);
-	assert.match(
-		prompt,
-		/Local list_files, find, grep, read_file, git status\/diff, and bash are fallback tools\./,
-	);
+	assert.match(prompt, /Fall back to local\/web tools only when/);
 	assert.ok(
 		prompt.indexOf("MCP-first tool workflow:") <
-			prompt.indexOf("Default coding-agent workflow:"),
+			prompt.indexOf("Workflow:"),
 	);
 });
 
@@ -105,7 +101,7 @@ void test("system prompt omits MCP policy when no MCP tools are available", () =
 	assert.doesNotMatch(prompt, /MCP-first tool workflow:/);
 	assert.match(
 		prompt,
-		/Local list_files, find, grep, read_file, git status\/diff, and bash are fallback tools\./,
+		/prefer the most specific tool for the source of truth/,
 	);
 });
 

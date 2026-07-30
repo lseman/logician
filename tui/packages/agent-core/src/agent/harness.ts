@@ -619,7 +619,10 @@ export class AgentHarness {
 			...(beforeStart?.messages ?? []),
 		];
 		if (injectedMessages.length) {
-			initialMessages = [...injectedMessages, ...initialMessages];
+			// These messages were produced for this prompt, so keep them at the
+			// current turn boundary. Prepending them to the complete history made
+			// each new hook message appear before every older conversation turn.
+			initialMessages = [...initialMessages, ...injectedMessages];
 		}
 
 		// nextTurn guidance belongs to the next user-initiated prompt. Consume it
