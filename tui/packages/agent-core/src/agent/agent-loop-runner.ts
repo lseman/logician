@@ -544,18 +544,23 @@ async function runAgentLoopInTaskScope(
 					const guardResult = outputGuard?.handleError(llmError);
 
 					if (!guardResult || guardResult.action === "abort") {
+						const cancelled =
+							config.signal?.aborted ||
+							(llmError instanceof Error && llmError.name === "AbortError");
 						await emit({
 							type: "error",
 							message: guardResult?.message ?? String(llmError),
 							error: llmError,
 						});
-						await emit({
-							type: "auto_retry_end",
-							attempt: guardResult?.attempt ?? activeRetryAttempt,
-							success: false,
-						});
+						if (!cancelled && activeRetryAttempt > 0) {
+							await emit({
+								type: "auto_retry_end",
+								attempt: guardResult?.attempt ?? activeRetryAttempt,
+								success: false,
+							});
+						}
 						return finish({
-							status: config.signal?.aborted ? "cancelled" : "failed",
+							status: cancelled ? "cancelled" : "failed",
 							summary: guardResult?.message ?? String(llmError),
 							source: "runtime",
 						});
@@ -616,11 +621,6 @@ async function runAgentLoopInTaskScope(
 						);
 						if (!completed) {
 							await emit({ type: "error", message: "Operation aborted" });
-							await emit({
-								type: "auto_retry_end",
-								attempt: activeRetryAttempt,
-								success: false,
-							});
 							return finish({
 								status: "cancelled",
 								summary: "Operation aborted during provider retry.",

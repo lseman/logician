@@ -397,6 +397,7 @@ void test("context-full retry compacts and publishes the live transcript", async
 
 void test("aborting retry backoff prevents another provider request", async () => {
 	const controller = new AbortController();
+	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
 		() => {
 			throw new BackendError({
@@ -417,10 +418,50 @@ void test("aborting retry backoff prevents another provider request", async () =
 			outputGuard: new OutputGuard(),
 		},
 		(event) => {
+			events.push(event);
 			if (event.type === "auto_retry_start") controller.abort();
 		},
 	);
 	assert.equal(backend.calls, 1);
+	assert.equal(
+		events.some((event) => event.type === "auto_retry_end"),
+		false,
+	);
+});
+
+void test("aborting an in-flight provider request does not emit a fake retry", async () => {
+	const controller = new AbortController();
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => {
+			controller.abort();
+			throw new DOMException("Operation aborted", "AbortError");
+		},
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend,
+			signal: controller.signal,
+			outputGuard: new OutputGuard(),
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+	assert.equal(backend.calls, 1);
+	assert.equal(
+		events.some(
+			(event) =>
+				event.type === "auto_retry_start" || event.type === "auto_retry_end",
+		),
+		false,
+	);
+	const outcome = events.find((event) => event.type === "run_outcome");
+	assert.ok(outcome?.type === "run_outcome");
+	assert.equal(outcome.status, "cancelled");
 });
 
 void test("runAgentLoop processes follow-up messages after a stop", async () => {

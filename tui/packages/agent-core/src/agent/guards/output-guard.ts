@@ -102,6 +102,15 @@ export class OutputGuard {
 	 * Called from the loop runner when the backend throws/categorizes an error.
 	 */
 	handleError(error: unknown): OutputGuardResult {
+		// Abort is an intentional cancellation — abort immediately, no retry.
+		if (error instanceof Error && error.name === "AbortError") {
+			return {
+				action: "abort",
+				message: "Operation aborted",
+				isRetryable: false,
+			};
+		}
+
 		// Classify the error
 		const backendErr =
 			error instanceof Error ? this.extractBackendError(error) : null;
