@@ -6,7 +6,7 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Tool, ToolResult } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
 import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
 import { appendToFile } from "./shared/atomic-write.ts";
 import {

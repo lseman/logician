@@ -5,8 +5,8 @@ import {
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
-} from "../core/messages.ts";
-import type { CompactableMessage } from "../core/types.ts";
+} from "../agent/messages.ts";
+import type { CompactableMessage } from "../agent/types.ts";
 
 void test("context compaction progressively tightens until it meets the target", async () => {
 	const messages: CompactableMessage[] = Array.from({ length: 20 }, (_, index) =>

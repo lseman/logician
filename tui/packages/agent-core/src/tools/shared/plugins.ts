@@ -2,7 +2,7 @@
 // CLI entry points and re-exports. All imports that previously used
 // `plugins.ts` continue to work unchanged.
 
-import { TsPluginManager, type PluginCommandResult } from "../../compatibility/claude-code/plugin-manager.ts";
+import { TsPluginManager, type PluginCommandResult } from "../../plugins/claude-code/plugin-manager.ts";
 
 // ── CLI functions ─────────────────────────────────────────────────────────────
 
@@ -177,8 +177,8 @@ function parseJsonArg(raw?: string): Record<string, unknown> {
 // ── Re-exports from sub-modules ──────────────────────────────────────────────
 
 // Manager exports
-export { TsPluginManager } from "../../compatibility/claude-code/plugin-manager.ts";
-export type { PluginCommandResult, PluginInstall } from "../../compatibility/claude-code/plugin-manager.ts";
+export { TsPluginManager } from "../../plugins/claude-code/plugin-manager.ts";
+export type { PluginCommandResult, PluginInstall } from "../../plugins/claude-code/plugin-manager.ts";
 
 // Executor exports
 export type {
@@ -188,7 +188,7 @@ export type {
 	LoadedHook,
 	HookContextMessage,
 	HookExecutionResult,
-} from "../../compatibility/claude-code/plugin-executor.ts";
+} from "../../plugins/claude-code/plugin-executor.ts";
 export {
 	loadPluginHooks,
 	executeLoadedHook,
@@ -197,4 +197,4 @@ export {
 	buildHookInput,
 	parseHookEventType,
 	matcherMatches,
-} from "../../compatibility/claude-code/plugin-executor.ts";
+} from "../../plugins/claude-code/plugin-executor.ts";

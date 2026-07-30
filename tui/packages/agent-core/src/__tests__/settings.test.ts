@@ -5,7 +5,7 @@ import { strict as assert } from "node:assert";
 import {
 	parseSettingsCommand,
 	buildSettingsSnapshot,
-} from "../core/configuration/settings.ts";
+} from "../agent/configuration/settings.ts";
 
 describe("buildSettingsSnapshot", () => {
 	it("includes all sections", () => {

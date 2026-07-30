@@ -3,7 +3,7 @@
 // Wires extension event handlers into the agent runner via the hook bus.
 // Provides both the legacy untyped EventBus and a structured typed event system.
 
-import type { AgentHooks } from "../core/types.ts";
+import type { AgentHooks } from "../agent/types.ts";
 import type {
 	AfterToolCallExtensionResult,
 	BeforeToolCallExtensionResult,

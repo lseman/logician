@@ -11,13 +11,13 @@ import type {
 	ToolCall,
 	ToolContext,
 	ToolResult,
-} from "../../core/types.ts";
-import type { AskUserContext } from "../../core/types/types-tools.ts";
-import { ToolResultCache } from "../../core/tool-cache.ts";
+} from "../../agent/types.ts";
+import type { AskUserContext } from "../../agent/types/types-tools.ts";
+import { ToolResultCache } from "../../agent/tool-cache.ts";
 import { withTimeout } from "./async-utils.ts";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { DEFAULT_TRUNCATION } from "../../core/types/types-truncation.ts";
+import { DEFAULT_TRUNCATION } from "../../agent/types/types-truncation.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;

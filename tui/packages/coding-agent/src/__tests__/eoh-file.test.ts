@@ -8,7 +8,7 @@ import {
 	evaluateEohCandidate,
 	loadEohFile,
 	renderEohCandidate,
-} from "../runtime/eoh-file.ts";
+} from "../application/eoh/file.ts";
 
 const SOURCE = `"""Maximize the score over a fixed integer dataset."""
 

@@ -1,4 +1,4 @@
-export { ask_user } from "@logician/agent-capabilities/ask-user/ask-user.ts";
+export { ask_user } from "@logician/agent-capabilities/interaction/ask-user/index.ts";
 export {
 	createDefaultTools,
 	DEFAULT_SEARXNG_URL,

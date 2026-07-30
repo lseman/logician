@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
-import { initTheme, theme, getAvailableThemes } from "./layers/theme/theme.ts";
+import { getAvailableThemes, initTheme, theme } from "./terminal/theme.ts";
 import {
 	AgentCoreBridge,
 	buildDoctorReport,
@@ -14,10 +14,13 @@ import {
 	resolveTrustInfo,
 	TrustStore,
 } from "@logician/coding-agent/trust";
-import { parseExecArgs, runHeadlessExec } from "./headless-exec.ts";
-import { TrustPromptOverlay, type TrustChoice } from "./components/trust-prompt-overlay.ts";
-import { visibleWidth } from "./layers/core/tui-core.ts";
-import { LogicianTUI } from "./layers/presentation/tui.ts";
+import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
+import {
+	TrustPromptOverlay,
+	type TrustChoice,
+} from "./overlays/trust-prompt-overlay.ts";
+import { visibleWidth } from "./terminal/core.ts";
+import { LogicianTUI } from "./app/tui.ts";
 
 /** Show the trust prompt as an interactive terminal card before the main TUI. */
 async function showTrustOverlay(

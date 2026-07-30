@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { TodoBar, type TaskItem } from "../src/components/todo/todo-bar.ts";
-import { initTheme } from "../src/layers/theme/theme.ts";
+import { TodoBar, type TaskItem } from "../src/status/todo-bar.ts";
+import { initTheme } from "../src/terminal/theme.ts";
 
 initTheme("dark");
 

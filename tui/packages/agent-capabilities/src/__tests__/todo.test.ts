@@ -4,7 +4,7 @@ import {
 	getTasks,
 	onTodosChanged,
 	todo_tool,
-} from "../todo/todo.ts";
+} from "../tasks/todo.ts";
 
 void test("todo store rejects invisible subjects and publishes immutable snapshots", async () => {
 	await todo_tool.execute({ action: "clear" }, {});

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HookBus } from "../hooks/native/hook-bus.ts";
-import type { ToolCall } from "../core/types.ts";
+import type { ToolCall } from "../agent/types.ts";
 
 const ctx = {
 	toolCall: { id: "1", name: "bash", arguments: "{}" } as ToolCall,

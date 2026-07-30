@@ -7,12 +7,15 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./tools": "./src/tools.ts",
-		"./todo/*": "./src/todo/*",
-		"./ask-user/*": "./src/ask-user/*",
-		"./subagents/*": "./src/subagents/*",
-		"./reasoners": "./src/reasoners/index.ts",
-		"./reasoners/registry": "./src/reasoners/registry.ts",
-		"./reasoners/*": "./src/reasoners/*",
+		"./tasks": "./src/tasks/index.ts",
+		"./tasks/*": "./src/tasks/*",
+		"./interaction": "./src/interaction/index.ts",
+		"./interaction/*": "./src/interaction/*",
+		"./delegation": "./src/delegation/index.ts",
+		"./delegation/*": "./src/delegation/*",
+		"./reasoning": "./src/reasoning/index.ts",
+		"./reasoning/registry": "./src/reasoning/registry.ts",
+		"./reasoning/*": "./src/reasoning/*",
 		"./eoh/*": "./src/eoh/*"
 	},
 	"scripts": {

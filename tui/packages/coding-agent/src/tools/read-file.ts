@@ -2,7 +2,7 @@
 // Read file contents with line-based pagination and two-axis truncation.
 
 import * as fs from "node:fs";
-import type { Tool } from "@logician/agent-core/core/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 import { ensureInsideCwd, resolveReadPath } from "@logician/agent-core/tools/shared/path-utils.ts";
 import { recordRead } from "./read-tracker.ts";
 import {

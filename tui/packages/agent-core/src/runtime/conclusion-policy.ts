@@ -1,5 +1,5 @@
-import type { AgentEvent, Message } from "../core/types.ts";
-import { awaitsUserInput, looksComplete, looksNonCommittal } from "../core/guards/response-patterns.ts";
+import type { AgentEvent, Message } from "../agent/types.ts";
+import { awaitsUserInput, looksComplete, looksNonCommittal } from "../agent/guards/response-patterns.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 

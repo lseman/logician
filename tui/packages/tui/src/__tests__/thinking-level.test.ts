@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { LogicianTUI } from "../layers/presentation/tui.ts";
+import { LogicianTUI } from "../app/tui.ts";
 
 void test("thinking-level transition synchronizes runtime, local state, and status", () => {
 	let bridgeLevel = "";

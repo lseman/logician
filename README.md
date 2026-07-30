@@ -79,7 +79,7 @@ tui/packages/
 
 | Package | Exports |
 |---|---|
-| `@logician/agent-core` | `core/*`, `hooks/*`, `tools/*`, `compaction/*`, `message-queue/*` |
+| `@logician/agent-core` | `agent/*`, `hooks/*`, `tools/*`, `compaction/*`, `queue/*` |
 | `@logician/agent-capabilities` | `todo/*`, `ask-user/*`, `subagents/*`, `reasoners/*`, `eoh/*` |
 | `@logician/coding-agent` | `tools`, `skills`, `mcp`, `context-files`, `prompts`, `trust`, `sessions` |
 | `@logician/tui` | `components/*`, `engine/*`, `layers/*`, `state/*` |
@@ -233,7 +233,7 @@ Inspect the change as a reviewer. Prioritize bugs and regressions before style.
 
 ## Themes
 
-Built-in themes live in `tui/packages/tui/src/layers/theme`. Custom themes go in `~/.logician/themes/`.
+Built-in themes live in `tui/packages/tui/src/terminal`. Custom themes go in `~/.logician/themes/`.
 
 ```json
 {

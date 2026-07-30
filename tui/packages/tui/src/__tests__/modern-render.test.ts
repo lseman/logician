@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Turn } from "@logician/coding-agent/transcript";
-import { InputBar } from "../components/input-bar.ts";
-import { NotificationCenter } from "../components/notification-center.ts";
-import { StatusBar } from "../components/status-bar.ts";
-import { TranscriptDisplay } from "../components/transcript-display.ts";
-import { CURSOR_MARKER, visibleWidth } from "../layers/core/tui-core.ts";
-import { initTheme } from "../layers/theme/theme.ts";
+import { InputBar } from "../input/input-bar.ts";
+import { NotificationCenter } from "../status/notification-center.ts";
+import { StatusBar } from "../status/status-bar.ts";
+import { TranscriptDisplay } from "../rendering/transcript/display.ts";
+import { CURSOR_MARKER, visibleWidth } from "../terminal/core.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
@@ -34,7 +34,7 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 					tool: {
 						tool: "read_file",
 						tool_name: "read_file",
-						args: { path: "runtime/bridge.ts" },
+						args: { path: "application/agent-bridge.ts" },
 						result: "ok",
 						isError: false,
 						isComplete: true,

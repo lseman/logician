@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SelectorController } from "../components/selector-controller.ts";
+import { SelectorController } from "../overlays/selector-controller.ts";
 
 void test("selector controller shares wrapping and viewport behavior", () => {
 	const selector = new SelectorController();

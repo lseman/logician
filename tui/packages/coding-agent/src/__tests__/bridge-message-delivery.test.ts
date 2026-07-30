@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
-import { AgentCoreBridge } from "../runtime/bridge.ts";
+import { AgentCoreBridge } from "../application/agent-bridge.ts";
 
 void test("startup state reports the registered web_search capability", async () => {
 	const bridge = new AgentCoreBridge({
@@ -190,6 +190,32 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 	assert.doesNotMatch(internal.config.systemPrompt, /<startup-hook-context>/);
 	assert.match(internal.config.systemPrompt, /<mcp-status>/);
 	assert.match(internal.config.systemPrompt, /<available-skills>/);
+});
+
+void test("malformed startup hook messages do not prevent initialization", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+
+	internal.applyPluginHookContext({
+		additional_contexts: ["valid additional context"],
+		context_messages: [
+			null,
+			"not a message",
+			{},
+			{ content: 42 },
+			{ content: "valid message context" },
+		],
+		initial_user_message: null,
+	});
+
+	assert.match(internal.config.systemPrompt, /valid additional context/);
+	assert.match(internal.config.systemPrompt, /valid message context/);
+	assert.doesNotMatch(internal.config.systemPrompt, /not a message/);
 });
 
 void test("/context preserves complete long messages and tool results", () => {

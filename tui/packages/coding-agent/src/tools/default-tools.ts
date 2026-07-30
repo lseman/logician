@@ -1,5 +1,5 @@
 import { getBuiltInTools } from "@logician/agent-capabilities/tools";
-import type { Tool, WebSearchConfig } from "@logician/agent-core/core/types.ts";
+import type { Tool, WebSearchConfig } from "@logician/agent-core/agent/types.ts";
 import { bash } from "./bash.ts";
 import { edit_file } from "./edit-file.ts";
 import { file_diff } from "./file-diff.ts";

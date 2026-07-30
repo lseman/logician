@@ -2,9 +2,9 @@
 
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { initTheme } from "../src/layers/theme/theme.ts";
-import { StatusBar } from "../src/components/status-bar.ts";
-import { visibleWidth } from "../src/layers/core/tui-core.ts";
+import { initTheme } from "../src/terminal/theme.ts";
+import { StatusBar } from "../src/status/status-bar.ts";
+import { visibleWidth } from "../src/terminal/core.ts";
 
 const setupTheme = (): void => {
 	try {

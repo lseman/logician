@@ -4,33 +4,33 @@
 // user-supplied hooks via the typed HookBus so both run.
 
 import { BudgetTracker } from "./budget.ts";
-import { ThinkingLoopDetector } from "../../core/guards/thinking-loop-detector.ts";
+import { ThinkingLoopDetector } from "../../agent/guards/thinking-loop-detector.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
 	snapshotBeforeBash,
 	type WorkspaceSnapshot,
-} from "../../core/file-checkpoints.ts";
-import type { LoopDetector } from "../../core/guards/loop-detector.ts";
+} from "../../agent/file-checkpoints.ts";
+import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
 import {
 	awaitsUserInput,
 	detectsCircling,
-} from "../../core/guards/response-patterns.ts";
+} from "../../agent/guards/response-patterns.ts";
 import { HookBus } from "../native/hook-bus.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
-} from "../../core/messages.ts";
+} from "../../agent/messages.ts";
 import { compactToFit } from "../../compaction/compaction.ts";
-import { getTaskStatus } from "../../core/tasks/task-status-state.ts";
-import { getTasks } from "../../core/tasks/todo-state.ts";
-import { resolveExecutionPolicy } from "../../core/execution-policy.ts";
+import { getTaskStatus } from "../../agent/tasks/task-status-state.ts";
+import { getTasks } from "../../agent/tasks/todo-state.ts";
+import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
 	CompactableMessage,
 	Message,
-} from "../../core/types.ts";
+} from "../../agent/types.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the

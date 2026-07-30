@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Tool } from "@logician/agent-core";
-import { buildDefaultSystemPrompt } from "../system-prompt.ts";
+import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 
 void test("system prompt makes MCP the primary tool-selection workflow", () => {
 	const fullDescription =

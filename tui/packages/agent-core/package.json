@@ -6,17 +6,17 @@
 	"main": "src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./core/*": "./src/core/*",
+		"./agent/*": "./src/agent/*",
 		"./tools/*": "./src/tools/*",
-		"./builtins/*": "./src/builtins/*",
+		"./builtins/*": "./src/hooks/builtin/*",
 		"./extensions/*": "./src/extensions/*",
 		"./hooks/*": "./src/hooks/*",
 		"./hooks/native": "./src/hooks/native/index.ts",
 		"./hooks/builtin": "./src/hooks/builtin/index.ts",
 		"./hooks/extensions": "./src/hooks/extensions/index.ts",
-		"./compatibility/claude-code": "./src/compatibility/claude-code/index.ts",
+		"./plugins/claude-code": "./src/plugins/claude-code/index.ts",
 		"./compaction/*": "./src/compaction/*",
-		"./message-queue/*": "./src/message-queue/*"
+		"./queue/*": "./src/queue/*"
 	},
 	"scripts": {
 		"test": "tsx src/__tests__/*.test.ts",

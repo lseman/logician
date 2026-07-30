@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MessageDeliveryManager } from "../message-queue/manager.ts";
+import { MessageDeliveryManager } from "../queue/manager.ts";
 
 void test("one-at-a-time steering drains without dropping later messages", () => {
 	const manager = new MessageDeliveryManager({ steeringMode: "one-at-a-time" });

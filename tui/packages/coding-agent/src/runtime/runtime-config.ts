@@ -1,4 +1,4 @@
-import type { AgentBridgeOptions } from "./bridge.ts";
+import type { AgentBridgeOptions } from "../application/agent-bridge.ts";
 import {
 	configBool,
 	configNumber,

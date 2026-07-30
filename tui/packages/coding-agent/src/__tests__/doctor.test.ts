@@ -6,7 +6,7 @@ import { test } from "node:test";
 import {
 	buildDoctorReport,
 	formatDoctorReport,
-} from "../runtime/doctor.ts";
+} from "../developer-tools/doctor.ts";
 
 void test("doctor reports configuration without modifying it", async () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-"));

@@ -5,8 +5,8 @@ import {
 	formatSkillActivationNotice,
 	SkillActivationSession,
 	selectSkillsForPrompt,
-} from "../skill-activation.ts";
-import type { Skill } from "../skills.ts";
+} from "../skills/activation.ts";
+import type { Skill } from "../skills/index.ts";
 
 function skill(
 	name: string,

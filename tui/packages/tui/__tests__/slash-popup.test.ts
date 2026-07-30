@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SlashPopup } from "../src/components/slash-popup.ts";
-import { initTheme } from "../src/layers/theme/theme.ts";
+import { SlashPopup } from "../src/overlays/slash-popup.ts";
+import { initTheme } from "../src/terminal/theme.ts";
 import type { SlashCommandDef } from "@logician/coding-agent/slash-commands";
 
 initTheme("dark");

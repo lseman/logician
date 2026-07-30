@@ -3,7 +3,7 @@
 //   - Line limit  (default 2000 lines)
 //   - Byte limit  (default 50KB)
 // Never returns partial lines (except the tail-truncation edge case).
-// Ported from pi (packages/coding-agent/src/core/tools/truncate.ts).
+// Ported from pi (packages/coding-agent/src/agent/tools/truncate.ts).
 
 import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";

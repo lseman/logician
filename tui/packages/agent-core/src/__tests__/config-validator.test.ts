@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateConfig, throwOnValidationErrors } from "../core/configuration/config-validator.ts";
-import type { AgentConfig } from "../core/types.ts";
+import { validateConfig, throwOnValidationErrors } from "../agent/configuration/config-validator.ts";
+import type { AgentConfig } from "../agent/types.ts";
 
 function describe(name: string, fn: () => void) { fn(); }
 function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }

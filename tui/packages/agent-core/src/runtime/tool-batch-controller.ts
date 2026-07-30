@@ -1,5 +1,5 @@
-import { createToolResultMessage } from "../core/messages.ts";
-import type { AgentEvent, AgentHooks, Message, ToolCall } from "../core/types.ts";
+import { createToolResultMessage } from "../agent/messages.ts";
+import type { AgentEvent, AgentHooks, Message, ToolCall } from "../agent/types.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
 import type { PermissionManager } from "../tools/shared/permissions.ts";

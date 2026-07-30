@@ -3,8 +3,13 @@
 // advertises a compact catalog (name + description); the model calls this tool
 // to pull the full SKILL.md body when it decides to use a skill.
 
-import { findSkillByName, formatSkillInvocation, skillLookupKeys, type Skill } from "../skills.ts";
-import type { Tool } from "@logician/agent-core/core/types.ts";
+import {
+	findSkillByName,
+	formatSkillInvocation,
+	skillLookupKeys,
+	type Skill,
+} from "../skills/index.ts";
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 
 /**
  * Build a read_skill tool bound to the given skills. Pass the skills loaded at

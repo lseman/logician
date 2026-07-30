@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ToolRegistry } from "../tools/shared/registry.ts";
-import type { Tool } from "../core/types.ts";
+import type { Tool } from "../agent/types.ts";
 import { microCompactMessages } from "../compaction/compaction.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {

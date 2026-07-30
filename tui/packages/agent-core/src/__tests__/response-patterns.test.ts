@@ -5,7 +5,7 @@ import {
 	looksComplete,
 	awaitsUserInput,
 	detectsCircling,
-} from "../core/guards/response-patterns.ts";
+} from "../agent/guards/response-patterns.ts";
 
 // ── looksNonCommittal ──────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Tool } from "@logician/agent-core/core/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 
 const execFileAsync = promisify(execFile);
 

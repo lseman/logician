@@ -18,7 +18,7 @@ import {
 	recordFileBeforeWrite,
 	restoreFileFrame,
 	snapshotBeforeBash,
-} from "../core/file-checkpoints.ts";
+} from "../agent/file-checkpoints.ts";
 
 void test("restore rewrites a modified file and deletes a created one", () => {
 	clearFileFrames();

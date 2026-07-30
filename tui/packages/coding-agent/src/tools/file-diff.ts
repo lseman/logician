@@ -4,7 +4,7 @@
 import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type { Tool } from "@logician/agent-core/core/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 import { ensureInsideCwd, resolveReadPath } from "@logician/agent-core/tools/shared/path-utils.ts";
 import { summarizeDiff } from "./diff-utils.ts";
 

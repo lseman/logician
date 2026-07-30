@@ -2,22 +2,22 @@
 // Returns all built-in tools for automatic registration at startup.
 
 import type { Tool, AgentEvent, AgentConfig } from "@logician/agent-core";
-import type { LLMBackend } from "@logician/agent-core/core/backend.ts";
-import { ask_user } from "./ask-user/ask-user.ts";
-import { task_status } from "./todo/task-status.ts";
-import { todo_tool } from "./todo/todo.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import { ask_user } from "./interaction/ask-user/index.ts";
+import { task_status } from "./tasks/task-status.ts";
+import { todo_tool } from "./tasks/todo.ts";
 import {
 	createSubagentConcurrencyLimiter,
 	createSpawnAgentTool,
 	createSpawnAgentsTool,
 	type SpawnAgentDeps,
-} from "./subagents/subagent.ts";
+} from "./delegation/definitions.ts";
 
 export interface SubagentToolDeps {
 	config: () => AgentConfig;
 	backend: LLMBackend;
 	cwd: string;
-	agents: () => import("./subagents/subagent.ts").AgentDefinition[];
+	agents: () => import("./delegation/definitions.ts").AgentDefinition[];
 	emit: (event: AgentEvent) => void;
 	/** Max concurrent subagent executions (default: 4). */
 	maxParallelAgents?: number;

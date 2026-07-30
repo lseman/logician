@@ -3,11 +3,11 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { AgentHarness, HarnessBusyError } from "../core/harness.ts";
-import { Session } from "../core/session.ts";
-import type { AgentConfig } from "../core/types.ts";
+import { AgentHarness, HarnessBusyError } from "../agent/harness.ts";
+import { Session } from "../agent/session.ts";
+import type { AgentConfig } from "../agent/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
-import { BackendError } from "../core/backend.ts";
+import { BackendError } from "../agent/backend.ts";
 
 function makeHarness(backend: FakeBackend): AgentHarness {
 	const config: AgentConfig = {

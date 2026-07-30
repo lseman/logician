@@ -6,7 +6,7 @@ import { test } from "node:test";
 import {
 	createPostEditDiagnosticHooks,
 	diagnoseEditedFile,
-} from "../runtime/post-edit-diagnostics.ts";
+} from "../developer-tools/post-edit-diagnostics.ts";
 
 function workspace(): string {
 	return mkdtempSync(path.join(tmpdir(), "logician-diagnostics-"));

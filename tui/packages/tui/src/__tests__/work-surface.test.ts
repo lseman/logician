@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WorkSurface } from "../components/work-surface.ts";
-import { initTheme } from "../layers/theme/theme.ts";
+import { WorkSurface } from "../status/work-surface.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 void test("work surface renders working set and turn evidence", () => {
 	initTheme("dark");

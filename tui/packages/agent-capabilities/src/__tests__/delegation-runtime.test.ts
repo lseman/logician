@@ -4,15 +4,15 @@ import type {
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
-} from "@logician/agent-core/core/backend.ts";
+} from "@logician/agent-core/agent/backend.ts";
 import type { AgentConfig, Tool } from "@logician/agent-core";
-import { runDelegatedAgent } from "../subagents/delegation-runtime.ts";
+import { runDelegatedAgent } from "../delegation/runtime.ts";
 import {
 	BUILTIN_AGENTS,
 	createSubagentConcurrencyLimiter,
 	createSpawnAgentTool,
 	createSpawnAgentsTool,
-} from "../subagents/subagent.ts";
+} from "../delegation/definitions.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake";

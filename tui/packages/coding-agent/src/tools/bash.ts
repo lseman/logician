@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { constants, access as fsAccess } from "node:fs/promises";
 
-import type { Tool, ToolResult } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

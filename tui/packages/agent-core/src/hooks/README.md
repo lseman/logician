@@ -6,7 +6,7 @@ Logician has four intentionally separate interception systems:
 2. `builtin/` — internal runtime policies such as compaction, budgets, checkpoints,
    and loop protection.
 3. `extensions/` — lifecycle events exposed to TypeScript extensions.
-4. `compatibility/claude-code/` — an adapter for Claude Code plugin manifests,
+4. `plugins/claude-code/` — an adapter for Claude Code plugin manifests,
    event names, stdin payloads, and hook responses.
 
 New runtime behavior should use native hooks. Built-in policy belongs in

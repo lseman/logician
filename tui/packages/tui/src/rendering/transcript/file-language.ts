@@ -1,0 +1,52 @@
+const EXTENSION_LANGUAGES: Record<string, string> = {
+	ts: "typescript",
+	tsx: "tsx",
+	js: "javascript",
+	jsx: "jsx",
+	py: "python",
+	rs: "rust",
+	go: "go",
+	java: "java",
+	rb: "ruby",
+	php: "php",
+	cs: "csharp",
+	cpp: "cpp",
+	c: "c",
+	h: "c",
+	hs: "haskell",
+	ml: "ocaml",
+	sh: "bash",
+	zsh: "bash",
+	bash: "bash",
+	md: "markdown",
+	html: "html",
+	css: "css",
+	json: "json",
+	yaml: "yaml",
+	yml: "yaml",
+	xml: "xml",
+	sql: "sql",
+	toml: "toml",
+	ini: "ini",
+	conf: "ini",
+	gitignore: "plaintext",
+	env: "plaintext",
+	svelte: "svelte",
+	vue: "vue",
+	astro: "astro",
+	kt: "kotlin",
+	swift: "swift",
+	dart: "dart",
+	lua: "lua",
+	r: "r",
+	pl: "perl",
+	pm: "perl",
+};
+
+export function detectLanguage(
+	filePath: string | undefined,
+): string | undefined {
+	if (!filePath) return undefined;
+	const extension = filePath.split(".").pop()?.toLowerCase();
+	return extension ? EXTENSION_LANGUAGES[extension] : undefined;
+}

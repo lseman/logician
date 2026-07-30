@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { TrustPromptOverlay } from "../components/trust-prompt-overlay.ts";
-import { visibleWidth } from "../layers/core/tui-core.ts";
-import { initTheme } from "../layers/theme/theme.ts";
+import { TrustPromptOverlay } from "../overlays/trust-prompt-overlay.ts";
+import { visibleWidth } from "../terminal/core.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
 

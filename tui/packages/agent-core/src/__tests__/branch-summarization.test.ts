@@ -2,7 +2,7 @@
 
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import type { Message } from "../core/types.ts";
+import type { Message } from "../agent/types.ts";
 import {
 	createFileOps,
 	extractFileOpsFromMessages,
@@ -11,7 +11,7 @@ import {
 	collectMessagesForBranchSummary,
 	parseBranchSummary,
 	serializeMessages,
-} from "../core/summaries/branch-summarization.ts";
+} from "../agent/summaries/branch-summarization.ts";
 
 describe("createFileOps", () => {
 	it("creates empty ops", () => {

@@ -2,7 +2,7 @@
 // Merged: Pi's serializeConversation (with thinking blocks) + Logician's
 // file operation tracking.
 
-import { DEFAULT_TRUNCATION } from "../core/types/types-truncation.ts";
+import { DEFAULT_TRUNCATION } from "../agent/types/types-truncation.ts";
 
 // ============================================================================
 // File Operation Tracking

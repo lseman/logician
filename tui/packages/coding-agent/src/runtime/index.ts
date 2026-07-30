@@ -1,7 +1,7 @@
-export * from "./bridge.ts";
-export * from "./doctor.ts";
+export * from "../application/agent-bridge.ts";
+export * from "../developer-tools/doctor.ts";
 export * from "./runtime-config.ts";
-export * from "./lsp-manager.ts";
-export * from "./goal-manager.ts";
-export { LoopManager } from "./loop-manager.ts";
+export * from "../developer-tools/lsp-manager.ts";
+export * from "../application/goal-manager.ts";
+export { LoopManager } from "../application/loop-manager.ts";
 export type { ParsedBridgeEvent } from "./events.ts";

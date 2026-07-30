@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ChoicePopup } from "../components/choice-popup.ts";
-import { SettingsSelectorOverlay } from "../components/settings-overlay.ts";
-import { ThemeSelectorOverlay } from "../components/theme-selector.ts";
-import { visibleWidth } from "../layers/core/tui-core.ts";
-import { initTheme, theme } from "../layers/theme/theme.ts";
+import { ChoicePopup } from "../overlays/choice-popup.ts";
+import { SettingsSelectorOverlay } from "../overlays/settings-overlay.ts";
+import { ThemeSelectorOverlay } from "../overlays/theme-selector.ts";
+import { visibleWidth } from "../terminal/core.ts";
+import { initTheme, theme } from "../terminal/theme.ts";
 
 initTheme("dark");
 

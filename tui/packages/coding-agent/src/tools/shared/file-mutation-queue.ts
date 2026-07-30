@@ -1,7 +1,7 @@
 // ── File mutation queue ──────────────────────────────────────────────────────────
 // Serialize mutations targeting the same file (keyed by realpath), while
 // mutations to different files still run in parallel.
-// Ported from pi (packages/coding-agent/src/core/tools/file-mutation-queue.ts).
+// Ported from pi (packages/coding-agent/src/agent/tools/file-mutation-queue.ts).
 
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";

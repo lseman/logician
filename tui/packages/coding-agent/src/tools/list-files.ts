@@ -5,7 +5,7 @@
 
 import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
-import type { Tool, ToolResult } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
 import { truncateHead, formatSize } from "./truncate.ts";
 import { ensureInsideCwd, resolvePath } from "@logician/agent-core/tools/shared/path-utils.ts";
 

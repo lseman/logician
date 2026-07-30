@@ -1,7 +1,7 @@
 // ── web_search tool ──────────────────────────────────────────────────────────────
 // Search the web via SearXNG (self-hosted privacy-respecting metasearch engine).
 
-import type { Tool, ToolContext, WebSearchConfig } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolContext, WebSearchConfig } from "@logician/agent-core/agent/types.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 
 type FetchLike = (

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { LspManager } from "../runtime/lsp-manager.ts";
+import { LspManager } from "../developer-tools/lsp-manager.ts";
 
 void test("LspManager lazily collects publishDiagnostics", async () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-lsp-"));

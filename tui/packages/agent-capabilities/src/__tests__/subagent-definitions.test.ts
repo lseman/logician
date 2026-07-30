@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import type { GenerateOptions, LLMBackend, LLMResponse } from "@logician/agent-core/core/backend.ts";
+import type { GenerateOptions, LLMBackend, LLMResponse } from "@logician/agent-core/agent/backend.ts";
 import type { AgentConfig, Tool } from "@logician/agent-core";
 import {
 	BUILTIN_AGENTS,
 	loadAgentDefinitions,
 	createSpawnAgentTool,
 	createSpawnAgentsTool,
-} from "../subagents/subagent.ts";
+} from "../delegation/definitions.ts";
 
 function mkAgentDir(): string {
 	return mkdtempSync(path.join(tmpdir(), "logician-agents-"));

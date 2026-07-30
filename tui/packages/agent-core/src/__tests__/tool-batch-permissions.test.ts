@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";
 import { PermissionManager } from "../tools/shared/permissions.ts";
-import type { AgentEvent, Tool, ToolCall } from "../core/types.ts";
+import type { AgentEvent, Tool, ToolCall } from "../agent/types.ts";
 import type { ExtensionEvent } from "../hooks/extensions/events.ts";
 
 function registryWithBash(): ToolRegistry {

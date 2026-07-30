@@ -1,6 +1,6 @@
-import type { MessageDeliveryManager } from "../message-queue/manager.ts";
-import { createUserMessage } from "../core/messages.ts";
-import type { AgentConfig, AgentEvent, AgentHooks, Message } from "../core/types.ts";
+import type { MessageDeliveryManager } from "../queue/manager.ts";
+import { createUserMessage } from "../agent/messages.ts";
+import type { AgentConfig, AgentEvent, AgentHooks, Message } from "../agent/types.ts";
 
 export interface HarnessQueueHookDependencies {
 	messageDelivery: MessageDeliveryManager;

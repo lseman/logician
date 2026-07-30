@@ -3,8 +3,8 @@ import { test } from "node:test";
 import {
 	awaitsUserInput,
 	detectsCircling,
-} from "../core/guards/response-patterns.ts";
-import { LoopDetector } from "../core/guards/loop-detector.ts";
+} from "../agent/guards/response-patterns.ts";
+import { LoopDetector } from "../agent/guards/loop-detector.ts";
 import { buildBuiltinHooks } from "../hooks/builtin/builtin-hooks.ts";
 
 // ── detectsCircling ───────────────────────────────────────────────────────

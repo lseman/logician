@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { AgentHarness } from "../core/harness.ts";
-import type { AgentConfig } from "../core/types.ts";
+import { AgentHarness } from "../agent/harness.ts";
+import type { AgentConfig } from "../agent/types.ts";
 import { ExtensionRunner } from "../extensions/runner.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 

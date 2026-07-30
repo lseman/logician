@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AgentHarness } from "../core/harness.ts";
-import type { LLMBackend } from "../core/backend.ts";
-import type { AgentEvent } from "../core/types.ts";
+import { AgentHarness } from "../agent/harness.ts";
+import type { LLMBackend } from "../agent/backend.ts";
+import type { AgentEvent } from "../agent/types.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake-model";

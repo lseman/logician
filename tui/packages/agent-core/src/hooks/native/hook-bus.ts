@@ -42,7 +42,7 @@ import type {
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-} from "../../core/types.ts";
+} from "../../agent/types.ts";
 
 export type HookEventName = keyof AgentHooks;
 

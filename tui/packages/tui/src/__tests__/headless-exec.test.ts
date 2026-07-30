@@ -6,7 +6,7 @@ import {
 	parseExecArgs,
 	runHeadlessExec,
 	type ExecBridge,
-} from "../headless-exec.ts";
+} from "../app/headless-exec.ts";
 
 class MemoryWriter {
 	value = "";

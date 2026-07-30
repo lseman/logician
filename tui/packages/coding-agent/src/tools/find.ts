@@ -5,7 +5,7 @@
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import type { Tool } from "@logician/agent-core/core/types.ts";
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 import { ensureInsideCwd, resolvePath } from "@logician/agent-core/tools/shared/path-utils.ts";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.ts";
 import { ensureTool } from "./shared/tools-manager.ts";

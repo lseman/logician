@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ThinkingLoopDetector } from "../core/guards/thinking-loop-detector.ts";
+import { ThinkingLoopDetector } from "../agent/guards/thinking-loop-detector.ts";
 
 describe("ThinkingLoopDetector", () => {
 	it("does not trip on a single short thinking turn", () => {

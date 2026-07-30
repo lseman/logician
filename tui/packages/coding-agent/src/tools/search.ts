@@ -7,7 +7,7 @@ import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import type { Tool, ToolResult } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
 import { truncateHead, truncateLine, formatSize } from "./truncate.ts";
 import { ensureInsideCwd, resolvePath } from "@logician/agent-core/tools/shared/path-utils.ts";
 import { ensureTool } from "./shared/tools-manager.ts";

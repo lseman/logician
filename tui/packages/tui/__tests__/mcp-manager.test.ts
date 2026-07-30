@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { McpManagerOverlay } from "../src/components/mcp-manager.ts";
-import { PluginManagerOverlay } from "../src/components/plugin-manager.ts";
-import { initTheme } from "../src/layers/theme/theme.ts";
+import { McpManagerOverlay } from "../src/overlays/mcp-manager.ts";
+import { PluginManagerOverlay } from "../src/overlays/plugin-manager.ts";
+import { initTheme } from "../src/terminal/theme.ts";
 
 function createOverlay(): McpManagerOverlay {
 	try {

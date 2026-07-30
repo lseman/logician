@@ -3,11 +3,10 @@
 // eoh is a demo extension, not re-exported here — import it directly from
 // "@logician/agent-capabilities/eoh/index.ts" if needed.
 
-export * from "./todo/todo.ts";
-export * from "./todo/task-status.ts";
-export * from "./ask-user/ask-user.ts";
-export * from "./subagents/subagent.ts";
-export * from "./reasoners/index.ts";
+export * from "./tasks/index.ts";
+export * from "./interaction/index.ts";
+export * from "./delegation/index.ts";
+export * from "./reasoning/index.ts";
 export {
 	getBuiltInTools,
 	getBuiltInSubagentTools,

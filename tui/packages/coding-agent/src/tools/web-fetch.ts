@@ -1,7 +1,7 @@
 // ── web_fetch tool ───────────────────────────────────────────────────────────────
 // Fetch and extract readable content from a web page.
 
-import type { Tool, ToolContext } from "@logician/agent-core/core/types.ts";
+import type { Tool, ToolContext } from "@logician/agent-core/agent/types.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 
 export const web_fetch: Tool = {

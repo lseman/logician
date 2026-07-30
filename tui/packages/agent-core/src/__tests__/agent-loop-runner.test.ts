@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runAgentLoop } from "../core/agent-loop-runner.ts";
-import { BackendError } from "../core/backend.ts";
-import { OutputGuard } from "../core/guards/output-guard.ts";
-import { recordTaskStatus } from "../core/tasks/task-status-state.ts";
-import type { AgentConfig, AgentEvent, Message, Tool } from "../core/types.ts";
+import { runAgentLoop } from "../agent/agent-loop-runner.ts";
+import { BackendError } from "../agent/backend.ts";
+import { OutputGuard } from "../agent/guards/output-guard.ts";
+import { recordTaskStatus } from "../agent/tasks/task-status-state.ts";
+import type { AgentConfig, AgentEvent, Message, Tool } from "../agent/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
 import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 

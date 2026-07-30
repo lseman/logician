@@ -3,12 +3,12 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { InputBar } from "../components/input-bar.ts";
+import { InputBar } from "../input/input-bar.ts";
 import {
 	type Component,
 	normalizeKeyboardInput,
 	TUI,
-} from "../layers/core/tui-core.ts";
+} from "../terminal/core.ts";
 import { runInPty, stripTerminalControls } from "../testing/pty-harness.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");

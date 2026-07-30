@@ -12,7 +12,7 @@ const textualGrepCall = `I will inspect the notices.
 notice|NoticeEvent
 </parameter>
 <parameter=path>
-/data/dev/logician/tui/packages/coding-agent/src/runtime/bridge.ts
+/data/dev/logician/tui/packages/coding-agent/src/application/agent-bridge.ts
 </parameter>
 <parameter=limit>
 50
@@ -26,7 +26,7 @@ void test("converts XML parameter tool text into structured JSON arguments", () 
 	assert.equal(calls[0].name, "grep");
 	assert.deepEqual(JSON.parse(calls[0].arguments), {
 		pattern: "notice|NoticeEvent",
-		path: "/data/dev/logician/tui/packages/coding-agent/src/runtime/bridge.ts",
+		path: "/data/dev/logician/tui/packages/coding-agent/src/application/agent-bridge.ts",
 		limit: 50,
 	});
 });
