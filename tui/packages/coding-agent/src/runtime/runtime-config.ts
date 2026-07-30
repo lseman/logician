@@ -86,6 +86,7 @@ export function resolveRuntimeConfig(
 			guardsEnabled: configBool(config.guardsEnabled),
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),
+			rtkProxyEnabled: configBool(config.rtkProxyEnabled),
 			autoRetryEnabled: configBool(config.autoRetryEnabled, true),
 			maxRetries: configNumber(config.maxRetries),
 			retryBaseDelayMs: configNumber(config.retryBaseDelayMs),

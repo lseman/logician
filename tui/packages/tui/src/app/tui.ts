@@ -521,6 +521,7 @@ export class LogicianTUI {
 			reasoner: "none",
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
+			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
 		});
 
 		// Setup slash commands
@@ -790,6 +791,14 @@ export class LogicianTUI {
 				return discarded
 					? "Branch discarded — conversation restored to fork point."
 					: "No active branch to discard.";
+			},
+			toggleRtkProxy: () => {
+				const current = this.bridge.getConfig()?.rtkProxyEnabled ?? false;
+				const next = !current;
+				this.bridge.setRuntimeToggle("rtkProxyEnabled", next);
+				saveConfigField("rtkProxyEnabled", next);
+				this.statusPanel.update({ rtkProxyEnabled: next });
+				return next;
 			},
 		};
 
@@ -2499,6 +2508,26 @@ export class LogicianTUI {
 					],
 				},
 				{
+					name: "RTK CLI proxy",
+					currentValue: data.rtkProxyEnabled ? "on" : "off",
+					description:
+						"Prefix all bash commands with `rtk` for 60-90% output compression",
+					options: [
+						{
+							label: "on",
+							value: "true",
+							current: data.rtkProxyEnabled,
+							toggleOn: true,
+						},
+						{
+							label: "off",
+							value: "false",
+							current: !data.rtkProxyEnabled,
+							toggleOn: false,
+						},
+					],
+				},
+				{
 					name: "Execution policy",
 					currentValue: data.executionProfile,
 					description:
@@ -2620,6 +2649,14 @@ export class LogicianTUI {
 				this.bridge.setRuntimeToggle("postEditDiagnostics", on);
 				saveConfigField("postEditDiagnostics", on);
 				this.notify(`Post-edit diagnostics: ${on ? "on" : "off"}`, "success");
+				break;
+			}
+			case "rtk cli proxy": {
+				const on = value === "true";
+				this.bridge.setRuntimeToggle("rtkProxyEnabled", on);
+				saveConfigField("rtkProxyEnabled", on);
+				this.statusPanel.update({ rtkProxyEnabled: on });
+				this.notify(`RTK proxy: ${on ? "on" : "off"}`, "success");
 				break;
 			}
 			case "inference mode": {

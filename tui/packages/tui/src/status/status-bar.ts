@@ -37,6 +37,7 @@ interface StatusInfo {
 	executionProfile?: "autonomous" | "minimal";
 	promptTokens?: number;
 	completionTokens?: number;
+	rtkProxyEnabled?: boolean;
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -63,6 +64,7 @@ const DEFAULT_INFO: StatusInfo = {
 	executionProfile: "autonomous",
 	promptTokens: undefined,
 	completionTokens: undefined,
+	rtkProxyEnabled: false,
 };
 
 export class StatusBar implements Component {
@@ -155,6 +157,7 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatSandbox());
 		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
+		insertIfFits(this.formatRtk());
 
 		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {
@@ -362,6 +365,11 @@ export class StatusBar implements Component {
 			return `${theme.fg("success", "act")}`;
 		}
 		return `${theme.fg("warning", "plan")}`;
+	}
+
+	private formatRtk(): string {
+		if (!this.info.rtkProxyEnabled) return "";
+		return `${DIM}rtk${RESET} ${theme.fg("accent", "on")}`;
 	}
 
 	private formatExecutionProfile(): string {

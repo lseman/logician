@@ -148,6 +148,8 @@ export interface AgentConfig {
 	allowAllPaths?: boolean;
 	/** Universal output/result truncation limits. Unset fields fall back to DEFAULT_TRUNCATION. */
 	truncation?: TruncationConfig;
+	/** When true, prefix all bash commands with `rtk` for token savings. */
+	rtkProxyEnabled?: boolean;
 }
 
 export interface WebSearchConfig {

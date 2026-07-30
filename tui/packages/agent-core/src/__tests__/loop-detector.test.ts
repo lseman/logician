@@ -43,23 +43,26 @@ void test("guard blocks on duplicate tool calls", () => {
 	assert.ok(decision.message?.includes("3 times"));
 });
 
-void test("guard allows different args", () => {
+void test("guard allows different args (interleaved resets counter)", () => {
 	const d = new LoopDetector({
 		duplicateThreshold: 3,
 		maxHistory: 10,
 	});
+	// 1st call — no block.
+	assert.equal(d.checkToolCall("read_file", "{\"path\":\"a.txt\"}").block, false);
+	// Different tool resets the counter.
+	assert.equal(d.checkToolCall("list_files", "{\"path\":\"/\"}").block, false);
+	// Same args as first — counter reset, starts at 1.
+	assert.equal(d.checkToolCall("read_file", "{\"path\":\"a.txt\"}").block, false);
+	// Different args resets too.
+	assert.equal(d.checkToolCall("read_file", "{\"path\":\"b.txt\"}").block, false);
+	// Same as previous — counter at 1 again.
+	assert.equal(d.checkToolCall("read_file", "{\"path\":\"b.txt\"}").block, false);
+	// A third consecutive call of the same tool+args blocks.
 	assert.equal(
-		d.recordAndDetect("first", [tool("read_file", "{\"path\":\"a.txt\"}")]),
-		false,
-	);
-	assert.equal(
-		d.recordAndDetect("second", [tool("read_file", "{\"path\":\"b.txt\"}")]),
-		false,
-	);
-	assert.equal(
-		d.recordAndDetect("third", [tool("read_file", "{\"path\":\"c.txt\"}")]),
-		false,
-		"diff args should not trigger guard",
+		d.checkToolCall("read_file", "{\"path\":\"b.txt\"}").block,
+		true,
+		"consecutive 3rd call should block",
 	);
 });
 

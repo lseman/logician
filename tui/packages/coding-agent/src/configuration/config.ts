@@ -51,6 +51,7 @@ const KNOWN_KEYS = new Set([
 	"inferenceMode",
 	"allowedPaths",
 	"allowAllPaths",
+	"rtkProxyEnabled",
 	"maxParallelAgents",
 	"cwd",
 	"truncation",
@@ -292,6 +293,7 @@ export function validateConfig(
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
+	cfg.rtkProxyEnabled = configBool(obj.rtkProxyEnabled);
 
 	for (const [key, minimum, inclusive] of [
 		["maxRetries", 0, true],
@@ -620,6 +622,8 @@ export interface LogicianTuiConfig {
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
 	autoRetryEnabled?: boolean;
+	// RTK CLI proxy — compresses bash/rg/grep output 60–90%.
+	rtkProxyEnabled?: boolean;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
 	turnTimeoutMs?: number;

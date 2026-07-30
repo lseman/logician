@@ -3,6 +3,7 @@
 // compaction) as a single AgentHooks object, and composes them with any
 // user-supplied hooks via the typed HookBus so both run.
 
+import { spawnSync } from "node:child_process";
 import { BudgetTracker } from "./budget.ts";
 import { ThinkingLoopDetector } from "../../agent/guards/thinking-loop-detector.ts";
 import {
@@ -38,6 +39,26 @@ import type {
 const DEFAULT_COMPACTION_FRACTION = 0.8;
 // Don't run proactive compaction every turn — cooldown in turns.
 const COMPACTION_COOLDOWN_TURNS = 3;
+const RTK_REWRITE_TIMEOUT_MS = 2_000;
+
+/**
+ * Ask RTK's own command registry whether a shell command should be proxied.
+ * Any missing binary, unsupported command, timeout, or rewrite failure falls
+ * back to the original command so enabling RTK can never block execution.
+ */
+export function rewriteCommandWithRtk(command: string): string {
+	const result = spawnSync("rtk", ["rewrite", command], {
+		encoding: "utf8",
+		timeout: RTK_REWRITE_TIMEOUT_MS,
+		maxBuffer: 1024 * 1024,
+		windowsHide: true,
+	});
+	if (result.error || (result.status !== 0 && result.status !== 3)) {
+		return command;
+	}
+	const rewritten = result.stdout.trim();
+	return rewritten || command;
+}
 
 export interface BuiltinHookDeps {
 	config: AgentConfig;
@@ -125,6 +146,23 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		}
 		if (toolCall.name === "bash") {
 			bashSnapshots.set(toolCall.id, snapshotBeforeBash(config.cwd));
+		}
+		// RTK proxy: let RTK's registry selectively rewrite supported commands.
+		if (toolCall.name === "bash" && config.rtkProxyEnabled === true) {
+			if (args.command !== undefined && typeof args.command === "string") {
+				args.command = rewriteCommandWithRtk(args.command);
+			}
+			if (args.commands !== undefined && Array.isArray(args.commands)) {
+				args.commands = args.commands.map((entry: unknown) => {
+					if (typeof entry === "object" && entry !== null) {
+						const obj = entry as Record<string, unknown>;
+						if (typeof obj.command === "string") {
+							obj.command = rewriteCommandWithRtk(obj.command);
+						}
+					}
+					return entry;
+				});
+			}
 		}
 		if (guardThresholds) {
 			const decision = loopDetector.checkToolCall(

@@ -31,6 +31,7 @@ describe("buildSettingsSnapshot", () => {
 			retryBaseDelayMs: 500,
 			turnTimeoutMs: 60000,
 			acceptAllPermissions: false,
+			rtkProxyEnabled: false,
 		});
 
 		assert.ok(snap.includes("── Runtime Settings ──"));
@@ -39,6 +40,7 @@ describe("buildSettingsSnapshot", () => {
 		assert.ok(snap.includes("── Compaction ──"));
 		assert.ok(snap.includes("── Execution ──"));
 		assert.ok(snap.includes("── Permissions ──"));
+		assert.ok(snap.includes("── RTK Proxy ──"));
 		assert.ok(snap.includes("── Quick Changes ──"));
 	});
 
@@ -65,6 +67,7 @@ describe("buildSettingsSnapshot", () => {
 			retryBaseDelayMs: undefined,
 			turnTimeoutMs: undefined,
 			acceptAllPermissions: true,
+			rtkProxyEnabled: undefined,
 		});
 
 		assert.ok(snap.includes("claude-sonnet-4"));
@@ -94,6 +97,7 @@ describe("buildSettingsSnapshot", () => {
 			retryBaseDelayMs: undefined,
 			turnTimeoutMs: undefined,
 			acceptAllPermissions: true,
+			rtkProxyEnabled: undefined,
 		});
 
 		assert.ok(snap.includes("unset"));
@@ -122,12 +126,14 @@ describe("buildSettingsSnapshot", () => {
 			retryBaseDelayMs: 100,
 			turnTimeoutMs: 30000,
 			acceptAllPermissions: true,
+			rtkProxyEnabled: true,
 		});
 
 		assert.ok(snap.includes("quick changes") || snap.includes("Quick Changes"));
 		assert.ok(snap.includes("/settings thinking"));
 		assert.ok(snap.includes("/settings model"));
 		assert.ok(snap.includes("/settings compaction"));
+		assert.ok(snap.includes("/rtk"));
 	});
 });
 

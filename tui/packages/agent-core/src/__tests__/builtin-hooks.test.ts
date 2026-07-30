@@ -1,11 +1,45 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import {
 	awaitsUserInput,
 	detectsCircling,
 } from "../agent/guards/response-patterns.ts";
 import { LoopDetector } from "../agent/guards/loop-detector.ts";
-import { buildBuiltinHooks } from "../hooks/builtin/builtin-hooks.ts";
+import {
+	buildBuiltinHooks,
+	rewriteCommandWithRtk,
+} from "../hooks/builtin/builtin-hooks.ts";
+
+function withFakeRtk<T>(body: () => T): T {
+	const root = mkdtempSync(path.join(tmpdir(), "logician-rtk-"));
+	const executable = path.join(root, "rtk");
+	writeFileSync(
+		executable,
+		`#!/bin/sh
+if [ "$1" != "rewrite" ]; then exit 2; fi
+case "$2" in
+  "git status") printf '%s\\n' "rtk git status" ;;
+  "cd repo && git status") printf '%s\\n' "cd repo && rtk git status" ;;
+  "npm test && echo done") printf '%s\\n' "rtk npm test && echo done" ;;
+  *) printf '%s\\n' "$2"; exit 3 ;;
+esac
+`,
+		"utf8",
+	);
+	chmodSync(executable, 0o755);
+	const previousPath = process.env.PATH;
+	process.env.PATH = `${root}${path.delimiter}${previousPath ?? ""}`;
+	try {
+		return body();
+	} finally {
+		if (previousPath === undefined) delete process.env.PATH;
+		else process.env.PATH = previousPath;
+		rmSync(root, { recursive: true, force: true });
+	}
+}
 
 // ── detectsCircling ───────────────────────────────────────────────────────
 
@@ -74,4 +108,24 @@ void test("minimal profile keeps mechanism hooks and omits built-in policies", (
 	assert.equal(typeof hooks.prepareNextTurn, "function");
 	assert.equal(typeof hooks.beforeToolCall, "function");
 	assert.equal(typeof hooks.afterToolCall, "function");
+});
+
+void test("RTK rewrite delegates supported and compound commands to RTK", () => {
+	withFakeRtk(() => {
+		assert.equal(rewriteCommandWithRtk("git status"), "rtk git status");
+		assert.equal(
+			rewriteCommandWithRtk("cd repo && git status"),
+			"cd repo && rtk git status",
+		);
+		assert.equal(
+			rewriteCommandWithRtk("npm test && echo done"),
+			"rtk npm test && echo done",
+		);
+	});
+});
+
+void test("RTK rewrite leaves unsupported commands unchanged", () => {
+	withFakeRtk(() => {
+		assert.equal(rewriteCommandWithRtk("echo hello"), "echo hello");
+	});
 });

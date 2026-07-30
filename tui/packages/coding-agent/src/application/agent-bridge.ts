@@ -153,6 +153,7 @@ export interface AgentBridgeOptions {
 	failureGuardEnabled?: boolean;
 	continuationEnabled?: boolean;
 	postEditDiagnostics?: boolean;
+	rtkProxyEnabled?: boolean;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
@@ -340,6 +341,7 @@ export class AgentCoreBridge {
 			duplicateGuardEnabled: opts.duplicateGuardEnabled,
 			failureGuardEnabled: opts.failureGuardEnabled,
 			continuationEnabled: opts.continuationEnabled,
+			rtkProxyEnabled: opts.rtkProxyEnabled,
 			autoRetryEnabled: opts.autoRetryEnabled,
 			maxRetries: opts.maxRetries,
 			retryBaseDelayMs: opts.retryBaseDelayMs,
@@ -612,8 +614,12 @@ export class AgentCoreBridge {
 	}
 
 	/** Return config snapshot for external LLM calls (goal evaluator, etc.). */
-	getConfig(): { baseUrl: string; model: string } {
-		return { baseUrl: this.config.baseUrl, model: this.config.model };
+	getConfig(): { baseUrl: string; model: string; rtkProxyEnabled?: boolean } {
+		return {
+			baseUrl: this.config.baseUrl,
+			model: this.config.model,
+			rtkProxyEnabled: this.config.rtkProxyEnabled,
+		};
 	}
 
 	/** Controls how queued follow-up messages are drained. */
@@ -1226,7 +1232,8 @@ export class AgentCoreBridge {
 		key:
 			| "guardsEnabled"
 			| "proactiveCompactionEnabled"
-			| "postEditDiagnostics",
+			| "postEditDiagnostics"
+			| "rtkProxyEnabled",
 		enabled: boolean,
 	): void {
 		if (key === "postEditDiagnostics") {
@@ -1252,7 +1259,8 @@ export class AgentCoreBridge {
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
 			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
-		].join("\n");
+			`  RTK proxy: ${this.config.rtkProxyEnabled ? "on" : "off"}`,
+	].join("\n");
 	}
 
 	/** Return structured settings data for the overlay UI. */
@@ -1268,6 +1276,7 @@ export class AgentCoreBridge {
 		guardsEnabled: boolean;
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
+		rtkProxyEnabled: boolean;
 	} {
 		return {
 			model: this.config.model,
@@ -1282,6 +1291,7 @@ export class AgentCoreBridge {
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? false,
 			postEditDiagnostics: this.postEditDiagnosticsEnabled,
+			rtkProxyEnabled: this.config.rtkProxyEnabled ?? false,
 		};
 	}
 

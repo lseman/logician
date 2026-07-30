@@ -34,6 +34,7 @@ export function buildSettingsSnapshot(opts: {
 	retryBaseDelayMs: number | undefined;
 	turnTimeoutMs: number | undefined;
 	acceptAllPermissions: boolean;
+	rtkProxyEnabled: boolean | undefined;
 }): string {
 	const lines: string[] = ["── Runtime Settings ──"];
 
@@ -86,6 +87,13 @@ export function buildSettingsSnapshot(opts: {
 	lines.push(fmtSetting("Default", opts.acceptAllPermissions ? "Accept All" : "Ask"));
 
 	lines.push("");
+	lines.push("── RTK Proxy ──");
+	lines.push(fmtSetting("RTK CLI Proxy", boolStr(opts.rtkProxyEnabled)));
+	if (opts.rtkProxyEnabled) {
+		lines.push("  All bash commands prefixed with `rtk` for 60-90% output compression.");
+	}
+
+	lines.push("");
 	lines.push("── Quick Changes ──");
 	lines.push("  /settings thinking <level>     → off|minimal|low|medium|high|xhigh");
 	lines.push("  /settings model <name>         → set a specific model");
@@ -97,6 +105,7 @@ export function buildSettingsSnapshot(opts: {
 	lines.push("  /settings compaction [on]      → toggle proactive compaction");
 	lines.push("  /settings permissions <mode>   → acceptAll|acceptEdits|ask|plan");
 	lines.push("  /settings inference-mode <m>   → thinking-general|thinking-coding|instruct-general|instruct-reasoning");
+	lines.push("  /rtk                           → toggle RTK CLI proxy on/off");
 
 	return lines.join("\n");
 }
@@ -251,4 +260,16 @@ export function parseSettingsCommand(
 				message: `Unknown subcommand: /settings ${sub}\n\nRun /settings for the full settings view.`,
 			};
 	}
+}
+
+export type RtkProxyAction = "toggle" | "error";
+
+export function parseRtkCommand(
+	args: string,
+): RtkProxyAction {
+	const trimmed = args.trim();
+	if (trimmed === "") {
+		return "toggle";
+	}
+	return "error";
 }

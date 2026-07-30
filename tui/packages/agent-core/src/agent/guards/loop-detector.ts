@@ -120,7 +120,10 @@ export class LoopDetector {
 	}> = [];
 
 	// ── Guard state ───────────────────────────────────────────────────────
-	private callSignatureCounts = new Map<string, number>();
+	// Duplicate guard: only counts CONSECUTIVE identical tool+args calls.
+	// Reset when a different tool or different args is called.
+	private lastCallSignature: string | null = null;
+	private consecutiveCallCount = 0;
 	private failSignatureCounts = new Map<string, number>();
 	private failCategoryCounts = new Map<string, number>();
 	private failPathCounts = new Map<string, number>();
@@ -156,12 +159,23 @@ export class LoopDetector {
 	 */
 	checkToolCall(name: string, args: string): GuardDecision {
 		const sig = callSignature(name, args);
-		const callCount = inc(this.callSignatureCounts, sig);
 
-		if (this.duplicateThreshold > 0 && callCount >= this.duplicateThreshold) {
+		// Duplicate guard: only count consecutive identical calls.
+		// Reset counter when a different tool or different args is called.
+		if (sig === this.lastCallSignature) {
+			this.consecutiveCallCount++;
+		} else {
+			this.lastCallSignature = sig;
+			this.consecutiveCallCount = 1;
+		}
+
+		if (
+			this.duplicateThreshold > 0 &&
+			this.consecutiveCallCount >= this.duplicateThreshold
+		) {
 			return {
 				block: true,
-				message: `Error: blocked — \`${name}\` was called with identical arguments ${callCount} times. Stop repeating the same call; change your approach.`,
+				message: `Error: blocked — \`${name}\` was called with identical arguments ${this.consecutiveCallCount} times in a row. Stop repeating the same call; change your approach.`,
 			};
 		}
 
@@ -395,7 +409,8 @@ export class LoopDetector {
 	reset(): void {
 		this.history = [];
 		this.seenShapes.clear();
-		this.callSignatureCounts.clear();
+		this.lastCallSignature = null;
+		this.consecutiveCallCount = 0;
 		this.failSignatureCounts.clear();
 		this.failCategoryCounts.clear();
 		this.failPathCounts.clear();

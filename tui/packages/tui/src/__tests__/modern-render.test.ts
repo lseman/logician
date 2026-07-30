@@ -486,6 +486,14 @@ void test("status bar renders cached tokens and unknown telemetry", () => {
 	assert.match(plain(status.render(160)[0]), /cache read: unknown/);
 });
 
+void test("status bar renders RTK when restored as enabled", () => {
+	const status = new StatusBar();
+	assert.doesNotMatch(plain(status.render(200)[0]), /\brtk on\b/);
+
+	status.update({ rtkProxyEnabled: true });
+	assert.match(plain(status.render(200)[0]), /\brtk on\b/);
+});
+
 void test("input prompt has stable inset modern chrome", () => {
 	const input = new InputBar();
 	input.focused = true;

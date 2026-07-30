@@ -543,6 +543,22 @@ export function createSlashCommands(
 				);
 			},
 		),
+
+		// ── RTK Proxy ────────────────────────────────────────────────────
+		cmd(
+			"/rtk",
+			"Toggle RTK CLI proxy (compresses bash output 60-90%)",
+			"local",
+			false,
+			{
+				category: "misc",
+				examples: ["/rtk"],
+			},
+			() => {
+				const state = localHandlers.toggleRtkProxy?.();
+				return state ? "RTK proxy: on" : "RTK proxy: off";
+			},
+		),
 	];
 	return commands;
 }
