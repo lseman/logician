@@ -90,4 +90,24 @@ export default defineConfig({
       provider: 'local',
     },
   },
+  markdown: {
+    config(md) {
+      const renderFence = md.renderer.rules.fence
+      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+        const token = tokens[idx]
+        if (token.info.trim() === 'mermaid') {
+          const id = 'mermaid-' + idx
+          const graph = encodeURIComponent(token.content)
+          return `<div class="mermaid" data-graph="${graph}" data-id="${id}"></div>`
+        }
+        if (renderFence) return renderFence(tokens, idx, options, env, self)
+        return self.renderToken(tokens, idx, options)
+      }
+    },
+  },
+  vite: {
+    optimizeDeps: {
+      include: ['mermaid'],
+    },
+  },
 })
