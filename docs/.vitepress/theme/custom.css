@@ -47,12 +47,51 @@ body {
   font-family: 'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif;
 }
 
-/* Nav — matches landing page */
+/* Nav — one dark surface, neutral controls, one interaction accent */
 .VPNavBar {
-  background: rgba(11, 14, 17, 0.65) !important;
+  --vp-nav-logo-height: 28px;
+  --vp-nav-bg-color: #0b0e11;
+  background: var(--vp-nav-bg-color) !important;
   backdrop-filter: blur(24px) saturate(1.3);
   -webkit-backdrop-filter: blur(24px) saturate(1.3);
   border-bottom: 1px solid var(--border);
+}
+
+.VPNavBar.has-sidebar > .wrapper > .container > .title,
+.VPNavBar:not(.home.top) .content-body {
+  background: var(--vp-nav-bg-color) !important;
+}
+
+.VPNavBar .title,
+.VPNavBar .text,
+.VPNavBar .button,
+.VPNavBar .VPSocialLink,
+.VPNavBar .vpi-more-horizontal {
+  color: var(--muted) !important;
+}
+
+.VPNavBarTitle .title {
+  color: var(--text) !important;
+}
+
+.VPNavBar .button,
+.VPNavBar .VPSocialLink {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+.VPNavBar .button:hover,
+.VPNavBar .button:focus-visible,
+.VPNavBar .VPSocialLink:hover,
+.VPNavBar .VPSocialLink:focus-visible {
+  color: var(--text) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.VPNavBar button:focus-visible,
+.VPNavBar a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
 }
 
 /* Sidebar */
@@ -65,15 +104,31 @@ body {
   background: var(--bg) !important;
 }
 
-/* Nav links */
-.nav-link {
+/* Nav dropdown button */
+.VPNavBarMenuGroup .button {
   font-size: 0.84rem;
-  color: var(--muted) !important;
-  transition: color 0.2s;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
 }
 
-.nav-link:hover, .nav-link.router-link-active {
-  color: var(--cyan-bright) !important;
+/* Search button follows the same neutral header controls. */
+.VPNavBarSearch .DocSearch-Button {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--muted) !important;
+}
+
+.VPNavBarSearch .DocSearch-Button:hover,
+.VPNavBarSearch .DocSearch-Button:focus-visible {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: var(--border-hi) !important;
+  color: var(--text) !important;
+}
+
+.VPNavBarSearch .DocSearch-Button-Key {
+  background: transparent !important;
+  border-color: var(--border-hi) !important;
+  color: var(--muted-2) !important;
 }
 
 /* Content — matches landing page container */
@@ -152,9 +207,9 @@ body {
   font-size: 0.84rem;
   font-weight: 500;
   font-family: 'DM Sans', sans-serif;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-hi);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
   transition: all 0.2s;
   cursor: pointer;
   text-decoration: none;
@@ -164,23 +219,31 @@ body {
 }
 
 .vp-doc .md-button:hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: var(--border-hi);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--cyan-bright);
 }
 
-.vp-doc .md-button--primary {
-  background: linear-gradient(135deg, var(--cyan), var(--violet));
+.vp-doc a.md-button.md-button--primary,
+.vp-doc a.md-button.md-button--primary:visited {
+  background: #0e7490;
   border-color: transparent;
-  color: #fff;
+  color: #fff !important;
   font-weight: 600;
-  box-shadow: 0 4px 18px rgba(6, 182, 212, 0.28);
+  box-shadow: 0 2px 10px rgba(14, 116, 144, 0.3);
 }
 
-.vp-doc .md-button--primary:hover {
-  background: linear-gradient(135deg, var(--cyan-bright), var(--cyan));
+.vp-doc a.md-button.md-button--primary:hover,
+.vp-doc a.md-button.md-button--primary:focus-visible {
+  background: #0891b2;
+  color: #fff !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.18);
+  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25);
+}
+
+.vp-doc a.md-button:focus-visible {
+  outline: 3px solid var(--cyan-bright);
+  outline-offset: 3px;
 }
 
 /* Hero actions */
@@ -273,6 +336,14 @@ body {
   border: 1px solid var(--border);
   text-align: center;
   margin: 2rem 0;
+}
+
+.mermaid svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
 }
 
 /* Footer — matches landing page */

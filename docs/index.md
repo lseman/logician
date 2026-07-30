@@ -10,8 +10,8 @@ A local-first coding agent with a streaming terminal UI. SSH-ready, thinking-vis
 Logician turns natural-language instructions into verified code changes — with full reasoning trace, session persistence, and skill-based extensibility. No cloud dependency, no black-box prompts.
 
 <div class="hero-actions">
-  <a class="md-button md-button--primary" href="/getting-started/">Get Started</a>
-  <a class="md-button" href="/guides/overview/">Read the Guides</a>
+  <a class="md-button md-button--primary" href="/docs/getting-started">Get Started</a>
+  <a class="md-button" href="/docs/guides/overview">Read the Guides</a>
   <a class="md-button" href="https://github.com/lseman/logician">View on GitHub</a>
 </div>
 

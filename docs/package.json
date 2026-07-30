@@ -4,6 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "vitepress build .",
+    "dev": "vitepress dev .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

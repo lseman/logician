@@ -64,6 +64,10 @@ Thumbs.db
 .local/
 output/
 site/
+!site/
+site/*
+!site/docs/
+!site/docs/**
 repos/
 wiki/
 
@@ -71,6 +75,7 @@ wiki/
 lightning_logs/
 plots/
 skills/.skills_catalog_cache.json
+docs/.vitepress/.temp/
 
 # ── Temp / scratch files ────────────────────────────────
 Untitled-*
@@ -79,3 +84,5 @@ Untitled-*
 .claudeignore
 .codex
 .claude/
+
+.cache/

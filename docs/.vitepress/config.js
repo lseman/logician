@@ -1,10 +1,11 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: 'Logician',
   description: 'Local-first coding agent with streaming terminal UI',
   base: '/docs/',
-  appearance: 'dark',
+  appearance: 'force-dark',
   cleanUrls: true,
   outDir: '../site/docs',
   head: [
@@ -91,24 +92,8 @@ export default defineConfig({
       provider: 'local',
     },
   },
-  markdown: {
-    config(md) {
-      const renderFence = md.renderer.rules.fence
-      md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-        const token = tokens[idx]
-        if (token.info.trim() === 'mermaid') {
-          const id = 'mermaid-' + idx
-          const graph = encodeURIComponent(token.content)
-          return `<div class="mermaid" data-graph="${graph}" data-id="${id}"></div>`
-        }
-        if (renderFence) return renderFence(tokens, idx, options, env, self)
-        return self.renderToken(tokens, idx, options)
-      }
-    },
+  mermaid: {
+    theme: 'dark',
+    securityLevel: 'strict',
   },
-  vite: {
-    optimizeDeps: {
-      include: ['mermaid'],
-    },
-  },
-})
+}))
