@@ -1,7 +1,7 @@
 #!/bin/sh
 # Logician installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/seman/logician/main/tui/install.sh | bash
-#        curl -fsSL https://raw.githubusercontent.com/seman/logician/main/tui/install.sh | bash -s -- 0.2.0
+# Usage: curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash
+#        curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- 0.3.0
 
 set -eu
 
@@ -71,7 +71,7 @@ esac
 case "$VERSION" in ""|latest|stable) VERSION="latest";; v*) VERSION="${VERSION#v}";; esac
 
 if [ "$VERSION" = "latest" ]; then
-  release_json="$(download_text "https://api.github.com/repos/seman/logician/releases/latest")"
+  release_json="$(download_text "https://api.github.com/repos/lseman/logician/releases/latest")"
   resolved_version="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":"v\{0,1\}\([^",]*\)".*/\1/p' | head -n 1)"
   if [ -z "$resolved_version" ]; then echo "Failed to resolve latest version." >&2; exit 1; fi
 else
@@ -79,7 +79,7 @@ else
 fi
 
 asset_name="logician-${os}-${arch}"
-base_url="https://github.com/seman/logician/releases/download/v${resolved_version}"
+base_url="https://github.com/lseman/logician/releases/download/v${resolved_version}"
 download_url="${base_url}/${asset_name}"
 
 step "Installing Logician ${resolved_version} (${os}-${arch})"
