@@ -19,12 +19,16 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install deps (project root)
+        run: bun install
+
       - name: Build binary
+        working-directory: tui
         run: |
-          cd tui
-          make binary
+          bun build --target=bun --compile packages/tui/src/index.ts --outfile dist/logician
 
       - name: Create archive
+        working-directory: tui
         run: |
           mkdir -p release
           cp dist/logician release/
@@ -33,7 +37,7 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: logician-linux-x86_64.tar.gz
+          files: tui/logician-linux-x86_64.tar.gz
           draft: false
           generate_release_notes: true
 
@@ -47,12 +51,16 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install deps (project root)
+        run: bun install
+
       - name: Build binary
+        working-directory: tui
         run: |
-          cd tui
-          make binary
+          bun build --target=bun --compile packages/tui/src/index.ts --outfile dist/logician
 
       - name: Create archive
+        working-directory: tui
         run: |
           mkdir -p release
           cp dist/logician release/
@@ -61,6 +69,6 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: logician-darwin-arm64.tar.gz
+          files: tui/logician-darwin-arm64.tar.gz
           draft: false
           generate_release_notes: true
