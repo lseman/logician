@@ -6,6 +6,7 @@ export default defineConfig({
   base: '/docs/',
   appearance: 'dark',
   cleanUrls: true,
+  outDir: '../site/docs',
   head: [
     ['link', { rel: 'icon', href: '/logo.svg' }],
   ],
