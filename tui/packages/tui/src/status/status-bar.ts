@@ -148,11 +148,13 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatDirWithGit(), 2);
 		insertIfFits(this.formatSession(), 2);
 		insertIfFits(this.formatThinking());
+		// An explicitly selected reasoner is active behavior, not telemetry. Give
+		// it priority over cache/token details so the user's choice stays visible.
+		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
 		insertIfFits(this.formatCache());
 		insertIfFits(this.formatTokenFlow());
 		insertIfFits(this.formatGoal());
 		insertIfFits(this.formatInferenceMode());
-		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
 		if (this.info.mcpServerCount) insertIfFits(this.formatMcp());
 		insertIfFits(this.formatSandbox());
 		insertIfFits(this.formatExecutionProfile());
@@ -198,6 +200,7 @@ export class StatusBar implements Component {
 			failed: "× FAILED",
 			compacting: `${spinner} COMPACTING`,
 			branching: `${spinner} BRANCHING`,
+			cancelling: `${spinner} CANCELLING`,
 			error: "× ERROR",
 		};
 		const label = phaseLabels[phase] || `● ${phase.toUpperCase()}`;

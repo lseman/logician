@@ -23,6 +23,7 @@ import {
 	type AgentEvent,
 	AgentHarness,
 	type AgentModelConfig,
+	type AbortResult,
 	type HarnessPhase,
 	type Message,
 	type Tool,
@@ -700,9 +701,9 @@ export class AgentCoreBridge {
 	}
 
 	/** Abort: clear steering/follow-up queues (preserves nextTurn). */
-	async abort(): Promise<void> {
+	async abort(): Promise<AbortResult | null> {
 		// harness.abort() clears steering/follow-up and emits onQueueChange.
-		await this.harness?.abort();
+		return (await this.harness?.abort()) ?? null;
 	}
 
 	/** Execute a slash command (sends as chat message to the agent). */
@@ -782,7 +783,7 @@ export class AgentCoreBridge {
 	/** Reload: restart the session (like Pi's /reload). */
 	private async reload(): Promise<void> {
 		// Stop any running turn
-		this.cancel();
+		void this.cancel();
 		this.running = false;
 
 		// Drop the old harness — conversation starts fresh
@@ -1323,10 +1324,17 @@ export class AgentCoreBridge {
 		});
 	}
 
-	cancel(): void {
+	async cancel(): Promise<AbortResult | null> {
 		// A turn blocked on an approval must unblock to abort cleanly.
 		this.denyPendingPermissions();
-		void this.harness?.abort().catch((error) => this.errorCb?.(error));
+		try {
+			return (await this.harness?.abort()) ?? null;
+		} catch (error) {
+			const normalized =
+				error instanceof Error ? error : new Error(String(error));
+			this.errorCb?.(normalized);
+			throw normalized;
+		}
 	}
 
 	/** Manual context compaction. Returns { tokensSaved, tokensBefore, tokensAfter } or null if nothing to compact. */
@@ -1470,7 +1478,7 @@ export class AgentCoreBridge {
 	}
 
 	async stop(): Promise<void> {
-		this.cancel();
+		void this.cancel();
 		await this.fireSessionEnd("shutdown");
 		this.lspManager.close();
 		await this.mcpManager.close();

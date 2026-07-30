@@ -156,6 +156,48 @@ void test("clicking a tool card toggles only that tool's details", () => {
 	assert.doesNotMatch(plain(display.render(100).join("\n")), /◆ details/);
 });
 
+void test("keyboard navigation focuses and toggles individual tool cards", () => {
+	const display = new TranscriptDisplay();
+	display.setViewportHeight(20);
+	display.setTurns([{
+		id: "keyboard-tools",
+		userMessage: { type: "user", content: "Run both." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: ["first", "second"].map((name, index) => ({
+				seq: index + 1,
+				type: "tool" as const,
+				tool: {
+					tool: "bash",
+					tool_name: "bash",
+					tool_call_id: name,
+					args: { command: `echo ${name}` },
+					result: `${name} output`,
+					isComplete: true,
+					isError: false,
+				},
+				isComplete: true,
+			})),
+		},
+		isComplete: true,
+	}]);
+
+	display.render(80);
+	assert.deepEqual(display.focusTool(1), { index: 1, total: 2 });
+	assert.match(plain(display.render(80).join("\n")), /› ✓ bash done/);
+	assert.equal(display.toggleFocusedTool(), true);
+	assert.match(
+		plain(display.render(80).join("\n")),
+		/COMMAND[\s\S]*echo first[\s\S]*OUTPUT[\s\S]*first output/,
+	);
+
+	assert.deepEqual(display.focusTool(1), { index: 2, total: 2 });
+	assert.equal(display.toggleFocusedTool(), true);
+	const expanded = plain(display.render(80).join("\n"));
+	assert.match(expanded, /echo second[\s\S]*second output/);
+});
+
 void test("write_file streams live line counts and expanded content", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([{

@@ -9,7 +9,10 @@ import {
 	normalizeKeyboardInput,
 	TUI,
 } from "../terminal/core.ts";
-import { runInPty, stripTerminalControls } from "../testing/pty-harness.ts";
+import {
+	runInPty,
+	screenFromPtyResult,
+} from "../testing/pty-harness.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const tsx = path.join(tuiRoot, "node_modules", ".bin", "tsx");
@@ -39,10 +42,10 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 		columns: 120,
 		rows: 32,
 	});
-	const output = stripTerminalControls(result.output);
-	assert.match(output, /Ask Logician/);
-	assert.match(output, /mode: REASON|Inference mode: Instruct \(Reasoning\)/);
-	assert.doesNotMatch(output, /TypeError|TUI render error/);
+	const screen = screenFromPtyResult(result, 120, 32).text();
+	assert.match(screen, /Enter commands/);
+	assert.match(screen, /REASON|Inference mode: Instruct \(Reasoning\)/);
+	assert.doesNotMatch(result.output, /TypeError|TUI render error/);
 });
 
 void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => {
@@ -96,14 +99,14 @@ void test("Ctrl+I changes and persists the execution profile", async () => {
 		columns: 140,
 		rows: 32,
 	});
-	const output = stripTerminalControls(result.output);
+	const screen = screenFromPtyResult(result, 140, 32).text();
 	const settings = JSON.parse(
 		readFileSync(path.join(home, ".logician", "settings.json"), "utf8"),
 	) as { executionProfile?: string };
 
-	assert.match(output, /Execution policy: minimal|exec: minimal/);
+	assert.match(screen, /Execution policy: minimal|exec: minimal/);
 	assert.equal(settings.executionProfile, "minimal");
-	assert.doesNotMatch(output, /TUI render error/);
+	assert.doesNotMatch(result.output, /TUI render error/);
 });
 
 void test("Escape clears first and cancels the active turn on second press", () => {
@@ -187,7 +190,7 @@ void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
 		columns: 120,
 		rows: 32,
 	});
-	const output = stripTerminalControls(result.output);
-	assert.match(output, /TOOLS EXPANDED/);
-	assert.doesNotMatch(output, /TUI render error/);
+	const screen = screenFromPtyResult(result, 120, 32).text();
+	assert.match(screen, /TOOLS EXPANDED/);
+	assert.doesNotMatch(result.output, /TUI render error/);
 });

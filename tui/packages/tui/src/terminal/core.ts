@@ -331,8 +331,6 @@ export class TUI extends Container {
 	private _scrollOffsetInternal: number = 0;
 	private _viewportHeight: number = 0;
 	private previousLines: string[] = [];
-	private previousWidth: number = -1;
-	private previousHeight: number = -1;
 	private scrollableComponent: Scrollable | null = null;
 	private inputBarComponent: Component | null = null;
 	private fixedBottomComponent: Component | null = null;
@@ -506,8 +504,6 @@ export class TUI extends Container {
 	requestRender(force = false): void {
 		if (force) {
 			this.previousLines = [];
-			this.previousWidth = -1;
-			this.previousHeight = -1;
 		}
 		if (this.renderRequested) return;
 		this.renderRequested = true;
@@ -814,44 +810,51 @@ export class TUI extends Container {
 			transcriptHeight,
 		);
 
-		// Full redraw from the home position. The alternate screen buffer means we
-		// own the whole canvas, so a synchronized home-and-repaint is both correct
-		// and flicker-free — no fragile cursor arithmetic, no scrollback bleed.
+		// Leave the physical last column unused: writing it can put terminals into
+		// pending-autowrap state and shift the next update down a row.
+		const renderWidth = Math.max(1, termWidth - 1);
 		let buffer = "\x1b[?2026h"; // begin synchronized update
-		buffer += "\x1b[H"; // home
 
 		// The InputBar marks the edit position with CURSOR_MARKER. Find it so we
 		// can park the hardware cursor exactly there, and strip it from output.
 		let markerRow = -1;
 		let markerCol = 0;
 
-		for (let i = 0; i < termHeight; i++) {
-			if (i > 0) buffer += "\r\n";
-			buffer += "\x1b[2K"; // clear the whole line
-			if (i < finalLines.length) {
-				// Hard-truncate short of the physical last column. Many terminals set a
-				// pending autowrap state when the last cell is written; during rapid
-				// scroll/redraw transitions that can leave stale doubled fragments.
-				let ln = finalLines[i];
-				const markerIdx = ln.indexOf(CURSOR_MARKER);
-				if (markerIdx >= 0) {
-					markerRow = i;
-					markerCol = visibleWidth(ln.slice(0, markerIdx));
-					ln = ln.replace(CURSOR_MARKER, "");
-				}
-				buffer += isImageLine(ln)
-					? ln
-					: clampLineToWidth(ln, Math.max(1, termWidth - 1));
+		for (let row = 0; row < termHeight; row++) {
+			const prevLine = this.previousLines[row];
+			const newLine = row < finalLines.length ? finalLines[row] : " ".repeat(termWidth);
+			const hasMarker = newLine.includes(CURSOR_MARKER);
+
+			// Extract cursor marker position before stripping
+			if (hasMarker) {
+				const markerIdx = newLine.indexOf(CURSOR_MARKER);
+				markerRow = row;
+				markerCol = visibleWidth(newLine.slice(0, markerIdx));
 			}
+
+			// Strip CURSOR_MARKER for cell parsing
+			const cleanNew = newLine.replace(CURSOR_MARKER, "");
+			const cleanPrev = prevLine?.replace(CURSOR_MARKER, "") ?? "";
+
+			// Image protocols are commands rather than printable cells. Repaint
+			// those rows atomically instead of trying to split their payload.
+			if (isImageLine(cleanNew) || isImageLine(cleanPrev)) {
+				if (cleanNew !== cleanPrev) {
+					buffer += `\x1b[${row + 1};1H\x1b[0m\x1b[2K`;
+					buffer += isImageLine(cleanNew)
+						? cleanNew
+						: clampLineToWidth(cleanNew, renderWidth);
+				}
+				continue;
+			}
+
+			buffer += diffTerminalLine(cleanPrev, cleanNew, row, renderWidth);
 		}
 
 		buffer += "\x1b[?2026l"; // end synchronized update
 		this.write(buffer);
 
 		this.previousLines = finalLines;
-		this.previousWidth = termWidth;
-		this.previousHeight = termHeight;
-
 		// Park the hardware cursor at the input's edit position (under the
 		// visible InputBar cursor). Falls back to the input line's first column
 		// only if no marker was emitted, which keeps the cursor off the footer.
@@ -1046,6 +1049,209 @@ export class TUI extends Container {
 
 function isImageLine(line: string): boolean {
 	return line.includes("\x1b_G") || line.includes("\x1b]1337;");
+}
+
+// ── Cell-level rendering ──────────────────────────────────────────────────────
+// Each cell is { char: string, attr: string } where attr is the full ANSI
+// attribute string (e.g. "\x1b[38;5;46m\x1b[1m"). We parse each rendered line
+// into cells, compare cell-by-cell against the previous frame, and emit only
+// the changes (cursor movement + attribute change + character write).
+
+interface Cell {
+	char: string;
+	attr: string;
+	continuation: boolean;
+}
+
+/**
+ * Parse an ANSI-styled line into an array of cells. Each cell has a character
+ * and the accumulated attribute string that applies to it. Handles CSI, OSC,
+ * and APC escape sequences.
+ */
+function parseLineIntoCells(line: string, targetWidth: number): Cell[] {
+	const cells: Cell[] = [];
+	let attr = "";
+	let i = 0;
+	const len = line.length;
+
+	while (i < len && cells.length < targetWidth) {
+		const ch = line[i];
+
+		if (ch === "\x1b") {
+			const next = line[i + 1];
+			if (next === "[") {
+				// CSI sequence
+				let j = i + 2;
+				while (j < len) {
+					const fc = line.charCodeAt(j);
+					if (fc >= 0x40 && fc <= 0x7e) break;
+					j++;
+				}
+				const seq = line.slice(i, j + 1);
+				i = j + 1;
+
+				// Only SGR changes cell appearance. Other CSI commands must not
+				// leak into a style restoration sequence.
+				if (seq.endsWith("m")) {
+					if (seq === "\x1b[m" || seq === "\x1b[0m" || seq === "\x1b[0;0m") {
+						attr = "";
+					} else {
+						attr += seq;
+					}
+				}
+				continue;
+			}
+			if (next === "]") {
+				// OSC sequence
+				let j = i + 2;
+				while (j < len) {
+					if (line[j] === "\x07") break;
+					if (line[j] === "\x1b" && line[j + 1] === "\\") {
+						j++;
+						break;
+					}
+					j++;
+				}
+				const end = line[j] === "\x07" ? j + 1 : Math.min(len, j + 2);
+				const seq = line.slice(i, end);
+				i = end;
+				attr += seq;
+				continue;
+			}
+			if (next === "_") {
+				// APC sequence
+				let j = i + 2;
+				while (j < len) {
+					if (line[j] === "\x07") break;
+					if (line[j] === "\x1b" && line[j + 1] === "\\") {
+						j++;
+						break;
+					}
+					j++;
+				}
+				const end = line[j] === "\x07" ? j + 1 : Math.min(len, j + 2);
+				i = end;
+				continue;
+			}
+			// Lone ESC
+			attr += ch;
+			i++;
+			continue;
+		}
+
+		// Drop C0 control bytes (except tab which we handle below)
+		const code = ch.charCodeAt(0);
+		if (code < 0x20 && code !== 0x09) {
+			i++;
+			continue;
+		}
+
+		// Tab: expand to one space
+		if (code === 0x09) {
+			if (cells.length < targetWidth) {
+				cells.push({ char: " ", attr, continuation: false });
+			}
+			i++;
+			continue;
+		}
+
+		const codePoint = line.codePointAt(i);
+		if (codePoint === undefined) break;
+		const char = String.fromCodePoint(codePoint);
+		const width = visibleWidth(char);
+		if (width > 0 && cells.length + width <= targetWidth) {
+			cells.push({ char, attr, continuation: false });
+			for (let column = 1; column < width; column++) {
+				cells.push({ char: "", attr, continuation: true });
+			}
+		}
+		i += char.length;
+	}
+
+	// Styling blank padding is visually irrelevant and makes every trailing cell
+	// appear changed when a component happens to omit a final reset.
+	while (cells.length < targetWidth) {
+		cells.push({ char: " ", attr: "", continuation: false });
+	}
+
+	return cells;
+}
+
+/**
+ * Generate ANSI escape sequence to transition from prevCells to newCells,
+ * starting at the given row. Only emits cursor movement + attribute changes
+ * + character writes for changed cells. Uses a smart strategy:
+ *   1. Move cursor to first changed cell
+ *   2. For each subsequent cell: if attr changed, emit attr; if char changed,
+ *      emit char; if both, emit attr then char
+ *   3. If we reach a run of unchanged cells, jump cursor past them
+ */
+function cellLevelDiff(
+	prevCells: Cell[],
+	newCells: Cell[],
+	row: number,
+): string {
+	let out = "";
+	const closeHyperlink = "\x1b]8;;\x1b\\";
+	const changed = new Array<boolean>(newCells.length).fill(false);
+	for (let i = 0; i < newCells.length; i++) {
+		const prev = prevCells[i];
+		changed[i] =
+			!prev ||
+			prev.char !== newCells[i].char ||
+			prev.attr !== newCells[i].attr ||
+			prev.continuation !== newCells[i].continuation;
+	}
+
+	// A terminal cannot address the second half of a wide glyph independently.
+	// Expand changes leftward so replacing either half repaints the whole glyph.
+	for (let i = 1; i < changed.length; i++) {
+		if (
+			changed[i] &&
+			(newCells[i].continuation || prevCells[i]?.continuation)
+		) {
+			changed[i - 1] = true;
+		}
+	}
+
+	let column = 0;
+	while (column < newCells.length) {
+		if (!changed[column]) {
+			column++;
+			continue;
+		}
+		const start = column;
+		while (column < newCells.length && changed[column]) column++;
+
+		out += `\x1b[${row + 1};${start + 1}H${closeHyperlink}\x1b[0m`;
+		let activeAttr = "";
+		for (let i = start; i < column; i++) {
+			const cell = newCells[i];
+			if (cell.continuation) continue;
+			if (cell.attr !== activeAttr) {
+				out += `\x1b[0m${cell.attr}`;
+				activeAttr = cell.attr;
+			}
+			out += cell.char;
+		}
+		out += closeHyperlink;
+	}
+
+	return out;
+}
+
+/** Build the terminal update for one printable row. Exported for regression tests. */
+export function diffTerminalLine(
+	previousLine: string,
+	nextLine: string,
+	row: number,
+	width: number,
+): string {
+	return cellLevelDiff(
+		parseLineIntoCells(previousLine, width),
+		parseLineIntoCells(nextLine, width),
+		row,
+	);
 }
 
 // ── Overlay options ──────────────────────────────────────────────────────────

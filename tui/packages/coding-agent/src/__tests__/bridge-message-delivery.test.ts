@@ -357,6 +357,37 @@ void test("sendMessage rejects when the turn fails", async () => {
 	await assert.rejects(bridge.sendMessage("hello"), /provider failed/);
 });
 
+void test("cancel resolves only after abort settlement and returns recoverable queues", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	let settled = false;
+	internal.harness = {
+		abort: async () => {
+			await Promise.resolve();
+			settled = true;
+			return {
+				clearedSteering: ["change direction"],
+				clearedFollowUp: ["then verify"],
+				clearedNextTurn: [],
+			};
+		},
+	};
+
+	const result = await bridge.cancel();
+
+	assert.equal(settled, true);
+	assert.deepEqual(result, {
+		clearedSteering: ["change direction"],
+		clearedFollowUp: ["then verify"],
+		clearedNextTurn: [],
+	});
+});
+
 void test("core iterations reconcile output without completing the UI turn early", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

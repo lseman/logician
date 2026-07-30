@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { renderTerminalScreen, type TerminalScreen } from "./terminal-screen.ts";
 
 export interface PtyAction {
 	afterMs: number;
@@ -21,6 +22,14 @@ export interface PtyRunOptions {
 export interface PtyRunResult {
 	output: string;
 	exitCode: number | null;
+}
+
+export function screenFromPtyResult(
+	result: PtyRunResult,
+	columns: number,
+	rows: number,
+): TerminalScreen {
+	return renderTerminalScreen(result.output, columns, rows);
 }
 
 /** Run a command in a real Unix PTY and capture the raw terminal stream. */
@@ -59,7 +68,14 @@ export async function runInPty(options: PtyRunOptions): Promise<PtyRunResult> {
 
 export function stripTerminalControls(value: string): string {
 	return value
+		// CSI: ESC [ ... final byte
 		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+		// OSC: ESC ] ... BEL or ST
+		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+		// APC: ESC _ ... BEL or ST
+		.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+		// DEC modes: ESC ( )
 		.replace(/\x1b[()][0-2A-Z]/g, "")
+		// C0 controls
 		.replace(/\r/g, "");
 }

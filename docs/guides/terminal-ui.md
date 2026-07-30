@@ -27,12 +27,19 @@ The Logician TUI is designed for real terminal environments — SSH sessions, tm
 | Key | Action |
 |---|---|
 | `Enter` | Submit instruction |
-| `Ctrl+C` | Cancel current operation |
-| `Ctrl+Z` | Pause and return to prompt |
-| `Ctrl+R` | Rewind to last checkpoint |
-| `Ctrl+B` | Create bookmark |
+| `Esc`, `Esc` | Clear the composer, then safely interrupt the active turn and restore its prompt |
+| `Ctrl+C` | Immediately request interruption |
+| `Ctrl+O` | Expand or collapse all tool results |
+| `Alt+J` / `Alt+K` | Focus the next or previous tool result |
+| `Alt+Enter` | Expand or collapse the focused tool result |
+| `Ctrl+L` | Open the model selector |
+| `Ctrl+S` | Open the session manager |
+| `Ctrl+K` | Cycle sandbox mode |
+| `Ctrl+P` | Toggle plan/act permission mode |
+| `Ctrl+I` | Toggle autonomous/minimal execution policy (enhanced keyboard protocol) |
+| `Ctrl+M` / `Alt+M` | Cycle inference mode |
 | `/` | Open command palette |
-| `?` | Show help |
+| `/help` | Show the live command reference |
 
 ## Terminal compatibility
 

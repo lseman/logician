@@ -118,6 +118,7 @@ export class LogicianTUI {
 	private loopActive = false;
 	private goalActive = false;
 	private goalEvaluationPending = false;
+	private cancellationPending = false;
 	private configPath?: string;
 	private thinkingLevel = "off";
 	private inferenceMode:
@@ -160,6 +161,50 @@ export class LogicianTUI {
 
 	private notify(message: string, level: NotificationLevel = "info"): void {
 		this.notifications.show(message, level);
+	}
+
+	private async cancelActiveTurn(): Promise<void> {
+		if (this.cancellationPending || !this.bridge.isActive()) return;
+		this.cancellationPending = true;
+		this.pendingPermission = null;
+		const activeTurn = this.transcript.getTurns().at(-1);
+		const recoveryPrompt =
+			activeTurn && !activeTurn.isComplete
+				? activeTurn.userMessage.content
+				: "";
+		this.statusPanel.update({ phase: "cancelling" });
+		this.statusPanel.startAnimation();
+		this.notify("Stopping after the active operation settles…", "info");
+		this.tui.requestRender();
+
+		try {
+			const cleared = await this.bridge.cancel();
+			const clearedCount =
+				(cleared?.clearedSteering.length ?? 0) +
+				(cleared?.clearedFollowUp.length ?? 0);
+			// Do not overwrite anything the user typed while cancellation settled.
+			if (recoveryPrompt && this.inputBar.valueText.length === 0) {
+				this.inputBar.valueText = recoveryPrompt;
+			}
+			this.transcript.addSystemMessage(
+				`Turn interrupted safely.${recoveryPrompt ? " The prompt was restored to the composer for editing or retry." : ""}` +
+					(clearedCount > 0
+						? ` Cleared ${clearedCount} queued message${clearedCount === 1 ? "" : "s"}; next-turn messages were preserved.`
+						: ""),
+			);
+			this.transcriptDisplay.setTurns(this.transcript.getTurns());
+			this.statusPanel.update({ phase: "ready" });
+		} catch (error) {
+			this.statusPanel.update({ phase: "error" });
+			this.notify(
+				`Could not confirm interruption: ${error instanceof Error ? error.message : String(error)}`,
+				"error",
+			);
+		} finally {
+			this.cancellationPending = false;
+			this.statusPanel.stopAnimation();
+			this.tui.requestRender();
+		}
 	}
 
 	private cycleInferenceMode(): void {
@@ -1669,6 +1714,27 @@ export class LogicianTUI {
 				return { consume: true };
 			}
 
+			// Alt+J / Alt+K — move between tool cards. Alt+Enter toggles only the
+			// focused card, providing keyboard parity with mouse clicks.
+			if (data === "\x1bj" || data === "\x1bk") {
+				const position = this.transcriptDisplay.focusTool(
+					data === "\x1bj" ? 1 : -1,
+				);
+				if (position) {
+					this.notify(`Tool ${position.index}/${position.total}`, "info");
+					this.tui.requestRender();
+				}
+				return { consume: true };
+			}
+			if (data === "\x1b\r" || data === "\x1b\n") {
+				const expanded = this.transcriptDisplay.toggleFocusedTool();
+				if (expanded !== null) {
+					this.notify(expanded ? "Tool expanded" : "Tool collapsed", "info");
+					this.tui.requestRender();
+				}
+				return { consume: true };
+			}
+
 			// Ctrl+Shift+T — cycle thinking display mode
 			if (data === "\x14") {
 				this.transcript.cycleThinkingDisplayMode();
@@ -1864,9 +1930,7 @@ export class LogicianTUI {
 		};
 
 		this.inputBar.onCancel = () => {
-			this.pendingPermission = null;
-			this.bridge.cancel();
-			this.statusPanel.update({ phase: "ready" });
+			void this.cancelActiveTurn();
 		};
 	}
 

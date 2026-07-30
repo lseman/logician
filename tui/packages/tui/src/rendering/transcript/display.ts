@@ -82,6 +82,7 @@ export class TranscriptDisplay implements Component, Scrollable {
 	private toolsExpanded = false;
 	private expandedToolKeys = new Set<string>();
 	private toolHitRegions: Array<{ start: number; end: number; key: string }> = [];
+	private focusedToolKey: string | null = null;
 	private maxMessageLength: number;
 	private maxTurns: number;
 	private maxRenderedLines: number;
@@ -197,6 +198,46 @@ export class TranscriptDisplay implements Component, Scrollable {
 		this.invalidate();
 		if (keepBottomAnchored) this._pendingScrollBottom = true;
 		return true;
+	}
+
+	/** Move keyboard focus between rendered tool cards and reveal the target. */
+	focusTool(direction: 1 | -1): { index: number; total: number } | null {
+		if (this.toolHitRegions.length === 0) return null;
+		const currentIndex = this.toolHitRegions.findIndex(
+			(region) => region.key === this.focusedToolKey,
+		);
+		const nextIndex =
+			currentIndex < 0
+				? direction > 0
+					? 0
+					: this.toolHitRegions.length - 1
+				: (currentIndex + direction + this.toolHitRegions.length) %
+					this.toolHitRegions.length;
+		const region = this.toolHitRegions[nextIndex];
+		this.focusedToolKey = region.key;
+		const viewportHeight = Math.max(1, this._viewportHeight);
+		if (region.start < this._scrollOffset) {
+			this._scrollOffset = region.start;
+		} else if (region.end > this._scrollOffset + viewportHeight) {
+			this._scrollOffset = Math.max(0, region.end - viewportHeight);
+		}
+		this._atBottom =
+			this._scrollOffset >= Math.max(0, this._totalHeight - viewportHeight);
+		this._pendingScrollBottom = false;
+		this.invalidate();
+		return { index: nextIndex + 1, total: this.toolHitRegions.length };
+	}
+
+	/** Expand or collapse the keyboard-focused tool card. */
+	toggleFocusedTool(): boolean | null {
+		if (!this.focusedToolKey) return null;
+		if (this.expandedToolKeys.has(this.focusedToolKey)) {
+			this.expandedToolKeys.delete(this.focusedToolKey);
+		} else {
+			this.expandedToolKeys.add(this.focusedToolKey);
+		}
+		this.invalidate();
+		return this.expandedToolKeys.has(this.focusedToolKey);
 	}
 
 	invalidate(): void {
@@ -398,8 +439,13 @@ export class TranscriptDisplay implements Component, Scrollable {
 							width,
 							this.toolsExpanded || this.expandedToolKeys.has(toolKey),
 						);
-						for (const line of toolLines)
-							renderedLines.push(padToWidth(`  ${line}`));
+						for (let lineIndex = 0; lineIndex < toolLines.length; lineIndex++) {
+							const prefix =
+								lineIndex === 0 && toolKey === this.focusedToolKey
+									? `${theme.fg("selected", "›")} `
+									: "  ";
+							renderedLines.push(padToWidth(`${prefix}${toolLines[lineIndex]}`));
+						}
 						pendingToolRegions.push({
 							start: regionStart,
 							end: renderedLines.length,
