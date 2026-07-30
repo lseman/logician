@@ -1,41 +1,27 @@
 <svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
-  <!-- Logo symbol (left side) -->
-  <g transform="translate(80, 0)">
-    <!-- Logic circuit paths (scaled down) -->
-    <g stroke="url(#pathGradientLight)" stroke-width="2.5" fill="none" stroke-linecap="round">
-      <path d="M 60 30 L 60 60"/>
-      <circle cx="60" cy="63" r="4" fill="#0891b2"/>
-      <path d="M 60 67 L 45 80 M 60 67 L 75 80"/>
-      <circle cx="45" cy="80" r="4" fill="#0891b2"/>
-      <circle cx="75" cy="80" r="4" fill="#0891b2"/>
-      <path d="M 42 80 L 35 90 M 48 80 L 52 90"/>
-      <path d="M 72 80 L 68 90 M 78 80 L 85 90"/>
-      <circle cx="35" cy="90" r="3" fill="#0e7490"/>
-      <circle cx="52" cy="90" r="3" fill="#0e7490"/>
-      <circle cx="68" cy="90" r="3" fill="#7c3aed"/>
-      <circle cx="85" cy="90" r="3" fill="#7c3aed"/>
-      <path d="M 35 93 L 48 105 M 52 93 L 48 105 M 68 93 L 72 105 M 85 93 L 72 105"/>
-      <circle cx="48" cy="105" r="4" fill="#0e7490"/>
-      <circle cx="72" cy="105" r="4" fill="#7c3aed"/>
-      <path d="M 48 109 L 60 125 M 72 109 L 60 125"/>
-      <circle cx="60" cy="125" r="5" fill="#8b5cf6"/>
-      <path d="M 60 130 L 60 150"/>
-    </g>
+  <!-- Icon badge (left side) -->
+  <g transform="translate(30, 30)">
+    <rect x="0" y="0" width="140" height="140" rx="32" fill="url(#badgeGradientLight)"/>
+    <rect x="0" y="0" width="140" height="140" rx="32" fill="url(#badgeSheenLight)"/>
 
-    <!-- Center "L" -->
-    <text x="60" y="95" font-size="36" font-weight="bold" font-family="system-ui, sans-serif"
-          fill="url(#textGradientLight)" text-anchor="middle" dominant-baseline="middle">L</text>
+    <!-- Geometric L monogram, top-right corner cut at 45deg, node accent at joint -->
+    <path d="M 46 32
+             L 66 32
+             L 66 88
+             L 96 88
+             L 108 100
+             L 96 112
+             L 46 112
+             Z"
+          fill="#ffffff"/>
 
-    <!-- Logic symbols -->
-    <g fill="#0891b2" opacity="0.7" font-family="serif" font-size="12">
-      <text x="33" y="83">&#8743;</text>
-      <text x="80" y="83" fill="#7c3aed">&#8744;</text>
-      <text x="54" y="145" fill="#7c3aed">&#8594;</text>
-    </g>
+    <!-- circuit node accent at the L's inner joint -->
+    <circle cx="66" cy="88" r="7" fill="#ffffff"/>
+    <circle cx="66" cy="88" r="4" fill="#0e7490"/>
   </g>
 
   <!-- Text content -->
-  <g transform="translate(200, 100)">
+  <g transform="translate(210, 100)">
     <text x="0" y="0" font-size="64" font-weight="bold" font-family="system-ui, sans-serif"
           fill="url(#titleGradientLight)">Logician</text>
     <text x="0" y="35" font-size="20" font-family="system-ui, sans-serif"
@@ -46,15 +32,15 @@
 
   <!-- Gradients -->
   <defs>
-    <linearGradient id="pathGradientLight" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="badgeGradientLight" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0891b2"/>
       <stop offset="40%" stop-color="#0e7490"/>
       <stop offset="100%" stop-color="#7c3aed"/>
     </linearGradient>
 
-    <linearGradient id="textGradientLight" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#0891b2"/>
-      <stop offset="100%" stop-color="#7c3aed"/>
+    <linearGradient id="badgeSheenLight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="35%" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
 
     <linearGradient id="titleGradientLight" x1="0%" y1="0%" x2="100%" y2="0%">

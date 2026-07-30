@@ -5,132 +5,145 @@
     viewBox="0 0 1024 1024"
     version="1.1"
     xmlns="http://www.w3.org/2000/svg">
-  <title>Logician Logo</title>
+  <title>Logician light bulb logo</title>
   <defs>
-    <!-- Dark metal shade gradient -->
-    <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#1e2a34" />
-      <stop offset="25%" stop-color="#2a3d4a" />
-      <stop offset="50%" stop-color="#4a6577" />
-      <stop offset="75%" stop-color="#2a3d4a" />
-      <stop offset="100%" stop-color="#1e2a34" />
-    </linearGradient>
-
-    <!-- Bulb glow — cyan to violet -->
-    <radialGradient id="bulbGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.95" />
-      <stop offset="35%" stop-color="#06b6d4" stop-opacity="0.45" />
-      <stop offset="70%" stop-color="#8b5cf6" stop-opacity="0.12" />
+    <radialGradient id="halo" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.34" />
+      <stop offset="55%" stop-color="#8b5cf6" stop-opacity="0.12" />
       <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0" />
     </radialGradient>
 
-    <!-- Light cone from lamp -->
-    <linearGradient id="lightCone" x1="0.5" y1="0" x2="0.5" y2="1">
-      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.32" />
-      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0" />
-    </linearGradient>
+    <radialGradient id="glass" cx="38%" cy="28%" r="76%">
+      <stop offset="0%" stop-color="#d9fbff" stop-opacity="0.24" />
+      <stop offset="35%" stop-color="#22d3ee" stop-opacity="0.13" />
+      <stop offset="75%" stop-color="#8b5cf6" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#111c2a" stop-opacity="0.58" />
+    </radialGradient>
 
-    <!-- Base metal gradient -->
-    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#3a5060" />
-      <stop offset="100%" stop-color="#1e2a34" />
-    </linearGradient>
-
-    <!-- Filament gradient -->
-    <linearGradient id="filament" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#22d3ee" />
+    <linearGradient id="glassStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#baf6ff" />
+      <stop offset="48%" stop-color="#22d3ee" />
       <stop offset="100%" stop-color="#8b5cf6" />
     </linearGradient>
+
+    <linearGradient id="filament" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="45%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#a78bfa" />
+    </linearGradient>
+
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#17232e" />
+      <stop offset="22%" stop-color="#334b5c" />
+      <stop offset="50%" stop-color="#668397" />
+      <stop offset="78%" stop-color="#334b5c" />
+      <stop offset="100%" stop-color="#17232e" />
+    </linearGradient>
+
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="14" />
+    </filter>
   </defs>
 
-  <!-- Cord -->
-  <line x1="512" y1="100" x2="512" y2="230"
-        stroke="#3a5060" stroke-width="8" stroke-linecap="round" />
-
-  <!-- Hook cap -->
-  <path d="M468 230 Q468 200 512 190 Q556 200 556 230"
-        fill="#3a5060" stroke="#5c7a8e" stroke-width="4" />
-
-  <!-- Shade body — conical dome -->
-  <path d="M396 230
-           Q396 206 512 206
-           Q628 206 628 230
-           L592 456
-           Q592 480 512 480
-           Q432 480 432 456 Z"
-        fill="url(#shade)"
-        stroke="#5c7a8e"
-        stroke-width="4"
-        stroke-linejoin="round" />
-
-  <!-- Bottom rim -->
-  <ellipse cx="512" cy="472" rx="80" ry="16"
-           fill="#1a2530"
-           stroke="#5c7a8e"
-           stroke-width="3" />
-
-  <!-- Light cone emanating from lamp -->
-  <path d="M440 476 L300 760 L724 760 L584 476 Z"
-        fill="url(#lightCone)"
-        opacity="0.4" />
-
-  <!-- Bulb glow -->
-  <circle cx="512" cy="352" r="96" fill="url(#bulbGlow)" />
-
-  <!-- Filament core -->
-  <circle cx="512" cy="352" r="20"
-          fill="none"
-          stroke="url(#filament)"
-          stroke-width="5"
-          opacity="0.9" />
-  <circle cx="512" cy="352" r="10"
-          fill="#22d3ee"
-          opacity="0.8" />
-  <circle cx="512" cy="352" r="4"
-          fill="#ffffff"
-          opacity="0.9" />
+  <!-- Ambient glow -->
+  <circle cx="512" cy="392" r="330" fill="url(#halo)" />
 
   <!-- Light rays -->
-  <g stroke="#22d3ee" stroke-width="3" stroke-linecap="round" opacity="0.25">
-    <line x1="512" y1="480" x2="512" y2="520" />
-    <line x1="464" y1="480" x2="448" y2="520" />
-    <line x1="560" y1="480" x2="576" y2="520" />
-    <line x1="424" y1="480" x2="400" y2="520" />
-    <line x1="600" y1="480" x2="624" y2="520" />
+  <g
+      fill="none"
+      stroke="url(#glassStroke)"
+      stroke-width="14"
+      stroke-linecap="round"
+      opacity="0.72">
+    <path d="M512 102 V58" />
+    <path d="M332 150 L300 112" />
+    <path d="M692 150 L724 112" />
+    <path d="M230 316 H178" />
+    <path d="M794 316 H846" />
+    <path d="M278 510 L236 540" />
+    <path d="M746 510 L788 540" />
   </g>
 
-  <!-- Base -->
-  <path d="M440 600 L584 600 L608 672 L416 672 Z"
-        fill="url(#base)"
-        stroke="#5c7a8e"
-        stroke-width="4"
-        stroke-linejoin="round" />
+  <!-- Glass bulb -->
+  <path
+      d="M512 142
+         C354 142 252 256 252 390
+         C252 482 300 536 355 590
+         C388 622 398 654 401 684
+         H623
+         C626 654 636 622 669 590
+         C724 536 772 482 772 390
+         C772 256 670 142 512 142 Z"
+      fill="url(#glass)"
+      stroke="url(#glassStroke)"
+      stroke-width="13"
+      stroke-linejoin="round" />
 
-  <!-- Base top rim -->
-  <ellipse cx="512" cy="600" rx="72" ry="14"
-           fill="#2a3d4a"
-           stroke="#5c7a8e"
-           stroke-width="2" />
+  <!-- Glass highlight -->
+  <path
+      d="M340 366 C350 278 418 218 496 208"
+      fill="none"
+      stroke="#e7fcff"
+      stroke-width="18"
+      stroke-linecap="round"
+      opacity="0.23" />
 
-  <!-- Base bottom -->
-  <ellipse cx="512" cy="672" rx="96" ry="18"
-           fill="#1e2a34"
-           stroke="#5c7a8e"
-           stroke-width="3" />
+  <!-- Filament glow -->
+  <path
+      d="M415 430 C452 372 572 372 609 430"
+      fill="none"
+      stroke="#22d3ee"
+      stroke-width="30"
+      stroke-linecap="round"
+      opacity="0.28"
+      filter="url(#softGlow)" />
 
-  <!-- Base detail line -->
-  <line x1="440" y1="636" x2="584" y2="636"
-        stroke="#5c7a8e"
-        stroke-width="2"
-        opacity="0.4" />
+  <!-- Filament and supports -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path
+        d="M410 404 L460 464 L493 424 L531 468 L566 424 L614 404"
+        stroke="url(#filament)"
+        stroke-width="14" />
+    <path d="M460 464 L446 615" stroke="#6ee7f5" stroke-width="8" opacity="0.72" />
+    <path d="M566 424 L578 615" stroke="#a78bfa" stroke-width="8" opacity="0.72" />
+  </g>
 
-  <!-- Brand name -->
-  <text x="512" y="800"
-        font-family="'Plus Jakarta Sans', Arial, sans-serif"
-        font-size="100"
-        font-weight="800"
-        letter-spacing="24"
-        text-anchor="middle"
-        fill="#eef7fb"
-        opacity="0.55">logician</text>
+  <!-- Bulb neck -->
+  <path
+      d="M401 668 Q512 692 623 668 L615 718 Q512 742 409 718 Z"
+      fill="#182733"
+      stroke="#5f7f92"
+      stroke-width="8"
+      stroke-linejoin="round" />
+
+  <!-- Threaded base -->
+  <path
+      d="M409 714
+         L615 714
+         L603 806
+         Q594 858 548 876
+         H476
+         Q430 858 421 806 Z"
+      fill="url(#metal)"
+      stroke="#5f7f92"
+      stroke-width="8"
+      stroke-linejoin="round" />
+  <g
+      fill="none"
+      stroke="#91a9b8"
+      stroke-width="9"
+      stroke-linecap="round"
+      opacity="0.78">
+    <path d="M418 742 Q512 766 606 742" />
+    <path d="M416 780 Q512 804 608 780" />
+    <path d="M422 818 Q512 840 602 818" />
+  </g>
+
+  <!-- Electrical contact -->
+  <path
+      d="M476 876 H548 Q542 912 512 918 Q482 912 476 876 Z"
+      fill="#263946"
+      stroke="#5f7f92"
+      stroke-width="7"
+      stroke-linejoin="round" />
 </svg>
