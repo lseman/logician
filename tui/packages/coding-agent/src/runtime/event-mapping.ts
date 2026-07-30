@@ -99,6 +99,12 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				...(event.cachedTokens !== undefined && {
 					cached_tokens: event.cachedTokens,
 				}),
+				...(event.promptTokens !== undefined && {
+					prompt_tokens: event.promptTokens,
+				}),
+				...(event.completionTokens !== undefined && {
+					completion_tokens: event.completionTokens,
+				}),
 			};
 		case "compaction":
 			return {

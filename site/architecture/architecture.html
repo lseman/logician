@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description"
-        content="How Logician is built: the five-package layout, the agent harness loop, and how TUI, capabilities, coding tools, and memory fit together." />
+        content="How Logician is built: the four-package layout, the agent harness loop, and how the TUI, capabilities, coding tools, and core engine fit together." />
     <title>Architecture — Logician</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,6 +16,8 @@
 
     <link rel="stylesheet" href="../style.css" />
     <link rel="stylesheet" href="architecture.css" />
+    <link rel="icon" href="../logo.svg" type="image/svg+xml" />
+
 </head>
 
 <body>
@@ -106,9 +108,9 @@
                 <div class="hero-kicker">System design</div>
                 <h1 class="arch-title">How <span class="grad">Logician</span> is built</h1>
                 <p class="section-copy arch-lede">
-                    A TypeScript monorepo of five packages arranged as a fan-in: everything sits on a
-                    minimal agent engine, capabilities and memory build on that engine independently, and the
-                    coding agent + terminal UI pull the rest together into one running process.
+                    A TypeScript monorepo of four packages arranged as a fan-in: a minimal agent engine forms
+                    the foundation, capabilities build on the engine, and the coding agent plus terminal UI
+                    pull everything together into one running process.
                 </p>
             </div>
         </div>
@@ -123,13 +125,14 @@
         <div class="container">
             <div class="reveal">
                 <div class="section-tag">01 — Package map</div>
-                <h2 class="section-title">Five packages, <span class="grad">one process</span></h2>
+                <h2 class="section-title">Four packages, <span class="grad">one process</span></h2>
                 <p class="section-copy">Everything runs locally in a single Node process. No services to
                     orchestrate — packages are TypeScript workspaces, not network boundaries.</p>
             </div>
 
             <div class="diagram-frame reveal reveal-d1">
-                <img src="logician-architecture.svg" alt="Logician package architecture: TUI on top of the agent-core harness, with agent-capabilities and coding-agent alongside it, observational-memory underneath, and external LLM backend / MCP / SearXNG / filesystem connected via a tool bus." />
+                <img src="logician-architecture.svg"
+                    alt="Logician architecture: four TypeScript packages in one Node.js process, a detailed agent-core harness loop, and a gated tool bus connecting external systems." />
             </div>
         </div>
     </section>
@@ -144,8 +147,8 @@
             <div class="reveal">
                 <div class="section-tag">02 — Dependency shape</div>
                 <h2 class="section-title">A <span class="grad">fan-in</span>, not a stack</h2>
-                <p class="section-copy">Package.json dependencies form a diamond, not a strict top-to-bottom
-                    layer cake:</p>
+                <p class="section-copy">Package dependencies converge on <code>agent-core</code>, with the
+                    terminal UI composing the complete runtime:</p>
             </div>
 
             <div class="dep-graph reveal reveal-d1">
@@ -154,10 +157,7 @@
                 </div>
                 <div class="dep-row dep-row-mid">
                     <div class="dep-node dep-coding">coding-agent</div>
-                </div>
-                <div class="dep-row dep-row-sib">
                     <div class="dep-node dep-cap">agent-capabilities</div>
-                    <div class="dep-node dep-mem">observational-memory</div>
                 </div>
                 <div class="dep-row dep-row-bottom">
                     <div class="dep-node dep-core">agent-core</div>
@@ -167,11 +167,11 @@
             <ul class="dep-list reveal reveal-d2">
                 <li><code>agent-core</code> has no internal dependencies — it's the foundation every other
                     package builds on.</li>
-                <li><code>agent-capabilities</code> and <code>observational-memory</code> are siblings: both
-                    depend only on <code>agent-core</code>, not on each other.</li>
-                <li><code>coding-agent</code> is the orchestration layer — it pulls together
-                    <code>agent-core</code>, <code>agent-capabilities</code>, and
-                    <code>observational-memory</code> into one bridge.</li>
+                <li><code>agent-capabilities</code> depends only on <code>agent-core</code>, adding todos,
+                    user prompts, subagents, and reasoning strategies.</li>
+                <li><code>coding-agent</code> is the orchestration layer — it combines
+                    <code>agent-core</code> and <code>agent-capabilities</code> with sessions, tools, skills,
+                    configuration, and MCP.</li>
                 <li><code>tui</code> sits on top of everything: <code>agent-core</code>,
                     <code>agent-capabilities</code>, and <code>coding-agent</code>.</li>
             </ul>
@@ -246,7 +246,7 @@
                         model resolution — where everything else gets wired together.</div>
                     <ul class="pkg-facts">
                         <li><code>runtime/bridge.ts</code> (<code>AgentCoreBridge</code>) — the largest file
-                            in the repo; connects harness, capabilities, memory, and tools into one runtime.
+                            in the repo; connects the harness, capabilities, sessions, and tools into one runtime.
                         </li>
                         <li><code>runtime/</code> also holds <code>LoopManager</code>,
                             <code>GoalManager</code>, an LSP manager for language-server integration, and
@@ -264,35 +264,14 @@
                     </ul>
                 </div>
 
-                <div class="pkg-card" style="--accent:#06b6d4">
-                    <div class="pkg-head">
-                        <span class="pkg-dot"></span>
-                        <code class="pkg-name">@logician/observational-memory</code>
-                    </div>
-                    <div class="pkg-desc">Structured, file-persisted memory: observations, reflections, and
-                        drops — not a chat-log cache.</div>
-                    <ul class="pkg-facts">
-                        <li><code>observer.ts</code> / <code>reflector.ts</code> / <code>dropper.ts</code> —
-                            capture, reflect on, and prune memory entries.</li>
-                        <li><code>consolidation.ts</code> (<code>ConsolidationPipeline</code>) — merges and
-                            compresses observations over time.</li>
-                        <li><code>knowledge-graph.ts</code> + <code>recall.ts</code> — structured retrieval
-                            across sessions.</li>
-                        <li><code>store.ts</code> / <code>persistence.ts</code> — <code>MemoryStoreImpl</code>
-                            over <code>FilePersistence</code>, local-first, no external DB.</li>
-                        <li>Session bookmarks and rewind checkpoints live in <code>coding-agent/sessions</code>
-                            and <code>agent-core</code>'s file-checkpoints, not here.</li>
-                    </ul>
-                </div>
-
-                <div class="pkg-card pkg-card-wide" style="--accent:#8b5cf6">
+                <div class="pkg-card" style="--accent:#8b5cf6">
                     <div class="pkg-head">
                         <span class="pkg-dot"></span>
                         <code class="pkg-name">@logician/tui</code>
                     </div>
                     <div class="pkg-desc">The terminal UI. Streams model output, tool traces, and reasoning
                         live to any VT100-compatible terminal — local, SSH, or tmux.</div>
-                    <ul class="pkg-facts pkg-facts-cols">
+                    <ul class="pkg-facts">
                         <li><code>layers/presentation</code> — rendering pipeline.</li>
                         <li><code>layers/input</code> — keybindings, input bar, steering queue.</li>
                         <li><code>layers/theme</code> — theme system, theme selector.</li>
@@ -324,22 +303,25 @@
             </div>
 
             <div class="diagram-frame reveal reveal-d1">
-                <img src="logician-harness-detail.svg" alt="Logician agent-core harness detail: intake of user input, steering, and follow-ups; context assembly; permission gate; model call; response parsing; pre-tool hooks; permission gate; tool execution; post-tool hooks; compaction check; loop back to next turn or final response, streamed live to the TUI." />
+                <img src="logician-harness-detail.svg" alt="Logician agent-core harness detail: task-scoped initialization; steering and follow-up queues; context transformation; provider request, payload, and response hooks; streaming model generation with retry and compaction recovery; ordered tool batches with per-call permissions and hooks; context accounting; continuation, acceptance, reflection, and structured run outcomes." />
             </div>
 
             <ul class="dep-list reveal reveal-d2">
-                <li><strong>Intake</strong> — merges user input, steering interrupts, and queued follow-ups
-                    from the message queue before the turn starts.</li>
-                <li><strong>Context assembly</strong> — builds the message list, running compaction first if
-                    the session is near its token budget.</li>
-                <li><strong>Permission gate</strong> — checked both before the model call and before tool
-                    execution, per the active <code>permissionMode</code> (<code>acceptAll</code>,
-                    <code>acceptEdits</code>, <code>ask</code>, <code>plan</code>).</li>
-                <li><strong>Model call → parse → hooks → tools</strong> — pre-tool hooks can veto or rewrite
-                    a call; tool execution covers file ops, search, system, agent primitives, and web; post-tool
-                    hooks run result formatting and post-edit diagnostics for JS/TS/JSON.</li>
-                <li><strong>Loop or finish</strong> — either another turn starts, or a final response streams
-                    to the TUI and the turn completes.</li>
+                <li><strong>Task scope and intake</strong> — initializes the registry, result cache, system
+                    prompt, and task status, then drains steering at turn boundaries and follow-ups when the
+                    agent would otherwise become idle.</li>
+                <li><strong>Provider pipeline</strong> — context transforms run before transport conversion;
+                    request and payload hooks can modify provider options, and thinking, text, and tool-call
+                    deltas stream as ordered events.</li>
+                <li><strong>Recovery and compaction</strong> — retryable provider failures use bounded retry;
+                    context-full failures compact to a target budget and retry. Proactive compaction also runs
+                    while preparing a later turn.</li>
+                <li><strong>Tool batches</strong> — each call is prepared and permission-checked before
+                    internal and user hooks run. Parallel-safe calls execute concurrently around sequential
+                    barriers, while result messages retain the model's original order.</li>
+                <li><strong>Loop or finish</strong> — context accounting, diagnostics, refreshed configuration,
+                    and queued messages can continue the loop. Stop policies, acceptance verification,
+                    optional reflection, and structured task status determine the final run outcome.</li>
             </ul>
         </div>
     </section>
@@ -354,7 +336,7 @@
             <div class="reveal">
                 <div class="section-tag">05 — Outside the process</div>
                 <h2 class="section-title">The <span class="grad">tool bus</span></h2>
-                <p class="section-copy">Everything the agent can touch outside its own memory goes through a
+                <p class="section-copy">Everything the agent can touch outside its own process goes through a
                     typed tool call — visible, loggable, and gated by the permission mode.</p>
             </div>
 

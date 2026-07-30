@@ -46,7 +46,6 @@ Untitled-1
 *.ipynb
 plugins/
 agent_config.json
-*.svg
 *.png
 
 # Rust / rust-cli
@@ -55,7 +54,6 @@ rust-cli/target/
 *.rs.bk
 /logician
 
-*.svg
 *.png
 .agent_history
 .local/

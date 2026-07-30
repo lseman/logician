@@ -1311,6 +1311,18 @@ export class LogicianTUI {
 								? event.cached_tokens
 								: undefined,
 					}),
+					...("prompt_tokens" in event && {
+						promptTokens:
+							typeof event.prompt_tokens === "number"
+								? event.prompt_tokens
+								: undefined,
+					}),
+					...("completion_tokens" in event && {
+						completionTokens:
+							typeof event.completion_tokens === "number"
+								? event.completion_tokens
+								: undefined,
+					}),
 				});
 				break;
 			case "compaction":

@@ -28,7 +28,7 @@
     max-width: 44rem;
 }
 
-/* ── Diagram frame ── */
+/* ── Architecture diagrams ── */
 .diagram-frame {
     margin-top: 3rem;
     background: var(--surface);
@@ -76,7 +76,6 @@
 .dep-tui { border-color: rgba(139, 92, 246, 0.5); color: #8b5cf6; }
 .dep-coding { border-color: rgba(86, 211, 100, 0.5); color: #56d364; }
 .dep-cap { border-color: rgba(210, 153, 34, 0.5); color: #22d3ee; }
-.dep-mem { border-color: rgba(188, 140, 255, 0.5); color: #06b6d4; }
 .dep-core { border-color: rgba(88, 166, 255, 0.5); color: #58a6ff; }
 
 .dep-list {

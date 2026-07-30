@@ -35,6 +35,8 @@ interface StatusInfo {
 	sandboxMode?: "none" | "code" | "file" | "dev" | "full";
 	permissionMode?: string;
 	executionProfile?: "autonomous" | "minimal";
+	promptTokens?: number;
+	completionTokens?: number;
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -59,6 +61,8 @@ const DEFAULT_INFO: StatusInfo = {
 	sandboxMode: "code",
 	permissionMode: "acceptAll",
 	executionProfile: "autonomous",
+	promptTokens: undefined,
+	completionTokens: undefined,
 };
 
 export class StatusBar implements Component {
@@ -143,6 +147,7 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatSession(), 2);
 		insertIfFits(this.formatThinking());
 		insertIfFits(this.formatCache());
+		insertIfFits(this.formatTokenFlow());
 		insertIfFits(this.formatGoal());
 		insertIfFits(this.formatInferenceMode());
 		if (this.info.reasoner !== "none") insertIfFits(this.formatReasoner());
@@ -306,6 +311,17 @@ export class StatusBar implements Component {
 				? theme.fg("dim", "unknown")
 				: theme.fg("accent", formatTokenCountClean(tokens));
 		return `${DIM}cache read:${RESET} ${value}`;
+	}
+
+	private formatTokenFlow(): string {
+		const inTok = this.info.promptTokens;
+		const outTok = this.info.completionTokens;
+		if (inTok === undefined && outTok === undefined) return "";
+
+		const inStr = inTok !== undefined ? formatTokenCountClean(inTok) : "–";
+		const outStr = outTok !== undefined ? formatTokenCountClean(outTok) : "–";
+
+		return `${DIM}↑${RESET} ${theme.fg("accent", inStr)}${DIM} │ ${RESET}${DIM}↓${RESET} ${theme.fg("accent", outStr)}`;
 	}
 
 	private formatReasoner(): string {

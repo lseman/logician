@@ -1112,6 +1112,8 @@ async function runAgentLoopInTaskScope(
 					tokens: contextTokens,
 					maxTokens: config.contextWindowTokens,
 					cachedTokens: response?.usage?.cachedTokens ?? null,
+					promptTokens: response?.usage?.promptTokens ?? null,
+					completionTokens: response?.usage?.completionTokens ?? null,
 				});
 				// budget_exhausted is a harder threshold than proactive compaction's
 				// (95% vs 80%) — if we're here, proactive compaction already failed

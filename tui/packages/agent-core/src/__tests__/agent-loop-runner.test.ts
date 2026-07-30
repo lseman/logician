@@ -177,6 +177,16 @@ void test("runAgentLoop estimates context usage when provider usage is absent", 
 			?.cachedTokens,
 		null,
 	);
+	assert.equal(
+		events.filter((event) => event.type === "context_update").at(-1)
+			?.promptTokens,
+		null,
+	);
+	assert.equal(
+		events.filter((event) => event.type === "context_update").at(-1)
+			?.completionTokens,
+		null,
+	);
 });
 
 void test("runAgentLoop propagates provider cache reads through context_update", async () => {
@@ -202,6 +212,8 @@ void test("runAgentLoop propagates provider cache reads through context_update",
 	);
 	const updates = events.filter((event) => event.type === "context_update");
 	assert.equal(updates.at(-1)?.cachedTokens, 12_400);
+	assert.equal(updates.at(-1)?.promptTokens, 20_000);
+	assert.equal(updates.at(-1)?.completionTokens, 50);
 });
 
 void test("structured run outcomes take precedence and reset between runs", async () => {

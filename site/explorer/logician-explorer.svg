@@ -1,0 +1,166 @@
+<svg id="home-svg" viewBox="0 0 1550 1040" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMin meet">
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 0,0 10,5 0,10 Z" fill="#58a6ff"/>
+</marker>
+<marker id="arrow-cap" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 0,0 10,5 0,10 Z" fill="#22d3ee"/>
+</marker>
+<marker id="arrow-code" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 0,0 10,5 0,10 Z" fill="#56d364"/>
+</marker>
+<marker id="arrow-ext" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 0,0 10,5 0,10 Z" fill="#6e7681"/>
+</marker>
+<marker id="arrow-tui" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 0,0 10,5 0,10 Z" fill="#f778ba"/>
+</marker>
+<filter id="softGlow" x="-0.4" y="-0.4" width="1.8" height="1.8">
+<feGaussianBlur stdDeviation="7" result="b"/>
+<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+<pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+<circle cx="1.2" cy="1.2" r="1.2" fill="#ffffff" opacity="0.035"/>
+</pattern>
+</defs>
+<rect x="0" y="0" width="1550" height="1040" fill="#0d1117" style="stroke-width:0.98"/>
+<rect x="0" y="0" width="1550" height="1040" fill="url(#dots)"/>
+
+<!-- TITLE -->
+<g id="title">
+<text x="800" y="58" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="42px" font-weight="700" fill="#58a6ff" text-anchor="middle" letter-spacing="6">LOGICIAN</text>
+<text x="800" y="84" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="15px" font-weight="600" fill="#8b949e" text-anchor="middle" letter-spacing="4">AGENT ARCHITECTURE</text>
+<rect x="610" y="98" width="98" height="22" rx="11" fill="#58a6ff1a" stroke="#58a6ff" stroke-width="1.2"/>
+<text x="659" y="112.85" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="600" fill="#58a6ff" text-anchor="middle">TypeScript</text>
+<rect x="722" y="98" width="128.4" height="22" rx="11" fill="#56d3641a" stroke="#56d364" stroke-width="1.2"/>
+<text x="786.2" y="112.85" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="600" fill="#56d364" text-anchor="middle">Node.js ≥22.19</text>
+<rect x="864.4" y="98" width="44.8" height="22" rx="11" fill="#8b949e1a" stroke="#8b949e" stroke-width="1.2"/>
+<text x="886.8" y="112.85" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="600" fill="#8b949e" text-anchor="middle">MIT</text>
+<text x="1510" y="1022" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11.5px" font-weight="400" fill="#6e7681" text-anchor="end">github.com/lseman/logician</text>
+<text x="40" y="1022" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11.5px" font-weight="400" fill="#6e7681" text-anchor="start">local-first · SSH-ready · thinking-visible</text>
+</g>
+
+<!-- USER SESSION -->
+<g id="user-session">
+<rect x="600" y="140" width="400" height="52" rx="9" fill="#161b22" stroke="#30363d" stroke-width="1.4"/>
+<text x="800" y="164" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="15px" font-weight="700" fill="#e6edf3" text-anchor="middle">User · Terminal Session</text>
+<text x="800" y="184" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="400" fill="#8b949e" text-anchor="middle">SSH · tmux · any VT100-compatible terminal</text>
+</g>
+
+<line x1="770" y1="192" x2="770" y2="210" stroke="#f778ba" stroke-width="1.6" marker-end="url(#arrow-tui)" opacity="1"/>
+
+<!-- TUI LAYER -->
+<g id="layer-tui" class="home-node" data-nav="tui">
+<rect x="150" y="214" width="1300" height="82" rx="11" fill="#161b22" stroke="#f778ba" stroke-width="2" class="node-bg"/>
+<text x="180" y="240" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11.5px" font-weight="600" fill="#f778ba" text-anchor="start">packages/tui</text>
+<text x="180" y="264" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="19px" font-weight="700" fill="#e6edf3" text-anchor="start">Terminal UI Layer</text>
+<g class="home-node-sub" data-nav="tui-rendering"><rect x="451" y="258" width="155" height="26" rx="13" fill="#f778ba1a" stroke="#f778ba" stroke-width="1.2" class="node-bg"/><text x="528.5" y="275.375" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#f778ba" text-anchor="middle">Rendering</text></g>
+<g class="home-node-sub" data-nav="tui-input"><rect x="632" y="258" width="155" height="26" rx="13" fill="#f778ba1a" stroke="#f778ba" stroke-width="1.2" class="node-bg"/><text x="709.5" y="275.375" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#f778ba" text-anchor="middle">Input</text></g>
+<g class="home-node-sub" data-nav="tui-themes"><rect x="813" y="258" width="155" height="26" rx="13" fill="#f778ba1a" stroke="#f778ba" stroke-width="1.2" class="node-bg"/><text x="890.5" y="275.375" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#f778ba" text-anchor="middle">Themes</text></g>
+<g class="home-node-sub" data-nav="tui-overlays"><rect x="994" y="258" width="155" height="26" rx="13" fill="#f778ba1a" stroke="#f778ba" stroke-width="1.2" class="node-bg"/><text x="1071.5" y="275.375" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#f778ba" text-anchor="middle">Overlays</text></g>
+</g>
+
+<line x1="770" y1="296" x2="770" y2="318" stroke="#58a6ff" stroke-width="1.6" marker-end="url(#arrow)" opacity="1"/>
+
+<!-- HARNESS LAYER -->
+<g id="layer-harness" class="home-node" data-nav="harness">
+<rect x="470" y="322" width="660" height="270" rx="14" fill="#141a24" stroke="#58a6ff" stroke-width="2.4" class="node-bg"/>
+<text x="800" y="350" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12px" font-weight="600" fill="#58a6ff" text-anchor="middle">packages/agent-core</text>
+<text x="800" y="376" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="23px" font-weight="700" fill="#e6edf3" text-anchor="middle">Harness — Agent Loop</text>
+<text x="800" y="396" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11.5px" font-weight="400" fill="#8b949e" text-anchor="middle">loop · hooks · tool registry · compaction · message-queue</text>
+<rect x="721" y="414" width="158" height="40" rx="8" fill="#0d1117" stroke="#58a6ff" stroke-width="1.4"/>
+<text x="800" y="439" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#e6edf3" text-anchor="middle">Message Queue</text>
+<rect x="901" y="467" width="158" height="40" rx="8" fill="#0d1117" stroke="#58a6ff" stroke-width="1.4"/>
+<text x="980" y="492" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#e6edf3" text-anchor="middle">Tool Execution</text>
+<rect x="721" y="520" width="158" height="40" rx="8" fill="#0d1117" stroke="#58a6ff" stroke-width="1.4"/>
+<text x="800" y="545" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#e6edf3" text-anchor="middle">Hooks</text>
+<rect x="541" y="467" width="158" height="40" rx="8" fill="#0d1117" stroke="#58a6ff" stroke-width="1.4"/>
+<text x="620" y="492" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="12.5px" font-weight="600" fill="#e6edf3" text-anchor="middle">Compaction</text>
+<line x1="843" y1="447" x2="934" y2="473" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" opacity="1"/>
+<line x1="937" y1="499" x2="846" y2="526" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" opacity="1"/>
+<line x1="757" y1="527" x2="666" y2="500" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" opacity="1"/>
+<line x1="663" y1="474" x2="754" y2="447" stroke="#58a6ff" stroke-width="1.5" marker-end="url(#arrow)" opacity="1"/>
+<text x="800" y="491" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.5px" font-weight="600" fill="#6e7681" text-anchor="middle" style="font-style:italic">loop</text>
+</g>
+
+<!-- CAPABILITIES LAYER -->
+<g id="layer-capabilities" class="home-node" data-nav="capabilities">
+<rect x="120" y="322" width="320" height="293" rx="12" fill="#161b22" stroke="#22d3ee" stroke-width="2.1" class="node-bg"/>
+<text x="280" y="348" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.6px" font-weight="600" fill="#22d3ee" text-anchor="middle">packages/agent-capabilities</text>
+<text x="280" y="374" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="18px" font-weight="700" fill="#e6edf3" text-anchor="middle">Agent Capabilities</text>
+<circle cx="146" cy="410" r="3" fill="#22d3ee"/>
+<g class="home-node-sub" data-nav="cap-todo"><text x="160" y="414" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">todo</text><text x="160" y="430" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">task tracking, status transitions</text></g>
+<circle cx="146" cy="452" r="3" fill="#22d3ee"/>
+<g class="home-node-sub" data-nav="cap-ask-user"><text x="160" y="456" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">ask-user</text><text x="160" y="472" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">user input prompts</text></g>
+<circle cx="146" cy="494" r="3" fill="#22d3ee"/>
+<g class="home-node-sub" data-nav="cap-subagents"><text x="160" y="498" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">subagents</text><text x="160" y="514" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">child agents, isolated worktrees</text></g>
+<circle cx="146" cy="536" r="3" fill="#22d3ee"/>
+<g class="home-node-sub" data-nav="cap-reasoners"><text x="160" y="540" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">reasoners</text><text x="160" y="556" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">SSR · Tree of Thoughts · Reflexion</text></g>
+<circle cx="146" cy="578" r="3" fill="#22d3ee"/>
+<g class="home-node-sub" data-nav="cap-eoh"><text x="160" y="582" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">eoh</text><text x="160" y="598" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">capability module</text></g>
+</g>
+
+<line x1="410" y1="457" x2="438" y2="457" stroke="#22d3ee" stroke-width="1.6" marker-end="url(#arrow-cap)" opacity="1"/>
+
+<!-- CODING AGENT LAYER -->
+<g id="layer-coding-agent" class="home-node" data-nav="coding-agent">
+<rect x="1160" y="322" width="320" height="313" rx="12" fill="#161b22" stroke="#56d364" stroke-width="2.2" class="node-bg"/>
+<text x="1320" y="348" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.6px" font-weight="600" fill="#56d364" text-anchor="middle">packages/coding-agent</text>
+<text x="1320" y="374" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="18px" font-weight="700" fill="#e6edf3" text-anchor="middle">Coding Agent</text>
+<circle cx="1186" cy="408" r="3" fill="#56d364"/>
+<g class="home-node-sub" data-nav="ca-tools"><text x="1200" y="412" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">Tools</text><text x="1200" y="427" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">file · search · system · web</text></g>
+<circle cx="1186" cy="446" r="3" fill="#56d364"/>
+<g class="home-node-sub" data-nav="ca-skills"><text x="1200" y="450" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">Skills</text><text x="1200" y="465" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">SKILL.md-driven capabilities</text></g>
+<circle cx="1186" cy="484" r="3" fill="#56d364"/>
+<g class="home-node-sub" data-nav="ca-mcp"><text x="1200" y="488" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">MCP client</text><text x="1200" y="503" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">stdio · streamable HTTP</text></g>
+<circle cx="1186" cy="522" r="3" fill="#56d364"/>
+<g class="home-node-sub" data-nav="ca-context"><text x="1200" y="526" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">Context files</text><text x="1200" y="541" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">repo &amp; doc context</text></g>
+<circle cx="1186" cy="560" r="3" fill="#56d364"/>
+<g class="home-node-sub" data-nav="ca-prompts"><text x="1200" y="564" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">Prompts · Trust</text><text x="1200" y="579" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">system prompts, permissions</text></g>
+<circle cx="1186" cy="598" r="3" fill="#56d364"/>
+<g class="home-node-sub" data-nav="ca-sessions"><text x="1200" y="602" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="13px" font-weight="700" fill="#e6edf3" text-anchor="start">Sessions</text><text x="1200" y="617" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#8b949e" text-anchor="start">persistence, bookmarks, rewind</text></g>
+</g>
+
+<line x1="1102" y1="457" x2="1130" y2="457" stroke="#56d364" stroke-width="1.6" marker-end="url(#arrow-code)" opacity="1"/>
+
+<!-- EXTERNAL LAYER -->
+<g id="layer-external" class="home-node" data-nav="external">
+<rect x="140" y="792" width="315" height="120" rx="10" fill="#161b22" stroke="#6e7681" stroke-width="1.4" stroke-dasharray="5, 4" class="node-bg"/>
+<text x="297.5" y="826" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="15px" font-weight="700" fill="#e6edf3" text-anchor="middle">LLM Backend</text>
+<text x="297.5" y="848" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.6px" font-weight="400" fill="#8b949e" text-anchor="middle">OpenAI-compatible API</text>
+<rect x="475" y="792" width="315" height="120" rx="10" fill="#161b22" stroke="#6e7681" stroke-width="1.4" stroke-dasharray="5, 4" class="node-bg"/>
+<text x="632.5" y="826" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="15px" font-weight="700" fill="#e6edf3" text-anchor="middle">MCP Servers</text>
+<text x="632.5" y="848" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.6px" font-weight="400" fill="#8b949e" text-anchor="middle">stdio · streamable HTTP</text>
+<rect x="810" y="792" width="315" height="120" rx="10" fill="#161b22" stroke="#6e7681" stroke-width="1.4" stroke-dasharray="5, 4" class="node-bg"/>
+<text x="967.5" y="826" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="15px" font-weight="700" fill="#e6edf3" text-anchor="middle">SearXNG</text>
+<text x="967.5" y="848" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.6px" font-weight="400" fill="#8b949e" text-anchor="middle">web_search · web_fetch</text>
+<rect x="1145" y="792" width="315" height="120" rx="10" fill="#161b22" stroke="#6e7681" stroke-width="1.4" stroke-dasharray="5, 4" class="node-bg"/>
+<text x="1302.5" y="826" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="15px" font-weight="700" fill="#e6edf3" text-anchor="middle">Filesystem · Git</text>
+<text x="1302.5" y="848" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10.6px" font-weight="400" fill="#8b949e" text-anchor="middle">bash · grep(rg) · find(fd) · git</text>
+</g>
+
+<!-- INTEGRATION BUS -->
+<g id="integration-bus">
+<line x1="297.5" y1="750" x2="1302.5" y2="750" stroke="#6e7681" stroke-width="1.6" stroke-dasharray="5, 4"/>
+<line x1="297.5" y1="750" x2="297.5" y2="790" stroke="#6e7681" stroke-width="1.6" stroke-dasharray="5, 4" marker-end="url(#arrow-ext)"/>
+<line x1="632.5" y1="750" x2="632.5" y2="790" stroke="#6e7681" stroke-width="1.6" stroke-dasharray="5, 4" marker-end="url(#arrow-ext)"/>
+<line x1="967.5" y1="750" x2="967.5" y2="790" stroke="#6e7681" stroke-width="1.6" stroke-dasharray="5, 4" marker-end="url(#arrow-ext)"/>
+<line x1="1302.5" y1="750" x2="1302.5" y2="790" stroke="#6e7681" stroke-width="1.6" stroke-dasharray="5, 4" marker-end="url(#arrow-ext)"/>
+<line x1="1100" y1="592" x2="1100" y2="750" stroke="#6e7681" stroke-width="1.6" marker-end="url(#arrow-ext)" marker-start="url(#arrow-ext)"/>
+<text x="1114" y="675" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="10px" font-weight="400" fill="#6e7681" text-anchor="start" style="font-style:italic">tool calls</text>
+</g>
+
+<!-- LEGEND -->
+<g id="legend">
+<rect x="150" y="978" width="14" height="14" rx="3" fill="#f778ba22" stroke="#f778ba" stroke-width="1.3"/>
+<text x="172" y="989" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="400" fill="#8b949e" text-anchor="start">TUI</text>
+<rect x="231.9" y="978" width="14" height="14" rx="3" fill="#58a6ff22" stroke="#58a6ff" stroke-width="1.3"/>
+<text x="253.9" y="989" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="400" fill="#8b949e" text-anchor="start">Harness / Core</text>
+<rect x="394.1" y="978" width="14" height="14" rx="3" fill="#22d3ee22" stroke="#22d3ee" stroke-width="1.3"/>
+<text x="416.1" y="989" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="400" fill="#8b949e" text-anchor="start">Capabilities</text>
+<rect x="541.7" y="978" width="14" height="14" rx="3" fill="#56d36422" stroke="#56d364" stroke-width="1.3"/>
+<text x="563.7" y="989" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="400" fill="#8b949e" text-anchor="start">Coding Agent</text>
+<rect x="689.3" y="978" width="14" height="14" rx="3" fill="#6e768122" stroke="#6e7681" stroke-width="1.3"/>
+<text x="711.3" y="989" font-family="'JetBrains Mono', 'Fira Code', SFMono-Regular, Consolas, monospace" font-size="11px" font-weight="400" fill="#8b949e" text-anchor="start">External (tool bus)</text>
+</g>
+</svg>

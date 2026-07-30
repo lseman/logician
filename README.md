@@ -67,14 +67,13 @@ reasoning tokens are not included in the stream.
 
 ## Architecture
 
-Logician is a monorepo with five packages under `tui/packages/`:
+Logician is a monorepo with four packages under `tui/packages/`:
 
 ```
 tui/packages/
 ├── agent-core/              Agent engine: loop, harness, hooks, types
 ├── agent-capabilities/      Capabilities: todo, ask-user, subagents, reasoners
 ├── coding-agent/            Orchestration: sessions, config, skills, MCP, prompts
-├── legacy-observational-memory/  Structured observations with file-based persistence
 └── tui/                     Terminal rendering, input, themes, overlays
 ```
 
@@ -83,8 +82,7 @@ tui/packages/
 | `@logician/agent-core` | `core/*`, `hooks/*`, `tools/*`, `compaction/*`, `message-queue/*` |
 | `@logician/agent-capabilities` | `todo/*`, `ask-user/*`, `subagents/*`, `reasoners/*`, `eoh/*` |
 | `@logician/coding-agent` | `tools`, `skills`, `mcp`, `context-files`, `prompts`, `trust`, `sessions` |
-| `@logician/legacy-observational-memory` | Structured observations with file-based persistence |
-| `@logician/tui` | Terminal UI layer |
+| `@logician/tui` | `components/*`, `engine/*`, `layers/*`, `state/*` |
 
 The `@logician/observational-memory` npm package (published separately) provides
 the cross-session memory store used by the agent at runtime.

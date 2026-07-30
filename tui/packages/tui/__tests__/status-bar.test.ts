@@ -275,4 +275,54 @@ void describe("StatusBar", () => {
 		const lines = bar.render(120);
 		assert.ok(lines[0].includes("93.3%"));
 	});
+
+	it("shows token flow with prompt and completion tokens", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 5000,
+			contextMaxTokens: 150000,
+			promptTokens: 4800,
+			completionTokens: 200,
+		});
+		const lines = bar.render(160);
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		assert.ok(plain.includes("↑"));
+		assert.ok(plain.includes("↓"));
+		assert.ok(plain.includes("4.8k"));
+		assert.ok(plain.includes("200"));
+	});
+
+	it("shows partial token flow when only prompt tokens present", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 5000,
+			contextMaxTokens: 150000,
+			promptTokens: 4800,
+		});
+		const lines = bar.render(160);
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		assert.ok(plain.includes("↑"));
+		assert.ok(plain.includes("–"));
+	});
+
+	it("omits token flow when neither token count is set", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 5000,
+			contextMaxTokens: 150000,
+		});
+		const lines = bar.render(120);
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		assert.ok(!plain.includes("↑"));
+		assert.ok(!plain.includes("↓"));
+	});
 });
