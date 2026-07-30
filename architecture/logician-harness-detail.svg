@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1260" role="img"
+  aria-labelledby="title description">
+  <title id="title">Logician agent-core harness loop</title>
+  <desc id="description">Implementation-aligned flow of the Logician agent harness: task-scoped initialization, queued steering and follow-ups, context transformation, provider hooks and streaming, output recovery, ordered tool batches with per-call permissions and hooks, context accounting and compaction, continuation policies, acceptance verification, reflection, and structured outcomes.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090e16"/>
+      <stop offset=".55" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <radialGradient id="aura" cx="50%" cy="40%" r="58%">
+      <stop offset="0" stop-color="#2563eb" stop-opacity=".12"/>
+      <stop offset=".6" stop-color="#06b6d4" stop-opacity=".035"/>
+      <stop offset="1" stop-color="#0d1117" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0V28" fill="none" stroke="#94a3b8" stroke-opacity=".04"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-25%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000" flood-opacity=".36"/>
+    </filter>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#56d364"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#f778ba"/>
+    </marker>
+    <style>
+      text { font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
+      .hero { font-size: 34px; font-weight: 800; letter-spacing: 6px; }
+      .hero-sub { font-size: 12px; font-weight: 650; letter-spacing: 2.7px; }
+      .step { fill: #60a5fa; font-size: 11px; font-weight: 800; letter-spacing: 1.2px; }
+      .heading { fill: #f1f5f9; font-size: 16px; font-weight: 750; }
+      .body { fill: #94a3b8; font-size: 10.5px; }
+      .tiny { fill: #64748b; font-size: 9px; }
+      .chip { fill: #cbd5e1; font-size: 10px; font-weight: 650; }
+      .rail-title { fill: #e2e8f0; font-size: 13px; font-weight: 750; }
+      .rail-body { fill: #94a3b8; font-size: 9.5px; }
+      .edge { fill: #64748b; font-size: 9px; font-style: italic; }
+      .outcome { fill: #f8fafc; font-size: 11px; font-weight: 750; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1260" rx="18" fill="url(#bg)"/>
+  <rect width="1600" height="1260" rx="18" fill="url(#grid)"/>
+  <rect width="1600" height="1260" rx="18" fill="url(#aura)"/>
+
+  <g aria-label="Heading">
+    <text id="title-text" x="800" y="50" text-anchor="middle" class="hero" fill="#60a5fa">HARNESS · AGENT LOOP</text>
+    <text x="800" y="76" text-anchor="middle" class="hero-sub" fill="#94a3b8">packages/agent-core · implementation flow</text>
+    <g transform="translate(561 94)">
+      <rect width="140" height="24" rx="12" fill="#58a6ff" fill-opacity=".09" stroke="#58a6ff" stroke-opacity=".65"/>
+      <text x="70" y="16" text-anchor="middle" class="chip" fill="#60a5fa">task-scoped</text>
+      <rect x="151" width="168" height="24" rx="12" fill="#22d3ee" fill-opacity=".08" stroke="#22d3ee" stroke-opacity=".6"/>
+      <text x="235" y="16" text-anchor="middle" class="chip">streaming events</text>
+      <rect x="330" width="148" height="24" rx="12" fill="#56d364" fill-opacity=".08" stroke="#56d364" stroke-opacity=".6"/>
+      <text x="404" y="16" text-anchor="middle" class="chip">max 30 turns</text>
+    </g>
+  </g>
+
+  <!-- Main execution spine -->
+  <g id="start" filter="url(#shadow)">
+    <rect x="470" y="145" width="660" height="66" rx="14" fill="#151c27" stroke="#58a6ff" stroke-width="1.7"/>
+    <text x="494" y="169" class="step">RUN START</text>
+    <text x="800" y="174" text-anchor="middle" class="heading">Create task scope and runtime state</text>
+    <text x="800" y="195" text-anchor="middle" class="body">system prompt · transcript · ToolRegistry + shared result cache · reset task status</text>
+  </g>
+  <path d="M800 211V236" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="before-agent-start" filter="url(#shadow)">
+    <rect x="470" y="236" width="660" height="72" rx="14" fill="#151c27" stroke="#8b5cf6" stroke-width="1.7"/>
+    <text x="494" y="260" class="step" fill="#a78bfa">INITIALIZE</text>
+    <text x="800" y="265" text-anchor="middle" class="heading">beforeAgentStart + typed extensions</text>
+    <text x="800" y="286" text-anchor="middle" class="body">augment messages/system prompt · inject autonomous acceptance contract · emit agent_start</text>
+  </g>
+  <path d="M800 308V333" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="queue" filter="url(#shadow)">
+    <rect x="470" y="333" width="660" height="72" rx="14" fill="#151c27" stroke="#22d3ee" stroke-width="1.7"/>
+    <text x="494" y="357" class="step" fill="#22d3ee">QUEUE INTAKE</text>
+    <text x="800" y="362" text-anchor="middle" class="heading">Drain pending messages at the turn boundary</text>
+    <text x="800" y="384" text-anchor="middle" class="body">steering first · follow-ups when idle · append as user messages · emit message events</text>
+  </g>
+  <path d="M800 405V430" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="context" filter="url(#shadow)">
+    <rect x="470" y="430" width="660" height="72" rx="14" fill="#151c27" stroke="#58a6ff" stroke-width="1.7"/>
+    <text x="494" y="454" class="step">TURN N</text>
+    <text x="800" y="459" text-anchor="middle" class="heading">Transform active context</text>
+    <text x="800" y="481" text-anchor="middle" class="body">config → internal hook → user hook · replace messages when a transform returns</text>
+  </g>
+  <path d="M800 502V527" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="provider" filter="url(#shadow)">
+    <rect x="400" y="527" width="800" height="112" rx="16" fill="#131c2a" stroke="#a78bfa" stroke-width="1.8"/>
+    <text x="424" y="552" class="step" fill="#a78bfa">PROVIDER PIPELINE</text>
+    <g transform="translate(430 570)">
+      <rect width="210" height="45" rx="10" fill="#1a2030" stroke="#8b5cf6" stroke-opacity=".75"/>
+      <text x="105" y="19" text-anchor="middle" class="chip">beforeProviderRequest</text>
+      <text x="105" y="34" text-anchor="middle" class="tiny">headers · timeout · retries · metadata</text>
+      <path d="M210 22H247" stroke="#a78bfa" stroke-width="1.6" marker-end="url(#arrow-blue)"/>
+      <rect x="247" width="210" height="45" rx="10" fill="#1a2030" stroke="#8b5cf6" stroke-opacity=".75"/>
+      <text x="352" y="19" text-anchor="middle" class="chip">beforeProviderPayload</text>
+      <text x="352" y="34" text-anchor="middle" class="tiny">transport-ready payload transform</text>
+      <path d="M457 22H494" stroke="#a78bfa" stroke-width="1.6" marker-end="url(#arrow-blue)"/>
+      <rect x="494" width="246" height="45" rx="10" fill="#1a2030" stroke="#a78bfa"/>
+      <text x="617" y="19" text-anchor="middle" class="chip">backend.generate()</text>
+      <text x="617" y="34" text-anchor="middle" class="tiny">thinking · text · tool-call SSE deltas</text>
+    </g>
+  </g>
+  <path d="M800 639V664" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="response" filter="url(#shadow)">
+    <path d="M800 664 1015 714 800 764 585 714Z" fill="#121c29" stroke="#22d3ee" stroke-width="1.8"/>
+    <text x="800" y="702" text-anchor="middle" class="heading">Normalize response</text>
+    <text x="800" y="722" text-anchor="middle" class="body">text-tool fallback · sanitize call arguments · afterProviderResponse</text>
+    <text x="800" y="740" text-anchor="middle" class="tiny">output guard: valid content or tool calls?</text>
+  </g>
+
+  <path d="M800 764V790" stroke="#56d364" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <text x="815" y="782" class="edge" fill="#56d364">tool calls</text>
+
+  <g id="tool-batch" filter="url(#shadow)">
+    <rect x="370" y="790" width="860" height="132" rx="16" fill="#121e23" stroke="#56d364" stroke-width="1.8"/>
+    <text x="394" y="815" class="step" fill="#56d364">TOOL BATCH · RESULTS PRESERVE MODEL ORDER</text>
+    <g transform="translate(395 835)">
+      <rect width="145" height="58" rx="10" fill="#172128" stroke="#56d364" stroke-opacity=".7"/>
+      <text x="72.5" y="22" text-anchor="middle" class="chip">Registry prepare</text>
+      <text x="72.5" y="40" text-anchor="middle" class="tiny">resolve + validate args</text>
+      <path d="M145 29H170" stroke="#56d364" marker-end="url(#arrow-green)"/>
+      <rect x="170" width="145" height="58" rx="10" fill="#172128" stroke="#22d3ee"/>
+      <text x="242.5" y="22" text-anchor="middle" class="chip">Permission</text>
+      <text x="242.5" y="40" text-anchor="middle" class="tiny">evaluate per call</text>
+      <path d="M315 29H340" stroke="#56d364" marker-end="url(#arrow-green)"/>
+      <rect x="340" width="145" height="58" rx="10" fill="#172128" stroke="#58a6ff"/>
+      <text x="412.5" y="22" text-anchor="middle" class="chip">beforeToolCall</text>
+      <text x="412.5" y="40" text-anchor="middle" class="tiny">rewrite · block · snapshot</text>
+      <path d="M485 29H510" stroke="#56d364" marker-end="url(#arrow-green)"/>
+      <rect x="510" width="145" height="58" rx="10" fill="#172128" stroke="#56d364"/>
+      <text x="582.5" y="22" text-anchor="middle" class="chip">Execute</text>
+      <text x="582.5" y="40" text-anchor="middle" class="tiny">parallel stages + barriers</text>
+      <path d="M655 29H680" stroke="#56d364" marker-end="url(#arrow-green)"/>
+      <rect x="680" width="145" height="58" rx="10" fill="#172128" stroke="#58a6ff"/>
+      <text x="752.5" y="22" text-anchor="middle" class="chip">afterToolCall</text>
+      <text x="752.5" y="40" text-anchor="middle" class="tiny">rewrite · error · terminate</text>
+    </g>
+    <text x="800" y="912" text-anchor="middle" class="tiny">stream updates · emit execution events · create paired tool-result messages</text>
+  </g>
+  <path d="M800 922V947" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="turn-end" filter="url(#shadow)">
+    <rect x="410" y="947" width="780" height="84" rx="15" fill="#151c27" stroke="#22d3ee" stroke-width="1.7"/>
+    <text x="434" y="971" class="step" fill="#22d3ee">TURN END</text>
+    <text x="800" y="976" text-anchor="middle" class="heading">Account, adapt, and prepare the next turn</text>
+    <text x="800" y="997" text-anchor="middle" class="body">loop diagnostics · token/context update · emergency compaction at budget exhaustion</text>
+    <text x="800" y="1015" text-anchor="middle" class="body">emit turn_end · refresh mutable config + registry · prepareNextTurn / proactive compaction</text>
+  </g>
+  <path d="M800 1031V1053" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow-blue)"/>
+
+  <g id="continue-decision">
+    <path d="M800 1053 988 1098 800 1143 612 1098Z" fill="#121c29" stroke="#22d3ee" stroke-width="1.8"/>
+    <text x="800" y="1092" text-anchor="middle" class="heading">Continue?</text>
+    <text x="800" y="1112" text-anchor="middle" class="body">tools · steering · follow-up · stop policy · acceptance · reflection</text>
+  </g>
+
+  <!-- Inner loop return -->
+  <path d="M612 1098H325V369H470" fill="none" stroke="#58a6ff" stroke-width="1.7" stroke-dasharray="6 5" marker-end="url(#arrow-blue)"/>
+  <text x="336" y="1083" class="edge" fill="#60a5fa">continue → pending messages</text>
+
+  <!-- Final outcomes -->
+  <path d="M988 1098H1198" stroke="#f778ba" stroke-width="2" marker-end="url(#arrow-pink)"/>
+  <text x="1055" y="1086" class="edge" fill="#f778ba">finish</text>
+  <g id="outcomes" filter="url(#shadow)">
+    <rect x="1198" y="1048" width="330" height="150" rx="16" fill="#201724" stroke="#f778ba" stroke-width="1.7"/>
+    <text x="1222" y="1074" class="step" fill="#f778ba">STRUCTURED RUN OUTCOME</text>
+    <g transform="translate(1222 1090)">
+      <rect width="88" height="28" rx="14" fill="#56d364" fill-opacity=".11" stroke="#56d364"/><text x="44" y="18" text-anchor="middle" class="outcome">completed</text>
+      <rect x="98" width="98" height="28" rx="14" fill="#22d3ee" fill-opacity=".1" stroke="#22d3ee"/><text x="147" y="18" text-anchor="middle" class="outcome">needs_input</text>
+      <rect x="206" width="86" height="28" rx="14" fill="#f59e0b" fill-opacity=".1" stroke="#f59e0b"/><text x="249" y="18" text-anchor="middle" class="outcome">blocked</text>
+      <rect y="39" width="88" height="28" rx="14" fill="#ef4444" fill-opacity=".1" stroke="#ef4444"/><text x="44" y="57" text-anchor="middle" class="outcome">failed</text>
+      <rect x="98" y="39" width="98" height="28" rx="14" fill="#94a3b8" fill-opacity=".08" stroke="#64748b"/><text x="147" y="57" text-anchor="middle" class="outcome">cancelled</text>
+    </g>
+    <text x="1363" y="1182" text-anchor="middle" class="tiny">run_outcome → typed agent_end → agent_end</text>
+  </g>
+
+  <!-- Side rails -->
+  <g id="queue-rail" filter="url(#shadow)">
+    <rect x="70" y="245" width="300" height="148" rx="14" fill="#121a24" stroke="#22d3ee" stroke-opacity=".75"/>
+    <text x="94" y="272" class="rail-title">Two delivery queues</text>
+    <text x="94" y="296" class="rail-body">steering: afterTurn()</text>
+    <text x="94" y="313" class="rail-body">interrupts the next model boundary</text>
+    <text x="94" y="340" class="rail-body">follow-up: onIdle()</text>
+    <text x="94" y="357" class="rail-body">reopens the outer loop after a stop</text>
+    <text x="94" y="379" class="tiny">turn_end also creates the session save point</text>
+    <path d="M370 333H470" stroke="#22d3ee" stroke-dasharray="5 4" marker-end="url(#arrow-cyan)"/>
+  </g>
+
+  <g id="hook-rail" filter="url(#shadow)">
+    <rect x="70" y="480" width="300" height="250" rx="14" fill="#121a24" stroke="#58a6ff" stroke-opacity=".75"/>
+    <text x="94" y="507" class="rail-title">Hook surfaces</text>
+    <text x="94" y="532" class="rail-body">beforeAgentStart</text>
+    <text x="94" y="550" class="rail-body">transformContext · prepareNextTurn</text>
+    <text x="94" y="568" class="rail-body">beforeProviderRequest</text>
+    <text x="94" y="586" class="rail-body">beforeProviderPayload</text>
+    <text x="94" y="604" class="rail-body">afterProviderResponse</text>
+    <text x="94" y="622" class="rail-body">beforeToolCall · afterToolCall</text>
+    <text x="94" y="640" class="rail-body">shouldStopAfterTurn</text>
+    <text x="94" y="658" class="rail-body">getSteeringMessages · getFollowUpMessages</text>
+    <path d="M94 678H346" stroke="#334155"/>
+    <text x="94" y="698" class="tiny">internal safeguards run before user hooks;</text>
+    <text x="94" y="714" class="tiny">typed extension events mirror lifecycle events</text>
+  </g>
+
+  <g id="recovery-rail" filter="url(#shadow)">
+    <rect x="1230" y="405" width="300" height="250" rx="14" fill="#121a24" stroke="#f59e0b" stroke-opacity=".8"/>
+    <text x="1254" y="432" class="rail-title">Output guard + recovery</text>
+    <text x="1254" y="457" class="rail-body">retryable provider error</text>
+    <text x="1254" y="475" class="rail-body">→ bounded delay → retry</text>
+    <text x="1254" y="503" class="rail-body">context_full</text>
+    <text x="1254" y="521" class="rail-body">→ compactToFit(75%) → retry</text>
+    <text x="1254" y="549" class="rail-body">empty / degenerate response</text>
+    <text x="1254" y="567" class="rail-body">→ fail closed</text>
+    <text x="1254" y="595" class="rail-body">turn-loop diagnostic</text>
+    <text x="1254" y="613" class="rail-body">→ inject course-correction nudge</text>
+    <text x="1254" y="639" class="tiny">abort signal can cancel every wait and tool</text>
+    <path d="M1230 553H1200" stroke="#f59e0b" stroke-dasharray="5 4" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <g id="policy-rail" filter="url(#shadow)">
+    <rect x="1230" y="730" width="300" height="268" rx="14" fill="#121a24" stroke="#a78bfa" stroke-opacity=".8"/>
+    <text x="1254" y="757" class="rail-title">Autonomous completion policies</text>
+    <text x="1254" y="782" class="rail-body">structured task_status termination</text>
+    <text x="1254" y="800" class="rail-body">queued follow-ups beat termination</text>
+    <text x="1254" y="827" class="rail-body">continuation nudge (bounded ×3)</text>
+    <text x="1254" y="845" class="rail-body">needs-input detection</text>
+    <text x="1254" y="872" class="rail-body">custom stop policies</text>
+    <text x="1254" y="890" class="rail-body">acceptance verification + correction</text>
+    <text x="1254" y="917" class="rail-body">optional reflection + corrective turn</text>
+    <text x="1254" y="944" class="rail-body">max-iteration safety failure</text>
+    <path d="M1254 962H1506" stroke="#334155"/>
+    <text x="1254" y="982" class="tiny">minimal profile bypasses embedded policies</text>
+  </g>
+
+  <!-- No-tool response path into completion decision -->
+  <path d="M1015 714H1160V1098H988" fill="none" stroke="#f778ba" stroke-width="1.7" stroke-dasharray="6 5" marker-end="url(#arrow-pink)"/>
+  <text x="1172" y="707" class="edge" fill="#f778ba">no tool calls</text>
+
+  <g aria-label="Legend and provenance">
+    <g transform="translate(70 1198)">
+      <rect width="13" height="13" rx="3" fill="#58a6ff" fill-opacity=".12" stroke="#58a6ff"/>
+      <text x="22" y="11" class="tiny">core turn stage</text>
+      <rect x="140" width="13" height="13" rx="3" fill="#22d3ee" fill-opacity=".12" stroke="#22d3ee"/>
+      <text x="162" y="11" class="tiny">queue / decision</text>
+      <rect x="300" width="13" height="13" rx="3" fill="#56d364" fill-opacity=".12" stroke="#56d364"/>
+      <text x="322" y="11" class="tiny">tool batch</text>
+      <rect x="430" width="13" height="13" rx="3" fill="#f778ba" fill-opacity=".12" stroke="#f778ba"/>
+      <text x="452" y="11" class="tiny">completion path</text>
+    </g>
+    <text x="70" y="1238" class="tiny">aligned to agent-loop-runner.ts · tool-batch-controller.ts · harness-queue-hooks.ts · builtin-hooks.ts</text>
+    <text x="1530" y="1238" text-anchor="end" class="tiny">github.com/lseman/logician</text>
+  </g>
+</svg>
