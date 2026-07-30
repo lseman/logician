@@ -2,19 +2,20 @@
 // Loads AGENTS.md / CLAUDE.md from multiple directories and concatenates.
 // Also handles SYSTEM.md override and APPEND_SYSTEM.md append.
 //
-// Discovery order (last wins, all concatenated):
+// Discovery order (later context files can refine earlier ones):
 //   1. ~/.logician/AGENTS.md (global)
 //   2. ~/.logician/SYSTEM.md (system prompt override)
 //   3. ~/.logician/APPEND_SYSTEM.md (appended to system prompt)
-//   4. <cwd>/.logician/AGENTS.md (project-local)
-//   5. <cwd>/.logician/SYSTEM.md
-//   6. <cwd>/.logician/APPEND_SYSTEM.md
-//   7. Parent directories walking up to root
+//   4. LOGICIAN_AGENTS_FILE entries
+//   5. AGENTS.md/CLAUDE.md from root through cwd
+//   6. Trusted .logician/AGENTS.md files from root through cwd
+//   7. Nearest trusted .logician/SYSTEM.md
+//   8. Nearest trusted .logician/APPEND_SYSTEM.md
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
-const CONTEXT_FILENAMES = ["AGENTS.md", "CLAUDE.md"];
+const CONTEXT_FILENAMES = ["AGENTS.md", "AGENTS.MD", "CLAUDE.md"];
 
 function findContextFile(startDir: string): string | null {
 	for (const name of CONTEXT_FILENAMES) {
@@ -29,10 +30,10 @@ function findSystemFile(startDir: string, filename: string): string | null {
 	return existsSync(path) ? path : null;
 }
 
-interface ContextFile {
+export interface ContextFile {
 	path: string;
 	content: string;
-	source: "global" | "project" | "parent";
+	source: "global" | "explicit" | "project" | "parent";
 }
 
 /**
@@ -42,19 +43,39 @@ interface ContextFile {
 export function loadContextFiles(options: {
 	agentDir: string;
 	cwd: string;
+	loadProjectContext?: boolean;
 }): {
 	contextFiles: ContextFile[];
 	systemFile: ContextFile | null;
 	appendSystemFile: ContextFile | null;
 } {
 	const contextFiles: ContextFile[] = [];
+	const seenContextPaths = new Set<string>();
 	let systemFile: ContextFile | null = null;
 	let appendSystemFile: ContextFile | null = null;
+	const addContextFile = (
+		filePath: string,
+		source: ContextFile["source"],
+	): void => {
+		const resolvedPath = resolve(filePath);
+		if (seenContextPaths.has(resolvedPath) || !existsSync(resolvedPath)) return;
+		seenContextPaths.add(resolvedPath);
+		contextFiles.push({
+			path: resolvedPath,
+			content: readFileSync(resolvedPath, "utf-8"),
+			source,
+		});
+	};
 
 	// 1. Global context file
-	const globalPath = join(options.agentDir, "AGENTS.md");
-	if (existsSync(globalPath)) {
-		contextFiles.push({ path: globalPath, content: readFileSync(globalPath, "utf-8"), source: "global" });
+	addContextFile(join(options.agentDir, "AGENTS.md"), "global");
+
+	// Explicit instruction files follow the global file and precede project files.
+	const explicitFiles = process.env.LOGICIAN_AGENTS_FILE;
+	if (explicitFiles) {
+		for (const filePath of explicitFiles.split(delimiter)) {
+			if (filePath.trim()) addContextFile(filePath.trim(), "explicit");
+		}
 	}
 
 	// 2. Global system files
@@ -67,36 +88,45 @@ export function loadContextFiles(options: {
 		appendSystemFile = { path: globalAppend, content: readFileSync(globalAppend, "utf-8"), source: "global" };
 	}
 
-	// 3. Project context file
-	const projectDir = join(options.cwd, ".logician");
-	if (existsSync(projectDir)) {
-		const projectContext = findContextFile(projectDir);
-		if (projectContext) {
-			contextFiles.push({ path: projectContext, content: readFileSync(projectContext, "utf-8"), source: "project" });
-		}
-
-		// Project system files (override global)
-		const projectSystem = findSystemFile(projectDir, "SYSTEM.md");
-		if (projectSystem) {
-			systemFile = { path: projectSystem, content: readFileSync(projectSystem, "utf-8"), source: "project" };
-		}
-		const projectAppend = findSystemFile(projectDir, "APPEND_SYSTEM.md");
-		if (projectAppend) {
-			appendSystemFile = { path: projectAppend, content: readFileSync(projectAppend, "utf-8"), source: "project" };
-		}
+	// 3. Walk from the filesystem root toward cwd so nearer instructions are
+	// appended later and can refine broader repository instructions.
+	const ancestorDirs: string[] = [];
+	let currentDir = resolve(options.cwd);
+	while (true) {
+		ancestorDirs.push(currentDir);
+		const parentDir = dirname(currentDir);
+		if (parentDir === currentDir) break;
+		currentDir = parentDir;
 	}
+	for (const ancestorDir of ancestorDirs.reverse()) {
+		const contextPath = findContextFile(ancestorDir);
+		if (contextPath) addContextFile(contextPath, "parent");
 
-	// 4. Walk up parent directories for context files
-	let currentDir = dirname(options.cwd);
-	const root = "/";
-	while (currentDir !== root) {
-		const parentContext = findContextFile(currentDir);
-		if (parentContext) {
-			contextFiles.push({ path: parentContext, content: readFileSync(parentContext, "utf-8"), source: "parent" });
-			// Stop at first parent match (like pi)
-			break;
+		if (options.loadProjectContext !== false) {
+			const projectDir = join(ancestorDir, ".logician");
+			const projectContextPath = findContextFile(projectDir);
+			if (projectContextPath) {
+				addContextFile(projectContextPath, "project");
+			}
+
+			// Nearer project system files override broader/global files.
+			const projectSystem = findSystemFile(projectDir, "SYSTEM.md");
+			if (projectSystem) {
+				systemFile = {
+					path: projectSystem,
+					content: readFileSync(projectSystem, "utf-8"),
+					source: "project",
+				};
+			}
+			const projectAppend = findSystemFile(projectDir, "APPEND_SYSTEM.md");
+			if (projectAppend) {
+				appendSystemFile = {
+					path: projectAppend,
+					content: readFileSync(projectAppend, "utf-8"),
+					source: "project",
+				};
+			}
 		}
-		currentDir = dirname(currentDir);
 	}
 
 	return { contextFiles, systemFile, appendSystemFile };

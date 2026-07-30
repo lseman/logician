@@ -1,1 +1,1 @@
-export * from "./compaction";
+export * from "./compaction.ts";

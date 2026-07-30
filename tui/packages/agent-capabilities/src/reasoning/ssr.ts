@@ -4,7 +4,7 @@
 // Flow: initial solution → decompose into steps → verify each step via sampling
 // → refine weakest step → repeat.
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 export interface SocraticStep {
 	index: number;

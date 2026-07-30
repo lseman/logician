@@ -3,7 +3,7 @@
 //
 // Iterate: attempt → critique → rewrite based on reflections.
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface ReflexionConfig {
 	maxTrials?: number;

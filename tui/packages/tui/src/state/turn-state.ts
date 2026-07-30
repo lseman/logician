@@ -1,4 +1,4 @@
-import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
+import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
 
 export type TurnPhase =
 	| "idle"

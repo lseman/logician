@@ -1,7 +1,7 @@
 # Logician
 
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.19.0-brightgreen)](https://nodejs.org)
-[![TypeScript](https://img.shields.io/badge/typescript-5.x-blue)](https://typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/typescript-6.x-blue)](https://typescriptlang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A local-first coding agent with a streaming terminal UI. SSH-ready, thinking-visible, and built for real code editing workflows.
@@ -30,8 +30,8 @@ Logician turns natural-language instructions into verified code changes — with
 
 ```bash
 cd tui
-npm install
-npm start
+bun install
+bun start
 ```
 
 The TUI connects to an OpenAI-compatible backend at `http://127.0.0.1:8080` by default. Configure it in `.logician.json` or via `LOGICIAN_LLM_URL`.
@@ -50,11 +50,11 @@ The TUI connects to an OpenAI-compatible backend at `http://127.0.0.1:8080` by d
 
 ```bash
 cd tui
-npm run dev        # start dev server
-npm run typecheck  # TypeScript check
-npm test           # run tests
-npm start -- doctor --json  # read-only readiness report
-npm start -- exec --jsonl "fix the failing test"  # headless JSONL stream
+bun run dev        # start dev server
+bun run typecheck  # TypeScript check
+bun run test       # run tests
+bun start -- doctor --json  # read-only readiness report
+bun start -- exec --jsonl "fix the failing test"  # headless JSONL stream
 ```
 
 `doctor` inspects configuration, local dependencies, MCP declarations, skills,
@@ -80,9 +80,9 @@ tui/packages/
 | Package | Exports |
 |---|---|
 | `@logician/agent-core` | `agent/*`, `hooks/*`, `tools/*`, `compaction/*`, `queue/*` |
-| `@logician/agent-capabilities` | `todo/*`, `ask-user/*`, `subagents/*`, `reasoners/*`, `eoh/*` |
-| `@logician/coding-agent` | `tools`, `skills`, `mcp`, `context-files`, `prompts`, `trust`, `sessions` |
-| `@logician/tui` | `components/*`, `engine/*`, `layers/*`, `state/*` |
+| `@logician/agent-capabilities` | `tasks`, `interaction`, `delegation`, `reasoning`, `eoh/*` |
+| `@logician/coding-agent` | `application`, `runtime`, `configuration`, `commands`, `context`, `developer-tools`, `sessions`, `tools`, `skills`, `mcp`, `prompts`, `trust` |
+| `@logician/tui` | Executable terminal application; internal UI modules are not package exports |
 
 The `@logician/observational-memory` npm package (published separately) provides
 the cross-session memory store used by the agent at runtime.

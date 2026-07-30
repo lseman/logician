@@ -3,11 +3,11 @@
 // Supports tool snippets, custom guidelines, project context files, skills,
 // and dynamic tool-based guidelines.
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Tool } from "@logician/agent-core";
 import type { Skill } from "../skills/index.ts";
+import { loadContextFiles } from "./files/loader.ts";
 
 // ============================================================================
 // Options interface
@@ -30,6 +30,10 @@ export interface BuildSystemPromptOptions {
 	cwd: string;
 	/** Pre-loaded context files (path + content). */
 	contextFiles?: Array<{ path: string; content: string }>;
+	/** Directory containing global Logician context files. */
+	agentDir?: string;
+	/** Whether trusted project-local `.logician` context may be loaded. */
+	loadProjectContext?: boolean;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
 }
@@ -59,81 +63,6 @@ function formatSkillsForPrompt(skills: Skill[]): string {
 // ============================================================================
 // Project context file loading
 // ============================================================================
-
-function loadAgentInstructions(
-	cwd: string,
-): Array<{ path: string; content: string }> {
-	const files = findAgentFiles(cwd);
-	const sections: Array<{ path: string; content: string }> = [];
-	for (const file of files) {
-		try {
-			const content = readFileSync(file, "utf8").trim();
-			if (content) {
-				sections.push({ path: file, content });
-			}
-		} catch (_e: unknown) {
-			// Ignore unreadable context files
-		}
-	}
-	return sections;
-}
-
-function findAgentFiles(cwd: string): string[] {
-	const seen = new Set<string>();
-	const files: string[] = [];
-	const add = (file: string | undefined) => {
-		if (!file) return;
-		const resolved = resolve(file);
-		if (seen.has(resolved) || !existsSync(resolved)) return;
-		seen.add(resolved);
-		files.push(resolved);
-	};
-
-	const explicit = process.env.LOGICIAN_AGENTS_FILE;
-	if (explicit) {
-		for (const item of explicit.split(":")) {
-			if (item.trim()) add(item.trim());
-		}
-	}
-
-	for (const dir of walkUp(cwd)) {
-		add(join(dir, "AGENTS.md"));
-		add(join(dir, "AGENTS.MD"));
-	}
-
-	add(join(dirname(process.execPath), "AGENTS.md"));
-
-	const packageRoot = findPackageRootFromModule();
-	if (packageRoot) add(join(packageRoot, "AGENTS.md"));
-
-	return files;
-}
-
-function walkUp(start: string): string[] {
-	const dirs: string[] = [];
-	let dir = resolve(start);
-	while (true) {
-		dirs.push(dir);
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return dirs;
-}
-
-function findPackageRootFromModule(): string | null {
-	try {
-		let dir = dirname(fileURLToPath(import.meta.url));
-		while (true) {
-			if (existsSync(join(dir, "package.json"))) return dir;
-			const parent = dirname(dir);
-			if (parent === dir) return null;
-			dir = parent;
-		}
-	} catch (_e: unknown) {
-		return null;
-	}
-}
 
 // ============================================================================
 // Web workflow (logician extension)
@@ -277,6 +206,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		appendSystemPrompt,
 		cwd,
 		contextFiles: providedContextFiles,
+		agentDir = join(homedir(), ".logician"),
+		loadProjectContext = true,
 		skills: providedSkills,
 	} = options;
 
@@ -287,9 +218,15 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const now = new Date();
 	const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-	// Load project context files (AGENTS.md)
-	const agentContext = loadAgentInstructions(cwd);
-	const allContextFiles = [...(providedContextFiles ?? []), ...agentContext];
+	const loadedContext = loadContextFiles({
+		agentDir,
+		cwd,
+		loadProjectContext,
+	});
+	const allContextFiles = [
+		...(providedContextFiles ?? []),
+		...loadedContext.contextFiles,
+	];
 
 	// Build the tool list
 	const tools = selectedTools ?? [];
@@ -321,7 +258,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const webWorkflow = buildWebWorkflow(hasWebSearch, hasWebFetch);
 
 	// Append section (custom or guidelines)
-	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
+	const resolvedAppendSystemPrompt = [
+		appendSystemPrompt,
+		loadedContext.appendSystemFile?.content,
+	]
+		.filter((part): part is string => Boolean(part))
+		.join("\n\n");
 	const guidelinesSection = guidelines ? `\n\nGuidelines:\n${guidelines}` : "";
 	const webSection = webWorkflow.length > 0 ? webWorkflow.join("\n") : "";
 
@@ -350,11 +292,15 @@ Default coding-agent workflow:
 - After writing or editing, read the changed area or use file_diff to verify the result. Mutation tools already return diffs; use those diffs to explain what changed.
 - Run the narrowest useful verification command after risky changes, such as tests, type checks, linters, or a smoke command.
 - Keep changes scoped to the user's request. Do not revert unrelated user changes.
-- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}${appendSection}`;
+- Never use destructive git operations such as reset --hard, checkout --, or deleting files unless the user explicitly asked.${webSection}`;
 
 	// Custom prompt overrides everything
-	if (customPrompt) {
-		prompt = customPrompt;
+	const resolvedCustomPrompt = customPrompt ?? loadedContext.systemFile?.content;
+	if (resolvedCustomPrompt) {
+		prompt = resolvedCustomPrompt;
+	}
+	if (resolvedAppendSystemPrompt) {
+		prompt += `\n\n${resolvedAppendSystemPrompt}`;
 	}
 
 	// Append project context files
@@ -387,7 +333,11 @@ Default coding-agent workflow:
  * Convenience function matching the old signature: buildDefaultSystemPrompt(cwd, tools).
  * Builds tool snippets from tool descriptions and delegates to buildSystemPrompt.
  */
-export function buildDefaultSystemPrompt(cwd: string, tools: Tool[]): string {
+export function buildDefaultSystemPrompt(
+	cwd: string,
+	tools: Tool[],
+	options: Pick<BuildSystemPromptOptions, "agentDir" | "loadProjectContext"> = {},
+): string {
 	const snippets: Record<string, string> = {};
 	const guidelines: Record<string, string[]> = {};
 	for (const tool of tools) {
@@ -408,5 +358,6 @@ export function buildDefaultSystemPrompt(cwd: string, tools: Tool[]): string {
 		selectedTools: tools,
 		toolSnippets: snippets,
 		toolGuidelines: guidelines,
+		...options,
 	});
 }

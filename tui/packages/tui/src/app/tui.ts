@@ -5,25 +5,26 @@ import {
 	getReasonerIds,
 	getReasonerMeta,
 	type ReasonerMeta,
-} from "@logician/agent-capabilities/reasoning/registry";
+} from "@logician/agent-capabilities/reasoning";
 import { formatContextSize } from "@logician/coding-agent";
-import { AgentCoreBridge } from "@logician/coding-agent/bridge";
-import { saveConfigField } from "@logician/coding-agent/config";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
-import { listProjectFiles } from "@logician/coding-agent/file-mentions";
-import { LoopManager } from "@logician/coding-agent/loop-manager";
 import {
+	AgentCoreBridge,
 	GoalManager,
 	type GoalState,
+	LoopManager,
+} from "@logician/coding-agent/application";
+import { saveConfigField } from "@logician/coding-agent/configuration";
+import { listProjectFiles } from "@logician/coding-agent/context";
+import {
+	type ParsedBridgeEvent,
 	resolveRuntimeConfig,
 } from "@logician/coding-agent/runtime";
-import { SessionStore } from "@logician/coding-agent/session-store";
+import { SessionStore, Transcript, type Turn } from "@logician/coding-agent/sessions";
 import {
 	createSlashCommands,
 	filterSlashCommands,
 	type SlashCommandDef,
-} from "@logician/coding-agent/slash-commands";
-import { Transcript, type Turn } from "@logician/coding-agent/transcript";
+} from "@logician/coding-agent/commands";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
 import { InputBar } from "../input/input-bar.ts";

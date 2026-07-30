@@ -6,13 +6,6 @@
 	"main": "src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./bridge": "./src/application/agent-bridge.ts",
-		"./session-store": "./src/sessions/session-store.ts",
-		"./config": "./src/configuration/config.ts",
-		"./slash-commands": "./src/commands/slash-commands.ts",
-		"./transcript": "./src/sessions/transcript.ts",
-		"./events": "./src/runtime/events.ts",
-		"./loop-manager": "./src/application/loop-manager.ts",
 		"./runtime": "./src/runtime/index.ts",
 		"./application": "./src/application/index.ts",
 		"./context": "./src/context/index.ts",
@@ -24,19 +17,15 @@
 		"./mcp/*": "./src/mcp/*",
 		"./skills": "./src/skills/index.ts",
 		"./skills/*": "./src/skills/*",
-		"./system-prompt": "./src/context/system-prompt.ts",
-		"./context-files": "./src/context/files/index.ts",
-		"./context-files/*": "./src/context/files/*",
 		"./prompts": "./src/prompts/index.ts",
 		"./prompts/*": "./src/prompts/*",
 		"./trust": "./src/trust/index.ts",
 		"./trust/*": "./src/trust/*",
 		"./tools": "./src/tools/index.ts",
-		"./tools/*": "./src/tools/*",
-		"./file-mentions": "./src/context/file-mentions.ts"
+		"./tools/*": "./src/tools/*"
 	},
 	"scripts": {
-		"test": "tsx --test src/__tests__/*.test.ts",
+		"test": "tsx --test $(find src -name '*.test.ts' -type f -print)",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -45,8 +34,8 @@
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",
-		"tsx": "^4.0.0",
-		"typescript": "^5.5.0",
+		"tsx": "^4.23.1",
+		"typescript": "^6.0.3",
 		"bun-types": "^1.0.0"
 	}
 }

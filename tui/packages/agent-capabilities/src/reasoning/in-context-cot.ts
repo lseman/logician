@@ -3,7 +3,7 @@
 //
 // Requires user-provided exemplars in config.
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 export class InContextCoTReasoner extends BaseReasoner {
 	config: Record<string, unknown>;
@@ -12,7 +12,7 @@ export class InContextCoTReasoner extends BaseReasoner {
 		llm: import("@logician/agent-core/agent/backend.ts").LLMBackend,
 		config: Record<string, unknown> = {},
 	) {
-		super(llm, config as import("./base.js").ReasonerConfig);
+		super(llm, config as import("./base.ts").ReasonerConfig);
 		this.config = config;
 	}
 

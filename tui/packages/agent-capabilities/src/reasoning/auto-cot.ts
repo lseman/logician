@@ -3,7 +3,7 @@
 //
 // Generates domain-relevant exemplars, then uses them as in-context examples.
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface AutoCoTConfig {
 	temperature?: number;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Turn } from "@logician/coding-agent/transcript";
+import type { Turn } from "@logician/coding-agent/sessions";
 import { InputBar } from "../input/input-bar.ts";
 import { NotificationCenter } from "../status/notification-center.ts";
 import { StatusBar } from "../status/status-bar.ts";

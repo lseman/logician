@@ -3,7 +3,7 @@
 //
 // Beam search over reasoning paths, scoring each candidate.
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface ToTConfig {
 	beamWidth?: number;

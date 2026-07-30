@@ -860,7 +860,7 @@ export class Transcript {
 		return assistant.chunks.filter((c) => c.type === "thinking");
 	}
 
-	// ── Backward-compatible getters ──────────────────────────────────────
+	// ── Transcript query helpers ─────────────────────────────────────────
 
 	getTurns(): Turn[] {
 		return this.state.turns;
@@ -883,7 +883,7 @@ export class Transcript {
 		return text || null;
 	}
 
-	/** Legacy: thinking blocks — derived from chunks for compatibility. */
+	/** Return the current turn's thinking chunks as plain text. */
 	getStreamingThinking(): string[] {
 		const chunks = this.getThinkingChunks();
 		return chunks.map((c) => c.contentText || "").filter(Boolean);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SlashPopup } from "../src/overlays/slash-popup.ts";
 import { initTheme } from "../src/terminal/theme.ts";
-import type { SlashCommandDef } from "@logician/coding-agent/slash-commands";
+import type { SlashCommandDef } from "@logician/coding-agent/commands";
 
 initTheme("dark");
 

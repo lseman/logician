@@ -7,7 +7,7 @@ import {
 	groupByCategory,
 	CATEGORY_ORDER,
 	type SlashCommandDef,
-} from "@logician/coding-agent/slash-commands";
+} from "@logician/coding-agent/commands";
 
 const TEST_COMMANDS: SlashCommandDef[] = [
 	{ command: "/new", description: "New session", dispatch: "bridge", acceptsArgs: false, category: "session" },

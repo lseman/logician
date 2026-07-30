@@ -614,7 +614,7 @@ export interface LogicianTuiConfig {
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
 	// Safeguard options (match pi's trust-model approach by default).
-	guardsEnabled?: boolean; // legacy: forces both guards below on when true
+	guardsEnabled?: boolean; // umbrella toggle that enables both guards below
 	duplicateGuardEnabled?: boolean; // ON by default — blocks exact-repeat tool calls (e.g. re-reading the same file)
 	failureGuardEnabled?: boolean; // OFF by default
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task

@@ -4,16 +4,16 @@
 // Factory: get_reasoner(name, llm, **config) → Reasoner instance.
 
 import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
-import { AutoCoTReasoner } from "./auto-cot.js";
-import type { Reasoner, ReasonerConfig, ReasonerConstructor } from "./base.js";
-import { BestOfNReasoner } from "./best-of-n.js";
-import { CoVeReasoner } from "./cover.js";
-import { GoTReasoner } from "./got.js";
-import { InContextCoTReasoner } from "./in-context-cot.js";
-import { ReflexionReasoner } from "./reflexion.js";
-import { SelfConsistencyReasoner } from "./self-consistency.js";
-import { SSRReasoner } from "./ssr.js";
-import { ToTReasoner } from "./tot.js";
+import { AutoCoTReasoner } from "./auto-cot.ts";
+import type { Reasoner, ReasonerConfig, ReasonerConstructor } from "./base.ts";
+import { BestOfNReasoner } from "./best-of-n.ts";
+import { CoVeReasoner } from "./cover.ts";
+import { GoTReasoner } from "./got.ts";
+import { InContextCoTReasoner } from "./in-context-cot.ts";
+import { ReflexionReasoner } from "./reflexion.ts";
+import { SelfConsistencyReasoner } from "./self-consistency.ts";
+import { SSRReasoner } from "./ssr.ts";
+import { ToTReasoner } from "./tot.ts";
 
 // ── Reasoner metadata ────────────────────────────────────────────────────────
 // Each entry: { name, description, defaultConfig }

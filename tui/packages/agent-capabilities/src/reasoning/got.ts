@@ -8,7 +8,7 @@
 // - Convergence: Merge multiple thoughts into a consolidated solution
 // - Pruning: Remove low-scoring nodes
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface GoTNode {
 	id: string;

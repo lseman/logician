@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { Tool } from "@logician/agent-core";
-import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
+import {
+	buildDefaultSystemPrompt,
+	buildSystemPrompt,
+} from "../context/system-prompt.ts";
 
 void test("system prompt makes MCP the primary tool-selection workflow", () => {
 	const fullDescription =
@@ -96,4 +107,81 @@ void test("system prompt omits MCP policy when no MCP tools are available", () =
 		prompt,
 		/Local list_files, find, grep, read_file, git status\/diff, and bash are fallback tools\./,
 	);
+});
+
+void test("system prompt injects global, ancestor, and project context files", () => {
+	const root = mkdtempSync(join(tmpdir(), "logician-context-"));
+	const agentDir = join(root, "home", ".logician");
+	const workspace = join(root, "workspace");
+	const cwd = join(workspace, "packages", "app");
+	const projectDir = join(cwd, ".logician");
+	const previousExplicit = process.env.LOGICIAN_AGENTS_FILE;
+
+	mkdirSync(agentDir, { recursive: true });
+	mkdirSync(projectDir, { recursive: true });
+	writeFileSync(join(agentDir, "AGENTS.md"), "global instructions", "utf8");
+	writeFileSync(join(agentDir, "SYSTEM.md"), "custom global system", "utf8");
+	writeFileSync(join(workspace, "AGENTS.md"), "workspace instructions", "utf8");
+	writeFileSync(join(projectDir, "AGENTS.md"), "project instructions", "utf8");
+	writeFileSync(join(agentDir, "APPEND_SYSTEM.md"), "global system append", "utf8");
+	delete process.env.LOGICIAN_AGENTS_FILE;
+
+	try {
+		const prompt = buildSystemPrompt({
+			agentDir,
+			cwd,
+			selectedTools: [],
+		});
+
+		assert.match(prompt, /global system append/);
+		assert.match(prompt, /^custom global system/);
+		assert.match(prompt, /global instructions/);
+		assert.match(prompt, /workspace instructions/);
+		assert.match(prompt, /project instructions/);
+		assert.ok(
+			prompt.indexOf("global instructions") <
+				prompt.indexOf("workspace instructions"),
+		);
+		assert.ok(
+			prompt.indexOf("workspace instructions") <
+				prompt.indexOf("project instructions"),
+		);
+	} finally {
+		if (previousExplicit === undefined) {
+			delete process.env.LOGICIAN_AGENTS_FILE;
+		} else {
+			process.env.LOGICIAN_AGENTS_FILE = previousExplicit;
+		}
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+void test("system prompt excludes untrusted .logician context", () => {
+	const root = mkdtempSync(join(tmpdir(), "logician-untrusted-context-"));
+	const agentDir = join(root, "home", ".logician");
+	const workspace = join(root, "workspace");
+	const projectDir = join(workspace, ".logician");
+
+	mkdirSync(agentDir, { recursive: true });
+	mkdirSync(projectDir, { recursive: true });
+	writeFileSync(join(agentDir, "AGENTS.md"), "global instructions", "utf8");
+	writeFileSync(join(workspace, "AGENTS.md"), "workspace instructions", "utf8");
+	writeFileSync(join(projectDir, "AGENTS.md"), "untrusted instructions", "utf8");
+	writeFileSync(join(projectDir, "SYSTEM.md"), "untrusted system", "utf8");
+
+	try {
+		const prompt = buildSystemPrompt({
+			agentDir,
+			cwd: workspace,
+			loadProjectContext: false,
+			selectedTools: [],
+		});
+
+		assert.match(prompt, /global instructions/);
+		assert.match(prompt, /workspace instructions/);
+		assert.doesNotMatch(prompt, /untrusted instructions/);
+		assert.doesNotMatch(prompt, /untrusted system/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });

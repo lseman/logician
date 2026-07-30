@@ -3,7 +3,7 @@
 //
 // Generate N samples, score each, pick the best.
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface BestOfNConfig {
 	n?: number;

@@ -1665,7 +1665,9 @@ export class AgentCoreBridge {
 	}
 
 	private buildBaseSystemPrompt(): string {
-		const defaultPrompt = buildDefaultSystemPrompt(this.cwd, this.defaultTools);
+		const defaultPrompt = buildDefaultSystemPrompt(this.cwd, this.defaultTools, {
+			loadProjectContext: this.projectTrusted,
+		});
 		return this.additionalSystemPrompt
 			? `${defaultPrompt}\n\nAdditional user/system instructions:\n${this.additionalSystemPrompt}`
 			: defaultPrompt;

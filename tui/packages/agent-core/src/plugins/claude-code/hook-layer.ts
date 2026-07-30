@@ -179,13 +179,6 @@ export function claudeToolMatcherName(toolName: string): string {
 	return aliases[toolName] ?? toolName;
 }
 
-/** @deprecated Use ClaudeCodeHookLayerOptions. */
-export type PluginHookLayerOptions = ClaudeCodeHookLayerOptions;
-/** @deprecated Use ClaudeCodeHookLayer. */
-export type PluginHookLayer = ClaudeCodeHookLayer;
-/** @deprecated Use createClaudeCodeHookLayer. */
-export const createPluginHookLayer = createClaudeCodeHookLayer;
-
 function contextText(result: PluginCommandResult | null): string {
 	return (result?.additional_contexts || [])
 		.map((item) => String(item || "").trim())

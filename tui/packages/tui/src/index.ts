@@ -2,10 +2,12 @@
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
 import { getAvailableThemes, initTheme, theme } from "./terminal/theme.ts";
+import { AgentCoreBridge } from "@logician/coding-agent/application";
 import {
-	AgentCoreBridge,
 	buildDoctorReport,
 	formatDoctorReport,
+} from "@logician/coding-agent/developer-tools";
+import {
 	resolveRuntimeConfig,
 } from "@logician/coding-agent/runtime";
 import {

@@ -5,7 +5,7 @@
 
 import { type Component, visibleWidth, RESET, BOLD } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import type { SessionStore } from "@logician/coding-agent/session-store";
+import type { SessionStore } from "@logician/coding-agent/sessions";
 import {
 	renderListItem,
 	renderSeparator,

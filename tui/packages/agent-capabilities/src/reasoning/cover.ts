@@ -7,7 +7,7 @@
 // 3. Executing verification steps
 // 4. Generating final verified response
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface CoVeConfig {
 	maxVerificationSteps?: number;

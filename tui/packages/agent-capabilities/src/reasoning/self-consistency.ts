@@ -3,7 +3,7 @@
 //
 // Generate N independent samples, pick the most common answer (voting).
 
-import { BaseReasoner, type ReasoningTrace } from "./base.js";
+import { BaseReasoner, type ReasoningTrace } from "./base.ts";
 
 interface SelfConsistencyConfig {
 	nRollouts?: number;

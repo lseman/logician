@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/events";
+import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
 import {
 	INITIAL_TURN_STATE,
 	reduceTurnState,

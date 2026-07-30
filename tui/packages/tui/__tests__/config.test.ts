@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateConfig } from "@logician/coding-agent/config";
+import { validateConfig } from "@logician/coding-agent/configuration";
 
 void test("validateConfig rejects non-object input", () => {
 	const w: string[] = [];

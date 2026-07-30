@@ -60,7 +60,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// (e.g. re-reading the same file over and over) is safe to force a
 	// strategy change. Failure-loop blocking stays default OFF — it can cut
 	// off a legitimate retry-with-variation sequence, matching pi's
-	// trust-model approach. `guardsEnabled` (legacy) forces both on when true.
+	// trust-model approach. `guardsEnabled` is the umbrella toggle for both.
 	const duplicateGuardOn =
 		executionPolicy.embeddedPoliciesEnabled &&
 		(config.guardsEnabled === true || config.duplicateGuardEnabled !== false);
