@@ -128,7 +128,6 @@ export class LogicianTUI {
 		| "instruct-reasoning" = "instruct-general";
 	private thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
 		"expanded";
-	private traceOn = false;
 	private currentSessionId: string | null = null;
 	// Tool call awaiting an interactive allow/deny answer in the input bar.
 	private pendingPermission: { toolCallId: string; toolName: string } | null =
@@ -591,11 +590,6 @@ export class LogicianTUI {
 			},
 			cycleThinking: () => {
 				this.transcript.cycleThinkingDisplayMode();
-				setStatusPhase("ready");
-			},
-			setTrace: (on: unknown) => {
-				this.traceOn =
-					typeof on === "boolean" ? on : on === "true" || on === true;
 				setStatusPhase("ready");
 			},
 			clear: () => {

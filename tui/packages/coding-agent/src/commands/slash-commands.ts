@@ -326,26 +326,6 @@ export function createSlashCommands(
 			},
 		),
 		cmd(
-			"/trace",
-			"Toggle trace messages",
-			"local",
-			true,
-			{
-				category: "display",
-				argHint: "[on|off]",
-				examples: ["/trace", "/trace off"],
-			},
-			(args: string) => {
-				const state = args.trim().toLowerCase();
-				if (state === "off" || state === "0") {
-					localHandlers.setTrace?.(false);
-					return "Trace: off";
-				}
-				localHandlers.setTrace?.(true);
-				return "Trace: on";
-			},
-		),
-		cmd(
 			"/clear",
 			"Clear visible transcript only",
 			"local",
