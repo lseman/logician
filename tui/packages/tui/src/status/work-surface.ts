@@ -91,12 +91,16 @@ export class WorkSurface implements Component {
 		this.onInvalidate?.();
 	}
 
+	getWorkingSet(): string[] {
+		return this.workingSet;
+	}
+
 	render(width: number): string[] {
 		if (this.workingSet.length === 0 && this.evidence.tools === 0 && !this.context) {
 			return [];
 		}
 		const lines: string[] = [];
-		const work = this.workingSet.slice(0, 4).join("  ·  ");
+		const work = this.workingSet.slice(0, 8).join("  ·  ");
 		if (work) {
 			lines.push(this.line(
 				`${theme.fg("muted", "Working set")}  ${theme.fg("text", work)}${RESET}`,

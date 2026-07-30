@@ -845,6 +845,38 @@ export class LogicianTUI {
 				this.statusPanel.update({ rtkProxyEnabled: next });
 				return next;
 			},
+			openModelSelector: () => {
+				this.openModelSelector();
+			},
+			openSessionManager: () => {
+				this.openSessionManager();
+			},
+			cycleSandboxMode: () => {
+				const mode = this.bridge.cycleSandboxMode();
+				this.statusPanel.update({ sandboxMode: mode });
+				return `Sandbox mode: ${mode}`;
+			},
+			cycleExecutionProfile: () => {
+				const next = this.cycleExecutionProfile();
+				return `Execution policy: ${next}`;
+			},
+			cycleInferenceMode: () => {
+				this.cycleInferenceMode();
+				return `Inference mode: ${this.inferenceMode}`;
+			},
+			notifications: () => {
+				const history = this.notifications.history();
+				if (history.length === 0) return "No notifications yet.";
+				const icons: Record<string, string> = {
+					info: "●",
+					success: "✓",
+					warning: "⚠",
+					error: "×",
+				};
+				return history
+					.map((n) => `${icons[n.level] ?? "●"} ${n.message}`)
+					.join("\n");
+			},
 		};
 
 		const slashCommands = createSlashCommands(this.bridge, localHandlers);
@@ -1701,6 +1733,24 @@ export class LogicianTUI {
 			// Ctrl+L — open model selector
 			if (data === "\x0c") {
 				this.openModelSelector();
+				return { consume: true };
+			}
+
+			// Ctrl+G — jump to a file from the current working set (files touched
+			// this session), inserting it as an @-mention in the composer.
+			if (data === "\x07") {
+				const files = this.workSurface.getWorkingSet();
+				if (files.length === 0) {
+					this.notify("Working set is empty.", "info");
+					return { consume: true };
+				}
+				if (this.inputBar.getActiveMentionQuery() === null) {
+					this.inputBar.valueText = `${this.inputBar.valueText}@`;
+				}
+				this.fileMentionPopup.setFiles(files);
+				this.fileMentionPopup.setQuery("");
+				this.fileMentionPopup.show();
+				this.tui.requestRender();
 				return { consume: true };
 			}
 

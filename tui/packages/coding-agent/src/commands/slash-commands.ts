@@ -8,7 +8,6 @@ export type SlashCommandCategory =
 	| "session"
 	| "agent"
 	| "context"
-	| "rag"
 	| "skills"
 	| "reasoning"
 	| "display"
@@ -23,7 +22,6 @@ export const CATEGORY_ORDER: Readonly<SlashCommandCategory[]> = [
 	"session",
 	"agent",
 	"context",
-	"rag",
 	"skills",
 	"reasoning",
 	"display",
@@ -156,33 +154,21 @@ export function createSlashCommands(
 			{ category: "session" },
 			() => String(localHandlers.listBookmarks?.() ?? "No bookmarks."),
 		),
-		cmd("/load", "Load a previous session", "bridge", true, {
-			category: "session",
-			argHint: "<session_id>",
-			examples: ["/load abc123"],
-		}),
-		cmd("/export", "Export chat history to file", "bridge", true, {
-			category: "session",
-			argHint: "[path]",
-			examples: ["/export", "/export chat.jsonl"],
-		}),
+		cmd(
+			"/session",
+			"Open the interactive session manager",
+			"local",
+			false,
+			{ category: "session", examples: ["/session"] },
+			() => {
+				localHandlers.openSessionManager?.();
+				return undefined;
+			},
+		),
 
 		// ── Agent control ────────────────────────────────────────────────────
 		cmd("/status", "Show runtime state snapshot", "state", false, {
 			category: "agent",
-		}),
-		cmd("/agents", "List loaded agents", "bridge", false, {
-			category: "agent",
-		}),
-		cmd("/agent", "Switch active agent", "bridge", true, {
-			category: "agent",
-			argHint: "<name>",
-			examples: ["/agent coder"],
-		}),
-		cmd("/pipeline", "Set inter-agent pipeline", "bridge", true, {
-			category: "agent",
-			argHint: "<agents...>",
-			examples: ["/pipeline planner reviewer"],
 		}),
 		cmd("/steer-now", "Process queued steering immediately", "bridge", false, {
 			category: "agent",
@@ -234,45 +220,8 @@ export function createSlashCommands(
 		cmd("/discard-branch", "Discard the active branch", "local", false, {
 			category: "context",
 		}),
-		cmd("/reset", "Reset runtime tool state", "bridge", false, {
-			category: "context",
-		}),
-		cmd("/changes", "Show git status and diff preview", "bridge", false, {
-			category: "context",
-		}),
-
-		// ── RAG & docs ───────────────────────────────────────────────────────
-		cmd("/mount", "Mount codebase (context + RAG)", "bridge", true, {
-			category: "rag",
-			argHint: "[path]",
-			examples: ["/mount", "/mount ./src"],
-		}),
-		cmd("/mount-code", "Alias for /mount", "bridge", true, { category: "rag" }),
-		cmd("/upload", "Ingest one document into RAG", "bridge", true, {
-			category: "rag",
-			argHint: "<path>",
-			examples: ["/upload doc.pdf"],
-		}),
-		cmd("/upload-dir", "Bulk ingest docs into RAG", "bridge", true, {
-			category: "rag",
-			argHint: "<dir>",
-			examples: ["/upload-dir ./docs"],
-		}),
-		cmd("/docs", "Fetch docs from Context7", "bridge", true, {
-			category: "rag",
-			argHint: "<lib>",
-			examples: ["/docs react", "/docs nextjs"],
-		}),
-		cmd("/rag", "Search RAG index", "bridge", true, {
-			category: "rag",
-			argHint: "<query>",
-			examples: ["/rag authentication"],
-		}),
 
 		// ── Skills ───────────────────────────────────────────────────────────
-		cmd("/skills-health", "Show skill loader diagnostics", "bridge", false, {
-			category: "skills",
-		}),
 		cmd("/plugins", "Manage installed plugins", "local", true, {
 			category: "skills",
 			argHint: "[list|install|remove]",
@@ -288,6 +237,17 @@ export function createSlashCommands(
 			argHint: "<theme>",
 			examples: ["/theme dark", "/theme github-dark", "/theme light"],
 		}),
+		cmd(
+			"/model",
+			"Open the model selector",
+			"local",
+			false,
+			{ category: "display", examples: ["/model"] },
+			() => {
+				localHandlers.openModelSelector?.();
+				return undefined;
+			},
+		),
 
 		// ── Reasoning ────────────────────────────────────────────────────────
 		cmd("/reasoner", "Select reasoning mode", "local", true, {
@@ -483,6 +443,17 @@ export function createSlashCommands(
 
 		// ── Misc ─────────────────────────────────────────────────────────────
 		cmd(
+			"/notifications",
+			"Show recent notification history",
+			"local",
+			false,
+			{ category: "misc", examples: ["/notifications"] },
+			() =>
+				String(
+					localHandlers.notifications?.() ?? "No notifications yet.",
+				),
+		),
+		cmd(
 			"/version",
 			"Show TUI and bridge version",
 			"local",
@@ -491,11 +462,6 @@ export function createSlashCommands(
 			() =>
 				String(localHandlers.version?.() ?? "Logician version unavailable."),
 		),
-		cmd("/login", "Authenticate with provider", "bridge", true, {
-			category: "misc",
-			argHint: "<provider>",
-			examples: ["/login anthropic"],
-		}),
 		// ── Sandbox ──────────────────────────────────────────────────────
 		cmd(
 			"/sandbox",
@@ -512,6 +478,41 @@ export function createSlashCommands(
 					"/sandbox status",
 				],
 			},
+		),
+		cmd(
+			"/sandbox-cycle",
+			"Cycle the default sandbox mode (off/code/full)",
+			"local",
+			false,
+			{ category: "misc", examples: ["/sandbox-cycle"] },
+			() =>
+				String(
+					localHandlers.cycleSandboxMode?.() ?? "Sandbox cycle unavailable.",
+				),
+		),
+		cmd(
+			"/execution-policy-cycle",
+			"Cycle execution policy (autonomous ↔ minimal)",
+			"local",
+			false,
+			{ category: "misc", examples: ["/execution-policy-cycle"] },
+			() =>
+				String(
+					localHandlers.cycleExecutionProfile?.() ??
+						"Execution policy cycle unavailable.",
+				),
+		),
+		cmd(
+			"/inference-mode-cycle",
+			"Cycle inference mode (thinking/instruct variants)",
+			"local",
+			false,
+			{ category: "misc", examples: ["/inference-mode-cycle"] },
+			() =>
+				String(
+					localHandlers.cycleInferenceMode?.() ??
+						"Inference mode cycle unavailable.",
+				),
 		),
 
 		// ── Settings ─────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ const TEST_COMMANDS: SlashCommandDef[] = [
 	{ command: "/fork", description: "Fork branch", dispatch: "local", acceptsArgs: false, category: "context", examples: ["/fork"] },
 	{ command: "/thinking", description: "Set thinking level", dispatch: "local", acceptsArgs: true, category: "display", argHint: "<level>", examples: ["/thinking high", "/thinking off"] },
 	{ command: "/quit", description: "Exit", dispatch: "quit", acceptsArgs: false, category: "shortcuts" },
-	{ command: "/rag", description: "Search RAG", dispatch: "bridge", acceptsArgs: true, category: "rag", argHint: "<query>" },
+	{ command: "/reasoner", description: "Select reasoning mode", dispatch: "local", acceptsArgs: true, category: "reasoning", argHint: "<mode>" },
 	{ command: "/plugins", description: "Manage plugins", dispatch: "local", acceptsArgs: true, category: "skills" },
 ];
 
@@ -63,7 +63,7 @@ describe("filterSlashCommands", () => {
 describe("groupByCategory", () => {
 	it("groups all commands by category", () => {
 		const groups = groupByCategory(TEST_COMMANDS);
-		assert.strictEqual(groups.size, 6); // session, context, display, shortcuts, rag, skills
+		assert.strictEqual(groups.size, 6); // session, context, skills, reasoning, display, shortcuts
 	});
 
 	it("preserves category order", () => {
@@ -72,11 +72,11 @@ describe("groupByCategory", () => {
 		for (const cat of CATEGORY_ORDER) {
 			if (groups.has(cat)) cats.push(cat);
 		}
-		// CATEGORY_ORDER: help, session, agent, context, rag, skills, reasoning, display, permissions, shortcuts, loop, misc
+		// CATEGORY_ORDER: help, session, agent, context, skills, reasoning, display, permissions, shortcuts, loop, misc
 		assert.strictEqual(cats[0], "session");
 		assert.strictEqual(cats[1], "context");
-		assert.strictEqual(cats[2], "rag");
-		assert.strictEqual(cats[3], "skills");
+		assert.strictEqual(cats[2], "skills");
+		assert.strictEqual(cats[3], "reasoning");
 		assert.strictEqual(cats[4], "display");
 		assert.strictEqual(cats[5], "shortcuts");
 	});

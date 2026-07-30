@@ -30,7 +30,6 @@ const getCategoryColor = (cat: SlashCommandCategory): string => {
 		session: "\x1b[33m",
 		agent: "\x1b[35m",
 		context: "\x1b[34m",
-		rag: "\x1b[32m",
 		skills: "\x1b[95m",
 		reasoning: "\x1b[37m",
 		display: "\x1b[93m",

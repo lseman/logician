@@ -8,7 +8,7 @@ import { type ThemeColor, theme } from "../terminal/theme.ts";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
-interface Notification {
+export interface Notification {
 	id: number;
 	level: NotificationLevel;
 	message: string;
@@ -16,10 +16,13 @@ interface Notification {
 
 const DISPLAY_MS = 3_500;
 const MAX_VISIBLE = 3;
+const MAX_HISTORY = 20;
 
-/** Transient UI feedback. Notifications are deliberately not session history. */
+/** Transient UI feedback. Notifications disappear from view but the last
+ * MAX_HISTORY are kept in `history()` for the /notifications command. */
 export class NotificationCenter implements Component {
 	private notifications: Notification[] = [];
+	private log: Notification[] = [];
 	private nextId = 1;
 	private timers = new Map<number, ReturnType<typeof setTimeout>>();
 	private onInvalidate: (() => void) | null = null;
@@ -39,10 +42,16 @@ export class NotificationCenter implements Component {
 		this.notifications = [...this.notifications, notification].slice(
 			-MAX_VISIBLE,
 		);
+		this.log = [...this.log, notification].slice(-MAX_HISTORY);
 		const timer = setTimeout(() => this.dismiss(notification.id), durationMs);
 		timer.unref?.();
 		this.timers.set(notification.id, timer);
 		this.onInvalidate?.();
+	}
+
+	/** Last MAX_HISTORY notifications, oldest first. */
+	history(): Notification[] {
+		return this.log;
 	}
 
 	dismiss(id: number): void {
