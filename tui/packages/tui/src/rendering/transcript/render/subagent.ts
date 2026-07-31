@@ -220,7 +220,7 @@ export function renderSubagentBatchActivityTail(
 		return renderSubagentFlow(
 			childChunks,
 			width,
-			true,
+			false,
 			ctx,
 			expanded,
 			tool.tool_call_id ?? "",
@@ -554,10 +554,9 @@ export function renderSubagentBatchCollapsed(
 					true,
 					`${toolCallId}:task:${index}`,
 					true,
-					// No header/footer frame — the task row above already carries
-					// that context, and rows must stay 1:1 with the child-tool hit
-					// regions renderSubagentFlow pushes for this task below.
-					false,
+					// Show header/footer frame so the child agent ID is visible
+					// (e.g. "╭─ SUBAGENT · agent_3") even inside spawn_agents batches.
+					true,
 				);
 				for (const fl of flowLines) {
 					lines.push("  " + fl);
