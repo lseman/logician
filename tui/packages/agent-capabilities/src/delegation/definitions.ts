@@ -49,7 +49,11 @@ const GENERIC_SUBAGENT_PROMPT =
 	"you cannot ask the user questions. When done, end with a final message " +
 	"that fully reports your findings/results: it is the ONLY thing returned " +
 	"to the caller, so include every detail that matters (paths, names, " +
-	"conclusions). Do not pad it with process narration.";
+	"conclusions). Do not pad it with process narration. The message content " +
+	"in the SAME turn as your task_status call is what gets returned — a " +
+	"closing line like \"the task is complete\" with no restated findings " +
+	"returns nothing useful. Restate the actual result there, not just that " +
+	"you finished.";
 
 export const BUILTIN_AGENTS: AgentDefinition[] = [
 	{

@@ -11,6 +11,10 @@ import type {
 	Message,
 	Tool,
 } from "@logician/agent-core";
+import type {
+	AfterToolCallContext,
+	AfterToolCallResult,
+} from "@logician/agent-core/agent/types/types-hooks.ts";
 
 export interface DelegationContract {
 	expectedOutput?: string;
@@ -178,6 +182,28 @@ export async function runDelegatedAgent(params: {
 	let turns = 0;
 	let validationAttempts = 0;
 
+	// Subagents run runAgentLoop directly, bypassing the harness's
+	// buildBuiltinHooks — so without this, task_status's "done" declaration
+	// never sets `terminate: true` and the child loops on runner nudges
+	// ("call task_status with the accurate status") until maxIterations,
+	// surfacing as a spurious isError result even though the model finished.
+	const priorAfterToolCall = params.config.internalHooks?.afterToolCall;
+	const afterToolCall = async (
+		ctx: AfterToolCallContext,
+		signal?: AbortSignal,
+	): Promise<AfterToolCallResult | undefined> => {
+		const prior = await priorAfterToolCall?.(ctx, signal);
+		if (prior?.terminate) return prior;
+		if (ctx.toolCall.name === "task_status" && !ctx.isError) {
+			return { ...prior, terminate: true };
+		}
+		return prior;
+	};
+	const configWithTermination: AgentConfig = {
+		...params.config,
+		internalHooks: { ...params.config.internalHooks, afterToolCall },
+	};
+
 	let messages: Message[] = [];
 	let prompts: Message[] = [
 		{ role: "user", content: params.task } satisfies Message,
@@ -195,7 +221,7 @@ export async function runDelegatedAgent(params: {
 			},
 			prompts,
 			{
-				...params.config,
+				...configWithTermination,
 				backend: params.backend,
 				tools,
 				maxIterations: remainingIterations,

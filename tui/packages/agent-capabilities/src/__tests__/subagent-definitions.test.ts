@@ -10,6 +10,7 @@ import {
 	loadAgentDefinitions,
 	createSpawnAgentTool,
 	createSpawnAgentsTool,
+	createSubagentConcurrencyLimiter,
 } from "../delegation/definitions.ts";
 
 function mkAgentDir(): string {
@@ -364,4 +365,61 @@ void test("spawn_agent surfaces backend errors as an isError result instead of t
 	if (typeof result === "string") return;
 	assert.equal(result.isError, true);
 	assert.ok(events.some((e) => e.type === "subagent_end"));
+});
+
+// ── spawn_agents: concurrency-limiter abort emits a synthetic subagent_end ──
+// so the TUI's per-task status doesn't hang on "running" when a queued task
+// never reaches _runSpawn's own subagent_end.
+
+void test("spawn_agents emits subagent_end for a task aborted while queued on the concurrency limiter", async () => {
+	const events: Array<Record<string, unknown>> = [];
+	const controller = new AbortController();
+	// Cap of 1: task 0 acquires the slot and blocks forever; task 1 queues.
+	const limiter = createSubagentConcurrencyLimiter(1);
+	let releaseFirst: (() => void) | undefined;
+	const blocker = new Promise<void>((resolve) => {
+		releaseFirst = resolve;
+	});
+
+	const tool = createSpawnAgentsTool({
+		config: () => ({ ...baseConfig, tools: [] }),
+		backend: {
+			model: "fake",
+			withModel() {
+				return this;
+			},
+			async generate() {
+				await blocker;
+				return { content: "done", toolCalls: [], stopReason: "stop" };
+			},
+		},
+		agents: () => BUILTIN_AGENTS,
+		emit: (event) => events.push(event as unknown as Record<string, unknown>),
+		concurrencyLimiter: limiter,
+	});
+
+	const run = tool.execute(
+		{ tasks: [{ task: "first" }, { task: "second" }] },
+		{ signal: controller.signal },
+	);
+
+	// Let task 0 acquire the limiter slot and start blocking in generate(),
+	// then abort before task 1 ever gets a turn.
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	controller.abort();
+	releaseFirst?.();
+
+	const result = await run;
+	assert.equal(typeof result, "object");
+	if (typeof result === "string") return;
+	const details = result.details as { results: Array<{ index: number; isError: boolean }> };
+	const task1 = details.results.find((r) => r.index === 1);
+	assert.ok(task1);
+	assert.equal(task1?.isError, true);
+
+	const task1End = events.find(
+		(e) => e.type === "subagent_end" && e.taskIndex === 1,
+	);
+	assert.ok(task1End, "expected a subagent_end event for the aborted queued task");
+	assert.equal(task1End?.isError, true);
 });
