@@ -197,6 +197,8 @@ export class AgentCoreBridge {
 	private skillsContext: string | null = null;
 	private skillsInjected: boolean = false;
 	private promptsInjected: boolean = false;
+	private pendingSpawnTasks: Array<{ task: string; agent?: string }> = [];
+	private subagentsInjected: boolean = false;
 	private sessionId =
 		`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 	private transcriptPath = "";
@@ -1975,6 +1977,13 @@ export class AgentCoreBridge {
 		this.config.tools = this.defaultTools;
 		this.harness?.setTools(this.defaultTools);
 		this.rebuildBaseSystemPrompt();
+		this.subagentsInjected = true;
+		// Drain any /spawn tasks that arrived before init completed.
+		for (const { task, agent } of this.pendingSpawnTasks) {
+			this.pendingSpawnTasks = [];
+			this.spawnAgentDirectly(task, agent);
+			break; // spawnAgentDirectly feeds result back; don't chain.
+		}
 	}
 
 	/**
@@ -1983,6 +1992,11 @@ export class AgentCoreBridge {
 	 * renders as a tool chunk with integrated streaming output.
 	 */
 	spawnAgentDirectly(task: string, agent?: string): void {
+		// If init hasn't finished, queue the task for later.
+		if (!this.subagentsInjected) {
+			this.pendingSpawnTasks.push({ task, agent });
+			return;
+		}
 		const spawnTool = this.defaultTools.find((t) => t.name === 'spawn_agent');
 		if (!spawnTool) {
 			this.reportError(new Error('spawn_agent tool not available (subagent tools not injected)'));
@@ -2024,41 +2038,51 @@ export class AgentCoreBridge {
 		};
 
 		void spawnTool.execute(
-			{ task, agent },
-			ctx,
+				{ task, agent },
+				ctx,
 		).then((result) => {
-			const content = typeof result === 'string' ? result : result.content;
-			const isError = typeof result === 'string'
-				? false
-				: result.isError === true;
-			// Emit tool_execution_end so the transcript closes the tool chunk.
-			this.emit({
-				type: 'tool_execution_end',
-				tool: 'spawn_agent',
-				tool_name: 'spawn_agent',
-				result: content,
-				is_error: isError,
-				tool_call_id: toolCallId,
-				details: typeof result === 'object' && result.details
-					? result.details
-					: undefined,
-			});
-			if (isError) {
-				this.reportError(new Error(content));
-			}
+				const content = typeof result === 'string' ? result : result.content;
+				const isError = typeof result === 'string'
+						? false
+						: result.isError === true;
+				// Emit tool_execution_end so the transcript closes the tool chunk.
+				this.emit({
+						type: 'tool_execution_end',
+						tool: 'spawn_agent',
+						tool_name: 'spawn_agent',
+						result: content,
+						is_error: isError,
+						tool_call_id: toolCallId,
+						details: typeof result === 'object' && result.details
+								? result.details
+								: undefined,
+				});
+				if (isError) {
+						this.reportError(new Error(content));
+				}
+				// Feed the subagent result back to the main agent so it can act on it.
+				// Use followUp() so the message is queued at the front of the steering
+				// queue (harness.drained = true, parent loop will consume next turn).
+				this.followUp(
+						`Subagent "${agent ?? 'general'}" completed task: ${task}\n\nResult:\n${content}`,
+				);
 		}).catch((err) => {
-			const error = err as Error;
-			this.emit({
-				type: 'tool_execution_end',
-				tool: 'spawn_agent',
-				tool_name: 'spawn_agent',
-				result: error.message,
-				is_error: true,
-				tool_call_id: toolCallId,
-			});
+				const error = err as Error;
+				this.emit({
+						type: 'tool_execution_end',
+						tool: 'spawn_agent',
+						tool_name: 'spawn_agent',
+						result: error.message,
+						is_error: true,
+						tool_call_id: toolCallId,
+				});
+				// Feed the error back to the main agent.
+				this.followUp(
+						`Subagent "${agent ?? 'general'}" failed on task: ${task}\n\nError:\n${error.message}`,
+				);
 		}).finally(() => {
-			// Close the synthetic turn so the transcript finalises the card.
-			this.emit({ type: 'turn_end', turn_id: turnId, message: '' });
+				// Close the synthetic turn so the transcript finalises the card.
+				this.emit({ type: 'turn_end', turn_id: turnId, message: '' });
 		});
 	}
 
