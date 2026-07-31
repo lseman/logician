@@ -195,28 +195,27 @@ export class Transcript {
 			.reverse()
 			.find((t) => !t.isComplete);
 		if (pending) {
+			// Reuse the open turn (e.g. slash /spawn after addTurn, or a
+			// user message already registered by the TUI).
 			pending.id = event.turn_id;
 			this.state.currentTurnId = event.turn_id;
-		} else if (this.state.turns.length > 0) {
-			this.state.currentTurnId =
-				this.state.turns[this.state.turns.length - 1].id;
-		} else {
-			// Direct-mode tool execution (e.g. /spawn) — no existing turn
-			// to update. Create a synthetic assistant-only turn so tool
-			// events have something to attach to.
-			const turn: Turn = {
-				id: event.turn_id,
-				userMessage: null,
-				assistantMessage: {
-					type: "assistant",
-					chunks: [],
-					isComplete: false,
-				},
-				isComplete: false,
-			};
-			this.state.turns.push(turn);
-			this.state.currentTurnId = event.turn_id;
+			return;
 		}
+		// No open turn: open a fresh one. Never rebind currentTurnId onto a
+		// completed prior turn — that split tool_start from lifecycle/stream
+		// events and left /spawn cards without their agent output.
+		const turn: Turn = {
+			id: event.turn_id,
+			userMessage: null,
+			assistantMessage: {
+				type: "assistant",
+				chunks: [],
+				isComplete: false,
+			},
+			isComplete: false,
+		};
+		this.state.turns.push(turn);
+		this.state.currentTurnId = event.turn_id;
 	}
 
 	// ── Chunk helpers ──────────────────────────────────────────────────────
@@ -458,7 +457,33 @@ export class Transcript {
 		turns?: number;
 		taskIndex?: number;
 	}): void {
-		const toolChunk = this.findOpenSubagentToolChunk();
+		let toolChunk = this.findOpenSubagentToolChunk();
+		// Direct-mode /spawn: lifecycle can race tool_end. Only create a
+		// placeholder on end (never on start) so we don't leave a second
+		// incomplete spawn_agent card stuck on "running".
+		if (!toolChunk?.tool && event.phase === "end") {
+			const turn = this.getCurrentTurn();
+			if (!turn?.assistantMessage) return;
+			const assistant = turn.assistantMessage;
+			const chunk: AssistantChunk = {
+				seq: assistant.chunks.length,
+				type: "tool",
+				tool: {
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					tool_call_id: `lifecycle_${Date.now()}`,
+					args: event.task ? { task: event.task, agent: event.agent } : undefined,
+					result: event.result,
+					partialResult: undefined,
+					isError: event.isError ?? false,
+					isComplete: false,
+					startedAt: Date.now(),
+				},
+				isComplete: false,
+			};
+			assistant.chunks.push(chunk);
+			toolChunk = chunk;
+		}
 		if (!toolChunk?.tool) return;
 		const details = (toolChunk.tool.details ??= {});
 
@@ -490,11 +515,36 @@ export class Transcript {
 
 		// Single spawn_agent: fold into the tool's own details, as before.
 		details.agent = details.agent || event.agent;
-		if (event.phase === "end") {
-			details.status = event.isError ? "failed" : "completed";
-			details.lifecycleSummary = event.isError
-				? event.result
-				: `done${event.turns ? ` in ${event.turns} turn(s)` : ""}`;
+		if (event.phase === "start") {
+			if (details.status !== "completed" && details.status !== "failed") {
+				details.status = "running";
+			}
+			if (event.task && !toolChunk.tool.args) {
+				toolChunk.tool.args = { task: event.task, agent: event.agent };
+			}
+			return;
+		}
+
+		details.status = event.isError ? "failed" : "completed";
+		details.lifecycleSummary = event.isError
+			? event.result
+			: `done${event.turns ? ` in ${event.turns} turn(s)` : ""}`;
+		// Close the card on lifecycle end so the UI cannot stick on
+		// "running" if tool_end is delayed or missed in direct mode.
+		toolChunk.tool.isError = event.isError ?? false;
+		if (event.result !== undefined && toolChunk.tool.result === undefined) {
+			toolChunk.tool.result = event.result;
+		}
+		toolChunk.tool.isComplete = true;
+		toolChunk.isComplete = true;
+		if (
+			toolChunk.tool.startedAt !== undefined &&
+			toolChunk.tool.durationMs === undefined
+		) {
+			toolChunk.tool.durationMs = Math.max(
+				0,
+				Date.now() - toolChunk.tool.startedAt,
+			);
 		}
 	}
 
@@ -617,6 +667,31 @@ export class Transcript {
 		}
 
 		if (event.kind === "tool_start") {
+			// Providers emit both tool_call_start and tool_execution_start for
+			// the same call. Reuse by toolCallId so each child tool renders once.
+			const existingStart = event.toolCallId
+				? childChunks
+						.slice()
+						.reverse()
+						.find(
+							(c) =>
+								c.type === "tool" &&
+								c.tool?.toolCallId === event.toolCallId,
+						)
+				: undefined;
+			if (existingStart?.tool) {
+				if (event.args) existingStart.tool.args = event.args;
+				if (event.toolName) existingStart.tool.toolName = event.toolName;
+				existingStart.seq = Math.max(existingStart.seq, event.seq);
+				if (
+					existingStart.tool.status !== "completed" &&
+					existingStart.tool.status !== "failed"
+				) {
+					existingStart.tool.status = "running";
+					existingStart.isComplete = false;
+				}
+				return;
+			}
 			childChunks.push({
 				seq: event.seq,
 				agentId: event.agentId,
@@ -636,22 +711,25 @@ export class Transcript {
 		}
 		if (event.kind !== "tool_end") return;
 
-		// tool_end
-		const running = childChunks
-			.slice()
-			.reverse()
-			.find(
-				(c) =>
-					c.type === "tool" &&
-					c.tool?.toolCallId === event.toolCallId &&
-					c.tool?.status === "running",
-			);
-		if (running?.tool) {
-			running.tool.status = event.isError ? "failed" : "completed";
-			running.tool.isError = event.isError;
-			running.tool.resultPreview = event.result;
-			running.isComplete = true;
-			running.seq = event.seq;
+		// tool_end — also dedupe: tool_call_end and tool_execution_end both fire.
+		const existingEnd = event.toolCallId
+			? childChunks
+					.slice()
+					.reverse()
+					.find(
+						(c) =>
+							c.type === "tool" &&
+							c.tool?.toolCallId === event.toolCallId,
+					)
+			: undefined;
+		if (existingEnd?.tool) {
+			existingEnd.tool.status = event.isError ? "failed" : "completed";
+			existingEnd.tool.isError = event.isError;
+			if (event.result !== undefined && event.result !== "") {
+				existingEnd.tool.resultPreview = event.result;
+			}
+			existingEnd.isComplete = true;
+			existingEnd.seq = Math.max(existingEnd.seq, event.seq);
 			return;
 		}
 		// Completion arrived without a matching start (e.g. truncated replay) —
@@ -778,15 +856,27 @@ export class Transcript {
 			event.tool_call_id,
 			event.tool_name || event.tool,
 		);
-		// Direct-mode /spawn: tool_start was never emitted, so create the
-		// missing spawn chunk here so that subagent lifecycle events can find
-		// it and write their summary into details.
-		const isDirectSpawn =
-			!toolChunk &&
-			["spawn_agent", "spawn_agents"].includes(
-				event.tool_name || event.tool,
-			);
-		if (isDirectSpawn) {
+		// Direct-mode /spawn: tool_start was never emitted, or lifecycle:end
+		// already closed a placeholder under a synthetic id. Reuse the most
+		// recent spawn chunk before creating another card.
+		const isDirectSpawnName = ["spawn_agent", "spawn_agents"].includes(
+			event.tool_name || event.tool,
+		);
+		if (!toolChunk && isDirectSpawnName) {
+			toolChunk = [...assistant.chunks]
+				.reverse()
+				.find(
+					(c) =>
+						c.type === "tool" &&
+						["spawn_agent", "spawn_agents"].includes(
+							c.tool?.tool_name ?? "",
+						),
+				);
+			if (toolChunk?.tool && event.tool_call_id) {
+				toolChunk.tool.tool_call_id = event.tool_call_id;
+			}
+		}
+		if (!toolChunk && isDirectSpawnName) {
 			const toolName = event.tool_name || event.tool;
 			assistant.chunks.push({
 				seq: assistant.chunks.length,
@@ -839,7 +929,19 @@ export class Transcript {
 			tool.isError = Boolean(isError);
 		}
 		tool.isComplete = true;
-		if (tool.startedAt !== undefined) tool.durationMs = Math.max(0, Date.now() - tool.startedAt);
+		// Prefer the tool's own measured duration (subagent metrics) when
+		// present; otherwise fall back to wall-clock from tool_start.
+		const metrics = tool.details?.metrics as
+			| { durationMs?: number }
+			| undefined;
+		if (
+			typeof metrics?.durationMs === "number" &&
+			Number.isFinite(metrics.durationMs)
+		) {
+			tool.durationMs = Math.max(0, metrics.durationMs);
+		} else if (tool.startedAt !== undefined) {
+			tool.durationMs = Math.max(0, Date.now() - tool.startedAt);
+		}
 		toolChunk.isComplete = true;
 	}
 

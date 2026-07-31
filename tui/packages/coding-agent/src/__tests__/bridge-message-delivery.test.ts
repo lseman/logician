@@ -3,6 +3,78 @@ import { test } from "node:test";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
 import { AgentCoreBridge } from "../application/agent-bridge.ts";
 
+void test("direct /spawn records task and result in harness history", async () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as {
+		subagentsInjected: boolean;
+		defaultTools: Array<{
+			name: string;
+			execute: (
+				args: Record<string, unknown>,
+				ctx: { onUpdate?: (delta: string) => void },
+			) => Promise<string | { content: string; isError?: boolean; details?: unknown }>;
+		}>;
+		ensureHarness: () => { messages: unknown[]; appendMessages: (m: unknown[]) => void };
+	};
+	internal.subagentsInjected = true;
+	internal.defaultTools = [
+		{
+			name: "spawn_agent",
+			execute: async () => ({
+				content: "Found README.md with install steps.",
+				isError: false,
+				details: { agent: "general", status: "completed" },
+			}),
+		},
+	];
+
+	const recorded: unknown[][] = [];
+	const fakeMessages: unknown[] = [];
+	internal.ensureHarness = () => ({
+		messages: fakeMessages,
+		appendMessages: (msgs: unknown[]) => {
+			recorded.push(msgs);
+			fakeMessages.push(...msgs);
+		},
+	});
+	// Patch the private method path: spawnAgentDirectly uses this.ensureHarness
+	// which is a real method — override via prototype-style assignment on instance.
+	(bridge as unknown as { ensureHarness: () => unknown }).ensureHarness = () => ({
+		messages: fakeMessages,
+		appendMessages: (msgs: unknown[]) => {
+			recorded.push(msgs);
+			fakeMessages.push(...msgs);
+		},
+	});
+
+	bridge.spawnAgentDirectly("check readme.md");
+	// Wait for the async execute().then path
+	await new Promise((r) => setTimeout(r, 20));
+
+	assert.equal(recorded.length, 1);
+	const msgs = recorded[0] as Array<{
+		role: string;
+		content: string | null;
+		tool_calls?: Array<{ name: string; arguments: string }>;
+		tool_call_id?: string;
+		name?: string;
+	}>;
+	assert.equal(msgs.length, 3);
+	assert.equal(msgs[0].role, "user");
+	assert.equal(msgs[0].content, "/spawn check readme.md");
+	assert.equal(msgs[1].role, "assistant");
+	assert.equal(msgs[1].tool_calls?.[0]?.name, "spawn_agent");
+	assert.match(msgs[1].tool_calls?.[0]?.arguments ?? "", /check readme\.md/);
+	assert.equal(msgs[2].role, "tool");
+	assert.equal(msgs[2].name, "spawn_agent");
+	assert.equal(msgs[2].content, "Found README.md with install steps.");
+});
+
 void test("startup state reports the registered web_search capability", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

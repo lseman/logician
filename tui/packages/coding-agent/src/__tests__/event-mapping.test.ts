@@ -41,3 +41,55 @@ void test("steering cancellation maps to one informational notice", () => {
 		},
 	);
 });
+
+void test("subagent tool_execution_start/end map into subagent_chunk activity", () => {
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "subagent_event",
+			agentId: "agent_1",
+			taskIndex: 0,
+			event: {
+				type: "tool_execution_start",
+				toolCallId: "tc1",
+				toolName: "bash",
+				args: { command: "ls" },
+				seq: 3,
+			},
+		}),
+		{
+			type: "subagent_chunk",
+			agentId: "agent_1",
+			seq: 3,
+			kind: "tool_start",
+			toolCallId: "tc1",
+			toolName: "bash",
+			args: JSON.stringify({ command: "ls" }),
+			taskIndex: 0,
+		},
+	);
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "subagent_event",
+			agentId: "agent_1",
+			event: {
+				type: "tool_execution_end",
+				toolCallId: "tc1",
+				toolName: "bash",
+				result: "ok",
+				isError: false,
+				seq: 4,
+			},
+		}),
+		{
+			type: "subagent_chunk",
+			agentId: "agent_1",
+			seq: 4,
+			kind: "tool_end",
+			toolCallId: "tc1",
+			toolName: "bash",
+			result: "ok",
+			isError: false,
+			taskIndex: undefined,
+		},
+	);
+});

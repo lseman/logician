@@ -274,15 +274,32 @@ export class SlashPopup implements Component {
 		);
 		if (!cmd) return false;
 		const args = this._lastCommand.replace(/^\/[^\s]+\s*/, "").trim();
+
+		if (cmd.dispatch === "quit") {
+			if (cmd.handler) {
+				const result = cmd.handler(args);
+				if (result) this._lastResult = String(result);
+			}
+			cmd.bridgeHandler?.(args);
+			this.onSubmit?.(null, "quit", this._lastCommand);
+			return true;
+		}
+
+		// Establish the user-command turn BEFORE local handlers run.
+		// Async handlers like /spawn emit tool/lifecycle/stream events that
+		// attach to getCurrentTurn(); if the turn is created afterwards those
+		// events land on a different card and the stream/final output vanish.
+		this.onSubmit?.(null, undefined, this._lastCommand);
+
 		if (cmd.handler) {
 			const result = cmd.handler(args);
 			if (result) this._lastResult = String(result);
 		}
 		cmd.bridgeHandler?.(args);
-		if (cmd.dispatch === "quit") {
-			this.onSubmit?.(null, "quit", this._lastCommand);
-		} else {
-			this.onSubmit?.(this._lastResult, undefined, this._lastCommand);
+
+		// Deliver handler return text as a system notice without a second turn.
+		if (this._lastResult) {
+			this.onSubmit?.(this._lastResult, undefined, undefined);
 		}
 		return true;
 	}

@@ -157,7 +157,7 @@ export class LogicianTUI {
 		const activeTurn = this.transcript.getTurns().at(-1);
 		const recoveryPrompt =
 			activeTurn && !activeTurn.isComplete
-				? activeTurn.userMessage.content
+				? activeTurn.userMessage?.content ?? ""
 				: "";
 		this.statusPanel.update({ phase: "cancelling" });
 		this.statusPanel.startAnimation();

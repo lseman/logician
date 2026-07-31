@@ -30,6 +30,9 @@ import {
 	type ToolContext,
 	type TruncationConfig,
 	type WebSearchConfig,
+	createAssistantMessage,
+	createToolResultMessage,
+	createUserMessage,
 } from "@logician/agent-core";
 import { OpenAIBackend } from "@logician/agent-core/agent/backend.ts";
 import {
@@ -1990,6 +1993,12 @@ export class AgentCoreBridge {
 	 * Directly invoke the spawn_agent tool without going through the LLM.
 	 * Emits tool execution events to the transcript so the subagent output
 	 * renders as a tool chunk with integrated streaming output.
+	 *
+	 * Lifecycle/chunk events come from the tool itself via
+	 * `deps.emit → config.onEvent → mapAgentEvent` (same path as LLM-mode).
+	 * On completion, the /spawn arg and final result are appended to harness
+	 * history (user + spawn_agent tool call + tool result) so later turns
+	 * can see them — without followUp/sendMessage (those stall outside a loop).
 	 */
 	spawnAgentDirectly(task: string, agent?: string): void {
 		// If init hasn't finished, queue the task for later.
@@ -1997,9 +2006,11 @@ export class AgentCoreBridge {
 			this.pendingSpawnTasks.push({ task, agent });
 			return;
 		}
-		const spawnTool = this.defaultTools.find((t) => t.name === 'spawn_agent');
+		const spawnTool = this.defaultTools.find((t) => t.name === "spawn_agent");
 		if (!spawnTool) {
-			this.reportError(new Error('spawn_agent tool not available (subagent tools not injected)'));
+			this.reportError(
+				new Error("spawn_agent tool not available (subagent tools not injected)"),
+			);
 			return;
 		}
 
@@ -2008,15 +2019,16 @@ export class AgentCoreBridge {
 		const controller = new AbortController();
 
 		// Create a synthetic turn so the transcript has a context for the
-		// tool chunk. The transcript's handleToolStart / integrateSubagent
-		// logic both require a current turn.
-		this.emit({ type: 'turn_start', turn_id: turnId });
+		// tool chunk. handleToolStart / subagent lifecycle both need a
+		// current turn.
+		this.emit({ type: "turn_start", turn_id: turnId });
 
-		// Emit tool_execution_start so the transcript creates a tool chunk.
+		// Emit tool_execution_start so the transcript creates a tool chunk
+		// before the tool fires subagent_start/subagent_event.
 		this.emit({
-			type: 'tool_execution_start',
-			tool: 'spawn_agent',
-			tool_name: 'spawn_agent',
+			type: "tool_execution_start",
+			tool: "spawn_agent",
+			tool_name: "spawn_agent",
 			tool_args: { task, agent },
 			tool_call_id: toolCallId,
 		});
@@ -2024,66 +2036,105 @@ export class AgentCoreBridge {
 		const ctx: ToolContext = {
 			signal: controller.signal,
 			onUpdate: (delta) => {
-				// Stream subagent output as tool_execution_update so it
-				// integrates into the open tool chunk in the transcript.
+				// Live stream into the open tool chunk. Child chunks (thinking,
+				// tool calls, content with agentId) arrive separately via
+				// deps.emit(subagent_event) → mapAgentEvent.
 				this.emit({
-					type: 'tool_execution_update',
-					tool: 'spawn_agent',
-					tool_name: 'spawn_agent',
+					type: "tool_execution_update",
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
 					partial_result: delta,
-					update_kind: 'output' as const,
+					update_kind: "output" as const,
 					tool_call_id: toolCallId,
 				});
 			},
 		};
 
-		void spawnTool.execute(
-				{ task, agent },
-				ctx,
-		).then((result) => {
-				const content = typeof result === 'string' ? result : result.content;
-				const isError = typeof result === 'string'
-						? false
-						: result.isError === true;
-				// Emit tool_execution_end so the transcript closes the tool chunk.
+		void spawnTool
+			.execute({ task, agent }, ctx)
+			.then((result) => {
+				const content = typeof result === "string" ? result : result.content;
+				const isError =
+					typeof result === "string" ? false : result.isError === true;
+
+				// tool_execution_end closes the card. subagent_end was already
+				// emitted by the tool via deps.emit during execute().
 				this.emit({
-						type: 'tool_execution_end',
-						tool: 'spawn_agent',
-						tool_name: 'spawn_agent',
-						result: content,
-						is_error: isError,
-						tool_call_id: toolCallId,
-						details: typeof result === 'object' && result.details
-								? result.details
-								: undefined,
+					type: "tool_execution_end",
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					result: content,
+					is_error: isError,
+					tool_call_id: toolCallId,
+					details:
+						typeof result === "object" && result.details
+							? result.details
+							: undefined,
 				});
 				if (isError) {
-						this.reportError(new Error(content));
+					this.reportError(new Error(content));
 				}
-				// Feed the subagent result back to the main agent so it can act on it.
-				// Use followUp() so the message is queued at the front of the steering
-				// queue (harness.drained = true, parent loop will consume next turn).
-				this.followUp(
-						`Subagent "${agent ?? 'general'}" completed task: ${task}\n\nResult:\n${content}`,
-				);
-		}).catch((err) => {
+				this.recordDirectSpawnInHistory(task, agent, toolCallId, content, isError);
+			})
+			.catch((err) => {
 				const error = err as Error;
 				this.emit({
-						type: 'tool_execution_end',
-						tool: 'spawn_agent',
-						tool_name: 'spawn_agent',
-						result: error.message,
-						is_error: true,
-						tool_call_id: toolCallId,
+					type: "tool_execution_end",
+					tool: "spawn_agent",
+					tool_name: "spawn_agent",
+					result: error.message,
+					is_error: true,
+					tool_call_id: toolCallId,
 				});
-				// Feed the error back to the main agent.
-				this.followUp(
-						`Subagent "${agent ?? 'general'}" failed on task: ${task}\n\nError:\n${error.message}`,
+				this.reportError(error);
+				this.recordDirectSpawnInHistory(
+					task,
+					agent,
+					toolCallId,
+					error.message,
+					true,
 				);
-		}).finally(() => {
-				// Close the synthetic turn so the transcript finalises the card.
-				this.emit({ type: 'turn_end', turn_id: turnId, message: '' });
-		});
+			})
+			.finally(() => {
+				// Close the synthetic turn and return the UI to ready. Mirror
+				// runMessage's phase emit so status/animation settle.
+				this.emit({ type: "turn_end", turn_id: turnId, message: "" });
+				this.emit({ type: "phase", state: "ready" });
+			});
+	}
+
+	/**
+	 * Persist a direct /spawn exchange into harness history so subsequent
+	 * agent turns can see the request and the subagent's final report.
+	 * Shape mirrors LLM-mode spawn_agent: user command → tool call → result.
+	 */
+	private recordDirectSpawnInHistory(
+		task: string,
+		agent: string | undefined,
+		toolCallId: string,
+		result: string,
+		isError: boolean,
+	): void {
+		try {
+			const harness = this.ensureHarness();
+			const agentName = agent?.trim() || "general";
+			const userText = agent?.trim()
+				? `/spawn agent=${agent.trim()} ${task}`
+				: `/spawn ${task}`;
+			harness.appendMessages([
+				createUserMessage(userText),
+				createAssistantMessage("", [
+					{
+						id: toolCallId,
+						name: "spawn_agent",
+						arguments: JSON.stringify({ task, agent: agentName }),
+					},
+				]),
+				createToolResultMessage(toolCallId, "spawn_agent", result, isError),
+			]);
+		} catch (err: unknown) {
+			this.reportError(err as Error);
+		}
 	}
 
 	private async fireSessionEnd(reason: string): Promise<void> {

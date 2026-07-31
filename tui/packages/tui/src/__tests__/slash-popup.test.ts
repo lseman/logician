@@ -37,3 +37,53 @@ test("SlashPopup renders the active command using the theme selected color", () 
 		output = popup.render(80).join("\n");
 		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/settings`));
 	});
+
+test("submitRaw establishes the command turn before running the local handler", () => {
+	const order: string[] = [];
+	const popup = new SlashPopup();
+	popup.setCommands([
+		{
+			command: "/spawn",
+			description: "Spawn",
+			dispatch: "local",
+			acceptsArgs: true,
+			handler: () => {
+				order.push("handler");
+				return undefined;
+			},
+		},
+	]);
+	popup.setOnSubmit((result, _dispatch, command) => {
+		if (command?.trim()) order.push(`turn:${command}`);
+		if (result) order.push(`result:${result}`);
+	});
+	assert.equal(popup.submitRaw("/spawn list files"), true);
+	assert.deepEqual(order, ["turn:/spawn list files", "handler"]);
+});
+
+test("submitRaw delivers handler return text after the turn is established", () => {
+	const order: string[] = [];
+	const popup = new SlashPopup();
+	popup.setCommands([
+		{
+			command: "/thinking",
+			description: "Thinking",
+			dispatch: "local",
+			acceptsArgs: true,
+			handler: () => {
+				order.push("handler");
+				return "Thinking level: high";
+			},
+		},
+	]);
+	popup.setOnSubmit((result, _dispatch, command) => {
+		if (command?.trim()) order.push(`turn:${command}`);
+		if (result) order.push(`result:${result}`);
+	});
+	assert.equal(popup.submitRaw("/thinking high"), true);
+	assert.deepEqual(order, [
+		"turn:/thinking high",
+		"handler",
+		"result:Thinking level: high",
+	]);
+});

@@ -704,6 +704,22 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		const chunkRevision = chunks
 			.map((chunk) => {
 				const tool = chunk.tool;
+				const details = tool?.details;
+				const childChunks = Array.isArray(details?.childChunks)
+					? details.childChunks
+					: [];
+				const childRevision = childChunks
+					.map((child) =>
+						[
+							child.seq,
+							child.type,
+							child.isComplete ? 1 : 0,
+							revisionText(child.contentText),
+							child.tool?.status ?? "",
+							revisionText(child.tool?.resultPreview),
+						].join("."),
+					)
+					.join(",");
 				return [
 					chunk.seq,
 					chunk.type,
@@ -711,6 +727,12 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 					revisionText(chunk.contentText),
 					revisionText(tool?.result),
 					revisionText(tool?.streamOutput),
+					revisionText(
+						typeof details?.streamTranscript === "string"
+							? details.streamTranscript
+							: undefined,
+					),
+					childRevision,
 					tool?.isComplete ? 1 : 0,
 				].join(":");
 			})

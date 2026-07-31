@@ -4,7 +4,7 @@ import type { Turn } from "@logician/coding-agent/sessions";
 export function turnsToMessages(turns: Turn[]): Message[] {
 	const messages: Message[] = [];
 	for (const turn of turns) {
-		if (turn.userMessage.content) {
+		if (turn.userMessage?.content) {
 			messages.push({ role: "user", content: turn.userMessage.content });
 		}
 		const assistantText = (turn.assistantMessage?.chunks ?? [])

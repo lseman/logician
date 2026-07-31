@@ -25,12 +25,16 @@ export function createSlashSubmitHandler(
 			void ctx.stop().then(() => process.exit(0));
 			return;
 		}
-		// Add slash command as user message to transcript
+		// Add slash command as user message to transcript. Called before local
+		// handlers that spawn async work so tool/stream events share this turn.
 		if (command?.trim()) {
 			ctx.transcript.addTurn(command.trim());
-			if (result) {
-				ctx.transcript.addSystemMessage(String(result));
-			}
+		}
+		// Handler return text (may arrive in a second onSubmit with no command).
+		if (result) {
+			ctx.transcript.addSystemMessage(String(result));
+		}
+		if (command?.trim()) {
 			const cmdName = command.trim().split(/\s+/)[0]?.toLowerCase() || "";
 			const args = command.trim().split(/\s+/).slice(1).join(" ");
 			const allCmds = ctx.slashPopup.getCommands() as SlashCommandDef[];

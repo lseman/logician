@@ -796,7 +796,7 @@ void test("expanded agent progress is never character-truncated", () => {
 	assert.doesNotMatch(output, /truncated|earlier progress hidden/i);
 });
 
-void test("collapsed agent card shows truncated stream while running", () => {
+void test("collapsed agent card shows only the header while running", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 14 });
 	const longProgress = `BEGIN\n${Array.from(
 		{ length: 80 },
@@ -830,12 +830,14 @@ void test("collapsed agent card shows truncated stream while running", () => {
 	]);
 
 	const output = plain(display.render(100).join("\n"));
-	assert.match(output, /subagent explorer streaming/);
-	// Collapsed running agents show truncated streaming output (not hidden).
-	assert.match(output, /BEGIN/);
-	// Only a subset of lines are visible; END should not appear.
-	assert.doesNotMatch(output, /stream-line-79|END/);
-	assert.match(output, /truncated/i);
+	// /spawn starts collapsed: header only until the user expands the card.
+	assert.match(output, /subagent explorer streaming|subagent explorer running/);
+	assert.doesNotMatch(output, /BEGIN|stream-line-|END|truncated/i);
+
+	display.toolsExpanded = true;
+	display.invalidate();
+	const expanded = plain(display.render(100).join("\n"));
+	assert.match(expanded, /BEGIN/);
 });
 
 void test("expanded completed subagent keeps its streaming transcript", () => {

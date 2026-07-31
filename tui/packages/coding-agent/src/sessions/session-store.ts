@@ -532,7 +532,7 @@ export class SessionStore {
 		this.statements.insertTurn.run(
 			turn.id,
 			this.currentSessionId,
-			turn.userMessage.content,
+			turn.userMessage?.content ?? "",
 			assistantContent,
 			thinkingContent?.trim() || null,
 			toolExecs.length > 0 ? serializeTools(toolExecs) : null,

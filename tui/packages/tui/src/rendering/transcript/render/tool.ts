@@ -40,7 +40,6 @@ import {
 	renderSubagentBatchActivityTail,
 	renderSubagentBatchCollapsed,
 	renderSubagentDetails,
-	renderSubagentLiveOutput,
 } from "./subagent.ts";
 import {
 	renderBashDetails,
@@ -268,12 +267,9 @@ export function renderTool(
 		}
 		return lines;
 	}
-	// Single subagent shows live streaming output when collapsed and running,
-	// and just the header once collapsed and complete.
+	// /spawn and LLM-mode spawn_agent start collapsed: header only.
+	// Click / Ctrl+O expands to the live stream, child tools, and final report.
 	if (!expanded && subagent) {
-		if (!tool.isComplete) {
-			lines.push(...renderSubagentLiveOutput(ctx, tool, width));
-		}
 		return lines;
 	}
 	if (!subagent && !subagentBatch) {

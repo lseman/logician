@@ -1273,6 +1273,21 @@ export class AgentHarness {
 		this._hasStartedSession = false;
 	}
 
+	/**
+	 * Append messages to the live conversation without resetting session
+	 * lifecycle. Used by direct-mode /spawn to record the spawn request and
+	 * subagent result so later turns can see them.
+	 */
+	appendMessages(messages: Message[]): void {
+		this.assertIdle("appendMessages");
+		const toAdd = messages.filter(
+			(m): m is Message => m != null && m.role !== "system",
+		);
+		if (!toAdd.length) return;
+		this.history = [...this.history, ...toAdd];
+		this.persistTurnMessages(toAdd);
+	}
+
 	rewind(): { messages: number; filesRestored: number } | null {
 		this.assertIdle("rewind");
 		const snapshot = this.checkpoints.pop();

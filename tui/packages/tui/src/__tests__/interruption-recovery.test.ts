@@ -73,7 +73,7 @@ void test("interruption waits for settlement and restores the active prompt", as
 	assert.equal(instance.inputBar.valueText, "repair the renderer");
 	assert.deepEqual(phases, ["cancelling", "ready"]);
 	assert.match(
-		transcript.getTurns().at(-1)?.userMessage.content ?? "",
+		transcript.getTurns().at(-1)?.userMessage?.content ?? "",
 		/Turn interrupted safely.*prompt was restored.*Cleared 1 queued message/s,
 	);
 });

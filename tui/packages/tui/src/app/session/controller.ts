@@ -42,8 +42,8 @@ export function autoSaveTurn(ctx: SessionControllerCtx): void {
 	if (latestTurn && latestTurn.isComplete) {
 		ctx.sessionStore.saveTurn(latestTurn);
 		// Update the session title from the first user message
-		if (latestTurn.userMessage.content.length > 0) {
-			const title = latestTurn.userMessage.content
+		if (latestTurn.userMessage?.content &&  (latestTurn.userMessage?.content || "").length > 0) {
+			const title =  (latestTurn.userMessage?.content ?? "")
 				.replace(/\n+/g, " ")
 				.slice(0, 60);
 			const current = ctx.sessionStore.getSession(ctx.currentSessionId);

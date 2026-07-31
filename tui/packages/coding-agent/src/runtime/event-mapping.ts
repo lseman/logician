@@ -215,6 +215,9 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 			// from text.
 			const child = event.event;
 			const seq = child.seq ?? 0;
+			// Streaming providers emit tool_call_*; execution always emits
+			// tool_execution_*. Map both so non-streaming backends still fill
+			// the expandable agent activity stream.
 			if (child.type === "tool_call_start") {
 				return {
 					type: "subagent_chunk",
@@ -227,7 +230,22 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					taskIndex: event.taskIndex,
 				};
 			}
-			if (child.type === "tool_call_end") {
+			if (child.type === "tool_execution_start") {
+				return {
+					type: "subagent_chunk",
+					agentId: event.agentId,
+					seq,
+					kind: "tool_start",
+					toolCallId: child.toolCallId,
+					toolName: child.toolName,
+					args: JSON.stringify(child.args ?? {}),
+					taskIndex: event.taskIndex,
+				};
+			}
+			if (
+				child.type === "tool_call_end" ||
+				child.type === "tool_execution_end"
+			) {
 				return {
 					type: "subagent_chunk",
 					agentId: event.agentId,

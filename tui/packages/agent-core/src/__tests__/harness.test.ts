@@ -48,6 +48,43 @@ void test("prompt persists history; setHistory replaces it and drops system mess
 	);
 });
 
+void test("appendMessages adds to history without dropping prior turns", async () => {
+	const harness = makeHarness(new FakeBackend([() => textResponse("hi!")]));
+	await harness.prompt("hello");
+	harness.appendMessages([
+		{ role: "user", content: "/spawn list files" },
+		{
+			role: "assistant",
+			content: null,
+			tool_calls: [
+				{
+					id: "spawn_1",
+					name: "spawn_agent",
+					arguments: JSON.stringify({ task: "list files", agent: "general" }),
+				},
+			],
+		},
+		{
+			role: "tool",
+			content: "a.md\nb.md",
+			tool_call_id: "spawn_1",
+			name: "spawn_agent",
+		},
+	]);
+	const roles = harness.messages.map((m) => m.role);
+	assert.deepEqual(roles, [
+		"system",
+		"user",
+		"assistant",
+		"user",
+		"assistant",
+		"tool",
+	]);
+	const tool = harness.messages.at(-1);
+	assert.equal(tool?.content, "a.md\nb.md");
+	assert.equal(tool?.tool_call_id, "spawn_1");
+});
+
 void test("constructor stream options reach the first provider request", async () => {
 	const backend = new FakeBackend([
 		(_messages, options) => {
