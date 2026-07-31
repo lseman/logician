@@ -71,6 +71,24 @@ export type { ReflectionConfig } from "./loop/reflection.ts";
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
+export const STEERING_INTERRUPT_NAME = "SteeringInterruptError";
+export const STEERING_INTERRUPT_SUMMARY =
+	"Current provider response interrupted to apply steering.";
+
+export function createSteeringInterruptReason(): Error {
+	const error = new Error(STEERING_INTERRUPT_SUMMARY);
+	error.name = STEERING_INTERRUPT_NAME;
+	return error;
+}
+
+function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
+	return (
+		signal?.aborted === true &&
+		signal.reason instanceof Error &&
+		signal.reason.name === STEERING_INTERRUPT_NAME
+	);
+}
+
 /** Emit a typed extension event if the bus is available. */
 async function emitTyped(
 	emitter: ExtensionEventBus | undefined,
@@ -372,10 +390,15 @@ async function runAgentLoopInTaskScope(
 
 	while (iteration < maxIterations) {
 		if (config.signal?.aborted) {
-			await emit({ type: "error", message: "Operation aborted" });
+			const steeringInterrupt = isSteeringInterrupt(config.signal);
+			if (!steeringInterrupt) {
+				await emit({ type: "error", message: "Operation aborted" });
+			}
 			return finish({
 				status: "cancelled",
-				summary: "Operation aborted before the provider request.",
+				summary: steeringInterrupt
+					? STEERING_INTERRUPT_SUMMARY
+					: "Operation aborted before the provider request.",
 				source: "runtime",
 			});
 		}
@@ -541,12 +564,29 @@ async function runAgentLoopInTaskScope(
 					}
 					break;
 				} catch (llmError) {
+					// Cancellation wins over provider error classification. Some provider
+					// clients replace an AbortSignal cancellation with a generic Error;
+					// sending that through OutputGuard would create a fake retry.
+					const cancelled =
+						config.signal?.aborted ||
+						(llmError instanceof Error && llmError.name === "AbortError");
+					if (cancelled) {
+						const steeringInterrupt = isSteeringInterrupt(config.signal);
+						if (!steeringInterrupt) {
+							await emit({ type: "error", message: "Operation aborted" });
+						}
+						return finish({
+							status: "cancelled",
+							summary: steeringInterrupt
+								? STEERING_INTERRUPT_SUMMARY
+								: "Operation aborted",
+							source: "runtime",
+						});
+					}
+
 					const guardResult = outputGuard?.handleError(llmError);
 
 					if (!guardResult || guardResult.action === "abort") {
-						const cancelled =
-							config.signal?.aborted ||
-							(llmError instanceof Error && llmError.name === "AbortError");
 						await emit({
 							type: "error",
 							message: guardResult?.message ?? String(llmError),
@@ -560,7 +600,7 @@ async function runAgentLoopInTaskScope(
 							});
 						}
 						return finish({
-							status: cancelled ? "cancelled" : "failed",
+							status: "failed",
 							summary: guardResult?.message ?? String(llmError),
 							source: "runtime",
 						});
@@ -620,10 +660,15 @@ async function runAgentLoopInTaskScope(
 							config.signal,
 						);
 						if (!completed) {
-							await emit({ type: "error", message: "Operation aborted" });
+							const steeringInterrupt = isSteeringInterrupt(config.signal);
+							if (!steeringInterrupt) {
+								await emit({ type: "error", message: "Operation aborted" });
+							}
 							return finish({
 								status: "cancelled",
-								summary: "Operation aborted during provider retry.",
+								summary: steeringInterrupt
+									? STEERING_INTERRUPT_SUMMARY
+									: "Operation aborted during provider retry.",
 								source: "runtime",
 							});
 						}
@@ -1335,7 +1380,9 @@ async function runAgentLoopInTaskScope(
 	if (config.signal?.aborted) {
 		return finish({
 			status: "cancelled",
-			summary: "Operation aborted.",
+			summary: isSteeringInterrupt(config.signal)
+				? STEERING_INTERRUPT_SUMMARY
+				: "Operation aborted.",
 			source: "runtime",
 		});
 	}

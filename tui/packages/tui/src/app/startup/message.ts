@@ -1,4 +1,4 @@
-import { formatStartupMemory } from "./startup-memory.ts";
+import { formatStartupMemory } from "./memory.ts";
 
 export interface StartupMessageOptions {
 	configPath?: string;

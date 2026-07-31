@@ -12,6 +12,7 @@ import {
 import { randomUUID } from "node:crypto";
 import type { LLMBackend } from "./backend.ts";
 import {
+	createSteeringInterruptReason,
 	runAgentLoop,
 	runAgentLoopContinue,
 	type RunAgentLoopConfig,
@@ -979,7 +980,7 @@ export class AgentHarness {
 		this.msgManager.queue.steering(text);
 		this.emitQueueChange();
 		if (this.config.steeringInterrupt) {
-			this.abortController?.abort();
+			this.abortController?.abort(createSteeringInterruptReason());
 		}
 	}
 
@@ -991,7 +992,7 @@ export class AgentHarness {
 		if (queued.length === 0) return 0;
 		this._nextTurnQueue.push(...queued.map((message) => message.content));
 		this.emitQueueChange();
-		this.abortController?.abort(new Error("Steering queue forced by user"));
+		this.abortController?.abort(createSteeringInterruptReason());
 		return queued.length;
 	}
 

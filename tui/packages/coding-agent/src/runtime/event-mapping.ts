@@ -1,6 +1,9 @@
 // ── Agent event → bridge event shape mapping ──────────────────────────────────
 
-import type { AgentEvent } from "@logician/agent-core";
+import {
+	STEERING_INTERRUPT_SUMMARY,
+	type AgentEvent,
+} from "@logician/agent-core";
 import type { ParsedBridgeEvent } from "./events.ts";
 
 export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
@@ -137,6 +140,17 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "run_outcome":
 			if (event.status === "completed" && event.source === "heuristic") {
 				return null;
+			}
+			if (
+				event.status === "cancelled" &&
+				event.summary === STEERING_INTERRUPT_SUMMARY
+			) {
+				return {
+					type: "notice",
+					level: "info",
+					label: "Steering",
+					text: STEERING_INTERRUPT_SUMMARY,
+				};
 			}
 			return {
 				type: "notice",

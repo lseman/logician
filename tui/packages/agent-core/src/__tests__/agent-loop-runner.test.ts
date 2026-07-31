@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runAgentLoop } from "../agent/agent-loop-runner.ts";
+import {
+	createSteeringInterruptReason,
+	runAgentLoop,
+	STEERING_INTERRUPT_SUMMARY,
+} from "../agent/agent-loop-runner.ts";
 import { BackendError } from "../agent/backend.ts";
 import { OutputGuard } from "../agent/guards/output-guard.ts";
 import { recordTaskStatus } from "../agent/tasks/task-status-state.ts";
@@ -462,6 +466,48 @@ void test("aborting an in-flight provider request does not emit a fake retry", a
 	const outcome = events.find((event) => event.type === "run_outcome");
 	assert.ok(outcome?.type === "run_outcome");
 	assert.equal(outcome.status, "cancelled");
+});
+
+void test("steering interruption suppresses provider errors and retries", async () => {
+	const controller = new AbortController();
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		() => {
+			controller.abort(createSteeringInterruptReason());
+			// Several provider clients normalize an aborted request to a generic error.
+			throw new Error("Unknown error");
+		},
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("prompt")],
+		{
+			...makeConfig(),
+			backend,
+			signal: controller.signal,
+			outputGuard: new OutputGuard(),
+		},
+		(event) => {
+			events.push(event);
+		},
+	);
+	assert.equal(
+		events.some(
+			(event) =>
+				event.type === "error" ||
+				event.type === "auto_retry_start" ||
+				event.type === "auto_retry_end",
+		),
+		false,
+	);
+	assert.ok(
+		events.some(
+			(event) =>
+				event.type === "run_outcome" &&
+				event.status === "cancelled" &&
+				event.summary === STEERING_INTERRUPT_SUMMARY,
+		),
+	);
 });
 
 void test("runAgentLoop processes follow-up messages after a stop", async () => {

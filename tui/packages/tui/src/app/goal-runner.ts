@@ -1,0 +1,130 @@
+// ── Goal evaluation ──────────────────────────────────────────────────────
+// Evaluates an active /goal condition against the conversation transcript.
+// Calls the LLM directly (bypassing the bridge) and mixes goal logic,
+// transcript access, bridge config, and fetch.
+
+import { AgentCoreBridge, GoalManager, type GoalState } from "@logician/coding-agent/application";
+import { Transcript } from "@logician/coding-agent/sessions";
+import { TranscriptDisplay } from "../rendering/transcript/display.ts";
+import { TUI } from "../terminal/core.ts";
+
+export interface GoalRunnerCtx {
+	bridge: AgentCoreBridge;
+	transcript: Transcript;
+	transcriptDisplay: TranscriptDisplay;
+	tui: TUI;
+	goalManager: GoalManager;
+	goalActive: boolean;
+	goalEvaluationPending: boolean;
+}
+
+export async function evaluateGoal(
+	ctx: GoalRunnerCtx,
+	goalState: Readonly<GoalState>,
+): Promise<void> {
+	if (ctx.goalEvaluationPending) return;
+	ctx.goalEvaluationPending = true;
+	// Build conversation snapshot from transcript turns
+	const turns = ctx.transcript.getTurns();
+	const snapshot = turns
+		.map((t) => {
+			const parts: string[] = [];
+			if (t.userMessage) parts.push(`User: ${t.userMessage}`);
+			if (t.assistantMessage) parts.push(`Assistant: ${t.assistantMessage}`);
+			return parts.join("\n");
+		})
+		.filter(Boolean)
+		.join("\n\n");
+
+	const evaluatorPrompt = GoalManager.buildEvaluatorPrompt(
+		goalState.condition,
+		snapshot,
+	);
+
+	ctx.transcript.addSystemMessage(
+		`◎ Goal evaluation #${goalState.turnCount}: "${goalState.condition}"`,
+	);
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.tui.requestRender();
+
+	// Call LLM directly for evaluation (like dropper.ts does)
+	const { baseUrl, model } = ctx.bridge.getConfig();
+	const apiKey =
+		process.env.ANTHROPIC_API_KEY ??
+		process.env.OPENAI_API_KEY ??
+		process.env.LLM_API_KEY ??
+		"sk-no-key";
+
+	let response: string;
+	try {
+		const res = await fetch(
+			`${(baseUrl ?? "https://api.openai.com").replace(/\/+$/, "")}/v1/chat/completions`,
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${apiKey}`,
+					"x-api-key": apiKey,
+				},
+				body: JSON.stringify({
+					model: model || "gpt-4o",
+					messages: [{ role: "system", content: evaluatorPrompt }],
+					max_tokens: 256,
+					temperature: 0,
+				}),
+			},
+		);
+
+		if (!res.ok) {
+			const errText = await res.text().catch(() => "");
+			throw new Error(
+				`LLM API error ${res.status}: ${errText.slice(0, 200)}`,
+			);
+		}
+
+		const data = (await res.json()) as {
+			choices: Array<{ message: { content: string } }>;
+		};
+		response = data.choices?.[0]?.message?.content ?? "";
+	} catch (e: unknown) {
+		const err = e instanceof Error ? e.message : String(e);
+		ctx.goalManager.handleAction({ type: "clear" });
+		ctx.goalActive = false;
+		ctx.transcript.addSystemMessage(
+			`Goal evaluation failed: ${err}. Goal cancelled.`,
+		);
+		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+		ctx.tui.requestRender();
+		ctx.goalEvaluationPending = false;
+		return;
+	}
+
+	const { met, reason } = GoalManager.parseEvaluatorResponse(response);
+
+	if (met) {
+		ctx.goalManager.recordEvaluation(true, reason);
+		ctx.goalActive = false;
+		ctx.transcript.addSystemMessage(
+			`✓ Goal achieved: "${goalState.condition}" — ${reason}`,
+		);
+	} else {
+		ctx.goalManager.recordEvaluation(false, reason);
+		const stillActive = ctx.goalManager.isActive();
+		ctx.goalActive = stillActive;
+		ctx.transcript.addSystemMessage(
+			stillActive
+				? `◎ Goal not yet met: ${reason} — continuing...`
+				: `Goal stopped: ${ctx.goalManager.getState()?.lastReason || reason}`,
+		);
+		if (stillActive) {
+			const reminder = `Goal reminder: "${goalState.condition}". ${reason}. Continue working toward the goal.`;
+			void ctx.bridge.sendMessage(reminder).catch((error: unknown) => {
+				ctx.bridge.reportError(error);
+			});
+		}
+	}
+
+	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+	ctx.tui.requestRender();
+	ctx.goalEvaluationPending = false;
+}

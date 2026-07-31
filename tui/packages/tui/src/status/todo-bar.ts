@@ -31,8 +31,24 @@ const STATUS: Record<TaskItem["status"], { sym: string; color: ThemeColor }> = {
 	deleted: { sym: "✗", color: "dim" },
 };
 
-function statusMark(status: TaskItem["status"]): string {
+// Fill-in frames shown briefly when a task's status just changed, e.g.
+// pending → in_progress plays ○ ◔ ◑ ◕ ▸, in_progress → completed plays ▸ ◕ ● ✓.
+const TRANSITION_FRAMES: Record<TaskItem["status"], string[]> = {
+	pending: ["○"],
+	in_progress: ["◔", "◑", "◕", "▸"],
+	completed: ["◕", "●", "✓"],
+	deleted: ["✗"],
+};
+const TRANSITION_TICKS = 4;
+const TRANSITION_INTERVAL_MS = 90;
+
+function statusMark(status: TaskItem["status"], frame?: number): string {
 	const s = STATUS[status];
+	if (frame !== undefined) {
+		const frames = TRANSITION_FRAMES[status];
+		const sym = frames[Math.min(frame, frames.length - 1)];
+		return ` ${theme.fg(s.color, sym)}${RESET}`;
+	}
 	return ` ${theme.fg(s.color, s.sym)}${RESET}`;
 }
 
@@ -46,6 +62,12 @@ export class TodoBar implements Component {
 	private cachedWidth = -1;
 	private cachedCount = -1;
 	private onInvalidate: (() => void) | null = null;
+
+	// Transition animation state: last-seen status per task id, and remaining
+	// frame count for tasks currently mid-transition.
+	private prevStatus = new Map<number, TaskItem["status"]>();
+	private transitionFrame = new Map<number, number>();
+	private timer: ReturnType<typeof setInterval> | null = null;
 
 	setOnInvalidate(cb: () => void): void {
 		this.onInvalidate = cb;
@@ -66,6 +88,25 @@ export class TodoBar implements Component {
 				},
 			];
 		});
+
+		let anyTransition = false;
+		const liveIds = new Set(this.tasks.map((t) => t.id));
+		for (const t of this.tasks) {
+			const prev = this.prevStatus.get(t.id);
+			if (prev !== undefined && prev !== t.status) {
+				this.transitionFrame.set(t.id, 0);
+				anyTransition = true;
+			}
+			this.prevStatus.set(t.id, t.status);
+		}
+		for (const id of this.prevStatus.keys()) {
+			if (!liveIds.has(id)) {
+				this.prevStatus.delete(id);
+				this.transitionFrame.delete(id);
+			}
+		}
+		if (anyTransition) this.startAnimation();
+
 		this.cachedLines = null;
 		this.cachedCount = -1;
 		this.onInvalidate?.();
@@ -77,18 +118,45 @@ export class TodoBar implements Component {
 		this.onInvalidate?.();
 	}
 
+	private startAnimation(): void {
+		if (this.timer) return;
+		this.timer = setInterval(() => {
+			let stillRunning = false;
+			for (const [id, frame] of this.transitionFrame) {
+				const next = frame + 1;
+				if (next >= TRANSITION_TICKS) {
+					this.transitionFrame.delete(id);
+				} else {
+					this.transitionFrame.set(id, next);
+					stillRunning = true;
+				}
+			}
+			this.cachedLines = null;
+			this.onInvalidate?.();
+			if (!stillRunning) this.stopAnimation();
+		}, TRANSITION_INTERVAL_MS);
+	}
+
+	private stopAnimation(): void {
+		if (this.timer) {
+			clearInterval(this.timer);
+			this.timer = null;
+		}
+	}
+
 	render(width: number): string[] {
 		const countKey = this.tasks.filter((t) => t.status !== "deleted").length;
 
 		if (
 			width === this.cachedWidth &&
 			countKey === this.cachedCount &&
-			this.cachedLines !== null
+			this.cachedLines !== null &&
+			this.transitionFrame.size === 0
 		) {
 			return this.cachedLines;
 		}
 
-		const lines = renderRaw(width, this.tasks);
+		const lines = renderRaw(width, this.tasks, this.transitionFrame);
 		this.cachedWidth = width;
 		this.cachedCount = countKey;
 		this.cachedLines = lines;
@@ -98,7 +166,11 @@ export class TodoBar implements Component {
 
 // ── Render (pure function, no closure over `this`) ────────────────────────────
 
-function renderRaw(width: number, tasks: TaskItem[]): string[] {
+function renderRaw(
+	width: number,
+	tasks: TaskItem[],
+	transitionFrame: Map<number, number>,
+): string[] {
 	const visible = tasks.filter((t) => t.status !== "deleted");
 	if (visible.length === 0) return [];
 
@@ -127,7 +199,7 @@ function renderRaw(width: number, tasks: TaskItem[]): string[] {
 		for (const t of group) {
 			if (shown >= MAX_ROWS) break;
 
-			const mark = statusMark(t.status);
+			const mark = statusMark(t.status, transitionFrame.get(t.id));
 			const line = buildTaskLine(t, mark);
 			lines.push(pad(clampLine(line, width), width));
 			shown++;
