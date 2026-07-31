@@ -176,8 +176,10 @@ export function createToolResultMessage(
 export function convertToChatFormat(
 	messages: Message[],
 ): Record<string, unknown>[] {
-	return messages.map((m) => {
-		const obj: Record<string, unknown> = { role: m.role };
+	return messages
+		.filter((m): m is Message => m != null)
+		.map((m) => {
+			const obj: Record<string, unknown> = { role: m.role };
 		if (m.content !== null && m.content !== undefined) {
 			obj.content = m.content;
 		}

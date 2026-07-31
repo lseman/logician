@@ -53,7 +53,7 @@ export function withSystemPrompt(
 ): Message[] {
 	return [
 		createSystemMessage(systemPrompt ?? "You are a helpful assistant."),
-		...messages.filter((message) => message.role !== "system"),
+		...messages.filter((message): message is Message => message != null && message.role !== "system"),
 	];
 }
 

@@ -474,7 +474,7 @@ export class AgentHarness {
 	 * the caller wants to re-enter the loop without fabricating a follow-up prompt.
 	 */
 	async continue(): Promise<Message[]> {
-		const nonSystem = this.history.filter((m) => m.role !== "system");
+		const nonSystem = this.history.filter((m): m is Message => m != null && m.role !== "system");
 		if (nonSystem.length === 0) {
 			throw new Error("Cannot continue: no messages in history");
 		}
@@ -559,7 +559,7 @@ export class AgentHarness {
 						content:
 							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
 					},
-					...snapshot.initialMessages.filter((m) => m.role !== "system"),
+					...snapshot.initialMessages.filter((m): m is Message => m != null && m.role !== "system"),
 					...newMessages,
 				];
 				this.history = result;
@@ -1227,7 +1227,7 @@ export class AgentHarness {
 		if (!resumed) return false;
 
 		if (resumed.messages.length > 0) {
-			this.setActiveHistory(resumed.messages.filter((m) => m.role !== "system"));
+			this.setActiveHistory(resumed.messages.filter((m): m is Message => m != null && m.role !== "system"));
 		}
 		this._sessionBaseDir = sessionBaseDir;
 		this._session = resumed.session;
@@ -1268,7 +1268,7 @@ export class AgentHarness {
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
-		this.setActiveHistory(messages.filter((m) => m.role !== "system"));
+		this.setActiveHistory(messages.filter((m): m is Message => m != null && m.role !== "system"));
 		this.emitSessionStart("resume").catch(() => {});
 		this._hasStartedSession = false;
 	}

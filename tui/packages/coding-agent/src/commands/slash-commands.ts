@@ -421,6 +421,45 @@ export function createSlashCommands(
 			},
 		),
 
+		// ── Agent ────────────────────────────────────────────────────────────
+		cmd(
+			"/spawn",
+			"Spawn a subagent to run a task autonomously",
+			"local",
+			true,
+			{
+				category: "agent",
+				argHint: "<task description>",
+				examples: [
+					"/spawn Review auth changes and run tests",
+					"/spawn",
+				],
+			},
+			(args) => {
+				const task = args.trim() || "Investigate the codebase and report findings";
+				localHandlers.spawnAgentDirectly?.(task);
+				return undefined;
+			},
+		),
+		cmd(
+			"/spawn-test",
+			"Spawn 2 fixed sample tasks via spawn_agents to test rendering",
+			"local",
+			false,
+			{
+				category: "agent",
+				examples: ["/spawn-test"],
+			},
+			() => {
+				const prompt = `Call spawn_agents once with exactly these two tasks, then report their results:
+
+- Task 0: agent="explorer" — task="List the files in the current directory"
+- Task 1: agent="general" — task="Say hello and explain what spawn_agents is in one sentence"`;
+				localHandlers.sendSpawnPrompt?.(prompt);
+				return undefined;
+			},
+		),
+
 		// ── Misc ─────────────────────────────────────────────────────────────
 		cmd(
 			"/notifications",

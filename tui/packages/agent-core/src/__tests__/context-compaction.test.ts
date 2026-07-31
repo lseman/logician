@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compactToFit } from "../compaction/compaction.ts";
+import { serializeConversation } from "../compaction/utils.ts";
 import {
 	createAssistantMessage,
 	createToolResultMessage,
@@ -8,6 +9,18 @@ import {
 	estimateChatPayloadTokens,
 } from "../agent/messages.ts";
 import type { CompactableMessage } from "../agent/types.ts";
+
+void test("conversation serialization tolerates null and malformed content", () => {
+	assert.equal(
+		serializeConversation([
+			{ role: "user", content: null },
+			{ role: "assistant", content: null },
+			{ role: "assistant", content: [null, { type: "text", text: "kept" }] },
+			{ role: "tool_result", content: undefined },
+		]),
+		"[Assistant]: kept",
+	);
+});
 
 void test("context estimates include tool definition overhead", () => {
 	const messages = [createUserMessage("hello")];

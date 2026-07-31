@@ -118,6 +118,23 @@ function truncateForSummary(text: string, maxChars: number): string {
 	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated]`;
 }
 
+function textContent(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter(
+			(block): block is { type: string; text: string } =>
+				typeof block === "object" &&
+				block !== null &&
+				"type" in block &&
+				block.type === "text" &&
+				"text" in block &&
+				typeof block.text === "string",
+		)
+		.map((block) => block.text)
+		.join("");
+}
+
 /**
  * Serialize conversation messages to text for summarization.
  * Prevents the model from treating it as a conversation to continue.
@@ -126,22 +143,15 @@ function truncateForSummary(text: string, maxChars: number): string {
 export function serializeConversation(
 	messages: Array<{
 		role: string;
-		content: string | Array<{ type: string; text?: string }>;
+		content?: unknown;
 	}>,
 ): string {
 	const parts: string[] = [];
 
 	for (const msg of messages) {
+		if (!msg) continue;
 		if (msg.role === "user") {
-			const content =
-				typeof msg.content === "string"
-					? msg.content
-					: msg.content
-							.filter(
-								(c): c is { type: string; text: string } => c.type === "text",
-							)
-							.map((c) => c.text)
-							.join("");
+			const content = textContent(msg.content);
 			if (content) parts.push(`[User]: ${content}`);
 		} else if (msg.role === "assistant") {
 			const textParts: string[] = [];
@@ -150,18 +160,17 @@ export function serializeConversation(
 
 			if (typeof msg.content === "string") {
 				textParts.push(msg.content);
-			} else {
+			} else if (Array.isArray(msg.content)) {
 				for (const block of msg.content) {
+					if (typeof block !== "object" || block === null) continue;
 					if (block.type === "text" && block.text) {
 						textParts.push(block.text);
 					} else if (
 						block.type === "thinking" &&
-						typeof block === "object" &&
-						block !== null
+						"thinking" in block &&
+						typeof block.thinking === "string"
 					) {
-						thinkingParts.push(
-							(block as unknown as { thinking: string }).thinking,
-						);
+						thinkingParts.push(block.thinking);
 					} else if (
 						block.type === "toolCall" &&
 						typeof block === "object" &&
@@ -189,15 +198,7 @@ export function serializeConversation(
 			if (toolCalls.length > 0)
 				parts.push(`[Assistant tool calls]: ${toolCalls.join("; ")}`);
 		} else if (msg.role === "toolResult" || msg.role === "tool_result") {
-			const content =
-				typeof msg.content === "string"
-					? msg.content
-					: msg.content
-							.filter(
-								(c): c is { type: string; text: string } => c.type === "text",
-							)
-							.map((c) => c.text)
-							.join("");
+			const content = textContent(msg.content);
 			if (content) {
 				parts.push(
 					`[Tool result]: ${truncateForSummary(content, TOOL_RESULT_MAX_CHARS)}`,

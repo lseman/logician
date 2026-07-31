@@ -53,6 +53,7 @@ const ESTIMATED_IMAGE_CHARS = 4800;
 export function estimateCompressableTokens(
 	message: AgentMessage | CompactableMessage,
 ): number {
+	if (!message) return 0;
 	const msg = message as AgentMessage & { content?: unknown };
 	let chars = 0;
 
@@ -252,6 +253,7 @@ function findValidCutPoints(
 ): number[] {
 	const cutPoints: number[] = [];
 	for (let i = startIndex; i < endIndex; i++) {
+		if (!messages[i]) continue;
 		const role = messages[i].role;
 		if (
 			role === "user" ||
@@ -273,6 +275,7 @@ function findTurnStartIndex(
 	startIndex: number,
 ): number {
 	for (let i = entryIndex; i >= startIndex; i--) {
+		if (!messages[i]) continue;
 		const role = messages[i].role;
 		if (
 			role === "custom" ||
@@ -310,6 +313,7 @@ function findCutPoint(
 ): CutPointResult {
 	// Assign entry IDs to messages that don't have them
 	for (const msg of messages) {
+		if (!msg) continue;
 		const m = msg as CompactableMessage & { entryId?: string };
 		if (!m.entryId) {
 			m.entryId = randomUUID();

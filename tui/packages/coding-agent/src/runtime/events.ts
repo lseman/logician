@@ -260,6 +260,7 @@ export type SubagentChunkEvent =
 			seq: number;
 			kind: "thinking" | "content";
 			delta: string;
+			taskIndex?: number;
 	  }
 	| {
 			type: "subagent_chunk";
@@ -269,6 +270,7 @@ export type SubagentChunkEvent =
 			toolCallId: string;
 			toolName: string;
 			args: string;
+			taskIndex?: number;
 	  }
 	| {
 			type: "subagent_chunk";
@@ -279,6 +281,31 @@ export type SubagentChunkEvent =
 			toolName: string;
 			result: string;
 			isError: boolean;
+			taskIndex?: number;
+	  };
+
+// Structured start/end lifecycle for one subagent run, carrying its taskIndex
+// when spawned as part of a spawn_agents batch — the single source of truth
+// for per-task status, replacing the old streamOutput marker-string protocol
+// (`▶ N agent` / `✓ N agent` / `× N agent`).
+export type SubagentLifecycleEvent =
+	| {
+			type: "subagent_lifecycle";
+			phase: "start";
+			agentId: string;
+			agent: string;
+			task: string;
+			taskIndex?: number;
+	  }
+	| {
+			type: "subagent_lifecycle";
+			phase: "end";
+			agentId: string;
+			agent: string;
+			result: string;
+			isError: boolean;
+			turns?: number;
+			taskIndex?: number;
 	  };
 
 // A tool call is paused waiting for the user's allow/deny decision. The UI
@@ -333,6 +360,7 @@ export type ParsedBridgeEvent =
 	| ModelSelectEvent
 	| NoticeEvent
 	| SubagentChunkEvent
+	| SubagentLifecycleEvent
 	| PermissionRequestEvent
 	| QuestionRequestEvent
 	| MemoryUpdateEvent

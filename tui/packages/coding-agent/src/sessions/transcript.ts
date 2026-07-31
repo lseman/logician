@@ -51,6 +51,8 @@ export interface ChildToolCall {
 	status?: "running" | "completed" | "failed";
 	isError?: boolean;
 	resultPreview?: string;
+	/** Position within a spawn_agents batch, if run as part of one. */
+	taskIndex?: number;
 }
 
 export interface ChildChunk {
@@ -60,6 +62,20 @@ export interface ChildChunk {
 	contentText?: string; // for 'thinking' and 'content'
 	tool?: ChildToolCall; // for 'tool'
 	isComplete: boolean;
+	/** Position within a spawn_agents batch, if run as part of one. */
+	taskIndex?: number;
+}
+
+/** Structured per-task live status for a spawn_agents batch — the single
+ * source of truth for status badges, replacing the old streamOutput
+ * marker-string protocol. Keyed by task index. */
+export interface TaskStatus {
+	taskIndex: number;
+	agentId: string;
+	agent: string;
+	status: "running" | "completed" | "failed";
+	startedAt: number;
+	endedAt?: number;
 }
 
 export interface AssistantChunk {
@@ -146,6 +162,9 @@ export class Transcript {
 				break;
 			case "subagent_chunk":
 				this.handleSubagentChunk(event);
+				break;
+			case "subagent_lifecycle":
+				this.handleSubagentLifecycle(event);
 				break;
 			case "thinking_token":
 				this.handleThinkingToken(String(event.token || ""));
@@ -383,8 +402,6 @@ export class Transcript {
 		label: string;
 		text: string;
 	}): void {
-		if (this.integrateSubagentLifecycleNotice(event)) return;
-
 		// Detect subagent tool call notices (label starts with "↳") and
 		// store them on the parent spawn_agent ToolExecution so the expanded
 		// view can render the child's tool activity.
@@ -409,44 +426,60 @@ export class Transcript {
 		});
 	}
 
-	private integrateSubagentLifecycleNotice(event: {
-		level: NoticeLevel;
-		label: string;
-		text: string;
-	}): boolean {
-		const match = /^Subagent (.+)$/.exec(event.label);
-		if (!match) return false;
-		const turn = this.getCurrentTurn();
-		const parent = turn?.assistantMessage?.chunks
-			.slice()
-			.reverse()
-			.find(
-				(chunk) =>
-					chunk.type === "tool" &&
-					["spawn_agent", "spawn_agents"].includes(
-						chunk.tool?.tool_name ?? "",
-					) &&
-					!chunk.isComplete,
-			)?.tool;
-		if (!parent) return false;
-		const details = (parent.details ??= {});
-		if (parent.tool_name === "spawn_agents") {
-			const lifecycle = (details.lifecycle as Array<{
-				agent: string;
-				level: NoticeLevel;
-				text: string;
-			}> | undefined) ?? [];
-			lifecycle.push({ agent: match[1], level: event.level, text: event.text });
-			details.lifecycle = lifecycle;
-			return true;
+	/**
+	 * Structured start/end lifecycle for one subagent run — the single source
+	 * of truth for per-task live status in a spawn_agents batch, stored as
+	 * `details.taskStatus[taskIndex]`. Replaces the old approach of parsing
+	 * `▶/✓/×` markers out of a streamOutput string.
+	 */
+	private handleSubagentLifecycle(event: {
+		phase: "start" | "end";
+		agentId: string;
+		agent: string;
+		task?: string;
+		result?: string;
+		isError?: boolean;
+		turns?: number;
+		taskIndex?: number;
+	}): void {
+		const toolChunk = this.findOpenSubagentToolChunk();
+		if (!toolChunk?.tool) return;
+		const details = (toolChunk.tool.details ??= {});
+
+		if (toolChunk.tool.tool_name === "spawn_agents") {
+			if (event.taskIndex === undefined) return;
+			const taskStatus = (details.taskStatus as Record<number, TaskStatus>) ??
+				(details.taskStatus = {});
+			if (event.phase === "start") {
+				taskStatus[event.taskIndex] = {
+					taskIndex: event.taskIndex,
+					agentId: event.agentId,
+					agent: event.agent,
+					status: "running",
+					startedAt: Date.now(),
+				};
+			} else {
+				const existing = taskStatus[event.taskIndex];
+				taskStatus[event.taskIndex] = {
+					taskIndex: event.taskIndex,
+					agentId: event.agentId,
+					agent: event.agent,
+					status: event.isError ? "failed" : "completed",
+					startedAt: existing?.startedAt ?? Date.now(),
+					endedAt: Date.now(),
+				};
+			}
+			return;
 		}
-		details.agent = details.agent || match[1];
-		if (event.level === "success") details.status = "completed";
-		if (event.level === "warn" || event.level === "error") {
-			details.status = "failed";
+
+		// Single spawn_agent: fold into the tool's own details, as before.
+		details.agent = details.agent || event.agent;
+		if (event.phase === "end") {
+			details.status = event.isError ? "failed" : "completed";
+			details.lifecycleSummary = event.isError
+				? event.result
+				: `done${event.turns ? ` in ${event.turns} turn(s)` : ""}`;
 		}
-		details.lifecycleSummary = event.text;
-		return true;
 	}
 
 	/**
@@ -543,6 +576,7 @@ export class Transcript {
 				type: event.kind,
 				contentText: event.delta,
 				isComplete: false,
+				taskIndex: event.taskIndex,
 			});
 			return;
 		}
@@ -558,8 +592,10 @@ export class Transcript {
 					toolName: event.toolName,
 					args: event.args,
 					status: "running",
+					taskIndex: event.taskIndex,
 				},
 				isComplete: false,
+				taskIndex: event.taskIndex,
 			});
 			return;
 		}
@@ -589,6 +625,7 @@ export class Transcript {
 			seq: event.seq,
 			agentId: event.agentId,
 			type: "tool",
+			taskIndex: event.taskIndex,
 			tool: {
 				agentId: event.agentId,
 				toolCallId: event.toolCallId,
@@ -597,6 +634,7 @@ export class Transcript {
 				status: event.isError ? "failed" : "completed",
 				isError: event.isError,
 				resultPreview: event.result,
+				taskIndex: event.taskIndex,
 			},
 			isComplete: true,
 		});
@@ -691,6 +729,7 @@ export class Transcript {
 					(toolChunk.tool.partialResult || "") + String(event.partial_result);
 			}
 		}
+		this.notify();
 	}
 
 	private handleToolEnd(event: ToolEndEvent): void {

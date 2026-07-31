@@ -55,7 +55,24 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				update_kind: "arguments",
 				tool_call_id: event.toolCallId,
 			} as ParsedBridgeEvent;
-		case "tool_call_update":
+		case "tool_execution_start":
+			return {
+				type: "tool_execution_start",
+				tool: event.toolName,
+				tool_name: event.toolName,
+				tool_args: event.args,
+				tool_call_id: event.toolCallId,
+			} as ParsedBridgeEvent;
+		case "tool_execution_end":
+			return {
+				type: "tool_execution_end",
+				tool: event.toolName,
+				tool_name: event.toolName,
+				result: event.result,
+				is_error: event.isError,
+				tool_call_id: event.toolCallId,
+			} as ParsedBridgeEvent;
+		case "tool_execution_update":
 			return {
 				type: "tool_execution_update",
 				tool: event.toolName,
@@ -172,19 +189,23 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 			};
 		case "subagent_start":
 			return {
-				type: "notice",
-				level: "info",
-				label: `Subagent ${event.agent}`,
-				text: `started: ${event.task.slice(0, 120)}`,
+				type: "subagent_lifecycle",
+				phase: "start",
+				agentId: event.agentId,
+				agent: event.agent,
+				task: event.task,
+				taskIndex: event.taskIndex,
 			};
 		case "subagent_end":
 			return {
-				type: "notice",
-				level: event.isError ? "warn" : "success",
-				label: `Subagent ${event.agent}`,
-				text: event.isError
-					? event.result
-					: `done${event.turns ? ` in ${event.turns} turn(s)` : ""}`,
+				type: "subagent_lifecycle",
+				phase: "end",
+				agentId: event.agentId,
+				agent: event.agent,
+				result: event.result,
+				isError: event.isError === true,
+				turns: event.turns,
+				taskIndex: event.taskIndex,
 			};
 		case "subagent_event": {
 			// Forward the child's own tool calls and text/thinking deltas as
@@ -203,6 +224,7 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					toolCallId: child.toolCallId,
 					toolName: child.toolName,
 					args: child.args,
+					taskIndex: event.taskIndex,
 				};
 			}
 			if (child.type === "tool_call_end") {
@@ -215,6 +237,7 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					toolName: child.toolName,
 					result: child.result,
 					isError: child.isError === true,
+					taskIndex: event.taskIndex,
 				};
 			}
 			if (child.type === "text_delta") {
@@ -224,6 +247,7 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					seq,
 					kind: "content",
 					delta: child.delta,
+					taskIndex: event.taskIndex,
 				};
 			}
 			if (child.type === "thinking_delta") {
@@ -233,6 +257,7 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					seq,
 					kind: "thinking",
 					delta: child.delta,
+					taskIndex: event.taskIndex,
 				};
 			}
 			if (child.type === "error") {

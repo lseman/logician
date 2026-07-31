@@ -183,6 +183,8 @@ let agentSeq = 0;
 interface _SpawnCtx {
 	signal?: AbortSignal;
 	onUpdate?: (delta: string) => void;
+	/** Position within a spawn_agents batch, if run as part of one. */
+	taskIndex?: number;
 }
 
 interface _PendingSpawn {
@@ -283,7 +285,13 @@ async function _runSpawn(
 
 	const agentId = `agent_${++agentSeq}`;
 	const parent = deps.config();
-	deps.emit({ type: "subagent_start", agentId, agent: def.name, task });
+	deps.emit({
+		type: "subagent_start",
+		agentId,
+		agent: def.name,
+		task,
+		taskIndex: ctx.taskIndex,
+	});
 
 	// Child config: parent's provider settings, but its own prompt, scoped
 	// tools, and NO parent hooks/queues/events — the child is isolated.
@@ -315,7 +323,12 @@ async function _runSpawn(
 			if (event.type === "text_delta") {
 				ctx.onUpdate?.(event.delta);
 			}
-			deps.emit({ type: "subagent_event", agentId, event });
+			deps.emit({
+				type: "subagent_event",
+				agentId,
+				event,
+				taskIndex: ctx.taskIndex,
+			});
 		},
 	};
 
@@ -351,6 +364,7 @@ async function _runSpawn(
 			result,
 			turns: run.turns,
 			isError: run.status !== "completed",
+			taskIndex: ctx.taskIndex,
 		});
 		return {
 			content: result,
@@ -377,6 +391,7 @@ async function _runSpawn(
 			agent: def.name,
 			result: message,
 			isError: true,
+			taskIndex: ctx.taskIndex,
 		});
 		return { content: message, isError: true };
 	}
@@ -616,41 +631,36 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 			const runOne = async (item: typeof taskArgs[number]) => {
 				try {
 					const result = await limiterFor(deps).run(
-						() => {
-							ctx.onUpdate?.(
-								`▶ ${item.taskIndex} ${item.task.agent || "general"}\n`,
-							);
-							return _runSpawn(
+						() =>
+							_runSpawn(
 								item.spawnArgs,
 								{
 									signal: ctx.signal,
-									onUpdate: (delta) => {
-										// One JSON string per line keeps concurrent agent
-										// streams lossless and attributable in the TUI.
-										ctx.onUpdate?.(
-											`↳ ${item.taskIndex} ${JSON.stringify(delta)}\n`,
-										);
-									},
+									taskIndex: item.taskIndex,
 								},
 								deps,
-							);
-						},
+							),
 						ctx.signal,
 					);
 					const isError =
 						typeof result !== "string" && result.isError === true;
-					ctx.onUpdate?.(
-						`${isError ? "×" : "✓"} ${item.taskIndex} ${item.task.agent || "general"}\n`,
-					);
 					results.push({
 						index: item.taskIndex,
 						result,
 						isError,
 					});
 				} catch (error) {
-					ctx.onUpdate?.(
-						`× ${item.taskIndex} ${item.task.agent || "general"}\n`,
-					);
+					// Failed before _runSpawn could emit its own subagent_end (e.g.
+					// the concurrency limiter's queue was aborted) — emit one here
+					// so the TUI's per-task status doesn't hang on "running".
+					deps.emit({
+						type: "subagent_end",
+						agentId: `agent_task${item.taskIndex}_failed`,
+						agent: item.task.agent || "general",
+						result: `Error: ${error instanceof Error ? error.message : String(error)}`,
+						isError: true,
+						taskIndex: item.taskIndex,
+					});
 					results.push({
 						index: item.taskIndex,
 						result: `Error: ${error instanceof Error ? error.message : String(error)}`,

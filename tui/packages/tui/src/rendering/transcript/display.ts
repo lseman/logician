@@ -60,8 +60,14 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 	thinkingMode: ThinkingDisplayStyle;
 	toolsExpanded = false;
 	private expandedToolKeys = new Set<string>();
+	/** Per-task expand state for spawn_agents cards, keyed by `${toolCallId}:task:${index}`. */
+	private expandedAgentKeys = new Set<string>();
+	/** Per-child-tool expand state within a subagent flow, keyed by `${parentKey}:child:${childToolCallId}`. */
+	private expandedChildToolKeys = new Set<string>();
 	private toolHitRegions: Array<{ start: number; end: number; key: string }> = [];
 	private focusedToolKey: string | null = null;
+	/** Populated by renderTool for spawn_agent(s) per-task/per-child-tool hit regions. */
+	_taskHitRegions?: Array<{ start: number; end: number; key: string }>;
 	maxMessageLength: number;
 	private maxTurns: number;
 	private maxRenderedLines: number;
@@ -69,17 +75,6 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 	private spinnerTick = 0;
 	private spinnerTimer: ReturnType<typeof setInterval> | null = null;
 	private onAnimationTick: (() => void) | null = null;
-	/**
-	 * Wall-clock timing for spawn_agents per-task rows, keyed by the batch
-	 * tool's call id then task index. The batch tool only reports per-task
-	 * status via a `▶/✓/×` marker stream with no timestamps, so the first
-	 * time a task is observed running/finished here we stamp it ourselves —
-	 * this is a rendering-side approximation, not the tool's real timing.
-	 */
-	batchTaskTiming = new Map<
-		string,
-		Map<number, { startedAt: number; endedAt?: number }>
-	>();
 	sanitizedToolCache = new WeakMap<ToolExecution, SanitizedToolCache>();
 	sanitizationMetrics = { cacheHits: 0, scannedCharacters: 0 };
 
@@ -156,6 +151,40 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		return this.toolsExpanded;
 	}
 
+	/** Whether a specific spawn_agents task card is expanded. */
+	isAgentExpanded(toolCallId: string, taskIndex: number): boolean {
+		const key = `${toolCallId}:task:${taskIndex}`;
+		return this.expandedAgentKeys.has(key);
+	}
+
+	/** Toggle expand state for a specific spawn_agents task card. */
+	toggleAgentExpanded(toolCallId: string, taskIndex: number): void {
+		const key = `${toolCallId}:task:${taskIndex}`;
+		if (this.expandedAgentKeys.has(key)) {
+			this.expandedAgentKeys.delete(key);
+		} else {
+			this.expandedAgentKeys.add(key);
+		}
+		this.invalidate();
+	}
+
+	/** Whether a specific child tool call within a subagent flow is expanded. */
+	isChildToolExpanded(parentKey: string, childToolCallId: string): boolean {
+		const key = `${parentKey}:child:${childToolCallId}`;
+		return this.expandedChildToolKeys.has(key);
+	}
+
+	/** Toggle expand state for a specific child tool call within a subagent flow. */
+	toggleChildToolExpanded(parentKey: string, childToolCallId: string): void {
+		const key = `${parentKey}:child:${childToolCallId}`;
+		if (this.expandedChildToolKeys.has(key)) {
+			this.expandedChildToolKeys.delete(key);
+		} else {
+			this.expandedChildToolKeys.add(key);
+		}
+		this.invalidate();
+	}
+
 	handleMouse(_column: number, row: number): boolean {
 		if (
 			this._newOutputBelow &&
@@ -171,14 +200,53 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		);
 		if (!region) return false;
 		const keepBottomAnchored = this._atBottom;
-		if (this.expandedToolKeys.has(region.key)) {
-			this.expandedToolKeys.delete(region.key);
-		} else {
-			this.expandedToolKeys.add(region.key);
-		}
-		this.invalidate();
+		this.toggleHitRegionKey(region.key);
 		if (keepBottomAnchored) this._pendingScrollBottom = true;
 		return true;
+	}
+
+	/**
+	 * Toggle whichever expand state a hit-region key addresses — a spawn_agents
+	 * per-task card, a per-child-tool call inside a subagent flow, or a plain
+	 * tool card. Shared by mouse clicks and keyboard-focused toggling so both
+	 * paths dispatch identically instead of the keyboard path assuming every
+	 * key belongs to `expandedToolKeys`.
+	 */
+	private toggleHitRegionKey(key: string): void {
+		// toolCallId can itself contain colons (e.g. the `${turn.id}:${chunk.seq}`
+		// fallback), so match the trailing `:task:<n>` / `:child:<id>` suffix
+		// instead of assuming the id has none.
+		const taskMatch = /^(.+):task:(\d+)$/.exec(key);
+		if (taskMatch) {
+			const [, toolCallId, taskIndexStr] = taskMatch;
+			this.toggleAgentExpanded(toolCallId, Number(taskIndexStr));
+			return;
+		}
+		const childMatch = /^(.+):child:(.+)$/.exec(key);
+		if (childMatch) {
+			const [, parentKey, childToolCallId] = childMatch;
+			this.toggleChildToolExpanded(parentKey, childToolCallId);
+			return;
+		}
+		if (this.expandedToolKeys.has(key)) {
+			this.expandedToolKeys.delete(key);
+		} else {
+			this.expandedToolKeys.add(key);
+		}
+		this.invalidate();
+	}
+
+	/** Whether a hit-region key's addressed expand state is currently on. */
+	private isHitRegionKeyExpanded(key: string): boolean {
+		const taskMatch = /^(.+):task:(\d+)$/.exec(key);
+		if (taskMatch) {
+			return this.isAgentExpanded(taskMatch[1], Number(taskMatch[2]));
+		}
+		const childMatch = /^(.+):child:(.+)$/.exec(key);
+		if (childMatch) {
+			return this.isChildToolExpanded(childMatch[1], childMatch[2]);
+		}
+		return this.expandedToolKeys.has(key);
 	}
 
 	/** Move keyboard focus between rendered tool cards and reveal the target. */
@@ -212,13 +280,8 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 	/** Expand or collapse the keyboard-focused tool card. */
 	toggleFocusedTool(): boolean | null {
 		if (!this.focusedToolKey) return null;
-		if (this.expandedToolKeys.has(this.focusedToolKey)) {
-			this.expandedToolKeys.delete(this.focusedToolKey);
-		} else {
-			this.expandedToolKeys.add(this.focusedToolKey);
-		}
-		this.invalidate();
-		return this.expandedToolKeys.has(this.focusedToolKey);
+		this.toggleHitRegionKey(this.focusedToolKey);
+		return this.isHitRegionKeyExpanded(this.focusedToolKey);
 	}
 
 	invalidate(): void {
@@ -427,6 +490,10 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 						const toolKey =
 							chunk.tool.tool_call_id ?? `${turn.id}:${chunk.seq}`;
 						const regionStart = renderedLines.length;
+						// Clear per-task hit regions before rendering so this tool's
+						// renderer starts from an empty list instead of inheriting
+						// (and then wiping) the previous tool's regions.
+						this._taskHitRegions = [];
 						const toolLines = renderTool(
 							this,
 							chunk.tool,
@@ -440,11 +507,28 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 									: "  ";
 							renderedLines.push(padToWidth(`${prefix}${toolLines[lineIndex]}`));
 						}
-						pendingToolRegions.push({
-							start: regionStart,
-							end: renderedLines.length,
-							key: toolKey,
-						});
+						// Merge per-task/per-child-tool regions from the renderer first
+						// so they take precedence.
+						for (const region of this._taskHitRegions ?? []) {
+							pendingToolRegions.push({
+								start: regionStart + region.start,
+								end: regionStart + region.end,
+								key: region.key,
+							});
+						}
+						// Parent tool region as fallback — except for spawn_agents,
+						// where only the per-task rows should be clickable. A
+						// whole-block fallback there would catch clicks on the
+						// header/blank rows between tasks and toggle every task's
+						// detail at once, which reads as agents' streams and
+						// responses getting mixed together.
+						if (chunk.tool.tool_name !== "spawn_agents") {
+							pendingToolRegions.push({
+								start: regionStart,
+								end: renderedLines.length,
+								key: toolKey,
+							});
+						}
 					} else if (chunk.type === "notice" && chunk.notice) {
 						const n = chunk.notice;
 						if (n.label === "Skills" && n.level === "info") {
@@ -609,7 +693,6 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		} else {
 			this.turns = turns;
 		}
-		this.pruneBatchTaskTiming();
 		this.invalidate();
 		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
@@ -640,29 +723,5 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		].join("/");
 	}
 
-	/**
-	 * batchTaskTiming is keyed by a spawn_agents tool_call_id and grows one
-	 * entry per batch call for the life of the session — evict entries whose
-	 * batch tool is no longer present in the retained turns (dropped by the
-	 * maxTurns cap above, or the batch simply scrolled out).
-	 */
-	private pruneBatchTaskTiming(): void {
-		if (this.batchTaskTiming.size === 0) return;
-		const liveIds = new Set<string>();
-		for (const turn of this.turns) {
-			for (const chunk of turn.assistantMessage?.chunks ?? []) {
-				if (
-					chunk.type === "tool" &&
-					chunk.tool?.tool_name === "spawn_agents" &&
-					chunk.tool.tool_call_id
-				) {
-					liveIds.add(chunk.tool.tool_call_id);
-				}
-			}
-		}
-		for (const key of this.batchTaskTiming.keys()) {
-			if (!liveIds.has(key)) this.batchTaskTiming.delete(key);
-		}
-	}
 	private _viewportHeight: number = 0;
 }

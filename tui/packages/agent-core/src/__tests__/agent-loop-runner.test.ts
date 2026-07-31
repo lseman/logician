@@ -823,7 +823,7 @@ void test("tool progress and thrown failures produce accurate lifecycle events",
 			events.push(event);
 		},
 	);
-	assert.equal(events.filter((event) => event.type === "tool_call_update").length, 2);
+	assert.equal(events.filter((event) => event.type === "tool_execution_update").length, 2);
 	assert.ok(
 		events.some(
 			(event) =>

@@ -166,16 +166,20 @@ void test("subagent lifecycle notices update the parent card without duplication
 		tool_args: { agent: "explorer", task: "Inspect the workspace" },
 	});
 	transcript.handleEvent({
-		type: "notice",
-		level: "info",
-		label: "Subagent explorer",
-		text: "started: Inspect the workspace",
+		type: "subagent_lifecycle",
+		phase: "start",
+		agentId: "agent_1",
+		agent: "explorer",
+		task: "Inspect the workspace",
 	});
 	transcript.handleEvent({
-		type: "notice",
-		level: "success",
-		label: "Subagent explorer",
-		text: "done in 2 turns",
+		type: "subagent_lifecycle",
+		phase: "end",
+		agentId: "agent_1",
+		agent: "explorer",
+		result: "done in 2 turns",
+		isError: false,
+		turns: 2,
 	});
 
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
@@ -188,7 +192,7 @@ void test("subagent lifecycle notices update the parent card without duplication
 		(chunk) => chunk.tool?.tool_call_id === "parent-tool",
 	)?.tool;
 	assert.equal(parent?.details?.status, "completed");
-	assert.equal(parent?.details?.lifecycleSummary, "done in 2 turns");
+	assert.equal(parent?.details?.lifecycleSummary, "done in 2 turn(s)");
 });
 
 void test("final batch details preserve collected child tool activity", () => {

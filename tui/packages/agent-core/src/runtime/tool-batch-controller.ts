@@ -139,22 +139,18 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		let resultText = plan.immediateContent;
 		let isError = plan.immediateError;
 		let terminate = false;
-		const updates: Promise<void>[] = [];
 		let accepting = true;
 		if (resultText === undefined) {
-			const result = await registry.execute(prepared.call, { signal, onUpdate: (partialResult) => {
+			const result = await registry.execute(prepared.call, { signal, onUpdate: async (partialResult) => {
 				if (!accepting) return;
-				updates.push(Promise.resolve(emit({ type: "tool_execution_update", toolCallId: prepared.call.id, toolName: prepared.call.name, args, partialResult })));
-				updates.push(Promise.resolve(emit({ type: "tool_call_update", toolCallId: prepared.call.id, toolName: prepared.call.name, partialResult })));
+				await emit({ type: "tool_execution_update", toolCallId: prepared.call.id, toolName: prepared.call.name, args, partialResult });
 			} }, args);
 			accepting = false;
-			await Promise.all(updates);
 			resultText = result.content;
 			isError = result.isError === true;
 			terminate = result.terminate === true;
 		}
 		accepting = false;
-		await Promise.all(updates);
 		const context = { toolCall: prepared.call, args, result: resultText, isError, iteration };
 		let after = await options.internalHooks?.afterToolCall?.(context, signal);
 		if (after === undefined) {

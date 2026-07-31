@@ -51,6 +51,7 @@ export function extractFileOpsFromMessages(messages: Message[]): FileOperations 
 	const ops = createFileOps();
 
 	for (const msg of messages) {
+		if (!msg) continue;
 		if (msg.role !== "assistant" || !msg.tool_calls) continue;
 
 		for (const tc of msg.tool_calls) {
@@ -211,6 +212,7 @@ export function collectMessagesForBranchSummary(
 
 /** Check if two messages are semantically equal (for common ancestor detection). */
 function messageEquals(a: Message, b: Message): boolean {
+	if (!a || !b) return false;
 	if (a.role !== b.role) return false;
 	if (typeof a.content !== typeof b.content) return false;
 	if (typeof a.content === "string" && a.content !== b.content) return false;
@@ -222,6 +224,7 @@ function messageEquals(a: Message, b: Message): boolean {
 
 /** Estimate tokens for a single message. */
 function estimateMessageTokens(msg: Message): number {
+	if (!msg) return 0;
 	const text = typeof msg.content === "string" ? msg.content : "";
 	return Math.max(1, Math.floor(text.length / 4));
 }
@@ -310,6 +313,7 @@ export function serializeMessages(messages: Message[]): string {
 	const parts: string[] = [];
 
 	for (const msg of messages) {
+		if (!msg) continue;
 		const role = msg.role === "assistant" ? "Assistant" : msg.role === "user" ? "User" : msg.role === "system" ? "System" : msg.role;
 
 		if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0) {

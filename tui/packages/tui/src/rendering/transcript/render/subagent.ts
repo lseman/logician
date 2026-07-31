@@ -29,25 +29,6 @@ import {
 	renderTool,
 } from "./tool.ts";
 
-export function batchAgentStreams(tool: ToolExecution): Map<number, string> {
-	const streams = new Map<number, string>();
-	const stored = tool.details?.streamTranscript;
-	const source = typeof stored === "string" ? stored : (tool.streamOutput ?? "");
-	for (const line of source.split("\n")) {
-		const match = /^↳\s+(\d+)\s+(.+)$/.exec(line);
-		if (!match) continue;
-		try {
-			const delta = JSON.parse(match[2]) as unknown;
-			if (typeof delta !== "string") continue;
-			const index = Number(match[1]);
-			streams.set(index, (streams.get(index) ?? "") + delta);
-		} catch {
-			// Ignore an incomplete update line while it is still streaming.
-		}
-	}
-	return streams;
-}
-
 export function renderSubagentText(
 	text: string,
 	width: number,
@@ -75,8 +56,15 @@ export function distinctSubagentOutputs(
 ): string[] {
 	const live = stripAcceptanceForDisplay(liveText).trim();
 	const final = stripAcceptanceForDisplay(finalText).trim();
-	if (!live) return final ? [final] : [];
-	if (!final || live === final || live.includes(final)) return [live];
+	if (!final) return live ? [live] : [];
+	if (!live || live === final) return [final];
+	// `live` may be a fuller transcript that already contains `final` as a
+	// substring (e.g. a full stream transcript vs. just the final report) —
+	// keep the richer one. Or `live` may be a stale prefix that hasn't caught
+	// up to `final` yet (task just finished) — `final` alone is authoritative
+	// there, since showing both would repeat the same text back to back.
+	if (live.includes(final)) return [live];
+	if (final.includes(live)) return [final];
 	return [live, final];
 }
 
@@ -112,16 +100,24 @@ export function renderSubagentFlow(
 	showAgent: boolean,
 	ctx: RenderCtx,
 	expanded = ctx.toolsExpanded,
+	parentKey = "",
+	includeContent = true,
+	showFrame = true,
 ): string[] {
 	const lines: string[] = [];
-	const agentIds = [
-		...new Set(chunks.map((chunk) => chunk.agentId).filter(Boolean)),
-	];
-	const plural = showAgent || agentIds.length > 1;
-	const runLabel = plural
-		? `SUBAGENTS · ${agentIds.length || "?"} CHILD RUNS`
-		: `SUBAGENT${agentIds[0] ? ` · ${agentIds[0]}` : ""}`;
-	lines.push(`${theme.fg("active", `╭─ ${runLabel}`)}${RESET}`);
+	const hitRegions = parentKey
+		? (ctx._taskHitRegions = ctx._taskHitRegions ?? [])
+		: undefined;
+	if (showFrame) {
+		const agentIds = [
+			...new Set(chunks.map((chunk) => chunk.agentId).filter(Boolean)),
+		];
+		const plural = showAgent || agentIds.length > 1;
+		const runLabel = plural
+			? `SUBAGENTS · ${agentIds.length || "?"} CHILD RUNS`
+			: `SUBAGENT${agentIds[0] ? ` · ${agentIds[0]}` : ""}`;
+		lines.push(`${theme.fg("active", `╭─ ${runLabel}`)}${RESET}`);
+	}
 	let contentBuffer = "";
 	let contentAgent = "";
 	let lastAgent = "";
@@ -149,6 +145,7 @@ export function renderSubagentFlow(
 
 	for (const chunk of chunks) {
 		if (chunk.type === "content") {
+			if (!includeContent) continue;
 			if (contentBuffer && contentAgent !== chunk.agentId) {
 				flushContent();
 			}
@@ -176,114 +173,70 @@ export function renderSubagentFlow(
 			continue;
 		}
 		if (chunk.type === "tool" && chunk.tool) {
+			const childToolCallId = chunk.tool.toolCallId;
+			const childExpanded =
+				parentKey && childToolCallId
+					? (ctx.isChildToolExpanded?.(parentKey, childToolCallId) ?? expanded)
+					: expanded;
+			const regionStart = lines.length;
 			lines.push(
-				...renderTool(ctx, childToolExecution(chunk.tool), Math.max(20, width), expanded),
+				...renderTool(ctx, childToolExecution(chunk.tool), Math.max(20, width), childExpanded),
 			);
+			if (hitRegions && childToolCallId) {
+				hitRegions.push({
+					start: regionStart,
+					end: regionStart + 1,
+					key: `${parentKey}:child:${childToolCallId}`,
+				});
+			}
 			lastWasThinking = false;
 		}
 	}
 	flushContent();
-	lines.push(`${theme.fg("active", "╰─ RETURN TO PARENT")}${RESET}`);
+	if (showFrame) {
+		lines.push(`${theme.fg("active", "╰─ RETURN TO PARENT")}${RESET}`);
+	}
 	return lines;
 }
 
-export function renderSubagentBatchDetails(
+/**
+ * Chronological tool-call activity appended after the per-task rows once the
+ * whole spawn_agents tool is expanded (Ctrl+O or row click). Response text is
+ * intentionally excluded here — the per-task rows already show each task's
+ * text, and duplicating it in the tail rendered two copies of the same
+ * streamed text back to back.
+ */
+export function renderSubagentBatchActivityTail(
 	ctx: RenderCtx,
 	tool: ToolExecution,
 	width: number,
 	expanded: boolean,
 ): string[] {
-	const tasks = Array.isArray(tool.args?.tasks)
-		? tool.args.tasks.filter(
-				(task): task is Record<string, unknown> =>
-					typeof task === "object" && task !== null,
-			)
-		: [];
 	const details = tool.details ?? {};
-	const results = Array.isArray(details.results)
-		? details.results.filter(
-				(result): result is Record<string, unknown> =>
-					typeof result === "object" && result !== null,
-			)
-		: [];
-	const resultByIndex = new Map(results.map((result) => [Number(result.index), result]));
-	const { liveStatus, taskElapsedMs } = computeBatchTally(ctx, tool);
-	const agentStreams = batchAgentStreams(tool);
 	const childChunks = Array.isArray(details.childChunks)
 		? (details.childChunks as ChildChunk[])
 		: [];
-	const hasOrderedFlow = childChunks.length > 0;
-	// The N/M tally already appears in the collapsed header row above this
-	// detail block — repeating it here as its own line was pure duplication.
-	const lines: string[] = [];
-
-	for (let index = 0; index < tasks.length; index++) {
-		const task = tasks[index];
-		const result = resultByIndex.get(index);
-		const resultError = result?.isError === true;
-		const state = result
-			? resultError
-				? "failed"
-				: "completed"
-			: (liveStatus.get(index) ?? "queued");
-		const icon =
-			state === "failed"
-				? theme.fg("toolError", "×")
-				: state === "completed"
-					? theme.fg("toolSuccess", "✓")
-					: state === "running"
-						? theme.fg("toolRunning", ctx.spinnerFrame())
-						: theme.fg("dim", "·");
-		const agent =
-			typeof task.agent === "string" && task.agent ? task.agent : "general";
-		const taskText =
-			typeof task.task === "string"
-				? compactText(task.task).slice(0, 100)
-				: `Task ${index + 1}`;
-		const elapsedMs = taskElapsedMs.get(index);
-		const elapsed =
-			elapsedMs !== undefined ? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}` : "";
-		const queuedTag = state === "queued" ? ` ${DIM}queued${RESET}` : "";
-		lines.push(
-			clampLineToWidth(
-				`${icon} ${theme.fg("active", `${index + 1}. ${agent}`)} ${DIM}${taskText}${RESET}${queuedTag}${elapsed}`,
-				Math.max(20, width),
-			),
-		);
-		if (expanded && !hasOrderedFlow) {
-			const liveText = agentStreams.get(index) ?? "";
-			const resultText = typeof result?.content === "string" ? result.content : "";
-			const texts = distinctSubagentOutputs(liveText, resultText);
-			for (const text of texts) {
-				for (const preview of renderSubagentText(
-					text,
-					Math.max(16, width - 4),
-					!result,
-					ctx,
-					expanded,
-				)) {
-					lines.push(`  ${preview}`);
-				}
-			}
-		}
-	}
-	if (hasOrderedFlow) {
-		lines.push(...renderSubagentFlow(childChunks, width, true, ctx, expanded));
-	} else {
-		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
-		lines.push(
-			...renderSubagentActivity(
-				childToolCalls,
-				width,
-				ctx,
-				expanded ? Number.POSITIVE_INFINITY : 4,
-				true,
-				true,
-				expanded,
-			),
+	if (childChunks.length > 0) {
+		return renderSubagentFlow(
+			childChunks,
+			width,
+			true,
+			ctx,
+			expanded,
+			tool.tool_call_id ?? "",
+			false,
 		);
 	}
-	return lines;
+	const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
+	return renderSubagentActivity(
+		childToolCalls,
+		width,
+		ctx,
+		expanded ? Number.POSITIVE_INFINITY : 4,
+		true,
+		true,
+		expanded,
+	);
 }
 
 export function renderSubagentDetails(
@@ -337,7 +290,16 @@ export function renderSubagentDetails(
 		? (details.childChunks as ChildChunk[])
 		: [];
 	if (childChunks.length > 0) {
-		lines.push(...renderSubagentFlow(childChunks, width, false, ctx, expanded));
+		lines.push(
+			...renderSubagentFlow(
+				childChunks,
+				width,
+				false,
+				ctx,
+				expanded,
+				tool.tool_call_id ?? "",
+			),
+		);
 	} else {
 		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
 		lines.push(
@@ -362,9 +324,9 @@ export function renderSubagentDetails(
 		.map((chunk) => chunk.contentText ?? "")
 		.join("");
 	const outputs =
-		expanded && childChunks.length === 0
+		childChunks.length === 0
 			? distinctSubagentOutputs(liveOutput, finalOutput)
-			: !expanded && tool.isComplete && finalOutput && !orderedContent.includes(finalOutput)
+			: tool.isComplete && finalOutput && !orderedContent.includes(finalOutput)
 				? [finalOutput]
 				: [];
 	if (outputs.length > 0) {
@@ -435,6 +397,196 @@ export function renderSubagentActivity(
 			);
 		}
 	}
+	return lines;
+}
+
+/**
+ * Render live streaming output for a single (spawn_agent) subagent that is
+ * still running. Called from the collapsed path so the user can follow
+ * progress without manually expanding.
+ *
+ * Prefers `childChunks` (ordered, chronological thinking/content/tool flow)
+ * when available, falling back to the legacy `streamOutput` path for older
+ * agents that never populated structured chunks.
+ */
+export function renderSubagentLiveOutput(
+	ctx: RenderCtx,
+	tool: ToolExecution,
+	width: number,
+): string[] {
+	// Prefer childChunks (ordered, chronological streaming).
+	const childChunks = Array.isArray(tool.details?.childChunks)
+		? (tool.details.childChunks as ChildChunk[])
+		: [];
+	if (childChunks.length > 0) {
+		const flowLines = renderSubagentFlow(childChunks, width, false, ctx, false);
+		// Drop the footer while still running.
+		if (!tool.isComplete) {
+			flowLines.pop();
+		}
+		return flowLines;
+	}
+
+	// Legacy fallback: use streamOutput for older agents.
+	const lines: string[] = [];
+	const storedTranscript =
+		typeof tool.details?.streamTranscript === "string"
+			? tool.details.streamTranscript
+			: "";
+	const liveOutput = tool.isComplete ? storedTranscript : (tool.streamOutput ?? "");
+	const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
+	const outputs = distinctSubagentOutputs(liveOutput, finalOutput);
+	for (const output of outputs) {
+		for (const line of renderSubagentText(
+			output,
+			Math.max(16, width - 4),
+			!tool.isComplete,
+			ctx,
+			false,
+		)) {
+			lines.push("  " + line);
+		}
+	}
+	return lines;
+}
+
+/**
+ * Render a compact collapsed view for spawn_agents: one line per task
+ * showing the task number, agent, description, and status.
+ *
+ * Each task card is clickable to expand/collapse.  When `expanded`
+ * is true, every task's detail lines are shown by default.  When
+ * false, only individually expanded tasks (via click) show their
+ * detail beneath the card.  Hit regions are registered via
+ * `ctx._taskHitRegions` so clicks are forwarded to the transcript
+ * display.
+ */
+export function renderSubagentBatchCollapsed(
+	ctx: RenderCtx,
+	tool: ToolExecution,
+	width: number,
+	expanded = false,
+): string[] {
+	const lines: string[] = [];
+	const hitRegions = (ctx._taskHitRegions = ctx._taskHitRegions ?? []);
+	const toolCallId = tool.tool_call_id ?? "";
+
+	const tasks = Array.isArray(tool.args?.tasks)
+		? tool.args.tasks.filter(
+				(task): task is Record<string, unknown> =>
+					typeof task === "object" && task !== null,
+			)
+		: [];
+	const { liveStatus, taskElapsedMs } = computeBatchTally(ctx, tool);
+	const results = Array.isArray(tool.details?.results)
+		? tool.details.results.filter(
+				(r): r is Record<string, unknown> =>
+					typeof r === "object" && r !== null,
+			)
+		: [];
+	const resultByIndex = new Map(results.map((r) => [Number(r.index), r]));
+
+	for (let index = 0; index < tasks.length; index++) {
+		const task = tasks[index];
+		const result = resultByIndex.get(index);
+
+		// Determine task state.
+		const state = result
+			? result.isError === true
+				? "failed"
+				: "completed"
+			: liveStatus.get(index) ?? "queued";
+
+		// Status icon (mirrors renderSubagentBatchDetails's icon logic).
+		const icon =
+			state === "failed"
+				? theme.fg("toolError", "×")
+				: state === "completed"
+					? theme.fg("toolSuccess", "✓")
+					: state === "running"
+						? theme.fg("toolRunning", ctx.spinnerFrame())
+						: theme.fg("dim", "·");
+
+		// Build task line: "icon N. agent description"
+		const agent =
+			typeof task.agent === "string" && task.agent ? task.agent : "general";
+		const taskText =
+			typeof task.task === "string"
+				? compactText(task.task).slice(0, 120)
+				: "Task " + (index + 1);
+
+		const elapsedMs = taskElapsedMs.get(index);
+		const elapsed =
+			elapsedMs !== undefined ? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}` : "";
+		const queuedTag = state === "queued" ? ` ${DIM}queued${RESET}` : "";
+		const line =
+			"  " + icon + " " + theme.fg("active", "" + (index + 1) + ". " + agent) + " " + DIM + taskText + RESET + queuedTag + elapsed;
+		const maxLine = Math.max(20, width - 4);
+		lines.push(clampLineToWidth(line, maxLine));
+
+		// Register hit region for per-task expand/collapse.
+		if (hitRegions) {
+			hitRegions.push({
+				start: lines.length - 1,
+				end: lines.length,
+				key: toolCallId + ":task:" + index,
+			});
+		}
+
+		// Expanded detail for this task: show when `expanded` is true or when
+		// this individual card has been clicked to expand. childChunks now
+		// carry their own taskIndex (threaded through subagent_start/_event),
+		// so this task's thinking/content/tool-call flow can be filtered out
+		// reliably instead of guessing agentId-to-task-index correspondence.
+		if (expanded || ctx.isAgentExpanded?.(toolCallId, index)) {
+			const allChunks = Array.isArray(tool.details?.childChunks)
+				? (tool.details.childChunks as ChildChunk[])
+				: [];
+			const taskChunks = allChunks.filter((c) => c.taskIndex === index);
+			if (taskChunks.length > 0) {
+				const regionBase = lines.length;
+				const hitRegionsBefore = hitRegions?.length ?? 0;
+				const flowLines = renderSubagentFlow(
+					taskChunks,
+					Math.max(16, width - 4),
+					false,
+					ctx,
+					true,
+					`${toolCallId}:task:${index}`,
+					true,
+					// No header/footer frame — the task row above already carries
+					// that context, and rows must stay 1:1 with the child-tool hit
+					// regions renderSubagentFlow pushes for this task below.
+					false,
+				);
+				for (const fl of flowLines) {
+					lines.push("  " + fl);
+				}
+				// renderSubagentFlow pushed child-tool hit regions relative to its
+				// own local `lines` (starting at 0) — translate only the entries it
+				// just appended into this function's own `lines` coordinate space.
+				if (hitRegions) {
+					for (let i = hitRegionsBefore; i < hitRegions.length; i++) {
+						hitRegions[i] = {
+							...hitRegions[i],
+							start: hitRegions[i].start + regionBase,
+							end: hitRegions[i].end + regionBase,
+						};
+					}
+				}
+			} else {
+				const resultText = result && typeof result.content === "string" ? result.content : "";
+				if (resultText) {
+					for (const fl of renderSubagentText(resultText, Math.max(16, width - 4), false, ctx, true)) {
+						lines.push("  " + fl);
+					}
+				} else if (!tool.isComplete) {
+					lines.push("  " + theme.fg("dim", "waiting for output...") + RESET);
+				}
+			}
+		}
+	}
+
 	return lines;
 }
 

@@ -796,7 +796,7 @@ void test("expanded agent progress is never character-truncated", () => {
 	assert.doesNotMatch(output, /truncated|earlier progress hidden/i);
 });
 
-void test("collapsed agent card hides its stream until expanded", () => {
+void test("collapsed agent card shows truncated stream while running", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 14 });
 	const longProgress = `BEGIN\n${Array.from(
 		{ length: 80 },
@@ -831,7 +831,11 @@ void test("collapsed agent card hides its stream until expanded", () => {
 
 	const output = plain(display.render(100).join("\n"));
 	assert.match(output, /subagent explorer streaming/);
-	assert.doesNotMatch(output, /BEGIN|stream-line-79|END/);
+	// Collapsed running agents show truncated streaming output (not hidden).
+	assert.match(output, /BEGIN/);
+	// Only a subset of lines are visible; END should not appear.
+	assert.doesNotMatch(output, /stream-line-79|END/);
+	assert.match(output, /truncated/i);
 });
 
 void test("expanded completed subagent keeps its streaming transcript", () => {
@@ -949,13 +953,21 @@ void test("collapsed completed subagent formats its final report as markdown", (
 			isComplete: true,
 		},
 	]);
-	const rendered = display.render(100).join("\n");
-	const output = plain(rendered);
+	// Collapsed: single header line with status and task summary
+	const renderedCollapsed = display.render(100).join("\n");
+	const outputCollapsed = plain(renderedCollapsed);
+	assert.match(outputCollapsed, /✓ subagent reviewer done/);
+	assert.doesNotMatch(outputCollapsed, /Approved|zero errors/);
 
-	assert.match(output, /Approved.*zero errors/);
-	assert.match(rendered, /\x1b\[1mApproved/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
-	assert.doesNotMatch(output, /acceptance-report|criteriaSatisfied/);
+	// Expanded: full detail block with markdown rendering
+	display.toolsExpanded = true;
+	display.invalidate();
+	const renderedExpanded = display.render(100).join("\n");
+	const outputExpanded = plain(renderedExpanded);
+	assert.match(outputExpanded, /Approved.*zero errors/);
+	assert.match(renderedExpanded, /\x1b\[1mApproved/);
+	assert.match(renderedExpanded, /\x1b\[38;5;\d+mconst/);
+	assert.doesNotMatch(outputExpanded, /acceptance-report|criteriaSatisfied/);
 });
 
 void test("post-edit diagnostics render as a dedicated formatted block", () => {
@@ -1454,8 +1466,10 @@ void test("expanded subagent renders thinking, tools, and responses in call orde
 	assert.ok(tool > progress);
 	assert.ok(result > tool);
 	assert.ok(response > result);
+	// The ordered content appears once in the child flow.
 	assert.equal(output.match(/The implementation is correct\./g)?.length, 1);
-	assert.doesNotMatch(
+	// The final result is also shown separately.
+	assert.match(
 		output,
 		/Summary: implementation verified successfully\./,
 	);
@@ -1511,11 +1525,18 @@ void test("collapsed completed subagent shows its final summary", () => {
 		},
 	]);
 
-	const output = plain(display.render(120).join("\n"));
+	// Collapsed: single header line with status/summary only
+	const collapsed = plain(display.render(120).join("\n"));
+	assert.match(collapsed, /✓ subagent explorer done/);
+	assert.doesNotMatch(collapsed, /Private reasoning|Intermediate progress/);
 
-	assert.match(output, /Summary: the implementation is correct\./);
-	assert.match(output, /Private reasoning/);
-	assert.match(output, /Intermediate progress/);
+	// Expanded: full detail block with child chunks
+	display.toolsExpanded = true;
+	display.invalidate();
+	const expanded = plain(display.render(120).join("\n"));
+	assert.match(expanded, /Summary: the implementation is correct\./);
+	assert.match(expanded, /Private reasoning/);
+	assert.match(expanded, /Intermediate progress/);
 });
 
 void test("collapsed subagent shows ordered flow with child tools collapsed", () => {
@@ -1588,18 +1609,22 @@ void test("collapsed subagent shows ordered flow with child tools collapsed", ()
 		},
 	]);
 
+	// Collapsed: single header line with status only
 	const collapsed = plain(display.render(120).join("\n"));
-	assert.match(collapsed, /I should inspect first\./);
-	assert.match(collapsed, /Inspecting now\./);
-	assert.match(collapsed, /read_file/);
-	assert.match(collapsed, /Inspection complete\./);
-	assert.match(collapsed, /SUBAGENT · explorer-1/);
-	assert.match(collapsed, /RETURN TO PARENT/);
-	assert.match(collapsed, /output private file contents/);
-	assert.equal(collapsed.match(/Inspection complete\./g)?.length, 1);
+	assert.match(collapsed, /✓ subagent explorer done/);
+	assert.doesNotMatch(collapsed, /I should inspect first|Inspecting now/);
+	assert.doesNotMatch(collapsed, /SUBAGENT · explorer-1/);
 
-	display.setToolsExpanded(true);
+	// Expanded: full detail block with ordered flow
+	display.toolsExpanded = true;
+	display.invalidate();
 	const expanded = plain(display.render(120).join("\n"));
+	assert.match(expanded, /I should inspect first\./);
+	assert.match(expanded, /Inspecting now\./);
+	assert.match(expanded, /read_file/);
+	assert.match(expanded, /Inspection complete\./);
+	assert.match(expanded, /SUBAGENT · explorer-1/);
+	assert.match(expanded, /RETURN TO PARENT/);
 	assert.match(expanded, /private file contents/);
 	assert.equal(expanded.match(/Inspection complete\./g)?.length, 1);
 });
@@ -1647,11 +1672,19 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
+	// Collapsed: single header line with status only
+	const collapsed = plain(display.render(120).join("\n"));
+	assert.match(collapsed, /✓ subagent explorer done/);
+	assert.doesNotMatch(collapsed, /read_file|ACTIVITY/);
+	assert.equal(collapsed.match(/explorer/g)?.length, 1);
 
-	assert.match(output, /read_file.*path=src\/index\.ts/);
-	assert.doesNotMatch(output, /ACTIVITY/);
-	assert.equal(output.match(/explorer/g)?.length, 1);
+	// Expanded: full detail block with child tool calls
+	display.toolsExpanded = true;
+	display.invalidate();
+	const expanded = plain(display.render(120).join("\n"));
+	assert.match(expanded, /read_file.*path=src\/index\.ts/);
+	assert.doesNotMatch(expanded, /ACTIVITY/);
+	assert.equal(expanded.match(/explorer/g)?.length, 1);
 });
 
 void test("completed subagent card has one parent success indicator", () => {
@@ -1687,17 +1720,26 @@ void test("completed subagent card has one parent success indicator", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
 
-	assert.equal(output.match(/✓/g)?.length, 1);
-	assert.match(output, /✓ subagent explorer done/);
-	assert.match(output, /2 turn.*0 tool call.*1\.4s/);
+	// Collapsed: single header line with one ✓
+	const collapsed = plain(display.render(120).join("\n"));
+	assert.equal(collapsed.match(/✓/g)?.length, 1);
+	assert.match(collapsed, /✓ subagent explorer done/);
+	assert.doesNotMatch(collapsed, /2 turn.*0 tool call|Inspection complete/);
+
+	// Expanded: detail block with metadata
+	display.toolsExpanded = true;
+	display.invalidate();
+	const expandedOutput = plain(display.render(120).join("\n"));
+	assert.equal(expandedOutput.match(/✓/g)?.length, 1);
+	assert.match(expandedOutput, /✓ subagent explorer done/);
+	assert.match(expandedOutput, /2 turn.*0 tool call.*1\.4s/);
 	assert.equal(
-		output.match(/Inspection complete\./g)?.length,
+		expandedOutput.match(/Inspection complete\./g)?.length,
 		1,
 		"the final report should render once",
 	);
-	assert.doesNotMatch(output, /◆ subagent|◆ agent/);
+	assert.doesNotMatch(expandedOutput, /◆ subagent|◆ agent/);
 });
 
 void test("spawn_agents renders ordered live task status", () => {
@@ -1724,7 +1766,25 @@ void test("spawn_agents renders ordered live task status", () => {
 									{ agent: "general", task: "Check documentation" },
 								],
 							},
-							streamOutput: "▶ 0 explorer\n✓ 0 explorer\n▶ 1 reviewer\n",
+							details: {
+								taskStatus: {
+									0: {
+										taskIndex: 0,
+										agentId: "agent_1",
+										agent: "explorer",
+										status: "completed",
+										startedAt: 1000,
+										endedAt: 1500,
+									},
+									1: {
+										taskIndex: 1,
+										agentId: "agent_2",
+										agent: "reviewer",
+										status: "running",
+										startedAt: 1500,
+									},
+								},
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1734,12 +1794,132 @@ void test("spawn_agents renders ordered live task status", () => {
 			isComplete: false,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
+	// Collapsed: task rows are always visible so each is individually
+	// clickable to expand, even before the whole tool is expanded.
+	const collapsed = plain(display.render(120).join("\n"));
+	assert.match(collapsed, /subagents 2\/3 running.*3 tasks/);
+	assert.match(collapsed, /✓ 1\. explorer.*Inspect the API/);
+	assert.match(collapsed, /⠋ 2\. reviewer.*Review the tests/);
+	assert.match(collapsed, /· 3\. general.*Check documentation/);
 
-	assert.match(output, /subagents 2\/3 running.*3 tasks/);
-	assert.match(output, /✓ 1\. explorer.*Inspect the API/);
-	assert.match(output, /⠋ 2\. reviewer.*Review the tests/);
-	assert.match(output, /· 3\. general.*Check documentation/);
+	// Expanded: task breakdown with per-task status
+	display.toolsExpanded = true;
+	display.invalidate();
+	const expanded = plain(display.render(120).join("\n"));
+	assert.match(expanded, /subagents 2\/3 running.*3 tasks/);
+	assert.match(expanded, /✓ 1\. explorer.*Inspect the API/);
+	assert.match(expanded, /⠋ 2\. reviewer.*Review the tests/);
+	assert.match(expanded, /· 3\. general.*Check documentation/);
+});
+
+void test("clicking a spawn_agents task row expands that exact task, not a neighbor", () => {
+	const display = new TranscriptDisplay();
+	display.setViewportHeight(40);
+	display.setTurns([
+		{
+			id: "click-target-batch",
+			userMessage: { type: "user", content: "Inspect in parallel" },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: true,
+				chunks: [
+					{
+						seq: 0,
+						type: "tool",
+						isComplete: true,
+						tool: {
+							tool: "spawn_agents",
+							tool_name: "spawn_agents",
+							tool_call_id: "batch-1",
+							args: {
+								tasks: [
+									{ agent: "explorer", task: "Task Alpha" },
+									{ agent: "reviewer", task: "Task Beta" },
+									{ agent: "general", task: "Task Gamma" },
+								],
+							},
+							details: {
+								childChunks: [
+									{
+										seq: 0,
+										agentId: "agent_1",
+										taskIndex: 0,
+										type: "content",
+										contentText: "ALPHA-ONLY-CONTENT",
+										isComplete: true,
+									},
+									{
+										seq: 1,
+										agentId: "agent_2",
+										taskIndex: 1,
+										type: "content",
+										contentText: "BETA-ONLY-CONTENT",
+										isComplete: true,
+									},
+									{
+										seq: 2,
+										agentId: "agent_3",
+										taskIndex: 2,
+										type: "content",
+										contentText: "GAMMA-ONLY-CONTENT",
+										isComplete: true,
+									},
+								],
+							},
+							isError: false,
+							isComplete: true,
+						},
+					},
+				],
+			},
+			isComplete: true,
+		},
+	]);
+
+	const findRow = (needle: string) => {
+		const rendered = display.render(120);
+		const row = rendered.findIndex((line) => plain(line).includes(needle));
+		assert.notEqual(row, -1, `row for "${needle}" not found`);
+		return row;
+	};
+
+	// Clicking the parent header should do nothing — only task rows toggle.
+	const headerRow = findRow("subagents");
+	assert.equal(display.handleMouse(4, headerRow), false);
+	assert.doesNotMatch(plain(display.render(120).join("\n")), /ALPHA-ONLY-CONTENT/);
+
+	// Click task 1 (Alpha) — only Alpha's content should appear.
+	const alphaRow = findRow("Task Alpha");
+	assert.equal(display.handleMouse(4, alphaRow), true);
+	const afterAlpha = plain(display.render(120).join("\n"));
+	assert.match(afterAlpha, /ALPHA-ONLY-CONTENT/);
+	assert.doesNotMatch(afterAlpha, /BETA-ONLY-CONTENT/);
+	assert.doesNotMatch(afterAlpha, /GAMMA-ONLY-CONTENT/);
+
+	// Click task 2 (Beta) — Alpha stays expanded (independent toggles), Beta
+	// joins it, Gamma remains collapsed.
+	const betaRow = findRow("Task Beta");
+	assert.equal(display.handleMouse(4, betaRow), true);
+	const afterBeta = plain(display.render(120).join("\n"));
+	assert.match(afterBeta, /ALPHA-ONLY-CONTENT/);
+	assert.match(afterBeta, /BETA-ONLY-CONTENT/);
+	assert.doesNotMatch(afterBeta, /GAMMA-ONLY-CONTENT/);
+
+	// Click task 3 (Gamma) — all three now expanded.
+	const gammaRow = findRow("Task Gamma");
+	assert.equal(display.handleMouse(4, gammaRow), true);
+	const afterGamma = plain(display.render(120).join("\n"));
+	assert.match(afterGamma, /ALPHA-ONLY-CONTENT/);
+	assert.match(afterGamma, /BETA-ONLY-CONTENT/);
+	assert.match(afterGamma, /GAMMA-ONLY-CONTENT/);
+
+	// Click task 1 (Alpha) again — it collapses back, Beta/Gamma stay expanded.
+	const alphaRowAgain = findRow("Task Alpha");
+	assert.equal(display.handleMouse(4, alphaRowAgain), true);
+	const afterAlphaCollapse = plain(display.render(120).join("\n"));
+	assert.doesNotMatch(afterAlphaCollapse, /ALPHA-ONLY-CONTENT/);
+	assert.match(afterAlphaCollapse, /BETA-ONLY-CONTENT/);
+	assert.match(afterAlphaCollapse, /GAMMA-ONLY-CONTENT/);
 });
 
 void test("spawn_agents never renders a positive count over zero while arguments stream", () => {
@@ -1760,7 +1940,17 @@ void test("spawn_agents never renders a positive count over zero while arguments
 							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							partialResult: "{\"tasks\":[{\"agent\":\"explorer\"",
-							streamOutput: "▶ 0 explorer\n",
+							details: {
+								taskStatus: {
+									0: {
+										taskIndex: 0,
+										agentId: "agent_1",
+										agent: "explorer",
+										status: "running",
+										startedAt: 1000,
+									},
+								},
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1793,8 +1983,18 @@ void test("spawn_agents repairs an inconsistent structured total", () => {
 						tool: {
 							tool: "spawn_agents",
 							tool_name: "spawn_agents",
-							streamOutput: "▶ 2 explorer\n",
-							details: { total: 0 },
+							details: {
+								total: 0,
+								taskStatus: {
+									2: {
+										taskIndex: 2,
+										agentId: "agent_1",
+										agent: "explorer",
+										status: "running",
+										startedAt: 1000,
+									},
+								},
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1834,13 +2034,42 @@ void test("expanded spawn_agents keeps concurrent text streams attributed", () =
 									{ agent: "reviewer", task: "Inspect tests" },
 								],
 							},
-							streamOutput: [
-								"▶ 0 explorer",
-								"↳ 0 \"API stream\\n```ts\\nconst api = true;\\n```\"",
-								"▶ 1 reviewer",
-								"↳ 1 \"Test stream\"",
-								"",
-							].join("\n"),
+							details: {
+								taskStatus: {
+									0: {
+										taskIndex: 0,
+										agentId: "agent_1",
+										agent: "explorer",
+										status: "running",
+										startedAt: 1000,
+									},
+									1: {
+										taskIndex: 1,
+										agentId: "agent_2",
+										agent: "reviewer",
+										status: "running",
+										startedAt: 1000,
+									},
+								},
+								childChunks: [
+									{
+										seq: 0,
+										agentId: "agent_1",
+										taskIndex: 0,
+										type: "content",
+										contentText: "API stream\n```ts\nconst api = true;\n```",
+										isComplete: false,
+									},
+									{
+										seq: 1,
+										agentId: "agent_2",
+										taskIndex: 1,
+										type: "content",
+										contentText: "Test stream",
+										isComplete: false,
+									},
+								],
+							},
 							isError: false,
 							isComplete: false,
 						},
@@ -1918,7 +2147,7 @@ void test("spawn_agents shows partial failures and expanded reports", () => {
 	assert.match(output, /× 2\. reviewer/);
 	assert.match(output, /API looks good/);
 	assert.match(output, /Tests failed/);
-	assert.match(output, /bash.*agent-reviewer.*command=npm test/);
+	assert.match(output, /bash.*command=npm test/);
 });
 
 void test("edited TypeScript previews are syntax highlighted", () => {

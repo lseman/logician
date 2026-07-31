@@ -27,6 +27,7 @@ import {
 	type HarnessPhase,
 	type Message,
 	type Tool,
+	type ToolContext,
 	type TruncationConfig,
 	type WebSearchConfig,
 } from "@logician/agent-core";
@@ -1516,6 +1517,7 @@ export class AgentCoreBridge {
 		if (!msgs.length) lines.push("No messages yet.");
 
 		for (const msg of msgs) {
+			if (!msg) continue;
 			const role = msg.role.toUpperCase();
 			const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : "";
 			const header = `[${role}]${ts ? ` ${ts}` : ""}`;
@@ -1973,6 +1975,91 @@ export class AgentCoreBridge {
 		this.config.tools = this.defaultTools;
 		this.harness?.setTools(this.defaultTools);
 		this.rebuildBaseSystemPrompt();
+	}
+
+	/**
+	 * Directly invoke the spawn_agent tool without going through the LLM.
+	 * Emits tool execution events to the transcript so the subagent output
+	 * renders as a tool chunk with integrated streaming output.
+	 */
+	spawnAgentDirectly(task: string, agent?: string): void {
+		const spawnTool = this.defaultTools.find((t) => t.name === 'spawn_agent');
+		if (!spawnTool) {
+			this.reportError(new Error('spawn_agent tool not available (subagent tools not injected)'));
+			return;
+		}
+
+		const toolCallId = `spawn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+		const turnId = `spawn_turn_${Date.now()}`;
+		const controller = new AbortController();
+
+		// Create a synthetic turn so the transcript has a context for the
+		// tool chunk. The transcript's handleToolStart / integrateSubagent
+		// logic both require a current turn.
+		this.emit({ type: 'turn_start', turn_id: turnId });
+
+		// Emit tool_execution_start so the transcript creates a tool chunk.
+		this.emit({
+			type: 'tool_execution_start',
+			tool: 'spawn_agent',
+			tool_name: 'spawn_agent',
+			tool_args: { task, agent },
+			tool_call_id: toolCallId,
+		});
+
+		const ctx: ToolContext = {
+			signal: controller.signal,
+			onUpdate: (delta) => {
+				// Stream subagent output as tool_execution_update so it
+				// integrates into the open tool chunk in the transcript.
+				this.emit({
+					type: 'tool_execution_update',
+					tool: 'spawn_agent',
+					tool_name: 'spawn_agent',
+					partial_result: delta,
+					update_kind: 'output' as const,
+					tool_call_id: toolCallId,
+				});
+			},
+		};
+
+		void spawnTool.execute(
+			{ task, agent },
+			ctx,
+		).then((result) => {
+			const content = typeof result === 'string' ? result : result.content;
+			const isError = typeof result === 'string'
+				? false
+				: result.isError === true;
+			// Emit tool_execution_end so the transcript closes the tool chunk.
+			this.emit({
+				type: 'tool_execution_end',
+				tool: 'spawn_agent',
+				tool_name: 'spawn_agent',
+				result: content,
+				is_error: isError,
+				tool_call_id: toolCallId,
+				details: typeof result === 'object' && result.details
+					? result.details
+					: undefined,
+			});
+			if (isError) {
+				this.reportError(new Error(content));
+			}
+		}).catch((err) => {
+			const error = err as Error;
+			this.emit({
+				type: 'tool_execution_end',
+				tool: 'spawn_agent',
+				tool_name: 'spawn_agent',
+				result: error.message,
+				is_error: true,
+				tool_call_id: toolCallId,
+			});
+		}).finally(() => {
+			// Close the synthetic turn so the transcript finalises the card.
+			this.emit({ type: 'turn_end', turn_id: turnId, message: '' });
+		});
 	}
 
 	private async fireSessionEnd(reason: string): Promise<void> {

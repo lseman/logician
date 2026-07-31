@@ -229,11 +229,12 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},
 	};
+	const emitted: Array<{ type: string; taskIndex?: number }> = [];
 	const tool = createSpawnAgentsTool({
 		config: () => ({ ...baseConfig, tools: [] }),
 		backend,
 		agents: () => BUILTIN_AGENTS,
-		emit: () => {},
+		emit: (event) => emitted.push(event as { type: string; taskIndex?: number }),
 		concurrencyLimiter: createSubagentConcurrencyLimiter(2),
 	});
 	const updates: string[] = [];
@@ -257,14 +258,24 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 	assert.match(result.content, /## Subagent 1: general \(completed\)/);
 	assert.match(result.content, /## Subagent 5: general \(completed\)/);
 	assert.equal(result.content.match(/\bdone\b/g)?.length, 5);
-	assert.equal(updates.filter((update) => update.startsWith("▶")).length, 5);
-	assert.equal(updates.filter((update) => update.startsWith("✓")).length, 5);
-	assert.equal(updates.filter((update) => update.startsWith("↳")).length, 5);
-	assert.ok(
-		updates
-			.filter((update) => update.startsWith("↳"))
-			.every((update) => /↳ \d+ "working"\n/.test(update)),
+	// Per-task lifecycle is now structured (subagent_start/subagent_end with
+	// taskIndex), not a `▶/↳/✓` marker-string stream on onUpdate.
+	const starts = emitted.filter((event) => event.type === "subagent_start");
+	const ends = emitted.filter((event) => event.type === "subagent_end");
+	assert.equal(starts.length, 5);
+	assert.equal(ends.length, 5);
+	assert.deepEqual(
+		new Set(starts.map((event) => event.taskIndex)),
+		new Set([0, 1, 2, 3, 4]),
 	);
+	assert.deepEqual(
+		new Set(ends.map((event) => event.taskIndex)),
+		new Set([0, 1, 2, 3, 4]),
+	);
+	// Per-task text streaming is carried via subagent_event/childChunks (see
+	// the taskIndex assertions above), not the top-level tool's onUpdate —
+	// spawn_agents no longer forwards child text deltas there.
+	assert.equal(updates.length, 0);
 });
 
 void test("spawn_agents requires more than one task", async () => {

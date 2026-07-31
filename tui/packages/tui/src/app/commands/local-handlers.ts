@@ -299,6 +299,15 @@ export function createLocalHandlers(
 			ctx.cycleInferenceMode();
 			return `Inference mode: ${ctx.inferenceMode}`;
 		},
+		sendSpawnPrompt: (prompt: unknown) => {
+			const text = typeof prompt === "string" ? prompt : String(prompt);
+			ctx.bridge.sendMessage(text);
+		},
+		spawnAgentDirectly: (args: unknown) => {
+			const raw = typeof args === "string" ? args : String(args ?? "");
+			const task = raw || "Investigate the codebase and report findings";
+			ctx.bridge.spawnAgentDirectly(task);
+		},
 		notifications: () => {
 			const history = ctx.notifications.history();
 			if (history.length === 0) return "No notifications yet.";

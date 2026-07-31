@@ -37,8 +37,10 @@ import { detectLanguage } from "../file-language.ts";
 import { wrapText } from "../layout.ts";
 import { truncateText, withTruncationMarker } from "./content.ts";
 import {
-	renderSubagentBatchDetails,
+	renderSubagentBatchActivityTail,
+	renderSubagentBatchCollapsed,
 	renderSubagentDetails,
+	renderSubagentLiveOutput,
 } from "./subagent.ts";
 import {
 	renderBashDetails,
@@ -73,11 +75,16 @@ export interface RenderCtx {
 	toolsExpanded: boolean;
 	spinnerFrame: () => string;
 	maxMessageLength: number;
-	batchTaskTiming: Map<string, Map<number, { startedAt: number; endedAt?: number }>>;
 	sanitizedToolCache: WeakMap<ToolExecution, SanitizedToolCache>;
 	sanitizationMetrics: { cacheHits: number; scannedCharacters: number };
 	currentWidth: number;
 	thinkingMode: ThinkingDisplayStyle;
+	/** Whether a specific spawn_agents task card is expanded. */
+	isAgentExpanded?: (toolCallId: string, taskIndex: number) => boolean;
+	/** Whether a specific child tool call (inside a subagent flow) is expanded. */
+	isChildToolExpanded?: (parentKey: string, childToolCallId: string) => boolean;
+	/** Populated by the renderer with per-task/per-child-tool hit regions for spawn_agent(s). */
+	_taskHitRegions?: Array<{ start: number; end: number; key: string }>;
 }
 
 export function renderTool(
@@ -225,6 +232,50 @@ export function renderTool(
 		);
 	}
 	if (!expanded && !subagent && !subagentBatch) return lines;
+	// Spawn_agents always shows compact per-task status cards, each
+	// independently clickable to expand/collapse. Once the whole tool is
+	// expanded (Ctrl+O / row click), the chronological child flow / activity
+	// list is appended after the per-task rows.
+	if (subagentBatch) {
+		// renderSubagentBatchCollapsed registers hit regions relative to its
+		// own local line array (starting at 0), but its output is appended
+		// after the header row already pushed above — translate by that
+		// offset so a click lands on the task row it visually points at,
+		// instead of resolving one row up (the header) or one row off from
+		// the intended task.
+		const headerOffset = lines.length;
+		const collapsedLines = renderSubagentBatchCollapsed(ctx, tool, width, expanded);
+		lines.push(...collapsedLines);
+		if (ctx._taskHitRegions) {
+			for (const region of ctx._taskHitRegions) {
+				region.start += headerOffset;
+				region.end += headerOffset;
+			}
+		}
+		if (expanded) {
+			// Same offset issue as above: renderSubagentBatchActivityTail's
+			// child-tool regions are relative to its own local line array,
+			// appended after everything pushed so far.
+			const tailOffset = lines.length;
+			const regionsBeforeTail = ctx._taskHitRegions?.length ?? 0;
+			lines.push(...renderSubagentBatchActivityTail(ctx, tool, width, expanded));
+			if (ctx._taskHitRegions) {
+				for (let i = regionsBeforeTail; i < ctx._taskHitRegions.length; i++) {
+					ctx._taskHitRegions[i].start += tailOffset;
+					ctx._taskHitRegions[i].end += tailOffset;
+				}
+			}
+		}
+		return lines;
+	}
+	// Single subagent shows live streaming output when collapsed and running,
+	// and just the header once collapsed and complete.
+	if (!expanded && subagent) {
+		if (!tool.isComplete) {
+			lines.push(...renderSubagentLiveOutput(ctx, tool, width));
+		}
+		return lines;
+	}
 	if (!subagent && !subagentBatch) {
 		lines.push(`${theme.fg("dim", "│ ")}${theme.fg("active", "◆ details")}`);
 	}
@@ -413,9 +464,6 @@ export function toolDetailLines(
 	if (tool.tool_name === "spawn_agent") {
 		return renderSubagentDetails(ctx, tool, width, expanded);
 	}
-	if (tool.tool_name === "spawn_agents") {
-		return renderSubagentBatchDetails(ctx, tool, width, expanded);
-	}
 
 	if (tool.isError && result && isPermissionRejection(result)) {
 		lines.push(...renderPermissionBlock(ctx, result, width));
@@ -464,11 +512,13 @@ export function toolDetailLines(
 }
 
 /**
- * Live progress tally for a spawn_agents batch. Before completion the only
- * signal available is the `▶/✓/×` marker stream on streamOutput (the tool
- * only reports structured total/completed/failed once every task
- * finishes), so this is the single place that parses it — reused by both
- * the collapsed header and the expanded per-task breakdown.
+ * Live progress tally for a spawn_agents batch, derived from the structured
+ * `details.taskStatus` map (populated from subagent_lifecycle events — see
+ * Transcript.handleSubagentLifecycle) rather than parsing a marker-string
+ * stream. The tool only reports structured total/completed/failed once
+ * every task finishes, so taskStatus is also the only live signal before
+ * that — reused by both the collapsed header and the expanded per-task
+ * breakdown.
  */
 export function computeBatchTally(
 	ctx: RenderCtx,
@@ -488,33 +538,17 @@ export function computeBatchTally(
 			)
 		: [];
 	const details = tool.details ?? {};
+	const taskStatus =
+		(details.taskStatus as Record<
+			number,
+			{ status: "running" | "completed" | "failed"; startedAt: number; endedAt?: number }
+		>) ?? {};
 	const liveStatus = new Map<number, "running" | "completed" | "failed">();
-	for (const line of (tool.streamOutput ?? "").split("\n")) {
-		const match = /^([▶✓×])\s+(\d+)\s+/.exec(line.trim());
-		if (!match) continue;
-		liveStatus.set(
-			Number(match[2]),
-			match[1] === "▶" ? "running" : match[1] === "✓" ? "completed" : "failed",
-		);
-	}
-
-	const timingKey = tool.tool_call_id ?? "";
-	let timing = ctx.batchTaskTiming.get(timingKey);
-	if (!timing) {
-		timing = new Map();
-		ctx.batchTaskTiming.set(timingKey, timing);
-	}
-	const now = Date.now();
 	const taskElapsedMs = new Map<number, number>();
-	for (const [index, status] of liveStatus) {
-		let entry = timing.get(index);
-		if (!entry) {
-			entry = { startedAt: now };
-			timing.set(index, entry);
-		}
-		if (status !== "running" && entry.endedAt === undefined) {
-			entry.endedAt = now;
-		}
+	const now = Date.now();
+	for (const [key, entry] of Object.entries(taskStatus)) {
+		const index = Number(key);
+		liveStatus.set(index, entry.status);
 		taskElapsedMs.set(index, (entry.endedAt ?? now) - entry.startedAt);
 	}
 

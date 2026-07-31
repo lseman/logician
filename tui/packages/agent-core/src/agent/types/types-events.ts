@@ -91,12 +91,6 @@ export type AgentEventBody =
 			details?: Record<string, unknown>;
 	  }
 	| {
-			type: "tool_call_update";
-			toolName: string;
-			toolCallId: string;
-			partialResult: string;
-	  }
-	| {
 			type: "tool_execution_start";
 			toolCallId: string;
 			toolName: string;
@@ -145,8 +139,21 @@ export type AgentEventBody =
 			message: string;
 			attempt?: number;
 	  }
-	| { type: "subagent_start"; agentId: string; agent: string; task: string }
-	| { type: "subagent_event"; agentId: string; event: AgentEvent }
+	| {
+			type: "subagent_start";
+			agentId: string;
+			agent: string;
+			task: string;
+			/** Position within a spawn_agents batch, if run as part of one. */
+			taskIndex?: number;
+	  }
+	| {
+			type: "subagent_event";
+			agentId: string;
+			event: AgentEvent;
+			/** Position within a spawn_agents batch, if run as part of one. */
+			taskIndex?: number;
+	  }
 	| {
 			type: "subagent_end";
 			agentId: string;
@@ -154,6 +161,8 @@ export type AgentEventBody =
 			result: string;
 			isError?: boolean;
 			turns?: number;
+			/** Position within a spawn_agents batch, if run as part of one. */
+			taskIndex?: number;
 	  }
 	| {
 			type: "tool_permission_request";
