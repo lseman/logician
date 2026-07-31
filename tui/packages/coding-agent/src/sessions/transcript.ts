@@ -112,7 +112,7 @@ export type Message = UserMessage | AssistantMessage | SystemMessage;
 
 export interface Turn {
 	id: string;
-	userMessage: UserMessage;
+	userMessage: UserMessage | null;
 	assistantMessage: AssistantMessage | null;
 	isComplete: boolean;
 }
@@ -200,6 +200,22 @@ export class Transcript {
 		} else if (this.state.turns.length > 0) {
 			this.state.currentTurnId =
 				this.state.turns[this.state.turns.length - 1].id;
+		} else {
+			// Direct-mode tool execution (e.g. /spawn) — no existing turn
+			// to update. Create a synthetic assistant-only turn so tool
+			// events have something to attach to.
+			const turn: Turn = {
+				id: event.turn_id,
+				userMessage: null,
+				assistantMessage: {
+					type: "assistant",
+					chunks: [],
+					isComplete: false,
+				},
+				isComplete: false,
+			};
+			this.state.turns.push(turn);
+			this.state.currentTurnId = event.turn_id;
 		}
 	}
 
@@ -534,18 +550,37 @@ export class Transcript {
 		});
 	}
 
-	/** Find the most recent incomplete singular or batch subagent tool chunk. */
+	/**
+	 * Find the tool chunk for a spawn_agent/spawn_agents call. Checks incomplete
+	 * chunks first (open stream), then falls back to the most recent completed
+	 * spawn chunk so that direct-mode /spawn can still capture lifecycle events
+	 * that arrive after the tool_end has already closed the chunk.
+	 */
 	private findOpenSubagentToolChunk(): AssistantChunk | undefined {
 		const turn = this.getCurrentTurn();
-		return turn?.assistantMessage?.chunks
-			.slice()
-			.reverse()
-			.find(
-				(c) =>
-					c.type === "tool" &&
-					["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? "") &&
-					!c.isComplete,
-			);
+		if (!turn?.assistantMessage) return undefined;
+		const chunks = turn.assistantMessage.chunks.slice().reverse();
+		// 1. Incomplete (still streaming)
+		for (const c of chunks) {
+			if (
+				c.type === "tool" &&
+				["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? "") &&
+				!c.isComplete
+			) {
+				return c;
+			}
+		}
+		// 2. Recently completed (direct-mode /spawn: tool_end fires before lifecycle)
+		for (const c of chunks) {
+			if (
+				c.type === "tool" &&
+				["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? "") &&
+				c.isComplete
+			) {
+				return c;
+			}
+		}
+		return undefined;
 	}
 
 	/**
@@ -738,11 +773,39 @@ export class Transcript {
 
 		const assistant = turn.assistantMessage;
 
-		const toolChunk = this.findToolChunk(
+		let toolChunk = this.findToolChunk(
 			assistant.chunks,
 			event.tool_call_id,
 			event.tool_name || event.tool,
 		);
+		// Direct-mode /spawn: tool_start was never emitted, so create the
+		// missing spawn chunk here so that subagent lifecycle events can find
+		// it and write their summary into details.
+		const isDirectSpawn =
+			!toolChunk &&
+			["spawn_agent", "spawn_agents"].includes(
+				event.tool_name || event.tool,
+			);
+		if (isDirectSpawn) {
+			const toolName = event.tool_name || event.tool;
+			assistant.chunks.push({
+				seq: assistant.chunks.length,
+				type: "tool",
+				tool: {
+					tool: toolName,
+					tool_name: toolName,
+					tool_call_id: event.tool_call_id,
+					args: undefined,
+					result: undefined,
+					partialResult: undefined,
+					isError: false,
+					isComplete: false,
+					startedAt: Date.now(),
+				},
+				isComplete: false,
+			});
+			toolChunk = assistant.chunks[assistant.chunks.length - 1];
+		}
 		if (!toolChunk?.tool) return;
 
 		// Mark the tool as finished
