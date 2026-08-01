@@ -1,12 +1,13 @@
 {
 	"name": "@logician/tui",
 	"version": "0.2.0",
+	"private": true,
 	"description": "Terminal TUI layer for Logician",
 	"type": "module",
 	"main": "src/index.ts",
 	"scripts": {
 		"start": "tsx src/index.ts",
-		"test": "tsx --test $(find src __tests__ -name '*.test.ts' -type f -print)",
+		"test": "tsx --test $(find src -name '*.test.ts' -type f -print)",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -15,7 +16,6 @@
 		"@logician/coding-agent": "0.2.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.4.16",
 		"@types/node": "^22.0.0",
 		"@typescript-eslint/eslint-plugin": "^8.65.0",
 		"@typescript-eslint/parser": "^8.65.0",

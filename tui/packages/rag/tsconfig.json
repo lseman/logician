@@ -3,7 +3,7 @@
 		"target": "ES2023",
 		"module": "ESNext",
 		"moduleResolution": "bundler",
-		"rootDir": "..",
+		"rootDir": "src",
 		"outDir": "dist",
 		"strict": true,
 		"esModuleInterop": true,
@@ -14,12 +14,9 @@
 		"forceConsistentCasingInFileNames": true,
 		"allowImportingTsExtensions": true,
 		"composite": true,
-		"paths": {
-			"@logician/rag/*": ["../rag/src/*"]
-		},
 		"noEmit": true,
-		"types": ["node"]
+		"types": ["bun-types"]
 	},
-	"include": ["src/**/*", "../agent-core/src/**/*", "../rag/src/**/*"],
+	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist"]
 }

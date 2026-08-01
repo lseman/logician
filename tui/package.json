@@ -1,6 +1,7 @@
 {
 	"name": "@logician/logician-tui",
 	"version": "0.2.0",
+	"private": true,
 	"description": "Terminal TUI for Logician — SSH-ready, streaming-first, thinking-visible, pi-style input",
 	"type": "module",
 	"packageManager": "bun@1.3.14",

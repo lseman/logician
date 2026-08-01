@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SlashPopup } from "../src/overlays/slash-popup.ts";
-import { initTheme } from "../src/terminal/theme.ts";
+import { SlashPopup } from "../overlays/slash-popup.ts";
+import { initTheme } from "../terminal/theme.ts";
 import type { SlashCommandDef } from "@logician/coding-agent/commands";
 
 initTheme("dark");
@@ -31,7 +31,7 @@ void test("slash popup renders every command for a bare slash", () => {
 
 void test("slash popup does not replay a stale previous result", () => {
 	const popup = new SlashPopup();
-	const submissions: Array<string | null> = [];
+	const submissions: Array<[string | null, string | undefined]> = [];
 	popup.setCommands([
 		{
 			command: "/first",
@@ -48,12 +48,20 @@ void test("slash popup does not replay a stale previous result", () => {
 			handler: () => undefined,
 		},
 	]);
-	popup.setOnSubmit((result) => submissions.push(result));
+	// Each submit fires a turn-establish call (command set, result null) before
+	// any handler result call — see submitRaw's comment on turn ordering.
+	popup.setOnSubmit((result, _dispatch, command) =>
+		submissions.push([result, command]),
+	);
 	popup.setQuery("/first");
 	popup.show();
 	popup.handleInput("\n");
 	popup.setQuery("/second");
 	popup.show();
 	popup.handleInput("\n");
-	assert.deepEqual(submissions, ["first result", null]);
+	assert.deepEqual(submissions, [
+		[null, "/first"],
+		["first result", undefined],
+		[null, "/second"],
+	]);
 });

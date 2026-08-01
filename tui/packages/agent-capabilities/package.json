@@ -1,6 +1,7 @@
 {
 	"name": "@logician/agent-capabilities",
 	"version": "0.2.0",
+	"private": true,
 	"description": "Agent capabilities for Logician — todo, ask-user, subagents, reasoners, eoh",
 	"type": "module",
 	"main": "src/index.ts",
@@ -16,6 +17,7 @@
 		"./reasoning": "./src/reasoning/index.ts",
 		"./reasoning/registry": "./src/reasoning/registry.ts",
 		"./reasoning/*": "./src/reasoning/*",
+		"./rag": "./src/rag/index.ts",
 		"./eoh/*": "./src/eoh/*"
 	},
 	"scripts": {
@@ -23,7 +25,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@logician/agent-core": "0.2.0"
+		"@logician/agent-core": "0.2.0",
+		"@logician/rag": "0.1.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

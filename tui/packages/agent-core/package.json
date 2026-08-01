@@ -1,6 +1,7 @@
 {
 	"name": "@logician/agent-core",
 	"version": "0.2.0",
+	"private": true,
 	"description": "Lean agent engine for Logician — loop, harness, hooks, types",
 	"type": "module",
 	"main": "src/index.ts",

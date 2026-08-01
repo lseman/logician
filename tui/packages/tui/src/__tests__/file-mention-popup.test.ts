@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FileMentionPopup } from "../src/overlays/file-mention-popup.ts";
-import { InputBar } from "../src/input/input-bar.ts";
-import { initTheme } from "../src/terminal/theme.ts";
+import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
+import { InputBar } from "../input/input-bar.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
 

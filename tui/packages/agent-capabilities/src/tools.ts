@@ -6,6 +6,7 @@ import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
 import { ask_user } from "./interaction/ask-user/index.ts";
 import { task_status } from "./tasks/task-status.ts";
 import { todo_tool } from "./tasks/todo.ts";
+import { rag_tools } from "./rag/index.ts";
 import {
 	createSubagentConcurrencyLimiter,
 	createSpawnAgentTool,
@@ -25,7 +26,7 @@ export interface SubagentToolDeps {
 
 /** Get all built-in tools as an array. */
 export function getBuiltInTools(): Tool[] {
-	return [todo_tool, ask_user, task_status];
+	return [todo_tool, ask_user, task_status, ...rag_tools];
 }
 
 /** Get subagent tools with dependencies. */

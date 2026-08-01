@@ -2,11 +2,11 @@
 
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { initTheme } from "../src/terminal/theme.ts";
+import { initTheme } from "../terminal/theme.ts";
 import {
 	SettingsSelectorOverlay,
 	type SettingDef,
-} from "../src/overlays/settings-overlay.ts";
+} from "../overlays/settings-overlay.ts";
 
 // Initialize theme before any overlay rendering.
 const setupTheme = (): void => {

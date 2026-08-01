@@ -1,0 +1,20 @@
+{
+	"name": "@logician/rag",
+	"version": "0.1.0",
+	"description": "Retrieval-Augmented Generation — Python Docling extraction via subprocess",
+	"type": "module",
+	"main": "src/index.ts",
+	"exports": {
+		".": "./src/index.ts",
+		"./pipeline": "./src/pipeline/index.ts",
+		"./store": "./src/store/sqlite-store.ts",
+		"./ingestion": "./src/ingestion.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@huggingface/transformers": "^4.2.0",
+		"usearch": "^2.26.0"
+	}
+}
