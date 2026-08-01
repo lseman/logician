@@ -213,7 +213,8 @@ export type AgentEventBody =
 				| "failure"
 				| "continuation_nudge"
 				| "acceptance_retry"
-				| "reflection_retry";
+				| "reflection_retry"
+				| "loop_detected";
 			message: string;
 			toolName?: string;
 			iteration: number;

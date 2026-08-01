@@ -829,13 +829,21 @@ async function runAgentLoopInTaskScope(
 				);
 				if (diagnostic) {
 					// checkLoopDetection already emitted a "loop_detected" event with
-					// this diagnostic — inject it as a nudge and keep going.
-					const nudge = createUserMessage(
-						`${diagnostic} Stop and try a different approach, or explain why you're stuck.`,
-					);
+					// this diagnostic — inject it as a nudge and keep going. The
+					// role:"user" message_start/message_end pair below is never
+					// rendered (Transcript.handleMessageUpdate ignores non-assistant
+					// roles), so guard_triggered is what actually makes this visible.
+					const nudgeContent = `[continuation-nudge:loop-detected] ${diagnostic} Stop and try a different approach, or explain why you're stuck.`;
+					const nudge = createUserMessage(nudgeContent);
 					messages.push(nudge);
 					newMessages.push(nudge);
 					await emitMessagePair(emit, turnId, nudge);
+					await emit({
+						type: "guard_triggered",
+						guard: "loop_detected",
+						message: nudgeContent,
+						iteration,
+					});
 				}
 			}
 
