@@ -28,6 +28,17 @@ export interface DelegationBudget {
 	toolLimits?: Record<string, number>;
 }
 
+/** Per-task input shape for the spawn_agents tool. */
+export interface SpawnAgentsTask {
+	task: string;
+	agent?: string;
+	expected_output?: string;
+	success_criteria?: string[];
+	max_validation_retries?: number;
+	timeout_ms?: number;
+	max_tool_calls?: number;
+}
+
 export interface DelegatedRunResult {
 	content: string;
 	messages: Message[];
@@ -133,6 +144,8 @@ function budgetTools(
 		violation?: string;
 	},
 ): Tool[] {
+	// No budget active — return tools unmodified (no wrapper overhead).
+	if (!budget.maxToolCalls && !budget.toolLimits) return tools;
 	return tools.map((tool) => ({
 		...tool,
 		execute: async (args, ctx) => {

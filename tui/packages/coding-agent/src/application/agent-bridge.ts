@@ -1982,11 +1982,9 @@ export class AgentCoreBridge {
 		this.rebuildBaseSystemPrompt();
 		this.subagentsInjected = true;
 		// Drain any /spawn tasks that arrived before init completed.
-		for (const { task, agent } of this.pendingSpawnTasks) {
-			this.pendingSpawnTasks = [];
-			this.spawnAgentDirectly(task, agent);
-			break; // spawnAgentDirectly feeds result back; don't chain.
-		}
+		// spawnAgentDirectly feeds result back; only process the first one.
+		const first = this.pendingSpawnTasks.shift();
+		if (first) this.spawnAgentDirectly(first.task, first.agent);
 	}
 
 	/**

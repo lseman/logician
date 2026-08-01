@@ -25,6 +25,7 @@ import {
 	contractFromArgs,
 	DELEGATION_CONTRACT_PROPERTIES,
 	runDelegatedAgent,
+	type SpawnAgentsTask,
 } from "./runtime.ts";
 
 // ── Agent definitions ────────────────────────────────────────────────────────
@@ -184,7 +185,7 @@ let agentSeq = 0;
 
 // ── Session-local concurrency limiter ───────────────────────────────────────
 
-interface _SpawnCtx {
+export interface SpawnCtx {
 	signal?: AbortSignal;
 	onUpdate?: (delta: string) => void;
 	/** Position within a spawn_agents batch, if run as part of one. */
@@ -198,19 +199,19 @@ interface _PendingSpawn {
 	onAbort?: () => void;
 }
 
-const _DEFAULT_MAX = 4;
+const DEFAULT_CONCURRENCY_LIMIT = 4;
 
 export interface SubagentConcurrencyLimiter {
 	run<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 
 export function createSubagentConcurrencyLimiter(
-	maxParallelAgents = _DEFAULT_MAX,
+	maxParallelAgents: number | undefined,
 ): SubagentConcurrencyLimiter {
-	const limit =
-		Number.isInteger(maxParallelAgents) && maxParallelAgents > 0
-			? maxParallelAgents
-			: _DEFAULT_MAX;
+	let limit = DEFAULT_CONCURRENCY_LIMIT;
+	if (typeof maxParallelAgents === "number" && Number.isInteger(maxParallelAgents) && maxParallelAgents > 0) {
+		limit = maxParallelAgents;
+	}
 	let activeCount = 0;
 	const pendingQueue: _PendingSpawn[] = [];
 
@@ -266,13 +267,12 @@ export function createSubagentConcurrencyLimiter(
 }
 
 function limiterFor(deps: SpawnAgentDeps): SubagentConcurrencyLimiter {
-	deps.concurrencyLimiter ??= createSubagentConcurrencyLimiter();
-	return deps.concurrencyLimiter;
+	return deps.concurrencyLimiter ??= createSubagentConcurrencyLimiter(undefined);
 }
 
 async function _runSpawn(
 	args: Record<string, unknown>,
-	ctx: _SpawnCtx,
+	ctx: SpawnCtx,
 	deps: SpawnAgentDeps,
 ): Promise<string | ToolResult> {
 	const task = typeof args.task === "string" ? args.task : "";
@@ -483,16 +483,6 @@ function truncateResult(text: string, maxChars: number): string {
 
 // ── spawn_agents tool ────────────────────────────────────────────────────────
 // Spawns multiple subagents concurrently, bounded by maxParallelAgents.
-
-export interface SpawnAgentsTask {
-	task: string;
-	agent?: string;
-	expected_output?: string;
-	success_criteria?: string[];
-	max_validation_retries?: number;
-	timeout_ms?: number;
-	max_tool_calls?: number;
-}
 
 export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 	return {
