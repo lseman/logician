@@ -44,6 +44,8 @@ interface ToolFingerprint {
 export interface GuardDecision {
 	block: boolean;
 	message?: string;
+	/** Which guard tripped — lets callers report/emit without parsing message text. */
+	guard?: "duplicate" | "failure";
 }
 
 export interface LoopDetectorOptions {
@@ -65,27 +67,43 @@ const DEFAULT_DUPLICATE_THRESHOLD = 3;
 const DEFAULT_FAILURE_THRESHOLD = 3;
 const MAX_CATEGORY_LEN = 120;
 
-// Stable signature for a tool call: name + canonical args.
+// Normalize a single string leaf so cosmetic noise (timestamps, incrementing
+// counters, whitespace) doesn't defeat duplicate detection. A model retrying
+// the "same" call with `timeout: 10` -> `timeout: 11` or a fresh timestamp
+// comment is still a duplicate in spirit — the guard should see through that.
+function normalizeLeaf(value: unknown): unknown {
+	if (typeof value === "number") return "#num";
+	if (typeof value !== "string") return value;
+	return value
+		.replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g, "#ts")
+		.replace(/\b\d{10,13}\b/g, "#ts") // unix ms/sec timestamps
+		.replace(/\b\d+\b/g, "#num") // any other bare integer (counters, retries)
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function normalizeForSignature(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(normalizeForSignature);
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+			out[k] = normalizeForSignature((value as Record<string, unknown>)[k]);
+		}
+		return out;
+	}
+	return normalizeLeaf(value);
+}
+
+// Stable signature for a tool call: name + canonical args, with cosmetic
+// noise normalized out so near-duplicates collapse to the same signature.
 function callSignature(name: string, args: string): string {
 	let argsKey = args || "";
 	try {
-		argsKey = JSON.stringify(sortKeys(JSON.parse(args || "{}")));
+		argsKey = JSON.stringify(normalizeForSignature(JSON.parse(args || "{}")));
 	} catch (_e: unknown) {
 		// Non-JSON args: use the raw string.
 	}
 	return `${name} ${argsKey}`;
-}
-
-function sortKeys(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(sortKeys);
-	if (value && typeof value === "object") {
-		const out: Record<string, unknown> = {};
-		for (const k of Object.keys(value as Record<string, unknown>).sort()) {
-			out[k] = sortKeys((value as Record<string, unknown>)[k]);
-		}
-		return out;
-	}
-	return value;
 }
 
 // Target path from common arg names — used to bucket failures by file.
@@ -100,9 +118,14 @@ function callPath(args: string): string {
 }
 
 // Coarse error bucket so distinct-but-equivalent failures collapse together.
+// The body is normalized the same way call args are (numbers/timestamps ->
+// placeholders) before truncation, so two errors that differ only in a line
+// number or a timestamp still bucket together, while errors that differ in
+// substance (a different missing module, a different variable name) do not
+// collapse just because they happen to share a raw text prefix.
 function failureCategory(toolName: string, result: string): string {
-	const body = result.replace(/^Error:\s*/i, "").trim();
-	return `${toolName} ${body.slice(0, MAX_CATEGORY_LEN)}`;
+	const body = normalizeLeaf(result.replace(/^Error:\s*/i, "").trim());
+	return `${toolName} ${String(body).slice(0, MAX_CATEGORY_LEN)}`;
 }
 
 function inc(map: Map<string, number>, key: string): number {
@@ -175,7 +198,8 @@ export class LoopDetector {
 		) {
 			return {
 				block: true,
-				message: `Error: blocked — \`${name}\` was called with identical arguments ${this.consecutiveCallCount} times in a row. Stop repeating the same call; change your approach.`,
+				guard: "duplicate",
+				message: `Error: [duplicate-guard] blocked — \`${name}\` called with the same (or cosmetically-varied) arguments ${this.consecutiveCallCount} times in a row (threshold: ${this.duplicateThreshold}). Stop repeating the same call; change your approach.`,
 			};
 		}
 
@@ -216,7 +240,8 @@ export class LoopDetector {
 	private tripFailure(toolName: string, target: string): GuardDecision {
 		return {
 			block: true,
-			message: `Error: blocked — \`${toolName}\` has failed on ${target} ${this.failureThreshold} times. Stop retrying the same approach; inspect the actual error, fix the root cause, or use a different tool.`,
+			guard: "failure",
+			message: `Error: [failure-guard] blocked — \`${toolName}\` has failed on ${target} ${this.failureThreshold} times (threshold: ${this.failureThreshold}). Stop retrying the same approach; inspect the actual error, fix the root cause, or use a different tool.`,
 		};
 	}
 

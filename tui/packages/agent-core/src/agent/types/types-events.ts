@@ -207,6 +207,13 @@ export type AgentEventBody =
 			iteration: number;
 	  }
 	| {
+			type: "guard_triggered";
+			guard: "duplicate" | "failure" | "continuation_nudge";
+			message: string;
+			toolName?: string;
+			iteration: number;
+	  }
+	| {
 			type: "thinking_loop_stats";
 			consecutiveThinkingOnly: number;
 			totalThinkingTurns: number;

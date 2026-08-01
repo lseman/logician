@@ -135,7 +135,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// hook can diff and record the paths the command mutated.
 	const bashSnapshots = new Map<string, WorkspaceSnapshot | null>();
 
-	hooks.beforeToolCall = ({ toolCall, args }) => {
+	hooks.beforeToolCall = ({ toolCall, args, iteration }) => {
 		// Snapshot pre-write state for /rewind: file tools record the target
 		// path directly; bash records a workspace tree to diff afterwards.
 		if (toolCall.name === "write_file" || toolCall.name === "edit_file") {
@@ -170,6 +170,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				JSON.stringify(args),
 			);
 			if (decision.block) {
+				deps.eventBus?.emit({
+					type: "guard_triggered",
+					guard: decision.guard ?? "duplicate",
+					message: decision.message ?? "",
+					toolName: toolCall.name,
+					iteration,
+				});
 				return { content: decision.message, isError: true };
 			}
 		}
@@ -292,7 +299,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		executionPolicy.embeddedPoliciesEnabled &&
 		config.continuationEnabled === true;
 	if (continuationEnabled) {
-		hooks.getFollowUpMessages = ({ assistantText, stopReason }) => {
+		hooks.getFollowUpMessages = ({ assistantText, stopReason, iteration }) => {
 			// Structured stop beats everything: a task_status call this run is
 			// an explicit done/blocked declaration — never nudge past it.
 			if (getTaskStatus()) return undefined;
@@ -304,14 +311,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// Length-stop = provider truncated the response mid-output. The model
 			// did not choose to stop; always continue so it can finish its thought.
 			if (stopReason === "length") {
-				return [
-					{
-						role: "user",
-						content:
-							"Your previous response was cut off because it reached the output limit. " +
-							"Please continue exactly where you left off — do not repeat what you already wrote.",
-					},
-				];
+				const message =
+					"[continuation-nudge:length] Your previous response was cut off because it reached the output limit. " +
+					"Please continue exactly where you left off — do not repeat what you already wrote.";
+				deps.eventBus?.emit({
+					type: "guard_triggered",
+					guard: "continuation_nudge",
+					message,
+					iteration,
+				});
+				return [{ role: "user", content: message }];
 			}
 
 			const tasks = getTasks();
@@ -340,7 +349,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				// that it's retrying the same thing. The nudge must break the
 				// pattern, not reinforce it.
 				content =
-					"You appear to be circling — retrying the same approach without progress. " +
+					"[continuation-nudge:circling] You appear to be circling — retrying the same approach without progress. " +
 					"Stop and assess: what have you actually tried so far? " +
 					"What specifically failed or didn't work? " +
 					"You need to try a different approach, not just repeat. " +
@@ -350,13 +359,19 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				// Standard nudge — context-rich. Include the next task and
 				// remind the model it can use any tool.
 				content =
-					`You still have ${remaining.length} unfinished task(s). ` +
+					`[continuation-nudge:todo] You still have ${remaining.length} unfinished task(s). ` +
 					`Continue working — next: #${next.id} ${next.subject}. ` +
 					"Use the todo tool to track progress: create tasks, mark them in_progress before working, and completed when done. " +
 					"Do not skip calling the todo tool — the system only knows you finished via that tool call. " +
 					"If you are truly blocked or done, say so explicitly and stop.";
 			}
 
+			deps.eventBus?.emit({
+				type: "guard_triggered",
+				guard: "continuation_nudge",
+				message: content,
+				iteration,
+			});
 			return [{ role: "user", content }];
 		};
 	}

@@ -183,6 +183,8 @@ async function runAgentLoopInTaskScope(
 	const outputGuard = config.outputGuard;
 	let iteration = 0;
 	let consecutiveRunnerNudges = 0;
+	let lastRunnerNudgeIteration = -1;
+	let lastToolWorkIteration = -1;
 	let performedToolWork = false;
 	let contextWasCompacted = false;
 	const reflectionEnabled =
@@ -692,6 +694,7 @@ async function runAgentLoopInTaskScope(
 			}
 			if (toolCalls.some((call) => call.name !== "task_status")) {
 				performedToolWork = true;
+				lastToolWorkIteration = iteration;
 			}
 			const rawStopReason =
 				(response?.stopReason as "stop" | "length" | "error") ?? "stop";
@@ -1063,6 +1066,13 @@ async function runAgentLoopInTaskScope(
 			const requiresStructuredConclusion =
 				performedToolWork && registry.has("task_status");
 
+			// Real tool work since the last nudge means the run is actually
+			// progressing, not stalled — give it a fresh nudge budget rather than
+			// counting this stall toward the same cap as the last one.
+			if (lastToolWorkIteration > lastRunnerNudgeIteration) {
+				consecutiveRunnerNudges = 0;
+			}
+
 			if (
 				!hadTools &&
 				!waitingForUser &&
@@ -1071,16 +1081,24 @@ async function runAgentLoopInTaskScope(
 				!hasStructuredStop &&
 				consecutiveRunnerNudges < MAX_CONSECUTIVE_RUNNER_NUDGES
 			) {
-				followUps.push({
-					role: "user" as const,
-					content: requiresStructuredConclusion
-						? "Do not stop yet without a structured conclusion. Verify that every requested step is complete. " +
-							"If work remains, continue with the next step. If the task is complete, blocked, failed, or needs user input, " +
-							"call task_status with the accurate status as your final action."
-						: "Continue with the next step. If the task is fully complete, " +
-							"say so explicitly. Otherwise keep working — do not stop prematurely.",
+				const nudgeTag = requiresStructuredConclusion
+					? "[continuation-nudge:structured-conclusion]"
+					: "[continuation-nudge:non-committal]";
+				const nudgeContent = requiresStructuredConclusion
+					? `${nudgeTag} Do not stop yet without a structured conclusion. Verify that every requested step is complete. ` +
+						"If work remains, continue with the next step. If the task is complete, blocked, failed, or needs user input, " +
+						"call task_status with the accurate status as your final action."
+					: `${nudgeTag} Continue with the next step. If the task is fully complete, ` +
+						"say so explicitly. Otherwise keep working — do not stop prematurely.";
+				followUps.push({ role: "user" as const, content: nudgeContent });
+				await emit({
+					type: "guard_triggered",
+					guard: "continuation_nudge",
+					message: nudgeContent,
+					iteration,
 				});
 				consecutiveRunnerNudges++;
+				lastRunnerNudgeIteration = iteration;
 			} else {
 				// Model signaled completion, has structured stop, or cap reached — reset.
 				consecutiveRunnerNudges = 0;

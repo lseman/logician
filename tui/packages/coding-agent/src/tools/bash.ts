@@ -111,6 +111,54 @@ export interface BashDetails {
 	[key: string]: unknown;
 }
 
+// ── Destructive command guard ────────────────────────────────────────────────
+// Not a sandbox — a denylist for a short list of unambiguously destructive
+// patterns that have no legitimate use in agent-driven development (wiping
+// home/root, force-pushing over history, fork bombs, curl-pipe-to-shell).
+// Matches git.ts's allowlist shape but inverted: block instead of allow, since
+// bash must stay broadly usable.
+const DESTRUCTIVE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+	{
+		pattern: /\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(-[a-zA-Z]*\s+)*(\/|~|\$HOME|\.\.?\/?\s*$)/,
+		reason: "recursive/force delete of home, root, or relative parent directory",
+	},
+	{
+		pattern: /\bgit\s+push\b[^|;&\n]*(--force(?!-with-lease)|(?<!--)\s-f\b)/,
+		reason: "force-push (overwrites remote history)",
+	},
+	{
+		pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:/,
+		reason: "fork bomb",
+	},
+	{
+		pattern: /\b(curl|wget)\b[^|;&\n]*\|\s*(sudo\s+)?(bash|sh|zsh|python[23]?)\b/,
+		reason: "curl/wget piped directly into a shell interpreter",
+	},
+	{
+		pattern: /\bmkfs(\.\w+)?\b/,
+		reason: "filesystem format",
+	},
+	{
+		pattern: /\bdd\b[^|;&\n]*\bof=\/dev\/(sd|nvme|hd|disk)/,
+		reason: "raw disk write via dd",
+	},
+	{
+		pattern: />\s*\/dev\/(sd|nvme|hd)[a-z0-9]*\b/,
+		reason: "direct write to a block device",
+	},
+	{
+		pattern: /\bchmod\s+(-R\s+)?[0-7]*777\s+\//,
+		reason: "world-writable permissions on root or system path",
+	},
+];
+
+function findDestructiveMatch(command: string): string | undefined {
+	for (const { pattern, reason } of DESTRUCTIVE_PATTERNS) {
+		if (pattern.test(command)) return reason;
+	}
+	return undefined;
+}
+
 function prepareArguments(raw: unknown): Record<string, unknown> {
 	if (typeof raw === "string") return { command: raw };
 	if (!raw || typeof raw !== "object") return {};
@@ -172,6 +220,13 @@ export const bash: Tool = {
 		}
 		if (parsed.commands !== undefined) return executeBatch(parsed, ctx);
 		if (!parsed.command) return "Error: command or commands is required.";
+		const blockedReason = findDestructiveMatch(parsed.command);
+		if (blockedReason) {
+			return {
+				content: `Error: command blocked (${blockedReason}): ${parsed.command}`,
+				isError: true,
+			};
+		}
 		const result = await executeSingleCommand(
 			{ command: parsed.command, timeout: parsed.timeout },
 			ctx,
@@ -381,8 +436,11 @@ async function executeBatch(
 
 	if (mode === "sequential") {
 		for (const entry of normalized) {
+			const blockedReason = findDestructiveMatch(entry.command);
 			if (ctx.signal?.aborted || (args.stopOnFailure && results.some(isBatchFailure))) {
 				results.push(skippedResult(entry, ctx.signal?.aborted ? "Batch aborted" : "Skipped after failure"));
+			} else if (blockedReason) {
+				results.push(blockedResult(entry, blockedReason));
 			} else {
 				results.push(toBatchResult(entry, await executeSingleCommand(entry, ctx)));
 			}
@@ -394,8 +452,11 @@ async function executeBatch(
 			while (nextIndex < normalized.length) {
 				const index = nextIndex++;
 				const entry = normalized[index];
+				const blockedReason = findDestructiveMatch(entry.command);
 				if (ctx.signal?.aborted) {
 					ordered[index] = skippedResult(entry, "Batch aborted");
+				} else if (blockedReason) {
+					ordered[index] = blockedResult(entry, blockedReason);
 				} else {
 					ordered[index] = toBatchResult(entry, await executeSingleCommand(entry, ctx));
 				}
@@ -479,6 +540,20 @@ function skippedResult(
 		exitCode: null,
 		signal: null,
 		status: "skipped",
+	};
+}
+
+function blockedResult(
+	entry: { id: string; command: string },
+	reason: string,
+): BashBatchResult {
+	return {
+		id: entry.id,
+		command: entry.command,
+		content: `Error: command blocked (${reason}): ${entry.command}`,
+		exitCode: null,
+		signal: null,
+		status: "failed",
 	};
 }
 

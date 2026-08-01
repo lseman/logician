@@ -120,7 +120,12 @@ export interface AgentBridgeOptions {
 	guardsEnabled?: boolean;
 	duplicateGuardEnabled?: boolean;
 	failureGuardEnabled?: boolean;
+	duplicateToolThreshold?: number;
+	toolFailureLoopThreshold?: number;
+	budgetStopEnabled?: boolean;
+	thinkingLoopDetectionEnabled?: boolean;
 	continuationEnabled?: boolean;
+	reflectionConfig?: AgentConfig["reflectionConfig"];
 	postEditDiagnostics?: boolean;
 	rtkProxyEnabled?: boolean;
 	autoRetryEnabled?: boolean;
@@ -292,7 +297,12 @@ export class AgentCoreBridge {
 			guardsEnabled: opts.guardsEnabled,
 			duplicateGuardEnabled: opts.duplicateGuardEnabled,
 			failureGuardEnabled: opts.failureGuardEnabled,
+			duplicateToolThreshold: opts.duplicateToolThreshold,
+			toolFailureLoopThreshold: opts.toolFailureLoopThreshold,
+			budgetStopEnabled: opts.budgetStopEnabled,
+			thinkingLoopDetectionEnabled: opts.thinkingLoopDetectionEnabled,
 			continuationEnabled: opts.continuationEnabled,
+			reflectionConfig: opts.reflectionConfig,
 			rtkProxyEnabled: opts.rtkProxyEnabled,
 			autoRetryEnabled: opts.autoRetryEnabled,
 			maxRetries: opts.maxRetries,

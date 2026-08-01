@@ -43,7 +43,12 @@ const KNOWN_KEYS = new Set([
 	"guardsEnabled",
 	"duplicateGuardEnabled",
 	"failureGuardEnabled",
+	"duplicateToolThreshold",
+	"toolFailureLoopThreshold",
+	"budgetStopEnabled",
+	"thinkingLoopDetectionEnabled",
 	"continuationEnabled",
+	"reflectionConfig",
 	"postEditDiagnostics",
 	"lsp",
 	"compaction",
@@ -291,6 +296,8 @@ export function validateConfig(
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
 	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
 	cfg.failureGuardEnabled = configBool(obj.failureGuardEnabled);
+	cfg.budgetStopEnabled = configBool(obj.budgetStopEnabled);
+	cfg.thinkingLoopDetectionEnabled = configBool(obj.thinkingLoopDetectionEnabled, true);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
@@ -302,6 +309,8 @@ export function validateConfig(
 		["turnTimeoutMs", 0, false],
 		["cacheSize", 0, false],
 		["cacheTtlMs", 0, false],
+		["duplicateToolThreshold", 0, true],
+		["toolFailureLoopThreshold", 0, true],
 	] as const) {
 		if (obj[key] === undefined) continue;
 		const value = configNumber(obj[key]);
@@ -410,6 +419,28 @@ export function validateConfig(
 				}
 			}
 			if (Object.keys(lc).length > 0) cfg.lsp = lc;
+		}
+	}
+
+	// reflectionConfig sub-object: self-evaluation before final conclusion.
+	if (obj.reflectionConfig !== undefined) {
+		if (typeof obj.reflectionConfig !== "object" || obj.reflectionConfig === null) {
+			warn(warnings, "\"reflectionConfig\" must be an object.");
+		} else {
+			const r = obj.reflectionConfig as Record<string, unknown>;
+			for (const key of Object.keys(r)) {
+				if (key !== "enabled" && key !== "maxReflections" && key !== "prompt") {
+					warn(warnings, `Unknown reflectionConfig key: "${key}".`);
+				}
+			}
+			const rc: { enabled?: boolean; maxReflections?: number; prompt?: string } = {};
+			const re = configBool(r.enabled);
+			if (re !== undefined) rc.enabled = re;
+			const rm = configNumber(r.maxReflections);
+			if (rm !== undefined && rm > 0) rc.maxReflections = rm;
+			const rp = configString(r.prompt);
+			if (rp !== undefined) rc.prompt = rp;
+			if (Object.keys(rc).length > 0) cfg.reflectionConfig = rc;
 		}
 	}
 
@@ -620,11 +651,21 @@ export interface LogicianTuiConfig {
 	guardsEnabled?: boolean; // umbrella toggle that enables both guards below
 	duplicateGuardEnabled?: boolean; // ON by default — blocks exact-repeat tool calls (e.g. re-reading the same file)
 	failureGuardEnabled?: boolean; // OFF by default
+	duplicateToolThreshold?: number; // consecutive identical calls before the duplicate guard blocks (default 3)
+	toolFailureLoopThreshold?: number; // repeated failures (same call/path/category) before the failure guard blocks (default 3)
+	budgetStopEnabled?: boolean; // OFF by default — stops the run early once per-turn token growth flattens
+	thinkingLoopDetectionEnabled?: boolean; // ON by default — detects meta-reasoning spirals (thinking without acting)
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
 	autoRetryEnabled?: boolean;
 	// RTK CLI proxy — compresses bash/rg/grep output 60–90%.
 	rtkProxyEnabled?: boolean;
+	// Self-evaluation step run before the agent's final conclusion (OFF by default).
+	reflectionConfig?: {
+		enabled?: boolean;
+		maxReflections?: number;
+		prompt?: string;
+	};
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
 	turnTimeoutMs?: number;
