@@ -93,6 +93,10 @@ function hardWrapVisible(text: string, width: number): string[] {
 		chunkWidth += characterWidth;
 		index++;
 	}
-	if (chunk) chunks.push(chunk);
+	if (chunk && activeCodes) {
+		chunks.push(chunk + RESET);
+	} else if (chunk) {
+		chunks.push(chunk);
+	}
 	return chunks;
 }

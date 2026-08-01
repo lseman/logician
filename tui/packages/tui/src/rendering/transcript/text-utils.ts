@@ -11,13 +11,14 @@ import { theme } from "../../terminal/theme.ts";
 const UNDERLINE = "\x1b[4m";
 
 // Heading palette — distinct color + weight per level.
+// NOTE: do NOT append RESET in `color` — it is placed around the text later.
 export const getHeadingStyles = (): Array<{ color: string; deco: string }> => [
-	{ color: theme.fgRaw("mdHeading") + RESET, deco: BOLD + UNDERLINE },
-	{ color: theme.fgRaw("accent") + RESET, deco: BOLD },
-	{ color: theme.fgRaw("mdHeading") + RESET, deco: BOLD },
-	{ color: theme.fgRaw("warning") + RESET, deco: "" },
-	{ color: theme.fgRaw("muted") + RESET, deco: "" },
-	{ color: theme.fgRaw("dim") + DIM + RESET, deco: DIM },
+	{ color: theme.fgRaw("mdHeading"), deco: BOLD + UNDERLINE },
+	{ color: theme.fgRaw("accent"), deco: BOLD },
+	{ color: theme.fgRaw("mdHeading"), deco: BOLD },
+	{ color: theme.fgRaw("warning"), deco: "" },
+	{ color: theme.fgRaw("muted"), deco: "" },
+	{ color: theme.fgRaw("dim") + DIM, deco: DIM },
 ];
 
 // ── Code fence language extraction ────────────────────────────────────────────
