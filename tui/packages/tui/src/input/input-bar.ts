@@ -222,6 +222,21 @@ export class InputBar implements Component, Focusable {
 			return;
 		}
 
+		// Fast typing, SSH, and tmux/mosh links routinely coalesce several plain
+		// keystrokes into one stdin chunk. Below, only single-character chunks
+		// reach the printable-character branch, so an unhandled multi-char burst
+		// would otherwise be silently dropped instead of typed. Bracketed paste
+		// (\x1b[200~) and any other escape-sequence chunk are handled by their own
+		// branches below and must not be split here.
+		if (
+			data.length > 1 &&
+			!data.includes("\x1b") &&
+			!this.isInPaste
+		) {
+			for (const ch of data) this.handleInput(ch);
+			return;
+		}
+
 		// ── Bracketed paste ──────────────────────────────────────────────────
 		if (data.includes("\x1b[200~")) {
 			this.isInPaste = true;

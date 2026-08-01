@@ -5,6 +5,7 @@
 		{ "path": "packages/agent-capabilities" },
 		{ "path": "packages/coding-agent" },
 		{ "path": "packages/tui" },
-		{ "path": "packages/rag" }
+		{ "path": "packages/rag" },
+		{ "path": "packages/memory" }
 	]
 }

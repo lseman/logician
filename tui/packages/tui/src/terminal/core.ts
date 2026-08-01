@@ -614,6 +614,26 @@ export class TUI extends Container {
 			if (consumed === data.length) return; // mouse-only chunk, nothing to scroll
 		}
 
+		// Fast repeated key presses (PageUp/PageDown/Home/End, held or double-
+		// tapped) are routinely coalesced by SSH/tmux/mosh into one stdin chunk.
+		// Every branch below matches a single sequence with strict equality, so
+		// an unsplit multi-sequence chunk (e.g. "\x1b[6~\x1b[6~") would fail every
+		// check and fall through unhandled. Replay recognized navigation
+		// sequences one at a time when the whole chunk is made of 2+ of them.
+		// Arrow keys are excluded — input-bar.ts already splits and handles a
+		// pure arrow-key batch with input/history-navigation semantics.
+		const navBatch = data.match(
+			/\x1b\[(?:5~|6~|1;5H|1;5F|H|F)/g,
+		);
+		if (
+			navBatch &&
+			navBatch.length > 1 &&
+			navBatch.join("") === data
+		) {
+			for (const key of navBatch) this.handleInput(key);
+			return;
+		}
+
 		// Scroll keys are global in coding-agent TUIs: the transcript can move while
 		// the prompt keeps focus. Plain arrows remain input/history navigation.
 		// But if any overlay is visible, skip scrolling so the overlay gets first
