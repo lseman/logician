@@ -1,6 +1,7 @@
 # Logician
 
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.19.0-brightgreen)](https://nodejs.org)
+[![Bun](https://img.shields.io/badge/bun-%3E%3D1.3.14-f9f1e1)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/typescript-6.x-blue)](https://typescriptlang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -54,6 +55,25 @@ Run the TUI. It connects to an OpenAI-compatible backend at `http://127.0.0.1:80
 / Enter commands  ·  Ctrl+Enter steer  ·  Ctrl+O tools
 ```
 
+### Keyboard shortcuts
+
+Shortcuts below change runtime settings immediately — no restart, no config edit.
+
+| Shortcut | Effect |
+| --- | --- |
+| `Ctrl+L` | Open model selector |
+| `Ctrl+G` | Jump to a file from the current working set |
+| `Ctrl+O` | Expand/collapse tool execution details |
+| `Alt+J` / `Alt+K` | Move focus between tool cards |
+| `Alt+Enter` | Toggle the focused tool card |
+| `Ctrl+Shift+T` | Cycle thinking display mode (collapsed → summary → expanded) |
+| `Ctrl+S` | Open session manager |
+| `Ctrl+K` | Cycle sandbox mode (off → code → full) |
+| `Ctrl+P` | Toggle plan mode (plan ↔ act) |
+| `Ctrl+Enter` | Submit as immediate steering, or flush the steering queue |
+| `Ctrl+M` / `Alt+M` | Cycle inference mode |
+| `Ctrl+I` | Cycle execution profile (autonomous ↔ minimal) |
+
 ### Development
 
 ```bash
@@ -90,43 +110,45 @@ reasoning tokens are not included in the stream.
 
 Logician is a TypeScript monorepo with four packages under `tui/packages/`. The TUI sits on top, connecting the user to the agent engine through an orchestration layer.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                          TUI Layer                          │
-│  tui/packages/tui/  — terminal rendering, input, overlays   │
-├─────────────────────────────────────────────────────────────┤
-│                       Orchestration                         │
-│  tui/packages/coding-agent/  — sessions, config, MCP,       │
-│                                skills, prompts, trust, tools│
-├─────────────────────────────────────────────────────────────┤
-│                        Agent Core                           │
-│  tui/packages/agent-core/  — loop, harness, hooks, types    │
-│  tui/packages/agent-capabilities/  — tasks, delegation,     │
-│                                     reasoning, interaction  │
-├─────────────────────────────────────────────────────────────┤
-│                        External                             │
-│  LLM backend (OpenAI-compatible) · MCP servers · SearXNG    │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph tui["TUI Layer"]
+        tuiDesc["tui/packages/tui/<br/>terminal rendering, input, overlays"]
+    end
+    subgraph orch["Orchestration"]
+        orchDesc["tui/packages/coding-agent/<br/>sessions, config, MCP, skills, prompts, trust, tools"]
+    end
+    subgraph core["Agent Core"]
+        coreDesc["tui/packages/agent-core/<br/>loop, harness, hooks, types"]
+        capDesc["tui/packages/agent-capabilities/<br/>tasks, delegation, reasoning, interaction"]
+    end
+    subgraph ext["External"]
+        extDesc["LLM backend (OpenAI-compatible) · MCP servers · SearXNG"]
+    end
+
+    tui --> orch --> core --> ext
 ```
 
 ### Data flow
 
-```
-User input (TUI)
-    │
-    ▼
-AgentCoreBridge ──► AgentHarness ──► runAgentLoop()
-    │                       │                  │
-    │                   hooks              LLM backend
-    │                       │                  │
-    ▼                       ▼                  ▼
-ToolRegistry            guardrails        response messages
-    │                       │                  │
-    ▼                       ▼                  ▼
-bash / edit / git    OutputGuard           parse & execute
-    │                       │
-    ▼                       ▼
-Tool results       compaction / stop
+```mermaid
+flowchart TD
+    A["User input (TUI)"] --> B["AgentCoreBridge"]
+    B --> C["AgentHarness"]
+    C --> D["runAgentLoop()"]
+    D --> E["LLM backend"]
+    E --> F["response messages"]
+    F --> G["parse & execute"]
+    C --> H["hooks"]
+    H --> I["guardrails"]
+    D --> J["ToolRegistry"]
+    J --> K["bash / edit / git"]
+    K --> L["Tool results"]
+    I --> M["OutputGuard"]
+    M --> N["compaction / stop"]
+    L --> D
+    G --> D
+    N --> D
 ```
 
 1. **TUI** collects input, renders the transcript, and manages overlays (permissions, session browser, settings).
