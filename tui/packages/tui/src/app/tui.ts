@@ -304,13 +304,16 @@ export class LogicianTUI {
 		this.sessionManager.setActionCallback((action) =>
 			this.handleSessionAction(action),
 		);
-		// Create initial session if none exists
+		// Create initial session if none exists, or optionally resume the most
+		// recent session.  The `autoResumeSession` setting (default true)
+		// controls whether an existing session is auto-resumed on startup.
+		const shouldResume = runtimeConfig.source.autoResumeSession !== false;
 		if (this.sessionStore.listSessions().length === 0) {
 			this.currentSessionId = this.sessionStore.createSession({
 				title: "New Session",
 			});
 			this.statusPanel.update({ sessionTitle: "New Session" });
-		} else {
+		} else if (shouldResume) {
 			// Resume the most recent session
 			const sessions = this.sessionStore.listSessions();
 			if (sessions.length > 0) {

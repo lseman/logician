@@ -92,6 +92,7 @@ export interface SessionSummary {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const LOGICIAN_BASE_DIR = ".logician";
 const SESSIONS_SUBDIR = "tui/sessions";
 
 /** Hash a project directory to a stable 8-char prefix for DB filename. */
@@ -103,9 +104,7 @@ function hashProjectDir(projectDir: string): string {
 }
 
 function resolveSessionDbPath(projectDir: string): string {
-	const storageRoot = process.env.XDG_DATA_HOME
-		? join(process.env.XDG_DATA_HOME, SESSIONS_SUBDIR)
-		: join(homedir(), ".local", "share", SESSIONS_SUBDIR);
+	const storageRoot = join(homedir(), LOGICIAN_BASE_DIR, SESSIONS_SUBDIR);
 	return join(storageRoot, `${hashProjectDir(projectDir)}.db`);
 }
 

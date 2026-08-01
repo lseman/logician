@@ -55,6 +55,7 @@ const KNOWN_KEYS = new Set([
 	"maxParallelAgents",
 	"cwd",
 	"truncation",
+	"autoResumeSession",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -659,6 +660,8 @@ export interface LogicianTuiConfig {
 		| "instruct-reasoning";
 	// Universal output/result truncation limits.
 	truncation?: TruncationConfig;
+	// Whether to auto-resume the most recent session on startup (default: true).
+	autoResumeSession?: boolean;
 }
 
 export function loadLogicianConfig(

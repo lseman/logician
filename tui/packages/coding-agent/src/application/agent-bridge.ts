@@ -135,6 +135,8 @@ export interface AgentBridgeOptions {
 	truncation?: TruncationConfig;
 	/** Whether project-local configuration, skills, hooks, and agents may load. */
 	projectTrusted?: boolean;
+	/** Whether to auto-resume the most recent session on startup (default: true). */
+	autoResumeSession?: boolean;
 }
 
 // ── AgentCoreBridge ─────────────────────────────────────────────────────────────
