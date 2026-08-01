@@ -566,7 +566,9 @@ export class LogicianTUI {
 		this.tui.stop();
 		await this.bridge.stop();
 		if (this.currentSessionId) {
-			process.stderr.write(`--session ${this.currentSessionId}\n`);
+			process.stderr.write(
+				`run \`logician --session ${this.currentSessionId}\` to recover this session\n`,
+			);
 		}
 	}
 

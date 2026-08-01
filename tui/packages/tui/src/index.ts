@@ -197,7 +197,15 @@ async function main(): Promise<void> {
 		try {
 			const turns = tui.loadTurns(resumeSessionId);
 			if (turns && turns.length > 0) {
+				// Drop the empty session auto-created on startup — new turns
+				// must accumulate onto the resumed session, not a fresh one.
+				const staleSessionId = tui.currentSessionId;
 				tui.restoreSession(turns);
+				tui.sessionStore.setCurrentSession(resumeSessionId);
+				tui.currentSessionId = resumeSessionId;
+				if (staleSessionId && staleSessionId !== resumeSessionId) {
+					tui.sessionStore.deleteSession(staleSessionId);
+				}
 			}
 		} catch (error: unknown) {
 			const message = error instanceof Error
