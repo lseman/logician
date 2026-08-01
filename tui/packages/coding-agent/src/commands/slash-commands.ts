@@ -203,6 +203,18 @@ export function createSlashCommands(
 				);
 			},
 		),
+		cmd(
+			"/memory",
+			"List or search stored session memories",
+			"local",
+			true,
+			{
+				category: "context",
+				argHint: "[list | search <query>]",
+				examples: ["/memory", "/memory list", "/memory search auth"],
+			},
+			(args) => String(localHandlers.memory?.(args as any) ?? ''),
+		),
 		cmd("/compact", "Summarize older conversation history", "bridge", false, {
 			category: "context",
 		}),

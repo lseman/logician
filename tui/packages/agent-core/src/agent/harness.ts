@@ -75,6 +75,7 @@ import { OutputGuard } from "./guards/output-guard.ts";
 import { validateConfig, throwOnValidationErrors } from "./configuration/config-validator.ts";
 import {
 	createMemoryStore,
+	extractMemoriesFromText,
 	formatMemoryPrompt,
 	type MemoryStore,
 } from "./memory.ts";
@@ -795,6 +796,24 @@ export class AgentHarness {
 		this.loopConfig?.onEvent?.(event);
 		if (event.type === "message_end" && event.message) {
 			this.persistTurnMessages([event.message]);
+			// Extract structured memories from assistant response
+			this.memoryEnabled = this._hasStartedSession;
+			if (this.memoryEnabled && event.message.content) {
+				const extracted = extractMemoriesFromText(
+					event.message.content,
+					this.memoryTurnCount,
+				);
+				for (const mem of extracted) {
+					try {
+						this.memoryStore.add(mem);
+					} catch (_e: unknown) {
+						console.error("[harness] memory add failed:", _e);
+					}
+				}
+			}
+		}
+		if (event.type === "turn_end") {
+			this.memoryTurnCount++;
 		}
 		this.persistJournalEvent(event);
 		await this.emitExtensionAgentEvent(event);

@@ -1506,6 +1506,19 @@ export class AgentCoreBridge {
 		].filter((zone) => zone.tokens > 0 || zone.name === "Conversation");
 	}
 
+	// ── Memory list (for /memory command) ─────────────────────
+
+	getMemoryStore() {
+		return this.harness?.getMemoryStore();
+	}
+
+	getMemoryList(limit = 20): Array<{ category: string; content: string; timestamp: number }> {
+		if (!this.harness) return [];
+		const store = this.harness.getMemoryStore();
+		const entries = store.getTopK(limit);
+		return entries.map(e => ({ category: e.category, content: e.content, timestamp: e.timestamp }));
+	}
+
 	/** Canonical size used by /context, /status, and the status bar. */
 	private measureContextTokens(): number {
 		const messages = this.getMessages();
