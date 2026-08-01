@@ -96,6 +96,15 @@ function defaultProjectTrust(): "ask" | "always" | "never" {
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	const cwd = process.cwd();
+
+	// ── Parse --session <id> flag ────────────────────────────────────────
+	let resumeSessionId: string | undefined;
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === '--session' && i + 1 < args.length) {
+			resumeSessionId = args[i + 1];
+			break;
+		}
+	}
 	if (args[0] === "exec") {
 		try {
 			const execArgs = parseExecArgs(args.slice(1));
@@ -182,6 +191,23 @@ async function main(): Promise<void> {
 	}
 
 	const tui = new LogicianTUI(runtimeConfig);
+
+	// Load explicit session if --session <id> was passed
+	if (resumeSessionId) {
+		try {
+			const turns = tui.loadTurns(resumeSessionId);
+			if (turns && turns.length > 0) {
+				tui.restoreSession(turns);
+			}
+		} catch (error: unknown) {
+			const message = error instanceof Error
+				? error.message
+				: String(error);
+			process.stderr.write(
+				`error: failed to load session ${resumeSessionId}: ${message}\n`,
+			);
+		}
+	}
 
 	// Graceful shutdown
 	let stopping = false;

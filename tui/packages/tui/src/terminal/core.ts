@@ -337,6 +337,7 @@ export class TUI extends Container {
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderAt = 0;
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
+	private started = false;
 	private stopped = false;
 	private focusedComponent: Component | null = null;
 	private overlayStack: Array<{
@@ -470,6 +471,7 @@ export class TUI extends Container {
 	}
 
 	start(): void {
+		this.started = true;
 		this.stopped = false;
 
 		// Keyboard input: process.stdin in raw mode (pi-style). The bridge child's
@@ -530,6 +532,10 @@ export class TUI extends Container {
 	}
 
 	requestRender(force = false): void {
+		// Defer renders until we've entered the alternate screen buffer.
+		// RequestRender during construction would output to stdout before
+		// alt-screen + clear, overlapping with startup theme text.
+		if (!this.started) return;
 		if (force) {
 			this.previousLines = [];
 			this.previousCursorRow = -1;

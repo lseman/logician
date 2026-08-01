@@ -304,28 +304,12 @@ export class LogicianTUI {
 		this.sessionManager.setActionCallback((action) =>
 			this.handleSessionAction(action),
 		);
-		// Create initial session if none exists, or optionally resume the most
-		// recent session.  The `autoResumeSession` setting (default true)
-		// controls whether an existing session is auto-resumed on startup.
-		const shouldResume = runtimeConfig.source.autoResumeSession !== false;
-		if (this.sessionStore.listSessions().length === 0) {
-			this.currentSessionId = this.sessionStore.createSession({
-				title: "New Session",
-			});
-			this.statusPanel.update({ sessionTitle: "New Session" });
-		} else if (shouldResume) {
-			// Resume the most recent session
-			const sessions = this.sessionStore.listSessions();
-			if (sessions.length > 0) {
-				this.currentSessionId = sessions[0].id;
-				const turns = this.sessionStore.loadTurns(this.currentSessionId);
-				if (turns.length > 0) {
-					this.restoreSession(turns);
-					this.statusPanel.update({ sessionTitle: sessions[0].title });
-					this.tui.requestRender();
-				}
-			}
-		}
+		// Only create initial session — never auto-resume. Sessions are loaded
+		// explicitly via the --session CLI flag in index.ts.
+		this.currentSessionId = this.sessionStore.createSession({
+			title: "New Session",
+		});
+		this.statusPanel.update({ sessionTitle: "New Session" });
 
 		// Wire up dependencies
 		this.inputBar.setKillRing(this.killRing);
@@ -410,7 +394,7 @@ export class LogicianTUI {
 	 * model starts cold ("continue" loses everything). Pass [] for a fresh
 	 * session (clears both).
 	 */
-	private restoreSession(turns: Turn[]): void {
+	private _restoreSession(turns: Turn[]): void {
 		restoreSessionImpl(this, turns);
 	}
 
@@ -431,6 +415,16 @@ export class LogicianTUI {
 	/** Open the session manager overlay. */
 	openSessionManager(): void {
 		openSessionManagerImpl(this);
+	}
+
+	/** Load turns for a specific session ID (used by --session CLI flag). */
+	loadTurns(sessionId: string): Turn[] | undefined {
+		return this.sessionStore.loadTurns(sessionId);
+	}
+
+	/** Restore turns into transcript and bridge (public for CLI --session usage). */
+	restoreSession(turns: Turn[]): void {
+		restoreSessionImpl(this, turns);
 	}
 
 	// ── Layout ─────────────────────────────────────────────────────────────
@@ -571,6 +565,9 @@ export class LogicianTUI {
 	async stop(): Promise<void> {
 		this.tui.stop();
 		await this.bridge.stop();
+		if (this.currentSessionId) {
+			process.stderr.write(`--session ${this.currentSessionId}\n`);
+		}
 	}
 
 	// ── Goal evaluation ──────────────────────────────────────────────────

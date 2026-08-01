@@ -77,15 +77,21 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 				contextMaxTokens: Number(state.context_max_tokens || 0) || undefined,
 				sandboxMode: ctx.bridge.getSandboxMode(),
 			});
-			const message = formatStartupMessage(state, {
-				configPath: ctx.configPath,
-				project: getGitVersion() || "-",
-				themeName: theme.name,
-			});
-			if (message) {
-				ctx.transcript.addSystemMessage(message);
-				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-				ctx.tui.requestRender(true);
+			// Don't add startup message when restoring a session — user history
+			// is already visible; prepending startup text just causes rendering
+			// overlap.
+			const turns = ctx.transcript.getTurns();
+			if (turns.length === 0) {
+				const message = formatStartupMessage(state, {
+					configPath: ctx.configPath,
+					project: getGitVersion() || "-",
+					themeName: theme.name,
+				});
+				if (message) {
+					ctx.transcript.addSystemMessage(message);
+					ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+					ctx.tui.requestRender(true);
+				}
 			}
 			// Surface discovered skills as /<skill-name> commands in the popup.
 			const skills = ctx.bridge.getSkills();
