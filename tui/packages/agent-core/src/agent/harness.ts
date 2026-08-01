@@ -74,12 +74,6 @@ import type { CompactionSettings } from "../compaction/index.ts";
 import { OutputGuard } from "./guards/output-guard.ts";
 import { validateConfig, throwOnValidationErrors } from "./configuration/config-validator.ts";
 import {
-	createMemoryStore,
-	extractMemoriesFromText,
-	formatMemoryPrompt,
-	type MemoryStore,
-} from "./memory.ts";
-import {
 	createRuntimeState,
 	reduceRuntimeState,
 	type AgentRuntimeState,
@@ -143,11 +137,6 @@ export class AgentHarness {
 		keepRecentTokens: 20_000,
 		contextWindow: 128_000,
 	};
-
-	// ── Structured memory ────────────────────────────────────────────────
-	private memoryStore: MemoryStore;
-	private memoryEnabled = true;
-	private memoryTurnCount = 0;
 
 	// ── Output Guard ─────────────────────────────────────────────────────
 	private outputGuard: OutputGuard | null = null;
@@ -218,7 +207,6 @@ export class AgentHarness {
 			followUpMode: (options.config.followUpQueueMode ??
 				"one-at-a-time") as DeliveryMode,
 		});
-		this.memoryStore = createMemoryStore();
 	}
 
 	get phase(): HarnessPhase {
@@ -795,25 +783,8 @@ export class AgentHarness {
 		// extension delivery must not hold streaming deltas behind an await.
 		this.loopConfig?.onEvent?.(event);
 		if (event.type === "message_end" && event.message) {
+			this.loopConfig?.onEvent?.(event);
 			this.persistTurnMessages([event.message]);
-			// Extract structured memories from assistant response
-			this.memoryEnabled = this._hasStartedSession;
-			if (this.memoryEnabled && event.message.content) {
-				const extracted = extractMemoriesFromText(
-					event.message.content,
-					this.memoryTurnCount,
-				);
-				for (const mem of extracted) {
-					try {
-						this.memoryStore.add(mem);
-					} catch (_e: unknown) {
-						console.error("[harness] memory add failed:", _e);
-					}
-				}
-			}
-		}
-		if (event.type === "turn_end") {
-			this.memoryTurnCount++;
 		}
 		this.persistJournalEvent(event);
 		await this.emitExtensionAgentEvent(event);
@@ -1164,43 +1135,6 @@ export class AgentHarness {
 		) => void,
 	): void {
 		this.onCompaction = cb;
-	}
-
-	// ── Memory management ────────────────────────────────────────────────
-
-	setMemoryEnabled(enabled: boolean): void {
-		this.memoryEnabled = enabled;
-	}
-
-	getMemoryStore(): MemoryStore {
-		return this.memoryStore;
-	}
-
-	getMemoryPrompt(maxEntries?: number): string {
-		return formatMemoryPrompt(this.memoryStore, maxEntries ?? 10);
-	}
-
-	/** Persist memory to a JSON file for cross-session recall. */
-	saveMemory(path: string): void {
-		try {
-			const fs = require("node:fs");
-			fs.writeFileSync(path, this.memoryStore.serialize());
-		} catch (_e: unknown) {
-			// Ignore persistence errors
-			console.error("[harness] saveMemory failed:", _e);
-		}
-	}
-
-	/** Load memory from a JSON file. */
-	loadMemory(path: string): void {
-		try {
-			const fs = require("node:fs");
-			const data = fs.readFileSync(path, "utf-8");
-			this.memoryStore.deserialize(data);
-		} catch (_e: unknown) {
-			// Ignore load errors
-			console.error("[harness] loadMemory failed:", _e);
-		}
 	}
 
 	// ── Session & history ──────────────────────────────────────────────────

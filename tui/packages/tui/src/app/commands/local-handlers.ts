@@ -308,21 +308,7 @@ export function createLocalHandlers(
 			const task = raw || "Investigate the codebase and report findings";
 			ctx.bridge.spawnAgentDirectly(task);
 		},
-		memory: (raw: unknown) => {
-			const args = String(raw ?? '').trim().toLowerCase();
-			if (!args || args === 'list') {
-				return ctx.bridge.getMemoryList(10);
-			}
-			if (args.startsWith('search ') || args === 'search:') {
-				const query = String(raw).replace(/^search\s*:/, '').trim();
-				if (!query) return 'Usage: /memory search <query>';
-				const store = ctx.bridge.getMemoryStore();
-				if (!store) return 'No memory store available.';
-				const results = store.search(query, 10);
-				return JSON.stringify(results.map(r => ({ category: r.entry.category, content: r.entry.content, score: r.score })), null, 2);
-			}
-			return 'Usage: /memory [list|search <query>]';
-		},
+		// memory handler removed — structured memory system deleted
 		notifications: () => {
 			const history = ctx.notifications.history();
 			if (history.length === 0) return "No notifications yet.";

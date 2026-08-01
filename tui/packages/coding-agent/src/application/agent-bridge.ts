@@ -1462,7 +1462,6 @@ export class AgentCoreBridge {
 		const toolDefinitions = this.getTools().toToolDefinitions();
 		const conversation = messages.filter((message) => message.role !== "tool");
 		const toolEvidence = messages.filter((message) => message.role === "tool");
-		const memory = this.harness?.getMemoryPrompt() ?? "";
 		return [
 			{
 				name: "Base instructions",
@@ -1473,16 +1472,6 @@ export class AgentCoreBridge {
 				name: "Plugin context",
 				tokens: estimateTokens(this.pluginSystemContext),
 				detail: "startup hooks",
-			},
-			{
-				name: "Skill catalog",
-				tokens: estimateTokens(this.toolRouter.getSkillsContext() ?? ""),
-				detail: `${this.toolRouter.getLoadedSkills().length} loaded`,
-			},
-			{
-				name: "Memory",
-				tokens: estimateTokens(memory),
-				detail: memory ? "active" : "empty",
 			},
 			{
 				name: "Tool definitions",
@@ -1504,19 +1493,6 @@ export class AgentCoreBridge {
 				detail: `${toolEvidence.length} results`,
 			},
 		].filter((zone) => zone.tokens > 0 || zone.name === "Conversation");
-	}
-
-	// ── Memory list (for /memory command) ─────────────────────
-
-	getMemoryStore() {
-		return this.harness?.getMemoryStore();
-	}
-
-	getMemoryList(limit = 20): Array<{ category: string; content: string; timestamp: number }> {
-		if (!this.harness) return [];
-		const store = this.harness.getMemoryStore();
-		const entries = store.getTopK(limit);
-		return entries.map(e => ({ category: e.category, content: e.content, timestamp: e.timestamp }));
 	}
 
 	/** Canonical size used by /context, /status, and the status bar. */

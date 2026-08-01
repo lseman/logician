@@ -416,12 +416,11 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 							`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userText")}${BOLD}YOU${RESET}`,
 						),
 					);
-					const lines = wrapText(
-						theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET,
-						Math.max(1, contentWidth),
-					);
-					for (const line of lines)
-						renderedLines.push(padToWidth(`  ${line}`));
+					const colored = theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET;
+					for (const rawLine of colored.split("\n")) {
+						for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
+								renderedLines.push(padToWidth(`  ${line}`));
+					}
 				}
 			}
 
