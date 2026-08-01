@@ -4,20 +4,7 @@ import { envNumber } from "../tui-utils.ts";
 // Translates agent-core events to the same shapes the transcript expects.
 
 import { readFileSync } from "node:fs";
-import {
-	readdir as readdirAsync,
-	readFile as readFileAsync,
-} from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import {
-	type AgentDefinition,
-	loadAgentDefinitions,
-} from "@logician/agent-capabilities/delegation/definitions.ts";
-import {
-	getBuiltInSubagentTools,
-	type SubagentToolDeps,
-} from "@logician/agent-capabilities/tools";
 import {
 	type AgentConfig,
 	type AgentEvent,
@@ -27,12 +14,8 @@ import {
 	type HarnessPhase,
 	type Message,
 	type Tool,
-	type ToolContext,
 	type TruncationConfig,
 	type WebSearchConfig,
-	createAssistantMessage,
-	createToolResultMessage,
-	createUserMessage,
 } from "@logician/agent-core";
 import { OpenAIBackend } from "@logician/agent-core/agent/backend.ts";
 import {
@@ -40,9 +23,7 @@ import {
 	estimateTokens,
 } from "@logician/agent-core/agent/messages.ts";
 import { onTodosChanged } from "@logician/agent-core/agent/tasks/todo-state.ts";
-import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import {
-	PermissionManager,
 	type PermissionMode,
 	type PermissionRules,
 } from "@logician/agent-core/tools/shared/permissions.ts";
@@ -59,11 +40,7 @@ import {
 	findLogicianConfig,
 	loadLogicianConfig,
 } from "../configuration/config.ts";
-import {
-	McpManager,
-	type McpSnapshotResult,
-	type McpToggleResult,
-} from "../mcp/index.ts";
+import type { McpSnapshotResult, McpToggleResult } from "../mcp/index.ts";
 import {
 	formatActivatedSkills,
 	formatSkillActivationNotice,
@@ -72,26 +49,17 @@ import {
 } from "../skills/activation.ts";
 import {
 	findSkillByName,
-	formatSkillCatalog,
 	formatSkillInvocation,
-	loadSkills,
 	type Skill,
 } from "../skills/index.ts";
-import {
-	findPromptByName,
-	loadPrompts,
-	type Prompt,
-} from "../prompts/index.ts";
+import { findPromptByName, type Prompt } from "../prompts/index.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
-import { createDefaultTools } from "../tools/default-tools.ts";
-import { createReadSkillTool } from "../tools/read-skill.ts";
-import {
-	getDefaultSandboxProfile,
-	type SandboxProfile,
-	setDefaultSandboxProfile,
-} from "../tools/sandbox.ts";
+import type { SandboxProfile } from "../tools/sandbox.ts";
 import { killAllTrackedChildren } from "../tools/shell.ts";
 import { EohController } from "./eoh/controller.ts";
+import { InteractionCoordinator } from "./interaction-coordinator.ts";
+import { SubagentCoordinator } from "./subagent-coordinator.ts";
+import { ToolRouter } from "./tool-router.ts";
 import { mapAgentEvent } from "../runtime/event-mapping.ts";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";
@@ -107,10 +75,6 @@ import {
 	applyCompactionSettings,
 	loadUserSettings,
 } from "./bridge-settings.ts";
-import {
-	getProjectPromptDirs,
-	getProjectSkillDirs,
-} from "./resource-directories.ts";
 export type EventCallback = (event: ParsedBridgeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
 
@@ -186,22 +150,10 @@ export class AgentCoreBridge {
 	private pendingAutoContinue = false;
 	private skillActivation = new SkillActivationSession();
 	private cwd: string;
-	private defaultTools: Tool[];
-	private mcpManager = new McpManager();
-	private mcpLoaded = false;
-	private mcpLoadPromise: Promise<void> | null = null;
-	private mcpServerCount = 0;
-	private mcpErrors: string[] = [];
-	private mcpToolNames = new Set<string>();
-	private mcpSystemContext = "";
+	private toolRouter: ToolRouter;
 	private baseSystemPrompt: string;
 	private additionalSystemPrompt?: string;
 	private pluginSystemContext = "";
-	private skillsContext: string | null = null;
-	private skillsInjected: boolean = false;
-	private promptsInjected: boolean = false;
-	private pendingSpawnTasks: Array<{ task: string; agent?: string }> = [];
-	private subagentsInjected: boolean = false;
 	private sessionId =
 		`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 	private transcriptPath = "";
@@ -215,25 +167,9 @@ export class AgentCoreBridge {
 	private postEditDiagnosticsEnabled: boolean;
 	private lspManagerEnabled: boolean;
 	private lspManager: LspManager;
-	private agentDefs: AgentDefinition[] = [];
-	private loadedSkills: Skill[] = [];
-	private loadedPrompts: Prompt[] = [];
 	private readonly projectTrusted: boolean;
-	private enabledPluginRoots: Array<{ name: string; installPath: string }> = [];
-	private permissionManager: PermissionManager;
-	// Pending interactive permission requests, keyed by tool_call_id; resolved
-	// by respondToPermission() from the UI.
-	private permissionResolvers = new Map<
-		string,
-		(decision: "allow" | "deny" | "always") => void
-	>();
-
-	// Pending interactive question requests, keyed by question_id; resolved
-	// by respondToQuestion() from the UI.
-	private questionResolvers = new Map<
-		string,
-		{ allow: (answer: string) => void; deny: () => void }
-	>();
+	private interaction: InteractionCoordinator;
+	private subagents: SubagentCoordinator;
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 	private eohController!: EohController;
@@ -300,9 +236,15 @@ export class AgentCoreBridge {
 			baseUrl: opts.webSearch?.baseUrl || defaultWebSearch.baseUrl,
 			maxResults: opts.webSearch?.maxResults ?? defaultWebSearch.maxResults,
 		};
-		this.defaultTools = opts.tools?.length
-			? opts.tools
-			: createDefaultTools({ webSearch });
+		this.toolRouter = new ToolRouter({
+			cwd: this.cwd,
+			projectTrusted: this.projectTrusted,
+			tools: opts.tools,
+			webSearch: opts.webSearch,
+			emit: (event) => this.emit(event),
+			onToolAdded: () => this.addDefaultTool(),
+			onContextChanged: () => this.rebuildBaseSystemPrompt(),
+		});
 		this.backend = new OpenAIBackend({
 			baseUrl: opts.baseUrl,
 			model: opts.model,
@@ -312,9 +254,10 @@ export class AgentCoreBridge {
 		this.additionalSystemPrompt = opts.systemPrompt;
 		this.baseSystemPrompt = this.buildBaseSystemPrompt();
 
-		this.permissionManager = new PermissionManager({
-			mode: opts.permissionMode ?? "acceptAll",
-			rules: opts.permissionRules,
+		this.interaction = new InteractionCoordinator({
+			emit: (event) => this.emit(event),
+			permissionMode: opts.permissionMode ?? "acceptAll",
+			permissionRules: opts.permissionRules,
 		});
 
 		this.config = {
@@ -322,7 +265,7 @@ export class AgentCoreBridge {
 			model: opts.model,
 			models: opts.models,
 			systemPrompt: this.baseSystemPrompt,
-			tools: this.defaultTools,
+			tools: this.toolRouter.getDefaultTools(),
 			webSearch,
 			cwd: this.cwd,
 			maxIterations: opts.maxIterations || 30,
@@ -343,7 +286,7 @@ export class AgentCoreBridge {
 			eventLogPath: eventLogPathFor(this.transcriptPath),
 			steeringInterrupt: opts.steeringInterrupt,
 			maxTotalTokens: opts.maxTotalTokens,
-			permissions: this.permissionManager,
+			permissions: this.interaction.getPermissionManager(),
 			guardsEnabled: opts.guardsEnabled,
 			duplicateGuardEnabled: opts.duplicateGuardEnabled,
 			failureGuardEnabled: opts.failureGuardEnabled,
@@ -359,29 +302,7 @@ export class AgentCoreBridge {
 			allowedPaths: opts.allowedPaths,
 			allowAllPaths: opts.allowAllPaths,
 			truncation: opts.truncation,
-			onPermissionRequest: (ctx) =>
-				new Promise((resolve) => {
-					this.permissionResolvers.set(ctx.toolCallId, resolve);
-					this.emit({
-						type: "permission_request",
-						tool_name: ctx.toolName,
-						tool_call_id: ctx.toolCallId,
-						args: ctx.args,
-					});
-				}),
-			onQuestionRequest: (ctx) =>
-				new Promise<string>((resolve) => {
-					const questionId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-					this.questionResolvers.set(questionId, {
-						allow: resolve,
-						deny: () => resolve("__dismissed__"),
-					});
-					this.emit({
-						type: "question_request",
-						question_id: questionId,
-						questions: ctx.questions,
-					});
-				}),
+			...this.interaction.buildConfigCallbacks(),
 			hooks: createPostEditDiagnosticHooks(
 				this.cwd,
 				() => this.postEditDiagnosticsEnabled,
@@ -409,6 +330,28 @@ export class AgentCoreBridge {
 		onTodosChanged((todos) => {
 			this.emit({ type: "todos", todos });
 		});
+
+		this.subagents = new SubagentCoordinator({
+			config: () => this.config,
+			backend: this.backend,
+			cwd: this.cwd,
+			projectTrusted: this.projectTrusted,
+			getEnabledPluginRoots: () => this.toolRouter.getEnabledPluginRoots(),
+			getDefaultTools: () => this.toolRouter.getDefaultTools(),
+			onToolAdded: () => this.addDefaultTool(),
+			ensureHarness: () => this.ensureHarness(),
+			emit: (event) => this.emit(event),
+			reportError: (error) => this.reportError(error),
+		});
+	}
+
+	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
+	/** Propagate a tool the router just registered into live config/harness/system prompt. */
+	private addDefaultTool(): void {
+		const tools = this.toolRouter.getDefaultTools();
+		this.config.tools = tools;
+		this.harness?.setTools(tools);
+		this.rebuildBaseSystemPrompt();
 	}
 
 	// ── Event registration ─────────────────────────────────────────────────
@@ -474,8 +417,8 @@ export class AgentCoreBridge {
 			await this.runStartupHooksOnce();
 			// Eager discovery is a real first-turn barrier so the provider's tool
 			// snapshot includes MCP capabilities. Deferred mode remains non-blocking.
-			if (!this.mcpLoaded) {
-				const mcpLoad = this.loadMcpToolsOnce();
+			if (!this.toolRouter.isMcpLoaded()) {
+				const mcpLoad = this.toolRouter.loadMcpToolsOnce();
 				if (this.mcpEager) {
 					await mcpLoad;
 				} else {
@@ -486,7 +429,7 @@ export class AgentCoreBridge {
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
 			const harness = this.ensureHarness();
 			const activations = this.skillActivation.select(
-				this.loadedSkills,
+				this.toolRouter.getLoadedSkills(),
 				message,
 			);
 			turnActivations = activations;
@@ -803,11 +746,7 @@ export class AgentCoreBridge {
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
 
 		// Reset state that is per-session
-		this.loadedSkills = [];
-		this.skillsContext = null;
-		this.skillsInjected = false;
-		this.loadedPrompts = [];
-		this.promptsInjected = false;
+		this.toolRouter.resetSkillsAndPrompts();
 		this.startupHooksRan = false;
 		this.startupHookResult = null;
 		this.pluginSystemContext = "";
@@ -825,7 +764,7 @@ export class AgentCoreBridge {
 
 	/** Skills discovered at startup (for /<skill-name> completion). */
 	getSkills(): Skill[] {
-		return this.loadedSkills;
+		return this.toolRouter.getLoadedSkills();
 	}
 
 	/**
@@ -834,7 +773,7 @@ export class AgentCoreBridge {
 	 * caller can fall back to normal slash handling.
 	 */
 	invokeSkill(name: string, args: string): boolean {
-		const skill = findSkillByName(this.loadedSkills, name);
+		const skill = findSkillByName(this.toolRouter.getLoadedSkills(), name);
 		if (!skill) return false;
 		const trimmedArgs = args.trim();
 		// Claude Code command convention: $ARGUMENTS in the body is replaced with
@@ -858,7 +797,7 @@ export class AgentCoreBridge {
 
 	/** Prompts discovered at startup (for /<prompt-name> completion). */
 	getPrompts(): Prompt[] {
-		return this.loadedPrompts;
+		return this.toolRouter.getLoadedPrompts();
 	}
 
 	/**
@@ -869,7 +808,7 @@ export class AgentCoreBridge {
 	 * can fall back to normal slash handling.
 	 */
 	invokePrompt(name: string, args: string): boolean {
-		const prompt = findPromptByName(this.loadedPrompts, name);
+		const prompt = findPromptByName(this.toolRouter.getLoadedPrompts(), name);
 		if (!prompt) return false;
 		const trimmedArgs = args.trim();
 		const substitutes = prompt.content.includes("$ARGUMENTS");
@@ -882,26 +821,20 @@ export class AgentCoreBridge {
 		return true;
 	}
 
-	// ── Permissions ────────────────────────────────────────────────────
+	// ── Permissions & interactive questions (see interaction-coordinator.ts) ─
 
 	/** Answer a pending permission_request. Returns false for unknown ids. */
 	respondToPermission(
 		toolCallId: string,
 		decision: "allow" | "deny" | "always",
 	): boolean {
-		const resolve = this.permissionResolvers.get(toolCallId);
-		if (!resolve) return false;
-		this.permissionResolvers.delete(toolCallId);
-		resolve(decision);
-		return true;
+		return this.interaction.respondToPermission(toolCallId, decision);
 	}
 
 	/** True while a permission_request awaits a decision. */
 	hasPendingPermission(): boolean {
-		return this.permissionResolvers.size > 0;
+		return this.interaction.hasPendingPermission();
 	}
-
-	// ── Interactive questions ────────────────────────────────────────────
 
 	/**
 	 * Register a pending question and emit it to the UI. Returns the question id
@@ -912,17 +845,7 @@ export class AgentCoreBridge {
 		question: string,
 		choices: Array<{ value: string; label: string }>,
 	): string {
-		const questionId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-		this.questionResolvers.set(questionId, {
-			allow: (_ans: string) => {},
-			deny: () => {},
-		});
-		this.emit({
-			type: "question_request",
-			question_id: questionId,
-			questions: [{ id: "answer", question, choices }],
-		});
-		return questionId;
+		return this.interaction.askQuestion(question, choices);
 	}
 
 	/**
@@ -930,70 +853,39 @@ export class AgentCoreBridge {
 	 * resolver. Returns false if the question id is unknown.
 	 */
 	respondToQuestion(questionId: string, answer: string): boolean {
-		const resolver = this.questionResolvers.get(questionId);
-		if (!resolver) return false;
-		this.questionResolvers.delete(questionId);
-		resolver.allow(answer);
-		return true;
+		return this.interaction.respondToQuestion(questionId, answer);
 	}
 
 	/** True while a question_request awaits an answer. */
 	hasPendingQuestion(): boolean {
-		return this.questionResolvers.size > 0;
+		return this.interaction.hasPendingQuestion();
 	}
 
 	/** Deny every pending permission request (abort / shutdown). */
 	private denyPendingPermissions(): void {
-		for (const [id, resolve] of this.permissionResolvers) {
-			this.permissionResolvers.delete(id);
-			resolve("deny");
-		}
+		this.interaction.denyPendingPermissions();
 	}
 
 	setPermissionMode(mode: PermissionMode): void {
-		this.permissionManager.setMode(mode);
-		this.emit({
-			type: "notice",
-			level: "info",
-			label: "Permissions",
-			text: `mode: ${mode}`,
-		});
+		this.interaction.setPermissionMode(mode);
 	}
 
 	getPermissionMode(): PermissionMode {
-		return this.permissionManager.getMode();
+		return this.interaction.getPermissionMode();
 	}
 
-	// ── Sandbox mode ─────────────────────────────────────────────────────
-	// Default profile applied by the sandbox tool when a call omits one.
-	// Cycled by the UI (Ctrl+K); "none" is exposed to the user as "off".
-
-	private static readonly SANDBOX_CYCLE: SandboxProfile[] = [
-		"none",
-		"code",
-		"full",
-	];
+	// ── Sandbox mode (see tool-router.ts) ───────────────────────────────
 
 	getSandboxMode(): SandboxProfile {
-		return getDefaultSandboxProfile();
+		return this.toolRouter.getSandboxMode();
 	}
 
 	setSandboxMode(mode: SandboxProfile): void {
-		setDefaultSandboxProfile(mode);
-		this.emit({
-			type: "notice",
-			level: "info",
-			label: "Sandbox",
-			text: `mode: ${mode === "none" ? "off" : mode}`,
-		});
+		this.toolRouter.setSandboxMode(mode);
 	}
 
 	cycleSandboxMode(): SandboxProfile {
-		const cycle = AgentCoreBridge.SANDBOX_CYCLE;
-		const currentIndex = cycle.indexOf(this.getSandboxMode());
-		const next = cycle[(currentIndex + 1) % cycle.length];
-		this.setSandboxMode(next);
-		return next;
+		return this.toolRouter.cycleSandboxMode();
 	}
 
 	// ── Model cycling ──────────────────────────────────────────────────
@@ -1096,13 +988,15 @@ export class AgentCoreBridge {
 	async getState(): Promise<Record<string, unknown>> {
 		// Status is a snapshot, not a synchronization barrier for external MCP
 		// transports. The manager UI provides explicit awaited refresh operations.
-		if (!this.mcpLoaded && !this.mcpLoadPromise) {
-			void this.loadMcpToolsOnce().catch((error) => this.reportError(error));
+		if (!this.toolRouter.isMcpLoaded() && !this.toolRouter.isMcpLoading()) {
+			void this.toolRouter
+				.loadMcpToolsOnce()
+				.catch((error) => this.reportError(error));
 		}
 		this.contextTokens = this.measureContextTokens();
 		const toolNames =
 			this.harness?.tools?.list().map((t: Tool) => t.name) ||
-			this.defaultTools.map((t) => t.name);
+			this.toolRouter.getDefaultTools().map((t) => t.name);
 		const state = {
 			agent_name: "logician",
 			model: this.config.model,
@@ -1110,9 +1004,9 @@ export class AgentCoreBridge {
 			web_search_url: this.config.webSearch?.baseUrl || "",
 			web_search_enabled: toolNames.includes("web_search"),
 			tools: toolNames,
-			mcp_servers: this.mcpServerCount,
-			mcp_tools: this.mcpToolNames.size,
-			mcp_errors: this.mcpErrors,
+			mcp_servers: this.toolRouter.getMcpServerCount(),
+			mcp_tools: this.toolRouter.getMcpToolCount(),
+			mcp_errors: this.toolRouter.getMcpErrors(),
 			context_tokens: this.contextTokens,
 			context_max_tokens: this.contextMaxTokens,
 			runtime_state: this.harness?.runtimeState ?? {
@@ -1137,22 +1031,14 @@ export class AgentCoreBridge {
 	}
 
 	async getMcpSnapshot(): Promise<McpSnapshotResult> {
-		const snapshot = await this.mcpManager.getSnapshot(this.cwd);
-		// MCP config handled by snapshot
-		return snapshot;
+		return this.toolRouter.getMcpSnapshot();
 	}
 
 	async setMcpServerEnabled(
 		serverName: string,
 		enabled: boolean,
 	): Promise<McpToggleResult> {
-		const result = await this.mcpManager.setServerEnabled(
-			serverName,
-			enabled,
-			this.cwd,
-		);
-		// MCP config handled by result
-		return result;
+		return this.toolRouter.setMcpServerEnabled(serverName, enabled);
 	}
 
 	async setPluginEnabled(
@@ -1314,9 +1200,7 @@ export class AgentCoreBridge {
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
 		// Reset skill/prompt injection state
-		this.skillsContext = null;
-		this.skillsInjected = false;
-		this.promptsInjected = false;
+		this.toolRouter.resetInjectedContext();
 		this.startupHooksRan = false;
 		this.pluginSystemContext = "";
 		this.skillActivation.reset();
@@ -1418,13 +1302,13 @@ export class AgentCoreBridge {
 		if (this.mcpEager) {
 			// Start discovery during initialization. The first user turn awaits
 			// this same promise before taking its tool snapshot.
-			void this.loadMcpToolsOnce().then(
+			void this.toolRouter.loadMcpToolsOnce().then(
 				() => {
 					this.emit({
 						type: "notice",
-						level: this.mcpErrors.length ? "warn" : "info",
+						level: this.toolRouter.getMcpErrors().length ? "warn" : "info",
 						label: "MCP",
-						text: `Loaded ${this.mcpServerCount} server(s).`,
+						text: `Loaded ${this.toolRouter.getMcpServerCount()} server(s).`,
 					});
 				},
 				(error) => this.reportError(error),
@@ -1432,19 +1316,20 @@ export class AgentCoreBridge {
 		}
 		const toolNames =
 			this.harness?.tools?.list().map((t: Tool) => t.name) ||
-			this.defaultTools.map((t) => t.name);
+			this.toolRouter.getDefaultTools().map((t) => t.name);
+		const status = this.toolRouter.getStatus();
 		const info: Record<string, unknown> = {
 			agent_name: "logician",
 			model: this.config.model,
 			base_url: this.config.baseUrl,
 			web_search_url: this.config.webSearch?.baseUrl || "",
 			web_search_enabled: toolNames.includes("web_search"),
-			mcp_deferred: !this.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
-			mcp_loading: this.mcpLoadPromise !== null && !this.mcpLoaded,
+			mcp_deferred: !status.mcpLoaded && process.env.LOGICIAN_MCP !== "0",
+			mcp_loading: status.mcpLoading,
 			tools: toolNames,
-			mcp_servers_loaded: this.mcpServerCount,
-			mcp_tools_loaded: this.mcpToolNames.size,
-			mcp_errors: this.mcpErrors,
+			mcp_servers_loaded: status.mcpServerCount,
+			mcp_tools_loaded: status.mcpToolCount,
+			mcp_errors: status.mcpErrors,
 			context_tokens: this.contextTokens,
 			context_max_tokens:
 				this.contextMaxTokens || this.config.contextWindowTokens,
@@ -1458,19 +1343,19 @@ export class AgentCoreBridge {
 			hooks_enabled: this.config.runtimeHooksEnabled !== false,
 			hook_transcript_path: this.config.hookTranscriptPath || "",
 			startup_plugins_loaded: this.startupPluginCount,
-			startup_plugins: this.enabledPluginRoots.map((plugin) => plugin.name),
+			startup_plugins: status.enabledPluginRoots.map((plugin) => plugin.name),
 			startup_hooks_loaded: this.startupHookResult?.hook_count || 0,
 			startup_hook_contexts: this.startupHookResult?.additional_contexts || [],
 			startup_hook_messages: this.startupHookResult?.context_messages || [],
 			startup_hook_initial_message:
 				this.startupHookResult?.initial_user_message || "",
 			startup_hook_errors: this.startupHookResult?.errors || [],
-			skills_injected: this.skillsInjected
-				? this.loadedSkills.filter((skill) => !skill.disableModelInvocation)
+			skills_injected: status.skillsInjected
+				? status.loadedSkills.filter((skill) => !skill.disableModelInvocation)
 						.length
 				: 0,
-			skills_visible: !!this.skillsContext,
-			loaded_skills: this.loadedSkills.map((skill) => ({
+			skills_visible: status.skillsVisible,
+			loaded_skills: status.loadedSkills.map((skill) => ({
 				name: skill.name,
 				slash_name: skill.slashName,
 				description: skill.description,
@@ -1487,7 +1372,7 @@ export class AgentCoreBridge {
 		void this.cancel();
 		await this.fireSessionEnd("shutdown");
 		this.lspManager.close();
-		await this.mcpManager.close();
+		await this.toolRouter.closeMcp();
 		killAllTrackedChildren();
 		this.running = false;
 	}
@@ -1579,8 +1464,8 @@ export class AgentCoreBridge {
 			},
 			{
 				name: "Skill catalog",
-				tokens: estimateTokens(this.skillsContext ?? ""),
-				detail: `${this.loadedSkills.length} loaded`,
+				tokens: estimateTokens(this.toolRouter.getSkillsContext() ?? ""),
+				detail: `${this.toolRouter.getLoadedSkills().length} loaded`,
 			},
 			{
 				name: "Memory",
@@ -1631,7 +1516,7 @@ export class AgentCoreBridge {
 	getTools(): ToolRegistry {
 		const live = this.harness?.tools;
 		if (live) return live;
-		const registry = new ToolRegistry({
+		return this.toolRouter.buildRegistry({
 			cwd: this.config.cwd,
 			allowedPaths: this.config.allowedPaths,
 			allowAllPaths: this.config.allowAllPaths,
@@ -1639,45 +1524,6 @@ export class AgentCoreBridge {
 			cacheTtlMs: this.config.cacheTtlMs,
 			maxResultChars: this.config.truncation?.toolResultMaxChars,
 		});
-		registry.registerMany(this.defaultTools);
-		return registry;
-	}
-
-	private async loadMcpToolsOnce(): Promise<void> {
-		if (this.mcpLoaded || process.env.LOGICIAN_MCP === "0") return;
-		if (!this.mcpLoadPromise) {
-			this.mcpLoadPromise = (async () => {
-				const result = await this.mcpManager.load(
-					this.config.cwd || process.cwd(),
-					this.defaultTools.map((tool) => tool.name),
-				);
-				this.mcpServerCount = result.servers;
-				this.mcpErrors = result.errors;
-				this.mcpToolNames = new Set(
-					result.tools.map((tool) => tool.name),
-				);
-				// Tool presence alone doesn't tell the model whether a missing
-				// capability was never configured or failed to connect — surface
-				// connection failures in the system prompt so it can explain a gap
-				// instead of silently working around it or guessing.
-				this.mcpSystemContext = result.errors.length
-					? `<mcp-status>\n${result.errors.length} MCP server(s) failed to load:\n${result.errors.map((e) => `- ${e}`).join("\n")}\n` +
-						"Tools from these servers are unavailable this session.\n</mcp-status>"
-					: "";
-				if (result.tools.length || this.mcpSystemContext) {
-					const existing = new Set(this.defaultTools.map((tool) => tool.name));
-					const newTools = result.tools.filter(
-						(tool) => !existing.has(tool.name),
-					);
-					this.defaultTools = [...this.defaultTools, ...newTools];
-					this.config.tools = this.defaultTools;
-					this.harness?.setTools(this.defaultTools);
-					this.rebuildBaseSystemPrompt();
-				}
-				this.mcpLoaded = true;
-			})();
-		}
-		await this.mcpLoadPromise;
 	}
 
 	private rebuildBaseSystemPrompt(): void {
@@ -1689,17 +1535,21 @@ export class AgentCoreBridge {
 	private applyContextLayers(): void {
 		const contexts: string[] = [];
 		if (this.pluginSystemContext) contexts.push(this.pluginSystemContext);
-		if (this.mcpSystemContext) contexts.push(this.mcpSystemContext);
-		if (this.skillsContext) contexts.push(this.skillsContext);
+		const mcpSystemContext = this.toolRouter.getMcpSystemContext();
+		if (mcpSystemContext) contexts.push(mcpSystemContext);
+		const skillsContext = this.toolRouter.getSkillsContext();
+		if (skillsContext) contexts.push(skillsContext);
 		this.config.systemPrompt = contexts.length
 			? `${this.baseSystemPrompt}\n\n${contexts.join("\n\n")}`
 			: this.baseSystemPrompt;
 	}
 
 	private buildBaseSystemPrompt(): string {
-		const defaultPrompt = buildDefaultSystemPrompt(this.cwd, this.defaultTools, {
-			loadProjectContext: this.projectTrusted,
-		});
+		const defaultPrompt = buildDefaultSystemPrompt(
+			this.cwd,
+			this.toolRouter.getDefaultTools(),
+			{ loadProjectContext: this.projectTrusted },
+		);
 		return this.additionalSystemPrompt
 			? `${defaultPrompt}\n\nAdditional user/system instructions:\n${this.additionalSystemPrompt}`
 			: defaultPrompt;
@@ -1740,182 +1590,6 @@ export class AgentCoreBridge {
 		this.applyContextLayers();
 	}
 
-	/**
-	 * Discover SKILL.md files from installed plugins and inject them into
-	 * the system prompt so the agent can see available skills.
-	 * Runs after startup hooks as a fallback when hooks fail to produce context.
-	 */
-	private async injectSkillsFromPlugins(): Promise<void> {
-		if (this.skillsInjected) return;
-		this.skillsInjected = true;
-
-		const registry = await runPluginBackend("list", []);
-		const plugins = registry.plugins || [];
-
-		// Collect skills directories from all enabled, on-disk plugins.
-		const skillsDirs: string[] = [];
-		const enabledPlugins: Array<{ name: string; installPath: string }> = [];
-		for (const plugin of plugins) {
-			const enabled = plugin.enabled !== false;
-			const onDisk = plugin.on_disk !== false;
-			const installPath = String(plugin.install_path || "");
-			const pluginName = String(plugin.name || plugin.plugin_id || "");
-			if (!enabled || !onDisk || !installPath) continue;
-			enabledPlugins.push({ name: pluginName, installPath });
-			skillsDirs.push(path.join(installPath, "skills"));
-		}
-		this.enabledPluginRoots = enabledPlugins;
-
-		// Load user-global skills independently of installed plugins.
-		// This is the shared agents convention used by Codex and other harnesses.
-		skillsDirs.push(path.join(os.homedir(), ".agents", "skills"));
-
-		// Also discover project-local skills by walking cwd ancestors.
-		// Missing directories are skipped silently by loadSkills.
-		const cwd = this.config.cwd || process.cwd();
-		if (this.projectTrusted) {
-			skillsDirs.push(...getProjectSkillDirs(cwd));
-		}
-
-		if (!skillsDirs.length) return;
-
-		const { skills: rawSkills, diagnostics } = await loadSkills(skillsDirs);
-
-		// Namespace plugin skills as plugin:skill (Claude Code convention); the
-		// bare name stays available as an alias when unambiguous.
-		const skills = rawSkills.map((skill) => {
-			const owner = enabledPlugins.find((p) =>
-				skill.filePath.startsWith(p.installPath + path.sep),
-			);
-			if (!owner || !owner.name || skill.name.startsWith(`${owner.name}:`)) {
-				return skill;
-			}
-			return {
-				...skill,
-				name: `${owner.name}:${skill.name}`,
-				slashName: `${owner.name}:${skill.slashName}`,
-				aliases: [...(skill.aliases ?? []), skill.name],
-			};
-		});
-
-		// Claude Code plugin commands (commands/*.md) become user-invocable
-		// skills: /plugin:command or /command, never advertised to the model.
-		skills.push(...(await this.loadPluginCommands(enabledPlugins)));
-
-		// Log diagnostics to transcript for visibility.
-		for (const diag of diagnostics) {
-			this.emit({
-				type: "token",
-				token: `[Skill warning] ${diag.code}: ${diag.message}`,
-			});
-		}
-
-		// All loaded skills are user-invocable via /<skill-name>; only the ones
-		// not flagged disable-model-invocation are advertised to the model.
-		this.loadedSkills = skills;
-		const visible = skills.filter((s) => !s.disableModelInvocation);
-		// Only skip catalog injection when there are no skills at all.
-		// Plugin commands (disableModelInvocation) still need read_skill.
-
-		// Inject a compact catalog (name + description), not full bodies. The
-		// model loads a skill's full instructions on demand via read_skill.
-		this.skillsContext = formatSkillCatalog(visible);
-
-		// Register the read_skill tool bound to ALL loaded skills so the model can
-		// pull full bodies for any skill, including plugin commands (disableModelInvocation).
-		// Append to the tool set (next loop turn picks it up) and
-		// patch the live harness registry if a run is already active.
-		const readSkill = createReadSkillTool(skills);
-		if (readSkill && !this.defaultTools.some((t) => t.name === "read_skill")) {
-			this.defaultTools = [...this.defaultTools, readSkill];
-			this.config.tools = this.defaultTools;
-			this.harness?.setTools(this.defaultTools);
-		}
-
-		this.rebuildBaseSystemPrompt();
-	}
-
-	/**
-	 * Discover prompts/.logician/prompts markdown files and register them as
-	 * direct, user-typed /<name> slash commands. Unlike skills, prompts are
-	 * never surfaced to the model — they exist only to be typed by the user.
-	 */
-	private async injectPrompts(): Promise<void> {
-		if (this.promptsInjected) return;
-		this.promptsInjected = true;
-
-		if (!this.projectTrusted) return;
-		const cwd = this.config.cwd || process.cwd();
-		const promptDirs = getProjectPromptDirs(cwd);
-		this.loadedPrompts = await loadPrompts(promptDirs);
-	}
-
-	/**
-	 * Load Claude Code plugin commands (commands/*.md) as user-invocable
-	 * skill entries. Command bodies are prompt templates; $ARGUMENTS is
-	 * substituted at invocation time by invokeSkill.
-	 */
-	private async loadPluginCommands(
-		plugins: Array<{ name: string; installPath: string }>,
-	): Promise<Skill[]> {
-		const out: Skill[] = [];
-		for (const { name: pluginName, installPath } of plugins) {
-			const dir = path.join(installPath, "commands");
-			let entries: string[];
-			try {
-				entries = await readdirAsync(dir);
-			} catch (err: unknown) {
-				// Most plugins have no commands/ dir at all — only a real error
-				// (permissions, etc.) is worth surfacing.
-				if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
-					console.error(
-						`[plugins] failed to read commands dir for "${pluginName}":`,
-						err,
-					);
-				}
-				continue;
-			}
-			for (const entry of entries) {
-				if (!entry.endsWith(".md")) continue;
-				const filePath = path.join(dir, entry);
-				let raw: string;
-				try {
-					raw = await readFileAsync(filePath, "utf8");
-				} catch (err: unknown) {
-					// The file was just listed by readdir, so a read failure here
-					// is a genuine anomaly (permissions, race), not "expected".
-					console.error(
-						`[plugins] failed to read command file "${filePath}":`,
-						err,
-					);
-					continue;
-				}
-				const parsed = parseFrontmatter<Record<string, unknown>>(raw);
-				const frontmatter = parsed.ok ? parsed.value.frontmatter : {};
-				const body = parsed.ok ? parsed.value.body : raw;
-				const cmdName = entry.slice(0, -3);
-				const description =
-					typeof frontmatter.description === "string" &&
-					frontmatter.description.trim()
-						? frontmatter.description
-						: `Command from the ${pluginName} plugin.`;
-				out.push({
-					name: `${pluginName}:${cmdName}`,
-					displayName: cmdName,
-					description,
-					content: body,
-					filePath,
-					baseDir: dir,
-					slashName: `${pluginName}:${cmdName}`,
-					disableModelInvocation: true,
-					aliases: [cmdName],
-					source: "path",
-				});
-			}
-		}
-		return out;
-	}
-
 	private async runStartupHooksOnce(source = "startup"): Promise<void> {
 		if (this.startupHooksRan) return;
 		this.startupHooksRan = true;
@@ -1937,202 +1611,26 @@ export class AgentCoreBridge {
 		}
 		// Skills, prompts, and agents are runtime resources, independent of
 		// whether command hooks are enabled.
-		await this.injectSkillsFromPlugins();
-		await this.injectPrompts();
+		await this.toolRouter.injectSkillsFromPlugins();
+		this.rebuildBaseSystemPrompt();
+		await this.toolRouter.injectPrompts();
 		await this.injectSubagents();
 	}
 
 	/**
-	 * Register the spawn_agent and spawn_agents tools bound to discovered definitions
-	 * (.logician/agents/*.md + built-ins). Subagent events are forwarded into
-	 * the normal event stream as subagent_* envelopes.
+	 * Register the spawn_agent and spawn_agents tools bound to discovered
+	 * definitions (.logician/agents/*.md + built-ins). See subagent-coordinator.ts.
 	 */
 	private async injectSubagents(): Promise<void> {
-		const cwd = this.config.cwd || process.cwd();
-		this.agentDefs = await loadAgentDefinitions([
-			...(this.projectTrusted ? [path.join(cwd, ".logician", "agents")] : []),
-			// Claude Code plugin agents (agents/*.md in each enabled plugin).
-			...this.enabledPluginRoots.map((p) => path.join(p.installPath, "agents")),
-		]);
-
-		// Inject subagent tools
-		const userSettings = loadUserSettings();
-		const maxParallelAgents =
-			userSettings.subagents?.maxParallelAgents ??
-			(typeof userSettings.maxParallelAgents === "number"
-				? userSettings.maxParallelAgents
-				: undefined);
-		const subagentDeps: SubagentToolDeps = {
-			config: () => this.config,
-			backend: this.backend,
-			cwd,
-			agents: () => this.agentDefs,
-			emit: (event) => this.config.onEvent?.(event),
-			maxParallelAgents,
-		};
-		const subagentTools = getBuiltInSubagentTools(subagentDeps);
-		for (const tool of subagentTools) {
-			if (!this.defaultTools.some((t) => t.name === tool.name)) {
-				this.defaultTools = [...this.defaultTools, tool];
-			}
-		}
-
-		this.config.tools = this.defaultTools;
-		this.harness?.setTools(this.defaultTools);
-		this.rebuildBaseSystemPrompt();
-		this.subagentsInjected = true;
-		// Drain any /spawn tasks that arrived before init completed.
-		// spawnAgentDirectly feeds result back; only process the first one.
-		const first = this.pendingSpawnTasks.shift();
-		if (first) this.spawnAgentDirectly(first.task, first.agent);
+		await this.subagents.inject();
 	}
 
 	/**
 	 * Directly invoke the spawn_agent tool without going through the LLM.
-	 * Emits tool execution events to the transcript so the subagent output
-	 * renders as a tool chunk with integrated streaming output.
-	 *
-	 * Lifecycle/chunk events come from the tool itself via
-	 * `deps.emit → config.onEvent → mapAgentEvent` (same path as LLM-mode).
-	 * On completion, the /spawn arg and final result are appended to harness
-	 * history (user + spawn_agent tool call + tool result) so later turns
-	 * can see them — without followUp/sendMessage (those stall outside a loop).
+	 * See subagent-coordinator.ts for the full lifecycle/event wiring.
 	 */
 	spawnAgentDirectly(task: string, agent?: string): void {
-		// If init hasn't finished, queue the task for later.
-		if (!this.subagentsInjected) {
-			this.pendingSpawnTasks.push({ task, agent });
-			return;
-		}
-		const spawnTool = this.defaultTools.find((t) => t.name === "spawn_agent");
-		if (!spawnTool) {
-			this.reportError(
-				new Error("spawn_agent tool not available (subagent tools not injected)"),
-			);
-			return;
-		}
-
-		const toolCallId = `spawn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-		const turnId = `spawn_turn_${Date.now()}`;
-		const controller = new AbortController();
-
-		// Create a synthetic turn so the transcript has a context for the
-		// tool chunk. handleToolStart / subagent lifecycle both need a
-		// current turn.
-		this.emit({ type: "turn_start", turn_id: turnId });
-
-		// Emit tool_execution_start so the transcript creates a tool chunk
-		// before the tool fires subagent_start/subagent_event.
-		this.emit({
-			type: "tool_execution_start",
-			tool: "spawn_agent",
-			tool_name: "spawn_agent",
-			tool_args: { task, agent },
-			tool_call_id: toolCallId,
-		});
-
-		const ctx: ToolContext = {
-			signal: controller.signal,
-			onUpdate: (delta) => {
-				// Live stream into the open tool chunk. Child chunks (thinking,
-				// tool calls, content with agentId) arrive separately via
-				// deps.emit(subagent_event) → mapAgentEvent.
-				this.emit({
-					type: "tool_execution_update",
-					tool: "spawn_agent",
-					tool_name: "spawn_agent",
-					partial_result: delta,
-					update_kind: "output" as const,
-					tool_call_id: toolCallId,
-				});
-			},
-		};
-
-		void spawnTool
-			.execute({ task, agent }, ctx)
-			.then((result) => {
-				const content = typeof result === "string" ? result : result.content;
-				const isError =
-					typeof result === "string" ? false : result.isError === true;
-
-				// tool_execution_end closes the card. subagent_end was already
-				// emitted by the tool via deps.emit during execute().
-				this.emit({
-					type: "tool_execution_end",
-					tool: "spawn_agent",
-					tool_name: "spawn_agent",
-					result: content,
-					is_error: isError,
-					tool_call_id: toolCallId,
-					details:
-						typeof result === "object" && result.details
-							? result.details
-							: undefined,
-				});
-				if (isError) {
-					this.reportError(new Error(content));
-				}
-				this.recordDirectSpawnInHistory(task, agent, toolCallId, content, isError);
-			})
-			.catch((err) => {
-				const error = err as Error;
-				this.emit({
-					type: "tool_execution_end",
-					tool: "spawn_agent",
-					tool_name: "spawn_agent",
-					result: error.message,
-					is_error: true,
-					tool_call_id: toolCallId,
-				});
-				this.reportError(error);
-				this.recordDirectSpawnInHistory(
-					task,
-					agent,
-					toolCallId,
-					error.message,
-					true,
-				);
-			})
-			.finally(() => {
-				// Close the synthetic turn and return the UI to ready. Mirror
-				// runMessage's phase emit so status/animation settle.
-				this.emit({ type: "turn_end", turn_id: turnId, message: "" });
-				this.emit({ type: "phase", state: "ready" });
-			});
-	}
-
-	/**
-	 * Persist a direct /spawn exchange into harness history so subsequent
-	 * agent turns can see the request and the subagent's final report.
-	 * Shape mirrors LLM-mode spawn_agent: user command → tool call → result.
-	 */
-	private recordDirectSpawnInHistory(
-		task: string,
-		agent: string | undefined,
-		toolCallId: string,
-		result: string,
-		isError: boolean,
-	): void {
-		try {
-			const harness = this.ensureHarness();
-			const agentName = agent?.trim() || "general";
-			const userText = agent?.trim()
-				? `/spawn agent=${agent.trim()} ${task}`
-				: `/spawn ${task}`;
-			harness.appendMessages([
-				createUserMessage(userText),
-				createAssistantMessage("", [
-					{
-						id: toolCallId,
-						name: "spawn_agent",
-						arguments: JSON.stringify({ task, agent: agentName }),
-					},
-				]),
-				createToolResultMessage(toolCallId, "spawn_agent", result, isError),
-			]);
-		} catch (err: unknown) {
-			this.reportError(err as Error);
-		}
+		this.subagents.spawnDirectly(task, agent);
 	}
 
 	private async fireSessionEnd(reason: string): Promise<void> {

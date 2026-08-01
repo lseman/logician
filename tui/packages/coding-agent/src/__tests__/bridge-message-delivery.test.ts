@@ -11,18 +11,20 @@ void test("direct /spawn records task and result in harness history", async () =
 		mcpEager: false,
 	});
 	const internal = bridge as unknown as {
-		subagentsInjected: boolean;
-		defaultTools: Array<{
-			name: string;
-			execute: (
-				args: Record<string, unknown>,
-				ctx: { onUpdate?: (delta: string) => void },
-			) => Promise<string | { content: string; isError?: boolean; details?: unknown }>;
-		}>;
+		toolRouter: {
+			getDefaultTools: () => Array<{
+				name: string;
+				execute: (
+					args: Record<string, unknown>,
+					ctx: { onUpdate?: (delta: string) => void },
+				) => Promise<string | { content: string; isError?: boolean; details?: unknown }>;
+			}>;
+		};
 		ensureHarness: () => { messages: unknown[]; appendMessages: (m: unknown[]) => void };
+		subagents: { injected: boolean };
 	};
-	internal.subagentsInjected = true;
-	internal.defaultTools = [
+	// defaultTools now lives on ToolRouter; stub its getter for this test's fake spawn_agent.
+	internal.toolRouter.getDefaultTools = () => [
 		{
 			name: "spawn_agent",
 			execute: async () => ({
@@ -32,6 +34,8 @@ void test("direct /spawn records task and result in harness history", async () =
 			}),
 		},
 	];
+	// SubagentCoordinator's `injected` flag lives on the coordinator instance now.
+	internal.subagents.injected = true;
 
 	const recorded: unknown[][] = [];
 	const fakeMessages: unknown[] = [];
@@ -126,9 +130,9 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 		runtimeHooksEnabled: false,
 		mcpEager: false,
 	});
-	const internal = bridge as unknown as Record<string, unknown>;
+	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.mcpLoadPromise = new Promise<void>(() => {});
+	internal.toolRouter.mcpLoadPromise = new Promise<void>(() => {});
 	let delivered = "";
 	internal.harness = {
 		messages: [],
@@ -158,12 +162,13 @@ void test("eager MCP discovery blocks the first tool snapshot until ready", asyn
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
 	let resolveLoad!: () => void;
-	internal.mcpLoadPromise = new Promise<void>((resolve) => {
+	internal.toolRouter.mcpLoadPromise = new Promise<void>((resolve) => {
 		resolveLoad = resolve;
 	});
 	let delivered = false;
 	internal.harness = {
 		messages: [],
+		setTools: () => {},
 		prompt: async () => {
 			delivered = true;
 		},
@@ -186,7 +191,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.mcpManager = {
+	internal.toolRouter.mcpManager = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -194,7 +199,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		}),
 	};
 
-	await internal.loadMcpToolsOnce();
+	await internal.toolRouter.loadMcpToolsOnce();
 
 	assert.match(
 		internal.config.systemPrompt,
@@ -215,8 +220,9 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
-	internal.skillsContext = "<available-skills>skill catalog</available-skills>";
-	internal.mcpManager = {
+	internal.toolRouter.getSkillsContext = () =>
+		"<available-skills>skill catalog</available-skills>";
+	internal.toolRouter.mcpManager = {
 		load: async () => ({
 			tools: [],
 			servers: 0,
@@ -224,7 +230,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		}),
 	};
 
-	await internal.loadMcpToolsOnce();
+	await internal.toolRouter.loadMcpToolsOnce();
 	internal.applyPluginHookContext({
 		additional_contexts: ["startup instructions"],
 		context_messages: [
@@ -329,8 +335,8 @@ void test("matching skills are injected only for the selected turn", async () =>
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.mcpLoaded = true;
-	internal.loadedSkills = [
+	internal.toolRouter.isMcpLoaded = () => true;
+	internal.toolRouter.getLoadedSkills = () => [
 		{
 			name: "typescript-code-review",
 			displayName: "TypeScript Code Review",
@@ -373,8 +379,8 @@ void test("automatic continuation retains the active skill", async () => {
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.mcpLoaded = true;
-	internal.loadedSkills = [
+	internal.toolRouter.isMcpLoaded = () => true;
+	internal.toolRouter.getLoadedSkills = () => [
 		{
 			name: "typescript-debugging",
 			displayName: "TypeScript Debugging",
@@ -419,7 +425,7 @@ void test("sendMessage rejects when the turn fails", async () => {
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.mcpLoaded = true;
+	internal.toolRouter.isMcpLoaded = () => true;
 	internal.harness = {
 		messages: [],
 		prompt: async () => {
@@ -469,7 +475,7 @@ void test("core iterations reconcile output without completing the UI turn early
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
-	internal.mcpLoaded = true;
+	internal.toolRouter.isMcpLoaded = () => true;
 	internal.harness = {
 		messages: [],
 		prompt: async () => {

@@ -1,0 +1,445 @@
+// ── ToolRouter ────────────────────────────────────────────────────────────────
+// Owns "which tools exist at runtime" and the context they contribute to the
+// system prompt: default tools, MCP loading, sandbox mode, skill/prompt
+// discovery and injection, and the shared default-tools ToolRegistry.
+// Extracted from agent-bridge.ts. System-prompt *assembly* (merging this
+// router's mcpSystemContext/skillsContext with plugin-hook context) stays on
+// the bridge — that merge is cross-cutting, not a tool-management concern.
+
+import { readdir as readdirAsync, readFile as readFileAsync } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import type { Tool } from "@logician/agent-core";
+import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
+import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
+import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
+import { createDefaultTools } from "../tools/default-tools.ts";
+import { createReadSkillTool } from "../tools/read-skill.ts";
+import {
+	getDefaultSandboxProfile,
+	setDefaultSandboxProfile,
+	type SandboxProfile,
+} from "../tools/sandbox.ts";
+import { loadSkills, formatSkillCatalog, type Skill } from "../skills/index.ts";
+import { loadPrompts, type Prompt } from "../prompts/index.ts";
+import {
+	McpManager,
+	type McpSnapshotResult,
+	type McpToggleResult,
+} from "../mcp/index.ts";
+import { resolveWebSearchConfig } from "./bridge-environment.ts";
+import { getProjectPromptDirs, getProjectSkillDirs } from "./resource-directories.ts";
+import type { ParsedBridgeEvent } from "../runtime/events.ts";
+
+export interface ToolRouterDeps {
+	cwd: string;
+	projectTrusted: boolean;
+	tools?: Tool[];
+	webSearch?: Partial<{ baseUrl: string; maxResults: number }>;
+	emit: (event: ParsedBridgeEvent) => void;
+	/** Add a tool to the live default set (propagates into config.tools / harness.setTools). */
+	onToolAdded: (tool: Tool) => void;
+	/** MCP/skills context changed (even with no new tools) — bridge should rebuild the system prompt. */
+	onContextChanged: () => void;
+}
+
+/** Snapshot of MCP/skill state as reported by getState()/init(). */
+export interface ToolRouterStatus {
+	mcpServerCount: number;
+	mcpToolCount: number;
+	mcpErrors: string[];
+	mcpLoaded: boolean;
+	mcpLoading: boolean;
+	skillsInjected: boolean;
+	skillsVisible: boolean;
+	loadedSkills: Skill[];
+	enabledPluginRoots: Array<{ name: string; installPath: string }>;
+}
+
+export class ToolRouter {
+	private readonly cwd: string;
+	private readonly projectTrusted: boolean;
+	private readonly emit: (event: ParsedBridgeEvent) => void;
+	private readonly onToolAdded: (tool: Tool) => void;
+	private readonly onContextChanged: () => void;
+
+	private defaultTools: Tool[];
+	private readonly mcpManager = new McpManager();
+	private mcpLoaded = false;
+	private mcpLoadPromise: Promise<void> | null = null;
+	private mcpServerCount = 0;
+	private mcpErrors: string[] = [];
+	private mcpToolNames = new Set<string>();
+	private mcpSystemContext = "";
+
+	private skillsInjected = false;
+	private skillsContext: string | null = null;
+	private loadedSkills: Skill[] = [];
+	private enabledPluginRoots: Array<{ name: string; installPath: string }> = [];
+
+	private promptsInjected = false;
+	private loadedPrompts: Prompt[] = [];
+
+	private static readonly SANDBOX_CYCLE: SandboxProfile[] = ["none", "code", "full"];
+
+	constructor(deps: ToolRouterDeps) {
+		this.cwd = deps.cwd;
+		this.projectTrusted = deps.projectTrusted;
+		this.emit = deps.emit;
+		this.onToolAdded = deps.onToolAdded;
+		this.onContextChanged = deps.onContextChanged;
+		const defaultWebSearch = resolveWebSearchConfig();
+		const webSearch = {
+			baseUrl: deps.webSearch?.baseUrl || defaultWebSearch.baseUrl,
+			maxResults: deps.webSearch?.maxResults ?? defaultWebSearch.maxResults,
+		};
+		this.defaultTools = deps.tools?.length ? deps.tools : createDefaultTools({ webSearch });
+	}
+
+	// ── Default tools ────────────────────────────────────────────────────
+
+	getDefaultTools(): Tool[] {
+		return this.defaultTools;
+	}
+
+	/** Append a tool to the router's own set and notify the bridge to propagate it into config/harness/system prompt. */
+	private addTool(tool: Tool): void {
+		if (this.defaultTools.some((t) => t.name === tool.name)) return;
+		this.defaultTools = [...this.defaultTools, tool];
+		this.onToolAdded(tool);
+	}
+
+	/** Build a standalone ToolRegistry over the current default tools (used when no harness exists yet). */
+	buildRegistry(config: {
+		cwd?: string;
+		allowedPaths?: string[];
+		allowAllPaths?: boolean;
+		cacheSize?: number;
+		cacheTtlMs?: number;
+		maxResultChars?: number;
+	}): ToolRegistry {
+		const registry = new ToolRegistry(config);
+		registry.registerMany(this.defaultTools);
+		return registry;
+	}
+
+	// ── MCP ──────────────────────────────────────────────────────────────
+
+	isMcpLoaded(): boolean {
+		return this.mcpLoaded;
+	}
+
+	isMcpLoading(): boolean {
+		return this.mcpLoadPromise !== null && !this.mcpLoaded;
+	}
+
+	getMcpServerCount(): number {
+		return this.mcpServerCount;
+	}
+
+	getMcpToolCount(): number {
+		return this.mcpToolNames.size;
+	}
+
+	getMcpErrors(): string[] {
+		return this.mcpErrors;
+	}
+
+	getMcpSystemContext(): string {
+		return this.mcpSystemContext;
+	}
+
+	async loadMcpToolsOnce(): Promise<void> {
+		if (this.mcpLoaded || process.env.LOGICIAN_MCP === "0") return;
+		if (!this.mcpLoadPromise) {
+			this.mcpLoadPromise = (async () => {
+				const result = await this.mcpManager.load(
+					this.cwd,
+					this.defaultTools.map((tool) => tool.name),
+				);
+				this.mcpServerCount = result.servers;
+				this.mcpErrors = result.errors;
+				this.mcpToolNames = new Set(result.tools.map((tool) => tool.name));
+				// Tool presence alone doesn't tell the model whether a missing
+				// capability was never configured or failed to connect — surface
+				// connection failures in the system prompt so it can explain a gap
+				// instead of silently working around it or guessing.
+				this.mcpSystemContext = result.errors.length
+					? `<mcp-status>\n${result.errors.length} MCP server(s) failed to load:\n${result.errors.map((e) => `- ${e}`).join("\n")}\n` +
+						"Tools from these servers are unavailable this session.\n</mcp-status>"
+					: "";
+				if (result.tools.length || this.mcpSystemContext) {
+					const existing = new Set(this.defaultTools.map((tool) => tool.name));
+					const newTools = result.tools.filter((tool) => !existing.has(tool.name));
+					for (const tool of newTools) this.addTool(tool);
+					// addTool() already triggers onToolAdded (which rebuilds the system
+					// prompt); an errors-only load with no new tools still changed
+					// mcpSystemContext, so notify explicitly for that case.
+					if (!newTools.length) this.onContextChanged();
+				}
+				this.mcpLoaded = true;
+			})();
+		}
+		await this.mcpLoadPromise;
+	}
+
+	async getMcpSnapshot(): Promise<McpSnapshotResult> {
+		return this.mcpManager.getSnapshot(this.cwd);
+	}
+
+	async setMcpServerEnabled(
+		serverName: string,
+		enabled: boolean,
+	): Promise<McpToggleResult> {
+		return this.mcpManager.setServerEnabled(serverName, enabled, this.cwd);
+	}
+
+	async closeMcp(): Promise<void> {
+		await this.mcpManager.close();
+	}
+
+	// ── Sandbox mode ─────────────────────────────────────────────────────
+	// Default profile applied by the sandbox tool when a call omits one.
+	// Cycled by the UI (Ctrl+K); "none" is exposed to the user as "off".
+
+	getSandboxMode(): SandboxProfile {
+		return getDefaultSandboxProfile();
+	}
+
+	setSandboxMode(mode: SandboxProfile): void {
+		setDefaultSandboxProfile(mode);
+		this.emit({
+			type: "notice",
+			level: "info",
+			label: "Sandbox",
+			text: `mode: ${mode === "none" ? "off" : mode}`,
+		});
+	}
+
+	cycleSandboxMode(): SandboxProfile {
+		const cycle = ToolRouter.SANDBOX_CYCLE;
+		const currentIndex = cycle.indexOf(this.getSandboxMode());
+		const next = cycle[(currentIndex + 1) % cycle.length];
+		this.setSandboxMode(next);
+		return next;
+	}
+
+	// ── Skills ───────────────────────────────────────────────────────────
+
+	isSkillsInjected(): boolean {
+		return this.skillsInjected;
+	}
+
+	getSkillsContext(): string | null {
+		return this.skillsContext;
+	}
+
+	getLoadedSkills(): Skill[] {
+		return this.loadedSkills;
+	}
+
+	getEnabledPluginRoots(): Array<{ name: string; installPath: string }> {
+		return this.enabledPluginRoots;
+	}
+
+	/**
+	 * Discover SKILL.md files from installed plugins and inject them into
+	 * the system prompt so the agent can see available skills.
+	 * Runs after startup hooks as a fallback when hooks fail to produce context.
+	 */
+	async injectSkillsFromPlugins(): Promise<void> {
+		if (this.skillsInjected) return;
+		this.skillsInjected = true;
+
+		const registry = await runPluginBackend("list", []);
+		const plugins = registry.plugins || [];
+
+		// Collect skills directories from all enabled, on-disk plugins.
+		const skillsDirs: string[] = [];
+		const enabledPlugins: Array<{ name: string; installPath: string }> = [];
+		for (const plugin of plugins) {
+			const enabled = plugin.enabled !== false;
+			const onDisk = plugin.on_disk !== false;
+			const installPath = String(plugin.install_path || "");
+			const pluginName = String(plugin.name || plugin.plugin_id || "");
+			if (!enabled || !onDisk || !installPath) continue;
+			enabledPlugins.push({ name: pluginName, installPath });
+			skillsDirs.push(path.join(installPath, "skills"));
+		}
+		this.enabledPluginRoots = enabledPlugins;
+
+		// Load user-global skills independently of installed plugins.
+		// This is the shared agents convention used by Codex and other harnesses.
+		skillsDirs.push(path.join(os.homedir(), ".agents", "skills"));
+
+		// Also discover project-local skills by walking cwd ancestors.
+		// Missing directories are skipped silently by loadSkills.
+		if (this.projectTrusted) {
+			skillsDirs.push(...getProjectSkillDirs(this.cwd));
+		}
+
+		if (!skillsDirs.length) return;
+
+		const { skills: rawSkills, diagnostics } = await loadSkills(skillsDirs);
+
+		// Namespace plugin skills as plugin:skill (Claude Code convention); the
+		// bare name stays available as an alias when unambiguous.
+		const skills = rawSkills.map((skill) => {
+			const owner = enabledPlugins.find((p) =>
+				skill.filePath.startsWith(p.installPath + path.sep),
+			);
+			if (!owner || !owner.name || skill.name.startsWith(`${owner.name}:`)) {
+				return skill;
+			}
+			return {
+				...skill,
+				name: `${owner.name}:${skill.name}`,
+				slashName: `${owner.name}:${skill.slashName}`,
+				aliases: [...(skill.aliases ?? []), skill.name],
+			};
+		});
+
+		// Claude Code plugin commands (commands/*.md) become user-invocable
+		// skills: /plugin:command or /command, never advertised to the model.
+		skills.push(...(await loadPluginCommands(enabledPlugins)));
+
+		// Log diagnostics to transcript for visibility.
+		for (const diag of diagnostics) {
+			this.emit({
+				type: "token",
+				token: `[Skill warning] ${diag.code}: ${diag.message}`,
+			});
+		}
+
+		// All loaded skills are user-invocable via /<skill-name>; only the ones
+		// not flagged disable-model-invocation are advertised to the model.
+		this.loadedSkills = skills;
+		const visible = skills.filter((s) => !s.disableModelInvocation);
+		// Only skip catalog injection when there are no skills at all.
+		// Plugin commands (disableModelInvocation) still need read_skill.
+
+		// Inject a compact catalog (name + description), not full bodies. The
+		// model loads a skill's full instructions on demand via read_skill.
+		this.skillsContext = formatSkillCatalog(visible);
+
+		// Register the read_skill tool bound to ALL loaded skills so the model can
+		// pull full bodies for any skill, including plugin commands (disableModelInvocation).
+		const readSkill = createReadSkillTool(skills);
+		if (readSkill) this.addTool(readSkill);
+	}
+
+	/** Reset skill/prompt injection flags/state (used by reload(), a full re-init). */
+	resetSkillsAndPrompts(): void {
+		this.loadedSkills = [];
+		this.skillsContext = null;
+		this.skillsInjected = false;
+		this.loadedPrompts = [];
+		this.promptsInjected = false;
+	}
+
+	/** Reset just the injected-context flags (used by reset(), a lighter session reset). */
+	resetInjectedContext(): void {
+		this.skillsContext = null;
+		this.skillsInjected = false;
+		this.promptsInjected = false;
+	}
+
+	// ── Prompts ──────────────────────────────────────────────────────────
+
+	getLoadedPrompts(): Prompt[] {
+		return this.loadedPrompts;
+	}
+
+	/**
+	 * Discover prompts/.logician/prompts markdown files and register them as
+	 * direct, user-typed /<name> slash commands. Unlike skills, prompts are
+	 * never surfaced to the model — they exist only to be typed by the user.
+	 */
+	async injectPrompts(): Promise<void> {
+		if (this.promptsInjected) return;
+		this.promptsInjected = true;
+
+		if (!this.projectTrusted) return;
+		const promptDirs = getProjectPromptDirs(this.cwd);
+		if (!promptDirs.length) return;
+		this.loadedPrompts = await loadPrompts(promptDirs);
+	}
+
+	// ── Status snapshot (getState()/init()) ─────────────────────────────
+
+	getStatus(): ToolRouterStatus {
+		return {
+			mcpServerCount: this.mcpServerCount,
+			mcpToolCount: this.mcpToolNames.size,
+			mcpErrors: this.mcpErrors,
+			mcpLoaded: this.mcpLoaded,
+			mcpLoading: this.isMcpLoading(),
+			skillsInjected: this.skillsInjected,
+			skillsVisible: !!this.skillsContext,
+			loadedSkills: this.loadedSkills,
+			enabledPluginRoots: this.enabledPluginRoots,
+		};
+	}
+}
+
+/**
+ * Claude Code plugin commands (commands/*.md) become user-invocable skills:
+ * /plugin:command or /command, never advertised to the model.
+ */
+async function loadPluginCommands(
+	plugins: Array<{ name: string; installPath: string }>,
+): Promise<Skill[]> {
+	const out: Skill[] = [];
+	for (const { name: pluginName, installPath } of plugins) {
+		const dir = path.join(installPath, "commands");
+		let entries: string[];
+		try {
+			entries = await readdirAsync(dir);
+		} catch (err: unknown) {
+			// Most plugins have no commands/ dir at all — only a real error
+			// (permissions, etc.) is worth surfacing.
+			if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+				console.error(
+					`[plugins] failed to read commands dir for "${pluginName}":`,
+					err,
+				);
+			}
+			continue;
+		}
+		for (const entry of entries) {
+			if (!entry.endsWith(".md")) continue;
+			const filePath = path.join(dir, entry);
+			let raw: string;
+			try {
+				raw = await readFileAsync(filePath, "utf8");
+			} catch (err: unknown) {
+				// The file was just listed by readdir, so a read failure here
+				// is a genuine anomaly (permissions, race), not "expected".
+				console.error(`[plugins] failed to read command file "${filePath}":`, err);
+				continue;
+			}
+			const parsed = parseFrontmatter<Record<string, unknown>>(raw);
+			const frontmatter = parsed.ok ? parsed.value.frontmatter : {};
+			const body = parsed.ok ? parsed.value.body : raw;
+			const cmdName = entry.slice(0, -3);
+			const description =
+				typeof frontmatter.description === "string" &&
+				frontmatter.description.trim()
+					? frontmatter.description
+					: `Command from the ${pluginName} plugin.`;
+			out.push({
+				name: `${pluginName}:${cmdName}`,
+				displayName: cmdName,
+				description,
+				content: body,
+				filePath,
+				baseDir: dir,
+				slashName: `${pluginName}:${cmdName}`,
+				disableModelInvocation: true,
+				aliases: [cmdName],
+				source: "path",
+			});
+		}
+	}
+	return out;
+}

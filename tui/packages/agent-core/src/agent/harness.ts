@@ -12,7 +12,6 @@ import {
 import { randomUUID } from "node:crypto";
 import type { LLMBackend } from "./backend.ts";
 import {
-	createSteeringInterruptReason,
 	runAgentLoop,
 	runAgentLoopContinue,
 	type RunAgentLoopConfig,
@@ -48,6 +47,8 @@ import {
 } from "./harness/branching.ts";
 import { runCompaction, shouldAutoCompact } from "./harness/compaction.ts";
 import { cycleModel as cycleModelHelper, resolveModelUrl } from "./harness/model.ts";
+import * as queueOps from "./harness/queue-ops.ts";
+import type { QueueOpsDeps } from "./harness/queue-ops.ts";
 import {
 	emitSessionStart as emitSessionStartHelper,
 	emitSessionEnd as emitSessionEndHelper,
@@ -84,11 +85,7 @@ import {
 	type HarnessPhase,
 } from "./runtime-state.ts";
 import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
-import {
-	assertIdlePhase,
-	assertPhaseTransition,
-	HarnessBusyError,
-} from "./harness/phase.ts";
+import { assertIdlePhase, assertPhaseTransition } from "./harness/phase.ts";
 import type {
 	AbortResult,
 	AgentHarnessOptions,
@@ -972,86 +969,66 @@ export class AgentHarness {
 		return registry;
 	}
 
-	// ── Queue operations ───────────────────────────────────────────────────
+	// ── Queue operations (see harness/queue-ops.ts) ─────────────────────────
+
+	private get queueOpsDeps(): QueueOpsDeps {
+		return {
+			msgManager: this.msgManager,
+			getPhase: () => this._phase,
+			getNextTurnQueue: () => this._nextTurnQueue,
+			setNextTurnQueue: (queue) => {
+				this._nextTurnQueue = queue;
+			},
+			emitQueueChange: () => this.emitQueueChange(),
+		};
+	}
 
 	steer(text: string): void {
-		if (this._phase !== "turn")
-			throw new HarnessBusyError("steer", this._phase, "turn");
-		this.msgManager.queue.steering(text);
-		this.emitQueueChange();
-		if (this.config.steeringInterrupt) {
-			this.abortController?.abort(createSteeringInterruptReason());
-		}
+		queueOps.steer(
+			this.queueOpsDeps,
+			text,
+			this.config.steeringInterrupt,
+			this.abortController,
+		);
 	}
 
 	/** Promote queued steering into the immediate next turn and interrupt the current step. */
 	flushSteeringNow(): number {
-		if (this._phase !== "turn")
-			throw new HarnessBusyError("flush steering", this._phase, "turn");
-		const queued = this.msgManager.queue.dequeueSteering();
-		if (queued.length === 0) return 0;
-		this._nextTurnQueue.push(...queued.map((message) => message.content));
-		this.emitQueueChange();
-		this.abortController?.abort(createSteeringInterruptReason());
-		return queued.length;
+		return queueOps.flushSteeringNow(this.queueOpsDeps, this.abortController);
 	}
 
 	dropQueuedMessage(displayIndex: number): string | undefined {
-		const queue = this.msgManager.queue;
-		const displayed = [...queue.getSteering(), ...queue.getFollowUp()];
-		const target = displayed[displayIndex];
-		if (!target) return undefined;
-		const removed = queue.remove(target.id);
-		if (removed) this.emitQueueChange();
-		return removed?.content;
+		return queueOps.dropQueuedMessage(this.queueOpsDeps, displayIndex);
 	}
 
 	followUp(text: string): void {
-		this.msgManager.queue.followUp(text);
-		this.emitQueueChange();
+		queueOps.followUp(this.queueOpsDeps, text);
 	}
 
 	nextTurn(text: string): void {
-		this._nextTurnQueue.push(text);
-		this.emitQueueChange();
+		queueOps.nextTurn(this.queueOpsDeps, text);
 	}
 
 	async abort(): Promise<AbortResult> {
-		const q = this.msgManager.queue;
-		const clearedSteering = q.getSteering().map((m) => m.content);
-		const clearedFollowUp = q.getFollowUp().map((m) => m.content);
-		const interruptedOperationId = this._activeOperationId;
-		this.runtime = { ...this.runtime, abortRequested: true };
-		if (interruptedOperationId) {
-			this._session?.appendJournalEvent({
-				type: "operation_interrupted",
-				operationId: interruptedOperationId,
-				status: "aborted",
-			});
-		}
-		this.abortController?.abort();
-		this.msgManager.queue.clear();
-		this.emitQueueChange();
-		await this.waitForIdle();
-		this.emitToSubscribers({
-			type: "abort",
-			clearedSteering,
-			clearedFollowUp,
-			clearedNextTurn: [],
+		return queueOps.abort({
+			...this.queueOpsDeps,
+			abortController: this.abortController,
+			activeOperationId: this._activeOperationId,
+			session: this._session,
+			setAbortRequested: () => {
+				this.runtime = { ...this.runtime, abortRequested: true };
+			},
+			waitForIdle: () => this.waitForIdle(),
+			emitAbortEvent: (result) =>
+				this.emitToSubscribers({ type: "abort", ...result }),
+			emitSessionEnd: (reason) => this.emitSessionEnd(reason),
 		});
-		await this.emitSessionEnd("abort");
-		return { clearedSteering, clearedFollowUp, clearedNextTurn: [] };
 	}
 
 	// ── Queue state ────────────────────────────────────────────────────────
 
 	getQueues(): HarnessQueues {
-		const q = this.msgManager.queue;
-		return {
-			steering: q.getSteering().map((m) => m.content),
-			followUp: q.getFollowUp().map((m) => m.content),
-			nextTurn: [...this._nextTurnQueue],
-		};
+		return queueOps.getQueues(this.queueOpsDeps);
 	}
 
 	setOnQueueChange(cb: (queues: HarnessQueues) => void): void {
@@ -1059,15 +1036,11 @@ export class AgentHarness {
 	}
 
 	clearQueues(): HarnessQueues {
-		const cleared = this.getQueues();
-		this.msgManager.queue.clear();
-		this._nextTurnQueue = [];
-		this.emitQueueChange();
-		return cleared;
+		return queueOps.clearQueues(this.queueOpsDeps);
 	}
 
 	private emitQueueChange(): void {
-		const queues = this.getQueues();
+		const queues = queueOps.getQueues(this.queueOpsDeps);
 		this.onQueueChange?.(queues);
 		this.emitToSubscribers({
 			type: "queue_update",
@@ -1086,19 +1059,19 @@ export class AgentHarness {
 	}
 
 	setSteeringMode(mode: QueueMode): void {
-		this.msgManager.setMode("steering", mode as DeliveryMode);
+		queueOps.setSteeringMode(this.queueOpsDeps, mode);
 	}
 
 	getSteeringMode(): QueueMode {
-		return this.msgManager.getMode("steering") as QueueMode;
+		return queueOps.getSteeringMode(this.queueOpsDeps);
 	}
 
 	setFollowUpMode(mode: QueueMode): void {
-		this.msgManager.setMode("followUp", mode as DeliveryMode);
+		queueOps.setFollowUpMode(this.queueOpsDeps, mode);
 	}
 
 	getFollowUpMode(): QueueMode {
-		return this.msgManager.getMode("followUp") as QueueMode;
+		return queueOps.getFollowUpMode(this.queueOpsDeps);
 	}
 
 	// ── Plugin lifecycle hooks ─────────────────────────────────────────────
