@@ -316,6 +316,17 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				label: "Stopped",
 				text: `reached the ${event.limit}-turn safety limit without finishing (${event.iterations} turns).`,
 			};
+		case "guard_triggered":
+			// Route through the generic "notice" event so Transcript.handleNotice
+			// attaches it as an inline chunk on the turn that's still in progress
+			// — right where the nudge happened — instead of a separate trailing
+			// system message.
+			return {
+				type: "notice",
+				level: "warn",
+				label: `Guard: ${event.guard}`,
+				text: event.message,
+			};
 		default:
 			return null;
 	}

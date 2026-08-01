@@ -208,7 +208,12 @@ export type AgentEventBody =
 	  }
 	| {
 			type: "guard_triggered";
-			guard: "duplicate" | "failure" | "continuation_nudge";
+			guard:
+				| "duplicate"
+				| "failure"
+				| "continuation_nudge"
+				| "acceptance_retry"
+				| "reflection_retry";
 			message: string;
 			toolName?: string;
 			iteration: number;

@@ -553,11 +553,22 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 								: n.level === "warn"
 									? theme.fgRaw("warning")
 									: theme.fgRaw("systemText");
-						renderedLines.push(
-							padToWidth(
-								`${color}${icon} NOTICE${RESET} ${BOLD}${n.label}${RESET}  ${color}${n.text}${RESET}`,
-							),
+						const prefix = `${icon} NOTICE ${n.label}  `;
+						const prefixWidth = visibleWidth(prefix);
+						const textLines = wrapText(
+							n.text,
+							Math.max(1, contentWidth - prefixWidth),
 						);
+						const indent = " ".repeat(prefixWidth);
+						textLines.forEach((line, index) => {
+							const lead =
+								index === 0
+									? `${color}${icon} NOTICE${RESET} ${BOLD}${n.label}${RESET}  `
+									: indent;
+							renderedLines.push(
+								padToWidth(`${lead}${color}${line}${RESET}`),
+							);
+						});
 					}
 				}
 				flushContent();

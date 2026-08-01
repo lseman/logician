@@ -1,6 +1,34 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
+import { join } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+
+// Load ~/.logician/.env so MCP servers can resolve env-var placeholders.
+(function loadHomeEnv(): void {
+	const home = process.env.HOME || "/";
+	const envPath = join(home, ".logician", ".env");
+	if (!existsSync(envPath)) return;
+	const lines = readFileSync(envPath, "utf8").split("\n");
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const eq = trimmed.indexOf("=");
+		if (eq < 1) continue;
+		const key = trimmed.slice(0, eq);
+		let value = trimmed.slice(eq + 1);
+		// Strip surrounding quotes (single or double)
+		if (
+			value.length >= 2 &&
+			((value[0] === '"' && value.at(-1) === '"') ||
+				(value[0] === "'" && value.at(-1) === "'"))
+		) {
+			value = value.slice(1, -1);
+		}
+		process.env[key] = value;
+	}
+})();
+
 import { getAvailableThemes, initTheme, theme } from "./terminal/theme.ts";
 import { AgentCoreBridge } from "@logician/coding-agent/application";
 import {

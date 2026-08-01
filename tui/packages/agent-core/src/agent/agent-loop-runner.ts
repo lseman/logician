@@ -1173,12 +1173,16 @@ async function runAgentLoopInTaskScope(
 				iteration < maxIterations
 			) {
 				acceptanceFinalizationTurns++;
-				pendingMessages = [{
-					role: "user",
-					content:
-						`Acceptance validation failed (attempt ${acceptanceFinalizationTurns}/${resolved.maxFinalizationTurns ?? 3}). ` +
-						"Review the acceptance contract, fix any unmet criteria or verification failures, and finish with a valid acceptance-report block.",
-				}];
+				const acceptanceRetryContent =
+					`[continuation-nudge:acceptance-retry] Acceptance validation failed (attempt ${acceptanceFinalizationTurns}/${resolved.maxFinalizationTurns ?? 3}). ` +
+					"Review the acceptance contract, fix any unmet criteria or verification failures, and finish with a valid acceptance-report block.";
+				pendingMessages = [{ role: "user", content: acceptanceRetryContent }];
+				await emit({
+					type: "guard_triggered",
+					guard: "acceptance_retry",
+					message: acceptanceRetryContent,
+					iteration,
+				});
 				continue;
 			} else {
 				acceptanceReported = true;
@@ -1219,12 +1223,16 @@ async function runAgentLoopInTaskScope(
 			reflectionCount++;
 			if (reflection.result.needsMoreWork) {
 				const suggested = reflection.result.suggestedSteps.join("; ");
-				pendingMessages = [{
-					role: "user",
-					content: reflection.result.issues.length > 0
-						? `Reflection found issues: ${reflection.result.issues.join(", ")}. Address them and continue working.`
-						: `Reflection found the task incomplete. ${suggested ? `Suggested next steps: ${suggested}. ` : ""}Continue working.`,
-				}];
+				const reflectionRetryContent = reflection.result.issues.length > 0
+					? `[continuation-nudge:reflection-retry] Reflection found issues: ${reflection.result.issues.join(", ")}. Address them and continue working.`
+					: `[continuation-nudge:reflection-retry] Reflection found the task incomplete. ${suggested ? `Suggested next steps: ${suggested}. ` : ""}Continue working.`;
+				pendingMessages = [{ role: "user", content: reflectionRetryContent }];
+				await emit({
+					type: "guard_triggered",
+					guard: "reflection_retry",
+					message: reflectionRetryContent,
+					iteration,
+				});
 				continue;
 			}
 		}

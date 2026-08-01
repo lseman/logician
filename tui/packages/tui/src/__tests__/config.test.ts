@@ -199,6 +199,7 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 		continuationEnabled: true,
 		duplicateGuardEnabled: true,
 		postEditDiagnostics: true,
+		thinkingLoopDetectionEnabled: true,
 	});
 	assert.equal(w.length, 0);
 });
