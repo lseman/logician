@@ -65,6 +65,7 @@ const KNOWN_KEYS = new Set([
 	"memoryDbPath",
 	"memoryViewer",
 	"memoryViewerPort",
+	"transcriptMaxTurns",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -317,6 +318,9 @@ export function validateConfig(
 	}
 	if (obj.memoryViewerPort !== undefined) {
 		cfg.memoryViewerPort = configNumber(obj.memoryViewerPort);
+	}
+	if (obj.transcriptMaxTurns !== undefined) {
+		cfg.transcriptMaxTurns = configNumber(obj.transcriptMaxTurns);
 	}
 
 	for (const [key, minimum, inclusive] of [
@@ -727,6 +731,8 @@ export interface LogicianTuiConfig {
 	memoryViewer?: boolean;
 	/** Port for the memory viewer dashboard (default: 3200). */
 	memoryViewerPort?: number;
+	/** Maximum number of turns to keep in the transcript (default: 200). */
+	transcriptMaxTurns?: number;
 }
 
 export function loadLogicianConfig(

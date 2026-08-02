@@ -469,7 +469,11 @@ void test("skill activations render as a compact dedicated status line", () => {
 
 	assert.match(
 		output,
-		/✦ NOTICE Skills  TypeScript Debugging · matched “TypeScript error”/,
+		/✦ NOTICE Skills/,
+	);
+	assert.match(
+		output,
+		/   TypeScript Debugging · matched .*TypeScript error.*/,
 	);
 	assert.doesNotMatch(output, /Skills:/);
 	assert.match(rendered, /\x1b\[/);
@@ -511,7 +515,8 @@ void test("assistant chunks render as distinct semantic blocks", () => {
 	]);
 	const output = plain(display.render(100).join("\n"));
 	assert.match(output, /REASONING.*Compare both execution paths/);
-	assert.match(output, /⚠ NOTICE Context  Near limit/);
+	assert.match(output, /⚠ NOTICE Context/);
+	assert.match(output, /   Near limit/);
 	assert.match(output, /RESPONSE/);
 	assert.match(output, /The minimal path delegates continuation/);
 });

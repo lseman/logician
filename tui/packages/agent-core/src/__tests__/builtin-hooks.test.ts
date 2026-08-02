@@ -13,6 +13,10 @@ import {
 	rewriteCommandWithRtk,
 } from "../hooks/builtin/builtin-hooks.ts";
 
+// Capture the real PATH once at module load so cleanup always restores the
+// true original value, even when other tests mutate process.env.PATH.
+const __originalPath = process.env.PATH;
+
 function withFakeRtk<T>(body: () => T): T {
 	const root = mkdtempSync(path.join(tmpdir(), "logician-rtk-"));
 	const executable = path.join(root, "rtk");
@@ -30,13 +34,12 @@ esac
 		"utf8",
 	);
 	chmodSync(executable, 0o755);
-	const previousPath = process.env.PATH;
-	process.env.PATH = `${root}${path.delimiter}${previousPath ?? ""}`;
+	process.env.PATH = `${root}${path.delimiter}${__originalPath ?? ""}`;
 	try {
 		return body();
 	} finally {
-		if (previousPath === undefined) delete process.env.PATH;
-		else process.env.PATH = previousPath;
+		if (__originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = __originalPath;
 		rmSync(root, { recursive: true, force: true });
 	}
 }

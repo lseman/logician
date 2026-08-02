@@ -7,7 +7,7 @@ export interface InkTUIViewProps {
 	/**
 	 * A TUI (with onComponentsFrame set) constructed by the host app (e.g.
 	 * LogicianTUI), with its components already wired (setScrollableComponent,
-	 * setInputBarComponent, addChild, ...). This component does not construct
+	 * setInputBarComponent, ...). This component does not construct
 	 * TUI itself so the host retains full control over construction order and
 	 * component wiring.
 	 */
@@ -43,5 +43,5 @@ export function InkTUIView({ tui, frame, renderTick }: InkTUIViewProps): React.R
 	}, [stdin, setRawMode, isRawModeSupported, tui]);
 
 	if (!frame) return null;
-	return <AppShell frame={frame} renderTick={renderTick} />;
+	return <AppShell tui={tui} frame={frame} renderTick={renderTick} />;
 }

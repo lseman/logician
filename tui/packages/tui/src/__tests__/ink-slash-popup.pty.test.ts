@@ -10,12 +10,8 @@ import { createPtyAppHome } from "../testing/pty-app-home.ts";
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
 
-// Regression test: AppShell's own aboveInput-selector visibility filter
-// initially checked only overlay-stack entry.hidden, missing the
-// component's own `visible` flag (SlashPopup.visible, toggled by
-// show()/hide()) that frame-layout.ts's isEntryVisible already accounted
-// for. That left the slash popup invisible while still being fully
-// functional (and, before Ink, visible under the old renderer).
+// Regression test: the aboveInput selector must honor both stack-level
+// visibility and SlashPopup.visible, which show()/hide() toggles.
 void test("shows the slash command popup while typing a command", async () => {
 	const result = await runInPty({
 		command: "bun",

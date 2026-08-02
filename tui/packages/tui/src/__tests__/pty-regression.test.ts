@@ -6,6 +6,7 @@ import { InputBar } from "../input/input-bar.ts";
 import {
 	type Component,
 	normalizeKeyboardInput,
+	type Scrollable,
 	TUI,
 } from "../terminal/core.ts";
 import {
@@ -73,6 +74,40 @@ void test("Kitty Ctrl+O and Ctrl+C reports reach TUI keybindings", () => {
 	assert.equal(cancelled, 1);
 });
 
+void test("mouse tool clicks request an Ink render", async () => {
+	let clicks = 0;
+	let frames = 0;
+	const transcript: Scrollable = {
+		scrollOffset: 0,
+		isAtBottom: true,
+		render: () => ["tool"],
+		scroll: () => {},
+		scrollToBottom: () => {},
+		setViewportHeight: () => {},
+		handleMouse: () => {
+			clicks++;
+			return true;
+		},
+	};
+	const tui = new TUI();
+	tui.setScrollableComponent(transcript);
+	tui.setViewportHeight(10);
+	tui.setOnComponentsFrame(() => {
+		frames++;
+	});
+	tui.start();
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	const framesBeforeClick = frames;
+
+	// SGR left-button press at terminal column 5, row 1.
+	tui.feedInput("\x1b[<0;5;1M");
+	await new Promise((resolve) => setTimeout(resolve, 25));
+	tui.stop();
+
+	assert.equal(clicks, 1);
+	assert.ok(frames > framesBeforeClick, "handled click must invalidate the Ink host");
+});
+
 void test("Ctrl+I changes and persists the execution profile", async () => {
 	const home = createPtyAppHome();
 	const result = await runInPty({
@@ -131,7 +166,7 @@ void test("Escape clears first and cancels the active turn on second press", () 
 });
 
 void test("Escape reaches the dialog owner before the core overlay fallback", () => {
-	const tui = new TUI({} as NodeJS.WriteStream);
+	const tui = new TUI();
 	const dialog: Component & {
 		visible: boolean;
 		handleInput(data: string): { type: "close" } | null;

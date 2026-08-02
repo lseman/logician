@@ -11,11 +11,8 @@ export interface Component {
 }
 
 /**
- * The raw pieces a frame is built from, handed to an external renderer via
- * TUIOptions.onComponentsFrame instead of one pre-composited line array, so
- * a host with its own layout engine (Ink's Box/flexbox) can size the
- * transcript-vs-dock split itself instead of consuming
- * buildFixedLayoutFrame's manual height arithmetic.
+ * The component model handed to Ink for each render. Ink sizes the
+ * transcript-vs-dock split instead of consuming a pre-composited line array.
  */
 export interface TUIComponentsFrame {
 	termWidth: number;
@@ -33,22 +30,12 @@ export interface TUIComponentsFrame {
 	showHardwareCursor: boolean;
 }
 
-export interface TUIOptions {
-	/**
-	 * Receive the raw component references each render cycle. Ink lays them
-	 * out with its own engine (Box/flexbox) and owns diffing/painting/resize;
-	 * TUI only runs input routing / scroll / overlay state.
-	 */
-	onComponentsFrame?: (frame: TUIComponentsFrame) => void;
-}
-
 export interface Focusable {
 	focused: boolean;
 }
 
 export interface Scrollable extends Component {
 	scrollOffset: number;
-	totalHeight: number;
 	scroll(delta: number): void;
 	scrollToBottom(): void;
 	setViewportHeight(height: number): void;
@@ -262,25 +249,10 @@ export function clampLineToWidth(text: string, width: number): string {
 // ── Container ────────────────────────────────────────────────────────────────
 
 export class Container implements Component {
-	children: Component[] = [];
+	private readonly children: Component[] = [];
 
 	addChild(component: Component): void {
 		this.children.push(component);
-	}
-
-	removeChild(component: Component): void {
-		const idx = this.children.indexOf(component);
-		if (idx >= 0) this.children.splice(idx, 1);
-	}
-
-	clear(): void {
-		this.children = [];
-	}
-
-	invalidate(): void {
-		for (const child of this.children) {
-			child.invalidate?.();
-		}
 	}
 
 	render(width: number): string[] {
@@ -301,7 +273,7 @@ export class Container implements Component {
 
 // ── TUI — Input routing, scroll state, overlay stack ────────────────────────
 
-export class TUI extends Container {
+export class TUI {
 	private renderRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderAt = 0;
@@ -320,7 +292,6 @@ export class TUI extends Container {
 	private inputListeners: Set<
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
-	private _scrollOffsetInternal: number = 0;
 	private _viewportHeight: number = 0;
 	private scrollableComponent: Scrollable | null = null;
 	private inputBarComponent: Component | null = null;
@@ -330,10 +301,8 @@ export class TUI extends Container {
 	private _showHardwareCursor = true;
 	private onComponentsFrame?: (frame: TUIComponentsFrame) => void;
 
-	constructor(_outStream: NodeJS.WriteStream, showCursor = true, options?: TUIOptions) {
-		super();
+	constructor(showCursor = true) {
 		this._showHardwareCursor = showCursor;
-		this.onComponentsFrame = options?.onComponentsFrame;
 	}
 
 	/**
@@ -354,10 +323,6 @@ export class TUI extends Container {
 	setShowHardwareCursor(enabled: boolean): void {
 		this._showHardwareCursor = enabled;
 		this.requestRender();
-	}
-
-	get scrollOffset(): number {
-		return this._scrollOffsetInternal;
 	}
 
 	get isAtBottom(): boolean {
@@ -536,7 +501,10 @@ export class TUI extends Container {
 				else this.scrollUp(-net * TUI.WHEEL_STEP);
 				return;
 			}
-			if (clicked && consumed === data.length) return;
+			if (clicked && consumed === data.length) {
+				this.requestRender();
+				return;
+			}
 			if (consumed === data.length) return; // mouse-only chunk, nothing to scroll
 		}
 
@@ -671,6 +639,12 @@ export class TUI extends Container {
 
 	setScrollableComponent(comp: Scrollable | null): void {
 		this.scrollableComponent = comp;
+	}
+
+	/** Keep input hit-testing and transcript slicing on the same Ink-owned viewport. */
+	setViewportHeight(height: number): void {
+		this._viewportHeight = Math.max(0, height);
+		this.scrollableComponent?.setViewportHeight(this._viewportHeight);
 	}
 
 	setInputBarComponent(comp: Component | null): void {

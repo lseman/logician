@@ -294,7 +294,7 @@ export class LogicianTUI {
 		});
 
 		// Create the TUI with hardware cursor support
-		this.tui = new TUI(process.stdout, true);
+		this.tui = new TUI(true);
 		this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
 		this.todoBar.setOnInvalidate(() => this.tui.requestRender());
 		this.workSurface.setOnInvalidate(() => this.tui.requestRender());

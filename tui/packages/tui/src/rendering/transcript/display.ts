@@ -44,7 +44,6 @@ interface TranscriptDisplayOptions {
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
-	public readonly rendersViewport = true;
 	private cachedWidth: number = 0;
 	private cachedLines: string[] | null = null;
 	// Not private: read by the extracted render-*.ts functions through the
@@ -306,10 +305,6 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		return this._scrollOffset;
 	}
 
-	get totalHeight(): number {
-		return this._totalHeight;
-	}
-
 	get isAtBottom(): boolean {
 		return this._atBottom;
 	}
@@ -532,9 +527,10 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 						const n = chunk.notice;
 						if (n.label === "Skills" && n.level === "info") {
 							renderedLines.push(
-								padToWidth(
-									`${theme.fg("active", "✦ NOTICE")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
-								),
+								padToWidth(`${theme.fg("active", "✦ NOTICE")} ${BOLD}${theme.fg("accent", "Skills")}${RESET}`),
+							);
+							renderedLines.push(
+								padToWidth(`   ${theme.fg("systemText", n.text)}${RESET}`),
 							);
 							continue;
 						}
@@ -546,28 +542,25 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 									: n.level === "success"
 										? "✓"
 										: "●";
-						const color =
+						const iconColor =
 							n.level === "error"
 								? theme.fgRaw("error")
 								: n.level === "warn"
 									? theme.fgRaw("warning")
 									: theme.fgRaw("systemText");
-						const prefix = `${icon} NOTICE ${n.label}  `;
-						const prefixWidth = visibleWidth(prefix);
+						// Header: icon + NOTICE (warning/error), label (accent)
+						const header = `${iconColor}${icon}${RESET}${iconColor} NOTICE ${RESET}${theme.fg("accent", n.label)}${RESET}`;
+						renderedLines.push(padToWidth(header));
+						// Wrapped lines: small fixed indent
 						const textLines = wrapText(
 							n.text,
-							Math.max(1, contentWidth - prefixWidth),
+							contentWidth - 5,
 						);
-						const indent = " ".repeat(prefixWidth);
-						textLines.forEach((line, index) => {
-							const lead =
-								index === 0
-									? `${color}${icon} NOTICE${RESET} ${BOLD}${n.label}${RESET}  `
-									: indent;
+						for (const line of textLines) {
 							renderedLines.push(
-								padToWidth(`${lead}${color}${line}${RESET}`),
+								padToWidth(`   ${iconColor}${line}${RESET}`),
 							);
-						});
+						}
 					}
 				}
 				flushContent();

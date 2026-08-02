@@ -1,15 +1,10 @@
 import { Box } from "ink";
 import React, { useMemo } from "react";
-import type { Component, OverlayOptions } from "../../terminal/core.ts";
-import { isEntryVisible } from "../../terminal/frame-layout.ts";
 import { RawLines } from "./raw-lines.tsx";
-
-interface OverlayEntry {
-	component: Component;
-	options?: OverlayOptions;
-	hidden: boolean;
-	focusOrder: number;
-}
+import {
+	isEntryVisible,
+	type OverlayEntry,
+} from "../overlay-visibility.ts";
 
 export interface OverlayLayerProps {
 	overlayStack: readonly OverlayEntry[];

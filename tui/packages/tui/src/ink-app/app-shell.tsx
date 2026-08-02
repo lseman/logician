@@ -1,16 +1,18 @@
 import { Box, Text, useCursor } from "ink";
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import {
 	CURSOR_MARKER,
 	clampLineToWidth,
 	visibleWidth,
 	type TUIComponentsFrame,
+	type TUI,
 } from "../terminal/core.ts";
-import { isEntryVisible } from "../terminal/frame-layout.ts";
 import { RawLines } from "./components/raw-lines.tsx";
 import { OverlayLayer } from "./components/overlay-layer.tsx";
+import { isEntryVisible } from "./overlay-visibility.ts";
 
 export interface AppShellProps {
+	tui: TUI;
 	frame: TUIComponentsFrame;
 	/** Bumped by the host app whenever any underlying component's content changes. */
 	renderTick: number;
@@ -23,7 +25,7 @@ export interface AppShellProps {
  * split; TUI (terminal/core.ts) only supplies the components and their
  * input/scroll/overlay state.
  */
-export function AppShell({ frame, renderTick }: AppShellProps): React.ReactElement {
+export function AppShell({ tui, frame, renderTick }: AppShellProps): React.ReactElement {
 	const {
 		termWidth,
 		termHeight,
@@ -41,8 +43,7 @@ export function AppShell({ frame, renderTick }: AppShellProps): React.ReactEleme
 		const lines = fixedAboveInputComponent?.render(width) ?? [];
 		// Interactive selectors (settings, model picker, ...) participate in the
 		// fixed composer stack instead of floating over transcript content --
-		// same contract as frame-layout.ts's renderAboveInputOverlays. Only the
-		// most recently focused one owns the region.
+		// Only the most recently focused selector owns the region.
 		const selectorEntries = overlayStack.filter(
 			(e) => e.options?.anchor === "aboveInput" && isEntryVisible(e),
 		);
@@ -75,9 +76,9 @@ export function AppShell({ frame, renderTick }: AppShellProps): React.ReactEleme
 		1 + aboveInputLines.length + inputLines.length + 1 + statusLines.length;
 	const transcriptHeight = Math.max(1, termHeight - dockHeight);
 
-	useEffect(() => {
-		scrollableComponent?.setViewportHeight(transcriptHeight);
-	}, [scrollableComponent, transcriptHeight]);
+	// Transcript rendering and mouse hit-testing both need the current Ink
+	// layout during this frame, not one commit later.
+	tui.setViewportHeight(transcriptHeight);
 
 	const transcriptLines = useMemo(
 		() => scrollableComponent?.render(width) ?? Array(transcriptHeight).fill(" ".repeat(width)),

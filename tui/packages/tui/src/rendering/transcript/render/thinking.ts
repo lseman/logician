@@ -107,17 +107,17 @@ export function renderThinkingCodeBlock(
 	if (!code) return;
 
 	let highlightedCode = code;
-	let detectedLanguage = language;
 	try {
-		const highlighted = language ? highlight(code, language) : highlightAuto(code);
-		highlightedCode = highlighted.value;
-		detectedLanguage = highlighted.language || language;
+		highlightedCode = language ? highlight(code, language).value : highlightAuto(code).value;
 	} catch {
 		// Unknown or incomplete languages remain readable as plain code.
 	}
 
 	const codeLines = highlightedCode.split("\n");
-	const label = detectedLanguage || "code";
+	// Auto-detection on short/ambiguous snippets guesses confidently wrong
+	// languages (e.g. prose labeled "arduino"), so only trust an explicitly
+	// declared fence language — otherwise show the generic "code" label.
+	const label = language || "code";
 	const meta = `${label} · ${codeLines.length} line${codeLines.length === 1 ? "" : "s"}${streaming ? " · streaming" : ""}`;
 	const border = theme.fgRaw("separator");
 	lines.push(`${border}  ┌─${RESET} ${theme.fg("mdCode", meta)}${RESET}`);
