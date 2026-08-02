@@ -285,9 +285,9 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 	};
 
 	const out: string[] = [];
-	out.push(border("+", "-", "+", "+"));
+	out.push(border("┌", "─", "┬", "┐"));
 	out.push(...renderTableRow(header, widths, headerColor, true));
-	out.push(border("+", "-", "+", "+"));
+	out.push(border("├", "─", "┼", "┤"));
 	for (let ri = 0; ri < rows.length; ri++) {
 		const row = rows[ri];
 		const normalized = row.slice(0, columnCount);
@@ -295,7 +295,7 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 		const rowColor_ = ri % 2 === 0 ? rowColor : altRowColor;
 		out.push(...renderTableRow(normalized, widths, rowColor_, false));
 	}
-	out.push(border("+", "-", "+", "+"));
+	out.push(border("└", "─", "┴", "┘"));
 	return out;
 }
 
@@ -318,9 +318,9 @@ export function renderTableRow(
 			return ` ${styled}${padding} `;
 		});
 		lines.push(
-			`${borderColor}|${RESET}${renderedCells.join(
-				`${borderColor}|${RESET}`,
-			)}${borderColor}|${RESET}`,
+			`${borderColor}│${RESET}${renderedCells.join(
+				`${borderColor}│${RESET}`,
+			)}${borderColor}│${RESET}`,
 		);
 	}
 
