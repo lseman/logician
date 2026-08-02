@@ -43,7 +43,13 @@ try:
     drain(master, output, 0.8)
     for action in config.get("actions", []):
         drain(master, output, int(action.get("afterMs", 0)) / 1000)
-        os.write(master, action.get("send", "").encode("utf-8"))
+        if "resize" in action:
+            new_columns = int(action["resize"].get("columns", columns))
+            new_rows = int(action["resize"].get("rows", rows))
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", new_rows, new_columns, 0, 0))
+            os.kill(pid, signal.SIGWINCH)
+        else:
+            os.write(master, action.get("send", "").encode("utf-8"))
     remaining = max(0.1, timeout - (time.monotonic() - start))
     drain(master, output, min(remaining, 1.0))
 finally:

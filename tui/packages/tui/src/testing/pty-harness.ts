@@ -5,7 +5,10 @@ import { renderTerminalScreen, type TerminalScreen } from "./terminal-screen.ts"
 
 export interface PtyAction {
 	afterMs: number;
-	send: string;
+	/** Bytes to write to the PTY's stdin. Mutually exclusive with `resize`. */
+	send?: string;
+	/** Resize the PTY (TIOCSWINSZ) and deliver SIGWINCH. Mutually exclusive with `send`. */
+	resize?: { columns?: number; rows?: number };
 }
 
 export interface PtyRunOptions {
