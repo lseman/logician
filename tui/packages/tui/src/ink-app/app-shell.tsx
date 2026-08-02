@@ -108,7 +108,12 @@ export function AppShell({ frame, renderTick }: AppShellProps): React.ReactEleme
 	if (markerInInput && showHardwareCursor) {
 		setCursorPosition({
 			x: markerInInput.col,
-			y: transcriptHeight + 1 + aboveInputLines.length + markerInInput.row,
+			// Ink's cursor suffix measures y from the implicit line immediately
+			// after its output. Fullscreen output has no trailing newline, so its
+			// public cursor coordinate is one greater than our zero-based layout
+			// row. Passing the layout row directly parks the terminal cursor on
+			// the line above the marked input position.
+			y: transcriptHeight + 1 + aboveInputLines.length + markerInInput.row + 1,
 		});
 	} else {
 		setCursorPosition(undefined);

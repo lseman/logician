@@ -89,7 +89,6 @@
         "@logician/coding-agent": "0.2.0",
         "ink": "^7.1.1",
         "react": "^19.2.8",
-        "react-devtools-core": "^7.0.1",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",

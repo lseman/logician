@@ -259,25 +259,6 @@ export function clampLineToWidth(text: string, width: number): string {
 	return result;
 }
 
-// ── Spacer ───────────────────────────────────────────────────────────────────
-
-export class Spacer implements Component {
-	private height: number;
-
-	constructor(height = 1) {
-		this.height = height;
-	}
-
-	render(width: number): string[] {
-		const line = " ".repeat(width);
-		return Array(this.height).fill(line);
-	}
-
-	invalidate(): void {
-		/* no-op */
-	}
-}
-
 // ── Container ────────────────────────────────────────────────────────────────
 
 export class Container implements Component {
