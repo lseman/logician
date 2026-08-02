@@ -5,6 +5,7 @@
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 import type { InkOverlayModelProvider } from "../overlays/ink-overlay-model.ts";
+import stringWidth from "string-width";
 
 export interface InkTextSpan {
 	text: string;
@@ -148,94 +149,15 @@ export function ansi256ToHex(index: number): string {
 
 // Simple visible width calculator (handles ANSI escape codes)
 export function visibleWidth(text: string): number {
-	let width = 0;
-	let i = 0;
-	while (i < text.length) {
-		const ch = text[i];
-		if (ch === "\x1b") {
-			const next = text[i + 1];
-			// CSI: ESC [ ... final byte (0x40-0x7E)
-			if (next === "[") {
-				i += 2;
-				while (i < text.length) {
-					const fc = text.charCodeAt(i);
-					if (fc >= 0x40 && fc <= 0x7e) break;
-					i++;
-				}
-				i++;
-				continue;
-			}
-			// OSC: ESC ] ... BEL (0x07) or ST (ESC \)
-			if (next === "]") {
-				i += 2;
-				while (i < text.length) {
-					if (text[i] === "\x07") break;
-					if (text[i] === "\x1b" && text[i + 1] === "\\") {
-						i++;
-						break;
-					}
-					i++;
-				}
-				i++;
-				if (text[i - 1] === "\x1b") i++; // skip ST backslash
-				continue;
-			}
-			// APC: ESC _ ... BEL (0x07) or ST (ESC \)
-			if (next === "_") {
-				i += 2;
-				while (i < text.length) {
-					if (text[i] === "\x07") break;
-					if (text[i] === "\x1b" && text[i + 1] === "\\") {
-						i++;
-						break;
-					}
-					i++;
-				}
-				i++;
-				if (text[i - 1] === "\x1b") i++; // skip ST backslash
-				continue;
-			}
-			// Lone ESC — pass through, count as zero width
-			i++;
-			continue;
-		}
-		// Drop other C0 control bytes (NUL, etc.) — zero width
-		const code = ch.charCodeAt(0);
-		if (code < 0x20) {
-			i++;
-			continue;
-		}
-		// Walk by code point so surrogate pairs (astral chars, most emoji) count
-		// as one character instead of two, which would otherwise desync width
-		// bookkeeping (e.g. table column padding) from what the terminal draws.
-		const codePoint = text.codePointAt(i);
-		const char = codePoint === undefined ? ch : String.fromCodePoint(codePoint);
-		if (codePoint !== undefined && codePoint >= 0xe000 && codePoint <= 0xf8ff) {
-			i += char.length;
-			continue;
-		}
-		width +=
-			codePoint !== undefined &&
-			codePoint >= 0x1100 &&
-			(codePoint <= 0x115f ||
-				codePoint === 0x2329 ||
-				codePoint === 0x232a ||
-				(codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
-				(codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
-				(codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-				(codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
-				(codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
-				(codePoint >= 0xff00 && codePoint <= 0xff60) ||
-				(codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
-				(codePoint >= 0x20000 && codePoint <= 0x2fffd) ||
-				(codePoint >= 0x30000 && codePoint <= 0x3fffd) ||
-				// Emoji outside the CJK ranges above are still typically wide.
-				(codePoint >= 0x1f000 && codePoint <= 0x1ffff))
-				? 2
-				: 1;
-		i += char.length;
-	}
-	return width;
+	return stringWidth(text.replace(/[\ue000-\uf8ff]/gu, ""));
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Return the complete grapheme cluster beginning at a UTF-16 offset. */
+export function graphemeAt(text: string, offset: number): string {
+	const segment = graphemeSegmenter.segment(text.slice(offset))[Symbol.iterator]().next();
+	return segment.done ? "" : segment.value.segment;
 }
 
 // Clamp a line to a visible width, preserving ALL escape sequences (CSI colors,
@@ -308,11 +230,12 @@ export function clampLineToWidth(text: string, width: number): string {
 			i++;
 			continue;
 		}
-		const w = visibleWidth(ch);
+		const grapheme = graphemeAt(text, i);
+		const w = visibleWidth(grapheme);
 		if (visible + w > width) break;
-		result += ch;
+		result += grapheme;
 		visible += w;
-		i++;
+		i += grapheme.length;
 	}
 	return result;
 }

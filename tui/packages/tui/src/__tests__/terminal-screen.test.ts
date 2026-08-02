@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderTerminalScreen } from "../testing/terminal-screen.ts";
+import { clampLineToWidth, visibleWidth } from "../terminal/core.ts";
 
 void test("terminal screen applies absolute cursor updates and erases", () => {
 	const screen = renderTerminalScreen(
@@ -33,4 +34,11 @@ void test("terminal screen tracks wide cells and cursor visibility", () => {
 
 	assert.equal(screen.line(0), "界aXc");
 	assert.equal(screen.cursor().visible, false);
+});
+
+void test("width helpers keep emoji grapheme clusters intact", () => {
+	assert.equal(visibleWidth("✅"), 2);
+	assert.equal(visibleWidth("👨‍👩‍👧‍👦"), 2);
+	assert.equal(clampLineToWidth("ab✅cd", 4), "ab✅");
+	assert.equal(clampLineToWidth("ab👨‍👩‍👧‍👦cd", 3), "ab");
 });
