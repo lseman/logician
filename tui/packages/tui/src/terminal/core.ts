@@ -1016,7 +1016,7 @@ export class TUI extends Container {
 	}
 }
 
-function isImageLine(line: string): boolean {
+export function isImageLine(line: string): boolean {
 	return line.includes("\x1b_G") || line.includes("\x1b]1337;");
 }
 

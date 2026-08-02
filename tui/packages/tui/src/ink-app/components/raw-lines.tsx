@@ -1,5 +1,6 @@
 import { Text } from "ink";
 import React from "react";
+import { isImageLine } from "../../terminal/core.ts";
 
 /**
  * Bridge for the ~16k lines of existing Component.render(width): string[]
@@ -16,8 +17,13 @@ export function RawLines({ lines }: { lines: readonly string[] }): React.ReactEl
 	return (
 		<>
 			{lines.map((line, index) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: rows are positional, not identity-bearing
-				<Text key={index}>{line || " "}</Text>
+				<Text
+					// biome-ignore lint/suspicious/noArrayIndexKey: rows are positional, not identity-bearing
+					key={index}
+					wrap={isImageLine(line) ? "truncate-end" : "wrap"}
+				>
+					{line || " "}
+				</Text>
 			))}
 		</>
 	);
