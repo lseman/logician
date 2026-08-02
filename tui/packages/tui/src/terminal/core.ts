@@ -308,6 +308,7 @@ import { Buffer } from "node:buffer";
 // Keyboard comes from process.stdin in raw mode (pi-style). The bridge child's
 // events arrive on its own stdout pipe, so stdin is free for the keyboard.
 import process from "node:process";
+import { buildFixedLayoutFrame } from "./frame-layout.ts";
 
 // ── TUI — Differential rendering ────────────────────────────────────────────
 
@@ -737,132 +738,17 @@ export class TUI extends Container {
 		const termWidth = Math.max(1, process.stdout.columns || 80);
 		const termHeight = Math.max(1, process.stdout.rows || 24);
 
-		let inputLines: string[];
-		try {
-			inputLines = this.inputBarComponent
-				? this.inputBarComponent.render(termWidth)
-				: [" ".repeat(termWidth)];
-		} catch (_e: unknown) {
-			inputLines = [" ".repeat(termWidth)];
-		}
-
-		let statusLines: string[];
-		try {
-			statusLines = this.fixedBottomComponent
-				? this.fixedBottomComponent.render(termWidth)
-				: [" ".repeat(termWidth)];
-		} catch (_e: unknown) {
-			statusLines = [" ".repeat(termWidth)];
-		}
-
-		const inputHeight = Math.max(1, inputLines.length);
-		const statusHeight = Math.max(1, statusLines.length);
-
-		// Optional pinned region above the input bar (todo list). Zero lines = hidden.
-		let aboveInputLines: string[] = [];
-		try {
-			aboveInputLines = this.fixedAboveInputComponent
-				? this.fixedAboveInputComponent.render(termWidth)
-				: [];
-		} catch (_e: unknown) {
-			aboveInputLines = [];
-		}
-		// Interactive selectors participate in the fixed composer stack instead
-		// of floating over transcript content. This matches pinned TODO/queue
-		// behavior and keeps the selector physically attached to the input.
-		aboveInputLines.push(...this.renderAboveInputOverlays(termWidth));
-		const aboveInputHeight = aboveInputLines.length;
-
-
-		// Fixed layout: transcript + divider + [pinned + divider] + input bar + divider + status footer.
-		const transcriptHeight = Math.max(
-			1,
-			termHeight -
-				2 -
-				aboveInputHeight -
-				inputHeight -
-				statusHeight,
-		);
-		const transcriptWidth = termWidth;
-
-		// Build output lines with fixed layout
-		const lines: string[] = [];
-
-		// 1. Transcript area (scrollable)
-		if (this.scrollableComponent) {
-			this.scrollableComponent.setViewportHeight(transcriptHeight);
-			this._viewportHeight = transcriptHeight;
-			let transcriptLines: string[];
-			try {
-				transcriptLines = this.scrollableComponent.render(transcriptWidth);
-			} catch (_e: unknown) {
-				// Component render failed — fill with safe placeholder
-				transcriptLines = Array(transcriptHeight)
-					.fill(0)
-					.map(() => " ".repeat(transcriptWidth));
-			}
-			const totalLines = Math.max(
-				transcriptLines.length,
-				this.scrollableComponent.totalHeight,
-			);
-			const maxScroll = Math.max(0, totalLines - transcriptHeight);
-			// Use scrollable component's scrollOffset (set during render by scrollToBottom)
-			const comp = this.scrollableComponent as Scrollable;
-			const scrollOff = Math.min(maxScroll, Math.max(0, comp.scrollOffset));
-			const visibleLines = (comp as unknown as { rendersViewport?: boolean })
-				.rendersViewport
-				? transcriptLines
-				: transcriptLines.slice(scrollOff, scrollOff + transcriptHeight);
-
-			// Pad transcript to fill its slot
-			while (lines.length < transcriptHeight) {
-				lines.push(
-					lines.length < visibleLines.length
-						? visibleLines[lines.length]
-						: " ".repeat(termWidth),
-				);
-			}
-		} else {
-			// Fill transcript area with spaces
-			for (let i = 0; i < transcriptHeight; i++) {
-				lines.push(" ".repeat(termWidth));
-			}
-		}
-
-		// 2. Separator line above input
-		lines.push(`\x1b[38;5;236m${"─".repeat(termWidth)}\x1b[0m`);
-
-		// 2b. Pinned region above input (todo list), when present
-		for (let i = 0; i < aboveInputHeight; i++) {
-			lines.push(aboveInputLines[i] || " ".repeat(termWidth));
-		}
-
-
-		// 3. Input bar (fixed)
-		for (let i = 0; i < inputHeight; i++) {
-			lines.push(inputLines[i] || " ".repeat(termWidth));
-		}
-
-		// 4. Separator line below input
-		lines.push(`\x1b[38;5;236m${"─".repeat(termWidth)}\x1b[0m`);
-
-		// 5. Status bar (fixed, at bottom)
-		for (let i = 0; i < statusHeight; i++) {
-			lines.push(statusLines[i] || " ".repeat(termWidth));
-		}
-
-		// Pad to termHeight if needed
-		while (lines.length < termHeight) {
-			lines.push(" ".repeat(termWidth));
-		}
-
-		// Compose overlays (slash popup, etc.)
-		const finalLines = this.composeOverlays(
-			lines,
-			termWidth,
-			termHeight,
-			transcriptHeight,
-		);
+		const { lines: finalLines, transcriptHeight, markerRow, markerCol, fallbackRow } =
+			buildFixedLayoutFrame({
+				termWidth,
+				termHeight,
+				scrollableComponent: this.scrollableComponent,
+				inputBarComponent: this.inputBarComponent,
+				fixedBottomComponent: this.fixedBottomComponent,
+				fixedAboveInputComponent: this.fixedAboveInputComponent,
+				overlayStack: this.overlayStack,
+			});
+		if (this.scrollableComponent) this._viewportHeight = transcriptHeight;
 		const layoutFinishedAt = performance.now();
 
 		// Leave the physical last column unused: writing it can put terminals into
@@ -875,22 +761,9 @@ export class TUI extends Container {
 		let dirtyTop = Number.POSITIVE_INFINITY;
 		let dirtyBottom = -1;
 
-		// The InputBar marks the edit position with CURSOR_MARKER. Find it so we
-		// can park the hardware cursor exactly there, and strip it from output.
-		let markerRow = -1;
-		let markerCol = 0;
-
 		for (let row = 0; row < termHeight; row++) {
 			const prevLine = this.previousLines[row];
 			const newLine = row < finalLines.length ? finalLines[row] : " ".repeat(termWidth);
-			const hasMarker = newLine.includes(CURSOR_MARKER);
-
-			// Extract cursor marker position before stripping
-			if (hasMarker) {
-				const markerIdx = newLine.indexOf(CURSOR_MARKER);
-				markerRow = row;
-				markerCol = visibleWidth(newLine.slice(0, markerIdx));
-			}
 
 			// Strip CURSOR_MARKER for cell parsing
 			const cleanNew = newLine.replace(CURSOR_MARKER, "");
@@ -933,10 +806,6 @@ export class TUI extends Container {
 		// Park the hardware cursor at the input's edit position (under the
 		// visible InputBar cursor). Falls back to the input line's first column
 		// only if no marker was emitted, which keeps the cursor off the footer.
-		const fallbackRow = Math.min(
-			termHeight,
-			transcriptHeight + 2 + aboveInputHeight,
-		);
 		const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackRow;
 		const cursorCol =
 			markerRow >= 0 ? Math.min(termWidth, markerCol + 1) : 1;
@@ -997,110 +866,6 @@ export class TUI extends Container {
 
 	getLastRenderMetrics(): RendererMetrics {
 		return { ...this.lastRenderMetrics };
-	}
-
-	private composeOverlays(
-		lines: string[],
-		termWidth: number,
-		_termHeight: number,
-		transcriptHeight: number,
-	): string[] {
-		const result = [...lines];
-
-		const visibleEntries = this.overlayStack.filter((e) => {
-			if (e.options?.anchor === "aboveInput") return false;
-			if (e.hidden) return false;
-			// Also check component's visible property if it has one
-			if (
-				"visible" in e.component &&
-				typeof (e.component as { visible?: unknown }).visible === "boolean"
-			) {
-				return (e.component as { visible: boolean }).visible;
-			}
-			return true;
-		});
-
-		for (const entry of visibleEntries) {
-			const leftAligned = entry.options?.align === "left";
-			const overlayWidth = leftAligned
-				? Math.max(1, termWidth)
-				: Math.max(
-						40,
-						Math.min(
-							termWidth - 8,
-							entry.options?.maxHeight ? termWidth * 0.6 : termWidth - 8,
-						),
-					);
-			const overlayLines = entry.component.render(Math.max(1, overlayWidth));
-			const overlayHeight = Math.min(
-				overlayLines.length,
-				entry.options?.maxHeight || 999,
-			);
-
-			// Calculate row position within transcript area
-			let row = 0;
-			switch (entry.options?.anchor) {
-				case "center":
-					row = Math.max(0, Math.floor((transcriptHeight - overlayHeight) / 2));
-					break;
-				case "bottom":
-					// Flush against the bottom of the transcript area, i.e. directly
-					// above the separator + input bar.
-					row = Math.max(0, transcriptHeight - overlayHeight);
-					break;
-				default:
-					row = 0;
-					break;
-			}
-
-			// Horizontal offset: left-aligned overlays hug the left edge; otherwise
-			// center within the terminal.
-			const margin = leftAligned
-				? 0
-				: Math.max(2, Math.floor((termWidth - overlayWidth) / 2));
-
-			for (let i = 0; i < overlayHeight; i++) {
-				const idx = row + i;
-				if (idx >= 0 && idx < result.length) {
-					const srcLine = overlayLines[i] || "";
-					const srcVis = visibleWidth(srcLine);
-					// Pad with spaces, then overlay the content at the correct offset
-					const basePad = " ".repeat(margin);
-					const afterPad = " ".repeat(Math.max(0, termWidth - margin - srcVis));
-					result[idx] = basePad + srcLine + afterPad;
-				}
-			}
-		}
-
-		return result;
-	}
-
-	private renderAboveInputOverlays(termWidth: number): string[] {
-		const entries = this.overlayStack.filter((entry) => {
-			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
-			if (
-				"visible" in entry.component &&
-				typeof (entry.component as { visible?: unknown }).visible === "boolean"
-			) {
-				return (entry.component as { visible: boolean }).visible;
-			}
-			return true;
-		});
-		if (entries.length === 0) return [];
-
-		// Only the most recently focused selector owns the composer region.
-		const entry = entries.reduce((latest, candidate) =>
-			candidate.focusOrder > latest.focusOrder ? candidate : latest,
-		);
-		const width = Math.max(1, termWidth - 1);
-		const rendered = entry.component.render(width);
-		const maxHeight = entry.options?.maxHeight ?? rendered.length;
-		return rendered.slice(0, maxHeight).map((line) => {
-			const clamped = clampLineToWidth(line, width);
-			return (
-				clamped + " ".repeat(Math.max(0, termWidth - visibleWidth(clamped)))
-			);
-		});
 	}
 
 	private write(data: string): void {
