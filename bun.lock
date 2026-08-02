@@ -45,6 +45,8 @@
       "dependencies": {
         "@logician/agent-capabilities": "0.2.0",
         "@logician/agent-core": "0.2.0",
+        "@logician/memory": "0.1.0",
+        "@logician/memory-viewer": "0.0.0",
         "ignore": "^7.0.5",
       },
       "devDependencies": {
@@ -62,6 +64,13 @@
         "@types/node": "^26.1.2",
         "tsx": "^4.23.1",
         "typescript": "^6.0.3",
+      },
+    },
+    "tui/packages/memory-viewer": {
+      "name": "@logician/memory-viewer",
+      "version": "0.0.0",
+      "dependencies": {
+        "@logician/memory": "0.1.0",
       },
     },
     "tui/packages/rag": {
@@ -232,6 +241,8 @@
     "@logician/coding-agent": ["@logician/coding-agent@workspace:tui/packages/coding-agent"],
 
     "@logician/memory": ["@logician/memory@workspace:tui/packages/memory"],
+
+    "@logician/memory-viewer": ["@logician/memory-viewer@workspace:tui/packages/memory-viewer"],
 
     "@logician/rag": ["@logician/rag@workspace:tui/packages/rag"],
 

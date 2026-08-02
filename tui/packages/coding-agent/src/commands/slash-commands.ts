@@ -215,6 +215,26 @@ export function createSlashCommands(
 			},
 			(args) => String(localHandlers.memory?.(args as any) ?? ''),
 		),
+		cmd(
+			"/obs",
+			"List or search agent observations",
+			"local",
+			true,
+			{
+				category: "context",
+				argHint: "[list [type] [limit] | search <query> [limit] | stats | sessions | by-session <sid> [limit]]",
+				examples: [
+					"/obs",
+					"/obs list",
+					"/obs list file_read 20",
+					"/obs search error 10",
+					"/obs stats",
+					"/obs sessions",
+					"/obs by-session sess-abc123 50",
+				],
+			},
+			(args) => String(localHandlers.obs?.(args as any) ?? ''),
+		),
 		cmd("/compact", "Summarize older conversation history", "bridge", false, {
 			category: "context",
 		}),

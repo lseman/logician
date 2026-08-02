@@ -2,6 +2,7 @@
 
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import type { SlashCommandsCtx } from "./context.ts";
+import type { MemoryStore } from "@logician/memory";
 
 export function createLocalHandlers(
 	ctx: SlashCommandsCtx,
@@ -308,7 +309,245 @@ export function createLocalHandlers(
 			const task = raw || "Investigate the codebase and report findings";
 			ctx.bridge.spawnAgentDirectly(task);
 		},
-		// memory handler removed — structured memory system deleted
+		memory: (raw: unknown) => {
+			const store = ctx.bridge.getMemoryStore();
+			if (!store) return "Memory is not enabled. Set \"memory\": true in settings.";
+			const args = typeof raw === "string" ? raw : String(raw ?? "");
+			const trimmed = args.trim().toLowerCase();
+			const workspace = store.getCurrentWorkspace();
+			if (!trimmed) {
+				const stats = ctx.bridge.getMemoryStats();
+				return [
+					`Memory: ${stats.memoryEnabled ? "on" : "off"}`,
+					`Workspace: ${workspace || "(unset)"}`,
+					`Memories: ${stats.memoryCount}`,
+					`Sessions: ${stats.sessionCount}`,
+					`Observations: ${stats.observationCount}`,
+					stats.viewerPort ? `Viewer: :${stats.viewerPort}` : undefined,
+					"",
+					"Subcommands: list [type] | search <q> | obs <q> | stats | ws [name] | tiers | auto-tier | forget <id> | consolidate <sid> | context <sid>",
+				].filter(Boolean).join("\n");
+			}
+			const [sub, ...rest] = trimmed.split(/\s+/);
+			const subArgs = rest.join(" ");
+			switch (sub) {
+				case "list": {
+					const parts = subArgs.split(/\s+/);
+					const type = parts[0] || undefined;
+					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 20;
+					const memories = store.list({ type: (type || undefined) as any, limit });
+					if (!memories.length) return "No memories found.";
+					const items = memories.slice(0, limit).map(
+						(m) => `[${m.strength}/10] ${m.type} | ${m.createdAt.slice(0, 10)} [${m.workspace || "global"}]\n${m.content.slice(0, 200)}`,
+					);
+					return `Showing ${items.length} of ${memories.length} memories (workspace: ${workspace || "(default)"}):\n\n${items.join("\n\n---\n\n")}`;
+				}
+				case "ws": {
+					if (!subArgs) {
+						return `Current workspace: ${workspace || "(none)"}\n\nUsage: /memory ws <workspace-name>`;
+					}
+					store.setCurrentWorkspace(subArgs);
+					return `Workspace set to: ${subArgs}`;
+				}
+				case "search": {
+					const parts = subArgs.split(/\s+/);
+					const query = parts[0] || "";
+					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 10;
+					if (!query) return "Usage: /memory search <query> [limit]";
+					const result = store.recall({ search: query, limit }, { format: "markdown" });
+					return result || `No memories found matching "${query}"`;
+				}
+				case "obs":
+				case "observations": {
+					const parts = subArgs.split(/\s+/);
+					const query = parts[0] || "";
+					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 20;
+					if (!query) return "Usage: /memory obs <query> [limit]";
+					const results = store.searchObservations(query, limit);
+					if (!results.length) return `No observations found matching "${query}"`;
+					const items = results.slice(0, limit).map(
+						(r) => `[${r.observation.importance}/10] ${r.observation.type}: ${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
+					);
+					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
+				}
+				case "stats": {
+					const stats = ctx.bridge.getMemoryStats();
+					const allMemories = store.list({ limit: 1000 });
+					const workspaceMemories = store.list({ limit: 1000 });
+					const sessions = store.listSessions();
+					const workspaceSessions = store.listSessions();
+					const tierCounts = { hot: 0, warm: 0, cold: 0, archived: 0 };
+					const typeCounts: Record<string, number> = {};
+					for (const m of workspaceMemories) {
+						tierCounts[store.getWorkingMemoryTier(m.id)] =
+							(tierCounts[store.getWorkingMemoryTier(m.id)] || 0) + 1;
+						typeCounts[m.type] = (typeCounts[m.type] || 0) + 1;
+					}
+					return [
+						`Workspace: ${workspace || "(none)"}`,
+						`Memories: ${workspaceMemories.length}`,
+						`Sessions: ${workspaceSessions.length}`,
+						`Type breakdown: ${Object.entries(typeCounts).map(([t, c]) => `${t}: ${c}`).join(", ")}`,
+						`Working tiers: hot=${tierCounts.hot}, warm=${tierCounts.warm}, cold=${tierCounts.cold}, archived=${tierCounts.archived}`,
+					].join("\n");
+				}
+				case "tiers":
+				case "tier": {
+					const memories = store.list({ limit: 50 });
+					if (!memories.length) return "No memories to tier.";
+					const tiers = memories.map((m) => ({
+						id: m.id,
+						content: m.content.slice(0, 80),
+						tier: store.getWorkingMemoryTier(m.id),
+					}));
+					const lines = tiers.slice(0, 20).map(
+						(t) => `[${t.tier}] ${t.id.slice(0, 12)}… ${t.content}`,
+					);
+					return `Working memory tiers (${tiers.length} total):\n${lines.join("\n")}`;
+				}
+				case "auto-tier": {
+					const result = store.autoTierMemories();
+					const summary = Object.entries(result)
+						.map(([tier, ids]) => `  ${tier}: ${ids.length}`)
+						.join("\n");
+					return `Auto-tier complete:\n${summary}`;
+				}
+				case "forget": {
+					if (!subArgs) return "Usage: /memory forget <id>";
+					const deleted = store.remove(subArgs);
+					return deleted ? `Memory ${subArgs} deleted.` : `Memory ${subArgs} not found.`;
+				}
+				case "consolidate": {
+					if (!subArgs) return "Usage: /memory consolidate <session-id>";
+					const memories = store.consolidate(subArgs);
+					if (!memories.length) return `No observations to consolidate for session ${subArgs}.`;
+					return `Consolidated ${memories.length} memories:\n${memories.map((m) => `[${m.strength}/10] ${m.content.slice(0, 100)}`).join("\n")}`;
+				}
+				case "context": {
+					if (!subArgs) return "Usage: /memory context <session-id>";
+					const ctxParts = subArgs.split(/\s+/);
+					const sessionId = ctxParts[0];
+					const budget = ctxParts[1] ? Number(ctxParts[1]) : 4000;
+					const context = store.getContext(sessionId, budget);
+					return context || `No context for session ${sessionId}.`;
+				}
+				case "retention":
+				case "scores": {
+					const scores = store.listByRetentionScore(undefined, 20);
+					if (!scores.length) return "No memories to score.";
+					const lines = scores.map(
+						(s) => `[${s.score.toFixed(2)}] ${s.id.slice(0, 12)}… type:${s.type} strength:${s.strength}`,
+					);
+					return `Retention scores (top ${scores.length}):\n${lines.join("\n")}`;
+				}
+				default:
+					return `Unknown memory subcommand: ${sub}.\n\nUsage:\n  /memory                         Show memory stats\n  /memory list [type] [limit]     List memories\n  /memory search <query> [n]      Search memories\n  /memory obs <query> [n]         Search observations\n  /memory stats                   Detailed stats\n  /memory tiers                   Show working memory tiers\n  /memory auto-tier               Auto-classify tiers\n  /memory forget <id>             Delete memory\n  /memory consolidate <sid>       Consolidate session observations\n  /memory context <sid> [budget]  Get context for session\n  /memory retention               Show retention scores`;
+			}
+		},
+		obs: (raw: unknown) => {
+			const store = ctx.bridge.getMemoryStore();
+			if (!store) return "Memory is not enabled. Set \"memory\": true in settings.";
+			const args = typeof raw === "string" ? raw : String(raw ?? "");
+			const trimmed = args.trim().toLowerCase();
+			if (!trimmed) {
+				// Default: show recent observations summary
+				const sessions = store.listSessions();
+				const totalObs = sessions.reduce((sum, s) => sum + (s.observationCount || 0), 0);
+				const workspace = store.getCurrentWorkspace();
+				return [
+					`Observations: ${totalObs} total`,
+					`Workspace: ${workspace || "(none)"}`,
+					`Sessions: ${sessions.length}`,
+					"",
+					"Subcommands: list [type] [n] | search <q> [n] | stats | sessions | by-session <sid> [n]",
+				].filter(Boolean).join("\n");
+			}
+			const [sub, ...rest] = trimmed.split(/\s+/);
+			const subArgs = rest.join(" ");
+			switch (sub) {
+				case "list": {
+					const parts = subArgs.split(/\s+/);
+					const type = parts[0] || undefined;
+					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 50;
+					// Get all sessions and list their observations
+					const sessions = store.listSessions();
+					const allObs: any[] = [];
+					for (const session of sessions) {
+						const obs = store.listObservations(session.id, limit);
+						for (const o of obs) {
+							if (type && o.type !== type) continue;
+							allObs.push({ ...o, sessionId: session.id });
+						}
+					}
+					if (!allObs.length) return "No observations found.";
+					const items = allObs.slice(0, limit).map(
+						(o) => `[${o.importance}/10] ${o.type} | ${o.createdAt?.slice(0, 19) || o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
+					);
+					return `Showing ${items.length} of ${allObs.length} observations (type: ${type || "all"}):\n\n${items.join("\n\n---\n\n")}`;
+				}
+				case "search":
+				case "find": {
+					const parts = subArgs.split(/\s+/);
+					const query = parts[0] || "";
+					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 30;
+					if (!query) return "Usage: /obs search <query> [limit]";
+					const results = store.searchObservations(query, limit);
+					if (!results.length) return `No observations found matching "${query}"`;
+					const items = results.slice(0, limit).map(
+						(r) => `[${r.observation.importance}/10] ${r.observation.type}: ${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`, 
+					);
+					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
+				}
+				case "stats": {
+					const sessions = store.listSessions();
+					const typeCounts: Record<string, number> = {};
+					const workspaceCounts: Record<string, number> = {};
+					let totalObs = 0;
+					for (const session of sessions) {
+						const obs = store.listObservations(session.id, 1000);
+						totalObs += obs.length;
+						for (const o of obs) {
+							typeCounts[o.type] = (typeCounts[o.type] || 0) + 1;
+							const ws = o.workspace || session.workspace || "(none)";
+							workspaceCounts[ws] = (workspaceCounts[ws] || 0) + 1;
+						}
+					}
+					const typeBreakdown = Object.entries(typeCounts).map(([t, c]) => `${t}: ${c}`).join(", ");
+					const wsBreakdown = Object.entries(workspaceCounts).map(([w, c]) => `${w}: ${c}`).join(", ");
+					return [
+						`Total observations: ${totalObs}`,
+						`Sessions: ${sessions.length}`,
+						`Type breakdown: ${typeBreakdown || "none"}`,
+						`Workspace breakdown: ${wsBreakdown || "none"}`,
+					].join("\n");
+				}
+				case "sessions": {
+					const sessions = store.listSessions();
+					if (!sessions.length) return "No sessions with observations.";
+					const items = sessions.slice(0, 30).map(
+						(s) => `  ${s.id.slice(0, 12)} | ${s.observationCount} obs | ${s.workspace || "(none)"} | ${s.startedAt?.slice(0, 19) || ""}`,
+					);
+					return `Sessions (${sessions.length} total, showing ${items.length}):\n${items.join("\n")}`;
+				}
+				case "by-session":
+				case "session": {
+					if (!subArgs) return "Usage: /obs by-session <session-id> [limit]";
+					const parts = subArgs.split(/\s+/);
+					const sessionId = parts[0];
+					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 50;
+					const session = store.getSession(sessionId);
+					if (!session) return `Session ${sessionId} not found.`;
+					const obs = store.listObservations(sessionId, limit);
+					if (!obs.length) return `No observations for session ${sessionId.slice(0, 12)}`;
+					const items = obs.slice(0, limit).map(
+						(o) => `[${o.importance}/10] ${o.type} | ${o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
+					);
+					return `Observations for session ${sessionId.slice(0, 12)} (${obs.length} total, showing ${items.length}):\n\n${items.join("\n\n---\n\n")}`;
+				}
+				default:
+					return `Unknown obs subcommand: ${sub}.\n\nUsage:\n  /obs                           Show observation summary\n  /obs list [type] [n]           List observations by type\n  /obs search <query> [n]        Search observations\n  /obs stats                     Observation statistics\n  /obs sessions                  List sessions with observations\n  /obs by-session <sid> [n]      Observations for a specific session`;
+			}
+		},
 		notifications: () => {
 			const history = ctx.notifications.history();
 			if (history.length === 0) return "No notifications yet.";

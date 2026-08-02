@@ -347,6 +347,7 @@ export class LogicianTUI {
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
+			memoryEnabled: runtimeConfig.bridge.memoryEnabled ?? false,
 		});
 
 		// Setup slash commands
@@ -570,6 +571,16 @@ export class LogicianTUI {
 				`run \`logician --session ${this.currentSessionId}\` to recover this session\n`,
 			);
 		}
+	}
+
+	// ── Memory forwarding ────────────────────────────────────────────────
+
+	getMemoryStore() {
+		return this.bridge.getMemoryStore();
+	}
+
+	getMemoryStats() {
+		return this.bridge.getMemoryStats();
 	}
 
 	// ── Goal evaluation ──────────────────────────────────────────────────

@@ -38,6 +38,7 @@ interface StatusInfo {
 	promptTokens?: number;
 	completionTokens?: number;
 	rtkProxyEnabled?: boolean;
+	memoryEnabled?: boolean;
 }
 
 const DEFAULT_INFO: StatusInfo = {
@@ -160,6 +161,7 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
 		insertIfFits(this.formatRtk());
+	insertIfFits(this.formatMemory());
 
 		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {
@@ -373,6 +375,11 @@ export class StatusBar implements Component {
 	private formatRtk(): string {
 		if (!this.info.rtkProxyEnabled) return "";
 		return `${DIM}rtk${RESET} ${theme.fg("accent", "on")}`;
+	}
+
+	private formatMemory(): string {
+		if (!this.info.memoryEnabled) return "";
+		return `${DIM}memory${RESET} ${theme.fg("accent", "on")}`;
 	}
 
 	private formatExecutionProfile(): string {

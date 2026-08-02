@@ -274,7 +274,9 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 	const headerColor = theme.fgRaw("assistantText");
 	const rowColor = theme.fgRaw("assistantText");
 	const altRowColor = theme.fgRaw("dim");
-	const border = (left: string, fill: string, join: string, right: string) => {
+
+	// Frame lines use full Unicode box-drawing, colored via a single ANSI code per line
+	const frame = (left: string, fill: string, join: string, right: string) => {
 		return (
 			borderColor +
 			left +
@@ -285,17 +287,17 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 	};
 
 	const out: string[] = [];
-	out.push(border("┌", "─", "┬", "┐"));
-	out.push(...renderTableRow(header, widths, headerColor, true));
-	out.push(border("├", "─", "┼", "┤"));
+	out.push(frame("┌", "─", "┬", "┐"));
+	out.push(...renderTableRow(header, widths, headerColor, true, borderColor));
+	out.push(frame("├", "─", "┼", "┤"));
 	for (let ri = 0; ri < rows.length; ri++) {
 		const row = rows[ri];
 		const normalized = row.slice(0, columnCount);
 		while (normalized.length < columnCount) normalized.push("");
 		const rowColor_ = ri % 2 === 0 ? rowColor : altRowColor;
-		out.push(...renderTableRow(normalized, widths, rowColor_, false));
+		out.push(...renderTableRow(normalized, widths, rowColor_, false, borderColor));
 	}
-	out.push(border("└", "─", "┴", "┘"));
+	out.push(frame("└", "─", "┴", "┘"));
 	return out;
 }
 
@@ -304,24 +306,24 @@ export function renderTableRow(
 	widths: number[],
 	color: string,
 	header: boolean,
+	borderColor: string,
 ): string[] {
 	const wrappedCells = cells.map((cell, idx) => wrapPlainCell(cell, widths[idx]));
 	const rowHeight = Math.max(1, ...wrappedCells.map((cell) => cell.length));
 	const lines: string[] = [];
-	const borderColor = theme.fgRaw("borderMuted");
+	const cellColor = header ? color + BOLD : color;
+	const border = borderColor;
 
 	for (let row = 0; row < rowHeight; row++) {
-		const renderedCells = wrappedCells.map((cellLines, idx) => {
-			const raw = cellLines[row] || "";
-			const styled = renderInline(raw, header ? color + BOLD : color);
+		const parts: string[] = [];
+		for (let idx = 0; idx < widths.length; idx++) {
+			const raw = wrappedCells[idx][row] || "";
+			const styled = renderInline(raw, cellColor);
 			const padding = " ".repeat(Math.max(0, widths[idx] - visibleWidth(raw)));
-			return ` ${styled}${padding} `;
-		});
-		lines.push(
-			`${borderColor}│${RESET}${renderedCells.join(
-				`${borderColor}│${RESET}`,
-			)}${borderColor}│${RESET}`,
-		);
+			parts.push(` ${styled}${padding} `);
+		}
+		// Unicode vertical bars to match the frame — gives continuous box borders.
+		lines.push(`${border}│${parts.join("│")}${border}│`);
 	}
 
 	return lines;

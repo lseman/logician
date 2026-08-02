@@ -23,10 +23,10 @@ const _FG_OVERRIDE = "\x1b[38;2;";
 // ── Box-drawing characters ──────────────────────────────────────────────────
 
 export const BOX = {
-	topLeft: "╭",
-	topRight: "╮",
-	bottomLeft: "╰",
-	bottomRight: "╯",
+	topLeft: "┌",
+	topRight: "┐",
+	bottomLeft: "└",
+	bottomRight: "┘",
 	horiz: "─",
 	vert: "│",
 	separator: "├",
@@ -337,7 +337,7 @@ export function renderListPopupFrame(opts: ListPopupFrameOptions): string[] {
 	};
 
 	lines.push(
-		`${border}╭${"─".repeat(Math.max(0, opts.popupWidth - 2))}╮${RESET}`,
+		`${border}┌${"─".repeat(Math.max(0, opts.popupWidth - 2))}┐${RESET}`,
 	);
 
 	const subtitleText = opts.subtitle ?? "";
@@ -360,7 +360,7 @@ export function renderListPopupFrame(opts: ListPopupFrameOptions): string[] {
 	}
 	lines.push(framed(renderStatusLine(opts.hints.trim(), opts.innerWidth)));
 	lines.push(
-		`${border}╰${"─".repeat(Math.max(0, opts.popupWidth - 2))}╯${RESET}`,
+		`${border}└${"─".repeat(Math.max(0, opts.popupWidth - 2))}┘${RESET}`,
 	);
 
 	return lines;

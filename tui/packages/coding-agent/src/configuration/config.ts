@@ -61,6 +61,10 @@ const KNOWN_KEYS = new Set([
 	"cwd",
 	"truncation",
 	"autoResumeSession",
+	"memory",
+	"memoryDbPath",
+	"memoryViewer",
+	"memoryViewerPort",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -302,6 +306,18 @@ export function validateConfig(
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
 	cfg.rtkProxyEnabled = configBool(obj.rtkProxyEnabled);
+	if (obj.memory !== undefined) {
+		cfg.memory = configBool(obj.memory);
+	}
+	if (obj.memoryDbPath !== undefined) {
+		cfg.memoryDbPath = configString(obj.memoryDbPath);
+	}
+	if (obj.memoryViewer !== undefined) {
+		cfg.memoryViewer = configBool(obj.memoryViewer);
+	}
+	if (obj.memoryViewerPort !== undefined) {
+		cfg.memoryViewerPort = configNumber(obj.memoryViewerPort);
+	}
 
 	for (const [key, minimum, inclusive] of [
 		["maxRetries", 0, true],
@@ -703,6 +719,14 @@ export interface LogicianTuiConfig {
 	truncation?: TruncationConfig;
 	// Whether to auto-resume the most recent session on startup (default: true).
 	autoResumeSession?: boolean;
+	// Memory persistence settings.
+	memory?: boolean;
+	/** Absolute path to the memory SQLite database. Default: ~/.logician/memory.db */
+	memoryDbPath?: string;
+	/** Whether to start the memory viewer web dashboard on startup (default: true when memory is enabled). */
+	memoryViewer?: boolean;
+	/** Port for the memory viewer dashboard (default: 3200). */
+	memoryViewerPort?: number;
 }
 
 export function loadLogicianConfig(

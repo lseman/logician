@@ -7,8 +7,8 @@ import {
 	isValidInferenceMode,
 } from "../agent/configuration/inference-modes.ts";
 
-void test("INFERENCE_MODES has exactly 4 entries", () => {
-	assert.equal(INFERENCE_MODES.size, 4);
+void test("INFERENCE_MODES has exactly 8 entries", () => {
+	assert.equal(INFERENCE_MODES.size, 8);
 });
 
 void test("getInferenceMode returns correct params", () => {
@@ -34,19 +34,23 @@ void test("isValidInferenceMode returns correct values", () => {
 	assert.equal(isValidInferenceMode("thinking-coding"), true);
 	assert.equal(isValidInferenceMode("instruct-general"), true);
 	assert.equal(isValidInferenceMode("instruct-reasoning"), true);
+	assert.equal(isValidInferenceMode("instruct-coding"), true);
+	assert.equal(isValidInferenceMode("deterministic"), true);
+	assert.equal(isValidInferenceMode("creative"), true);
+	assert.equal(isValidInferenceMode("analytical"), true);
 	assert.equal(isValidInferenceMode("invalid"), false);
 });
 
 void test("cycleInferenceMode cycles through all modes in order", () => {
-	const modes: Array<"thinking-general" | "thinking-coding" | "instruct-general" | "instruct-reasoning"> =
-		["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+	const modes: Array<"thinking-general" | "thinking-coding" | "instruct-general" | "instruct-reasoning" | "instruct-coding" | "deterministic" | "creative" | "analytical"> =
+		["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning", "instruct-coding", "deterministic", "creative", "analytical"];
 	for (let i = 0; i < modes.length; i++) {
 		assert.equal(cycleInferenceMode(modes[i]), modes[(i + 1) % modes.length]);
 	}
 });
 
 void test("cycleInferenceMode wraps around from last to first", () => {
-	const mode = cycleInferenceMode("instruct-reasoning");
+	const mode = cycleInferenceMode("analytical");
 	assert.equal(mode, "thinking-general");
 });
 
@@ -69,4 +73,45 @@ void test("instruct-general has balanced sampling", () => {
 	assert.ok(mode);
 	assert.equal(mode.params.temperature, 0.7);
 	assert.equal(mode.params.top_p, 0.8);
+});
+
+void test("instruct-coding has low temperature and zero presence penalty", () => {
+	const mode = getInferenceMode("instruct-coding");
+	assert.ok(mode);
+	assert.equal(mode.label, "Code");
+	assert.equal(mode.thinking, false);
+	assert.equal(mode.params.temperature, 0.3);
+	assert.equal(mode.params.presence_penalty, 0.0);
+});
+
+void test("deterministic has zero temperature and top_p", () => {
+	const mode = getInferenceMode("deterministic");
+	assert.ok(mode);
+	assert.equal(mode.label, "Exact");
+	assert.equal(mode.thinking, false);
+	assert.equal(mode.params.temperature, 0.0);
+	assert.equal(mode.params.top_p, 0.0);
+	assert.equal(mode.params.top_k, 1);
+});
+
+void test("creative has ultra-high temperature", () => {
+	const mode = getInferenceMode("creative");
+	assert.ok(mode);
+	assert.equal(mode.label, "Creative");
+	assert.equal(mode.thinking, false);
+	assert.equal(mode.params.temperature, 1.3);
+	assert.equal(mode.params.top_p, 0.99);
+	assert.equal(mode.params.top_k, 40);
+	assert.equal(mode.params.presence_penalty, 2.0);
+});
+
+void test("analytical has low temperature and tight top_p", () => {
+	const mode = getInferenceMode("analytical");
+	assert.ok(mode);
+	assert.equal(mode.label, "Analyze");
+	assert.equal(mode.thinking, false);
+	assert.equal(mode.params.temperature, 0.2);
+	assert.equal(mode.params.top_p, 0.7);
+	assert.equal(mode.params.presence_penalty, 0.5);
+	assert.equal(mode.params.repetition_penalty, 1.1);
 });

@@ -1,7 +1,7 @@
 {
   "name": "@logician/memory",
   "version": "0.1.0",
-  "description": "Persistent memory for Logician agent — SQLite-backed, manual remember/recall",
+  "description": "Persistent memory for Logician agent — SQLite-backed with observation capture, synthetic compression, consolidation, and context injection.",
   "type": "module",
   "main": "src/index.ts",
   "exports": {

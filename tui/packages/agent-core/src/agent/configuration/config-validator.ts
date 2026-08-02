@@ -18,6 +18,10 @@ const VALID_INFERENCE_MODES: ReadonlySet<InferenceMode> = new Set([
 	"thinking-coding",
 	"instruct-general",
 	"instruct-reasoning",
+	"instruct-coding",
+	"deterministic",
+	"creative",
+	"analytical",
 ]);
 
 interface ValidationError {

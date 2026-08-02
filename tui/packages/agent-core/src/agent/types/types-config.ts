@@ -35,7 +35,11 @@ export type InferenceMode =
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"
-	| "instruct-reasoning";
+	| "instruct-reasoning"
+	| "instruct-coding"
+	| "deterministic"
+	| "creative"
+	| "analytical";
 
 /** Curated provider request options owned by the harness and snapshotted per turn. */
 export interface AgentHarnessStreamOptions {

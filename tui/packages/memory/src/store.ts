@@ -1,11 +1,32 @@
-// ── SQLite-backed Memory Store ───────────────────────────────────────────────
+// ── @logician/memory — SQLite-backed Store ───────────────────────────────────
+// Implements the observation→compression→memory pipeline.
+
 import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
-  MemoryEntry,
-  MemoryQuery,
+  CompressedObservation,
+  ContextBlock,
   CreateMemoryOptions,
+  DecayConfig,
+  DecayConfigInput,
+  ExportData,
+  FileContextEntry,
+  ImportData,
+  ImportResult,
+  Memory,
+  MemoryQuery,
+  MemoryRelation,
+  MemoryRelationType,
   MemoryStore,
+  MemoryType,
+  ObservationType,
+  RawObservation,
   RecallOptions,
+  RetentionScore,
+  SearchResult,
+  Session,
+  WorkingMemoryTier,
 } from "./types.js";
 
 function generateId(): string {
@@ -16,250 +37,1755 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function extractTags(content: string): string[] {
-  const hashtags = content.match(/#(\w+)/g) || [];
-  return [...new Set(hashtags.map((t) => t.slice(1)))];
+// ── Synthetic Compression (zero-LLM) ─────────────────────────────────────────
+
+function inferType(payload: unknown, hookType: string): ObservationType {
+  // post_tool_failure is always an error, regardless of payload
+  if (hookType === "post_tool_failure") return "error";
+  if (hookType === "prompt_submit") return "conversation";
+  if (hookType === "notification") return "notification";
+
+  if (typeof payload === "object" && payload !== null) {
+    const d = payload as Record<string, unknown>;
+    const name = ((d as any).tool_name || (d as any).name || "") as string;
+    const lower = name.toLowerCase();
+
+    if (lower.includes("read") || lower.includes("cat")) return "file_read";
+    if (lower.includes("write") || lower.includes("append") || lower.includes("overwrite")) return "file_write";
+    if (lower.includes("edit")) return "file_edit";
+    if (lower.includes("bash") || lower.includes("shell") || lower.includes("exec") || lower.includes("run")) return "command_run";
+    if (lower.includes("search") || lower.includes("grep")) return "search";
+    if (lower.includes("fetch") || lower.includes("curl") || lower.includes("http")) return "web_fetch";
+  }
+  return "other";
 }
 
-function assignImportance(content: string, requested?: number): number {
-  if (requested !== undefined && requested >= 1 && requested <= 10)
-    return requested;
-  const lower = content.toLowerCase();
-  if (/^fix|^bug|error|panic|crash/i.test(lower)) return 7;
-  if (/^todo|^next|future/i.test(lower)) return 4;
-  return 5;
-}
+function buildSyntheticCompression(raw: RawObservation): CompressedObservation {
+  const { id, sessionId, timestamp, hookType, raw: data } = raw;
+  const type = inferType(data, hookType);
 
-export function createMemoryStore(dbPath: string): MemoryStore {
-  const db = new Database(dbPath);
+  let title = "Observation";
+  let narrative = "";
+  const facts: string[] = [];
+  const concepts: string[] = [];
+  const files: string[] = [];
+  let importance = 5;
 
-  // Create table only — no FTS5 (Bun bundled SQLite has issues with virtual tables in exec())
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS memories (
-      id TEXT PRIMARY KEY,
-      content TEXT NOT NULL,
-      tags TEXT NOT NULL DEFAULT '[]',
-      source TEXT NOT NULL DEFAULT '',
-      session_id TEXT NOT NULL DEFAULT '',
-      importance INTEGER NOT NULL DEFAULT 5,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
+  if (typeof data === "object" && data !== null) {
+    const d = data as Record<string, unknown>;
+    const toolName = ((d as any).tool_name || (d as any).name || hookType) as string;
 
-    CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
-    CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
-    CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance DESC);
-  `);
+    // Extract file references
+    const filePatterns = [
+      /(?:file_path|path|file|filename|target_file|output_file)["']?\s*[:=]\s*["']?([^\s"'`,]+)/gi,
+      /(?:read|write|edit|open)\s+["']?([^\s"'`,]+\.[\w.]+)/gi,
+    ];
+    for (const pattern of filePatterns) {
+      let match;
+      const str = JSON.stringify(d);
+      while ((match = pattern.exec(str)) !== null) {
+        if (match[1] && match[1].includes("/")) files.push(match[1].slice(0, 300));
+      }
+    }
+
+    // Extract concepts from keywords
+    const conceptKeywords = [
+      "error", "bug", "fix", "crash", "panic", "timeout", "retry",
+      "config", "setting", "env", "environment",
+      "auth", "permission", "access", "token",
+      "database", "schema", "migration", "query", "connection",
+      "api", "endpoint", "route", "middleware", "login", "auth",
+      "test", "unit", "integration", "mock", "stub",
+      "build", "deploy", "pipeline", "ci", "cd",
+      "refactor", "optimize", "performance", "memory", "cpu",
+      "security", "vulnerability", "sanitize", "escape",
+    ];
+    const lowerStr = JSON.stringify(d).toLowerCase();
+    for (const kw of conceptKeywords) {
+      if (lowerStr.includes(kw)) concepts.push(kw);
+    }
+
+    // Build title and narrative
+    const output = (d as any).tool_output || (d as any).output || (d as any).result || "";
+    const error = (d as any).error || "";
+    const input = (d as any).tool_input || (d as any).input || (d as any).arguments || {};
+    const inputStr = typeof input === "string" ? input : JSON.stringify(input).slice(0, 500);
+
+    // For failures, error field takes precedence
+    const effectiveOutput = error || output;
+
+    if (typeof effectiveOutput === "string" && effectiveOutput.length > 0) {
+      const truncated = effectiveOutput.slice(0, 1000);
+      title = truncate(truncated, 80) || toolName;
+      narrative = `${toolName}: ${truncated.slice(0, 300)}`;
+      facts.push(truncated.slice(0, 500));
+    } else if (typeof inputStr === "string" && inputStr.length > 0) {
+      title = `${toolName}: ${inputStr.slice(0, 80)}`;
+      narrative = `${toolName}(input)`;
+      facts.push(inputStr.slice(0, 500));
+    } else {
+      title = `${toolName}`;
+      narrative = `${hookType} → ${toolName}`;
+    }
+
+    // Boost importance for errors
+    const outputStr = typeof output === "string" ? output.toLowerCase() : "";
+    const errorStr = typeof error === "string" ? error.toLowerCase() : "";
+    const combinedErr = outputStr + " " + errorStr;
+    if (/error|fail|panic|crash|exception|not found|timeout|refused/.test(combinedErr)) {
+      importance = 8;
+    } else if (/fix|patch|correct|resolve|handle/.test(combinedErr)) {
+      importance = 7;
+    }
+
+    // Add files to facts
+    const uniqueFiles = [...new Set(files)];
+    if (uniqueFiles.length > 0) {
+      facts.push(`Files: ${uniqueFiles.slice(0, 5).join(", ")}`);
+    }
+
+    // Add concepts to narrative
+    if (concepts.length > 3) {
+      facts.push(`Concepts: ${concepts.slice(0, 5).join(", ")}`);
+    }
+  } else if (typeof data === "string") {
+    title = truncate(data, 80) || hookType;
+    narrative = data.slice(0, 500);
+    facts.push(data.slice(0, 500));
+  }
+
+  // Extract concepts from narrative
+  const extractedConcepts = new Set(concepts);
+  const conceptPatterns = [
+    /#[\w]+/g,  // hashtags
+    /\b([A-Z][a-z]+(?:[A-Z][a-z]+)*\w*)\b/g,  // camelCase/PascalCase words
+  ];
+  for (const pattern of conceptPatterns) {
+    let match;
+    const str = narrative + " " + facts.join(" ");
+    while ((match = pattern.exec(str)) !== null) {
+      const word = match[0].replace(/#/g, "");
+      if (word.length >= 3 && !extractedConcepts.has(word)) {
+        extractedConcepts.add(word);
+      }
+      if (extractedConcepts.size >= 10) break;
+    }
+  }
+
+  const uniqueFiles = [...new Set(files)];
 
   return {
-    create(content: string, options?: CreateMemoryOptions): MemoryEntry {
-      const id = generateId();
-      const ts = now();
-      const tags = options?.tags ?? (options?.autoTags ? extractTags(content) : []);
-      const importance = assignImportance(content, options?.importance);
+    id,
+    sessionId,
+    timestamp,
+    type,
+    title: title.slice(0, 200),
+    narrative: narrative.slice(0, 2000),
+    facts,
+    concepts: [...extractedConcepts].slice(0, 10),
+    files: uniqueFiles,
+    importance: Math.max(1, Math.min(10, importance)),
+    consolidated: false,
+  };
+}
 
-      db.prepare(
-        `INSERT INTO memories (id, content, tags, source, session_id, importance, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        id,
-        content,
-        JSON.stringify(tags),
-        options?.source || "",
-        options?.sessionId || "",
-        importance,
-        ts,
-        ts,
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 3) + "...";
+}
+
+// ── DB Helpers ───────────────────────────────────────────────────────────────
+
+function safeParseJsonArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val.map(String);
+  if (typeof val === "string") {
+    try { return JSON.parse(val); } catch { return []; }
+  }
+  return [];
+}
+
+function safeParseJson(val: string): unknown {
+  try { return JSON.parse(val); } catch { return null; }
+}
+
+// ── Store Factory ────────────────────────────────────────────────────────────
+
+export function createMemoryStore(dbPath: string): MemoryStore {
+  const resolved = dbPath
+    .replace(/^~(?=\/|$)/, process.env.HOME || "")
+    .replace(/^~/, process.env.HOME || "");
+  mkdirSync(dirname(resolved), { recursive: true });
+  const db = new Database(resolved);
+
+  db.exec(`
+    -- Sessions: lifecycle tracking
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      project TEXT NOT NULL DEFAULT '',
+      cwd TEXT NOT NULL DEFAULT '',
+      workspace TEXT NOT NULL DEFAULT '',
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      observation_count INTEGER NOT NULL DEFAULT 0,
+      model TEXT,
+      tags TEXT NOT NULL DEFAULT '[]',
+      first_prompt TEXT,
+      summary TEXT,
+      commit_shas TEXT NOT NULL DEFAULT '[]'
+    );
+
+    -- Observations: raw + compressed
+    CREATE TABLE IF NOT EXISTS observations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      hook_type TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'other',
+      title TEXT NOT NULL DEFAULT '',
+      subtitle TEXT,
+      narrative TEXT NOT NULL DEFAULT '',
+      facts TEXT NOT NULL DEFAULT '[]',
+      concepts TEXT NOT NULL DEFAULT '[]',
+      files TEXT NOT NULL DEFAULT '[]',
+      importance INTEGER NOT NULL DEFAULT 5,
+      workspace TEXT NOT NULL DEFAULT '',
+      consolidated INTEGER NOT NULL DEFAULT 0,
+      raw_data TEXT,
+      FOREIGN KEY (session_id) REFERENCES sessions(id)
+    );
+
+    -- Memories: long-term structured knowledge
+    CREATE TABLE IF NOT EXISTS memories (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'fact',
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      concepts TEXT NOT NULL DEFAULT '[]',
+      files TEXT NOT NULL DEFAULT '[]',
+      session_ids TEXT NOT NULL DEFAULT '[]',
+      strength INTEGER NOT NULL DEFAULT 5,
+      version INTEGER NOT NULL DEFAULT 1,
+      parent_id TEXT,
+      related_ids TEXT NOT NULL DEFAULT '[]',
+      source_observation_ids TEXT NOT NULL DEFAULT '[]',
+      is_latest INTEGER NOT NULL DEFAULT 1,
+      project TEXT,
+      workspace TEXT NOT NULL DEFAULT '',
+      access_count INTEGER NOT NULL DEFAULT 0,
+      last_accessed TEXT,
+      working_tier TEXT NOT NULL DEFAULT 'cold',
+      supersedes TEXT NOT NULL DEFAULT '[]'
+    );
+
+    -- Dedup: hash-based deduplication within a time window
+    CREATE TABLE IF NOT EXISTS dedup (
+      hash TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL
+    );
+
+    -- Indices for efficient querying
+    CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
+    CREATE INDEX IF NOT EXISTS idx_observations_type ON observations(type);
+    CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_observations_importance ON observations(importance DESC);
+    CREATE INDEX IF NOT EXISTS idx_observations_narrative ON observations(narrative);
+    CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
+    CREATE INDEX IF NOT EXISTS idx_memories_strength ON memories(strength DESC);
+    CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project);
+    CREATE INDEX IF NOT EXISTS idx_memories_is_latest ON memories(is_latest);
+    CREATE INDEX IF NOT EXISTS idx_memories_working_tier ON memories(working_tier);
+    CREATE INDEX IF NOT EXISTS idx_memories_access_count ON memories(access_count DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+    CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+
+    -- Memory Relations
+    CREATE TABLE IF NOT EXISTS relations (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK(type IN ('supersedes', 'contradicts', 'related_to', 'supports', 'extends')),
+      source_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.5,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (source_id) REFERENCES memories(id),
+      FOREIGN KEY (target_id) REFERENCES memories(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_id);
+    CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(type);
+  `);
+
+  // ── Schema migrations ──────────────────────────────────────────────────
+  // Add workspace columns to existing databases that were created before
+  // the workspace scoping feature.
+  for (const table of ["sessions", "observations", "memories"]) {
+    try {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!cols.find(c => c.name === "workspace")) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN workspace TEXT NOT NULL DEFAULT ''`);
+      }
+      try { db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_workspace ON ${table}(workspace)`); } catch {}
+    } catch {}
+  }
+  // Add consolidated column to observations
+  try {
+    const obsCols = db.prepare(`PRAGMA table_info(observations)`).all() as Array<{ name: string }>;
+    if (!obsCols.find(c => c.name === "consolidated")) {
+      db.exec(`ALTER TABLE observations ADD COLUMN consolidated INTEGER NOT NULL DEFAULT 0`);
+    }
+  } catch {}
+  // Create consolidated index
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_observations_consolidated ON observations(consolidated)`); } catch {}
+
+  // ── Sessions ───────────────────────────────────────────────────────────
+
+  function createSession(id: string, data: Partial<Session>): Session {
+    const ts = now();
+    db.prepare(`
+      INSERT OR IGNORE INTO sessions (id, project, cwd, workspace, started_at, status, observation_count,
+                                      model, tags, first_prompt, summary, commit_shas)
+      VALUES (?, COALESCE(?, ''), COALESCE(?, ''), COALESCE(?, ''), ?, 'active', 0, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      data.project || "",
+      data.cwd || "",
+      data.workspace || "",
+      ts,
+      data.model || null,
+      JSON.stringify(data.tags || []),
+      data.firstPrompt || null,
+      data.summary || null,
+      JSON.stringify(data.commitShas || []),
+    );
+    return {
+      id,
+      project: data.project || "",
+      cwd: data.cwd || "",
+      workspace: data.workspace || "",
+      startedAt: ts,
+      status: "active",
+      observationCount: 0,
+      model: data.model,
+      tags: data.tags || [],
+      firstPrompt: data.firstPrompt,
+      summary: data.summary,
+      commitShas: data.commitShas || [],
+    };
+  }
+
+  function getSession(id: string): Session | null {
+    const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      project: row.project || "",
+      cwd: row.cwd || "",
+      workspace: row.workspace || "",
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      status: row.status || "active",
+      observationCount: row.observation_count || 0,
+      model: row.model,
+      tags: safeParseJsonArray(row.tags),
+      firstPrompt: row.first_prompt,
+      summary: row.summary,
+      commitShas: safeParseJsonArray(row.commit_shas),
+    };
+  }
+
+  function listSessions(query?: { status?: string; project?: string; workspace?: string }): Session[] {
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (query?.status) {
+      conditions.push("status = ?");
+      params.push(query.status);
+    }
+    if (query?.project) {
+      conditions.push("project = ?");
+      params.push(query.project);
+    }
+    if (query?.workspace) {
+      conditions.push("workspace = ?");
+      params.push(query.workspace);
+    } else if (currentWorkspace) {
+      // Default to current workspace
+      conditions.push("workspace = ?");
+      params.push(currentWorkspace);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = db.prepare(`SELECT * FROM sessions ${where} ORDER BY started_at DESC`).all(...params) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      project: r.project || "",
+      cwd: r.cwd || "",
+      workspace: r.workspace || "",
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      status: r.status || "active",
+      observationCount: r.observation_count || 0,
+      model: r.model,
+      tags: safeParseJsonArray(r.tags),
+      firstPrompt: r.first_prompt,
+      summary: r.summary,
+      commitShas: safeParseJsonArray(r.commit_shas),
+    }));
+  }
+
+  function updateSession(id: string, updates: Partial<Session>): Session | null {
+    const sets: string[] = [];
+    const params: any[] = [];
+
+    if (updates.project !== undefined) { sets.push("project = ?"); params.push(updates.project); }
+    if (updates.cwd !== undefined) { sets.push("cwd = ?"); params.push(updates.cwd); }
+    if (updates.status !== undefined) { sets.push("status = ?"); params.push(updates.status); }
+    if (updates.endedAt !== undefined) { sets.push("ended_at = ?"); params.push(updates.endedAt); }
+    if (updates.observationCount !== undefined) { sets.push("observation_count = ?"); params.push(updates.observationCount); }
+    if (updates.model !== undefined) { sets.push("model = ?"); params.push(updates.model); }
+    if (updates.tags !== undefined) { sets.push("tags = ?"); params.push(JSON.stringify(updates.tags)); }
+    if (updates.firstPrompt !== undefined) { sets.push("first_prompt = ?"); params.push(updates.firstPrompt); }
+    if (updates.summary !== undefined) { sets.push("summary = ?"); params.push(updates.summary); }
+
+    if (!sets.length) return getSession(id);
+
+    params.push(id);
+    db.prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    return getSession(id);
+  }
+
+  // ── Observations ───────────────────────────────────────────────────────
+
+  function observe(raw: RawObservation, compressed?: CompressedObservation): CompressedObservation | null {
+    const ts = now();
+    const comp = compressed || buildSyntheticCompression(raw);
+    // Derive workspace from observation data or current workspace
+    const obsWorkspace = (raw as any).workspace || currentWorkspace || "";
+
+    db.prepare(`
+      INSERT INTO observations (id, session_id, timestamp, hook_type, type, title, subtitle,
+                                narrative, facts, concepts, files, importance, workspace, raw_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      comp.id,
+      raw.sessionId,
+      raw.timestamp || ts,
+      raw.hookType,
+      comp.type,
+      comp.title,
+      comp.subtitle || null,
+      comp.narrative,
+      JSON.stringify(comp.facts),
+      JSON.stringify(comp.concepts),
+      JSON.stringify(comp.files),
+      comp.importance,
+      obsWorkspace,
+      JSON.stringify(raw.raw),
+    );
+
+    // Update session observation count
+    db.prepare(`
+      UPDATE sessions SET observation_count = observation_count + 1 WHERE id = ?
+    `).run(raw.sessionId);
+
+    // Apply sliding window cap (enforce max observations per session)
+    slidingWindowCap(raw.sessionId, 200);
+
+    return comp;
+  }
+
+  function getObservation(id: string, sessionId: string): CompressedObservation | null {
+    const row = db.prepare(
+      `SELECT * FROM observations WHERE id = ? AND session_id = ?`
+    ).get(id, sessionId) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      timestamp: row.timestamp,
+      type: row.type as ObservationType,
+      title: row.title || "",
+      subtitle: row.subtitle,
+      facts: safeParseJsonArray(row.facts),
+      narrative: row.narrative || "",
+      concepts: safeParseJsonArray(row.concepts),
+      files: safeParseJsonArray(row.files),
+      importance: row.importance ?? 5,
+      consolidated: row.consolidated === 1 || row.consolidated === true,
+    };
+  }
+
+  function listObservations(sessionId: string, limit: number = 50): CompressedObservation[] {
+    const rows = db.prepare(
+      `SELECT * FROM observations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?`
+    ).all(sessionId, limit) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      timestamp: r.timestamp,
+      type: r.type as ObservationType,
+      title: r.title || "",
+      subtitle: r.subtitle,
+      facts: safeParseJsonArray(r.facts),
+      narrative: r.narrative || "",
+      concepts: safeParseJsonArray(r.concepts),
+      files: safeParseJsonArray(r.files),
+      importance: r.importance ?? 5,
+      consolidated: r.consolidated === 1 || r.consolidated === true,
+    }));
+  }
+
+  function searchObservations(query: string, limit: number = 20): SearchResult[] {
+    const escaped = query.replace(/([%_\\])/g, "\\$1");
+    const rows = db.prepare(`
+      SELECT * FROM observations
+      WHERE narrative LIKE ? OR title LIKE ? OR concepts LIKE ?
+      ORDER BY importance DESC, timestamp DESC
+      LIMIT ?
+    `).all(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`, limit) as any[];
+
+    return rows.map((r) => ({
+      observation: {
+        id: r.id,
+        sessionId: r.session_id,
+        timestamp: r.timestamp,
+        type: r.type as ObservationType,
+        title: r.title || "",
+        subtitle: r.subtitle,
+        facts: safeParseJsonArray(r.facts),
+        narrative: r.narrative || "",
+        concepts: safeParseJsonArray(r.concepts),
+        files: safeParseJsonArray(r.files),
+        importance: r.importance ?? 5,
+        consolidated: r.consolidated === 1 || r.consolidated === true,
+      },
+      score: r.importance,
+      sessionId: r.session_id,
+    }));
+  }
+
+  // ── Memories ───────────────────────────────────────────────────────────
+
+  function create(content: string, options: CreateMemoryOptions = {}): Memory {
+    const id = generateId();
+    const ts = now();
+
+    // Auto-extract concepts from content
+    const concepts = options.concepts || extractConcepts(content);
+    const files = options.files || extractFiles(content);
+
+    // Auto-assign strength
+    const strength = options.strength ?? assignStrength(content);
+
+    // Derive workspace from options or current workspace
+    const memoryWorkspace = options.workspace || currentWorkspace || "";
+
+    db.prepare(`
+      INSERT INTO memories (id, created_at, updated_at, type, title, content,
+                            concepts, files, session_ids, strength, version,
+                            parent_id, related_ids, source_observation_ids, is_latest, project, workspace,
+                            access_count, last_accessed, working_tier)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, '[]', '[]', 1, ?, ?, 0, NULL, 'cold')
+    `).run(
+      id,
+      ts,
+      ts,
+      options.type || "fact",
+      content.slice(0, 200),
+      content,
+      JSON.stringify(concepts),
+      JSON.stringify(files),
+      JSON.stringify(options.sessionIds || []),
+      strength,
+      options.parentId || null,
+      options.project || null,
+      memoryWorkspace,
+    );
+
+    return {
+      id,
+      createdAt: ts,
+      updatedAt: ts,
+      type: options.type || "fact",
+      title: content.slice(0, 200),
+      content,
+      concepts,
+      files,
+      sessionIds: options.sessionIds || [],
+      strength,
+      version: 1,
+      parentId: options.parentId,
+      relatedIds: [],
+      sourceObservationIds: [],
+      isLatest: true,
+      project: options.project,
+      workspace: memoryWorkspace,
+    };
+  }
+
+  function get(id: string): Memory | null {
+    const row = db.prepare("SELECT * FROM memories WHERE id = ? AND is_latest = 1").get(id) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      type: row.type as MemoryType,
+      title: row.title || "",
+      content: row.content,
+      concepts: safeParseJsonArray(row.concepts),
+      files: safeParseJsonArray(row.files),
+      sessionIds: safeParseJsonArray(row.session_ids),
+      strength: row.strength ?? 5,
+      version: row.version ?? 1,
+      parentId: row.parent_id,
+      supersedes: safeParseJsonArray(row.supersedes),
+      relatedIds: safeParseJsonArray(row.related_ids),
+      sourceObservationIds: safeParseJsonArray(row.source_observation_ids),
+      isLatest: true,
+      project: row.project,
+    };
+  }
+
+  function getAny(id: string): Memory | null {
+    const row = db.prepare("SELECT * FROM memories WHERE id = ?").get(id) as any;
+    if (!row) return null;
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      type: row.type as MemoryType,
+      title: row.title || "",
+      content: row.content,
+      concepts: safeParseJsonArray(row.concepts),
+      files: safeParseJsonArray(row.files),
+      sessionIds: safeParseJsonArray(row.session_ids),
+      strength: row.strength ?? 5,
+      version: row.version ?? 1,
+      parentId: row.parent_id,
+      supersedes: safeParseJsonArray(row.supersedes),
+      relatedIds: safeParseJsonArray(row.related_ids),
+      sourceObservationIds: safeParseJsonArray(row.source_observation_ids),
+      isLatest: row.is_latest === 1,
+      project: row.project,
+    };
+  }
+
+  function rowToMemory(row: any): Memory {
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      type: row.type as MemoryType,
+      title: row.title || "",
+      content: row.content,
+      concepts: safeParseJsonArray(row.concepts),
+      files: safeParseJsonArray(row.files),
+      sessionIds: safeParseJsonArray(row.session_ids),
+      strength: row.strength ?? 5,
+      version: row.version ?? 1,
+      parentId: row.parent_id,
+      supersedes: safeParseJsonArray(row.supersedes),
+      relatedIds: safeParseJsonArray(row.related_ids),
+      sourceObservationIds: safeParseJsonArray(row.source_observation_ids),
+      isLatest: row.is_latest === 1 || row.is_latest === true,
+      project: row.project,
+      workspace: row.workspace || "",
+    };
+  }
+
+  // ── Dedup ──────────────────────────────────────────────────────────────
+
+  const dedupWindowMs = 5 * 60 * 1000; // 5 minutes
+
+  function computeDedupHash(sessionId: string, toolName: string, toolInput: unknown): string {
+    const inputStr = typeof toolInput === "string" ? toolInput : JSON.stringify(toolInput ?? "").slice(0, 500);
+    const raw = `${sessionId}:${toolName}:${inputStr}`;
+    // Simple hash: use node:crypto if available, otherwise fallback
+    try {
+      const { createHash } = require("node:crypto") as typeof import("node:crypto");
+      return createHash("sha256").update(raw).digest("hex").slice(0, 16);
+    } catch {
+      // Fallback: simple string hash
+      let hash = 0;
+      for (let i = 0; i < raw.length; i++) {
+        const char = raw.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      return Math.abs(hash).toString(36);
+    }
+  }
+
+  function dedupCheck(sessionId: string, toolName: string, toolInput: unknown): boolean {
+    const hash = computeDedupHash(sessionId, toolName, toolInput);
+    const row = db.prepare("SELECT created_at FROM dedup WHERE hash = ?").get(hash) as { created_at: string } | undefined;
+    if (!row) return false;
+    const age = Date.now() - new Date(row.created_at).getTime();
+    return age < dedupWindowMs;
+  }
+
+  function dedupRecord(sessionId: string, toolName: string, toolInput: unknown): void {
+    const hash = computeDedupHash(sessionId, toolName, toolInput);
+    db.prepare("INSERT OR IGNORE INTO dedup (hash, created_at) VALUES (?, ?)").run(hash, now());
+    // Clean up old entries
+    db.prepare("DELETE FROM dedup WHERE created_at < ?").run(new Date(Date.now() - dedupWindowMs * 2).toISOString());
+  }
+
+  // ── Sliding Window ─────────────────────────────────────────────────────
+
+  function slidingWindowCap(sessionId: string, cap: number = 200): number {
+    const excess = db.prepare(
+      "SELECT COUNT(*) as cnt FROM observations WHERE session_id = ? AND id NOT IN (SELECT id FROM observations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?)"
+    ).get(sessionId, sessionId, cap) as { cnt: number };
+    if (!excess || excess.cnt <= 0) return 0;
+
+    db.prepare(`
+      DELETE FROM observations WHERE session_id = ? AND id NOT IN (
+        SELECT id FROM observations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?
+      )
+    `).run(sessionId, sessionId, cap);
+
+    return excess.cnt;
+  }
+
+  // ── Access Tracker ─────────────────────────────────────────────────────
+
+  function trackAccess(entityId: string): void {
+    db.prepare(`
+      UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?
+    `).run(now(), entityId);
+  }
+
+  function getAccessStats(entityId: string): { lastAccessed: string; accessCount: number } | null {
+    const row = db.prepare(
+      "SELECT last_accessed, access_count FROM memories WHERE id = ?"
+    ).get(entityId) as { last_accessed: string; access_count: number } | undefined;
+    if (!row) return null;
+    return {
+      lastAccessed: row.last_accessed || "",
+      accessCount: row.access_count || 0,
+    };
+  }
+
+  // ── Working Memory Tiers ───────────────────────────────────────────────
+
+  function getWorkingMemoryTier(entityId: string): WorkingMemoryTier {
+    const row = db.prepare("SELECT working_tier FROM memories WHERE id = ?").get(entityId) as { working_tier: string } | undefined;
+    return (row?.working_tier as WorkingMemoryTier) || "cold";
+  }
+
+  function setWorkingMemoryTier(entityId: string, tier: WorkingMemoryTier): void {
+    db.prepare("UPDATE memories SET working_tier = ? WHERE id = ?").run(tier, entityId);
+  }
+
+  function autoTierMemories(): Record<string, WorkingMemoryTier> {
+    const tiered: Record<string, WorkingMemoryTier> = {};
+    const nowMs = Date.now();
+    const oneHour = 60 * 60 * 1000;
+    const oneDay = 24 * oneHour;
+
+    const rows = db.prepare(
+      "SELECT id, last_accessed FROM memories WHERE is_latest = 1 AND last_accessed IS NOT NULL"
+    ).all() as { id: string; last_accessed: string }[];
+
+    for (const row of rows) {
+      const accessMs = new Date(row.last_accessed).getTime();
+      const age = nowMs - accessMs;
+      let tier: WorkingMemoryTier;
+      if (age < oneHour) tier = "hot";
+      else if (age < oneDay) tier = "warm";
+      else tier = "cold";
+
+      db.prepare("UPDATE memories SET working_tier = ? WHERE id = ?").run(tier, row.id);
+      tiered[row.id] = tier;
+    }
+
+    // Mark memories with no access as archived
+    db.prepare("UPDATE memories SET working_tier = 'archived' WHERE is_latest = 1 AND last_accessed IS NULL").run();
+
+    return tiered;
+  }
+
+  // ── Auto-Forget ────────────────────────────────────────────────────────
+
+  interface AutoForgetResult {
+    deleted: number;
+    details: string[];
+  }
+
+  function autoForget(ttlMs: number = 30 * 24 * 60 * 60 * 1000, minImportance: number = 3, maxDeletes: number = 100): AutoForgetResult {
+    const cutoff = new Date(Date.now() - ttlMs).toISOString();
+    const result: AutoForgetResult = { deleted: 0, details: [] };
+
+    // Find old, low-importance observations
+    const oldObs = db.prepare(
+      "SELECT id, session_id, importance, timestamp FROM observations WHERE timestamp < ? AND importance < ? LIMIT ?"
+    ).all(cutoff, minImportance, maxDeletes) as { id: string; session_id: string; importance: number; timestamp: string }[];
+
+    for (const obs of oldObs) {
+      db.prepare("DELETE FROM observations WHERE id = ?").run(obs.id);
+      result.deleted++;
+      result.details.push(`Deleted obs ${obs.id.slice(0, 8)} from session ${obs.session_id.slice(0, 8)} (${obs.importance}/10)`);
+    }
+
+    return result;
+  }
+
+  function list(query: MemoryQuery = {}): Memory[] {
+    // Default to current workspace if not specified
+    const workspace = query.workspace ?? currentWorkspace;
+
+    // Simple path: no concept/session filter
+    if (!query.concepts?.length && !query.sessionId) {
+      const conditions: string[] = [];
+      const params: any[] = [];
+
+      if (workspace) {
+        conditions.push("workspace = ?");
+        params.push(workspace);
+      }
+
+      if (query.search) {
+        const escaped = query.search.replace(/([%_\\])/g, "\\$1");
+        conditions.push("(title LIKE ? OR content LIKE ? OR concepts LIKE ?)");
+        params.push(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`);
+      }
+
+      if (query.type) {
+        conditions.push("type = ?");
+        params.push(query.type);
+      }
+
+      if (query.project) {
+        conditions.push("project = ?");
+        params.push(query.project);
+      }
+
+      if (query.minStrength !== undefined) {
+        conditions.push("strength >= ?");
+        params.push(query.minStrength);
+      }
+
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const limit = query.limit ?? 10;
+
+      const sql = `SELECT * FROM memories ${where} ORDER BY strength DESC, created_at DESC LIMIT ?`;
+      return db.prepare(sql).all(...params, limit).map(rowToMemory);
+    }
+
+    // Complex path: concept AND / session filtering using subqueries
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (workspace) {
+      conditions.push("m.workspace = ?");
+      params.push(workspace);
+    }
+
+    if (query.search) {
+      const escaped = query.search.replace(/([%_\\])/g, "\\$1");
+      conditions.push("(m.title LIKE ? OR m.content LIKE ? OR m.concepts LIKE ?)");
+      params.push(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`);
+    }
+
+    if (query.type) {
+      conditions.push("m.type = ?");
+      params.push(query.type);
+    }
+
+    if (query.project) {
+      conditions.push("m.project = ?");
+      params.push(query.project);
+    }
+
+    if (query.minStrength !== undefined) {
+      conditions.push("m.strength >= ?");
+      params.push(query.minStrength);
+    }
+
+    const baseWhere = conditions.length ? `${conditions.join(" AND ")}` : "1=1";
+
+    // Subquery for concept AND filtering: all concepts must match
+    const conceptSub = query.concepts?.length
+      ? `(SELECT COUNT(DISTINCT je.value) FROM json_each(m.concepts) je WHERE je.value IN (${Array(query.concepts!.length).fill("?").join(", ")})) >= ${query.concepts!.length}`
+      : "1=1";
+
+    // Subquery for session matching
+    const sessionSub = query.sessionId
+      ? `(SELECT COUNT(*) FROM json_each(m.session_ids) je WHERE je.value = ?) >= 1`
+      : "1=1";
+
+    // Add params for subqueries
+    if (query.concepts?.length) {
+      for (const c of query.concepts!) params.push(c);
+    }
+    if (query.sessionId) {
+      params.push(query.sessionId);
+    }
+
+    const limit = query.limit ?? 10;
+
+    const sql = `
+      SELECT m.* FROM memories m
+      WHERE ${baseWhere}
+        AND ${conceptSub}
+        AND ${sessionSub}
+      ORDER BY m.strength DESC, m.created_at DESC
+      LIMIT ?
+    `;
+    params.push(limit);
+
+    return db.prepare(sql).all(...params).map(rowToMemory);
+  }
+
+  function deleteEntry(id: string): boolean {
+    // Only delete if still latest (prevent double-delete)
+    const result = db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ? AND is_latest = 1").run(id);
+    return result.changes > 0;
+  }
+
+  function update(
+    id: string,
+    updates: Partial<Pick<Memory, "content" | "concepts" | "strength" | "title">>,
+  ): Memory | null {
+    const sets: string[] = [];
+    const params: any[] = [];
+
+    if (updates.content !== undefined) { sets.push("content = ?"); params.push(updates.content); }
+    if (updates.title !== undefined) { sets.push("title = ?"); params.push(updates.title); }
+    if (updates.concepts !== undefined) { sets.push("concepts = ?"); params.push(JSON.stringify(updates.concepts)); }
+    if (updates.strength !== undefined) { sets.push("strength = ?"); params.push(updates.strength); }
+
+    if (!sets.length) return get(id);
+
+    sets.push("updated_at = ?");
+    params.push(now());
+    params.push(id);
+
+    db.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(...params);
+    return get(id);
+  }
+
+  function recall(query: MemoryQuery, options: RecallOptions = {}): string {
+    const memories = list(query);
+    if (!memories.length) return "";
+
+    const format = options.format || "text";
+    const template = options.template || "{{title}}: {{content}}";
+
+    if (format === "markdown") {
+      return memories
+        .map((m) => `## ${m.title} [${m.strength}/10]\n\n${m.content}\n\n${m.concepts.length ? " Concepts: " + m.concepts.join(", ") : ""}`)
+        .join("\n\n---\n\n");
+    }
+
+    if (format === "system-prompt") {
+      return memories
+        .map((m) => `## ${m.type} [${m.strength}/10]\n\n${m.content}`)
+        .join("\n\n");
+    }
+
+    // text
+    return memories
+      .map((m) => template
+        .replace("{{content}}", m.content)
+        .replace("{{title}}", m.title)
+        .replace("{{strength}}", String(m.strength)))
+      .join("\n\n");
+  }
+
+  // ── Consolidation ──────────────────────────────────────────────────────
+
+  function consolidate(sessionId: string): Memory[] {
+    // Get only unconsolidated observations
+    const rows = db.prepare(
+      `SELECT * FROM observations WHERE session_id = ? AND consolidated = 0 ORDER BY timestamp DESC LIMIT 100`
+    ).all(sessionId) as any[];
+
+    if (rows.length < 3) return [];
+
+    const observations = rows.map((r) => ({
+      id: r.id,
+      sessionId: r.session_id,
+      timestamp: r.timestamp,
+      type: r.type as ObservationType,
+      title: r.title || "",
+      subtitle: r.subtitle,
+      facts: safeParseJsonArray(r.facts),
+      narrative: r.narrative || "",
+      concepts: safeParseJsonArray(r.concepts),
+      files: safeParseJsonArray(r.files),
+      importance: r.importance ?? 5,
+      consolidated: r.consolidated === 1,
+    }));
+
+    // Group observations by type
+    const groups: Record<string, typeof observations> = {};
+    for (const obs of observations) {
+      if (!groups[obs.type]) groups[obs.type] = [];
+      groups[obs.type].push(obs);
+    }
+
+    const memories: Memory[] = [];
+    const ts = now();
+
+    for (const [type, group] of Object.entries(groups)) {
+      if (group.length < 2) continue;
+
+      // Merge facts from observations
+      const allFacts = group.flatMap(o => o.facts).slice(0, 5);
+      const allConcepts = [...new Set(group.flatMap(o => o.concepts))].slice(0, 10);
+      const allFiles = [...new Set(group.flatMap(o => o.files))].slice(0, 10);
+      const avgStrength = Math.round(group.reduce((s, o) => s + o.importance, 0) / group.length);
+
+      const typeNames: Record<string, MemoryType> = {
+        file_read: "fact",
+        file_write: "pattern",
+        file_edit: "pattern",
+        command_run: "workflow",
+        search: "fact",
+        web_fetch: "fact",
+        conversation: "pattern",
+        error: "bug",
+        decision: "pattern",
+        discovery: "fact",
+        notification: "fact",
+        other: "fact",
+      };
+
+      const title = `${type} pattern (${group.length} observations)`;
+      const content = allFacts.slice(0, 3).join("\n");
+
+      const id = generateId();
+      const memoryWorkspace = rows[0]?.workspace || "";
+      db.prepare(`
+        INSERT INTO memories (id, created_at, updated_at, type, title, content,
+                              concepts, files, session_ids, strength, version,
+                              parent_id, related_ids, source_observation_ids, is_latest, project, workspace)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, ?, ?)
+      `).run(
+        id, ts, ts,
+        typeNames[type] || "fact",
+        title, content,
+        JSON.stringify(allConcepts),
+        JSON.stringify(allFiles),
+        JSON.stringify([sessionId]),
+        Math.min(10, Math.max(1, avgStrength + 1)),
+        JSON.stringify(group.map(o => o.id)),
+        null,
+        memoryWorkspace,
       );
 
-      return {
+      memories.push({
         id,
-        content,
-        tags,
-        source: options?.source || "",
-        sessionId: options?.sessionId || "",
-        importance,
         createdAt: ts,
         updatedAt: ts,
-      };
-    },
+        type: typeNames[type] || "fact",
+        title,
+        content,
+        concepts: allConcepts,
+        files: allFiles,
+        sessionIds: [sessionId],
+        strength: Math.min(10, Math.max(1, avgStrength + 1)),
+        version: 1,
+        relatedIds: [],
+        sourceObservationIds: group.map(o => o.id),
+        isLatest: true,
+        workspace: memoryWorkspace,
+      });
+    }
 
-    get(id: string): MemoryEntry | null {
-      const row = db.prepare("SELECT * FROM memories WHERE id = ?").get(
-        id,
-      ) as any;
-      return row ? deserialize(row) : null;
-    },
+    // Mark consolidated observations
+    const obsIds = observations.map(o => `'${o.id.replace(/'/g, "''")}'`);
+    if (obsIds.length) {
+      db.exec(`UPDATE observations SET consolidated = 1 WHERE id IN (${obsIds.join(",")})`);
+    }
 
-    list(query?: MemoryQuery): MemoryEntry[] {
-      const conditions: string[] = [];
-      const params: (string | number)[] = [];
+    return memories;
+  }
 
-      if (query?.search) {
-        // Plain-text search — no FTS5 dependency
-        conditions.push("content LIKE ?");
-        params.push(`%${escapeLike(query.search)}%`);
+  // ── Context Injection ──────────────────────────────────────────────────
+
+  function getContext(sessionId: string, budget: number = 4000): string {
+    const blocks: ContextBlock[] = [];
+    let tokenCount = 0;
+    const estimateTokens = (text: string) => Math.ceil(text.length / 3);
+
+    // 1. Session summary (if available)
+    const session = getSession(sessionId);
+    if (session?.summary) {
+      blocks.push({
+        type: "summary",
+        content: `# Session Summary\n\n${session.summary}`,
+        tokens: estimateTokens(session.summary),
+        recency: Date.now(),
+      });
+      tokenCount += estimateTokens(session.summary);
+    }
+
+    // 2. Recent observations (high importance)
+    const recentObs = listObservations(sessionId, 10)
+      .filter(o => o.importance >= 7)
+      .sort((a, b) => b.importance - a.importance);
+
+    for (const obs of recentObs) {
+      const text = `## [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 300)}`;
+      const tokens = estimateTokens(text);
+      if (tokenCount + tokens > budget) break;
+      blocks.push({ type: "observation", content: text, tokens, recency: Date.parse(obs.timestamp) });
+      tokenCount += tokens;
+    }
+
+    // 3. Relevant memories
+    const memories = list({ sessionId, limit: 5, minStrength: 6 });
+    for (const mem of memories) {
+      const text = `## Memory [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 200)}`;
+      const tokens = estimateTokens(text);
+      if (tokenCount + tokens > budget) break;
+      blocks.push({ type: "memory", content: text, tokens, recency: Date.parse(mem.updatedAt) });
+      tokenCount += tokens;
+    }
+
+    if (!blocks.length) return "";
+
+    return "# Agent Context\n\n" + blocks.map(b => b.content).join("\n\n---\n\n") + "\n";
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────
+
+  function extractConcepts(content: string): string[] {
+    const concepts = new Set<string>();
+    const keywords = [
+      "error", "bug", "fix", "crash", "panic", "timeout", "retry",
+      "config", "setting", "env", "environment",
+      "auth", "permission", "access", "token",
+      "database", "schema", "migration", "query", "connection",
+      "api", "endpoint", "route", "middleware", "login",
+      "test", "unit", "integration", "mock", "stub",
+      "build", "deploy", "pipeline", "ci", "cd",
+      "refactor", "optimize", "performance", "memory", "cpu",
+      "security", "vulnerability", "sanitize", "escape",
+      "cache", "index", "search", "filter", "sort",
+      "async", "promise", "callback", "event", "listener",
+      "state", "store", "redux", "context", "hook",
+      "type", "interface", "class", "module", "package",
+    ];
+    const lower = content.toLowerCase();
+    for (const kw of keywords) {
+      if (lower.includes(kw)) concepts.add(kw);
+    }
+    // Hashtags
+    const hashtags = content.match(/#(\w+)/g);
+    if (hashtags) {
+      for (const h of hashtags) concepts.add(h.slice(1));
+    }
+    return [...concepts].slice(0, 10);
+  }
+
+  function extractFiles(content: string): string[] {
+    const files = new Set<string>();
+    // Match file paths: src/foo.ts, ./lib/bar.js, ../test/baz.py
+    const patterns = [
+      /(?:src|lib|pkg|test|app|src|vendor|node_modules|dist|build)\//g,
+      /\/[\w.-]+\.(ts|js|tsx|jsx|py|rs|go|rb|java|c|h|cpp|json|yaml|yml|toml|md|css|scss|html|sh|bash)/g,
+    ];
+    for (const pattern of patterns) {
+      let match;
+      const str = content;
+      while ((match = pattern.exec(str)) !== null) {
+        const path = content.slice(Math.max(0, match.index - 50), match.index + match[0].length);
+        if (path.includes("/")) files.add(path.slice(0, 300));
       }
+    }
+    return [...files].slice(0, 10);
+  }
 
-      if (query?.tags?.length) {
-        for (const tag of query.tags) {
-          // json_each iterates the JSON array stored in tags column
-          conditions.push("json_each.value = ?");
-          params.push(tag);
-        }
-      }
+  function assignStrength(content: string): number {
+    const lower = content.toLowerCase();
+    if (/^fix|^bug|error|panic|crash|exception/i.test(lower)) return 8;
+    if (/^decid|^architect|^design|^pattern/i.test(lower)) return 7;
+    if (/^todo|^next|^future|suggestion/i.test(lower)) return 4;
+    return 5;
+  }
 
-      if (query?.source) {
-        conditions.push("source = ?");
-        params.push(query.source);
-      }
+  // ── Memory Relations ─────────────────────────────────────────────────
 
-      if (query?.sessionId) {
-        conditions.push("session_id = ?");
-        params.push(query.sessionId);
-      }
+  function relate(
+    sourceId: string,
+    targetId: string,
+    type: MemoryRelationType,
+    confidence: number = 0.5,
+  ): MemoryRelation | null {
+    // Validate both memories exist
+    const source = get(sourceId);
+    const target = get(targetId);
+    if (!source || !target) return null;
 
-      if (query?.minImportance !== undefined) {
-        conditions.push("importance >= ?");
-        params.push(query.minImportance);
-      }
+    const relationId = generateId();
+    const ts = now();
+    const clampedConf = Math.max(0, Math.min(1, confidence || computeRelationConfidence(source, target, type)));
 
-      const whereClause = conditions.length > 0
-        ? `WHERE ${conditions.join(" AND ")}`
-        : "";
-      const limit = query?.limit ?? 10;
+    db.prepare(`
+      INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(relationId, type, sourceId, targetId, clampedConf, ts);
 
-      // Tag filtering uses HAVING + json_each to enforce all tags match
-      if (query?.tags?.length) {
-        // Build the tag-matching clause with explicit HAVING count
-        const baseConditions = conditions.filter((c, i) => !c.includes("json_each"));
-        const baseWhere = baseConditions.length > 0 ? `WHERE ${baseConditions.join(" AND ")}` : "";
+    // Update related_ids on both memories
+    db.prepare(`UPDATE memories SET related_ids = json_insert(related_ids, '$', ?) WHERE id IN (?, ?)`).run(
+      targetId, sourceId, sourceId,
+    );
+    db.prepare(`UPDATE memories SET related_ids = json_insert(related_ids, '$', ?) WHERE id IN (?, ?)`).run(
+      sourceId, targetId, targetId,
+    );
 
-        const tags = query.tags!;
-        // eslint-disable-next-line no-useless-escape
-        const tagParamList = Array(tags.length).fill("?").join(", ");
-        const sql = `
-          SELECT m.* FROM memories m
-          LEFT JOIN json_each(m.tags) je
-          ${baseWhere}
-          HAVING SUM(je.value IN (${tagParamList})) >= ?
-          ORDER BY m.importance DESC, m.created_at DESC
-          LIMIT ?
-        `;
+    return { id: relationId, type, sourceId, targetId, confidence: clampedConf, createdAt: ts };
+  }
 
-        // Rebuild params: base conditions first, then tag values, then count + limit
-        const baseParams: (string | number)[] = [];
-        for (const c of baseConditions) {
-          baseParams.push(params.shift()!);
-        }
-        return db.prepare(sql)
-          .all(...baseParams, ...tags, tags.length, limit)
-          .map(deserialize) as MemoryEntry[];
-      }
+  function computeRelationConfidence(
+    source: Memory,
+    target: Memory,
+    relationType: MemoryRelationType,
+  ): number {
+    let score = 0.5;
 
-      const sql = `SELECT * FROM memories ${whereClause} ORDER BY importance DESC, created_at DESC LIMIT ?`;
-      return db.prepare(sql)
-        .all(...params, limit)
-        .map(deserialize) as MemoryEntry[];
-    },
+    // Shared sessions boost confidence
+    const sharedSessions = source.sessionIds.filter((sid) => target.sessionIds.includes(sid));
+    score += Math.min(sharedSessions.length * 0.1, 0.3);
 
-    delete(id: string): boolean {
-      const result = db.prepare("DELETE FROM memories WHERE id = ?").run(id);
-      return result.changes > 0;
-    },
+    // Recency boost
+    const now = Date.now();
+    const sourceAge = now - new Date(source.updatedAt).getTime();
+    const targetAge = now - new Date(target.updatedAt).getTime();
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    const ninetyDays = 90 * 24 * 60 * 60 * 1000;
 
-    update(
-      id: string,
-      updates: Partial<Pick<MemoryEntry, "content" | "tags" | "importance">>,
-    ): MemoryEntry | null {
-      const sets: string[] = [];
-      const params: (string | number)[] = [];
+    if (sourceAge < sevenDays && targetAge < sevenDays) score += 0.1;
+    else if (sourceAge > ninetyDays && targetAge > ninetyDays) score -= 0.1;
 
-      if (updates.content !== undefined) {
-        sets.push("content = ?");
-        params.push(updates.content);
-      }
-      if (updates.tags !== undefined) {
-        sets.push("tags = ?");
-        params.push(JSON.stringify(updates.tags));
-      }
-      if (updates.importance !== undefined) {
-        sets.push("importance = ?");
-        params.push(updates.importance);
-      }
+    // Relation-type adjustments
+    if (relationType === "supersedes") score += 0.1;
+    if (relationType === "contradicts") score -= 0.05;
 
-      sets.push("updated_at = ?");
-      params.push(now());
-      params.push(id);
+    return Math.max(0, Math.min(1, score));
+  }
 
-      db.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(
-        ...params,
+  function getRelations(memoryId: string): MemoryRelation[] {
+    const rows = db.prepare(
+      `SELECT * FROM relations WHERE source_id = ? OR target_id = ? ORDER BY created_at DESC`
+    ).all(memoryId, memoryId) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      type: r.type as MemoryRelationType,
+      sourceId: r.source_id,
+      targetId: r.target_id,
+      confidence: r.confidence ?? 0.5,
+      createdAt: r.created_at,
+    }));
+  }
+
+  function getRelatedMemories(
+    memoryId: string,
+    maxHops: number = 2,
+    minConfidence: number = 0,
+  ): Array<{ memory: Memory; hop: number; confidence: number }> {
+    const allRelations = db.prepare(
+      `SELECT * FROM relations`
+    ).all() as any[];
+
+    const visited = new Set<string>([memoryId]);
+    const result: Array<{ memory: Memory; hop: number; confidence: number }> = [];
+    const queue: Array<{ id: string; hop: number }> = [{ id: memoryId, hop: 0 }];
+    const MAX_VISITED = 500;
+
+    while (queue.length > 0 && visited.size < MAX_VISITED) {
+      const current = queue.shift()!;
+      if (current.hop >= maxHops) continue;
+      visited.add(current.id);
+
+      const memory = get(current.id);
+      if (!memory) continue;
+
+      // Find relations involving this memory
+      const relatedRelations = allRelations.filter(
+        (r) => r.source_id === current.id || r.target_id === current.id,
       );
-      return this.get(id);
-    },
 
-    recall(query: MemoryQuery, options?: RecallOptions): string {
-      const memories = this.list(query);
-      if (!memories.length) return "";
+      // Get the target memory IDs from these relations
+      for (const rel of relatedRelations) {
+        const targetId = rel.source_id === current.id ? rel.target_id : rel.source_id;
+        if (visited.has(targetId)) continue;
 
-      const format = options?.format || "text";
-      const template = options?.template || "{{content}}";
+        const targetMemory = get(targetId);
+        if (!targetMemory) continue;
 
-      if (format === "markdown") {
-        return memories
-          .map(
-            (m: MemoryEntry) =>
-              `## ${m.id} [${m.importance}/10]\n\n${m.content}\n\n${
-                m.tags.length ? "`" + m.tags.join("` `") + "`" : ""
-              }`,
-          )
-          .join("\n\n---\n\n");
+        visited.add(targetId);
+        const confidence = rel.confidence ?? 0.5;
+
+        if (current.hop >= 0 && confidence >= minConfidence) {
+          result.push({ memory: targetMemory, hop: current.hop + 1, confidence });
+        }
+
+        queue.push({ id: targetId, hop: current.hop + 1 });
       }
+    }
 
-      if (format === "system-prompt") {
-        return memories
-          .map((m: MemoryEntry) => `## ${m.source || "memory"} [${m.importance}/10]\n\n${m.content}`)
-          .join("\n\n");
+    result.sort((a, b) => b.confidence - a.confidence);
+    return result;
+  }
+
+  function evolve(
+    memoryId: string,
+    newContent: string,
+    newTitle?: string,
+  ): { memory: Memory; previousId: string } | null {
+    // First get the existing memory (must be latest)
+    const existing = get(memoryId);
+    if (!existing) return null;
+
+    const ts = now();
+    const evolved: Memory = {
+      ...existing,
+      id: generateId(),
+      createdAt: ts,
+      updatedAt: ts,
+      title: newTitle || existing.title,
+      content: newContent,
+      version: (existing.version || 1) + 1,
+      parentId: existing.id,
+      supersedes: [existing.id, ...(existing.supersedes || [])],
+      isLatest: true,
+    };
+
+    // Insert new version FIRST (so we can still reference it)
+    db.prepare(`
+      INSERT INTO memories (id, created_at, updated_at, type, title, content,
+                            concepts, files, session_ids, strength, version,
+                            parent_id, related_ids, source_observation_ids, is_latest, project,
+                            access_count, last_accessed, working_tier, supersedes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1, ?, 0, NULL, 'cold', ?)
+    `).run(
+      evolved.id,
+      ts, ts,
+      existing.type,
+      evolved.title,
+      newContent,
+      JSON.stringify(existing.concepts),
+      JSON.stringify(existing.files),
+      JSON.stringify(existing.sessionIds),
+      existing.strength,
+      evolved.version,
+      memoryId,
+      existing.project || null,
+      JSON.stringify([existing.id]),
+    );
+
+    // Mark old as non-latest
+    db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(memoryId);
+
+    // Create supersedes relation
+    const relationId = generateId();
+    db.prepare(`
+      INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
+      VALUES (?, 'supersedes', ?, ?, 1.0, ?)
+    `).run(relationId, evolved.id, memoryId, ts);
+
+    // Update related_ids on new memory
+    db.prepare(`UPDATE memories SET related_ids = json_insert(related_ids, '$', ?) WHERE id = ?`).run(
+      memoryId, evolved.id,
+    );
+
+    return { memory: evolved, previousId: memoryId };
+  }
+
+  function removeRelation(relationId: string): boolean {
+    const result = db.prepare("DELETE FROM relations WHERE id = ?").run(relationId);
+    return result.changes > 0;
+  }
+
+  // ── Retention Scoring ────────────────────────────────────────────────
+
+  const DEFAULT_DECAY: DecayConfig = {
+    lambda: 0.01,
+    sigma: 0.3,
+    tierThresholds: { hot: 0.7, warm: 0.4, cold: 0.15 },
+  };
+
+  function resolveDecayConfig(input?: DecayConfigInput): { lambda: number; sigma: number; tierThresholds: { hot: number; warm: number; cold: number } } {
+    const tierThresholds = {
+      hot: input?.tierThresholds?.hot ?? 0.7,
+      warm: input?.tierThresholds?.warm ?? 0.4,
+      cold: input?.tierThresholds?.cold ?? 0.15,
+    };
+    return { lambda: input?.lambda ?? 0.01, sigma: input?.sigma ?? 0.3, tierThresholds };
+  }
+
+  function computeRetentionScore(
+    id: string,
+    config: DecayConfigInput = {},
+  ): RetentionScore | null {
+    const memory = get(id);
+    if (!memory) return null;
+
+    const resolved = resolveDecayConfig(config);
+    const now = Date.now();
+
+    // Time decay
+    const deltaT = (now - new Date(memory.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    const temporalDecay = Math.exp(-resolved.lambda * deltaT);
+
+    // Reinforcement from access count
+    const accessStats = getAccessStats(id);
+    let reinforcementBoost = 0;
+    if (accessStats) {
+      // Each access contributes: sigma / daysSinceAccess
+      const daysSinceAccess = (now - new Date(accessStats.lastAccessed).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceAccess > 0) {
+        reinforcementBoost = resolved.sigma / daysSinceAccess;
       }
+    }
 
-      // text (default)
-      return memories
-        .map(
-          (m: MemoryEntry) =>
-            template
-              .replace("{{content}}", m.content)
-              .replace("{{importance}}", String(m.importance)),
-        )
-        .join("\n\n");
-    },
+    // Salience from memory type and access count
+    const typeWeights: Record<string, number> = {
+      architecture: 0.9,
+      bug: 0.7,
+      pattern: 0.8,
+      preference: 0.85,
+      workflow: 0.6,
+      fact: 0.5,
+    };
+    const baseSalience = typeWeights[memory.type] || 0.5;
+    const accessBonus = Math.min(0.2, (accessStats?.accessCount || 0) * 0.02);
+    const salience = Math.min(1, baseSalience + accessBonus);
 
-    close(): void {
+    // Final retention score
+    const score = Math.min(1, salience * temporalDecay + reinforcementBoost);
+
+    // Determine tier
+    let tier: WorkingMemoryTier = "cold";
+    if (score >= resolved.tierThresholds.hot) tier = "hot";
+    else if (score >= resolved.tierThresholds.warm) tier = "warm";
+
+    return {
+      id: memory.id,
+      score,
+      decayFactor: temporalDecay,
+      reinforcementBoost,
+      tier,
+      type: memory.type,
+      strength: memory.strength,
+    };
+  }
+
+  function rescoreAll(config: DecayConfigInput = {}): RetentionScore[] {
+    const allMemories = db.prepare(`SELECT * FROM memories WHERE is_latest = 1`).all() as any[];
+    const scores: RetentionScore[] = [];
+
+    for (const row of allMemories) {
+      const memory = rowToMemory(row);
+      const score = computeRetentionScore(memory.id, config);
+      if (score) scores.push(score);
+    }
+
+    scores.sort((a, b) => b.score - a.score);
+    return scores;
+  }
+
+  function listByRetentionScore(config: DecayConfigInput = {}, limit: number = 50): RetentionScore[] {
+    return rescoreAll(config).slice(0, limit);
+  }
+
+  // ── File Context Index ───────────────────────────────────────────────
+
+  function getFileContext(file: string, sessionId?: string): FileContextEntry | null {
+    const pattern = `%${file}%`;
+    const rows = sessionId
+      ? db.prepare(`
+          SELECT id, session_id, type, title, narrative, importance, timestamp
+          FROM observations
+          WHERE (title LIKE ? OR narrative LIKE ? OR files LIKE ?) AND session_id = ?
+          ORDER BY timestamp DESC
+        `).all(pattern, pattern, pattern, sessionId) as any[]
+      : db.prepare(`
+          SELECT id, session_id, type, title, narrative, importance, timestamp
+          FROM observations
+          WHERE title LIKE ? OR narrative LIKE ? OR files LIKE ?
+          ORDER BY timestamp DESC
+        `).all(pattern, pattern, pattern) as any[];
+
+    if (rows.length === 0) return null;
+
+    return {
+      file,
+      observations: rows.map((r) => ({
+        sessionId: r.session_id,
+        obsId: r.id,
+        type: r.type as ObservationType,
+        title: r.title || "",
+        narrative: r.narrative || "",
+        importance: r.importance ?? 5,
+        timestamp: r.timestamp,
+      })),
+    };
+  }
+
+  function getFilesContext(files: string[], sessionId?: string): FileContextEntry[] {
+    return files
+      .map((f) => getFileContext(f, sessionId))
+      .filter((e): e is FileContextEntry => e !== null);
+  }
+
+  function rebuildFileIndex(): number {
+    // Count observations with non-empty files array
+    // Since JSON arrays like ["a"] are > 4 chars while [] is exactly 2 chars
+    const count = db.prepare(
+      `SELECT COUNT(*) as cnt FROM observations WHERE LENGTH(files) > 2`
+    ).get() as { cnt: number };
+    return count.cnt || 0;
+  }
+
+  // ── Export/Import ────────────────────────────────────────────────────
+
+  function exportData(): ExportData {
+    const sessions = listSessions();
+    const memories = db.prepare(`SELECT * FROM memories WHERE is_latest = 1`).all().map(rowToMemory);
+    const observations = db.prepare(`SELECT * FROM observations ORDER BY timestamp DESC`).all() as any[];
+    const relations = db.prepare(`SELECT * FROM relations ORDER BY created_at DESC`).all() as any[];
+
+    return {
+      version: 1,
+      exportedAt: now(),
+      sessions,
+      observations: observations.map((r) => ({
+        id: r.id,
+        sessionId: r.session_id,
+        timestamp: r.timestamp,
+        type: r.type as ObservationType,
+        title: r.title || "",
+        subtitle: r.subtitle,
+        facts: safeParseJsonArray(r.facts),
+        narrative: r.narrative || "",
+        concepts: safeParseJsonArray(r.concepts),
+        files: safeParseJsonArray(r.files),
+        importance: r.importance ?? 5,
+        consolidated: r.consolidated === 1 || r.consolidated === true,
+      })),
+      memories,
+      relations: relations.map((r) => ({
+        id: r.id,
+        type: r.type as MemoryRelationType,
+        sourceId: r.source_id,
+        targetId: r.target_id,
+        confidence: r.confidence ?? 0.5,
+        createdAt: r.created_at,
+      })),
+    };
+  }
+
+  function importData(data: ImportData): ImportResult {
+    const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
+    const mode = data.onConflict || "skip";
+
+    // Import sessions
+    for (const session of data.sessions) {
+      try {
+        const existing = getSession(session.id);
+        if (existing && mode === "skip") {
+          result.skipped++;
+          continue;
+        }
+        if (existing && mode === "update") {
+          updateSession(session.id, session);
+        } else {
+          createSession(session.id, session);
+        }
+        result.imported++;
+      } catch (e) {
+        result.errors.push(`Session ${session.id}: ${(e as Error).message}`);
+      }
+    }
+
+    // Import observations
+    for (const obs of data.observations) {
+      try {
+        const existing = db.prepare("SELECT id FROM observations WHERE id = ?").get(obs.id) as { id: string } | undefined;
+        if (existing && mode === "skip") {
+          result.skipped++;
+          continue;
+        }
+        if (existing && mode === "update") {
+          db.prepare(`
+            UPDATE observations SET session_id=?, timestamp=?, type=?, title=?,
+              subtitle=?, narrative=?, facts=?, concepts=?, files=?, importance=?
+            WHERE id=?
+          `).run(
+            obs.sessionId, obs.timestamp, obs.type, obs.title,
+            obs.subtitle || null, obs.narrative, JSON.stringify(obs.facts),
+            JSON.stringify(obs.concepts), JSON.stringify(obs.files),
+            obs.importance, obs.id,
+          );
+        } else {
+          observe(
+            { id: obs.id, sessionId: obs.sessionId, timestamp: obs.timestamp, hookType: "import" as any, raw: {} },
+            obs,
+          );
+        }
+        result.imported++;
+      } catch (e) {
+        result.errors.push(`Observation ${obs.id}: ${(e as Error).message}`);
+      }
+    }
+
+    // Import memories
+    for (const mem of data.memories) {
+      try {
+        const existing = db.prepare("SELECT id FROM memories WHERE id = ?").get(mem.id) as { id: string } | undefined;
+        if (existing && mode === "skip") {
+          result.skipped++;
+          continue;
+        }
+        if (existing && mode === "update") {
+          update(mem.id, { content: mem.content, title: mem.title });
+        } else {
+          create(mem.content, {
+            type: mem.type,
+            concepts: mem.concepts,
+            files: mem.files,
+            strength: mem.strength,
+            sessionIds: mem.sessionIds,
+            parentId: mem.parentId,
+            project: mem.project,
+          });
+        }
+        result.imported++;
+      } catch (e) {
+        result.errors.push(`Memory ${mem.id}: ${(e as Error).message}`);
+      }
+    }
+
+    // Import relations
+    if (data.relations) {
+      for (const rel of data.relations) {
+        try {
+          const existing = db.prepare("SELECT id FROM relations WHERE id = ?").get(rel.id) as { id: string } | undefined;
+          if (existing && mode === "skip") {
+            result.skipped++;
+            continue;
+          }
+          db.prepare(`
+            INSERT OR IGNORE INTO relations (id, type, source_id, target_id, confidence, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).run(rel.id, rel.type, rel.sourceId, rel.targetId, rel.confidence, rel.createdAt);
+          result.imported++;
+        } catch (e) {
+          result.errors.push(`Relation ${rel.id}: ${(e as Error).message}`);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // ── Session ID tracking ────────────────────────────────────────────────
+
+  let currentSessionId: string | null = null;
+  let currentWorkspace = "";
+
+  function setCurrentSessionId(id: string): void {
+    currentSessionId = id;
+    // Ensure session exists
+    if (!getSession(id)) {
+      createSession(id, { project: "" });
+    }
+    // Sync workspace from session
+    const session = getSession(id);
+    if (session?.workspace) {
+      currentWorkspace = session.workspace;
+    }
+  }
+
+  function getCurrentSessionId(): string | null {
+    return currentSessionId;
+  }
+
+  function setCurrentWorkspace(ws: string): void {
+    currentWorkspace = ws;
+  }
+
+  function getCurrentWorkspace(): string {
+    return currentWorkspace || "";
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────
+
+  return {
+    createSession,
+    getSession,
+    listSessions,
+    updateSession,
+    observe,
+    getObservation,
+    listObservations,
+    searchObservations,
+    create,
+    get,
+    getAny,
+    list,
+    remove: deleteEntry,
+    update,
+    recall,
+    consolidate,
+    getContext,
+    setCurrentSessionId,
+    getCurrentSessionId,
+    setCurrentWorkspace,
+    getCurrentWorkspace,
+
+    // Dedup
+    dedupCheck,
+    dedupRecord,
+
+    // Sliding Window
+    slidingWindowCap,
+
+    // Access Tracker
+    trackAccess,
+    getAccessStats,
+
+    // Working Memory Tiers
+    getWorkingMemoryTier,
+    setWorkingMemoryTier,
+    autoTierMemories,
+
+    // Auto-Forget
+    autoForget,
+
+    // Memory Relations
+    relate,
+    getRelations,
+    getRelatedMemories,
+    evolve,
+    removeRelation,
+
+    // Retention Scoring
+    computeRetentionScore,
+    rescoreAll,
+    listByRetentionScore,
+
+    // File Context Index
+    getFileContext,
+    getFilesContext,
+    rebuildFileIndex,
+
+    // Export/Import
+    exportData,
+    importData,
+
+    close() {
       db.close();
     },
   };
-}
-
-function escapeLike(val: string): string {
-  return val.replace(/([%_\\])/g, "\\$1");
-}
-
-function deserialize(row: any): MemoryEntry {
-  return {
-    id: row.id,
-    content: row.content,
-    tags: safeParseJsonArray(row.tags) || [],
-    source: row.source || "",
-    sessionId: row.session_id || "",
-    importance: row.importance ?? 5,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function safeParseJsonArray(val: string): string[] {
-  try {
-    return JSON.parse(val);
-  } catch {
-    return [];
-  }
 }

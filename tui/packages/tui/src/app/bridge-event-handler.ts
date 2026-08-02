@@ -76,6 +76,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 				contextTokens: Number(state.context_tokens || 0),
 				contextMaxTokens: Number(state.context_max_tokens || 0) || undefined,
 				sandboxMode: ctx.bridge.getSandboxMode(),
+				memoryEnabled: ctx.bridge.getSettingsData().memoryEnabled,
 			});
 			// Don't add startup message when restoring a session — user history
 			// is already visible; prepending startup text just causes rendering
@@ -315,6 +316,10 @@ export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent
 					ctx.statusPanel.update({
 						mcpServerCount: Number(state.mcp_servers || 0),
 					});
+				});
+			} else if (event.label === "Memory") {
+				ctx.statusPanel.update({
+					memoryEnabled: ctx.bridge.getSettingsData().memoryEnabled,
 				});
 			}
 			break;

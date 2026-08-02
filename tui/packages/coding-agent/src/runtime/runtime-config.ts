@@ -100,6 +100,8 @@ export function resolveRuntimeConfig(
 			turnTimeoutMs: configNumber(config.turnTimeoutMs),
 			cacheSize: configNumber(config.cacheSize),
 			cacheTtlMs: configNumber(config.cacheTtlMs),
+			memoryEnabled: configBool(config.memory, false),
+			memoryDbPath: configString(config.memoryDbPath),
 			cwd: config.cwd ?? cwd,
 			allowedPaths: config.allowedPaths,
 			allowAllPaths: configBool(config.allowAllPaths),

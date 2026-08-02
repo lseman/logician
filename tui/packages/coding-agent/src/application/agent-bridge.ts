@@ -64,6 +64,8 @@ import { mapAgentEvent } from "../runtime/event-mapping.ts";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";
 import { formatPluginResult } from "../runtime/plugin-result-formatter.ts";
+import { createMemoryStore, createMemoryHooks, setSessionId } from "@logician/memory";
+import { startViewerServer, getBoundViewerPort } from "@logician/memory-viewer";
 import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diagnostics.ts";
 import {
 	buildPluginRuntimeEnv,
@@ -142,6 +144,21 @@ export interface AgentBridgeOptions {
 	projectTrusted?: boolean;
 	/** Whether to auto-resume the most recent session on startup (default: true). */
 	autoResumeSession?: boolean;
+	// ── Memory ────────────────────────────────────────────────────────────
+	/** Whether to enable memory hooks. Default: false (opt-in). */
+	memoryEnabled?: boolean;
+	/** Path to the memory SQLite database. Default: ~/.logician/memory.db. */
+	memoryDbPath?: string;
+	/** Whether to capture tool observations. Default: true. */
+	memoryCaptureTools?: boolean;
+	/** Whether to inject context into agent messages. Default: true. */
+	memoryInjectContext?: boolean;
+	/** Token budget for memory context injection. Default: 4000. */
+	memoryContextBudget?: number;
+	/** Whether to start the memory viewer web dashboard. Default: true when memory enabled. */
+	memoryViewerEnabled?: boolean;
+	/** Port for the memory viewer dashboard. Default: 3200. */
+	memoryViewerPort?: number;
 }
 
 // ── AgentCoreBridge ─────────────────────────────────────────────────────────────
@@ -176,6 +193,15 @@ export class AgentCoreBridge {
 	private lspManager: LspManager;
 	private readonly projectTrusted: boolean;
 	private interaction: InteractionCoordinator;
+	private memoryStore: ReturnType<typeof createMemoryStore> | null = null;
+	private memoryCaptureTools: boolean;
+	private memoryInjectContext: boolean;
+	private memoryContextBudget: number;
+	private memoryDbPath: string;
+	private memoryViewerServer: ReturnType<typeof startViewerServer> | null = null;
+	private memoryViewerPort: number = 3200;
+	private memoryViewerEnabled: boolean = true;
+	private memoryViewerPortConfig: number = 3200;
 	private subagents: SubagentCoordinator;
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
@@ -267,6 +293,46 @@ export class AgentCoreBridge {
 			permissionRules: opts.permissionRules,
 		});
 
+		// Initialize memory store if enabled
+		if (opts.memoryEnabled !== false) {
+			this.memoryDbPath = opts.memoryDbPath || "~/.logician/memory.db";
+			this.memoryCaptureTools = opts.memoryCaptureTools ?? true;
+			this.memoryInjectContext = opts.memoryInjectContext ?? true;
+			this.memoryContextBudget = opts.memoryContextBudget ?? 4000;
+			this.memoryStore = createMemoryStore(this.memoryDbPath);
+			// Set initial session and derive workspace from cwd
+			if (this.memoryStore) {
+				const workspace = this.cwd || "";
+				this.memoryStore.setCurrentWorkspace(workspace);
+				setSessionId(this.memoryStore, this.sessionId);
+				// Create session with workspace
+				this.memoryStore.createSession(this.sessionId, { project: "", cwd: this.cwd, workspace });
+			}
+			// Start the memory viewer dashboard
+			if (opts.memoryViewerEnabled !== false) {
+				this.memoryViewerEnabled = true;
+				this.memoryViewerPortConfig = opts.memoryViewerPort || 3200;
+				this.memoryViewerPort = this.memoryViewerPortConfig;
+				try {
+					this.memoryViewerServer = startViewerServer({
+						port: this.memoryViewerPort,
+						host: "127.0.0.1",
+						store: this.memoryStore,
+					});
+					const bound = getBoundViewerPort();
+					if (bound) this.memoryViewerPort = bound;
+					console.log(`[bridge] Memory viewer: http://localhost:${this.memoryViewerPort}`);
+				} catch (e) {
+					console.error("[bridge] Failed to start memory viewer:", e);
+				}
+			}
+		} else {
+			this.memoryDbPath = "~/.logician/memory.db";
+			this.memoryCaptureTools = true;
+			this.memoryInjectContext = true;
+			this.memoryContextBudget = 4000;
+		}
+
 		this.config = {
 			baseUrl: opts.baseUrl,
 			model: opts.model,
@@ -315,14 +381,16 @@ export class AgentCoreBridge {
 			allowAllPaths: opts.allowAllPaths,
 			truncation: opts.truncation,
 			...this.interaction.buildConfigCallbacks(),
-			hooks: createPostEditDiagnosticHooks(
-				this.cwd,
-				() => this.postEditDiagnosticsEnabled,
-				this.lspManager,
-				{
-					allowedPaths: opts.allowedPaths,
-					allowAllPaths: opts.allowAllPaths,
-				},
+			hooks: this.buildMemoryHooks(
+				createPostEditDiagnosticHooks(
+					this.cwd,
+					() => this.postEditDiagnosticsEnabled,
+					this.lspManager,
+					{
+						allowedPaths: opts.allowedPaths,
+						allowAllPaths: opts.allowAllPaths,
+					},
+				),
 			),
 			turnEndCallback: (turnId: string) => {
 				this.emit({ type: "turn_end", turn_id: turnId, message: "" });
@@ -355,6 +423,45 @@ export class AgentCoreBridge {
 			emit: (event) => this.emit(event),
 			reportError: (error) => this.reportError(error),
 		});
+	}
+
+	/**
+	 * Merge memory hooks with existing hooks. Memory hooks capture observations
+	 * and inject context. Returns the combined hooks object.
+	 */
+	private buildMemoryHooks(existingHooks: AgentConfig["hooks"]): AgentConfig["hooks"] {
+		if (!this.memoryStore) return existingHooks;
+
+		const memoryHooks = createMemoryHooks(this.memoryStore, {
+			captureTools: this.memoryCaptureTools,
+			injectContext: this.memoryInjectContext,
+			contextBudget: this.memoryContextBudget,
+		});
+
+		// Merge hooks: existing hooks run first, then memory hooks
+		const merged: Record<string, any> = {};
+
+		for (const [key, value] of Object.entries(existingHooks || {})) {
+			merged[key as keyof AgentConfig["hooks"]] = value;
+		}
+
+		for (const [key, value] of Object.entries(memoryHooks || {})) {
+			const existing = merged[key as keyof AgentConfig["hooks"]];
+			if (existing) {
+				// Chain: existing hook runs first, then memory hook
+				merged[key as keyof AgentConfig["hooks"]] = async (ctx: any, signal: any) => {
+					const existingResult = await existing(ctx, signal);
+					const memoryResult = await (value as Function)(ctx, signal);
+					// Return whichever has a non-undefined result
+					if (memoryResult !== undefined) return memoryResult;
+					return existingResult;
+				};
+			} else {
+				merged[key as keyof AgentConfig["hooks"]] = value;
+			}
+		}
+
+		return merged as AgentConfig["hooks"];
 	}
 
 	/** Add a tool to the default set and propagate it into live config/harness/system prompt. */
@@ -1138,9 +1245,49 @@ export class AgentCoreBridge {
 			| "guardsEnabled"
 			| "proactiveCompactionEnabled"
 			| "postEditDiagnostics"
-			| "rtkProxyEnabled",
+			| "rtkProxyEnabled"
+			| "memoryEnabled",
 		enabled: boolean,
 	): void {
+		if (key === "memoryEnabled") {
+			if (enabled && !this.memoryStore) {
+				// Enable memory on the fly
+				const dbPath = this.memoryDbPath;
+				this.memoryStore = createMemoryStore(dbPath);
+				setSessionId(this.memoryStore, this.sessionId);
+				// Start viewer if enabled
+				if (this.memoryViewerEnabled) {
+					try {
+						this.memoryViewerServer = startViewerServer({
+							port: this.memoryViewerPortConfig,
+							host: "127.0.0.1",
+							store: this.memoryStore,
+						});
+						const bound = getBoundViewerPort();
+						if (bound) this.memoryViewerPort = bound;
+						console.log(`[bridge] Memory viewer started on port ${this.memoryViewerPort}`);
+					} catch (e) {
+						console.error("[bridge] Failed to start memory viewer:", e);
+					}
+				}
+			} else if (!enabled) {
+				if (this.memoryStore) this.memoryStore.close();
+				this.memoryStore = null;
+				if (this.memoryViewerServer) {
+					this.memoryViewerServer.stop();
+					this.memoryViewerServer = null;
+				}
+			}
+			this.emit({
+				type: "notice",
+				level: "info",
+				label: "Memory",
+				text: enabled
+					? "Memory enabled"
+					: "Memory disabled",
+			});
+			return;
+		}
 		if (key === "postEditDiagnostics") {
 			this.postEditDiagnosticsEnabled = enabled;
 			return;
@@ -1164,6 +1311,7 @@ export class AgentCoreBridge {
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
 			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
+			`  Memory: ${this.memoryStore ? "on" : "off"}`,
 			`  RTK proxy: ${this.config.rtkProxyEnabled ? "on" : "off"}`,
 	].join("\n");
 	}
@@ -1182,6 +1330,7 @@ export class AgentCoreBridge {
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
 		rtkProxyEnabled: boolean;
+		memoryEnabled: boolean;
 	} {
 		return {
 			model: this.config.model,
@@ -1197,6 +1346,33 @@ export class AgentCoreBridge {
 				this.config.proactiveCompactionEnabled ?? false,
 			postEditDiagnostics: this.postEditDiagnosticsEnabled,
 			rtkProxyEnabled: this.config.rtkProxyEnabled ?? false,
+			memoryEnabled: this.memoryStore !== null,
+		};
+	}
+
+	getMemoryStore(): ReturnType<typeof createMemoryStore> | null {
+		return this.memoryStore;
+	}
+
+	getMemoryStats(): {
+		memoryEnabled: boolean;
+		memoryCount: number;
+		sessionCount: number;
+		observationCount: number;
+		viewerPort?: number;
+	} {
+		if (!this.memoryStore) {
+			return { memoryEnabled: false, memoryCount: 0, sessionCount: 0, observationCount: 0 };
+		}
+		const memories = this.memoryStore.list({ limit: 1000 });
+		const sessions = this.memoryStore.listSessions();
+		const observations = this.memoryStore.listObservations(this.sessionId, 1000);
+		return {
+			memoryEnabled: true,
+			memoryCount: memories.length,
+			sessionCount: sessions.length,
+			observationCount: observations.length,
+			viewerPort: this.memoryViewerPort,
 		};
 	}
 
@@ -1211,6 +1387,10 @@ export class AgentCoreBridge {
 		this.config.hookSessionId = this.sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
+		// Update memory session ID
+		if (this.memoryStore) {
+			setSessionId(this.memoryStore, this.sessionId);
+		}
 		// Reset skill/prompt injection state
 		this.toolRouter.resetInjectedContext();
 		this.startupHooksRan = false;

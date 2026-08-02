@@ -10,6 +10,7 @@ import {
 	LoopManager,
 } from "@logician/coding-agent/application";
 import { SessionStore, Transcript } from "@logician/coding-agent/sessions";
+import type { MemoryStore } from "@logician/memory";
 import { ChoicePopup } from "../../overlays/choice-popup.ts";
 import { SlashPopup } from "../../overlays/slash-popup.ts";
 import { NotificationCenter } from "../../status/notification-center.ts";
@@ -50,4 +51,5 @@ export interface SlashCommandsCtx {
 	setThemeByName: (name: string) => boolean;
 	_autoSaveTurn: () => void;
 	stop: () => Promise<void>;
+	getMemoryStore: () => MemoryStore | null;
 }
