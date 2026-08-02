@@ -10,6 +10,48 @@ export interface Component {
 	invalidate?(): void;
 }
 
+export interface InkTextSpan {
+	text: string;
+	color?: string;
+	backgroundColor?: string;
+	bold?: boolean;
+	dim?: boolean;
+	underline?: boolean;
+	italic?: boolean;
+	inverse?: boolean;
+}
+
+export type InkTextRow = readonly InkTextSpan[];
+
+export interface InkTextComponent {
+	getInkTextRows(width: number): InkTextRow[];
+	invalidate?(): void;
+}
+
+export interface InkComposerModel {
+	prompt: string;
+	headerHint: string | null;
+	beforeCursor: string;
+	atCursor: string;
+	afterCursor: string;
+	isPlaceholder: boolean;
+	leftClipped: boolean;
+	rightClipped: boolean;
+	cursorColumn: number;
+	focused: boolean;
+}
+
+export interface InkComposerComponent {
+	getInkComposerModel(width: number): InkComposerModel;
+	invalidate?(): void;
+}
+
+/** Overlay state owner. Native Ink overlays do not require a string renderer. */
+export interface OverlayComponent {
+	render?(width: number): string[];
+	invalidate?(): void;
+}
+
 /**
  * The component model handed to Ink for each render. Ink sizes the
  * transcript-vs-dock split instead of consuming a pre-composited line array.
@@ -18,11 +60,11 @@ export interface TUIComponentsFrame {
 	termWidth: number;
 	termHeight: number;
 	scrollableComponent: Scrollable | null;
-	inputBarComponent: Component | null;
-	fixedBottomComponent: Component | null;
-	fixedAboveInputComponent: Component | null;
+	inputBarComponent: InkComposerComponent | null;
+	fixedBottomComponent: InkTextComponent | null;
+	fixedAboveInputComponent: InkTextComponent | null;
 	overlayStack: readonly {
-		component: Component;
+		component: OverlayComponent;
 		options?: OverlayOptions;
 		hidden: boolean;
 		focusOrder: number;
@@ -34,7 +76,7 @@ export interface Focusable {
 	focused: boolean;
 }
 
-export interface Scrollable extends Component {
+export interface Scrollable extends InkTextComponent {
 	scrollOffset: number;
 	scroll(delta: number): void;
 	scrollToBottom(): void;
@@ -43,7 +85,9 @@ export interface Scrollable extends Component {
 	handleMouse?(column: number, row: number): boolean;
 }
 
-export function isFocusable(c: Component | null): c is Component & Focusable {
+export function isFocusable(
+	c: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null,
+): c is (Component | InkComposerComponent | InkTextComponent | OverlayComponent) & Focusable {
 	return c !== null && "focused" in c;
 }
 
@@ -66,16 +110,107 @@ export function normalizeKeyboardInput(data: string): string {
 		});
 }
 
-// ── Cursor marker ────────────────────────────────────────────────────────────
-
-export const CURSOR_MARKER = "\x1b_pi:c\x07";
-
 // ── Shared ANSI codes ─────────────────────────────────────────────────────────
 // Every component previously redeclared these identically — single source now.
 
 export const RESET = "\x1b[0m";
 export const BOLD = "\x1b[1m";
 export const DIM = "\x1b[2m";
+
+/** Convert ANSI-formatted model output into native Ink text spans. */
+export function ansiToInkTextRow(value: string): InkTextRow {
+	const spans: InkTextSpan[] = [];
+	let style: Omit<InkTextSpan, "text"> = {};
+	let cursor = 0;
+	const sgr = /\x1b\[([0-9;]*)m/g;
+	let match: RegExpExecArray | null;
+	const append = (text: string): void => {
+		if (!text) return;
+		spans.push({ text, ...style });
+	};
+	while ((match = sgr.exec(value)) !== null) {
+		append(value.slice(cursor, match.index));
+		const codes = (match[1] || "0").split(";").map(Number);
+		for (let i = 0; i < codes.length; i++) {
+			const code = codes[i];
+			if (code === 0) style = {};
+			else if (code === 1) style = { ...style, bold: true };
+			else if (code === 2) style = { ...style, dim: true };
+			else if (code === 4) style = { ...style, underline: true };
+			else if (code === 7) style = { ...style, inverse: true };
+			else if (code === 22) style = { ...style, bold: false, dim: false };
+			else if (code === 24) style = { ...style, underline: false };
+			else if (code === 27) style = { ...style, inverse: false };
+			else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+				const paletteIndex = code >= 90 ? code - 90 + 8 : code - 30;
+				style = { ...style, color: ansi256ToHex(paletteIndex) };
+			}
+			else if (code === 39) {
+				const { color: _color, ...rest } = style;
+				style = rest;
+			} else if (code === 38 && codes[i + 1] === 5) {
+				style = { ...style, color: ansi256ToHex(codes[i + 2] ?? 7) };
+				i += 2;
+			} else if (code === 38 && codes[i + 1] === 2) {
+				const [r, g, b] = [codes[i + 2] ?? 255, codes[i + 3] ?? 255, codes[i + 4] ?? 255];
+				style = { ...style, color: `#${[r, g, b].map((part) => part.toString(16).padStart(2, "0")).join("")}` };
+				i += 4;
+			} else if (code === 49) {
+				const { backgroundColor: _backgroundColor, ...rest } = style;
+				style = rest;
+			} else if (code === 48 && codes[i + 1] === 5) {
+				style = { ...style, backgroundColor: ansi256ToHex(codes[i + 2] ?? 0) };
+				i += 2;
+			} else if (code === 48 && codes[i + 1] === 2) {
+				const [r, g, b] = [codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0];
+				style = { ...style, backgroundColor: `#${[r, g, b].map((part) => part.toString(16).padStart(2, "0")).join("")}` };
+				i += 4;
+			}
+		}
+		cursor = sgr.lastIndex;
+	}
+	append(value.slice(cursor));
+	return spans;
+}
+
+export function inkTextRowText(row: InkTextRow): string {
+	return row.map((span) => span.text).join("");
+}
+
+export function clampInkTextRow(row: InkTextRow, width: number): InkTextRow {
+	const result: InkTextSpan[] = [];
+	let remaining = Math.max(0, width);
+	for (const span of row) {
+		if (remaining <= 0) break;
+		const text = clampLineToWidth(span.text, remaining);
+		if (text) result.push({ ...span, text });
+		remaining -= visibleWidth(text);
+	}
+	return result;
+}
+
+export function padInkTextRow(row: InkTextRow, width: number): InkTextRow {
+	const clipped = clampInkTextRow(row, width);
+	const padding = Math.max(0, width - visibleWidth(inkTextRowText(clipped)));
+	return padding > 0 ? [...clipped, { text: " ".repeat(padding) }] : clipped;
+}
+
+/** Plain-text projection for model tests and width calculations. */
+export function inkTextComponentLines(component: InkTextComponent, width: number): string[] {
+	return component.getInkTextRows(width).map(inkTextRowText);
+}
+
+export function ansi256ToHex(index: number): string {
+	const base = ["#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#c0c0c0", "#808080", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "#00ffff", "#ffffff"];
+	if (index < 16) return base[Math.max(0, index)] ?? "#ffffff";
+	if (index >= 232) {
+		const value = 8 + (Math.min(255, index) - 232) * 10;
+		return `#${value.toString(16).padStart(2, "0").repeat(3)}`;
+	}
+	const n = Math.min(231, index) - 16;
+	const channel = (part: number): number => part === 0 ? 0 : 55 + part * 40;
+	return `#${[Math.floor(n / 36), Math.floor((n % 36) / 6), n % 6].map((part) => channel(part).toString(16).padStart(2, "0")).join("")}`;
+}
 
 // ── Width utilities ──────────────────────────────────────────────────────────
 
@@ -143,6 +278,10 @@ export function visibleWidth(text: string): number {
 		// bookkeeping (e.g. table column padding) from what the terminal draws.
 		const codePoint = text.codePointAt(i);
 		const char = codePoint === undefined ? ch : String.fromCodePoint(codePoint);
+		if (codePoint !== undefined && codePoint >= 0xe000 && codePoint <= 0xf8ff) {
+			i += char.length;
+			continue;
+		}
 		width +=
 			codePoint !== undefined &&
 			codePoint >= 0x1100 &&
@@ -248,17 +387,17 @@ export function clampLineToWidth(text: string, width: number): string {
 
 // ── Container ────────────────────────────────────────────────────────────────
 
-export class Container implements Component {
-	private readonly children: Component[] = [];
+export class InkTextContainer implements InkTextComponent {
+	private readonly children: InkTextComponent[] = [];
 
-	addChild(component: Component): void {
+	addChild(component: InkTextComponent): void {
 		this.children.push(component);
 	}
 
-	render(width: number): string[] {
-		const lines: string[] = [];
+	getInkTextRows(width: number): InkTextRow[] {
+		const lines: InkTextRow[] = [];
 		for (const child of this.children) {
-			for (const line of child.render(width)) {
+			for (const line of child.getInkTextRows(width)) {
 				lines.push(line);
 			}
 		}
@@ -280,11 +419,11 @@ export class TUI {
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private started = false;
 	private stopped = false;
-	private focusedComponent: Component | null = null;
+	private focusedComponent: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null = null;
 	private overlayStack: Array<{
-		component: Component;
+		component: OverlayComponent;
 		options?: OverlayOptions;
-		preFocus: Component | null;
+		preFocus: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null;
 		hidden: boolean;
 		focusOrder: number;
 	}> = [];
@@ -294,9 +433,9 @@ export class TUI {
 	> = new Set();
 	private _viewportHeight: number = 0;
 	private scrollableComponent: Scrollable | null = null;
-	private inputBarComponent: Component | null = null;
-	private fixedBottomComponent: Component | null = null;
-	private fixedAboveInputComponent: Component | null = null;
+	private inputBarComponent: InkComposerComponent | null = null;
+	private fixedBottomComponent: InkTextComponent | null = null;
+	private fixedAboveInputComponent: InkTextComponent | null = null;
 
 	private _showHardwareCursor = true;
 	private onComponentsFrame?: (frame: TUIComponentsFrame) => void;
@@ -330,7 +469,7 @@ export class TUI {
 		return this.scrollableComponent.isAtBottom;
 	}
 
-	setFocus(component: Component | null): void {
+	setFocus(component: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null): void {
 		if (isFocusable(this.focusedComponent)) {
 			(this.focusedComponent as Focusable).focused = false;
 		}
@@ -341,7 +480,7 @@ export class TUI {
 	}
 
 	showOverlay(
-		component: Component,
+		component: OverlayComponent,
 		options?: OverlayOptions,
 	): {
 		hide: () => void;
@@ -382,7 +521,7 @@ export class TUI {
 	}
 
 	/** Remove a specific overlay from the stack and restore focus to its pre-focus target. */
-	removeOverlay(component: Component): void {
+	removeOverlay(component: OverlayComponent): void {
 		const idx = this.overlayStack.findIndex((e) => e.component === component);
 		if (idx >= 0) {
 			const entry = this.overlayStack[idx];
@@ -647,17 +786,17 @@ export class TUI {
 		this.scrollableComponent?.setViewportHeight(this._viewportHeight);
 	}
 
-	setInputBarComponent(comp: Component | null): void {
+	setInputBarComponent(comp: InkComposerComponent | null): void {
 		this.inputBarComponent = comp;
 	}
 
-	setFixedBottomComponent(comp: Component | null): void {
+	setFixedBottomComponent(comp: InkTextComponent | null): void {
 		this.fixedBottomComponent = comp;
 	}
 
 	// Pinned region rendered directly above the input bar (e.g. the todo list).
 	// Renders nothing when the component returns no lines.
-	setFixedAboveInputComponent(comp: Component | null): void {
+	setFixedAboveInputComponent(comp: InkTextComponent | null): void {
 		this.fixedAboveInputComponent = comp;
 	}
 

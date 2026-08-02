@@ -6,13 +6,19 @@ import { NotificationCenter } from "../status/notification-center.ts";
 import { SteerQueue } from "../status/steer-queue.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
-import { CURSOR_MARKER, visibleWidth } from "../terminal/core.ts";
+import { inkTextComponentLines as inkLines, visibleWidth } from "../terminal/core.ts";
 import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
 const plain = (value: string): string =>
 	value.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+
+const styledSpan = (
+	display: TranscriptDisplay,
+	width: number,
+	text: string,
+) => display.getInkTextRows(width).flat().find((span) => span.text.includes(text));
 
 void test("transcript renders clear speaker hierarchy and compact tool activity", () => {
 	const display = new TranscriptDisplay();
@@ -48,7 +54,7 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 		isComplete: true,
 	};
 	display.setTurns([turn]);
-	const lines = display.render(80);
+	const lines = inkLines(display, 80);
 	const output = plain(lines.join("\n"));
 
 	assert.match(output, /› YOU/);
@@ -58,6 +64,28 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	assert.match(output, /output ok/);
 	assert.match(output, /18ms/);
 	assert.ok(lines.every((line) => visibleWidth(line) <= 80));
+});
+
+void test("transcript exposes escape-free styled rows for native Ink painting", () => {
+	const display = new TranscriptDisplay({ thinkingMode: "expanded" });
+	display.setTurns([
+		{
+			id: "native-ink",
+			userMessage: { type: "user", content: "inspect this" },
+			assistantMessage: {
+				type: "assistant",
+				isComplete: true,
+				chunks: [{ seq: 1, type: "content", contentText: "**Result** is ready", isComplete: true }],
+			},
+			isComplete: true,
+		},
+	]);
+	const rows = display.getInkTextRows(80);
+	const spans = rows.flat();
+	assert.ok(spans.some((span) => span.color));
+	assert.ok(spans.some((span) => span.bold));
+	assert.ok(spans.every((span) => !span.text.includes("\x1b[")));
+	assert.ok(spans.every((span) => !/[\ue000-\uf8ff]/u.test(span.text)));
 });
 
 void test("collapsed running tools show live output without expanding details", () => {
@@ -89,7 +117,7 @@ void test("collapsed running tools show live output without expanding details", 
 			isComplete: false,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	assert.match(output, /bash streaming/);
 	assert.match(output, /live compiling packages\.\.\./);
 	assert.doesNotMatch(output, /second line/);
@@ -122,7 +150,7 @@ void test("tool output cannot inject terminal control sequences", () => {
 		isComplete: true,
 	}]);
 
-	const rendered = display.render(100).join("\n");
+	const rendered = inkLines(display, 100).join("\n");
 	assert.doesNotMatch(rendered, /\x1b\[2J|\x1b\]0;/);
 	assert.match(plain(rendered), /safe text visible/);
 });
@@ -152,14 +180,14 @@ void test("growing tool streams sanitize only the appended suffix", () => {
 		isComplete: false,
 	};
 	display.setTurns([turn]);
-	display.render(100);
+	inkLines(display, 100);
 	const before = display.getSanitizationMetrics().scannedCharacters;
 	const tool = turn.assistantMessage?.chunks[0].tool;
 	assert.ok(tool);
 	tool.streamOutput += "y";
 	display.setTurns([turn]);
 
-	display.render(100);
+	inkLines(display, 100);
 
 	const scanned =
 		display.getSanitizationMetrics().scannedCharacters - before;
@@ -209,23 +237,23 @@ void test("clicking a tool card toggles only that tool's details", () => {
 		isComplete: true,
 	}]);
 
-	const collapsed = display.render(100);
+	const collapsed = inkLines(display, 100);
 	const firstToolRow = collapsed.findIndex((line) =>
 		plain(line).includes("echo first"),
 	);
 	assert.notEqual(firstToolRow, -1);
 	assert.equal(display.handleMouse(4, firstToolRow), true);
 
-	const expanded = plain(display.render(100).join("\n"));
+	const expanded = plain(inkLines(display, 100).join("\n"));
 	assert.match(expanded, /COMMAND[\s\S]*echo first/);
 	assert.doesNotMatch(expanded, /COMMAND[\s\S]*echo second[\s\S]*OUTPUT/);
 
-	const rerendered = display.render(100);
+	const rerendered = inkLines(display, 100);
 	const expandedFirstRow = rerendered.findIndex((line) =>
 		plain(line).includes("echo first"),
 	);
 	assert.equal(display.handleMouse(4, expandedFirstRow), true);
-	assert.doesNotMatch(plain(display.render(100).join("\n")), /◆ details/);
+	assert.doesNotMatch(plain(inkLines(display, 100).join("\n")), /◆ details/);
 });
 
 void test("keyboard navigation focuses and toggles individual tool cards", () => {
@@ -255,18 +283,18 @@ void test("keyboard navigation focuses and toggles individual tool cards", () =>
 		isComplete: true,
 	}]);
 
-	display.render(80);
+	inkLines(display, 80);
 	assert.deepEqual(display.focusTool(1), { index: 1, total: 2 });
-	assert.match(plain(display.render(80).join("\n")), /› ✓ bash done/);
+	assert.match(plain(inkLines(display, 80).join("\n")), /› ✓ bash done/);
 	assert.equal(display.toggleFocusedTool(), true);
 	assert.match(
-		plain(display.render(80).join("\n")),
+		plain(inkLines(display, 80).join("\n")),
 		/COMMAND[\s\S]*echo first[\s\S]*OUTPUT[\s\S]*first output/,
 	);
 
 	assert.deepEqual(display.focusTool(1), { index: 2, total: 2 });
 	assert.equal(display.toggleFocusedTool(), true);
-	const expanded = plain(display.render(80).join("\n"));
+	const expanded = plain(inkLines(display, 80).join("\n"));
 	assert.match(expanded, /echo second[\s\S]*second output/);
 });
 
@@ -297,14 +325,14 @@ void test("write_file streams live line counts and expanded content", () => {
 		isComplete: false,
 	}]);
 
-	const collapsed = plain(display.render(100).join("\n"));
+	const collapsed = plain(inkLines(display, 100).join("\n"));
 	assert.match(collapsed, /write_file src\/live\.ts streaming/);
 	assert.match(collapsed, /3 lines written so far/);
 	assert.doesNotMatch(collapsed, /const one = 1/);
 	assert.doesNotMatch(collapsed, /"content"/);
 
 	display.setToolsExpanded(true);
-	const expanded = plain(display.render(100).join("\n"));
+	const expanded = plain(inkLines(display, 100).join("\n"));
 	assert.match(expanded, /CONTENT.*3 lines · streaming/);
 	assert.match(expanded, /const one = 1/);
 	assert.match(expanded, /const two = 2/);
@@ -340,7 +368,7 @@ void test("click-expanded write_file shows every line without a Ctrl+O hint", ()
 		isComplete: true,
 	}]);
 
-	const collapsed = display.render(100);
+	const collapsed = inkLines(display, 100);
 	const toolRow = collapsed.findIndex((line) =>
 		plain(line).includes("write_file fixture.txt"),
 	);
@@ -348,7 +376,7 @@ void test("click-expanded write_file shows every line without a Ctrl+O hint", ()
 	assert.match(plain(collapsed.join("\n")), /24 lines written/);
 	assert.equal(display.handleMouse(4, toolRow), true);
 
-	const expanded = plain(display.render(100).join("\n"));
+	const expanded = plain(inkLines(display, 100).join("\n"));
 	assert.match(expanded, /24│line-24/);
 	assert.doesNotMatch(expanded, /more lines · ctrl\+o to expand/);
 });
@@ -380,14 +408,14 @@ void test("write_file_append streams live line counts and expanded content", () 
 		isComplete: false,
 	}]);
 
-	const collapsed = plain(display.render(100).join("\n"));
+	const collapsed = plain(inkLines(display, 100).join("\n"));
 	assert.match(collapsed, /write_file_append src\/live\.ts streaming/);
 	assert.match(collapsed, /3 lines appended so far/);
 	assert.doesNotMatch(collapsed, /const four = 4/);
 	assert.doesNotMatch(collapsed, /"content"/);
 
 	display.setToolsExpanded(true);
-	const expanded = plain(display.render(100).join("\n"));
+	const expanded = plain(inkLines(display, 100).join("\n"));
 	assert.match(expanded, /APPEND CONTENT.*3 lines · streaming/);
 	assert.match(expanded, /const four = 4/);
 	assert.match(expanded, /const five = 5/);
@@ -426,7 +454,7 @@ void test("click-expanded write_file_append shows every appended line", () => {
 		isComplete: true,
 	}]);
 
-	const collapsed = display.render(100);
+	const collapsed = inkLines(display, 100);
 	const toolRow = collapsed.findIndex((line) =>
 		plain(line).includes("write_file_append fixture.txt"),
 	);
@@ -434,7 +462,7 @@ void test("click-expanded write_file_append shows every appended line", () => {
 	assert.match(plain(collapsed.join("\n")), /24 lines appended/);
 	assert.equal(display.handleMouse(4, toolRow), true);
 
-	const expanded = plain(display.render(100).join("\n"));
+	const expanded = plain(inkLines(display, 100).join("\n"));
 	assert.match(expanded, /24│appended-24/);
 	assert.doesNotMatch(expanded, /more lines · ctrl\+o to expand/);
 });
@@ -464,7 +492,7 @@ void test("skill activations render as a compact dedicated status line", () => {
 			isComplete: false,
 		},
 	]);
-	const rendered = display.render(100).join("\n");
+	const rendered = inkLines(display, 100).join("\n");
 	const output = plain(rendered);
 
 	assert.match(
@@ -476,7 +504,7 @@ void test("skill activations render as a compact dedicated status line", () => {
 		/   TypeScript Debugging · matched .*TypeScript error.*/,
 	);
 	assert.doesNotMatch(output, /Skills:/);
-	assert.match(rendered, /\x1b\[/);
+	assert.ok(styledSpan(display, 100, "Skills")?.color);
 });
 
 void test("assistant chunks render as distinct semantic blocks", () => {
@@ -513,7 +541,7 @@ void test("assistant chunks render as distinct semantic blocks", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	assert.match(output, /REASONING.*Compare both execution paths/);
 	assert.match(output, /⚠ NOTICE Context/);
 	assert.match(output, /   Near limit/);
@@ -540,7 +568,7 @@ void test("expanded reasoning renders fenced code as one labeled block", () => {
 		isComplete: true,
 	}]);
 
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	assert.match(output, /┌─ typescript · 2 lines/);
 	assert.match(output, /│ const value = 1;/);
 	assert.match(output, /│ return value;/);
@@ -555,14 +583,14 @@ void test("notifications are transient, bounded, and width-safe", () => {
 	notifications.show("Theme: dark", "info", 60_000);
 	notifications.show("Invalid temperature", "error", 60_000);
 	notifications.show("Only the newest three remain", "warning", 60_000);
-	const lines = notifications.render(32);
+	const lines = inkLines(notifications, 32);
 	const output = plain(lines.join("\n"));
 	assert.equal(lines.length, 3);
 	assert.doesNotMatch(output, /Execution policy/);
 	assert.match(output, /Only the newest three remain/);
 	assert.ok(lines.every((line) => visibleWidth(line) <= 32));
 	notifications.clear();
-	assert.deepEqual(notifications.render(32), []);
+	assert.deepEqual(inkLines(notifications, 32), []);
 });
 
 void test("status bar drops optional sections instead of clipping ANSI text", () => {
@@ -581,12 +609,12 @@ void test("status bar drops optional sections instead of clipping ANSI text", ()
 	});
 
 	for (const width of [32, 60, 120]) {
-		const [line] = status.render(width);
+		const [line] = inkLines(status, width);
 		assert.ok(visibleWidth(line) <= width);
 		assert.match(plain(line), /READY/);
 		assert.doesNotMatch(plain(line), /…/);
 	}
-	assert.match(plain(status.render(120)[0]), /feature\/modern-ui/);
+	assert.match(plain(inkLines(status, 120)[0]), /feature\/modern-ui/);
 });
 
 void test("status bar renders cached tokens and unknown telemetry", () => {
@@ -596,31 +624,48 @@ void test("status bar renders cached tokens and unknown telemetry", () => {
 		contextMaxTokens: 32_768,
 		cacheReadTokens: 12_400,
 	});
-	assert.match(plain(status.render(160)[0]), /cache read: 12\.4k/);
+	assert.match(plain(inkLines(status, 160)[0]), /cache read: 12\.4k/);
 
 	status.update({ contextTokens: 21_000 });
-	assert.match(plain(status.render(160)[0]), /cache read: 12\.4k/);
+	assert.match(plain(inkLines(status, 160)[0]), /cache read: 12\.4k/);
 
 	status.update({ cacheReadTokens: undefined });
-	assert.match(plain(status.render(160)[0]), /cache read: unknown/);
+	assert.match(plain(inkLines(status, 160)[0]), /cache read: unknown/);
 });
 
 void test("status bar renders RTK when restored as enabled", () => {
 	const status = new StatusBar();
-	assert.doesNotMatch(plain(status.render(200)[0]), /\brtk on\b/);
+	assert.doesNotMatch(plain(inkLines(status, 200)[0]), /\brtk on\b/);
 
 	status.update({ rtkProxyEnabled: true });
-	assert.match(plain(status.render(200)[0]), /\brtk on\b/);
+	assert.match(plain(inkLines(status, 200)[0]), /\brtk on\b/);
+});
+
+void test("native Ink dock models expose styled spans without terminal escapes", () => {
+	const status = new StatusBar();
+	status.update({
+		phase: "thinking",
+		model: "test",
+		contextTokens: 12_000,
+		contextMaxTokens: 100_000,
+	});
+	const rows = status.getInkTextRows(120);
+	assert.ok(rows.flat().some((span) => span.color));
+	assert.ok(rows.flat().some((span) => span.dim));
+	assert.ok(rows.flat().every((span) => !span.text.includes("\x1b")));
 });
 
 void test("input prompt has stable inset modern chrome", () => {
 	const input = new InputBar();
 	input.focused = true;
-	const [header, line] = input.render(40);
-	assert.match(plain(header), /Enter send/);
-	assert.match(plain(line).replace(CURSOR_MARKER, ""), /^  › Ask Logician/);
-	assert.equal(visibleWidth(header), 40);
-	assert.equal(visibleWidth(line), 40);
+	const model = input.getInkComposerModel(40);
+	assert.match(model.headerHint ?? "", /Enter send/);
+	assert.match(
+		plain(`${model.prompt}${model.beforeCursor}${model.atCursor}${model.afterCursor}`),
+		/^  › Ask Logician/,
+	);
+	assert.equal(model.isPlaceholder, true);
+	assert.equal(model.focused, true);
 });
 
 void test("composer preserves explicit steer-now submission intent", () => {
@@ -643,7 +688,7 @@ void test("composer preserves explicit steer-now submission intent", () => {
 void test("steering queue distinguishes queued and later delivery", () => {
 	const queue = new SteerQueue();
 	queue.setItems(["inspect the parser"], ["run the complete test suite"]);
-	const lines = queue.render(72);
+	const lines = inkLines(queue, 72);
 	const rendered = plain(lines.join("\n"));
 
 	assert.match(rendered, /STEERING\s+1 queued · 1 follow-up/);
@@ -655,9 +700,13 @@ void test("steering queue distinguishes queued and later delivery", () => {
 
 void test("input composer collapses to one line on narrow terminals", () => {
 	const input = new InputBar();
-	const lines = input.render(30);
-	assert.equal(lines.length, 1);
-	assert.equal(visibleWidth(lines[0]), 30);
+	const model = input.getInkComposerModel(30);
+	assert.equal(model.headerHint, null);
+	assert.ok(
+		visibleWidth(
+			`${model.prompt}${model.beforeCursor}${model.atCursor}${model.afterCursor}`,
+		) <= 30,
+	);
 });
 
 void test("message editor accepts terminal arrow variants and batched movement", () => {
@@ -718,7 +767,7 @@ void test("expanded agent tools separate task arguments from live output", () =>
 			isComplete: false,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 
 	assert.match(output, /subagent explorer streaming/);
 	assert.match(output, /Inspect architecture and tests/);
@@ -757,11 +806,11 @@ void test("expanded subagent streams render fenced code with syntax highlighting
 			isComplete: false,
 		},
 	]);
-	const rendered = display.render(100).join("\n");
+	const rendered = inkLines(display, 100).join("\n");
 
 	assert.match(plain(rendered), /Found this/);
 	assert.match(plain(rendered), /const answer = 42/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.ok(styledSpan(display, 100, "const")?.color);
 });
 
 void test("expanded agent progress is never character-truncated", () => {
@@ -794,7 +843,7 @@ void test("expanded agent progress is never character-truncated", () => {
 			isComplete: false,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 
 	assert.match(output, /BEGIN-/);
 	assert.match(output, /-END/);
@@ -834,14 +883,14 @@ void test("collapsed agent card shows only the header while running", () => {
 		},
 	]);
 
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	// /spawn starts collapsed: header only until the user expands the card.
 	assert.match(output, /subagent explorer streaming|subagent explorer running/);
 	assert.doesNotMatch(output, /BEGIN|stream-line-|END|truncated/i);
 
 	display.toolsExpanded = true;
 	display.invalidate();
-	const expanded = plain(display.render(100).join("\n"));
+	const expanded = plain(inkLines(display, 100).join("\n"));
 	assert.match(expanded, /BEGIN/);
 });
 
@@ -878,13 +927,13 @@ void test("expanded completed subagent keeps its streaming transcript", () => {
 			isComplete: true,
 		},
 	]);
-	const rendered = display.render(100).join("\n");
+	const rendered = inkLines(display, 100).join("\n");
 	const output = plain(rendered);
 
 	assert.match(output, /Inspecting files/);
 	assert.match(output, /const ok = true/);
 	assert.match(output, /Audit complete/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.ok(styledSpan(display, 100, "const")?.color);
 });
 
 void test("expanded completed subagent does not repeat its final report", () => {
@@ -921,7 +970,7 @@ void test("expanded completed subagent does not repeat its final report", () => 
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 
 	assert.equal(output.match(/Final report:/g)?.length, 1);
 	assert.match(output, /Inspecting files/);
@@ -961,7 +1010,7 @@ void test("collapsed completed subagent formats its final report as markdown", (
 		},
 	]);
 	// Collapsed: single header line with status and task summary
-	const renderedCollapsed = display.render(100).join("\n");
+	const renderedCollapsed = inkLines(display, 100).join("\n");
 	const outputCollapsed = plain(renderedCollapsed);
 	assert.match(outputCollapsed, /✓ subagent reviewer done/);
 	assert.doesNotMatch(outputCollapsed, /Approved|zero errors/);
@@ -969,11 +1018,11 @@ void test("collapsed completed subagent formats its final report as markdown", (
 	// Expanded: full detail block with markdown rendering
 	display.toolsExpanded = true;
 	display.invalidate();
-	const renderedExpanded = display.render(100).join("\n");
+	const renderedExpanded = inkLines(display, 100).join("\n");
 	const outputExpanded = plain(renderedExpanded);
 	assert.match(outputExpanded, /Approved.*zero errors/);
-	assert.match(renderedExpanded, /\x1b\[1mApproved/);
-	assert.match(renderedExpanded, /\x1b\[38;5;\d+mconst/);
+	assert.equal(styledSpan(display, 100, "Approved")?.bold, true);
+	assert.ok(styledSpan(display, 100, "const")?.color);
 	assert.doesNotMatch(outputExpanded, /acceptance-report|criteriaSatisfied/);
 });
 
@@ -1012,7 +1061,7 @@ void test("post-edit diagnostics render as a dedicated formatted block", () => {
 		},
 	]);
 
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	assert.match(output, /◆ DIAGNOSTICS 1 issue/);
 	assert.match(output, /\/workspace\/src\/runtime-config\.ts/);
 	assert.match(output, /× 78:4 TS2353/);
@@ -1058,7 +1107,7 @@ void test("post-edit diagnostics render clangd source and symbolic codes", () =>
 		},
 	]);
 
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	assert.match(output, /◆ DIAGNOSTICS 1 issue/);
 	assert.match(output, /× 42:7 clang ovl_no_viable_function_in_call/);
 	assert.match(output, /No matching function for call/);
@@ -1085,7 +1134,7 @@ void test("transcript line limits discard oldest turns and retain newest message
 		isComplete: true,
 	}));
 	display.setTurns(turns);
-	const output = plain(display.render(80).join("\n"));
+	const output = plain(inkLines(display, 80).join("\n"));
 
 	assert.match(output, /older turn\(s\) not shown/);
 	assert.match(output, /user-7/);
@@ -1132,9 +1181,9 @@ void test("Ctrl+O expansion keeps a bottom-anchored viewport on newest content",
 		},
 	]);
 	display.scrollToBottom();
-	display.render(90);
+	inkLines(display, 90);
 	display.toggleToolsExpanded();
-	const output = plain(display.render(90).join("\n"));
+	const output = plain(inkLines(display, 90).join("\n"));
 
 	assert.match(output, /LATEST RESPONSE/);
 });
@@ -1163,7 +1212,7 @@ void test("wheel-down reaches the new bottom while a streaming update awaits ren
 	display.setTurns([
 		streamingTurn(Array.from({ length: 16 }, (_, i) => `line-${i}`).join("\n")),
 	]);
-	display.render(80);
+	inkLines(display, 80);
 	display.scroll(4);
 	assert.equal(display.isAtBottom, false);
 
@@ -1176,7 +1225,7 @@ void test("wheel-down reaches the new bottom while a streaming update awaits ren
 		),
 	]);
 	display.scroll(-100);
-	const output = plain(display.render(80).join("\n"));
+	const output = plain(inkLines(display, 80).join("\n"));
 
 	assert.equal(display.isAtBottom, true);
 	assert.match(output, /NEWEST STREAMED LINE/);
@@ -1204,9 +1253,9 @@ void test("new streamed output is signaled while the user is scrolled up", () =>
 	display.setTurns([
 		streamingTurn(Array.from({ length: 18 }, (_, i) => `line-${i}`).join("\n")),
 	]);
-	display.render(80);
+	inkLines(display, 80);
 	display.scroll(4);
-	assert.doesNotMatch(plain(display.render(80).join("\n")), /new output below/);
+	assert.doesNotMatch(plain(inkLines(display, 80).join("\n")), /new output below/);
 
 	display.setTurns([
 		streamingTurn(
@@ -1216,12 +1265,12 @@ void test("new streamed output is signaled while the user is scrolled up", () =>
 			].join("\n"),
 		),
 	]);
-	const scrolledOutput = plain(display.render(80).join("\n"));
+	const scrolledOutput = plain(inkLines(display, 80).join("\n"));
 	assert.equal(display.isAtBottom, false);
 	assert.match(scrolledOutput, /↓ new output below/);
 
 	assert.equal(display.handleMouse(4, 5), true);
-	const bottomOutput = plain(display.render(80).join("\n"));
+	const bottomOutput = plain(inkLines(display, 80).join("\n"));
 	assert.doesNotMatch(bottomOutput, /new output below/);
 	assert.match(bottomOutput, /line-18/);
 });
@@ -1253,7 +1302,7 @@ void test("empty think wrappers do not render a THINK section", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(80).join("\n"));
+	const output = plain(inkLines(display, 80).join("\n"));
 
 	assert.doesNotMatch(output, /THINK|<\/?think>/);
 	assert.match(output, /Final answer/);
@@ -1280,7 +1329,7 @@ void test("think wrappers are removed without hiding real reasoning", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(80).join("\n"));
+	const output = plain(inkLines(display, 80).join("\n"));
 
 	assert.match(output, /REASONING/);
 	assert.match(output, /Useful reasoning/);
@@ -1319,7 +1368,7 @@ cfg.defaults
 		},
 	]);
 
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 	assert.match(output, /I need to inspect the defaults/);
 	assert.doesNotMatch(
 		output,
@@ -1381,7 +1430,7 @@ void test("expanded subagent details show child tool calls", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
+	const output = plain(inkLines(display, 120).join("\n"));
 
 	assert.match(output, /3 tool call\(s\)/);
 	assert.match(output, /read_file/);
@@ -1461,7 +1510,7 @@ void test("expanded subagent renders thinking, tools, and responses in call orde
 		},
 	]);
 
-	const output = plain(display.render(120).join("\n"));
+	const output = plain(inkLines(display, 120).join("\n"));
 	const thinking = output.indexOf("I should inspect the entry point.");
 	const progress = output.indexOf("I am checking the implementation.");
 	const tool = output.indexOf("read_file");
@@ -1533,14 +1582,14 @@ void test("collapsed completed subagent shows its final summary", () => {
 	]);
 
 	// Collapsed: single header line with status/summary only
-	const collapsed = plain(display.render(120).join("\n"));
+	const collapsed = plain(inkLines(display, 120).join("\n"));
 	assert.match(collapsed, /✓ subagent explorer done/);
 	assert.doesNotMatch(collapsed, /Private reasoning|Intermediate progress/);
 
 	// Expanded: full detail block with child chunks
 	display.toolsExpanded = true;
 	display.invalidate();
-	const expanded = plain(display.render(120).join("\n"));
+	const expanded = plain(inkLines(display, 120).join("\n"));
 	assert.match(expanded, /Summary: the implementation is correct\./);
 	assert.match(expanded, /Private reasoning/);
 	assert.match(expanded, /Intermediate progress/);
@@ -1617,7 +1666,7 @@ void test("collapsed subagent shows ordered flow with child tools collapsed", ()
 	]);
 
 	// Collapsed: single header line with status only
-	const collapsed = plain(display.render(120).join("\n"));
+	const collapsed = plain(inkLines(display, 120).join("\n"));
 	assert.match(collapsed, /✓ subagent explorer done/);
 	assert.doesNotMatch(collapsed, /I should inspect first|Inspecting now/);
 	assert.doesNotMatch(collapsed, /SUBAGENT · explorer-1/);
@@ -1625,7 +1674,7 @@ void test("collapsed subagent shows ordered flow with child tools collapsed", ()
 	// Expanded: full detail block with ordered flow
 	display.toolsExpanded = true;
 	display.invalidate();
-	const expanded = plain(display.render(120).join("\n"));
+	const expanded = plain(inkLines(display, 120).join("\n"));
 	assert.match(expanded, /I should inspect first\./);
 	assert.match(expanded, /Inspecting now\./);
 	assert.match(expanded, /read_file/);
@@ -1680,7 +1729,7 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 		},
 	]);
 	// Collapsed: single header line with status only
-	const collapsed = plain(display.render(120).join("\n"));
+	const collapsed = plain(inkLines(display, 120).join("\n"));
 	assert.match(collapsed, /✓ subagent explorer done/);
 	assert.doesNotMatch(collapsed, /read_file|ACTIVITY/);
 	assert.equal(collapsed.match(/explorer/g)?.length, 1);
@@ -1688,7 +1737,7 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 	// Expanded: full detail block with child tool calls
 	display.toolsExpanded = true;
 	display.invalidate();
-	const expanded = plain(display.render(120).join("\n"));
+	const expanded = plain(inkLines(display, 120).join("\n"));
 	assert.match(expanded, /read_file.*path=src\/index\.ts/);
 	assert.doesNotMatch(expanded, /ACTIVITY/);
 	assert.equal(expanded.match(/explorer/g)?.length, 1);
@@ -1729,7 +1778,7 @@ void test("completed subagent card has one parent success indicator", () => {
 	]);
 
 	// Collapsed: single header line with one ✓
-	const collapsed = plain(display.render(120).join("\n"));
+	const collapsed = plain(inkLines(display, 120).join("\n"));
 	assert.equal(collapsed.match(/✓/g)?.length, 1);
 	assert.match(collapsed, /✓ subagent explorer done/);
 	assert.doesNotMatch(collapsed, /2 turn.*0 tool call|Inspection complete/);
@@ -1737,7 +1786,7 @@ void test("completed subagent card has one parent success indicator", () => {
 	// Expanded: detail block with metadata
 	display.toolsExpanded = true;
 	display.invalidate();
-	const expandedOutput = plain(display.render(120).join("\n"));
+	const expandedOutput = plain(inkLines(display, 120).join("\n"));
 	assert.equal(expandedOutput.match(/✓/g)?.length, 1);
 	assert.match(expandedOutput, /✓ subagent explorer done/);
 	assert.match(expandedOutput, /2 turn.*0 tool call.*1\.4s/);
@@ -1803,7 +1852,7 @@ void test("spawn_agents renders ordered live task status", () => {
 	]);
 	// Collapsed: task rows are always visible so each is individually
 	// clickable to expand, even before the whole tool is expanded.
-	const collapsed = plain(display.render(120).join("\n"));
+	const collapsed = plain(inkLines(display, 120).join("\n"));
 	assert.match(collapsed, /subagents 2\/3 running.*3 tasks/);
 	assert.match(collapsed, /✓ 1\. explorer.*Inspect the API/);
 	assert.match(collapsed, /⠋ 2\. reviewer.*Review the tests/);
@@ -1812,7 +1861,7 @@ void test("spawn_agents renders ordered live task status", () => {
 	// Expanded: task breakdown with per-task status
 	display.toolsExpanded = true;
 	display.invalidate();
-	const expanded = plain(display.render(120).join("\n"));
+	const expanded = plain(inkLines(display, 120).join("\n"));
 	assert.match(expanded, /subagents 2\/3 running.*3 tasks/);
 	assert.match(expanded, /✓ 1\. explorer.*Inspect the API/);
 	assert.match(expanded, /⠋ 2\. reviewer.*Review the tests/);
@@ -1884,7 +1933,7 @@ void test("clicking a spawn_agents task row expands that exact task, not a neigh
 	]);
 
 	const findRow = (needle: string) => {
-		const rendered = display.render(120);
+		const rendered = inkLines(display, 120);
 		const row = rendered.findIndex((line) => plain(line).includes(needle));
 		assert.notEqual(row, -1, `row for "${needle}" not found`);
 		return row;
@@ -1893,12 +1942,12 @@ void test("clicking a spawn_agents task row expands that exact task, not a neigh
 	// Clicking the parent header should do nothing — only task rows toggle.
 	const headerRow = findRow("subagents");
 	assert.equal(display.handleMouse(4, headerRow), false);
-	assert.doesNotMatch(plain(display.render(120).join("\n")), /ALPHA-ONLY-CONTENT/);
+	assert.doesNotMatch(plain(inkLines(display, 120).join("\n")), /ALPHA-ONLY-CONTENT/);
 
 	// Click task 1 (Alpha) — only Alpha's content should appear.
 	const alphaRow = findRow("Task Alpha");
 	assert.equal(display.handleMouse(4, alphaRow), true);
-	const afterAlpha = plain(display.render(120).join("\n"));
+	const afterAlpha = plain(inkLines(display, 120).join("\n"));
 	assert.match(afterAlpha, /ALPHA-ONLY-CONTENT/);
 	assert.doesNotMatch(afterAlpha, /BETA-ONLY-CONTENT/);
 	assert.doesNotMatch(afterAlpha, /GAMMA-ONLY-CONTENT/);
@@ -1907,7 +1956,7 @@ void test("clicking a spawn_agents task row expands that exact task, not a neigh
 	// joins it, Gamma remains collapsed.
 	const betaRow = findRow("Task Beta");
 	assert.equal(display.handleMouse(4, betaRow), true);
-	const afterBeta = plain(display.render(120).join("\n"));
+	const afterBeta = plain(inkLines(display, 120).join("\n"));
 	assert.match(afterBeta, /ALPHA-ONLY-CONTENT/);
 	assert.match(afterBeta, /BETA-ONLY-CONTENT/);
 	assert.doesNotMatch(afterBeta, /GAMMA-ONLY-CONTENT/);
@@ -1915,7 +1964,7 @@ void test("clicking a spawn_agents task row expands that exact task, not a neigh
 	// Click task 3 (Gamma) — all three now expanded.
 	const gammaRow = findRow("Task Gamma");
 	assert.equal(display.handleMouse(4, gammaRow), true);
-	const afterGamma = plain(display.render(120).join("\n"));
+	const afterGamma = plain(inkLines(display, 120).join("\n"));
 	assert.match(afterGamma, /ALPHA-ONLY-CONTENT/);
 	assert.match(afterGamma, /BETA-ONLY-CONTENT/);
 	assert.match(afterGamma, /GAMMA-ONLY-CONTENT/);
@@ -1923,7 +1972,7 @@ void test("clicking a spawn_agents task row expands that exact task, not a neigh
 	// Click task 1 (Alpha) again — it collapses back, Beta/Gamma stay expanded.
 	const alphaRowAgain = findRow("Task Alpha");
 	assert.equal(display.handleMouse(4, alphaRowAgain), true);
-	const afterAlphaCollapse = plain(display.render(120).join("\n"));
+	const afterAlphaCollapse = plain(inkLines(display, 120).join("\n"));
 	assert.doesNotMatch(afterAlphaCollapse, /ALPHA-ONLY-CONTENT/);
 	assert.match(afterAlphaCollapse, /BETA-ONLY-CONTENT/);
 	assert.match(afterAlphaCollapse, /GAMMA-ONLY-CONTENT/);
@@ -1967,7 +2016,7 @@ void test("spawn_agents never renders a positive count over zero while arguments
 			isComplete: false,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
+	const output = plain(inkLines(display, 120).join("\n"));
 
 	assert.match(output, /subagents 1\/1 running/);
 	assert.doesNotMatch(output, /\/0 running/);
@@ -2011,7 +2060,7 @@ void test("spawn_agents repairs an inconsistent structured total", () => {
 			isComplete: false,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
+	const output = plain(inkLines(display, 120).join("\n"));
 
 	assert.match(output, /subagents 1\/3 running/);
 	assert.doesNotMatch(output, /\/0 running/);
@@ -2086,12 +2135,12 @@ void test("expanded spawn_agents keeps concurrent text streams attributed", () =
 			isComplete: false,
 		},
 	]);
-	const rendered = display.render(120).join("\n");
+	const rendered = inkLines(display, 120).join("\n");
 	const output = plain(rendered);
 
 	assert.match(output, /1\. explorer.*Inspect API[\s\S]*API stream/);
 	assert.match(output, /2\. reviewer.*Inspect tests[\s\S]*Test stream/);
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.ok(styledSpan(display, 120, "const")?.color);
 });
 
 void test("spawn_agents shows partial failures and expanded reports", () => {
@@ -2147,7 +2196,7 @@ void test("spawn_agents shows partial failures and expanded reports", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(120).join("\n"));
+	const output = plain(inkLines(display, 120).join("\n"));
 
 	assert.match(output, /! subagents partial · 1 failed/);
 	assert.match(output, /✓ 1\. explorer/);
@@ -2189,9 +2238,9 @@ void test("edited TypeScript previews are syntax highlighted", () => {
 			isComplete: true,
 		},
 	]);
-	const rendered = display.render(100).join("\n");
+	const rendered = inkLines(display, 100).join("\n");
 
-	assert.match(rendered, /\x1b\[38;5;\d+mconst/);
+	assert.ok(styledSpan(display, 100, "const")?.color);
 	assert.match(plain(rendered), /const answer = "yes";/);
 });
 
@@ -2232,12 +2281,11 @@ void test("edit_file result highlights code inside the diff", () => {
 			isComplete: true,
 		},
 	]);
-	const rendered = display.render(100).join("\n");
+	const rendered = inkLines(display, 100).join("\n");
 
-	assert.match(
-		rendered,
-		/\x1b\[38;5;\d+m\+\x1b\[0m\x1b\[48;5;\d+m\x1b\[0m\x1b\[38;5;141mconst/,
-	);
+	const addedCode = styledSpan(display, 100, "const");
+	assert.ok(addedCode?.color);
+	assert.ok(styledSpan(display, 100, "+")?.color);
 	assert.match(plain(rendered), /\+const answer = "yes";/);
 });
 
@@ -2271,7 +2319,7 @@ void test("internal post-tool hook guidance stays out of the transcript", () => 
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const output = plain(inkLines(display, 100).join("\n"));
 
 	assert.match(output, /visible output/);
 	assert.doesNotMatch(

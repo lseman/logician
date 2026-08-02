@@ -11,7 +11,6 @@ import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
 import { SessionStore, Transcript, type Turn } from "@logician/coding-agent/sessions";
 import {
 	createSlashCommands,
-	type SlashCommandDef,
 } from "@logician/coding-agent/commands";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
@@ -53,7 +52,7 @@ import { TodoBar } from "../status/todo-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
-import { Container, TUI } from "../terminal/core.ts";
+import { InkTextContainer, TUI } from "../terminal/core.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
@@ -98,6 +97,8 @@ import {
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
 export class LogicianTUI {
+	private exitHandler: (() => void) | null = null;
+	private stopPromise: Promise<void> | null = null;
 	// Not private: read/written by the extracted app/*.ts functions through
 	// their Ctx interfaces, which LogicianTUI satisfies structurally.
 	tui: TUI;
@@ -206,7 +207,6 @@ export class LogicianTUI {
 		return cycleExecutionProfileImpl(this);
 	}
 
-	// eslint-disable-next-line max-lines-per-function -- wires up entire TUI (bridge, transcript, components, keybindings, overlays)
 	constructor(
 		runtimeConfig = resolveRuntimeConfig(process.cwd(), process.env, {
 			loadProjectConfig: false,
@@ -355,7 +355,10 @@ export class LogicianTUI {
 		// Setup slash commands
 		const localHandlers = createLocalHandlers(this);
 		this.slashPopup.setCommands(createSlashCommands(this.bridge, localHandlers));
-		this.slashPopup.setOnSubmit(createSlashSubmitHandler(this));
+		const submitSlashCommand = createSlashSubmitHandler(this);
+		this.slashPopup.setOnSubmit((result, dispatch, command) => {
+			void submitSlashCommand(result, dispatch, command);
+		});
 	}
 
 	// ── Bridge setup ─────────────────────────────────────────────────────────
@@ -441,7 +444,7 @@ export class LogicianTUI {
 		// Stack todo bar + steer queue + question handler above the input bar
 		// (both render empty when there's nothing to show, so they only take
 		// space when active).
-		const pinnedContainer = new Container();
+		const pinnedContainer = new InkTextContainer();
 		this.notifications.setOnInvalidate(() => this.tui.requestRender());
 		pinnedContainer.addChild(this.notifications);
 		pinnedContainer.addChild(this.todoBar);
@@ -565,14 +568,32 @@ export class LogicianTUI {
 		return this.inputBar;
 	}
 
-	async stop(): Promise<void> {
-		this.tui.stop();
-		await this.bridge.stop();
-		if (this.currentSessionId) {
-			process.stderr.write(
-				`run \`logician --session ${this.currentSessionId}\` to recover this session\n`,
-			);
+	setExitHandler(handler: () => void): void {
+		this.exitHandler = handler;
+	}
+
+	requestExit(): void {
+		if (this.exitHandler) {
+			this.exitHandler();
+			return;
 		}
+		void this.stop().then(() => process.exit(0));
+	}
+
+	stop(): Promise<void> {
+		if (!this.stopPromise) {
+			this.stopPromise = (async () => {
+				this.tui.stop();
+				await this.bridge.stop();
+			})();
+		}
+		return this.stopPromise;
+	}
+
+	getSessionRecoveryTip(): string | null {
+		return this.currentSessionId
+			? `run \`logician --session ${this.currentSessionId}\` to recover this session\n`
+			: null;
 	}
 
 	// ── Memory forwarding ────────────────────────────────────────────────

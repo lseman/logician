@@ -4,7 +4,7 @@
 // Sections (separated by |):
 //   phase | model | thinking | dir/git | context | cache | reasoner | mcp
 
-import { type Component, visibleWidth, RESET, DIM } from "../terminal/core.ts";
+import { ansiToInkTextRow, type InkTextComponent, type InkTextRow, visibleWidth, RESET, DIM } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 
 /** Max chars for a free-text label before it's ellipsis-truncated. */
@@ -68,7 +68,7 @@ const DEFAULT_INFO: StatusInfo = {
 	rtkProxyEnabled: false,
 };
 
-export class StatusBar implements Component {
+export class StatusBar implements InkTextComponent {
 	private info: StatusInfo = { ...DEFAULT_INFO };
 	private tick = 0;
 	private timer: ReturnType<typeof setInterval> | null = null;
@@ -117,15 +117,15 @@ export class StatusBar implements Component {
 		this._invalidate();
 	}
 
-	render(width: number): string[] {
+	getInkTextRows(width: number): InkTextRow[] {
 		if (width === this.cachedWidth && this.cachedLine !== null) {
-			return [this.cachedLine];
+			return [ansiToInkTextRow(this.cachedLine)];
 		}
 
 		this.cachedWidth = width;
 		const line = this.renderCompact(width);
 		this.cachedLine = line;
-		return [line];
+		return [ansiToInkTextRow(line)];
 	}
 
 	// ── Compact single-line render ──────────────────────────────────────────

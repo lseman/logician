@@ -1,7 +1,7 @@
-import type { Component, OverlayOptions } from "../terminal/core.ts";
+import type { OverlayComponent, OverlayOptions } from "../terminal/core.ts";
 
 export interface OverlayEntry {
-	component: Component;
+	component: OverlayComponent;
 	options?: OverlayOptions;
 	hidden: boolean;
 	focusOrder: number;

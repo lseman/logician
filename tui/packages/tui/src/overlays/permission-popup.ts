@@ -2,16 +2,7 @@
 // Rounded-corner overlay for tool permission requests with selectable
 // allow-once / always-allow / deny options.
 
-import type { Component } from "../terminal/core.ts";
-import {
-	type ChoiceOption,
-	clampPopupLines,
-	renderChoiceOption,
-	renderListPopupFrame,
-	renderQuestion,
-	renderSeparator,
-	renderStatusLine,
-} from "./popup-utils.ts";
+import type { InkListOverlayModel } from "./ink-overlay-model.ts";
 
 export interface PermissionChoice {
 	/** Value sent back to the agent: "allow" | "always" | "deny" */
@@ -26,14 +17,12 @@ export type PermissionPopupAction =
 	| { type: "select"; choice: PermissionChoice }
 	| { type: "close" };
 
-export class PermissionPopup implements Component {
+export class PermissionPopup {
 	private toolName = "";
 	private toolArgs = "";
 	private choices: PermissionChoice[] = [];
 	private selectedIndex = 0;
 	public visible = false;
-	private cachedLines: string[] | null = null;
-	private cachedWidth = -1;
 
 	setToolInfo(toolName: string, toolArgs: string): void {
 		this.toolName = toolName;
@@ -144,88 +133,25 @@ export class PermissionPopup implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedLines = null;
+		// State is read directly by the Ink renderer.
 	}
 
-	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedLines !== null) {
-			return this.cachedLines;
-		}
-
-		this.cachedWidth = width;
-
-		if (!this.visible) return [];
-
-		const popupWidth = Math.max(48, Math.min(width, 120));
-		const innerWidth = Math.max(1, popupWidth - 4);
-		const bodyLines: string[] = [];
-		const dim = "\x1b[2m";
-		const reset = "\x1b[0m";
-
-		// ── Tool name ──
-		bodyLines.push(renderQuestion(this.toolName, innerWidth));
-
-		// ── Tool args preview ──
-		if (this.toolArgs) {
-			const argsPreview =
-				this.toolArgs.length > innerWidth
-					? `${this.toolArgs.slice(0, innerWidth - 3)}…`
-					: this.toolArgs;
-			const argsLine = `${dim}${argsPreview}${reset}`;
-			bodyLines.push(renderStatusLine(argsLine, innerWidth, ""));
-		}
-
-		// ── Separator ──
-		bodyLines.push(renderSeparator(innerWidth + 2));
-
-		// ── Choices ──
-		if (this.choices.length > 0) {
-			const maxRows = 6;
-			const start = Math.max(
-				0,
-				Math.min(
-					this.selectedIndex - Math.floor(maxRows / 2),
-					Math.max(0, this.choices.length - maxRows),
-				),
-			);
-			const end = Math.min(this.choices.length, start + maxRows);
-			if (start > 0) {
-				bodyLines.push(renderStatusLine(`↑ ${start} more`, innerWidth));
-			}
-			for (let i = start; i < end; i++) {
-				const ch = this.choices[i];
-				const option: ChoiceOption = {
-					label: ch.label,
-					value: ch.value,
-					selected: i === this.selectedIndex,
-					description: ch.description,
-				};
-				bodyLines.push(renderChoiceOption(option, innerWidth, i));
-			}
-			if (end < this.choices.length) {
-				bodyLines.push(
-					renderStatusLine(`↓ ${this.choices.length - end} more`, innerWidth),
-				);
-			}
-		} else {
-			bodyLines.push("");
-		}
-
-		const bottomText =
-			this.choices.length > 0
-				? "Select an option to decide."
-				: "Deny by default.";
-		const lines = renderListPopupFrame({
-			popupWidth,
-			innerWidth,
-			title: "Permission",
-			subtitle: ` (${this.choices.length})`,
-			hints: "↑↓ navigate · enter confirm · esc close",
-			bodyLines,
-			bottomText,
-		});
-
-		this.cachedLines = clampPopupLines(lines, width);
-		return this.cachedLines;
+	getInkOverlayModel(): InkListOverlayModel {
+		return {
+			kind: "list",
+			title: "Permission Required",
+			subtitle: this.toolName ? ` · ${this.toolName}` : undefined,
+			hints: "↑↓ select · enter confirm · esc deny",
+			headerLines: this.toolArgs ? [this.toolArgs] : undefined,
+			items: this.choices.map((choice, index) => ({
+				label: choice.label,
+				metadata: choice.description,
+				selected: index === this.selectedIndex,
+			})),
+			emptyText: "No permission choices available.",
+			footer: "Choose how Logician may run this tool.",
+			selectedIndex: this.selectedIndex,
+		};
 	}
+
 }

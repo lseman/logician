@@ -80,7 +80,7 @@ void test("mouse tool clicks request an Ink render", async () => {
 	const transcript: Scrollable = {
 		scrollOffset: 0,
 		isAtBottom: true,
-		render: () => ["tool"],
+		getInkTextRows: () => [[{ text: "tool" }]],
 		scroll: () => {},
 		scrollToBottom: () => {},
 		setViewportHeight: () => {},
@@ -220,4 +220,31 @@ void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
 	const screen = screenFromPtyResult(result, 120, 32).text();
 	assert.match(screen, /TOOLS EXPANDED/);
 	assert.doesNotMatch(result.output, /TUI render error/);
+});
+
+void test("/quit restores the normal screen before printing the session tip", async () => {
+	const result = await runInPty({
+		command: "bun",
+		args: ["run", entry],
+		cwd: tuiRoot,
+		env: {
+			HOME: createPtyAppHome(),
+			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
+			LOGICIAN_MCP: "0",
+			LOGICIAN_HOOKS: "0",
+		},
+		actions: [{ afterMs: 1200, send: "/quit\n" }],
+		timeoutMs: 6_000,
+		columns: 100,
+		rows: 30,
+	});
+	const tip = result.output.match(
+		/run `logician --session [^`]+` to recover this session/,
+	);
+	assert.ok(tip, "quit command must print the recovery tip");
+	assert.ok(
+		result.output.lastIndexOf("\x1b[?1049l") < (tip.index ?? 0),
+		"recovery tip must be written after Ink leaves the alternate screen",
+	);
 });

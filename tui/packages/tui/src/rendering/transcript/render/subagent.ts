@@ -3,8 +3,8 @@
 // tallies, per-child-agent streamed output, and the chronological child
 // thinking/response/tool flow.
 
-import { clampLineToWidth, DIM, RESET } from "../../../terminal/core.ts";
-import { theme } from "../../../terminal/theme.ts";
+import { clampLineToWidth } from "../../../terminal/core.ts";
+import { DIM, RESET, theme } from "../semantic-markup.ts";
 import type {
 	ChildChunk,
 	ChildToolCall,

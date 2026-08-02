@@ -2,10 +2,9 @@
 // Renders assistant reasoning chunks (collapsed/summary/expanded modes) with
 // code-block syntax highlighting in expanded mode.
 
-import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import { highlight, highlightAuto } from "../semantic-highlight.ts";
 import type { AssistantChunk, ThinkingDisplayStyle } from "@logician/coding-agent/sessions";
-import { BOLD, DIM, RESET } from "../../../terminal/core.ts";
-import { theme } from "../../../terminal/theme.ts";
+import { BOLD, DIM, RESET, theme } from "../semantic-markup.ts";
 import {
 	extractLangFromFence,
 	renderInline,
@@ -37,7 +36,7 @@ export function renderThinkingChunk(
 		}
 		case "summary": {
 			lines.push(
-				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
+				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} ${DIM}${text.trim().slice(0, 150)}${RESET}`,
 			);
 			break;
 		}

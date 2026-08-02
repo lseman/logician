@@ -8,38 +8,9 @@ import {
 	type SlashCommandCategory,
 	type SlashCommandDef,
 } from "@logician/coding-agent/commands";
-import {
-	BOLD,
-	type Component,
-	DIM,
-	RESET,
-	visibleWidth,
-} from "../terminal/core.ts";
-import { theme } from "../terminal/theme.ts";
-import {
-	clampPopupLines,
-	POPUP_FRAME_OVERHEAD,
-	renderListPopupFrame,
-} from "./popup-utils.ts";
+import type { InkListOverlayModel } from "./ink-overlay-model.ts";
 
 const MAX_VISIBLE_ENTRIES = 8;
-const getSelectedColor = (): string => theme.fgRaw("selected");
-const getCategoryColor = (cat: SlashCommandCategory): string => {
-	const colors: Record<SlashCommandCategory, string> = {
-		help: "\x1b[36m",
-		session: "\x1b[33m",
-		agent: "\x1b[35m",
-		context: "\x1b[34m",
-		skills: "\x1b[95m",
-		reasoning: "\x1b[37m",
-		display: "\x1b[93m",
-		permissions: "\x1b[31m",
-		shortcuts: "\x1b[36m",
-		loop: "\x1b[94m",
-		misc: "\x1b[90m",
-	};
-	return colors[cat] ?? "\x1b[90m";
-};
 
 interface RenderState {
 	filtered: SlashCommandDef[];
@@ -61,13 +32,11 @@ interface RenderState {
 	flatSelection: number;
 }
 
-export class SlashPopup implements Component {
+export class SlashPopup {
 	private commands: SlashCommandDef[] = [];
 	private query = "";
 	private selectedIndex = 0;
 	public visible = false;
-	private cachedLines: string[] | null = null;
-	private cachedWidth = -1;
 	private onSubmit?: (
 		result: string | null,
 		dispatch?: "quit",
@@ -318,165 +287,27 @@ export class SlashPopup implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedLines = null;
+		// State is read directly by the Ink renderer.
 	}
 
-	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedLines !== null) {
-			return this.cachedLines;
-		}
-
-		this.cachedWidth = width;
-
-		if (!this.visible) return [];
-
+	getInkOverlayModel(): InkListOverlayModel {
 		const state = this._prepareRenderState();
-		const popupWidth = Math.max(1, width);
-		const contentWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
-		const lines: string[] = [];
-
-		const count = state.filtered.length;
-
-		if (state.groups.length > 0) {
-			// Grouped display: category headers + commands
-			const { items, hiddenAbove, hiddenBelow } = windowAroundSelection(
-				state.flatEntries,
-				state.flatSelection,
-			);
-			if (hiddenAbove > 0) {
-				lines.push(`${DIM}  ↑ ${hiddenAbove} more above${RESET}`);
-			}
-			for (const entry of items) {
-				if (entry.isHeader) {
-					const category = entry.category ?? "misc";
-					const catColor = getCategoryColor(category);
-					const catLabel = category.charAt(0).toUpperCase() + category.slice(1);
-					lines.push(`${DIM}${catColor}── ${catLabel} ──${RESET}`);
-					continue;
-				}
-
-				const cmd = entry.cmd;
-				const idx = state.flatEntries.indexOf(entry);
-				const isSelected = idx === state.flatSelection;
-				const prefix = isSelected ? "▸ " : "  ";
-
-				const cmdName = cmd.command;
-				let line = isSelected
-					? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
-					: ` ${prefix}${cmdName}`;
-
-				// Arg hint in brackets
-				if (cmd.argHint) {
-					line += ` ${DIM}[${cmd.argHint}]${RESET}`;
-				}
-
-				// Description
-				if (cmd.description) {
-					const descStart = visibleWidth(line) + 2;
-					const descWidth = Math.max(1, contentWidth - descStart);
-					if (descWidth > 0) {
-						line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
-					}
-				}
-
-				lines.push(line);
-			}
-			if (hiddenBelow > 0) {
-				lines.push(`${DIM}  ↓ ${hiddenBelow} more below${RESET}`);
-			}
-		} else {
-			// Flat filtered list
-			const indexed = state.filtered.map((cmd, index) => ({ cmd, index }));
-			const { items, hiddenAbove, hiddenBelow } = windowAroundSelection(
-				indexed,
-				state.flatSelection,
-			);
-			if (hiddenAbove > 0) {
-				lines.push(`${DIM}  ↑ ${hiddenAbove} more above${RESET}`);
-			}
-			for (const item of items) {
-				const { cmd, index } = item;
-				const isSelected = index === state.flatSelection;
-				const prefix = isSelected ? "▸ " : "  ";
-				const cmdName = cmd.command;
-
-				let line = isSelected
-					? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
-					: ` ${prefix}${cmdName}`;
-
-				// Arg hint
-				if (cmd.argHint) {
-					line += ` ${DIM}[${cmd.argHint}]${RESET}`;
-				}
-
-				// Description
-				if (cmd.description) {
-					const descStart = visibleWidth(line) + 2;
-					const descWidth = Math.max(1, contentWidth - descStart);
-					if (descWidth > 0) {
-						line += `  ${DIM}${cmd.description.slice(0, descWidth)}${RESET}`;
-					}
-				}
-
-				lines.push(line);
-			}
-			if (hiddenBelow > 0) {
-				lines.push(`${DIM}  ↓ ${hiddenBelow} more below${RESET}`);
-			}
-		}
-
-		// Details panel for selected command (examples, arg info)
-		if (
-			state.selectedCmd &&
-			(state.selectedCmd.examples || state.selectedCmd.argHint)
-		) {
-			const sel = state.selectedCmd;
-			lines.push("");
-			const detailsColor = getCategoryColor(sel.category ?? "misc");
-			if (sel.argHint) {
-				lines.push(
-					`${DIM}Usage:${RESET} ${detailsColor}${sel.command}${RESET} ${BOLD}${sel.argHint}${RESET}`,
-				);
-			}
-			if (sel.examples && sel.examples.length > 0) {
-				for (const ex of sel.examples) {
-					lines.push(`${DIM}  Example:${RESET} ${DIM}${ex}${RESET}`);
-				}
-			}
-		}
-
-		this.cachedLines = clampPopupLines(
-			renderListPopupFrame({
-				popupWidth,
-				innerWidth: contentWidth,
-				title: "commands",
-				subtitle: ` (${count})`,
-				hints: "↑↓ select · tab complete · enter run · esc close",
-				bodyLines: lines,
-				bottomText: state.selectedCmd?.description ?? "Run a Logician command.",
-			}),
-			width,
-		);
-		return this.cachedLines;
+		return {
+			kind: "list",
+			title: "commands",
+			subtitle: ` (${state.filtered.length})`,
+			hints: "↑↓ select · tab complete · enter run · esc close",
+			items: state.filtered.map((command, index) => ({
+				label: command.command,
+				metadata: [command.argHint ? `[${command.argHint}]` : "", command.description]
+					.filter(Boolean)
+					.join("  "),
+				selected: index === this.selectedIndex,
+			})),
+			emptyText: "No matching commands.",
+			footer: state.selectedCmd?.description ?? "Run a Logician command.",
+			selectedIndex: this.selectedIndex,
+			maxRows: MAX_VISIBLE_ENTRIES,
+		};
 	}
-}
-
-function windowAroundSelection<T>(
-	items: T[],
-	selection: number,
-): { items: T[]; hiddenAbove: number; hiddenBelow: number } {
-	if (items.length <= MAX_VISIBLE_ENTRIES) {
-		return { items, hiddenAbove: 0, hiddenBelow: 0 };
-	}
-	const half = Math.floor(MAX_VISIBLE_ENTRIES / 2);
-	const start = Math.max(
-		0,
-		Math.min(selection - half, items.length - MAX_VISIBLE_ENTRIES),
-	);
-	const end = Math.min(items.length, start + MAX_VISIBLE_ENTRIES);
-	return {
-		items: items.slice(start, end),
-		hiddenAbove: start,
-		hiddenBelow: items.length - end,
-	};
 }

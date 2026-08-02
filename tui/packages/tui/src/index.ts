@@ -20,7 +20,7 @@ import { readFileSync, existsSync } from "node:fs";
 		// Strip surrounding quotes (single or double)
 		if (
 			value.length >= 2 &&
-			((value[0] === '"' && value.at(-1) === '"') ||
+			((value[0] === "\"" && value.at(-1) === "\"") ||
 				(value[0] === "'" && value.at(-1) === "'"))
 		) {
 			value = value.slice(1, -1);
@@ -45,11 +45,8 @@ import {
 	TrustStore,
 } from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
-import {
-	TrustPromptOverlay,
-	type TrustChoice,
-} from "./overlays/trust-prompt-overlay.ts";
-import { visibleWidth } from "./terminal/core.ts";
+import type { TrustChoice } from "./overlays/trust-prompt-overlay.ts";
+import { showTrustOverlayInk } from "./ink-app/mount-trust-prompt.tsx";
 import { LogicianTUI } from "./app/tui.ts";
 
 /** Show the trust prompt as an interactive terminal card before the main TUI. */
@@ -57,61 +54,8 @@ async function showTrustOverlay(
 	cwd: string,
 	paths: string[],
 ): Promise<TrustChoice> {
-	return new Promise((resolve) => {
-		initTheme();
-		const overlay = new TrustPromptOverlay();
-		overlay.setOptions({ cwd, paths });
-		overlay.show();
-		const stdin = process.stdin;
-		const wasRaw = stdin.isRaw === true;
-
-		const render = (): void => {
-			const width = Math.max(24, process.stdout.columns ?? 80);
-			const height = Math.max(12, process.stdout.rows ?? 24);
-			const lines = overlay.render(width);
-			const left = Math.max(
-				0,
-				Math.floor((width - Math.max(...lines.map(visibleWidth))) / 2),
-			);
-			const top = Math.max(0, height - lines.length - 3);
-			const inset = " ".repeat(left);
-			process.stdout.write(
-				`\x1b[?25l\x1b[2J\x1b[H${"\n".repeat(top)}${lines
-					.map((line) => inset + line)
-					.join("\n")}`,
-			);
-		};
-		const cleanup = (): void => {
-			stdin.off("data", onData);
-			process.stdout.off("resize", render);
-			if (stdin.setRawMode) stdin.setRawMode(wasRaw);
-			process.stdout.write("\x1b[?25h\x1b[2J\x1b[H");
-		};
-		const onData = (chunk: Buffer | string): void => {
-			const input = String(chunk);
-			let action = overlay.handleInput(input);
-			// PTYs and some terminals batch a shortcut with Enter. Preserve
-			// escape sequences as one key, but replay ordinary character batches.
-			if (!action && input.length > 1 && !input.startsWith("\x1b[")) {
-				for (const character of input) {
-					action = overlay.handleInput(character);
-					if (action) break;
-				}
-			}
-			if (!action) {
-				render();
-				return;
-			}
-			cleanup();
-			resolve(action.choice);
-		};
-
-		if (stdin.setRawMode) stdin.setRawMode(true);
-		stdin.resume();
-		stdin.on("data", onData);
-		process.stdout.on("resize", render);
-		render();
-	});
+	initTheme();
+	return showTrustOverlayInk(cwd, paths);
 }
 
 function defaultProjectTrust(): "ask" | "always" | "never" {
@@ -128,7 +72,7 @@ async function main(): Promise<void> {
 	// ── Parse --session <id> flag ────────────────────────────────────────
 	let resumeSessionId: string | undefined;
 	for (let i = 0; i < args.length; i++) {
-		if (args[i] === '--session' && i + 1 < args.length) {
+		if (args[i] === "--session" && i + 1 < args.length) {
 			resumeSessionId = args[i + 1];
 			break;
 		}
@@ -245,20 +189,21 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// Graceful shutdown
+	const { mountLogicianTui } = await import("./ink-app/mount-logician-tui.tsx");
+	const ink = mountLogicianTui(tui);
 	let stopping = false;
 	const shutdown = async (): Promise<void> => {
 		if (stopping) return;
 		stopping = true;
+		ink.unmount();
 		await tui.stop();
+		const recoveryTip = tui.getSessionRecoveryTip();
+		if (recoveryTip) process.stderr.write(recoveryTip);
 		process.exit(0);
 	};
-
+	tui.setExitHandler(() => void shutdown());
 	process.on("SIGINT", () => void shutdown());
 	process.on("SIGTERM", () => void shutdown());
-
-	const { mountLogicianTui } = await import("./ink-app/mount-logician-tui.tsx");
-	mountLogicianTui(tui);
 }
 
 void main();

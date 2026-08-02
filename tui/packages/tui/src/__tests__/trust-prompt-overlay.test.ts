@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { TrustPromptOverlay } from "../overlays/trust-prompt-overlay.ts";
-import { visibleWidth } from "../terminal/core.ts";
 import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
@@ -16,18 +15,14 @@ function prompt(): TrustPromptOverlay {
 	return overlay;
 }
 
-void test("trust prompt explains scope and renders within terminal width", () => {
+void test("trust prompt exposes workspace scope to Ink", () => {
 	const overlay = prompt();
-	for (const width of [36, 80, 120]) {
-		const lines = overlay.render(width);
-		const text = lines.join("\n");
-		assert.match(text, /TRUST THIS WORKSPACE/);
-		assert.match(text, /Trust this folder/);
-		assert.match(text, /Trust for this session/);
-		assert.match(text, /Exit without saving/);
-		assert.match(text, /\.logician\.json/);
-		assert.ok(lines.every((line) => visibleWidth(line) <= width));
-	}
+	const model = overlay.getInkOverlayModel();
+	assert.match(model.title, /Trust this workspace/);
+	assert.match(model.items.map((item) => item.label).join("\n"), /Trust this folder/);
+	assert.match(model.items.map((item) => item.label).join("\n"), /Trust for this session/);
+	assert.match(model.items.map((item) => item.label).join("\n"), /Exit without saving/);
+	assert.match(model.headerLines?.join("\n") ?? "", /\.logician\.json/);
 });
 
 void test("trust prompt supports navigation and direct shortcuts", () => {

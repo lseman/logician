@@ -1,5 +1,7 @@
 import {
-	type Component,
+	ansiToInkTextRow,
+	type InkTextComponent,
+	type InkTextRow,
 	clampLineToWidth,
 	RESET,
 	visibleWidth,
@@ -20,7 +22,7 @@ const MAX_HISTORY = 20;
 
 /** Transient UI feedback. Notifications disappear from view but the last
  * MAX_HISTORY are kept in `history()` for the /notifications command. */
-export class NotificationCenter implements Component {
+export class NotificationCenter implements InkTextComponent {
 	private notifications: Notification[] = [];
 	private log: Notification[] = [];
 	private nextId = 1;
@@ -71,13 +73,13 @@ export class NotificationCenter implements Component {
 		this.onInvalidate?.();
 	}
 
-	render(width: number): string[] {
+	getInkTextRows(width: number): InkTextRow[] {
 		return this.notifications.map((notification) => {
 			const { icon, color } = notificationStyle(notification.level);
 			const content = `${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
 			const clipped = clampLineToWidth(content, Math.max(1, width - 2));
 			const line = ` ${clipped}`;
-			return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
+			return ansiToInkTextRow(line + " ".repeat(Math.max(0, width - visibleWidth(line))));
 		});
 	}
 }

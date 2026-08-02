@@ -1,8 +1,7 @@
 // ── Transcript per-tool-type detail renderers ───────────────────────────────
 // Expanded-detail rendering for write/edit/file_diff/bash/mcp tool executions.
 
-import { DIM, RESET } from "../../../terminal/core.ts";
-import { theme } from "../../../terminal/theme.ts";
+import { DIM, RESET, theme } from "../semantic-markup.ts";
 import {
 	normalizeEditArgs,
 	stringArg,

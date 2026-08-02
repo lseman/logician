@@ -51,5 +51,6 @@ export interface SlashCommandsCtx {
 	setThemeByName: (name: string) => boolean;
 	_autoSaveTurn: () => void;
 	stop: () => Promise<void>;
+	requestExit: () => void;
 	getMemoryStore: () => MemoryStore | null;
 }

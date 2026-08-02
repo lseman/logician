@@ -2,9 +2,9 @@
 // Block-level markdown line rendering (code fences, tables, JSON) and the
 // table layout helpers it depends on. No instance state.
 
-import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
-import { BOLD, DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
-import { theme } from "../../../terminal/theme.ts";
+import { highlight, highlightAuto } from "../semantic-highlight.ts";
+import { visibleWidth } from "../../../terminal/core.ts";
+import { BOLD, DIM, RESET, theme } from "../semantic-markup.ts";
 import {
 	escapeMarkdownTableCell,
 	extractLangFromFence,

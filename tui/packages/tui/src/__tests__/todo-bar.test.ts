@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { TodoBar, type TaskItem } from "../status/todo-bar.ts";
 import { initTheme } from "../terminal/theme.ts";
+import { inkTextComponentLines as inkLines } from "../terminal/core.ts";
 
 initTheme("dark");
 
@@ -19,7 +20,7 @@ void test("TodoBar drops blank and invisible task labels", () => {
 		task("\x1b[31m\x1b[0m", 3),
 		task("  Ship\nfeature  ", 4),
 	]);
-	const rows = bar.render(80);
+	const rows = inkLines(bar, 80);
 	// header + task = 2 lines
 	assert.equal(rows.length, 2);
 	assert.match(rows[0], /Tasks 0\/1/);
@@ -29,13 +30,13 @@ void test("TodoBar drops blank and invisible task labels", () => {
 void test("TodoBar renders nothing when every task label is blank", () => {
 	const bar = new TodoBar();
 	bar.setTodos([task(" ", 1), task("\u200b", 2)]);
-	assert.deepEqual(bar.render(80), []);
+	assert.deepEqual(inkLines(bar, 80), []);
 });
 
 void test("TodoBar renders clean lines (no borders)", () => {
 	const bar = new TodoBar();
 	bar.setTodos([task("Fix login", 1)]);
-	const rows = bar.render(80);
+	const rows = inkLines(bar, 80);
 
 	// 2 lines: header, task
 	assert.equal(rows.length, 2);
@@ -54,7 +55,7 @@ void test("TodoBar groups tasks by status", () => {
 		task("Writing tests", 2, "in_progress"),
 		task("Done task", 3, "completed"),
 	]);
-	const rows = bar.render(80);
+	const rows = inkLines(bar, 80);
 
 	// Header shows 1/3
 	assert.match(rows[0], /Tasks 1\/3/);
@@ -78,7 +79,7 @@ void test("TodoBar shows dependencies", () => {
 		{ id: 1, subject: "Base task", status: "pending" },
 		{ id: 2, subject: "Depends on #1", status: "pending", blockedBy: [1] },
 	]);
-	const rows = bar.render(80);
+	const rows = inkLines(bar, 80);
 
 	// Second task should show dependency
 	const depRow = rows.find((r) => /Depends on/.test(r))!;
@@ -96,7 +97,7 @@ void test("TodoBar shows active form for in_progress tasks", () => {
 			activeForm: "checking logs",
 		},
 	]);
-	const rows = bar.render(80);
+	const rows = inkLines(bar, 80);
 
 	// Should show active form indicator
 	const taskRow = rows.find((r) => /Running task/.test(r))!;
@@ -114,7 +115,7 @@ void test("TodoBar shows hidden count when too many tasks", () => {
 		task("F", 6),
 		task("G", 7),
 	]);
-	const rows = bar.render(80);
+	const rows = inkLines(bar, 80);
 
 	// MAX_ROWS is 5, so 2 hidden (header + 5 tasks + hidden hint)
 	const hiddenIdx = rows.findIndex((r) => /more/.test(r));

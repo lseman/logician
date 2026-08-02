@@ -22,7 +22,7 @@ export function createSlashSubmitHandler(
 ) => Promise<void> {
 	return async (result, dispatch, command) => {
 		if (dispatch === "quit") {
-			void ctx.stop().then(() => process.exit(0));
+			ctx.requestExit();
 			return;
 		}
 		// Add slash command as user message to transcript. Called before local

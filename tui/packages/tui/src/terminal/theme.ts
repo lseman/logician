@@ -4,6 +4,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ansi256ToHex } from "./core.ts";
 
 // ── Color token names ─────────────────────────────────────────────────────────
 
@@ -233,6 +234,27 @@ export class Theme {
 		const ansi = this.fgCache.get(color);
 		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
 		return ansi;
+	}
+
+	/** Resolve a theme token for Ink's native color prop. */
+	inkColor(color: ThemeColor): string | undefined {
+		const ansi = this.fgRaw(color);
+		const trueColor = /\x1b\[38;2;(\d+);(\d+);(\d+)m/.exec(ansi);
+		if (trueColor) {
+			return `#${trueColor.slice(1).map((part) => Number(part).toString(16).padStart(2, "0")).join("")}`;
+		}
+		const indexed = /\x1b\[38;5;(\d+)m/.exec(ansi);
+		return indexed ? ansi256ToHex(Number(indexed[1])) : undefined;
+	}
+
+	inkBackgroundColor(color: ThemeBg): string | undefined {
+		const ansi = this.bgRaw(color);
+		const trueColor = /\x1b\[48;2;(\d+);(\d+);(\d+)m/.exec(ansi);
+		if (trueColor) {
+			return `#${trueColor.slice(1).map((part) => Number(part).toString(16).padStart(2, "0")).join("")}`;
+		}
+		const indexed = /\x1b\[48;5;(\d+)m/.exec(ansi);
+		return indexed ? ansi256ToHex(Number(indexed[1])) : undefined;
 	}
 
 	bgRaw(color: ThemeBg): string {

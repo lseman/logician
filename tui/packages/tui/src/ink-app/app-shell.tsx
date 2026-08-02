@@ -1,15 +1,18 @@
-import { Box, Text, useCursor } from "ink";
+import { Box, Text } from "ink";
 import React, { useMemo } from "react";
 import {
-	CURSOR_MARKER,
 	clampLineToWidth,
 	visibleWidth,
 	type TUIComponentsFrame,
 	type TUI,
 } from "../terminal/core.ts";
-import { RawLines } from "./components/raw-lines.tsx";
 import { OverlayLayer } from "./components/overlay-layer.tsx";
+import { ComposerRegion, composerHeight } from "./components/composer-region.tsx";
+import { PinnedRegion } from "./components/pinned-region.tsx";
+import { StatusRegion, statusHeight } from "./components/status-region.tsx";
+import { ListOverlay, listOverlayHeight } from "./components/list-overlay.tsx";
 import { isEntryVisible } from "./overlay-visibility.ts";
+import { hasInkOverlayModel, type InkListOverlayModel } from "../overlays/ink-overlay-model.ts";
 
 export interface AppShellProps {
 	tui: TUI;
@@ -37,10 +40,11 @@ export function AppShell({ tui, frame, renderTick }: AppShellProps): React.React
 		showHardwareCursor,
 	} = frame;
 	const width = Math.max(1, termWidth - 1);
-	const { setCursorPosition } = useCursor();
 
-	const aboveInputLines = useMemo(() => {
-		const lines = fixedAboveInputComponent?.render(width) ?? [];
+	const aboveInput = useMemo((): { rows: import("../terminal/core.ts").InkTextRow[]; model: InkListOverlayModel | null; modelHeight: number } => {
+		const rows = fixedAboveInputComponent?.getInkTextRows(width) ?? [];
+		let model: InkListOverlayModel | null = null;
+		let modelHeight = 0;
 		// Interactive selectors (settings, model picker, ...) participate in the
 		// fixed composer stack instead of floating over transcript content --
 		// Only the most recently focused selector owns the region.
@@ -51,98 +55,67 @@ export function AppShell({ tui, frame, renderTick }: AppShellProps): React.React
 			const entry = selectorEntries.reduce((latest, candidate) =>
 				candidate.focusOrder > latest.focusOrder ? candidate : latest,
 			);
-			const rendered = entry.component.render(width);
-			const maxHeight = entry.options?.maxHeight ?? rendered.length;
-			for (const line of rendered.slice(0, maxHeight)) {
-				const clamped = clampLineToWidth(line, width);
-				lines.push(clamped + " ".repeat(Math.max(0, width - visibleWidth(clamped))));
+			if (hasInkOverlayModel(entry.component)) {
+				model = entry.component.getInkOverlayModel();
+				modelHeight = Math.min(
+					listOverlayHeight(model),
+					entry.options?.maxHeight ?? Number.POSITIVE_INFINITY,
+				);
+			} else {
+				const rendered = entry.component.render?.(width) ?? [];
+				const maxHeight = entry.options?.maxHeight ?? rendered.length;
+				for (const line of rendered.slice(0, maxHeight)) {
+					const clamped = clampLineToWidth(line, width);
+					rows.push([{ text: clamped + " ".repeat(Math.max(0, width - visibleWidth(clamped))) }]);
+				}
 			}
 		}
-		return lines;
+		return { rows, model, modelHeight };
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
 	}, [fixedAboveInputComponent, overlayStack, width, renderTick]);
-	const inputLines = useMemo(
-		() => inputBarComponent?.render(width) ?? [" ".repeat(width)],
-		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[inputBarComponent, width, renderTick],
-	);
-	const statusLines = useMemo(
-		() => fixedBottomComponent?.render(width) ?? [" ".repeat(width)],
-		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[fixedBottomComponent, width, renderTick],
-	);
+	const aboveInputHeight = aboveInput.rows.length + aboveInput.modelHeight;
+	const inputHeight = composerHeight(inputBarComponent, width);
+	const footerHeight = statusHeight(fixedBottomComponent, width);
 
 	const dockHeight =
-		1 + aboveInputLines.length + inputLines.length + 1 + statusLines.length;
+		1 + aboveInputHeight + inputHeight + 1 + footerHeight;
 	const transcriptHeight = Math.max(1, termHeight - dockHeight);
 
 	// Transcript rendering and mouse hit-testing both need the current Ink
 	// layout during this frame, not one commit later.
 	tui.setViewportHeight(transcriptHeight);
 
-	const transcriptLines = useMemo(
-		() => scrollableComponent?.render(width) ?? Array(transcriptHeight).fill(" ".repeat(width)),
+	const transcriptRows = useMemo(
+		() => scrollableComponent?.getInkTextRows(width) ?? Array(transcriptHeight).fill([{ text: " ".repeat(width) }]),
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
 		[scrollableComponent, width, transcriptHeight, renderTick],
-	);
-
-	// The InputBar marks the edit position with CURSOR_MARKER so the hardware
-	// cursor can be parked exactly there. Its on-screen row is the input
-	// region's offset within the dock (transcript + separator + above-input
-	// lines) plus the marker's row within the input bar's own output.
-	const markerInInput = useMemo(() => {
-		for (let row = 0; row < inputLines.length; row++) {
-			const idx = inputLines[row].indexOf(CURSOR_MARKER);
-			if (idx >= 0) {
-				return { row, col: visibleWidth(inputLines[row].slice(0, idx)) };
-			}
-		}
-		return null;
-	}, [inputLines]);
-
-	// Called directly in the render body, not an effect: Ink's own useCursor
-	// example does the same, since cursor position must be current for this
-	// exact commit rather than lagging a frame behind (an effect would apply
-	// the previous frame's position, visible as the cursor sitting one row
-	// off -- e.g. on the separator above the input bar -- whenever content
-	// shifts the input region's row offset between renders).
-	if (markerInInput && showHardwareCursor) {
-		setCursorPosition({
-			x: markerInInput.col,
-			// Ink's cursor suffix measures y from the implicit line immediately
-			// after its output. Fullscreen output has no trailing newline, so its
-			// public cursor coordinate is one greater than our zero-based layout
-			// row. Passing the layout row directly parks the terminal cursor on
-			// the line above the marked input position.
-			y: transcriptHeight + 1 + aboveInputLines.length + markerInInput.row + 1,
-		});
-	} else {
-		setCursorPosition(undefined);
-	}
-
-	const displayInputLines = useMemo(
-		() => inputLines.map((line) => line.replace(CURSOR_MARKER, "")),
-		[inputLines],
 	);
 
 	return (
 		<Box flexDirection="column" width={termWidth} height={termHeight}>
 			<Box flexDirection="column" height={transcriptHeight} overflow="hidden">
-				<RawLines lines={transcriptLines} />
+				<PinnedRegion rows={transcriptRows} />
 			</Box>
 			<Text dimColor>{"─".repeat(width)}</Text>
-			{aboveInputLines.length > 0 && (
-				<Box flexDirection="column">
-					<RawLines lines={aboveInputLines} />
+			<PinnedRegion rows={aboveInput.rows} />
+			{aboveInput.model && (
+				<Box height={aboveInput.modelHeight} overflow="hidden">
+					<ListOverlay model={aboveInput.model} width={width} />
 				</Box>
 			)}
-			<Box flexDirection="column">
-				<RawLines lines={displayInputLines} />
-			</Box>
+			<ComposerRegion
+				component={inputBarComponent}
+				width={width}
+				originY={transcriptHeight + 1 + aboveInputHeight}
+				showHardwareCursor={showHardwareCursor}
+				renderTick={renderTick}
+			/>
 			<Text dimColor>{"─".repeat(width)}</Text>
-			<Box flexDirection="column">
-				<RawLines lines={statusLines} />
-			</Box>
+			<StatusRegion
+				component={fixedBottomComponent}
+				width={width}
+				renderTick={renderTick}
+			/>
 			<OverlayLayer
 				overlayStack={overlayStack}
 				termWidth={termWidth}

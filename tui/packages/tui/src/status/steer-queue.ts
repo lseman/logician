@@ -6,13 +6,15 @@
 
 import {
 	clampLineToWidth,
-	type Component,
+	ansiToInkTextRow,
+	type InkTextComponent,
+	type InkTextRow,
 	visibleWidth,
 	RESET,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 
-export class SteerQueue implements Component {
+export class SteerQueue implements InkTextComponent {
 	private steering: string[] = [];
 	private followUp: string[] = [];
 	private onInvalidate: (() => void) | null = null;
@@ -31,7 +33,7 @@ export class SteerQueue implements Component {
 		this.onInvalidate?.();
 	}
 
-	render(width: number): string[] {
+	getInkTextRows(width: number): InkTextRow[] {
 		const total = this.steering.length + this.followUp.length;
 		if (total === 0) return [];
 
@@ -99,7 +101,7 @@ export class SteerQueue implements Component {
 			),
 		);
 
-		return lines;
+		return lines.map(ansiToInkTextRow);
 	}
 }
 

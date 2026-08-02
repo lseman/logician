@@ -5,7 +5,7 @@
 // Displays: compact task list with status marks, grouped by status.
 //           in_progress first, then pending, then completed.
 
-import { type Component, visibleWidth } from "../terminal/core.ts";
+import { ansiToInkTextRow, type InkTextComponent, type InkTextRow, visibleWidth } from "../terminal/core.ts";
 import { theme, type ThemeColor } from "../terminal/theme.ts";
 
 const RESET = "\x1b[0m";
@@ -56,7 +56,7 @@ function statusMark(status: TaskItem["status"], frame?: number): string {
 
 const MAX_ROWS = 5;
 
-export class TodoBar implements Component {
+export class TodoBar implements InkTextComponent {
 	private tasks: TaskItem[] = [];
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
@@ -144,7 +144,7 @@ export class TodoBar implements Component {
 		}
 	}
 
-	render(width: number): string[] {
+	getInkTextRows(width: number): InkTextRow[] {
 		const countKey = this.tasks.filter((t) => t.status !== "deleted").length;
 
 		if (
@@ -153,14 +153,14 @@ export class TodoBar implements Component {
 			this.cachedLines !== null &&
 			this.transitionFrame.size === 0
 		) {
-			return this.cachedLines;
+			return this.cachedLines.map(ansiToInkTextRow);
 		}
 
 		const lines = renderRaw(width, this.tasks, this.transitionFrame);
 		this.cachedWidth = width;
 		this.cachedCount = countKey;
 		this.cachedLines = lines;
-		return lines;
+		return lines.map(ansiToInkTextRow);
 	}
 }
 

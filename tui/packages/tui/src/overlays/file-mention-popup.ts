@@ -3,15 +3,7 @@
 // after an "@". Mirrors SlashPopup's inline-autocomplete pattern (input bar
 // keeps focus; this popup renders below and only intercepts nav/accept keys).
 
-import type { Component } from "../terminal/core.ts";
-import {
-	clampPopupLines,
-	type ListItem,
-	POPUP_FRAME_OVERHEAD,
-	renderListItem,
-	renderListPopupBody,
-	renderListPopupFrame,
-} from "./popup-utils.ts";
+import type { InkListOverlayModel } from "./ink-overlay-model.ts";
 
 const MAX_VISIBLE_ENTRIES = 8;
 const MAX_MATCHES = 50;
@@ -44,13 +36,11 @@ function subsequenceMatch(query: string, text: string): boolean {
 	return qi === query.length;
 }
 
-export class FileMentionPopup implements Component {
+export class FileMentionPopup {
 	private files: string[] = [];
 	private query = "";
 	private selectedIndex = 0;
 	public visible = false;
-	private cachedLines: string[] | null = null;
-	private cachedWidth = -1;
 	private matches: string[] = [];
 
 	setFiles(files: string[]): void {
@@ -114,59 +104,23 @@ export class FileMentionPopup implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedLines = null;
+		// State is read directly by the Ink renderer.
 	}
 
-	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedLines !== null) {
-			return this.cachedLines;
-		}
-		this.cachedWidth = width;
-
-		if (!this.visible) return [];
-
-		const popupWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
-		const selection = {
-			window: (count: number, maxRows: number) => {
-				const start = Math.max(
-					0,
-					Math.min(
-						this.selectedIndex - Math.floor(maxRows / 2),
-						Math.max(0, count - maxRows),
-					),
-				);
-				return { start, end: Math.min(count, start + maxRows) };
-			},
+	getInkOverlayModel(): InkListOverlayModel {
+		return {
+			kind: "list",
+			title: "files",
+			subtitle: ` (${this.matches.length})`,
+			hints: "↑↓ select · tab/enter insert · esc close",
+			items: this.matches.map((path, index) => ({
+				label: path,
+				selected: index === this.selectedIndex,
+			})),
+			emptyText: "No matching files.",
+			footer: this.query ? `Matching @${this.query}` : "Mention a project file.",
+			selectedIndex: this.selectedIndex,
+			maxRows: MAX_VISIBLE_ENTRIES,
 		};
-		const bodyLines = renderListPopupBody(
-			this.matches,
-			selection,
-			innerWidth,
-			MAX_VISIBLE_ENTRIES,
-			(path, index) => {
-				const item: ListItem = {
-					label: path,
-					selected: index === this.selectedIndex,
-				};
-				return renderListItem(item, innerWidth);
-			},
-			"No matching files.",
-		);
-		this.cachedLines = clampPopupLines(
-			renderListPopupFrame({
-				popupWidth,
-				innerWidth,
-				title: "files",
-				subtitle: ` (${this.matches.length})`,
-				hints: "↑↓ select · tab/enter insert · esc close",
-				bodyLines,
-				bottomText: this.query
-					? `Matching @${this.query}`
-					: "Mention a project file.",
-			}),
-			width,
-		);
-		return this.cachedLines;
 	}
 }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SlashCommandDef } from "@logician/coding-agent/commands";
 import { SlashPopup } from "../overlays/slash-popup.ts";
-import { initTheme, theme } from "../terminal/theme.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
@@ -23,19 +23,18 @@ const commands: SlashCommandDef[] = [
 	},
 ];
 
-test("SlashPopup renders the active command using the theme selected color", () => {
+test("SlashPopup exposes the active command to Ink", () => {
 		const popup = new SlashPopup();
 		popup.setCommands(commands);
 		popup.setQuery("/");
 		popup.show();
 
-		const selectedColor = theme.fgRaw("selected");
-		let output = popup.render(80).join("\n");
-		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/help`));
+		let model = popup.getInkOverlayModel();
+		assert.equal(model.items.find((item) => item.selected)?.label, "/help");
 
 		popup.moveSelection(1);
-		output = popup.render(80).join("\n");
-		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/settings`));
+		model = popup.getInkOverlayModel();
+		assert.equal(model.items.find((item) => item.selected)?.label, "/settings");
 	});
 
 test("submitRaw establishes the command turn before running the local handler", () => {

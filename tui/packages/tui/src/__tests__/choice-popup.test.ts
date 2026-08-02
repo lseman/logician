@@ -3,14 +3,9 @@ import { test } from "node:test";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { SettingsSelectorOverlay } from "../overlays/settings-overlay.ts";
 import { ThemeSelectorOverlay } from "../overlays/theme-selector.ts";
-import { visibleWidth } from "../terminal/core.ts";
-import { initTheme, theme } from "../terminal/theme.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
-
-const plain = (value: string): string =>
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI CSI escape sequence
-	value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 
 function popup(): ChoicePopup {
 	const result = new ChoicePopup();
@@ -34,32 +29,17 @@ function popup(): ChoicePopup {
 
 void test("choice popup renders a compact ask-user card with stacked details", () => {
 	const component = popup();
-	const lines = component.render(64);
-	const output = plain(lines.join("\n"));
-
-	assert.match(output, /ASK {2}choose one/);
-	assert.match(output, /● Focused fix {2}1/);
-	assert.match(output, /○ Balanced refactor {2}2/);
-	assert.match(output, /Make the smallest safe change/);
-	assert.match(output, /↑↓ move {3}enter answer {3}esc dismiss/);
-	const selectedDescription = lines.find((line) =>
-		plain(line).includes("Make the smallest safe change"),
-	);
-	assert.ok(selectedDescription?.includes(theme.fgRaw("active")));
-	const selectedLabel = lines.find((line) =>
-		plain(line).includes("● Focused fix"),
-	);
-	assert.ok(selectedLabel?.includes(theme.fgRaw("selected")));
-	assert.ok(lines.every((line) => visibleWidth(line) <= 64));
+	const model = component.getInkOverlayModel();
+	assert.equal(model.title, "ASK");
+	assert.equal(model.items[0]?.label, "Focused fix");
+	assert.match(model.items[0]?.metadata ?? "", /smallest safe change/);
+	assert.equal(model.items[0]?.selected, true);
 });
 
-void test("choice popup wraps copy and remains width-safe in narrow terminals", () => {
-	const lines = popup().render(34);
-	const output = plain(lines.join("\n"));
-
-	assert.match(output, /next implementation\?/);
-	assert.match(output, /current structure\./);
-	assert.ok(lines.every((line) => visibleWidth(line) <= 34));
+void test("choice popup exposes question copy to Ink", () => {
+	const model = popup().getInkOverlayModel();
+	assert.match(model.headerLines?.join("\n") ?? "", /next implementation\?/);
+	assert.match(model.items[0]?.metadata ?? "", /current structure\./);
 });
 
 void test("choice popup supports arrows, vim keys, and direct number selection", () => {
@@ -101,11 +81,11 @@ void test("multi-question popup uses tabs and submits a structured answer", () =
 	component.show();
 
 	assert.equal(component.handleInput("\n"), null);
-	assert.match(plain(component.render(80).join("\n")), /✓ Scope.*Tests/);
+	assert.equal(component.getInkOverlayModel().headerLines?.[0], "Tests");
 	component.handleInput("2");
 	assert.equal(component.handleInput("\n"), null);
-	const submit = plain(component.render(80).join("\n"));
-	assert.match(submit, /Ready to submit your answers/);
+	const submit = component.getInkOverlayModel();
+	assert.match(submit.footer, /Ready to submit/);
 	assert.deepEqual(component.handleInput("\n"), {
 		type: "submit",
 		answers: { scope: "small", tests: "full" },
@@ -138,19 +118,16 @@ void test("settings and selectors share the same dialog frame and focus style", 
 	]);
 	themes.show();
 
-	for (const lines of [settings.render(64), themes.render(64)]) {
-		const output = plain(lines.join("\n"));
-		assert.match(output, /^╭─/);
-		assert.match(output, /❯/);
-		assert.match(output, /↑↓/);
-		assert.match(output, /╰─/);
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI background escape
-		assert.doesNotMatch(lines.join("\n"), /\x1b\[48;/);
-		assert.ok(lines.every((line) => visibleWidth(line) <= 64));
-	}
+	const settingsModel = settings.getInkOverlayModel();
+	assert.equal(settingsModel.title, "Runtime Settings");
+	assert.equal(settingsModel.items[0]?.selected, true);
+	const themeModel = themes.getInkOverlayModel();
+	assert.equal(themeModel.title, "Theme");
+	assert.equal(themeModel.items.length, 2);
+	assert.equal(themeModel.items[0]?.selected, true);
 
 	settings.handleInput("\n");
-	const detail = plain(settings.render(64).join("\n"));
-	assert.match(detail, /❯ High ✓/);
-	assert.doesNotMatch(detail, /●/);
+	const detail = settings.getInkOverlayModel();
+	assert.equal(detail.items.find((item) => item.selected)?.label, "High");
+	assert.equal(detail.items.find((item) => item.current)?.label, "High");
 });

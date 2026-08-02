@@ -18,15 +18,15 @@ void test("slash popup renders every command for a bare slash", () => {
 	popup.setCommands(commands);
 	popup.setQuery("/");
 	popup.show();
-	let rendered = popup.render(120).join("\n");
-	assert.match(rendered, /commands.*\(15\)/);
-	assert.match(rendered, /more below/);
+	let model = popup.getInkOverlayModel();
+	assert.equal(`${model.title}${model.subtitle}`, "commands (15)");
+	assert.equal(model.items.length, 15);
 	for (let index = 0; index < commands.length - 1; index++) {
 		popup.moveSelection(1);
 	}
-	rendered = popup.render(120).join("\n");
-	assert.match(rendered, /more above/);
-	assert.match(rendered, /\/command-14/);
+	model = popup.getInkOverlayModel();
+	assert.equal(model.selectedIndex, 14);
+	assert.equal(model.items[14]?.label, "/command-14");
 });
 
 void test("slash popup does not replay a stale previous result", () => {

@@ -2,16 +2,7 @@
 // Rounded-corner overlay popup for agent questions with numbered selectable options.
 // Uses the shared popup-utils design system.
 
-import {
-	BOLD,
-	type Component,
-	clampLineToWidth,
-	DIM,
-	RESET,
-	visibleWidth,
-} from "../terminal/core.ts";
-import { theme } from "../terminal/theme.ts";
-import { wrapText } from "../rendering/transcript/layout.ts";
+import type { InkListOverlayModel } from "./ink-overlay-model.ts";
 
 export interface ChoiceItem {
 	/** The value sent back to the agent when selected. */
@@ -42,15 +33,13 @@ export type ChoicePopupAction =
 	| { type: "submit"; answers: Record<string, string> }
 	| { type: "close" };
 
-export class ChoicePopup implements Component {
+export class ChoicePopup {
 	private questionId = "";
 	private questions: ChoiceQuestion[] = [];
 	private currentTab = 0;
 	private selectedIndices: number[] = [];
 	private answers = new Map<string, string>();
 	public visible = false;
-	private cachedLines: string[] | null = null;
-	private cachedWidth = -1;
 
 	setQuestion(q: string): void {
 		const choices = this.questions[0]?.choices ?? [];
@@ -213,150 +202,52 @@ export class ChoicePopup implements Component {
 	}
 
 	invalidate(): void {
-		this.cachedLines = null;
+		// State is read directly by the Ink renderer.
 	}
 
-	render(width: number): string[] {
-		if (width === this.cachedWidth && this.cachedLines !== null) {
-			return this.cachedLines;
+	getInkOverlayModel(): InkListOverlayModel {
+		const question = this.questions[this.currentTab];
+		if (!question) {
+			return {
+				kind: "list",
+				title: "ASK",
+				subtitle: ` · ${this.answers.size}/${this.questions.length} answered`,
+				hints: "tab questions · enter submit · esc dismiss",
+				items: this.questions.map((item) => {
+					const answer = this.answers.get(item.id);
+					const choice = item.choices.find((candidate) => candidate.value === answer);
+					return {
+						label: item.header || item.question,
+						metadata: choice?.label ?? "Not answered",
+						current: Boolean(answer),
+					};
+				}),
+				emptyText: "No questions available.",
+				footer: this.answers.size === this.questions.length
+					? "Ready to submit."
+					: "Answer every question before submitting.",
+				selectedIndex: 0,
+			};
 		}
-
-		this.cachedWidth = width;
-
-		if (!this.visible) return [];
-
-		const popupWidth = Math.max(1, width);
-		const innerWidth = Math.max(1, popupWidth - 4);
-		const lines: string[] = [];
-		const accent = theme.fgRaw("accent");
-		const selectedColor = theme.fgRaw("selected");
-		const text = theme.fgRaw("text");
-		const muted = theme.fgRaw("muted");
-		const active = theme.fgRaw("active");
-		const border = theme.fgRaw("borderMuted");
-		const line = (content = ""): string => {
-			const clipped = clampLineToWidth(content, innerWidth);
-			return `${border}│${RESET} ${clipped}${" ".repeat(
-				Math.max(0, innerWidth - visibleWidth(clipped)),
-			)} ${border}│${RESET}`;
-		};
-
-		lines.push(`${border}╭${"─".repeat(popupWidth - 2)}╮${RESET}`);
-		lines.push(
-			line(
-				`${accent}${BOLD}ASK${RESET}${muted}  ${this.questions.length > 1 ? `${this.answers.size}/${this.questions.length} answered` : "choose one"}${RESET}`,
-			),
-		);
-		if (this.questions.length > 1) {
-			const tabs = this.questions.map((question, index) => {
-				const activeTab = index === this.currentTab;
-				const answered = this.answers.has(question.id);
-				const color = activeTab ? selectedColor : muted;
-				const mark = answered ? "✓" : "□";
-				return `${color}${activeTab ? BOLD : ""}${mark} ${question.header || `Question ${index + 1}`}${RESET}`;
-			});
-			const submitColor =
-				this.currentTab === this.questions.length ? selectedColor : muted;
-			tabs.push(
-				`${submitColor}${this.currentTab === this.questions.length ? BOLD : ""}✓ Submit${RESET}`,
-			);
-			lines.push(line(`←  ${tabs.join(` ${muted}·${RESET} `)}  →`));
-		}
-		lines.push(line());
-
-		const activeQuestion = this.questions[this.currentTab];
-		if (!activeQuestion) {
-			const complete = this.answers.size === this.questions.length;
-			lines.push(
-				line(
-					`${text}${BOLD}${complete ? "Ready to submit your answers?" : "Answer every question before submitting."}${RESET}`,
-				),
-			);
-			lines.push(line());
-			for (const question of this.questions) {
-				const answer = this.answers.get(question.id);
-				const choice = question.choices.find((item) => item.value === answer);
-				lines.push(
-					line(
-						`${answer ? active : muted}${answer ? "✓" : "□"} ${question.header || question.question}: ${choice?.label ?? "Not answered"}${RESET}`,
-					),
-				);
-			}
-			lines.push(line());
-			lines.push(
-				line(
-					`${muted}${BOLD}tab${RESET}${muted} questions   ${BOLD}enter${RESET}${muted} submit   ${BOLD}esc${RESET}${muted} dismiss${RESET}`,
-				),
-			);
-			lines.push(`${border}╰${"─".repeat(popupWidth - 2)}╯${RESET}`);
-			this.cachedLines = lines.map((value) => clampLineToWidth(value, width));
-			return this.cachedLines;
-		}
-
-		const questionLines = wrapText(
-			activeQuestion.question || "What should we do?",
-			Math.max(1, innerWidth - 2),
-		);
-		for (const questionLine of questionLines) {
-			lines.push(line(`${text}${BOLD}${questionLine}${RESET}`));
-		}
-		lines.push(line());
-
-		// ── Choices ──
-		const choices = activeQuestion.choices;
 		const selectedIndex = this.selectedIndices[this.currentTab] ?? 0;
-		if (choices.length > 0) {
-			const maxRows = 10;
-			const start = Math.max(
-				0,
-				Math.min(
-					selectedIndex - Math.floor(maxRows / 2),
-					Math.max(0, choices.length - maxRows),
-				),
-			);
-			const end = Math.min(choices.length, start + maxRows);
-			if (start > 0) lines.push(line(`${muted}  ↑ ${start} more${RESET}`));
-			for (let i = start; i < end; i++) {
-				const ch = choices[i];
-				const selected = i === selectedIndex;
-				const labelColor = selected ? `${selectedColor}${BOLD}` : text;
-				const marker = selected
-					? `${selectedColor}●${RESET}`
-					: `${muted}○${RESET}`;
-				lines.push(
-					line(
-						`${marker} ${labelColor}${ch.label}${RESET}${muted}  ${i + 1}${RESET}`,
-					),
-				);
-				if (ch.description) {
-					for (const descriptionLine of wrapText(
-						ch.description,
-						Math.max(1, innerWidth - 4),
-					)) {
-						lines.push(
-							line(
-								`${selected ? active : muted}   ${DIM}${descriptionLine}${RESET}`,
-							),
-						);
-					}
-				}
-			}
-			if (end < choices.length) {
-				lines.push(line(`${muted}  ↓ ${choices.length - end} more${RESET}`));
-			}
-		} else {
-			lines.push(line(`${muted}No options available${RESET}`));
-		}
-
-		lines.push(line());
-		lines.push(
-			line(
-				`${muted}${BOLD}↑↓${RESET}${muted} move   ${BOLD}enter${RESET}${muted} answer   ${this.questions.length > 1 ? `${BOLD}tab${RESET}${muted} questions   ` : ""}${BOLD}esc${RESET}${muted} dismiss${RESET}`,
-			),
-		);
-		lines.push(`${border}╰${"─".repeat(popupWidth - 2)}╯${RESET}`);
-
-		this.cachedLines = lines.map((value) => clampLineToWidth(value, width));
-		return this.cachedLines;
+		return {
+			kind: "list",
+			title: "ASK",
+			subtitle: this.questions.length > 1
+				? ` · ${this.answers.size}/${this.questions.length} answered`
+				: " · choose one",
+			hints: "↑↓ choose · enter confirm · esc dismiss",
+			headerLines: [question.header || `Question ${this.currentTab + 1}`, question.question],
+			items: question.choices.map((choice, index) => ({
+				label: choice.label,
+				metadata: choice.description,
+				selected: index === selectedIndex,
+				current: this.answers.get(question.id) === choice.value,
+			})),
+			emptyText: "No choices available.",
+			footer: this.questions.length > 1 ? "Tab moves between questions and Submit." : "Select one option.",
+			selectedIndex,
+		};
 	}
+
 }
