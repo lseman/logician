@@ -1,8 +1,6 @@
 // ── Utility primitives ────────────────────────────────────────────────────────
 // Grapheme segmentation, visible width, text wrapping, fuzzy matching
 
-import { visibleWidth } from "./core.ts";
-
 // ── Grapheme segmenter (Unicode-aware) ────────────────────────────────────────
 
 export const getGraphemeSegmenter = (): Intl.Segmenter => {
@@ -95,35 +93,6 @@ export function graphemeSlice(text: string, from: number, to?: number): string {
 		.join("");
 }
 
-// ── Text wrapping ─────────────────────────────────────────────────────────────
-
-export function wrapText(text: string, maxLineLength: number): string[] {
-	const lines: string[] = [];
-	const rawLines = text.split("\n");
-
-	for (const rawLine of rawLines) {
-		if (rawLine.length <= maxLineLength) {
-			lines.push(rawLine);
-		} else {
-			const words = rawLine.split(/\s+/);
-			let current = "";
-			for (const word of words) {
-				if (current.length === 0) {
-					current = word;
-				} else if (current.length + 1 + word.length <= maxLineLength) {
-					current += ` ${word}`;
-				} else {
-					lines.push(current);
-					current = word;
-				}
-			}
-			if (current) lines.push(current);
-		}
-	}
-
-	return lines;
-}
-
 // ── Fuzzy matching (for slash commands) ───────────────────────────────────────
 
 export interface FuzzyScore {
@@ -200,50 +169,3 @@ export function fuzzyFilter<T>(
 	return scored;
 }
 
-// ── Clamp string to width (preserving ANSI) ───────────────────────────────────
-
-export function clampLineToWidth(text: string, width: number): string {
-	let result = "";
-	let visible = 0;
-	let i = 0;
-
-	while (i < text.length) {
-		const ch = text[i];
-		if (ch === "\x1b") {
-			const next = text[i + 1];
-			if (next === "[") {
-				let j = i + 2;
-				while (
-					j < text.length &&
-					!(text.charCodeAt(j) >= 0x40 && text.charCodeAt(j) <= 0x7e)
-				)
-					j++;
-				result += text.slice(i, j + 1);
-				i = j + 1;
-				continue;
-			}
-			if (next === "]") {
-				let j = i + 2;
-				while (
-					j < text.length &&
-					text[j] !== "\x07" &&
-					!(text[j] === "\x1b" && text[j + 1] === "\\")
-				)
-					j++;
-				const end = text[j] === "\x07" ? j + 1 : j + 2;
-				result += text.slice(i, end);
-				i = end;
-				continue;
-			}
-			result += ch;
-			i++;
-			continue;
-		}
-		const w = visibleWidth(ch);
-		if (visible + w > width) break;
-		result += ch;
-		visible += w;
-		i++;
-	}
-	return result;
-}

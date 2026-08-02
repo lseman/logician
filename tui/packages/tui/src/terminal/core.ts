@@ -140,61 +140,39 @@ export function visibleWidth(text: string): number {
 			i++;
 			continue;
 		}
-		// Basic wide char detection (CJK ranges)
+		// Walk by code point so surrogate pairs (astral chars, most emoji) count
+		// as one character instead of two, which would otherwise desync width
+		// bookkeeping (e.g. table column padding) from what the terminal draws.
+		const codePoint = text.codePointAt(i);
+		const char = codePoint === undefined ? ch : String.fromCodePoint(codePoint);
 		width +=
-			code >= 0x1100 &&
-			(code <= 0x115f ||
-				code === 0x2329 ||
-				code === 0x232a ||
-				(code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f) ||
-				(code >= 0xac00 && code <= 0xd7a3) ||
-				(code >= 0xf900 && code <= 0xfaff) ||
-				(code >= 0xfe10 && code <= 0xfe19) ||
-				(code >= 0xfe30 && code <= 0xfe6f) ||
-				(code >= 0xff00 && code <= 0xff60) ||
-				(code >= 0xffe0 && code <= 0xffe6) ||
-				(code >= 0x20000 && code <= 0x2fffd) ||
-				(code >= 0x30000 && code <= 0x3fffd))
+			codePoint !== undefined &&
+			codePoint >= 0x1100 &&
+			(codePoint <= 0x115f ||
+				codePoint === 0x2329 ||
+				codePoint === 0x232a ||
+				(codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
+				(codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+				(codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+				(codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+				(codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+				(codePoint >= 0xff00 && codePoint <= 0xff60) ||
+				(codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+				(codePoint >= 0x20000 && codePoint <= 0x2fffd) ||
+				(codePoint >= 0x30000 && codePoint <= 0x3fffd) ||
+				// Emoji outside the CJK ranges above are still typically wide.
+				(codePoint >= 0x1f000 && codePoint <= 0x1ffff))
 				? 2
 				: 1;
-		i++;
+		i += char.length;
 	}
 	return width;
 }
 
-// Truncate text to fit within width
-export function truncateToWidth(text: string, width: number): string {
-	let result = "";
-	let currentWidth = 0;
-	let inEscape = false;
-
-	for (let i = 0; i < text.length; i++) {
-		if (text[i] === "\x1b" && text[i + 1] === "[") {
-			inEscape = true;
-			result += text[i];
-		} else if (inEscape) {
-			result += text[i];
-			if (text[i] === "m") {
-				inEscape = false;
-			}
-		} else {
-			const charWidth = visibleWidth(text[i]);
-			if (currentWidth + charWidth > width) {
-				result += "...";
-				break;
-			}
-			result += text[i];
-			currentWidth += charWidth;
-		}
-	}
-
-	return result;
-}
-
 // Clamp a line to a visible width, preserving ALL escape sequences (CSI colors,
-// OSC hyperlinks/markers). Unlike truncateToWidth this adds no ellipsis — it is
-// used per-frame to guarantee a line can never exceed the terminal width and
-// wrap onto the next row (which would desync the whole differential frame).
+// OSC hyperlinks/markers). Adds no ellipsis — it is used per-frame to guarantee
+// a line can never exceed the terminal width and wrap onto the next row (which
+// would desync the whole differential frame).
 export function clampLineToWidth(text: string, width: number): string {
 	let result = "";
 	let visible = 0;
@@ -352,6 +330,7 @@ export class TUI extends Container {
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
 	private stdinHandler: ((data: string | Buffer) => void) | null = null;
+	private resizeHandler: (() => void) | null = null;
 	private wasRaw = false;
 	private _scrollOffsetInternal: number = 0;
 	private _viewportHeight: number = 0;
@@ -494,6 +473,14 @@ export class TUI extends Container {
 		};
 		process.stdin.on("data", this.stdinHandler);
 
+		// A resize lands between two frames' worth of `previousLines`, which were
+		// diffed against the old termWidth/termHeight. Cell columns and row count
+		// both shift, so patching the old buffer against new geometry can leave
+		// stale glyphs at now-meaningless coordinates. Force a full repaint so
+		// the next frame always redraws from a clean slate at the new size.
+		this.resizeHandler = () => this.requestRender(true);
+		process.stdout.on("resize", this.resizeHandler);
+
 		// Enter alternate screen buffer + hide cursor + enable bracketed paste.
 		// Push Kitty's disambiguate-escape-codes keyboard mode when supported.
 		// Unsupported terminals safely ignore it; supporting terminals can then
@@ -520,6 +507,10 @@ export class TUI extends Container {
 		if (this.stdinHandler) {
 			process.stdin.removeListener("data", this.stdinHandler);
 			this.stdinHandler = null;
+		}
+		if (this.resizeHandler) {
+			process.stdout.removeListener("resize", this.resizeHandler);
+			this.resizeHandler = null;
 		}
 		if (process.stdin.setRawMode) {
 			try {

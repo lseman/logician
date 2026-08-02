@@ -11,7 +11,7 @@ import {
 	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import { wrapText } from "../terminal/utils.ts";
+import { wrapText } from "../rendering/transcript/layout.ts";
 
 export interface ChoiceItem {
 	/** The value sent back to the agent when selected. */

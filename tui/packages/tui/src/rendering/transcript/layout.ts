@@ -83,15 +83,18 @@ function hardWrapVisible(text: string, width: number): string[] {
 			}
 			continue;
 		}
-		const characterWidth = visibleWidth(character);
+		const codePoint = text.codePointAt(index);
+		const fullCharacter =
+			codePoint === undefined ? character : String.fromCodePoint(codePoint);
+		const characterWidth = visibleWidth(fullCharacter);
 		if (chunk && chunkWidth + characterWidth > width) {
 			chunks.push(chunk + (activeCodes ? RESET : ""));
 			chunk = activeCodes;
 			chunkWidth = 0;
 		}
-		chunk += character;
+		chunk += fullCharacter;
 		chunkWidth += characterWidth;
-		index++;
+		index += fullCharacter.length;
 	}
 	if (chunk && activeCodes) {
 		chunks.push(chunk + RESET);
