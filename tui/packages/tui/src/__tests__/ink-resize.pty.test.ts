@@ -5,23 +5,26 @@ import {
 	runInPty,
 	screenFromPtyResult,
 } from "../testing/pty-harness.ts";
+import { createPtyAppHome } from "../testing/pty-app-home.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
 
 // A mid-session resize is exactly the scenario that used to leave stale,
-// wrong-width cells on screen under the legacy renderer (previousLines was
-// never invalidated on resize until a fix earlier in this effort). Ink owns
-// layout/diffing/resize itself, so this exercises that Ink's resize handling
-// produces a frame sized to the NEW terminal dimensions, not a stale one.
-void test("Ink renderer repaints correctly after a terminal resize", async () => {
+// wrong-width cells on screen under the old hand-rolled renderer
+// (previousLines was never invalidated on resize until a fix earlier in
+// this effort, before the renderer was replaced with Ink entirely). Ink
+// owns layout/diffing/resize itself, so this exercises that Ink's resize
+// handling produces a frame sized to the NEW terminal dimensions, not a
+// stale one.
+void test("resize repaints correctly at the new terminal dimensions", async () => {
 	const result = await runInPty({
 		command: "bun",
 		args: ["run", entry],
 		cwd: tuiRoot,
 		env: {
+			HOME: createPtyAppHome(),
 			TERM: "xterm-256color",
-			LOGICIAN_INK_RENDERER: "1",
 			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",

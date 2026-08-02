@@ -31,7 +31,7 @@ function Root({ app }: { app: LogicianTUI }): React.ReactElement | null {
 	return <InkTUIView tui={app.tui} frame={state.frame} renderTick={state.tick} />;
 }
 
-/** Mount a fully-wired LogicianTUI (constructed with externalIO TUI options) under Ink. */
+/** Mount a fully-wired LogicianTUI under Ink. */
 export function mountLogicianTui(app: LogicianTUI): ReturnType<typeof render> {
 	return render(<Root app={app} />, { alternateScreen: true });
 }

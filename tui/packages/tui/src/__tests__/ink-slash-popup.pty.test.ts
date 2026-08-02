@@ -5,6 +5,7 @@ import {
 	runInPty,
 	screenFromPtyResult,
 } from "../testing/pty-harness.ts";
+import { createPtyAppHome } from "../testing/pty-app-home.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
@@ -13,16 +14,16 @@ const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
 // initially checked only overlay-stack entry.hidden, missing the
 // component's own `visible` flag (SlashPopup.visible, toggled by
 // show()/hide()) that frame-layout.ts's isEntryVisible already accounted
-// for. That left the slash popup invisible under the Ink renderer while
-// still fully functional (and visible) under the legacy renderer.
-void test("Ink renderer shows the slash command popup while typing a command", async () => {
+// for. That left the slash popup invisible while still being fully
+// functional (and, before Ink, visible under the old renderer).
+void test("shows the slash command popup while typing a command", async () => {
 	const result = await runInPty({
 		command: "bun",
 		args: ["run", entry],
 		cwd: tuiRoot,
 		env: {
+			HOME: createPtyAppHome(),
 			TERM: "xterm-256color",
-			LOGICIAN_INK_RENDERER: "1",
 			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",

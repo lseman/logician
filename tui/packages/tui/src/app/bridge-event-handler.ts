@@ -91,7 +91,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 				if (message) {
 					ctx.transcript.addSystemMessage(message);
 					ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-					ctx.tui.requestRender(true);
+					ctx.tui.requestRender();
 				}
 			}
 			// Surface discovered skills as /<skill-name> commands in the popup.

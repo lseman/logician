@@ -19,11 +19,9 @@ export interface AppShellProps {
 /**
  * Alternate-screen app shell: scrollable transcript (grows to fill remaining
  * space) above a fixed dock (pinned region + input bar + status bar), with
- * overlays composited on top. This is the native-Ink counterpart to
- * terminal/frame-layout.ts's buildFixedLayoutFrame -- same regions, same
- * components, but Box/flexbox owns the height split instead of manual
- * arithmetic, and Ink owns resize/diffing instead of the legacy renderer
- * recomputing everything from process.stdout.columns/rows every frame.
+ * overlays composited on top. Box/flexbox owns the transcript-vs-dock height
+ * split; TUI (terminal/core.ts) only supplies the components and their
+ * input/scroll/overlay state.
  */
 export function AppShell({ frame, renderTick }: AppShellProps): React.ReactElement {
 	const {
@@ -101,16 +99,20 @@ export function AppShell({ frame, renderTick }: AppShellProps): React.ReactEleme
 		return null;
 	}, [inputLines]);
 
-	useEffect(() => {
-		if (markerInInput && showHardwareCursor) {
-			setCursorPosition({
-				x: markerInInput.col,
-				y: transcriptHeight + 1 + aboveInputLines.length + markerInInput.row,
-			});
-		} else {
-			setCursorPosition(undefined);
-		}
-	}, [markerInInput, showHardwareCursor, transcriptHeight, aboveInputLines.length, setCursorPosition]);
+	// Called directly in the render body, not an effect: Ink's own useCursor
+	// example does the same, since cursor position must be current for this
+	// exact commit rather than lagging a frame behind (an effect would apply
+	// the previous frame's position, visible as the cursor sitting one row
+	// off -- e.g. on the separator above the input bar -- whenever content
+	// shifts the input region's row offset between renders).
+	if (markerInInput && showHardwareCursor) {
+		setCursorPosition({
+			x: markerInInput.col,
+			y: transcriptHeight + 1 + aboveInputLines.length + markerInInput.row,
+		});
+	} else {
+		setCursorPosition(undefined);
+	}
 
 	const displayInputLines = useMemo(
 		() => inputLines.map((line) => line.replace(CURSOR_MARKER, "")),

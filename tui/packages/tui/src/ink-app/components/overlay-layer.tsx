@@ -19,11 +19,11 @@ export interface OverlayLayerProps {
 }
 
 /**
- * Native-Ink counterpart to frame-layout.ts's composeOverlays: same overlay
- * stack, same anchor/width rules, but each overlay is a real absolutely
- * positioned Box instead of splicing padded strings into a line array.
- * aboveInput-anchored entries are not handled here -- AppShell renders those
- * inline as part of the fixed dock, matching the legacy layout.
+ * Composites the overlay stack on top of the app shell as real absolutely
+ * positioned Boxes, honoring each overlay's anchor (center/bottom/top) and
+ * width/align rules. aboveInput-anchored entries are not handled here --
+ * AppShell renders those inline as part of the fixed dock instead, since
+ * they participate in the composer's layout rather than floating over it.
  */
 export function OverlayLayer({
 	overlayStack,

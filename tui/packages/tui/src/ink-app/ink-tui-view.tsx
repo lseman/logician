@@ -5,12 +5,11 @@ import { AppShell } from "./app-shell.tsx";
 
 export interface InkTUIViewProps {
 	/**
-	 * A TUI constructed with { externalIO: true, onComponentsFrame: ... } by
-	 * the host app (e.g. LogicianTUI), with its components already wired
-	 * (setScrollableComponent, setInputBarComponent, addChild, ...). This
-	 * component does not construct TUI itself so the host retains full
-	 * control over construction order and component wiring, exactly like
-	 * the legacy renderer.
+	 * A TUI (with onComponentsFrame set) constructed by the host app (e.g.
+	 * LogicianTUI), with its components already wired (setScrollableComponent,
+	 * setInputBarComponent, addChild, ...). This component does not construct
+	 * TUI itself so the host retains full control over construction order and
+	 * component wiring.
 	 */
 	tui: TUI;
 	/** The frame most recently produced by tui's onComponentsFrame callback. */
@@ -20,12 +19,11 @@ export interface InkTUIViewProps {
 }
 
 /**
- * Lays out and paints TUI's components via Ink's own Box/flexbox (AppShell)
- * instead of the legacy cell-diff writer, and forwards raw stdin into TUI's
- * own input routing (mouse, scroll keys, overlay stack) unchanged. TUI must
- * be started by the host (tui.start()) after this component -- or a
- * component wrapping it -- has mounted, since TUI's externalIO mode calls
- * onComponentsFrame synchronously.
+ * Lays out and paints TUI's components via Ink's own Box/flexbox (AppShell),
+ * and forwards raw stdin into TUI's own input routing (mouse, scroll keys,
+ * overlay stack). TUI must be started by the host (tui.start()) after this
+ * component -- or a component wrapping it -- has mounted, since TUI calls
+ * onComponentsFrame synchronously from start().
  */
 export function InkTUIView({ tui, frame, renderTick }: InkTUIViewProps): React.ReactElement | null {
 	const { stdin, setRawMode, isRawModeSupported } = useStdin();

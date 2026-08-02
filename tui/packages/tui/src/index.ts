@@ -218,14 +218,7 @@ async function main(): Promise<void> {
 		console.error(`Theme: ${theme.name} (available: ${themes.join(", ")})`);
 	}
 
-	// LOGICIAN_INK_RENDERER opts into the Ink-backed renderer: same TUI input
-	// routing / scroll / overlay logic, but Ink owns alt-screen, diffing, and
-	// painting instead of the legacy absolute-cursor cell-diff writer.
-	const useInkRenderer = process.env.LOGICIAN_INK_RENDERER === "1";
-	const tui = new LogicianTUI(
-		runtimeConfig,
-		useInkRenderer ? { externalIO: true } : undefined,
-	);
+	const tui = new LogicianTUI(runtimeConfig);
 
 	// Load explicit session if --session <id> was passed
 	if (resumeSessionId) {
@@ -264,12 +257,8 @@ async function main(): Promise<void> {
 	process.on("SIGINT", () => void shutdown());
 	process.on("SIGTERM", () => void shutdown());
 
-	if (useInkRenderer) {
-		const { mountLogicianTui } = await import("./ink-app/mount-logician-tui.tsx");
-		mountLogicianTui(tui);
-	} else {
-		tui.start();
-	}
+	const { mountLogicianTui } = await import("./ink-app/mount-logician-tui.tsx");
+	mountLogicianTui(tui);
 }
 
 void main();
