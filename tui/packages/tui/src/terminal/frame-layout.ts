@@ -40,7 +40,7 @@ export interface FixedLayoutResult {
 	fallbackRow: number;
 }
 
-function isEntryVisible(entry: OverlayEntry): boolean {
+export function isEntryVisible(entry: OverlayEntry): boolean {
 	if (entry.hidden) return false;
 	if (
 		"visible" in entry.component &&

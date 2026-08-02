@@ -8,25 +8,39 @@ export interface Component {
 	invalidate?(): void;
 }
 
-/** One composed frame, handed to an external renderer (e.g. Ink) via TUIOptions.onFrame. */
-export interface RenderedFrame {
-	lines: string[];
+/**
+ * The raw pieces a frame is built from, handed to an external renderer via
+ * TUIOptions.onComponentsFrame instead of one pre-composited line array, so
+ * a host with its own layout engine (Ink's Box/flexbox) can size the
+ * transcript-vs-dock split itself instead of consuming
+ * buildFixedLayoutFrame's manual height arithmetic.
+ */
+export interface TUIComponentsFrame {
 	termWidth: number;
 	termHeight: number;
-	/** CURSOR_MARKER position for hardware-cursor placement, or -1 if absent. */
-	cursorRow: number;
-	cursorCol: number;
+	scrollableComponent: Scrollable | null;
+	inputBarComponent: Component | null;
+	fixedBottomComponent: Component | null;
+	fixedAboveInputComponent: Component | null;
+	overlayStack: readonly {
+		component: Component;
+		options?: OverlayOptions;
+		hidden: boolean;
+		focusOrder: number;
+	}[];
 	showHardwareCursor: boolean;
 }
 
 export interface TUIOptions {
 	/**
-	 * Receive each composed frame instead of TUI cell-diffing and writing it
-	 * itself. Pairs with externalIO: true so a host renderer (Ink) owns both
-	 * input and output while TUI still runs input routing / scroll / overlay
-	 * state, which is otherwise entangled with the legacy paint path.
+	 * Receive the raw component references each render cycle instead of TUI
+	 * cell-diffing and writing a composed frame itself, so a host renderer
+	 * (Ink) can lay them out with its own engine (Box/flexbox) and own
+	 * diffing/painting/resize, while TUI still runs input routing / scroll /
+	 * overlay state -- otherwise entangled with the legacy paint path. Pairs
+	 * with externalIO: true.
 	 */
-	onFrame?: (frame: RenderedFrame) => void;
+	onComponentsFrame?: (frame: TUIComponentsFrame) => void;
 	/** Skip alt-screen entry, raw-mode setup, and stdin reading in start()/stop(). */
 	externalIO?: boolean;
 }
@@ -370,26 +384,28 @@ export class TUI extends Container {
 	private fixedAboveInputComponent: Component | null = null;
 
 	private _showHardwareCursor = true;
-	private onFrame?: (frame: RenderedFrame) => void;
+	private onComponentsFrame?: (frame: TUIComponentsFrame) => void;
 	private readonly externalIO: boolean;
 
 	constructor(_outStream: NodeJS.WriteStream, showCursor = true, options?: TUIOptions) {
 		super();
 		this._showHardwareCursor = showCursor;
-		this.onFrame = options?.onFrame;
+		this.onComponentsFrame = options?.onComponentsFrame;
 		// When another renderer (e.g. Ink) owns alt-screen entry, raw mode, and
 		// stdin reading, TUI must skip its own I/O setup and only run input
-		// routing / scroll / overlay state against frames delivered via onFrame.
+		// routing / scroll / overlay state against frames delivered via
+		// onComponentsFrame.
 		this.externalIO = options?.externalIO ?? false;
 	}
 
 	/**
-	 * Set or replace the frame sink after construction. Needed when the host
-	 * renderer (e.g. an Ink component) only knows its own state setter after
-	 * it mounts, which happens after LogicianTUI/TUI must already exist.
+	 * Set or replace the components-frame sink after construction. Needed when
+	 * the host renderer (e.g. an Ink component) only knows its own state
+	 * setter after it mounts, which happens after LogicianTUI/TUI must
+	 * already exist.
 	 */
-	setOnFrame(onFrame: (frame: RenderedFrame) => void): void {
-		this.onFrame = onFrame;
+	setOnComponentsFrame(onComponentsFrame: (frame: TUIComponentsFrame) => void): void {
+		this.onComponentsFrame = onComponentsFrame;
 	}
 
 	/** Feed raw stdin bytes when constructed with externalIO — normally TUI reads stdin itself. */
@@ -792,6 +808,27 @@ export class TUI extends Container {
 		const termWidth = Math.max(1, process.stdout.columns || 80);
 		const termHeight = Math.max(1, process.stdout.rows || 24);
 
+		if (this.onComponentsFrame) {
+			// Host owns layout entirely (Ink Box/flexbox); skip
+			// buildFixedLayoutFrame's manual height arithmetic and hand over the
+			// raw pieces instead of a composed line array.
+			this.onComponentsFrame({
+				termWidth,
+				termHeight,
+				scrollableComponent: this.scrollableComponent,
+				inputBarComponent: this.inputBarComponent,
+				fixedBottomComponent: this.fixedBottomComponent,
+				fixedAboveInputComponent: this.fixedAboveInputComponent,
+				overlayStack: this.overlayStack,
+				showHardwareCursor: this._showHardwareCursor,
+			});
+			this.lastRenderMetrics = {
+				...EMPTY_RENDERER_METRICS,
+				frameTimeMs: performance.now() - frameStartedAt,
+			};
+			return;
+		}
+
 		const { lines: finalLines, transcriptHeight, markerRow, markerCol, fallbackRow } =
 			buildFixedLayoutFrame({
 				termWidth,
@@ -804,25 +841,6 @@ export class TUI extends Container {
 			});
 		if (this.scrollableComponent) this._viewportHeight = transcriptHeight;
 		const layoutFinishedAt = performance.now();
-
-		if (this.onFrame) {
-			// Host renderer (Ink) owns diffing and painting; hand off the composed
-			// frame as-is instead of cell-diffing against previousLines.
-			this.onFrame({
-				lines: finalLines,
-				termWidth,
-				termHeight,
-				cursorRow: markerRow,
-				cursorCol: markerCol >= 0 ? markerCol : 0,
-				showHardwareCursor: this._showHardwareCursor,
-			});
-			this.lastRenderMetrics = {
-				...EMPTY_RENDERER_METRICS,
-				layoutTimeMs: layoutFinishedAt - frameStartedAt,
-				frameTimeMs: performance.now() - frameStartedAt,
-			};
-			return;
-		}
 
 		// Leave the physical last column unused: writing it can put terminals into
 		// pending-autowrap state and shift the next update down a row.

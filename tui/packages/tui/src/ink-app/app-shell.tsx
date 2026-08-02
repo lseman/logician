@@ -1,85 +1,124 @@
-import { Box, Text, useStdout } from "ink";
-import React, { useEffect, useMemo, useState } from "react";
-import type { Scrollable, Component } from "../terminal/core.ts";
+import { Box, Text, useCursor } from "ink";
+import React, { useEffect, useMemo } from "react";
+import {
+	CURSOR_MARKER,
+	clampLineToWidth,
+	visibleWidth,
+	type TUIComponentsFrame,
+} from "../terminal/core.ts";
+import { isEntryVisible } from "../terminal/frame-layout.ts";
 import { RawLines } from "./components/raw-lines.tsx";
+import { OverlayLayer } from "./components/overlay-layer.tsx";
 
 export interface AppShellProps {
-	/** The scrollable transcript. Owns its own viewport slicing via render(width). */
-	transcript: Scrollable;
-	/** Optional pinned region directly above the input bar (todo list, selectors). */
-	aboveInput?: Component | null;
-	/** The input bar. Fixed height at the bottom, above the status bar. */
-	inputBar: Component;
-	/** The status/footer bar. Fixed height, last row(s). */
-	statusBar: Component;
+	frame: TUIComponentsFrame;
 	/** Bumped by the host app whenever any underlying component's content changes. */
 	renderTick: number;
 }
 
 /**
  * Alternate-screen app shell: scrollable transcript (grows to fill remaining
- * space) above a fixed dock (pinned region + input bar + status bar).
- * Mirrors the fixed-dock/scrollable-transcript split from terminal/core.ts's
- * TUI._doRenderInner, but layout, resize, and diffing are owned by Ink
- * instead of manual row-slicing + absolute cursor addressing.
+ * space) above a fixed dock (pinned region + input bar + status bar), with
+ * overlays composited on top. This is the native-Ink counterpart to
+ * terminal/frame-layout.ts's buildFixedLayoutFrame -- same regions, same
+ * components, but Box/flexbox owns the height split instead of manual
+ * arithmetic, and Ink owns resize/diffing instead of the legacy renderer
+ * recomputing everything from process.stdout.columns/rows every frame.
  */
-export function AppShell(props: AppShellProps): React.ReactElement {
-	const { transcript, aboveInput, inputBar, statusBar, renderTick } = props;
-	const { stdout } = useStdout();
-	const [size, setSize] = useState(() => ({
-		columns: stdout?.columns ?? 80,
-		rows: stdout?.rows ?? 24,
-	}));
+export function AppShell({ frame, renderTick }: AppShellProps): React.ReactElement {
+	const {
+		termWidth,
+		termHeight,
+		scrollableComponent,
+		inputBarComponent,
+		fixedBottomComponent,
+		fixedAboveInputComponent,
+		overlayStack,
+		showHardwareCursor,
+	} = frame;
+	const width = Math.max(1, termWidth - 1);
+	const { setCursorPosition } = useCursor();
 
-	useEffect(() => {
-		if (!stdout) return;
-		const onResize = () => {
-			setSize({ columns: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
-		};
-		stdout.on("resize", onResize);
-		return () => {
-			stdout.off("resize", onResize);
-		};
-	}, [stdout]);
-
-	const width = Math.max(1, size.columns - 1);
-
-	// Render fixed-height regions first so their line counts can be subtracted
-	// from total terminal rows to get the transcript's viewport height — same
-	// two-pass approach the legacy renderer uses, just expressed as effects
-	// instead of manual arithmetic threaded through one function.
-	const aboveInputLines = useMemo(
-		() => aboveInput?.render(width) ?? [],
+	const aboveInputLines = useMemo(() => {
+		const lines = fixedAboveInputComponent?.render(width) ?? [];
+		// Interactive selectors (settings, model picker, ...) participate in the
+		// fixed composer stack instead of floating over transcript content --
+		// same contract as frame-layout.ts's renderAboveInputOverlays. Only the
+		// most recently focused one owns the region.
+		const selectorEntries = overlayStack.filter(
+			(e) => e.options?.anchor === "aboveInput" && isEntryVisible(e),
+		);
+		if (selectorEntries.length > 0) {
+			const entry = selectorEntries.reduce((latest, candidate) =>
+				candidate.focusOrder > latest.focusOrder ? candidate : latest,
+			);
+			const rendered = entry.component.render(width);
+			const maxHeight = entry.options?.maxHeight ?? rendered.length;
+			for (const line of rendered.slice(0, maxHeight)) {
+				const clamped = clampLineToWidth(line, width);
+				lines.push(clamped + " ".repeat(Math.max(0, width - visibleWidth(clamped))));
+			}
+		}
+		return lines;
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[aboveInput, width, renderTick],
-	);
+	}, [fixedAboveInputComponent, overlayStack, width, renderTick]);
 	const inputLines = useMemo(
-		() => inputBar.render(width),
+		() => inputBarComponent?.render(width) ?? [" ".repeat(width)],
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[inputBar, width, renderTick],
+		[inputBarComponent, width, renderTick],
 	);
 	const statusLines = useMemo(
-		() => statusBar.render(width),
+		() => fixedBottomComponent?.render(width) ?? [" ".repeat(width)],
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[statusBar, width, renderTick],
+		[fixedBottomComponent, width, renderTick],
 	);
 
 	const dockHeight =
 		1 + aboveInputLines.length + inputLines.length + 1 + statusLines.length;
-	const transcriptHeight = Math.max(1, size.rows - dockHeight);
+	const transcriptHeight = Math.max(1, termHeight - dockHeight);
 
 	useEffect(() => {
-		transcript.setViewportHeight(transcriptHeight);
-	}, [transcript, transcriptHeight]);
+		scrollableComponent?.setViewportHeight(transcriptHeight);
+	}, [scrollableComponent, transcriptHeight]);
 
 	const transcriptLines = useMemo(
-		() => transcript.render(width),
+		() => scrollableComponent?.render(width) ?? Array(transcriptHeight).fill(" ".repeat(width)),
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[transcript, width, transcriptHeight, renderTick],
+		[scrollableComponent, width, transcriptHeight, renderTick],
+	);
+
+	// The InputBar marks the edit position with CURSOR_MARKER so the hardware
+	// cursor can be parked exactly there. Its on-screen row is the input
+	// region's offset within the dock (transcript + separator + above-input
+	// lines) plus the marker's row within the input bar's own output.
+	const markerInInput = useMemo(() => {
+		for (let row = 0; row < inputLines.length; row++) {
+			const idx = inputLines[row].indexOf(CURSOR_MARKER);
+			if (idx >= 0) {
+				return { row, col: visibleWidth(inputLines[row].slice(0, idx)) };
+			}
+		}
+		return null;
+	}, [inputLines]);
+
+	useEffect(() => {
+		if (markerInInput && showHardwareCursor) {
+			setCursorPosition({
+				x: markerInInput.col,
+				y: transcriptHeight + 1 + aboveInputLines.length + markerInInput.row,
+			});
+		} else {
+			setCursorPosition(undefined);
+		}
+	}, [markerInInput, showHardwareCursor, transcriptHeight, aboveInputLines.length, setCursorPosition]);
+
+	const displayInputLines = useMemo(
+		() => inputLines.map((line) => line.replace(CURSOR_MARKER, "")),
+		[inputLines],
 	);
 
 	return (
-		<Box flexDirection="column" width={size.columns} height={size.rows}>
+		<Box flexDirection="column" width={termWidth} height={termHeight}>
 			<Box flexDirection="column" height={transcriptHeight} overflow="hidden">
 				<RawLines lines={transcriptLines} />
 			</Box>
@@ -90,12 +129,18 @@ export function AppShell(props: AppShellProps): React.ReactElement {
 				</Box>
 			)}
 			<Box flexDirection="column">
-				<RawLines lines={inputLines} />
+				<RawLines lines={displayInputLines} />
 			</Box>
 			<Text dimColor>{"─".repeat(width)}</Text>
 			<Box flexDirection="column">
 				<RawLines lines={statusLines} />
 			</Box>
+			<OverlayLayer
+				overlayStack={overlayStack}
+				termWidth={termWidth}
+				transcriptHeight={transcriptHeight}
+				renderTick={renderTick}
+			/>
 		</Box>
 	);
 }
