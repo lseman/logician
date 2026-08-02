@@ -45,7 +45,7 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 	assert.doesNotMatch(result.output, /TypeError|TUI render error/);
 });
 
-void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => {
+void test("Kitty Ctrl+O and Ctrl+C reports reach TUI keybindings", () => {
 	assert.equal(normalizeKeyboardInput("\x1b[27u"), "\x1b");
 	assert.equal(normalizeKeyboardInput("\x1b[27;1u"), "\x1b");
 	assert.equal(normalizeKeyboardInput("\x1b[111;5u"), "\x0f");
