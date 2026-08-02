@@ -1,92 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-
-// Minimal dark theme that satisfies the TUI's initTheme() requirement.
-const DARK_THEME_JSON = JSON.stringify({
-	name: "dark",
-	vars: {
-		"cyan": "#00d7ff",
-		"blue": "#5f87ff",
-		"green": "#b5bd68",
-		"red": "#cc6666",
-		"yellow": "#ffff00",
-		"text": "#d4d4d4",
-		"gray": "#808080",
-		"dimGray": "#666666",
-		"darkGray": "#505050",
-		"accent": "#8abeb7",
-	},
-	colors: {
-		"accent": "accent",
-		"border": "blue",
-		"borderMuted": "darkGray",
-		"success": "green",
-		"error": "red",
-		"warning": "yellow",
-		"muted": "gray",
-		"dim": "dimGray",
-		"text": "text",
-		"userText": "text",
-		"assistantText": "text",
-		"systemText": "text",
-		"mdHeading": "#f0c674",
-		"mdCode": "accent",
-		"mdCodeBlock": "green",
-		"mdCodeBlockBg": "#1e1e24",
-		"mdCodeBlockBorder": "gray",
-		"mdLink": "#81a2be",
-		"mdQuote": "gray",
-		"mdListBullet": "accent",
-		"toolTitle": "text",
-		"toolRunning": "#f0c674",
-		"toolSuccess": "green",
-		"toolError": "red",
-		"toolStreaming": "#f0c674",
-		"toolOutput": "gray",
-		"thinkingText": "gray",
-		"separator": "gray",
-		"prompt": "green",
-		"inputText": "text",
-		"phaseReady": "green",
-		"phaseThinking": "#81a2be",
-		"phaseTool": "#f0c674",
-		"phaseError": "red",
-		"phaseStreaming": "#f0c674",
-		"phaseCompacting": "#81a2be",
-		"phaseBranching": "#81a2be",
-		"contextGood": "green",
-		"contextWarning": "yellow",
-		"contextCritical": "red",
-		"levelOff": "#505050",
-		"levelLow": "#6e6e6e",
-		"levelMedium": "#5f87af",
-		"levelHigh": "#5f87af",
-		"levelXhigh": "#81a2be",
-		"diffAdded": "green",
-		"diffRemoved": "red",
-		"diffContext": "gray",
-		"diffHunk": "#f0c674",
-		"diffMeta": "gray",
-		"terminalOutput": "text",
-		"memoryTag": "#81a2be",
-		"memoryId": "#81a2be",
-		"memoryContent": "text",
-		"memoryCount": "#81a2be",
-		"pluginStartup": "green",
-		"header": "accent",
-		"active": "accent",
-		"selected": "#3a3a4a",
-		"inputPlaceholder": "dimGray",
-		"jsonKey": "#81a2be",
-		"jsonKeyword": "#c678dd",
-		"jsonNumber": "#b5bd68",
-		"jsonString": "#abb2bf",
-		"jsonPunctuation": "#808080",
-	},
-});
 import { InputBar } from "../input/input-bar.ts";
 import {
 	type Component,
@@ -97,30 +12,30 @@ import {
 	runInPty,
 	screenFromPtyResult,
 } from "../testing/pty-harness.ts";
+import { createPtyAppHome } from "../testing/pty-app-home.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
-const tsx = path.join(tuiRoot, "node_modules", ".bin", "tsx");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
+
+// Run with `bun run` (not `tsx`/node directly): @logician/memory imports
+// `bun:sqlite`, which plain Node's ESM loader cannot resolve.
 void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
-	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
-	const themeDir = path.join(home, ".logician", "themes");
-	mkdirSync(themeDir, { recursive: true });
-	writeFileSync(path.join(themeDir, "dark.json"), DARK_THEME_JSON);
 	const result = await runInPty({
-		command: tsx,
-		args: [entry],
+		command: "bun",
+		args: ["run", entry],
 		cwd: tuiRoot,
 		env: {
-			HOME: home,
+			HOME: createPtyAppHome(),
 			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 		},
 		actions: [
-			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 1200, send: "s\n" },
 			{ afterMs: 500, send: "\x1b[109;5u" },
 		],
-		timeoutMs: 4_000,
+		timeoutMs: 6_000,
 		columns: 120,
 		rows: 32,
 	});
@@ -159,25 +74,23 @@ void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => 
 });
 
 void test("Ctrl+I changes and persists the execution profile", async () => {
-	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
-	const themeDir = path.join(home, ".logician", "themes");
-	mkdirSync(themeDir, { recursive: true });
-	writeFileSync(path.join(themeDir, "dark.json"), DARK_THEME_JSON);
+	const home = createPtyAppHome();
 	const result = await runInPty({
-		command: tsx,
-		args: [entry],
+		command: "bun",
+		args: ["run", entry],
 		cwd: tuiRoot,
 		env: {
 			HOME: home,
 			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 		},
 		actions: [
-			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 1200, send: "s\n" },
 			{ afterMs: 500, send: "\x1b[105;5u" },
 		],
-		timeoutMs: 4_000,
+		timeoutMs: 6_000,
 		columns: 140,
 		rows: 32,
 	});
@@ -250,25 +163,22 @@ void test("Escape reaches the dialog owner before the core overlay fallback", ()
 });
 
 void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
-	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
-	const themeDir = path.join(home, ".logician", "themes");
-	mkdirSync(themeDir, { recursive: true });
-	writeFileSync(path.join(themeDir, "dark.json"), DARK_THEME_JSON);
 	const result = await runInPty({
-		command: tsx,
-		args: [entry],
+		command: "bun",
+		args: ["run", entry],
 		cwd: tuiRoot,
 		env: {
-			HOME: home,
+			HOME: createPtyAppHome(),
 			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
 		},
 		actions: [
-			{ afterMs: 100, send: "s\n" },
+			{ afterMs: 1200, send: "s\n" },
 			{ afterMs: 500, send: "\x1b[111;5u" },
 		],
-		timeoutMs: 4_000,
+		timeoutMs: 6_000,
 		columns: 120,
 		rows: 32,
 	});
