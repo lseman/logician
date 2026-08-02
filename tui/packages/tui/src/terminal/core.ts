@@ -370,7 +370,7 @@ export class TUI extends Container {
 	private fixedAboveInputComponent: Component | null = null;
 
 	private _showHardwareCursor = true;
-	private readonly onFrame?: (frame: RenderedFrame) => void;
+	private onFrame?: (frame: RenderedFrame) => void;
 	private readonly externalIO: boolean;
 
 	constructor(_outStream: NodeJS.WriteStream, showCursor = true, options?: TUIOptions) {
@@ -381,6 +381,15 @@ export class TUI extends Container {
 		// stdin reading, TUI must skip its own I/O setup and only run input
 		// routing / scroll / overlay state against frames delivered via onFrame.
 		this.externalIO = options?.externalIO ?? false;
+	}
+
+	/**
+	 * Set or replace the frame sink after construction. Needed when the host
+	 * renderer (e.g. an Ink component) only knows its own state setter after
+	 * it mounts, which happens after LogicianTUI/TUI must already exist.
+	 */
+	setOnFrame(onFrame: (frame: RenderedFrame) => void): void {
+		this.onFrame = onFrame;
 	}
 
 	/** Feed raw stdin bytes when constructed with externalIO — normally TUI reads stdin itself. */

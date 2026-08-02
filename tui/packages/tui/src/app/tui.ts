@@ -53,7 +53,7 @@ import { TodoBar } from "../status/todo-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
-import { Container, TUI } from "../terminal/core.ts";
+import { Container, TUI, type TUIOptions } from "../terminal/core.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
@@ -211,6 +211,7 @@ export class LogicianTUI {
 		runtimeConfig = resolveRuntimeConfig(process.cwd(), process.env, {
 			loadProjectConfig: false,
 		}),
+		tuiOptions?: TUIOptions,
 	) {
 		this.configPath = runtimeConfig.configPath;
 		this.bridge = new AgentCoreBridge(runtimeConfig.bridge);
@@ -235,6 +236,8 @@ export class LogicianTUI {
 			thinkingMode: this.thinkingDisplayMode,
 			maxMessageLength:
 				runtimeConfig.source.truncation?.transcriptMessageMaxChars,
+			maxTurns:
+				runtimeConfig.source.transcriptMaxTurns,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.
@@ -292,7 +295,7 @@ export class LogicianTUI {
 		});
 
 		// Create the TUI with hardware cursor support
-		this.tui = new TUI(process.stdout, true);
+		this.tui = new TUI(process.stdout, true, tuiOptions);
 		this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
 		this.todoBar.setOnInvalidate(() => this.tui.requestRender());
 		this.workSurface.setOnInvalidate(() => this.tui.requestRender());
