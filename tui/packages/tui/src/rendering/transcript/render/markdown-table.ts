@@ -18,7 +18,7 @@ export function renderMarkdownLines(
 	text: string,
 	maxLen: number,
 	_streaming: boolean,
-	baseColor = theme.fg("assistantText", ""),
+	baseColor = theme.fgRaw("assistantText"),
 	firstLinePrefix = "",
 ): string[] {
 	const lines: string[] = [];

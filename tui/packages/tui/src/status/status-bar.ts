@@ -216,14 +216,14 @@ export class StatusBar implements InkTextComponent {
 		const label = phaseLabels[phase] || `● ${phase.toUpperCase()}`;
 		const color =
 			this.info.phase === "error" || this.info.phase === "failed"
-				? theme.fg("error", "")
+				? theme.fgRaw("error")
 				: this.info.phase === "streaming"
-					? theme.fg("accent", "")
+					? theme.fgRaw("accent")
 					: this.info.phase === "thinking"
-						? theme.fg("phaseThinking", "")
+						? theme.fgRaw("phaseThinking")
 						: this.info.phase === "tool"
-							? theme.fg("phaseTool", "")
-							: theme.fg("success", "");
+							? theme.fgRaw("phaseTool")
+							: theme.fgRaw("success");
 		return `${color}${label}${RESET}`;
 	}
 
@@ -233,12 +233,12 @@ export class StatusBar implements InkTextComponent {
 			return `${this.label("think:")} ${theme.fg("levelOff", "off")}`;
 		}
 		const levelColors: Record<string, string> = {
-			low: theme.fg("levelLow", ""),
-			medium: theme.fg("levelMedium", ""),
-			high: theme.fg("levelHigh", ""),
-			xhigh: theme.fg("levelXhigh", ""),
+			low: theme.fgRaw("levelLow"),
+			medium: theme.fgRaw("levelMedium"),
+			high: theme.fgRaw("levelHigh"),
+			xhigh: theme.fgRaw("levelXhigh"),
 		};
-		const color = levelColors[lvl] ?? theme.fg("accent", "");
+		const color = levelColors[lvl] ?? theme.fgRaw("accent");
 		return `${this.label("think:")} ${color}${lvl.toUpperCase()}${RESET}`;
 	}
 
@@ -307,10 +307,10 @@ export class StatusBar implements InkTextComponent {
 		// Color based on ratio
 		const color =
 			ratio >= 0.9
-				? theme.fg("contextCritical", "")
+				? theme.fgRaw("contextCritical")
 				: ratio >= 0.75
-					? theme.fg("contextWarning", "")
-					: theme.fg("contextGood", "");
+					? theme.fgRaw("contextWarning")
+					: theme.fgRaw("contextGood");
 
 		const maxStr = formatTokenCountClean(maxTokens);
 		const cells = 5;

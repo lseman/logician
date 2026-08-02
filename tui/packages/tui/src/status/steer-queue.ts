@@ -106,14 +106,14 @@ export class SteerQueue implements InkTextComponent {
 // ── Styling ──────────────────────────────────────────────────────────────────
 
 const MAX_ROWS = 6;
-const getHeader = (): string => theme.fg("muted", "");
-const getCount = (): string => theme.fg("dim", "");
-const getNum = (): string => theme.fg("muted", "");
-const getLabel = (): string => theme.fg("dim", "");
+const getHeader = (): string => theme.fgRaw("muted");
+const getCount = (): string => theme.fgRaw("dim");
+const getNum = (): string => theme.fgRaw("muted");
+const getLabel = (): string => theme.fgRaw("dim");
 const getSteerMark = (): string => ` ${theme.fg("accent", "▸")}`;
-const getFollowMark = (): string => " " + theme.fg("dim", "") + "↳" + RESET;
-const steerStyle = (s: string): string => theme.fg("text", "") + s + RESET;
-const followStyle = (s: string): string => theme.fg("muted", "") + s + RESET;
+const getFollowMark = (): string => " " + theme.fgRaw("dim") + "↳" + RESET;
+const steerStyle = (s: string): string => theme.fgRaw("text") + s + RESET;
+const followStyle = (s: string): string => theme.fgRaw("muted") + s + RESET;
 
 /** Collapse newlines/whitespace runs so each queued message is one row. */
 function oneLine(msg: string): string {

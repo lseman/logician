@@ -177,7 +177,7 @@ function renderRaw(
 	const lines: string[] = [];
 
 	// Header
-	const header = `${theme.fg("muted", "")}Tasks ${done}/${total}${RESET}`;
+	const header = `${theme.fgRaw("muted")}Tasks ${done}/${total}${RESET}`;
 	lines.push(pad(clampLine(header, width), width));
 
 	// Group by status: in_progress → pending → completed

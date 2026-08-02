@@ -46,7 +46,7 @@ export function renderSubagentText(
 		markdown,
 		Math.max(16, width),
 		streaming,
-		theme.fg("assistantText", ""),
+		theme.fgRaw("assistantText"),
 	);
 }
 
