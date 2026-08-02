@@ -8,6 +8,29 @@ export interface Component {
 	invalidate?(): void;
 }
 
+/** One composed frame, handed to an external renderer (e.g. Ink) via TUIOptions.onFrame. */
+export interface RenderedFrame {
+	lines: string[];
+	termWidth: number;
+	termHeight: number;
+	/** CURSOR_MARKER position for hardware-cursor placement, or -1 if absent. */
+	cursorRow: number;
+	cursorCol: number;
+	showHardwareCursor: boolean;
+}
+
+export interface TUIOptions {
+	/**
+	 * Receive each composed frame instead of TUI cell-diffing and writing it
+	 * itself. Pairs with externalIO: true so a host renderer (Ink) owns both
+	 * input and output while TUI still runs input routing / scroll / overlay
+	 * state, which is otherwise entangled with the legacy paint path.
+	 */
+	onFrame?: (frame: RenderedFrame) => void;
+	/** Skip alt-screen entry, raw-mode setup, and stdin reading in start()/stop(). */
+	externalIO?: boolean;
+}
+
 export interface Focusable {
 	focused: boolean;
 }
@@ -347,10 +370,22 @@ export class TUI extends Container {
 	private fixedAboveInputComponent: Component | null = null;
 
 	private _showHardwareCursor = true;
+	private readonly onFrame?: (frame: RenderedFrame) => void;
+	private readonly externalIO: boolean;
 
-	constructor(_outStream: NodeJS.WriteStream, showCursor = true) {
+	constructor(_outStream: NodeJS.WriteStream, showCursor = true, options?: TUIOptions) {
 		super();
 		this._showHardwareCursor = showCursor;
+		this.onFrame = options?.onFrame;
+		// When another renderer (e.g. Ink) owns alt-screen entry, raw mode, and
+		// stdin reading, TUI must skip its own I/O setup and only run input
+		// routing / scroll / overlay state against frames delivered via onFrame.
+		this.externalIO = options?.externalIO ?? false;
+	}
+
+	/** Feed raw stdin bytes when constructed with externalIO — normally TUI reads stdin itself. */
+	feedInput(data: string): void {
+		this.handleInput(data);
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {
@@ -455,6 +490,13 @@ export class TUI extends Container {
 		this.started = true;
 		this.stopped = false;
 
+		if (this.externalIO) {
+			// Host renderer (Ink) owns stdin, raw mode, resize, and alt-screen.
+			// TUI only needs its render-request scheduling running.
+			this.requestRender(true);
+			return;
+		}
+
 		// Keyboard input: process.stdin in raw mode (pi-style). The bridge child's
 		// events arrive on its own stdout pipe, so stdin is dedicated to keys.
 		this.wasRaw = process.stdin.isRaw ?? false;
@@ -502,6 +544,9 @@ export class TUI extends Container {
 			this.renderTimer = null;
 		}
 		this.disableMouse();
+
+		if (this.externalIO) return;
+
 		// Show cursor + leave alternate screen + disable bracketed paste,
 		// restoring the user's terminal.
 		this.write("\x1b[<u\x1b[?25h\x1b[?1049l\x1b[?2004l");
@@ -750,6 +795,25 @@ export class TUI extends Container {
 			});
 		if (this.scrollableComponent) this._viewportHeight = transcriptHeight;
 		const layoutFinishedAt = performance.now();
+
+		if (this.onFrame) {
+			// Host renderer (Ink) owns diffing and painting; hand off the composed
+			// frame as-is instead of cell-diffing against previousLines.
+			this.onFrame({
+				lines: finalLines,
+				termWidth,
+				termHeight,
+				cursorRow: markerRow,
+				cursorCol: markerCol >= 0 ? markerCol : 0,
+				showHardwareCursor: this._showHardwareCursor,
+			});
+			this.lastRenderMetrics = {
+				...EMPTY_RENDERER_METRICS,
+				layoutTimeMs: layoutFinishedAt - frameStartedAt,
+				frameTimeMs: performance.now() - frameStartedAt,
+			};
+			return;
+		}
 
 		// Leave the physical last column unused: writing it can put terminals into
 		// pending-autowrap state and shift the next update down a row.
