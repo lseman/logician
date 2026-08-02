@@ -17,6 +17,7 @@ export interface Scrollable extends Component {
 	totalHeight: number;
 	scroll(delta: number): void;
 	scrollToBottom(): void;
+	setViewportHeight(height: number): void;
 	isAtBottom: boolean;
 	handleMouse?(column: number, row: number): boolean;
 }
@@ -789,11 +790,7 @@ export class TUI extends Container {
 
 		// 1. Transcript area (scrollable)
 		if (this.scrollableComponent) {
-			(
-				this.scrollableComponent as unknown as {
-					setViewportHeight: (h: number) => void;
-				}
-			).setViewportHeight(transcriptHeight);
+			this.scrollableComponent.setViewportHeight(transcriptHeight);
 			this._viewportHeight = transcriptHeight;
 			let transcriptLines: string[];
 			try {

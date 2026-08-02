@@ -3,6 +3,7 @@
 		"target": "ES2023",
 		"module": "ESNext",
 		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
 		"rootDir": "..",
 		"outDir": "dist",
 		"strict": true,
