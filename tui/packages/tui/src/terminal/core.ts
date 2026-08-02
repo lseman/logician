@@ -4,11 +4,7 @@
 // only decides what should be on screen, never how to draw it.
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
-
-export interface Component {
-	render(width: number): string[];
-	invalidate?(): void;
-}
+import type { InkOverlayModelProvider } from "../overlays/ink-overlay-model.ts";
 
 export interface InkTextSpan {
 	text: string;
@@ -47,8 +43,7 @@ export interface InkComposerComponent {
 }
 
 /** Overlay state owner. Native Ink overlays do not require a string renderer. */
-export interface OverlayComponent {
-	render?(width: number): string[];
+export interface OverlayComponent extends InkOverlayModelProvider {
 	invalidate?(): void;
 }
 
@@ -86,8 +81,8 @@ export interface Scrollable extends InkTextComponent {
 }
 
 export function isFocusable(
-	c: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null,
-): c is (Component | InkComposerComponent | InkTextComponent | OverlayComponent) & Focusable {
+	c: InkComposerComponent | InkTextComponent | OverlayComponent | null,
+): c is (InkComposerComponent | InkTextComponent | OverlayComponent) & Focusable {
 	return c !== null && "focused" in c;
 }
 
@@ -108,69 +103,6 @@ export function normalizeKeyboardInput(data: string): string {
 			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
 			return String.fromCharCode(lowerCodepoint & 0x1f);
 		});
-}
-
-// ── Shared ANSI codes ─────────────────────────────────────────────────────────
-// Every component previously redeclared these identically — single source now.
-
-export const RESET = "\x1b[0m";
-export const BOLD = "\x1b[1m";
-export const DIM = "\x1b[2m";
-
-/** Convert ANSI-formatted model output into native Ink text spans. */
-export function ansiToInkTextRow(value: string): InkTextRow {
-	const spans: InkTextSpan[] = [];
-	let style: Omit<InkTextSpan, "text"> = {};
-	let cursor = 0;
-	const sgr = /\x1b\[([0-9;]*)m/g;
-	let match: RegExpExecArray | null;
-	const append = (text: string): void => {
-		if (!text) return;
-		spans.push({ text, ...style });
-	};
-	while ((match = sgr.exec(value)) !== null) {
-		append(value.slice(cursor, match.index));
-		const codes = (match[1] || "0").split(";").map(Number);
-		for (let i = 0; i < codes.length; i++) {
-			const code = codes[i];
-			if (code === 0) style = {};
-			else if (code === 1) style = { ...style, bold: true };
-			else if (code === 2) style = { ...style, dim: true };
-			else if (code === 4) style = { ...style, underline: true };
-			else if (code === 7) style = { ...style, inverse: true };
-			else if (code === 22) style = { ...style, bold: false, dim: false };
-			else if (code === 24) style = { ...style, underline: false };
-			else if (code === 27) style = { ...style, inverse: false };
-			else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
-				const paletteIndex = code >= 90 ? code - 90 + 8 : code - 30;
-				style = { ...style, color: ansi256ToHex(paletteIndex) };
-			}
-			else if (code === 39) {
-				const { color: _color, ...rest } = style;
-				style = rest;
-			} else if (code === 38 && codes[i + 1] === 5) {
-				style = { ...style, color: ansi256ToHex(codes[i + 2] ?? 7) };
-				i += 2;
-			} else if (code === 38 && codes[i + 1] === 2) {
-				const [r, g, b] = [codes[i + 2] ?? 255, codes[i + 3] ?? 255, codes[i + 4] ?? 255];
-				style = { ...style, color: `#${[r, g, b].map((part) => part.toString(16).padStart(2, "0")).join("")}` };
-				i += 4;
-			} else if (code === 49) {
-				const { backgroundColor: _backgroundColor, ...rest } = style;
-				style = rest;
-			} else if (code === 48 && codes[i + 1] === 5) {
-				style = { ...style, backgroundColor: ansi256ToHex(codes[i + 2] ?? 0) };
-				i += 2;
-			} else if (code === 48 && codes[i + 1] === 2) {
-				const [r, g, b] = [codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0];
-				style = { ...style, backgroundColor: `#${[r, g, b].map((part) => part.toString(16).padStart(2, "0")).join("")}` };
-				i += 4;
-			}
-		}
-		cursor = sgr.lastIndex;
-	}
-	append(value.slice(cursor));
-	return spans;
 }
 
 export function inkTextRowText(row: InkTextRow): string {
@@ -419,11 +351,11 @@ export class TUI {
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private started = false;
 	private stopped = false;
-	private focusedComponent: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null = null;
+	private focusedComponent: InkComposerComponent | InkTextComponent | OverlayComponent | null = null;
 	private overlayStack: Array<{
 		component: OverlayComponent;
 		options?: OverlayOptions;
-		preFocus: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null;
+		preFocus: InkComposerComponent | InkTextComponent | OverlayComponent | null;
 		hidden: boolean;
 		focusOrder: number;
 	}> = [];
@@ -469,7 +401,7 @@ export class TUI {
 		return this.scrollableComponent.isAtBottom;
 	}
 
-	setFocus(component: Component | InkComposerComponent | InkTextComponent | OverlayComponent | null): void {
+	setFocus(component: InkComposerComponent | InkTextComponent | OverlayComponent | null): void {
 		if (isFocusable(this.focusedComponent)) {
 			(this.focusedComponent as Focusable).focused = false;
 		}

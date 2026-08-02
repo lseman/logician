@@ -5,6 +5,7 @@ import type {
 	InkComposerModel,
 } from "../../terminal/core.ts";
 import { visibleWidth } from "../../terminal/core.ts";
+import { theme } from "../../terminal/theme.ts";
 
 export interface ComposerRegionProps {
 	component: InkComposerComponent | null;
@@ -57,25 +58,25 @@ export function ComposerRegion({
 		<Box flexDirection="column">
 			{model.headerHint ? (
 				<Box width={width}>
-					<Text dimColor>
+					<Text color={theme.inkColor("separator")}>
 						{"─".repeat(
 							Math.max(1, width - visibleWidth(` ${model.headerHint} `)),
 						)}
 					</Text>
-					<Text dimColor>{` ${model.headerHint} `}</Text>
+					<Text color={theme.inkColor("muted")}>{` ${model.headerHint} `}</Text>
 				</Box>
 			) : null}
 			<Box width={width}>
-				<Text>{model.prompt}</Text>
-				{model.leftClipped ? <Text dimColor>‹</Text> : null}
-				<Text dimColor={model.isPlaceholder}>
+				<Text color={theme.inkColor("prompt")} bold>{model.prompt}</Text>
+				{model.leftClipped ? <Text color={theme.inkColor("dim")}>‹</Text> : null}
+				<Text color={theme.inkColor(model.isPlaceholder ? "inputPlaceholder" : "inputText")}>
 					{model.beforeCursor}
 					<Text inverse={model.focused && !model.isPlaceholder}>
 						{model.atCursor}
 					</Text>
 					{model.afterCursor}
 				</Text>
-				{model.rightClipped ? <Text dimColor>›</Text> : null}
+				{model.rightClipped ? <Text color={theme.inkColor("dim")}>›</Text> : null}
 			</Box>
 		</Box>
 	);

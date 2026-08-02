@@ -4,7 +4,7 @@
 
 import { highlight, highlightAuto } from "../semantic-highlight.ts";
 import type { AssistantChunk, ThinkingDisplayStyle } from "@logician/coding-agent/sessions";
-import { BOLD, DIM, RESET, theme } from "../semantic-markup.ts";
+import { BOLD, RESET, theme } from "../semantic-markup.ts";
 import {
 	extractLangFromFence,
 	renderInline,
@@ -30,18 +30,18 @@ export function renderThinkingChunk(
 		case "collapsed": {
 			const preview = text.trim().slice(0, 100);
 			lines.push(
-				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} ${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`,
+				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} ${theme.fg("thinkingText", preview ? `${preview}...` : "thinking")}`,
 			);
 			break;
 		}
 		case "summary": {
 			lines.push(
-				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} ${DIM}${text.trim().slice(0, 150)}${RESET}`,
+				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} ${theme.fg("thinkingText", text.trim().slice(0, 150))}`,
 			);
 			break;
 		}
 		case "expanded": {
-			lines.push(`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET}`);
+			lines.push(`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET}`);
 			renderThinkingExpanded(text, lines, currentWidth);
 			break;
 		}
@@ -63,7 +63,7 @@ export function renderThinkingExpanded(
 	let inCodeBlock = false;
 	let codeContent = "";
 	let codeBlockLang: string | null = null;
-	const fg = theme.fgRaw("thinkingText") + DIM;
+	const fg = theme.fgRaw("thinkingText");
 
 	for (const rawLine of rawLines) {
 		if (rawLine.startsWith("```")) {

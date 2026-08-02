@@ -6,13 +6,11 @@
 
 import {
 	clampLineToWidth,
-	ansiToInkTextRow,
 	type InkTextComponent,
 	type InkTextRow,
 	visibleWidth,
-	RESET,
 } from "../terminal/core.ts";
-import { theme } from "../terminal/theme.ts";
+import { DIM, RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
 
 export class SteerQueue implements InkTextComponent {
 	private steering: string[] = [];
@@ -49,8 +47,8 @@ export class SteerQueue implements InkTextComponent {
 			parts.push(`${this.followUp.length} follow-up`);
 		}
 		const header =
-			`${getHeader()} STEERING\x1b[0m  ` +
-			`${getCount()}${parts.join(" · ")}\x1b[0m`;
+			`${getHeader()} STEERING${RESET}  ` +
+			`${getCount()}${parts.join(" · ")}${RESET}`;
 		lines.push(pad(clampLineToWidth(header, width), width));
 
 		// Numbered rows, capped. Delivery labels make queue semantics visible
@@ -62,7 +60,7 @@ export class SteerQueue implements InkTextComponent {
 			msg: string;
 		}[] = [];
 		this.steering.forEach((msg) =>
-			rows.push({ mark: STEER_MARK, label: "QUEUE", style: steerStyle, msg }),
+			rows.push({ mark: getSteerMark(), label: "QUEUE", style: steerStyle, msg }),
 		);
 		this.followUp.forEach((msg) =>
 			rows.push({
@@ -75,8 +73,8 @@ export class SteerQueue implements InkTextComponent {
 
 		const shown = rows.slice(0, MAX_ROWS);
 		shown.forEach((row, i) => {
-			const n = `${getNum()}${i + 1}.\x1b[0m`;
-			const label = `${getLabel()}${row.label}\x1b[0m`;
+			const n = `${getNum()}${i + 1}.${RESET}`;
+			const label = `${getLabel()}${row.label}${RESET}`;
 			const text = `${row.mark} ${n} ${label}  ${row.style(oneLine(row.msg))}`;
 			lines.push(pad(clampLineToWidth(text, width), width));
 		});
@@ -85,7 +83,7 @@ export class SteerQueue implements InkTextComponent {
 		if (hidden > 0) {
 			lines.push(
 				pad(
-					clampLineToWidth(`   ${getCount()}… ${hidden} more\x1b[0m`, width),
+					clampLineToWidth(`   ${getCount()}… ${hidden} more${RESET}`, width),
 					width,
 				),
 			);
@@ -94,14 +92,14 @@ export class SteerQueue implements InkTextComponent {
 		lines.push(
 			pad(
 				clampLineToWidth(
-					"   \x1b[2mEnter queue · Ctrl+Enter steer now · /queue manage\x1b[0m",
+					`   ${DIM}Enter queue · Ctrl+Enter steer now · /queue manage${RESET}`,
 					width,
 				),
 				width,
 			),
 		);
 
-		return lines.map(ansiToInkTextRow);
+		return lines.map(semanticMarkupToInkRow);
 	}
 }
 
@@ -112,7 +110,7 @@ const getHeader = (): string => theme.fg("muted", "");
 const getCount = (): string => theme.fg("dim", "");
 const getNum = (): string => theme.fg("muted", "");
 const getLabel = (): string => theme.fg("dim", "");
-const STEER_MARK = " \x1b[36m▸\x1b[0m"; // cyan triangle ▸
+const getSteerMark = (): string => ` ${theme.fg("accent", "▸")}`;
 const getFollowMark = (): string => " " + theme.fg("dim", "") + "↳" + RESET;
 const steerStyle = (s: string): string => theme.fg("text", "") + s + RESET;
 const followStyle = (s: string): string => theme.fg("muted", "") + s + RESET;

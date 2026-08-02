@@ -394,7 +394,7 @@ export function renderPostEditDiagnostics(
 }
 
 export function detailSection(label: string, meta = ""): string {
-	return `${theme.fg("active", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
+	return `${theme.fg("separator", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
 }
 
 export function toolSummary(tool: ToolExecution): string {

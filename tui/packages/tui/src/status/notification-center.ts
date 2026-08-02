@@ -1,12 +1,11 @@
 import {
-	ansiToInkTextRow,
 	type InkTextComponent,
 	type InkTextRow,
 	clampLineToWidth,
-	RESET,
 	visibleWidth,
 } from "../terminal/core.ts";
-import { type ThemeColor, theme } from "../terminal/theme.ts";
+import type { ThemeColor } from "../terminal/theme.ts";
+import { RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
@@ -79,7 +78,7 @@ export class NotificationCenter implements InkTextComponent {
 			const content = `${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
 			const clipped = clampLineToWidth(content, Math.max(1, width - 2));
 			const line = ` ${clipped}`;
-			return ansiToInkTextRow(line + " ".repeat(Math.max(0, width - visibleWidth(line))));
+			return semanticMarkupToInkRow(line + " ".repeat(Math.max(0, width - visibleWidth(line))));
 		});
 	}
 }

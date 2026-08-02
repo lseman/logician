@@ -102,7 +102,7 @@ export function renderEditDetails(
 				? `${oldText.length} bytes · ${oldLineCount} lines · streaming`
 				: `${oldText.length} bytes · ${oldLineCount} lines`;
 			lines.push(
-				`${theme.fgRaw("diffRemoved")}── - OLD${RESET}  ${DIM}${oldMeta}${RESET}`,
+				`${theme.fg("separator", "── ")}${theme.fg("diffRemoved", "- OLD")}${RESET}  ${DIM}${oldMeta}${RESET}`,
 			);
 			lines.push(
 				...renderFileContent(oldText, width, oldLineCount, language, expanded),
@@ -114,7 +114,7 @@ export function renderEditDetails(
 				? `${newText.length} bytes · ${newLineCount} lines · streaming`
 				: `${newText.length} bytes · ${newLineCount} lines`;
 			lines.push(
-				`${theme.fgRaw("diffAdded")}── + NEW${RESET}  ${DIM}${newMeta}${RESET}`,
+				`${theme.fg("separator", "── ")}${theme.fg("diffAdded", "+ NEW")}${RESET}  ${DIM}${newMeta}${RESET}`,
 			);
 			lines.push(
 				...renderFileContent(newText, width, newLineCount, language, expanded),

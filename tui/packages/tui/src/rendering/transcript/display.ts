@@ -448,7 +448,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 					if (lastThinkingSection) {
 						renderedLines.push(
 							padToWidth(
-								[themed("separator", "  ─────────────────", { dim: true })],
+								[themed("separator", "  ─────────────────")],
 							),
 						);
 						lastThinkingSection = false;
@@ -456,7 +456,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 					if (answer) {
 						renderedLines.push(
 							padToWidth(
-								[{ text: "  " }, themed("assistantText", "RESPONSE", { bold: true })],
+								[{ text: "  " }, themed("responseLabel", "RESPONSE", { bold: true })],
 							),
 						);
 						const contentLines = renderMarkdownLines(

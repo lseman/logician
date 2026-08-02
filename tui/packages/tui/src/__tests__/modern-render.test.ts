@@ -7,7 +7,7 @@ import { SteerQueue } from "../status/steer-queue.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { inkTextComponentLines as inkLines, visibleWidth } from "../terminal/core.ts";
-import { initTheme } from "../terminal/theme.ts";
+import { initTheme, theme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
@@ -635,10 +635,10 @@ void test("status bar renders cached tokens and unknown telemetry", () => {
 
 void test("status bar renders RTK when restored as enabled", () => {
 	const status = new StatusBar();
-	assert.doesNotMatch(plain(inkLines(status, 200)[0]), /\brtk on\b/);
+	assert.doesNotMatch(plain(inkLines(status, 200)[0]), /\brtk: on\b/);
 
 	status.update({ rtkProxyEnabled: true });
-	assert.match(plain(inkLines(status, 200)[0]), /\brtk on\b/);
+	assert.match(plain(inkLines(status, 200)[0]), /\brtk: on\b/);
 });
 
 void test("native Ink dock models expose styled spans without terminal escapes", () => {
@@ -651,7 +651,7 @@ void test("native Ink dock models expose styled spans without terminal escapes",
 	});
 	const rows = status.getInkTextRows(120);
 	assert.ok(rows.flat().some((span) => span.color));
-	assert.ok(rows.flat().some((span) => span.dim));
+	assert.ok(rows.flat().some((span) => span.color === theme.inkColor("dim")));
 	assert.ok(rows.flat().every((span) => !span.text.includes("\x1b")));
 });
 

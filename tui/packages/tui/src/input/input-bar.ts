@@ -3,14 +3,11 @@
 // bracketed paste, history, grapheme-aware cursor. Mirrors pi TUI's input.
 
 import type { KillRing } from "./kill-ring.ts";
-import { theme } from "../terminal/theme.ts";
 import {
 	type InkComposerComponent,
 	type InkComposerModel,
 	type Focusable,
 	visibleWidth,
-	RESET,
-	BOLD,
 } from "../terminal/core.ts";
 import type { UndoStack } from "./undo-stack.ts";
 import { getGraphemeSegmenter } from "../terminal/utils.ts";
@@ -46,7 +43,7 @@ export class InputBar implements InkComposerComponent, Focusable {
 	private _prompt: string | undefined;
 	private get _promptResolved(): string {
 		if (this._prompt === undefined) {
-			this._prompt = "  " + theme.fg("prompt", "") + BOLD + "› " + RESET;
+			this._prompt = "  › ";
 		}
 		return this._prompt;
 	}

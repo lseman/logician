@@ -4,8 +4,8 @@
 // Sections (separated by |):
 //   phase | model | thinking | dir/git | context | cache | reasoner | mcp
 
-import { ansiToInkTextRow, type InkTextComponent, type InkTextRow, visibleWidth, RESET, DIM } from "../terminal/core.ts";
-import { theme } from "../terminal/theme.ts";
+import { clampLineToWidth, type InkTextComponent, type InkTextRow, visibleWidth } from "../terminal/core.ts";
+import { RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
 
 /** Max chars for a free-text label before it's ellipsis-truncated. */
 const LABEL_TRUNCATE_LENGTH = 24;
@@ -119,19 +119,19 @@ export class StatusBar implements InkTextComponent {
 
 	getInkTextRows(width: number): InkTextRow[] {
 		if (width === this.cachedWidth && this.cachedLine !== null) {
-			return [ansiToInkTextRow(this.cachedLine)];
+			return [semanticMarkupToInkRow(this.cachedLine)];
 		}
 
 		this.cachedWidth = width;
 		const line = this.renderCompact(width);
 		this.cachedLine = line;
-		return [ansiToInkTextRow(line)];
+		return [semanticMarkupToInkRow(line)];
 	}
 
 	// ── Compact single-line render ──────────────────────────────────────────
 
 	private renderCompact(width: number): string {
-		const separator = ` ${DIM}│${RESET} `;
+		const separator = ` ${theme.fg("separator", "│")} `;
 		const phase = this.formatPhase();
 		const model = this.formatModel();
 		const context = this.formatContext();
@@ -177,13 +177,21 @@ export class StatusBar implements InkTextComponent {
 		return theme.fg("text", this.info.model || "local");
 	}
 
+	private label(text: string): string {
+		return theme.fg("muted", text);
+	}
+
+	private value(text: string): string {
+		return theme.fg("text", text);
+	}
+
 	private formatSession(): string {
 		const title = this.info.sessionTitle?.trim();
 		if (!title || title === "New Session") return "";
 		const compact = title.length > LABEL_TRUNCATE_LENGTH
 			? `${title.slice(0, LABEL_TRUNCATE_LENGTH - 1)}…`
 			: title;
-		return `${DIM}◇${RESET} ${theme.fg("muted", compact)}`;
+		return `${this.label("◇")} ${this.value(compact)}`;
 	}
 
 	private formatPhase(): string {
@@ -222,7 +230,7 @@ export class StatusBar implements InkTextComponent {
 	private formatThinking(): string {
 		const lvl = this.info.thinkingLevel;
 		if (lvl === "off") {
-			return `${DIM}think:${RESET} ${theme.fg("levelOff", "off")}`;
+			return `${this.label("think:")} ${theme.fg("levelOff", "off")}`;
 		}
 		const levelColors: Record<string, string> = {
 			low: theme.fg("levelLow", ""),
@@ -231,7 +239,7 @@ export class StatusBar implements InkTextComponent {
 			xhigh: theme.fg("levelXhigh", ""),
 		};
 		const color = levelColors[lvl] ?? theme.fg("accent", "");
-		return `${DIM}think:${RESET} ${color}${lvl.toUpperCase()}`;
+		return `${this.label("think:")} ${color}${lvl.toUpperCase()}${RESET}`;
 	}
 
 	private formatInferenceMode(): string {
@@ -243,7 +251,7 @@ export class StatusBar implements InkTextComponent {
 			"instruct-reasoning": "REASON",
 		};
 		const label = modeLabels[mode] ?? mode.toUpperCase();
-		return `${DIM}mode:${RESET} ${theme.fg("accent", label)}`;
+		return `${this.label("mode:")} ${this.value(label)}`;
 	}
 
 	private formatDir(): string {
@@ -255,13 +263,13 @@ export class StatusBar implements InkTextComponent {
 		// Just the last directory component
 		const parts = cwd.split("/").filter(Boolean);
 		const name = parts[parts.length - 1] || ".";
-		return `${DIM}dir${RESET} ${name}`;
+		return `${this.label("dir")} ${this.value(name)}`;
 	}
 
 	private formatGit(): string {
 		if (!this.info.branch) return "";
 
-		const branch = theme.fg("success", this.info.branch);
+		const branch = this.value(this.info.branch);
 		let indicators = "";
 
 		if (this.info.gitModified) {
@@ -274,16 +282,16 @@ export class StatusBar implements InkTextComponent {
 			indicators += ` ${theme.fg("error", `?${this.info.gitUntracked}`)}`;
 		}
 
-		if (!indicators) return `${DIM}⎇${RESET} ${branch}`;
+		if (!indicators) return `${this.label("⎇")} ${branch}`;
 
-		return `${DIM}⎇${RESET} ${branch} ${indicators}`;
+		return `${this.label("⎇")} ${branch} ${indicators}`;
 	}
 
 	private formatDirWithGit(): string {
 		const dir = this.formatDir();
 		const git = this.formatGit();
 		if (dir && git) {
-			return `${dir} ${DIM}│${RESET} ${git}`;
+			return `${dir} ${theme.fg("separator", "│")} ${git}`;
 		}
 		return dir || git || "";
 	}
@@ -309,7 +317,7 @@ export class StatusBar implements InkTextComponent {
 		const filled = Math.min(cells, Math.max(0, Math.round(ratio * cells)));
 		const meter = filled > 0 ? `${"▰".repeat(filled)}` : "";
 
-		return `${DIM}ctx${RESET} ${color}${meter} ${pct}%${RESET}${DIM}/${maxStr}${RESET}`;
+		return `${this.label("ctx")} ${color}${meter} ${pct}%${RESET}${this.label(`/${maxStr}`)}`;
 	}
 
 	private formatCache(): string {
@@ -317,8 +325,8 @@ export class StatusBar implements InkTextComponent {
 		const value =
 			tokens === undefined
 				? theme.fg("dim", "unknown")
-				: theme.fg("accent", formatTokenCountClean(tokens));
-		return `${DIM}cache read:${RESET} ${value}`;
+				: theme.fg("text", formatTokenCountClean(tokens));
+		return `${this.label("cache read:")} ${value}`;
 	}
 
 	private formatTokenFlow(): string {
@@ -329,12 +337,12 @@ export class StatusBar implements InkTextComponent {
 		const inStr = inTok !== undefined ? formatTokenCountClean(inTok) : "–";
 		const outStr = outTok !== undefined ? formatTokenCountClean(outTok) : "–";
 
-		return `${DIM}↑${RESET} ${theme.fg("accent", inStr)}${DIM} │ ${RESET}${DIM}↓${RESET} ${theme.fg("accent", outStr)}`;
+		return `${this.label("↑")} ${this.value(inStr)} ${theme.fg("separator", "│")} ${this.label("↓")} ${this.value(outStr)}`;
 	}
 
 	private formatReasoner(): string {
 		const reasoner = this.info.reasoner || "none";
-		return `${DIM}reasoner:${RESET} ${theme.fg("muted", reasoner)}`;
+		return `${this.label("reasoner:")} ${this.value(reasoner)}`;
 	}
 
 	private formatGoal(): string {
@@ -348,45 +356,45 @@ export class StatusBar implements InkTextComponent {
 		const truncated = cond.length > LABEL_TRUNCATE_LENGTH
 			? cond.slice(0, LABEL_TRUNCATE_LENGTH) + "…"
 			: cond;
-		return `${theme.fg("accent", `◎ ${truncated}`)} ${DIM}(${turns} turns, ${timeStr})${RESET}`;
+		return `${theme.fg("accent", "◎")} ${this.value(truncated)} ${this.label(`(${turns} turns, ${timeStr})`)}`;
 	}
 
 	private formatMcp(): string {
 		const count = this.info.mcpServerCount || 0;
-		return `${DIM}mcp${RESET} ${theme.fg("accent", `${count}`)}${RESET}`;
+		return `${this.label("mcp:")} ${this.value(`${count}`)}`;
 	}
 
 	private formatSandbox(): string {
 		const mode = this.info.sandboxMode ?? "code";
 		if (mode === "none") {
-			return `${DIM}sandbox:${RESET} ${theme.fg("levelOff", "off")}`;
+			return `${this.label("sandbox:")} ${theme.fg("levelOff", "off")}`;
 		}
-		return `${DIM}sandbox:${RESET} ${theme.fg("accent", mode)}`;
+		return `${this.label("sandbox:")} ${this.value(mode)}`;
 	}
 
 	private formatPermissionMode(): string {
 		const mode = this.info.permissionMode ?? "acceptAll";
 		if (mode === "acceptAll") {
-			return `${theme.fg("success", "act")}`;
+			return `${this.label("perm:")} ${theme.fg("success", "act")}`;
 		}
-		return `${theme.fg("warning", "plan")}`;
+		return `${this.label("perm:")} ${theme.fg("warning", "plan")}`;
 	}
 
 	private formatRtk(): string {
 		if (!this.info.rtkProxyEnabled) return "";
-		return `${DIM}rtk${RESET} ${theme.fg("accent", "on")}`;
+		return `${this.label("rtk:")} ${theme.fg("success", "on")}`;
 	}
 
 	private formatMemory(): string {
 		if (!this.info.memoryEnabled) return "";
-		return `${DIM}memory${RESET} ${theme.fg("accent", "on")}`;
+		return `${this.label("memory:")} ${theme.fg("success", "on")}`;
 	}
 
 	private formatExecutionProfile(): string {
 		const profile = this.info.executionProfile ?? "autonomous";
 		return profile === "minimal"
-			? `${DIM}exec:${RESET} ${theme.fg("warning", "minimal")}`
-			: `${DIM}exec:${RESET} ${theme.fg("success", "auto")}`;
+			? `${this.label("exec:")} ${theme.fg("warning", "minimal")}`
+			: `${this.label("exec:")} ${theme.fg("success", "auto")}`;
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
@@ -394,29 +402,8 @@ export class StatusBar implements InkTextComponent {
 	private truncateVisible(text: string, width: number): string {
 		if (visibleWidth(text) <= width) return text;
 		const ellipsis = "…";
-		let out = "";
-		let inEscape = false;
-		let visible = 0;
 		const target = Math.max(0, width - visibleWidth(ellipsis));
-		for (let i = 0; i < text.length && visible < target; i++) {
-			const ch = text[i];
-			if (ch === "\x1b" && text[i + 1] === "[") {
-				inEscape = true;
-				out += ch;
-				continue;
-			}
-			if (inEscape) {
-				out += ch;
-				if (ch === "m") inEscape = false;
-				continue;
-			}
-			const chWidth = visibleWidth(ch);
-			if (chWidth > 0) {
-				out += ch;
-				visible += chWidth;
-			}
-		}
-		return out + ellipsis;
+		return clampLineToWidth(text, target) + ellipsis;
 	}
 }
 

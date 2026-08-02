@@ -1,13 +1,10 @@
 import { Box } from "ink";
 import React, { useMemo } from "react";
-import { ansiToInkTextRow } from "../../terminal/core.ts";
-import { InkTextRows } from "./status-region.tsx";
 import { ListOverlay, listOverlayHeight } from "./list-overlay.tsx";
 import {
 	isEntryVisible,
 	type OverlayEntry,
 } from "../overlay-visibility.ts";
-import { hasInkOverlayModel } from "../../overlays/ink-overlay-model.ts";
 
 export interface OverlayLayerProps {
 	overlayStack: readonly OverlayEntry[];
@@ -74,17 +71,13 @@ function OverlayBox({
 					entry.options?.maxHeight ? termWidth * 0.6 : termWidth - 8,
 				),
 			);
-	const overlayLines = useMemo(
-		() => hasInkOverlayModel(entry.component)
-			? []
-			: entry.component.render?.(Math.max(1, overlayWidth)) ?? [],
+	const model = useMemo(
+		() => entry.component.getInkOverlayModel(),
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
-		[entry.component, overlayWidth, renderTick],
+		[entry.component, renderTick],
 	);
 	const overlayHeight = Math.min(
-		hasInkOverlayModel(entry.component)
-			? listOverlayHeight(entry.component.getInkOverlayModel())
-			: overlayLines.length,
+		listOverlayHeight(model),
 		entry.options?.maxHeight || 999,
 	);
 
@@ -107,14 +100,7 @@ function OverlayBox({
 
 	return (
 		<Box position="absolute" top={top} left={left} flexDirection="column">
-			{hasInkOverlayModel(entry.component) ? (
-				<ListOverlay
-					model={entry.component.getInkOverlayModel()}
-					width={overlayWidth}
-				/>
-			) : (
-				<InkTextRows rows={overlayLines.map(ansiToInkTextRow)} />
-			)}
+			<ListOverlay model={model} width={overlayWidth} />
 		</Box>
 	);
 }

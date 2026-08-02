@@ -51,7 +51,9 @@ export function semanticMarkupToInkRow(value: string): InkTextRow {
 		flush();
 		if (character === RESET) style = {};
 		else if (character === BOLD) style = { ...style, bold: true };
-		else if (character === DIM) style = { ...style, dim: true };
+		else if (character === DIM) {
+			style = { ...style, color: terminalTheme.inkColor("dim") };
+		}
 		else if (character === UNDERLINE) style = { ...style, underline: true };
 		else if (character === ITALIC) style = { ...style, italic: true };
 		else if (character === BOLD_OFF) style = { ...style, bold: false };

@@ -4,8 +4,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { InputBar } from "../input/input-bar.ts";
 import {
-	type Component,
 	normalizeKeyboardInput,
+	type OverlayComponent,
 	type Scrollable,
 	TUI,
 } from "../terminal/core.ts";
@@ -167,12 +167,19 @@ void test("Escape clears first and cancels the active turn on second press", () 
 
 void test("Escape reaches the dialog owner before the core overlay fallback", () => {
 	const tui = new TUI();
-	const dialog: Component & {
+	const dialog: OverlayComponent & {
 		visible: boolean;
 		handleInput(data: string): { type: "close" } | null;
 	} = {
 		visible: true,
-		render: () => [],
+		getInkOverlayModel: () => ({
+			kind: "list",
+			title: "Dialog",
+			items: [],
+			emptyText: "",
+			footer: "",
+			selectedIndex: 0,
+		}),
 		handleInput: (data) => (data === "\x1b" ? { type: "close" } : null),
 	};
 	let dismissed = false;

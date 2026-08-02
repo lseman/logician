@@ -270,7 +270,7 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 		}
 	}
 
-	const borderColor = theme.fgRaw("borderMuted");
+	const borderColor = theme.fgRaw("separator");
 	const headerColor = theme.fgRaw("assistantText");
 	const rowColor = theme.fgRaw("assistantText");
 	const altRowColor = theme.fgRaw("dim");

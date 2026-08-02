@@ -219,7 +219,7 @@ const HTML = `<!DOCTYPE html>
     const headers = { 'Cache-Control': 'no-cache' };
     return fetch('/api' + path, { ...opts, headers: { ...headers, ...(opts?.headers || {}) } });
   }
-  function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   const TABS = ['dashboard','memories','timeline','sessions','audit','activity','profile','working-memory','graph','replay'];
   function switchTab(tabId) {
     if (!TABS.includes(tabId)) return;
@@ -255,11 +255,6 @@ const HTML = `<!DOCTYPE html>
       const res = await api('/stats');
       const data = await res.json();
       const s = data.stats || {}, h = data.health || {};
-      document.getElementById('stat-sessions').textContent = s.sessions || 0;
-      document.getElementById('stat-sessions').nextElementSibling.textContent = s.memories || 0;
-      document.getElementById('stat-observations').nextElementSibling.textContent = s.observations || 0;
-      document.getElementById('stat-observations-today').nextElementSibling.textContent = s.observationsToday || 0;
-      // Fix stat values - need proper element selection
       const statEls = document.querySelectorAll('.stat-card .value');
       statEls[0].textContent = s.sessions || 0;
       statEls[1].textContent = s.memories || 0;
@@ -359,12 +354,16 @@ const HTML = `<!DOCTYPE html>
       // Render list
       const html = sessions.length === 0
         ? '<div class="empty-state"><div class="empty-icon">&#128193;</div><p>No sessions</p></div>'
-        : sessions.map(s => '<div class="session-item'+(state.currentSessionId === s.id ? ' selected' : '')+'" onclick="selectSession(\''+esc(s.id)+'\')">' +
+        : sessions.map(s => '<div class="session-item'+(state.currentSessionId === s.id ? ' selected' : '')+'" data-session-id="'+esc(s.id)+'">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
           '<span class="session-project">'+esc(s.project||'Untitled')+'</span>' +
           '<span class="session-meta">'+esc(s.status)+' · '+s.observationCount+' obs</span>' +
           '</div><div class="session-meta">'+esc(s.startedAt?.slice(0,16))+'</div></div>').join('');
-      document.getElementById('sessions-list').innerHTML = html;
+      const listEl = document.getElementById('sessions-list');
+      listEl.innerHTML = html;
+      listEl.querySelectorAll('[data-session-id]').forEach(el => {
+        el.addEventListener('click', () => selectSession(el.getAttribute('data-session-id')));
+      });
     } catch (e) { console.error('[sessions] error:', e); }
   }
   async function selectSession(sid) {

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
+// Force truecolor output. Must run before chalk/ink are imported (even
+// transitively) — chalk reads COLORTERM/TERM once at module-init time via
+// `supports-color`, and terminals that report bare `TERM=xterm` with no
+// COLORTERM get downgraded to basic 16-color, which mangles our hex theme
+// colors (e.g. a light gray can render as the terminal's black/dark slot).
+if (!process.env.FORCE_COLOR) process.env.FORCE_COLOR = "3";
+
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 

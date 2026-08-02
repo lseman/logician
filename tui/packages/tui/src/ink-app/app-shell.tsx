@@ -1,8 +1,6 @@
 import { Box, Text } from "ink";
 import React, { useMemo } from "react";
 import {
-	clampLineToWidth,
-	visibleWidth,
 	type TUIComponentsFrame,
 	type TUI,
 } from "../terminal/core.ts";
@@ -12,7 +10,8 @@ import { PinnedRegion } from "./components/pinned-region.tsx";
 import { StatusRegion, statusHeight } from "./components/status-region.tsx";
 import { ListOverlay, listOverlayHeight } from "./components/list-overlay.tsx";
 import { isEntryVisible } from "./overlay-visibility.ts";
-import { hasInkOverlayModel, type InkListOverlayModel } from "../overlays/ink-overlay-model.ts";
+import type { InkListOverlayModel } from "../overlays/ink-overlay-model.ts";
+import { theme } from "../terminal/theme.ts";
 
 export interface AppShellProps {
 	tui: TUI;
@@ -55,20 +54,11 @@ export function AppShell({ tui, frame, renderTick }: AppShellProps): React.React
 			const entry = selectorEntries.reduce((latest, candidate) =>
 				candidate.focusOrder > latest.focusOrder ? candidate : latest,
 			);
-			if (hasInkOverlayModel(entry.component)) {
-				model = entry.component.getInkOverlayModel();
-				modelHeight = Math.min(
-					listOverlayHeight(model),
-					entry.options?.maxHeight ?? Number.POSITIVE_INFINITY,
-				);
-			} else {
-				const rendered = entry.component.render?.(width) ?? [];
-				const maxHeight = entry.options?.maxHeight ?? rendered.length;
-				for (const line of rendered.slice(0, maxHeight)) {
-					const clamped = clampLineToWidth(line, width);
-					rows.push([{ text: clamped + " ".repeat(Math.max(0, width - visibleWidth(clamped))) }]);
-				}
-			}
+			model = entry.component.getInkOverlayModel();
+			modelHeight = Math.min(
+				listOverlayHeight(model),
+				entry.options?.maxHeight ?? Number.POSITIVE_INFINITY,
+			);
 		}
 		return { rows, model, modelHeight };
 		// biome-ignore lint/correctness/useExhaustiveDependencies: renderTick is the invalidation signal; component identity is stable
@@ -96,7 +86,7 @@ export function AppShell({ tui, frame, renderTick }: AppShellProps): React.React
 			<Box flexDirection="column" height={transcriptHeight} overflow="hidden">
 				<PinnedRegion rows={transcriptRows} />
 			</Box>
-			<Text dimColor>{"─".repeat(width)}</Text>
+			<Text color={theme.inkColor("separator")}>{"─".repeat(width)}</Text>
 			<PinnedRegion rows={aboveInput.rows} />
 			{aboveInput.model && (
 				<Box height={aboveInput.modelHeight} overflow="hidden">
@@ -110,7 +100,7 @@ export function AppShell({ tui, frame, renderTick }: AppShellProps): React.React
 				showHardwareCursor={showHardwareCursor}
 				renderTick={renderTick}
 			/>
-			<Text dimColor>{"─".repeat(width)}</Text>
+			<Text color={theme.inkColor("separator")}>{"─".repeat(width)}</Text>
 			<StatusRegion
 				component={fixedBottomComponent}
 				width={width}

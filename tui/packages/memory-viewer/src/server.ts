@@ -37,7 +37,7 @@ export function startViewerServer(opts: ViewerOptions): {
 	stop: (force?: boolean) => void;
 } {
 	const port = opts.port ?? 3200;
-	const host = opts.host ?? "127.0.0.1";
+	const host = opts.host ?? "0.0.0.0";
 	const store = opts.store;
 	const secret = opts.secret;
 
@@ -73,7 +73,8 @@ export function startViewerServer(opts: ViewerOptions): {
 
 		// WebSocket upgrade
 		if (path === "/ws") {
-			return new Response("WS upgrade", { status: 101 });
+			if (server.upgrade(req)) return new Response(null, { status: 101 });
+			return new Response("Upgrade failed", { status: 400 });
 		}
 
 		// API routes
@@ -83,7 +84,7 @@ export function startViewerServer(opts: ViewerOptions): {
 
 			const segments = path.replace(/^\/api\//, "").split("/").filter(Boolean);
 
-			if (segments.length === 0) {
+			if (segments.length === 0 || (segments[0] === "stats" && segments.length === 1)) {
 				return new Response(JSON.stringify({ stats: getStats(), health: getHealth() }), { headers: { "Content-Type": "application/json" } });
 			}
 
@@ -184,6 +185,17 @@ export function startViewerServer(opts: ViewerOptions): {
 		port,
 		hostname: host,
 		fetch: handleRequest,
+		websocket: {
+			open(ws) {
+				ws.subscribe("observations");
+			},
+			message() {
+				// Client messages (e.g. subscribe ack) require no server-side action.
+			},
+			close(ws) {
+				ws.unsubscribe("observations");
+			},
+		},
 	});
 
 	boundPort = server.port ?? port;

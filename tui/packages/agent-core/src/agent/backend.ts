@@ -461,7 +461,14 @@ export class OpenAIBackend implements LLMBackend {
 					const chunkFinish = chunk.choices?.[0]?.finish_reason;
 					if (chunkFinish) finishReason = chunkFinish;
 					if (chunk.usage || chunk.timings) {
-						usage = parseProviderUsage(chunk.usage, chunk.timings);
+						const parsed = parseProviderUsage(chunk.usage, chunk.timings);
+						usage = {
+							promptTokens: parsed?.promptTokens ?? usage?.promptTokens,
+							completionTokens:
+								parsed?.completionTokens ?? usage?.completionTokens,
+							totalTokens: parsed?.totalTokens ?? usage?.totalTokens,
+							cachedTokens: parsed?.cachedTokens ?? usage?.cachedTokens,
+						};
 					}
 					const delta = chunk.choices?.[0]?.delta;
 					if (!delta) continue;

@@ -1,5 +1,4 @@
 import {
-	ansiToInkTextRow,
 	type InkTextComponent,
 	type InkTextSpan,
 	type InkTextRow,
@@ -141,8 +140,7 @@ export class WorkSurface implements InkTextComponent {
 	}
 
 	private themedSpan(color: Parameters<typeof theme.fg>[0], text: string): InkTextSpan {
-		const [span] = ansiToInkTextRow(theme.fg(color, text));
-		return span ?? { text };
+		return { text, color: theme.inkColor(color) };
 	}
 
 	private row(spans: InkTextRow, width: number): InkTextRow {

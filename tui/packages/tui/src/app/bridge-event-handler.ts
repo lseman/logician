@@ -274,11 +274,8 @@ export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent
 				contextTokens: Number(event.tokens || 0),
 				contextMaxTokens: Number(event.max_tokens || 0) || undefined,
 				contextCompacted: event.compacted === true,
-				...("cached_tokens" in event && {
-					cacheReadTokens:
-						typeof event.cached_tokens === "number"
-							? event.cached_tokens
-							: undefined,
+				...(typeof event.cached_tokens === "number" && {
+					cacheReadTokens: event.cached_tokens,
 				}),
 				...("prompt_tokens" in event && {
 					promptTokens:

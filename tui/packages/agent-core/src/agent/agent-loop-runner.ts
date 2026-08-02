@@ -850,26 +850,26 @@ async function runAgentLoopInTaskScope(
 			// The final usage-only SSE chunk is optional and many local providers
 			// omit it. Estimate the serialized conversation as a reliable fallback
 			// so context usage never remains stuck at zero.
+			const contextTokens = Math.max(
+				estimateChatPayloadTokens(
+					messages,
+					registry.toToolDefinitions(),
+				),
+				response?.usage?.totalTokens ?? 0,
+			);
+			await emit({
+				type: "context_update",
+				tokens: contextTokens,
+				maxTokens: config.contextWindowTokens,
+				cachedTokens: response?.usage?.cachedTokens ?? null,
+				promptTokens: response?.usage?.promptTokens ?? null,
+				completionTokens: response?.usage?.completionTokens ?? null,
+			});
 			if (config.contextWindowTokens) {
-				const contextTokens = Math.max(
-					estimateChatPayloadTokens(
-						messages,
-						registry.toToolDefinitions(),
-					),
-					response?.usage?.totalTokens ?? 0,
-				);
 				const budgetResult = outputGuard?.processResponse(
 					contextTokens,
 					config.contextWindowTokens,
 				);
-				await emit({
-					type: "context_update",
-					tokens: contextTokens,
-					maxTokens: config.contextWindowTokens,
-					cachedTokens: response?.usage?.cachedTokens ?? null,
-					promptTokens: response?.usage?.promptTokens ?? null,
-					completionTokens: response?.usage?.completionTokens ?? null,
-				});
 				// budget_exhausted is a harder threshold than proactive compaction's
 				// (95% vs 80%) — if we're here, proactive compaction already failed
 				// to keep up (e.g. cooldown window, or a single oversized turn).

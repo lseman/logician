@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import React from "react";
 import type { InkListOverlayModel } from "../../overlays/ink-overlay-model.ts";
+import { theme, type ThemeColor } from "../../terminal/theme.ts";
 
 export function ListOverlay({
 	model,
@@ -22,37 +23,47 @@ export function ListOverlay({
 	const visible = model.items.slice(start, end);
 
 	return (
-		<Box flexDirection="column" width={width} borderStyle="round" borderColor="gray">
+		<Box flexDirection="column" width={width} borderStyle="round" borderColor={theme.inkColor("borderMuted")}>
 			<Box paddingX={1} justifyContent="space-between">
 				<Text bold>{model.title}{model.subtitle ?? ""}</Text>
-				{model.hints && <Text dimColor>{model.hints}</Text>}
+				{model.hints && <Text color={theme.inkColor("muted")}>{model.hints}</Text>}
 			</Box>
 			{model.headerLines?.map((line, index) => (
-				<Text key={`header:${index}`} dimColor wrap="truncate-end"> {line}</Text>
+				<Text key={`header:${index}`} color={theme.inkColor("muted")} wrap="truncate-end"> {line}</Text>
 			))}
-			{start > 0 && <Text dimColor> ↑ {start} more above</Text>}
+			{start > 0 && <Text color={theme.inkColor("dim")}> ↑ {start} more above</Text>}
 			{visible.length === 0 ? (
-				<Text dimColor> {model.emptyText}</Text>
+				<Text color={theme.inkColor("muted")}> {model.emptyText}</Text>
 			) : visible.map((item, index) => {
 				const marker = item.selected ? "❯" : " ";
 				const current = item.current ? " ✓" : "";
 				const left = `${marker} ${item.label}${current}`;
 				return (
 					<Box key={`${start + index}:${item.label}`} paddingX={1} width={innerWidth + 2}>
-						<Text bold={item.selected} color={item.selected ? "cyan" : undefined}>
+						<Text bold={item.selected} color={theme.inkColor(item.selected ? "selected" : itemColor(item.status))}>
 							{left}
 						</Text>
 						<Box flexGrow={1} />
-						{item.metadata && <Text dimColor={!item.selected}>{item.metadata}</Text>}
+						{item.metadata && <Text color={theme.inkColor(item.selected ? "text" : "muted")}>{item.metadata}</Text>}
 					</Box>
 				);
 			})}
-			{end < model.items.length && <Text dimColor> ↓ {model.items.length - end} more below</Text>}
+			{end < model.items.length && <Text color={theme.inkColor("dim")}> ↓ {model.items.length - end} more below</Text>}
 			<Box paddingX={1}>
-				<Text dimColor wrap="truncate-end">{model.footer}</Text>
+				<Text color={theme.inkColor("muted")} wrap="truncate-end">{model.footer}</Text>
 			</Box>
 		</Box>
 	);
+}
+
+function itemColor(status: InkListOverlayModel["items"][number]["status"]): ThemeColor {
+	switch (status) {
+		case "active": return "active";
+		case "success": return "success";
+		case "warning": return "warning";
+		case "error": return "error";
+		default: return "text";
+	}
 }
 
 export function listOverlayHeight(model: InkListOverlayModel): number {

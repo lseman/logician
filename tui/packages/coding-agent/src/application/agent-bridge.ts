@@ -316,7 +316,7 @@ export class AgentCoreBridge {
 				try {
 					this.memoryViewerServer = startViewerServer({
 						port: this.memoryViewerPort,
-						host: "127.0.0.1",
+						host: "0.0.0.0",
 						store: this.memoryStore,
 					});
 					const bound = getBoundViewerPort();
