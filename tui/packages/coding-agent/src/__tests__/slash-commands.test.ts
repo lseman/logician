@@ -14,10 +14,12 @@ void test("bare slash returns the complete command catalog", () => {
 	assert.equal(filterSlashCommands(commands, "/").length, commands.length);
 });
 
-void test("memory command was removed with observational memory", () => {
+void test("memory command exposes the persistent memory handlers", () => {
 	const commands = createSlashCommands(bridge, {});
 	const memory = commands.find((command) => command.command === "/memory");
-	assert.equal(memory, undefined);
+	assert.ok(memory);
+	assert.equal(memory.dispatch, "local");
+	assert.equal(memory.acceptsArgs, true);
 });
 
 void test("steer-now forces the existing steering queue without accepting text", () => {

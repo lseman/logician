@@ -913,7 +913,17 @@ export class AgentHarness {
 
 	setInferenceMode(mode: string): void {
 		// Validate mode name before accepting it.
-		const valid = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+		const valid = [
+			"auto",
+			"thinking-general",
+			"thinking-coding",
+			"instruct-general",
+			"instruct-reasoning",
+			"instruct-coding",
+			"deterministic",
+			"creative",
+			"analytical",
+		];
 		if (!valid.includes(mode)) {
 			// Silently ignore invalid mode — the caller (TUI) should handle this.
 			return;

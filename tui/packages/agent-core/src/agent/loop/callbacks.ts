@@ -6,6 +6,7 @@ import type {
 	StopReason,
 	ToolCall,
 } from "../types.ts";
+import type { ExplicitTaskState } from "../tasks/task-state-controller.ts";
 
 export type EventSink = (
 	event: import("../types.ts").AgentEvent,
@@ -41,6 +42,7 @@ export interface LoopCallbacks {
 		messages: AgentMessage[];
 		iteration: number;
 		signal?: AbortSignal;
+		taskState?: ExplicitTaskState;
 	}) =>
 		| Promise<{ messages?: AgentMessage[] } | undefined>
 		| { messages?: AgentMessage[] }
@@ -86,6 +88,7 @@ export async function transformMessages(
 		messages: AgentMessage[];
 		iteration: number;
 		signal?: AbortSignal;
+		taskState?: ExplicitTaskState;
 	},
 ): Promise<AgentMessage[] | undefined> {
 	for (const callback of callbacks) {

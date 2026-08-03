@@ -104,7 +104,7 @@ export function buildSettingsSnapshot(opts: {
 	lines.push("  /settings guards [on]          → toggle output guards");
 	lines.push("  /settings compaction [on]      → toggle proactive compaction");
 	lines.push("  /settings permissions <mode>   → acceptAll|acceptEdits|ask|plan");
-	lines.push("  /settings inference-mode <m>   → thinking-general|thinking-coding|instruct-general|instruct-reasoning|instruct-coding|deterministic|creative|analytical");
+	lines.push("  /settings inference-mode <m>   → auto|thinking-general|thinking-coding|instruct-general|instruct-reasoning|instruct-coding|deterministic|creative|analytical");
 	lines.push("  /rtk                           → toggle RTK CLI proxy on/off");
 
 	return lines.join("\n");
@@ -234,10 +234,15 @@ export function parseSettingsCommand(
 		case "inference_mode": {
 			const mode = parts[1]?.trim().toLowerCase();
 			const valid = [
+				"auto",
 				"thinking-general",
 				"thinking-coding",
 				"instruct-general",
 				"instruct-reasoning",
+				"instruct-coding",
+				"deterministic",
+				"creative",
+				"analytical",
 			];
 			if (!mode) {
 				return {

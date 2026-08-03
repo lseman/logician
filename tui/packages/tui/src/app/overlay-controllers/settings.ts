@@ -84,6 +84,11 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 				description: "Safety guards against harmful tool use",
 				options: [
 					{
+						label: "Auto",
+						value: "auto",
+						current: data.inferenceMode === "auto",
+					},
+					{
 						label: "on",
 						value: "true",
 						current: data.guardsEnabled,
@@ -140,6 +145,26 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 						label: "Reason",
 						value: "instruct-reasoning",
 						current: data.inferenceMode === "instruct-reasoning",
+					},
+					{
+						label: "Code",
+						value: "instruct-coding",
+						current: data.inferenceMode === "instruct-coding",
+					},
+					{
+						label: "Exact",
+						value: "deterministic",
+						current: data.inferenceMode === "deterministic",
+					},
+					{
+						label: "Creative",
+						value: "creative",
+						current: data.inferenceMode === "creative",
+					},
+					{
+						label: "Analyze",
+						value: "analytical",
+						current: data.inferenceMode === "analytical",
 					},
 				],
 			},
@@ -319,10 +344,15 @@ export function handleSettingsSelectorAction(
 		}
 		case "inference mode": {
 			const valid = [
+				"auto",
 				"thinking-general",
 				"thinking-coding",
 				"instruct-general",
 				"instruct-reasoning",
+				"instruct-coding",
+				"deterministic",
+				"creative",
+				"analytical",
 			];
 			if (!valid.includes(value)) {
 				ctx.notify(

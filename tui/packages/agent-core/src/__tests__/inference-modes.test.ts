@@ -7,8 +7,8 @@ import {
 	isValidInferenceMode,
 } from "../agent/configuration/inference-modes.ts";
 
-void test("INFERENCE_MODES has exactly 8 entries", () => {
-	assert.equal(INFERENCE_MODES.size, 8);
+void test("INFERENCE_MODES has exactly 9 entries", () => {
+	assert.equal(INFERENCE_MODES.size, 9);
 });
 
 void test("getInferenceMode returns correct params", () => {
@@ -30,6 +30,7 @@ void test("getInferenceMode returns undefined for unknown mode", () => {
 });
 
 void test("isValidInferenceMode returns correct values", () => {
+	assert.equal(isValidInferenceMode("auto"), true);
 	assert.equal(isValidInferenceMode("thinking-general"), true);
 	assert.equal(isValidInferenceMode("thinking-coding"), true);
 	assert.equal(isValidInferenceMode("instruct-general"), true);
@@ -42,8 +43,7 @@ void test("isValidInferenceMode returns correct values", () => {
 });
 
 void test("cycleInferenceMode cycles through all modes in order", () => {
-	const modes: Array<"thinking-general" | "thinking-coding" | "instruct-general" | "instruct-reasoning" | "instruct-coding" | "deterministic" | "creative" | "analytical"> =
-		["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning", "instruct-coding", "deterministic", "creative", "analytical"];
+	const modes = ["auto", "thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning", "instruct-coding", "deterministic", "creative", "analytical"] as const;
 	for (let i = 0; i < modes.length; i++) {
 		assert.equal(cycleInferenceMode(modes[i]), modes[(i + 1) % modes.length]);
 	}
@@ -51,7 +51,7 @@ void test("cycleInferenceMode cycles through all modes in order", () => {
 
 void test("cycleInferenceMode wraps around from last to first", () => {
 	const mode = cycleInferenceMode("analytical");
-	assert.equal(mode, "thinking-general");
+	assert.equal(mode, "auto");
 });
 
 void test("instruct-reasoning has high temp and presence penalty", () => {

@@ -32,6 +32,7 @@ export type ThinkingLevel =
 	| "xhigh";
 
 export type InferenceMode =
+	| "auto"
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"

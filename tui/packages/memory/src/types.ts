@@ -116,6 +116,15 @@ export interface SnapshotMeta {
   memoryCount: number;
 }
 
+/** Live task signals used to rank bounded context candidates. */
+export interface ContextRetrievalQuery {
+  objective: string;
+  phase?: "orient" | "investigate" | "implement" | "verify" | "handoff" | "blocked";
+  changedFiles?: string[];
+  recentEvidence?: string[];
+  toolFailures?: number;
+}
+
 // ── Dedup Config ─────────────────────────────────────────────────────────────
 
 export interface DedupConfig {
@@ -354,7 +363,7 @@ export interface MemoryStore {
   consolidate(sessionId: string): Memory[];
 
   // Context injection
-  getContext(sessionId: string, budget?: number, query?: string): string;
+  getContext(sessionId: string, budget?: number, query?: string | ContextRetrievalQuery): string;
 
   // Session tracking
   setCurrentSessionId(id: string): void;

@@ -13,6 +13,7 @@ export * from "./agent/messages.ts";
 export * from "./agent/runtime-state.ts";
 export * from "./agent/session.ts";
 export * from "./agent/tool-cache.ts";
+export * from "./agent/tasks/task-state-controller.ts";
 export * from "./agent/types.ts";
 
 // Hooks: hook bus, builtin hooks, budget

@@ -27,7 +27,7 @@ if [ "$1" != "rewrite" ]; then exit 2; fi
 case "$2" in
   "git status") printf '%s\\n' "rtk git status" ;;
   "cd repo && git status") printf '%s\\n' "cd repo && rtk git status" ;;
-  "npm test && echo done") printf '%s\\n' "rtk npm test && echo done" ;;
+  "cargo test && echo done") printf '%s\\n' "rtk cargo test && echo done" ;;
   *) printf '%s\\n' "$2"; exit 3 ;;
 esac
 `,
@@ -121,8 +121,8 @@ void test("RTK rewrite delegates supported and compound commands to RTK", () => 
 			"cd repo && rtk git status",
 		);
 		assert.equal(
-			rewriteCommandWithRtk("npm test && echo done"),
-			"rtk npm test && echo done",
+			rewriteCommandWithRtk("cargo test && echo done"),
+			"rtk cargo test && echo done",
 		);
 	});
 });

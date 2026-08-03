@@ -126,6 +126,25 @@ void test("validateConfig rejects invalid inferenceMode", () => {
 	assert.ok(warnings.some((w) => w.includes("\"inferenceMode\" must be one of")));
 });
 
+void test("validateConfig accepts every inference preset", () => {
+	for (const inferenceMode of [
+		"auto",
+		"thinking-general",
+		"thinking-coding",
+		"instruct-general",
+		"instruct-reasoning",
+		"instruct-coding",
+		"deterministic",
+		"creative",
+		"analytical",
+	] as const) {
+		const warnings: string[] = [];
+		const cfg = validateConfig({ inferenceMode }, warnings);
+		assert.equal(cfg.inferenceMode, inferenceMode);
+		assert.deepEqual(warnings, []);
+	}
+});
+
 void test("validateConfig accepts execution profiles and rejects unknown profiles", () => {
 	const validWarnings: string[] = [];
 	const valid = validateConfig({ executionProfile: "minimal" }, validWarnings);

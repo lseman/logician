@@ -12,6 +12,8 @@ import {
 	type AgentModelConfig,
 	type AbortResult,
 	type HarnessPhase,
+	type ExplicitTaskState,
+	formatTaskStateContext,
 	type Message,
 	type Tool,
 	type TruncationConfig,
@@ -186,6 +188,7 @@ export class AgentCoreBridge {
 	private startupPluginCount = 0;
 	private contextTokens = 0;
 	private contextMaxTokens?: number;
+	private currentTaskState: ExplicitTaskState | null = null;
 	private configPath: string | null;
 	private mcpEager: boolean;
 	private postEditDiagnosticsEnabled: boolean;
@@ -400,6 +403,9 @@ export class AgentCoreBridge {
 					this.contextTokens = event.tokens;
 					this.contextMaxTokens = event.maxTokens;
 				}
+				if (event.type === "task_state_update") {
+					this.currentTaskState = event.state;
+				}
 				const mapped = mapAgentEvent(event);
 				if (mapped) {
 					this.emit(mapped);
@@ -459,7 +465,11 @@ export class AgentCoreBridge {
 				// Chain: existing hook runs first, then memory hook
 				merged[key as keyof AgentConfig["hooks"]] = async (ctx: any, signal: any) => {
 					const existingResult = await existing(ctx, signal);
-					const memoryResult = await (value as Function)(ctx, signal);
+					const memoryCtx =
+						key === "transformContext" && existingResult?.messages
+							? { ...ctx, messages: existingResult.messages }
+							: ctx;
+					const memoryResult = await (value as Function)(memoryCtx, signal);
 					// Return whichever has a non-undefined result
 					if (memoryResult !== undefined) return memoryResult;
 					return existingResult;
@@ -1646,9 +1656,8 @@ export class AgentCoreBridge {
 			"",
 			...sourceLines,
 			"",
-			"## Conversation",
-			"",
 		];
+		lines.push("## Conversation", "");
 		if (!msgs.length) lines.push("No messages yet.");
 
 		for (const msg of msgs) {
@@ -1681,6 +1690,17 @@ export class AgentCoreBridge {
 				lines.push(`${header}\n${msg.content || ""}`);
 			}
 			lines.push("");
+		}
+
+		// The loop appends task state as the final system message immediately before
+		// each provider request. Mirror that ordering here so /context reflects the
+		// actual provider payload instead of presenting task state as a side panel.
+		if (this.currentTaskState) {
+			lines.push(
+				"[SYSTEM]",
+				formatTaskStateContext(this.currentTaskState),
+				"",
+			);
 		}
 
 		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;

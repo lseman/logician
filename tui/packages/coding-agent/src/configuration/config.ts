@@ -288,7 +288,17 @@ export function validateConfig(
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
 	if (obj.inferenceMode !== undefined) {
 		const im = configString(obj.inferenceMode);
-		const validModes = ["thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning"];
+		const validModes = [
+			"auto",
+			"thinking-general",
+			"thinking-coding",
+			"instruct-general",
+			"instruct-reasoning",
+			"instruct-coding",
+			"deterministic",
+			"creative",
+			"analytical",
+		];
 		if (im && !validModes.includes(im)) {
 			warn(
 				warnings,
@@ -715,10 +725,15 @@ export interface LogicianTuiConfig {
 	};
 	// Inference mode — pre-defined sampling parameter set, cycled via Alt+M.
 	inferenceMode?:
+		| "auto"
 		| "thinking-general"
 		| "thinking-coding"
 		| "instruct-general"
-		| "instruct-reasoning";
+		| "instruct-reasoning"
+		| "instruct-coding"
+		| "deterministic"
+		| "creative"
+		| "analytical";
 	// Universal output/result truncation limits.
 	truncation?: TruncationConfig;
 	// Whether to auto-resume the most recent session on startup (default: true).

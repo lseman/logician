@@ -4,6 +4,7 @@
 
 import type { AgentHooks } from "@logician/agent-core";
 import type { CompressedObservation, Memory, MemoryStore, RawObservation } from "./types.js";
+import type { ExplicitTaskState } from "@logician/agent-core";
 
 export interface MemoryHooksConfig {
   /** Whether to capture tool observations. Default: true */
@@ -142,14 +143,31 @@ export function createMemoryHooks(
   // ── transformContext: inject session context into messages ──────────
 
   const transformContext = injectContext
-    ? (ctx: { messages: any[] }) => {
+    ? (ctx: { messages: any[]; taskState?: ExplicitTaskState }) => {
         const sessionId = store.getCurrentSessionId();
         if (!sessionId) return undefined;
-        const sessionContext = store.getContext(sessionId, contextBudget, latestPrompt);
+        const sessionContext = store.getContext(
+          sessionId,
+          contextBudget,
+          ctx.taskState
+            ? {
+                objective: ctx.taskState.objective || latestPrompt,
+                phase: ctx.taskState.phase,
+                changedFiles: ctx.taskState.changedFiles,
+                recentEvidence: ctx.taskState.evidence.slice(-6).map((item) => item.summary),
+                toolFailures: ctx.taskState.toolFailures,
+              }
+            : latestPrompt,
+        );
         if (!sessionContext) return undefined;
 
         const messages = [
-          ...ctx.messages,
+          ...ctx.messages.filter(
+            (message) =>
+              !(message?.role === "system" &&
+                typeof message.content === "string" &&
+                message.content.startsWith("# Agent Context\n")),
+          ),
           {
             role: "system" as const,
             content: sessionContext,

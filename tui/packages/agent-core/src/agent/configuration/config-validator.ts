@@ -14,6 +14,7 @@ const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
 const VALID_QUEUE_MODES: ReadonlySet<QueueMode> = new Set(["all", "one-at-a-time"]);
 const VALID_TOOL_EXECUTION = new Set(["sequential", "parallel"]);
 const VALID_INFERENCE_MODES: ReadonlySet<InferenceMode> = new Set([
+	"auto",
 	"thinking-general",
 	"thinking-coding",
 	"instruct-general",

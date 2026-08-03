@@ -7,6 +7,7 @@ import { dirname, normalize, resolve } from "node:path";
 import type {
   CompressedObservation,
   ContextBlock,
+  ContextRetrievalQuery,
   CreateMemoryOptions,
   DecayConfig,
   DecayConfigInput,
@@ -1381,65 +1382,145 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
   // ── Context Injection ──────────────────────────────────────────────────
 
-  function getContext(sessionId: string, budget: number = 4000, query: string = ""): string {
-    const blocks: ContextBlock[] = [];
-    let tokenCount = 0;
+  function getContext(
+    sessionId: string,
+    budget: number = 4000,
+    query: string | ContextRetrievalQuery = "",
+  ): string {
+    const retrieval = typeof query === "string" ? { objective: query } : query;
+    const objective = retrieval.objective?.trim() || "";
+    const phase = retrieval.phase || "orient";
+    const changedFiles = retrieval.changedFiles || [];
+    const queryText = [objective, ...changedFiles, ...(retrieval.recentEvidence || [])].join(" ");
+    const queryTokens = contextTokens(queryText);
+    const fileTokens = new Set(changedFiles.flatMap((file) => [...contextTokens(file)]));
+    const nowMs = Date.now();
     const estimateTokens = (text: string) => Math.ceil(text.length / 3);
+    type Candidate = ContextBlock & { id: string; score: number };
+    const candidates: Candidate[] = [];
 
-    // 1. Session summary (if available)
+    const overlapScore = (text: string): number => {
+      if (!queryTokens.size) return 0;
+      const candidateTokens = contextTokens(text);
+      let overlap = 0;
+      for (const token of queryTokens) if (candidateTokens.has(token)) overlap++;
+      return overlap / Math.sqrt(Math.max(1, queryTokens.size * candidateTokens.size));
+    };
+    const fileScore = (files: string[] | undefined, text: string): number => {
+      if (!fileTokens.size) return 0;
+      const candidateTokens = contextTokens([...(files || []), text].join(" "));
+      let matches = 0;
+      for (const token of fileTokens) if (candidateTokens.has(token)) matches++;
+      return matches / fileTokens.size;
+    };
+    const recencyScore = (timestamp: string | undefined): number => {
+      const ageDays = Math.max(0, nowMs - Date.parse(timestamp || "")) / 86_400_000;
+      return Number.isFinite(ageDays) ? 1 / (1 + ageDays / 14) : 0;
+    };
+    const phaseScore = (type: string): number => {
+      if (phase === "investigate" && /error|file_read|search|fact/.test(type)) return 1;
+      if (phase === "implement" && /file_write|file_edit|decision|pattern/.test(type)) return 1;
+      if (phase === "verify" && /command_run|error|test/.test(type)) return 1;
+      if (phase === "blocked" && /error|decision/.test(type)) return 1;
+      return 0;
+    };
+
     const session = getSession(sessionId);
     if (session?.summary) {
-      blocks.push({
+      const content = `# Session Summary\n\n${session.summary}`;
+      candidates.push({
+        id: `summary:${sessionId}`,
         type: "summary",
-        content: `# Session Summary\n\n${session.summary}`,
-        tokens: estimateTokens(session.summary),
-        recency: Date.now(),
+        content,
+        tokens: estimateTokens(content),
+        recency: nowMs,
+        score: 8 + overlapScore(session.summary) * 12,
       });
-      tokenCount += estimateTokens(session.summary);
     }
 
-    // 2. Current-turn/session evidence.
-    const recentObs = listObservations(sessionId, 10)
-      .filter(o => o.importance >= 7)
-      .sort((a, b) => b.importance - a.importance);
-
-    for (const obs of recentObs) {
-      const text = `## [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 300)}`;
-      const tokens = estimateTokens(text);
-      if (tokenCount + tokens > budget) break;
-      blocks.push({ type: "observation", content: text, tokens, recency: Date.parse(obs.timestamp) });
-      tokenCount += tokens;
+    // Pull a broad bounded pool, then rank in-process. This avoids strict FTS
+    // AND semantics dropping useful context when an objective contains filler.
+    for (const obs of listRecentObservations(120)) {
+      const body = `${obs.title} ${obs.narrative} ${(obs.facts || []).join(" ")} ${(obs.concepts || []).join(" ")}`;
+      const relevance = overlapScore(body);
+      const files = fileScore(obs.files, body);
+      const sameSession = obs.sessionId === sessionId ? 1 : 0;
+      const score =
+        relevance * 18 +
+        files * 10 +
+        phaseScore(obs.type) * 3 +
+        (obs.importance / 10) * 4 +
+        recencyScore(obs.timestamp) * 2 +
+        sameSession * 2;
+      if (
+        queryTokens.size &&
+        relevance === 0 &&
+        files === 0 &&
+        !(sameSession && obs.importance >= 7 && phaseScore(obs.type) > 0)
+      ) continue;
+      const label = sameSession ? "Current-session evidence" : "Prior observation";
+      const content = `## ${label} [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 300)}`;
+      candidates.push({
+        id: `observation:${obs.id}`,
+        type: "observation",
+        content,
+        tokens: estimateTokens(content),
+        recency: Date.parse(obs.timestamp),
+        score,
+      });
     }
 
-    // 3. Retrieve relevant observations from prior sessions in this folder.
-    if (query.trim()) {
-      const seen = new Set(recentObs.map((obs) => obs.id));
-      for (const result of searchObservations(query, 6)) {
-        const obs = result.observation;
-        if (seen.has(obs.id) || obs.importance < 5) continue;
-        const text = `## Prior observation [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 300)}`;
-        const tokens = estimateTokens(text);
-        if (tokenCount + tokens > budget) break;
-        blocks.push({ type: "observation", content: text, tokens, recency: Date.parse(obs.timestamp) });
-        tokenCount += tokens;
-      }
-    }
-
-    // 4. Folder memory is intentionally cross-session. A new session should
-    // still benefit from decisions and discoveries made in this same path.
-    const memories = list({ search: query.trim() || undefined, limit: 6, minStrength: 6 });
-    for (const mem of memories) {
+    for (const mem of list({ limit: 100, minStrength: 4 })) {
+      const body = `${mem.title} ${mem.content} ${(mem.concepts || []).join(" ")} ${(mem.files || []).join(" ")}`;
+      const relevance = overlapScore(body);
+      const files = fileScore(mem.files, body);
+      if (queryTokens.size && relevance === 0 && files === 0) continue;
       const sources = mem.sourceObservationIds?.length || 0;
-      const text = `## Folder memory [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 350)}${sources ? `\n\nSources: ${sources} observations` : ""}`;
-      const tokens = estimateTokens(text);
-      if (tokenCount + tokens > budget) break;
-      blocks.push({ type: "memory", content: text, tokens, recency: Date.parse(mem.updatedAt) });
-      tokenCount += tokens;
+      const content = `## Folder memory [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 350)}${sources ? `\n\nSources: ${sources} observations` : ""}`;
+      candidates.push({
+        id: `memory:${mem.id}`,
+        type: "memory",
+        content,
+        tokens: estimateTokens(content),
+        recency: Date.parse(mem.updatedAt),
+        score:
+          relevance * 20 +
+          files * 12 +
+          phaseScore(mem.type) * 3 +
+          (mem.strength / 10) * 6 +
+          recencyScore(mem.updatedAt),
+      });
     }
 
+    candidates.sort((a, b) =>
+      b.score - a.score ||
+      (b.score / Math.max(1, b.tokens)) - (a.score / Math.max(1, a.tokens)) ||
+      b.recency - a.recency,
+    );
+
+    const blocks: Candidate[] = [];
+    let tokenCount = 0;
+    for (const candidate of candidates) {
+      if (blocks.some((block) => block.id === candidate.id)) continue;
+      if (tokenCount + candidate.tokens > budget) continue;
+      blocks.push(candidate);
+      tokenCount += candidate.tokens;
+    }
     if (!blocks.length) return "";
 
-    return "# Agent Context\n\n" + blocks.map(b => b.content).join("\n\n---\n\n") + "\n";
+    const retrievalNote = objective
+      ? `_Task-aware retrieval: ${phase}; ${blocks.length} items; ~${tokenCount}/${budget} tokens._`
+      : `_Context retrieval: ${blocks.length} items; ~${tokenCount}/${budget} tokens._`;
+    return `# Agent Context\n\n${retrievalNote}\n\n${blocks.map((block) => block.content).join("\n\n---\n\n")}\n`;
+  }
+
+  function contextTokens(value: string): Set<string> {
+    const stop = new Set(["a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of", "on", "or", "the", "this", "to", "with"]);
+    return new Set(
+      (value.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) || [])
+        .map((token) => token.replace(/(?:ing|ed|es|s)$/i, ""))
+        .filter((token) => token.length > 1 && !stop.has(token)),
+    );
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────

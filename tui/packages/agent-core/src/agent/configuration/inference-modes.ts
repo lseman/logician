@@ -3,6 +3,7 @@
 // Each mode packs temperature, top_p, top_k, min_p, presence_penalty, repetition_penalty.
 
 export type InferenceMode =
+	| "auto"
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"
@@ -33,6 +34,23 @@ export interface InferenceModeDef {
 }
 
 export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> = new Map([
+	[
+		"auto",
+		{
+			label: "Auto",
+			description: "Automatically selects a preset from the live task phase and evidence.",
+			thinking: true,
+			// Adaptive is resolved before requests; these are safe fallback values.
+			params: {
+				temperature: 0.7,
+				top_p: 0.8,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 1.0,
+				repetition_penalty: 1.0,
+			},
+		},
+	],
 	[
 		"thinking-general",
 		{
@@ -164,6 +182,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> = new
 ]);
 
 const MODE_ORDER: InferenceMode[] = [
+	"auto",
 	"thinking-general",
 	"thinking-coding",
 	"instruct-general",

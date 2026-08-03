@@ -587,6 +587,49 @@ describe("getContext", () => {
     assert.match(context, /exponential backoff/);
     store.close();
   });
+
+  test("ranks context by task objective instead of raw memory strength", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.create("Authentication retries use exponential backoff", {
+      strength: 6,
+      concepts: ["authentication", "retries"],
+    });
+    store.create("Database migrations require a production snapshot", {
+      strength: 10,
+      concepts: ["database", "migration"],
+    });
+    store.createSession("sess-task", { cwd: "/workspace" });
+
+    const context = store.getContext("sess-task", 4000, {
+      objective: "Fix authentication retry handling",
+      phase: "investigate",
+    });
+
+    assert.match(context, /exponential backoff/);
+    assert.doesNotMatch(context, /production snapshot/);
+    assert.match(context, /Task-aware retrieval: investigate/);
+    store.close();
+  });
+
+  test("uses changed files as task-aware retrieval signals", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.create("Preserve the parser's CRLF normalization convention", {
+      strength: 7,
+      files: ["src/parser.ts"],
+    });
+    store.createSession("sess-files", { cwd: "/workspace" });
+
+    const context = store.getContext("sess-files", 4000, {
+      objective: "Continue the implementation",
+      phase: "implement",
+      changedFiles: ["src/parser.ts"],
+    });
+
+    assert.match(context, /CRLF normalization/);
+    store.close();
+  });
   test("includes session summary", () => {
     const store = createMemoryStore(dbPath());
     store.createSession("sess-1", { project: "test", summary: "Built a login page with auth" });

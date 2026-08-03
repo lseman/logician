@@ -109,7 +109,15 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "agent_start":
 		case "agent_end":
 		case "phase":
+		case "task_state_update":
 			return null; // Handled separately
+		case "inference_mode_selected":
+			return {
+				type: "notice",
+				level: "info",
+				label: `Auto → ${event.effectiveMode}`,
+				text: `${event.reason} (${event.phase})`,
+			};
 		case "context_update":
 			return {
 				type: "context_update",

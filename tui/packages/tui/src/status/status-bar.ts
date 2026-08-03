@@ -245,10 +245,15 @@ export class StatusBar implements InkTextComponent {
 	private formatInferenceMode(): string {
 		const mode = this.info.inferenceMode;
 		const modeLabels: Record<string, string> = {
+			auto: "AUTO",
 			"thinking-general": "THINK GEN",
 			"thinking-coding": "THINK CODE",
 			"instruct-general": "INSTRUCT",
 			"instruct-reasoning": "REASON",
+			"instruct-coding": "CODE",
+			deterministic: "EXACT",
+			creative: "CREATIVE",
+			analytical: "ANALYZE",
 		};
 		const label = modeLabels[mode] ?? mode.toUpperCase();
 		return `${this.label("mode:")} ${this.value(label)}`;

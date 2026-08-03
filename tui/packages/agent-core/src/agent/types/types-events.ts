@@ -1,6 +1,8 @@
 // ── Event types ───────────────────────────────────────────────────────────
 
 import type { Message, MessageRole, StopReason } from "./types-messages.ts";
+import type { ExplicitTaskState, TaskPhase } from "../tasks/task-state-controller.ts";
+import type { InferenceMode } from "../configuration/inference-modes.ts";
 
 /**
  * Envelope metadata stamped onto every event at the emit boundary: a
@@ -27,6 +29,14 @@ export type AgentEventBody =
 			nextTurn: readonly string[];
 	  }
 	| { type: "turn_start"; turnId: string }
+	| { type: "task_state_update"; state: ExplicitTaskState }
+	| {
+			type: "inference_mode_selected";
+			configuredMode: "auto";
+			effectiveMode: Exclude<InferenceMode, "auto">;
+			reason: string;
+			phase: TaskPhase;
+	  }
 	| {
 			type: "turn_end";
 			turnId: string;

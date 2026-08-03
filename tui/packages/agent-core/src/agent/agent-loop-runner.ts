@@ -49,6 +49,10 @@ import { emitConclusion, lastAssistantContent, lastHadToolCalls } from "../runti
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
 import {
+	TaskStateController,
+	taskObjectiveFromMessages,
+} from "./tasks/task-state-controller.ts";
+import {
 	evaluateStopPolicies,
 	resolveExecutionPolicy,
 } from "./execution-policy.ts";
@@ -143,12 +147,20 @@ async function runAgentLoopInTaskScope(
 		...prompts,
 	];
 	const newMessages: Message[] = [...prompts];
+	const taskState = new TaskStateController(
+		taskObjectiveFromMessages([...context.messages, ...prompts]),
+	);
 	resetTaskStatus();
 	const finish = async (outcome: {
 		status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
 		summary?: string;
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
+		if (outcome.status === "completed") taskState.markHandoff();
+		if (outcome.status === "blocked" || outcome.status === "failed") {
+			taskState.markBlocked(outcome.summary ?? outcome.status);
+		}
+		await emit({ type: "task_state_update", state: taskState.snapshot() });
 		await emit({ type: "run_outcome", ...outcome });
 		await emitTyped(config.extensionBus, {
 			type: "agent_end",
@@ -193,6 +205,7 @@ async function runAgentLoopInTaskScope(
 	const maxReflections = config.reflectionConfig?.maxReflections ?? 2;
 	let reflectionCount = 0;
 	let reflectionFailed = false;
+	let lastAdaptiveSelection = "";
 
 	// ── Acceptance contract tracking ─────────────────────────────────────
 	let resolvedAcceptance: ResolvedAcceptance | null = null;
@@ -350,6 +363,7 @@ async function runAgentLoopInTaskScope(
 	}
 
 	await emit({ type: "agent_start" });
+	await emit({ type: "task_state_update", state: taskState.snapshot() });
 	const promptTurnId = "turn_0";
 	for (const prompt of prompts) {
 		await emitMessagePair(emit, promptTurnId, prompt);
@@ -437,6 +451,7 @@ async function runAgentLoopInTaskScope(
 					messages: messages as AgentMessage[],
 					iteration,
 					signal: config.signal,
+					taskState: taskState.snapshot(),
 				},
 			);
 			if (transformed) {
@@ -460,6 +475,7 @@ async function runAgentLoopInTaskScope(
 					messages as AgentMessage[],
 				);
 				const chatMessages = convertToChatFormat(llmMessages);
+				chatMessages.push({ role: "system", content: taskState.toContext() });
 
 				// Apply beforeProviderRequest hook
 				const providerRequestHooks = [
@@ -505,8 +521,26 @@ async function runAgentLoopInTaskScope(
 
 				try {
 					// Resolve inference mode params — they override individual config values.
-					const modeParams = config.inferenceMode
-						? getInferenceMode(config.inferenceMode)?.params
+					const adaptiveDecision =
+						config.inferenceMode === "auto"
+							? taskState.selectAdaptiveMode()
+							: undefined;
+					const effectiveMode = adaptiveDecision?.mode ?? config.inferenceMode;
+					if (adaptiveDecision) {
+						const selectionKey = `${adaptiveDecision.mode}:${adaptiveDecision.reason}`;
+						if (selectionKey !== lastAdaptiveSelection) {
+							lastAdaptiveSelection = selectionKey;
+							await emit({
+								type: "inference_mode_selected",
+								configuredMode: "auto",
+								effectiveMode: adaptiveDecision.mode,
+								reason: adaptiveDecision.reason,
+								phase: taskState.snapshot().phase,
+							});
+						}
+					}
+					const modeParams = effectiveMode
+						? getInferenceMode(effectiveMode)?.params
 						: undefined;
 					const effectiveTemp = modeParams?.temperature ?? config.temperature ?? 0.5;
 					response = await config.backend.generate(chatMessages, {
@@ -804,6 +838,10 @@ async function runAgentLoopInTaskScope(
 				newMessages.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
 				hasMoreToolCalls = true;
+			}
+			if (toolCalls.length > 0) {
+				taskState.recordToolBatch(toolCalls, toolResults, iteration);
+				await emit({ type: "task_state_update", state: taskState.snapshot() });
 			}
 
 			// Turn-level loop detection: exact-repeat / degenerate / stagnation

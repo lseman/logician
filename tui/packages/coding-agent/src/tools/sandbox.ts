@@ -144,8 +144,11 @@ function buildBwrapCommand(
 	// Proc filesystem
 	cmd.push("--proc", "/proc");
 
-	// Home directory
-	cmd.push("--bind", path.join(_sandboxTmpdir, "home"), "/home");
+	// Synthetic home. Mount it at a dedicated path so workspaces living below
+	// /home remain visible through the read-only root bind.
+	cmd.push("--dir", "/tmp/logician-home");
+	cmd.push("--bind", path.join(_sandboxTmpdir, "home"), "/tmp/logician-home");
+	cmd.push("--setenv", "HOME", "/tmp/logician-home");
 
 	// Working directory
 	cmd.push("--chdir", cwd);

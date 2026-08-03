@@ -25,6 +25,60 @@ afterEach(() => {
 });
 
 describe("createMemoryHooks observation capture", () => {
+
+  test("retrieves memory against live task state rather than only the initial prompt", async () => {
+    const store = testStore();
+    store.create("The parser requires CRLF-safe edits", {
+      strength: 8,
+      files: ["src/parser.ts"],
+    });
+    store.create("Unrelated deployment credentials", { strength: 10 });
+    const hooks = createMemoryHooks(store, { contextBudget: 1000 });
+
+    await hooks.beforeAgentStart?.({ prompt: "Continue", systemPrompt: "", messages: [] });
+    const transformed = await hooks.transformContext?.({
+      messages: [],
+      iteration: 2,
+      taskState: {
+        objective: "Fix parser line endings",
+        phase: "implement",
+        hypotheses: [],
+        evidence: [],
+        changedFiles: ["src/parser.ts"],
+        verification: [],
+        blockers: [],
+        toolCalls: 1,
+        toolFailures: 0,
+      },
+    });
+    const last = transformed?.messages?.at(-1);
+    const injected = String(last && "content" in last ? last.content || "" : "");
+    assert.match(injected, /CRLF-safe edits/);
+    assert.doesNotMatch(injected, /deployment credentials/);
+    store.close();
+  });
+
+  test("replaces stale retrieved context instead of accumulating system blocks", async () => {
+    const store = testStore();
+    store.create("Authentication uses bounded exponential retries", { strength: 8 });
+    const hooks = createMemoryHooks(store, { contextBudget: 1000 });
+    await hooks.beforeAgentStart?.({ prompt: "Fix authentication retries", systemPrompt: "", messages: [] });
+
+    const first = await hooks.transformContext?.({ messages: [], iteration: 1 });
+    const second = await hooks.transformContext?.({
+      messages: first?.messages || [],
+      iteration: 2,
+    });
+    const memoryBlocks = (second?.messages || []).filter(
+      (message) =>
+        message != null &&
+        "content" in message &&
+        typeof message.content === "string" &&
+        message.content.startsWith("# Agent Context\n"),
+    );
+    assert.equal(memoryBlocks.length, 1);
+    store.close();
+  });
   test("captures prompts and tool outcomes without duplicating pre-tool intent", async () => {
     const store = testStore();
     const saved: CompressedObservation[] = [];

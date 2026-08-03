@@ -110,6 +110,36 @@ void test("typed before_agent_start results augment provider context", async () 
 	);
 });
 
+void test("auto inference selects a preset and injects explicit task state", async () => {
+	const events: AgentEvent[] = [];
+	const backend = new FakeBackend([
+		(messages, options) => {
+			assert.equal(options.temperature, 0.2);
+			assert.equal(options.topP, 0.7);
+			assert.ok(messages.some(
+				(message) =>
+					message.role === "system" &&
+					String(message.content).includes("<task_state>") &&
+					String(message.content).includes("phase: orient"),
+			));
+			return textResponse("Analysis complete.");
+		},
+	]);
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("Review and diagnose this authentication failure")],
+		{ ...makeConfig({ inferenceMode: "auto" }), backend },
+		(event) => {
+			events.push(event);
+		},
+	);
+	const selection = events.find((event) => event.type === "inference_mode_selected");
+	assert.ok(selection && selection.type === "inference_mode_selected");
+	assert.equal(selection.effectiveMode, "analytical");
+	assert.equal(selection.phase, "orient");
+	assert.ok(events.some((event) => event.type === "task_state_update"));
+});
+
 void test("provider payload hooks preserve transport fields", async () => {
 	const backend = new FakeBackend([
 		async (_messages, options) => {

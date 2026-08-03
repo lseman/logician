@@ -205,6 +205,27 @@ describe("parseSettingsCommand — model-cycle", () => {
 	});
 });
 
+describe("parseSettingsCommand — inference mode", () => {
+	it("accepts every inference preset", () => {
+		for (const mode of [
+			"auto",
+			"thinking-general",
+			"thinking-coding",
+			"instruct-general",
+			"instruct-reasoning",
+			"instruct-coding",
+			"deterministic",
+			"creative",
+			"analytical",
+		]) {
+			const result = parseSettingsCommand(`inference-mode ${mode}`);
+			assert.strictEqual(result.type, "change");
+			assert.strictEqual(result.key, "inference_mode");
+			assert.strictEqual(result.value, mode);
+		}
+	});
+});
+
 describe("parseSettingsCommand — temperature", () => {
 	it("accepts valid temperature", () => {
 		const result = parseSettingsCommand("temp 0.7");

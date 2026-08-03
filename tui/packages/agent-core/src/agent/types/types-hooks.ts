@@ -1,6 +1,7 @@
 // ── Hook types ────────────────────────────────────────────────────────────
 
 import type { AgentHarnessStreamOptions } from "./types-config.ts";
+import type { ExplicitTaskState } from "../tasks/task-state-controller.ts";
 import type { Message, AgentMessage, StopReason } from "./types-messages.ts";
 import type { ToolCall } from "./types-tools.ts";
 
@@ -66,6 +67,8 @@ export interface TransformContext {
 	messages: AgentMessage[];
 	iteration: number;
 	signal?: AbortSignal;
+	/** Live structured task state for task-aware retrieval and context shaping. */
+	taskState?: ExplicitTaskState;
 }
 
 export interface BeforeProviderRequestContext {

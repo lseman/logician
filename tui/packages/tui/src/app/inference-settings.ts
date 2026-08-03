@@ -8,10 +8,27 @@ import { StatusBar } from "../status/status-bar.ts";
 import { TUI } from "../terminal/core.ts";
 
 export type InferenceMode =
+	| "auto"
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"
-	| "instruct-reasoning";
+	| "instruct-reasoning"
+	| "instruct-coding"
+	| "deterministic"
+	| "creative"
+	| "analytical";
+
+export const INFERENCE_MODE_ORDER: readonly InferenceMode[] = [
+	"auto",
+	"thinking-general",
+	"thinking-coding",
+	"instruct-general",
+	"instruct-reasoning",
+	"instruct-coding",
+	"deterministic",
+	"creative",
+	"analytical",
+];
 
 export interface InferenceSettingsCtx {
 	bridge: AgentCoreBridge;
@@ -24,23 +41,22 @@ export interface InferenceSettingsCtx {
 
 // Inference mode helper — used by the keyboard shortcut and /settings.
 export function setInferenceMode(ctx: InferenceSettingsCtx, mode: string): void {
-	const valid = [
-		"thinking-general",
-		"thinking-coding",
-		"instruct-general",
-		"instruct-reasoning",
-	];
-	if (!valid.includes(mode)) return;
+	if (!INFERENCE_MODE_ORDER.includes(mode as InferenceMode)) return;
 	const oldMode = ctx.inferenceMode;
 	ctx.inferenceMode = mode as InferenceMode;
 	ctx.bridge.setInferenceMode(mode);
 	ctx.statusPanel.update({ inferenceMode: mode });
 	if (oldMode !== mode) {
 		const labels: Record<string, string> = {
+			auto: "Auto",
 			"thinking-general": "Thinking (General)",
 			"thinking-coding": "Thinking (Precise Code)",
 			"instruct-general": "Instruct (General)",
 			"instruct-reasoning": "Instruct (Reasoning)",
+			"instruct-coding": "Instruct (Code)",
+			deterministic: "Exact (Deterministic)",
+			creative: "Creative",
+			analytical: "Analytical",
 		};
 		ctx.notify(`Inference mode: ${labels[mode] ?? mode}`, "success");
 		saveConfigField("inferenceMode", mode);
@@ -48,14 +64,11 @@ export function setInferenceMode(ctx: InferenceSettingsCtx, mode: string): void 
 }
 
 export function cycleInferenceMode(ctx: InferenceSettingsCtx): void {
-	const modes: InferenceMode[] = [
-		"thinking-general",
-		"thinking-coding",
-		"instruct-general",
-		"instruct-reasoning",
-	];
-	const currentIndex = modes.indexOf(ctx.inferenceMode);
-	setInferenceMode(ctx, modes[(currentIndex + 1) % modes.length]);
+	const currentIndex = INFERENCE_MODE_ORDER.indexOf(ctx.inferenceMode);
+	setInferenceMode(
+		ctx,
+		INFERENCE_MODE_ORDER[(currentIndex + 1) % INFERENCE_MODE_ORDER.length],
+	);
 	ctx.tui.requestRender();
 }
 

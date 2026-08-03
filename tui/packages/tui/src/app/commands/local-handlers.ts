@@ -178,10 +178,15 @@ export function createLocalHandlers(
 				case "inference-mode":
 				case "inference_mode": {
 					const modes = [
+						"auto",
 						"thinking-general",
 						"thinking-coding",
 						"instruct-general",
 						"instruct-reasoning",
+						"instruct-coding",
+						"deterministic",
+						"creative",
+						"analytical",
 					];
 					if (!value) {
 						return `Usage: /settings inference-mode <mode>\n\nValid: ${modes.join(", ")}`;
