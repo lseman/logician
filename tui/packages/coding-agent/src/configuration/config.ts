@@ -740,7 +740,7 @@ export interface LogicianTuiConfig {
 	autoResumeSession?: boolean;
 	// Memory persistence settings.
 	memory?: boolean;
-	/** Absolute path to the memory SQLite database. Default: ~/.logician/memory.db */
+	/** Path to the memory SQLite database. Default: <cwd>/.logician/memory.db */
 	memoryDbPath?: string;
 	/** Whether to start the memory viewer web dashboard on startup (default: true when memory is enabled). */
 	memoryViewer?: boolean;

@@ -1,13 +1,11 @@
 // ── Session Store ──────────────────────────────────────────────────────────────
 // Persistent session storage using the host runtime's built-in SQLite driver.
-// One SQLite DB per project workspace in ~/.logician/tui/sessions/.
+// One SQLite DB per project workspace in <project>/.logician/tui/sessions/.
 // Auto-save on turn_end; crash-safe via WAL mode.
 
 import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
-import { createHash } from "node:crypto";
 import type { Turn } from "./transcript.ts";
 import { markPathIgnoredByCloudSync } from "@logician/agent-core/tools/shared/path-utils.ts";
 
@@ -95,14 +93,6 @@ export interface SessionSummary {
 const LOGICIAN_BASE_DIR = ".logician";
 const SESSIONS_SUBDIR = "tui/sessions";
 
-/** Hash a project directory to a stable 8-char prefix for DB filename. */
-function hashProjectDir(projectDir: string): string {
-	return createHash("sha256")
-		.update(projectDir.toLowerCase())
-		.digest("hex")
-		.slice(0, 8);
-}
-
 function normalizeProjectDir(projectDir: string): string {
 	return normalize(resolve(projectDir));
 }
@@ -162,8 +152,8 @@ function extractSessionTopic(content: string | null | undefined, fromAgent = fal
 }
 
 function resolveSessionDbPath(projectDir: string): string {
-	const storageRoot = join(homedir(), LOGICIAN_BASE_DIR, SESSIONS_SUBDIR);
-	return join(storageRoot, `${hashProjectDir(projectDir)}.db`);
+	const storageRoot = join(projectDir, LOGICIAN_BASE_DIR, SESSIONS_SUBDIR);
+	return join(storageRoot, "history.db");
 }
 
 /** Truncate content to a short preview for session listings. */

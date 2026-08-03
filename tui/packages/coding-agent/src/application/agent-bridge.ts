@@ -149,7 +149,7 @@ export interface AgentBridgeOptions {
 	// ── Memory ────────────────────────────────────────────────────────────
 	/** Whether to enable memory hooks. Default: false (opt-in). */
 	memoryEnabled?: boolean;
-	/** Path to the memory SQLite database. Default: ~/.logician/memory.db. */
+	/** Path to the memory SQLite database. Default: <cwd>/.logician/memory.db. */
 	memoryDbPath?: string;
 	/** Whether to capture tool observations. Default: true. */
 	memoryCaptureTools?: boolean;
@@ -298,7 +298,7 @@ export class AgentCoreBridge {
 
 		// Initialize memory store if enabled
 		if (opts.memoryEnabled !== false) {
-			this.memoryDbPath = opts.memoryDbPath || "~/.logician/memory.db";
+			this.memoryDbPath = opts.memoryDbPath || path.join(this.cwd, ".logician", "memory.db");
 			this.memoryCaptureTools = opts.memoryCaptureTools ?? true;
 			this.memoryInjectContext = opts.memoryInjectContext ?? true;
 			this.memoryContextBudget = opts.memoryContextBudget ?? 4000;
@@ -330,7 +330,7 @@ export class AgentCoreBridge {
 				}
 			}
 		} else {
-			this.memoryDbPath = "~/.logician/memory.db";
+			this.memoryDbPath = opts.memoryDbPath || path.join(this.cwd, ".logician", "memory.db");
 			this.memoryCaptureTools = true;
 			this.memoryInjectContext = true;
 			this.memoryContextBudget = 4000;
