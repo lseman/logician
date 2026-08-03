@@ -35,6 +35,10 @@ export interface SessionControllerCtx {
  * session (clears both).
  */
 export function restoreSession(ctx: SessionControllerCtx, turns: Turn[]): void {
+	if (ctx.currentSessionId) {
+		ctx.sessionStore.setCurrentSessionId(ctx.currentSessionId);
+		ctx.bridge.useConversationSession(ctx.currentSessionId);
+	}
 	ctx.transcript.loadTurns(turns);
 	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 	ctx.bridge.restoreHistory(turnsToMessages(turns));
@@ -51,9 +55,14 @@ export function autoSaveTurn(ctx: SessionControllerCtx): void {
 		// renamed sessions are never overwritten.
 		if (latestTurn.userMessage?.content) {
 			const current = ctx.sessionStore.getSession(ctx.currentSessionId);
-			const inferred = inferSessionTitle(latestTurn.userMessage.content);
+			const agentResponse = latestTurn.assistantMessage?.chunks
+				.filter((chunk) => chunk.type === "content" && chunk.contentText)
+				.map((chunk) => chunk.contentText)
+				.join("") || "";
+			const inferred = inferSessionTitle(latestTurn.userMessage.content, agentResponse);
 			if (current && inferred && isGeneratedSessionTitle(current.title)) {
 				ctx.sessionStore.renameSession(ctx.currentSessionId, inferred);
+				ctx.bridge.renameConversationSession(ctx.currentSessionId, inferred);
 				ctx.statusPanel.update({ sessionTitle: inferred });
 			}
 		}
@@ -98,6 +107,7 @@ export function handleSessionAction(
 		case "rename":
 			if (!action.sessionId || !action.title) return;
 			ctx.sessionStore.renameSession(action.sessionId, action.title);
+			ctx.bridge.renameConversationSession(action.sessionId, action.title);
 			ctx.tui.removeOverlay(ctx.sessionManager);
 			ctx.tui.requestRender();
 			break;

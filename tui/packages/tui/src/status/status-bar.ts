@@ -4,7 +4,7 @@
 // Sections (separated by |):
 //   phase | model | thinking | dir/git | context | cache | reasoner | mcp
 
-import { clampLineToWidth, type InkTextComponent, type InkTextRow, visibleWidth } from "../terminal/core.ts";
+import { clampLineToWidth, padInkTextRow, type InkTextComponent, type InkTextRow, visibleWidth } from "../terminal/core.ts";
 import { RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
 
 /** Max chars for a free-text label before it's ellipsis-truncated. */
@@ -119,13 +119,13 @@ export class StatusBar implements InkTextComponent {
 
 	getInkTextRows(width: number): InkTextRow[] {
 		if (width === this.cachedWidth && this.cachedLine !== null) {
-			return [semanticMarkupToInkRow(this.cachedLine)];
+			return [padInkTextRow(semanticMarkupToInkRow(this.cachedLine), width)];
 		}
 
 		this.cachedWidth = width;
 		const line = this.renderCompact(width);
 		this.cachedLine = line;
-		return [semanticMarkupToInkRow(line)];
+		return [padInkTextRow(semanticMarkupToInkRow(line), width)];
 	}
 
 	// ── Compact single-line render ──────────────────────────────────────────

@@ -22,6 +22,13 @@ describe("session title inference", () => {
 		assert.equal(inferSessionTitle("Thank you!"), null);
 	});
 
+	test("uses the agent response to resolve a vague first request", () => {
+		assert.equal(
+			inferSessionTitle("fix this", "Implemented folder-scoped FTS5 memory retrieval and indexing."),
+			"Folder-scoped FTS5 memory retrieval and indexing.",
+		);
+	});
+
 	test("ignores attachment headings and truncates long topics", () => {
 		const title = inferSessionTitle(`# Files mentioned by the user:\n- /tmp/output.txt\n\n# My request for Codex:\nPlease investigate why the current session browser includes conversations from unrelated working directories and correct the folder isolation`);
 		assert.match(title || "", /^Investigate why the current session browser/);
@@ -32,5 +39,24 @@ describe("session title inference", () => {
 		assert.equal(isGeneratedSessionTitle("New Session"), true);
 		assert.equal(isGeneratedSessionTitle("Untitled Session"), true);
 		assert.equal(isGeneratedSessionTitle("Authentication timeout"), false);
+	});
+
+	test("returns null for null/undefined content without crashing", () => {
+		assert.equal(inferSessionTitle(null as unknown as string), null);
+		assert.equal(inferSessionTitle(undefined as unknown as string), null);
+		assert.equal(inferSessionTitle(""), null);
+		assert.equal(inferSessionTitle("   "), null);
+		assert.equal(inferSessionTitle("\n\n"), null);
+	});
+
+	test("handles null/undefined agentResponse gracefully", () => {
+		assert.equal(
+			inferSessionTitle("fix the login bug", null as unknown as string),
+			"Fix the login bug",
+		);
+		assert.equal(
+			inferSessionTitle("fix the login bug", undefined as unknown as string),
+			"Fix the login bug",
+		);
 	});
 });

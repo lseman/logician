@@ -111,8 +111,33 @@ export function isGeneratedSessionTitle(title: string): boolean {
 	return title === "Untitled Session" || title === "New Session";
 }
 
-/** Derive a compact topic label from the first meaningful user request. */
-export function inferSessionTitle(content: string, maxLength = 60): string | null {
+/** Derive a compact topic label from the first completed user/agent exchange. */
+export function inferSessionTitle(
+	content: string,
+	agentResponse = "",
+	maxLength = 60,
+): string | null {
+	if (!content || !content.trim()) return null;
+	if (/^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(content.trim())) return null;
+	const userTopic = extractSessionTopic(content);
+	const responseTopic = extractSessionTopic(agentResponse, true);
+	const userWords = userTopic?.split(/\s+/) || [];
+	const userIsVague = !userTopic || userWords.length < 4 ||
+		/^(?:do|fix|change|update|add|remove|clean|check|try|yes|no)\s+(?:it|this|that|these|those)\b/i.test(userTopic);
+	const topic = userIsVague && responseTopic ? responseTopic : userTopic || responseTopic;
+	if (!topic) return null;
+
+	const firstClause = topic.split(/(?<=[.!?])\s+|\s+[—–]\s+|;\s+/)[0]?.trim() || topic;
+	const words = firstClause.split(" ");
+	let title = words.slice(0, 10).join(" ");
+	if (words.length > 10 || title.length > maxLength) {
+		title = title.slice(0, maxLength - 1).trimEnd() + "…";
+	}
+	return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+function extractSessionTopic(content: string | null | undefined, fromAgent = false): string | null {
+	if (!content) return null;
 	const lines = content
 		.split(/\r?\n/)
 		.map((line) => line.trim())
@@ -125,6 +150,7 @@ export function inferSessionTitle(content: string, maxLength = 60): string | nul
 		.replace(/^(?:my request for codex|request)\s*:\s*/i, "")
 		.replace(/^(?:please\s+)?(?:can|could|would)\s+you\s+/i, "")
 		.replace(/^(?:please\s+)?(?:we|i)\s+(?:need|want)\s+(?:you\s+)?to\s+/i, "")
+		.replace(fromAgent ? /^(?:i(?:'ve| have)?\s+)?(?:implemented|fixed|updated|added|removed|changed|completed)\s+/i : /$^/, "")
 		.replace(/^please\s+/i, "")
 		.replace(/\s+/g, " ")
 		.trim();
@@ -132,14 +158,7 @@ export function inferSessionTitle(content: string, maxLength = 60): string | nul
 	if (!topic || /^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(topic)) {
 		return null;
 	}
-
-	const firstClause = topic.split(/(?<=[.!?])\s+|\s+[—–]\s+|;\s+/)[0]?.trim() || topic;
-	const words = firstClause.split(" ");
-	let title = words.slice(0, 10).join(" ");
-	if (words.length > 10 || title.length > maxLength) {
-		title = title.slice(0, maxLength - 1).trimEnd() + "…";
-	}
-	return title.charAt(0).toUpperCase() + title.slice(1);
+	return topic;
 }
 
 function resolveSessionDbPath(projectDir: string): string {
@@ -487,7 +506,7 @@ export class SessionStore {
 			SessionRow & { turn_count: number; msg_count: number }
 		>;
 
-		return rows.map((row) => {
+		return rows.filter((row) => normalizeProjectDir(row.cwd) === this.projectDir).map((row) => {
 			const previews = this.statements["getTurnPreview"].all(row.id) as Array<{
 				user_content: string;
 				assistant_content: string | null;
@@ -515,6 +534,11 @@ export class SessionStore {
 		});
 	}
 
+	/** Normalized folder whose sessions this store exposes. */
+	getProjectDir(): string {
+		return this.projectDir;
+	}
+
 	/** Rename a session. */
 	renameSession(id: string, title: string): boolean {
 		const result = this.statements.updateSessionTitle.run(title, id);
@@ -536,6 +560,13 @@ export class SessionStore {
 	/** Get the current session ID. */
 	getCurrentSessionId(): string | null {
 		return this.currentSessionId;
+	}
+
+	/** Mark an existing folder session as current. */
+	setCurrentSessionId(id: string): boolean {
+		if (!this.getSession(id)) return false;
+		this.currentSessionId = id;
+		return true;
 	}
 
 	/** Set the current session. */

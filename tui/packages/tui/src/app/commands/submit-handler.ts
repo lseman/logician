@@ -101,7 +101,9 @@ export function createSlashSubmitHandler(
 				ctx.tui.requestRender();
 				return;
 			}
-			if (match && match.command === "/sessions") {
+			// Plain /sessions opens the browser. Subcommands such as
+			// /sessions clean are handled by the local command handler.
+			if (match && match.command === "/sessions" && !args.trim()) {
 				ctx.openSessionManager();
 				return;
 			}
@@ -283,6 +285,7 @@ export function createSlashSubmitHandler(
 				ctx.currentSessionId = ctx.sessionStore.createSession({
 					title: "New Session",
 				});
+				ctx.bridge.useConversationSession(ctx.currentSessionId);
 				ctx.transcript.clear();
 				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 				ctx.statusPanel.update({ sessionTitle: "New Session" });
@@ -299,6 +302,7 @@ export function createSlashSubmitHandler(
 			if (match && match.command === "/rename") {
 				if (ctx.currentSessionId && args.trim()) {
 					ctx.sessionStore.renameSession(ctx.currentSessionId, args.trim());
+					ctx.bridge.renameConversationSession(ctx.currentSessionId, args.trim());
 					ctx.statusPanel.update({ sessionTitle: args.trim() });
 					ctx.transcript.addSystemMessage(
 						`Session renamed to "${args.trim()}"`,

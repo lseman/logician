@@ -294,6 +294,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     -- Sessions: lifecycle tracking
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
+      name TEXT,
       project TEXT NOT NULL DEFAULT '',
       cwd TEXT NOT NULL DEFAULT '',
       workspace TEXT NOT NULL DEFAULT '',
@@ -402,6 +403,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       try { db.exec(`CREATE INDEX IF NOT EXISTS idx_${table}_workspace ON ${table}(workspace)`); } catch {}
     } catch {}
   }
+  try {
+    const sessionCols = db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    if (!sessionCols.some((column) => column.name === "name")) {
+      db.exec("ALTER TABLE sessions ADD COLUMN name TEXT");
+    }
+  } catch {}
   // Add consolidated column to observations
   try {
     const obsCols = db.prepare(`PRAGMA table_info(observations)`).all() as Array<{ name: string }>;
@@ -513,11 +520,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const sessionCwd = data.cwd ? normalizeWorkspacePath(data.cwd) : currentWorkspace;
     const sessionWorkspace = normalizeWorkspacePath(data.workspace || sessionCwd);
     db.prepare(`
-      INSERT OR IGNORE INTO sessions (id, project, cwd, workspace, started_at, status, observation_count,
+      INSERT OR IGNORE INTO sessions (id, name, project, cwd, workspace, started_at, status, observation_count,
                                       model, tags, first_prompt, summary, commit_shas)
-      VALUES (?, COALESCE(?, ''), COALESCE(?, ''), COALESCE(?, ''), ?, 'active', 0, ?, ?, ?, ?, ?)
+      VALUES (?, ?, COALESCE(?, ''), COALESCE(?, ''), COALESCE(?, ''), ?, 'active', 0, ?, ?, ?, ?, ?)
     `).run(
       id,
+      data.name || null,
       data.project || "",
       sessionCwd,
       sessionWorkspace,
@@ -530,6 +538,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     );
     return {
       id,
+      name: data.name,
       project: data.project || "",
       cwd: sessionCwd,
       workspace: sessionWorkspace,
@@ -549,6 +558,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     if (!row) return null;
     return {
       id: row.id,
+      name: row.name || undefined,
       project: row.project || "",
       cwd: row.cwd || "",
       workspace: row.workspace || "",
@@ -588,6 +598,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const rows = db.prepare(`SELECT * FROM sessions ${where} ORDER BY started_at DESC`).all(...params) as any[];
     return rows.map((r) => ({
       id: r.id,
+      name: r.name || undefined,
       project: r.project || "",
       cwd: r.cwd || "",
       workspace: r.workspace || "",
@@ -607,6 +618,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const sets: string[] = [];
     const params: any[] = [];
 
+    if (updates.name !== undefined) { sets.push("name = ?"); params.push(updates.name || null); }
     if (updates.project !== undefined) { sets.push("project = ?"); params.push(updates.project); }
     if (updates.cwd !== undefined) { sets.push("cwd = ?"); params.push(updates.cwd); }
     if (updates.status !== undefined) { sets.push("status = ?"); params.push(updates.status); }
@@ -622,6 +634,50 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     params.push(id);
     db.prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = ?`).run(...params);
     return getSession(id);
+  }
+
+  function clearSessions(keepSessionId?: string): { sessions: number; observations: number } {
+    // Completely unscoped rows predate workspace support and can never be
+    // shown or attributed safely. Treat them as legacy garbage when the user
+    // explicitly asks to clean sessions.
+    const rows = db.prepare(`
+      SELECT id FROM sessions
+      WHERE (workspace = ? OR (workspace = '' AND cwd = ''))
+        AND (? IS NULL OR id != ?)
+    `).all(currentWorkspace, keepSessionId || null, keepSessionId || null) as Array<{ id: string }>;
+    if (!rows.length) return { sessions: 0, observations: 0 };
+    const sessionIds = new Set(rows.map((session) => session.id));
+    let observations = 0;
+    const countObservations = db.prepare("SELECT COUNT(*) AS count FROM observations WHERE session_id = ?");
+    const deleteObservations = db.prepare("DELETE FROM observations WHERE session_id = ?");
+    const deleteSession = db.prepare("DELETE FROM sessions WHERE id = ?");
+    for (const session of rows) {
+      observations += (countObservations.get(session.id) as { count: number }).count;
+      deleteObservations.run(session.id);
+      deleteSession.run(session.id);
+    }
+    const memories = db.prepare("SELECT id, session_ids FROM memories WHERE json_valid(session_ids)")
+      .all() as Array<{ id: string; session_ids: string }>;
+    const updateSources = db.prepare("UPDATE memories SET session_ids = ? WHERE id = ?");
+    for (const memory of memories) {
+      const retained = safeParseJsonArray(memory.session_ids).filter((id) => !sessionIds.has(id));
+      updateSources.run(JSON.stringify(retained), memory.id);
+    }
+    return { sessions: rows.length, observations };
+  }
+
+  function discardEmptySession(id: string): boolean {
+    const session = db.prepare(`
+      SELECT id FROM sessions
+      WHERE id = ? AND observation_count = 0
+        AND NOT EXISTS (SELECT 1 FROM observations WHERE session_id = sessions.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM memories m, json_each(m.session_ids) je
+          WHERE json_valid(m.session_ids) AND je.value = sessions.id
+        )
+    `).get(id) as { id: string } | undefined;
+    if (!session) return false;
+    return db.prepare("DELETE FROM sessions WHERE id = ?").run(id).changes > 0;
   }
 
   // ── Observations ───────────────────────────────────────────────────────
@@ -1959,6 +2015,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     getSession,
     listSessions,
     updateSession,
+    clearSessions,
+    discardEmptySession,
     observe,
     getObservation,
     listObservations,

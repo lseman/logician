@@ -5,6 +5,7 @@
 
 export interface Session {
   id: string;
+  name?: string;
   project: string;
   cwd: string;
   workspace: string; // Normalized workspace identifier
@@ -324,6 +325,10 @@ export interface MemoryStore {
   getSession(id: string): Session | null;
   listSessions(query?: { status?: string; project?: string }): Session[];
   updateSession(id: string, updates: Partial<Session>): Session | null;
+  /** Remove folder sessions except an optional active session, with their observations. */
+  clearSessions(keepSessionId?: string): { sessions: number; observations: number };
+  /** Remove one session only when it has no observations or durable references. */
+  discardEmptySession(id: string): boolean;
 
   // Observations
   observe(raw: RawObservation, compressed?: CompressedObservation): CompressedObservation | null;

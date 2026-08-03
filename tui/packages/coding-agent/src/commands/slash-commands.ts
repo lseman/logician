@@ -106,11 +106,21 @@ export function createSlashCommands(
 		cmd("/new", "Start a new session", "bridge", false, {
 			category: "session",
 		}),
-		cmd("/sessions", "List previous sessions", "local", true, {
-			category: "session",
-			argHint: "[filter]",
-			examples: ["/sessions", "/sessions 2024"],
-		}),
+		cmd(
+			"/sessions",
+			"List or clean sessions in the current folder",
+			"local",
+			true,
+			{
+				category: "session",
+				argHint: "[clean]",
+				examples: ["/sessions", "/sessions clean"],
+			},
+			(args) => {
+				if (!args.trim()) return undefined;
+				return String(localHandlers.sessions?.(args) ?? "Session cleanup unavailable.");
+			},
+		),
 		cmd("/save", "Save current session", "local", false, {
 			category: "session",
 		}),

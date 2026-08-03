@@ -242,6 +242,18 @@ void describe("StatusBar", () => {
 		assert.ok(lines1[0] !== lines2[0]);
 	});
 
+	it("pads shorter phase redraws to erase stale terminal cells", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({ phase: "compacting", model: "test", contextTokens: 0, contextMaxTokens: 100000 });
+		const longLine = inkLines(bar, 80)[0];
+		bar.update({ phase: "ready" });
+		const shortLine = inkLines(bar, 80)[0];
+		assert.equal(visibleWidth(longLine), 80);
+		assert.equal(visibleWidth(shortLine), 80);
+		assert.match(shortLine, /\s+$/);
+	});
+
 	it("starts and stops animation timer", () => {
 		setupTheme();
 		const bar = new StatusBar();

@@ -311,6 +311,7 @@ export class LogicianTUI {
 		this.currentSessionId = this.sessionStore.createSession({
 			title: "New Session",
 		});
+		this.bridge.useConversationSession(this.currentSessionId);
 		this.statusPanel.update({ sessionTitle: "New Session" });
 
 		// Wire up dependencies

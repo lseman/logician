@@ -86,3 +86,23 @@ test("submitRaw delivers handler return text after the turn is established", () 
 		"result:Thinking level: high",
 	]);
 });
+
+test("submitRaw forwards sessions subcommands to its local handler", () => {
+	const calls: string[] = [];
+	const popup = new SlashPopup();
+	popup.setCommands([
+		{
+			command: "/sessions",
+			description: "Sessions",
+			dispatch: "local",
+			acceptsArgs: true,
+			handler: (args) => {
+				calls.push(args);
+				return "cleaned";
+			},
+		},
+	]);
+	popup.setOnSubmit(() => {});
+	assert.equal(popup.submitRaw("/sessions clean"), true);
+	assert.deepEqual(calls, ["clean"]);
+});

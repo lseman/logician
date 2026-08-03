@@ -865,8 +865,8 @@ export class AgentCoreBridge {
 		// Drop the old harness — conversation starts fresh
 		this.harness = null;
 
-		// Generate a new session ID
-		this.sessionId = `tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+		// Reload the runtime without splitting memory from the active
+		// user-facing conversation session.
 		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		this.config.hookSessionId = this.sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
@@ -1399,13 +1399,38 @@ export class AgentCoreBridge {
 		};
 	}
 
+	/** Use the user-facing conversation session as the hook and memory session. */
+	useConversationSession(sessionId: string): void {
+		if (!sessionId.trim()) return;
+		const provisionalSessionId = this.sessionId;
+		if (this.memoryStore && provisionalSessionId !== sessionId) {
+			this.memoryStore.discardEmptySession(provisionalSessionId);
+		}
+		this.sessionId = sessionId;
+		this.transcriptPath = createHookTranscriptPath(this.cwd, sessionId);
+		this.config.hookSessionId = sessionId;
+		this.config.hookTranscriptPath = this.transcriptPath;
+		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
+		if (this.memoryStore) {
+			setSessionId(this.memoryStore, sessionId);
+			this.memoryStore.createSession(sessionId, {
+				project: "",
+				cwd: this.cwd,
+				workspace: this.cwd || "",
+			});
+		}
+	}
+
+	renameConversationSession(sessionId: string, name: string): void {
+		this.memoryStore?.updateSession(sessionId, { name: name.trim() });
+	}
+
 	reset(): void {
 		// Reset tool state and conversation
 		void this.fireSessionEnd("reset");
 		// Drop the persisted harness so history starts fresh.
 		this.harness?.clearHistory();
 		this.harness = null;
-		this.sessionId = `tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		this.config.hookSessionId = this.sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;

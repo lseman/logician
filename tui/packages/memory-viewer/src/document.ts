@@ -395,14 +395,14 @@ const HTML = `<!DOCTYPE html>
       // Populate session dropdown
       const sel = document.getElementById('timeline-session');
       const curVal = sel.value;
-      sel.innerHTML = '<option value="">All Sessions</option>' + sessions.map(s => '<option value="'+esc(s.id)+'">'+esc((s.project||'Untitled').slice(0,40))+'</option>').join('');
+      sel.innerHTML = '<option value="">All Sessions</option>' + sessions.map(s => '<option value="'+esc(s.id)+'">'+esc((s.name||s.project||'Untitled').slice(0,40))+'</option>').join('');
       sel.value = curVal;
       // Render list
       const html = sessions.length === 0
         ? '<div class="empty-state"><div class="empty-icon">&#128193;</div><p>No sessions</p></div>'
         : sessions.map(s => '<div class="session-item'+(state.currentSessionId === s.id ? ' selected' : '')+'" data-session-id="'+esc(s.id)+'">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-          '<span class="session-project">'+esc(s.project||'Untitled')+'</span>' +
+          '<span class="session-project">'+esc(s.name||s.project||'Untitled')+'</span>' +
           '<span class="session-meta">'+esc(s.status)+' · '+s.observationCount+' obs</span>' +
           '</div><div class="session-meta">'+esc(s.startedAt?.slice(0,16))+'</div></div>').join('');
       const listEl = document.getElementById('sessions-list');
@@ -426,7 +426,7 @@ const HTML = `<!DOCTYPE html>
         '<div class="obs-meta">'+esc(o.type)+' · '+esc(o.timestamp?.slice(0,16))+'</div>' +
         '<div class="obs-narrative">'+esc(o.narrative?.slice(0,200))+'</div></div>').join('');
       document.getElementById('session-detail').innerHTML =
-        '<div class="detail-panel"><h3>Session: '+esc(session.project||'Untitled')+'</h3>' +
+        '<div class="detail-panel"><h3>Session: '+esc(session.name||session.project||'Untitled')+'</h3>' +
         '<div class="detail-row"><span class="dl">ID</span><span class="dv" style="font-family:var(--font-mono);font-size:11px;">'+esc(session.id)+'</span></div>' +
         '<div class="detail-row"><span class="dl">Status</span><span class="dv"><span class="badge badge-'+(session.status==='active'?'green':'blue')+'">'+esc(session.status)+'</span></span></div>' +
         '<div class="detail-row"><span class="dl">Observations</span><span class="dv">'+session.observationCount+'</span></div>' +

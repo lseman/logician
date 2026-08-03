@@ -259,7 +259,7 @@ export class SessionBrowserOverlay {
 		if (data === "\r" || data === "\n") {
 			const newTitle = this.renameInput.trim();
 			if (this.renameSessionId && newTitle.length > 0) {
-				this.store?.renameSession(this.renameSessionId, newTitle);
+				this.actionCallback?.({ type: "rename", sessionId: this.renameSessionId, title: newTitle });
 				this.refresh();
 			}
 			this.mode = "list";
@@ -344,7 +344,7 @@ export class SessionBrowserOverlay {
 		return {
 			kind: "list",
 			title: "Sessions",
-			subtitle: ` (${this.sessions.length} total)`,
+			subtitle: ` · ${this.store?.getProjectDir() || "current folder"} (${this.sessions.length} total)`,
 			hints: "enter switch · ' filter · ^R rename · ^D delete · ^N new",
 			headerLines: this.filter ? [`Filter: ${this.filter}`] : undefined,
 			items: this.sessions.map((session, index) => ({

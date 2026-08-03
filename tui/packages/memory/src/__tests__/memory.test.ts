@@ -1,5 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { Database } from "bun:sqlite";
 import { createMemoryStore } from "../store.js";
 import {
   remember,
@@ -226,6 +227,65 @@ describe("createMemoryStore — memories", () => {
 // ── Sessions ───────────────────────────────────────────────────────────────
 
 describe("createMemoryStore — sessions", () => {
+
+  test("cleans older folder sessions while preserving the active session", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    for (const id of ["older", "current"]) {
+      store.createSession(id, { cwd: "/workspace" });
+      store.observe({
+        id: `obs-${id}`,
+        sessionId: id,
+        timestamp: new Date().toISOString(),
+        hookType: "prompt_submit",
+        raw: { prompt: id },
+      });
+    }
+    store.create("durable", { sessionIds: ["older", "current"] });
+    const result = store.clearSessions("current");
+    assert.deepEqual(result, { sessions: 1, observations: 1 });
+    assert.equal(store.getSession("older"), null);
+    assert.ok(store.getSession("current"));
+    assert.deepEqual(store.list()[0]?.sessionIds, ["current"]);
+    store.close();
+  });
+
+  test("cleans unscoped legacy sessions", () => {
+    const path = dbPath();
+    const store = createMemoryStore(path);
+    store.setCurrentWorkspace("/workspace");
+    store.createSession("current", { cwd: "/workspace" });
+    const legacyDb = new Database(path);
+    legacyDb.prepare(`INSERT INTO sessions
+      (id, project, cwd, workspace, started_at, status, observation_count)
+      VALUES ('legacy', '', '', '', ?, 'completed', 0)`)
+      .run(new Date().toISOString());
+    legacyDb.close();
+    const result = store.clearSessions("current");
+    assert.equal(result.sessions, 1);
+    assert.equal(store.getSession("legacy"), null);
+    assert.ok(store.getSession("current"));
+    store.close();
+  });
+
+  test("discards only empty provisional sessions", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.createSession("empty", { cwd: "/workspace" });
+    store.createSession("used", { cwd: "/workspace" });
+    store.observe({
+      id: "used-observation",
+      sessionId: "used",
+      timestamp: new Date().toISOString(),
+      hookType: "prompt_submit",
+      raw: { prompt: "real work" },
+    });
+    assert.equal(store.discardEmptySession("empty"), true);
+    assert.equal(store.discardEmptySession("used"), false);
+    assert.equal(store.getSession("empty"), null);
+    assert.ok(store.getSession("used"));
+    store.close();
+  });
   test("creates and retrieves a session", () => {
     const store = createMemoryStore(dbPath());
     const session = store.createSession("sess-1", {
@@ -274,6 +334,16 @@ describe("createMemoryStore — sessions", () => {
     assert.equal(updated.status, "completed");
     assert.equal(updated.summary, "Completed the task");
 
+    store.close();
+  });
+
+  test("stores and updates the conversation session name", () => {
+    const store = createMemoryStore(dbPath());
+    store.createSession("named", { project: "test", name: "Initial topic" });
+    assert.equal(store.getSession("named")?.name, "Initial topic");
+    store.updateSession("named", { name: "Memory architecture" });
+    assert.equal(store.getSession("named")?.name, "Memory architecture");
+    assert.equal(store.listSessions()[0]?.name, "Memory architecture");
     store.close();
   });
 });
