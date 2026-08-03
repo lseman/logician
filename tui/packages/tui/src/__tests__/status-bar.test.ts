@@ -180,6 +180,16 @@ void describe("StatusBar", () => {
 		assert.ok(lines[0].includes("12.4k"));
 	});
 
+	it("renders the memory toggle exactly once", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({ memoryEnabled: true });
+		const line = inkLines(bar, 240)[0];
+		assert.equal(line.match(/memory:/g)?.length, 1);
+		assert.match(line, /memory: on\b/);
+		assert.doesNotMatch(line, /memory: on:\s*on/);
+	});
+
 	it("shows goal when present", () => {
 		setupTheme();
 		const bar = new StatusBar();

@@ -329,7 +329,11 @@ export interface MemoryStore {
   observe(raw: RawObservation, compressed?: CompressedObservation): CompressedObservation | null;
   getObservation(id: string, sessionId: string): CompressedObservation | null;
   listObservations(sessionId: string, limit?: number): CompressedObservation[];
+  /** List recent observations directly, scoped to the current workspace by default. */
+  listRecentObservations(limit?: number, type?: ObservationType): CompressedObservation[];
   searchObservations(query: string, limit?: number): SearchResult[];
+  /** Permanently remove observations in the current workspace. */
+  clearObservations(): number;
 
   // Memories
   create(content: string, options?: CreateMemoryOptions): Memory;
@@ -338,12 +342,14 @@ export interface MemoryStore {
   getAny(id: string): Memory | null;
   list(query?: MemoryQuery): Memory[];
   remove(id: string): boolean;
+  /** Permanently remove memories and their relations in the current workspace. */
+  clearMemories(): number;
   update(id: string, updates: Partial<Pick<Memory, "content" | "concepts" | "strength" | "title">>): Memory | null;
   recall(query: MemoryQuery, options?: RecallOptions): string;
   consolidate(sessionId: string): Memory[];
 
   // Context injection
-  getContext(sessionId: string, budget?: number): string;
+  getContext(sessionId: string, budget?: number, query?: string): string;
 
   // Session tracking
   setCurrentSessionId(id: string): void;

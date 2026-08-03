@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { Turn } from "./transcript.ts";
 import { markPathIgnoredByCloudSync } from "@logician/agent-core/tools/shared/path-utils.ts";
@@ -103,6 +103,45 @@ function hashProjectDir(projectDir: string): string {
 		.slice(0, 8);
 }
 
+function normalizeProjectDir(projectDir: string): string {
+	return normalize(resolve(projectDir));
+}
+
+export function isGeneratedSessionTitle(title: string): boolean {
+	return title === "Untitled Session" || title === "New Session";
+}
+
+/** Derive a compact topic label from the first meaningful user request. */
+export function inferSessionTitle(content: string, maxLength = 60): string | null {
+	const lines = content
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+		.filter((line) => !/^#{1,6}\s*(?:files? mentioned(?: by the user)?|my request for codex)\s*:?$/i.test(line))
+		.filter((line) => !/^(?:file|attachment):\s*[/\\]/i.test(line));
+	let topic = lines.find((line) => !/^[-*]\s*[/\\]/.test(line)) || "";
+	topic = topic
+		.replace(/^#{1,6}\s*/, "")
+		.replace(/^(?:my request for codex|request)\s*:\s*/i, "")
+		.replace(/^(?:please\s+)?(?:can|could|would)\s+you\s+/i, "")
+		.replace(/^(?:please\s+)?(?:we|i)\s+(?:need|want)\s+(?:you\s+)?to\s+/i, "")
+		.replace(/^please\s+/i, "")
+		.replace(/\s+/g, " ")
+		.trim();
+
+	if (!topic || /^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(topic)) {
+		return null;
+	}
+
+	const firstClause = topic.split(/(?<=[.!?])\s+|\s+[—–]\s+|;\s+/)[0]?.trim() || topic;
+	const words = firstClause.split(" ");
+	let title = words.slice(0, 10).join(" ");
+	if (words.length > 10 || title.length > maxLength) {
+		title = title.slice(0, maxLength - 1).trimEnd() + "…";
+	}
+	return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
 function resolveSessionDbPath(projectDir: string): string {
 	const storageRoot = join(homedir(), LOGICIAN_BASE_DIR, SESSIONS_SUBDIR);
 	return join(storageRoot, `${hashProjectDir(projectDir)}.db`);
@@ -155,8 +194,8 @@ export class SessionStore {
 	private currentSessionId: string | null = null;
 
 	constructor(projectDir: string) {
-		this.projectDir = projectDir;
-		const dbPath = resolveSessionDbPath(projectDir);
+		this.projectDir = normalizeProjectDir(projectDir);
+		const dbPath = resolveSessionDbPath(this.projectDir);
 
 		// Ensure directory exists
 		const dir = dirname(dbPath);
@@ -173,7 +212,20 @@ export class SessionStore {
 
 		this.initSchema();
 		this.runMigrations();
+		this.normalizeCurrentFolderRows();
 		this.prepareStatements();
+	}
+
+	private normalizeCurrentFolderRows(): void {
+		const rows = this.db.prepare(
+			"SELECT DISTINCT cwd FROM sessions WHERE cwd != ''",
+		).all() as Array<{ cwd: string }>;
+		const update = this.db.prepare("UPDATE sessions SET cwd = ? WHERE cwd = ?");
+		for (const row of rows) {
+			if (normalizeProjectDir(row.cwd) === this.projectDir && row.cwd !== this.projectDir) {
+				update.run(this.projectDir, row.cwd);
+			}
+		}
 	}
 
 	// ── Schema ────────────────────────────────────────────────────────────
@@ -314,7 +366,7 @@ export class SessionStore {
 		p(
 			"getSession",
 			`
-      SELECT * FROM sessions WHERE id = ?
+      SELECT * FROM sessions WHERE id = ? AND cwd = ?
     `,
 		);
 		p(
@@ -324,6 +376,7 @@ export class SessionStore {
         (SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id) AS turn_count,
         (SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id AND t.user_content != '') AS msg_count
       FROM sessions s
+      WHERE s.cwd = ?
       ORDER BY s.updated_at DESC
     `,
 		);
@@ -425,12 +478,12 @@ export class SessionStore {
 
 	/** Get session by ID. */
 	getSession(id: string): SessionRow | null {
-		return this.statements.getSession.get(id) as SessionRow | null;
+		return this.statements.getSession.get(id, this.projectDir) as SessionRow | null;
 	}
 
 	/** List all sessions with metadata. */
 	listSessions(): SessionSummary[] {
-		const rows = this.statements.listSessions.all() as Array<
+		const rows = this.statements.listSessions.all(this.projectDir) as Array<
 			SessionRow & { turn_count: number; msg_count: number }
 		>;
 

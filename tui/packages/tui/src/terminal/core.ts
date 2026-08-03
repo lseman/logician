@@ -156,6 +156,23 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme
 
 /** Return the complete grapheme cluster beginning at a UTF-16 offset. */
 export function graphemeAt(text: string, offset: number): string {
+	const codePoint = text.codePointAt(offset);
+	if (codePoint === undefined) return "";
+	const character = String.fromCodePoint(codePoint);
+	const next = text.codePointAt(offset + character.length);
+	const nextExtendsCluster =
+		next === 0x200d ||
+		(next !== undefined && next >= 0x300 && next <= 0x36f) ||
+		(next !== undefined && next >= 0x1ab0 && next <= 0x1aff) ||
+		(next !== undefined && next >= 0x1dc0 && next <= 0x1dff) ||
+		(next !== undefined && next >= 0x20d0 && next <= 0x20ff) ||
+		(next !== undefined && next >= 0xfe00 && next <= 0xfe0f) ||
+		(next !== undefined && next >= 0x1f3fb && next <= 0x1f3ff);
+	const needsSegmentation =
+		codePoint === 0x200d ||
+		(codePoint >= 0x1f000 && codePoint <= 0x1ffff) ||
+		nextExtendsCluster;
+	if (!needsSegmentation) return character;
 	const segment = graphemeSegmenter.segment(text.slice(offset))[Symbol.iterator]().next();
 	return segment.done ? "" : segment.value.segment;
 }

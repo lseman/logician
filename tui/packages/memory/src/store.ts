@@ -3,7 +3,7 @@
 
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, normalize, resolve } from "node:path";
 import type {
   CompressedObservation,
   ContextBlock,
@@ -37,6 +37,44 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function normalizeWorkspacePath(workspace: string): string {
+  const value = workspace.trim();
+  return normalize(resolve(value || process.cwd()));
+}
+
+const REDACTED = "[REDACTED]";
+const MAX_RAW_STRING = 8_000;
+
+function sanitizeString(value: string): string {
+  return value
+    .replace(/-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*PRIVATE KEY-----/gi, REDACTED)
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{12,}/gi, `Bearer ${REDACTED}`)
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,})\b/g, REDACTED)
+    .replace(/\b(api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|secret)\s*[:=]\s*([^\s,;]+)/gi, `$1=${REDACTED}`)
+    .slice(0, MAX_RAW_STRING);
+}
+
+function sanitizePayload(value: unknown, depth = 0): unknown {
+  if (depth > 8) return "[TRUNCATED]";
+  if (typeof value === "string") return sanitizeString(value);
+  if (typeof value !== "object" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 100).map((item) => sanitizePayload(item, depth + 1));
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value).slice(0, 100)) {
+    result[key] = /(?:authorization|cookie|api[_-]?key|token|secret|password|passwd|private[_-]?key)/i.test(key)
+      ? REDACTED
+      : sanitizePayload(item, depth + 1);
+  }
+  return result;
+}
+
+function toFtsQuery(query: string): string {
+  const terms = query.normalize("NFKC").match(/[\p{L}\p{N}_]+/gu) || [];
+  return [...new Set(terms.slice(0, 12).map((term) => term.toLowerCase()))]
+    .map((term) => `"${term.replace(/"/g, '""')}"${term.length > 1 ? "*" : ""}`)
+    .join(" AND ");
+}
+
 // ── Synthetic Compression (zero-LLM) ─────────────────────────────────────────
 
 function inferType(payload: unknown, hookType: string): ObservationType {
@@ -62,7 +100,7 @@ function inferType(payload: unknown, hookType: string): ObservationType {
 
 function buildSyntheticCompression(raw: RawObservation): CompressedObservation {
   const { id, sessionId, timestamp, hookType, raw: data } = raw;
-  const type = inferType(data, hookType);
+  let type = inferType(data, hookType);
 
   let title = "Observation";
   let narrative = "";
@@ -132,10 +170,20 @@ function buildSyntheticCompression(raw: RawObservation): CompressedObservation {
     const outputStr = typeof output === "string" ? output.toLowerCase() : "";
     const errorStr = typeof error === "string" ? error.toLowerCase() : "";
     const combinedErr = outputStr + " " + errorStr;
-    if (/error|fail|panic|crash|exception|not found|timeout|refused/.test(combinedErr)) {
+    if (type === "error") {
       importance = 8;
-    } else if (/fix|patch|correct|resolve|handle/.test(combinedErr)) {
+    } else if (type === "file_write" || type === "file_edit") {
       importance = 7;
+    } else if (type === "file_read" || type === "search" || type === "web_fetch") {
+      importance = 3;
+    } else if (type === "command_run") {
+      if (/\b(?:error|fail(?:ed|ure)?|panic|crash|exception|timeout|refused)\b/.test(combinedErr)) {
+        importance = 8;
+      } else {
+        importance = /\b(?:pass(?:ed)?|success|built|compiled|deployed)\b/.test(outputStr) ? 6 : 4;
+      }
+    } else if (type === "other") {
+      importance = 4;
     }
 
     // Add files to facts
@@ -147,6 +195,30 @@ function buildSyntheticCompression(raw: RawObservation): CompressedObservation {
     // Add concepts to narrative
     if (concepts.length > 3) {
       facts.push(`Concepts: ${concepts.slice(0, 5).join(", ")}`);
+    }
+
+    if (hookType === "prompt_submit") {
+      const prompt = typeof d.prompt === "string"
+        ? d.prompt.trim()
+        : typeof d.userPrompt === "string"
+          ? d.userPrompt.trim()
+          : raw.userPrompt?.trim() || "";
+      if (prompt) {
+        title = `User request: ${truncate(prompt, 100)}`;
+        narrative = prompt.slice(0, 2000);
+        facts.length = 0;
+        facts.push(prompt.slice(0, 1000));
+        if (/^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(prompt)) {
+          importance = 1;
+        } else if (/\b(?:decide|decision|must|requirement|architecture|security|breaking|never|always)\b/i.test(prompt)) {
+          type = "decision";
+          importance = 7;
+        } else if (prompt.length < 20) {
+          importance = 2;
+        } else {
+          importance = 5;
+        }
+      }
     }
   } else if (typeof data === "string") {
     title = truncate(data, 80) || hookType;
@@ -216,6 +288,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     .replace(/^~/, process.env.HOME || "");
   mkdirSync(dirname(resolved), { recursive: true });
   const db = new Database(resolved);
+  let currentWorkspace = normalizeWorkspacePath(process.cwd());
 
   db.exec(`
     -- Sessions: lifecycle tracking
@@ -339,10 +412,106 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   // Create consolidated index
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_observations_consolidated ON observations(consolidated)`); } catch {}
 
+  // FTS5 indices are kept separate from the source tables so existing
+  // databases can be upgraded in place. Triggers keep them current.
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+      id UNINDEXED, title, narrative, facts, concepts, files,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+      id UNINDEXED, title, content, concepts, files,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER IF NOT EXISTS observations_fts_insert AFTER INSERT ON observations BEGIN
+      INSERT INTO observations_fts(id, title, narrative, facts, concepts, files)
+      VALUES (new.id, new.title, new.narrative, new.facts, new.concepts, new.files);
+    END;
+    CREATE TRIGGER IF NOT EXISTS observations_fts_delete AFTER DELETE ON observations BEGIN
+      DELETE FROM observations_fts WHERE id = old.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS observations_fts_update AFTER UPDATE ON observations BEGIN
+      DELETE FROM observations_fts WHERE id = old.id;
+      INSERT INTO observations_fts(id, title, narrative, facts, concepts, files)
+      VALUES (new.id, new.title, new.narrative, new.facts, new.concepts, new.files);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memories_fts_insert AFTER INSERT ON memories BEGIN
+      INSERT INTO memories_fts(id, title, content, concepts, files)
+      VALUES (new.id, new.title, new.content, new.concepts, new.files);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memories_fts_delete AFTER DELETE ON memories BEGIN
+      DELETE FROM memories_fts WHERE id = old.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS memories_fts_update AFTER UPDATE ON memories BEGIN
+      DELETE FROM memories_fts WHERE id = old.id;
+      INSERT INTO memories_fts(id, title, content, concepts, files)
+      VALUES (new.id, new.title, new.content, new.concepts, new.files);
+    END;
+  `);
+  // Incrementally backfill databases created before FTS5 support.
+  db.exec(`
+    INSERT INTO observations_fts(id, title, narrative, facts, concepts, files)
+      SELECT o.id, o.title, o.narrative, o.facts, o.concepts, o.files
+      FROM observations o
+      WHERE NOT EXISTS (SELECT 1 FROM observations_fts f WHERE f.id = o.id);
+    INSERT INTO memories_fts(id, title, content, concepts, files)
+      SELECT m.id, m.title, m.content, m.concepts, m.files
+      FROM memories m
+      WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.id = m.id);
+  `);
+
+  // Recover path scope for databases written before workspace became
+  // mandatory. Session cwd is authoritative; observations inherit it.
+  try {
+    const legacySessions = db.prepare(
+      "SELECT id, cwd FROM sessions WHERE workspace = '' AND cwd != ''",
+    ).all() as Array<{ id: string; cwd: string }>;
+    const updateSessionWorkspace = db.prepare("UPDATE sessions SET workspace = ? WHERE id = ?");
+    for (const session of legacySessions) {
+      updateSessionWorkspace.run(normalizeWorkspacePath(session.cwd), session.id);
+    }
+    db.exec(`
+      UPDATE observations
+      SET workspace = COALESCE(
+        (SELECT sessions.workspace FROM sessions WHERE sessions.id = observations.session_id),
+        ''
+      )
+      WHERE workspace = ''
+    `);
+    db.exec(`
+      UPDATE memories
+      SET workspace = COALESCE((
+        SELECT sessions.workspace
+        FROM json_each(memories.session_ids)
+        JOIN sessions ON sessions.id = json_each.value
+        WHERE sessions.workspace != ''
+        LIMIT 1
+      ), '')
+      WHERE workspace = '' AND json_valid(session_ids)
+    `);
+
+    for (const table of ["sessions", "observations", "memories"]) {
+      const scopes = db.prepare(
+        `SELECT DISTINCT workspace FROM ${table} WHERE workspace != ''`,
+      ).all() as Array<{ workspace: string }>;
+      const normalizeStoredScope = db.prepare(
+        `UPDATE ${table} SET workspace = ? WHERE workspace = ?`,
+      );
+      for (const scope of scopes) {
+        const normalized = normalizeWorkspacePath(scope.workspace);
+        if (normalized !== scope.workspace) {
+          normalizeStoredScope.run(normalized, scope.workspace);
+        }
+      }
+    }
+  } catch {}
+
   // ── Sessions ───────────────────────────────────────────────────────────
 
   function createSession(id: string, data: Partial<Session>): Session {
     const ts = now();
+    const sessionCwd = data.cwd ? normalizeWorkspacePath(data.cwd) : currentWorkspace;
+    const sessionWorkspace = normalizeWorkspacePath(data.workspace || sessionCwd);
     db.prepare(`
       INSERT OR IGNORE INTO sessions (id, project, cwd, workspace, started_at, status, observation_count,
                                       model, tags, first_prompt, summary, commit_shas)
@@ -350,8 +519,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     `).run(
       id,
       data.project || "",
-      data.cwd || "",
-      data.workspace || "",
+      sessionCwd,
+      sessionWorkspace,
       ts,
       data.model || null,
       JSON.stringify(data.tags || []),
@@ -362,8 +531,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     return {
       id,
       project: data.project || "",
-      cwd: data.cwd || "",
-      workspace: data.workspace || "",
+      cwd: sessionCwd,
+      workspace: sessionWorkspace,
       startedAt: ts,
       status: "active",
       observationCount: 0,
@@ -409,9 +578,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     }
     if (query?.workspace) {
       conditions.push("workspace = ?");
-      params.push(query.workspace);
-    } else if (currentWorkspace) {
-      // Default to current workspace
+      params.push(normalizeWorkspacePath(query.workspace));
+    } else {
       conditions.push("workspace = ?");
       params.push(currentWorkspace);
     }
@@ -460,9 +628,25 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
   function observe(raw: RawObservation, compressed?: CompressedObservation): CompressedObservation | null {
     const ts = now();
-    const comp = compressed || buildSyntheticCompression(raw);
+    const safeRaw = {
+      ...raw,
+      toolInput: sanitizePayload(raw.toolInput),
+      toolOutput: sanitizePayload(raw.toolOutput),
+      userPrompt: raw.userPrompt ? sanitizeString(raw.userPrompt) : undefined,
+      raw: sanitizePayload(raw.raw),
+    };
+    const generated = compressed || buildSyntheticCompression(safeRaw);
+    const comp: CompressedObservation = {
+      ...generated,
+      title: sanitizeString(generated.title).slice(0, 200),
+      subtitle: generated.subtitle ? sanitizeString(generated.subtitle).slice(0, 300) : undefined,
+      narrative: sanitizeString(generated.narrative).slice(0, 2000),
+      facts: generated.facts.map(sanitizeString).slice(0, 20),
+      concepts: generated.concepts.map(sanitizeString).slice(0, 20),
+      files: generated.files.map(sanitizeString).slice(0, 20),
+    };
     // Derive workspace from observation data or current workspace
-    const obsWorkspace = (raw as any).workspace || currentWorkspace || "";
+    const obsWorkspace = normalizeWorkspacePath(raw.workspace || currentWorkspace);
 
     db.prepare(`
       INSERT INTO observations (id, session_id, timestamp, hook_type, type, title, subtitle,
@@ -482,7 +666,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       JSON.stringify(comp.files),
       comp.importance,
       obsWorkspace,
-      JSON.stringify(raw.raw),
+      JSON.stringify(safeRaw.raw).slice(0, 32_000),
     );
 
     // Update session observation count
@@ -514,6 +698,25 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       files: safeParseJsonArray(row.files),
       importance: row.importance ?? 5,
       consolidated: row.consolidated === 1 || row.consolidated === true,
+      workspace: row.workspace || "",
+    };
+  }
+
+  function rowToObservation(row: any): CompressedObservation {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      timestamp: row.timestamp,
+      type: row.type as ObservationType,
+      title: row.title || "",
+      subtitle: row.subtitle,
+      facts: safeParseJsonArray(row.facts),
+      narrative: row.narrative || "",
+      concepts: safeParseJsonArray(row.concepts),
+      files: safeParseJsonArray(row.files),
+      importance: row.importance ?? 5,
+      consolidated: row.consolidated === 1 || row.consolidated === true,
+      workspace: row.workspace || "",
     };
   }
 
@@ -521,30 +724,37 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const rows = db.prepare(
       `SELECT * FROM observations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?`
     ).all(sessionId, limit) as any[];
-    return rows.map((r) => ({
-      id: r.id,
-      sessionId: r.session_id,
-      timestamp: r.timestamp,
-      type: r.type as ObservationType,
-      title: r.title || "",
-      subtitle: r.subtitle,
-      facts: safeParseJsonArray(r.facts),
-      narrative: r.narrative || "",
-      concepts: safeParseJsonArray(r.concepts),
-      files: safeParseJsonArray(r.files),
-      importance: r.importance ?? 5,
-      consolidated: r.consolidated === 1 || r.consolidated === true,
-    }));
+    return rows.map(rowToObservation);
+  }
+
+  function listRecentObservations(limit: number = 50, type?: ObservationType): CompressedObservation[] {
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+    conditions.push("workspace = ?");
+    params.push(currentWorkspace);
+    if (type) {
+      conditions.push("type = ?");
+      params.push(type);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(Math.max(1, Math.min(limit, 1000)));
+    const rows = db.prepare(
+      `SELECT * FROM observations ${where} ORDER BY timestamp DESC, rowid DESC LIMIT ?`,
+    ).all(...params) as any[];
+    return rows.map(rowToObservation);
   }
 
   function searchObservations(query: string, limit: number = 20): SearchResult[] {
-    const escaped = query.replace(/([%_\\])/g, "\\$1");
+    const ftsQuery = toFtsQuery(query);
+    if (!ftsQuery) return [];
     const rows = db.prepare(`
-      SELECT * FROM observations
-      WHERE narrative LIKE ? OR title LIKE ? OR concepts LIKE ?
-      ORDER BY importance DESC, timestamp DESC
+      SELECT o.*, bm25(observations_fts, 0, 8, 4, 2, 3, 3) AS lexical_rank
+      FROM observations_fts
+      JOIN observations o ON o.id = observations_fts.id
+      WHERE observations_fts MATCH ? AND o.workspace = ?
+      ORDER BY lexical_rank ASC, o.importance DESC, o.timestamp DESC
       LIMIT ?
-    `).all(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`, limit) as any[];
+    `).all(ftsQuery, currentWorkspace, Math.max(1, Math.min(limit, 1000))) as any[];
 
     return rows.map((r) => ({
       observation: {
@@ -560,10 +770,25 @@ export function createMemoryStore(dbPath: string): MemoryStore {
         files: safeParseJsonArray(r.files),
         importance: r.importance ?? 5,
         consolidated: r.consolidated === 1 || r.consolidated === true,
+        workspace: r.workspace || "",
       },
-      score: r.importance,
+      score: Number((Math.max(0, -Number(r.lexical_rank || 0)) + r.importance / 10).toFixed(4)),
       sessionId: r.session_id,
     }));
+  }
+
+  function clearObservations(): number {
+    const { count } = db.prepare("SELECT COUNT(*) AS count FROM observations WHERE workspace = ?")
+      .get(currentWorkspace) as { count: number };
+    db.prepare("DELETE FROM observations WHERE workspace = ?").run(currentWorkspace);
+    db.prepare(`
+      UPDATE sessions
+      SET observation_count = (
+        SELECT COUNT(*) FROM observations WHERE observations.session_id = sessions.id
+      )
+      WHERE workspace = ?
+    `).run(currentWorkspace);
+    return count;
   }
 
   // ── Memories ───────────────────────────────────────────────────────────
@@ -580,7 +805,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const strength = options.strength ?? assignStrength(content);
 
     // Derive workspace from options or current workspace
-    const memoryWorkspace = options.workspace || currentWorkspace || "";
+    const memoryWorkspace = normalizeWorkspacePath(options.workspace || currentWorkspace);
 
     db.prepare(`
       INSERT INTO memories (id, created_at, updated_at, type, title, content,
@@ -626,7 +851,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   }
 
   function get(id: string): Memory | null {
-    const row = db.prepare("SELECT * FROM memories WHERE id = ? AND is_latest = 1").get(id) as any;
+    const row = db.prepare(
+      "SELECT * FROM memories WHERE id = ? AND is_latest = 1 AND workspace = ?",
+    ).get(id, currentWorkspace) as any;
     if (!row) return null;
     return {
       id: row.id,
@@ -646,11 +873,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       sourceObservationIds: safeParseJsonArray(row.source_observation_ids),
       isLatest: true,
       project: row.project,
+      workspace: row.workspace || "",
     };
   }
 
   function getAny(id: string): Memory | null {
-    const row = db.prepare("SELECT * FROM memories WHERE id = ?").get(id) as any;
+    const row = db.prepare("SELECT * FROM memories WHERE id = ? AND workspace = ?").get(id, currentWorkspace) as any;
     if (!row) return null;
     return {
       id: row.id,
@@ -670,6 +898,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       sourceObservationIds: safeParseJsonArray(row.source_observation_ids),
       isLatest: row.is_latest === 1,
       project: row.project,
+      workspace: row.workspace || "",
     };
   }
 
@@ -729,7 +958,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
   function dedupRecord(sessionId: string, toolName: string, toolInput: unknown): void {
     const hash = computeDedupHash(sessionId, toolName, toolInput);
-    db.prepare("INSERT OR IGNORE INTO dedup (hash, created_at) VALUES (?, ?)").run(hash, now());
+    db.prepare(`
+      INSERT INTO dedup (hash, created_at) VALUES (?, ?)
+      ON CONFLICT(hash) DO UPDATE SET created_at = excluded.created_at
+    `).run(hash, now());
     // Clean up old entries
     db.prepare("DELETE FROM dedup WHERE created_at < ?").run(new Date(Date.now() - dedupWindowMs * 2).toISOString());
   }
@@ -788,8 +1020,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const oneDay = 24 * oneHour;
 
     const rows = db.prepare(
-      "SELECT id, last_accessed FROM memories WHERE is_latest = 1 AND last_accessed IS NOT NULL"
-    ).all() as { id: string; last_accessed: string }[];
+      "SELECT id, last_accessed FROM memories WHERE is_latest = 1 AND last_accessed IS NOT NULL AND workspace = ?"
+    ).all(currentWorkspace) as { id: string; last_accessed: string }[];
 
     for (const row of rows) {
       const accessMs = new Date(row.last_accessed).getTime();
@@ -804,7 +1036,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     }
 
     // Mark memories with no access as archived
-    db.prepare("UPDATE memories SET working_tier = 'archived' WHERE is_latest = 1 AND last_accessed IS NULL").run();
+    db.prepare(
+      "UPDATE memories SET working_tier = 'archived' WHERE is_latest = 1 AND last_accessed IS NULL AND workspace = ?",
+    ).run(currentWorkspace);
 
     return tiered;
   }
@@ -822,8 +1056,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
     // Find old, low-importance observations
     const oldObs = db.prepare(
-      "SELECT id, session_id, importance, timestamp FROM observations WHERE timestamp < ? AND importance < ? LIMIT ?"
-    ).all(cutoff, minImportance, maxDeletes) as { id: string; session_id: string; importance: number; timestamp: string }[];
+      "SELECT id, session_id, importance, timestamp FROM observations WHERE workspace = ? AND timestamp < ? AND importance < ? LIMIT ?"
+    ).all(currentWorkspace, cutoff, minImportance, maxDeletes) as { id: string; session_id: string; importance: number; timestamp: string }[];
 
     for (const obs of oldObs) {
       db.prepare("DELETE FROM observations WHERE id = ?").run(obs.id);
@@ -835,61 +1069,19 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   }
 
   function list(query: MemoryQuery = {}): Memory[] {
-    // Default to current workspace if not specified
-    const workspace = query.workspace ?? currentWorkspace;
-
-    // Simple path: no concept/session filter
-    if (!query.concepts?.length && !query.sessionId) {
-      const conditions: string[] = [];
-      const params: any[] = [];
-
-      if (workspace) {
-        conditions.push("workspace = ?");
-        params.push(workspace);
-      }
-
-      if (query.search) {
-        const escaped = query.search.replace(/([%_\\])/g, "\\$1");
-        conditions.push("(title LIKE ? OR content LIKE ? OR concepts LIKE ?)");
-        params.push(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`);
-      }
-
-      if (query.type) {
-        conditions.push("type = ?");
-        params.push(query.type);
-      }
-
-      if (query.project) {
-        conditions.push("project = ?");
-        params.push(query.project);
-      }
-
-      if (query.minStrength !== undefined) {
-        conditions.push("strength >= ?");
-        params.push(query.minStrength);
-      }
-
-      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-      const limit = query.limit ?? 10;
-
-      const sql = `SELECT * FROM memories ${where} ORDER BY strength DESC, created_at DESC LIMIT ?`;
-      return db.prepare(sql).all(...params, limit).map(rowToMemory);
-    }
-
-    // Complex path: concept AND / session filtering using subqueries
+    const workspace = normalizeWorkspacePath(query.workspace || currentWorkspace);
     const conditions: string[] = [];
     const params: any[] = [];
-
-    if (workspace) {
-      conditions.push("m.workspace = ?");
-      params.push(workspace);
+    const ftsQuery = query.search ? toFtsQuery(query.search) : "";
+    const from = ftsQuery
+      ? "memories_fts JOIN memories m ON m.id = memories_fts.id"
+      : "memories m";
+    if (ftsQuery) {
+      conditions.push("memories_fts MATCH ?");
+      params.push(ftsQuery);
     }
-
-    if (query.search) {
-      const escaped = query.search.replace(/([%_\\])/g, "\\$1");
-      conditions.push("(m.title LIKE ? OR m.content LIKE ? OR m.concepts LIKE ?)");
-      params.push(`%${escaped}%`, `%${escaped}%`, `%${escaped}%`);
-    }
+    conditions.push("m.workspace = ?", "m.is_latest = 1");
+    params.push(workspace);
 
     if (query.type) {
       conditions.push("m.type = ?");
@@ -906,7 +1098,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       params.push(query.minStrength);
     }
 
-    const baseWhere = conditions.length ? `${conditions.join(" AND ")}` : "1=1";
+    const baseWhere = conditions.join(" AND ");
 
     // Subquery for concept AND filtering: all concepts must match
     const conceptSub = query.concepts?.length
@@ -929,11 +1121,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const limit = query.limit ?? 10;
 
     const sql = `
-      SELECT m.* FROM memories m
+      SELECT m.*${ftsQuery ? ", bm25(memories_fts, 0, 8, 4, 2, 2) AS lexical_rank" : ""}
+      FROM ${from}
       WHERE ${baseWhere}
         AND ${conceptSub}
         AND ${sessionSub}
-      ORDER BY m.strength DESC, m.created_at DESC
+      ORDER BY ${ftsQuery ? "lexical_rank ASC," : ""} m.strength DESC, m.updated_at DESC
       LIMIT ?
     `;
     params.push(limit);
@@ -945,6 +1138,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     // Only delete if still latest (prevent double-delete)
     const result = db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ? AND is_latest = 1").run(id);
     return result.changes > 0;
+  }
+
+  function clearMemories(): number {
+    const ids = db.prepare("SELECT id FROM memories WHERE workspace = ?").all(currentWorkspace) as Array<{ id: string }>;
+    if (!ids.length) return 0;
+    const removeRelations = db.prepare("DELETE FROM relations WHERE source_id = ? OR target_id = ?");
+    for (const { id } of ids) removeRelations.run(id, id);
+    db.prepare("DELETE FROM memories WHERE workspace = ?").run(currentWorkspace);
+    return ids.length;
   }
 
   function update(
@@ -1000,12 +1202,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   // ── Consolidation ──────────────────────────────────────────────────────
 
   function consolidate(sessionId: string): Memory[] {
-    // Get only unconsolidated observations
     const rows = db.prepare(
-      `SELECT * FROM observations WHERE session_id = ? AND consolidated = 0 ORDER BY timestamp DESC LIMIT 100`
-    ).all(sessionId) as any[];
+      `SELECT * FROM observations
+       WHERE session_id = ? AND workspace = ? AND consolidated = 0
+         AND importance >= 5
+       ORDER BY timestamp ASC LIMIT 100`
+    ).all(sessionId, currentWorkspace) as any[];
 
-    if (rows.length < 3) return [];
+    if (rows.length < 2) return [];
 
     const observations = rows.map((r) => ({
       id: r.id,
@@ -1020,23 +1224,31 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       files: safeParseJsonArray(r.files),
       importance: r.importance ?? 5,
       consolidated: r.consolidated === 1,
+      workspace: r.workspace || currentWorkspace,
     }));
 
-    // Group observations by type
+    // Group by the most concrete topic available. A file or concept is much
+    // more useful than broad buckets such as "command_run".
     const groups: Record<string, typeof observations> = {};
     for (const obs of observations) {
-      if (!groups[obs.type]) groups[obs.type] = [];
-      groups[obs.type].push(obs);
+      const key = obs.files[0]
+        ? `file:${obs.files[0]}`
+        : obs.concepts[0]
+          ? `concept:${obs.concepts[0].toLowerCase()}`
+          : `type:${obs.type}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(obs);
     }
 
     const memories: Memory[] = [];
-    const ts = now();
+    const usedObservationIds: string[] = [];
 
-    for (const [type, group] of Object.entries(groups)) {
+    for (const [topic, group] of Object.entries(groups)) {
       if (group.length < 2) continue;
-
-      // Merge facts from observations
-      const allFacts = group.flatMap(o => o.facts).slice(0, 5);
+      const dominantType = group
+        .map((item) => item.type)
+        .sort((a, b) => group.filter((item) => item.type === b).length - group.filter((item) => item.type === a).length)[0];
+      const allFacts = [...new Set(group.flatMap((o) => o.facts.length ? o.facts : [o.narrative]).filter(Boolean))].slice(0, 8);
       const allConcepts = [...new Set(group.flatMap(o => o.concepts))].slice(0, 10);
       const allFiles = [...new Set(group.flatMap(o => o.files))].slice(0, 10);
       const avgStrength = Math.round(group.reduce((s, o) => s + o.importance, 0) / group.length);
@@ -1056,52 +1268,56 @@ export function createMemoryStore(dbPath: string): MemoryStore {
         other: "fact",
       };
 
-      const title = `${type} pattern (${group.length} observations)`;
-      const content = allFacts.slice(0, 3).join("\n");
+      const label = topic.replace(/^(?:file|concept|type):/, "");
+      const title = `${label} — ${dominantType.replace(/_/g, " ")}`.slice(0, 200);
+      const content = allFacts.join("\n");
+      const sourceIds = group.map((o) => o.id);
+      const strength = Math.min(10, Math.max(1, avgStrength + 1));
+      const ts = now();
+      const existingRow = db.prepare(
+        "SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
+      ).get(currentWorkspace, title) as any;
 
-      const id = generateId();
-      const memoryWorkspace = rows[0]?.workspace || "";
-      db.prepare(`
-        INSERT INTO memories (id, created_at, updated_at, type, title, content,
-                              concepts, files, session_ids, strength, version,
-                              parent_id, related_ids, source_observation_ids, is_latest, project, workspace)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, ?, ?)
-      `).run(
-        id, ts, ts,
-        typeNames[type] || "fact",
-        title, content,
-        JSON.stringify(allConcepts),
-        JSON.stringify(allFiles),
-        JSON.stringify([sessionId]),
-        Math.min(10, Math.max(1, avgStrength + 1)),
-        JSON.stringify(group.map(o => o.id)),
-        null,
-        memoryWorkspace,
-      );
-
-      memories.push({
-        id,
-        createdAt: ts,
-        updatedAt: ts,
-        type: typeNames[type] || "fact",
-        title,
-        content,
-        concepts: allConcepts,
-        files: allFiles,
-        sessionIds: [sessionId],
-        strength: Math.min(10, Math.max(1, avgStrength + 1)),
-        version: 1,
-        relatedIds: [],
-        sourceObservationIds: group.map(o => o.id),
-        isLatest: true,
-        workspace: memoryWorkspace,
-      });
+      if (existingRow) {
+        const existing = rowToMemory(existingRow);
+        const id = generateId();
+        const mergedContent = [...new Set([...existing.content.split("\n"), ...allFacts])].filter(Boolean).slice(-12).join("\n");
+        const mergedConcepts = [...new Set([...existing.concepts, ...allConcepts])].slice(0, 15);
+        const mergedFiles = [...new Set([...existing.files, ...allFiles])].slice(0, 15);
+        const mergedSessions = [...new Set([...existing.sessionIds, sessionId])];
+        const mergedSources = [...new Set([...(existing.sourceObservationIds || []), ...sourceIds])].slice(-100);
+        db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(existing.id);
+        db.prepare(`INSERT INTO memories
+            (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
+             strength, version, parent_id, related_ids, source_observation_ids, is_latest,
+             project, workspace, supersedes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`)
+            .run(id, existing.createdAt, ts, existing.type, title, mergedContent,
+              JSON.stringify(mergedConcepts), JSON.stringify(mergedFiles), JSON.stringify(mergedSessions),
+              Math.min(10, Math.max(existing.strength, strength)), existing.version + 1, existing.id,
+              JSON.stringify(existing.relatedIds || []), JSON.stringify(mergedSources), existing.project || null,
+              currentWorkspace, JSON.stringify([existing.id]));
+        db.prepare(`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
+          VALUES (?, 'supersedes', ?, ?, 1, ?)`)
+          .run(generateId(), id, existing.id, ts);
+        memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
+      } else {
+        const id = generateId();
+        db.prepare(`INSERT INTO memories
+          (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
+           strength, version, parent_id, related_ids, source_observation_ids, is_latest, project, workspace)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, NULL, ?)`)
+          .run(id, ts, ts, typeNames[dominantType] || "fact", title, content,
+            JSON.stringify(allConcepts), JSON.stringify(allFiles), JSON.stringify([sessionId]),
+            strength, JSON.stringify(sourceIds), currentWorkspace);
+        memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
+      }
+      usedObservationIds.push(...sourceIds);
     }
 
-    // Mark consolidated observations
-    const obsIds = observations.map(o => `'${o.id.replace(/'/g, "''")}'`);
-    if (obsIds.length) {
-      db.exec(`UPDATE observations SET consolidated = 1 WHERE id IN (${obsIds.join(",")})`);
+    if (usedObservationIds.length) {
+      const mark = db.prepare("UPDATE observations SET consolidated = 1 WHERE id = ?");
+      usedObservationIds.forEach((id) => mark.run(id));
     }
 
     return memories;
@@ -1109,7 +1325,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
   // ── Context Injection ──────────────────────────────────────────────────
 
-  function getContext(sessionId: string, budget: number = 4000): string {
+  function getContext(sessionId: string, budget: number = 4000, query: string = ""): string {
     const blocks: ContextBlock[] = [];
     let tokenCount = 0;
     const estimateTokens = (text: string) => Math.ceil(text.length / 3);
@@ -1126,7 +1342,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       tokenCount += estimateTokens(session.summary);
     }
 
-    // 2. Recent observations (high importance)
+    // 2. Current-turn/session evidence.
     const recentObs = listObservations(sessionId, 10)
       .filter(o => o.importance >= 7)
       .sort((a, b) => b.importance - a.importance);
@@ -1139,10 +1355,26 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       tokenCount += tokens;
     }
 
-    // 3. Relevant memories
-    const memories = list({ sessionId, limit: 5, minStrength: 6 });
+    // 3. Retrieve relevant observations from prior sessions in this folder.
+    if (query.trim()) {
+      const seen = new Set(recentObs.map((obs) => obs.id));
+      for (const result of searchObservations(query, 6)) {
+        const obs = result.observation;
+        if (seen.has(obs.id) || obs.importance < 5) continue;
+        const text = `## Prior observation [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 300)}`;
+        const tokens = estimateTokens(text);
+        if (tokenCount + tokens > budget) break;
+        blocks.push({ type: "observation", content: text, tokens, recency: Date.parse(obs.timestamp) });
+        tokenCount += tokens;
+      }
+    }
+
+    // 4. Folder memory is intentionally cross-session. A new session should
+    // still benefit from decisions and discoveries made in this same path.
+    const memories = list({ search: query.trim() || undefined, limit: 6, minStrength: 6 });
     for (const mem of memories) {
-      const text = `## Memory [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 200)}`;
+      const sources = mem.sourceObservationIds?.length || 0;
+      const text = `## Folder memory [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 350)}${sources ? `\n\nSources: ${sources} observations` : ""}`;
       const tokens = estimateTokens(text);
       if (tokenCount + tokens > budget) break;
       blocks.push({ type: "memory", content: text, tokens, recency: Date.parse(mem.updatedAt) });
@@ -1365,8 +1597,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       INSERT INTO memories (id, created_at, updated_at, type, title, content,
                             concepts, files, session_ids, strength, version,
                             parent_id, related_ids, source_observation_ids, is_latest, project,
-                            access_count, last_accessed, working_tier, supersedes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1, ?, 0, NULL, 'cold', ?)
+                            workspace, access_count, last_accessed, working_tier, supersedes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1, ?, ?, 0, NULL, 'cold', ?)
     `).run(
       evolved.id,
       ts, ts,
@@ -1380,6 +1612,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       evolved.version,
       memoryId,
       existing.project || null,
+      existing.workspace || currentWorkspace,
       JSON.stringify([existing.id]),
     );
 
@@ -1481,7 +1714,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   }
 
   function rescoreAll(config: DecayConfigInput = {}): RetentionScore[] {
-    const allMemories = db.prepare(`SELECT * FROM memories WHERE is_latest = 1`).all() as any[];
+    const allMemories = db.prepare(
+      `SELECT * FROM memories WHERE is_latest = 1 AND workspace = ?`,
+    ).all(currentWorkspace) as any[];
     const scores: RetentionScore[] = [];
 
     for (const row of allMemories) {
@@ -1506,15 +1741,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       ? db.prepare(`
           SELECT id, session_id, type, title, narrative, importance, timestamp
           FROM observations
-          WHERE (title LIKE ? OR narrative LIKE ? OR files LIKE ?) AND session_id = ?
+          WHERE workspace = ? AND (title LIKE ? OR narrative LIKE ? OR files LIKE ?) AND session_id = ?
           ORDER BY timestamp DESC
-        `).all(pattern, pattern, pattern, sessionId) as any[]
+        `).all(currentWorkspace, pattern, pattern, pattern, sessionId) as any[]
       : db.prepare(`
           SELECT id, session_id, type, title, narrative, importance, timestamp
           FROM observations
-          WHERE title LIKE ? OR narrative LIKE ? OR files LIKE ?
+          WHERE workspace = ? AND (title LIKE ? OR narrative LIKE ? OR files LIKE ?)
           ORDER BY timestamp DESC
-        `).all(pattern, pattern, pattern) as any[];
+        `).all(currentWorkspace, pattern, pattern, pattern) as any[];
 
     if (rows.length === 0) return null;
 
@@ -1542,8 +1777,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     // Count observations with non-empty files array
     // Since JSON arrays like ["a"] are > 4 chars while [] is exactly 2 chars
     const count = db.prepare(
-      `SELECT COUNT(*) as cnt FROM observations WHERE LENGTH(files) > 2`
-    ).get() as { cnt: number };
+      `SELECT COUNT(*) as cnt FROM observations WHERE workspace = ? AND LENGTH(files) > 2`
+    ).get(currentWorkspace) as { cnt: number };
     return count.cnt || 0;
   }
 
@@ -1692,8 +1927,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   // ── Session ID tracking ────────────────────────────────────────────────
 
   let currentSessionId: string | null = null;
-  let currentWorkspace = "";
-
   function setCurrentSessionId(id: string): void {
     currentSessionId = id;
     // Ensure session exists
@@ -1703,7 +1936,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     // Sync workspace from session
     const session = getSession(id);
     if (session?.workspace) {
-      currentWorkspace = session.workspace;
+      currentWorkspace = normalizeWorkspacePath(session.workspace);
     }
   }
 
@@ -1712,11 +1945,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   }
 
   function setCurrentWorkspace(ws: string): void {
-    currentWorkspace = ws;
+    currentWorkspace = normalizeWorkspacePath(ws);
   }
 
   function getCurrentWorkspace(): string {
-    return currentWorkspace || "";
+    return currentWorkspace;
   }
 
   // ── Public API ─────────────────────────────────────────────────────────
@@ -1729,12 +1962,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     observe,
     getObservation,
     listObservations,
+    listRecentObservations,
     searchObservations,
+    clearObservations,
     create,
     get,
     getAny,
     list,
     remove: deleteEntry,
+    clearMemories,
     update,
     recall,
     consolidate,

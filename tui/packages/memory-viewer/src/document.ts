@@ -139,6 +139,7 @@ const HTML = `<!DOCTYPE html>
   </div>
   <div class="tab-bar" id="tab-bar">
     <button class="active" data-tab="dashboard">Dashboard</button>
+    <button data-tab="observations">Observations</button>
     <button data-tab="memories">Memories</button>
     <button data-tab="timeline">Timeline</button>
     <button data-tab="sessions">Sessions</button>
@@ -166,6 +167,19 @@ const HTML = `<!DOCTYPE html>
         <div class="card"><div class="card-title">Recent Activity</div><div id="recent-activity"></div></div>
       </div>
     </div>
+  </div>
+  <div id="view-observations" class="view">
+    <div class="card" style="padding:12px 16px;">
+      <div class="card-title" style="margin-bottom:0;">Current folder</div>
+      <div id="observations-workspace" style="font-family:var(--font-mono);font-size:12px;color:var(--ink-muted);word-break:break-all;">—</div>
+    </div>
+    <div class="toolbar">
+      <input id="observation-search" type="text" placeholder="Search observations in this folder...">
+      <select id="observation-type"><option value="">All Types</option><option value="conversation">Conversation</option><option value="file_read">File Read</option><option value="file_write">File Write</option><option value="file_edit">File Edit</option><option value="command_run">Command</option><option value="search">Search</option><option value="web_fetch">Web Fetch</option><option value="error">Error</option><option value="other">Other</option></select>
+      <select id="observation-min-importance"><option value="0">Any Importance</option><option value="5">5+</option><option value="7">7+</option></select>
+      <button class="btn" id="btn-refresh-observations">Refresh</button>
+    </div>
+    <div id="observations-list"></div>
   </div>
   <div id="view-memories" class="view">
     <div class="toolbar">
@@ -220,7 +234,7 @@ const HTML = `<!DOCTYPE html>
     return fetch('/api' + path, { ...opts, headers: { ...headers, ...(opts?.headers || {}) } });
   }
   function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-  const TABS = ['dashboard','memories','timeline','sessions','audit','activity','profile','working-memory','graph','replay'];
+  const TABS = ['dashboard','observations','memories','timeline','sessions','audit','activity','profile','working-memory','graph','replay'];
   function switchTab(tabId) {
     if (!TABS.includes(tabId)) return;
     state.activeTab = tabId;
@@ -229,6 +243,7 @@ const HTML = `<!DOCTYPE html>
     const view = document.getElementById('view-' + tabId);
     if (view) view.classList.add('active');
     if (tabId === 'dashboard') loadDashboard();
+    else if (tabId === 'observations') loadObservations();
     else if (tabId === 'memories') loadMemories();
     else if (tabId === 'timeline') loadTimeline();
     else if (tabId === 'sessions') loadSessions();
@@ -260,6 +275,8 @@ const HTML = `<!DOCTYPE html>
       statEls[1].textContent = s.memories || 0;
       statEls[2].textContent = s.observations || 0;
       statEls[3].textContent = s.observationsToday || 0;
+      const workspaceEl = document.getElementById('observations-workspace');
+      if (workspaceEl) workspaceEl.textContent = s.workspace || 'Unknown workspace';
       // Health
       const rssMB = (h.rss / 1024 / 1024).toFixed(0);
       const heapMB = (h.heapUsed / 1024 / 1024).toFixed(0);
@@ -290,6 +307,35 @@ const HTML = `<!DOCTYPE html>
       }).join('');
       document.getElementById('recent-activity').innerHTML = actHtml || '<div class="empty-state"><div class="empty-icon">&#128231;</div><p>No recent activity</p></div>';
     } catch (e) { console.error('[dashboard] error:', e); }
+  }
+  // Observations for the store's active working directory
+  async function loadObservations() {
+    const search = document.getElementById('observation-search').value.trim();
+    const type = document.getElementById('observation-type').value;
+    const minImportance = document.getElementById('observation-min-importance').value;
+    const params = new URLSearchParams({ limit: '250', minImportance });
+    if (search) params.set('search', search);
+    if (type) params.set('type', type);
+    try {
+      const [obsRes, statsRes] = await Promise.all([api('/observations?' + params), api('/stats')]);
+      const observations = await obsRes.json();
+      const statsData = await statsRes.json();
+      document.getElementById('observations-workspace').textContent = statsData.stats?.workspace || 'Unknown workspace';
+      const colors = { file_read:'var(--blue)', file_write:'var(--green)', file_edit:'var(--yellow)', command_run:'var(--orange)', search:'var(--purple)', web_fetch:'var(--cyan)', conversation:'var(--ink-muted)', error:'var(--red)', decision:'var(--purple)', other:'var(--ink-muted)' };
+      const html = observations.length === 0
+        ? '<div class="empty-state"><div class="empty-icon">&#128203;</div><p>No observations in this folder</p></div>'
+        : observations.map((o, index) => '<div class="obs-card imp-' + (o.importance >= 7 ? 'high' : o.importance >= 4 ? 'med' : 'low') + '">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+          '<span class="badge badge-blue">#' + (index + 1) + '</span>' +
+          '<span class="badge" style="border-color:' + (colors[o.type] || 'var(--border-light)') + ';color:' + (colors[o.type] || 'var(--ink-muted)') + '">' + esc(o.type) + '</span>' +
+          '<span class="badge badge-' + (o.importance >= 7 ? 'red' : o.importance >= 4 ? 'yellow' : 'green') + '">importance ' + o.importance + '/10</span>' +
+          '<span class="obs-meta" style="margin-left:auto;">' + esc(o.timestamp?.slice(0,19)) + '</span></div>' +
+          '<div class="obs-title" style="margin-top:8px;">' + esc(o.title) + '</div>' +
+          '<div class="obs-meta">' + esc(o.id) + '</div>' +
+          (o.narrative ? '<div class="obs-narrative">' + esc(o.narrative.slice(0,500)) + '</div>' : '') +
+          '</div>').join('');
+      document.getElementById('observations-list').innerHTML = html;
+    } catch (e) { console.error('[observations] error:', e); }
   }
   // Memories
   async function loadMemories() {
@@ -485,6 +531,7 @@ const HTML = `<!DOCTYPE html>
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === 'observation' && state.activeTab === 'dashboard') loadDashboard();
+        if (msg.type === 'observation' && state.activeTab === 'observations') loadObservations();
       } catch {}
     };
   }
@@ -493,6 +540,10 @@ const HTML = `<!DOCTYPE html>
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
   document.getElementById('memory-search').addEventListener('input', debounce(loadMemories, 300));
+  document.getElementById('observation-search').addEventListener('input', debounce(loadObservations, 300));
+  document.getElementById('observation-type').addEventListener('change', loadObservations);
+  document.getElementById('observation-min-importance').addEventListener('change', loadObservations);
+  document.getElementById('btn-refresh-observations').addEventListener('click', loadObservations);
   document.getElementById('memory-type').addEventListener('change', loadMemories);
   document.getElementById('memory-min-strength').addEventListener('change', loadMemories);
   document.getElementById('btn-refresh-memories').addEventListener('click', loadMemories);
@@ -512,7 +563,10 @@ const HTML = `<!DOCTYPE html>
   function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); }; }
   // Init
   loadDashboard();
-  state.refreshInterval = setInterval(loadDashboard, 5000);
+  state.refreshInterval = setInterval(() => {
+    if (state.activeTab === 'observations') loadObservations();
+    else if (state.activeTab === 'dashboard') loadDashboard();
+  }, 5000);
   connectWebSocket();
   </script>
 </body>

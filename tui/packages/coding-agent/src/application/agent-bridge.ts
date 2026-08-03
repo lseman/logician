@@ -436,6 +436,14 @@ export class AgentCoreBridge {
 			captureTools: this.memoryCaptureTools,
 			injectContext: this.memoryInjectContext,
 			contextBudget: this.memoryContextBudget,
+			onMemoriesSaved: (memories) => {
+				this.emit({
+					type: "memory_update",
+					kind: "reflections_added",
+					count: memories.length,
+					items: memories.map((memory) => ({ id: memory.id, content: memory.title })),
+				});
+			},
 		});
 
 		// Merge hooks: existing hooks run first, then memory hooks
@@ -863,6 +871,14 @@ export class AgentCoreBridge {
 		this.config.hookSessionId = this.sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
 		this.config.eventLogPath = eventLogPathFor(this.transcriptPath);
+		if (this.memoryStore) {
+			setSessionId(this.memoryStore, this.sessionId);
+			this.memoryStore.createSession(this.sessionId, {
+				project: "",
+				cwd: this.cwd,
+				workspace: this.cwd || "",
+			});
+		}
 
 		// Reset state that is per-session
 		this.toolRouter.resetSkillsAndPrompts();
@@ -1255,6 +1271,13 @@ export class AgentCoreBridge {
 				const dbPath = this.memoryDbPath;
 				this.memoryStore = createMemoryStore(dbPath);
 				setSessionId(this.memoryStore, this.sessionId);
+				const workspace = this.cwd || "";
+				this.memoryStore.setCurrentWorkspace(workspace);
+				this.memoryStore.createSession(this.sessionId, {
+					project: "",
+					cwd: this.cwd,
+					workspace,
+				});
 				// Start viewer if enabled
 				if (this.memoryViewerEnabled) {
 					try {
@@ -1390,6 +1413,11 @@ export class AgentCoreBridge {
 		// Update memory session ID
 		if (this.memoryStore) {
 			setSessionId(this.memoryStore, this.sessionId);
+			this.memoryStore.createSession(this.sessionId, {
+				project: "",
+				cwd: this.cwd,
+				workspace: this.cwd || "",
+			});
 		}
 		// Reset skill/prompt injection state
 		this.toolRouter.resetInjectedContext();

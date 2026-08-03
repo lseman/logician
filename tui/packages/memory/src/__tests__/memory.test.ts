@@ -135,6 +135,17 @@ describe("createMemoryStore — memories", () => {
     store.close();
   });
 
+  test("uses FTS5 term matching instead of substring matching", () => {
+    const store = createMemoryStore(dbPath());
+    store.create("authentication timeout recovery workflow", { strength: 7 });
+    store.create("authentication cache workflow", { strength: 9 });
+    assert.deepEqual(
+      store.list({ search: "authentication timeout" }).map((memory) => memory.content),
+      ["authentication timeout recovery workflow"],
+    );
+    store.close();
+  });
+
   test("updates a memory entry", () => {
     const store = createMemoryStore(dbPath());
     const entry = store.create("original content", { type: "fact" });
@@ -160,6 +171,19 @@ describe("createMemoryStore — memories", () => {
     assert.equal(store.get(entry.id), null);
     assert.equal(store.remove(entry.id), false);
 
+    store.close();
+  });
+
+  test("clears memories only in the current workspace", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace-a");
+    store.create("memory a");
+    store.setCurrentWorkspace("/workspace-b");
+    store.create("memory b");
+    assert.equal(store.clearMemories(), 1);
+    assert.equal(store.list().length, 0);
+    store.setCurrentWorkspace("/workspace-a");
+    assert.equal(store.list().length, 1);
     store.close();
   });
 
@@ -257,6 +281,102 @@ describe("createMemoryStore — sessions", () => {
 // ── Observations ───────────────────────────────────────────────────────────
 
 describe("createMemoryStore — observations", () => {
+
+  test("clears observations only in the current workspace", () => {
+    const store = createMemoryStore(dbPath());
+    for (const [sessionId, workspace] of [["a", "/workspace-a"], ["b", "/workspace-b"]] as const) {
+      store.setCurrentWorkspace(workspace);
+      store.createSession(sessionId, { cwd: workspace });
+      store.observe({
+        id: `obs-${sessionId}`,
+        sessionId,
+        timestamp: new Date().toISOString(),
+        hookType: "prompt_submit",
+        raw: { prompt: `request ${sessionId}` },
+      });
+    }
+    assert.equal(store.clearObservations(), 1);
+    assert.equal(store.listRecentObservations().length, 0);
+    assert.equal(store.getSession("b")?.observationCount, 0);
+    store.setCurrentWorkspace("/workspace-a");
+    assert.equal(store.listRecentObservations().length, 1);
+    store.close();
+  });
+
+  test("redacts credentials before compression and indexing", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.createSession("safe", { cwd: "/workspace" });
+    const observation = store.observe({
+      id: "secret-observation",
+      sessionId: "safe",
+      timestamp: new Date().toISOString(),
+      hookType: "post_tool_failure",
+      raw: { error: "Bearer abcdefghijklmnopqrstuvwxyz and sk-abcdefghijklmnopqrstuvwxyz" },
+    })!;
+    assert.doesNotMatch(JSON.stringify(observation), /abcdefghijklmnop|sk-/);
+    assert.equal(store.searchObservations("abcdefghijklmnopqrstuvwxyz").length, 0);
+    store.close();
+  });
+  test("isolates observations and searches by normalized working directory", () => {
+    const store = createMemoryStore(dbPath());
+    const capture = (id: string, workspace: string, marker: string) => store.observe({
+      id,
+      sessionId: `session-${id}`,
+      timestamp: new Date().toISOString(),
+      hookType: "post_tool_use" as const,
+      workspace,
+      raw: { tool_name: "read_file", tool_output: marker },
+    });
+
+    capture("project-a", "/work/project-a/./", "alpha-marker");
+    capture("project-b", "/work/project-b", "beta-marker");
+
+    store.setCurrentWorkspace("/work/project-a");
+    assert.deepEqual(store.listRecentObservations().map((o) => o.id), ["project-a"]);
+    assert.equal(store.searchObservations("alpha-marker").length, 1);
+    assert.equal(store.searchObservations("beta-marker").length, 0);
+
+    store.setCurrentWorkspace("/work/project-b/../project-b");
+    assert.deepEqual(store.listRecentObservations().map((o) => o.id), ["project-b"]);
+    assert.equal(store.searchObservations("beta-marker").length, 1);
+    assert.equal(store.searchObservations("alpha-marker").length, 0);
+    store.close();
+  });
+
+  test("isolates durable memories by working directory", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/work/project-a");
+    store.create("Project A architecture");
+    store.setCurrentWorkspace("/work/project-b");
+    store.create("Project B architecture");
+
+    assert.deepEqual(store.list({ limit: 10 }).map((m) => m.content), ["Project B architecture"]);
+    assert.equal(store.recall({ search: "Project A" }), "");
+    store.setCurrentWorkspace("/work/project-a");
+    assert.deepEqual(store.list({ limit: 10 }).map((m) => m.content), ["Project A architecture"]);
+    store.close();
+  });
+
+  test("lists recent observations without requiring session metadata", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.observe({
+      id: "orphan-observation",
+      sessionId: "orphan-session",
+      timestamp: new Date().toISOString(),
+      hookType: "post_tool_use",
+      workspace: "/workspace",
+      raw: { tool_name: "read_file", tool_input: { path: "/workspace/a.ts" } },
+    });
+
+    const observations = store.listRecentObservations(10);
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0]!.id, "orphan-observation");
+    assert.equal(observations[0]!.workspace, "/workspace");
+    store.close();
+  });
+
   test("captures an observation with synthetic compression", () => {
     const store = createMemoryStore(dbPath());
     const comp = store.observe({
@@ -273,7 +393,7 @@ describe("createMemoryStore — observations", () => {
     assert.ok(comp);
     assert.equal(comp.id, "obs-1");
     assert.equal(comp.type, "command_run");
-    assert.equal(comp.importance, 5);
+    assert.equal(comp.importance, 4);
     assert.ok(comp.concepts.length >= 0);
 
     store.close();
@@ -295,6 +415,23 @@ describe("createMemoryStore — observations", () => {
     assert.equal(comp.importance, 8);
     assert.equal(comp.type, "error");
 
+    store.close();
+  });
+
+  test("scores passive retrieval below edits and successful verification", () => {
+    const store = createMemoryStore(dbPath());
+    const observeTool = (id: string, toolName: string, toolOutput: string) => store.observe({
+      id,
+      sessionId: "sess-signal",
+      timestamp: new Date().toISOString(),
+      hookType: "post_tool_use",
+      raw: { tool_name: toolName, tool_input: { path: "/work/a.ts" }, tool_output: toolOutput },
+    })!;
+
+    assert.equal(observeTool("read", "read_file", "source mentions an error").importance, 3);
+    assert.equal(observeTool("search", "grep", "No matches found").importance, 3);
+    assert.equal(observeTool("edit", "edit_file", "Updated file").importance, 7);
+    assert.equal(observeTool("test", "bash", "12 tests passed").importance, 6);
     store.close();
   });
 
@@ -367,6 +504,19 @@ describe("consolidate", () => {
 // ── Context Injection ──────────────────────────────────────────────────────
 
 describe("getContext", () => {
+
+  test("recalls folder memories across sessions using the current query", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.create("Authentication retries use exponential backoff", {
+      strength: 8,
+      sessionIds: ["old-session"],
+    });
+    store.createSession("new-session", { cwd: "/workspace" });
+    const context = store.getContext("new-session", 4000, "authentication retries");
+    assert.match(context, /exponential backoff/);
+    store.close();
+  });
   test("includes session summary", () => {
     const store = createMemoryStore(dbPath());
     store.createSession("sess-1", { project: "test", summary: "Built a login page with auth" });
@@ -921,7 +1071,7 @@ test("getFileContext returns observations mentioning a file", () => {
     id: "obs-1",
     sessionId: "sess-1",
     timestamp: new Date().toISOString(),
-    hookType: "file_read",
+    hookType: "post_tool_use",
     toolName: "read_file",
     toolOutput: "Reading src/app.ts",
     raw: { tool_name: "read_file", file_path: "src/app.ts" },
@@ -940,7 +1090,7 @@ test("getFileContext returns null for non-matching file", () => {
     id: "obs-1",
     sessionId: "sess-1",
     timestamp: new Date().toISOString(),
-    hookType: "file_read",
+    hookType: "post_tool_use",
     toolName: "read_file",
     toolOutput: "Reading src/app.ts",
     raw: { tool_name: "read_file", file_path: "src/app.ts" },
@@ -957,7 +1107,7 @@ test("getFilesContext returns contexts for multiple files", () => {
     id: "obs-1",
     sessionId: "sess-1",
     timestamp: new Date().toISOString(),
-    hookType: "file_read",
+    hookType: "post_tool_use",
     toolName: "read_file",
     toolOutput: "Reading src/app.ts",
     raw: { tool_name: "read_file", file_path: "src/app.ts" },
@@ -976,7 +1126,7 @@ test("rebuildFileIndex counts observations with file refs", () => {
     id: "obs-1",
     sessionId: "sess-1",
     timestamp: new Date().toISOString(),
-    hookType: "command_run",
+    hookType: "post_tool_use",
     toolName: "bash",
     toolOutput: "echo hello",
     raw: { tool_name: "bash" },
@@ -986,7 +1136,7 @@ test("rebuildFileIndex counts observations with file refs", () => {
     id: "obs-2",
     sessionId: "sess-1",
     timestamp: new Date().toISOString(),
-    hookType: "file_read",
+    hookType: "post_tool_use",
     toolName: "read_file",
     toolOutput: "Reading src/app.ts",
     raw: { tool_name: "read_file", file_path: "src/app.ts" },

@@ -4,7 +4,13 @@
 // internals (tui.removeOverlay/requestRender) as well as session state.
 
 import { AgentCoreBridge } from "@logician/coding-agent/application";
-import { SessionStore, Transcript, type Turn } from "@logician/coding-agent/sessions";
+import {
+	SessionStore,
+	Transcript,
+	inferSessionTitle,
+	isGeneratedSessionTitle,
+	type Turn,
+} from "@logician/coding-agent/sessions";
 import { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
 import { StatusBar } from "../../status/status-bar.ts";
 import { TUI } from "../../terminal/core.ts";
@@ -41,14 +47,14 @@ export function autoSaveTurn(ctx: SessionControllerCtx): void {
 	const latestTurn = turns[turns.length - 1];
 	if (latestTurn && latestTurn.isComplete) {
 		ctx.sessionStore.saveTurn(latestTurn);
-		// Update the session title from the first user message
-		if (latestTurn.userMessage?.content &&  (latestTurn.userMessage?.content || "").length > 0) {
-			const title =  (latestTurn.userMessage?.content ?? "")
-				.replace(/\n+/g, " ")
-				.slice(0, 60);
+		// Generated placeholders follow the first meaningful topic. Explicitly
+		// renamed sessions are never overwritten.
+		if (latestTurn.userMessage?.content) {
 			const current = ctx.sessionStore.getSession(ctx.currentSessionId);
-			if (current && current.title === "Untitled Session") {
-				ctx.sessionStore.renameSession(ctx.currentSessionId, title);
+			const inferred = inferSessionTitle(latestTurn.userMessage.content);
+			if (current && inferred && isGeneratedSessionTitle(current.title)) {
+				ctx.sessionStore.renameSession(ctx.currentSessionId, inferred);
+				ctx.statusPanel.update({ sessionTitle: inferred });
 			}
 		}
 	}

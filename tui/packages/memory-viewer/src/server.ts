@@ -1,8 +1,9 @@
 // @logician/memory-viewer — HTTP + WebSocket Server
 
-import type { MemoryStore } from "@logician/memory";
+import type { MemoryStore, ObservationType } from "@logician/memory";
 
 interface DashboardStats {
+	workspace: string;
 	sessions: number;
 	memories: number;
 	observations: number;
@@ -48,12 +49,22 @@ export function startViewerServer(opts: ViewerOptions): {
 
 	function getStats(): DashboardStats {
 		const sessions = store.listSessions();
-		const memories = store.list();
+		const memories = store.list({ limit: 1000 });
+		const observations = store.listRecentObservations(1000);
+		const today = new Date().toISOString().slice(0, 10);
 		const memoriesByType: Record<string, number> = {};
 		for (const m of memories) memoriesByType[m.type] = (memoriesByType[m.type] || 0) + 1;
 		const sessionsByStatus: Record<string, number> = {};
 		for (const s of sessions) sessionsByStatus[s.status] = (sessionsByStatus[s.status] || 0) + 1;
-		return { sessions: sessions.length, memories: memories.length, observations: 0, observationsToday: 0, memoriesByType, sessionsByStatus };
+		return {
+			workspace: store.getCurrentWorkspace(),
+			sessions: sessions.length,
+			memories: memories.length,
+			observations: observations.length,
+			observationsToday: observations.filter((observation) => observation.timestamp.startsWith(today)).length,
+			memoriesByType,
+			sessionsByStatus,
+		};
 	}
 
 	function checkAuth(auth: string | null): boolean {
@@ -94,16 +105,27 @@ export function startViewerServer(opts: ViewerOptions): {
 
 			if (segments[0] === "sessions" && segments.length === 2) {
 				const session = store.getSession(segments[1]);
-				if (!session) return new Response("Not found", { status: 404 });
+				if (!session || session.workspace !== store.getCurrentWorkspace()) {
+					return new Response("Not found", { status: 404 });
+				}
 				return new Response(JSON.stringify(session), { headers: { "Content-Type": "application/json" } });
 			}
 
 			if (segments[0] === "observations" && segments.length === 1) {
 				const sessionId = url.searchParams.get("sessionId");
-				const limit = parseInt(url.searchParams.get("limit") || "50");
+				const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "100"), 1), 1000);
 				const minImportance = parseInt(url.searchParams.get("minImportance") || "0");
-				const obs = sessionId ? store.listObservations(sessionId, limit) : [];
-				const filtered = obs.filter((o: any) => o.importance >= minImportance);
+				const type = url.searchParams.get("type") || undefined;
+				const search = url.searchParams.get("search")?.trim();
+				const scopedSession = sessionId ? store.getSession(sessionId) : null;
+				const obs = sessionId
+					? scopedSession?.workspace === store.getCurrentWorkspace()
+						? store.listObservations(sessionId, limit)
+						: []
+					: search
+						? store.searchObservations(search, limit).map((result) => result.observation)
+						: store.listRecentObservations(limit, type as ObservationType | undefined);
+				const filtered = obs.filter((o: any) => o.importance >= minImportance && (!type || o.type === type));
 				return new Response(JSON.stringify(filtered), { headers: { "Content-Type": "application/json" } });
 			}
 

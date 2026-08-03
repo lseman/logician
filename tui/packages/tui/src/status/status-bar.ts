@@ -161,7 +161,7 @@ export class StatusBar implements InkTextComponent {
 		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
 		insertIfFits(this.formatRtk());
-	insertIfFits(this.formatMemory());
+		insertIfFits(this.formatMemory());
 
 		let line = parts.join(separator);
 		if (visibleWidth(line) > width) {

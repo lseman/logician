@@ -2,7 +2,26 @@
 
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import type { SlashCommandsCtx } from "./context.ts";
-import type { MemoryStore } from "@logician/memory";
+import type { CompressedObservation, MemoryStore, ObservationType } from "@logician/memory";
+import { theme } from "../../rendering/transcript/semantic-markup.ts";
+
+function observationLabel(observation: CompressedObservation, index?: number): string {
+	const ordinal = index === undefined ? "" : `#${index + 1} · `;
+	const shortId = observation.id.length > 12
+		? `${observation.id.slice(0, 12)}…`
+		: observation.id;
+	return `${ordinal}${shortId} · importance ${observation.importance}/10`;
+}
+
+function compactObservationLine(observation: CompressedObservation, index: number): string {
+	const number = theme.fg("memoryCount", `#${index + 1}`);
+	const shortId = observation.id.length > 12
+		? `${observation.id.slice(0, 12)}…`
+		: observation.id;
+	const id = theme.fg("memoryId", shortId);
+	const title = observation.title || observation.narrative?.slice(0, 100) || "No title";
+	return `${number} · ${id} · importance ${observation.importance}/10 · ${observation.type} · ${observation.timestamp.slice(0, 19)} · ${title.replace(/\s+/g, " ")}`;
+}
 
 export function createLocalHandlers(
 	ctx: SlashCommandsCtx,
@@ -313,7 +332,7 @@ export function createLocalHandlers(
 			const store = ctx.bridge.getMemoryStore();
 			if (!store) return "Memory is not enabled. Set \"memory\": true in settings.";
 			const args = typeof raw === "string" ? raw : String(raw ?? "");
-			const trimmed = args.trim().toLowerCase();
+			const trimmed = args.trim();
 			const workspace = store.getCurrentWorkspace();
 			if (!trimmed) {
 				const stats = ctx.bridge.getMemoryStats();
@@ -325,10 +344,11 @@ export function createLocalHandlers(
 					`Observations: ${stats.observationCount}`,
 					stats.viewerPort ? `Viewer: :${stats.viewerPort}` : undefined,
 					"",
-					"Subcommands: list [type] | search <q> | obs <q> | stats | ws [name] | tiers | auto-tier | forget <id> | consolidate <sid> | context <sid>",
+					"Subcommands: list [type] | search <q> | obs <q> | stats | ws [name] | tiers | auto-tier | forget <id> | clean | consolidate [all|sid] | context <sid>",
 				].filter(Boolean).join("\n");
 			}
-			const [sub, ...rest] = trimmed.split(/\s+/);
+			const [rawSub, ...rest] = trimmed.split(/\s+/);
+			const sub = rawSub.toLowerCase();
 			const subArgs = rest.join(" ");
 			switch (sub) {
 				case "list": {
@@ -347,7 +367,7 @@ export function createLocalHandlers(
 						return `Current workspace: ${workspace || "(none)"}\n\nUsage: /memory ws <workspace-name>`;
 					}
 					store.setCurrentWorkspace(subArgs);
-					return `Workspace set to: ${subArgs}`;
+					return `Workspace set to: ${store.getCurrentWorkspace()}`;
 				}
 				case "search": {
 					const parts = subArgs.split(/\s+/);
@@ -366,7 +386,7 @@ export function createLocalHandlers(
 					const results = store.searchObservations(query, limit);
 					if (!results.length) return `No observations found matching "${query}"`;
 					const items = results.slice(0, limit).map(
-						(r) => `[${r.observation.importance}/10] ${r.observation.type}: ${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
+						(r, index) => `${observationLabel(r.observation, index)} · ${r.observation.type}\n${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
 					);
 					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
 				}
@@ -417,11 +437,24 @@ export function createLocalHandlers(
 					const deleted = store.remove(subArgs);
 					return deleted ? `Memory ${subArgs} deleted.` : `Memory ${subArgs} not found.`;
 				}
+				case "clean": {
+					const removed = store.clearMemories();
+					return removed
+						? `Removed ${removed} memories from ${workspace}.`
+						: `No memories to remove from ${workspace}.`;
+				}
 				case "consolidate": {
-					if (!subArgs) return "Usage: /memory consolidate <session-id>";
-					const memories = store.consolidate(subArgs);
-					if (!memories.length) return `No observations to consolidate for session ${subArgs}.`;
-					return `Consolidated ${memories.length} memories:\n${memories.map((m) => `[${m.strength}/10] ${m.content.slice(0, 100)}`).join("\n")}`;
+					const target = subArgs.trim();
+					const sessionIds = /^(?:all|folder)$/i.test(target)
+						? store.listSessions().map((session) => session.id)
+						: [target || store.getCurrentSessionId()].filter((id): id is string => Boolean(id));
+					if (!sessionIds.length) return "No active memory session for this folder.";
+					const memories = sessionIds.flatMap((sessionId) => store.consolidate(sessionId));
+					const scope = sessionIds.length > 1 || /^(?:all|folder)$/i.test(target)
+						? `folder ${workspace}`
+						: `current session ${sessionIds[0]!.slice(0, 12)}`;
+					if (!memories.length) return `No unconsolidated high-signal observations in the ${scope}.`;
+					return `Consolidated ${memories.length} memories from the ${scope}:\n${memories.map((m) => `[${m.strength}/10] ${m.title}`).join("\n")}`;
 				}
 				case "context": {
 					if (!subArgs) return "Usage: /memory context <session-id>";
@@ -441,14 +474,14 @@ export function createLocalHandlers(
 					return `Retention scores (top ${scores.length}):\n${lines.join("\n")}`;
 				}
 				default:
-					return `Unknown memory subcommand: ${sub}.\n\nUsage:\n  /memory                         Show memory stats\n  /memory list [type] [limit]     List memories\n  /memory search <query> [n]      Search memories\n  /memory obs <query> [n]         Search observations\n  /memory stats                   Detailed stats\n  /memory tiers                   Show working memory tiers\n  /memory auto-tier               Auto-classify tiers\n  /memory forget <id>             Delete memory\n  /memory consolidate <sid>       Consolidate session observations\n  /memory context <sid> [budget]  Get context for session\n  /memory retention               Show retention scores`;
+					return `Unknown memory subcommand: ${sub}.\n\nUsage:\n  /memory                         Show memory stats\n  /memory list [type] [limit]     List memories\n  /memory search <query> [n]      Search memories\n  /memory obs <query> [n]         Search observations\n  /memory stats                   Detailed stats\n  /memory tiers                   Show working memory tiers\n  /memory auto-tier               Auto-classify tiers\n  /memory forget <id>             Delete memory\n  /memory clean                   Remove memories in this folder\n  /memory consolidate             Consolidate the current session\n  /memory consolidate all         Consolidate sessions in this folder\n  /memory context <sid> [budget]  Get context for session\n  /memory retention               Show retention scores`;
 			}
 		},
 		obs: (raw: unknown) => {
 			const store = ctx.bridge.getMemoryStore();
 			if (!store) return "Memory is not enabled. Set \"memory\": true in settings.";
 			const args = typeof raw === "string" ? raw : String(raw ?? "");
-			const trimmed = args.trim().toLowerCase();
+			const trimmed = args.trim();
 			if (!trimmed) {
 				// Default: show recent observations summary
 				const sessions = store.listSessions();
@@ -459,31 +492,23 @@ export function createLocalHandlers(
 					`Workspace: ${workspace || "(none)"}`,
 					`Sessions: ${sessions.length}`,
 					"",
-					"Subcommands: list [type] [n] | search <q> [n] | stats | sessions | by-session <sid> [n]",
+					"Subcommands: list [type] [n] | search <q> [n] | stats | sessions | by-session <sid> [n] | clean",
 				].filter(Boolean).join("\n");
 			}
-			const [sub, ...rest] = trimmed.split(/\s+/);
+			const [rawSub, ...rest] = trimmed.split(/\s+/);
+			const sub = rawSub.toLowerCase();
 			const subArgs = rest.join(" ");
 			switch (sub) {
 				case "list": {
-					const parts = subArgs.split(/\s+/);
-					const type = parts[0] || undefined;
-					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 50;
-					// Get all sessions and list their observations
-					const sessions = store.listSessions();
-					const allObs: any[] = [];
-					for (const session of sessions) {
-						const obs = store.listObservations(session.id, limit);
-						for (const o of obs) {
-							if (type && o.type !== type) continue;
-							allObs.push({ ...o, sessionId: session.id });
-						}
-					}
+					const parts = subArgs ? subArgs.split(/\s+/) : [];
+					const firstIsLimit = parts[0] !== undefined && /^\d+$/.test(parts[0]);
+					const type = firstIsLimit ? undefined : parts[0] || undefined;
+					const rawLimit = firstIsLimit ? parts[0] : parts[1];
+					const limit = rawLimit ? Math.min(Math.max(Number(rawLimit), 1), 100) : 50;
+					const allObs = store.listRecentObservations(limit, type as ObservationType | undefined);
 					if (!allObs.length) return "No observations found.";
-					const items = allObs.slice(0, limit).map(
-						(o) => `[${o.importance}/10] ${o.type} | ${o.createdAt?.slice(0, 19) || o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
-					);
-					return `Showing ${items.length} of ${allObs.length} observations (type: ${type || "all"}):\n\n${items.join("\n\n---\n\n")}`;
+					const items = allObs.map(compactObservationLine);
+					return `Observations for ${store.getCurrentWorkspace()} (${items.length} recent, type: ${type || "all"}):\n${items.join("\n")}`;
 				}
 				case "search":
 				case "find": {
@@ -494,7 +519,7 @@ export function createLocalHandlers(
 					const results = store.searchObservations(query, limit);
 					if (!results.length) return `No observations found matching "${query}"`;
 					const items = results.slice(0, limit).map(
-						(r) => `[${r.observation.importance}/10] ${r.observation.type}: ${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`, 
+						(r, index) => `${observationLabel(r.observation, index)} · ${r.observation.type}\n${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
 					);
 					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
 				}
@@ -536,16 +561,25 @@ export function createLocalHandlers(
 					const sessionId = parts[0];
 					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 50;
 					const session = store.getSession(sessionId);
-					if (!session) return `Session ${sessionId} not found.`;
+					if (!session || session.workspace !== store.getCurrentWorkspace()) {
+						return `Session ${sessionId} not found in ${store.getCurrentWorkspace()}.`;
+					}
 					const obs = store.listObservations(sessionId, limit);
 					if (!obs.length) return `No observations for session ${sessionId.slice(0, 12)}`;
 					const items = obs.slice(0, limit).map(
-						(o) => `[${o.importance}/10] ${o.type} | ${o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
+						(o, index) => `${observationLabel(o, index)} · ${o.type} · ${o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
 					);
 					return `Observations for session ${sessionId.slice(0, 12)} (${obs.length} total, showing ${items.length}):\n\n${items.join("\n\n---\n\n")}`;
 				}
+				case "clean": {
+					const workspace = store.getCurrentWorkspace();
+					const removed = store.clearObservations();
+					return removed
+						? `Removed ${removed} observations from ${workspace}.`
+						: `No observations to remove from ${workspace}.`;
+				}
 				default:
-					return `Unknown obs subcommand: ${sub}.\n\nUsage:\n  /obs                           Show observation summary\n  /obs list [type] [n]           List observations by type\n  /obs search <query> [n]        Search observations\n  /obs stats                     Observation statistics\n  /obs sessions                  List sessions with observations\n  /obs by-session <sid> [n]      Observations for a specific session`;
+					return `Unknown obs subcommand: ${sub}.\n\nUsage:\n  /obs                           Show observation summary\n  /obs list [type] [n]           List observations by type\n  /obs search <query> [n]        Search observations\n  /obs stats                     Observation statistics\n  /obs sessions                  List sessions with observations\n  /obs by-session <sid> [n]      Observations for a specific session\n  /obs clean                     Remove observations in this folder`;
 			}
 		},
 		notifications: () => {
