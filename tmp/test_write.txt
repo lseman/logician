@@ -1,2 +1,0 @@
-Hello from Logician!
-Testing the write_file tool.
