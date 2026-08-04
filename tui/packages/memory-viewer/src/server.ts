@@ -79,7 +79,7 @@ export function startViewerServer(opts: ViewerOptions): {
 
 		// Favicon
 		if (path === "/favicon.svg") {
-			return new Response(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#1e1e2e" stroke="#89b4fa" stroke-width="4"/><text x="50" y="62" text-anchor="middle" fill="#89b4fa" font-size="40" font-family="monospace" font-weight="bold">M</text></svg>`, { headers: { "Content-Type": "image/svg+xml" } });
+			return new Response(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#67e8f9"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs><circle cx="50" cy="50" r="42" fill="#0e1420" stroke="url(#g)" stroke-width="5"/><text x="50" y="63" text-anchor="middle" fill="url(#g)" font-size="40" font-family="monospace" font-weight="bold">M</text></svg>`, { headers: { "Content-Type": "image/svg+xml" } });
 		}
 
 		// WebSocket upgrade

@@ -38,6 +38,25 @@ test("SlashPopup renders the active command using the theme selected color", () 
 		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/settings`));
 	});
 
+test("SlashPopup completes declared subcommands", () => {
+	const popup = new SlashPopup();
+	popup.setCommands([
+		{
+			command: "/mcp",
+			description: "Manage MCP servers",
+			dispatch: "local",
+			acceptsArgs: true,
+			subcommands: ["list", "add", "remove"],
+		},
+	]);
+
+	popup.setQuery("/mcp li");
+	popup.show();
+	assert.equal(popup.hasMatches(), true);
+	assert.equal(popup.currentCommand(), "/mcp list");
+	assert.match(popup.render(80).join("\n"), /\/mcp list/);
+});
+
 test("submitRaw establishes the command turn before running the local handler", () => {
 	const order: string[] = [];
 	const popup = new SlashPopup();

@@ -74,7 +74,7 @@ import {
 	type ReasonerConfig,
 } from "@logician/agent-capabilities/reasoning";
 import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diagnostics.ts";
-import { createMemoryGetTool } from "../tools/memory-tools.ts";
+import { createMemoryGetTool, createMemorySearchTool } from "../tools/memory-tools.ts";
 import {
 	buildPluginRuntimeEnv,
 	createHookTranscriptPath,
@@ -223,6 +223,7 @@ export class AgentCoreBridge {
 	private memoryExtractorBaseUrl?: string;
 	private memoryBackgroundTasks = new Set<Promise<void>>();
 	private memoryExtractorRequests = new Set<AbortController>();
+	private memoryShutdownController = new AbortController();
 	private memoryViewerServer: ReturnType<typeof startViewerServer> | null = null;
 	private memoryViewerPort: number = 3200;
 	private memoryViewerEnabled: boolean = true;
@@ -304,7 +305,10 @@ export class AgentCoreBridge {
 			projectTrusted: this.projectTrusted,
 			tools: opts.tools,
 			extraTools: opts.memoryEnabled !== false
-				? [createMemoryGetTool(() => this.memoryStore)]
+				? [
+					createMemorySearchTool(() => this.memoryStore),
+					createMemoryGetTool(() => this.memoryStore),
+				]
 				: [],
 			webSearch: opts.webSearch,
 			emit: (event) => this.emit(event),
@@ -479,6 +483,7 @@ export class AgentCoreBridge {
 			injectContext: this.memoryInjectContext,
 			contextBudget: this.memoryContextBudget,
 			embedder: this.memoryEmbedder,
+			shutdownSignal: this.memoryShutdownController.signal,
 			semanticExtractor: async ({ systemPrompt, userPrompt }) => {
 				// The stop hook fires before runMessage has transitioned to idle. Give
 				// the UI a short quiet window, and never compete with an active turn.
@@ -1755,6 +1760,10 @@ export class AgentCoreBridge {
 	async stop(): Promise<void> {
 		void this.cancel();
 		for (const controller of this.memoryExtractorRequests) controller.abort();
+		// Bounds the embedding warmup backfill to at most one more in-flight
+		// batch instead of letting it run to completion (up to thousands of
+		// entries on a large first run) before shutdown can proceed.
+		this.memoryShutdownController.abort();
 		await this.fireSessionEnd("shutdown");
 		await Promise.allSettled([...this.memoryBackgroundTasks]);
 		this.lspManager.close();
@@ -1774,10 +1783,11 @@ export class AgentCoreBridge {
 	/** Return full context as formatted text for /context command. */
 	getContext(): string {
 		const msgs = this.getMessages();
-		const contextTokens = this.measureContextTokens();
+		const memoryContext = this.getMemoryContextForInspection(msgs);
+		const contextTokens = this.measureContextTokens() + estimateTokens(memoryContext);
 		this.contextTokens = contextTokens;
 
-		const sourceMap = this.getContextSourceMap();
+		const sourceMap = this.getContextSourceMap(memoryContext);
 		const sourceLines = sourceMap.map(
 			(zone) =>
 				`- ${zone.name}: ~${zone.tokens} tokens${zone.detail ? ` — ${zone.detail}` : ""}`,
@@ -1823,6 +1833,13 @@ export class AgentCoreBridge {
 			lines.push("");
 		}
 
+		// Memory retrieval is a request-time system message, not persistent
+		// conversation history. Include the same synthetic block here so /context
+		// displays the effective provider payload instead of only the harness log.
+		if (memoryContext) {
+			lines.push("[SYSTEM]", memoryContext, "");
+		}
+
 		// The loop appends task state as the final system message immediately before
 		// each provider request. Mirror that ordering here so /context reflects the
 		// actual provider payload instead of presenting task state as a side panel.
@@ -1837,7 +1854,27 @@ export class AgentCoreBridge {
 		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;
 	}
 
-	getContextSourceMap(): Array<{
+	private getMemoryContextForInspection(messages: Message[]): string {
+		if (!this.memoryStore || !this.memoryInjectContext) return "";
+		const sessionId = this.memoryStore.getCurrentSessionId();
+		if (!sessionId) return "";
+		const latestPrompt = [...messages]
+			.reverse()
+			.find((message) => message.role === "user" && message.content?.trim())
+			?.content?.trim() || "";
+		const retrieval = this.currentTaskState
+			? {
+				objective: this.currentTaskState.objective || latestPrompt,
+				phase: this.currentTaskState.phase,
+				changedFiles: this.currentTaskState.changedFiles,
+				recentEvidence: this.currentTaskState.evidence.slice(-6).map((item) => item.summary),
+				toolFailures: this.currentTaskState.toolFailures,
+			}
+			: { objective: latestPrompt };
+		return this.memoryStore.getContext(sessionId, this.memoryContextBudget, retrieval);
+	}
+
+	getContextSourceMap(memoryContext: string = ""): Array<{
 		name: string;
 		tokens: number;
 		detail: string;
@@ -1861,6 +1898,11 @@ export class AgentCoreBridge {
 				name: "Tool definitions",
 				tokens: estimateChatPayloadTokens([], toolDefinitions),
 				detail: `${toolDefinitions.length} tools`,
+			},
+			{
+				name: "Retrieved memory",
+				tokens: estimateTokens(memoryContext),
+				detail: memoryContext ? "request-time compact index" : "none retrieved",
 			},
 			{
 				name: "Conversation",

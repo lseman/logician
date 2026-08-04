@@ -22,6 +22,10 @@ export type ThemeColor =
 	| "userText"
 	| "assistantText"
 	| "systemText"
+	// Transcript section labels
+	| "userLabel"
+	| "responseLabel"
+	| "reasoningLabel"
 	// Markdown
 	| "mdHeading"
 	| "mdCode"
@@ -378,6 +382,9 @@ function buildThemeFromJson(
 		"userText",
 		"assistantText",
 		"systemText",
+		"userLabel",
+		"responseLabel",
+		"reasoningLabel",
 		"mdHeading",
 		"mdCode",
 		"mdCodeBlock",
@@ -432,9 +439,15 @@ function buildThemeFromJson(
 	];
 
 	const bgKeys: ThemeBg[] = ["mdCodeBlockBg"];
+	const labelFallbacks: Partial<Record<ThemeColor, ThemeColor>> = {
+		userLabel: "accent",
+		responseLabel: "assistantText",
+		reasoningLabel: "thinkingText",
+	};
 
 	for (const key of fgKeys) {
-		const raw = (json.colors as Record<string, unknown>)[key];
+		const colors = json.colors as Record<string, unknown>;
+		const raw = colors[key] ?? colors[labelFallbacks[key] ?? ""];
 		if (raw !== undefined && raw !== null) {
 			const resolved = resolveVarRefs(raw as string | number, vars);
 			fgColors.set(key, valueToAnsi(resolved, mode, false));

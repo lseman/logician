@@ -18,7 +18,12 @@ import {
 	visibleWidth,
 } from "../../terminal/core.ts";
 import { theme } from "../../terminal/theme.ts";
-import { hasStreamingChunk, revisionText, stripThinkTags } from "./text-utils.ts";
+import {
+	hasStreamingChunk,
+	renderInline,
+	revisionText,
+	stripThinkTags,
+} from "./text-utils.ts";
 import { wrapText } from "./layout.ts";
 import { renderMarkdownLines } from "./render/markdown-table.ts";
 import { renderThinkingChunk } from "./render/thinking.ts";
@@ -41,6 +46,15 @@ interface TranscriptDisplayOptions {
 	maxRenderedLines?: number;
 }
 
+interface CompletedPrefixCache {
+	width: number;
+	styleRevision: string;
+	turns: Turn[];
+	lines: string[];
+	turnStartLines: number[];
+	toolRegions: Array<{ start: number; end: number; key: string }>;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
@@ -56,6 +70,7 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 	private _pendingScrollBottom: boolean = false;
 	private _newOutputBelow = false;
 	private contentRevision = "";
+	private completedPrefixCache: CompletedPrefixCache | null = null;
 
 	thinkingMode: ThinkingDisplayStyle;
 	toolsExpanded = false;
@@ -385,9 +400,30 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		// shows the bottom, meaning new messages are always visible even when
 		// maxRenderedLines truncates older content.
 		const emptyLine = " ".repeat(frameWidth);
-		renderedLines.push(padToWidth(emptyLine));
+		const prefixTurns = this.turns.slice(0, -1);
+		const styleRevision = this.renderStyleRevision();
+		const prefixCache = this.completedPrefixCache;
+		const canReusePrefix =
+			prefixTurns.length > 0 &&
+			prefixCache !== null &&
+			prefixCache.width === width &&
+			prefixCache.styleRevision === styleRevision &&
+			prefixCache.turns.length === prefixTurns.length &&
+			prefixCache.turns.every((turn, index) => turn === prefixTurns[index]);
+		let firstTurnToRender = 0;
+		if (canReusePrefix && prefixCache) {
+			renderedLines.push(...prefixCache.lines);
+			turnStartLines.push(...prefixCache.turnStartLines);
+			pendingToolRegions.push(...prefixCache.toolRegions);
+			firstTurnToRender = prefixTurns.length;
+		} else {
+			renderedLines.push(padToWidth(emptyLine));
+			if (!prefixTurns.every((turn) => this.isStableTurn(turn))) {
+				this.completedPrefixCache = null;
+			}
+		}
 
-		for (let ti = 0; ti < this.turns.length; ti++) {
+		for (let ti = firstTurnToRender; ti < this.turns.length; ti++) {
 			turnStartLines.push(renderedLines.length);
 			const turn = this.turns[ti];
 			if (ti > 0) renderedLines.push(padToWidth(emptyLine));
@@ -413,7 +449,7 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 				} else {
 					renderedLines.push(
 						padToWidth(
-							`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userText")}${BOLD}YOU${RESET}`,
+							`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userLabel")}${BOLD}YOU${RESET}`,
 						),
 					);
 					const colored = theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET;
@@ -454,7 +490,7 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 					if (answer) {
 						renderedLines.push(
 							padToWidth(
-								`  ${theme.fgRaw("assistantText")}${BOLD}RESPONSE${RESET}`,
+								`  ${theme.fgRaw("responseLabel")}${BOLD}RESPONSE${RESET}`,
 							),
 						);
 						const contentLines = renderMarkdownLines(
@@ -552,12 +588,24 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 								: n.level === "warn"
 									? theme.fgRaw("warning")
 									: theme.fgRaw("systemText");
+						const labelText = n.label.replace(/^\*\*(.*?)\*\*$/, "$1");
+						const noticePrefix = `${icon} NOTICE `;
+						const bodyIndent = " ".repeat(visibleWidth(noticePrefix));
+						const reasonMatch = /^(\[[^\]\n]+\])(?:\s+|$)/.exec(n.text);
+						const bodyText = reasonMatch
+							? `${theme.fg("accent", reasonMatch[1])} ${theme.fgRaw("text")}${n.text.slice(reasonMatch[0].length)}${RESET}`
+							: theme.fg("text", n.text);
 						renderedLines.push(
-							padToWidth(`${color}${icon} NOTICE${RESET} ${BOLD}${theme.fg("text", n.label)}${RESET}`),
+							padToWidth(
+								`${color}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, theme.fgRaw("text"))}${RESET}`,
+							),
 						);
-						for (const line of wrapText(n.text, Math.max(1, contentWidth))) {
+						for (const line of wrapText(
+							bodyText,
+							Math.max(1, contentWidth - visibleWidth(bodyIndent)),
+						)) {
 							renderedLines.push(
-								padToWidth(`${theme.fg("text", line)}${RESET}`),
+								padToWidth(`${bodyIndent}${line}${RESET}`),
 							);
 						}
 					}
@@ -565,6 +613,24 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 				flushContent();
 
 				// No streaming cursor — messages display as-is
+			}
+
+			// Completed historical turns never change during ordinary streaming. Keep
+			// their fully wrapped lines and hit regions so the next token only rebuilds
+			// the active turn instead of replaying the entire transcript pipeline.
+			if (
+				!canReusePrefix &&
+				ti === prefixTurns.length - 1 &&
+				prefixTurns.every((prefixTurn) => this.isStableTurn(prefixTurn))
+			) {
+				this.completedPrefixCache = {
+					width,
+					styleRevision,
+					turns: [...prefixTurns],
+					lines: [...renderedLines],
+					turnStartLines: [...turnStartLines],
+					toolRegions: pendingToolRegions.map((region) => ({ ...region })),
+				};
 			}
 		}
 
@@ -745,6 +811,23 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 			message?.isComplete ? 1 : 0,
 			chunkRevision,
 		].join("/");
+	}
+
+	private isStableTurn(turn: Turn): boolean {
+		return turn.isComplete && (turn.assistantMessage?.isComplete ?? true);
+	}
+
+	private renderStyleRevision(): string {
+		return [
+			theme.name,
+			this.thinkingMode,
+			this.toolsExpanded ? 1 : 0,
+			this.maxMessageLength,
+			this.focusedToolKey ?? "",
+			[...this.expandedToolKeys].sort().join(","),
+			[...this.expandedAgentKeys].sort().join(","),
+			[...this.expandedChildToolKeys].sort().join(","),
+		].join("|");
 	}
 
 	private _viewportHeight: number = 0;

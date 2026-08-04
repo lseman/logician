@@ -365,6 +365,37 @@ void test("/context renders the latest explicit task state", () => {
 	);
 });
 
+void test("/context renders request-time memory injection", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+		memoryDbPath: `/tmp/logician-context-memory-${process.pid}-${Date.now()}.db`,
+		memoryViewerEnabled: false,
+	});
+	const store = bridge.getMemoryStore()!;
+	const memory = store.create("Authentication retries use bounded exponential backoff", {
+		strength: 9,
+		concepts: ["authentication", "retries"],
+	});
+	store.update(memory.id, { title: "Authentication retry policy" });
+	const internal = bridge as unknown as Record<string, any>;
+	internal.harness = {
+		messages: [{ role: "user", content: "Fix authentication retries" }],
+		getMemoryPrompt: () => "",
+	};
+
+	const context = bridge.getContext();
+
+	assert.match(context, /Retrieved memory: ~\d+ tokens — request-time compact index/);
+	assert.match(context, /\[SYSTEM\]\n# Agent Context/);
+	assert.match(context, new RegExp(memory.id));
+	assert.match(context, /Authentication retry policy/);
+	assert.match(context, /Call `memory_get` once/);
+	bridge.getMemoryStore()?.close();
+});
+
 void test("matching skills are injected only for the selected turn", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

@@ -431,6 +431,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     );
     CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace
       ON memory_embeddings(workspace, dimensions, entity_kind);
+    CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recency
+      ON memory_embeddings(workspace, dimensions, updated_at DESC);
   `);
 
   // A process may exit after claiming but before acknowledging a job. Requeue
@@ -465,6 +467,30 @@ export function createMemoryStore(dbPath: string): MemoryStore {
   } catch {}
   // Create consolidated index
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_observations_consolidated ON observations(consolidated)`); } catch {}
+
+  // Enforce at most one is_latest=1 memory per (workspace, title). Without
+  // this, two concurrent consolidate() calls (e.g. the extraction worker and
+  // a direct turn-end consolidation) can both read "no existing memory with
+  // this title" before either writes, and both insert instead of one
+  // superseding the other. Existing databases may already have duplicates
+  // from before this constraint existed, so they're resolved (keep the most
+  // recently updated row as latest) before the index is created — otherwise
+  // CREATE UNIQUE INDEX would fail outright on those rows.
+  try {
+    db.exec(`
+      UPDATE memories SET is_latest = 0
+      WHERE is_latest = 1 AND id NOT IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY workspace, title ORDER BY updated_at DESC, rowid DESC
+          ) AS rn
+          FROM memories WHERE is_latest = 1
+        ) WHERE rn = 1
+      )
+    `);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_latest_title
+      ON memories(workspace, title) WHERE is_latest = 1`);
+  } catch {}
 
   // FTS5 indices are kept separate from the source tables so existing
   // databases can be upgraded in place. Triggers keep them current.
@@ -905,6 +931,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       const memoryRow = memoryStatement.get(id, currentWorkspace) as any;
       if (memoryRow) {
         const memory = rowToMemory(memoryRow);
+        trackAccess(memory.id);
         entries.set(id, {
           id,
           kind: "memory",
@@ -1363,11 +1390,23 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       .run(id, kind, sessionId || null, currentWorkspace, vector.length, JSON.stringify(vector), now());
   }
 
+  // Brute-force cosine similarity has no index to lean on, so it's bounded to
+  // the most recently embedded rows rather than the whole workspace history.
+  // This runs synchronously on every turn's context injection (once the
+  // embedder is warm), so an unbounded scan would make per-turn latency grow
+  // linearly with total memory size. Recency is a reasonable proxy here: the
+  // context-ranking pass in getContext() already privileges recent and
+  // lexically/file-matched candidates over exhaustive semantic recall, so
+  // capping the semantic candidate pool trades a small amount of recall on
+  // very old entries for bounded per-turn cost.
+  const SEMANTIC_SEARCH_SCAN_CAP = 4_000;
+
   function searchEmbeddings(vector: number[], limit: number = 40): SemanticSearchResult[] {
     if (!vector.length || vector.some((value) => !Number.isFinite(value))) return [];
     const rows = db.prepare(`SELECT entity_id, entity_kind, session_id, vector
-      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?`)
-      .all(currentWorkspace, vector.length) as Array<{
+      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
+      ORDER BY updated_at DESC LIMIT ?`)
+      .all(currentWorkspace, vector.length, SEMANTIC_SEARCH_SCAN_CAP) as Array<{
         entity_id: string; entity_kind: "observation" | "memory";
         session_id: string | null; vector: string;
       }>;
@@ -1491,35 +1530,40 @@ export function createMemoryStore(dbPath: string): MemoryStore {
         const content = allFacts.join("\n");
         const sourceIds = group.map((o) => o.id);
         const strength = Math.min(10, Math.max(1, avgStrength + 1));
-        const ts = now();
-        const existingRow = db.prepare(
-          "SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
-        ).get(currentWorkspace, title) as any;
 
-        if (existingRow) {
-          const existing = rowToMemory(existingRow);
-          const id = generateId();
-          const mergedContent = [...new Set([...existing.content.split("\n"), ...allFacts])].filter(Boolean).slice(-12).join("\n");
-          const mergedConcepts = [...new Set([...existing.concepts, ...allConcepts])].slice(0, 15);
-          const mergedFiles = [...new Set([...existing.files, ...allFiles])].slice(0, 15);
-          const mergedSessions = [...new Set([...existing.sessionIds, sessionId])];
-          const mergedSources = [...new Set([...(existing.sourceObservationIds || []), ...sourceIds])].slice(-100);
-          db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(existing.id);
-          db.prepare(`INSERT INTO memories
-              (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
-               strength, version, parent_id, related_ids, source_observation_ids, is_latest,
-               project, workspace, supersedes)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`)
-              .run(id, existing.createdAt, ts, existing.type, title, mergedContent,
-                JSON.stringify(mergedConcepts), JSON.stringify(mergedFiles), JSON.stringify(mergedSessions),
-                Math.min(10, Math.max(existing.strength, strength)), existing.version + 1, existing.id,
-                JSON.stringify(existing.relatedIds || []), JSON.stringify(mergedSources), existing.project || null,
-                currentWorkspace, JSON.stringify([existing.id]));
-          db.prepare(`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
-            VALUES (?, 'supersedes', ?, ?, 1, ?)`)
-            .run(generateId(), id, existing.id, ts);
-          memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
-        } else {
+        // Writes the group as either a fresh memory or a superseding version
+        // of `existingRow`. idx_memories_latest_title enforces at most one
+        // is_latest=1 row per (workspace, title); the caller retries this
+        // once against a fresh read if that constraint fires, which only
+        // happens when a separate process consolidates the same title
+        // between the SELECT and this INSERT (writes on this connection are
+        // already serialized by the enclosing transaction).
+        const writeMemory = (existingRow: any) => {
+          const ts = now();
+          if (existingRow) {
+            const existing = rowToMemory(existingRow);
+            const id = generateId();
+            const mergedContent = [...new Set([...existing.content.split("\n"), ...allFacts])].filter(Boolean).slice(-12).join("\n");
+            const mergedConcepts = [...new Set([...existing.concepts, ...allConcepts])].slice(0, 15);
+            const mergedFiles = [...new Set([...existing.files, ...allFiles])].slice(0, 15);
+            const mergedSessions = [...new Set([...existing.sessionIds, sessionId])];
+            const mergedSources = [...new Set([...(existing.sourceObservationIds || []), ...sourceIds])].slice(-100);
+            db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(existing.id);
+            db.prepare(`INSERT INTO memories
+                (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
+                 strength, version, parent_id, related_ids, source_observation_ids, is_latest,
+                 project, workspace, supersedes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`)
+                .run(id, existing.createdAt, ts, existing.type, title, mergedContent,
+                  JSON.stringify(mergedConcepts), JSON.stringify(mergedFiles), JSON.stringify(mergedSessions),
+                  Math.min(10, Math.max(existing.strength, strength)), existing.version + 1, existing.id,
+                  JSON.stringify(existing.relatedIds || []), JSON.stringify(mergedSources), existing.project || null,
+                  currentWorkspace, JSON.stringify([existing.id]));
+            db.prepare(`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
+              VALUES (?, 'supersedes', ?, ?, 1, ?)`)
+              .run(generateId(), id, existing.id, ts);
+            return id;
+          }
           const id = generateId();
           db.prepare(`INSERT INTO memories
             (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
@@ -1528,8 +1572,24 @@ export function createMemoryStore(dbPath: string): MemoryStore {
             .run(id, ts, ts, typeNames[dominantType] || "fact", title, content,
               JSON.stringify(allConcepts), JSON.stringify(allFiles), JSON.stringify([sessionId]),
               strength, JSON.stringify(sourceIds), currentWorkspace);
-          memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
+          return id;
+        };
+
+        const existingRow = db.prepare(
+          "SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
+        ).get(currentWorkspace, title) as any;
+
+        let newId: string;
+        try {
+          newId = writeMemory(existingRow);
+        } catch (error) {
+          if (!(error instanceof Error) || !/UNIQUE constraint failed/.test(error.message)) throw error;
+          const retryRow = db.prepare(
+            "SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
+          ).get(currentWorkspace, title) as any;
+          newId = writeMemory(retryRow);
         }
+        memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(newId)));
         usedObservationIds.push(...sourceIds);
       }
 
@@ -1559,8 +1619,21 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const fileTokens = new Set(changedFiles.flatMap((file) => [...contextTokens(file)]));
     const nowMs = Date.now();
     const estimateTokens = (text: string) => Math.ceil(text.length / 3);
-    type Candidate = ContextBlock & { id: string; score: number; compact: string; full: string; sourceKey: string };
+    type Candidate = ContextBlock & {
+      id: string;
+      score: number;
+      sourceKey: string;
+      memoryId?: string;
+    };
     const candidates: Candidate[] = [];
+    const episodicFallbackCandidates: Candidate[] = [];
+    const briefDescription = (value: string, maxLength: number = 220): string => {
+      const normalized = value.replace(/\s+/g, " ").trim();
+      if (normalized.length <= maxLength) return normalized;
+      const slice = normalized.slice(0, maxLength - 1);
+      const boundary = slice.lastIndexOf(" ");
+      return `${slice.slice(0, boundary > maxLength * 0.65 ? boundary : undefined).trimEnd()}…`;
+    };
 
     const overlapScore = (text: string): number => {
       if (!queryTokens.size) return 0;
@@ -1598,8 +1671,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
         tokens: estimateTokens(content),
         recency: nowMs,
         score: 8 + overlapScore(session.summary) * 12,
-        compact: content,
-        full: content,
         sourceKey: sessionId,
       });
     }
@@ -1655,6 +1726,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       );
     }
     for (const obs of observationPool.values()) {
+      // The active transcript already contains current-session events. Adding
+      // them again wastes context and can make stale tool output look current.
+      if (obs.sessionId === sessionId) continue;
       const isEpisode = obs.id.startsWith("episode:");
       const coveredByEpisode = !isEpisode &&
         (latestEpisodeBySession.get(obs.sessionId) || 0) >= (Date.parse(obs.timestamp) || 0);
@@ -1664,42 +1738,37 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       const body = `${obs.title} ${obs.narrative} ${(obs.facts || []).join(" ")} ${(obs.concepts || []).join(" ")}`;
       const relevance = overlapScore(body);
       const files = fileScore(obs.files, body);
-      const sameSession = obs.sessionId === sessionId ? 1 : 0;
       const score =
         relevance * 18 +
         files * 10 +
         phaseScore(obs.type) * 3 +
         (obs.importance / 10) * 4 +
         recencyScore(obs.timestamp) * 2 +
-        sameSession * 2 +
         (isEpisode ? 5 : 0) +
         rrfBoost(lexicalObservationRank.get(obs.id), 12) +
         rrfBoost(semanticObservationRank.get(obs.id), 10);
-      if (
-        queryTokens.size &&
-        relevance === 0 &&
-        files === 0 &&
-        !semanticObservationRank.has(obs.id) &&
-        !(sameSession && obs.importance >= 7 && phaseScore(obs.type) > 0)
-      ) continue;
-      const label = sameSession ? "Current-session evidence" : "Prior observation";
+      // Episodic evidence is a fallback, not a peer of durable memory. Without
+      // a task/file/semantic match, raw observations stay available through
+      // memory_get and explicit observation search instead of entering every
+      // prompt.
+      if (!queryTokens.size || (relevance === 0 && files === 0 && !semanticObservationRank.has(obs.id))) continue;
+      const label = isEpisode ? "Prior episode" : "Prior observation";
       const fileLabel = obs.files.length ? ` · ${obs.files.slice(0, 3).join(", ")}` : "";
-      const compact = `- [${obs.id}] ${obs.type} ${obs.title}${fileLabel}`;
-      const full = `## ${label} [${obs.id}] [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 600)}`;
-      candidates.push({
+      const description = briefDescription([obs.narrative, ...(obs.facts || [])].filter(Boolean).join(" "));
+      const content = `- [${obs.id}] ${label} · ${obs.type} · ${obs.title}${description ? ` — ${description}` : ""}${fileLabel}`;
+      episodicFallbackCandidates.push({
         id: `observation:${obs.id}`,
         type: "observation",
-        content: compact,
-        tokens: estimateTokens(compact),
+        content,
+        tokens: estimateTokens(content),
         recency: Date.parse(obs.timestamp),
         score,
-        compact,
-        full,
         sourceKey: obs.sessionId,
       });
     }
 
     const memoryPool = new Map<string, Memory>();
+    let memoryCandidateCount = 0;
     list({ limit: 50, minStrength: 4 }).forEach((memory) => memoryPool.set(memory.id, memory));
     lexicalMemories.forEach((row) => memoryPool.set(row.id, rowToMemory(row)));
     for (const result of semanticResults) {
@@ -1715,13 +1784,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       if (queryTokens.size && relevance === 0 && files === 0 && !semanticMemoryRank.has(mem.id)) continue;
       const sources = mem.sourceObservationIds?.length || 0;
       const fileLabel = mem.files.length ? ` · ${mem.files.slice(0, 3).join(", ")}` : "";
-      const compact = `- [${mem.id}] ${mem.type} ${mem.title}${fileLabel}`;
-      const full = `## Folder memory [${mem.id}] [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 700)}${sources ? `\n\nSources: ${sources} observations` : ""}`;
+      const description = briefDescription(mem.content);
+      const sourceLabel = sources ? ` · ${sources} sources` : "";
+      const content = `- [${mem.id}] Memory · ${mem.type} · ${mem.title}${description ? ` — ${description}` : ""}${fileLabel}${sourceLabel}`;
       candidates.push({
         id: `memory:${mem.id}`,
         type: "memory",
-        content: compact,
-        tokens: estimateTokens(compact),
+        content,
+        tokens: estimateTokens(content),
         recency: Date.parse(mem.updatedAt),
         score:
           relevance * 20 +
@@ -1731,10 +1801,20 @@ export function createMemoryStore(dbPath: string): MemoryStore {
           recencyScore(mem.updatedAt) +
           rrfBoost(lexicalMemoryRank.get(mem.id), 14) +
           rrfBoost(semanticMemoryRank.get(mem.id), 12),
-        compact,
-        full,
         sourceKey: mem.sessionIds[0] || `memory:${mem.type}`,
+        memoryId: mem.id,
       });
+      memoryCandidateCount++;
+    }
+
+    // Prefer consolidated semantic memory. Only when retrieval finds no
+    // relevant durable memory do we surface a small amount of prior episodic
+    // evidence, which the agent can expand by stable ID if needed.
+    if (memoryCandidateCount === 0) {
+      episodicFallbackCandidates
+        .sort((a, b) => b.score - a.score || b.recency - a.recency)
+        .slice(0, 3)
+        .forEach((candidate) => candidates.push(candidate));
     }
 
     candidates.sort((a, b) =>
@@ -1759,19 +1839,24 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const blocks: Candidate[] = [];
     let tokenCount = 0;
     for (const candidate of diversified) {
+      if (blocks.length >= 40) break;
       if (blocks.some((block) => block.id === candidate.id)) continue;
-      const content = blocks.length < 3 ? candidate.full : candidate.compact;
-      const tokens = estimateTokens(content);
-      if (tokenCount + tokens > budget) continue;
-      blocks.push({ ...candidate, content, tokens });
-      tokenCount += tokens;
+      if (tokenCount + candidate.tokens > budget) continue;
+      blocks.push(candidate);
+      tokenCount += candidate.tokens;
     }
     if (!blocks.length) return "";
+    for (const memoryId of new Set(blocks.flatMap((block) => block.memoryId ? [block.memoryId] : []))) {
+      trackAccess(memoryId);
+    }
 
+    const includesEpisodicFallback = blocks.some((block) => block.type === "observation");
+    const retrievalMode = includesEpisodicFallback ? "episodic fallback" : "semantic memory";
     const retrievalNote = objective
-      ? `_Task-aware retrieval: ${phase}; hybrid; ${blocks.length} items; ~${tokenCount}/${budget} tokens. Full detail is shown for the top 3; remaining IDs are compact indexes._`
-      : `_Hybrid context retrieval: ${blocks.length} items; ~${tokenCount}/${budget} tokens. Full detail is shown for the top 3; remaining IDs are compact indexes._`;
-    return `# Agent Context\n\n${retrievalNote}\n\n${blocks.map((block) => block.content).join("\n\n---\n\n")}\n`;
+      ? `_Task-aware retrieval: ${phase}; ${retrievalMode} compact index; ${blocks.length} items; ~${tokenCount}/${budget} tokens._`
+      : `_Semantic memory compact index: ${blocks.length} items; ~${tokenCount}/${budget} tokens._`;
+    const expansionNote = "Each bracketed value is a stable ID. These entries are summaries, not complete records. Call `memory_get` once with the relevant IDs when full rationale, evidence, or details are needed.";
+    return `# Agent Context\n\n${retrievalNote}\n\n${expansionNote}\n\n${blocks.map((block) => block.content).join("\n")}\n`;
   }
 
   function contextTokens(value: string): Set<string> {

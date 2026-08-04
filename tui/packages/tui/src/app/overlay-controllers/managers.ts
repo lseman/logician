@@ -8,6 +8,12 @@ import type { OverlayHandlersCtx } from "./context.ts";
 
 export async function openPluginManager(ctx: OverlayHandlersCtx): Promise<void> {
 	ctx.statusPanel.update({ phase: "plugins" });
+	// Show the popup immediately with a loading message rather than waiting on
+	// the disk-scanning snapshot fetch below — otherwise Enter appears to do
+	// nothing until the async round-trip resolves.
+	ctx.pluginManager.setMessage("Loading plugins...");
+	ctx.pluginManager.show();
+	ctx.tui.requestRender();
 	try {
 		const snapshot = await ctx.bridge.getPluginSnapshot();
 		ctx.pluginManager.setSnapshot({
@@ -18,9 +24,8 @@ export async function openPluginManager(ctx: OverlayHandlersCtx): Promise<void> 
 		ctx.pluginManager.setMessage(
 			"Space toggles enabled state in the Claude plugin registry.",
 		);
-		ctx.pluginManager.show();
 	} catch (e: unknown) {
-		ctx.transcript.addSystemMessage(
+		ctx.pluginManager.setMessage(
 			`Plugins error: ${e instanceof Error ? e.message : String(e)}`,
 		);
 	} finally {
@@ -80,6 +85,12 @@ export function handlePluginManagerAction(
 
 export async function openMcpManager(ctx: OverlayHandlersCtx): Promise<void> {
 	ctx.statusPanel.update({ phase: "mcp" });
+	// Show the popup immediately with a loading message rather than waiting on
+	// the snapshot fetch below — otherwise Enter appears to do nothing until
+	// the async round-trip resolves.
+	ctx.mcpManager.setMessage("Loading MCP servers...");
+	ctx.mcpManager.show();
+	ctx.tui.requestRender();
 	try {
 		const snapshot = await ctx.bridge.getMcpSnapshot();
 		ctx.mcpManager.setSnapshot({
@@ -98,9 +109,8 @@ export async function openMcpManager(ctx: OverlayHandlersCtx): Promise<void> {
 		ctx.mcpManager.setMessage(
 			"Space toggles enabled state in the MCP config file.",
 		);
-		ctx.mcpManager.show();
 	} catch (e: unknown) {
-		ctx.transcript.addSystemMessage(
+		ctx.mcpManager.setMessage(
 			`MCP error: ${e instanceof Error ? e.message : String(e)}`,
 		);
 	} finally {

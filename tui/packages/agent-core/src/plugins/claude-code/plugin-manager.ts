@@ -109,30 +109,32 @@ export class TsPluginManager {
 	}
 
 	async listPlugins(): Promise<PluginCommandResult> {
-		const rows = [];
-		for (const [pluginId, inst] of await this.allInstalls()) {
-			const [name, marketplace = ""] = pluginId.split("@");
-			const onDisk = await isDir(inst.installPath || "");
-			const skillCount = onDisk
-				? await childDirNames(path.join(inst.installPath, "skills")).then(
-						(d) => d.length,
-					)
-				: 0;
-			rows.push({
-				plugin_id: pluginId,
-				name,
-				marketplace,
-				version: inst.version || "unknown",
-				scope: inst.scope || "user",
-				enabled: this.isEnabled(inst),
-				install_path: inst.installPath || "",
-				sha: (inst.gitCommitSha || "").slice(0, 12),
-				installed_at: inst.installedAt || "",
-				last_updated: inst.lastUpdated || "",
-				on_disk: onDisk,
-				skill_count: skillCount,
-			});
-		}
+		const installs = await this.allInstalls();
+		const rows = await Promise.all(
+			installs.map(async ([pluginId, inst]) => {
+				const [name, marketplace = ""] = pluginId.split("@");
+				const onDisk = await isDir(inst.installPath || "");
+				const skillCount = onDisk
+					? await childDirNames(path.join(inst.installPath, "skills")).then(
+							(d) => d.length,
+						)
+					: 0;
+				return {
+					plugin_id: pluginId,
+					name,
+					marketplace,
+					version: inst.version || "unknown",
+					scope: inst.scope || "user",
+					enabled: this.isEnabled(inst),
+					install_path: inst.installPath || "",
+					sha: (inst.gitCommitSha || "").slice(0, 12),
+					installed_at: inst.installedAt || "",
+					last_updated: inst.lastUpdated || "",
+					on_disk: onDisk,
+					skill_count: skillCount,
+				};
+			}),
+		);
 		return { status: "ok", plugins: rows, plugins_dir: this.pluginsDir };
 	}
 
@@ -388,16 +390,19 @@ export class TsPluginManager {
 	}
 
 	async sessionStartHookCounts(): Promise<Record<string, number>> {
+		const installs = await this.allInstalls();
 		const counts: Record<string, number> = {};
-		for (const [pluginId, inst] of await this.allInstalls()) {
-			if (!this.isEnabled(inst)) {
-				counts[pluginId] = 0;
-				continue;
-			}
-			counts[pluginId] = (
-				await loadPluginHooks(inst.installPath, pluginId)
-			).filter((h) => h.eventType === "SessionStart").length;
-		}
+		await Promise.all(
+			installs.map(async ([pluginId, inst]) => {
+				if (!this.isEnabled(inst)) {
+					counts[pluginId] = 0;
+					return;
+				}
+				counts[pluginId] = (
+					await loadPluginHooks(inst.installPath, pluginId)
+				).filter((h) => h.eventType === "SessionStart").length;
+			}),
+		);
 		return counts;
 	}
 

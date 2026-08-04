@@ -76,7 +76,7 @@ export class SlashPopup implements Component {
 
 	/** Prepare rendering state: groups commands by category or filters by query. */
 	private _prepareRenderState(): RenderState {
-		const filtered = filterSlashCommands(this.commands, this.query);
+		const filtered = this._getFiltered();
 		const isFiltered = this.query.length > 1;
 
 		if (isFiltered) {
@@ -250,6 +250,22 @@ export class SlashPopup implements Component {
 	}
 
 	private _getFiltered(): SlashCommandDef[] {
+		const subcommandMatch = this.query.match(/^(\/\S+)\s+(.*)$/);
+		if (subcommandMatch) {
+			const [, commandName = "", fragment = ""] = subcommandMatch;
+			const parent = this.commands.find(
+				(command) => command.command.toLowerCase() === commandName.toLowerCase(),
+			);
+			if (!parent?.subcommands) return [];
+			const normalizedFragment = fragment.toLowerCase();
+			return parent.subcommands
+				.filter((subcommand) => subcommand.toLowerCase().startsWith(normalizedFragment))
+				.map((subcommand) => ({
+					...parent,
+					command: `${parent.command} ${subcommand}`,
+					description: `${subcommand} — ${parent.description}`,
+				}));
+		}
 		return filterSlashCommands(this.commands, this.query);
 	}
 

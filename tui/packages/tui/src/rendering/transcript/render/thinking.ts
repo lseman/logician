@@ -31,18 +31,18 @@ export function renderThinkingChunk(
 		case "collapsed": {
 			const preview = text.trim().slice(0, 100);
 			lines.push(
-				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} ${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`,
+				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} ${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`,
 			);
 			break;
 		}
 		case "summary": {
 			lines.push(
-				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
+				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
 			);
 			break;
 		}
 		case "expanded": {
-			lines.push(`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET}`);
+			lines.push(`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET}`);
 			renderThinkingExpanded(text, lines, currentWidth);
 			break;
 		}

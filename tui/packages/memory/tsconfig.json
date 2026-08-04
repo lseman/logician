@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["node"],
+    "types": ["node", "bun-types"],
     "composite": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,

@@ -221,8 +221,12 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 				if (cmd && ctx.inputBar.valueText.trim() !== cmd) {
 					// If the typed text isn't already an exact command, accept the
 					// highlighted one (carrying over any args the user typed).
-					const typedArgs = ctx.inputBar.valueText.replace(/^\/\S*\s*/, "");
-					ctx.inputBar.valueText = typedArgs ? `${cmd} ${typedArgs}` : cmd;
+					if (/^\/\S+\s+\S+/.test(cmd)) {
+						ctx.inputBar.valueText = cmd;
+					} else {
+						const typedArgs = ctx.inputBar.valueText.replace(/^\/\S*\s*/, "");
+						ctx.inputBar.valueText = typedArgs ? `${cmd} ${typedArgs}` : cmd;
+					}
 				}
 				ctx.slashPopup.hide();
 				// Fall through to the input bar so it submits the value.
@@ -369,10 +373,10 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 	});
 
 	// Live slash autocomplete: show/hide + filter the popup as the input text
-	// changes. The popup only appears while the line begins with "/" and has no
-	// space yet (i.e. the user is still picking a command, not typing args).
+	// changes. Commands with declared subcommands continue offering matches after
+	// the first space (for example, `/mcp li` offers `/mcp list`).
 	ctx.inputBar.onChange = (text: string) => {
-		const isCommandPrefix = text.startsWith("/") && !text.includes(" ");
+		const isCommandPrefix = text.startsWith("/");
 		if (isCommandPrefix) {
 			ctx.slashPopup.setQuery(text);
 			if (ctx.slashPopup.hasMatches()) {

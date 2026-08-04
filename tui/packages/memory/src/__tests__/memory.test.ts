@@ -615,7 +615,7 @@ describe("getContext", () => {
     store.close();
   });
 
-  test("uses compact index cards after the top three detailed results", () => {
+  test("injects only compact summaries with stable IDs and expansion guidance", () => {
     const store = createMemoryStore(dbPath());
     store.setCurrentWorkspace("/workspace");
     for (let index = 0; index < 6; index++) {
@@ -626,10 +626,26 @@ describe("getContext", () => {
       store.update(memory.id, { title: `Parser convention ${index}` });
     }
     const context = store.getContext("new-session", 4000, "parser delimiter convention");
-    assert.match(context, /remaining IDs are compact indexes/);
-    assert.match(context, /\[[0-9a-f-]{36}\] fact Parser convention/);
-    const fullDetails = context.match(/FULL_DETAIL_\d/g) || [];
-    assert.equal(fullDetails.length, 3);
+    assert.match(context, /semantic memory compact index/);
+    assert.match(context, /\[[0-9a-f-]{36}\] Memory · fact · Parser convention/);
+    assert.match(context, /Call `memory_get` once with the relevant IDs/);
+    assert.equal((context.match(/FULL_DETAIL_\d/g) || []).length, 6);
+    store.close();
+  });
+
+  test("truncates injected descriptions while preserving complete memory by ID", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    const uniqueTail = "COMPLETE_ONLY_AFTER_EXPANSION";
+    const memory = store.create(`Important parser rationale ${"supporting detail ".repeat(30)}${uniqueTail}`, {
+      strength: 9,
+      concepts: ["parser"],
+    });
+    store.update(memory.id, { title: "Parser rationale" });
+    const context = store.getContext("new-session", 4000, "parser rationale");
+    assert.match(context, new RegExp(memory.id));
+    assert.doesNotMatch(context, new RegExp(uniqueTail));
+    assert.match(store.expandEntries([memory.id])[0]!.content, new RegExp(uniqueTail));
     store.close();
   });
 
@@ -698,7 +714,7 @@ describe("getContext", () => {
     store.close();
   });
 
-  test("includes high-importance observations", () => {
+  test("does not reinject current-session observations", () => {
     const store = createMemoryStore(dbPath());
     store.createSession("sess-1", { project: "test" });
 
@@ -712,7 +728,28 @@ describe("getContext", () => {
     });
 
     const ctx = store.getContext("sess-1");
-    assert.ok(ctx.includes("authentication failed") || ctx.includes("Error"));
+    assert.doesNotMatch(ctx, /authentication failed/);
+
+    store.close();
+  });
+
+  test("prefers durable memory over matching prior observations", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.createSession("prior", { cwd: "/workspace", workspace: "/workspace" });
+    store.observe({
+      id: "raw-auth", sessionId: "prior", timestamp: new Date().toISOString(),
+      hookType: "post_tool_failure", toolOutput: "Raw authentication retry telemetry",
+      raw: { tool_name: "auth", error: "Raw authentication retry telemetry" },
+    });
+    store.create("Authentication retries use exponential backoff", {
+      strength: 8,
+      concepts: ["authentication", "retry"],
+    });
+
+    const ctx = store.getContext("new-session", 4000, "authentication retry");
+    assert.match(ctx, /exponential backoff/);
+    assert.doesNotMatch(ctx, /Raw authentication retry telemetry/);
 
     store.close();
   });
@@ -743,6 +780,7 @@ describe("memory expansion", () => {
     const expanded = store.expandEntries([memory.id, observation.id, hidden.id]);
     assert.deepEqual(expanded.map((entry) => entry.id), [memory.id, observation.id]);
     assert.deepEqual(expanded.map((entry) => entry.kind), ["memory", "observation"]);
+    assert.equal(store.getAccessStats(memory.id)?.accessCount, 1);
     store.close();
   });
 });

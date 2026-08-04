@@ -43,6 +43,8 @@ export interface SlashCommandDef {
 	category?: SlashCommandCategory;
 	/** Usage examples (shown in popup when command selected). */
 	examples?: string[];
+	/** Literal first-level subcommands offered by inline autocomplete. */
+	subcommands?: string[];
 	/** Source attribution (builtin / extension / skill). */
 	source?: SlashCommandSource;
 	handler?: (args: string) => string | undefined;
@@ -222,6 +224,7 @@ export function createSlashCommands(
 				category: "context",
 				argHint: "[list | search <query>]",
 				examples: ["/memory", "/memory list", "/memory search auth"],
+				subcommands: ["list", "search", "obs", "stats", "tiers", "auto-tier", "forget", "clean", "consolidate", "context", "retention"],
 			},
 			(args) => String(localHandlers.memory?.(args as any) ?? ''),
 		),
@@ -242,6 +245,7 @@ export function createSlashCommands(
 					"/obs sessions",
 					"/obs by-session sess-abc123 50",
 				],
+				subcommands: ["list", "search", "stats", "sessions", "by-session", "clean"],
 			},
 			(args) => String(localHandlers.obs?.(args as any) ?? ''),
 		),
@@ -268,16 +272,19 @@ export function createSlashCommands(
 			category: "skills",
 			argHint: "[list|install|remove]",
 			examples: ["/plugins", "/plugins install my-ext"],
+			subcommands: ["list", "install", "remove"],
 		}),
 		cmd("/mcp", "Manage MCP servers", "local", true, {
 			category: "skills",
 			argHint: "[list|add|remove]",
 			examples: ["/mcp", "/mcp add http://localhost:3000"],
+			subcommands: ["list", "add", "remove"],
 		}),
 		cmd("/theme", "Select a color theme", "local", true, {
 			category: "display",
 			argHint: "<theme>",
 			examples: ["/theme dark", "/theme github-dark", "/theme light"],
+			subcommands: ["list", "dark", "github-dark", "light"],
 		}),
 		cmd(
 			"/model",
@@ -296,6 +303,7 @@ export function createSlashCommands(
 			category: "reasoning",
 			argHint: "<mode>",
 			examples: ["/reasoner none", "/reasoner tot", "/reasoner reflexion"],
+			subcommands: ["list", "none", "tot", "reflexion", "ssr", "auto-cot", "best-of-n", "self-consistency", "got", "cover"],
 		}),
 		cmd(
 			"/eoh",
@@ -311,6 +319,7 @@ export function createSlashCommands(
 					"/eoh status",
 					"/eoh stop",
 				],
+				subcommands: ["status", "stop", "best", "reset"],
 			},
 			(args: string) =>
 				String(localHandlers.eoh?.(args) ?? "EoH unavailable."),
@@ -326,6 +335,7 @@ export function createSlashCommands(
 				category: "display",
 				argHint: "<level>",
 				examples: ["/thinking off", "/thinking high", "/thinking xhigh"],
+				subcommands: ["off", "low", "medium", "high", "xhigh"],
 			},
 			(args: string) => {
 				const level = args.trim().toLowerCase();
@@ -357,6 +367,7 @@ export function createSlashCommands(
 				category: "display",
 				argHint: "<mode>",
 				examples: ["/thinking-steps collapsed", "/thinking-steps expanded"],
+				subcommands: ["collapsed", "summary", "expanded"],
 			},
 			(args: string) => {
 				const mode = args.trim().toLowerCase();
@@ -400,6 +411,7 @@ export function createSlashCommands(
 				category: "permissions",
 				argHint: "<mode>",
 				examples: ["/permissions acceptAll", "/permissions ask"],
+				subcommands: ["acceptAll", "acceptEdits", "ask", "plan"],
 			},
 			(args: string) => {
 				const valid = ["acceptAll", "acceptEdits", "ask", "plan"];
@@ -538,6 +550,7 @@ export function createSlashCommands(
 					"/sandbox profile code",
 					"/sandbox status",
 				],
+				subcommands: ["status", "profile", "none", "code", "file", "dev", "full"],
 			},
 		),
 		cmd(
@@ -597,6 +610,18 @@ export function createSlashCommands(
 					"/settings guards on",
 					"/settings compaction on",
 					"/settings permissions ask",
+				],
+				subcommands: [
+					"thinking",
+					"model",
+					"model-cycle",
+					"temp",
+					"max-tokens",
+					"max-iterations",
+					"loop-detection",
+					"guards",
+					"compaction",
+					"permissions",
 				],
 			},
 			(args) => {

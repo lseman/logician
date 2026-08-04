@@ -103,9 +103,9 @@ Semantic retrieval is optional and disabled by default. Enable it alongside memo
 
 The quantized embedding model loads lazily and is cached by the local Transformers runtime. Its first enablement may download model files. Logician continues using fast SQLite FTS retrieval while the model warms, then fuses lexical and semantic ranks without requiring a separate vector service. New episodes and consolidated memories are embedded in the background.
 
-Retrieved context initially includes full detail for only the strongest matches. The agent can call the read-only `memory_get` tool with up to 20 displayed memory or observation IDs when it needs the complete evidence, keeping routine prompts smaller.
+Retrieved context injects compact summaries of relevant durable memories. The agent can call the read-only `memory_get` tool with up to 20 displayed memory or observation IDs when it needs complete rationale or evidence, keeping routine prompts smaller.
 
-Memory retrieval uses FTS5 candidate generation across both observations and durable memories, reciprocal-rank fusion with task/file/phase signals, and session diversification. The three highest-ranked items are injected with details; additional results use compact ID-index cards to preserve the context budget.
+Memory retrieval searches both durable memories and the episodic observation store, using reciprocal-rank fusion with task, file, phase, recency, and semantic signals. Durable memories are injected by default. Current-session observations are never reinjected because they already exist in the active transcript; up to three strongly relevant prior observations are used only when no durable memory answers the retrieval query. Every injected entry is a compact stable-ID card that can be expanded with `memory_get`.
 
 ## Runtime settings
 

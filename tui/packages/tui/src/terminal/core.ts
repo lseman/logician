@@ -244,8 +244,9 @@ import process from "node:process";
 
 export class TUI extends Container {
 	private renderRequested = false;
+	private renderImmediateRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
-	private lastRenderAt = 0;
+	private lastRenderFinishedAt = 0;
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private started = false;
 	private stopped = false;
@@ -401,7 +402,9 @@ export class TUI extends Container {
 		this.stdinHandler = (data: string | Buffer) => {
 			const str = Buffer.isBuffer(data) ? data.toString("utf-8") : data;
 			this.handleInput(normalizeKeyboardInput(str));
-			this.requestRender();
+			// Composer/navigation feedback should not wait behind the streaming frame
+			// budget. Upgrade any already-scheduled render to an immediate frame.
+			this.requestRender(false, true);
 		};
 		process.stdin.on("data", this.stdinHandler);
 
@@ -454,7 +457,7 @@ export class TUI extends Container {
 		process.stdin.pause();
 	}
 
-	requestRender(force = false): void {
+	requestRender(force = false, immediate = false): void {
 		// Defer renders until we've entered the alternate screen buffer.
 		// RequestRender during construction would output to stdout before
 		// alt-screen + clear, overlapping with startup theme text.
@@ -465,21 +468,35 @@ export class TUI extends Container {
 			this.previousCursorCol = -1;
 			this.previousCursorVisible = null;
 		}
-		if (this.renderRequested) return;
+		if (immediate) this.renderImmediateRequested = true;
+		if (this.renderRequested) {
+			if (immediate && this.renderTimer) {
+				clearTimeout(this.renderTimer);
+				this.renderTimer = null;
+				process.nextTick(() => this.scheduleRender());
+			}
+			return;
+		}
 		this.renderRequested = true;
 		process.nextTick(() => this.scheduleRender());
 	}
 
 	private scheduleRender(): void {
 		if (this.stopped || this.renderTimer || !this.renderRequested) return;
-		const elapsed = Date.now() - this.lastRenderAt;
-		const delay = Math.max(0, TUI.MIN_RENDER_INTERVAL_MS - elapsed);
+		// Pace from the end of the previous frame. Measuring from frame start made
+		// expensive streaming frames schedule their successor immediately, creating
+		// bursts of layout work and terminal writes that could starve input handling.
+		const elapsed = performance.now() - this.lastRenderFinishedAt;
+		const delay = this.renderImmediateRequested
+			? 0
+			: Math.max(0, TUI.MIN_RENDER_INTERVAL_MS - elapsed);
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = null;
 			if (this.stopped || !this.renderRequested) return;
 			this.renderRequested = false;
-			this.lastRenderAt = Date.now();
+			this.renderImmediateRequested = false;
 			this.doRender();
+			this.lastRenderFinishedAt = performance.now();
 			if (this.renderRequested) this.scheduleRender();
 		}, delay);
 	}

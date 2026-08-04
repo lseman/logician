@@ -60,11 +60,13 @@ export async function runPluginBackend(
 	const manager = new TsPluginManager({ env: pluginRuntimeEnv });
 	try {
 		switch (action) {
-			case "list":
-				return {
-					...(await manager.listPlugins()),
-					session_start_hooks: await manager.sessionStartHookCounts(),
-				};
+			case "list": {
+				const [listResult, sessionStartHooks] = await Promise.all([
+					manager.listPlugins(),
+					manager.sessionStartHookCounts(),
+				]);
+				return { ...listResult, session_start_hooks: sessionStartHooks };
+			}
 			case "enable":
 			case "disable": {
 				if (!args[0]) throw new Error(`usage: /plugins ${action} <plugin>`);

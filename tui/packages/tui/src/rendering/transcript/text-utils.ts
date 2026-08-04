@@ -131,6 +131,7 @@ export function matchTagAt(text: string, i: number): number {
 }
 
 export function renderInline(text: string, baseColor: string): string {
+	text = decodeInlineDisplayEscapes(text);
 	let out = baseColor;
 	let i = 0;
 	while (i < text.length) {
@@ -196,6 +197,32 @@ export function renderInline(text: string, baseColor: string): string {
 		i++;
 	}
 	return out + RESET;
+}
+
+function decodeInlineDisplayEscapes(text: string): string {
+	return text
+		.replace(
+			/&(?:quot|apos|amp|lt|gt|#\d+|#x[\da-f]+);/gi,
+			(entity) => decodeXmlEntity(entity.slice(1, -1)) ?? entity,
+		)
+		.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, "$1");
+}
+
+function decodeXmlEntity(entity: string): string | null {
+	const named: Record<string, string> = {
+		quot: '"',
+		apos: "'",
+		amp: "&",
+		lt: "<",
+		gt: ">",
+	};
+	const normalized = entity.toLowerCase();
+	if (normalized in named) return named[normalized];
+	const radix = normalized.startsWith("#x") ? 16 : 10;
+	const rawCodePoint = normalized.slice(radix === 16 ? 2 : 1);
+	const codePoint = Number.parseInt(rawCodePoint, radix);
+	if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return null;
+	return String.fromCodePoint(codePoint);
 }
 
 // ── Block-level markdown ──────────────────────────────────────────────────────

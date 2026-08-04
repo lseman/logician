@@ -7,7 +7,7 @@ import { SteerQueue } from "../status/steer-queue.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { CURSOR_MARKER, visibleWidth } from "../terminal/core.ts";
-import { initTheme } from "../terminal/theme.ts";
+import { initTheme, theme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
@@ -52,6 +52,7 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 	const output = plain(lines.join("\n"));
 
 	assert.match(output, /› YOU/);
+	assert.ok(lines.some((line) => line.includes(`${theme.fgRaw("userLabel")}\x1b[1mYOU`)));
 	assert.doesNotMatch(output, /╭─|╰─/);
 	assert.match(output, /◆ LOGICIAN/);
 	assert.match(output, /✓ read_file done/);
@@ -164,6 +165,54 @@ void test("growing tool streams sanitize only the appended suffix", () => {
 	const scanned =
 		display.getSanitizationMetrics().scannedCharacters - before;
 	assert.equal(scanned, 1);
+});
+
+void test("streaming updates reuse the rendered completed-turn prefix", () => {
+	const display = new TranscriptDisplay();
+	display.setToolsExpanded(true);
+	const completed: Turn = {
+		id: "completed-prefix",
+		userMessage: { type: "user", content: "Run once." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [{
+				seq: 0,
+				type: "tool",
+				tool: {
+					tool: "bash",
+					tool_name: "bash",
+					args: { command: "build" },
+					result: "completed output",
+					isComplete: true,
+					isError: false,
+				},
+				isComplete: true,
+			}],
+		},
+		isComplete: true,
+	};
+	const streaming: Turn = {
+		id: "active-turn",
+		userMessage: { type: "user", content: "Explain it." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{ seq: 0, type: "content", contentText: "First", isComplete: false }],
+		},
+		isComplete: false,
+	};
+	const turns = [completed, streaming];
+	display.setTurns(turns);
+	display.render(100);
+	const cacheHitsAfterFirstFrame = display.getSanitizationMetrics().cacheHits;
+
+	streaming.assistantMessage!.chunks[0].contentText = "First second";
+	display.setTurns(turns);
+	const output = plain(display.render(100).join("\n"));
+
+	assert.match(output, /First second/);
+	assert.equal(display.getSanitizationMetrics().cacheHits, cacheHitsAfterFirstFrame);
 });
 
 void test("clicking a tool card toggles only that tool's details", () => {
@@ -496,7 +545,36 @@ void test("notices render their heading and message on separate themed lines", (
 	const heading = lines.findIndex((line) => line.includes("⚠ NOTICE Run needs input"));
 	assert.ok(heading >= 0);
 	assert.equal(lines[heading].includes("Agent is waiting"), false);
-	assert.match(lines[heading + 1], /Agent is waiting for the user's answer\./);
+	assert.match(lines[heading + 1], /^\s{9}Agent is waiting for the user's answer\./);
+});
+
+void test("notice reasons use a distinct color and align beneath the label", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([{
+		id: "notice-reason",
+		userMessage: { type: "user", content: "Continue" },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [{
+				seq: 0,
+				type: "notice",
+				notice: {
+					level: "warn",
+					label: "**Guard: continuation\\_nudge**",
+					text: "[continuation-nudge:structured-conclusion] Do not stop yet.",
+				},
+				isComplete: true,
+			}],
+		},
+		isComplete: false,
+	}]);
+
+	const lines = display.render(100);
+	const heading = lines.findIndex((line) => plain(line).includes("⚠ NOTICE Guard: continuation_nudge"));
+	assert.ok(heading >= 0);
+	assert.match(plain(lines[heading + 1]), /^\s{9}\[continuation-nudge:structured-conclusion\] Do not stop yet\./);
+	assert.ok(lines[heading + 1].includes(`${theme.fgRaw("accent")}[continuation-nudge:structured-conclusion]`));
 });
 
 void test("assistant chunks render as distinct semantic blocks", () => {
@@ -533,7 +611,10 @@ void test("assistant chunks render as distinct semantic blocks", () => {
 			isComplete: true,
 		},
 	]);
-	const output = plain(display.render(100).join("\n"));
+	const rendered = display.render(100).join("\n");
+	const output = plain(rendered);
+	assert.ok(rendered.includes(`${theme.fgRaw("reasoningLabel")}\x1b[1mREASONING`));
+	assert.ok(rendered.includes(`${theme.fgRaw("responseLabel")}\x1b[1mRESPONSE`));
 	assert.match(output, /REASONING.*Compare both execution paths/);
 	assert.match(output, /⚠ NOTICE Context\s+Near limit/);
 	assert.match(output, /RESPONSE/);

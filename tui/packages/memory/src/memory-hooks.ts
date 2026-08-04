@@ -33,6 +33,14 @@ export interface MemoryHooksConfig {
   onBackgroundTask?: (task: Promise<void>) => void;
   /** Optional local semantic embedder. Disabled when omitted. */
   embedder?: MemoryEmbedder;
+  /**
+   * Aborted when the host is shutting down. Checked between embedding
+   * batches so a large first-run backfill (up to thousands of entries)
+   * doesn't hold up shutdown indefinitely — at most one in-flight batch
+   * completes after abort. Remaining entries are simply re-embedded (or
+   * picked up incrementally) on the next run; nothing is lost.
+   */
+  shutdownSignal?: AbortSignal;
 }
 
 function compactEvidenceValue(value: unknown, depth = 0): unknown {
@@ -118,6 +126,7 @@ export function createMemoryHooks(
     if (!config.embedder || !entries.length) return;
     const missing = entries.filter((entry) => !store.hasEmbedding(entry.id));
     for (let offset = 0; offset < missing.length; offset += 16) {
+      if (config.shutdownSignal?.aborted) return;
       const batch = missing.slice(offset, offset + 16);
       const vectors = await config.embedder.embedBatch(batch.map((entry) => entry.text));
       batch.forEach((entry, index) => {
