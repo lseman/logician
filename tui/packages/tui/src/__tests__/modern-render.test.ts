@@ -319,6 +319,120 @@ void test("keyboard navigation focuses and toggles individual tool cards", () =>
 	assert.match(expanded, /echo second[\s\S]*second output/);
 });
 
+void test("clicking a tool card in a non-first turn expands the right card", () => {
+	// Per-turn caching builds each turn's hitRegions relative to that turn's
+	// OWN lines (see buildTurnLines in display.ts), then render() rebases them
+	// to absolute offsets by adding that turn's turnStart. A single-turn test
+	// can't catch a rebasing bug — turnStart is always the same small constant
+	// with only one turn. This test's second turn has a non-trivial turnStart,
+	// so a broken rebase (e.g. forgetting to add turnStart) would expand the
+	// wrong card or fail to expand anything.
+	const display = new TranscriptDisplay();
+	display.setViewportHeight(20);
+	const makeToolTurn = (id: string, name: string): Turn => ({
+		id,
+		userMessage: { type: "user", content: `Run ${name}.` },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [
+				{
+					seq: 1,
+					type: "tool" as const,
+					tool: {
+						tool: "bash",
+						tool_name: "bash",
+						tool_call_id: name,
+						args: { command: `echo ${name}` },
+						result: `${name} output`,
+						isComplete: true,
+						isError: false,
+					},
+					isComplete: true,
+				},
+			],
+		},
+		isComplete: true,
+	});
+	display.setTurns([makeToolTurn("turn-a", "first"), makeToolTurn("turn-b", "second")]);
+
+	const collapsed = display.render(80);
+	const secondToolRow = collapsed.findIndex((line) =>
+		plain(line).includes("echo second"),
+	);
+	assert.notEqual(secondToolRow, -1);
+	assert.equal(display.handleMouse(4, secondToolRow), true);
+
+	const expanded = plain(display.render(80).join("\n"));
+	assert.match(expanded, /COMMAND[\s\S]*echo second[\s\S]*OUTPUT[\s\S]*second output/);
+	// The first turn's card must stay collapsed — only the clicked card toggled.
+	assert.doesNotMatch(expanded, /COMMAND[\s\S]*echo first/);
+
+	// focusTool's scroll-into-view math also depends on absolute offsets —
+	// cover it too, using key-based toggling for the first turn's card.
+	assert.deepEqual(display.focusTool(-1), { index: 2, total: 2 });
+	assert.deepEqual(display.focusTool(-1), { index: 1, total: 2 });
+	assert.equal(display.toggleFocusedTool(), true);
+	assert.match(
+		plain(display.render(80).join("\n")),
+		/echo first[\s\S]*first output/,
+	);
+});
+
+void test("streaming a new turn does not disturb a completed turn's cached lines", () => {
+	// Per-turn caching means a streaming turn's cache entry should churn every
+	// token while sibling turns' entries stay untouched — the opposite of the
+	// old single prefix-blob cache, which required the ENTIRE prefix to be
+	// simultaneously stable before caching anything.
+	const display = new TranscriptDisplay();
+	const completedTurn: Turn = {
+		id: "completed",
+		userMessage: { type: "user", content: "First question." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: true,
+			chunks: [
+				{
+					seq: 1,
+					type: "content",
+					contentText: "COMPLETED_TURN_MARKER answer.",
+					isComplete: true,
+				},
+			],
+		},
+		isComplete: true,
+	};
+	const streamingTurn = (text: string): Turn => ({
+		id: "streaming",
+		userMessage: { type: "user", content: "Second question." },
+		assistantMessage: {
+			type: "assistant",
+			isComplete: false,
+			chunks: [
+				{ seq: 1, type: "content", contentText: text, isComplete: false },
+			],
+		},
+		isComplete: false,
+	});
+
+	display.setTurns([completedTurn, streamingTurn("partial")]);
+	const first = plain(display.render(80).join("\n"));
+	assert.match(first, /COMPLETED_TURN_MARKER/);
+	const completedLineIndex = first
+		.split("\n")
+		.findIndex((line) => line.includes("COMPLETED_TURN_MARKER"));
+
+	display.setTurns([completedTurn, streamingTurn("partial more tokens arrived")]);
+	const second = plain(display.render(80).join("\n"));
+	const secondLines = second.split("\n");
+	assert.match(second, /COMPLETED_TURN_MARKER/);
+	assert.equal(
+		secondLines[completedLineIndex],
+		first.split("\n")[completedLineIndex],
+	);
+	assert.match(second, /partial more tokens arrived/);
+});
+
 void test("write_file streams live line counts and expanded content", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([{

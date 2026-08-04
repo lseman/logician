@@ -191,9 +191,17 @@ export class Transcript {
 
 	private handleTurnStart(event: { turn_id: string }): void {
 		if (!event.turn_id) return;
-		const pending = [...this.state.turns]
-			.reverse()
-			.find((t) => !t.isComplete);
+		// An incomplete turn is always at or near the tail (new turns are only
+		// ever appended, and streaming completes roughly in order), so scan
+		// backward in place rather than copying + reversing the whole,
+		// session-lifetime-unbounded turns array on every turn-start event.
+		let pending: Turn | undefined;
+		for (let i = this.state.turns.length - 1; i >= 0; i--) {
+			if (!this.state.turns[i].isComplete) {
+				pending = this.state.turns[i];
+				break;
+			}
+		}
 		if (pending) {
 			// Reuse the open turn (e.g. slash /spawn after addTurn, or a
 			// user message already registered by the TUI).

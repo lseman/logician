@@ -22,42 +22,38 @@ export function getGitStatus(): {
 	staged: number;
 	untracked: number;
 } {
-	const branch = getGitBranch();
-	let modified = 0;
-	let staged = 0;
-	let untracked = 0;
+	// A single `status --porcelain=v2 --branch` call replaces what used to be
+	// 4 sequential execSync shell spawns (branch + 3 more piped through `wc
+	// -l`) — each spawn is a blocking subprocess on the startup path, before
+	// the first frame paints.
 	try {
-		modified =
-			parseInt(
-				execSync("git diff --quiet || git diff --name-only | wc -l", {
-					cwd: process.cwd(),
-					encoding: "utf8",
-					stdio: ["ignore", "pipe", "ignore"],
-				}).trim(),
-			) || 0;
-		staged =
-			parseInt(
-				execSync(
-					"git diff --cached --quiet || git diff --cached --name-only | wc -l",
-					{
-						cwd: process.cwd(),
-						encoding: "utf8",
-						stdio: ["ignore", "pipe", "ignore"],
-					},
-				).trim(),
-			) || 0;
-		untracked =
-			parseInt(
-				execSync("git ls-files --others --exclude-standard | wc -l", {
-					cwd: process.cwd(),
-					encoding: "utf8",
-					stdio: ["ignore", "pipe", "ignore"],
-				}).trim(),
-			) || 0;
+		const output = execSync("git status --porcelain=v2 --branch", {
+			cwd: process.cwd(),
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		let branch = "";
+		let modified = 0;
+		let staged = 0;
+		let untracked = 0;
+		for (const line of output.split("\n")) {
+			if (line.startsWith("# branch.head ")) {
+				const head = line.slice("# branch.head ".length).trim();
+				branch = head === "(detached)" ? "" : head;
+			} else if (line.startsWith("1 ") || line.startsWith("2 ")) {
+				// Ordinary/renamed entry: "1 XY ...path" — X is the index (staged)
+				// status, Y is the worktree (unstaged) status; "." means no change.
+				const xy = line.slice(2, 4);
+				if (xy[0] !== ".") staged++;
+				if (xy[1] !== ".") modified++;
+			} else if (line.startsWith("? ")) {
+				untracked++;
+			}
+		}
+		return { branch, modified, staged, untracked };
 	} catch {
-		// ignore
+		return { branch: "", modified: 0, staged: 0, untracked: 0 };
 	}
-	return { branch, modified, staged, untracked };
 }
 
 export function getGitVersion(): string {

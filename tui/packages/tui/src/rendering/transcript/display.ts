@@ -46,13 +46,17 @@ interface TranscriptDisplayOptions {
 	maxRenderedLines?: number;
 }
 
-interface CompletedPrefixCache {
+interface TurnRenderCache {
 	width: number;
+	/** Content fingerprint — turns mutate in place while streaming, so turn
+	 * object identity alone is not a valid cache-hit signal. */
+	turnRevision: string;
+	/** This turn's own narrow slice of style/expand state (see
+	 * `turnStyleRevision`), not the whole transcript's. */
 	styleRevision: string;
-	turns: Turn[];
 	lines: string[];
-	turnStartLines: number[];
-	toolRegions: Array<{ start: number; end: number; key: string }>;
+	/** Relative to `lines[0]`, rebased to absolute offsets by the caller. */
+	hitRegions: Array<{ start: number; end: number; key: string }>;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -70,7 +74,11 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 	private _pendingScrollBottom: boolean = false;
 	private _newOutputBelow = false;
 	private contentRevision = "";
-	private completedPrefixCache: CompletedPrefixCache | null = null;
+	/** Per-turn render cache — a turn's own lines/hitRegions are only rebuilt
+	 * when its own content, width, or narrow style slice actually changes.
+	 * WeakMap so turns dropped by `setTurns()`'s maxTurns cap become
+	 * GC-eligible automatically. */
+	private turnCache = new WeakMap<Turn, TurnRenderCache>();
 
 	thinkingMode: ThinkingDisplayStyle;
 	toolsExpanded = false;
@@ -394,260 +402,37 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 			key: string;
 		}> = [];
 		const frameWidth = Math.max(1, width - 2);
-		const contentWidth = Math.max(1, frameWidth - 2);
-
 		const padToWidth = (line: string): string => {
 			const clipped = clampLineToWidth(line, frameWidth);
 			const w = visibleWidth(clipped);
 			return clipped + " ".repeat(Math.max(0, frameWidth - w));
 		};
+		const emptyLine = " ".repeat(frameWidth);
 
 		// Render oldest-to-newest so the newest turns always end up at the
 		// bottom of the buffer — the viewport slices from scrollOffset and
 		// shows the bottom, meaning new messages are always visible even when
 		// maxRenderedLines truncates older content.
-		const emptyLine = " ".repeat(frameWidth);
-		const prefixTurns = this.turns.slice(0, -1);
-		const styleRevision = this.renderStyleRevision();
-		const prefixCache = this.completedPrefixCache;
-		const canReusePrefix =
-			prefixTurns.length > 0 &&
-			prefixCache !== null &&
-			prefixCache.width === width &&
-			prefixCache.styleRevision === styleRevision &&
-			prefixCache.turns.length === prefixTurns.length &&
-			prefixCache.turns.every((turn, index) => turn === prefixTurns[index]);
-		let firstTurnToRender = 0;
-		if (canReusePrefix && prefixCache) {
-			renderedLines.push(...prefixCache.lines);
-			turnStartLines.push(...prefixCache.turnStartLines);
-			pendingToolRegions.push(...prefixCache.toolRegions);
-			firstTurnToRender = prefixTurns.length;
-		} else {
-			renderedLines.push(padToWidth(emptyLine));
-			if (!prefixTurns.every((turn) => this.isStableTurn(turn))) {
-				this.completedPrefixCache = null;
-			}
-		}
+		renderedLines.push(padToWidth(emptyLine));
 
-		for (let ti = firstTurnToRender; ti < this.turns.length; ti++) {
-			turnStartLines.push(renderedLines.length);
+		for (let ti = 0; ti < this.turns.length; ti++) {
 			const turn = this.turns[ti];
 			if (ti > 0) renderedLines.push(padToWidth(emptyLine));
+			const turnStart = renderedLines.length;
+			turnStartLines.push(turnStart);
 
-			// User or system message
-			if (turn.userMessage) {
-				const content = turn.userMessage.content;
-				if (content.startsWith("[System] ")) {
-					renderedLines.push(
-						padToWidth(`${theme.fgRaw("systemText")}◇ SYSTEM${RESET}`),
-					);
-					const sysLines = renderMarkdownLines(
-						content.slice(9),
-						contentWidth - 2,
-						false,
-						theme.fgRaw("systemText") + RESET,
-						"",
-					);
-					for (const line of sysLines)
-						renderedLines.push(
-							padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`),
-						);
-				} else {
-					renderedLines.push(
-						padToWidth(
-							`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userLabel")}${BOLD}YOU${RESET}`,
-						),
-					);
-					const colored = theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET;
-					for (const rawLine of colored.split("\n")) {
-						for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
-								renderedLines.push(padToWidth(`  ${line}`));
-					}
-				}
-			}
-
-			// Assistant message — render chunks in seq order (chronological)
-			if (turn.assistantMessage) {
-				const msg = turn.assistantMessage;
-				const chunks = msg.chunks;
-				const streaming = !msg.isComplete || hasStreamingChunk(chunks);
-				let lastThinkingSection = false;
-				renderedLines.push(
-					padToWidth(
-						`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`,
-					),
-				);
-
-				// Buffer consecutive content chunks so block-level markdown
-				// (tables, code fences) that spans chunk boundaries renders whole.
-				let contentBuffer = "";
-				const flushContent = () => {
-					if (!contentBuffer) return;
-					const answer = stripThinkTags(contentBuffer);
-					contentBuffer = "";
-					if (lastThinkingSection) {
-						renderedLines.push(
-							padToWidth(
-								`${theme.fgRaw("separator")}${DIM}  ─────────────────${RESET}`,
-							),
-						);
-						lastThinkingSection = false;
-					}
-					if (answer) {
-						renderedLines.push(
-							padToWidth(
-								`  ${theme.fgRaw("responseLabel")}${BOLD}RESPONSE${RESET}`,
-							),
-						);
-						const contentLines = renderMarkdownLines(
-							answer,
-							contentWidth - 2,
-							streaming,
-						);
-						for (const line of contentLines)
-							renderedLines.push(padToWidth(`  ${line}`));
-					}
-				};
-
-				for (const chunk of chunks) {
-					if (chunk.type === "content") {
-						contentBuffer += chunk.contentText || "";
-						continue;
-					}
-					flushContent();
-					if (chunk.type === "thinking") {
-						// Render thinking block
-						const thinkLines = renderThinkingChunk(
-							chunk,
-							streaming,
-							this.thinkingMode,
-							this.currentWidth,
-						);
-						for (const line of thinkLines)
-							renderedLines.push(padToWidth(`  ${line}`));
-						lastThinkingSection = true;
-					} else if (chunk.type === "tool" && chunk.tool) {
-						lastThinkingSection = false;
-						const toolKey =
-							chunk.tool.tool_call_id ?? `${turn.id}:${chunk.seq}`;
-						const regionStart = renderedLines.length;
-						// Clear per-task hit regions before rendering so this tool's
-						// renderer starts from an empty list instead of inheriting
-						// (and then wiping) the previous tool's regions.
-						this._taskHitRegions = [];
-						const toolLines = renderTool(
-							this,
-							chunk.tool,
-							width,
-							this.toolsExpanded || this.expandedToolKeys.has(toolKey),
-						);
-						for (let lineIndex = 0; lineIndex < toolLines.length; lineIndex++) {
-							const prefix =
-								lineIndex === 0 && toolKey === this.focusedToolKey
-									? `${theme.fg("selected", "›")} `
-									: "  ";
-							renderedLines.push(padToWidth(`${prefix}${toolLines[lineIndex]}`));
-						}
-						// Merge per-task/per-child-tool regions from the renderer first
-						// so they take precedence.
-						for (const region of this._taskHitRegions ?? []) {
-							pendingToolRegions.push({
-								start: regionStart + region.start,
-								end: regionStart + region.end,
-								key: region.key,
-							});
-						}
-						// Parent tool region as fallback — except for spawn_agents,
-						// where only the per-task rows should be clickable. A
-						// whole-block fallback there would catch clicks on the
-						// header/blank rows between tasks and toggle every task's
-						// detail at once, which reads as agents' streams and
-						// responses getting mixed together.
-						if (chunk.tool.tool_name !== "spawn_agents") {
-							pendingToolRegions.push({
-								start: regionStart,
-								end: renderedLines.length,
-								key: toolKey,
-							});
-						}
-					} else if (chunk.type === "notice" && chunk.notice) {
-						const n = chunk.notice;
-						if (n.label === "Skills" && n.level === "info") {
-							renderedLines.push(
-								padToWidth(
-									`${theme.fg("active", "✦ NOTICE")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
-								),
-							);
-							continue;
-						}
-						const icon =
-							n.level === "error"
-								? "✗"
-								: n.level === "warn"
-									? "⚠"
-									: n.level === "success"
-										? "✓"
-										: "●";
-						const color =
-							n.level === "error"
-								? theme.fgRaw("error")
-								: n.level === "warn"
-									? theme.fgRaw("warning")
-									: theme.fgRaw("systemText");
-						const labelText = n.label.replace(/^\*\*(.*?)\*\*$/, "$1");
-						const noticePrefix = `${icon} NOTICE `;
-						const bodyIndent = " ".repeat(visibleWidth(noticePrefix));
-						const reasonMatch = /^(\[[^\]\n]+\])(?:\s+|$)/.exec(n.text);
-						const bodyText = reasonMatch
-							? `${theme.fg("accent", reasonMatch[1])} ${theme.fgRaw("text")}${n.text.slice(reasonMatch[0].length)}${RESET}`
-							: theme.fg("text", n.text);
-						renderedLines.push(
-							padToWidth(
-								`${color}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, theme.fgRaw("text"))}${RESET}`,
-							),
-						);
-						for (const line of wrapText(
-							bodyText,
-							Math.max(1, contentWidth - visibleWidth(bodyIndent)),
-						)) {
-							renderedLines.push(
-								padToWidth(`${bodyIndent}${line}${RESET}`),
-							);
-						}
-					}
-				}
-				flushContent();
-
-				// No streaming cursor — messages display as-is
-			}
-
-			// Completed historical turns never change during ordinary streaming. Keep
-			// their fully wrapped lines and hit regions so the next token only rebuilds
-			// the active turn instead of replaying the entire transcript pipeline.
-			if (
-				!canReusePrefix &&
-				ti === prefixTurns.length - 1 &&
-				prefixTurns.every((prefixTurn) => this.isStableTurn(prefixTurn))
-			) {
-				// Cap what gets cached to maxRenderedLines. Without this, every frame
-				// during streaming (the spinner ticks every 150ms and invalidates
-				// cachedLines) pays an O(total transcript size) cost just re-copying
-				// this cached prefix back out — even though only the active turn
-				// actually changed. Trimming the oldest lines here keeps that copy
-				// bounded regardless of history length, even when a single oversized
-				// turn (e.g. a `/context` dump) is what blew the budget.
-				this.completedPrefixCache = capPrefixCache(
-					{
-						width,
-						styleRevision,
-						turns: [...prefixTurns],
-						lines: [...renderedLines],
-						turnStartLines: [...turnStartLines],
-						toolRegions: pendingToolRegions.map((region) => ({ ...region })),
-					},
-					this.maxRenderedLines,
-				);
+			// Per-turn cache: a turn's own lines/hitRegions are only rebuilt when
+			// its own content, width, or narrow style slice actually changes —
+			// toggling one tool card or streaming one active turn no longer
+			// forces every other turn to re-render.
+			const cache = this.renderTurn(turn, width);
+			renderedLines.push(...cache.lines);
+			for (const region of cache.hitRegions) {
+				pendingToolRegions.push({
+					start: turnStart + region.start,
+					end: turnStart + region.end,
+					key: region.key,
+				});
 			}
 		}
 
@@ -662,31 +447,11 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		// every 150ms, so skipping the cut here meant every one of those frames
 		// carried the full, unbounded transcript back through the render/diff
 		// pipeline for as long as a turn was in flight.
-		let visibleBuffer = renderedLines;
-		let visibleStart = 0;
-		if (renderedLines.length > this.maxRenderedLines) {
-			const desiredStart = renderedLines.length - (this.maxRenderedLines - 1);
-			const firstCompleteTurn = turnStartLines.findIndex(
-				(line) => line >= desiredStart,
-			);
-			const sliceStart =
-				firstCompleteTurn >= 0
-					? turnStartLines[firstCompleteTurn]
-					: desiredStart;
-			const olderCount =
-				firstCompleteTurn >= 0
-					? firstCompleteTurn
-					: Math.max(0, this.turns.length - 1);
-			const omittedLabel =
-				olderCount > 0
-					? `${olderCount} older turn(s) not shown`
-					: "earlier lines not shown";
-			visibleBuffer = [
-				padToWidth(`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`),
-				...renderedLines.slice(sliceStart),
-			];
-			visibleStart = sliceStart - 1;
-		}
+		const { visibleBuffer, visibleStart } = this.truncateToRenderedLines(
+			renderedLines,
+			turnStartLines,
+			padToWidth,
+		);
 		this.toolHitRegions = pendingToolRegions
 			.map((region) => ({
 				...region,
@@ -779,8 +544,17 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 
+	/** Fingerprints only the newest turn — drives the "new output below"
+	 * scroll indicator, unrelated to per-turn render caching. */
 	private revisionFor(turns: Turn[]): string {
 		const turn = turns.at(-1);
+		return [turns.length, this.turnRevisionFor(turn)].join("/");
+	}
+
+	/** Content fingerprint for one turn. Turns/chunks mutate in place while
+	 * streaming, so this — not object identity — is what a cache-hit check
+	 * must compare. */
+	private turnRevisionFor(turn: Turn | undefined): string {
 		const message = turn?.assistantMessage;
 		const chunks = message?.chunks ?? [];
 		const chunkRevision = chunks
@@ -819,69 +593,306 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 				].join(":");
 			})
 			.join("|");
-		return [
-			turns.length,
-			turn?.id ?? "",
-			message?.isComplete ? 1 : 0,
-			chunkRevision,
-		].join("/");
+		return [turn?.id ?? "", message?.isComplete ? 1 : 0, chunkRevision].join(
+			"/",
+		);
 	}
 
-	private isStableTurn(turn: Turn): boolean {
-		return turn.isComplete && (turn.assistantMessage?.isComplete ?? true);
-	}
-
-	private renderStyleRevision(): string {
+	/** This turn's narrow slice of style/expand state. Global fields (theme,
+	 * thinkingMode, toolsExpanded, maxMessageLength) are folded in
+	 * unconditionally so they still invalidate every turn's cache when
+	 * changed; expand-key sets and focus are narrowed to just the keys that
+	 * belong to this turn, so toggling one tool card no longer invalidates
+	 * every other turn the way one global revision string used to. */
+	private turnStyleRevision(turn: Turn): string {
+		const keysForTurn = (set: Set<string>) =>
+			[...set]
+				.filter((key) => this.keyBelongsToTurn(key, turn))
+				.sort()
+				.join(",");
 		return [
 			theme.name,
 			this.thinkingMode,
 			this.toolsExpanded ? 1 : 0,
 			this.maxMessageLength,
-			this.focusedToolKey ?? "",
-			[...this.expandedToolKeys].sort().join(","),
-			[...this.expandedAgentKeys].sort().join(","),
-			[...this.expandedChildToolKeys].sort().join(","),
+			this.focusedToolKey && this.keyBelongsToTurn(this.focusedToolKey, turn)
+				? this.focusedToolKey
+				: "",
+			keysForTurn(this.expandedToolKeys),
+			keysForTurn(this.expandedAgentKeys),
+			keysForTurn(this.expandedChildToolKeys),
 		].join("|");
 	}
 
-	private _viewportHeight: number = 0;
-}
-
-/**
- * Bound a completed-prefix cache to its last maxLines lines once it exceeds
- * that budget, rebasing turnStartLines/toolRegions to the new start. Keeps
- * the per-frame prefix-reuse copy bounded by maxLines instead of growing with
- * total transcript size — including the case where a single oversized turn
- * (e.g. a `/context` dump) blows past the budget on its own, where capping at
- * turn boundaries alone couldn't shrink anything.
- *
- * `turns` is intentionally left untouched: it's still used for the
- * turn-identity reuse check on the next frame, and every turn — even ones
- * whose lines got trimmed here — remains unchanged and reusable as long as
- * its object reference doesn't change.
- */
-function capPrefixCache(
-	cache: CompletedPrefixCache,
-	maxLines: number,
-): CompletedPrefixCache {
-	if (cache.lines.length <= maxLines) {
-		return cache;
+	/** Whether an expand/focus key (a plain tool_call_id, or a composite
+	 * `${toolCallId}:task:${n}` / `${parentKey}:child:${childId}` key) refers
+	 * to a tool call that belongs to this turn. Reuses the same trailing-anchor
+	 * regexes as toggleHitRegionKey/isHitRegionKeyExpanded — a tool_call_id can
+	 * itself contain colons, so a naive split is not safe here either. */
+	private keyBelongsToTurn(key: string, turn: Turn): boolean {
+		const taskMatch = /^(.+):task:(\d+)$/.exec(key);
+		const childMatch = /^(.+):child:(.+)$/.exec(key);
+		const rootId = taskMatch?.[1] ?? childMatch?.[1] ?? key;
+		const chunks = turn.assistantMessage?.chunks ?? [];
+		return chunks.some(
+			(chunk) =>
+				chunk.type === "tool" &&
+				chunk.tool &&
+				(chunk.tool.tool_call_id === rootId ||
+					`${turn.id}:${chunk.seq}` === rootId),
+		);
 	}
-	const sliceStart = cache.lines.length - maxLines;
-	return {
-		width: cache.width,
-		styleRevision: cache.styleRevision,
-		turns: cache.turns,
-		lines: cache.lines.slice(sliceStart),
-		turnStartLines: cache.turnStartLines
-			.map((line) => line - sliceStart)
-			.filter((line) => line >= 0),
-		toolRegions: cache.toolRegions
-			.map((region) => ({
-				...region,
-				start: region.start - sliceStart,
-				end: region.end - sliceStart,
-			}))
-			.filter((region) => region.end > 0),
-	};
+
+	/** Look up or (re)build this turn's cached lines/hitRegions. */
+	private renderTurn(turn: Turn, width: number): TurnRenderCache {
+		const turnRevision = this.turnRevisionFor(turn);
+		const styleRevision = this.turnStyleRevision(turn);
+		const cached = this.turnCache.get(turn);
+		if (
+			cached &&
+			cached.width === width &&
+			cached.turnRevision === turnRevision &&
+			cached.styleRevision === styleRevision
+		) {
+			return cached;
+		}
+		const built = this.buildTurnLines(turn, width, turnRevision, styleRevision);
+		this.turnCache.set(turn, built);
+		return built;
+	}
+
+	/** Renders one turn's user/system message, assistant content, thinking
+	 * chunks, tool calls, and notices into its own line buffer. This is the
+	 * unmodified per-turn rendering logic, just scoped to a single turn
+	 * instead of running inline across the whole transcript. */
+	private buildTurnLines(
+		turn: Turn,
+		width: number,
+		turnRevision: string,
+		styleRevision: string,
+	): TurnRenderCache {
+		const lines: string[] = [];
+		const hitRegions: Array<{ start: number; end: number; key: string }> = [];
+		const frameWidth = Math.max(1, width - 2);
+		const contentWidth = Math.max(1, frameWidth - 2);
+		const padToWidth = (line: string): string => {
+			const clipped = clampLineToWidth(line, frameWidth);
+			const w = visibleWidth(clipped);
+			return clipped + " ".repeat(Math.max(0, frameWidth - w));
+		};
+
+		// User or system message
+		if (turn.userMessage) {
+			const content = turn.userMessage.content;
+			if (content.startsWith("[System] ")) {
+				lines.push(padToWidth(`${theme.fgRaw("systemText")}◇ SYSTEM${RESET}`));
+				const sysLines = renderMarkdownLines(
+					content.slice(9),
+					contentWidth - 2,
+					false,
+					theme.fgRaw("systemText") + RESET,
+					"",
+				);
+				for (const line of sysLines)
+					lines.push(padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`));
+			} else {
+				lines.push(
+					padToWidth(
+						`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userLabel")}${BOLD}YOU${RESET}`,
+					),
+				);
+				const colored = theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET;
+				for (const rawLine of colored.split("\n")) {
+					for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
+						lines.push(padToWidth(`  ${line}`));
+				}
+			}
+		}
+
+		// Assistant message — render chunks in seq order (chronological)
+		if (turn.assistantMessage) {
+			const msg = turn.assistantMessage;
+			const chunks = msg.chunks;
+			const streaming = !msg.isComplete || hasStreamingChunk(chunks);
+			let lastThinkingSection = false;
+			lines.push(
+				padToWidth(`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`),
+			);
+
+			// Buffer consecutive content chunks so block-level markdown
+			// (tables, code fences) that spans chunk boundaries renders whole.
+			let contentBuffer = "";
+			const flushContent = () => {
+				if (!contentBuffer) return;
+				const answer = stripThinkTags(contentBuffer);
+				contentBuffer = "";
+				if (lastThinkingSection) {
+					lines.push(
+						padToWidth(
+							`${theme.fgRaw("separator")}${DIM}  ─────────────────${RESET}`,
+						),
+					);
+					lastThinkingSection = false;
+				}
+				if (answer) {
+					lines.push(
+						padToWidth(`  ${theme.fgRaw("responseLabel")}${BOLD}RESPONSE${RESET}`),
+					);
+					const contentLines = renderMarkdownLines(
+						answer,
+						contentWidth - 2,
+						streaming,
+					);
+					for (const line of contentLines) lines.push(padToWidth(`  ${line}`));
+				}
+			};
+
+			for (const chunk of chunks) {
+				if (chunk.type === "content") {
+					contentBuffer += chunk.contentText || "";
+					continue;
+				}
+				flushContent();
+				if (chunk.type === "thinking") {
+					// Render thinking block
+					const thinkLines = renderThinkingChunk(
+						chunk,
+						streaming,
+						this.thinkingMode,
+						this.currentWidth,
+					);
+					for (const line of thinkLines) lines.push(padToWidth(`  ${line}`));
+					lastThinkingSection = true;
+				} else if (chunk.type === "tool" && chunk.tool) {
+					lastThinkingSection = false;
+					const toolKey = chunk.tool.tool_call_id ?? `${turn.id}:${chunk.seq}`;
+					const regionStart = lines.length;
+					// Clear per-task hit regions before rendering so this tool's
+					// renderer starts from an empty list instead of inheriting
+					// (and then wiping) the previous tool's regions.
+					this._taskHitRegions = [];
+					const toolLines = renderTool(
+						this,
+						chunk.tool,
+						width,
+						this.toolsExpanded || this.expandedToolKeys.has(toolKey),
+					);
+					for (let lineIndex = 0; lineIndex < toolLines.length; lineIndex++) {
+						const prefix =
+							lineIndex === 0 && toolKey === this.focusedToolKey
+								? `${theme.fg("selected", "›")} `
+								: "  ";
+						lines.push(padToWidth(`${prefix}${toolLines[lineIndex]}`));
+					}
+					// Merge per-task/per-child-tool regions from the renderer first
+					// so they take precedence.
+					for (const region of this._taskHitRegions ?? []) {
+						hitRegions.push({
+							start: regionStart + region.start,
+							end: regionStart + region.end,
+							key: region.key,
+						});
+					}
+					// Parent tool region as fallback — except for spawn_agents,
+					// where only the per-task rows should be clickable. A
+					// whole-block fallback there would catch clicks on the
+					// header/blank rows between tasks and toggle every task's
+					// detail at once, which reads as agents' streams and
+					// responses getting mixed together.
+					if (chunk.tool.tool_name !== "spawn_agents") {
+						hitRegions.push({
+							start: regionStart,
+							end: lines.length,
+							key: toolKey,
+						});
+					}
+				} else if (chunk.type === "notice" && chunk.notice) {
+					const n = chunk.notice;
+					if (n.label === "Skills" && n.level === "info") {
+						lines.push(
+							padToWidth(
+								`${theme.fg("active", "✦ NOTICE")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
+							),
+						);
+						continue;
+					}
+					const icon =
+						n.level === "error"
+							? "✗"
+							: n.level === "warn"
+								? "⚠"
+								: n.level === "success"
+									? "✓"
+									: "●";
+					const color =
+						n.level === "error"
+							? theme.fgRaw("error")
+							: n.level === "warn"
+								? theme.fgRaw("warning")
+								: theme.fgRaw("systemText");
+					const labelText = n.label.replace(/^\*\*(.*?)\*\*$/, "$1");
+					const noticePrefix = `${icon} NOTICE `;
+					const bodyIndent = " ".repeat(visibleWidth(noticePrefix));
+					const reasonMatch = /^(\[[^\]\n]+\])(?:\s+|$)/.exec(n.text);
+					const bodyText = reasonMatch
+						? `${theme.fg("accent", reasonMatch[1])} ${color}${n.text.slice(reasonMatch[0].length).trimStart()}${RESET}`
+						: `${color}${n.text}${RESET}`;
+					lines.push(
+						padToWidth(
+							`${color}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, color)}${RESET}`,
+						),
+					);
+					for (const line of wrapText(
+						bodyText,
+						Math.max(1, contentWidth - visibleWidth(bodyIndent)),
+					)) {
+						lines.push(padToWidth(`${bodyIndent}${line}`));
+					}
+				}
+			}
+			flushContent();
+
+			// No streaming cursor — messages display as-is
+		}
+
+		return { width, turnRevision, styleRevision, lines, hitRegions };
+	}
+
+	/** Bound the render buffer from the front once it exceeds maxRenderedLines,
+	 * prepending a "N older turn(s) not shown" banner. Runs on every render()
+	 * call regardless of streaming state — skipping this while the newest turn
+	 * streams would carry the full, unbounded transcript through the render
+	 * pipeline for as long as a turn is in flight. */
+	private truncateToRenderedLines(
+		renderedLines: string[],
+		turnStartLines: number[],
+		padToWidth: (line: string) => string,
+	): { visibleBuffer: string[]; visibleStart: number } {
+		if (renderedLines.length <= this.maxRenderedLines) {
+			return { visibleBuffer: renderedLines, visibleStart: 0 };
+		}
+		const desiredStart = renderedLines.length - (this.maxRenderedLines - 1);
+		const firstCompleteTurn = turnStartLines.findIndex(
+			(line) => line >= desiredStart,
+		);
+		const sliceStart =
+			firstCompleteTurn >= 0 ? turnStartLines[firstCompleteTurn] : desiredStart;
+		const olderCount =
+			firstCompleteTurn >= 0
+				? firstCompleteTurn
+				: Math.max(0, this.turns.length - 1);
+		const omittedLabel =
+			olderCount > 0
+				? `${olderCount} older turn(s) not shown`
+				: "earlier lines not shown";
+		return {
+			visibleBuffer: [
+				padToWidth(`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`),
+				...renderedLines.slice(sliceStart),
+			],
+			visibleStart: sliceStart - 1,
+		};
+	}
+
+	private _viewportHeight: number = 0;
 }

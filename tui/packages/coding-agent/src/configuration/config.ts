@@ -70,6 +70,7 @@ const KNOWN_KEYS = new Set([
 	"memoryEmbeddings",
 	"memoryEmbeddingModel",
 	"transcriptMaxTurns",
+	"transcriptMaxRenderedLines",
 	"reasoner",
 	"reasonerConfig",
 ]);
@@ -383,6 +384,9 @@ export function validateConfig(
 	}
 	if (obj.transcriptMaxTurns !== undefined) {
 		cfg.transcriptMaxTurns = configNumber(obj.transcriptMaxTurns);
+	}
+	if (obj.transcriptMaxRenderedLines !== undefined) {
+		cfg.transcriptMaxRenderedLines = configNumber(obj.transcriptMaxRenderedLines);
 	}
 
 	for (const [key, minimum, inclusive] of [
@@ -806,8 +810,10 @@ export interface LogicianTuiConfig {
 	memoryEmbeddings?: boolean;
 	/** Optional Hugging Face feature-extraction model ID. */
 	memoryEmbeddingModel?: string;
-	/** Maximum number of turns to keep in the transcript (default: 200). */
+	/** Maximum number of turns to keep in the transcript (default: 40). */
 	transcriptMaxTurns?: number;
+	/** Maximum rendered lines before older transcript content is cut off (default: 400). */
+	transcriptMaxRenderedLines?: number;
 	/** Structured pre-reasoning mode. Default: "none" (disabled). */
 	reasoner?: string;
 	/** Overrides for the selected reasoner's registry defaults. */
