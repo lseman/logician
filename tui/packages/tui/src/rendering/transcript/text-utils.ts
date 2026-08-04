@@ -5,7 +5,10 @@
 import { stripAcceptanceReport } from "@logician/agent-core/agent/guards/acceptance-contract.ts";
 import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
 import type { AssistantChunk } from "@logician/coding-agent/sessions";
-import { BOLD, BOLD_OFF, DIM, ITALIC, RESET, theme, UNDERLINE } from "./semantic-markup.ts";
+import { BOLD, DIM, RESET } from "../../terminal/core.ts";
+import { theme } from "../../terminal/theme.ts";
+
+const UNDERLINE = "\x1b[4m";
 
 // Heading palette — distinct color + weight per level.
 // NOTE: do NOT append RESET in `color` — it is placed around the text later.
@@ -184,7 +187,7 @@ export function renderInline(text: string, baseColor: string): string {
 		if (text[i] === "*" && i + 1 < text.length && text[i + 1] !== "*") {
 			const end = text.indexOf("*", i + 1);
 			if (end !== -1 && end !== i + 1) {
-				out += `${ITALIC}${text.slice(i + 1, end)}${RESET}${baseColor}`;
+				out += `\x1b[3m${text.slice(i + 1, end)}${RESET}${baseColor}`;
 				i = end + 1;
 				continue;
 			}
@@ -446,7 +449,7 @@ export function renderInlinePlain(text: string): string {
 		if (text.startsWith("**", i)) {
 			const end = text.indexOf("**", i + 2);
 			if (end !== -1) {
-				out += `${BOLD + text.slice(i + 2, end)}${BOLD_OFF}`;
+				out += `${BOLD + text.slice(i + 2, end)}\x1b[22m`;
 				i = end + 2;
 				continue;
 			}

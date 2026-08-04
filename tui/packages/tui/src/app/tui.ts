@@ -52,7 +52,7 @@ import { TodoBar } from "../status/todo-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
-import { InkTextContainer, TUI } from "../terminal/core.ts";
+import { Container, TUI } from "../terminal/core.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
@@ -294,7 +294,7 @@ export class LogicianTUI {
 		});
 
 		// Create the TUI with hardware cursor support
-		this.tui = new TUI(true);
+		this.tui = new TUI(process.stdout, true);
 		this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
 		this.todoBar.setOnInvalidate(() => this.tui.requestRender());
 		this.workSurface.setOnInvalidate(() => this.tui.requestRender());
@@ -346,7 +346,7 @@ export class LogicianTUI {
 			gitStaged: gitStatus.staged,
 			gitUntracked: gitStatus.untracked,
 			contextTokens: 0,
-			reasoner: "none",
+			reasoner: this.bridge.getReasonerStatus(),
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
@@ -445,7 +445,7 @@ export class LogicianTUI {
 		// Stack todo bar + steer queue + question handler above the input bar
 		// (both render empty when there's nothing to show, so they only take
 		// space when active).
-		const pinnedContainer = new InkTextContainer();
+		const pinnedContainer = new Container();
 		this.notifications.setOnInvalidate(() => this.tui.requestRender());
 		pinnedContainer.addChild(this.notifications);
 		pinnedContainer.addChild(this.todoBar);

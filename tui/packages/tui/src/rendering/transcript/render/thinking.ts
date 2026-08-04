@@ -2,9 +2,10 @@
 // Renders assistant reasoning chunks (collapsed/summary/expanded modes) with
 // code-block syntax highlighting in expanded mode.
 
-import { highlight, highlightAuto } from "../semantic-highlight.ts";
+import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import type { AssistantChunk, ThinkingDisplayStyle } from "@logician/coding-agent/sessions";
-import { BOLD, RESET, theme } from "../semantic-markup.ts";
+import { BOLD, DIM, RESET } from "../../../terminal/core.ts";
+import { theme } from "../../../terminal/theme.ts";
 import {
 	extractLangFromFence,
 	renderInline,
@@ -30,18 +31,18 @@ export function renderThinkingChunk(
 		case "collapsed": {
 			const preview = text.trim().slice(0, 100);
 			lines.push(
-				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} ${theme.fg("thinkingText", preview ? `${preview}...` : "thinking")}`,
+				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} ${DIM}${preview ? `${preview}...` : "thinking"}${RESET}`,
 			);
 			break;
 		}
 		case "summary": {
 			lines.push(
-				`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET} ${theme.fg("thinkingText", text.trim().slice(0, 150))}`,
+				`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET} \x1b[2m${text.trim().slice(0, 150)}\x1b[0m`,
 			);
 			break;
 		}
 		case "expanded": {
-			lines.push(`${theme.fgRaw("reasoningLabel")}${BOLD}REASONING${RESET}`);
+			lines.push(`${theme.fgRaw("thinkingText")}${BOLD}REASONING${RESET}`);
 			renderThinkingExpanded(text, lines, currentWidth);
 			break;
 		}
@@ -63,7 +64,7 @@ export function renderThinkingExpanded(
 	let inCodeBlock = false;
 	let codeContent = "";
 	let codeBlockLang: string | null = null;
-	const fg = theme.fgRaw("thinkingText");
+	const fg = theme.fgRaw("thinkingText") + DIM;
 
 	for (const rawLine of rawLines) {
 		if (rawLine.startsWith("```")) {
@@ -106,17 +107,17 @@ export function renderThinkingCodeBlock(
 	if (!code) return;
 
 	let highlightedCode = code;
+	let detectedLanguage = language;
 	try {
-		highlightedCode = language ? highlight(code, language).value : highlightAuto(code).value;
+		const highlighted = language ? highlight(code, language) : highlightAuto(code);
+		highlightedCode = highlighted.value;
+		detectedLanguage = highlighted.language || language;
 	} catch {
 		// Unknown or incomplete languages remain readable as plain code.
 	}
 
 	const codeLines = highlightedCode.split("\n");
-	// Auto-detection on short/ambiguous snippets guesses confidently wrong
-	// languages (e.g. prose labeled "arduino"), so only trust an explicitly
-	// declared fence language — otherwise show the generic "code" label.
-	const label = language || "code";
+	const label = detectedLanguage || "code";
 	const meta = `${label} · ${codeLines.length} line${codeLines.length === 1 ? "" : "s"}${streaming ? " · streaming" : ""}`;
 	const border = theme.fgRaw("separator");
 	lines.push(`${border}  ┌─${RESET} ${theme.fg("mdCode", meta)}${RESET}`);

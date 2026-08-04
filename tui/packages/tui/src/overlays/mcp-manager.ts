@@ -1,6 +1,14 @@
+import { type Component } from "../terminal/core.ts";
 import { SelectorController } from "./selector-controller.ts";
-import type { InkListOverlayModel } from "./ink-overlay-model.ts";
-import { parsePopupListNav } from "./popup-utils.ts";
+import {
+	renderListItem,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	parsePopupListNav,
+	renderListPopupFrame,
+	renderListPopupBody,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface McpServerItem {
 	serverName: string;
@@ -17,13 +25,15 @@ export type McpManagerAction =
 	| { type: "refresh" }
 	| { type: "close" };
 
-export class McpManagerOverlay {
+export class McpManagerOverlay implements Component {
 	public visible = false;
 	private servers: McpServerItem[] = [];
 	private configPath = "";
 	private selection = new SelectorController();
 	private busyServerName: string | null = null;
 	private message = "";
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
 
 	setSnapshot(snapshot: {
 		configPath?: string;
@@ -102,30 +112,72 @@ export class McpManagerOverlay {
 	}
 
 	invalidate(): void {
-		// State is read directly by the Ink renderer.
+		this.cachedLines = null;
 	}
 
-	getInkOverlayModel(): InkListOverlayModel {
-		return {
-			kind: "list",
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+
+		if (!this.visible) return [];
+
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
+
+		const bodyLines = renderListPopupBody(
+			this.servers,
+			this.selection,
+			innerWidth,
+			10,
+			(server, i) => {
+				const typeIcon =
+					server.type === "http" || server.type === "streamable-http"
+						? "http"
+						: "cmd";
+				const toolText =
+					server.toolCount > 0 ? `${server.toolCount} tool(s)` : "0 tools";
+				const urlText = server.url
+					? server.url.slice(0, 50)
+					: server.command
+						? server.command.split(" ").slice(0, 3).join(" ") + "..."
+						: "-";
+				const busy =
+					this.busyServerName === server.serverName ? "  updating…" : "";
+
+				const item: ListItem = {
+					label: `${server.serverName} (${typeIcon})`,
+					metadata: `${toolText} · ${urlText}${busy}`,
+					selected: i === this.selection.index,
+					statusDot:
+						this.busyServerName === server.serverName
+							? "yellow"
+							: server.enabled
+								? "green"
+								: "gray",
+				};
+
+				return renderListItem(item, innerWidth);
+			},
+			"No MCP servers configured.",
+		);
+
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
 			title: "MCP Servers",
 			subtitle: ` (${this.servers.length})`,
-			hints: "space toggle · r refresh · enter/esc close",
-			headerLines: this.configPath ? [`Config: ${this.configPath}`] : undefined,
-			items: this.servers.map((server, index) => {
-				const endpoint = server.url || server.command || "-";
-				const busy = this.busyServerName === server.serverName ? " · updating…" : "";
-				return {
-					label: `${server.serverName} (${server.type === "stdio" ? "cmd" : "http"})`,
-					metadata: `${server.toolCount === 0 ? "0 tools" : `${server.toolCount} tool(s)`} · ${endpoint.slice(0, 50)}${busy}`,
-					selected: index === this.selection.index,
-					current: server.enabled,
-				};
-			}),
-			emptyText: "No MCP servers configured.",
-			footer: this.message || "Changes apply on next reconnect.",
-			selectedIndex: this.selection.index,
-		};
+			hints: " space toggle · r refresh · enter/esc close",
+			extraHeaderLines: this.configPath ? [`Config: ${this.configPath}`] : undefined,
+			bodyLines,
+			bottomText:
+				this.message ||
+				"Toggle enables/disables MCP servers in config. Changes apply on next reconnect.",
+		});
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
 	}
 
 	private moveSelection(delta: number): void {

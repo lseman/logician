@@ -2,7 +2,15 @@
 // Shown at TUI startup when the current directory (or an ancestor) contains
 // trust-requiring resources (.logician/, extensions/, skills/, etc.).
 
-import type { InkListOverlayModel } from "./ink-overlay-model.ts";
+import {
+	visibleWidth,
+	clampLineToWidth,
+	BOLD,
+	DIM,
+	RESET,
+} from "../terminal/core.ts";
+import { theme } from "../terminal/theme.ts";
+import { BOX, clampPopupLines } from "./popup-utils.ts";
 
 export type TrustChoice =
 	| "trust"
@@ -66,6 +74,8 @@ export class TrustPromptOverlay {
 	private paths: string[] = [];
 	private selectedIndex = 0;
 	private visible = false;
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
 	private onClose?: () => void;
 
 	setOptions(opts: TrustPromptOverlayOptions): void {
@@ -154,27 +164,100 @@ export class TrustPromptOverlay {
 	}
 
 	invalidate(): void {
-		// State is read directly by the Ink renderer.
-	}
-
-	getInkOverlayModel(): InkListOverlayModel {
-		return {
-			kind: "list",
-			title: "Trust this workspace?",
-			subtitle: this.cwd ? ` · ${this.cwd}` : undefined,
-			hints: "↑↓ select · enter confirm · esc deny",
-			headerLines: this.paths.length ? this.paths : undefined,
-			items: OPTIONS.map((option, index) => ({
-				label: option.label,
-				metadata: option.description,
-				selected: index === this.selectedIndex,
-			})),
-			emptyText: "No trust choices available.",
-			footer: "Only trust folders whose contents you understand.",
-			selectedIndex: this.selectedIndex,
-		};
+		this.cachedLines = null;
 	}
 
 	// ── Rendering ─────────────────────────────────────────────────────────────
 
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+
+		this.cachedWidth = width;
+		if (!this.visible) return [];
+
+		const popupWidth = Math.max(24, Math.min(width, 78));
+		const innerWidth = Math.max(1, popupWidth - 4);
+		const border = theme.fg("border", "");
+		const lines: string[] = [];
+		const row = (content = ""): string => {
+			const clipped = clampLineToWidth(content, innerWidth);
+			const padding = " ".repeat(
+				Math.max(0, innerWidth - visibleWidth(clipped)),
+			);
+			return `${border}${BOX.vert}${RESET} ${clipped}${padding} ${border}${BOX.vert}${RESET}`;
+		};
+		const separator = (): string =>
+			`${border}${BOX.separator}${BOX.horiz.repeat(popupWidth - 2)}${BOX.sepRight}${RESET}`;
+
+		lines.push(
+			`${border}${BOX.topLeft}${BOX.horiz.repeat(popupWidth - 2)}${BOX.topRight}${RESET}`,
+		);
+		lines.push(
+			row(
+				`${theme.fg("warning", "◆")} ${BOLD}${theme.fg("header", "TRUST THIS WORKSPACE?")}${RESET}`,
+			),
+		);
+		lines.push(row(`${theme.fg("muted", "Folder")}  ${theme.fg("text", this.cwd)}`));
+		lines.push(separator());
+		lines.push(
+			row(
+				"Local configuration can change agent instructions and permit project tools.",
+			),
+		);
+		lines.push(
+			row(
+				`${DIM}Only continue if you recognize and trust this folder.${RESET}`,
+			),
+		);
+
+		if (this.paths.length > 0) {
+			const maxPaths = 3;
+			const shown = this.paths.slice(0, maxPaths);
+			lines.push(separator());
+			lines.push(row(theme.fg("muted", "LOCAL RESOURCES")));
+			for (const p of shown) {
+				lines.push(row(`${theme.fg("separator", "│")} ${p}`));
+			}
+			if (this.paths.length > maxPaths) {
+				lines.push(
+					row(`${DIM}… and ${this.paths.length - maxPaths} more${RESET}`),
+				);
+			}
+		}
+
+		lines.push(separator());
+		for (let i = 0; i < OPTIONS.length; i++) {
+			const opt = OPTIONS[i];
+			const isSelected = i === this.selectedIndex;
+			const marker = isSelected
+				? theme.fg("active", "›")
+				: theme.fg("dim", `${i + 1}`);
+			const label = isSelected
+				? `${BOLD}${theme.fg("text", opt.label)}${RESET}`
+				: theme.fg("muted", opt.label);
+			const shortcut = theme.fg("dim", opt.key);
+			const left = `${marker} ${label}`;
+			const right = `${opt.description}  ${shortcut}`;
+			const gap = Math.max(
+				1,
+				innerWidth - visibleWidth(left) - visibleWidth(right),
+			);
+			lines.push(row(`${left}${" ".repeat(gap)}${theme.fg("dim", right)}`));
+		}
+
+		lines.push(separator());
+		lines.push(
+			row(
+				`${theme.fg("muted", "↑↓ navigate")}  ·  ${theme.fg("muted", "Enter confirm")}  ·  ${theme.fg("muted", "Esc exit safely")}`,
+			),
+		);
+		lines.push(
+			`${border}${BOX.bottomLeft}${BOX.horiz.repeat(popupWidth - 2)}${BOX.bottomRight}${RESET}`,
+		);
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
+	}
 }

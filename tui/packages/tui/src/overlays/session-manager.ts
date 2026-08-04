@@ -3,8 +3,21 @@
 // Not to be confused with agent-core's SessionManager, which manages an
 // internal JSONL crash-recovery journal, not this UI.
 
-import type { InkListOverlayModel } from "./ink-overlay-model.ts";
+import { type Component, visibleWidth, RESET, BOLD } from "../terminal/core.ts";
+import { theme } from "../terminal/theme.ts";
 import type { SessionStore } from "@logician/coding-agent/sessions";
+import {
+	renderListItem,
+	renderSeparator,
+	renderStatusLine,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	type ListItem,
+} from "./popup-utils.ts";
+
+const getHeaderColor = (): string => theme.fg("header", "");
+const getYellow = (): string => theme.fg("levelHigh", "");
+const getRed = (): string => theme.fg("error", "");
 
 export interface SessionInfo {
 	id: string;
@@ -28,11 +41,13 @@ export type SessionManagerAction =
 
 type InputMode = "list" | "rename" | "delete-confirm" | "new";
 
-export class SessionBrowserOverlay {
+export class SessionBrowserOverlay implements Component {
 	private store: SessionStore | null = null;
 	private sessions: SessionInfo[] = [];
 	private selectedIndex = 0;
 	private visible = false;
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
 	private mode: InputMode = "list";
 	private filter = "";
 	private renameSessionId: string | null = null;
@@ -259,7 +274,7 @@ export class SessionBrowserOverlay {
 		if (data === "\r" || data === "\n") {
 			const newTitle = this.renameInput.trim();
 			if (this.renameSessionId && newTitle.length > 0) {
-				this.actionCallback?.({ type: "rename", sessionId: this.renameSessionId, title: newTitle });
+				this.store?.renameSession(this.renameSessionId, newTitle);
 				this.refresh();
 			}
 			this.mode = "list";
@@ -313,50 +328,127 @@ export class SessionBrowserOverlay {
 	}
 
 	invalidate(): void {
-		// State is read directly by the Ink renderer.
+		this.cachedLines = null;
 	}
 
-	getInkOverlayModel(): InkListOverlayModel {
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+
+		this.cachedWidth = width;
+
+		if (!this.visible) return [];
+
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
+		const lines: string[] = [];
+
+		// ── List mode ────────────────────────────────────────────────────────
+		if (this.mode === "list") {
+			const headerFg = getHeaderColor();
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+
+			const titleText = "Sessions";
+			const subtitleText = ` (${this.sessions.length} total)`;
+			const hintsText = " enter switch · ' filter · ^R rename · ^D delete · ^N new";
+			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
+			const titleVisible = visibleWidth(titleLine);
+			const titlePad = Math.max(0, innerWidth - titleVisible);
+			lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+
+			if (this.filter) {
+				lines.push(renderStatusLine(`/filter: ${this.filter}`, innerWidth));
+			}
+			lines.push(renderSeparator(popupWidth));
+
+			// Session list
+			const maxListItems = Math.min(12, this.sessions.length);
+			if (this.sessions.length === 0) {
+				lines.push(
+					renderStatusLine("No sessions found.", innerWidth, theme.fg("warning", "")),
+				);
+			}
+			for (let i = 0; i < maxListItems; i++) {
+				const s = this.sessions[i];
+				const isSelected = i === this.selectedIndex;
+				const label = s.name ? `${s.name}  (${s.title})` : s.title;
+
+				const item: ListItem = {
+					label,
+					metadata: `${s.messageCount}msg`,
+					selected: isSelected,
+					dim: !!s.name,
+				};
+
+				lines.push(renderListItem(item, innerWidth));
+			}
+
+			if (this.sessions.length > maxListItems) {
+				lines.push(
+					renderStatusLine(
+						`… and ${this.sessions.length - maxListItems} more`,
+						innerWidth,
+					),
+				);
+			}
+
+			lines.push(renderSeparator(popupWidth));
+			lines.push(
+				renderStatusLine(
+					"Enter switch · ' filter · Ctrl+R rename · Ctrl+D delete · Ctrl+N new",
+					innerWidth,
+				),
+			);
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+		}
+
+		// ── Rename mode ──────────────────────────────────────────────────────
 		if (this.mode === "rename") {
-			const filtering = this.renameSessionId === null;
-			return {
-				kind: "list",
-				title: filtering ? "Filter sessions" : "Rename session",
-				headerLines: [this.renameInput],
-				items: [],
-				emptyText: filtering ? `${this.sessions.length} matches` : "Enter a new title.",
-				footer: "Enter confirm · Esc cancel",
-				selectedIndex: 0,
-			};
-		}
-		if (this.mode === "delete-confirm") {
-			const session = this.sessions[this.selectedIndex];
-			return {
-				kind: "list",
-				title: "Delete session?",
-				subtitle: session ? ` · ${session.title}` : undefined,
-				items: [],
-				emptyText: "This cannot be undone.",
-				footer: "Y confirm · Esc cancel",
-				selectedIndex: 0,
-			};
-		}
-		return {
-			kind: "list",
-			title: "Sessions",
-			subtitle: ` · ${this.store?.getProjectDir() || "current folder"} (${this.sessions.length} total)`,
-			hints: "enter switch · ' filter · ^R rename · ^D delete · ^N new",
-			headerLines: this.filter ? [`Filter: ${this.filter}`] : undefined,
-			items: this.sessions.map((session, index) => ({
-				label: session.name ? `${session.name}  (${session.title})` : session.title,
-				metadata: `${session.messageCount}msg`,
-				selected: index === this.selectedIndex,
-			})),
-			emptyText: "No sessions found.",
-			footer: "Enter switch · Ctrl+R rename · Ctrl+D delete · Ctrl+N new",
-			selectedIndex: this.selectedIndex,
-			maxRows: 12,
-		};
-	}
+			const headerFg = getHeaderColor();
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
 
+			if (this.renameSessionId !== null) {
+				const title =
+					this.sessions.find((s) => s.id === this.renameSessionId)?.title ||
+					"Untitled";
+				const titleLine = `Rename: ${title}`;
+				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
+				lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+				lines.push(renderSeparator(popupWidth));
+				const display = `${getYellow()}${this.renameInput}${RESET}_`;
+				lines.push(renderStatusLine(display, innerWidth));
+				lines.push(renderStatusLine("Enter to confirm, Esc to cancel", innerWidth));
+			} else {
+				const titleLine = `Filter: ${this.sessions.length} matches`;
+				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
+				lines.push(`${headerFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+				lines.push(renderSeparator(popupWidth));
+				const display = `${getYellow()}${this.renameInput}${RESET}_`;
+				lines.push(renderStatusLine(display, innerWidth));
+				lines.push(renderStatusLine("Enter to apply, Esc to cancel", innerWidth));
+			}
+			lines.push(renderSeparator(popupWidth));
+			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+		}
+
+		// ── Delete confirm mode ──────────────────────────────────────────────
+		if (this.mode === "delete-confirm") {
+			const session =
+				this.selectedIndex < this.sessions.length
+					? this.sessions[this.selectedIndex]
+					: null;
+			const redFg = getRed();
+			lines.push(`${redFg}${"─".repeat(popupWidth)}${RESET}`);
+			const titleLine = `${BOLD}${redFg}Delete session?${RESET}${session ? `: ${session.title}` : ""}`;
+			const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
+			lines.push(`${redFg} ${titleLine}${" ".repeat(titlePad + 1)}`);
+			lines.push(renderSeparator(popupWidth));
+			lines.push(renderStatusLine("Y to confirm, Esc to cancel", innerWidth));
+			lines.push(`${redFg}${"─".repeat(popupWidth)}${RESET}`);
+		}
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
+	}
 }

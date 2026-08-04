@@ -3,9 +3,17 @@
 // Pattern: list, select, confirm, close.
 // Mirrors ReasonerSelectorOverlay / PluginManagerOverlay.
 
+import { type Component } from "../terminal/core.ts";
 import { SelectorController } from "./selector-controller.ts";
-import type { InkListOverlayModel } from "./ink-overlay-model.ts";
-import { parsePopupListNav } from "./popup-utils.ts";
+import {
+	renderListItem,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	parsePopupListNav,
+	renderListPopupFrame,
+	renderListPopupBody,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface ThemeInfo {
 	name: string;
@@ -16,11 +24,13 @@ export type ThemeSelectorAction =
 	| { type: "select"; theme: ThemeInfo }
 	| { type: "close" };
 
-export class ThemeSelectorOverlay {
+export class ThemeSelectorOverlay implements Component {
 	public visible = false;
 	private themes: ThemeInfo[] = [];
 	private selection = new SelectorController();
 	private message = "";
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
 
 	setThemes(themes: ThemeInfo[]): void {
 		this.themes = themes;
@@ -65,24 +75,48 @@ export class ThemeSelectorOverlay {
 	}
 
 	invalidate(): void {
-		// State is read directly by the Ink renderer.
+		this.cachedLines = null;
 	}
 
-	getInkOverlayModel(): InkListOverlayModel {
-		return {
-			kind: "list",
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+
+		if (!this.visible) return [];
+
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
+
+		const bodyLines = renderListPopupBody(
+			this.themes,
+			this.selection,
+			innerWidth,
+			10,
+			(t, i) => {
+				const item: ListItem = {
+					label: t.name,
+					metadata: t.description,
+					selected: i === this.selection.index,
+				};
+				return renderListItem(item, innerWidth);
+			},
+			"No themes available.",
+		);
+
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
 			title: "Theme",
 			subtitle: ` (${this.themes.length})`,
-			hints: "↑↓ select · enter confirm · esc close",
-			items: this.themes.map((themeInfo, index) => ({
-				label: themeInfo.name,
-				metadata: themeInfo.description,
-				selected: index === this.selection.index,
-			})),
-			emptyText: "No themes available.",
-			footer: this.message || "Select a color theme.",
-			selectedIndex: this.selection.index,
-		};
+			hints: " ↑↓ select · enter confirm · esc close",
+			bodyLines,
+			bottomText: this.message || "Select a color theme.",
+		});
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
 	}
 
 	private moveSelection(delta: number): void {

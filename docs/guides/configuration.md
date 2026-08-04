@@ -52,6 +52,60 @@ Create `.logician.json` in the project root:
 | `LOGICIAN_THINKING` | Thinking level | `medium` |
 | `LOGICIAN_MAX_TOKENS` | Max tokens | `8192` |
 | `LOGICIAN_TEMPERATURE` | Temperature | `0.7` |
+| `LOGICIAN_MEMORY_EXTRACTOR_URL` | Dedicated semantic-memory model endpoint | Primary LLM endpoint |
+| `LOGICIAN_MEMORY_EXTRACTOR_MODEL` | Model used for semantic-memory extraction | Active model |
+| `LOGICIAN_MEMORY_EMBEDDINGS` | Enable local semantic memory retrieval | `false` |
+| `LOGICIAN_MEMORY_EMBEDDING_MODEL` | Local embedding model | `Xenova/all-MiniLM-L6-v2` |
+| `LOGICIAN_REASONER` | Structured pre-reasoner ID | `none` |
+
+## Structured reasoners
+
+Reasoners are opt-in and disabled by default. When enabled, the selected reasoner produces advisory analysis before the normal agent loop; the agent still verifies that analysis and can use tools normally.
+
+```json
+{
+  "reasoner": "reflexion",
+  "reasonerConfig": {
+    "maxTrials": 2
+  }
+}
+```
+
+Available IDs are `ssr`, `tot`, `got`, `reflexion`, `self_consistency`, `best_of_n`, `auto_cot`, `in_context_cot`, and `cover`. Use `none` to disable them. The `/reasoner` command changes and persists the active mode.
+
+## Dedicated memory extractor
+
+Memory extraction can run against a smaller model on a separate OpenAI-compatible endpoint:
+
+```json
+{
+  "memory": true,
+  "memoryExtractor": {
+    "baseUrl": "http://127.0.0.1:8081",
+    "model": "mistralai/Ministral-3-3B-Instruct-2512"
+  }
+}
+```
+
+The primary agent continues using `baseUrl` and `model`. Extraction runs through a durable SQLite-backed background queue, so it does not delay turn completion and unfinished jobs recover after restart. Evidence payloads are bounded and redacted before persistence. If the extractor endpoint is unavailable or returns invalid or ungrounded output, memory creation falls back to deterministic synthesis.
+
+## Local semantic memory retrieval
+
+Semantic retrieval is optional and disabled by default. Enable it alongside memory with:
+
+```json
+{
+  "memory": true,
+  "memoryEmbeddings": true,
+  "memoryEmbeddingModel": "Xenova/all-MiniLM-L6-v2"
+}
+```
+
+The quantized embedding model loads lazily and is cached by the local Transformers runtime. Its first enablement may download model files. Logician continues using fast SQLite FTS retrieval while the model warms, then fuses lexical and semantic ranks without requiring a separate vector service. New episodes and consolidated memories are embedded in the background.
+
+Retrieved context initially includes full detail for only the strongest matches. The agent can call the read-only `memory_get` tool with up to 20 displayed memory or observation IDs when it needs the complete evidence, keeping routine prompts smaller.
+
+Memory retrieval uses FTS5 candidate generation across both observations and durable memories, reciprocal-rank fusion with task/file/phase signals, and session diversification. The three highest-ranked items are injected with details; additional results use compact ID-index cards to preserve the context budget.
 
 ## Runtime settings
 

@@ -12,6 +12,9 @@ import type {
   DecayConfig,
   DecayConfigInput,
   ExportData,
+  ExtractionJob,
+  ExtractionJobStatus,
+  ExpandedMemoryEntry,
   FileContextEntry,
   ImportData,
   ImportResult,
@@ -26,6 +29,7 @@ import type {
   RecallOptions,
   RetentionScore,
   SearchResult,
+  SemanticSearchResult,
   Session,
   WorkingMemoryTier,
 } from "./types.js";
@@ -72,8 +76,16 @@ function sanitizePayload(value: unknown, depth = 0): unknown {
 function toFtsQuery(query: string): string {
   const terms = query.normalize("NFKC").match(/[\p{L}\p{N}_]+/gu) || [];
   return [...new Set(terms.slice(0, 12).map((term) => term.toLowerCase()))]
-    .map((term) => `"${term.replace(/"/g, '""')}"${term.length > 1 ? "*" : ""}`)
+    .map((term) => `"${term.replace(/"/g, "\"\"")}"${term.length > 1 ? "*" : ""}`)
     .join(" AND ");
+}
+
+function toFtsAnyQuery(query: string): string {
+  const stop = new Set(["a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of", "on", "or", "the", "this", "to", "with"]);
+  const terms = query.normalize("NFKC").match(/[\p{L}\p{N}_]+/gu) || [];
+  return [...new Set(terms.map((term) => term.toLowerCase()).filter((term) => term.length > 1 && !stop.has(term)).slice(0, 12))]
+    .map((term) => `"${term.replace(/"/g, "\"\"")}"*`)
+    .join(" OR ");
 }
 
 // ── Synthetic Compression (zero-LLM) ─────────────────────────────────────────
@@ -390,7 +402,41 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_id);
     CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target_id);
     CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(type);
+
+    -- Durable background semantic-extraction queue. Jobs survive crashes and
+    -- are reclaimed on the next startup without delaying interactive turns.
+    CREATE TABLE IF NOT EXISTS extraction_jobs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      workspace TEXT NOT NULL DEFAULT '',
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      next_attempt_at TEXT NOT NULL,
+      last_error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_extraction_jobs_ready
+      ON extraction_jobs(workspace, status, next_attempt_at, created_at);
+
+    CREATE TABLE IF NOT EXISTS memory_embeddings (
+      entity_id TEXT PRIMARY KEY,
+      entity_kind TEXT NOT NULL CHECK(entity_kind IN ('observation', 'memory')),
+      session_id TEXT,
+      workspace TEXT NOT NULL DEFAULT '',
+      dimensions INTEGER NOT NULL,
+      vector TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace
+      ON memory_embeddings(workspace, dimensions, entity_kind);
   `);
+
+  // A process may exit after claiming but before acknowledging a job. Requeue
+  // those leases on startup; writes are idempotent because observation IDs are
+  // derived from the job ID by the hook worker.
+  db.prepare("UPDATE extraction_jobs SET status = 'pending' WHERE status = 'running'").run();
 
   // ── Schema migrations ──────────────────────────────────────────────────
   // Add workspace columns to existing databases that were created before
@@ -834,6 +880,47 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     }));
   }
 
+  function expandEntries(ids: string[]): ExpandedMemoryEntry[] {
+    const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))].slice(0, 20);
+    const entries = new Map<string, ExpandedMemoryEntry>();
+    const observationStatement = db.prepare("SELECT * FROM observations WHERE id = ? AND workspace = ?");
+    const memoryStatement = db.prepare("SELECT * FROM memories WHERE id = ? AND workspace = ?");
+    for (const id of uniqueIds) {
+      const observationRow = observationStatement.get(id, currentWorkspace) as any;
+      if (observationRow) {
+        const observation = rowToObservation(observationRow);
+        entries.set(id, {
+          id,
+          kind: "observation",
+          title: observation.title,
+          content: [observation.narrative, ...observation.facts].filter(Boolean).join("\n"),
+          type: observation.type,
+          files: observation.files,
+          concepts: observation.concepts,
+          timestamp: observation.timestamp,
+          sessionIds: [observation.sessionId],
+        });
+        continue;
+      }
+      const memoryRow = memoryStatement.get(id, currentWorkspace) as any;
+      if (memoryRow) {
+        const memory = rowToMemory(memoryRow);
+        entries.set(id, {
+          id,
+          kind: "memory",
+          title: memory.title,
+          content: memory.content,
+          type: memory.type,
+          files: memory.files,
+          concepts: memory.concepts,
+          timestamp: memory.updatedAt,
+          sessionIds: memory.sessionIds,
+        });
+      }
+    }
+    return uniqueIds.flatMap((id) => entries.get(id) ? [entries.get(id)!] : []);
+  }
+
   function clearObservations(): number {
     const { count } = db.prepare("SELECT COUNT(*) AS count FROM observations WHERE workspace = ?")
       .get(currentWorkspace) as { count: number };
@@ -1256,17 +1343,83 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       .join("\n\n");
   }
 
+  function upsertEmbedding(
+    id: string,
+    kind: "observation" | "memory",
+    vector: number[],
+    sessionId?: string,
+  ): void {
+    if (!vector.length || vector.some((value) => !Number.isFinite(value))) return;
+    db.prepare(`INSERT INTO memory_embeddings
+      (entity_id, entity_kind, session_id, workspace, dimensions, vector, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(entity_id) DO UPDATE SET
+        entity_kind = excluded.entity_kind,
+        session_id = excluded.session_id,
+        workspace = excluded.workspace,
+        dimensions = excluded.dimensions,
+        vector = excluded.vector,
+        updated_at = excluded.updated_at`)
+      .run(id, kind, sessionId || null, currentWorkspace, vector.length, JSON.stringify(vector), now());
+  }
+
+  function searchEmbeddings(vector: number[], limit: number = 40): SemanticSearchResult[] {
+    if (!vector.length || vector.some((value) => !Number.isFinite(value))) return [];
+    const rows = db.prepare(`SELECT entity_id, entity_kind, session_id, vector
+      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?`)
+      .all(currentWorkspace, vector.length) as Array<{
+        entity_id: string; entity_kind: "observation" | "memory";
+        session_id: string | null; vector: string;
+      }>;
+    let queryNorm = 0;
+    for (const value of vector) queryNorm += value * value;
+    queryNorm = Math.sqrt(queryNorm);
+    if (!queryNorm) return [];
+    const results: SemanticSearchResult[] = [];
+    for (const row of rows) {
+      const candidate = safeParseJson(row.vector);
+      if (!Array.isArray(candidate) || candidate.length !== vector.length) continue;
+      let dot = 0;
+      let norm = 0;
+      for (let index = 0; index < vector.length; index++) {
+        const value = Number(candidate[index]);
+        if (!Number.isFinite(value)) { norm = 0; break; }
+        dot += vector[index] * value;
+        norm += value * value;
+      }
+      const score = norm ? dot / (queryNorm * Math.sqrt(norm)) : 0;
+      if (score <= 0) continue;
+      results.push({
+        id: row.entity_id,
+        kind: row.entity_kind,
+        sessionId: row.session_id || undefined,
+        score,
+      });
+    }
+    return results.sort((a, b) => b.score - a.score).slice(0, Math.max(1, Math.min(limit, 200)));
+  }
+
+  function hasEmbedding(id: string): boolean {
+    return Boolean(db.prepare("SELECT 1 AS found FROM memory_embeddings WHERE entity_id = ? AND workspace = ?")
+      .get(id, currentWorkspace));
+  }
+
   // ── Consolidation ──────────────────────────────────────────────────────
 
   function consolidate(sessionId: string): Memory[] {
-    const rows = db.prepare(
+    const pendingRows = db.prepare(
       `SELECT * FROM observations
        WHERE session_id = ? AND workspace = ? AND consolidated = 0
          AND importance >= 5
        ORDER BY timestamp ASC LIMIT 100`
     ).all(sessionId, currentWorkspace) as any[];
 
-    if (rows.length < 2) return [];
+    // Semantic episodes are complete grounded units. When present, consolidate
+    // those rather than mechanically merging their underlying tool telemetry.
+    const semanticRows = pendingRows.filter((row) => row.hook_type === "stop");
+    const rows = semanticRows.length ? semanticRows : pendingRows;
+
+    if (rows.length < 1 || (!semanticRows.length && rows.length < 2)) return [];
 
     const observations = rows.map((r) => ({
       id: r.id,
@@ -1300,82 +1453,92 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const memories: Memory[] = [];
     const usedObservationIds: string[] = [];
 
-    for (const [topic, group] of Object.entries(groups)) {
-      if (group.length < 2) continue;
-      const dominantType = group
-        .map((item) => item.type)
-        .sort((a, b) => group.filter((item) => item.type === b).length - group.filter((item) => item.type === a).length)[0];
-      const allFacts = [...new Set(group.flatMap((o) => o.facts.length ? o.facts : [o.narrative]).filter(Boolean))].slice(0, 8);
-      const allConcepts = [...new Set(group.flatMap(o => o.concepts))].slice(0, 10);
-      const allFiles = [...new Set(group.flatMap(o => o.files))].slice(0, 10);
-      const avgStrength = Math.round(group.reduce((s, o) => s + o.importance, 0) / group.length);
+    // A single transaction for the whole consolidation pass: it makes each
+    // group's read-existing/supersede/insert sequence atomic with respect to
+    // other writers on this connection (the extraction worker also calls
+    // consolidate() after every job), and turns what was one commit per
+    // group/observation into a single commit for the entire pass.
+    const applyConsolidation = db.transaction(() => {
+      for (const [topic, group] of Object.entries(groups)) {
+        if (group.length < 2 && !semanticRows.length) continue;
+        const dominantType = group
+          .map((item) => item.type)
+          .sort((a, b) => group.filter((item) => item.type === b).length - group.filter((item) => item.type === a).length)[0];
+        const allFacts = [...new Set(group.flatMap((o) => o.facts.length ? o.facts : [o.narrative]).filter(Boolean))].slice(0, 8);
+        const allConcepts = [...new Set(group.flatMap(o => o.concepts))].slice(0, 10);
+        const allFiles = [...new Set(group.flatMap(o => o.files))].slice(0, 10);
+        const avgStrength = Math.round(group.reduce((s, o) => s + o.importance, 0) / group.length);
 
-      const typeNames: Record<string, MemoryType> = {
-        file_read: "fact",
-        file_write: "pattern",
-        file_edit: "pattern",
-        command_run: "workflow",
-        search: "fact",
-        web_fetch: "fact",
-        conversation: "pattern",
-        error: "bug",
-        decision: "pattern",
-        discovery: "fact",
-        notification: "fact",
-        other: "fact",
-      };
+        const typeNames: Record<string, MemoryType> = {
+          file_read: "fact",
+          file_write: "pattern",
+          file_edit: "pattern",
+          command_run: "workflow",
+          search: "fact",
+          web_fetch: "fact",
+          conversation: "pattern",
+          error: "bug",
+          decision: "pattern",
+          discovery: "fact",
+          implementation: "architecture",
+          bugfix: "bug",
+          notification: "fact",
+          other: "fact",
+        };
 
-      const label = topic.replace(/^(?:file|concept|type):/, "");
-      const title = `${label} — ${dominantType.replace(/_/g, " ")}`.slice(0, 200);
-      const content = allFacts.join("\n");
-      const sourceIds = group.map((o) => o.id);
-      const strength = Math.min(10, Math.max(1, avgStrength + 1));
-      const ts = now();
-      const existingRow = db.prepare(
-        "SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
-      ).get(currentWorkspace, title) as any;
+        const label = topic.replace(/^(?:file|concept|type):/, "");
+        const title = `${label} — ${dominantType.replace(/_/g, " ")}`.slice(0, 200);
+        const content = allFacts.join("\n");
+        const sourceIds = group.map((o) => o.id);
+        const strength = Math.min(10, Math.max(1, avgStrength + 1));
+        const ts = now();
+        const existingRow = db.prepare(
+          "SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
+        ).get(currentWorkspace, title) as any;
 
-      if (existingRow) {
-        const existing = rowToMemory(existingRow);
-        const id = generateId();
-        const mergedContent = [...new Set([...existing.content.split("\n"), ...allFacts])].filter(Boolean).slice(-12).join("\n");
-        const mergedConcepts = [...new Set([...existing.concepts, ...allConcepts])].slice(0, 15);
-        const mergedFiles = [...new Set([...existing.files, ...allFiles])].slice(0, 15);
-        const mergedSessions = [...new Set([...existing.sessionIds, sessionId])];
-        const mergedSources = [...new Set([...(existing.sourceObservationIds || []), ...sourceIds])].slice(-100);
-        db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(existing.id);
-        db.prepare(`INSERT INTO memories
+        if (existingRow) {
+          const existing = rowToMemory(existingRow);
+          const id = generateId();
+          const mergedContent = [...new Set([...existing.content.split("\n"), ...allFacts])].filter(Boolean).slice(-12).join("\n");
+          const mergedConcepts = [...new Set([...existing.concepts, ...allConcepts])].slice(0, 15);
+          const mergedFiles = [...new Set([...existing.files, ...allFiles])].slice(0, 15);
+          const mergedSessions = [...new Set([...existing.sessionIds, sessionId])];
+          const mergedSources = [...new Set([...(existing.sourceObservationIds || []), ...sourceIds])].slice(-100);
+          db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(existing.id);
+          db.prepare(`INSERT INTO memories
+              (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
+               strength, version, parent_id, related_ids, source_observation_ids, is_latest,
+               project, workspace, supersedes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`)
+              .run(id, existing.createdAt, ts, existing.type, title, mergedContent,
+                JSON.stringify(mergedConcepts), JSON.stringify(mergedFiles), JSON.stringify(mergedSessions),
+                Math.min(10, Math.max(existing.strength, strength)), existing.version + 1, existing.id,
+                JSON.stringify(existing.relatedIds || []), JSON.stringify(mergedSources), existing.project || null,
+                currentWorkspace, JSON.stringify([existing.id]));
+          db.prepare(`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
+            VALUES (?, 'supersedes', ?, ?, 1, ?)`)
+            .run(generateId(), id, existing.id, ts);
+          memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
+        } else {
+          const id = generateId();
+          db.prepare(`INSERT INTO memories
             (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
-             strength, version, parent_id, related_ids, source_observation_ids, is_latest,
-             project, workspace, supersedes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`)
-            .run(id, existing.createdAt, ts, existing.type, title, mergedContent,
-              JSON.stringify(mergedConcepts), JSON.stringify(mergedFiles), JSON.stringify(mergedSessions),
-              Math.min(10, Math.max(existing.strength, strength)), existing.version + 1, existing.id,
-              JSON.stringify(existing.relatedIds || []), JSON.stringify(mergedSources), existing.project || null,
-              currentWorkspace, JSON.stringify([existing.id]));
-        db.prepare(`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
-          VALUES (?, 'supersedes', ?, ?, 1, ?)`)
-          .run(generateId(), id, existing.id, ts);
-        memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
-      } else {
-        const id = generateId();
-        db.prepare(`INSERT INTO memories
-          (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
-           strength, version, parent_id, related_ids, source_observation_ids, is_latest, project, workspace)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, NULL, ?)`)
-          .run(id, ts, ts, typeNames[dominantType] || "fact", title, content,
-            JSON.stringify(allConcepts), JSON.stringify(allFiles), JSON.stringify([sessionId]),
-            strength, JSON.stringify(sourceIds), currentWorkspace);
-        memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
+             strength, version, parent_id, related_ids, source_observation_ids, is_latest, project, workspace)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, NULL, ?)`)
+            .run(id, ts, ts, typeNames[dominantType] || "fact", title, content,
+              JSON.stringify(allConcepts), JSON.stringify(allFiles), JSON.stringify([sessionId]),
+              strength, JSON.stringify(sourceIds), currentWorkspace);
+          memories.push(rowToMemory(db.prepare("SELECT * FROM memories WHERE id = ?").get(id)));
+        }
+        usedObservationIds.push(...sourceIds);
       }
-      usedObservationIds.push(...sourceIds);
-    }
 
-    if (usedObservationIds.length) {
-      const mark = db.prepare("UPDATE observations SET consolidated = 1 WHERE id = ?");
-      usedObservationIds.forEach((id) => mark.run(id));
-    }
+      if (usedObservationIds.length) {
+        const mark = db.prepare("UPDATE observations SET consolidated = 1 WHERE id = ?");
+        usedObservationIds.forEach((id) => mark.run(id));
+      }
+    });
+    applyConsolidation();
 
     return memories;
   }
@@ -1396,7 +1559,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     const fileTokens = new Set(changedFiles.flatMap((file) => [...contextTokens(file)]));
     const nowMs = Date.now();
     const estimateTokens = (text: string) => Math.ceil(text.length / 3);
-    type Candidate = ContextBlock & { id: string; score: number };
+    type Candidate = ContextBlock & { id: string; score: number; compact: string; full: string; sourceKey: string };
     const candidates: Candidate[] = [];
 
     const overlapScore = (text: string): number => {
@@ -1435,12 +1598,69 @@ export function createMemoryStore(dbPath: string): MemoryStore {
         tokens: estimateTokens(content),
         recency: nowMs,
         score: 8 + overlapScore(session.summary) * 12,
+        compact: content,
+        full: content,
+        sourceKey: sessionId,
       });
     }
 
-    // Pull a broad bounded pool, then rank in-process. This avoids strict FTS
-    // AND semantics dropping useful context when an objective contains filler.
-    for (const obs of listRecentObservations(120)) {
+    // Generate candidates in SQLite so relevant older knowledge is not hidden
+    // behind a fixed recent-item window. RRF makes lexical rank comparable to
+    // task, file, recency, and salience signals without score calibration.
+    const ftsQuery = toFtsAnyQuery(queryText);
+    const lexicalObservationRank = new Map<string, number>();
+    const lexicalMemoryRank = new Map<string, number>();
+    const semanticObservationRank = new Map<string, number>();
+    const semanticMemoryRank = new Map<string, number>();
+    const lexicalObservations = ftsQuery
+      ? db.prepare(`SELECT o.*, bm25(observations_fts, 0, 8, 4, 2, 3, 4) AS rank
+          FROM observations_fts JOIN observations o ON o.id = observations_fts.id
+          WHERE observations_fts MATCH ? AND o.workspace = ?
+          ORDER BY rank ASC LIMIT 80`).all(ftsQuery, currentWorkspace) as any[]
+      : [];
+    lexicalObservations.forEach((row, index) => lexicalObservationRank.set(row.id, index + 1));
+    const lexicalMemories = ftsQuery
+      ? db.prepare(`SELECT m.*, bm25(memories_fts, 0, 8, 4, 3, 4) AS rank
+          FROM memories_fts JOIN memories m ON m.id = memories_fts.id
+          WHERE memories_fts MATCH ? AND m.workspace = ? AND m.is_latest = 1
+          ORDER BY rank ASC LIMIT 80`).all(ftsQuery, currentWorkspace) as any[]
+      : [];
+    lexicalMemories.forEach((row, index) => lexicalMemoryRank.set(row.id, index + 1));
+    const semanticResults = retrieval.semanticVector?.length
+      ? searchEmbeddings(retrieval.semanticVector, 80)
+      : [];
+    semanticResults.forEach((result, index) => {
+      const target = result.kind === "observation" ? semanticObservationRank : semanticMemoryRank;
+      target.set(result.id, index + 1);
+    });
+    const rrfBoost = (rank: number | undefined, weight: number): number =>
+      rank ? weight * (60 / (60 + rank)) : 0;
+
+    const recentObservations = listRecentObservations(60);
+    const observationPool = new Map<string, CompressedObservation>();
+    recentObservations.forEach((obs) => observationPool.set(obs.id, obs));
+    lexicalObservations.forEach((row) => observationPool.set(row.id, rowToObservation(row)));
+    for (const result of semanticResults) {
+      if (result.kind !== "observation" || observationPool.has(result.id)) continue;
+      const row = db.prepare("SELECT * FROM observations WHERE id = ? AND workspace = ?")
+        .get(result.id, currentWorkspace) as any;
+      if (row) observationPool.set(result.id, rowToObservation(row));
+    }
+    const latestEpisodeBySession = new Map<string, number>();
+    for (const obs of observationPool.values()) {
+      if (!obs.id.startsWith("episode:")) continue;
+      latestEpisodeBySession.set(
+        obs.sessionId,
+        Math.max(latestEpisodeBySession.get(obs.sessionId) || 0, Date.parse(obs.timestamp) || 0),
+      );
+    }
+    for (const obs of observationPool.values()) {
+      const isEpisode = obs.id.startsWith("episode:");
+      const coveredByEpisode = !isEpisode &&
+        (latestEpisodeBySession.get(obs.sessionId) || 0) >= (Date.parse(obs.timestamp) || 0);
+      // Completed semantic episodes supersede the low-level telemetry that
+      // produced them. Newer, not-yet-synthesized events remain available.
+      if (coveredByEpisode) continue;
       const body = `${obs.title} ${obs.narrative} ${(obs.facts || []).join(" ")} ${(obs.concepts || []).join(" ")}`;
       const relevance = overlapScore(body);
       const files = fileScore(obs.files, body);
@@ -1451,44 +1671,69 @@ export function createMemoryStore(dbPath: string): MemoryStore {
         phaseScore(obs.type) * 3 +
         (obs.importance / 10) * 4 +
         recencyScore(obs.timestamp) * 2 +
-        sameSession * 2;
+        sameSession * 2 +
+        (isEpisode ? 5 : 0) +
+        rrfBoost(lexicalObservationRank.get(obs.id), 12) +
+        rrfBoost(semanticObservationRank.get(obs.id), 10);
       if (
         queryTokens.size &&
         relevance === 0 &&
         files === 0 &&
+        !semanticObservationRank.has(obs.id) &&
         !(sameSession && obs.importance >= 7 && phaseScore(obs.type) > 0)
       ) continue;
       const label = sameSession ? "Current-session evidence" : "Prior observation";
-      const content = `## ${label} [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 300)}`;
+      const fileLabel = obs.files.length ? ` · ${obs.files.slice(0, 3).join(", ")}` : "";
+      const compact = `- [${obs.id}] ${obs.type} ${obs.title}${fileLabel}`;
+      const full = `## ${label} [${obs.id}] [${obs.importance}/10] ${obs.type}: ${obs.title}\n\n${obs.narrative.slice(0, 600)}`;
       candidates.push({
         id: `observation:${obs.id}`,
         type: "observation",
-        content,
-        tokens: estimateTokens(content),
+        content: compact,
+        tokens: estimateTokens(compact),
         recency: Date.parse(obs.timestamp),
         score,
+        compact,
+        full,
+        sourceKey: obs.sessionId,
       });
     }
 
-    for (const mem of list({ limit: 100, minStrength: 4 })) {
+    const memoryPool = new Map<string, Memory>();
+    list({ limit: 50, minStrength: 4 }).forEach((memory) => memoryPool.set(memory.id, memory));
+    lexicalMemories.forEach((row) => memoryPool.set(row.id, rowToMemory(row)));
+    for (const result of semanticResults) {
+      if (result.kind !== "memory" || memoryPool.has(result.id)) continue;
+      const row = db.prepare("SELECT * FROM memories WHERE id = ? AND workspace = ? AND is_latest = 1")
+        .get(result.id, currentWorkspace) as any;
+      if (row) memoryPool.set(result.id, rowToMemory(row));
+    }
+    for (const mem of memoryPool.values()) {
       const body = `${mem.title} ${mem.content} ${(mem.concepts || []).join(" ")} ${(mem.files || []).join(" ")}`;
       const relevance = overlapScore(body);
       const files = fileScore(mem.files, body);
-      if (queryTokens.size && relevance === 0 && files === 0) continue;
+      if (queryTokens.size && relevance === 0 && files === 0 && !semanticMemoryRank.has(mem.id)) continue;
       const sources = mem.sourceObservationIds?.length || 0;
-      const content = `## Folder memory [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 350)}${sources ? `\n\nSources: ${sources} observations` : ""}`;
+      const fileLabel = mem.files.length ? ` · ${mem.files.slice(0, 3).join(", ")}` : "";
+      const compact = `- [${mem.id}] ${mem.type} ${mem.title}${fileLabel}`;
+      const full = `## Folder memory [${mem.id}] [${mem.strength}/10] ${mem.type}: ${mem.title}\n\n${mem.content.slice(0, 700)}${sources ? `\n\nSources: ${sources} observations` : ""}`;
       candidates.push({
         id: `memory:${mem.id}`,
         type: "memory",
-        content,
-        tokens: estimateTokens(content),
+        content: compact,
+        tokens: estimateTokens(compact),
         recency: Date.parse(mem.updatedAt),
         score:
           relevance * 20 +
           files * 12 +
           phaseScore(mem.type) * 3 +
           (mem.strength / 10) * 6 +
-          recencyScore(mem.updatedAt),
+          recencyScore(mem.updatedAt) +
+          rrfBoost(lexicalMemoryRank.get(mem.id), 14) +
+          rrfBoost(semanticMemoryRank.get(mem.id), 12),
+        compact,
+        full,
+        sourceKey: mem.sessionIds[0] || `memory:${mem.type}`,
       });
     }
 
@@ -1498,19 +1743,34 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       b.recency - a.recency,
     );
 
+    const diversified: Candidate[] = [];
+    const deferred: Candidate[] = [];
+    const sourceCounts = new Map<string, number>();
+    for (const candidate of candidates) {
+      const count = sourceCounts.get(candidate.sourceKey) || 0;
+      if (count >= 2) deferred.push(candidate);
+      else {
+        diversified.push(candidate);
+        sourceCounts.set(candidate.sourceKey, count + 1);
+      }
+    }
+    diversified.push(...deferred);
+
     const blocks: Candidate[] = [];
     let tokenCount = 0;
-    for (const candidate of candidates) {
+    for (const candidate of diversified) {
       if (blocks.some((block) => block.id === candidate.id)) continue;
-      if (tokenCount + candidate.tokens > budget) continue;
-      blocks.push(candidate);
-      tokenCount += candidate.tokens;
+      const content = blocks.length < 3 ? candidate.full : candidate.compact;
+      const tokens = estimateTokens(content);
+      if (tokenCount + tokens > budget) continue;
+      blocks.push({ ...candidate, content, tokens });
+      tokenCount += tokens;
     }
     if (!blocks.length) return "";
 
     const retrievalNote = objective
-      ? `_Task-aware retrieval: ${phase}; ${blocks.length} items; ~${tokenCount}/${budget} tokens._`
-      : `_Context retrieval: ${blocks.length} items; ~${tokenCount}/${budget} tokens._`;
+      ? `_Task-aware retrieval: ${phase}; hybrid; ${blocks.length} items; ~${tokenCount}/${budget} tokens. Full detail is shown for the top 3; remaining IDs are compact indexes._`
+      : `_Hybrid context retrieval: ${blocks.length} items; ~${tokenCount}/${budget} tokens. Full detail is shown for the top 3; remaining IDs are compact indexes._`;
     return `# Agent Context\n\n${retrievalNote}\n\n${blocks.map((block) => block.content).join("\n\n---\n\n")}\n`;
   }
 
@@ -2089,6 +2349,82 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     return currentWorkspace;
   }
 
+  // ── Durable semantic extraction queue ────────────────────────────────
+
+  type ExtractionJobRow = {
+    id: string; session_id: string; workspace: string; payload: string;
+    status: ExtractionJobStatus; attempts: number; created_at: string;
+    updated_at: string; next_attempt_at: string; last_error: string | null;
+  };
+  const rowToExtractionJob = (row: ExtractionJobRow): ExtractionJob => ({
+    id: row.id,
+    sessionId: row.session_id,
+    workspace: row.workspace,
+    payload: row.payload,
+    status: row.status,
+    attempts: row.attempts,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    nextAttemptAt: row.next_attempt_at,
+    lastError: row.last_error || undefined,
+  });
+
+  function enqueueExtractionJob(sessionId: string, workspace: string, payload: string): ExtractionJob {
+    const id = crypto.randomUUID();
+    const timestamp = now();
+    const safePayload = (() => {
+      try { return JSON.stringify(sanitizePayload(JSON.parse(payload))); }
+      catch { return JSON.stringify({ invalidPayload: sanitizeString(payload) }); }
+    })();
+    db.prepare(`INSERT INTO extraction_jobs
+      (id, session_id, workspace, payload, status, attempts, created_at, updated_at, next_attempt_at)
+      VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)`)
+      .run(id, sessionId, normalizeWorkspacePath(workspace), safePayload, timestamp, timestamp, timestamp);
+    db.prepare("DELETE FROM extraction_jobs WHERE status = 'completed' AND updated_at < ?")
+      .run(new Date(Date.now() - 7 * 86_400_000).toISOString());
+    return rowToExtractionJob(db.prepare("SELECT * FROM extraction_jobs WHERE id = ?").get(id) as ExtractionJobRow);
+  }
+
+  function claimExtractionJob(): ExtractionJob | null {
+    const timestamp = now();
+    const row = db.prepare(`SELECT * FROM extraction_jobs
+      WHERE workspace = ? AND status = 'pending' AND next_attempt_at <= ?
+      ORDER BY created_at ASC LIMIT 1`)
+      .get(currentWorkspace, timestamp) as ExtractionJobRow | undefined;
+    if (!row) return null;
+    const updated = db.prepare(`UPDATE extraction_jobs
+      SET status = 'running', attempts = attempts + 1, updated_at = ?
+      WHERE id = ? AND status = 'pending'`).run(timestamp, row.id);
+    if (updated.changes !== 1) return null;
+    return rowToExtractionJob({ ...row, status: "running", attempts: row.attempts + 1, updated_at: timestamp });
+  }
+
+  function completeExtractionJob(id: string): void {
+    const timestamp = now();
+    db.prepare("UPDATE extraction_jobs SET status = 'completed', updated_at = ?, last_error = NULL WHERE id = ?")
+      .run(timestamp, id);
+  }
+
+  function failExtractionJob(id: string, error: string, retryDelayMs: number = 1_000): void {
+    const row = db.prepare("SELECT attempts FROM extraction_jobs WHERE id = ?")
+      .get(id) as { attempts: number } | undefined;
+    if (!row) return;
+    const terminal = row.attempts >= 3;
+    const timestamp = now();
+    const nextAttempt = new Date(Date.now() + Math.max(0, retryDelayMs)).toISOString();
+    db.prepare(`UPDATE extraction_jobs SET status = ?, updated_at = ?, next_attempt_at = ?, last_error = ?
+      WHERE id = ?`).run(terminal ? "failed" : "pending", timestamp, nextAttempt, error.slice(0, 1000), id);
+  }
+
+  function listExtractionJobs(status?: ExtractionJobStatus): ExtractionJob[] {
+    const rows = status
+      ? db.prepare("SELECT * FROM extraction_jobs WHERE workspace = ? AND status = ? ORDER BY created_at")
+          .all(currentWorkspace, status)
+      : db.prepare("SELECT * FROM extraction_jobs WHERE workspace = ? ORDER BY created_at")
+          .all(currentWorkspace);
+    return (rows as ExtractionJobRow[]).map(rowToExtractionJob);
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────
 
   return {
@@ -2103,6 +2439,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     listObservations,
     listRecentObservations,
     searchObservations,
+    expandEntries,
     clearObservations,
     create,
     get,
@@ -2113,7 +2450,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     update,
     recall,
     consolidate,
+    enqueueExtractionJob,
+    claimExtractionJob,
+    completeExtractionJob,
+    failExtractionJob,
+    listExtractionJobs,
     getContext,
+    upsertEmbedding,
+    hasEmbedding,
+    searchEmbeddings,
     setCurrentSessionId,
     getCurrentSessionId,
     setCurrentWorkspace,

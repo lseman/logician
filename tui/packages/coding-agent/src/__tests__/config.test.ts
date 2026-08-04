@@ -89,6 +89,28 @@ void test("validateConfig accepts in-range temperature without warning", () => {
 	assert.equal(warnings.length, 0);
 });
 
+void test("validateConfig accepts reasoner settings", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig(
+		{ reasoner: "Reflexion", reasonerConfig: { maxTrials: 2 } },
+		warnings,
+	);
+	assert.equal(cfg.reasoner, "reflexion");
+	assert.deepEqual(cfg.reasonerConfig, { maxTrials: 2 });
+	assert.deepEqual(warnings, []);
+});
+
+void test("validateConfig accepts optional local memory embeddings", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig(
+		{ memoryEmbeddings: true, memoryEmbeddingModel: "Xenova/all-MiniLM-L6-v2" },
+		warnings,
+	);
+	assert.equal(cfg.memoryEmbeddings, true);
+	assert.equal(cfg.memoryEmbeddingModel, "Xenova/all-MiniLM-L6-v2");
+	assert.deepEqual(warnings, []);
+});
+
 void test("validateConfig ignores non-positive maxTokens/maxIterations/maxTotalTokens", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(
@@ -309,6 +331,26 @@ void test("validateConfig validates webSearch.baseUrl and clamps maxResults rang
 	assert.equal(cfg.webSearch?.maxResults, undefined);
 	assert.ok(warnings.some((w) => w.includes("\"webSearch.baseUrl\" must be a valid")));
 	assert.ok(warnings.some((w) => w.includes("\"webSearch.maxResults\" must be 1")));
+});
+
+void test("validateConfig accepts a dedicated memory extractor endpoint", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig({
+		memoryExtractor: { baseUrl: "http://127.0.0.1:8081", model: "small-extractor" },
+	}, warnings);
+	assert.deepEqual(cfg.memoryExtractor, {
+		baseUrl: "http://127.0.0.1:8081",
+		model: "small-extractor",
+	});
+	assert.deepEqual(warnings, []);
+});
+
+void test("validateConfig rejects an invalid memory extractor endpoint", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig({ memoryExtractor: { baseUrl: "not-a-url", model: "small" } }, warnings);
+	assert.equal(cfg.memoryExtractor?.baseUrl, undefined);
+	assert.equal(cfg.memoryExtractor?.model, "small");
+	assert.ok(warnings.some((warning) => warning.includes("memoryExtractor.baseUrl")));
 });
 
 void test("validateConfig filters non-string entries from permissions.allow/deny", () => {

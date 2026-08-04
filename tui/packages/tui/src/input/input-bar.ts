@@ -3,11 +3,14 @@
 // bracketed paste, history, grapheme-aware cursor. Mirrors pi TUI's input.
 
 import type { KillRing } from "./kill-ring.ts";
+import { theme } from "../terminal/theme.ts";
 import {
-	type InkComposerComponent,
-	type InkComposerModel,
+	type Component,
+	CURSOR_MARKER,
 	type Focusable,
 	visibleWidth,
+	RESET,
+	BOLD,
 } from "../terminal/core.ts";
 import type { UndoStack } from "./undo-stack.ts";
 import { getGraphemeSegmenter } from "../terminal/utils.ts";
@@ -31,7 +34,7 @@ export interface InputBarOptions {
 
 export type InputSubmitIntent = "default" | "steer-now";
 
-export class InputBar implements InkComposerComponent, Focusable {
+export class InputBar implements Component, Focusable {
 	public focused = false;
 
 	// State
@@ -43,7 +46,7 @@ export class InputBar implements InkComposerComponent, Focusable {
 	private _prompt: string | undefined;
 	private get _promptResolved(): string {
 		if (this._prompt === undefined) {
-			this._prompt = "  › ";
+			this._prompt = "  " + theme.fg("prompt", "") + BOLD + "› " + RESET;
 		}
 		return this._prompt;
 	}
@@ -59,6 +62,10 @@ export class InputBar implements InkComposerComponent, Focusable {
 	private pasteBuffer = "";
 	private isInPaste = false;
 	private escapeArmed = false;
+
+	// Rendering cache
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
@@ -586,6 +593,7 @@ export class InputBar implements InkComposerComponent, Focusable {
 	// ── Rendering ────────────────────────────────────────────────────────
 
 	_invalidate(): void {
+		this.cachedLines = null;
 		this.onChange?.(this.value);
 	}
 
@@ -593,7 +601,12 @@ export class InputBar implements InkComposerComponent, Focusable {
 		this._invalidate();
 	}
 
-	getInkComposerModel(width: number): InkComposerModel {
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+
+		this.cachedWidth = width;
 		const prompt = this._promptResolved;
 		const promptWidth = visibleWidth(prompt);
 		const contentWidth = Math.max(1, width - promptWidth - 1);
@@ -614,12 +627,53 @@ export class InputBar implements InkComposerComponent, Focusable {
 		const segments = viewport.segments;
 		const cursorInViewport = Math.max(0, graphCursor - viewport.start);
 
+		// Build rendered segments with cursor
 		const beforeCursor = segments.slice(0, cursorInViewport).join("");
 		const atCursor =
 			cursorInViewport < segments.length ? segments[cursorInViewport] : " ";
 		const afterCursor = segments.slice(cursorInViewport + 1).join("");
 
-		const headerHint = width < 36 ? null : width >= 72
+		// Mark the edit position so the renderer can park the hardware cursor
+		// there (consumed + stripped in tui-core). Inverse video draws the
+		// visible cursor only when focused and not showing the placeholder, so
+		// the prompt glyph never appears highlighted on an empty field.
+		const cursorChar =
+			isPlaceholder || !this.focused
+				? `${CURSOR_MARKER}${atCursor}`
+				: `${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m`;
+
+		// Build the line
+		const color = isPlaceholder
+			? theme.fg("inputPlaceholder", "")
+			: theme.fg("inputText", "");
+		const rawLine =
+			prompt +
+			(viewport.leftClipped
+				? theme.fg("inputPlaceholder", "") + "‹" + RESET
+				: "") +
+			color +
+			beforeCursor +
+			cursorChar +
+			afterCursor +
+			"\x1b[0m" +
+			(viewport.rightClipped
+				? theme.fg("inputPlaceholder", "") + "›" + RESET
+				: "");
+
+		// Calculate visible width (strip CURSOR_MARKER for measurement)
+		const cleanLine = rawLine.replace(CURSOR_MARKER, "");
+		const lineWidth = visibleWidth(cleanLine);
+		const finalLine = rawLine + " ".repeat(Math.max(0, width - lineWidth));
+
+		// Give the composer a quiet visual boundary on normal-width terminals.
+		// Narrow terminals keep the compact one-line editor.
+		const header = width >= 36 ? this._renderComposerHeader(width) : null;
+		this.cachedLines = header ? [header, finalLine] : [finalLine];
+		return this.cachedLines;
+	}
+
+	private _renderComposerHeader(width: number): string {
+		const hintText = width >= 72
 			? this.value
 				? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear  ·  Ctrl+O tools"
 				: "/ Enter commands  ·  Ctrl+Enter steer now  ·  Ctrl+O tools"
@@ -628,18 +682,13 @@ export class InputBar implements InkComposerComponent, Focusable {
 					? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear"
 					: "/ commands  ·  Ctrl+Enter steer now"
 				: "Enter send  ·  Ctrl+Enter now";
-		return {
-			prompt,
-			headerHint,
-			beforeCursor,
-			atCursor,
-			afterCursor,
-			isPlaceholder,
-			leftClipped: viewport.leftClipped,
-			rightClipped: viewport.rightClipped,
-			cursorColumn: promptWidth + (viewport.leftClipped ? 1 : 0) + visibleWidth(beforeCursor),
-			focused: this.focused,
-		};
+		const hint = ` ${theme.fg("muted", hintText)} `;
+		const hintWidth = visibleWidth(hint);
+		const ruleWidth = Math.max(1, width - hintWidth);
+		return (
+			theme.fg("borderMuted", "─".repeat(ruleWidth)) +
+			hint
+		);
 	}
 
 	private _inputViewport(

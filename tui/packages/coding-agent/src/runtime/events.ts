@@ -49,6 +49,7 @@ export interface MemoryUpdateEvent {
 	kind:
 		| "observations_added"
 		| "reflections_added"
+		| "reflections_evolved"
 		| "observations_dropped"
 		| "cleared";
 	count: number;

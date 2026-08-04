@@ -66,9 +66,15 @@ import { mapAgentEvent } from "../runtime/event-mapping.ts";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";
 import { formatPluginResult } from "../runtime/plugin-result-formatter.ts";
-import { createMemoryStore, createMemoryHooks, setSessionId } from "@logician/memory";
+import { createMemoryStore, createMemoryHooks, LocalMemoryEmbedder, setSessionId } from "@logician/memory";
 import { startViewerServer, getBoundViewerPort } from "@logician/memory-viewer";
+import {
+	get_reasoner,
+	getReasonerMeta,
+	type ReasonerConfig,
+} from "@logician/agent-capabilities/reasoning";
 import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diagnostics.ts";
+import { createMemoryGetTool } from "../tools/memory-tools.ts";
 import {
 	buildPluginRuntimeEnv,
 	createHookTranscriptPath,
@@ -151,6 +157,10 @@ export interface AgentBridgeOptions {
 	memoryEnabled?: boolean;
 	/** Path to the memory SQLite database. Default: <cwd>/.logician/memory.db. */
 	memoryDbPath?: string;
+	/** Smaller model for semantic memory extraction; defaults to the active model. */
+	memoryExtractorModel?: string;
+	/** Dedicated OpenAI-compatible endpoint for semantic memory extraction. */
+	memoryExtractorBaseUrl?: string;
 	/** Whether to capture tool observations. Default: true. */
 	memoryCaptureTools?: boolean;
 	/** Whether to inject context into agent messages. Default: true. */
@@ -161,6 +171,14 @@ export interface AgentBridgeOptions {
 	memoryViewerEnabled?: boolean;
 	/** Port for the memory viewer dashboard. Default: 3200. */
 	memoryViewerPort?: number;
+	/** Enable optional local MiniLM semantic retrieval. Default: false. */
+	memoryEmbeddingsEnabled?: boolean;
+	/** Hugging Face model ID used for local embeddings. */
+	memoryEmbeddingModel?: string;
+	/** Structured pre-reasoning mode. Default: "none" (disabled). */
+	reasoner?: string;
+	/** Overrides merged over the selected reasoner's defaults. */
+	reasonerConfig?: ReasonerConfig;
 }
 
 // ── AgentCoreBridge ─────────────────────────────────────────────────────────────
@@ -201,9 +219,16 @@ export class AgentCoreBridge {
 	private memoryInjectContext: boolean;
 	private memoryContextBudget: number;
 	private memoryDbPath: string;
+	private memoryExtractorModel: string;
+	private memoryExtractorBaseUrl?: string;
+	private memoryBackgroundTasks = new Set<Promise<void>>();
+	private memoryExtractorRequests = new Set<AbortController>();
 	private memoryViewerServer: ReturnType<typeof startViewerServer> | null = null;
 	private memoryViewerPort: number = 3200;
 	private memoryViewerEnabled: boolean = true;
+	private memoryEmbedder?: LocalMemoryEmbedder;
+	private reasonerId: string;
+	private reasonerConfig: ReasonerConfig;
 	private memoryViewerPortConfig: number = 3200;
 	private subagents: SubagentCoordinator;
 
@@ -221,6 +246,8 @@ export class AgentCoreBridge {
 			model: "",
 		},
 	) {
+		this.reasonerId = opts.reasoner?.trim().toLowerCase() || "none";
+		this.reasonerConfig = opts.reasonerConfig ?? {};
 		this.cwd = opts.cwd || process.cwd();
 		this.eohController = new EohController({
 			cwd: this.cwd,
@@ -276,6 +303,9 @@ export class AgentCoreBridge {
 			cwd: this.cwd,
 			projectTrusted: this.projectTrusted,
 			tools: opts.tools,
+			extraTools: opts.memoryEnabled !== false
+				? [createMemoryGetTool(() => this.memoryStore)]
+				: [],
 			webSearch: opts.webSearch,
 			emit: (event) => this.emit(event),
 			onToolAdded: () => this.addDefaultTool(),
@@ -299,9 +329,14 @@ export class AgentCoreBridge {
 		// Initialize memory store if enabled
 		if (opts.memoryEnabled !== false) {
 			this.memoryDbPath = opts.memoryDbPath || path.join(this.cwd, ".logician", "memory.db");
+			this.memoryExtractorModel = opts.memoryExtractorModel || opts.model;
+			this.memoryExtractorBaseUrl = opts.memoryExtractorBaseUrl;
 			this.memoryCaptureTools = opts.memoryCaptureTools ?? true;
 			this.memoryInjectContext = opts.memoryInjectContext ?? true;
 			this.memoryContextBudget = opts.memoryContextBudget ?? 4000;
+			if (opts.memoryEmbeddingsEnabled) {
+				this.memoryEmbedder = new LocalMemoryEmbedder(opts.memoryEmbeddingModel);
+			}
 			this.memoryStore = createMemoryStore(this.memoryDbPath);
 			// Set initial session and derive workspace from cwd
 			if (this.memoryStore) {
@@ -324,13 +359,14 @@ export class AgentCoreBridge {
 					});
 					const bound = getBoundViewerPort();
 					if (bound) this.memoryViewerPort = bound;
-					console.log(`[bridge] Memory viewer: http://localhost:${this.memoryViewerPort}`);
-				} catch (e) {
-					console.error("[bridge] Failed to start memory viewer:", e);
+				} catch {
+					this.memoryViewerServer = null;
 				}
 			}
 		} else {
 			this.memoryDbPath = opts.memoryDbPath || path.join(this.cwd, ".logician", "memory.db");
+			this.memoryExtractorModel = opts.memoryExtractorModel || opts.model;
+			this.memoryExtractorBaseUrl = opts.memoryExtractorBaseUrl;
 			this.memoryCaptureTools = true;
 			this.memoryInjectContext = true;
 			this.memoryContextBudget = 4000;
@@ -442,13 +478,62 @@ export class AgentCoreBridge {
 			captureTools: this.memoryCaptureTools,
 			injectContext: this.memoryInjectContext,
 			contextBudget: this.memoryContextBudget,
+			embedder: this.memoryEmbedder,
+			semanticExtractor: async ({ systemPrompt, userPrompt }) => {
+				// The stop hook fires before runMessage has transitioned to idle. Give
+				// the UI a short quiet window, and never compete with an active turn.
+				while (this.running) await new Promise((resolve) => setTimeout(resolve, 25));
+				await new Promise((resolve) => setTimeout(resolve, 500));
+				if (this.running) throw new DOMException("Extractor deferred by active turn", "AbortError");
+				const controller = new AbortController();
+				this.memoryExtractorRequests.add(controller);
+				const extractorModel = this.memoryExtractorModel || this.backend.model;
+				const extractorBackend = this.memoryExtractorBaseUrl && this.backend.withEndpoint
+					? this.backend.withEndpoint(extractorModel, this.memoryExtractorBaseUrl)
+					: this.backend.withModel(extractorModel);
+				try {
+					const response = await extractorBackend.generate(
+						[
+							{ role: "system", content: systemPrompt },
+							{ role: "user", content: userPrompt },
+						],
+						{
+							temperature: 0.1,
+							maxTokens: 1000,
+							thinkingLevel: "off",
+							timeoutMs: 30_000,
+							maxRetries: 1,
+							signal: controller.signal,
+						},
+					);
+					return response.content || "";
+				} finally {
+					this.memoryExtractorRequests.delete(controller);
+				}
+			},
+			onBackgroundTask: (task) => {
+				this.memoryBackgroundTasks.add(task);
+				void task.finally(() => this.memoryBackgroundTasks.delete(task));
+			},
 			onMemoriesSaved: (memories) => {
-				this.emit({
-					type: "memory_update",
-					kind: "reflections_added",
-					count: memories.length,
-					items: memories.map((memory) => ({ id: memory.id, content: memory.title })),
-				});
+				const added = memories.filter((memory) => memory.version === 1);
+				const evolved = memories.filter((memory) => memory.version > 1);
+				if (added.length) {
+					this.emit({
+						type: "memory_update",
+						kind: "reflections_added",
+						count: added.length,
+						items: added.map((memory) => ({ id: memory.id, content: memory.title })),
+					});
+				}
+				if (evolved.length) {
+					this.emit({
+						type: "memory_update",
+						kind: "reflections_evolved",
+						count: evolved.length,
+						items: evolved.map((memory) => ({ id: memory.id, content: memory.title })),
+					});
+				}
 			},
 		});
 
@@ -546,9 +631,14 @@ export class AgentCoreBridge {
 	}
 
 	private async runMessage(message: string): Promise<void> {
+		// Local extractor models can saturate CPU/GPU and make both the UI and
+		// primary provider sluggish. Prefer the interactive turn; extraction's
+		// deterministic fallback still records the completed prior turn.
+		for (const controller of this.memoryExtractorRequests) controller.abort();
 		this.running = true;
 		const turnId = `turn_${Date.now()}`;
 		let persistentSystemPrompt: string | undefined;
+		let turnSystemPrompt = this.config.systemPrompt;
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
 		try {
 			await this.runStartupHooksOnce();
@@ -565,15 +655,41 @@ export class AgentCoreBridge {
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
 			const harness = this.ensureHarness();
+			if (this.reasonerId !== "none") {
+				const meta = getReasonerMeta(this.reasonerId);
+				if (!meta) {
+					throw new Error(`Unknown reasoner '${this.reasonerId}'.`);
+				}
+				this.emit({
+					type: "notice",
+					level: "info",
+					label: "Reasoner",
+					text: `Running ${meta.name} pre-reasoning`,
+				});
+				const reasoner = get_reasoner(this.reasonerId, this.backend, {
+					...meta.defaultConfig,
+					...this.reasonerConfig,
+				});
+				const trace = await reasoner.solve(message);
+				const advisory = [trace.reasoning, trace.answer]
+					.map((part) => part?.trim())
+					.filter(Boolean)
+					.join("\n\nProposed answer:\n");
+				if (advisory) {
+					persistentSystemPrompt = this.config.systemPrompt;
+					turnSystemPrompt = `${persistentSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
+					harness.setSystemPrompt(turnSystemPrompt);
+				}
+			}
 			const activations = this.skillActivation.select(
 				this.toolRouter.getLoadedSkills(),
 				message,
 			);
 			turnActivations = activations;
 			if (activations.length) {
-				persistentSystemPrompt = this.config.systemPrompt;
+				persistentSystemPrompt ??= this.config.systemPrompt;
 				harness.setSystemPrompt(
-					`${persistentSystemPrompt}\n\n${formatActivatedSkills(activations)}`,
+					`${turnSystemPrompt}\n\n${formatActivatedSkills(activations)}`,
 				);
 				this.emit({
 					type: "notice",
@@ -1162,6 +1278,7 @@ export class AgentCoreBridge {
 			},
 			config_path: this.configPath || "",
 			connected: true,
+			reasoner: this.reasonerId,
 		};
 		return state;
 	}
@@ -1246,6 +1363,18 @@ export class AgentCoreBridge {
 		this.harness?.setTemperature(temperature);
 	}
 
+	setReasonerId(reasonerId: string): void {
+		const normalized = reasonerId.trim().toLowerCase();
+		if (normalized !== "none" && !getReasonerMeta(normalized)) {
+			throw new Error(`Unknown reasoner '${reasonerId}'.`);
+		}
+		this.reasonerId = normalized || "none";
+	}
+
+	getReasonerStatus(): string {
+		return this.reasonerId;
+	}
+
 	setInferenceMode(mode: string): void {
 		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
 		this.harness?.setInferenceMode(mode);
@@ -1298,9 +1427,8 @@ export class AgentCoreBridge {
 						});
 						const bound = getBoundViewerPort();
 						if (bound) this.memoryViewerPort = bound;
-						console.log(`[bridge] Memory viewer started on port ${this.memoryViewerPort}`);
-					} catch (e) {
-						console.error("[bridge] Failed to start memory viewer:", e);
+					} catch {
+						this.memoryViewerServer = null;
 					}
 				}
 			} else if (!enabled) {
@@ -1340,6 +1468,7 @@ export class AgentCoreBridge {
 			`  Max iterations: ${this.config.maxIterations ?? 30}`,
 			`  Context window: ${this.config.contextWindowTokens ?? "unset"}`,
 			`  Thinking: ${this.config.thinkingLevel ?? "off"}`,
+			`  Reasoner: ${this.reasonerId}`,
 			`  Permission mode: ${this.getPermissionMode()}`,
 			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
@@ -1625,7 +1754,9 @@ export class AgentCoreBridge {
 
 	async stop(): Promise<void> {
 		void this.cancel();
+		for (const controller of this.memoryExtractorRequests) controller.abort();
 		await this.fireSessionEnd("shutdown");
+		await Promise.allSettled([...this.memoryBackgroundTasks]);
 		this.lspManager.close();
 		await this.toolRouter.closeMcp();
 		killAllTrackedChildren();

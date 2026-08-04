@@ -16,8 +16,8 @@ void test("file mention popup fuzzy-matches by basename and renders count", () =
 	]);
 	popup.setQuery("tui.");
 	popup.show();
-	const model = popup.getInkOverlayModel();
-	assert.equal(`${model.title}${model.subtitle}`, "files (1)");
+	const rendered = popup.render(120).join("\n");
+	assert.match(rendered, /files.*\(1\)/);
 	assert.equal(popup.currentFile(), "packages/tui/src/app/tui.ts");
 });
 
@@ -27,12 +27,12 @@ void test("file mention popup windows long match lists with more-above/below", (
 	popup.setFiles(files);
 	popup.setQuery("");
 	popup.show();
-	let model = popup.getInkOverlayModel();
-	assert.equal(model.items.length, 15);
-	assert.equal(model.selectedIndex, 0);
+	let rendered = popup.render(120).join("\n");
+	assert.match(rendered, /files.*\(15\)/);
+	assert.match(rendered, /more below/);
 	for (let i = 0; i < files.length - 1; i++) popup.moveSelection(1);
-	model = popup.getInkOverlayModel();
-	assert.equal(model.selectedIndex, 14);
+	rendered = popup.render(120).join("\n");
+	assert.match(rendered, /more above/);
 });
 
 void test("file mention popup reports no matches without throwing", () => {
@@ -40,8 +40,8 @@ void test("file mention popup reports no matches without throwing", () => {
 	popup.setFiles(["src/a.ts", "src/b.ts"]);
 	popup.setQuery("zzz-nonexistent");
 	popup.show();
-	const model = popup.getInkOverlayModel();
-	assert.equal(model.emptyText, "No matching files.");
+	const rendered = popup.render(120).join("\n");
+	assert.match(rendered, /No matching files/);
 	assert.equal(popup.currentFile(), null);
 	assert.equal(popup.hasMatches(), false);
 });

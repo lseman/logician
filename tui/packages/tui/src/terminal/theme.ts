@@ -4,7 +4,6 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ansi256ToHex } from "./core.ts";
 
 // ── Color token names ─────────────────────────────────────────────────────────
 
@@ -50,9 +49,7 @@ export type ThemeColor =
 	// Terminal output
 	| "terminalOutput"
 	// Thinking
-	| "reasoningLabel"
 	| "thinkingText"
-	| "responseLabel"
 	// Status phases
 	| "phaseReady"
 	| "phaseThinking"
@@ -204,23 +201,17 @@ export class Theme {
 
 	private fgCache = new Map<ThemeColor, string>();
 	private bgCache = new Map<ThemeBg, string>();
-	private inkFgCache = new Map<ThemeColor, string | undefined>();
-	private inkBgCache = new Map<ThemeBg, string | undefined>();
 
 	constructor(
 		name: string,
 		mode: "truecolor" | "256color",
 		fgColors: Map<ThemeColor, string>,
 		bgColors: Map<ThemeBg, string>,
-		inkFgColors: Map<ThemeColor, string | undefined>,
-		inkBgColors: Map<ThemeBg, string | undefined>,
 	) {
 		this.name = name;
 		this.mode = mode;
 		this.fgCache = fgColors;
 		this.bgCache = bgColors;
-		this.inkFgCache = inkFgColors;
-		this.inkBgCache = inkBgColors;
 	}
 
 	// ── Public color methods ──────────────────────────────────────────────────
@@ -242,17 +233,6 @@ export class Theme {
 		const ansi = this.fgCache.get(color);
 		if (!ansi) throw new Error(`Unknown theme color: ${color}`);
 		return ansi;
-	}
-
-	/** Resolve a theme token for Ink's native color prop. */
-	inkColor(color: ThemeColor): string | undefined {
-		if (!this.fgCache.has(color)) throw new Error(`Unknown theme color: ${color}`);
-		return this.inkFgCache.get(color);
-	}
-
-	inkBackgroundColor(color: ThemeBg): string | undefined {
-		if (!this.bgCache.has(color)) throw new Error(`Unknown theme bg: ${color}`);
-		return this.inkBgCache.get(color);
 	}
 
 	bgRaw(color: ThemeBg): string {
@@ -384,35 +364,6 @@ function buildThemeFromJson(
 	const vars = json.vars || {};
 	const fgColors = new Map<ThemeColor, string>();
 	const bgColors = new Map<ThemeBg, string>();
-	const inkFgColors = new Map<ThemeColor, string | undefined>();
-	const inkBgColors = new Map<ThemeBg, string | undefined>();
-	const ansiInkColors = [
-		"black",
-		"red",
-		"green",
-		"yellow",
-		"blue",
-		"magenta",
-		"cyan",
-		"white",
-		"gray",
-		"redBright",
-		"greenBright",
-		"yellowBright",
-		"blueBright",
-		"magentaBright",
-		"cyanBright",
-		"whiteBright",
-	] as const;
-	const inkValue = (value: string | number): string | undefined => {
-		if (value === "") return undefined;
-		// Preserve terminal-native ANSI colors by name. This avoids RGB colors
-		// collapsing into the same basic color on low-color terminals.
-		if (typeof value === "number" && value >= 0 && value < ansiInkColors.length) {
-			return ansiInkColors[value];
-		}
-		return typeof value === "number" ? ansi256ToHex(value) : value;
-	};
 
 	const fgKeys: ThemeColor[] = [
 		"accent",
@@ -430,7 +381,6 @@ function buildThemeFromJson(
 		"mdHeading",
 		"mdCode",
 		"mdCodeBlock",
-		"mdCodeBlockBorder",
 		"mdLink",
 		"mdQuote",
 		"mdListBullet",
@@ -447,9 +397,7 @@ function buildThemeFromJson(
 		"diffHunk",
 		"diffMeta",
 		"terminalOutput",
-		"reasoningLabel",
 		"thinkingText",
-		"responseLabel",
 		"phaseReady",
 		"phaseThinking",
 		"phaseTool",
@@ -485,18 +433,11 @@ function buildThemeFromJson(
 
 	const bgKeys: ThemeBg[] = ["mdCodeBlockBg"];
 
-	const colorFallbacks: Partial<Record<ThemeColor, ThemeColor>> = {
-		reasoningLabel: "thinkingText",
-		responseLabel: "assistantText",
-	};
-
 	for (const key of fgKeys) {
-		const colors = json.colors as Record<string, unknown>;
-		const raw = colors[key] ?? colors[colorFallbacks[key] ?? ""];
+		const raw = (json.colors as Record<string, unknown>)[key];
 		if (raw !== undefined && raw !== null) {
 			const resolved = resolveVarRefs(raw as string | number, vars);
 			fgColors.set(key, valueToAnsi(resolved, mode, false));
-			inkFgColors.set(key, inkValue(resolved));
 		}
 	}
 
@@ -505,18 +446,10 @@ function buildThemeFromJson(
 		if (raw !== undefined && raw !== null) {
 			const resolved = resolveVarRefs(raw as string | number, vars);
 			bgColors.set(key, valueToAnsi(resolved, mode, true));
-			inkBgColors.set(key, inkValue(resolved));
 		}
 	}
 
-	return new Theme(
-		json.name,
-		mode,
-		fgColors,
-		bgColors,
-		inkFgColors,
-		inkBgColors,
-	);
+	return new Theme(json.name, mode, fgColors, bgColors);
 }
 
 export function getAvailableThemes(): string[] {

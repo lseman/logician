@@ -1,8 +1,8 @@
 import {
-	type InkTextComponent,
-	type InkTextSpan,
-	type InkTextRow,
-	padInkTextRow,
+	clampLineToWidth,
+	type Component,
+	visibleWidth,
+	RESET,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import type { TurnPhase } from "../state/turn-state.ts";
@@ -24,7 +24,7 @@ interface Evidence {
 }
 
 /** Composer-attached working set and evidence for the current/last turn. */
-export class WorkSurface implements InkTextComponent {
+export class WorkSurface implements Component {
 	private workingSet: string[] = [];
 	private calls = new Map<string, ToolRecord>();
 	private evidence: Evidence = this.emptyEvidence();
@@ -95,22 +95,23 @@ export class WorkSurface implements InkTextComponent {
 		return this.workingSet;
 	}
 
-	getInkTextRows(width: number): InkTextRow[] {
+	render(width: number): string[] {
 		if (this.workingSet.length === 0 && this.evidence.tools === 0 && !this.context) {
 			return [];
 		}
-		const rows: InkTextRow[] = [];
+		const lines: string[] = [];
 		const work = this.workingSet.slice(0, 8).join("  ·  ");
 		if (work) {
-			rows.push(this.row([
-				this.themedSpan("muted", "Working set"),
-				{ text: "  " },
-				this.themedSpan("text", work),
-			], width));
+			lines.push(this.line(
+				`${theme.fg("muted", "Working set")}  ${theme.fg("text", work)}${RESET}`,
+				width,
+			));
 		}
 		if (this.evidence.tools > 0 || this.context) {
 			const label = this.active ? "Activity" : "Turn summary";
-			const state = this.active ? "● running" : "✓";
+			const state = this.active
+				? theme.fg("warning", "● running")
+				: theme.fg("success", "✓");
 			const parts = [
 				`${this.evidence.tools} tools`,
 				this.evidence.changed.size ? `${this.evidence.changed.size} changed` : "",
@@ -119,15 +120,12 @@ export class WorkSurface implements InkTextComponent {
 				this.evidence.failures ? `${this.evidence.failures} failed` : "",
 				this.context ? `context ${this.context}` : "",
 			].filter(Boolean);
-			rows.push(this.row([
-				this.themedSpan("muted", label),
-				{ text: "  " },
-				this.themedSpan(this.active ? "warning" : "success", state),
-				{ text: "  " },
-				this.themedSpan("text", parts.join(" · ")),
-			], width));
+			lines.push(this.line(
+				`${theme.fg("muted", label)}  ${state}${RESET}  ${theme.fg("dim", parts.join(" · "))}${RESET}`,
+				width,
+			));
 		}
-		return rows;
+		return lines;
 	}
 
 	private touch(file: string): void {
@@ -139,11 +137,8 @@ export class WorkSurface implements InkTextComponent {
 		return { tools: 0, changed: new Set(), commands: 0, failures: 0, diagnostics: 0 };
 	}
 
-	private themedSpan(color: Parameters<typeof theme.fg>[0], text: string): InkTextSpan {
-		return { text, color: theme.inkColor(color) };
-	}
-
-	private row(spans: InkTextRow, width: number): InkTextRow {
-		return padInkTextRow(spans, width);
+	private line(value: string, width: number): string {
+		const output = clampLineToWidth(value, width);
+		return output + " ".repeat(Math.max(0, width - visibleWidth(output)));
 	}
 }

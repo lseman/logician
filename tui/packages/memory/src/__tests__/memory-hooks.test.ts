@@ -1,12 +1,28 @@
 import assert from "node:assert/strict";
 import { unlinkSync } from "node:fs";
 import { afterEach, describe, test } from "node:test";
-import { createMemoryHooks } from "../memory-hooks.js";
+import { createMemoryHooks as createHooks } from "../memory-hooks.js";
+import type { MemoryHooksConfig } from "../memory-hooks.js";
 import { createMemoryStore } from "../store.js";
 import type { CompressedObservation } from "../types.js";
 
 let counter = 0;
 const paths: string[] = [];
+let backgroundTasks: Promise<void>[] = [];
+
+function createMemoryHooks(store: ReturnType<typeof createMemoryStore>, config: MemoryHooksConfig = {}) {
+  return createHooks(store, {
+    ...config,
+    onBackgroundTask: (task) => {
+      backgroundTasks.push(task);
+      config.onBackgroundTask?.(task);
+    },
+  });
+}
+
+async function drainBackgroundTasks() {
+  await Promise.all(backgroundTasks.splice(0));
+}
 
 function testStore() {
   const path = `/tmp/logician-memory-hooks-${process.pid}-${++counter}.db`;
@@ -19,6 +35,7 @@ function testStore() {
 }
 
 afterEach(() => {
+  backgroundTasks = [];
   for (const path of paths.splice(0)) {
     try { unlinkSync(path); } catch {}
   }
@@ -181,10 +198,180 @@ describe("createMemoryHooks observation capture", () => {
         iteration: 0,
       });
     }
+    await hooks.afterProviderResponse?.({
+      model: "test",
+      content: "Authentication now uses a bounded timeout in /workspace/auth.ts.",
+      toolCallCount: 0,
+      stopReason: "stop",
+      iteration: 1,
+    });
     await hooks.shouldStopAfterTurn?.({ messages: [], iteration: 1, hadToolCalls: false });
+    await drainBackgroundTasks();
     assert.equal(savedMemories, 1);
     assert.equal(store.list({ limit: 10 }).length, 1);
     assert.equal(store.list({ limit: 10 })[0]?.sourceObservationIds?.length, 2);
+    store.close();
+  });
+
+  test("synthesizes a grounded turn episode from intent, mutations, outcome, and verification", async () => {
+    const store = testStore();
+    const hooks = createMemoryHooks(store, { injectContext: false, autoConsolidate: true });
+    await hooks.beforeAgentStart?.({
+      prompt: "Move session storage into each project folder",
+      systemPrompt: "",
+      messages: [],
+    });
+    await hooks.afterToolCall?.({
+      toolCall: { id: "edit", name: "edit_file", arguments: "{}" },
+      args: { path: "/workspace/src/session-store.ts" },
+      result: "Updated file",
+      isError: false,
+      iteration: 0,
+    });
+    await hooks.afterToolCall?.({
+      toolCall: { id: "test", name: "exec_command", arguments: "{}" },
+      args: { command: "bun test session-store.test.ts" },
+      result: "1 pass, 0 fail",
+      isError: false,
+      iteration: 1,
+    });
+    await hooks.afterProviderResponse?.({
+      model: "test",
+      content: "Session history is now stored in each workspace's .logician directory.",
+      toolCallCount: 0,
+      stopReason: "stop",
+      iteration: 2,
+    });
+    await hooks.shouldStopAfterTurn?.({ messages: [], iteration: 2, hadToolCalls: false });
+    await drainBackgroundTasks();
+
+    const episode = store.listObservations("session-1", 10).find((item) => item.id.startsWith("episode:"));
+    assert.ok(episode);
+    assert.equal(episode.type, "implementation");
+    assert.match(episode.narrative, /Move session storage/);
+    assert.match(episode.narrative, /stored in each workspace/);
+    assert.ok(episode.files.includes("/workspace/src/session-store.ts"));
+    assert.ok(episode.facts.some((fact) => fact.startsWith("Verification:")));
+    assert.equal(store.list({ limit: 10 })[0]?.type, "architecture");
+    const context = store.getContext("session-1", 2000, "session storage workspace");
+    assert.match(context, /Session history is now stored/);
+    assert.doesNotMatch(context, /Updated file/);
+    store.close();
+  });
+
+  test("accepts specific model claims only when evidence and verification are grounded", async () => {
+    const store = testStore();
+    const hooks = createMemoryHooks(store, {
+      injectContext: false,
+      autoConsolidate: false,
+      semanticExtractor: async () => JSON.stringify({
+        kind: "bugfix",
+        title: "Authentication timeout now uses a bounded retry policy",
+        summary: "The authentication timeout path was corrected and its focused test completed successfully.",
+        claims: [{
+          text: "Authentication timeout retries are bounded by the policy implemented in auth.ts.",
+          confidence: 0.96,
+          status: "verified",
+          evidenceEventIds: ["edit-grounded", "test-grounded"],
+        }],
+        outcome: "The focused authentication test passes.",
+        filesRead: [],
+        filesModified: ["/workspace/auth.ts"],
+        concepts: ["problem-solution", "verified"],
+      }),
+    });
+    await hooks.beforeAgentStart?.({ prompt: "Fix the authentication timeout bug", systemPrompt: "", messages: [] });
+    await hooks.afterToolCall?.({
+      toolCall: { id: "edit-grounded", name: "edit_file", arguments: "{}" },
+      args: { path: "/workspace/auth.ts" }, result: "Updated timeout policy", isError: false, iteration: 0,
+    });
+    await hooks.afterToolCall?.({
+      toolCall: { id: "test-grounded", name: "exec_command", arguments: "{}" },
+      args: { command: "bun test auth.test.ts" }, result: "1 pass, 0 fail", isError: false, iteration: 1,
+    });
+    await hooks.afterProviderResponse?.({ model: "test", content: "Fixed and verified.", toolCallCount: 0, stopReason: "stop", iteration: 2 });
+    await hooks.shouldStopAfterTurn?.({ messages: [], iteration: 2, hadToolCalls: false });
+    await drainBackgroundTasks();
+
+    const episode = store.listObservations("session-1", 10).find((item) => item.id.startsWith("episode:"));
+    assert.equal(episode?.title, "Authentication timeout now uses a bounded retry policy");
+    assert.match(episode?.facts[0] || "", /verified; confidence=0\.96; evidence=edit-grounded,test-grounded/);
+    store.close();
+  });
+
+  test("rejects hallucinated model evidence and falls back to deterministic synthesis", async () => {
+    const store = testStore();
+    const hooks = createMemoryHooks(store, {
+      injectContext: false,
+      autoConsolidate: false,
+      semanticExtractor: async () => ({
+        kind: "implementation",
+        title: "Secret deployment workflow was implemented successfully",
+        summary: "A deployment workflow was supposedly added to an unrelated file and verified.",
+        claims: [{ text: "Production deploys now use canaries.", confidence: 1, status: "verified", evidenceEventIds: ["invented"] }],
+        filesRead: [], filesModified: ["/invented/deploy.ts"], concepts: [],
+      }),
+    });
+    await hooks.beforeAgentStart?.({ prompt: "Update auth timeout", systemPrompt: "", messages: [] });
+    await hooks.afterToolCall?.({
+      toolCall: { id: "real-edit", name: "edit_file", arguments: "{}" },
+      args: { path: "/workspace/auth.ts" }, result: "Updated timeout", isError: false, iteration: 0,
+    });
+    await hooks.afterProviderResponse?.({ model: "test", content: "Authentication timeout is now bounded.", toolCallCount: 0, stopReason: "stop", iteration: 1 });
+    await hooks.shouldStopAfterTurn?.({ messages: [], iteration: 1, hadToolCalls: false });
+    await drainBackgroundTasks();
+
+    const episode = store.listObservations("session-1", 10).find((item) => item.id.startsWith("episode:"));
+    assert.match(episode?.title || "", /Authentication timeout is now bounded/);
+    assert.doesNotMatch(JSON.stringify(episode), /canaries|invented/);
+    store.close();
+  });
+
+  test("honors a model skip for turns without durable knowledge", async () => {
+    const store = testStore();
+    const hooks = createMemoryHooks(store, {
+      injectContext: false,
+      autoConsolidate: false,
+      semanticExtractor: async () => ({ skip: true }),
+    });
+    await hooks.beforeAgentStart?.({ prompt: "Thanks", systemPrompt: "", messages: [] });
+    await hooks.afterProviderResponse?.({ model: "test", content: "You're welcome.", toolCallCount: 0, stopReason: "stop", iteration: 0 });
+    await hooks.shouldStopAfterTurn?.({ messages: [], iteration: 0, hadToolCalls: false });
+    await drainBackgroundTasks();
+    assert.equal(store.listObservations("session-1", 10).some((item) => item.id.startsWith("episode:")), false);
+    store.close();
+  });
+
+  test("runs semantic extraction in the background and serializes turns", async () => {
+    const store = testStore();
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const started: string[] = [];
+    const hooks = createMemoryHooks(store, {
+      injectContext: false,
+      autoConsolidate: false,
+      semanticExtractor: async ({ userPrompt }) => {
+        const intent = JSON.parse(userPrompt).user_intent as string;
+        started.push(intent);
+        if (intent === "first turn") await firstGate;
+        return { skip: true };
+      },
+    });
+
+    await hooks.beforeAgentStart?.({ prompt: "first turn", systemPrompt: "", messages: [] });
+    const firstResult = hooks.shouldStopAfterTurn?.({ messages: [], iteration: 0, hadToolCalls: false });
+    assert.equal(firstResult, undefined);
+    await Promise.resolve();
+
+    await hooks.beforeAgentStart?.({ prompt: "second turn", systemPrompt: "", messages: [] });
+    const secondResult = hooks.shouldStopAfterTurn?.({ messages: [], iteration: 1, hadToolCalls: false });
+    assert.equal(secondResult, undefined);
+    await Promise.resolve();
+    assert.deepEqual(started, ["first turn"]);
+
+    releaseFirst();
+    await drainBackgroundTasks();
+    assert.deepEqual(started, ["first turn", "second turn"]);
     store.close();
   });
 });

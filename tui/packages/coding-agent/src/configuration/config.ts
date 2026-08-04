@@ -63,9 +63,15 @@ const KNOWN_KEYS = new Set([
 	"autoResumeSession",
 	"memory",
 	"memoryDbPath",
+	"memoryExtractorModel",
+	"memoryExtractor",
 	"memoryViewer",
 	"memoryViewerPort",
+	"memoryEmbeddings",
+	"memoryEmbeddingModel",
 	"transcriptMaxTurns",
+	"reasoner",
+	"reasonerConfig",
 ]);
 const COMPACTION_KEYS = new Set([
 	"enabled",
@@ -84,6 +90,11 @@ const TRUNCATION_KEYS = new Set([
 const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(["tool", "assistant", "default"]);
 
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
+const MEMORY_EXTRACTOR_KEYS = new Set(["baseUrl", "model"]);
+const REASONER_IDS = new Set([
+	"none", "ssr", "tot", "got", "reflexion", "self_consistency",
+	"best_of_n", "auto_cot", "in_context_cot", "cover",
+]);
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
 
 /** Validate a URL string (non-empty, starts with http:// or https://). */
@@ -323,8 +334,49 @@ export function validateConfig(
 	if (obj.memoryDbPath !== undefined) {
 		cfg.memoryDbPath = configString(obj.memoryDbPath);
 	}
+	if (obj.memoryExtractorModel !== undefined) {
+		cfg.memoryExtractorModel = configString(obj.memoryExtractorModel);
+	}
+	if (obj.memoryExtractor !== undefined) {
+		if (!obj.memoryExtractor || typeof obj.memoryExtractor !== "object" || Array.isArray(obj.memoryExtractor)) {
+			warn(warnings, "\"memoryExtractor\" must be an object.");
+		} else {
+			const extractor = obj.memoryExtractor as Record<string, unknown>;
+			for (const key of Object.keys(extractor)) {
+				if (!MEMORY_EXTRACTOR_KEYS.has(key)) warn(warnings, `Unknown memoryExtractor key: "${key}".`);
+			}
+			const baseUrl = extractor.baseUrl === undefined || isValidUrl(extractor.baseUrl)
+				? configString(extractor.baseUrl)
+				: undefined;
+			if (extractor.baseUrl !== undefined && !baseUrl) {
+				warn(warnings, "\"memoryExtractor.baseUrl\" must be a valid http/https URL.");
+			}
+			cfg.memoryExtractor = { baseUrl, model: configString(extractor.model) };
+		}
+	}
 	if (obj.memoryViewer !== undefined) {
 		cfg.memoryViewer = configBool(obj.memoryViewer);
+	}
+	if (obj.memoryEmbeddings !== undefined) {
+		cfg.memoryEmbeddings = configBool(obj.memoryEmbeddings);
+	}
+	if (obj.memoryEmbeddingModel !== undefined) {
+		cfg.memoryEmbeddingModel = configString(obj.memoryEmbeddingModel);
+	}
+	if (obj.reasoner !== undefined) {
+		cfg.reasoner = configString(obj.reasoner)?.toLowerCase();
+		if (!cfg.reasoner) warn(warnings, "\"reasoner\" must be a non-empty string.");
+		else if (!REASONER_IDS.has(cfg.reasoner)) {
+			warn(warnings, `Unknown reasoner: "${cfg.reasoner}". Using "none".`);
+			cfg.reasoner = "none";
+		}
+	}
+	if (obj.reasonerConfig !== undefined) {
+		if (obj.reasonerConfig && typeof obj.reasonerConfig === "object" && !Array.isArray(obj.reasonerConfig)) {
+			cfg.reasonerConfig = { ...(obj.reasonerConfig as Record<string, unknown>) };
+		} else {
+			warn(warnings, "\"reasonerConfig\" must be an object.");
+		}
 	}
 	if (obj.memoryViewerPort !== undefined) {
 		cfg.memoryViewerPort = configNumber(obj.memoryViewerPort);
@@ -742,12 +794,24 @@ export interface LogicianTuiConfig {
 	memory?: boolean;
 	/** Path to the memory SQLite database. Default: <cwd>/.logician/memory.db */
 	memoryDbPath?: string;
+	/** Optional smaller model used for grounded semantic memory extraction. */
+	memoryExtractorModel?: string;
+	/** Dedicated OpenAI-compatible endpoint and model for semantic extraction. */
+	memoryExtractor?: { baseUrl?: string; model?: string };
 	/** Whether to start the memory viewer web dashboard on startup (default: true when memory is enabled). */
 	memoryViewer?: boolean;
 	/** Port for the memory viewer dashboard (default: 3200). */
 	memoryViewerPort?: number;
+	/** Enable local MiniLM semantic retrieval. Default: false. */
+	memoryEmbeddings?: boolean;
+	/** Optional Hugging Face feature-extraction model ID. */
+	memoryEmbeddingModel?: string;
 	/** Maximum number of turns to keep in the transcript (default: 200). */
 	transcriptMaxTurns?: number;
+	/** Structured pre-reasoning mode. Default: "none" (disabled). */
+	reasoner?: string;
+	/** Overrides for the selected reasoner's registry defaults. */
+	reasonerConfig?: Record<string, unknown>;
 }
 
 export function loadLogicianConfig(

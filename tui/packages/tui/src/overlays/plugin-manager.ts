@@ -1,6 +1,14 @@
+import { type Component } from "../terminal/core.ts";
 import { SelectorController } from "./selector-controller.ts";
-import type { InkListOverlayModel } from "./ink-overlay-model.ts";
-import { parsePopupListNav } from "./popup-utils.ts";
+import {
+	renderListItem,
+	clampPopupLines,
+	POPUP_FRAME_OVERHEAD,
+	parsePopupListNav,
+	renderListPopupFrame,
+	renderListPopupBody,
+	type ListItem,
+} from "./popup-utils.ts";
 
 export interface PluginListItem {
 	pluginId: string;
@@ -18,13 +26,15 @@ export type PluginManagerAction =
 	| { type: "refresh" }
 	| { type: "close" };
 
-export class PluginManagerOverlay {
+export class PluginManagerOverlay implements Component {
 	public visible = false;
 	private plugins: PluginListItem[] = [];
 	private pluginsDir = "";
 	private selection = new SelectorController();
 	private busyPluginId: string | null = null;
 	private message = "";
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
 
 	setSnapshot(snapshot: {
 		pluginsDir?: string;
@@ -97,35 +107,72 @@ export class PluginManagerOverlay {
 	}
 
 	invalidate(): void {
-		// State is read directly by the Ink renderer.
+		this.cachedLines = null;
 	}
 
-	getInkOverlayModel(): InkListOverlayModel {
-		return {
-			kind: "list",
-			title: "Plugins",
-			subtitle: ` (${this.plugins.length})`,
-			hints: "space toggle · r refresh · enter/esc close",
-			headerLines: this.pluginsDir ? [this.pluginsDir] : undefined,
-			items: this.plugins.map((plugin, index) => {
-				const meta = [
-					`v${plugin.version || "?"}`,
-					plugin.hookCount ? `hooks:${plugin.hookCount}` : "hooks:-",
-					plugin.skillCount ? `skills:${plugin.skillCount}` : "",
-					plugin.onDisk ? "" : "missing",
-					this.busyPluginId === plugin.pluginId ? "updating…" : "",
-				].filter(Boolean).join(" · ");
-				return {
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+
+		if (!this.visible) return [];
+
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
+
+		const bodyLines = renderListPopupBody(
+			this.plugins,
+			this.selection,
+			innerWidth,
+			10,
+			(plugin, i) => {
+				const hookText = plugin.hookCount
+					? `hooks:${plugin.hookCount}`
+					: "hooks:-";
+				const skillText = plugin.skillCount
+					? `skills:${plugin.skillCount}`
+					: "";
+				const metaParts = [hookText];
+				if (skillText) metaParts.push(skillText);
+				const metaStr = metaParts.join(" · ");
+				const diskText = plugin.onDisk ? "" : "  missing";
+				const busy = this.busyPluginId === plugin.pluginId ? "  updating…" : "";
+				const meta = `v${plugin.version || "?"} · ${metaStr}${diskText}${busy}`;
+
+				const item: ListItem = {
 					label: plugin.pluginId,
 					metadata: meta,
-					selected: index === this.selection.index,
-					current: plugin.enabled,
+					selected: i === this.selection.index,
+					statusDot: !plugin.onDisk
+						? "red"
+						: this.busyPluginId === plugin.pluginId
+							? "yellow"
+							: plugin.enabled
+								? "green"
+								: "gray",
 				};
-			}),
-			emptyText: "No plugins installed.",
-			footer: this.message || `Skills: ${this.plugins.reduce((sum, plugin) => sum + plugin.skillCount, 0)} total`,
-			selectedIndex: this.selection.index,
-		};
+
+				return renderListItem(item, innerWidth);
+			},
+			"No plugins installed.",
+		);
+
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
+			title: "Plugins",
+			subtitle: ` (${this.plugins.length})`,
+			hints: " space toggle · r refresh · enter/esc close",
+			extraHeaderLines: this.pluginsDir ? [this.pluginsDir] : undefined,
+			bodyLines,
+			bottomText:
+				this.message ||
+				`Skills: ${this.plugins.reduce((s, p) => s + p.skillCount, 0)} total · Enabled plugins expose skills + hooks to Logician.`,
+		});
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
 	}
 
 	private moveSelection(delta: number): void {

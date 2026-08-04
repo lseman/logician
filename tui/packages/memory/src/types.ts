@@ -123,6 +123,8 @@ export interface ContextRetrievalQuery {
   changedFiles?: string[];
   recentEvidence?: string[];
   toolFailures?: number;
+  /** Internal optional query embedding used by hybrid retrieval. */
+  semanticVector?: number[];
 }
 
 // ── Dedup Config ─────────────────────────────────────────────────────────────
@@ -215,6 +217,8 @@ export type ObservationType =
   | "error"
   | "decision"
   | "discovery"
+  | "implementation"
+  | "bugfix"
   | "notification"
   | "other";
 
@@ -257,6 +261,25 @@ export interface SearchResult {
   sessionId: string;
 }
 
+export interface ExpandedMemoryEntry {
+  id: string;
+  kind: "observation" | "memory";
+  title: string;
+  content: string;
+  type: string;
+  files: string[];
+  concepts: string[];
+  timestamp: string;
+  sessionIds: string[];
+}
+
+export interface SemanticSearchResult {
+  id: string;
+  kind: "observation" | "memory";
+  sessionId?: string;
+  score: number;
+}
+
 export interface MemoryQuery {
   /** Full-text search across memory content and titles */
   search?: string;
@@ -281,6 +304,21 @@ export interface ContextBlock {
   content: string;
   tokens: number;
   recency: number;
+}
+
+export type ExtractionJobStatus = "pending" | "running" | "completed" | "failed";
+
+export interface ExtractionJob {
+  id: string;
+  sessionId: string;
+  workspace: string;
+  payload: string;
+  status: ExtractionJobStatus;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+  nextAttemptAt: string;
+  lastError?: string;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
@@ -346,6 +384,7 @@ export interface MemoryStore {
   /** List recent observations directly, scoped to the current workspace by default. */
   listRecentObservations(limit?: number, type?: ObservationType): CompressedObservation[];
   searchObservations(query: string, limit?: number): SearchResult[];
+  expandEntries(ids: string[]): ExpandedMemoryEntry[];
   /** Permanently remove observations in the current workspace. */
   clearObservations(): number;
 
@@ -362,8 +401,18 @@ export interface MemoryStore {
   recall(query: MemoryQuery, options?: RecallOptions): string;
   consolidate(sessionId: string): Memory[];
 
+  // Durable semantic extraction queue
+  enqueueExtractionJob(sessionId: string, workspace: string, payload: string): ExtractionJob;
+  claimExtractionJob(): ExtractionJob | null;
+  completeExtractionJob(id: string): void;
+  failExtractionJob(id: string, error: string, retryDelayMs?: number): void;
+  listExtractionJobs(status?: ExtractionJobStatus): ExtractionJob[];
+
   // Context injection
   getContext(sessionId: string, budget?: number, query?: string | ContextRetrievalQuery): string;
+  upsertEmbedding(id: string, kind: "observation" | "memory", vector: number[], sessionId?: string): void;
+  hasEmbedding(id: string): boolean;
+  searchEmbeddings(vector: number[], limit?: number): SemanticSearchResult[];
 
   // Session tracking
   setCurrentSessionId(id: string): void;

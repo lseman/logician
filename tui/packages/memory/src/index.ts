@@ -18,6 +18,8 @@ export {
   autoTierMemories,
 } from "./hook-adapter.js";
 export { createMemoryHooks, type MemoryHooksConfig } from "./memory-hooks.js";
+export { LocalMemoryEmbedder, type MemoryEmbedder } from "./local-embedder.js";
+export type { SemanticExtractor, SemanticExtractionRequest } from "./semantic-extractor.js";
 
 export type {
   // Sessions
@@ -39,6 +41,8 @@ export type {
   RecallOptions,
   ContextBlock,
   SearchResult,
+  ExpandedMemoryEntry,
+  SemanticSearchResult,
   // Working Memory
   WorkingMemoryTier,
   // Retention Scoring

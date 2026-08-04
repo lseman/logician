@@ -2,9 +2,9 @@
 // Block-level markdown line rendering (code fences, tables, JSON) and the
 // table layout helpers it depends on. No instance state.
 
-import { highlight, highlightAuto } from "../semantic-highlight.ts";
-import { visibleWidth } from "../../../terminal/core.ts";
-import { BOLD, DIM, RESET, theme } from "../semantic-markup.ts";
+import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import { BOLD, DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
+import { theme } from "../../../terminal/theme.ts";
 import {
 	escapeMarkdownTableCell,
 	extractLangFromFence,
@@ -18,7 +18,7 @@ export function renderMarkdownLines(
 	text: string,
 	maxLen: number,
 	_streaming: boolean,
-	baseColor = theme.fgRaw("assistantText"),
+	baseColor = theme.fg("assistantText", ""),
 	firstLinePrefix = "",
 ): string[] {
 	const lines: string[] = [];
@@ -270,7 +270,7 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 		}
 	}
 
-	const borderColor = theme.fgRaw("separator");
+	const borderColor = theme.fgRaw("borderMuted");
 	const headerColor = theme.fgRaw("assistantText");
 	const rowColor = theme.fgRaw("assistantText");
 	const altRowColor = theme.fgRaw("dim");

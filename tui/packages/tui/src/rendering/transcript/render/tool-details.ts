@@ -1,7 +1,8 @@
 // ── Transcript per-tool-type detail renderers ───────────────────────────────
 // Expanded-detail rendering for write/edit/file_diff/bash/mcp tool executions.
 
-import { DIM, RESET, theme } from "../semantic-markup.ts";
+import { DIM, RESET } from "../../../terminal/core.ts";
+import { theme } from "../../../terminal/theme.ts";
 import {
 	normalizeEditArgs,
 	stringArg,
@@ -102,7 +103,7 @@ export function renderEditDetails(
 				? `${oldText.length} bytes · ${oldLineCount} lines · streaming`
 				: `${oldText.length} bytes · ${oldLineCount} lines`;
 			lines.push(
-				`${theme.fg("separator", "── ")}${theme.fg("diffRemoved", "- OLD")}${RESET}  ${DIM}${oldMeta}${RESET}`,
+				`${theme.fgRaw("diffRemoved")}── - OLD${RESET}  ${DIM}${oldMeta}${RESET}`,
 			);
 			lines.push(
 				...renderFileContent(oldText, width, oldLineCount, language, expanded),
@@ -114,7 +115,7 @@ export function renderEditDetails(
 				? `${newText.length} bytes · ${newLineCount} lines · streaming`
 				: `${newText.length} bytes · ${newLineCount} lines`;
 			lines.push(
-				`${theme.fg("separator", "── ")}${theme.fg("diffAdded", "+ NEW")}${RESET}  ${DIM}${newMeta}${RESET}`,
+				`${theme.fgRaw("diffAdded")}── + NEW${RESET}  ${DIM}${newMeta}${RESET}`,
 			);
 			lines.push(
 				...renderFileContent(newText, width, newLineCount, language, expanded),

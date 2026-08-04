@@ -3,7 +3,7 @@
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import type { SlashCommandsCtx } from "./context.ts";
 import type { CompressedObservation, MemoryStore, ObservationType } from "@logician/memory";
-import { theme } from "../../rendering/transcript/semantic-markup.ts";
+import { theme } from "../../terminal/theme.ts";
 
 function observationLabel(observation: CompressedObservation, index?: number): string {
 	const ordinal = index === undefined ? "" : `#${index + 1} · `;

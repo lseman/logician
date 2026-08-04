@@ -32,9 +32,5 @@ void test("shows the slash command popup while typing a command", async () => {
 	const screen = screenFromPtyResult(result, 100, 30).text();
 	assert.match(screen, /commands \(\d+\)/, "slash popup header must be visible");
 	assert.match(screen, /\/memory/, "matching command must be listed");
-	assert.match(
-		result.output,
-		/\x1b\[2A\x1b\[9G\x1b\[\?25h/,
-		"hardware cursor must be parked on the input row",
-	);
+	assert.match(result.output, /\x1b\[28;9H/, "hardware cursor must be parked on the input row");
 });

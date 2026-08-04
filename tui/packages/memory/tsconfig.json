@@ -6,7 +6,8 @@
     "types": ["node"],
     "composite": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts"]
 }

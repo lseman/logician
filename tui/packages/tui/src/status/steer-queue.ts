@@ -6,13 +6,13 @@
 
 import {
 	clampLineToWidth,
-	type InkTextComponent,
-	type InkTextRow,
+	type Component,
 	visibleWidth,
+	RESET,
 } from "../terminal/core.ts";
-import { DIM, RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
+import { theme } from "../terminal/theme.ts";
 
-export class SteerQueue implements InkTextComponent {
+export class SteerQueue implements Component {
 	private steering: string[] = [];
 	private followUp: string[] = [];
 	private onInvalidate: (() => void) | null = null;
@@ -31,7 +31,7 @@ export class SteerQueue implements InkTextComponent {
 		this.onInvalidate?.();
 	}
 
-	getInkTextRows(width: number): InkTextRow[] {
+	render(width: number): string[] {
 		const total = this.steering.length + this.followUp.length;
 		if (total === 0) return [];
 
@@ -47,8 +47,8 @@ export class SteerQueue implements InkTextComponent {
 			parts.push(`${this.followUp.length} follow-up`);
 		}
 		const header =
-			`${getHeader()} STEERING${RESET}  ` +
-			`${getCount()}${parts.join(" · ")}${RESET}`;
+			`${getHeader()} STEERING\x1b[0m  ` +
+			`${getCount()}${parts.join(" · ")}\x1b[0m`;
 		lines.push(pad(clampLineToWidth(header, width), width));
 
 		// Numbered rows, capped. Delivery labels make queue semantics visible
@@ -60,7 +60,7 @@ export class SteerQueue implements InkTextComponent {
 			msg: string;
 		}[] = [];
 		this.steering.forEach((msg) =>
-			rows.push({ mark: getSteerMark(), label: "QUEUE", style: steerStyle, msg }),
+			rows.push({ mark: STEER_MARK, label: "QUEUE", style: steerStyle, msg }),
 		);
 		this.followUp.forEach((msg) =>
 			rows.push({
@@ -73,8 +73,8 @@ export class SteerQueue implements InkTextComponent {
 
 		const shown = rows.slice(0, MAX_ROWS);
 		shown.forEach((row, i) => {
-			const n = `${getNum()}${i + 1}.${RESET}`;
-			const label = `${getLabel()}${row.label}${RESET}`;
+			const n = `${getNum()}${i + 1}.\x1b[0m`;
+			const label = `${getLabel()}${row.label}\x1b[0m`;
 			const text = `${row.mark} ${n} ${label}  ${row.style(oneLine(row.msg))}`;
 			lines.push(pad(clampLineToWidth(text, width), width));
 		});
@@ -83,7 +83,7 @@ export class SteerQueue implements InkTextComponent {
 		if (hidden > 0) {
 			lines.push(
 				pad(
-					clampLineToWidth(`   ${getCount()}… ${hidden} more${RESET}`, width),
+					clampLineToWidth(`   ${getCount()}… ${hidden} more\x1b[0m`, width),
 					width,
 				),
 			);
@@ -92,28 +92,28 @@ export class SteerQueue implements InkTextComponent {
 		lines.push(
 			pad(
 				clampLineToWidth(
-					`   ${DIM}Enter queue · Ctrl+Enter steer now · /queue manage${RESET}`,
+					"   \x1b[2mEnter queue · Ctrl+Enter steer now · /queue manage\x1b[0m",
 					width,
 				),
 				width,
 			),
 		);
 
-		return lines.map(semanticMarkupToInkRow);
+		return lines;
 	}
 }
 
 // ── Styling ──────────────────────────────────────────────────────────────────
 
 const MAX_ROWS = 6;
-const getHeader = (): string => theme.fgRaw("muted");
-const getCount = (): string => theme.fgRaw("dim");
-const getNum = (): string => theme.fgRaw("muted");
-const getLabel = (): string => theme.fgRaw("dim");
-const getSteerMark = (): string => ` ${theme.fg("accent", "▸")}`;
-const getFollowMark = (): string => " " + theme.fgRaw("dim") + "↳" + RESET;
-const steerStyle = (s: string): string => theme.fgRaw("text") + s + RESET;
-const followStyle = (s: string): string => theme.fgRaw("muted") + s + RESET;
+const getHeader = (): string => theme.fg("muted", "");
+const getCount = (): string => theme.fg("dim", "");
+const getNum = (): string => theme.fg("muted", "");
+const getLabel = (): string => theme.fg("dim", "");
+const STEER_MARK = " \x1b[36m▸\x1b[0m"; // cyan triangle ▸
+const getFollowMark = (): string => " " + theme.fg("dim", "") + "↳" + RESET;
+const steerStyle = (s: string): string => theme.fg("text", "") + s + RESET;
+const followStyle = (s: string): string => theme.fg("muted", "") + s + RESET;
 
 /** Collapse newlines/whitespace runs so each queued message is one row. */
 function oneLine(msg: string): string {

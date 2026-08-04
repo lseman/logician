@@ -5,9 +5,11 @@
 // Displays: compact task list with status marks, grouped by status.
 //           in_progress first, then pending, then completed.
 
-import { type InkTextComponent, type InkTextRow, visibleWidth } from "../terminal/core.ts";
-import type { ThemeColor } from "../terminal/theme.ts";
-import { DIM, RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
+import { type Component, visibleWidth } from "../terminal/core.ts";
+import { theme, type ThemeColor } from "../terminal/theme.ts";
+
+const RESET = "\x1b[0m";
+const DIM = "\x1b[2m";
 
 export interface TaskItem {
 	id: number;
@@ -54,7 +56,7 @@ function statusMark(status: TaskItem["status"], frame?: number): string {
 
 const MAX_ROWS = 5;
 
-export class TodoBar implements InkTextComponent {
+export class TodoBar implements Component {
 	private tasks: TaskItem[] = [];
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
@@ -142,7 +144,7 @@ export class TodoBar implements InkTextComponent {
 		}
 	}
 
-	getInkTextRows(width: number): InkTextRow[] {
+	render(width: number): string[] {
 		const countKey = this.tasks.filter((t) => t.status !== "deleted").length;
 
 		if (
@@ -151,14 +153,14 @@ export class TodoBar implements InkTextComponent {
 			this.cachedLines !== null &&
 			this.transitionFrame.size === 0
 		) {
-			return this.cachedLines.map(semanticMarkupToInkRow);
+			return this.cachedLines;
 		}
 
 		const lines = renderRaw(width, this.tasks, this.transitionFrame);
 		this.cachedWidth = width;
 		this.cachedCount = countKey;
 		this.cachedLines = lines;
-		return lines.map(semanticMarkupToInkRow);
+		return lines;
 	}
 }
 
@@ -177,7 +179,7 @@ function renderRaw(
 	const lines: string[] = [];
 
 	// Header
-	const header = `${theme.fgRaw("muted")}Tasks ${done}/${total}${RESET}`;
+	const header = `${theme.fg("muted", "")}Tasks ${done}/${total}${RESET}`;
 	lines.push(pad(clampLine(header, width), width));
 
 	// Group by status: in_progress → pending → completed

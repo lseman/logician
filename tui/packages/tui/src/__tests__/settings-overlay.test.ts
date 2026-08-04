@@ -8,17 +8,6 @@ import {
 	type SettingDef,
 } from "../overlays/settings-overlay.ts";
 
-const modelLines = (overlay: SettingsSelectorOverlay): string[] => {
-	const model = overlay.getInkOverlayModel();
-	return [
-		model.title,
-		...(model.items.length
-			? model.items.flatMap((item) => [item.label, item.metadata ?? ""])
-			: [model.emptyText]),
-		model.footer,
-	];
-};
-
 // Initialize theme before any overlay rendering.
 const setupTheme = (): void => {
 	try {
@@ -64,7 +53,8 @@ describe("SettingsSelectorOverlay", () => {
 	it("shows empty when not visible", () => {
 		setupTheme();
 		const overlay = new SettingsSelectorOverlay();
-		assert.strictEqual(overlay.isVisibleOverlay(), false);
+		const lines = overlay.render(80);
+		assert.strictEqual(lines.length, 0);
 	});
 
 	it("shows overlay when visible", () => {
@@ -72,9 +62,10 @@ describe("SettingsSelectorOverlay", () => {
 		const overlay = new SettingsSelectorOverlay();
 		overlay.setSettings(makeSettings());
 		overlay.show();
-		const model = overlay.getInkOverlayModel();
-		assert.equal(model.title, "Runtime Settings");
-		assert.equal(model.items.length, 3);
+		const lines = overlay.render(80);
+		assert.ok(lines.length > 5);
+		assert.ok(lines[0].includes("─"));
+		assert.ok(lines.at(-1)?.includes("─"));
 	});
 
 	it("navigates menu with arrow keys", () => {
@@ -167,10 +158,10 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r");
 
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const rendered = lines.join("\n");
-		assert.ok(rendered.includes("on"));
-		assert.ok(rendered.includes("off"));
+		assert.ok(rendered.includes("[on]"));
+		assert.ok(rendered.includes("[off]"));
 	});
 
 	it("renders current value indicator", () => {
@@ -179,7 +170,7 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.setSettings(makeSettings());
 		overlay.show();
 
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const rendered = lines.join("\n");
 		assert.ok(rendered.includes("(claude-sonnet-4)"));
 		assert.ok(rendered.includes("(medium)"));
@@ -191,7 +182,7 @@ describe("SettingsSelectorOverlay", () => {
 		overlay.setSettings([]);
 		overlay.show();
 
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const rendered = lines.join("\n");
 		assert.ok(rendered.includes("No settings available"));
 	});

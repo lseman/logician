@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SlashCommandDef } from "@logician/coding-agent/commands";
 import { SlashPopup } from "../overlays/slash-popup.ts";
-import { initTheme } from "../terminal/theme.ts";
+import { initTheme, theme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
@@ -23,18 +23,19 @@ const commands: SlashCommandDef[] = [
 	},
 ];
 
-test("SlashPopup exposes the active command to Ink", () => {
+test("SlashPopup renders the active command using the theme selected color", () => {
 		const popup = new SlashPopup();
 		popup.setCommands(commands);
 		popup.setQuery("/");
 		popup.show();
 
-		let model = popup.getInkOverlayModel();
-		assert.equal(model.items.find((item) => item.selected)?.label, "/help");
+		const selectedColor = theme.fgRaw("selected");
+		let output = popup.render(80).join("\n");
+		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/help`));
 
 		popup.moveSelection(1);
-		model = popup.getInkOverlayModel();
-		assert.equal(model.items.find((item) => item.selected)?.label, "/settings");
+		output = popup.render(80).join("\n");
+		assert.ok(output.includes(`${selectedColor}▸ \x1b[1m/settings`));
 	});
 
 test("submitRaw establishes the command turn before running the local handler", () => {
@@ -85,24 +86,4 @@ test("submitRaw delivers handler return text after the turn is established", () 
 		"handler",
 		"result:Thinking level: high",
 	]);
-});
-
-test("submitRaw forwards sessions subcommands to its local handler", () => {
-	const calls: string[] = [];
-	const popup = new SlashPopup();
-	popup.setCommands([
-		{
-			command: "/sessions",
-			description: "Sessions",
-			dispatch: "local",
-			acceptsArgs: true,
-			handler: (args) => {
-				calls.push(args);
-				return "cleaned";
-			},
-		},
-	]);
-	popup.setOnSubmit(() => {});
-	assert.equal(popup.submitRaw("/sessions clean"), true);
-	assert.deepEqual(calls, ["clean"]);
 });

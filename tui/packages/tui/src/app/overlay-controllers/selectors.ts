@@ -13,7 +13,7 @@ import type { OverlayHandlersCtx } from "./context.ts";
 
 export async function openReasonerSelector(ctx: OverlayHandlersCtx): Promise<void> {
 	ctx.statusPanel.update({ phase: "reasoner" });
-	const currentId = "none";
+	const currentId = ctx.bridge.getReasonerStatus();
 	const reasoners: ReasonerInfo[] = getReasonerIds().map((id) => {
 		const meta = getReasonerMeta(id) as ReasonerMeta;
 		return {
@@ -49,9 +49,11 @@ export function handleReasonerSelectorAction(
 	const reasoner = action.reasoner;
 	ctx.reasonerSelector.setMessage(`Setting: ${reasoner.name}...`);
 	ctx.tui.requestRender();
-	// reasoner removed;
+	ctx.bridge.setReasonerId(reasoner.id);
+	saveConfigField("reasoner", reasoner.id);
 	ctx.tui.removeOverlay(ctx.reasonerSelector);
 	ctx.statusPanel.update({ phase: "ready" });
+	ctx.statusPanel.update({ reasoner: reasoner.id });
 	ctx.notify(`Reasoning mode: ${reasoner.name}`, "success");
 	ctx.tui.requestRender();
 }

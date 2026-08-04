@@ -60,8 +60,6 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 
 	ctx.bridge.on(eventHandler);
 	ctx.bridge.onError((err) => {
-		// eslint-disable-next-line no-console
-		console.error(`Bridge error: ${err.message}`);
 		// Also display in transcript so the user sees connection/server errors
 		ctx.transcript.addSystemMessage(`Connection error: ${err.message}`);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -138,8 +136,6 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 			}
 		})
 		.catch((err) => {
-			// eslint-disable-next-line no-console
-			console.error(`Bridge init failed: ${err.message}`);
 			// Display init/connection errors in transcript so the user knows
 			// the agent couldn't start (e.g. server unreachable).
 			ctx.transcript.addSystemMessage(
@@ -339,6 +335,10 @@ export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent
 			} else if (event.kind === "reflections_added") {
 				ctx.transcript.addSystemMessage(
 					`Memory synthesized: ${event.count} reflection${event.count === 1 ? "" : "s"}`,
+				);
+			} else if (event.kind === "reflections_evolved") {
+				ctx.transcript.addSystemMessage(
+					`Memory evolved: ${event.count} existing reflection${event.count === 1 ? "" : "s"}`,
 				);
 			} else if (event.kind === "observations_dropped") {
 				ctx.transcript.addSystemMessage(

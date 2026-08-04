@@ -1,11 +1,10 @@
 import {
-	type InkTextComponent,
-	type InkTextRow,
+	type Component,
 	clampLineToWidth,
+	RESET,
 	visibleWidth,
 } from "../terminal/core.ts";
-import type { ThemeColor } from "../terminal/theme.ts";
-import { RESET, semanticMarkupToInkRow, theme } from "../rendering/transcript/semantic-markup.ts";
+import { type ThemeColor, theme } from "../terminal/theme.ts";
 
 export type NotificationLevel = "info" | "success" | "warning" | "error";
 
@@ -21,7 +20,7 @@ const MAX_HISTORY = 20;
 
 /** Transient UI feedback. Notifications disappear from view but the last
  * MAX_HISTORY are kept in `history()` for the /notifications command. */
-export class NotificationCenter implements InkTextComponent {
+export class NotificationCenter implements Component {
 	private notifications: Notification[] = [];
 	private log: Notification[] = [];
 	private nextId = 1;
@@ -72,13 +71,13 @@ export class NotificationCenter implements InkTextComponent {
 		this.onInvalidate?.();
 	}
 
-	getInkTextRows(width: number): InkTextRow[] {
+	render(width: number): string[] {
 		return this.notifications.map((notification) => {
 			const { icon, color } = notificationStyle(notification.level);
 			const content = `${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
 			const clipped = clampLineToWidth(content, Math.max(1, width - 2));
 			const line = ` ${clipped}`;
-			return semanticMarkupToInkRow(line + " ".repeat(Math.max(0, width - visibleWidth(line))));
+			return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
 		});
 	}
 }

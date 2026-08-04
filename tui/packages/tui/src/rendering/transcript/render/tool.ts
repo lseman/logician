@@ -7,16 +7,19 @@
 import {
 	highlight,
 	highlightAuto,
-} from "../semantic-highlight.ts";
+} from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import type {
 	ThinkingDisplayStyle,
 	ToolExecution,
 } from "@logician/coding-agent/sessions";
 import {
+	BOLD,
 	clampLineToWidth,
+	DIM,
+	RESET,
 	visibleWidth,
 } from "../../../terminal/core.ts";
-import { BOLD, DIM, RESET, theme } from "../semantic-markup.ts";
+import { theme } from "../../../terminal/theme.ts";
 import {
 	compactText,
 	diffLineColor,
@@ -394,7 +397,7 @@ export function renderPostEditDiagnostics(
 }
 
 export function detailSection(label: string, meta = ""): string {
-	return `${theme.fg("separator", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
+	return `${theme.fg("active", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
 }
 
 export function toolSummary(tool: ToolExecution): string {

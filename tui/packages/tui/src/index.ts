@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ── Logician TUI — Entry point ────────────────────────────────────────────────
 
-// Force truecolor output. Must run before chalk/ink are imported (even
+// Force truecolor output before terminal theme initialization.
 // transitively) — chalk reads COLORTERM/TERM once at module-init time via
 // `supports-color`, and terminals that report bare `TERM=xterm` with no
 // COLORTERM get downgraded to basic 16-color, which mangles our hex theme
@@ -52,8 +52,8 @@ import {
 	TrustStore,
 } from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
-import type { TrustChoice } from "./overlays/trust-prompt-overlay.ts";
-import { showTrustOverlayInk } from "./ink-app/mount-trust-prompt.tsx";
+import { TrustPromptOverlay, type TrustChoice } from "./overlays/trust-prompt-overlay.ts";
+import { visibleWidth } from "./terminal/core.ts";
 import { LogicianTUI } from "./app/tui.ts";
 
 /** Show the trust prompt as an interactive terminal card before the main TUI. */
@@ -61,8 +61,46 @@ async function showTrustOverlay(
 	cwd: string,
 	paths: string[],
 ): Promise<TrustChoice> {
-	initTheme();
-	return showTrustOverlayInk(cwd, paths);
+	return new Promise((resolve) => {
+		initTheme();
+		const overlay = new TrustPromptOverlay();
+		overlay.setOptions({ cwd, paths });
+		overlay.show();
+		const stdin = process.stdin;
+		const wasRaw = stdin.isRaw === true;
+		const render = (): void => {
+			const width = Math.max(24, process.stdout.columns ?? 80);
+			const height = Math.max(12, process.stdout.rows ?? 24);
+			const lines = overlay.render(width);
+			const left = Math.max(0, Math.floor((width - Math.max(...lines.map(visibleWidth))) / 2));
+			const top = Math.max(0, height - lines.length - 3);
+			process.stdout.write(`\x1b[?25l\x1b[2J\x1b[H${"\n".repeat(top)}${lines.map((line) => " ".repeat(left) + line).join("\n")}`);
+		};
+		const cleanup = (): void => {
+			stdin.off("data", onData);
+			process.stdout.off("resize", render);
+			stdin.setRawMode?.(wasRaw);
+			process.stdout.write("\x1b[?25h\x1b[2J\x1b[H");
+		};
+		const onData = (chunk: Buffer | string): void => {
+			const input = String(chunk);
+			let action = overlay.handleInput(input);
+			if (!action && input.length > 1 && !input.startsWith("\x1b[")) {
+				for (const character of input) {
+					action = overlay.handleInput(character);
+					if (action) break;
+				}
+			}
+			if (!action) return render();
+			cleanup();
+			resolve(action.choice);
+		};
+		stdin.setRawMode?.(true);
+		stdin.resume();
+		stdin.on("data", onData);
+		process.stdout.on("resize", render);
+		render();
+	});
 }
 
 function defaultProjectTrust(): "ask" | "always" | "never" {
@@ -196,13 +234,11 @@ async function main(): Promise<void> {
 		}
 	}
 
-	const { mountLogicianTui } = await import("./ink-app/mount-logician-tui.tsx");
-	const ink = mountLogicianTui(tui);
+	tui.start();
 	let stopping = false;
 	const shutdown = async (): Promise<void> => {
 		if (stopping) return;
 		stopping = true;
-		ink.unmount();
 		await tui.stop();
 		const recoveryTip = tui.getSessionRecoveryTip();
 		if (recoveryTip) process.stderr.write(recoveryTip);

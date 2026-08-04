@@ -575,6 +575,64 @@ describe("consolidate", () => {
 
 describe("getContext", () => {
 
+  test("fuses optional semantic candidates when lexical terms do not overlap", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    const target = store.create("Authentication credentials rotate through the identity broker", {
+      strength: 8,
+    });
+    store.create("Unrelated rendering pipeline", { strength: 10 });
+    store.upsertEmbedding(target.id, "memory", [1, 0, 0]);
+    const context = store.getContext("new-session", 2_000, {
+      objective: "sign-in access policy",
+      semanticVector: [1, 0, 0],
+    });
+    assert.match(context, /identity broker/);
+    store.close();
+  });
+
+  test("retrieves relevant observations beyond the recent scan window", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    store.createSession("history", { cwd: "/workspace", workspace: "/workspace" });
+    store.observe({
+      id: "old-relevant", sessionId: "history", timestamp: "2025-01-01T00:00:00.000Z",
+      hookType: "post_tool_use", toolName: "read_file",
+      toolOutput: "The quasar scheduler requires monotonic lease renewal.",
+      raw: { tool_name: "read_file", tool_output: "The quasar scheduler requires monotonic lease renewal." },
+    });
+    for (let index = 0; index < 130; index++) {
+      store.observe({
+        id: `recent-${index}`, sessionId: "history",
+        timestamp: new Date(Date.now() + index).toISOString(),
+        hookType: "post_tool_use", toolName: "read_file",
+        toolOutput: `Unrelated renderer note ${index}`,
+        raw: { tool_name: "read_file", tool_output: `Unrelated renderer note ${index}` },
+      });
+    }
+    const context = store.getContext("new-session", 2000, "quasar scheduler lease");
+    assert.match(context, /monotonic lease renewal/);
+    store.close();
+  });
+
+  test("uses compact index cards after the top three detailed results", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    for (let index = 0; index < 6; index++) {
+      const memory = store.create(`Preserve delimiter behavior. FULL_DETAIL_${index}`, {
+        strength: 8,
+        concepts: ["parser", "delimiter"],
+      });
+      store.update(memory.id, { title: `Parser convention ${index}` });
+    }
+    const context = store.getContext("new-session", 4000, "parser delimiter convention");
+    assert.match(context, /remaining IDs are compact indexes/);
+    assert.match(context, /\[[0-9a-f-]{36}\] fact Parser convention/);
+    const fullDetails = context.match(/FULL_DETAIL_\d/g) || [];
+    assert.equal(fullDetails.length, 3);
+    store.close();
+  });
+
   test("recalls folder memories across sessions using the current query", () => {
     const store = createMemoryStore(dbPath());
     store.setCurrentWorkspace("/workspace");
@@ -664,6 +722,58 @@ describe("getContext", () => {
     const ctx = store.getContext("nonexistent");
     assert.equal(ctx, "");
 
+    store.close();
+  });
+});
+
+describe("memory expansion", () => {
+  test("expands mixed IDs in request order and enforces workspace scope", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace-a");
+    store.createSession("session-a", { cwd: "/workspace-a", workspace: "/workspace-a" });
+    const observation = store.observe({
+      id: "obs-expand", sessionId: "session-a", timestamp: new Date().toISOString(),
+      hookType: "post_tool_use", toolName: "read_file", toolOutput: "Parser detail",
+      raw: { tool_name: "read_file", tool_output: "Parser detail" },
+    })!;
+    const memory = store.create("Architecture detail", { strength: 8 });
+    store.setCurrentWorkspace("/workspace-b");
+    const hidden = store.create("Hidden workspace memory", { strength: 8 });
+    store.setCurrentWorkspace("/workspace-a");
+    const expanded = store.expandEntries([memory.id, observation.id, hidden.id]);
+    assert.deepEqual(expanded.map((entry) => entry.id), [memory.id, observation.id]);
+    assert.deepEqual(expanded.map((entry) => entry.kind), ["memory", "observation"]);
+    store.close();
+  });
+});
+
+describe("durable extraction queue", () => {
+  test("requeues a claimed job when the database is reopened", () => {
+    const path = dbPath();
+    const first = createMemoryStore(path);
+    first.setCurrentWorkspace("/workspace");
+    const queued = first.enqueueExtractionJob("session-1", "/workspace", JSON.stringify({ intent: "recover" }));
+    assert.equal(first.claimExtractionJob()?.id, queued.id);
+    first.close();
+
+    const recovered = createMemoryStore(path);
+    recovered.setCurrentWorkspace("/workspace");
+    assert.equal(recovered.listExtractionJobs("pending")[0]?.id, queued.id);
+    recovered.completeExtractionJob(queued.id);
+    assert.equal(recovered.listExtractionJobs("completed").length, 1);
+    recovered.close();
+  });
+
+  test("moves repeatedly failing jobs to a terminal state", () => {
+    const store = createMemoryStore(dbPath());
+    store.setCurrentWorkspace("/workspace");
+    const job = store.enqueueExtractionJob("session-1", "/workspace", "{}");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const claimed = store.claimExtractionJob();
+      assert.equal(claimed?.id, job.id);
+      store.failExtractionJob(job.id, "extractor unavailable", 0);
+    }
+    assert.equal(store.listExtractionJobs("failed")[0]?.attempts, 3);
     store.close();
   });
 });

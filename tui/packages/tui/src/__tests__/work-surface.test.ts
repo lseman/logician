@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WorkSurface } from "../status/work-surface.ts";
-import { initTheme, theme } from "../terminal/theme.ts";
-import { inkTextComponentLines as inkLines } from "../terminal/core.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 void test("work surface renders working set and turn evidence", () => {
 	initTheme("dark");
@@ -11,7 +10,7 @@ void test("work surface renders working set and turn evidence", () => {
 	surface.recordToolStart("1", "edit_file", { path: "src/main.ts" });
 	surface.recordToolEnd("1", "edit_file", "ok\n<post_edit_diagnostics>", false);
 	surface.setContext(1200, 8000);
-	const text = inkLines(surface, 100).join("\n");
+	const text = surface.render(100).join("\n");
 	assert.match(text, /Working set/);
 	assert.match(text, /Activity/);
 	assert.match(text, /● running/);
@@ -19,13 +18,9 @@ void test("work surface renders working set and turn evidence", () => {
 	assert.match(text, /1 changed/);
 	assert.match(text, /1 diagnostics/);
 	assert.match(text, /1,200\/8,000/);
-	const metadata = surface.getInkTextRows(100).flat().find((span) =>
-		span.text.includes("1 tools"),
-	);
-	assert.equal(metadata?.color, theme.inkColor("text"));
 
 	surface.endTurn();
-	const settled = inkLines(surface, 100).join("\n");
+	const settled = surface.render(100).join("\n");
 	assert.doesNotMatch(settled, /Activity|● running/);
 	assert.match(settled, /Turn summary/);
 	assert.match(settled, /✓/);

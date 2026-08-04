@@ -2,6 +2,7 @@
 
 import { getReasonerMeta } from "@logician/agent-capabilities/reasoning";
 import { formatContextSize } from "@logician/coding-agent";
+import { saveConfigField } from "@logician/coding-agent/configuration";
 import { getAvailableThemes } from "../../terminal/theme.ts";
 import { getGitVersion } from "../git-status.ts";
 import type { SlashCommandsCtx } from "./context.ts";
@@ -134,7 +135,8 @@ export async function handleReasoner(ctx: SlashCommandsCtx, args: string): Promi
 			return;
 		}
 		// Direct set: /reasoner ssr, /reasoner none, etc.
-		// reasoner removed;
+		ctx.bridge.setReasonerId(normalized);
+		saveConfigField("reasoner", normalized);
 		const meta = getReasonerMeta(normalized);
 		const label = meta ? meta.name : normalized;
 		ctx.transcript.addSystemMessage(`Reasoning mode: ${label}`);

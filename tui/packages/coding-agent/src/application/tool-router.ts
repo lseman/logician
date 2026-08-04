@@ -35,6 +35,7 @@ export interface ToolRouterDeps {
 	cwd: string;
 	projectTrusted: boolean;
 	tools?: Tool[];
+	extraTools?: Tool[];
 	webSearch?: Partial<{ baseUrl: string; maxResults: number }>;
 	emit: (event: ParsedBridgeEvent) => void;
 	/** Add a tool to the live default set (propagates into config.tools / harness.setTools). */
@@ -94,6 +95,12 @@ export class ToolRouter {
 			maxResults: deps.webSearch?.maxResults ?? defaultWebSearch.maxResults,
 		};
 		this.defaultTools = deps.tools?.length ? deps.tools : createDefaultTools({ webSearch });
+		if (deps.extraTools?.length) {
+			this.defaultTools = [
+				...this.defaultTools,
+				...deps.extraTools.filter((tool) => !this.defaultTools.some((existing) => existing.name === tool.name)),
+			];
+		}
 	}
 
 	// ── Default tools ────────────────────────────────────────────────────
@@ -395,15 +402,7 @@ async function loadPluginCommands(
 		let entries: string[];
 		try {
 			entries = await readdirAsync(dir);
-		} catch (err: unknown) {
-			// Most plugins have no commands/ dir at all — only a real error
-			// (permissions, etc.) is worth surfacing.
-			if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
-				console.error(
-					`[plugins] failed to read commands dir for "${pluginName}":`,
-					err,
-				);
-			}
+		} catch {
 			continue;
 		}
 		for (const entry of entries) {
@@ -412,10 +411,7 @@ async function loadPluginCommands(
 			let raw: string;
 			try {
 				raw = await readFileAsync(filePath, "utf8");
-			} catch (err: unknown) {
-				// The file was just listed by readdir, so a read failure here
-				// is a genuine anomaly (permissions, race), not "expected".
-				console.error(`[plugins] failed to read command file "${filePath}":`, err);
+			} catch {
 				continue;
 			}
 			const parsed = parseFrontmatter<Record<string, unknown>>(raw);

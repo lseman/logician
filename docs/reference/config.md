@@ -7,6 +7,30 @@ description: Full configuration schema with all options.
 
 Complete configuration reference for `.logician.json`.
 
+The current flat runtime keys include:
+
+```json
+{
+  "baseUrl": "http://127.0.0.1:8080",
+  "model": "model-id",
+  "memory": false,
+  "memoryEmbeddings": false,
+  "memoryEmbeddingModel": "Xenova/all-MiniLM-L6-v2",
+  "memoryExtractor": {
+    "baseUrl": "http://127.0.0.1:8081",
+    "model": "small-model-id"
+  },
+  "memoryViewer": true,
+  "memoryViewerPort": 3200,
+  "reasoner": "none",
+  "reasonerConfig": {}
+}
+```
+
+`reasoner` defaults to `none`. A selected reasoner runs before the ordinary tool-capable agent loop and its `reasonerConfig` values override that reasoner's registry defaults.
+
+`memoryEmbeddings` defaults to `false`. When enabled, Logician lazily loads the configured local embedding model and fuses its semantic results with SQLite FTS memory retrieval. Lexical retrieval remains available while the model warms.
+
 ## Full schema
 
 ```json

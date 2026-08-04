@@ -3,19 +3,6 @@ import { describe, it } from "node:test";
 import { McpManagerOverlay } from "../overlays/mcp-manager.ts";
 import { PluginManagerOverlay } from "../overlays/plugin-manager.ts";
 import { initTheme } from "../terminal/theme.ts";
-import type { InkOverlayModelProvider } from "../overlays/ink-overlay-model.ts";
-
-function modelLines(overlay: InkOverlayModelProvider): string[] {
-	const model = overlay.getInkOverlayModel();
-	return [
-		`${model.title}${model.subtitle ?? ""}`,
-		...(model.headerLines ?? []),
-		...(model.items.length
-			? model.items.flatMap((item) => [item.label, item.metadata ?? ""])
-			: [model.emptyText]),
-		model.footer,
-	];
-}
 
 function createOverlay(): McpManagerOverlay {
 	try {
@@ -48,7 +35,7 @@ void describe("McpManagerOverlay", () => {
 
 		overlay.show();
 		assert.equal(overlay.isVisibleOverlay(), true);
-		assert.ok(modelLines(overlay).join("\n").includes("agentmemory"));
+		assert.ok(overlay.render(80).join("\n").includes("agentmemory"));
 		assert.deepEqual(overlay.handleInput("q"), { type: "close" });
 	});
 });
@@ -73,7 +60,7 @@ void describe("PluginManagerOverlay", () => {
 
 		overlay.show();
 		assert.equal(overlay.isVisibleOverlay(), true);
-		assert.ok(modelLines(overlay).join("\n").includes("example@local"));
+		assert.ok(overlay.render(80).join("\n").includes("example@local"));
 		assert.deepEqual(overlay.handleInput("q"), { type: "close" });
 	});
 });
@@ -82,7 +69,7 @@ void describe("McpManagerOverlay rendering", () => {
 	void it("renders server list with correct format", () => {
 		const overlay = createOverlay();
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("MCP Servers"));
 		assert.ok(text.includes("agentmemory"));
@@ -105,7 +92,7 @@ void describe("McpManagerOverlay rendering", () => {
 			},
 		});
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("server1"));
 		assert.ok(text.includes("server2"));
@@ -226,7 +213,7 @@ void describe("McpManagerOverlay rendering", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({ servers: [] });
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("No MCP servers configured"));
 	});
@@ -238,7 +225,7 @@ void describe("McpManagerOverlay rendering", () => {
 		});
 		overlay.show();
 		overlay.setBusy("a");
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("updating"));
 	});
@@ -250,7 +237,7 @@ void describe("McpManagerOverlay rendering", () => {
 		});
 		overlay.show();
 		overlay.setMessage("Custom message");
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("Custom message"));
 	});
@@ -271,7 +258,7 @@ void describe("McpManagerOverlay rendering", () => {
 			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
 		});
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("Config:"));
 		assert.ok(text.includes(".logician/mcp.json"));
@@ -287,7 +274,7 @@ void describe("PluginManagerOverlay rendering", () => {
 			],
 		});
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("Plugins"));
 		assert.ok(text.includes("test@local"));
@@ -302,7 +289,7 @@ void describe("PluginManagerOverlay rendering", () => {
 			],
 		});
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("a@local"));
 		assert.ok(text.includes("b@local"));
@@ -341,7 +328,7 @@ void describe("PluginManagerOverlay rendering", () => {
 		const overlay = new PluginManagerOverlay();
 		overlay.setSnapshot({ plugins: [] });
 		overlay.show();
-		const lines = modelLines(overlay);
+		const lines = overlay.render(80);
 		const text = lines.join("\n");
 		assert.ok(text.includes("No plugins installed"));
 	});

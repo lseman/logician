@@ -24,6 +24,17 @@ function configuredWorkspace(): string {
 			turnTimeoutMs: 5000,
 			cacheSize: 64,
 			cacheTtlMs: 2000,
+			memory: true,
+			memoryExtractor: {
+				baseUrl: "http://memory.test:8081",
+				model: "small-extractor",
+			},
+			memoryViewer: false,
+			memoryViewerPort: 4321,
+			memoryEmbeddings: true,
+			memoryEmbeddingModel: "local/test-embedder",
+			reasoner: "reflexion",
+			reasonerConfig: { maxTrials: 2 },
 		}),
 		"utf8",
 	);
@@ -54,6 +65,21 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.turnTimeoutMs, 5000);
 	assert.equal(resolved.bridge.cacheSize, 64);
 	assert.equal(resolved.bridge.cacheTtlMs, 2000);
+	assert.equal(resolved.bridge.memoryExtractorBaseUrl, "http://memory.test:8081");
+	assert.equal(resolved.bridge.memoryExtractorModel, "small-extractor");
+	assert.equal(resolved.bridge.memoryViewerEnabled, false);
+	assert.equal(resolved.bridge.memoryViewerPort, 4321);
+	assert.equal(resolved.bridge.memoryEmbeddingsEnabled, true);
+	assert.equal(resolved.bridge.memoryEmbeddingModel, "local/test-embedder");
+	assert.equal(resolved.bridge.reasoner, "reflexion");
+	assert.deepEqual(resolved.bridge.reasonerConfig, { maxTrials: 2 });
+});
+
+void test("reasoners are disabled by default", () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-runtime-defaults-"));
+	const resolved = resolveRuntimeConfig(cwd, {});
+	assert.equal(resolved.bridge.reasoner, "none");
+	assert.equal(resolved.bridge.memoryEmbeddingsEnabled, false);
 });
 
 void test("untrusted runtime resolution ignores project configuration", () => {

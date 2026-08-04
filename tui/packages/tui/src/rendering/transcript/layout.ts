@@ -1,5 +1,4 @@
-import { graphemeAt, visibleWidth } from "../../terminal/core.ts";
-import { isSemanticStyleToken, RESET } from "./semantic-markup.ts";
+import { RESET, visibleWidth } from "../../terminal/core.ts";
 
 export function wrapText(text: string, maxLineLength: number): string[] {
 	const width = Math.max(1, Math.floor(maxLineLength));
@@ -50,12 +49,6 @@ function hardWrapVisible(text: string, width: number): string[] {
 	let index = 0;
 	while (index < text.length) {
 		const character = text[index];
-		if (isSemanticStyleToken(character)) {
-			chunk += character;
-			activeCodes = character === RESET ? "" : activeCodes + character;
-			index++;
-			continue;
-		}
 		if (character === "\x1b") {
 			const start = index;
 			index++;
@@ -90,7 +83,9 @@ function hardWrapVisible(text: string, width: number): string[] {
 			}
 			continue;
 		}
-		const fullCharacter = graphemeAt(text, index);
+		const codePoint = text.codePointAt(index);
+		const fullCharacter =
+			codePoint === undefined ? character : String.fromCodePoint(codePoint);
 		const characterWidth = visibleWidth(fullCharacter);
 		if (chunk && chunkWidth + characterWidth > width) {
 			chunks.push(chunk + (activeCodes ? RESET : ""));

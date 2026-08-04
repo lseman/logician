@@ -102,6 +102,24 @@ export function resolveRuntimeConfig(
 			cacheTtlMs: configNumber(config.cacheTtlMs),
 			memoryEnabled: configBool(config.memory, false),
 			memoryDbPath: configString(config.memoryDbPath),
+			memoryExtractorModel:
+				environment.LOGICIAN_MEMORY_EXTRACTOR_MODEL ||
+				configString(config.memoryExtractor?.model) ||
+				configString(config.memoryExtractorModel),
+			memoryExtractorBaseUrl:
+				environment.LOGICIAN_MEMORY_EXTRACTOR_URL ||
+				configString(config.memoryExtractor?.baseUrl),
+			memoryViewerEnabled: configBool(config.memoryViewer, true),
+			memoryViewerPort: configNumber(config.memoryViewerPort),
+			memoryEmbeddingsEnabled:
+				environment.LOGICIAN_MEMORY_EMBEDDINGS !== undefined
+					? configBool(environment.LOGICIAN_MEMORY_EMBEDDINGS, false)
+					: configBool(config.memoryEmbeddings, false),
+			memoryEmbeddingModel:
+				environment.LOGICIAN_MEMORY_EMBEDDING_MODEL ||
+				configString(config.memoryEmbeddingModel),
+			reasoner: environment.LOGICIAN_REASONER || configString(config.reasoner) || "none",
+			reasonerConfig: config.reasonerConfig,
 			cwd: config.cwd ?? cwd,
 			allowedPaths: config.allowedPaths,
 			allowAllPaths: configBool(config.allowAllPaths),

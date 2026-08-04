@@ -9,16 +9,15 @@ import type {
 	Turn,
 } from "@logician/coding-agent/sessions";
 import {
+	BOLD,
+	type Component,
 	clampLineToWidth,
+	DIM,
+	RESET,
 	type Scrollable,
-	type InkTextRow,
-	type InkTextSpan,
-	inkTextRowText,
-	padInkTextRow,
 	visibleWidth,
 } from "../../terminal/core.ts";
-import type { ThemeColor } from "../../terminal/theme.ts";
-import { RESET, semanticMarkupToInkRow, theme } from "./semantic-markup.ts";
+import { theme } from "../../terminal/theme.ts";
 import { hasStreamingChunk, revisionText, stripThinkTags } from "./text-utils.ts";
 import { wrapText } from "./layout.ts";
 import { renderMarkdownLines } from "./render/markdown-table.ts";
@@ -44,9 +43,10 @@ interface TranscriptDisplayOptions {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export class TranscriptDisplay implements Scrollable, RenderCtx {
+export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
+	public readonly rendersViewport = true;
 	private cachedWidth: number = 0;
-	private cachedLines: InkTextRow[] | null = null;
+	private cachedLines: string[] | null = null;
 	// Not private: read by the extracted render-*.ts functions through the
 	// RenderCtx interface, which TranscriptDisplay satisfies structurally.
 	currentWidth: number = 80;
@@ -306,6 +306,10 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 		return this._scrollOffset;
 	}
 
+	get totalHeight(): number {
+		return this._totalHeight;
+	}
+
 	get isAtBottom(): boolean {
 		return this._atBottom;
 	}
@@ -350,7 +354,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 		if (this._atBottom) this._newOutputBelow = false;
 	}
 
-	getInkTextRows(width: number): InkTextRow[] {
+	render(width: number): string[] {
 		// Fast path: content unchanged → reuse cached body, only repaint viewport
 		if (width === this.cachedWidth && this.cachedLines !== null) {
 			this.resolvePendingScroll();
@@ -360,7 +364,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 		this.currentWidth = width;
 		this.cachedWidth = width;
 
-		const renderedLines: InkTextRow[] = [];
+		const renderedLines: string[] = [];
 		const turnStartLines: number[] = [];
 		const pendingToolRegions: Array<{
 			start: number;
@@ -369,17 +373,11 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 		}> = [];
 		const frameWidth = Math.max(1, width - 2);
 		const contentWidth = Math.max(1, frameWidth - 2);
-		const themed = (
-			color: ThemeColor,
-			text: string,
-			style: Omit<InkTextSpan, "text" | "color"> = {},
-		) => ({ text, color: theme.inkColor(color), ...style });
 
-		const padToWidth = (line: string | InkTextRow): InkTextRow => {
-			if (typeof line !== "string") return padInkTextRow(line, frameWidth);
+		const padToWidth = (line: string): string => {
 			const clipped = clampLineToWidth(line, frameWidth);
-			const row = semanticMarkupToInkRow(clipped);
-			return padInkTextRow(row, frameWidth);
+			const w = visibleWidth(clipped);
+			return clipped + " ".repeat(Math.max(0, frameWidth - w));
 		};
 
 		// Render oldest-to-newest so the newest turns always end up at the
@@ -399,7 +397,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 				const content = turn.userMessage.content;
 				if (content.startsWith("[System] ")) {
 					renderedLines.push(
-						padToWidth([themed("systemText", "◇ SYSTEM")]),
+						padToWidth(`${theme.fgRaw("systemText")}◇ SYSTEM${RESET}`),
 					);
 					const sysLines = renderMarkdownLines(
 						content.slice(9),
@@ -415,7 +413,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 				} else {
 					renderedLines.push(
 						padToWidth(
-							[themed("separator", "›"), { text: " " }, themed("userText", "YOU", { bold: true })],
+							`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userText")}${BOLD}YOU${RESET}`,
 						),
 					);
 					const colored = theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET;
@@ -434,7 +432,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 				let lastThinkingSection = false;
 				renderedLines.push(
 					padToWidth(
-						[themed("assistantText", "◆ "), themed("assistantText", "LOGICIAN", { bold: true })],
+						`${theme.fgRaw("assistantText")}◆ ${BOLD}LOGICIAN${RESET}`,
 					),
 				);
 
@@ -448,7 +446,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 					if (lastThinkingSection) {
 						renderedLines.push(
 							padToWidth(
-								[themed("separator", "  ─────────────────")],
+								`${theme.fgRaw("separator")}${DIM}  ─────────────────${RESET}`,
 							),
 						);
 						lastThinkingSection = false;
@@ -456,7 +454,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 					if (answer) {
 						renderedLines.push(
 							padToWidth(
-								[{ text: "  " }, themed("responseLabel", "RESPONSE", { bold: true })],
+								`  ${theme.fgRaw("assistantText")}${BOLD}RESPONSE${RESET}`,
 							),
 						);
 						const contentLines = renderMarkdownLines(
@@ -534,10 +532,9 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 						const n = chunk.notice;
 						if (n.label === "Skills" && n.level === "info") {
 							renderedLines.push(
-								padToWidth([themed("active", "✦ NOTICE"), { text: " " }, themed("accent", "Skills", { bold: true })]),
-							);
-							renderedLines.push(
-								padToWidth([{ text: "   " }, themed("systemText", n.text)]),
+								padToWidth(
+									`${theme.fg("active", "✦ NOTICE")} ${BOLD}${theme.fg("toolTitle", "Skills")}${RESET}  ${theme.fg("systemText", n.text)}${RESET}`,
+								),
 							);
 							continue;
 						}
@@ -549,23 +546,18 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 									: n.level === "success"
 										? "✓"
 										: "●";
-						const iconColor =
+						const color =
 							n.level === "error"
 								? theme.fgRaw("error")
 								: n.level === "warn"
 									? theme.fgRaw("warning")
 									: theme.fgRaw("systemText");
-						// Header: icon + NOTICE (warning/error), label (accent)
-						const header = `${iconColor}${icon}${RESET}${iconColor} NOTICE ${RESET}${theme.fg("accent", n.label)}${RESET}`;
-						renderedLines.push(padToWidth(header));
-						// Wrapped lines: small fixed indent
-						const textLines = wrapText(
-							n.text,
-							contentWidth - 5,
+						renderedLines.push(
+							padToWidth(`${color}${icon} NOTICE${RESET} ${BOLD}${theme.fg("text", n.label)}${RESET}`),
 						);
-						for (const line of textLines) {
+						for (const line of wrapText(n.text, Math.max(1, contentWidth))) {
 							renderedLines.push(
-								padToWidth(`   ${iconColor}${line}${RESET}`),
+								padToWidth(`${theme.fg("text", line)}${RESET}`),
 							);
 						}
 					}
@@ -581,7 +573,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 		// labelling them as "older", which became especially visible after Ctrl+O
 		// expanded tool output. Prefer a complete recent-turn boundary; if the
 		// newest turn alone exceeds the budget, retain its tail.
-		let visibleBuffer: InkTextRow[] = renderedLines;
+		let visibleBuffer = renderedLines;
 		let visibleStart = 0;
 		const newestAssistant = this.turns.at(-1)?.assistantMessage;
 		const newestTurnIsStreaming =
@@ -610,7 +602,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 					? `${olderCount} older turn(s) not shown`
 					: "earlier lines not shown";
 			visibleBuffer = [
-				padToWidth([themed("dim", `… ${omittedLabel}`)]),
+				padToWidth(`${theme.fgRaw("dim")}… ${omittedLabel}${RESET}`),
 				...renderedLines.slice(sliceStart),
 			];
 			visibleStart = sliceStart - 1;
@@ -640,7 +632,7 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 		this._pendingScrollBottom = false;
 	}
 
-	private renderViewport(content: InkTextRow[], width: number): InkTextRow[] {
+	private renderViewport(content: string[], width: number): string[] {
 		const viewportHeight = this._viewportHeight || 0;
 		if (viewportHeight <= 0) return content;
 		if (content.length <= viewportHeight) return content;
@@ -664,27 +656,24 @@ export class TranscriptDisplay implements Scrollable, RenderCtx {
 						(this._scrollOffset / maxScroll) * (viewportHeight - thumbHeight),
 					)
 				: 0;
-		const thumbColor = theme.inkColor("selected");
-		const barColor = theme.inkColor("separator");
+		const thumbColor = theme.fgRaw("selected");
+		const barColor = theme.fgRaw("separator");
+		const reset = "\x1b[0m";
 		for (let i = 0; i < visible.length; i++) {
 			const line = visible[i];
-			const w = visibleWidth(inkTextRowText(line));
+			const w = visibleWidth(line);
 			const pad = " ".repeat(Math.max(0, width - 2 - w));
 			const isThumb = i >= thumbStart && i < thumbStart + thumbHeight;
-			const bar: InkTextSpan = {
-				text: isThumb ? "█" : "│",
-				color: isThumb ? thumbColor : barColor,
-			};
-			visible[i] = [...line, { text: pad }, bar];
+			const bar = isThumb ? `${thumbColor}█${reset}` : `${barColor}│${reset}`;
+			visible[i] = line + pad + bar;
 		}
 		if (this._newOutputBelow && !this._atBottom && visible.length > 0) {
 			const indicator = `${theme.fg("accent", "↓")} ${theme.fg("muted", "new output below")}`;
 			const clipped = clampLineToWidth(indicator, Math.max(1, width - 2));
-			visible[visible.length - 1] = semanticMarkupToInkRow(
+			visible[visible.length - 1] =
 				" ".repeat(Math.max(0, width - 2 - visibleWidth(clipped))) +
 				clipped +
-				`${theme.fgRaw("separator")}│${RESET}`,
-			);
+				`${barColor}│${reset}`;
 		}
 		return visible;
 	}

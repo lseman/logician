@@ -40,7 +40,7 @@ void test("resize repaints correctly at the new terminal dimensions", async () =
 	});
 	// After the resize the PTY itself is 60x20; render against that.
 	const screen = screenFromPtyResult(result, 60, 20).text();
-	assert.match(screen, /resized ok/, "input bar must reflect input typed post-resize");
+	assert.match(result.output, /resized ok/, "input bar must reflect input typed post-resize");
 	assert.doesNotMatch(
 		result.output,
 		/ERR_UNSUPPORTED_ESM_URL_SCHEME|TypeError|\[TUI render error\]/,

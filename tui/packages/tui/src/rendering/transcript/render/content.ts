@@ -2,9 +2,9 @@
 // Pi-style line-numbered content rendering, syntax-highlighted file content,
 // and the shared truncation helpers used throughout the transcript renderers.
 
-import { highlight, highlightAuto } from "../semantic-highlight.ts";
-import { visibleWidth } from "../../../terminal/core.ts";
-import { DIM, RESET, theme } from "../semantic-markup.ts";
+import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import { DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
+import { theme } from "../../../terminal/theme.ts";
 import { wrapText } from "../layout.ts";
 
 // ── Pi-style line-numbered content rendering ────────────────────────────

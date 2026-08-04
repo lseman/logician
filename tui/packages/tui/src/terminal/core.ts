@@ -1,91 +1,55 @@
 // ── Minimal TUI core ──────────────────────────────────────────────────────────
-// Input routing, scroll state, and overlay stack for the TUI. Ink
-// (ink-app/) owns painting, diffing, resize, and alt-screen; this module
-// only decides what should be on screen, never how to draw it.
+// Differential rendering engine — minimal, no external deps
 
-// ── Interfaces ────────────────────────────────────────────────────────────────
-import type { InkOverlayModelProvider } from "../overlays/ink-overlay-model.ts";
 import stringWidth from "string-width";
 
-export interface InkTextSpan {
-	text: string;
-	color?: string;
-	backgroundColor?: string;
-	bold?: boolean;
-	dim?: boolean;
-	underline?: boolean;
-	italic?: boolean;
-	inverse?: boolean;
-}
+// ── Interfaces ────────────────────────────────────────────────────────────────
 
-export type InkTextRow = readonly InkTextSpan[];
-
-export interface InkTextComponent {
-	getInkTextRows(width: number): InkTextRow[];
+export interface Component {
+	render(width: number): string[];
 	invalidate?(): void;
-}
-
-export interface InkComposerModel {
-	prompt: string;
-	headerHint: string | null;
-	beforeCursor: string;
-	atCursor: string;
-	afterCursor: string;
-	isPlaceholder: boolean;
-	leftClipped: boolean;
-	rightClipped: boolean;
-	cursorColumn: number;
-	focused: boolean;
-}
-
-export interface InkComposerComponent {
-	getInkComposerModel(width: number): InkComposerModel;
-	invalidate?(): void;
-}
-
-/** Overlay state owner. Native Ink overlays do not require a string renderer. */
-export interface OverlayComponent extends InkOverlayModelProvider {
-	invalidate?(): void;
-}
-
-/**
- * The component model handed to Ink for each render. Ink sizes the
- * transcript-vs-dock split instead of consuming a pre-composited line array.
- */
-export interface TUIComponentsFrame {
-	termWidth: number;
-	termHeight: number;
-	scrollableComponent: Scrollable | null;
-	inputBarComponent: InkComposerComponent | null;
-	fixedBottomComponent: InkTextComponent | null;
-	fixedAboveInputComponent: InkTextComponent | null;
-	overlayStack: readonly {
-		component: OverlayComponent;
-		options?: OverlayOptions;
-		hidden: boolean;
-		focusOrder: number;
-	}[];
-	showHardwareCursor: boolean;
 }
 
 export interface Focusable {
 	focused: boolean;
 }
 
-export interface Scrollable extends InkTextComponent {
+export interface Scrollable extends Component {
 	scrollOffset: number;
+	totalHeight: number;
 	scroll(delta: number): void;
 	scrollToBottom(): void;
-	setViewportHeight(height: number): void;
 	isAtBottom: boolean;
 	handleMouse?(column: number, row: number): boolean;
 }
 
-export function isFocusable(
-	c: InkComposerComponent | InkTextComponent | OverlayComponent | null,
-): c is (InkComposerComponent | InkTextComponent | OverlayComponent) & Focusable {
+export function isFocusable(c: Component | null): c is Component & Focusable {
 	return c !== null && "focused" in c;
 }
+
+export interface RendererMetrics {
+	bytesWritten: number;
+	changedCells: number;
+	cursorMoves: number;
+	diffTimeMs: number;
+	dirtyRegion: { top: number; bottom: number } | null;
+	dirtyRows: number;
+	frameTimeMs: number;
+	layoutTimeMs: number;
+	writeTimeMs: number;
+}
+
+const EMPTY_RENDERER_METRICS: RendererMetrics = {
+	bytesWritten: 0,
+	changedCells: 0,
+	cursorMoves: 0,
+	diffTimeMs: 0,
+	dirtyRegion: null,
+	dirtyRows: 0,
+	frameTimeMs: 0,
+	layoutTimeMs: 0,
+	writeTimeMs: 0,
+};
 
 /**
  * Translate Kitty CSI-u Ctrl+letter reports back to the C0 bytes consumed by
@@ -106,73 +70,31 @@ export function normalizeKeyboardInput(data: string): string {
 		});
 }
 
-export function inkTextRowText(row: InkTextRow): string {
-	return row.map((span) => span.text).join("");
-}
+// ── Cursor marker ────────────────────────────────────────────────────────────
 
-export function clampInkTextRow(row: InkTextRow, width: number): InkTextRow {
-	const result: InkTextSpan[] = [];
-	let remaining = Math.max(0, width);
-	for (const span of row) {
-		if (remaining <= 0) break;
-		const text = clampLineToWidth(span.text, remaining);
-		if (text) result.push({ ...span, text });
-		remaining -= visibleWidth(text);
-	}
-	return result;
-}
+export const CURSOR_MARKER = "\x1b_pi:c\x07";
 
-export function padInkTextRow(row: InkTextRow, width: number): InkTextRow {
-	const clipped = clampInkTextRow(row, width);
-	const padding = Math.max(0, width - visibleWidth(inkTextRowText(clipped)));
-	return padding > 0 ? [...clipped, { text: " ".repeat(padding) }] : clipped;
-}
+// ── Shared ANSI codes ─────────────────────────────────────────────────────────
+// Every component previously redeclared these identically — single source now.
 
-/** Plain-text projection for model tests and width calculations. */
-export function inkTextComponentLines(component: InkTextComponent, width: number): string[] {
-	return component.getInkTextRows(width).map(inkTextRowText);
-}
-
-export function ansi256ToHex(index: number): string {
-	const base = ["#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#c0c0c0", "#808080", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "#00ffff", "#ffffff"];
-	if (index < 16) return base[Math.max(0, index)] ?? "#ffffff";
-	if (index >= 232) {
-		const value = 8 + (Math.min(255, index) - 232) * 10;
-		return `#${value.toString(16).padStart(2, "0").repeat(3)}`;
-	}
-	const n = Math.min(231, index) - 16;
-	const channel = (part: number): number => part === 0 ? 0 : 55 + part * 40;
-	return `#${[Math.floor(n / 36), Math.floor((n % 36) / 6), n % 6].map((part) => channel(part).toString(16).padStart(2, "0")).join("")}`;
-}
+export const RESET = "\x1b[0m";
+export const BOLD = "\x1b[1m";
+export const DIM = "\x1b[2m";
 
 // ── Width utilities ──────────────────────────────────────────────────────────
 
 // Simple visible width calculator (handles ANSI escape codes)
 export function visibleWidth(text: string): number {
-	return stringWidth(text.replace(/[\ue000-\uf8ff]/gu, ""));
+	return stringWidth(
+		text
+			.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+			.replace(/\x1b[\]_][\s\S]*?(?:\x07|\x1b\\)/g, ""),
+	);
 }
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** Return the complete grapheme cluster beginning at a UTF-16 offset. */
-export function graphemeAt(text: string, offset: number): string {
-	const codePoint = text.codePointAt(offset);
-	if (codePoint === undefined) return "";
-	const character = String.fromCodePoint(codePoint);
-	const next = text.codePointAt(offset + character.length);
-	const nextExtendsCluster =
-		next === 0x200d ||
-		(next !== undefined && next >= 0x300 && next <= 0x36f) ||
-		(next !== undefined && next >= 0x1ab0 && next <= 0x1aff) ||
-		(next !== undefined && next >= 0x1dc0 && next <= 0x1dff) ||
-		(next !== undefined && next >= 0x20d0 && next <= 0x20ff) ||
-		(next !== undefined && next >= 0xfe00 && next <= 0xfe0f) ||
-		(next !== undefined && next >= 0x1f3fb && next <= 0x1f3ff);
-	const needsSegmentation =
-		codePoint === 0x200d ||
-		(codePoint >= 0x1f000 && codePoint <= 0x1ffff) ||
-		nextExtendsCluster;
-	if (!needsSegmentation) return character;
+function graphemeAt(text: string, offset: number): string {
 	const segment = graphemeSegmenter.segment(text.slice(offset))[Symbol.iterator]().next();
 	return segment.done ? "" : segment.value.segment;
 }
@@ -248,6 +170,7 @@ export function clampLineToWidth(text: string, width: number): string {
 			continue;
 		}
 		const grapheme = graphemeAt(text, i);
+		if (!grapheme) break;
 		const w = visibleWidth(grapheme);
 		if (visible + w > width) break;
 		result += grapheme;
@@ -257,19 +180,53 @@ export function clampLineToWidth(text: string, width: number): string {
 	return result;
 }
 
+// ── Spacer ───────────────────────────────────────────────────────────────────
+
+export class Spacer implements Component {
+	private height: number;
+
+	constructor(height = 1) {
+		this.height = height;
+	}
+
+	render(width: number): string[] {
+		const line = " ".repeat(width);
+		return Array(this.height).fill(line);
+	}
+
+	invalidate(): void {
+		/* no-op */
+	}
+}
+
 // ── Container ────────────────────────────────────────────────────────────────
 
-export class InkTextContainer implements InkTextComponent {
-	private readonly children: InkTextComponent[] = [];
+export class Container implements Component {
+	children: Component[] = [];
 
-	addChild(component: InkTextComponent): void {
+	addChild(component: Component): void {
 		this.children.push(component);
 	}
 
-	getInkTextRows(width: number): InkTextRow[] {
-		const lines: InkTextRow[] = [];
+	removeChild(component: Component): void {
+		const idx = this.children.indexOf(component);
+		if (idx >= 0) this.children.splice(idx, 1);
+	}
+
+	clear(): void {
+		this.children = [];
+	}
+
+	invalidate(): void {
 		for (const child of this.children) {
-			for (const line of child.getInkTextRows(width)) {
+			child.invalidate?.();
+		}
+	}
+
+	render(width: number): string[] {
+		const lines: string[] = [];
+		for (const child of this.children) {
+			for (const line of child.render(width)) {
 				lines.push(line);
 			}
 		}
@@ -277,25 +234,26 @@ export class InkTextContainer implements InkTextComponent {
 	}
 }
 
+import { Buffer } from "node:buffer";
 // ── Terminal input ───────────────────────────────────────────────────────────
-// Ink owns stdin, raw mode, resize, and alt-screen; TUI only runs input
-// routing / scroll / overlay state against frames delivered via
-// onComponentsFrame.
+// Keyboard comes from process.stdin in raw mode (pi-style). The bridge child's
+// events arrive on its own stdout pipe, so stdin is free for the keyboard.
+import process from "node:process";
 
-// ── TUI — Input routing, scroll state, overlay stack ────────────────────────
+// ── TUI — Differential rendering ────────────────────────────────────────────
 
-export class TUI {
+export class TUI extends Container {
 	private renderRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderAt = 0;
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private started = false;
 	private stopped = false;
-	private focusedComponent: InkComposerComponent | InkTextComponent | OverlayComponent | null = null;
+	private focusedComponent: Component | null = null;
 	private overlayStack: Array<{
-		component: OverlayComponent;
+		component: Component;
 		options?: OverlayOptions;
-		preFocus: InkComposerComponent | InkTextComponent | OverlayComponent | null;
+		preFocus: Component | null;
 		hidden: boolean;
 		focusOrder: number;
 	}> = [];
@@ -303,32 +261,26 @@ export class TUI {
 	private inputListeners: Set<
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
+	private stdinHandler: ((data: string | Buffer) => void) | null = null;
+	private resizeHandler: (() => void) | null = null;
+	private wasRaw = false;
+	private _scrollOffsetInternal: number = 0;
 	private _viewportHeight: number = 0;
+	private previousLines: string[] = [];
+	private previousCursorRow = -1;
+	private previousCursorCol = -1;
+	private previousCursorVisible: boolean | null = null;
+	private lastRenderMetrics: RendererMetrics = EMPTY_RENDERER_METRICS;
 	private scrollableComponent: Scrollable | null = null;
-	private inputBarComponent: InkComposerComponent | null = null;
-	private fixedBottomComponent: InkTextComponent | null = null;
-	private fixedAboveInputComponent: InkTextComponent | null = null;
+	private inputBarComponent: Component | null = null;
+	private fixedBottomComponent: Component | null = null;
+	private fixedAboveInputComponent: Component | null = null;
 
 	private _showHardwareCursor = true;
-	private onComponentsFrame?: (frame: TUIComponentsFrame) => void;
 
-	constructor(showCursor = true) {
+	constructor(_outStream: NodeJS.WriteStream, showCursor = true) {
+		super();
 		this._showHardwareCursor = showCursor;
-	}
-
-	/**
-	 * Set or replace the components-frame sink after construction. Needed when
-	 * the host renderer (e.g. an Ink component) only knows its own state
-	 * setter after it mounts, which happens after LogicianTUI/TUI must
-	 * already exist.
-	 */
-	setOnComponentsFrame(onComponentsFrame: (frame: TUIComponentsFrame) => void): void {
-		this.onComponentsFrame = onComponentsFrame;
-	}
-
-	/** Feed raw stdin bytes -- Ink owns stdin and forwards them here. */
-	feedInput(data: string): void {
-		this.handleInput(data);
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {
@@ -336,12 +288,16 @@ export class TUI {
 		this.requestRender();
 	}
 
+	get scrollOffset(): number {
+		return this._scrollOffsetInternal;
+	}
+
 	get isAtBottom(): boolean {
 		if (!this.scrollableComponent) return true;
 		return this.scrollableComponent.isAtBottom;
 	}
 
-	setFocus(component: InkComposerComponent | InkTextComponent | OverlayComponent | null): void {
+	setFocus(component: Component | null): void {
 		if (isFocusable(this.focusedComponent)) {
 			(this.focusedComponent as Focusable).focused = false;
 		}
@@ -352,7 +308,7 @@ export class TUI {
 	}
 
 	showOverlay(
-		component: OverlayComponent,
+		component: Component,
 		options?: OverlayOptions,
 	): {
 		hide: () => void;
@@ -393,7 +349,7 @@ export class TUI {
 	}
 
 	/** Remove a specific overlay from the stack and restore focus to its pre-focus target. */
-	removeOverlay(component: OverlayComponent): void {
+	removeOverlay(component: Component): void {
 		const idx = this.overlayStack.findIndex((e) => e.component === component);
 		if (idx >= 0) {
 			const entry = this.overlayStack[idx];
@@ -425,11 +381,48 @@ export class TUI {
 		};
 	}
 
-	/** Ink owns stdin, raw mode, resize, and alt-screen; this only starts the render-request scheduler. */
 	start(): void {
 		this.started = true;
 		this.stopped = false;
-		this.requestRender();
+
+		// Keyboard input: process.stdin in raw mode (pi-style). The bridge child's
+		// events arrive on its own stdout pipe, so stdin is dedicated to keys.
+		this.wasRaw = process.stdin.isRaw ?? false;
+		process.stdin.setEncoding("utf-8");
+		if (process.stdin.setRawMode) {
+			try {
+				process.stdin.setRawMode(true);
+			} catch (_e: unknown) {
+				// raw mode unavailable (e.g. piped stdin) — keys won't work but the UI
+				// still renders; degrade gracefully rather than crash.
+			}
+		}
+		process.stdin.resume();
+		this.stdinHandler = (data: string | Buffer) => {
+			const str = Buffer.isBuffer(data) ? data.toString("utf-8") : data;
+			this.handleInput(normalizeKeyboardInput(str));
+			this.requestRender();
+		};
+		process.stdin.on("data", this.stdinHandler);
+
+		// A resize lands between two frames' worth of `previousLines`, which were
+		// diffed against the old termWidth/termHeight. Cell columns and row count
+		// both shift, so patching the old buffer against new geometry can leave
+		// stale glyphs at now-meaningless coordinates. Force a full repaint so
+		// the next frame always redraws from a clean slate at the new size.
+		this.resizeHandler = () => this.requestRender(true);
+		process.stdout.on("resize", this.resizeHandler);
+
+		// Enter alternate screen buffer + hide cursor + enable bracketed paste.
+		// Push Kitty's disambiguate-escape-codes keyboard mode when supported.
+		// Unsupported terminals safely ignore it; supporting terminals can then
+		// report Ctrl+M separately from Enter as CSI 109;5u.
+		// The alt screen gives us a fixed canvas to redraw each frame from the
+		// home position. Bracketed paste makes the terminal wrap pasted text in
+		// \x1b[200~ … \x1b[201~ so the app can distinguish paste from typed input.
+		this.write("\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l\x1b[?2004h\x1b[>1u");
+
+		this.requestRender(true);
 	}
 
 	stop(): void {
@@ -439,11 +432,39 @@ export class TUI {
 			this.renderTimer = null;
 		}
 		this.disableMouse();
+		// Show cursor + leave alternate screen + disable bracketed paste,
+		// restoring the user's terminal.
+		this.write("\x1b[<u\x1b[?25h\x1b[?1049l\x1b[?2004l");
+
+		if (this.stdinHandler) {
+			process.stdin.removeListener("data", this.stdinHandler);
+			this.stdinHandler = null;
+		}
+		if (this.resizeHandler) {
+			process.stdout.removeListener("resize", this.resizeHandler);
+			this.resizeHandler = null;
+		}
+		if (process.stdin.setRawMode) {
+			try {
+				process.stdin.setRawMode(this.wasRaw);
+			} catch (_e: unknown) {
+				// ignore
+			}
+		}
+		process.stdin.pause();
 	}
 
-	requestRender(): void {
-		// Defer renders until Ink has mounted and is ready to receive them.
+	requestRender(force = false): void {
+		// Defer renders until we've entered the alternate screen buffer.
+		// RequestRender during construction would output to stdout before
+		// alt-screen + clear, overlapping with startup theme text.
 		if (!this.started) return;
+		if (force) {
+			this.previousLines = [];
+			this.previousCursorRow = -1;
+			this.previousCursorCol = -1;
+			this.previousCursorVisible = null;
+		}
 		if (this.renderRequested) return;
 		this.renderRequested = true;
 		process.nextTick(() => this.scheduleRender());
@@ -512,10 +533,7 @@ export class TUI {
 				else this.scrollUp(-net * TUI.WHEEL_STEP);
 				return;
 			}
-			if (clicked && consumed === data.length) {
-				this.requestRender();
-				return;
-			}
+			if (clicked && consumed === data.length) return;
 			if (consumed === data.length) return; // mouse-only chunk, nothing to scroll
 		}
 
@@ -623,26 +641,408 @@ export class TUI {
 	private doRender(): void {
 		if (this.stopped) return;
 		try {
-			const termWidth = Math.max(1, process.stdout.columns || 80);
-			const termHeight = Math.max(1, process.stdout.rows || 24);
-			this.onComponentsFrame?.({
-				termWidth,
-				termHeight,
-				scrollableComponent: this.scrollableComponent,
-				inputBarComponent: this.inputBarComponent,
-				fixedBottomComponent: this.fixedBottomComponent,
-				fixedAboveInputComponent: this.fixedAboveInputComponent,
-				overlayStack: this.overlayStack,
-				showHardwareCursor: this._showHardwareCursor,
-			});
+			this._doRenderInner();
 		} catch (err) {
-			// A crash here would otherwise be silently swallowed by Ink's own
-			// render cycle. Surface it to stderr, which Ink doesn't own, so it's
-			// visible outside the alt-screen the next frame paints over.
+			// Render crash: print a minimal error and fall back to a blank
+			// screen so the terminal is left in a usable state rather than
+			// showing corrupted escape sequences.
 			const msg = err instanceof Error ? err.message : String(err);
-			process.stderr.write(`\n[TUI render error] ${msg}\n`);
+			this.previousLines = [];
+			this.previousCursorRow = -1;
+			this.previousCursorCol = -1;
+			this.previousCursorVisible = null;
+			// Close every state the renderer may have left open, clear the
+			// potentially partial frame, and leave a visible cursor. The next
+			// render starts from an invalidated cache and therefore repaints.
+			process.stderr.write(
+				"\x1b[?2026l\x1b]8;;\x1b\\\x1b[0m\x1b[2J\x1b[H\x1b[?25h" +
+					`\n\x1b[38;5;203m[TUI render error]\x1b[0m ${msg}\n`,
+			);
 			// eslint-disable-next-line no-console
 			console.error("TUI render crash:", err);
+		}
+	}
+
+	private _doRenderInner(): void {
+		const frameStartedAt = performance.now();
+		const termWidth = Math.max(1, process.stdout.columns || 80);
+		const termHeight = Math.max(1, process.stdout.rows || 24);
+
+		let inputLines: string[];
+		try {
+			inputLines = this.inputBarComponent
+				? this.inputBarComponent.render(termWidth)
+				: [" ".repeat(termWidth)];
+		} catch (_e: unknown) {
+			inputLines = [" ".repeat(termWidth)];
+		}
+
+		let statusLines: string[];
+		try {
+			statusLines = this.fixedBottomComponent
+				? this.fixedBottomComponent.render(termWidth)
+				: [" ".repeat(termWidth)];
+		} catch (_e: unknown) {
+			statusLines = [" ".repeat(termWidth)];
+		}
+
+		const inputHeight = Math.max(1, inputLines.length);
+		const statusHeight = Math.max(1, statusLines.length);
+
+		// Optional pinned region above the input bar (todo list). Zero lines = hidden.
+		let aboveInputLines: string[] = [];
+		try {
+			aboveInputLines = this.fixedAboveInputComponent
+				? this.fixedAboveInputComponent.render(termWidth)
+				: [];
+		} catch (_e: unknown) {
+			aboveInputLines = [];
+		}
+		// Interactive selectors participate in the fixed composer stack instead
+		// of floating over transcript content. This matches pinned TODO/queue
+		// behavior and keeps the selector physically attached to the input.
+		aboveInputLines.push(...this.renderAboveInputOverlays(termWidth));
+		const aboveInputHeight = aboveInputLines.length;
+
+
+		// Fixed layout: transcript + divider + [pinned + divider] + input bar + divider + status footer.
+		const transcriptHeight = Math.max(
+			1,
+			termHeight -
+				2 -
+				aboveInputHeight -
+				inputHeight -
+				statusHeight,
+		);
+		const transcriptWidth = termWidth;
+
+		// Build output lines with fixed layout
+		const lines: string[] = [];
+
+		// 1. Transcript area (scrollable)
+		if (this.scrollableComponent) {
+			(
+				this.scrollableComponent as unknown as {
+					setViewportHeight: (h: number) => void;
+				}
+			).setViewportHeight(transcriptHeight);
+			this._viewportHeight = transcriptHeight;
+			let transcriptLines: string[];
+			try {
+				transcriptLines = this.scrollableComponent.render(transcriptWidth);
+			} catch (_e: unknown) {
+				// Component render failed — fill with safe placeholder
+				transcriptLines = Array(transcriptHeight)
+					.fill(0)
+					.map(() => " ".repeat(transcriptWidth));
+			}
+			const totalLines = Math.max(
+				transcriptLines.length,
+				this.scrollableComponent.totalHeight,
+			);
+			const maxScroll = Math.max(0, totalLines - transcriptHeight);
+			// Use scrollable component's scrollOffset (set during render by scrollToBottom)
+			const comp = this.scrollableComponent as Scrollable;
+			const scrollOff = Math.min(maxScroll, Math.max(0, comp.scrollOffset));
+			const visibleLines = (comp as unknown as { rendersViewport?: boolean })
+				.rendersViewport
+				? transcriptLines
+				: transcriptLines.slice(scrollOff, scrollOff + transcriptHeight);
+
+			// Pad transcript to fill its slot
+			while (lines.length < transcriptHeight) {
+				lines.push(
+					lines.length < visibleLines.length
+						? visibleLines[lines.length]
+						: " ".repeat(termWidth),
+				);
+			}
+		} else {
+			// Fill transcript area with spaces
+			for (let i = 0; i < transcriptHeight; i++) {
+				lines.push(" ".repeat(termWidth));
+			}
+		}
+
+		// 2. Separator line above input
+		lines.push(`\x1b[38;5;236m${"─".repeat(termWidth)}\x1b[0m`);
+
+		// 2b. Pinned region above input (todo list), when present
+		for (let i = 0; i < aboveInputHeight; i++) {
+			lines.push(aboveInputLines[i] || " ".repeat(termWidth));
+		}
+
+
+		// 3. Input bar (fixed)
+		for (let i = 0; i < inputHeight; i++) {
+			lines.push(inputLines[i] || " ".repeat(termWidth));
+		}
+
+		// 4. Separator line below input
+		lines.push(`\x1b[38;5;236m${"─".repeat(termWidth)}\x1b[0m`);
+
+		// 5. Status bar (fixed, at bottom)
+		for (let i = 0; i < statusHeight; i++) {
+			lines.push(statusLines[i] || " ".repeat(termWidth));
+		}
+
+		// Pad to termHeight if needed
+		while (lines.length < termHeight) {
+			lines.push(" ".repeat(termWidth));
+		}
+
+		// Compose overlays (slash popup, etc.)
+		const finalLines = this.composeOverlays(
+			lines,
+			termWidth,
+			termHeight,
+			transcriptHeight,
+		);
+		const layoutFinishedAt = performance.now();
+
+		// Leave the physical last column unused: writing it can put terminals into
+		// pending-autowrap state and shift the next update down a row.
+		const renderWidth = Math.max(1, termWidth - 1);
+		let changes = "";
+		let dirtyRows = 0;
+		let changedCells = 0;
+		let cursorMoves = 0;
+		let dirtyTop = Number.POSITIVE_INFINITY;
+		let dirtyBottom = -1;
+
+		// The InputBar marks the edit position with CURSOR_MARKER. Find it so we
+		// can park the hardware cursor exactly there, and strip it from output.
+		let markerRow = -1;
+		let markerCol = 0;
+
+		for (let row = 0; row < termHeight; row++) {
+			const prevLine = this.previousLines[row];
+			const newLine = row < finalLines.length ? finalLines[row] : " ".repeat(termWidth);
+			const hasMarker = newLine.includes(CURSOR_MARKER);
+
+			// Extract cursor marker position before stripping
+			if (hasMarker) {
+				const markerIdx = newLine.indexOf(CURSOR_MARKER);
+				markerRow = row;
+				markerCol = visibleWidth(newLine.slice(0, markerIdx));
+			}
+
+			// Strip CURSOR_MARKER for cell parsing
+			const cleanNew = newLine.replace(CURSOR_MARKER, "");
+			const cleanPrev = prevLine?.replace(CURSOR_MARKER, "") ?? "";
+
+			// Image protocols are commands rather than printable cells. Repaint
+			// those rows atomically instead of trying to split their payload.
+			if (isImageLine(cleanNew) || isImageLine(cleanPrev)) {
+				if (cleanNew !== cleanPrev) {
+					changes += `\x1b[${row + 1};1H\x1b[0m\x1b[2K`;
+					changes += isImageLine(cleanNew)
+						? cleanNew
+						: clampLineToWidth(cleanNew, renderWidth);
+					dirtyRows++;
+					dirtyTop = Math.min(dirtyTop, row);
+					dirtyBottom = Math.max(dirtyBottom, row);
+					changedCells += renderWidth;
+					cursorMoves++;
+				}
+				continue;
+			}
+
+			const lineDiff = diffTerminalLineWithMetrics(
+				cleanPrev,
+				cleanNew,
+				row,
+				renderWidth,
+			);
+			changes += lineDiff.output;
+			if (lineDiff.changedCells > 0) {
+				dirtyRows++;
+				dirtyTop = Math.min(dirtyTop, row);
+				dirtyBottom = Math.max(dirtyBottom, row);
+			}
+			changedCells += lineDiff.changedCells;
+			cursorMoves += lineDiff.cursorMoves;
+		}
+
+		this.previousLines = finalLines;
+		// Park the hardware cursor at the input's edit position (under the
+		// visible InputBar cursor). Falls back to the input line's first column
+		// only if no marker was emitted, which keeps the cursor off the footer.
+		const fallbackRow = Math.min(
+			termHeight,
+			transcriptHeight + 2 + aboveInputHeight,
+		);
+		const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackRow;
+		const cursorCol =
+			markerRow >= 0 ? Math.min(termWidth, markerCol + 1) : 1;
+		const cursorMoved =
+			changes.length > 0 ||
+			cursorRow !== this.previousCursorRow ||
+			cursorCol !== this.previousCursorCol;
+		const cursorUpdate = cursorMoved
+			? `\x1b[${cursorRow};${cursorCol}H`
+			: "";
+		const visibilityChanged =
+			this._showHardwareCursor !== this.previousCursorVisible;
+		const visibilityUpdate = visibilityChanged
+			? this._showHardwareCursor
+				? "\x1b[?25h"
+				: "\x1b[?25l"
+			: "";
+		const diffFinishedAt = performance.now();
+		const writeStartedAt = performance.now();
+		let bytesWritten = 0;
+		if (changes) {
+			// Cursor restoration is part of the synchronized frame, so the user
+			// never observes it parked on the last streamed cell.
+			const buffer =
+				`\x1b[?2026h${changes}${cursorUpdate}${visibilityUpdate}` +
+				"\x1b[?2026l";
+			this.write(buffer);
+			bytesWritten = Buffer.byteLength(buffer);
+		} else {
+			const terminalStateUpdate = cursorUpdate + visibilityUpdate;
+			if (terminalStateUpdate) {
+				this.write(terminalStateUpdate);
+				bytesWritten = Buffer.byteLength(terminalStateUpdate);
+			}
+		}
+		if (cursorMoved) {
+			cursorMoves++;
+			this.previousCursorRow = cursorRow;
+			this.previousCursorCol = cursorCol;
+		}
+		if (visibilityChanged) {
+			this.previousCursorVisible = this._showHardwareCursor;
+		}
+		const frameFinishedAt = performance.now();
+		this.lastRenderMetrics = {
+			bytesWritten,
+			changedCells,
+			cursorMoves,
+			diffTimeMs: diffFinishedAt - layoutFinishedAt,
+			dirtyRegion:
+				dirtyBottom >= 0 ? { top: dirtyTop, bottom: dirtyBottom } : null,
+			dirtyRows,
+			frameTimeMs: frameFinishedAt - frameStartedAt,
+			layoutTimeMs: layoutFinishedAt - frameStartedAt,
+			writeTimeMs: frameFinishedAt - writeStartedAt,
+		};
+	}
+
+	getLastRenderMetrics(): RendererMetrics {
+		return { ...this.lastRenderMetrics };
+	}
+
+	private composeOverlays(
+		lines: string[],
+		termWidth: number,
+		_termHeight: number,
+		transcriptHeight: number,
+	): string[] {
+		const result = [...lines];
+
+		const visibleEntries = this.overlayStack.filter((e) => {
+			if (e.options?.anchor === "aboveInput") return false;
+			if (e.hidden) return false;
+			// Also check component's visible property if it has one
+			if (
+				"visible" in e.component &&
+				typeof (e.component as { visible?: unknown }).visible === "boolean"
+			) {
+				return (e.component as { visible: boolean }).visible;
+			}
+			return true;
+		});
+
+		for (const entry of visibleEntries) {
+			const leftAligned = entry.options?.align === "left";
+			const overlayWidth = leftAligned
+				? Math.max(1, termWidth)
+				: Math.max(
+						40,
+						Math.min(
+							termWidth - 8,
+							entry.options?.maxHeight ? termWidth * 0.6 : termWidth - 8,
+						),
+					);
+			const overlayLines = entry.component.render(Math.max(1, overlayWidth));
+			const overlayHeight = Math.min(
+				overlayLines.length,
+				entry.options?.maxHeight || 999,
+			);
+
+			// Calculate row position within transcript area
+			let row = 0;
+			switch (entry.options?.anchor) {
+				case "center":
+					row = Math.max(0, Math.floor((transcriptHeight - overlayHeight) / 2));
+					break;
+				case "bottom":
+					// Flush against the bottom of the transcript area, i.e. directly
+					// above the separator + input bar.
+					row = Math.max(0, transcriptHeight - overlayHeight);
+					break;
+				default:
+					row = 0;
+					break;
+			}
+
+			// Horizontal offset: left-aligned overlays hug the left edge; otherwise
+			// center within the terminal.
+			const margin = leftAligned
+				? 0
+				: Math.max(2, Math.floor((termWidth - overlayWidth) / 2));
+
+			for (let i = 0; i < overlayHeight; i++) {
+				const idx = row + i;
+				if (idx >= 0 && idx < result.length) {
+					const srcLine = overlayLines[i] || "";
+					const srcVis = visibleWidth(srcLine);
+					// Pad with spaces, then overlay the content at the correct offset
+					const basePad = " ".repeat(margin);
+					const afterPad = " ".repeat(Math.max(0, termWidth - margin - srcVis));
+					result[idx] = basePad + srcLine + afterPad;
+				}
+			}
+		}
+
+		return result;
+	}
+
+	private renderAboveInputOverlays(termWidth: number): string[] {
+		const entries = this.overlayStack.filter((entry) => {
+			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
+			if (
+				"visible" in entry.component &&
+				typeof (entry.component as { visible?: unknown }).visible === "boolean"
+			) {
+				return (entry.component as { visible: boolean }).visible;
+			}
+			return true;
+		});
+		if (entries.length === 0) return [];
+
+		// Only the most recently focused selector owns the composer region.
+		const entry = entries.reduce((latest, candidate) =>
+			candidate.focusOrder > latest.focusOrder ? candidate : latest,
+		);
+		const width = Math.max(1, termWidth - 1);
+		const rendered = entry.component.render(width);
+		const maxHeight = entry.options?.maxHeight ?? rendered.length;
+		return rendered.slice(0, maxHeight).map((line) => {
+			const clamped = clampLineToWidth(line, width);
+			return (
+				clamped + " ".repeat(Math.max(0, termWidth - visibleWidth(clamped)))
+			);
+		});
+	}
+
+	private write(data: string): void {
+		try {
+			process.stdout.write(data);
+		} catch (_e: unknown) {
+			// Silently ignore write errors
 		}
 	}
 
@@ -652,23 +1052,17 @@ export class TUI {
 		this.scrollableComponent = comp;
 	}
 
-	/** Keep input hit-testing and transcript slicing on the same Ink-owned viewport. */
-	setViewportHeight(height: number): void {
-		this._viewportHeight = Math.max(0, height);
-		this.scrollableComponent?.setViewportHeight(this._viewportHeight);
-	}
-
-	setInputBarComponent(comp: InkComposerComponent | null): void {
+	setInputBarComponent(comp: Component | null): void {
 		this.inputBarComponent = comp;
 	}
 
-	setFixedBottomComponent(comp: InkTextComponent | null): void {
+	setFixedBottomComponent(comp: Component | null): void {
 		this.fixedBottomComponent = comp;
 	}
 
 	// Pinned region rendered directly above the input bar (e.g. the todo list).
 	// Renders nothing when the component returns no lines.
-	setFixedAboveInputComponent(comp: InkTextComponent | null): void {
+	setFixedAboveInputComponent(comp: Component | null): void {
 		this.fixedAboveInputComponent = comp;
 	}
 
@@ -697,18 +1091,8 @@ export class TUI {
 	}
 
 	// ── Mouse tracking ───────────────────────────────────────────────────────────
-	// Ink has no mouse API, so TUI still owns this: raw mode-toggle sequences
-	// written straight to stdout, orthogonal to Ink's own frame buffer.
 
 	private mouseEnabled = false;
-
-	private write(data: string): void {
-		try {
-			process.stdout.write(data);
-		} catch (_e: unknown) {
-			// Silently ignore write errors
-		}
-	}
 
 	enableMouse(): void {
 		if (this.mouseEnabled) return;
@@ -729,8 +1113,230 @@ export class TUI {
 	}
 }
 
-export function isImageLine(line: string): boolean {
+function isImageLine(line: string): boolean {
 	return line.includes("\x1b_G") || line.includes("\x1b]1337;");
+}
+
+// ── Cell-level rendering ──────────────────────────────────────────────────────
+// Each cell is { char: string, attr: string } where attr is the full ANSI
+// attribute string (e.g. "\x1b[38;5;46m\x1b[1m"). We parse each rendered line
+// into cells, compare cell-by-cell against the previous frame, and emit only
+// the changes (cursor movement + attribute change + character write).
+
+interface Cell {
+	char: string;
+	attr: string;
+	continuation: boolean;
+}
+
+/**
+ * Parse an ANSI-styled line into an array of cells. Each cell has a character
+ * and the accumulated attribute string that applies to it. Handles CSI, OSC,
+ * and APC escape sequences.
+ */
+function parseLineIntoCells(line: string, targetWidth: number): Cell[] {
+	const cells: Cell[] = [];
+	let attr = "";
+	let i = 0;
+	const len = line.length;
+
+	while (i < len && cells.length < targetWidth) {
+		const ch = line[i];
+
+		if (ch === "\x1b") {
+			const next = line[i + 1];
+			if (next === "[") {
+				// CSI sequence
+				let j = i + 2;
+				while (j < len) {
+					const fc = line.charCodeAt(j);
+					if (fc >= 0x40 && fc <= 0x7e) break;
+					j++;
+				}
+				const seq = line.slice(i, j + 1);
+				i = j + 1;
+
+				// Only SGR changes cell appearance. Other CSI commands must not
+				// leak into a style restoration sequence.
+				if (seq.endsWith("m")) {
+					if (seq === "\x1b[m" || seq === "\x1b[0m" || seq === "\x1b[0;0m") {
+						attr = "";
+					} else {
+						attr += seq;
+					}
+				}
+				continue;
+			}
+			if (next === "]") {
+				// OSC sequence
+				let j = i + 2;
+				while (j < len) {
+					if (line[j] === "\x07") break;
+					if (line[j] === "\x1b" && line[j + 1] === "\\") {
+						j++;
+						break;
+					}
+					j++;
+				}
+				const end = line[j] === "\x07" ? j + 1 : Math.min(len, j + 2);
+				const seq = line.slice(i, end);
+				i = end;
+				attr += seq;
+				continue;
+			}
+			if (next === "_") {
+				// APC sequence
+				let j = i + 2;
+				while (j < len) {
+					if (line[j] === "\x07") break;
+					if (line[j] === "\x1b" && line[j + 1] === "\\") {
+						j++;
+						break;
+					}
+					j++;
+				}
+				const end = line[j] === "\x07" ? j + 1 : Math.min(len, j + 2);
+				i = end;
+				continue;
+			}
+			// Lone ESC
+			attr += ch;
+			i++;
+			continue;
+		}
+
+		// Drop C0 control bytes (except tab which we handle below)
+		const code = ch.charCodeAt(0);
+		if (code < 0x20 && code !== 0x09) {
+			i++;
+			continue;
+		}
+
+		// Tab: expand to one space
+		if (code === 0x09) {
+			if (cells.length < targetWidth) {
+				cells.push({ char: " ", attr, continuation: false });
+			}
+			i++;
+			continue;
+		}
+
+		const codePoint = line.codePointAt(i);
+		if (codePoint === undefined) break;
+		const char = String.fromCodePoint(codePoint);
+		const width = visibleWidth(char);
+		if (width > 0 && cells.length + width <= targetWidth) {
+			cells.push({ char, attr, continuation: false });
+			for (let column = 1; column < width; column++) {
+				cells.push({ char: "", attr, continuation: true });
+			}
+		}
+		i += char.length;
+	}
+
+	// Styling blank padding is visually irrelevant and makes every trailing cell
+	// appear changed when a component happens to omit a final reset.
+	while (cells.length < targetWidth) {
+		cells.push({ char: " ", attr: "", continuation: false });
+	}
+
+	return cells;
+}
+
+/**
+ * Generate ANSI escape sequence to transition from prevCells to newCells,
+ * starting at the given row. Only emits cursor movement + attribute changes
+ * + character writes for changed cells. Uses a smart strategy:
+ *   1. Move cursor to first changed cell
+ *   2. For each subsequent cell: if attr changed, emit attr; if char changed,
+ *      emit char; if both, emit attr then char
+ *   3. If we reach a run of unchanged cells, jump cursor past them
+ */
+export interface TerminalLineDiff {
+	output: string;
+	changedCells: number;
+	cursorMoves: number;
+}
+
+function cellLevelDiff(
+	prevCells: Cell[],
+	newCells: Cell[],
+	row: number,
+): TerminalLineDiff {
+	let out = "";
+	const closeHyperlink = "\x1b]8;;\x1b\\";
+	const changed = new Array<boolean>(newCells.length).fill(false);
+	for (let i = 0; i < newCells.length; i++) {
+		const prev = prevCells[i];
+		changed[i] =
+			!prev ||
+			prev.char !== newCells[i].char ||
+			prev.attr !== newCells[i].attr ||
+			prev.continuation !== newCells[i].continuation;
+	}
+
+	// A terminal cannot address the second half of a wide glyph independently.
+	// Expand changes leftward so replacing either half repaints the whole glyph.
+	for (let i = 1; i < changed.length; i++) {
+		if (
+			changed[i] &&
+			(newCells[i].continuation || prevCells[i]?.continuation)
+		) {
+			changed[i - 1] = true;
+		}
+	}
+
+	let column = 0;
+	let changedCells = 0;
+	let cursorMoves = 0;
+	while (column < newCells.length) {
+		if (!changed[column]) {
+			column++;
+			continue;
+		}
+		const start = column;
+		while (column < newCells.length && changed[column]) column++;
+		changedCells += column - start;
+		cursorMoves++;
+
+		out += `\x1b[${row + 1};${start + 1}H${closeHyperlink}\x1b[0m`;
+		let activeAttr = "";
+		for (let i = start; i < column; i++) {
+			const cell = newCells[i];
+			if (cell.continuation) continue;
+			if (cell.attr !== activeAttr) {
+				out += `\x1b[0m${cell.attr}`;
+				activeAttr = cell.attr;
+			}
+			out += cell.char;
+		}
+		out += closeHyperlink;
+	}
+
+	return { output: out, changedCells, cursorMoves };
+}
+
+/** Build the terminal update for one printable row. Exported for regression tests. */
+export function diffTerminalLine(
+	previousLine: string,
+	nextLine: string,
+	row: number,
+	width: number,
+): string {
+	return diffTerminalLineWithMetrics(previousLine, nextLine, row, width).output;
+}
+
+export function diffTerminalLineWithMetrics(
+	previousLine: string,
+	nextLine: string,
+	row: number,
+	width: number,
+): TerminalLineDiff {
+	return cellLevelDiff(
+		parseLineIntoCells(previousLine, width),
+		parseLineIntoCells(nextLine, width),
+		row,
+	);
 }
 
 // ── Overlay options ──────────────────────────────────────────────────────────
