@@ -473,27 +473,40 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		// starting a new run. The bridge emits a `steered` event that
 		// renders the message, so skip the normal turn/animation setup.
 		if (ctx.bridge.isActive()) {
-			ctx.bridge
-				.sendMessage(text)
-				.catch((err) => ctx.bridge.reportError(err));
-			if (intent === "steer-now") {
-				const count = ctx.bridge.flushSteeringNow();
-				ctx.notify(
-					`Steering now with ${count} message${count === 1 ? "" : "s"}.`,
-					"info",
-				);
-			}
+			ctx.notify(
+				intent === "steer-now" ? "Steering now…" : "Steering queued…",
+				"info",
+			);
+			ctx.tui.renderNow();
+			setImmediate(() => {
+				void ctx.bridge
+					.sendMessage(text)
+					.catch((err) => ctx.bridge.reportError(err));
+				if (intent === "steer-now") {
+					const count = ctx.bridge.flushSteeringNow();
+					ctx.notify(
+						`Steering now with ${count} message${count === 1 ? "" : "s"}.`,
+						"info",
+					);
+					ctx.tui.requestRender();
+				}
+			});
 			return;
 		}
 
 		ctx.transcript.addTurn(text);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-		ctx.tui.requestRender();
-		ctx.bridge
-			.sendMessage(text)
-			.catch((err) => ctx.bridge.reportError(err));
 		ctx.statusPanel.update({ phase: "streaming" });
 		ctx.statusPanel.startAnimation();
+		// Paint the submitted turn and active status before bridge setup. Model,
+		// plugin, and skill initialization can do synchronous work before their
+		// first await; deferring it keeps Enter-to-feedback latency near one frame.
+		ctx.tui.renderNow();
+		setImmediate(() => {
+			void ctx.bridge
+				.sendMessage(text)
+				.catch((err) => ctx.bridge.reportError(err));
+		});
 	};
 
 	ctx.inputBar.onCancel = () => {

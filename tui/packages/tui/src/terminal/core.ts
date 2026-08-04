@@ -481,6 +481,23 @@ export class TUI extends Container {
 		process.nextTick(() => this.scheduleRender());
 	}
 
+	/**
+	 * Commit one frame synchronously at an interaction boundary. Use sparingly
+	 * for Enter/loading acknowledgement; continuous streaming stays frame-paced.
+	 */
+	renderNow(): void {
+		if (!this.started || this.stopped) return;
+		if (this.renderTimer) {
+			clearTimeout(this.renderTimer);
+			this.renderTimer = null;
+		}
+		this.renderRequested = false;
+		this.renderImmediateRequested = false;
+		this.doRender();
+		this.lastRenderFinishedAt = performance.now();
+		if (this.renderRequested) this.scheduleRender();
+	}
+
 	private scheduleRender(): void {
 		if (this.stopped || this.renderTimer || !this.renderRequested) return;
 		// Pace from the end of the previous frame. Measuring from frame start made
@@ -864,6 +881,11 @@ export class TUI extends Container {
 				}
 				continue;
 			}
+
+			// Most rows are untouched most frames (static scrollback, blank
+			// padding, unrelated status regions). Skip the full ANSI-aware cell
+			// parse + diff for both strings when the row didn't change at all.
+			if (cleanPrev === cleanNew) continue;
 
 			const lineDiff = diffTerminalLineWithMetrics(
 				cleanPrev,

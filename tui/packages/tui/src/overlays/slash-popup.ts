@@ -138,9 +138,9 @@ export class SlashPopup implements Component {
 	setQuery(query: string): void {
 		if (this.query === query) return;
 		this.query = query;
-		// Keep selection in range as the filtered list shrinks/grows.
-		const n = this._getFiltered().length;
-		if (this.selectedIndex >= n) this.selectedIndex = Math.max(0, n - 1);
+		// A new search has a new best match. Keeping the old row index selected
+		// makes fast typing appear to jump to a lower-ranked result.
+		this.selectedIndex = 0;
 		this.invalidate();
 	}
 
@@ -418,7 +418,7 @@ export class SlashPopup implements Component {
 
 				let line = isSelected
 					? ` ${getSelectedColor()}${prefix}${BOLD}${cmdName}${RESET}${getSelectedColor()}`
-					: ` ${prefix}${cmdName}`;
+					: ` ${prefix}${highlightCommandMatch(cmdName, this.query)}`;
 
 				// Arg hint
 				if (cmd.argHint) {
@@ -475,6 +475,24 @@ export class SlashPopup implements Component {
 		);
 		return this.cachedLines;
 	}
+}
+
+/** Emphasize the subsequence that caused a command-name match. */
+function highlightCommandMatch(command: string, query: string): string {
+	const needle = query.trim().replace(/^\/+/, "").toLowerCase();
+	if (!needle) return command;
+	let needleIndex = 0;
+	let output = command.startsWith("/") ? "/" : "";
+	const name = command.replace(/^\/+/, "");
+	for (const character of name) {
+		if (needleIndex < needle.length && character.toLowerCase() === needle[needleIndex]) {
+			output += `${theme.fgRaw("accent")}${BOLD}${character}${RESET}`;
+			needleIndex++;
+		} else {
+			output += character;
+		}
+	}
+	return needleIndex === needle.length ? output : command;
 }
 
 function windowAroundSelection<T>(

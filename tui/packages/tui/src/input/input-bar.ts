@@ -250,10 +250,10 @@ export class InputBar implements Component, Focusable {
 			const endIdx = this.pasteBuffer.indexOf("\x1b[201~");
 			if (endIdx !== -1) {
 				const pasteText = this.pasteBuffer.substring(0, endIdx);
+				const remaining = this.pasteBuffer.substring(endIdx + 6);
 				this._handlePaste(pasteText);
 				this.isInPaste = false;
 				this.pasteBuffer = "";
-				const remaining = this.pasteBuffer.substring(endIdx + 6);
 				if (remaining) this.handleInput(remaining);
 				return;
 			}
@@ -609,9 +609,14 @@ export class InputBar implements Component, Focusable {
 		this.cachedWidth = width;
 		const prompt = this._promptResolved;
 		const promptWidth = visibleWidth(prompt);
-		const contentWidth = Math.max(1, width - promptWidth - 1);
+		const contentWidth = Math.max(1, width - promptWidth - 2);
 		const displayText = this.value || this._placeholder;
 		const isPlaceholder = !this.value;
+		const logicalLines = displayText.split("\n");
+		if (!isPlaceholder && logicalLines.length > 1) {
+			this.cachedLines = this._renderMultiline(width, logicalLines);
+			return this.cachedLines;
+		}
 
 		// Grapheme segments for cursor positioning
 		const allSegments = [...segmenter.segment(displayText)].map(
@@ -670,6 +675,78 @@ export class InputBar implements Component, Focusable {
 		const header = width >= 36 ? this._renderComposerHeader(width) : null;
 		this.cachedLines = header ? [header, finalLine] : [finalLine];
 		return this.cachedLines;
+	}
+
+	/**
+	 * Render a stable, bounded window around the active logical line. Long
+	 * prompts remain readable without letting the composer consume the whole
+	 * terminal; each logical line still gets the familiar horizontal viewport.
+	 */
+	private _renderMultiline(width: number, logicalLines: string[]): string[] {
+		const header = width >= 36 ? [this._renderComposerHeader(width)] : [];
+		const maxVisibleLines = width >= 52 ? 5 : 3;
+		const beforeCursor = this._graphemeSlice(this.value, 0, this.cursor);
+		const cursorLine = Math.min(
+			logicalLines.length - 1,
+			beforeCursor.split("\n").length - 1,
+		);
+		const cursorColumn = this._graphemeCount(beforeCursor.split("\n").at(-1) ?? "");
+		let start = Math.max(0, cursorLine - maxVisibleLines + 1);
+		start = Math.min(start, Math.max(0, logicalLines.length - maxVisibleLines));
+		const end = Math.min(logicalLines.length, start + maxVisibleLines);
+		const hiddenAbove = start > 0;
+		const hiddenBelow = end < logicalLines.length;
+
+		const prompt = this._promptResolved;
+		const promptWidth = visibleWidth(prompt);
+		const continuation = " ".repeat(promptWidth);
+		const contentWidth = Math.max(1, width - promptWidth - 1);
+		const rows: string[] = [];
+
+		for (let lineIndex = start; lineIndex < end; lineIndex++) {
+			const lineSegments = [...segmenter.segment(logicalLines[lineIndex] ?? "")]
+				.map((item) => item.segment);
+			const isCursorLine = lineIndex === cursorLine;
+			const lineCursor = isCursorLine
+				? Math.min(cursorColumn, lineSegments.length)
+				: lineSegments.length;
+			const viewport = this._inputViewport(
+				lineSegments,
+				lineCursor,
+				contentWidth,
+				false,
+			);
+			const cursorInViewport = Math.max(0, lineCursor - viewport.start);
+			const visible = [...viewport.segments];
+			let body: string;
+			if (isCursorLine) {
+				const before = visible.slice(0, cursorInViewport).join("");
+				const at = cursorInViewport < visible.length
+					? visible[cursorInViewport]
+					: " ";
+				const after = visible.slice(cursorInViewport + 1).join("");
+				const cursor = this.focused
+					? `${CURSOR_MARKER}\x1b[7m${at}\x1b[27m`
+					: `${CURSOR_MARKER}${at}`;
+				body = before + cursor + after;
+			} else {
+				body = visible.join("");
+			}
+
+			const prefix = lineIndex === 0 ? prompt : continuation;
+			const aboveMarker = hiddenAbove && lineIndex === start ? "↑" : "";
+			const belowMarker = hiddenBelow && lineIndex === end - 1 ? "↓" : "";
+			const leftMarker = viewport.leftClipped ? "‹" : aboveMarker;
+			const rightMarker = viewport.rightClipped ? "›" : belowMarker;
+			const raw = prefix +
+				theme.fg("inputPlaceholder", leftMarker) +
+				theme.fg("inputText", body) +
+				theme.fg("inputPlaceholder", rightMarker) + RESET;
+			const clean = raw.replace(CURSOR_MARKER, "");
+			rows.push(raw + " ".repeat(Math.max(0, width - visibleWidth(clean))));
+		}
+
+		return [...header, ...rows];
 	}
 
 	private _renderComposerHeader(width: number): string {

@@ -100,23 +100,7 @@ export async function handleMcp(ctx: SlashCommandsCtx, args: string): Promise<vo
 	try {
 		const normalized = args.trim().toLowerCase();
 		if (normalized === "list" || normalized === "") {
-			const snapshot = await ctx.bridge.getMcpSnapshot();
-			if (snapshot.servers.length === 0) {
-				ctx.transcript.addSystemMessage("No MCP servers configured.");
-			} else {
-				const lines = snapshot.servers.map((s) => {
-					const status = s.enabled ? "✓" : "✗";
-					const serverType = s.server.url ? "http" : "stdio";
-					const error = s.error ? ` (${s.error})` : "";
-					return `  ${status} ${s.serverName}  [${serverType}]  tools:${s.toolCount}${error}`;
-				});
-				lines.unshift(
-					`MCP servers (${snapshot.servers.length} configured, ${Object.keys(snapshot.loadedServers).length} loaded):`,
-				);
-				ctx.transcript.addSystemMessage(lines.join("\n"));
-			}
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender();
+			await ctx.openMcpManager();
 			return;
 		}
 		await ctx.openMcpManager();

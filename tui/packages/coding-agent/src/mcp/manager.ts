@@ -291,15 +291,17 @@ export class McpManager {
 			primaryConfigPath,
 		} = await this.resolveConfigs(cwd);
 
-		const loadedServers: Record<string, { toolCount: number }> = {};
-		for (const client of this.clients) {
-			try {
-				const tools = await client.listTools();
-				loadedServers[client.name] = { toolCount: tools.length };
-			} catch {
-				loadedServers[client.name] = { toolCount: 0 };
-			}
-		}
+		const loadedEntries = await Promise.all(
+			this.clients.map(async (client): Promise<[string, { toolCount: number }]> => {
+				try {
+					const tools = await client.listTools();
+					return [client.name, { toolCount: tools.length }];
+				} catch {
+					return [client.name, { toolCount: 0 }];
+				}
+			}),
+		);
+		const loadedServers = Object.fromEntries(loadedEntries);
 
 		const servers: McpServerInfo[] = Object.entries(configs).map(
 			([name, server]) => {

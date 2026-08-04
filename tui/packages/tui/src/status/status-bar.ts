@@ -75,6 +75,10 @@ export class StatusBar implements Component {
 	private cachedLine: string | null = null;
 	private cachedWidth = -1;
 	private onInvalidate: (() => void) | null = null;
+	/** Non-phase parts that fit at cachedWidth, from the last full layout pass.
+	 * A tick-only update reuses this instead of rerunning the fit probing. */
+	private cachedParts: string[] = [];
+	private tickOnlyDirty = false;
 
 	setOnInvalidate(cb: () => void): void {
 		this.onInvalidate = cb;
@@ -96,6 +100,7 @@ export class StatusBar implements Component {
 
 	_invalidate(): void {
 		this.cachedLine = null;
+		this.tickOnlyDirty = false;
 		this.onInvalidate?.();
 	}
 
@@ -104,7 +109,15 @@ export class StatusBar implements Component {
 		if (this.timer) return;
 		this.timer = setInterval(() => {
 			this.tick = (this.tick + 1) % 8;
-			this._invalidate();
+			// A spinner-only change never affects layout (every frame glyph is one
+			// column wide, so which parts fit and the truncation fallback can't
+			// flip), so skip the full renderCompact() rebuild — including its
+			// dozen-odd visibleWidth() fit-probe calls — and just splice the new
+			// phase segment into the already-composed line on the next render().
+			if (!this.tickOnlyDirty) {
+				this.tickOnlyDirty = true;
+				this.onInvalidate?.();
+			}
 		}, 150);
 	}
 
@@ -119,18 +132,31 @@ export class StatusBar implements Component {
 
 	render(width: number): string[] {
 		if (width === this.cachedWidth && this.cachedLine !== null) {
+			if (this.tickOnlyDirty) {
+				// Spinner-only change: every frame glyph is one column wide, so
+				// which parts fit and whether the truncation fallback triggers
+				// can't flip between ticks — only formatPhase()'s output does.
+				// Recompute just that and re-splice, skipping the dozen-odd
+				// visibleWidth() fit-probe calls renderCompact() would otherwise
+				// redo for parts that provably haven't changed.
+				this.cachedLine = this.composeLine(width, this.cachedParts);
+				this.tickOnlyDirty = false;
+			}
 			return [this.cachedLine];
 		}
 
 		this.cachedWidth = width;
-		const line = this.renderCompact(width);
+		this.cachedParts = this.layoutParts(width);
+		this.tickOnlyDirty = false;
+		const line = this.composeLine(width, this.cachedParts);
 		this.cachedLine = line;
 		return [line];
 	}
 
 	// ── Compact single-line render ──────────────────────────────────────────
 
-	private renderCompact(width: number): string {
+	/** Which non-phase parts fit at this width, and where phase/context sit. */
+	private layoutParts(width: number): string[] {
 		const separator = ` ${DIM}│${RESET} `;
 		const phase = this.formatPhase();
 		const model = this.formatModel();
@@ -161,9 +187,21 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
 		insertIfFits(this.formatRtk());
-	insertIfFits(this.formatMemory());
+		insertIfFits(this.formatMemory());
+		return parts;
+	}
 
-		let line = parts.join(separator);
+	/** Re-derives phase/context fresh (tick-sensitive) and joins with the
+	 * already-decided part list. Cheap: no width-fit probing. */
+	private composeLine(width: number, parts: string[]): string {
+		const separator = ` ${DIM}│${RESET} `;
+		const phase = this.formatPhase();
+		const context = this.formatContext();
+		// parts[0] is always phase when present (layoutParts starts the array
+		// with it); refresh it in place since formatPhase() picked up the tick.
+		const refreshed = parts.length > 0 ? [phase, ...parts.slice(1)] : parts;
+
+		let line = refreshed.join(separator);
 		if (visibleWidth(line) > width) {
 			const compact = [phase, context].filter(Boolean).join(separator);
 			line = visibleWidth(compact) <= width

@@ -97,8 +97,15 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
 		this.maxMessageLength =
 			options.maxMessageLength ?? DEFAULT_TRUNCATION.transcriptMessageMaxChars;
-		this.maxTurns = options.maxTurns ?? 200;
-		this.maxRenderedLines = options.maxRenderedLines ?? 2000;
+		// A terminal viewport is typically 30-60 rows, so both budgets stay a
+		// small multiple of that rather than the old 200-turn/2000-line
+		// defaults — those forced every full rebuild (any cache miss, e.g. a
+		// theme change or a fresh streaming turn joining the prefix) to
+		// markdown-parse and word-wrap far more content than a screen could
+		// ever show, while still only ever displaying the last viewportHeight
+		// rows. Scrollback is intentionally shallow now, not unbounded.
+		this.maxTurns = options.maxTurns ?? 40;
+		this.maxRenderedLines = options.maxRenderedLines ?? 400;
 	}
 
 	private static readonly SPINNER_FRAMES = [
@@ -623,14 +630,24 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 				ti === prefixTurns.length - 1 &&
 				prefixTurns.every((prefixTurn) => this.isStableTurn(prefixTurn))
 			) {
-				this.completedPrefixCache = {
-					width,
-					styleRevision,
-					turns: [...prefixTurns],
-					lines: [...renderedLines],
-					turnStartLines: [...turnStartLines],
-					toolRegions: pendingToolRegions.map((region) => ({ ...region })),
-				};
+				// Cap what gets cached to maxRenderedLines. Without this, every frame
+				// during streaming (the spinner ticks every 150ms and invalidates
+				// cachedLines) pays an O(total transcript size) cost just re-copying
+				// this cached prefix back out — even though only the active turn
+				// actually changed. Trimming the oldest lines here keeps that copy
+				// bounded regardless of history length, even when a single oversized
+				// turn (e.g. a `/context` dump) is what blew the budget.
+				this.completedPrefixCache = capPrefixCache(
+					{
+						width,
+						styleRevision,
+						turns: [...prefixTurns],
+						lines: [...renderedLines],
+						turnStartLines: [...turnStartLines],
+						toolRegions: pendingToolRegions.map((region) => ({ ...region })),
+					},
+					this.maxRenderedLines,
+				);
 			}
 		}
 
@@ -639,18 +656,15 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		// labelling them as "older", which became especially visible after Ctrl+O
 		// expanded tool output. Prefer a complete recent-turn boundary; if the
 		// newest turn alone exceeds the budget, retain its tail.
+		//
+		// This must stay active while the newest turn is streaming, not just once
+		// it settles — streaming is exactly when the spinner forces a re-render
+		// every 150ms, so skipping the cut here meant every one of those frames
+		// carried the full, unbounded transcript back through the render/diff
+		// pipeline for as long as a turn was in flight.
 		let visibleBuffer = renderedLines;
 		let visibleStart = 0;
-		const newestAssistant = this.turns.at(-1)?.assistantMessage;
-		const newestTurnIsStreaming =
-			newestAssistant !== null &&
-			newestAssistant !== undefined &&
-			(!newestAssistant.isComplete ||
-				hasStreamingChunk(newestAssistant.chunks));
-		if (
-			!newestTurnIsStreaming &&
-			renderedLines.length > this.maxRenderedLines
-		) {
+		if (renderedLines.length > this.maxRenderedLines) {
 			const desiredStart = renderedLines.length - (this.maxRenderedLines - 1);
 			const firstCompleteTurn = turnStartLines.findIndex(
 				(line) => line >= desiredStart,
@@ -831,4 +845,43 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 	}
 
 	private _viewportHeight: number = 0;
+}
+
+/**
+ * Bound a completed-prefix cache to its last maxLines lines once it exceeds
+ * that budget, rebasing turnStartLines/toolRegions to the new start. Keeps
+ * the per-frame prefix-reuse copy bounded by maxLines instead of growing with
+ * total transcript size — including the case where a single oversized turn
+ * (e.g. a `/context` dump) blows past the budget on its own, where capping at
+ * turn boundaries alone couldn't shrink anything.
+ *
+ * `turns` is intentionally left untouched: it's still used for the
+ * turn-identity reuse check on the next frame, and every turn — even ones
+ * whose lines got trimmed here — remains unchanged and reusable as long as
+ * its object reference doesn't change.
+ */
+function capPrefixCache(
+	cache: CompletedPrefixCache,
+	maxLines: number,
+): CompletedPrefixCache {
+	if (cache.lines.length <= maxLines) {
+		return cache;
+	}
+	const sliceStart = cache.lines.length - maxLines;
+	return {
+		width: cache.width,
+		styleRevision: cache.styleRevision,
+		turns: cache.turns,
+		lines: cache.lines.slice(sliceStart),
+		turnStartLines: cache.turnStartLines
+			.map((line) => line - sliceStart)
+			.filter((line) => line >= 0),
+		toolRegions: cache.toolRegions
+			.map((region) => ({
+				...region,
+				start: region.start - sliceStart,
+				end: region.end - sliceStart,
+			}))
+			.filter((region) => region.end > 0),
+	};
 }

@@ -711,41 +711,54 @@ export function filterSlashCommands(
 ): SlashCommandDef[] {
 	if (!query || query.length <= 1) return commands.slice(0, limit);
 
-	const lowerQuery = query.toLowerCase().trim();
+	const lowerQuery = query.toLowerCase().trim().replace(/^\/+/, "");
+	if (!lowerQuery) return commands.slice(0, limit);
 	const scored = commands
 		.map((cmd, idx) => {
-			const cmdName = cmd.command.toLowerCase();
+			const cmdName = cmd.command.toLowerCase().replace(/^\/+/, "");
 			const desc = cmd.description.toLowerCase();
-			let score = -1;
+			const category = (cmd.category ?? "misc").toLowerCase();
+			const commandScore = fuzzyFieldScore(lowerQuery, cmdName, 10_000);
+			const descriptionScore = fuzzyFieldScore(lowerQuery, desc, 3_000);
+			const categoryScore = fuzzyFieldScore(lowerQuery, category, 1_500);
+			const score = Math.max(commandScore, descriptionScore, categoryScore);
 
-			// Exact match on command name
-			if (cmdName === lowerQuery) score = 3000 - idx;
-			// Prefix match
-			else if (cmdName.startsWith(lowerQuery))
-				score = 2500 - (cmdName.length - lowerQuery.length) - idx;
-			// Contains match
-			else if (cmdName.includes(lowerQuery))
-				score = 2000 - cmdName.indexOf(lowerQuery) * 8 - idx;
-			// Subsequence match
-			else if (subsequenceMatch(lowerQuery, cmdName)) score = 1500 - idx;
-			// Description match
-			else if (desc.includes(lowerQuery)) score = 800 - idx;
-			// Word match in description
-			else if (desc.split(/\s+/).some((w) => w.startsWith(lowerQuery)))
-				score = 1000 - idx;
-
-			return score >= 0 ? { cmd, score } : null;
+			return score >= 0 ? { cmd, score, idx } : null;
 		})
-		.filter(Boolean) as { cmd: SlashCommandDef; score: number }[];
+		.filter(Boolean) as { cmd: SlashCommandDef; score: number; idx: number }[];
 
-	scored.sort((a, b) => b.score - a.score);
+	scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
 	return scored.map((s) => s.cmd).slice(0, limit);
 }
 
-function subsequenceMatch(query: string, text: string): boolean {
-	let qi = 0;
-	for (let ti = 0; ti < text.length && qi < query.length; ti++) {
-		if (text[ti] === query[qi]) qi++;
+/** Score a field while rewarding compact runs and word-boundary matches. */
+function fuzzyFieldScore(query: string, text: string, base: number): number {
+	if (text === query) return base + 4_000;
+	if (text.startsWith(query)) return base + 3_000 - (text.length - query.length);
+
+	const containedAt = text.indexOf(query);
+	if (containedAt >= 0) {
+		const boundaryBonus = containedAt === 0 || /[\s_/-]/.test(text[containedAt - 1] ?? "")
+			? 800
+			: 0;
+		return base + 1_800 + boundaryBonus - containedAt * 4;
 	}
-	return qi === query.length;
+
+	let queryIndex = 0;
+	let first = -1;
+	let previous = -2;
+	let gaps = 0;
+	let consecutive = 0;
+	let boundaries = 0;
+	for (let textIndex = 0; textIndex < text.length && queryIndex < query.length; textIndex++) {
+		if (text[textIndex] !== query[queryIndex]) continue;
+		if (first < 0) first = textIndex;
+		if (textIndex === previous + 1) consecutive++;
+		else if (previous >= 0) gaps += textIndex - previous - 1;
+		if (textIndex === 0 || /[\s_/-]/.test(text[textIndex - 1] ?? "")) boundaries++;
+		previous = textIndex;
+		queryIndex++;
+	}
+	if (queryIndex !== query.length) return -1;
+	return base + 700 + boundaries * 100 + consecutive * 35 - gaps * 12 - first * 3;
 }

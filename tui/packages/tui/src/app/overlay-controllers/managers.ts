@@ -13,8 +13,9 @@ export async function openPluginManager(ctx: OverlayHandlersCtx): Promise<void> 
 	// nothing until the async round-trip resolves.
 	ctx.pluginManager.setMessage("Loading plugins...");
 	ctx.pluginManager.show();
-	ctx.tui.requestRender();
+	ctx.tui.renderNow();
 	try {
+		await yieldToRenderer();
 		const snapshot = await ctx.bridge.getPluginSnapshot();
 		ctx.pluginManager.setSnapshot({
 			pluginsDir: String(snapshot.plugins_dir || ""),
@@ -90,8 +91,9 @@ export async function openMcpManager(ctx: OverlayHandlersCtx): Promise<void> {
 	// the async round-trip resolves.
 	ctx.mcpManager.setMessage("Loading MCP servers...");
 	ctx.mcpManager.show();
-	ctx.tui.requestRender();
+	ctx.tui.renderNow();
 	try {
+		await yieldToRenderer();
 		const snapshot = await ctx.bridge.getMcpSnapshot();
 		ctx.mcpManager.setSnapshot({
 			configPath: snapshot.configPath,
@@ -118,6 +120,11 @@ export async function openMcpManager(ctx: OverlayHandlersCtx): Promise<void> {
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 		ctx.tui.requestRender();
 	}
+}
+
+/** Let the immediate loading frame reach the terminal before discovery work. */
+function yieldToRenderer(): Promise<void> {
+	return new Promise((resolve) => setImmediate(resolve));
 }
 
 export function handleMcpManagerAction(

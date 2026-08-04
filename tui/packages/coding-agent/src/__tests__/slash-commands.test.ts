@@ -14,6 +14,18 @@ void test("bare slash returns the complete command catalog", () => {
 	assert.equal(filterSlashCommands(commands, "/").length, commands.length);
 });
 
+void test("command search ranks compact and boundary-aware fuzzy matches", () => {
+	const commands = [
+		{ command: "/settings", description: "Configure Logician", category: "display" },
+		{ command: "/sessions", description: "Browse saved conversations", category: "session" },
+		{ command: "/status", description: "Show runtime details", category: "agent" },
+	] as Parameters<typeof filterSlashCommands>[0];
+
+	assert.equal(filterSlashCommands(commands, "/ssn")[0]?.command, "/sessions");
+	assert.equal(filterSlashCommands(commands, "/saved")[0]?.command, "/sessions");
+	assert.equal(filterSlashCommands(commands, "/display")[0]?.command, "/settings");
+});
+
 void test("memory command exposes the persistent memory handlers", () => {
 	const commands = createSlashCommands(bridge, {});
 	const memory = commands.find((command) => command.command === "/memory");

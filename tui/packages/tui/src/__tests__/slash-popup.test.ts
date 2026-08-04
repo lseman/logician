@@ -57,6 +57,36 @@ test("SlashPopup completes declared subcommands", () => {
 	assert.match(popup.render(80).join("\n"), /\/mcp list/);
 });
 
+test("SlashPopup returns to the best-ranked result when the query changes", () => {
+	const popup = new SlashPopup();
+	popup.setCommands(commands);
+	popup.setQuery("/");
+	popup.moveSelection(1);
+	assert.equal(popup.currentCommand(), "/settings");
+
+	popup.setQuery("/he");
+	assert.equal(popup.currentCommand(), "/help");
+});
+
+test("SlashPopup emphasizes command characters responsible for fuzzy matches", () => {
+	const popup = new SlashPopup();
+	popup.setCommands([
+		...commands,
+		{
+			command: "/sessions",
+			description: "Browse conversations",
+			dispatch: "local",
+			acceptsArgs: false,
+			category: "session",
+		},
+	]);
+	popup.setQuery("/s");
+	popup.show();
+	const rendered = popup.render(80).join("\n");
+	assert.equal(popup.hasMatches(), true);
+	assert.match(rendered, new RegExp(theme.fgRaw("accent").replace("[", "\\[")));
+});
+
 test("submitRaw establishes the command turn before running the local handler", () => {
 	const order: string[] = [];
 	const popup = new SlashPopup();

@@ -785,6 +785,26 @@ void test("up and down arrows navigate within multiline message text", () => {
 	assert.equal(input.valueText, "abXcd\nxyZ");
 });
 
+void test("multiline composer keeps a bounded readable window around the cursor", () => {
+	const input = new InputBar();
+	input.focused = true;
+	input.valueText = "one\ntwo\nthree\nfour\nfive\nsix";
+	const lines = input.render(60);
+	const rendered = plain(lines.join("\n")).replace(CURSOR_MARKER, "");
+
+	assert.equal(lines.length, 6, "header plus at most five prompt lines");
+	assert.doesNotMatch(rendered, /one/);
+	assert.match(rendered, /two[\s\S]*six/);
+	assert.match(rendered, /↑/);
+	assert.ok(lines.every((line) => visibleWidth(line) === 60));
+});
+
+void test("bracketed paste replays input batched after its closing marker", () => {
+	const input = new InputBar();
+	input.handleInput("\x1b[200~first\nsecond\x1b[201~!");
+	assert.equal(input.valueText, "first\nsecond!");
+});
+
 void test("expanded agent tools separate task arguments from live output", () => {
 	const display = new TranscriptDisplay();
 	display.setToolsExpanded(true);
@@ -942,7 +962,12 @@ void test("collapsed agent card shows only the header while running", () => {
 	display.toolsExpanded = true;
 	display.invalidate();
 	const expanded = plain(display.render(100).join("\n"));
-	assert.match(expanded, /BEGIN/);
+	// The render buffer is capped to maxRenderedLines even while streaming (so
+	// a long-running turn doesn't force an ever-growing full-history re-render
+	// on every spinner tick), so only the tail of this 82-line card survives —
+	// same as any other over-budget content. Assert on the tail, not "BEGIN".
+	assert.match(expanded, /END/);
+	assert.match(expanded, /stream-line-79-/);
 });
 
 void test("expanded completed subagent keeps its streaming transcript", () => {

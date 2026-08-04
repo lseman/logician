@@ -125,6 +125,43 @@ void test("MCP snapshot includes loaded plugin-provided servers", async () => {
 	});
 });
 
+void test("MCP snapshot asks live servers for tools concurrently", async () => {
+	await withIsolatedMcpEnvironment(async (_home, workspace) => {
+		let started = 0;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const client = (name: string): McpClient => ({
+			name,
+			initialize: async () => {},
+			listTools: async () => {
+				started++;
+				await gate;
+				return [];
+			},
+			callTool: async () => ({}),
+			close: () => {},
+		});
+		const manager = new McpManager({
+			loadPluginConfigs: async () => ({
+				first: { command: "first" },
+				second: { command: "second" },
+			}),
+		});
+		(manager as unknown as { clients: McpClient[] }).clients = [
+			client("first"),
+			client("second"),
+		];
+
+		const snapshotPromise = manager.getSnapshot(workspace);
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(started, 2);
+		release();
+		await snapshotPromise;
+	});
+});
+
 void test("toggling a global MCP from a project workspace updates its defining file", async () => {
 	await withIsolatedMcpEnvironment(async (home, workspace) => {
 		const globalPath = path.join(home, ".logician", "settings.json");
