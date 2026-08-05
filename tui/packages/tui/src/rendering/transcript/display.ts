@@ -824,22 +824,24 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 								: n.level === "success"
 									? "✓"
 									: "●";
-					const color =
+					const levelColor =
 						n.level === "error"
 							? theme.fgRaw("error")
 							: n.level === "warn"
 								? theme.fgRaw("warning")
 								: theme.fgRaw("systemText");
+					const labelColor = theme.fgRaw("toolTitle");
 					const labelText = n.label.replace(/^\*\*(.*?)\*\*$/, "$1");
 					const noticePrefix = `${icon} NOTICE `;
 					const bodyIndent = " ".repeat(visibleWidth(noticePrefix));
 					const reasonMatch = /^(\[[^\]\n]+\])(?:\s+|$)/.exec(n.text);
+					const bodyColor = theme.fgRaw("muted");
 					const bodyText = reasonMatch
-						? `${theme.fg("accent", reasonMatch[1])} ${color}${n.text.slice(reasonMatch[0].length).trimStart()}${RESET}`
-						: `${color}${n.text}${RESET}`;
+						? `${theme.fg("accent", reasonMatch[1])} ${bodyColor}${n.text.slice(reasonMatch[0].length).trimStart()}${RESET}`
+						: `${bodyColor}${n.text}${RESET}`;
 					lines.push(
 						padToWidth(
-							`${color}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, color)}${RESET}`,
+							`${levelColor}${noticePrefix.trimEnd()}${RESET} ${BOLD}${renderInline(labelText, labelColor)}${RESET}`,
 						),
 					);
 					for (const line of wrapText(

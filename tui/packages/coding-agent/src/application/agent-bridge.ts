@@ -202,6 +202,7 @@ export class AgentCoreBridge {
 		`tui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 	private transcriptPath = "";
 	private startupHooksRan = false;
+	private startupHooksPromise: Promise<void> | null = null;
 	private startupHookResult: PluginCommandResult | null = null;
 	private startupPluginCount = 0;
 	private contextTokens = 0;
@@ -1014,6 +1015,7 @@ export class AgentCoreBridge {
 		// Reset state that is per-session
 		this.toolRouter.resetSkillsAndPrompts();
 		this.startupHooksRan = false;
+		this.startupHooksPromise = null;
 		this.startupHookResult = null;
 		this.pluginSystemContext = "";
 		this.skillActivation.reset();
@@ -1317,6 +1319,7 @@ export class AgentCoreBridge {
 		]);
 		if (result.status !== "error") {
 			this.startupHooksRan = false;
+			this.startupHooksPromise = null;
 			await this.runStartupHooksOnce();
 		}
 		return result;
@@ -1591,6 +1594,7 @@ export class AgentCoreBridge {
 		// Reset skill/prompt injection state
 		this.toolRouter.resetInjectedContext();
 		this.startupHooksRan = false;
+		this.startupHooksPromise = null;
 		this.pluginSystemContext = "";
 		this.skillActivation.reset();
 		this.rebuildBaseSystemPrompt();
@@ -2017,9 +2021,26 @@ export class AgentCoreBridge {
 		this.applyContextLayers();
 	}
 
+	/**
+	 * Runs plugin listing, session-start hooks, and skill/prompt/subagent
+	 * injection exactly once per (re)set of `startupHooksRan`. Memoized as a
+	 * promise — not just the boolean flag — so a caller that starts this
+	 * eagerly (e.g. right after construction, to prewarm before the user's
+	 * first message) and a concurrent `runMessage()` call both await the same
+	 * in-flight work instead of the second caller seeing the flag flip early
+	 * and racing ahead of hook/skill injection.
+	 */
 	private async runStartupHooksOnce(source = "startup"): Promise<void> {
 		if (this.startupHooksRan) return;
-		this.startupHooksRan = true;
+		if (!this.startupHooksPromise) {
+			this.startupHooksPromise = this.runStartupHooksNow(source).then(() => {
+				this.startupHooksRan = true;
+			});
+		}
+		await this.startupHooksPromise;
+	}
+
+	private async runStartupHooksNow(source: string): Promise<void> {
 		const snapshot = await runPluginBackend("list", []);
 		this.startupPluginCount = (snapshot.plugins || []).filter((plugin) => {
 			return plugin.enabled !== false && plugin.on_disk !== false;

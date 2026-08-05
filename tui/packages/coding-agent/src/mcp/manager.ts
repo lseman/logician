@@ -14,6 +14,19 @@ import {
 import { parseJsonWithComments } from "@logician/agent-core/tools/shared/json-utils.ts";
 import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
 
+// Temporary, opt-in tracing for the "MCP loaded but /mcp shows nothing"
+// investigation. LOGICIAN_MCP_DEBUG=1 prints resolved cwd/config paths/server
+// counts to stderr at every resolveConfigs()/load()/getSnapshot() call so a
+// live repro can show exactly what each call actually saw. Remove once the
+// bug is found — this is not meant to stay.
+const MCP_DEBUG = process.env.LOGICIAN_MCP_DEBUG === "1";
+function mcpDebug(label: string, data: unknown): void {
+	if (!MCP_DEBUG) return;
+	process.stderr.write(
+		`[mcp-debug] ${new Date().toISOString()} ${label} ${JSON.stringify(data)}\n`,
+	);
+}
+
 export interface McpLoadResult {
 	tools: Tool[];
 	servers: number;
@@ -209,17 +222,40 @@ export class McpManager {
 	}
 
 	private async resolveConfigs(cwd: string): Promise<ResolvedMcpConfigs> {
-		const configs = { ...(await this.pluginConfigLoader()) };
+		const pluginConfigs = await this.pluginConfigLoader();
+		const configs = { ...pluginConfigs };
 		const configPaths: Record<string, string | undefined> =
 			Object.fromEntries(Object.keys(configs).map((name) => [name, undefined]));
 		const paths = fileMcpConfigPaths(cwd);
+		mcpDebug("resolveConfigs:paths", {
+			cwd,
+			paths,
+			pluginServerNames: Object.keys(pluginConfigs),
+		});
 		for (const configPath of paths) {
-			const fromFile = readMcpServerConfigs(configPath);
+			let fromFile: Record<string, McpServerConfig> = {};
+			try {
+				fromFile = readMcpServerConfigs(configPath);
+			} catch (error) {
+				mcpDebug("resolveConfigs:readError", {
+					configPath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				continue;
+			}
+			mcpDebug("resolveConfigs:fileRead", {
+				configPath,
+				serverNames: Object.keys(fromFile),
+			});
 			for (const [name, config] of Object.entries(fromFile)) {
 				configs[name] = config;
 				configPaths[name] = configPath;
 			}
 		}
+		mcpDebug("resolveConfigs:result", {
+			cwd,
+			allServerNames: Object.keys(configs),
+		});
 		return {
 			configs,
 			configPaths,
@@ -231,6 +267,7 @@ export class McpManager {
 		cwd: string,
 		reservedToolNames: Iterable<string> = [],
 	): Promise<McpLoadResult> {
+		mcpDebug("load:called", { cwd, alreadyLoaded: this.loaded });
 		if (this.loaded) {
 			return {
 				tools: this.tools,
@@ -243,6 +280,7 @@ export class McpManager {
 
 		// Project config wins over user and plugin-declared servers on name clash.
 		const { configs } = await this.resolveConfigs(cwd);
+		mcpDebug("load:configs", { cwd, names: Object.keys(configs) });
 		for (const [name, config] of Object.entries(configs)) {
 			if (config.enabled === false) continue;
 			let client: McpClient | null = null;
@@ -285,6 +323,7 @@ export class McpManager {
 	}
 
 	async getSnapshot(cwd: string): Promise<McpSnapshotResult> {
+		mcpDebug("getSnapshot:called", { cwd, clientCount: this.clients.length });
 		const {
 			configs,
 			configPaths,
@@ -318,6 +357,12 @@ export class McpManager {
 			},
 		);
 
+		mcpDebug("getSnapshot:result", {
+			cwd,
+			configPath: primaryConfigPath,
+			serverCount: servers.length,
+			loadedServerNames: Object.keys(loadedServers),
+		});
 		return {
 			configPath: primaryConfigPath,
 			servers,

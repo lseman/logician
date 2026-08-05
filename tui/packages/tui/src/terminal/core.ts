@@ -234,11 +234,34 @@ export class Container implements Component {
 	}
 }
 
+import { appendFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 // ── Terminal input ───────────────────────────────────────────────────────────
 // Keyboard comes from process.stdin in raw mode (pi-style). The bridge child's
 // events arrive on its own stdout pipe, so stdin is free for the keyboard.
 import process from "node:process";
+
+// ── Render debug logging ─────────────────────────────────────────────────────
+// Opt-in, off by default: LOGICIAN_TUI_DEBUG_RENDER=1 appends one JSON line per
+// frame to the given path (or ./logician-tui-render.log). Writing to a file
+// rather than stdout/stderr keeps it out of the alt-screen buffer being
+// measured. This is the only consumer of RendererMetrics today — without it
+// the per-frame timing/dirty-row data core.ts already computes had nowhere to
+// go, so profiling real sessions meant adding ad-hoc console.error calls.
+const RENDER_DEBUG_ENABLED = process.env.LOGICIAN_TUI_DEBUG_RENDER === "1";
+const RENDER_DEBUG_PATH =
+	process.env.LOGICIAN_TUI_DEBUG_RENDER_PATH || "logician-tui-render.log";
+
+function logRenderMetrics(metrics: RendererMetrics): void {
+	try {
+		appendFileSync(
+			RENDER_DEBUG_PATH,
+			`${JSON.stringify({ t: Date.now(), ...metrics })}\n`,
+		);
+	} catch {
+		// Debug logging is best-effort; never let it break rendering.
+	}
+}
 
 // ── TUI — Differential rendering ────────────────────────────────────────────
 
@@ -518,7 +541,10 @@ export class TUI extends Container {
 		}, delay);
 	}
 
-	private static readonly WHEEL_STEP = 4;
+	// Lines moved per wheel tick. Kept small so a single notch reads as a
+	// glide rather than a jump; fast spins still move proportionally further
+	// because multiple ticks batched into one stdin chunk are coalesced below.
+	private static readonly WHEEL_STEP = 2;
 
 	private handleInput(data: string): void {
 		const hasVisibleOverlay = this.overlayStack.some((entry) => {
@@ -854,12 +880,22 @@ export class TUI extends Container {
 			const newLine = row < finalLines.length ? finalLines[row] : " ".repeat(termWidth);
 			const hasMarker = newLine.includes(CURSOR_MARKER);
 
-			// Extract cursor marker position before stripping
+			// Extract cursor marker position before stripping. Done for every
+			// row, even ones whose text didn't change, since the marker can
+			// land on such a row while other rows moved.
 			if (hasMarker) {
 				const markerIdx = newLine.indexOf(CURSOR_MARKER);
 				markerRow = row;
 				markerCol = visibleWidth(newLine.slice(0, markerIdx));
 			}
+
+			// Most rows are untouched most frames (static scrollback, blank
+			// padding, unrelated status regions). Skip the marker-strip
+			// allocation and cell parse entirely when the raw row is identical
+			// to last frame — a row carrying the marker but unchanged text
+			// still stripped to the same string both times, so re-diffing it
+			// would be a no-op anyway.
+			if (prevLine === newLine) continue;
 
 			// Strip CURSOR_MARKER for cell parsing
 			const cleanNew = newLine.replace(CURSOR_MARKER, "");
@@ -882,9 +918,9 @@ export class TUI extends Container {
 				continue;
 			}
 
-			// Most rows are untouched most frames (static scrollback, blank
-			// padding, unrelated status regions). Skip the full ANSI-aware cell
-			// parse + diff for both strings when the row didn't change at all.
+			// Reachable when the raw lines differed only in marker position —
+			// stripping the marker made both sides equal, so there's nothing
+			// left to diff.
 			if (cleanPrev === cleanNew) continue;
 
 			const lineDiff = diffTerminalLineWithMetrics(
@@ -967,6 +1003,7 @@ export class TUI extends Container {
 			layoutTimeMs: layoutFinishedAt - frameStartedAt,
 			writeTimeMs: frameFinishedAt - writeStartedAt,
 		};
+		if (RENDER_DEBUG_ENABLED) logRenderMetrics(this.lastRenderMetrics);
 	}
 
 	getLastRenderMetrics(): RendererMetrics {
