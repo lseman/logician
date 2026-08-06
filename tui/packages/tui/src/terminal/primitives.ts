@@ -144,7 +144,7 @@ export function clampLineToWidth(text: string, width: number): string {
 // Place `overlayLine` (already clamped to `overlayWidth`) into `baseLine` at
 // column `startCol`, padding both sides with spaces out to `totalWidth`.
 // Resets styles at each boundary so a colored child never bleeds into its
-// neighbor — used by HStack to compose siblings left-to-right on one row.
+// neighbor — used by Flex's row direction to compose siblings left-to-right.
 export function compositeTuiLine(
 	baseLine: string,
 	overlayLine: string,

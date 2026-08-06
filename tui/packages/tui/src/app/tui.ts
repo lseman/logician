@@ -54,7 +54,7 @@ import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator
 import { WorkSurface } from "../status/work-surface.ts";
 import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
 import { Container, TUI } from "../terminal/core.ts";
-import { VStack } from "../rendering/v-stack.ts";
+import { Flex } from "../rendering/flex.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { Separator } from "../rendering/separator.ts";
 import { theme } from "../terminal/theme.ts";
@@ -505,7 +505,7 @@ export class LogicianTUI {
 			maxHeight: 18,
 		});
 
-		const dock = new VStack([
+		const dock = new Flex([
 			{ component: new Separator(), basis: 1 },
 			{ component: pinnedContainer, basis: "auto", shrink: 1, minSize: 0 },
 			{ component: this.tui.getAboveInputOverlaysComponent(), basis: "auto", shrink: 1, minSize: 0 },
@@ -513,7 +513,7 @@ export class LogicianTUI {
 			{ component: new Separator(), basis: 1 },
 			{ component: this.statusPanel, basis: "auto", shrink: 1, minSize: 1 },
 		]);
-		const root = new VStack([
+		const root = new Flex([
 			{ component: transcriptScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
 			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 		]);

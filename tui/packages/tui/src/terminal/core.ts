@@ -1080,7 +1080,7 @@ export class TUI extends Container {
 	// When set, _doRenderInner() builds the frame through the constrained
 	// layout engine (rendering/layout.ts) instead of the hand-assembled
 	// transcript/separator/pinned/input/status block below. Regions are then
-	// whatever VStack/HStack/ScrollView tree the caller composes.
+	// whatever Flex/ScrollView tree the caller composes.
 
 	setLayoutRoot(component: Component | null): void {
 		this.layoutRoot = component;
