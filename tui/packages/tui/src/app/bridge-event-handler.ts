@@ -308,6 +308,7 @@ export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent
 				void ctx.bridge.getState().then((state) => {
 					ctx.statusPanel.update({
 						mcpServerCount: Number(state.mcp_servers || 0),
+						mcpLoading: false,
 					});
 				});
 			} else if (event.label === "Memory") {

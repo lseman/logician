@@ -121,7 +121,14 @@ export interface AgentBridgeOptions {
 	permissionRules?: PermissionRules;
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
+	/** Whether a turn blocks waiting for MCP discovery to finish. Discovery
+	 * itself always starts in the background at construction regardless of
+	 * this — it only controls whether a turn's tool snapshot waits for it. */
 	mcpEager?: boolean;
+	/** Test-only: suppress the construction-time MCP auto-start so unit tests
+	 * can stub McpManager/loadMcpToolsOnce before anything real fires.
+	 * Real app startup never sets this — MCP always auto-starts on open. */
+	autoStartMcp?: boolean;
 	tools?: Tool[];
 	cwd?: string;
 	systemPrompt?: string;
@@ -315,6 +322,7 @@ export class AgentCoreBridge {
 			emit: (event) => this.emit(event),
 			onToolAdded: () => this.addDefaultTool(),
 			onContextChanged: () => this.rebuildBaseSystemPrompt(),
+			autoStartMcp: opts.autoStartMcp,
 		});
 		this.backend = new OpenAIBackend({
 			baseUrl: opts.baseUrl,
@@ -648,15 +656,16 @@ export class AgentCoreBridge {
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
 		try {
 			await this.runStartupHooksOnce();
-			// Eager discovery is a real first-turn barrier so the provider's tool
-			// snapshot includes MCP capabilities. Deferred mode remains non-blocking.
+			// MCP loads in the background from the moment the bridge is
+			// constructed (see ToolRouter's constructor) — never block turn
+			// submission on it. Whatever has finished connecting by the time the
+			// prompt actually goes out is what the model sees; a load still in
+			// flight keeps running and its tools become available on the next
+			// turn once it settles.
 			if (!this.toolRouter.isMcpLoaded()) {
-				const mcpLoad = this.toolRouter.loadMcpToolsOnce();
-				if (this.mcpEager) {
-					await mcpLoad;
-				} else {
-					void mcpLoad.catch((error) => this.reportError(error));
-				}
+				void this.toolRouter
+					.loadMcpToolsOnce()
+					.catch((error) => this.reportError(error));
 			}
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
@@ -1383,6 +1392,12 @@ export class AgentCoreBridge {
 		return this.reasonerId;
 	}
 
+	/** Whether MCP discovery has started but not finished — lets the TUI show
+	 * a "loading" status while background discovery is in flight. */
+	isMcpLoading(): boolean {
+		return this.toolRouter.isMcpLoading();
+	}
+
 	setInferenceMode(mode: string): void {
 		this.config.inferenceMode = mode as typeof this.config.inferenceMode;
 		this.harness?.setInferenceMode(mode);
@@ -1692,21 +1707,15 @@ export class AgentCoreBridge {
 	async init(): Promise<Record<string, unknown>> {
 		await this.runStartupHooksOnce();
 		this.ensureHarness();
-		if (this.mcpEager) {
-			// Start discovery during initialization. The first user turn awaits
-			// this same promise before taking its tool snapshot.
-			void this.toolRouter.loadMcpToolsOnce().then(
-				() => {
-					this.emit({
-						type: "notice",
-						level: this.toolRouter.getMcpErrors().length ? "warn" : "info",
-						label: "MCP",
-						text: `Loaded ${this.toolRouter.getMcpServerCount()} server(s).`,
-					});
-				},
-				(error) => this.reportError(error),
-			);
-		}
+		// MCP discovery already started in ToolRouter's constructor — fire-
+		// and-forget from the moment the bridge exists, not gated behind
+		// init() or the first message. loadMcpToolsOnce() is memoized, so this
+		// just observes the same in-flight/settled load instead of starting a
+		// second one; the "Loaded N server(s)" notice fires once, from inside
+		// loadMcpToolsOnce() itself, whenever that load actually finishes.
+		void this.toolRouter
+			.loadMcpToolsOnce()
+			.catch((error) => this.reportError(error));
 		const toolNames =
 			this.harness?.tools?.list().map((t: Tool) => t.name) ||
 			this.toolRouter.getDefaultTools().map((t) => t.name);

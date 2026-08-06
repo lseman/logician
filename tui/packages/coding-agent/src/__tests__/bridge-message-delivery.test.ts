@@ -129,6 +129,7 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 		model: "test",
 		runtimeHooksEnabled: false,
 		mcpEager: false,
+		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
@@ -152,12 +153,13 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 	assert.equal(bridge.isActive(), false);
 });
 
-void test("eager MCP discovery blocks the first tool snapshot until ready", async () => {
+void test("MCP discovery never blocks the first turn — it loads in the background", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
 		mcpEager: true,
+		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
@@ -174,13 +176,14 @@ void test("eager MCP discovery blocks the first tool snapshot until ready", asyn
 		},
 	};
 
-	const sending = bridge.sendMessage("hello");
-	await Promise.resolve();
-	assert.equal(delivered, false);
+	// The turn should complete without ever waiting on the in-flight MCP
+	// load — MCP starts loading the moment the bridge (ToolRouter) is
+	// constructed and keeps loading in the background regardless of when,
+	// or whether, the load promise settles.
+	await bridge.sendMessage("hello");
+	assert.equal(delivered, true);
 
 	resolveLoad();
-	await sending;
-	assert.equal(delivered, true);
 });
 
 void test("MCP load failures are injected into the system prompt", async () => {
@@ -189,6 +192,7 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		model: "test",
 		runtimeHooksEnabled: false,
 		mcpEager: false,
+		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.toolRouter.mcpManager = {
@@ -218,6 +222,7 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		model: "test",
 		runtimeHooksEnabled: false,
 		mcpEager: false,
+		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.toolRouter.getSkillsContext = () =>

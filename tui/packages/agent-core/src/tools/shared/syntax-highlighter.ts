@@ -96,27 +96,64 @@ export interface HighlightResult {
 	language?: string;
 }
 
+// A TUI turn re-renders its whole transcript on every streamed chunk (see
+// TranscriptDisplay's per-turn cache in packages/tui), which re-runs this
+// highlighter over every code fence in that turn every time — including
+// fences that finished streaming turns ago and whose content hasn't changed
+// since. Highlighting is a pure function of (code, language), so a small
+// bounded cache turns "already-closed code block" back into an O(1) hit
+// instead of a full re-parse on every subsequent chunk of the same turn.
+const HIGHLIGHT_CACHE_MAX = 200;
+const highlightCache = new Map<string, HighlightResult>();
+
+function cacheGet(key: string): HighlightResult | undefined {
+	const hit = highlightCache.get(key);
+	if (hit === undefined) return undefined;
+	// Refresh insertion order so recently-used entries survive eviction.
+	highlightCache.delete(key);
+	highlightCache.set(key, hit);
+	return hit;
+}
+
+function cacheSet(key: string, value: HighlightResult): void {
+	if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) {
+		const oldest = highlightCache.keys().next().value;
+		if (oldest !== undefined) highlightCache.delete(oldest);
+	}
+	highlightCache.set(key, value);
+}
+
 /**
  * Highlight code with auto-detection. Falls back to plain text.
  */
 export function highlightAuto(code: string): HighlightResult {
+	const key = `auto ${code}`;
+	const cached = cacheGet(key);
+	if (cached) return cached;
 	const opts: AutoOptions = { sheet: DARK_SHEET as Sheet };
 	const result = instance.highlightAuto(code, opts);
-	return {
+	const out: HighlightResult = {
 		value: result.value ?? code,
 		language: result.language,
 	};
+	cacheSet(key, out);
+	return out;
 }
 
 /**
  * Highlight code for a specific language. Falls back to plain text.
  */
 export function highlight(code: string, language: string): HighlightResult {
+	const key = `${language} ${code}`;
+	const cached = cacheGet(key);
+	if (cached) return cached;
 	const result = instance.highlight(language, code, DARK_SHEET as Sheet);
-	return {
+	const out: HighlightResult = {
 		value: result.value ?? code,
 		language: result.language,
 	};
+	cacheSet(key, out);
+	return out;
 }
 
 /** Highlight with a caller-owned style sheet (for structured/non-ANSI renderers). */

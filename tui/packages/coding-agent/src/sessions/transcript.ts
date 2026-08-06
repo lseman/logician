@@ -436,6 +436,13 @@ export class Transcript {
 			return;
 		}
 
+		// MCP load/reload notices only carry a server count — the status bar's
+		// mcp indicator (loading… -> N, driven by this same event in
+		// bridge-event-handler.ts) already surfaces that. A transcript line
+		// per load is redundant clutter, especially since it can fire more
+		// than once per session (startup, /mcp refresh, plugin toggle).
+		if (event.label === "MCP") return;
+
 		const turn = this.getCurrentTurn();
 		if (!turn) return;
 		const msg = this.ensureAssistant(turn);

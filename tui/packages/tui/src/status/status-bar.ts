@@ -32,6 +32,7 @@ interface StatusInfo {
 	goalTurnCount?: number;
 	goalElapsed?: number;
 	mcpServerCount?: number;
+	mcpLoading?: boolean;
 	sandboxMode?: "none" | "code" | "file" | "dev" | "full";
 	permissionMode?: string;
 	executionProfile?: "autonomous" | "minimal";
@@ -60,6 +61,7 @@ const DEFAULT_INFO: StatusInfo = {
 	reasoner: "none",
 	sessionTitle: "",
 	mcpServerCount: 0,
+	mcpLoading: false,
 	sandboxMode: "code",
 	permissionMode: "acceptAll",
 	executionProfile: "autonomous",
@@ -182,7 +184,7 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatTokenFlow());
 		insertIfFits(this.formatGoal());
 		insertIfFits(this.formatInferenceMode());
-		if (this.info.mcpServerCount) insertIfFits(this.formatMcp());
+		if (this.info.mcpServerCount || this.info.mcpLoading) insertIfFits(this.formatMcp());
 		insertIfFits(this.formatSandbox());
 		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
@@ -390,6 +392,9 @@ export class StatusBar implements Component {
 	}
 
 	private formatMcp(): string {
+		if (this.info.mcpLoading) {
+			return `${DIM}mcp${RESET} ${theme.fg("warning", "loading…")}`;
+		}
 		const count = this.info.mcpServerCount || 0;
 		return `${DIM}mcp${RESET} ${theme.fg("accent", `${count}`)}${RESET}`;
 	}

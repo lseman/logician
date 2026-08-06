@@ -42,6 +42,19 @@ export interface ToolRouterDeps {
 	onToolAdded: (tool: Tool) => void;
 	/** MCP/skills context changed (even with no new tools) — bridge should rebuild the system prompt. */
 	onContextChanged: () => void;
+	/**
+	 * Start MCP discovery in the background the moment this router is
+	 * constructed, instead of waiting for the first caller that needs it.
+	 * Defaults to true for real sessions — this is a construction-time
+	 * side-effect switch only, unrelated to the user-facing `mcpEager` bridge
+	 * option (which controls whether a turn *blocks* on MCP, not whether
+	 * discovery starts). Set false to keep construction free of network/
+	 * subprocess side effects — tests that stub `mcpManager` or
+	 * `loadMcpToolsOnce()` after construction need this, since otherwise the
+	 * real load can already be in flight (and win the memoized promise) by
+	 * the time the stub is installed.
+	 */
+	autoStartMcp?: boolean;
 }
 
 /** Snapshot of MCP/skill state as reported by getState()/init(). */
@@ -101,6 +114,13 @@ export class ToolRouter {
 				...deps.extraTools.filter((tool) => !this.defaultTools.some((existing) => existing.name === tool.name)),
 			];
 		}
+
+		// Fire-and-forget: start MCP connections as soon as Logician opens,
+		// regardless of the user-facing mcpEager setting — that setting only
+		// controls whether a turn blocks waiting for MCP, not whether
+		// discovery starts. Opt out (autoStartMcp: false) to keep construction
+		// free of side effects — see ToolRouterDeps.
+		if (deps.autoStartMcp !== false) void this.loadMcpToolsOnce();
 	}
 
 	// ── Default tools ────────────────────────────────────────────────────
@@ -185,6 +205,17 @@ export class ToolRouter {
 					if (!newTools.length) this.onContextChanged();
 				}
 				this.mcpLoaded = true;
+				// Single source of truth for "MCP finished loading," regardless of
+				// who triggered it (startup prewarm, a slash command, or the first
+				// turn falling back to a lazy load) — the caller doesn't need its
+				// own .then() to surface this, and there's no risk of it firing
+				// twice for one load since mcpLoadPromise is memoized above.
+				this.emit({
+					type: "notice",
+					level: result.errors.length ? "warn" : "info",
+					label: "MCP",
+					text: `Loaded ${result.servers} server(s).`,
+				});
 			})();
 		}
 		await this.mcpLoadPromise;

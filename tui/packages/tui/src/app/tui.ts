@@ -353,6 +353,12 @@ export class LogicianTUI {
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
 			memoryEnabled: runtimeConfig.bridge.memoryEnabled ?? false,
+			// MCP discovery starts in the background the moment the bridge is
+			// constructed (ToolRouter's constructor), so it's typically already
+			// in flight by the time this status line renders. The "MCP" notice
+			// handler in bridge-event-handler.ts flips this back off and fills
+			// in the server count once loading actually finishes.
+			mcpLoading: this.bridge.isMcpLoading(),
 		});
 
 		// Setup slash commands
