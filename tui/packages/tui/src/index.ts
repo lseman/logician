@@ -128,6 +128,18 @@ async function main(): Promise<void> {
 			break;
 		}
 	}
+
+	// ── Parse UI mode: main-screen (default) prints append-only into the
+	// terminal's own scrollback instead of taking over the alternate screen
+	// buffer. --fullscreen opts back into the old alt-screen, fixed-viewport
+	// behavior.
+	let uiMode: "fullscreen" | "regular" = "regular";
+	if (
+		args.includes("--fullscreen") ||
+		process.env.LOGICIAN_UI_MODE === "fullscreen"
+	) {
+		uiMode = "fullscreen";
+	}
 	if (args[0] === "exec") {
 		try {
 			const execArgs = parseExecArgs(args.slice(1));
@@ -213,7 +225,7 @@ async function main(): Promise<void> {
 		console.error(`Theme: ${theme.name} (available: ${themes.join(", ")})`);
 	}
 
-	const tui = new LogicianTUI(runtimeConfig);
+	const tui = new LogicianTUI(runtimeConfig, uiMode);
 
 	// Load explicit session if --session <id> was passed
 	if (resumeSessionId) {

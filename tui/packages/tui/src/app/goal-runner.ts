@@ -10,13 +10,13 @@ import {
 } from "@logician/coding-agent/application";
 import type { Transcript } from "@logician/coding-agent/sessions";
 import type { TranscriptDisplay } from "../rendering/transcript/display.ts";
-import type { TUI } from "../terminal/core.ts";
+import type { TuiHandle } from "../terminal/core.ts";
 
 export interface GoalRunnerCtx {
 	bridge: AgentCoreBridge;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
-	tui: TUI;
+	tui: TuiHandle;
 	goalManager: GoalManager;
 	goalActive: boolean;
 	goalEvaluationPending: boolean;

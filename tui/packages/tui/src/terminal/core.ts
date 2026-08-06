@@ -1519,3 +1519,29 @@ export interface OverlayOptions {
 	 * screen rect. Only wired up in layout-engine mode (setLayoutRoot). */
 	onClick?: () => void;
 }
+
+// ── Shared renderer surface ──────────────────────────────────────────────────
+// The narrow slice of TUI that app/*.ts "Ctx" interfaces actually call
+// (verified by grep: requestRender, renderNow, addInputListener, showOverlay,
+// removeOverlay). Both TUI (alt-screen, fixed viewport) and TuiMainScreen
+// (append-only, native scrollback — see terminal/main-screen.ts) implement
+// this structurally, so app/*.ts code stays renderer-agnostic without caring
+// which mode is active.
+export interface TuiHandle {
+	requestRender(force?: boolean, immediate?: boolean): void;
+	renderNow(): void;
+	addInputListener(
+		listener: (
+			data: string,
+		) => { consume?: boolean; data?: string } | undefined,
+	): () => void;
+	showOverlay(
+		component: Component,
+		options?: OverlayOptions,
+	): {
+		hide: () => void;
+		setHidden: (hidden: boolean) => void;
+		focus: () => void;
+	};
+	removeOverlay(component: Component): void;
+}

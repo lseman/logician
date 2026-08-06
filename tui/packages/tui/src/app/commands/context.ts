@@ -16,10 +16,10 @@ import type { SlashPopup } from "../../overlays/slash-popup.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { NotificationCenter } from "../../status/notification-center.ts";
 import type { StatusBar } from "../../status/status-bar.ts";
-import type { TUI } from "../../terminal/core.ts";
+import type { TuiHandle } from "../../terminal/core.ts";
 
 export interface SlashCommandsCtx {
-	tui: TUI;
+	tui: TuiHandle;
 	bridge: AgentCoreBridge;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;

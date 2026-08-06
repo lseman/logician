@@ -26,13 +26,13 @@ import type { StatusBar } from "../status/status-bar.ts";
 import type { SteerQueue } from "../status/steer-queue.ts";
 import type { TodoBar } from "../status/todo-bar.ts";
 import type { WorkSurface } from "../status/work-surface.ts";
-import type { TUI } from "../terminal/core.ts";
+import type { TuiHandle } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import { getGitVersion } from "./git-status.ts";
 import { formatStartupMessage } from "./startup/message.ts";
 
 export interface BridgeEventHandlerCtx {
-	tui: TUI;
+	tui: TuiHandle;
 	bridge: AgentCoreBridge;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;

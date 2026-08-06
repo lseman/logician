@@ -10,7 +10,7 @@ import type { SettingsSelectorOverlay } from "../../overlays/settings-overlay.ts
 import type { ThemeSelectorOverlay } from "../../overlays/theme-selector.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { StatusBar } from "../../status/status-bar.ts";
-import type { TUI } from "../../terminal/core.ts";
+import type { TuiHandle } from "../../terminal/core.ts";
 import type { InferenceMode } from "../inference-settings.ts";
 
 export type NotifyFn = (
@@ -19,7 +19,7 @@ export type NotifyFn = (
 ) => void;
 
 export interface OverlayHandlersCtx {
-	tui: TUI;
+	tui: TuiHandle;
 	bridge: AgentCoreBridge;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;

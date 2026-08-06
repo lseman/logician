@@ -14,11 +14,11 @@ import {
 import type { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
 import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
 import type { StatusBar } from "../../status/status-bar.ts";
-import type { TUI } from "../../terminal/core.ts";
+import type { TuiHandle } from "../../terminal/core.ts";
 import { turnsToMessages } from "./messages.ts";
 
 export interface SessionControllerCtx {
-	tui: TUI;
+	tui: TuiHandle;
 	bridge: AgentCoreBridge;
 	transcript: Transcript;
 	transcriptDisplay: TranscriptDisplay;
