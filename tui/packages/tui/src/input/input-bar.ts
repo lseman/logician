@@ -38,8 +38,34 @@ export class InputBar implements Component, Focusable {
 	public focused = false;
 
 	// State
-	private value = "";
+	private _value = "";
 	private cursor = 0; // grapheme index
+	// Segmentation cache: re-running Intl.Segmenter over the whole buffer on
+	// every keystroke is O(buffer length) per key, which compounds once a large
+	// paste sits in the composer. Cached here and invalidated only when `value`
+	// is reassigned via `_setValue`/`this.value =`.
+	private _segsCache: string[] | null = null;
+	private _segsCacheValue: string | null = null;
+
+	private get value(): string {
+		return this._value;
+	}
+
+	private set value(text: string) {
+		this._value = text;
+	}
+
+	private _segments(text: string = this._value): string[] {
+		if (text === this._segsCacheValue && this._segsCache !== null) {
+			return this._segsCache;
+		}
+		const segs = [...segmenter.segment(text)].map((s) => s.segment);
+		if (text === this._value) {
+			this._segsCache = segs;
+			this._segsCacheValue = text;
+		}
+		return segs;
+	}
 	private history: string[] = [];
 	private historyIndex: number | null = null;
 	private historyUnsaved: string | null = null;
@@ -123,7 +149,7 @@ export class InputBar implements Component, Focusable {
 	 * current line segment.
 	 */
 	getActiveMentionQuery(): string | null {
-		const segs = [...segmenter.segment(this.value)].map((s) => s.segment);
+		const segs = this._segments();
 		const before = segs.slice(0, this.cursor).join("");
 		const at = before.lastIndexOf("@");
 		if (at === -1) return null;
@@ -134,7 +160,7 @@ export class InputBar implements Component, Focusable {
 
 	/** Replace the active "@partial" token at the cursor with "@path ". */
 	insertMention(path: string): void {
-		const segs = [...segmenter.segment(this.value)].map((s) => s.segment);
+		const segs = this._segments();
 		const before = segs.slice(0, this.cursor).join("");
 		const after = segs.slice(this.cursor).join("");
 		const at = before.lastIndexOf("@");
@@ -394,27 +420,24 @@ export class InputBar implements Component, Focusable {
 	// ── Private helpers ────────────────────────────────────────────────────
 
 	private _graphemeCount(text: string): number {
-		return [...segmenter.segment(text)].length;
+		return this._segments(text).length;
 	}
 
 	private _graphemeSlice(text: string, from: number, to?: number): string {
-		const segs = [...segmenter.segment(text)];
+		const segs = this._segments(text);
 		const end = to !== undefined ? to : segs.length;
-		return segs
-			.slice(from, end)
-			.map((s) => s.segment)
-			.join("");
+		return segs.slice(from, end).join("");
 	}
 
 	private _insert(ch: string): void {
 		this._pushUndo();
-		const segs = [...segmenter.segment(this.value)];
+		const segs = this._segments();
 		const newSegs = [
 			...segs.slice(0, this.cursor),
-			...[...segmenter.segment(ch)],
+			...this._segments(ch),
 			...segs.slice(this.cursor),
 		];
-		this.value = newSegs.map((s) => s.segment).join("");
+		this.value = newSegs.join("");
 		this.cursor += this._graphemeCount(ch);
 		this._invalidate();
 	}
@@ -422,9 +445,9 @@ export class InputBar implements Component, Focusable {
 	private _handleBackspace(): void {
 		if (this.cursor === 0) return;
 		this._pushUndo();
-		const segs = [...segmenter.segment(this.value)];
+		const segs = this._segments().slice();
 		segs.splice(this.cursor - 1, 1);
-		this.value = segs.map((s) => s.segment).join("");
+		this.value = segs.join("");
 		this.cursor -= 1;
 		this._invalidate();
 	}
@@ -433,15 +456,15 @@ export class InputBar implements Component, Focusable {
 		const totalGraphemes = this._graphemeCount(this.value);
 		if (this.cursor >= totalGraphemes) return;
 		this._pushUndo();
-		const segs = [...segmenter.segment(this.value)];
+		const segs = this._segments().slice();
 		segs.splice(this.cursor, 1);
-		this.value = segs.map((s) => s.segment).join("");
+		this.value = segs.join("");
 		this._invalidate();
 	}
 
 	/** Move vertically through pasted/multiline input while preserving column. */
 	private _moveToAdjacentLine(direction: -1 | 1): boolean {
-		const segments = [...segmenter.segment(this.value)].map((item) => item.segment);
+		const segments = this._segments();
 		const beforeCursor = segments.slice(0, this.cursor);
 		const previousBreak = beforeCursor.lastIndexOf("\n");
 		const lineStart = previousBreak + 1;
@@ -476,9 +499,9 @@ export class InputBar implements Component, Focusable {
 		this.cursor = findWordBackward(this.value, this.cursor);
 		const deleted = this._graphemeSlice(this.value, this.cursor, oldCursor);
 		this._killRing?.push(deleted, { prepend: true, accumulate: true });
-		const segs = [...segmenter.segment(this.value)];
+		const segs = this._segments().slice();
 		segs.splice(this.cursor, oldCursor - this.cursor);
-		this.value = segs.map((s) => s.segment).join("");
+		this.value = segs.join("");
 		this._invalidate();
 	}
 
@@ -487,9 +510,9 @@ export class InputBar implements Component, Focusable {
 		this._pushUndo();
 		const deleted = this._graphemeSlice(this.value, 0, this.cursor);
 		this._killRing?.push(deleted, { prepend: true, accumulate: true });
-		const segs = [...segmenter.segment(this.value)];
+		const segs = this._segments().slice();
 		segs.splice(0, this.cursor);
-		this.value = segs.map((s) => s.segment).join("");
+		this.value = segs.join("");
 		this.cursor = 0;
 		this._invalidate();
 	}
@@ -619,9 +642,7 @@ export class InputBar implements Component, Focusable {
 		}
 
 		// Grapheme segments for cursor positioning
-		const allSegments = [...segmenter.segment(displayText)].map(
-			(s) => s.segment,
-		);
+		const allSegments = isPlaceholder ? this._segments(displayText) : this._segments();
 		const graphCursor = Math.min(this.cursor, allSegments.length);
 		const viewport = this._inputViewport(
 			allSegments,

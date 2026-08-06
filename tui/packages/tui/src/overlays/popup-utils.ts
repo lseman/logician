@@ -11,9 +11,11 @@ import {
 	clampLineToWidth,
 	DIM,
 	RESET,
+	type Component,
 	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 // ── ANSI codes ──────────────────────────────────────────────────────────────
 
@@ -429,4 +431,121 @@ export function renderStatusLine(
 	const lineVisible = visibleWidth(line);
 	const padRight = Math.max(0, innerWidth - lineVisible);
 	return `${" ".repeat(pad)}${line}${" ".repeat(padRight + pad)}`;
+}
+
+// ── Generic list-select overlay ─────────────────────────────────────────────
+// Base for the "list, select, confirm, close" popups (theme/model/reasoner
+// selectors): identical show/hide/cache-invalidation/handleInput/render
+// shape, differing only in item type, its ListItem mapping, and title/hints/
+// empty-state text. Subclasses stay tiny wrappers that supply that config.
+
+export type SelectAction<T> = { type: "select"; item: T } | { type: "close" };
+
+export interface ListSelectorConfig<T> {
+	title: string;
+	hints?: string;
+	emptyText: string;
+	/** Shown as the bottom-bar text whenever no transient message (e.g. "Switching to X...") is set. */
+	defaultMessage: string;
+	maxRows?: number;
+	toItem: (item: T, index: number, selectedIndex: number) => ListItem;
+}
+
+export class ListSelectorOverlay<T> implements Component {
+	public visible = false;
+	protected items: T[] = [];
+	protected selection = new SelectorController();
+	protected message = "";
+	private cachedLines: string[] | null = null;
+	private cachedWidth = -1;
+
+	constructor(private readonly config: ListSelectorConfig<T>) {}
+
+	setItems(items: T[], preferredIndex = this.selection.index): void {
+		this.items = items;
+		this.selection.set(preferredIndex, this.items.length);
+		this.invalidate();
+	}
+
+	setMessage(message: string): void {
+		this.message = message;
+		this.invalidate();
+	}
+
+	show(): void {
+		this.visible = true;
+		this.invalidate();
+	}
+
+	hide(): void {
+		this.visible = false;
+		this.invalidate();
+	}
+
+	isVisibleOverlay(): boolean {
+		return this.visible;
+	}
+
+	/** Named distinctly from `handleInput` so subclasses can expose their own
+	 * narrowed action type (e.g. `{ type: "select"; reasoner: ReasonerInfo }`)
+	 * without hitting TS's method-override return-type variance rules. */
+	handleListInput(data: string): SelectAction<T> | null {
+		if (!this.visible) return null;
+
+		const nav = parsePopupListNav(data);
+		if (nav?.type === "close") return { type: "close" };
+		if (nav?.type === "confirm") {
+			const item = this.items[this.selection.index];
+			return item ? { type: "select", item } : { type: "close" };
+		}
+		if (nav?.type === "move") {
+			this.moveSelection(nav.delta);
+		}
+		return null;
+	}
+
+	invalidate(): void {
+		this.cachedLines = null;
+	}
+
+	render(width: number): string[] {
+		if (width === this.cachedWidth && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+
+		if (!this.visible) return [];
+
+		const popupWidth = Math.max(1, width);
+		const innerWidth = Math.max(1, popupWidth - POPUP_FRAME_OVERHEAD);
+
+		const bodyLines = renderListPopupBody(
+			this.items,
+			this.selection,
+			innerWidth,
+			this.config.maxRows ?? 10,
+			(item, i) => renderListItem(this.config.toItem(item, i, this.selection.index), innerWidth),
+			this.config.emptyText,
+		);
+
+		const lines = renderListPopupFrame({
+			popupWidth,
+			innerWidth,
+			title: this.config.title,
+			subtitle: ` (${this.items.length})`,
+			hints: this.config.hints ?? " ↑↓ select · enter confirm · esc close",
+			bodyLines,
+			bottomText: this.message || this.config.defaultMessage,
+		});
+
+		this.cachedLines = clampPopupLines(lines, width);
+		return this.cachedLines;
+	}
+
+	private moveSelection(delta: number): void {
+		const n = this.items.length;
+		if (!n) return;
+		this.selection.move(delta, n);
+		this.invalidate();
+	}
 }
