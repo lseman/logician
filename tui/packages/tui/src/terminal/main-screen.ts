@@ -237,16 +237,6 @@ export class TuiMainScreen extends Container {
 			}
 		}
 		process.stdin.resume();
-		this.stdinHandler = (data: string | Buffer) => {
-			const str = Buffer.isBuffer(data) ? data.toString("utf-8") : data;
-			// Kitty's disambiguate-escape-codes mode (enabled below via \x1b[>1u)
-			// reports plain Escape as CSI 27u instead of a bare 0x1b — without
-			// translating it back, every `data === "\x1b"` check in the app
-			// (Esc-to-cancel, popup dismissal, etc.) silently never matches.
-			this.handleInput(normalizeKeyboardInput(str));
-			this.requestRender(false, true);
-		};
-		process.stdin.on("data", this.stdinHandler);
 
 		// A resize can leave previousLines addressed against stale geometry —
 		// force a full repaint (which for main-screen mode means: stop trying
@@ -260,19 +250,24 @@ export class TuiMainScreen extends Container {
 		};
 		process.stdout.on("resize", this.resizeHandler);
 
-		// No alt-screen enter, no clear. Bracketed paste still helps the input
-		// bar distinguish pasted text from typed input.
+		// No alt-screen enter, no clear, no pre-scroll. Bracketed paste still
+		// helps the input bar distinguish pasted text from typed input.
+		// Render fresh from wherever the cursor already is, same as pi —
+		// prior shell output stays exactly where it is, on screen and in
+		// scrollback, untouched.
 		process.stdout.write("\x1b[?2004h\x1b[>1u");
 
-		// Push whatever's currently on screen (shell prompt, previous command
-		// output) up into the terminal's own scrollback so logician starts on a
-		// fresh line, the same way pi's TuiMainScreen appears to on launch.
-		// Printing a full screen's worth of newlines is what makes a real
-		// terminal do this: content that scrolls off the top goes to
-		// scrollback, not lost — the user can still scroll up to see it.
-		const rows = Math.max(1, process.stdout.rows || 24);
-		process.stdout.write("\n".repeat(rows));
-
+		this.stdinHandler = (data: string | Buffer) => {
+			const str = Buffer.isBuffer(data) ? data.toString("utf-8") : data;
+			// Kitty's disambiguate-escape-codes mode (enabled below via
+			// \x1b[>1u) reports plain Escape as CSI 27u instead of a bare
+			// 0x1b — without translating it back, every `data === "\x1b"`
+			// check in the app (Esc-to-cancel, popup dismissal, etc.)
+			// silently never matches.
+			this.handleInput(normalizeKeyboardInput(str));
+			this.requestRender(false, true);
+		};
+		process.stdin.on("data", this.stdinHandler);
 		this.requestRender(true);
 	}
 
