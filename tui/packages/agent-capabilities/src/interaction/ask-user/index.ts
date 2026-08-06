@@ -142,11 +142,11 @@ export const ask_user: Tool = {
 
 		if (
 			questions.length === 0 ||
-			questions.some((item) => !item.choices.length)
+			questions.some(item => !item.choices.length)
 		) {
 			return "Error: ask_user requires at least one choice with 'value' and 'label'.";
 		}
-		if (new Set(questions.map((item) => item.id)).size !== questions.length) {
+		if (new Set(questions.map(item => item.id)).size !== questions.length) {
 			return "Error: ask_user question ids must be unique.";
 		}
 

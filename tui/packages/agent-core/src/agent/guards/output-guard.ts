@@ -15,8 +15,8 @@
 //
 // Usage: create one per harness/loop invocation, feed each response + error.
 
-import type { EventHandler } from "../types.ts";
 import { BackendError, type BackendErrorCategory } from "../backend.ts";
+import type { EventHandler } from "../types.ts";
 import type { LoopDetector } from "./loop-detector.ts";
 import { NON_COMMITTAL_PATTERNS } from "./response-patterns.ts";
 
@@ -124,7 +124,8 @@ export class OutputGuard {
 			if (this.config.maxRetries === 0) {
 				return {
 					action: "abort",
-					message: "Malformed assistant message and automatic retries are disabled.",
+					message:
+						"Malformed assistant message and automatic retries are disabled.",
 					isRetryable: false,
 				};
 			}
@@ -173,12 +174,11 @@ export class OutputGuard {
 		// Context-full: auto-compact and retry
 		if (category === "context_full") {
 			this.retryCount = 0; // Reset retry count for context errors
-			if (
-				this.config.autoCompactOnContextFull &&
-				this.config.maxRetries > 0
-			) {
+			if (this.config.autoCompactOnContextFull && this.config.maxRetries > 0) {
 				this.consecutiveCompactions++;
-				if (this.consecutiveCompactions > this.config.maxConsecutiveCompactions) {
+				if (
+					this.consecutiveCompactions > this.config.maxConsecutiveCompactions
+				) {
 					this.emitEvent({
 						type: "auto_retry_end",
 						attempt: this.consecutiveCompactions,
@@ -252,7 +252,8 @@ export class OutputGuard {
 				attempt: 1,
 				maxRetries: 1,
 				isRetryable: true,
-				message: "Rate limited near context capacity — compaction triggered before retry.",
+				message:
+					"Rate limited near context capacity — compaction triggered before retry.",
 			};
 		}
 
@@ -292,11 +293,7 @@ export class OutputGuard {
 		}
 
 		// Unknown/unclassified error: single retry as safety net
-		if (
-			!backendErr &&
-			this.retryCount === 0 &&
-			this.config.maxRetries > 0
-		) {
+		if (!backendErr && this.retryCount === 0 && this.config.maxRetries > 0) {
 			this.retryCount = 1;
 			return {
 				action: "retry",
@@ -352,7 +349,7 @@ export class OutputGuard {
 
 		// Track non-committal responses (has content but no tool calls, matches vague patterns)
 		if (content && content.trim().length > 0 && hasNoTools) {
-			const isNonCommittal = NON_COMMITTAL_PATTERNS.some((p) => p.test(content));
+			const isNonCommittal = NON_COMMITTAL_PATTERNS.some(p => p.test(content));
 			if (isNonCommittal) {
 				this.consecutiveNonCommittalResponses++;
 				if (
@@ -497,7 +494,7 @@ export class OutputGuard {
 			},
 		];
 		for (const { patterns, category } of categories) {
-			if (patterns.some((p) => lower.includes(p))) {
+			if (patterns.some(p => lower.includes(p))) {
 				return new BackendError({ category, message: error.message });
 			}
 		}

@@ -89,7 +89,7 @@ export function formatPluginResult(
 		const errors = result.errors || [];
 		if (errors.length) {
 			lines.push("", "Errors:");
-			lines.push(...errors.map((err) => `- ${err}`));
+			lines.push(...errors.map(err => `- ${err}`));
 		}
 		if ((result.additional_contexts || []).length) {
 			lines.push("", "Hook context has been applied to future agent turns.");

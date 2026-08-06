@@ -8,26 +8,26 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-	loadPluginHooks,
+	buildHookInput,
 	childDirNames,
-	markdownNames,
-	readJson,
-	isDir,
 	copyDir,
-	gitHead,
+	emptyHookResult,
+	executeLoadedHook,
 	findPluginManifest,
-	resolvePluginsDir,
-	sanitize,
+	gitHead,
+	type HookEventType,
+	isDir,
+	loadPluginHooks,
+	markdownNames,
+	matcherMatches,
+	mergeHookResult,
 	normalizeInstall,
 	nowIso,
 	parseHookEventType,
-	mergeHookResult,
-	emptyHookResult,
+	readJson,
+	resolvePluginsDir,
+	sanitize,
 	withHookMetadata,
-	executeLoadedHook,
-	buildHookInput,
-	matcherMatches,
-	type HookEventType,
 } from "./plugin-executor.ts";
 
 const execFileAsync = promisify(execFile);
@@ -116,7 +116,7 @@ export class TsPluginManager {
 				const onDisk = await isDir(inst.installPath || "");
 				const skillCount = onDisk
 					? await childDirNames(path.join(inst.installPath, "skills")).then(
-							(d) => d.length,
+							d => d.length,
 						)
 					: 0;
 				return {
@@ -175,9 +175,11 @@ export class TsPluginManager {
 			};
 		const registry = await this.loadRegistry();
 		const records = registry.plugins[pluginId] || [];
-		const idx = records.findIndex((r) => (r.scope || "user") === "user");
+		const idx = records.findIndex(r => (r.scope || "user") === "user");
 		const targetIdx = idx >= 0 ? idx : 0;
-		const inst = normalizeInstall(records[targetIdx] as unknown as Record<string, unknown>) as unknown as PluginInstall;
+		const inst = normalizeInstall(
+			records[targetIdx] as unknown as Record<string, unknown>,
+		) as unknown as PluginInstall;
 		const alreadyEffective = this.effectiveEnabled(pluginId, inst) === enabled;
 		if ((inst.enabled !== false) !== enabled) {
 			records[targetIdx] = { ...inst, enabled, lastUpdated: nowIso() };
@@ -276,7 +278,9 @@ export class TsPluginManager {
 			};
 		const registry = await this.loadRegistry();
 		const records = registry.plugins[pluginId] || [];
-		const inst = normalizeInstall(records[0] as unknown as Record<string, unknown>) as unknown as PluginInstall;
+		const inst = normalizeInstall(
+			records[0] as unknown as Record<string, unknown>,
+		) as unknown as PluginInstall;
 		if (!keepCache && inst.installPath)
 			await fs
 				.rm(inst.installPath, { recursive: true, force: true })
@@ -324,16 +328,16 @@ export class TsPluginManager {
 	async dependencies(name?: string): Promise<PluginCommandResult> {
 		const issues = [];
 		const installs = name
-			? ((await this.resolvePluginId(name))
-					? ([
-							[
+			? (await this.resolvePluginId(name))
+				? ([
+						[
+							(await this.resolvePluginId(name)) as string,
+							(await this.getInstall(
 								(await this.resolvePluginId(name)) as string,
-								(await this.getInstall(
-									(await this.resolvePluginId(name)) as string,
-								)) as PluginInstall,
-							],
-						] as Array<[string, PluginInstall]>)
-					: [])
+							)) as PluginInstall,
+						],
+					] as Array<[string, PluginInstall]>)
+				: []
 			: await this.allInstalls();
 		for (const [pluginId, inst] of installs) {
 			if (!inst || inst.enabled === false) continue;
@@ -400,7 +404,7 @@ export class TsPluginManager {
 				}
 				counts[pluginId] = (
 					await loadPluginHooks(inst.installPath, pluginId)
-				).filter((h) => h.eventType === "SessionStart").length;
+				).filter(h => h.eventType === "SessionStart").length;
 			}),
 		);
 		return counts;
@@ -416,12 +420,12 @@ export class TsPluginManager {
 			source: eventType ? "" : source,
 			event: eventType || "SessionStart",
 			plugins_dir: this.pluginsDir,
-			hooks: hooks.map((hook) => ({
+			hooks: hooks.map(hook => ({
 				plugin_id: hook.pluginId,
 				plugin_name: hook.pluginName,
 				event: hook.eventType,
 				matcher: hook.definition.matcher || "",
-				commands: hook.definition.hooks.map((cmd) => ({
+				commands: hook.definition.hooks.map(cmd => ({
 					type: cmd.type || "command",
 					command: cmd.command || cmd.prompt || cmd.agent || cmd.url || "",
 				})),
@@ -437,7 +441,7 @@ export class TsPluginManager {
 		const result = emptyHookResult();
 		const errors: string[] = [];
 		await Promise.all(
-			hooks.map(async (hook) => {
+			hooks.map(async hook => {
 				try {
 					mergeHookResult(
 						result,
@@ -655,12 +659,18 @@ export class TsPluginManager {
 		await fs.mkdir(path.dirname(settingsPath), { recursive: true });
 		const raw = this.loadUserSettings() as Record<string, unknown>;
 		const plugins =
-			raw.plugins && typeof raw.plugins === "object" && !Array.isArray(raw.plugins)
+			raw.plugins &&
+			typeof raw.plugins === "object" &&
+			!Array.isArray(raw.plugins)
 				? { ...(raw.plugins as Record<string, PluginSettingsEntry>) }
 				: {};
 		plugins[pluginId] = { enabled };
 		raw.plugins = plugins;
-		await fs.writeFile(settingsPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+		await fs.writeFile(
+			settingsPath,
+			`${JSON.stringify(raw, null, 2)}\n`,
+			"utf8",
+		);
 	}
 
 	private async upsert(
@@ -669,7 +679,7 @@ export class TsPluginManager {
 	): Promise<void> {
 		const registry = await this.loadRegistry();
 		const records = registry.plugins[pluginId] || [];
-		const idx = records.findIndex((r) => (r.scope || "user") === install.scope);
+		const idx = records.findIndex(r => (r.scope || "user") === install.scope);
 		if (idx >= 0) records[idx] = install;
 		else records.push(install);
 		registry.plugins[pluginId] = records;
@@ -682,14 +692,18 @@ export class TsPluginManager {
 		const lowered = name.toLowerCase();
 		return (
 			Object.keys(registry.plugins).find(
-				(pid) => pid.split("@")[0].toLowerCase() === lowered,
+				pid => pid.split("@")[0].toLowerCase() === lowered,
 			) || null
 		);
 	}
 
 	private async getInstall(pluginId: string): Promise<PluginInstall | null> {
 		const records = (await this.loadRegistry()).plugins[pluginId] || [];
-		return records.length ? (normalizeInstall(records[0] as unknown as Record<string, unknown>) as unknown as PluginInstall) : null;
+		return records.length
+			? (normalizeInstall(
+					records[0] as unknown as Record<string, unknown>,
+				) as unknown as PluginInstall)
+			: null;
 	}
 
 	private async findMarketplacePlugin(name: string): Promise<{
@@ -703,7 +717,9 @@ export class TsPluginManager {
 			path.join(this.pluginsDir, "known_marketplaces.json"),
 		);
 		for (const [marketplaceName, info] of Object.entries(
-			typeof known === "object" && known !== null ? (known as Record<string, unknown>) : {},
+			typeof known === "object" && known !== null
+				? (known as Record<string, unknown>)
+				: {},
 		)) {
 			const installLocation = String(
 				(info as Record<string, unknown>).installLocation || "",
@@ -720,7 +736,9 @@ export class TsPluginManager {
 					(plugin: unknown) =>
 						typeof plugin === "object" &&
 						plugin !== null &&
-						String((plugin as Record<string, unknown>).name || "").toLowerCase() === name.toLowerCase(),
+						String(
+							(plugin as Record<string, unknown>).name || "",
+						).toLowerCase() === name.toLowerCase(),
 				);
 				if (!found || typeof found !== "object") continue;
 				const source = (found as Record<string, unknown>).source;
@@ -741,20 +759,30 @@ export class TsPluginManager {
 				if (typeof source === "object" && source !== null) {
 					const url = String((source as Record<string, unknown>).url || "");
 					if (
-						String((source as Record<string, unknown>).source || "") === "local" &&
+						String((source as Record<string, unknown>).source || "") ===
+							"local" &&
 						typeof (source as Record<string, unknown>).path === "string"
 					) {
 						return {
 							owner: String(marketplaceName),
-							localPath: path.resolve(path.dirname(manifestPath), String((source as Record<string, unknown>).path)),
+							localPath: path.resolve(
+								path.dirname(manifestPath),
+								String((source as Record<string, unknown>).path),
+							),
 						};
 					}
 					if (url) {
 						return {
 							owner: String(marketplaceName),
 							gitUrl: url.endsWith(".git") ? url : `${url}.git`,
-							subdir: typeof (source as Record<string, unknown>).path === "string" ? String((source as Record<string, unknown>).path) : undefined,
-							ref: typeof (source as Record<string, unknown>).ref === "string" ? String((source as Record<string, unknown>).ref) : undefined,
+							subdir:
+								typeof (source as Record<string, unknown>).path === "string"
+									? String((source as Record<string, unknown>).path)
+									: undefined,
+							ref:
+								typeof (source as Record<string, unknown>).ref === "string"
+									? String((source as Record<string, unknown>).ref)
+									: undefined,
 						};
 					}
 				}

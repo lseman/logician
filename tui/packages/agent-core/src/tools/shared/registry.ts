@@ -5,19 +5,19 @@
 // default), a per-tool execution timeout, and a result size cap so a
 // misbehaving tool (MCP/extension) cannot flood the conversation context.
 
-import { parseToolInput } from "./parser.ts";
+import { statSync } from "node:fs";
+import { resolve } from "node:path";
+import { ToolResultCache } from "../../agent/tool-cache.ts";
+import type { AskUserContext } from "../../agent/types/types-tools.ts";
+import { DEFAULT_TRUNCATION } from "../../agent/types/types-truncation.ts";
 import type {
 	Tool,
 	ToolCall,
 	ToolContext,
 	ToolResult,
 } from "../../agent/types.ts";
-import type { AskUserContext } from "../../agent/types/types-tools.ts";
-import { ToolResultCache } from "../../agent/tool-cache.ts";
 import { withTimeout } from "./async-utils.ts";
-import { statSync } from "node:fs";
-import { resolve } from "node:path";
-import { DEFAULT_TRUNCATION } from "../../agent/types/types-truncation.ts";
+import { parseToolInput } from "./parser.ts";
 
 /** Default cap on tool execution time. Tools can override via timeoutMs. */
 const DEFAULT_TOOL_TIMEOUT_MS = 600_000;
@@ -71,7 +71,7 @@ export class ToolRegistry {
 		this.ctx = options || {};
 		this.cwd = options?.cwd ?? process.cwd();
 		this.cache =
-			options && Object.prototype.hasOwnProperty.call(options, "cache")
+			options && Object.hasOwn(options, "cache")
 				? (options.cache ?? null)
 				: new ToolResultCache(
 						options?.cacheSize ?? 2000,
@@ -157,7 +157,7 @@ export class ToolRegistry {
 			tool.cacheable === true &&
 			!call.arguments?.includes("__nocache__");
 		if (useCache) {
-			const cached = this.cache!.get(
+			const cached = this.cache?.get(
 				call.name,
 				JSON.stringify(args),
 				this.extractMtimeKey(call.name, args) ?? undefined,
@@ -177,7 +177,10 @@ export class ToolRegistry {
 			const abortFromParent = () =>
 				executionController.abort(parentSignal?.reason);
 			if (parentSignal?.aborted) abortFromParent();
-			else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+			else
+				parentSignal?.addEventListener("abort", abortFromParent, {
+					once: true,
+				});
 			let raw: string | ToolResult;
 			try {
 				const run = tool.execute(args, {
@@ -212,7 +215,7 @@ export class ToolRegistry {
 			}
 
 			if (useCache && !result.isError) {
-				this.cache!.put(
+				this.cache?.put(
 					call.name,
 					JSON.stringify(args),
 					result.content,
@@ -277,7 +280,7 @@ export class ToolRegistry {
 	}
 
 	toToolDefinitions(): Record<string, unknown>[] {
-		return this.list().map((tool) => {
+		return this.list().map(tool => {
 			const fn: Record<string, unknown> = {
 				name: tool.name,
 				description: tool.description,

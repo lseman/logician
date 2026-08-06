@@ -2,13 +2,16 @@
 // Find files by glob pattern using fd (falls back to rg --files).
 // fd: --glob, --hidden, --no-require-git, --full-path for path-containing patterns.
 
-import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import type { Tool } from "@logician/agent-core/agent/types.ts";
-import { ensureInsideCwd, resolvePath } from "@logician/agent-core/tools/shared/path-utils.ts";
-import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.ts";
+import {
+	ensureInsideCwd,
+	resolvePath,
+} from "@logician/agent-core/tools/shared/path-utils.ts";
 import { ensureTool } from "./shared/tools-manager.ts";
+import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.ts";
 
 const DEFAULT_LIMIT = 1000;
 
@@ -25,14 +28,18 @@ export const find: Tool = {
 		"Find files by glob pattern, e.g. '*.ts', '**/*.json', 'src/**/*.test.ts'. " +
 		"Respects .gitignore. Includes hidden files. Returns paths relative to the search directory. " +
 		`Truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB.`,
-	promptSnippet: "Find files by name pattern (supports glob, includes hidden files)",
-	promptGuidelines: ["Use find to search by name pattern; use grep for content search"],
+	promptSnippet:
+		"Find files by name pattern (supports glob, includes hidden files)",
+	promptGuidelines: [
+		"Use find to search by name pattern; use grep for content search",
+	],
 	parameters: {
 		type: "object",
 		properties: {
 			pattern: {
 				type: "string",
-				description: "Glob pattern to match files, e.g. '*.ts', '**/*.json', 'src/**/*.spec.ts'",
+				description:
+					"Glob pattern to match files, e.g. '*.ts', '**/*.json', 'src/**/*.spec.ts'",
 			},
 			path: {
 				type: "string",
@@ -67,7 +74,7 @@ export const find: Tool = {
 			return resolveFallback(pattern, searchPath, limit, ctx.signal);
 		}
 
-		return new Promise<string>((resolve) => {
+		return new Promise<string>(resolve => {
 			if (ctx.signal?.aborted) {
 				resolve("Error: Command aborted");
 				return;
@@ -80,21 +87,28 @@ export const find: Tool = {
 				"--color=never",
 				"--hidden",
 				"--no-require-git",
-				"--max-results", String(limit),
+				"--max-results",
+				String(limit),
 			];
 
 			// Patterns containing '/' need --full-path so fd matches against the full path.
 			let effectivePattern = pattern;
 			if (pattern.includes("/")) {
 				fdArgs.push("--full-path");
-				if (!pattern.startsWith("/") && !pattern.startsWith("**/") && pattern !== "**") {
+				if (
+					!pattern.startsWith("/") &&
+					!pattern.startsWith("**/") &&
+					pattern !== "**"
+				) {
 					effectivePattern = `**/${pattern}`;
 				}
 			}
 
 			fdArgs.push("--", effectivePattern, searchPath);
 
-			const child = spawn(fdPath, fdArgs, { stdio: ["ignore", "pipe", "pipe"] });
+			const child = spawn(fdPath, fdArgs, {
+				stdio: ["ignore", "pipe", "pipe"],
+			});
 			const rl = createInterface({ input: child.stdout });
 			let stderr = "";
 			const lines: string[] = [];
@@ -105,9 +119,11 @@ export const find: Tool = {
 			};
 			ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
-			child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
 
-			rl.on("line", (line) => {
+			rl.on("line", line => {
 				if (line) lines.push(line);
 				if (lines.length >= limit && !killedDueToLimit) {
 					killedDueToLimit = true;
@@ -115,13 +131,13 @@ export const find: Tool = {
 				}
 			});
 
-			child.on("error", (err) => {
+			child.on("error", err => {
 				ctx.signal?.removeEventListener("abort", onAbort);
 				rl.close();
 				resolve(`Error: Failed to run fd: ${err.message}`);
 			});
 
-			child.on("close", (code) => {
+			child.on("close", code => {
 				ctx.signal?.removeEventListener("abort", onAbort);
 				rl.close();
 
@@ -142,26 +158,33 @@ export const find: Tool = {
 				}
 
 				// Relativize paths
-				const relativized = lines.map((raw) => {
-					const line = raw.replace(/\r$/, "").trim();
-					if (!line) return null;
-					const hadSlash = line.endsWith("/") || line.endsWith("\\");
-					let rel = line.startsWith(searchPath)
-						? line.slice(searchPath.length + 1)
-						: path.relative(searchPath, line);
-					if (hadSlash && !rel.endsWith("/")) rel += "/";
-					return toPosixPath(rel);
-				}).filter(Boolean) as string[];
+				const relativized = lines
+					.map(raw => {
+						const line = raw.replace(/\r$/, "").trim();
+						if (!line) return null;
+						const hadSlash = line.endsWith("/") || line.endsWith("\\");
+						let rel = line.startsWith(searchPath)
+							? line.slice(searchPath.length + 1)
+							: path.relative(searchPath, line);
+						if (hadSlash && !rel.endsWith("/")) rel += "/";
+						return toPosixPath(rel);
+					})
+					.filter(Boolean) as string[];
 
 				const limitReached = killedDueToLimit || relativized.length >= limit;
 				const rawOutput = relativized.join("\n");
-				const t = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+				const t = truncateHead(rawOutput, {
+					maxLines: Number.MAX_SAFE_INTEGER,
+				});
 				let out = t.content;
 				const notices: string[] = [];
 				if (limitReached) {
-					notices.push(`${limit} results limit reached. Use limit=${limit * 2} or refine pattern`);
+					notices.push(
+						`${limit} results limit reached. Use limit=${limit * 2} or refine pattern`,
+					);
 				}
-				if (t.truncated) notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+				if (t.truncated)
+					notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
 				if (notices.length) out += `\n\n[${notices.join(". ")}]`;
 				resolve(out);
 			});
@@ -185,19 +208,29 @@ async function resolveFallback(
 		const { stdout } = await execFileAsync(
 			rgPath,
 			["--files", "--hidden", "-g", pattern, searchPath],
-			{ timeout: 10000, maxBuffer: 1024 * 1024, signal, killSignal: "SIGKILL" as const },
+			{
+				timeout: 10000,
+				maxBuffer: 1024 * 1024,
+				signal,
+				killSignal: "SIGKILL" as const,
+			},
 		);
 		const all = stdout.split("\n").filter(Boolean);
 		if (all.length === 0) return "No files found matching pattern.";
 		const limited = all.slice(0, limit);
-		const t = truncateHead(limited.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
+		const t = truncateHead(limited.join("\n"), {
+			maxLines: Number.MAX_SAFE_INTEGER,
+		});
 		let out = t.content;
-		if (all.length > limit) out += `\n\n[${limit} results limit reached. Use limit=${limit * 2} or refine pattern]`;
-		if (t.truncated) out += `\n\n[${formatSize(DEFAULT_MAX_BYTES)} limit reached]`;
+		if (all.length > limit)
+			out += `\n\n[${limit} results limit reached. Use limit=${limit * 2} or refine pattern]`;
+		if (t.truncated)
+			out += `\n\n[${formatSize(DEFAULT_MAX_BYTES)} limit reached]`;
 		return out;
 	} catch (err: unknown) {
 		const e = err as { name?: string; code?: number | string; stderr?: string };
-		if (e.name === "AbortError" || e.code === "ABORT_ERR") return "Error: Command aborted";
+		if (e.name === "AbortError" || e.code === "ABORT_ERR")
+			return "Error: Command aborted";
 		if (e.code === 1) return "No files found matching pattern.";
 		return `Error: ${e.stderr || String(err)}`;
 	}

@@ -2,17 +2,23 @@
 // Renders assistant reasoning chunks (collapsed/summary/expanded modes) with
 // code-block syntax highlighting in expanded mode.
 
-import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
-import type { AssistantChunk, ThinkingDisplayStyle } from "@logician/coding-agent/sessions";
+import {
+	highlight,
+	highlightAuto,
+} from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import type {
+	AssistantChunk,
+	ThinkingDisplayStyle,
+} from "@logician/coding-agent/sessions";
 import { BOLD, DIM, RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import { wrapText } from "../layout.ts";
 import {
 	extractLangFromFence,
 	renderInline,
 	stripThinkingToolMarkup,
 	unwrapThinkingChannel,
 } from "../text-utils.ts";
-import { wrapText } from "../layout.ts";
 
 export function renderThinkingChunk(
 	chunk: AssistantChunk,
@@ -81,7 +87,7 @@ export function renderThinkingExpanded(
 		}
 
 		if (inCodeBlock) {
-			codeContent += rawLine + "\n";
+			codeContent += `${rawLine}\n`;
 		} else {
 			// Wrap plain text
 			const wrapped = wrapText(rawLine, currentWidth - 4);
@@ -109,7 +115,9 @@ export function renderThinkingCodeBlock(
 	let highlightedCode = code;
 	let detectedLanguage = language;
 	try {
-		const highlighted = language ? highlight(code, language) : highlightAuto(code);
+		const highlighted = language
+			? highlight(code, language)
+			: highlightAuto(code);
 		highlightedCode = highlighted.value;
 		detectedLanguage = highlighted.language || language;
 	} catch {

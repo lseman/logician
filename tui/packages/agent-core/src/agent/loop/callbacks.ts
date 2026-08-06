@@ -1,4 +1,5 @@
 import { createSystemMessage } from "../messages.ts";
+import type { ExplicitTaskState } from "../tasks/task-state-controller.ts";
 import type {
 	AgentHooks,
 	AgentMessage,
@@ -6,7 +7,6 @@ import type {
 	StopReason,
 	ToolCall,
 } from "../types.ts";
-import type { ExplicitTaskState } from "../tasks/task-state-controller.ts";
 
 export type EventSink = (
 	event: import("../types.ts").AgentEvent,
@@ -55,7 +55,10 @@ export function withSystemPrompt(
 ): Message[] {
 	return [
 		createSystemMessage(systemPrompt ?? "You are a helpful assistant."),
-		...messages.filter((message): message is Message => message != null && message.role !== "system"),
+		...messages.filter(
+			(message): message is Message =>
+				message != null && message.role !== "system",
+		),
 	];
 }
 
@@ -100,9 +103,7 @@ export async function transformMessages(
 
 export async function prepareMessages(
 	callbacks: Array<
-		| AgentHooks["prepareNextTurn"]
-		| LoopCallbacks["prepareNextTurn"]
-		| undefined
+		AgentHooks["prepareNextTurn"] | LoopCallbacks["prepareNextTurn"] | undefined
 	>,
 	context: {
 		messages: Message[];
@@ -161,7 +162,7 @@ export function waitForRetryDelay(
 	signal?: AbortSignal,
 ): Promise<boolean> {
 	if (signal?.aborted) return Promise.resolve(false);
-	return new Promise((resolve) => {
+	return new Promise(resolve => {
 		const timer = setTimeout(() => {
 			signal?.removeEventListener("abort", onAbort);
 			resolve(true);

@@ -79,7 +79,11 @@ export interface AcceptanceLedger {
 	status: "passed" | "failed" | "timeout" | "not-required";
 	report?: AcceptanceReport;
 	config?: ResolvedAcceptance;
-	verification?: Array<{ command: string; result: "passed" | "failed"; summary?: string }>;
+	verification?: Array<{
+		command: string;
+		result: "passed" | "failed";
+		summary?: string;
+	}>;
 }
 
 const ACCEPTANCE_FENCE = "```\nacceptance-report";
@@ -195,10 +199,14 @@ export function formatAcceptancePrompt(resolved: ResolvedAcceptance): string {
 	lines.push("");
 	lines.push("```acceptance-report");
 	lines.push("{");
-	lines.push("  \"criteriaSatisfied\": [{ \"id\": \"criterion-1\", \"status\": \"satisfied\", \"evidence\": \"...\" }],");
-	lines.push("  \"changedFiles\": [\"file.ts\"],");
-	lines.push("  \"commandsRun\": [{ \"command\": \"npm test\", \"result\": \"passed\", \"summary\": \"all pass\" }],");
-	lines.push("  \"residualRisks\": []");
+	lines.push(
+		'  "criteriaSatisfied": [{ "id": "criterion-1", "status": "satisfied", "evidence": "..." }],',
+	);
+	lines.push('  "changedFiles": ["file.ts"],');
+	lines.push(
+		'  "commandsRun": [{ "command": "npm test", "result": "passed", "summary": "all pass" }],',
+	);
+	lines.push('  "residualRisks": []');
 	lines.push("}");
 	lines.push("```");
 	lines.push("");
@@ -239,7 +247,10 @@ export function stripAcceptanceReport(output: string): string {
 	const afterStart = fenceStart + ACCEPTANCE_FENCE.length;
 	const fenceEnd = output.indexOf(ACCEPTANCE_FENCE_END, afterStart);
 	if (fenceEnd === -1) return output;
-	return output.slice(0, fenceStart) + output.slice(fenceEnd + ACCEPTANCE_FENCE_END.length);
+	return (
+		output.slice(0, fenceStart) +
+		output.slice(fenceEnd + ACCEPTANCE_FENCE_END.length)
+	);
 }
 
 export function validateAcceptanceInput(config: AcceptanceConfig): string[] {
@@ -274,7 +285,9 @@ export function validateAcceptanceInput(config: AcceptanceConfig): string[] {
 	}
 	if (config.maxFinalizationTurns !== undefined) {
 		if (config.maxFinalizationTurns < 1 || config.maxFinalizationTurns > 10) {
-			errors.push(`maxFinalizationTurns must be between 1 and 10, got ${config.maxFinalizationTurns}`);
+			errors.push(
+				`maxFinalizationTurns must be between 1 and 10, got ${config.maxFinalizationTurns}`,
+			);
 		}
 	}
 	return errors;

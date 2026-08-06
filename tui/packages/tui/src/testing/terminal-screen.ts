@@ -139,7 +139,10 @@ export class TerminalScreen {
 		}
 		// Charset selection and other two/three-byte ESC sequences do not alter
 		// the logical screen used by these tests.
-		return Math.min(data.length, start + (kind === "(" || kind === ")" ? 3 : 2));
+		return Math.min(
+			data.length,
+			start + (kind === "(" || kind === ")" ? 3 : 2),
+		);
 	}
 
 	private applyCsi(parameterText: string, final: string): void {
@@ -147,8 +150,8 @@ export class TerminalScreen {
 		const normalized = parameterText.replace(/^[?>!]/u, "");
 		const parameters = normalized
 			.split(";")
-			.map((value) => (value === "" ? 0 : Number(value)))
-			.map((value) => (Number.isFinite(value) ? value : 0));
+			.map(value => (value === "" ? 0 : Number(value)))
+			.map(value => (Number.isFinite(value) ? value : 0));
 		const first = parameters[0] ?? 0;
 
 		if (privateMode && (final === "h" || final === "l")) {
@@ -239,7 +242,11 @@ export class TerminalScreen {
 		this.printableWrites += width;
 		if (this.column + width >= this.columns) this.lastColumnWrites++;
 		this.cells[this.row][this.column] = char;
-		for (let offset = 1; offset < width && this.column + offset < this.columns; offset++) {
+		for (
+			let offset = 1;
+			offset < width && this.column + offset < this.columns;
+			offset++
+		) {
 			this.cells[this.row][this.column + offset] = "";
 		}
 		this.column += width;

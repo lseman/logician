@@ -1,6 +1,11 @@
 // Config schema validation and defaults.
 
-import type { AgentConfig, ThinkingLevel, QueueMode, InferenceMode } from "../types.ts";
+import type {
+	AgentConfig,
+	InferenceMode,
+	QueueMode,
+	ThinkingLevel,
+} from "../types.ts";
 
 const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
 	"off",
@@ -11,7 +16,10 @@ const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set([
 	"xhigh",
 ]);
 
-const VALID_QUEUE_MODES: ReadonlySet<QueueMode> = new Set(["all", "one-at-a-time"]);
+const VALID_QUEUE_MODES: ReadonlySet<QueueMode> = new Set([
+	"all",
+	"one-at-a-time",
+]);
 const VALID_TOOL_EXECUTION = new Set(["sequential", "parallel"]);
 const VALID_INFERENCE_MODES: ReadonlySet<InferenceMode> = new Set([
 	"auto",
@@ -40,7 +48,10 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 		errors.push({ field: "model", message: "required" });
 	}
 
-	if (config.temperature !== undefined && (config.temperature < 0 || config.temperature > 2)) {
+	if (
+		config.temperature !== undefined &&
+		(config.temperature < 0 || config.temperature > 2)
+	) {
 		errors.push({ field: "temperature", message: "must be 0-2" });
 	}
 
@@ -48,25 +59,37 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 		errors.push({ field: "maxTokens", message: "must be > 0" });
 	}
 
-	if (config.contextWindowTokens !== undefined && config.contextWindowTokens <= 0) {
+	if (
+		config.contextWindowTokens !== undefined &&
+		config.contextWindowTokens <= 0
+	) {
 		errors.push({ field: "contextWindowTokens", message: "must be > 0" });
 	}
 
-	if (config.thinkingLevel && !VALID_THINKING_LEVELS.has(config.thinkingLevel)) {
+	if (
+		config.thinkingLevel &&
+		!VALID_THINKING_LEVELS.has(config.thinkingLevel)
+	) {
 		errors.push({
 			field: "thinkingLevel",
 			message: `must be one of: ${[...VALID_THINKING_LEVELS].join(", ")}`,
 		});
 	}
 
-	if (config.steeringQueueMode && !VALID_QUEUE_MODES.has(config.steeringQueueMode)) {
+	if (
+		config.steeringQueueMode &&
+		!VALID_QUEUE_MODES.has(config.steeringQueueMode)
+	) {
 		errors.push({
 			field: "steeringQueueMode",
 			message: `must be one of: ${[...VALID_QUEUE_MODES].join(", ")}`,
 		});
 	}
 
-	if (config.followUpQueueMode && !VALID_QUEUE_MODES.has(config.followUpQueueMode)) {
+	if (
+		config.followUpQueueMode &&
+		!VALID_QUEUE_MODES.has(config.followUpQueueMode)
+	) {
 		errors.push({
 			field: "followUpQueueMode",
 			message: `must be one of: ${[...VALID_QUEUE_MODES].join(", ")}`,
@@ -80,7 +103,10 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 		});
 	}
 
-	if (config.inferenceMode && !VALID_INFERENCE_MODES.has(config.inferenceMode)) {
+	if (
+		config.inferenceMode &&
+		!VALID_INFERENCE_MODES.has(config.inferenceMode)
+	) {
 		errors.push({
 			field: "inferenceMode",
 			message: `must be one of: ${[...VALID_INFERENCE_MODES].join(", ")}`,
@@ -111,23 +137,36 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 		errors.push({ field: "cacheTtlMs", message: "must be > 0" });
 	}
 
-	if (config.loopDetectionWindow !== undefined && config.loopDetectionWindow <= 0) {
+	if (
+		config.loopDetectionWindow !== undefined &&
+		config.loopDetectionWindow <= 0
+	) {
 		errors.push({ field: "loopDetectionWindow", message: "must be > 0" });
 	}
 
-	if (config.degenerateLoopThreshold !== undefined && config.degenerateLoopThreshold < 0) {
+	if (
+		config.degenerateLoopThreshold !== undefined &&
+		config.degenerateLoopThreshold < 0
+	) {
 		errors.push({ field: "degenerateLoopThreshold", message: "must be >= 0" });
 	}
 
-	if (config.stagnationThreshold !== undefined && config.stagnationThreshold < 0) {
+	if (
+		config.stagnationThreshold !== undefined &&
+		config.stagnationThreshold < 0
+	) {
 		errors.push({ field: "stagnationThreshold", message: "must be >= 0" });
 	}
 
 	if (
 		config.proactiveCompactionFraction !== undefined &&
-		(config.proactiveCompactionFraction <= 0 || config.proactiveCompactionFraction > 1)
+		(config.proactiveCompactionFraction <= 0 ||
+			config.proactiveCompactionFraction > 1)
 	) {
-		errors.push({ field: "proactiveCompactionFraction", message: "must be 0-1" });
+		errors.push({
+			field: "proactiveCompactionFraction",
+			message: "must be 0-1",
+		});
 	}
 
 	return errors;
@@ -135,6 +174,6 @@ export function validateConfig(config: AgentConfig): ValidationError[] {
 
 export function throwOnValidationErrors(errors: ValidationError[]): void {
 	if (errors.length === 0) return;
-	const msg = errors.map((e) => `${e.field}: ${e.message}`).join("; ");
+	const msg = errors.map(e => `${e.field}: ${e.message}`).join("; ");
 	throw new Error(`Invalid config: ${msg}`);
 }

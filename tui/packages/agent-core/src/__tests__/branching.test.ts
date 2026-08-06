@@ -1,11 +1,16 @@
 // ── Branching enhancement tests ──────────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
+import { describe, it } from "node:test";
 
 describe("BranchInfo type", () => {
 	it("has all required fields", () => {
-		const branch: { id: string; depth: number; summary: unknown; forkedAt: number } = {
+		const branch: {
+			id: string;
+			depth: number;
+			summary: unknown;
+			forkedAt: number;
+		} = {
 			id: "branch_1",
 			depth: 1,
 			summary: null,
@@ -28,9 +33,7 @@ describe("BranchSummaryData structure", () => {
 				inProgress: ["Add tests"],
 				blocked: ["Waiting on API key"],
 			},
-			keyDecisions: [
-				{ decision: "Use SQLite", rationale: "Faster queries" },
-			],
+			keyDecisions: [{ decision: "Use SQLite", rationale: "Faster queries" }],
 			nextSteps: ["Run tests", "Deploy"],
 			full: "Full summary text",
 		};
@@ -95,7 +98,8 @@ describe("BranchProgress", () => {
 
 describe("BranchSummaryData with file ops", () => {
 	it("includes file info in full summary", () => {
-		const full = "Branch conversation\n\nRead files: src/main.ts, config.json\nModified files: src/main.ts";
+		const full =
+			"Branch conversation\n\nRead files: src/main.ts, config.json\nModified files: src/main.ts";
 		const summary = {
 			goal: "Refactor main module",
 			constraints: [],

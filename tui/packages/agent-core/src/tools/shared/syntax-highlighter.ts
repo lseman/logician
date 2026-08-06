@@ -13,61 +13,61 @@ import {
 // Designed for dark terminals — high contrast, readable at any size.
 const DARK_SHEET: Record<string, (t: string) => string> = {
 	// Keywords (import, export, const, function, return, etc.)
-	keyword: (t) => `\x1b[38;5;141m${t}\x1b[39m`, // cyan
+	keyword: t => `\x1b[38;5;141m${t}\x1b[39m`, // cyan
 	// Strings (quotes, template literals)
-	string: (t) => `\x1b[38;5;114m${t}\x1b[39m`, // green
+	string: t => `\x1b[38;5;114m${t}\x1b[39m`, // green
 	// Comments
-	comment: (t) => `\x1b[38;5;245m${t}\x1b[39m`, // grey
+	comment: t => `\x1b[38;5;245m${t}\x1b[39m`, // grey
 	// Numbers
-	number: (t) => `\x1b[38;5;179m${t}\x1b[39m`, // gold
+	number: t => `\x1b[38;5;179m${t}\x1b[39m`, // gold
 	// Functions
-	function: (t) => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
+	function: t => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
 	// Class names
-	"class name": (t) => `\x1b[38;5;81m${t}\x1b[39m`, // cyan
+	"class name": t => `\x1b[38;5;81m${t}\x1b[39m`, // cyan
 	// Built-in types
-	built_in: (t) => `\x1b[38;5;220m${t}\x1b[39m`, // yellow
+	built_in: t => `\x1b[38;5;220m${t}\x1b[39m`, // yellow
 	// Literals (true, false, null, undefined)
-	literal: (t) => `\x1b[38;5;203m${t}\x1b[39m`, // red
+	literal: t => `\x1b[38;5;203m${t}\x1b[39m`, // red
 	// Punctuation
-	punctuation: (t) => `\x1b[38;5;244m${t}\x1b[39m`, // dark grey
+	punctuation: t => `\x1b[38;5;244m${t}\x1b[39m`, // dark grey
 	// Operators
-	operator: (t) => `\x1b[38;5;147m${t}\x1b[39m`, // periwinkle
+	operator: t => `\x1b[38;5;147m${t}\x1b[39m`, // periwinkle
 	// Regular expressions
-	regex: (t) => `\x1b[38;5;208m${t}\x1b[39m`, // orange
+	regex: t => `\x1b[38;5;208m${t}\x1b[39m`, // orange
 	// Template expressions
-	"template expression": (t) => `\x1b[38;5;147m${t}\x1b[39m`, // periwinkle
+	"template expression": t => `\x1b[38;5;147m${t}\x1b[39m`, // periwinkle
 	// Attributes (HTML/XML)
-	attribute: (t) => `\x1b[38;5;179m${t}\x1b[39m`, // gold
+	attribute: t => `\x1b[38;5;179m${t}\x1b[39m`, // gold
 	// Doctypes
-	doctype: (t) => `\x1b[38;5;245m${t}\x1b[39m`, // grey
+	doctype: t => `\x1b[38;5;245m${t}\x1b[39m`, // grey
 	// XML tags
-	"xml tag": (t) => `\x1b[38;5;141m${t}\x1b[39m`, // cyan
+	"xml tag": t => `\x1b[38;5;141m${t}\x1b[39m`, // cyan
 	// Properties
-	property: (t) => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
+	property: t => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
 	// Meta
-	meta: (t) => `\x1b[38;5;245m${t}\x1b[39m`, // grey
+	meta: t => `\x1b[38;5;245m${t}\x1b[39m`, // grey
 	// Shebang
-	shebang: (t) => `\x1b[38;5;245m${t}\x1b[39m`, // grey
+	shebang: t => `\x1b[38;5;245m${t}\x1b[39m`, // grey
 	// Subst (template substitutions)
-	subst: (t) => `\x1b[38;5;208m${t}\x1b[39m`, // orange
+	subst: t => `\x1b[38;5;208m${t}\x1b[39m`, // orange
 	// Symbol
-	symbol: (t) => `\x1b[38;5;179m${t}\x1b[39m`, // gold
+	symbol: t => `\x1b[38;5;179m${t}\x1b[39m`, // gold
 	// Type
-	type: (t) => `\x1b[38;5;81m${t}\x1b[39m`, // cyan
+	type: t => `\x1b[38;5;81m${t}\x1b[39m`, // cyan
 	// Params
-	params: (t) => `\x1b[38;5;220m${t}\x1b[39m`, // yellow
+	params: t => `\x1b[38;5;220m${t}\x1b[39m`, // yellow
 	// Title
-	title: (t) => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
+	title: t => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
 	// Section
-	section: (t) => `\x1b[38;5;81m${t}\x1b[39m`, // cyan
+	section: t => `\x1b[38;5;81m${t}\x1b[39m`, // cyan
 	// Link
-	link: (t) => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
+	link: t => `\x1b[38;5;111m${t}\x1b[39m`, // bright green
 	// Code
-	code: (t) => `\x1b[38;5;114m${t}\x1b[39m`, // green
+	code: t => `\x1b[38;5;114m${t}\x1b[39m`, // green
 	// Additions
-	addition: (t) => `\x1b[38;5;114m${t}\x1b[39m`, // green
+	addition: t => `\x1b[38;5;114m${t}\x1b[39m`, // green
 	// Deletions
-	deletion: (t) => `\x1b[38;5;203m${t}\x1b[39m`, // red
+	deletion: t => `\x1b[38;5;203m${t}\x1b[39m`, // red
 };
 
 // Common grammars subset (37 languages) — covers 99% of use cases.

@@ -1,25 +1,34 @@
 // ── Local slash-command registry ───────────────────────────────────────────
 
 import { saveConfigField } from "@logician/coding-agent/configuration";
-import type { SlashCommandsCtx } from "./context.ts";
-import type { CompressedObservation, MemoryStore, ObservationType } from "@logician/memory";
+import type { CompressedObservation, ObservationType } from "@logician/memory";
 import { theme } from "../../terminal/theme.ts";
+import type { SlashCommandsCtx } from "./context.ts";
 
-function observationLabel(observation: CompressedObservation, index?: number): string {
+function observationLabel(
+	observation: CompressedObservation,
+	index?: number,
+): string {
 	const ordinal = index === undefined ? "" : `#${index + 1} · `;
-	const shortId = observation.id.length > 12
-		? `${observation.id.slice(0, 12)}…`
-		: observation.id;
+	const shortId =
+		observation.id.length > 12
+			? `${observation.id.slice(0, 12)}…`
+			: observation.id;
 	return `${ordinal}${shortId} · importance ${observation.importance}/10`;
 }
 
-function compactObservationLine(observation: CompressedObservation, index: number): string {
+function compactObservationLine(
+	observation: CompressedObservation,
+	index: number,
+): string {
 	const number = theme.fg("memoryCount", `#${index + 1}`);
-	const shortId = observation.id.length > 12
-		? `${observation.id.slice(0, 12)}…`
-		: observation.id;
+	const shortId =
+		observation.id.length > 12
+			? `${observation.id.slice(0, 12)}…`
+			: observation.id;
 	const id = theme.fg("memoryId", shortId);
-	const title = observation.title || observation.narrative?.slice(0, 100) || "No title";
+	const title =
+		observation.title || observation.narrative?.slice(0, 100) || "No title";
 	return `${number} · ${id} · importance ${observation.importance}/10 · ${observation.type} · ${observation.timestamp.slice(0, 19)} · ${title.replace(/\s+/g, " ")}`;
 }
 
@@ -206,9 +215,7 @@ export function createLocalHandlers(
 					if (!value) {
 						return `Usage: /settings execution-policy <mode>\n\nValid: ${valid.join(", ")}`;
 					}
-					if (
-						!valid.includes(value.toLowerCase() as (typeof valid)[number])
-					) {
+					if (!valid.includes(value.toLowerCase() as (typeof valid)[number])) {
 						return `Invalid policy "${value}". Valid: ${valid.join(", ")}`;
 					}
 					ctx.setExecutionProfile(value as "autonomous" | "minimal");
@@ -222,20 +229,25 @@ export function createLocalHandlers(
 			return ctx.bridge.getContext();
 		},
 		sessions: (raw: unknown) => {
-			const args = typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
+			const args =
+				typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
 			if (args.toLowerCase() !== "clean") {
 				ctx.openSessionManager();
 				return;
 			}
-			const currentSessionId = ctx.currentSessionId || ctx.sessionStore.getCurrentSessionId();
-			const olderSessions = ctx.sessionStore.listSessions()
-				.filter((session) => session.id !== currentSessionId);
+			const currentSessionId =
+				ctx.currentSessionId || ctx.sessionStore.getCurrentSessionId();
+			const olderSessions = ctx.sessionStore
+				.listSessions()
+				.filter(session => session.id !== currentSessionId);
 			let removedSessions = 0;
 			for (const session of olderSessions) {
 				if (ctx.sessionStore.deleteSession(session.id)) removedSessions++;
 			}
 			const memoryStore = ctx.bridge.getMemoryStore();
-			const memoryResult = memoryStore?.clearSessions(currentSessionId || undefined) || { sessions: 0, observations: 0 };
+			const memoryResult = memoryStore?.clearSessions(
+				currentSessionId || undefined,
+			) || { sessions: 0, observations: 0 };
 			if (!removedSessions && !memoryResult.sessions) {
 				return "No older sessions to remove from this folder.";
 			}
@@ -263,11 +275,13 @@ export function createLocalHandlers(
 		},
 		renameSession: (title: unknown) => {
 			if (!ctx.currentSessionId) return;
-			const newTitle =
-				typeof title === "string" ? title : String(title || "");
+			const newTitle = typeof title === "string" ? title : String(title || "");
 			if (!newTitle.trim()) return;
 			ctx.sessionStore.renameSession(ctx.currentSessionId, newTitle.trim());
-			ctx.bridge.renameConversationSession(ctx.currentSessionId, newTitle.trim());
+			ctx.bridge.renameConversationSession(
+				ctx.currentSessionId,
+				newTitle.trim(),
+			);
 			ctx.statusPanel.update({ sessionTitle: newTitle.trim() });
 			setStatusPhase("ready");
 		},
@@ -354,7 +368,8 @@ export function createLocalHandlers(
 		},
 		memory: (raw: unknown) => {
 			const store = ctx.bridge.getMemoryStore();
-			if (!store) return "Memory is not enabled. Set \"memory\": true in settings.";
+			if (!store)
+				return 'Memory is not enabled. Set "memory": true in settings.';
 			const args = typeof raw === "string" ? raw : String(raw ?? "");
 			const trimmed = args.trim();
 			const workspace = store.getCurrentWorkspace();
@@ -369,7 +384,9 @@ export function createLocalHandlers(
 					stats.viewerPort ? `Viewer: :${stats.viewerPort}` : undefined,
 					"",
 					"Subcommands: list [type] | search <q> | obs <q> | stats | ws [name] | tiers | auto-tier | forget <id> | clean | consolidate [all|sid] | context <sid>",
-				].filter(Boolean).join("\n");
+				]
+					.filter(Boolean)
+					.join("\n");
 			}
 			const [rawSub, ...rest] = trimmed.split(/\s+/);
 			const sub = rawSub.toLowerCase();
@@ -379,11 +396,17 @@ export function createLocalHandlers(
 					const parts = subArgs.split(/\s+/);
 					const type = parts[0] || undefined;
 					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 20;
-					const memories = store.list({ type: (type || undefined) as any, limit });
+					const memories = store.list({
+						type: (type || undefined) as any,
+						limit,
+					});
 					if (!memories.length) return "No memories found.";
-					const items = memories.slice(0, limit).map(
-						(m) => `[${m.strength}/10] ${m.type} | ${m.createdAt.slice(0, 10)} [${m.workspace || "global"}]\n${m.content.slice(0, 200)}`,
-					);
+					const items = memories
+						.slice(0, limit)
+						.map(
+							m =>
+								`[${m.strength}/10] ${m.type} | ${m.createdAt.slice(0, 10)} [${m.workspace || "global"}]\n${m.content.slice(0, 200)}`,
+						);
 					return `Showing ${items.length} of ${memories.length} memories (workspace: ${workspace || "(default)"}):\n\n${items.join("\n\n---\n\n")}`;
 				}
 				case "ws": {
@@ -398,7 +421,10 @@ export function createLocalHandlers(
 					const query = parts[0] || "";
 					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 10;
 					if (!query) return "Usage: /memory search <query> [limit]";
-					const result = store.recall({ search: query, limit }, { format: "markdown" });
+					const result = store.recall(
+						{ search: query, limit },
+						{ format: "markdown" },
+					);
 					return result || `No memories found matching "${query}"`;
 				}
 				case "obs":
@@ -408,17 +434,21 @@ export function createLocalHandlers(
 					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 20;
 					if (!query) return "Usage: /memory obs <query> [limit]";
 					const results = store.searchObservations(query, limit);
-					if (!results.length) return `No observations found matching "${query}"`;
-					const items = results.slice(0, limit).map(
-						(r, index) => `${observationLabel(r.observation, index)} · ${r.observation.type}\n${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
-					);
+					if (!results.length)
+						return `No observations found matching "${query}"`;
+					const items = results
+						.slice(0, limit)
+						.map(
+							(r, index) =>
+								`${observationLabel(r.observation, index)} · ${r.observation.type}\n${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
+						);
 					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
 				}
 				case "stats": {
-					const stats = ctx.bridge.getMemoryStats();
-					const allMemories = store.list({ limit: 1000 });
+					const _stats = ctx.bridge.getMemoryStats();
+					const _allMemories = store.list({ limit: 1000 });
 					const workspaceMemories = store.list({ limit: 1000 });
-					const sessions = store.listSessions();
+					const _sessions = store.listSessions();
 					const workspaceSessions = store.listSessions();
 					const tierCounts = { hot: 0, warm: 0, cold: 0, archived: 0 };
 					const typeCounts: Record<string, number> = {};
@@ -431,7 +461,9 @@ export function createLocalHandlers(
 						`Workspace: ${workspace || "(none)"}`,
 						`Memories: ${workspaceMemories.length}`,
 						`Sessions: ${workspaceSessions.length}`,
-						`Type breakdown: ${Object.entries(typeCounts).map(([t, c]) => `${t}: ${c}`).join(", ")}`,
+						`Type breakdown: ${Object.entries(typeCounts)
+							.map(([t, c]) => `${t}: ${c}`)
+							.join(", ")}`,
 						`Working tiers: hot=${tierCounts.hot}, warm=${tierCounts.warm}, cold=${tierCounts.cold}, archived=${tierCounts.archived}`,
 					].join("\n");
 				}
@@ -439,14 +471,14 @@ export function createLocalHandlers(
 				case "tier": {
 					const memories = store.list({ limit: 50 });
 					if (!memories.length) return "No memories to tier.";
-					const tiers = memories.map((m) => ({
+					const tiers = memories.map(m => ({
 						id: m.id,
 						content: m.content.slice(0, 80),
 						tier: store.getWorkingMemoryTier(m.id),
 					}));
-					const lines = tiers.slice(0, 20).map(
-						(t) => `[${t.tier}] ${t.id.slice(0, 12)}… ${t.content}`,
-					);
+					const lines = tiers
+						.slice(0, 20)
+						.map(t => `[${t.tier}] ${t.id.slice(0, 12)}… ${t.content}`);
 					return `Working memory tiers (${tiers.length} total):\n${lines.join("\n")}`;
 				}
 				case "auto-tier": {
@@ -459,7 +491,9 @@ export function createLocalHandlers(
 				case "forget": {
 					if (!subArgs) return "Usage: /memory forget <id>";
 					const deleted = store.remove(subArgs);
-					return deleted ? `Memory ${subArgs} deleted.` : `Memory ${subArgs} not found.`;
+					return deleted
+						? `Memory ${subArgs} deleted.`
+						: `Memory ${subArgs} not found.`;
 				}
 				case "clean": {
 					const removed = store.clearMemories();
@@ -470,15 +504,22 @@ export function createLocalHandlers(
 				case "consolidate": {
 					const target = subArgs.trim();
 					const sessionIds = /^(?:all|folder)$/i.test(target)
-						? store.listSessions().map((session) => session.id)
-						: [target || store.getCurrentSessionId()].filter((id): id is string => Boolean(id));
-					if (!sessionIds.length) return "No active memory session for this folder.";
-					const memories = sessionIds.flatMap((sessionId) => store.consolidate(sessionId));
-					const scope = sessionIds.length > 1 || /^(?:all|folder)$/i.test(target)
-						? `folder ${workspace}`
-						: `current session ${sessionIds[0]!.slice(0, 12)}`;
-					if (!memories.length) return `No unconsolidated high-signal observations in the ${scope}.`;
-					return `Consolidated ${memories.length} memories from the ${scope}:\n${memories.map((m) => `[${m.strength}/10] ${m.title}`).join("\n")}`;
+						? store.listSessions().map(session => session.id)
+						: [target || store.getCurrentSessionId()].filter(
+								(id): id is string => Boolean(id),
+							);
+					if (!sessionIds.length)
+						return "No active memory session for this folder.";
+					const memories = sessionIds.flatMap(sessionId =>
+						store.consolidate(sessionId),
+					);
+					const scope =
+						sessionIds.length > 1 || /^(?:all|folder)$/i.test(target)
+							? `folder ${workspace}`
+							: `current session ${sessionIds[0]?.slice(0, 12)}`;
+					if (!memories.length)
+						return `No unconsolidated high-signal observations in the ${scope}.`;
+					return `Consolidated ${memories.length} memories from the ${scope}:\n${memories.map(m => `[${m.strength}/10] ${m.title}`).join("\n")}`;
 				}
 				case "context": {
 					if (!subArgs) return "Usage: /memory context <session-id>";
@@ -493,7 +534,8 @@ export function createLocalHandlers(
 					const scores = store.listByRetentionScore(undefined, 20);
 					if (!scores.length) return "No memories to score.";
 					const lines = scores.map(
-						(s) => `[${s.score.toFixed(2)}] ${s.id.slice(0, 12)}… type:${s.type} strength:${s.strength}`,
+						s =>
+							`[${s.score.toFixed(2)}] ${s.id.slice(0, 12)}… type:${s.type} strength:${s.strength}`,
 					);
 					return `Retention scores (top ${scores.length}):\n${lines.join("\n")}`;
 				}
@@ -503,13 +545,17 @@ export function createLocalHandlers(
 		},
 		obs: (raw: unknown) => {
 			const store = ctx.bridge.getMemoryStore();
-			if (!store) return "Memory is not enabled. Set \"memory\": true in settings.";
+			if (!store)
+				return 'Memory is not enabled. Set "memory": true in settings.';
 			const args = typeof raw === "string" ? raw : String(raw ?? "");
 			const trimmed = args.trim();
 			if (!trimmed) {
 				// Default: show recent observations summary
 				const sessions = store.listSessions();
-				const totalObs = sessions.reduce((sum, s) => sum + (s.observationCount || 0), 0);
+				const totalObs = sessions.reduce(
+					(sum, s) => sum + (s.observationCount || 0),
+					0,
+				);
 				const workspace = store.getCurrentWorkspace();
 				return [
 					`Observations: ${totalObs} total`,
@@ -517,7 +563,9 @@ export function createLocalHandlers(
 					`Sessions: ${sessions.length}`,
 					"",
 					"Subcommands: list [type] [n] | search <q> [n] | stats | sessions | by-session <sid> [n] | clean",
-				].filter(Boolean).join("\n");
+				]
+					.filter(Boolean)
+					.join("\n");
 			}
 			const [rawSub, ...rest] = trimmed.split(/\s+/);
 			const sub = rawSub.toLowerCase();
@@ -528,8 +576,13 @@ export function createLocalHandlers(
 					const firstIsLimit = parts[0] !== undefined && /^\d+$/.test(parts[0]);
 					const type = firstIsLimit ? undefined : parts[0] || undefined;
 					const rawLimit = firstIsLimit ? parts[0] : parts[1];
-					const limit = rawLimit ? Math.min(Math.max(Number(rawLimit), 1), 100) : 50;
-					const allObs = store.listRecentObservations(limit, type as ObservationType | undefined);
+					const limit = rawLimit
+						? Math.min(Math.max(Number(rawLimit), 1), 100)
+						: 50;
+					const allObs = store.listRecentObservations(
+						limit,
+						type as ObservationType | undefined,
+					);
 					if (!allObs.length) return "No observations found.";
 					const items = allObs.map(compactObservationLine);
 					return `Observations for ${store.getCurrentWorkspace()} (${items.length} recent, type: ${type || "all"}):\n${items.join("\n")}`;
@@ -541,10 +594,14 @@ export function createLocalHandlers(
 					const limit = parts[1] ? Math.min(Number(parts[1]), 100) : 30;
 					if (!query) return "Usage: /obs search <query> [limit]";
 					const results = store.searchObservations(query, limit);
-					if (!results.length) return `No observations found matching "${query}"`;
-					const items = results.slice(0, limit).map(
-						(r, index) => `${observationLabel(r.observation, index)} · ${r.observation.type}\n${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
-					);
+					if (!results.length)
+						return `No observations found matching "${query}"`;
+					const items = results
+						.slice(0, limit)
+						.map(
+							(r, index) =>
+								`${observationLabel(r.observation, index)} · ${r.observation.type}\n${r.observation.title}\n${r.observation.narrative.slice(0, 300)}`,
+						);
 					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
 				}
 				case "stats": {
@@ -561,8 +618,12 @@ export function createLocalHandlers(
 							workspaceCounts[ws] = (workspaceCounts[ws] || 0) + 1;
 						}
 					}
-					const typeBreakdown = Object.entries(typeCounts).map(([t, c]) => `${t}: ${c}`).join(", ");
-					const wsBreakdown = Object.entries(workspaceCounts).map(([w, c]) => `${w}: ${c}`).join(", ");
+					const typeBreakdown = Object.entries(typeCounts)
+						.map(([t, c]) => `${t}: ${c}`)
+						.join(", ");
+					const wsBreakdown = Object.entries(workspaceCounts)
+						.map(([w, c]) => `${w}: ${c}`)
+						.join(", ");
 					return [
 						`Total observations: ${totalObs}`,
 						`Sessions: ${sessions.length}`,
@@ -573,9 +634,12 @@ export function createLocalHandlers(
 				case "sessions": {
 					const sessions = store.listSessions();
 					if (!sessions.length) return "No sessions with observations.";
-					const items = sessions.slice(0, 30).map(
-						(s) => `  ${s.id.slice(0, 12)} | ${s.observationCount} obs | ${s.workspace || "(none)"} | ${s.startedAt?.slice(0, 19) || ""}`,
-					);
+					const items = sessions
+						.slice(0, 30)
+						.map(
+							s =>
+								`  ${s.id.slice(0, 12)} | ${s.observationCount} obs | ${s.workspace || "(none)"} | ${s.startedAt?.slice(0, 19) || ""}`,
+						);
 					return `Sessions (${sessions.length} total, showing ${items.length}):\n${items.join("\n")}`;
 				}
 				case "by-session":
@@ -589,10 +653,14 @@ export function createLocalHandlers(
 						return `Session ${sessionId} not found in ${store.getCurrentWorkspace()}.`;
 					}
 					const obs = store.listObservations(sessionId, limit);
-					if (!obs.length) return `No observations for session ${sessionId.slice(0, 12)}`;
-					const items = obs.slice(0, limit).map(
-						(o, index) => `${observationLabel(o, index)} · ${o.type} · ${o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
-					);
+					if (!obs.length)
+						return `No observations for session ${sessionId.slice(0, 12)}`;
+					const items = obs
+						.slice(0, limit)
+						.map(
+							(o, index) =>
+								`${observationLabel(o, index)} · ${o.type} · ${o.timestamp?.slice(0, 19) || ""}\n  ${o.title || o.narrative?.slice(0, 100) || "No title"}`,
+						);
 					return `Observations for session ${sessionId.slice(0, 12)} (${obs.length} total, showing ${items.length}):\n\n${items.join("\n\n---\n\n")}`;
 				}
 				case "clean": {
@@ -616,7 +684,7 @@ export function createLocalHandlers(
 				error: "×",
 			};
 			return history
-				.map((n) => `${icons[n.level] ?? "●"} ${n.message}`)
+				.map(n => `${icons[n.level] ?? "●"} ${n.message}`)
 				.join("\n");
 		},
 	};

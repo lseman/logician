@@ -24,13 +24,18 @@ describe("session title inference", () => {
 
 	test("uses the agent response to resolve a vague first request", () => {
 		assert.equal(
-			inferSessionTitle("fix this", "Implemented folder-scoped FTS5 memory retrieval and indexing."),
+			inferSessionTitle(
+				"fix this",
+				"Implemented folder-scoped FTS5 memory retrieval and indexing.",
+			),
 			"Folder-scoped FTS5 memory retrieval and indexing.",
 		);
 	});
 
 	test("ignores attachment headings and truncates long topics", () => {
-		const title = inferSessionTitle(`# Files mentioned by the user:\n- /tmp/output.txt\n\n# My request for Codex:\nPlease investigate why the current session browser includes conversations from unrelated working directories and correct the folder isolation`);
+		const title = inferSessionTitle(
+			`# Files mentioned by the user:\n- /tmp/output.txt\n\n# My request for Codex:\nPlease investigate why the current session browser includes conversations from unrelated working directories and correct the folder isolation`,
+		);
 		assert.match(title || "", /^Investigate why the current session browser/);
 		assert.ok((title?.length || 0) <= 60);
 	});

@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { AgentConfig, Tool } from "@logician/agent-core";
 import type {
 	GenerateOptions,
 	LLMBackend,
 	LLMResponse,
 } from "@logician/agent-core/agent/backend.ts";
-import type { AgentConfig, Tool } from "@logician/agent-core";
-import { task_status } from "../tasks/task-status.ts";
-import { runDelegatedAgent } from "../delegation/runtime.ts";
 import {
 	BUILTIN_AGENTS,
-	createSubagentConcurrencyLimiter,
-	createSpawnAgentTool,
 	createSpawnAgentsTool,
+	createSpawnAgentTool,
+	createSubagentConcurrencyLimiter,
 } from "../delegation/definitions.ts";
+import { runDelegatedAgent } from "../delegation/runtime.ts";
+import { task_status } from "../tasks/task-status.ts";
 
 class FakeBackend implements LLMBackend {
 	readonly model = "fake";
@@ -28,11 +28,13 @@ class FakeBackend implements LLMBackend {
 		_messages: Record<string, unknown>[],
 		_options?: GenerateOptions,
 	): Promise<LLMResponse> {
-		return this.responses.shift() ?? {
-			content: "done",
-			toolCalls: [],
-			stopReason: "stop",
-		};
+		return (
+			this.responses.shift() ?? {
+				content: "done",
+				toolCalls: [],
+				stopReason: "stop",
+			}
+		);
 	}
 }
 
@@ -136,7 +138,10 @@ void test("a real task_status(done) call ends a delegated run in one turn instea
 					{
 						id: "ts-1",
 						name: "task_status",
-						arguments: JSON.stringify({ status: "done", summary: "Listed files." }),
+						arguments: JSON.stringify({
+							status: "done",
+							summary: "Listed files.",
+						}),
 					},
 				],
 				stopReason: "stop",
@@ -181,11 +186,15 @@ void test("delegated tool-call budgets are shared across the whole run", async (
 	const result = await runDelegatedAgent({
 		task: "Probe twice",
 		config: { ...baseConfig, tools: [tool] },
-		backend: new FakeBackend([toolCall("one"), toolCall("two"), {
-			content: "finished",
-			toolCalls: [],
-			stopReason: "stop",
-		}]),
+		backend: new FakeBackend([
+			toolCall("one"),
+			toolCall("two"),
+			{
+				content: "finished",
+				toolCalls: [],
+				stopReason: "stop",
+			},
+		]),
 		tools: [tool],
 		maxIterations: 3,
 		budget: { maxToolCalls: 1 },
@@ -206,9 +215,13 @@ void test("whole-task deadlines cancel a delegated run", async () => {
 		},
 		generate: async (_messages, options = {}) =>
 			new Promise<LLMResponse>((_resolve, reject) => {
-				const rejectAbort = () => reject(new DOMException("timed out", "AbortError"));
+				const rejectAbort = () =>
+					reject(new DOMException("timed out", "AbortError"));
 				if (options.signal?.aborted) rejectAbort();
-				else options.signal?.addEventListener("abort", rejectAbort, { once: true });
+				else
+					options.signal?.addEventListener("abort", rejectAbort, {
+						once: true,
+					});
 			}),
 	};
 	const result = await runDelegatedAgent({
@@ -248,7 +261,7 @@ void test("subagent progress callbacks emit deltas rather than accumulated prefi
 	const updates: string[] = [];
 	await tool.execute(
 		{ task: "Complete it", agent: "general" },
-		{ onUpdate: (value) => updates.push(value) },
+		{ onUpdate: value => updates.push(value) },
 	);
 
 	assert.deepEqual(updates, ["I", " finished."]);
@@ -266,7 +279,7 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 			active++;
 			peak = Math.max(peak, active);
 			options.callbacks?.onDelta?.("working");
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			await new Promise<void>(resolve => setImmediate(resolve));
 			active--;
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},
@@ -276,7 +289,7 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 		config: () => ({ ...baseConfig, tools: [] }),
 		backend,
 		agents: () => BUILTIN_AGENTS,
-		emit: (event) => emitted.push(event as { type: string; taskIndex?: number }),
+		emit: event => emitted.push(event as { type: string; taskIndex?: number }),
 		concurrencyLimiter: createSubagentConcurrencyLimiter(2),
 	});
 	const updates: string[] = [];
@@ -288,7 +301,7 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 				task: `Task ${index}`,
 			})),
 		},
-		{ onUpdate: (update) => updates.push(update) },
+		{ onUpdate: update => updates.push(update) },
 	);
 
 	assert.equal(peak, 2);
@@ -302,16 +315,16 @@ void test("spawn_agents honors maxParallelAgents and preserves its plural API", 
 	assert.equal(result.content.match(/\bdone\b/g)?.length, 5);
 	// Per-task lifecycle is now structured (subagent_start/subagent_end with
 	// taskIndex), not a `▶/↳/✓` marker-string stream on onUpdate.
-	const starts = emitted.filter((event) => event.type === "subagent_start");
-	const ends = emitted.filter((event) => event.type === "subagent_end");
+	const starts = emitted.filter(event => event.type === "subagent_start");
+	const ends = emitted.filter(event => event.type === "subagent_end");
 	assert.equal(starts.length, 5);
 	assert.equal(ends.length, 5);
 	assert.deepEqual(
-		new Set(starts.map((event) => event.taskIndex)),
+		new Set(starts.map(event => event.taskIndex)),
 		new Set([0, 1, 2, 3, 4]),
 	);
 	assert.deepEqual(
-		new Set(ends.map((event) => event.taskIndex)),
+		new Set(ends.map(event => event.taskIndex)),
 		new Set([0, 1, 2, 3, 4]),
 	);
 	// Per-task text streaming is carried via subagent_event/childChunks (see
@@ -345,7 +358,7 @@ void test("subagent concurrency limits are isolated between sessions", async () 
 		async generate() {
 			active++;
 			peak = Math.max(peak, active);
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			await new Promise<void>(resolve => setImmediate(resolve));
 			active--;
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},

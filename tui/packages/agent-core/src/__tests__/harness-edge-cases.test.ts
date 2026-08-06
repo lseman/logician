@@ -33,11 +33,11 @@ function makeHarness(
 void test("setTemperature takes effect on the next turn", async () => {
 	const responses: Array<{ temp?: number }> = [];
 	const backend = new FakeBackend([
-		(msgs, opts) => {
+		(_msgs, opts) => {
 			responses.push({ temp: opts.temperature });
 			return textResponse("a1");
 		},
-		(msgs, opts) => {
+		(_msgs, opts) => {
 			responses.push({ temp: opts.temperature });
 			return textResponse("a2");
 		},
@@ -54,13 +54,13 @@ void test("setTemperature takes effect on the next turn", async () => {
 void test("setSystemPrompt takes effect on the next turn", async () => {
 	const systemPrompts: string[] = [];
 	const backend = new FakeBackend([
-		(msgs) => {
-			const sys = msgs.find((m) => m.role === "system");
+		msgs => {
+			const sys = msgs.find(m => m.role === "system");
 			systemPrompts.push(String(sys?.content ?? ""));
 			return textResponse("a1");
 		},
-		(msgs) => {
-			const sys = msgs.find((m) => m.role === "system");
+		msgs => {
+			const sys = msgs.find(m => m.role === "system");
 			systemPrompts.push(String(sys?.content ?? ""));
 			return textResponse("a2");
 		},
@@ -82,7 +82,11 @@ void test("runtime config changes take effect at the next save point", async () 
 	const backend = new FakeBackend([
 		(messages, options) => {
 			temperatures.push(options.temperature ?? -1);
-			prompts.push(String(messages.find((message) => message.role === "system")?.content ?? ""));
+			prompts.push(
+				String(
+					messages.find(message => message.role === "system")?.content ?? "",
+				),
+			);
 			harness.setTemperature(1.25);
 			harness.setSystemPrompt("refreshed prompt");
 			return {
@@ -93,7 +97,11 @@ void test("runtime config changes take effect at the next save point", async () 
 		},
 		(messages, options) => {
 			temperatures.push(options.temperature ?? -1);
-			prompts.push(String(messages.find((message) => message.role === "system")?.content ?? ""));
+			prompts.push(
+				String(
+					messages.find(message => message.role === "system")?.content ?? "",
+				),
+			);
 			return textResponse("done");
 		},
 	]);
@@ -221,10 +229,10 @@ void test("setTranscriptPath accepts a path", async () => {
 
 void test("setAutoCompactionSettings stores settings", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));
-			harness.setAutoCompactionSettings({
-			enabled: true,
-			reserveTokens: 1000,
-		});;
+	harness.setAutoCompactionSettings({
+		enabled: true,
+		reserveTokens: 1000,
+	});
 });
 
 void test("enableAutoCompaction toggles auto-compaction", async () => {
@@ -238,11 +246,11 @@ void test("config changes persist across prompt turns", async () => {
 	await harness.prompt("q1");
 	harness.setTemperature(1.5);
 	await harness.prompt("q2");
-			assert.equal(harness.getTemperature(), 1.5);
-		// Config should still be set after a subsequent prompt.
-		await harness.prompt("q3");
-		assert.equal(harness.getTemperature(), 1.5);
-	});;
+	assert.equal(harness.getTemperature(), 1.5);
+	// Config should still be set after a subsequent prompt.
+	await harness.prompt("q3");
+	assert.equal(harness.getTemperature(), 1.5);
+});
 
 void test("listBranches returns empty when no branches", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("a")]));

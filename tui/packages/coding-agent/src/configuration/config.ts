@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, isAbsolute } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AgentModelConfig, TruncationConfig } from "@logician/agent-core";
 
 /** Validated configuration with warnings collected during load. */
@@ -93,8 +93,16 @@ const MICRO_COMPACT_MAX_CHARS_KEYS = new Set(["tool", "assistant", "default"]);
 const WEB_SEARCH_KEYS = new Set(["baseUrl", "maxResults"]);
 const MEMORY_EXTRACTOR_KEYS = new Set(["baseUrl", "model"]);
 const REASONER_IDS = new Set([
-	"none", "ssr", "tot", "got", "reflexion", "self_consistency",
-	"best_of_n", "auto_cot", "in_context_cot", "cover",
+	"none",
+	"ssr",
+	"tot",
+	"got",
+	"reflexion",
+	"self_consistency",
+	"best_of_n",
+	"auto_cot",
+	"in_context_cot",
+	"cover",
 ]);
 const PERMISSIONS_KEYS = new Set(["allow", "deny"]);
 
@@ -141,14 +149,14 @@ export function validateConfig(
 		if (isValidUrl(obj.baseUrl)) {
 			cfg.baseUrl = configString(obj.baseUrl);
 		} else {
-			warn(warnings, "\"baseUrl\" must be a valid http/https URL.");
+			warn(warnings, '"baseUrl" must be a valid http/https URL.');
 		}
 	}
 	if (obj.llmUrl !== undefined) {
 		if (isValidUrl(obj.llmUrl)) {
 			cfg.llmUrl = configString(obj.llmUrl);
 		} else {
-			warn(warnings, "\"llmUrl\" must be a valid http/https URL.");
+			warn(warnings, '"llmUrl" must be a valid http/https URL.');
 		}
 	}
 
@@ -159,10 +167,7 @@ export function validateConfig(
 		if (profile === "autonomous" || profile === "minimal") {
 			cfg.executionProfile = profile;
 		} else {
-			warn(
-				warnings,
-				"\"executionProfile\" must be one of: autonomous, minimal.",
-			);
+			warn(warnings, '"executionProfile" must be one of: autonomous, minimal.');
 		}
 	}
 
@@ -201,7 +206,7 @@ export function validateConfig(
 				cfg.models = parsed as LogicianTuiConfig["models"];
 			}
 		} else {
-			warn(warnings, "\"models\" must be an array.");
+			warn(warnings, '"models" must be an array.');
 		}
 	}
 	cfg.theme = configString(obj.theme);
@@ -324,7 +329,10 @@ export function validateConfig(
 	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
 	cfg.failureGuardEnabled = configBool(obj.failureGuardEnabled);
 	cfg.budgetStopEnabled = configBool(obj.budgetStopEnabled);
-	cfg.thinkingLoopDetectionEnabled = configBool(obj.thinkingLoopDetectionEnabled, true);
+	cfg.thinkingLoopDetectionEnabled = configBool(
+		obj.thinkingLoopDetectionEnabled,
+		true,
+	);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
@@ -339,18 +347,27 @@ export function validateConfig(
 		cfg.memoryExtractorModel = configString(obj.memoryExtractorModel);
 	}
 	if (obj.memoryExtractor !== undefined) {
-		if (!obj.memoryExtractor || typeof obj.memoryExtractor !== "object" || Array.isArray(obj.memoryExtractor)) {
-			warn(warnings, "\"memoryExtractor\" must be an object.");
+		if (
+			!obj.memoryExtractor ||
+			typeof obj.memoryExtractor !== "object" ||
+			Array.isArray(obj.memoryExtractor)
+		) {
+			warn(warnings, '"memoryExtractor" must be an object.');
 		} else {
 			const extractor = obj.memoryExtractor as Record<string, unknown>;
 			for (const key of Object.keys(extractor)) {
-				if (!MEMORY_EXTRACTOR_KEYS.has(key)) warn(warnings, `Unknown memoryExtractor key: "${key}".`);
+				if (!MEMORY_EXTRACTOR_KEYS.has(key))
+					warn(warnings, `Unknown memoryExtractor key: "${key}".`);
 			}
-			const baseUrl = extractor.baseUrl === undefined || isValidUrl(extractor.baseUrl)
-				? configString(extractor.baseUrl)
-				: undefined;
+			const baseUrl =
+				extractor.baseUrl === undefined || isValidUrl(extractor.baseUrl)
+					? configString(extractor.baseUrl)
+					: undefined;
 			if (extractor.baseUrl !== undefined && !baseUrl) {
-				warn(warnings, "\"memoryExtractor.baseUrl\" must be a valid http/https URL.");
+				warn(
+					warnings,
+					'"memoryExtractor.baseUrl" must be a valid http/https URL.',
+				);
 			}
 			cfg.memoryExtractor = { baseUrl, model: configString(extractor.model) };
 		}
@@ -366,17 +383,23 @@ export function validateConfig(
 	}
 	if (obj.reasoner !== undefined) {
 		cfg.reasoner = configString(obj.reasoner)?.toLowerCase();
-		if (!cfg.reasoner) warn(warnings, "\"reasoner\" must be a non-empty string.");
+		if (!cfg.reasoner) warn(warnings, '"reasoner" must be a non-empty string.');
 		else if (!REASONER_IDS.has(cfg.reasoner)) {
 			warn(warnings, `Unknown reasoner: "${cfg.reasoner}". Using "none".`);
 			cfg.reasoner = "none";
 		}
 	}
 	if (obj.reasonerConfig !== undefined) {
-		if (obj.reasonerConfig && typeof obj.reasonerConfig === "object" && !Array.isArray(obj.reasonerConfig)) {
-			cfg.reasonerConfig = { ...(obj.reasonerConfig as Record<string, unknown>) };
+		if (
+			obj.reasonerConfig &&
+			typeof obj.reasonerConfig === "object" &&
+			!Array.isArray(obj.reasonerConfig)
+		) {
+			cfg.reasonerConfig = {
+				...(obj.reasonerConfig as Record<string, unknown>),
+			};
 		} else {
-			warn(warnings, "\"reasonerConfig\" must be an object.");
+			warn(warnings, '"reasonerConfig" must be an object.');
 		}
 	}
 	if (obj.memoryViewerPort !== undefined) {
@@ -386,7 +409,9 @@ export function validateConfig(
 		cfg.transcriptMaxTurns = configNumber(obj.transcriptMaxTurns);
 	}
 	if (obj.transcriptMaxRenderedLines !== undefined) {
-		cfg.transcriptMaxRenderedLines = configNumber(obj.transcriptMaxRenderedLines);
+		cfg.transcriptMaxRenderedLines = configNumber(
+			obj.transcriptMaxRenderedLines,
+		);
 	}
 
 	for (const [key, minimum, inclusive] of [
@@ -420,7 +445,10 @@ export function validateConfig(
 				if (typeof p === "string" && p.trim()) {
 					const trimmed = p.trim();
 					if (!isAbsolute(trimmed)) {
-						warn(warnings, `"allowedPaths" entry must be an absolute path: "${trimmed}". Ignored.`);
+						warn(
+							warnings,
+							`"allowedPaths" entry must be an absolute path: "${trimmed}". Ignored.`,
+						);
 					} else {
 						paths.push(trimmed);
 					}
@@ -428,7 +456,7 @@ export function validateConfig(
 			}
 			if (paths.length > 0) cfg.allowedPaths = paths;
 		} else {
-			warn(warnings, "\"allowedPaths\" must be an array.");
+			warn(warnings, '"allowedPaths" must be an array.');
 		}
 	}
 
@@ -453,20 +481,27 @@ export function validateConfig(
 	// lsp sub-object.
 	if (obj.lsp !== undefined) {
 		if (typeof obj.lsp !== "object" || obj.lsp === null) {
-			warn(warnings, "\"lsp\" must be an object.");
+			warn(warnings, '"lsp" must be an object.');
 		} else {
 			const l = obj.lsp as Record<string, unknown>;
 			const lc: {
 				enabled?: boolean;
 				timeoutMs?: number;
-				serverOverrides?: Record<string, {
-					command: string;
-					args?: string[];
-					languageId: string;
-				}>;
+				serverOverrides?: Record<
+					string,
+					{
+						command: string;
+						args?: string[];
+						languageId: string;
+					}
+				>;
 			} = {};
 			for (const key of Object.keys(l)) {
-				if (key !== "enabled" && key !== "timeoutMs" && key !== "serverOverrides") {
+				if (
+					key !== "enabled" &&
+					key !== "timeoutMs" &&
+					key !== "serverOverrides"
+				) {
 					warn(warnings, `Unknown lsp key: "${key}".`);
 				}
 			}
@@ -474,7 +509,11 @@ export function validateConfig(
 			if (le !== undefined) lc.enabled = le;
 			const lt = configNumber(l.timeoutMs);
 			if (lt !== undefined && lt > 0) lc.timeoutMs = lt;
-			if (l.serverOverrides !== undefined && typeof l.serverOverrides === "object" && l.serverOverrides !== null) {
+			if (
+				l.serverOverrides !== undefined &&
+				typeof l.serverOverrides === "object" &&
+				l.serverOverrides !== null
+			) {
 				const overrides = l.serverOverrides as Record<string, unknown>;
 				const parsedOverrides: NonNullable<typeof lc.serverOverrides> = {};
 				for (const [ext, def] of Object.entries(overrides)) {
@@ -484,11 +523,17 @@ export function validateConfig(
 					}
 					const d = def as Record<string, unknown>;
 					if (typeof d.command !== "string" || !d.command.trim()) {
-						warn(warnings, `"lsp.serverOverrides.${ext}.command" must be a non-empty string.`);
+						warn(
+							warnings,
+							`"lsp.serverOverrides.${ext}.command" must be a non-empty string.`,
+						);
 						continue;
 					}
 					if (typeof d.languageId !== "string" || !d.languageId.trim()) {
-						warn(warnings, `"lsp.serverOverrides.${ext}.languageId" must be a non-empty string.`);
+						warn(
+							warnings,
+							`"lsp.serverOverrides.${ext}.languageId" must be a non-empty string.`,
+						);
 						continue;
 					}
 					const args = Array.isArray(d.args)
@@ -510,8 +555,11 @@ export function validateConfig(
 
 	// reflectionConfig sub-object: self-evaluation before final conclusion.
 	if (obj.reflectionConfig !== undefined) {
-		if (typeof obj.reflectionConfig !== "object" || obj.reflectionConfig === null) {
-			warn(warnings, "\"reflectionConfig\" must be an object.");
+		if (
+			typeof obj.reflectionConfig !== "object" ||
+			obj.reflectionConfig === null
+		) {
+			warn(warnings, '"reflectionConfig" must be an object.');
 		} else {
 			const r = obj.reflectionConfig as Record<string, unknown>;
 			for (const key of Object.keys(r)) {
@@ -519,7 +567,11 @@ export function validateConfig(
 					warn(warnings, `Unknown reflectionConfig key: "${key}".`);
 				}
 			}
-			const rc: { enabled?: boolean; maxReflections?: number; prompt?: string } = {};
+			const rc: {
+				enabled?: boolean;
+				maxReflections?: number;
+				prompt?: string;
+			} = {};
 			const re = configBool(r.enabled);
 			if (re !== undefined) rc.enabled = re;
 			const rm = configNumber(r.maxReflections);
@@ -533,7 +585,7 @@ export function validateConfig(
 	// compaction sub-object.
 	if (obj.compaction !== undefined) {
 		if (typeof obj.compaction !== "object" || obj.compaction === null) {
-			warn(warnings, "\"compaction\" must be an object.");
+			warn(warnings, '"compaction" must be an object.');
 		} else {
 			const c = obj.compaction as Record<string, unknown>;
 			const ccfg: {
@@ -559,7 +611,7 @@ export function validateConfig(
 	// truncation sub-object: universal output/result size caps.
 	if (obj.truncation !== undefined) {
 		if (typeof obj.truncation !== "object" || obj.truncation === null) {
-			warn(warnings, "\"truncation\" must be an object.");
+			warn(warnings, '"truncation" must be an object.');
 		} else {
 			const t = obj.truncation as Record<string, unknown>;
 			const tcfg: TruncationConfig = {};
@@ -579,7 +631,10 @@ export function validateConfig(
 				const n = configNumber(t[key]);
 				if (n !== undefined) {
 					if (n <= 0) {
-						warn(warnings, `"truncation.${key}" must be > 0, got ${n}. Ignored.`);
+						warn(
+							warnings,
+							`"truncation.${key}" must be > 0, got ${n}. Ignored.`,
+						);
 					} else {
 						tcfg[key] = n;
 					}
@@ -590,13 +645,20 @@ export function validateConfig(
 					typeof t.microCompactMaxChars !== "object" ||
 					t.microCompactMaxChars === null
 				) {
-					warn(warnings, "\"truncation.microCompactMaxChars\" must be an object.");
+					warn(
+						warnings,
+						'"truncation.microCompactMaxChars" must be an object.',
+					);
 				} else {
 					const m = t.microCompactMaxChars as Record<string, unknown>;
-					const mcfg: NonNullable<TruncationConfig["microCompactMaxChars"]> = {};
+					const mcfg: NonNullable<TruncationConfig["microCompactMaxChars"]> =
+						{};
 					for (const key of Object.keys(m)) {
 						if (!MICRO_COMPACT_MAX_CHARS_KEYS.has(key)) {
-							warn(warnings, `Unknown truncation.microCompactMaxChars key: "${key}".`);
+							warn(
+								warnings,
+								`Unknown truncation.microCompactMaxChars key: "${key}".`,
+							);
 						}
 					}
 					for (const key of ["tool", "assistant", "default"] as const) {
@@ -633,7 +695,7 @@ export function validateConfig(
 			obj.plugins === null ||
 			Array.isArray(obj.plugins)
 		) {
-			warn(warnings, "\"plugins\" must be an object.");
+			warn(warnings, '"plugins" must be an object.');
 		} else {
 			cfg.plugins = obj.plugins as Record<string, unknown>;
 		}
@@ -642,7 +704,7 @@ export function validateConfig(
 	// webSearch sub-object.
 	if (obj.webSearch !== undefined) {
 		if (typeof obj.webSearch !== "object" || obj.webSearch === null) {
-			warn(warnings, "\"webSearch\" must be an object.");
+			warn(warnings, '"webSearch" must be an object.');
 		} else {
 			const ws = obj.webSearch as Record<string, unknown>;
 			const wscfg: NonNullable<LogicianTuiConfig["webSearch"]> = {};
@@ -653,7 +715,7 @@ export function validateConfig(
 			}
 			if (ws.baseUrl !== undefined) {
 				if (!isValidUrl(ws.baseUrl)) {
-					warn(warnings, "\"webSearch.baseUrl\" must be a valid http/https URL.");
+					warn(warnings, '"webSearch.baseUrl" must be a valid http/https URL.');
 				} else {
 					wscfg.baseUrl = configString(ws.baseUrl);
 				}
@@ -673,7 +735,7 @@ export function validateConfig(
 	// permissions sub-object.
 	if (obj.permissions !== undefined) {
 		if (typeof obj.permissions !== "object" || obj.permissions === null) {
-			warn(warnings, "\"permissions\" must be an object.");
+			warn(warnings, '"permissions" must be an object.');
 		} else {
 			const perms = obj.permissions as Record<string, unknown>;
 			const percfg: NonNullable<LogicianTuiConfig["permissions"]> = {};
@@ -767,11 +829,14 @@ export interface LogicianTuiConfig {
 	lsp?: {
 		enabled?: boolean;
 		timeoutMs?: number;
-		serverOverrides?: Record<string, {
-			command: string;
-			args?: string[];
-			languageId: string;
-		}>;
+		serverOverrides?: Record<
+			string,
+			{
+				command: string;
+				args?: string[];
+				languageId: string;
+			}
+		>;
 	};
 	// Compaction settings.
 	compaction?: {
@@ -935,7 +1000,7 @@ export function saveConfigField(key: string, value: unknown): boolean {
 				>)
 			: {};
 		raw[key] = value;
-		writeFileSync(configPath, JSON.stringify(raw, null, 2) + "\n");
+		writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`);
 		return true;
 	} catch (_e: unknown) {
 		return false;

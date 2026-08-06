@@ -3,13 +3,13 @@
 // advertises a compact catalog (name + description); the model calls this tool
 // to pull the full SKILL.md body when it decides to use a skill.
 
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 import {
 	findSkillByName,
 	formatSkillInvocation,
-	skillLookupKeys,
 	type Skill,
+	skillLookupKeys,
 } from "../skills/index.ts";
-import type { Tool } from "@logician/agent-core/agent/types.ts";
 
 /**
  * Build a read_skill tool bound to the given skills. Pass the skills loaded at
@@ -46,11 +46,11 @@ export function createReadSkillTool(skills: Skill[]): Tool | null {
 			if (!raw || typeof raw !== "object") return {};
 			return raw as Record<string, unknown>;
 		},
-		execute: async (args) => {
+		execute: async args => {
 			const name = typeof args.name === "string" ? args.name : "";
 			const skill = byName.get(name) ?? findSkillByName(skills, name);
 			if (!skill) {
-				const available = skills.map((s) => s.name).join(", ") || "(none)";
+				const available = skills.map(s => s.name).join(", ") || "(none)";
 				return `Error: Unknown skill "${name}". Available: ${available}`;
 			}
 			return formatSkillInvocation(skill);

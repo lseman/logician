@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderTerminalScreen, type TerminalScreen } from "./terminal-screen.ts";
+import {
+	renderTerminalScreen,
+	type TerminalScreen,
+} from "./terminal-screen.ts";
 
 export interface PtyAction {
 	afterMs: number;
@@ -51,10 +54,14 @@ export async function runInPty(options: PtyRunOptions): Promise<PtyRunResult> {
 		let stderr = "";
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
-		child.stdout.on("data", (chunk: string) => { stdout += chunk; });
-		child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+		child.stdout.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
 		child.once("error", reject);
-		child.once("close", (code) => {
+		child.once("close", code => {
 			if (code !== 0) {
 				reject(new Error(`PTY driver failed (${code}): ${stderr || stdout}`));
 				return;
@@ -62,7 +69,9 @@ export async function runInPty(options: PtyRunOptions): Promise<PtyRunResult> {
 			try {
 				resolve(JSON.parse(stdout) as PtyRunResult);
 			} catch {
-				reject(new Error(`PTY driver returned invalid JSON: ${stdout}\n${stderr}`));
+				reject(
+					new Error(`PTY driver returned invalid JSON: ${stdout}\n${stderr}`),
+				);
 			}
 		});
 		child.stdin.end(payload);
@@ -70,15 +79,21 @@ export async function runInPty(options: PtyRunOptions): Promise<PtyRunResult> {
 }
 
 export function stripTerminalControls(value: string): string {
-	return value
-		// CSI: ESC [ ... final byte
-		.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
-		// OSC: ESC ] ... BEL or ST
-		.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
-		// APC: ESC _ ... BEL or ST
-		.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
-		// DEC modes: ESC ( )
-		.replace(/\x1b[()][0-2A-Z]/g, "")
-		// C0 controls
-		.replace(/\r/g, "");
+	return (
+		value
+			// CSI: ESC [ ... final byte
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+			.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+			// OSC: ESC ] ... BEL or ST
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+			.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+			// APC: ESC _ ... BEL or ST
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+			.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+			// DEC modes: ESC ( )
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+			.replace(/\x1b[()][0-2A-Z]/g, "")
+			// C0 controls
+			.replace(/\r/g, "")
+	);
 }

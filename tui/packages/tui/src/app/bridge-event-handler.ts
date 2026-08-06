@@ -4,29 +4,29 @@
 // permission/question requests.
 
 import { formatContextSize } from "@logician/coding-agent";
-import {
+import type {
 	AgentCoreBridge,
 	GoalManager,
-	type GoalState,
+	GoalState,
 } from "@logician/coding-agent/application";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
-import { Transcript } from "@logician/coding-agent/sessions";
 import type { SlashCommandDef } from "@logician/coding-agent/commands";
-import { ChoicePopup } from "../overlays/choice-popup.ts";
-import { PermissionPopup } from "../overlays/permission-popup.ts";
-import { SlashPopup } from "../overlays/slash-popup.ts";
-import { StatusBar } from "../status/status-bar.ts";
-import { SteerQueue } from "../status/steer-queue.ts";
-import { TodoBar } from "../status/todo-bar.ts";
-import { TranscriptDisplay } from "../rendering/transcript/display.ts";
-import { WorkSurface } from "../status/work-surface.ts";
+import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
+import type { Transcript } from "@logician/coding-agent/sessions";
+import type { ChoicePopup } from "../overlays/choice-popup.ts";
+import type { PermissionPopup } from "../overlays/permission-popup.ts";
+import type { SlashPopup } from "../overlays/slash-popup.ts";
+import type { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import {
 	reduceTurnState,
 	type TurnState,
 	turnPhaseIsActive,
 	turnPhaseLabel,
 } from "../state/turn-state.ts";
-import { TUI } from "../terminal/core.ts";
+import type { StatusBar } from "../status/status-bar.ts";
+import type { SteerQueue } from "../status/steer-queue.ts";
+import type { TodoBar } from "../status/todo-bar.ts";
+import type { WorkSurface } from "../status/work-surface.ts";
+import type { TUI } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import { getGitVersion } from "./git-status.ts";
 import { formatStartupMessage } from "./startup/message.ts";
@@ -59,7 +59,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 	};
 
 	ctx.bridge.on(eventHandler);
-	ctx.bridge.onError((err) => {
+	ctx.bridge.onError(err => {
 		// Also display in transcript so the user sees connection/server errors
 		ctx.transcript.addSystemMessage(`Connection error: ${err.message}`);
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -69,7 +69,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 	// Initialize bridge
 	ctx.bridge
 		.init()
-		.then((state) => {
+		.then(state => {
 			ctx.statusPanel.update({
 				contextTokens: Number(state.context_tokens || 0),
 				contextMaxTokens: Number(state.context_max_tokens || 0) || undefined,
@@ -96,9 +96,9 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 			const skills = ctx.bridge.getSkills();
 			if (skills.length) {
 				const existing = ctx.slashPopup.getCommands() as SlashCommandDef[];
-				const taken = new Set(existing.map((c) => c.command));
+				const taken = new Set(existing.map(c => c.command));
 				const skillCmds: SlashCommandDef[] = skills
-					.map((s) => ({
+					.map(s => ({
 						command: `/${s.slashName}`,
 						usage: `/${s.slashName}${s.argumentHint ? ` ${s.argumentHint}` : ""}`,
 						description: `Skill: ${s.description.slice(0, 80)}`,
@@ -108,7 +108,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 							ctx.bridge.invokeSkill(s.name, args);
 						},
 					}))
-					.filter((c) => !taken.has(c.command));
+					.filter(c => !taken.has(c.command));
 				if (skillCmds.length) {
 					ctx.slashPopup.setCommands([...existing, ...skillCmds]);
 				}
@@ -117,9 +117,9 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 			const prompts = ctx.bridge.getPrompts();
 			if (prompts.length) {
 				const existing = ctx.slashPopup.getCommands() as SlashCommandDef[];
-				const taken = new Set(existing.map((c) => c.command));
+				const taken = new Set(existing.map(c => c.command));
 				const promptCmds: SlashCommandDef[] = prompts
-					.map((p) => ({
+					.map(p => ({
 						command: `/${p.slashName}`,
 						usage: `/${p.slashName}${p.argumentHint ? ` ${p.argumentHint}` : ""}`,
 						description: `Prompt: ${p.description.slice(0, 80)}`,
@@ -129,24 +129,25 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 							ctx.bridge.invokePrompt(p.name, args);
 						},
 					}))
-					.filter((c) => !taken.has(c.command));
+					.filter(c => !taken.has(c.command));
 				if (promptCmds.length) {
 					ctx.slashPopup.setCommands([...existing, ...promptCmds]);
 				}
 			}
 		})
-		.catch((err) => {
+		.catch(err => {
 			// Display init/connection errors in transcript so the user knows
 			// the agent couldn't start (e.g. server unreachable).
-			ctx.transcript.addSystemMessage(
-				`Failed to start agent: ${err.message}`,
-			);
+			ctx.transcript.addSystemMessage(`Failed to start agent: ${err.message}`);
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.tui.requestRender();
 		});
 }
 
-export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent): void {
+export function handleEvent(
+	ctx: BridgeEventHandlerCtx,
+	event: ParsedBridgeEvent,
+): void {
 	// Update transcript state
 	ctx.transcript.handleEvent(event);
 	ctx.turnState = reduceTurnState(ctx.turnState, event);
@@ -305,7 +306,7 @@ export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent
 			break;
 		case "notice":
 			if (event.label === "MCP") {
-				void ctx.bridge.getState().then((state) => {
+				void ctx.bridge.getState().then(state => {
 					ctx.statusPanel.update({
 						mcpServerCount: Number(state.mcp_servers || 0),
 						mcpLoading: false,
@@ -327,7 +328,7 @@ export function handleEvent(ctx: BridgeEventHandlerCtx, event: ParsedBridgeEvent
 			if (event.kind === "observations_added") {
 				const previews = (event.items ?? [])
 					.slice(0, 3)
-					.map((item) => `[${item.id}] ${item.content.slice(0, 120)}`)
+					.map(item => `[${item.id}] ${item.content.slice(0, 120)}`)
 					.join("\n");
 				ctx.transcript.addSystemMessage(
 					`Memory added: ${event.count} observation${event.count === 1 ? "" : "s"}` +

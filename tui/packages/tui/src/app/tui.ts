@@ -7,14 +7,18 @@ import {
 	type GoalState,
 	LoopManager,
 } from "@logician/coding-agent/application";
+import { createSlashCommands } from "@logician/coding-agent/commands";
 import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
-import { SessionStore, Transcript, type Turn } from "@logician/coding-agent/sessions";
 import {
-	createSlashCommands,
-} from "@logician/coding-agent/commands";
+	SessionStore,
+	Transcript,
+	type Turn,
+} from "@logician/coding-agent/sessions";
+import { InputBar } from "../input/input-bar.ts";
+import { KillRing } from "../input/kill-ring.ts";
+import { UndoStack } from "../input/undo-stack.ts";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
-import { InputBar } from "../input/input-bar.ts";
 import {
 	type McpManagerAction,
 	McpManagerOverlay,
@@ -23,10 +27,6 @@ import {
 	type ModelSelectorAction,
 	ModelSelectorOverlay,
 } from "../overlays/model-selector.ts";
-import {
-	NotificationCenter,
-	type NotificationLevel,
-} from "../status/notification-center.ts";
 import { PermissionPopup } from "../overlays/permission-popup.ts";
 import {
 	type PluginManagerAction,
@@ -42,27 +42,41 @@ import {
 	SettingsSelectorOverlay,
 } from "../overlays/settings-overlay.ts";
 import { SlashPopup } from "../overlays/slash-popup.ts";
-import { StatusBar } from "../status/status-bar.ts";
-import { SteerQueue } from "../status/steer-queue.ts";
 import {
 	type ThemeSelectorAction,
 	ThemeSelectorOverlay,
 } from "../overlays/theme-selector.ts";
-import { TodoBar } from "../status/todo-bar.ts";
-import { TranscriptDisplay } from "../rendering/transcript/display.ts";
-import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator.ts";
-import { WorkSurface } from "../status/work-surface.ts";
-import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
-import { Container, TUI } from "../terminal/core.ts";
 import { Flex } from "../rendering/flex.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { Separator } from "../rendering/separator.ts";
+import { TranscriptDisplay } from "../rendering/transcript/display.ts";
+import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator.ts";
+import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
+import {
+	NotificationCenter,
+	type NotificationLevel,
+} from "../status/notification-center.ts";
+import { StatusBar } from "../status/status-bar.ts";
+import { SteerQueue } from "../status/steer-queue.ts";
+import { TodoBar } from "../status/todo-bar.ts";
+import { WorkSurface } from "../status/work-surface.ts";
+import { Container, TUI } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import { KillRing } from "../input/kill-ring.ts";
-import { UndoStack } from "../input/undo-stack.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
+import {
+	createLocalHandlers,
+	createSlashSubmitHandler,
+} from "./commands/index.ts";
 import { getGitStatus } from "./git-status.ts";
 import { evaluateGoal as evaluateGoalImpl } from "./goal-runner.ts";
+import {
+	applyThinkingLevel as applyThinkingLevelImpl,
+	cycleExecutionProfile as cycleExecutionProfileImpl,
+	cycleInferenceMode as cycleInferenceModeImpl,
+	type InferenceMode,
+	setExecutionProfile as setExecutionProfileImpl,
+	setInferenceMode as setInferenceModeImpl,
+} from "./inference-settings.ts";
 import { setupInputHandler as setupInputHandlerImpl } from "./input-controller.ts";
 import {
 	handleMcpManagerAction as handleMcpManagerActionImpl,
@@ -86,18 +100,6 @@ import {
 	openSessionManager as openSessionManagerImpl,
 	restoreSession as restoreSessionImpl,
 } from "./session/controller.ts";
-import {
-	applyThinkingLevel as applyThinkingLevelImpl,
-	cycleExecutionProfile as cycleExecutionProfileImpl,
-	cycleInferenceMode as cycleInferenceModeImpl,
-	type InferenceMode,
-	setExecutionProfile as setExecutionProfileImpl,
-	setInferenceMode as setInferenceModeImpl,
-} from "./inference-settings.ts";
-import {
-	createLocalHandlers,
-	createSlashSubmitHandler,
-} from "./commands/index.ts";
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
@@ -141,8 +143,7 @@ export class LogicianTUI {
 	configPath?: string;
 	thinkingLevel = "off";
 	inferenceMode: InferenceMode = "instruct-general";
-	thinkingDisplayMode: "collapsed" | "summary" | "expanded" =
-		"expanded";
+	thinkingDisplayMode: "collapsed" | "summary" | "expanded" = "expanded";
 	currentSessionId: string | null = null;
 	// Tool call awaiting an interactive allow/deny answer in the input bar.
 	pendingPermission: { toolCallId: string; toolName: string } | null = null;
@@ -163,7 +164,7 @@ export class LogicianTUI {
 		const activeTurn = this.transcript.getTurns().at(-1);
 		const recoveryPrompt =
 			activeTurn && !activeTurn.isComplete
-				? activeTurn.userMessage?.content ?? ""
+				? (activeTurn.userMessage?.content ?? "")
 				: "";
 		this.statusPanel.update({ phase: "cancelling" });
 		this.statusPanel.startAnimation();
@@ -240,10 +241,8 @@ export class LogicianTUI {
 			thinkingMode: this.thinkingDisplayMode,
 			maxMessageLength:
 				runtimeConfig.source.truncation?.transcriptMessageMaxChars,
-			maxTurns:
-				runtimeConfig.source.transcriptMaxTurns,
-			maxRenderedLines:
-				runtimeConfig.source.transcriptMaxRenderedLines,
+			maxTurns: runtimeConfig.source.transcriptMaxTurns,
+			maxRenderedLines: runtimeConfig.source.transcriptMaxRenderedLines,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.
@@ -263,7 +262,7 @@ export class LogicianTUI {
 			this.tui.requestRender();
 			await this.bridge.sendMessage(prompt);
 		});
-		this.loopManager.setOnStateChange((state) => {
+		this.loopManager.setOnStateChange(state => {
 			this.loopActive = state !== null;
 			if (state?.lastError) {
 				this.transcript.addSystemMessage(
@@ -310,7 +309,7 @@ export class LogicianTUI {
 		this.sessionStore = new SessionStore(process.cwd());
 		this.sessionManager = new SessionBrowserOverlay();
 		this.sessionManager.setStore(this.sessionStore);
-		this.sessionManager.setActionCallback((action) =>
+		this.sessionManager.setActionCallback(action =>
 			this.handleSessionAction(action),
 		);
 		// Only create initial session — never auto-resume. Sessions are loaded
@@ -365,7 +364,9 @@ export class LogicianTUI {
 
 		// Setup slash commands
 		const localHandlers = createLocalHandlers(this);
-		this.slashPopup.setCommands(createSlashCommands(this.bridge, localHandlers));
+		this.slashPopup.setCommands(
+			createSlashCommands(this.bridge, localHandlers),
+		);
 		const submitSlashCommand = createSlashSubmitHandler(this);
 		this.slashPopup.setOnSubmit((result, dispatch, command) => {
 			void submitSlashCommand(result, dispatch, command);
@@ -399,18 +400,6 @@ export class LogicianTUI {
 
 	private setupInputHandler(): void {
 		setupInputHandlerImpl(this);
-	}
-
-	// ── Session management ───────────────────────────────────────────────
-
-	/**
-	 * Restore a session into BOTH the UI transcript and the model context.
-	 * Without the bridge restore, a resumed session renders its history but the
-	 * model starts cold ("continue" loses everything). Pass [] for a fresh
-	 * session (clears both).
-	 */
-	private _restoreSession(turns: Turn[]): void {
-		restoreSessionImpl(this, turns);
 	}
 
 	/** Auto-save the latest turn to the current session. */
@@ -508,7 +497,12 @@ export class LogicianTUI {
 		const dock = new Flex([
 			{ component: new Separator(), basis: 1 },
 			{ component: pinnedContainer, basis: "auto", shrink: 1, minSize: 0 },
-			{ component: this.tui.getAboveInputOverlaysComponent(), basis: "auto", shrink: 1, minSize: 0 },
+			{
+				component: this.tui.getAboveInputOverlaysComponent(),
+				basis: "auto",
+				shrink: 1,
+				minSize: 0,
+			},
 			{ component: this.inputBar, basis: "auto", shrink: 1, minSize: 1 },
 			{ component: new Separator(), basis: 1 },
 			{ component: this.statusPanel, basis: "auto", shrink: 1, minSize: 1 },

@@ -110,8 +110,8 @@ export class SettingsSelectorOverlay implements Component {
 			}
 			this.inDetailView = true;
 			this.selectedOptionIndex = s
-				? s.options.findIndex((o) => o.current) >= 0
-					? s.options.findIndex((o) => o.current)
+				? s.options.findIndex(o => o.current) >= 0
+					? s.options.findIndex(o => o.current)
 					: 0
 				: 0;
 			this.invalidate();
@@ -277,7 +277,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 
 		// ── Current value indicator ──
-		const currentMark = s.options.find((o) => o.current);
+		const currentMark = s.options.find(o => o.current);
 		if (currentMark) {
 			const currentColor =
 				typeof currentMark.toggleOn === "boolean"

@@ -84,7 +84,7 @@ void test("openclaude-style nested skills keep path ids and display names", asyn
 
 	const { skills, diagnostics } = await loadSkills(root);
 	assert.equal(diagnostics.length, 0);
-	assert.deepEqual(skills.map((s) => s.name).sort(), [
+	assert.deepEqual(skills.map(s => s.name).sort(), [
 		"academic",
 		"academic/semantic_scholar",
 	]);
@@ -109,8 +109,16 @@ void test("skill catalog and invocation render openclaude metadata and resources
 	const skillDir = join(root, "coding", "file_ops");
 	mkdirSync(join(skillDir, "scripts"), { recursive: true });
 	mkdirSync(join(skillDir, "references"), { recursive: true });
-	writeFileSync(join(skillDir, "scripts", "file_ops.py"), "print('ok')", "utf8");
-	writeFileSync(join(skillDir, "references", "workflow.md"), "# workflow", "utf8");
+	writeFileSync(
+		join(skillDir, "scripts", "file_ops.py"),
+		"print('ok')",
+		"utf8",
+	);
+	writeFileSync(
+		join(skillDir, "references", "workflow.md"),
+		"# workflow",
+		"utf8",
+	);
 	writeFileSync(
 		join(skillDir, "SKILL.md"),
 		[
@@ -167,7 +175,10 @@ void test("metadata-only and lenient frontmatter skills are accepted", async () 
 	const skill = findSkillByName(skills, "Web");
 	assert.ok(skill);
 	assert.equal(skill.name, "coding/web");
-	assert.equal(skill.description, "Use for web-related tasks: fetching documentation, inspecting REST APIs.");
+	assert.equal(
+		skill.description,
+		"Use for web-related tasks: fetching documentation, inspecting REST APIs.",
+	);
 	assert.deepEqual(skill.allowedTools, ["fetch_url"]);
 });
 
@@ -182,14 +193,16 @@ void test("skill without a description is rejected with a diagnostic", async () 
 	);
 	const { skills, diagnostics } = await loadSkills(root);
 	assert.equal(skills.length, 0);
-	assert.ok(diagnostics.some((d) => d.code === "invalid_metadata"));
+	assert.ok(diagnostics.some(d => d.code === "invalid_metadata"));
 });
 
 void test("skill catalog is bounded while retaining every skill name", () => {
 	const skills = Array.from({ length: 40 }, (_, index) => ({
 		name: `skill-${index}`,
 		displayName: `Skill ${index}`,
-		description: `A deliberately long description for skill ${index} `.repeat(8),
+		description: `A deliberately long description for skill ${index} `.repeat(
+			8,
+		),
 		content: "body",
 		filePath: `/skills/${index}/SKILL.md`,
 		baseDir: `/skills/${index}`,
@@ -199,5 +212,6 @@ void test("skill catalog is bounded while retaining every skill name", () => {
 	}));
 	const catalog = formatSkillCatalog(skills, { maxChars: 4_000 });
 	assert.ok(catalog.length <= 4_000);
-	for (const skill of skills) assert.match(catalog, new RegExp(`name="${skill.name}"`));
+	for (const skill of skills)
+		assert.match(catalog, new RegExp(`name="${skill.name}"`));
 });

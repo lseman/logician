@@ -4,13 +4,16 @@
 // abortController) and supplies them here; these functions contain the logic
 // that used to live directly on the AgentHarness class.
 
+import type {
+	DeliveryMode,
+	MessageDeliveryManager,
+} from "../../queue/manager.ts";
 import { createSteeringInterruptReason } from "../agent-loop-runner.ts";
-import type { MessageDeliveryManager, DeliveryMode } from "../../queue/manager.ts";
-import type { Session } from "../session.ts";
 import type { HarnessPhase } from "../runtime-state.ts";
+import type { Session } from "../session.ts";
 import type { QueueMode } from "../types.ts";
-import { HarnessBusyError } from "./phase.ts";
 import type { AbortResult, HarnessQueues } from "./contracts.ts";
+import { HarnessBusyError } from "./phase.ts";
 
 export interface QueueOpsDeps {
 	msgManager: MessageDeliveryManager;
@@ -23,8 +26,8 @@ export interface QueueOpsDeps {
 export function getQueues(deps: QueueOpsDeps): HarnessQueues {
 	const q = deps.msgManager.queue;
 	return {
-		steering: q.getSteering().map((m) => m.content),
-		followUp: q.getFollowUp().map((m) => m.content),
+		steering: q.getSteering().map(m => m.content),
+		followUp: q.getFollowUp().map(m => m.content),
 		nextTurn: [...deps.getNextTurnQueue()],
 	};
 }
@@ -66,7 +69,7 @@ export function flushSteeringNow(
 	if (queued.length === 0) return 0;
 	deps.setNextTurnQueue([
 		...deps.getNextTurnQueue(),
-		...queued.map((message) => message.content),
+		...queued.map(message => message.content),
 	]);
 	deps.emitQueueChange();
 	abortController?.abort(createSteeringInterruptReason());
@@ -124,8 +127,8 @@ export interface AbortDeps extends QueueOpsDeps {
 
 export async function abort(deps: AbortDeps): Promise<AbortResult> {
 	const q = deps.msgManager.queue;
-	const clearedSteering = q.getSteering().map((m) => m.content);
-	const clearedFollowUp = q.getFollowUp().map((m) => m.content);
+	const clearedSteering = q.getSteering().map(m => m.content);
+	const clearedFollowUp = q.getFollowUp().map(m => m.content);
 	if (deps.activeOperationId) {
 		deps.session?.appendJournalEvent({
 			type: "operation_interrupted",

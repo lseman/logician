@@ -25,7 +25,7 @@ void test("diagnoseEditedFile reports bounded TypeScript syntax errors", async (
 
 void test("diagnoseEditedFile reports malformed JSON", async () => {
 	const cwd = workspace();
-	writeFileSync(path.join(cwd, "broken.json"), "{\"ok\": true,}", "utf8");
+	writeFileSync(path.join(cwd, "broken.json"), '{"ok": true,}', "utf8");
 
 	const diagnostics = await diagnoseEditedFile(cwd, "broken.json");
 
@@ -37,7 +37,7 @@ void test("diagnoseEditedFile honors configured paths outside CWD", async () => 
 	const cwd = workspace();
 	const allowed = workspace();
 	const file = path.join(allowed, "broken.json");
-	writeFileSync(file, "{\"ok\": true,}", "utf8");
+	writeFileSync(file, '{"ok": true,}', "utf8");
 
 	const diagnostics = await diagnoseEditedFile(cwd, file, [allowed]);
 
@@ -49,7 +49,7 @@ void test("diagnoseEditedFile honors allowAllPaths outside CWD", async () => {
 	const cwd = workspace();
 	const outside = workspace();
 	const file = path.join(outside, "broken.json");
-	writeFileSync(file, "{\"ok\": true,}", "utf8");
+	writeFileSync(file, '{"ok": true,}', "utf8");
 
 	const diagnostics = await diagnoseEditedFile(cwd, file, undefined, true);
 
@@ -64,11 +64,15 @@ void test("diagnoseEditedFile uses the nearest project for semantic errors", asy
 		JSON.stringify({ compilerOptions: { strict: true, noEmit: true } }),
 		"utf8",
 	);
-	writeFileSync(path.join(cwd, "semantic.ts"), "const value: string = 1;\n", "utf8");
+	writeFileSync(
+		path.join(cwd, "semantic.ts"),
+		"const value: string = 1;\n",
+		"utf8",
+	);
 
 	const diagnostics = await diagnoseEditedFile(cwd, "semantic.ts");
 
-	assert.ok(diagnostics.some((item) => item.code === 2322));
+	assert.ok(diagnostics.some(item => item.code === 2322));
 });
 
 void test("post-edit hook appends diagnostics after a successful edit", async () => {
@@ -96,13 +100,15 @@ void test("post-edit hook separates LSP source and symbolic code", async () => {
 	const cwd = workspace();
 	writeFileSync(path.join(cwd, "broken.cpp"), "broken", "utf8");
 	const lspManager = {
-		diagnosticsFor: async () => [{
-			line: 4,
-			column: 2,
-			message: "No matching function for call.",
-			source: "clang",
-			code: "ovl_no_viable_function_in_call",
-		}],
+		diagnosticsFor: async () => [
+			{
+				line: 4,
+				column: 2,
+				message: "No matching function for call.",
+				source: "clang",
+				code: "ovl_no_viable_function_in_call",
+			},
+		],
 	};
 	const hook = createPostEditDiagnosticHooks(
 		cwd,
@@ -174,5 +180,8 @@ void test("post-edit hook can be toggled without rebuilding it", async () => {
 	};
 	assert.equal(await hook(input, undefined), undefined);
 	enabled = true;
-	assert.match((await hook(input, undefined))?.content ?? "", /post_edit_diagnostics/);
+	assert.match(
+		(await hook(input, undefined))?.content ?? "",
+		/post_edit_diagnostics/,
+	);
 });

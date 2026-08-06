@@ -32,11 +32,9 @@ void test("ensureInsideCwd accepts configured paths outside CWD", () => {
 	);
 	assert.throws(
 		() =>
-			ensureInsideCwd(
-				cwd,
-				resolve(tmpdir(), "logician-other-root/file.ts"),
-				[allowed],
-			),
+			ensureInsideCwd(cwd, resolve(tmpdir(), "logician-other-root/file.ts"), [
+				allowed,
+			]),
 		/outside CWD/,
 	);
 });

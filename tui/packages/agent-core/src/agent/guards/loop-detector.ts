@@ -75,7 +75,10 @@ function normalizeLeaf(value: unknown): unknown {
 	if (typeof value === "number") return "#num";
 	if (typeof value !== "string") return value;
 	return value
-		.replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g, "#ts")
+		.replace(
+			/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g,
+			"#ts",
+		)
 		.replace(/\b\d{10,13}\b/g, "#ts") // unix ms/sec timestamps
 		.replace(/\b\d+\b/g, "#num") // any other bare integer (counters, retries)
 		.replace(/\s+/g, " ")
@@ -208,7 +211,10 @@ export class LoopDetector {
 			if ((this.failSignatureCounts.get(sig) || 0) >= this.failureThreshold) {
 				return this.tripFailure(name, "the same call");
 			}
-			if (path && (this.failPathCounts.get(path) || 0) >= this.failureThreshold) {
+			if (
+				path &&
+				(this.failPathCounts.get(path) || 0) >= this.failureThreshold
+			) {
 				return this.tripFailure(name, `\`${path}\``);
 			}
 			// Category bucket: distinct-but-equivalent failures collapse
@@ -263,7 +269,7 @@ export class LoopDetector {
 		const entry = {
 			signature: fingerprint.signature,
 			toolFingerprints: fingerprint.fingerprints,
-			toolNames: toolCalls.map((tc) => tc.name),
+			toolNames: toolCalls.map(tc => tc.name),
 			contentDirection: fingerprint.contentDirection,
 		};
 		this.history.push(entry);
@@ -293,13 +299,13 @@ export class LoopDetector {
 			.trim();
 		const toolSnippet = toolCalls
 			.map(
-				(tc) =>
+				tc =>
 					`${tc.name}:${tc.args.toLowerCase().slice(0, 80)}:${tc.result.toLowerCase().slice(0, 80)}`,
 			)
 			.join("|");
 		const signature = `${contentSnippet}||${toolSnippet}`;
 
-		const fingerprints = toolCalls.map((tc) => ({
+		const fingerprints = toolCalls.map(tc => ({
 			name: tc.name,
 			argHash: this.hashArgs(tc.args),
 			// Prefix alone collapses genuinely different results that happen to
@@ -348,11 +354,6 @@ export class LoopDetector {
 		}
 	}
 
-	// ── Turn-level loop detection ─────────────────────────────────────────
-	private isLooping(): boolean {
-		return this.isLoopingWithShapesBefore(new Set(this.seenShapes));
-	}
-
 	private isLoopingWithShapesBefore(shapesBefore: Set<string>): boolean {
 		return (
 			this.isExactRepeat() ||
@@ -364,7 +365,7 @@ export class LoopDetector {
 	private isExactRepeat(): boolean {
 		if (this.history.length < this.exactRepeatWindow) return false;
 		const window = this.history.slice(-this.exactRepeatWindow);
-		return window.every((h) => h.signature === window[0].signature);
+		return window.every(h => h.signature === window[0].signature);
 	}
 
 	private isDegenerateLoop(): boolean {
@@ -372,16 +373,16 @@ export class LoopDetector {
 		const window = this.history.slice(-this.degenerateWindow);
 
 		const firstNames = window[0].toolNames.join(",");
-		if (!window.every((h) => h.toolNames.join(",") === firstNames)) {
+		if (!window.every(h => h.toolNames.join(",") === firstNames)) {
 			return false;
 		}
 		if (!firstNames) return false;
 
 		const firstFps = new Set(
-			window[0].toolFingerprints.map((fp) => `${fp.name}:${fp.resultPrefix}`),
+			window[0].toolFingerprints.map(fp => `${fp.name}:${fp.resultPrefix}`),
 		);
-		const allSameShape = window.every((h) =>
-			h.toolFingerprints.every((fp) =>
+		const allSameShape = window.every(h =>
+			h.toolFingerprints.every(fp =>
 				firstFps.has(`${fp.name}:${fp.resultPrefix}`),
 			),
 		);
@@ -394,7 +395,7 @@ export class LoopDetector {
 		if (this.history.length < this.stagnationWindow) return false;
 		const window = this.history.slice(-this.stagnationWindow);
 
-		const hasTools = window.some((h) => h.toolNames.length > 0);
+		const hasTools = window.some(h => h.toolNames.length > 0);
 		if (!hasTools) return false;
 
 		let anyNew = false;
@@ -462,7 +463,7 @@ export class LoopDetector {
 			const first = window[0];
 			const toolSeq = first.toolNames.join(", ");
 			const resultPrefixes = new Set(
-				first.toolFingerprints.map((fp) => fp.resultPrefix),
+				first.toolFingerprints.map(fp => fp.resultPrefix),
 			);
 			const results = Array.from(resultPrefixes).slice(0, 3).join("; ");
 			return (
@@ -474,7 +475,7 @@ export class LoopDetector {
 
 		if (this.isStagnating()) {
 			const window = this.history.slice(-this.stagnationWindow);
-			const toolNames = new Set(window.flatMap((h) => h.toolNames));
+			const toolNames = new Set(window.flatMap(h => h.toolNames));
 			const shapes = Array.from(this.seenShapes).slice(0, 5).join(", ");
 			return (
 				`Stagnation detected: ${this.stagnationWindow} turns with no new signal. ` +

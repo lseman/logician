@@ -8,8 +8,8 @@ export function turnsToMessages(turns: Turn[]): Message[] {
 			messages.push({ role: "user", content: turn.userMessage.content });
 		}
 		const assistantText = (turn.assistantMessage?.chunks ?? [])
-			.filter((chunk) => chunk.type === "content" && chunk.contentText)
-			.map((chunk) => chunk.contentText)
+			.filter(chunk => chunk.type === "content" && chunk.contentText)
+			.map(chunk => chunk.contentText)
 			.join("");
 		if (assistantText) {
 			messages.push({ role: "assistant", content: assistantText });

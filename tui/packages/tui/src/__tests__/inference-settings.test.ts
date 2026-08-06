@@ -3,8 +3,8 @@ import { test } from "node:test";
 import {
 	cycleInferenceMode,
 	INFERENCE_MODE_ORDER,
-	setInferenceMode,
 	type InferenceMode,
+	setInferenceMode,
 } from "../app/inference-settings.ts";
 
 function createContext() {

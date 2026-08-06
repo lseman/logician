@@ -1,7 +1,7 @@
 // ── ModelSelectorOverlay — beautiful model selection popup ─────────────────
 // Rounded-corner overlay for selecting an active model from the configured list.
 
-import { ListSelectorOverlay, type ListItem } from "./popup-utils.ts";
+import { type ListItem, ListSelectorOverlay } from "./popup-utils.ts";
 
 export interface ModelInfo {
 	id: string;
@@ -30,13 +30,18 @@ export class ModelSelectorOverlay extends ListSelectorOverlay<ModelInfo> {
 	}
 
 	setModels(models: ModelInfo[]): void {
-		const activeIndex = models.findIndex((model) => model.active);
-		this.setItems(models, activeIndex >= 0 ? activeIndex : this.selection.index);
+		const activeIndex = models.findIndex(model => model.active);
+		this.setItems(
+			models,
+			activeIndex >= 0 ? activeIndex : this.selection.index,
+		);
 	}
 
 	handleInput(data: string): ModelSelectorAction | null {
 		const action = this.handleListInput(data);
 		if (!action) return null;
-		return action.type === "select" ? { type: "select", model: action.item } : action;
+		return action.type === "select"
+			? { type: "select", model: action.item }
+			: action;
 	}
 }

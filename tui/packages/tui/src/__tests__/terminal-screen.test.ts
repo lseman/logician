@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderTerminalScreen } from "../testing/terminal-screen.ts";
 import { clampLineToWidth, visibleWidth } from "../terminal/core.ts";
+import { renderTerminalScreen } from "../testing/terminal-screen.ts";
 
 void test("terminal screen applies absolute cursor updates and erases", () => {
 	const screen = renderTerminalScreen(

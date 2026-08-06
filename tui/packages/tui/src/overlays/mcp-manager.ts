@@ -1,14 +1,14 @@
-import { type Component } from "../terminal/core.ts";
-import { SelectorController } from "./selector-controller.ts";
+import type { Component } from "../terminal/core.ts";
 import {
-	renderListItem,
 	clampPopupLines,
+	type ListItem,
 	POPUP_FRAME_OVERHEAD,
 	parsePopupListNav,
-	renderListPopupFrame,
+	renderListItem,
 	renderListPopupBody,
-	type ListItem,
+	renderListPopupFrame,
 } from "./popup-utils.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 export interface McpServerItem {
 	serverName: string;
@@ -42,7 +42,7 @@ export class McpManagerOverlay implements Component {
 		errors?: string[];
 	}): void {
 		this.configPath = snapshot.configPath || "";
-		this.servers = snapshot.servers.map((server) => {
+		this.servers = snapshot.servers.map(server => {
 			const serverName = String(server.server_name || server.name || "");
 			const loadedServers = snapshot.loadedServers || {};
 			const toolCount = Number(
@@ -141,7 +141,7 @@ export class McpManagerOverlay implements Component {
 				const urlText = server.url
 					? server.url.slice(0, 50)
 					: server.command
-						? server.command.split(" ").slice(0, 3).join(" ") + "..."
+						? `${server.command.split(" ").slice(0, 3).join(" ")}...`
 						: "-";
 				const busy =
 					this.busyServerName === server.serverName ? "  updating…" : "";
@@ -169,7 +169,9 @@ export class McpManagerOverlay implements Component {
 			title: "MCP Servers",
 			subtitle: ` (${this.servers.length})`,
 			hints: " space toggle · r refresh · enter/esc close",
-			extraHeaderLines: this.configPath ? [`Config: ${this.configPath}`] : undefined,
+			extraHeaderLines: this.configPath
+				? [`Config: ${this.configPath}`]
+				: undefined,
 			bodyLines,
 			bottomText:
 				this.message ||

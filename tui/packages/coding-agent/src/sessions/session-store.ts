@@ -6,8 +6,8 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, normalize, resolve } from "node:path";
-import type { Turn } from "./transcript.ts";
 import { markPathIgnoredByCloudSync } from "@logician/agent-core/tools/shared/path-utils.ts";
+import type { Turn } from "./transcript.ts";
 
 const SCHEMA_VERSION = 2;
 
@@ -31,7 +31,9 @@ function resolveSqliteDatabase(): SqliteDatabaseConstructor {
 	const module = isBun
 		? runtimeRequire("bun:sqlite")
 		: runtimeRequire("node:sqlite");
-	return (isBun ? module.Database : module.DatabaseSync) as SqliteDatabaseConstructor;
+	return (
+		isBun ? module.Database : module.DatabaseSync
+	) as SqliteDatabaseConstructor;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -107,45 +109,68 @@ export function inferSessionTitle(
 	agentResponse = "",
 	maxLength = 60,
 ): string | null {
-	if (!content || !content.trim()) return null;
-	if (/^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(content.trim())) return null;
+	if (!content?.trim()) return null;
+	if (/^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(content.trim()))
+		return null;
 	const userTopic = extractSessionTopic(content);
 	const responseTopic = extractSessionTopic(agentResponse, true);
 	const userWords = userTopic?.split(/\s+/) || [];
-	const userIsVague = !userTopic || userWords.length < 4 ||
-		/^(?:do|fix|change|update|add|remove|clean|check|try|yes|no)\s+(?:it|this|that|these|those)\b/i.test(userTopic);
-	const topic = userIsVague && responseTopic ? responseTopic : userTopic || responseTopic;
+	const userIsVague =
+		!userTopic ||
+		userWords.length < 4 ||
+		/^(?:do|fix|change|update|add|remove|clean|check|try|yes|no)\s+(?:it|this|that|these|those)\b/i.test(
+			userTopic,
+		);
+	const topic =
+		userIsVague && responseTopic ? responseTopic : userTopic || responseTopic;
 	if (!topic) return null;
 
-	const firstClause = topic.split(/(?<=[.!?])\s+|\s+[—–]\s+|;\s+/)[0]?.trim() || topic;
+	const firstClause =
+		topic.split(/(?<=[.!?])\s+|\s+[—–]\s+|;\s+/)[0]?.trim() || topic;
 	const words = firstClause.split(" ");
 	let title = words.slice(0, 10).join(" ");
 	if (words.length > 10 || title.length > maxLength) {
-		title = title.slice(0, maxLength - 1).trimEnd() + "…";
+		title = `${title.slice(0, maxLength - 1).trimEnd()}…`;
 	}
 	return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
-function extractSessionTopic(content: string | null | undefined, fromAgent = false): string | null {
+function extractSessionTopic(
+	content: string | null | undefined,
+	fromAgent = false,
+): string | null {
 	if (!content) return null;
 	const lines = content
 		.split(/\r?\n/)
-		.map((line) => line.trim())
-		.filter((line) => line.length > 0)
-		.filter((line) => !/^#{1,6}\s*(?:files? mentioned(?: by the user)?|my request for codex)\s*:?$/i.test(line))
-		.filter((line) => !/^(?:file|attachment):\s*[/\\]/i.test(line));
-	let topic = lines.find((line) => !/^[-*]\s*[/\\]/.test(line)) || "";
+		.map(line => line.trim())
+		.filter(line => line.length > 0)
+		.filter(
+			line =>
+				!/^#{1,6}\s*(?:files? mentioned(?: by the user)?|my request for codex)\s*:?$/i.test(
+					line,
+				),
+		)
+		.filter(line => !/^(?:file|attachment):\s*[/\\]/i.test(line));
+	let topic = lines.find(line => !/^[-*]\s*[/\\]/.test(line)) || "";
 	topic = topic
 		.replace(/^#{1,6}\s*/, "")
 		.replace(/^(?:my request for codex|request)\s*:\s*/i, "")
 		.replace(/^(?:please\s+)?(?:can|could|would)\s+you\s+/i, "")
 		.replace(/^(?:please\s+)?(?:we|i)\s+(?:need|want)\s+(?:you\s+)?to\s+/i, "")
-		.replace(fromAgent ? /^(?:i(?:'ve| have)?\s+)?(?:implemented|fixed|updated|added|removed|changed|completed)\s+/i : /$^/, "")
+		.replace(
+			fromAgent
+				? /^(?:i(?:'ve| have)?\s+)?(?:implemented|fixed|updated|added|removed|changed|completed)\s+/i
+				: /$^/,
+			"",
+		)
 		.replace(/^please\s+/i, "")
 		.replace(/\s+/g, " ")
 		.trim();
 
-	if (!topic || /^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(topic)) {
+	if (
+		!topic ||
+		/^(?:hi|hello|hey|thanks|thank you|ok|okay)[!. ]*$/i.test(topic)
+	) {
 		return null;
 	}
 	return topic;
@@ -160,7 +185,7 @@ function resolveSessionDbPath(projectDir: string): string {
 function toPreview(text: string | null, maxLen = 80): string {
 	if (!text) return "";
 	const cleaned = text.replace(/\n+/g, " ").trim();
-	return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "…" : cleaned;
+	return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}…` : cleaned;
 }
 
 /** Serialize tool executions to JSON string. */
@@ -174,7 +199,7 @@ function serializeTools(
 	}>,
 ): string {
 	return JSON.stringify(
-		toolExecs.map((t) => ({
+		toolExecs.map(t => ({
 			tool: t.tool,
 			tool_name: t.tool_name,
 			isError: t.isError,
@@ -226,12 +251,15 @@ export class SessionStore {
 	}
 
 	private normalizeCurrentFolderRows(): void {
-		const rows = this.db.prepare(
-			"SELECT DISTINCT cwd FROM sessions WHERE cwd != ''",
-		).all() as Array<{ cwd: string }>;
+		const rows = this.db
+			.prepare("SELECT DISTINCT cwd FROM sessions WHERE cwd != ''")
+			.all() as Array<{ cwd: string }>;
 		const update = this.db.prepare("UPDATE sessions SET cwd = ? WHERE cwd = ?");
 		for (const row of rows) {
-			if (normalizeProjectDir(row.cwd) === this.projectDir && row.cwd !== this.projectDir) {
+			if (
+				normalizeProjectDir(row.cwd) === this.projectDir &&
+				row.cwd !== this.projectDir
+			) {
 				update.run(this.projectDir, row.cwd);
 			}
 		}
@@ -351,7 +379,7 @@ export class SessionStore {
 		const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
 			name: string;
 		}>;
-		return rows.some((row) => row.name === column);
+		return rows.some(row => row.name === column);
 	}
 
 	private prepareStatements(): void {
@@ -487,7 +515,10 @@ export class SessionStore {
 
 	/** Get session by ID. */
 	getSession(id: string): SessionRow | null {
-		return this.statements.getSession.get(id, this.projectDir) as SessionRow | null;
+		return this.statements.getSession.get(
+			id,
+			this.projectDir,
+		) as SessionRow | null;
 	}
 
 	/** List all sessions with metadata. */
@@ -496,32 +527,35 @@ export class SessionStore {
 			SessionRow & { turn_count: number; msg_count: number }
 		>;
 
-		return rows.filter((row) => normalizeProjectDir(row.cwd) === this.projectDir).map((row) => {
-			const previews = this.statements["getTurnPreview"].all(row.id) as Array<{
-				user_content: string;
-				assistant_content: string | null;
-			}>;
-			const previewText = previews
-				.map(
-					(p) =>
-						toPreview(p.user_content, 60) || toPreview(p.assistant_content, 60),
-				)
-				.filter(Boolean)
-				.slice(0, 2)
-				.join(" · ");
+		return rows
+			.filter(row => normalizeProjectDir(row.cwd) === this.projectDir)
+			.map(row => {
+				const previews = this.statements.getTurnPreview.all(row.id) as Array<{
+					user_content: string;
+					assistant_content: string | null;
+				}>;
+				const previewText = previews
+					.map(
+						p =>
+							toPreview(p.user_content, 60) ||
+							toPreview(p.assistant_content, 60),
+					)
+					.filter(Boolean)
+					.slice(0, 2)
+					.join(" · ");
 
-			return {
-				id: row.id,
-				title: row.title,
-				name: row.name,
-				preview: previewText || "Empty session",
-				lastUpdated: row.updated_at,
-				messageCount: row.msg_count,
-				model: row.model,
-				cwd: row.cwd,
-				created_at: row.created_at,
-			};
-		});
+				return {
+					id: row.id,
+					title: row.title,
+					name: row.name,
+					preview: previewText || "Empty session",
+					lastUpdated: row.updated_at,
+					messageCount: row.msg_count,
+					model: row.model,
+					cwd: row.cwd,
+					created_at: row.created_at,
+				};
+			});
 	}
 
 	/** Normalized folder whose sessions this store exposes. */
@@ -588,8 +622,7 @@ export class SessionStore {
 		if (assistant) {
 			for (const chunk of assistant.chunks) {
 				if (chunk.type === "thinking" && chunk.contentText) {
-					thinkingContent =
-						(thinkingContent || "") + chunk.contentText + "\n\n";
+					thinkingContent = `${(thinkingContent || "") + chunk.contentText}\n\n`;
 				} else if (chunk.type === "content" && chunk.contentText) {
 					assistantContent = (assistantContent || "") + chunk.contentText;
 				} else if (chunk.type === "tool" && chunk.tool) {
@@ -642,7 +675,7 @@ export class SessionStore {
 	loadTurns(sessionId: string): Turn[] {
 		const rows = this.statements.getTurns.all(sessionId) as TurnRow[];
 
-		return rows.map((row) => {
+		return rows.map(row => {
 			const chunks = [];
 
 			// Reconstruct assistant chunks from stored data
@@ -730,7 +763,7 @@ export class SessionStore {
 			SessionRow & { turn_count: number; msg_count: number }
 		>;
 
-		return rows.map((row) => ({
+		return rows.map(row => ({
 			id: row.id,
 			title: row.title,
 			name: row.name,
@@ -804,7 +837,10 @@ export class SessionStore {
 	// ── Labels / Bookmarks ────────────────────────────────────────────────
 
 	/** Add a label/bookmark to the current session, optionally tied to a turn. */
-	addLabel(label: string, opts?: { turnId?: string; note?: string; sessionId?: string }): string {
+	addLabel(
+		label: string,
+		opts?: { turnId?: string; note?: string; sessionId?: string },
+	): string {
 		const sessionId = opts?.sessionId ?? this.currentSessionId;
 		if (!sessionId) throw new Error("No active session");
 		const id = `lbl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;

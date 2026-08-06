@@ -3,23 +3,19 @@
 // Falls back to regular bash execution on non-Linux or when bwrap is unavailable.
 
 import { spawn, spawnSync } from "node:child_process";
-import { constants, access as fsAccess, rm as fsRm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { constants, access as fsAccess, rm as fsRm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
+import { getShellConfig, getShellEnv, killProcessTree } from "./shell.ts";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	OutputAccumulator,
 	type TruncationResult,
 } from "./truncate.ts";
-import {
-	getShellConfig,
-	getShellEnv,
-	killProcessTree,
-} from "./shell.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -80,9 +76,7 @@ function detectBwrap(): { available: boolean; path: string | null } {
 						version.length >= 3 &&
 						(version[0] > 0 ||
 							(version[0] === 0 && version[1] > 4) ||
-							(version[0] === 0 &&
-								version[1] === 4 &&
-								version[2] >= 1));
+							(version[0] === 0 && version[1] === 4 && version[2] >= 1));
 				}
 			}
 		} catch {
@@ -177,7 +171,12 @@ async function executeSandboxed(
 	if (!bwrap.available) {
 		// Fallback: execute normally without sandbox
 		return {
-			...((await executeFallback(command, cwd, timeout, ctx)) as unknown as Omit<SandboxRunResult, "details">),
+			...((await executeFallback(
+				command,
+				cwd,
+				timeout,
+				ctx,
+			)) as unknown as Omit<SandboxRunResult, "details">),
 			details: {
 				bwrapAvailable: false,
 				bwrapPath: bwrap.path,
@@ -209,7 +208,7 @@ async function executeSandboxed(
 			}
 		};
 
-		const result = await new Promise<SandboxRunResult>((resolve) => {
+		const result = await new Promise<SandboxRunResult>(resolve => {
 			const child = spawn(bwrap.path!, bwrapArgs, {
 				cwd,
 				stdio: ["ignore", "pipe", "pipe"],
@@ -301,7 +300,8 @@ async function executeSandboxed(
 						content += `\n\n[${notices.join(". ")}]`;
 					}
 
-					let status: SandboxRunResult["status"] = code === 0 ? "completed" : "failed";
+					let status: SandboxRunResult["status"] =
+						code === 0 ? "completed" : "failed";
 					if (timedOut) status = "timed_out";
 					else if (ctx.signal?.aborted) status = "aborted";
 
@@ -364,7 +364,7 @@ async function executeFallback(
 		exitCode: number | null;
 		signal: string | null;
 		status: SandboxRunResult["status"];
-	}>((resolve) => {
+	}>(resolve => {
 		const child = spawn(shell, [...shellArgs, command], {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
@@ -448,7 +448,8 @@ async function executeFallback(
 					content += `\n\n[${notices.join(". ")}]`;
 				}
 
-				let status: SandboxRunResult["status"] = code === 0 ? "completed" : "failed";
+				let status: SandboxRunResult["status"] =
+					code === 0 ? "completed" : "failed";
 				if (timedOut) status = "timed_out";
 				else if (ctx.signal?.aborted) status = "aborted";
 
@@ -513,9 +514,7 @@ export const sandbox: Tool = {
 		const command = args.command ?? args.cmd ?? args.script ?? args.input;
 		return {
 			...args,
-			...(command === undefined
-				? {}
-				: { command: String(command) }),
+			...(command === undefined ? {} : { command: String(command) }),
 		};
 	},
 	resolveTimeoutMs: (args: Record<string, unknown>) => {
@@ -531,7 +530,8 @@ export const sandbox: Tool = {
 			return "Error: command is required.";
 		}
 
-		const profile = ((args.profile ?? getDefaultSandboxProfile()) as string) as SandboxProfile;
+		const profile = (args.profile ??
+			getDefaultSandboxProfile()) as string as SandboxProfile;
 		const cwd = ctx.cwd || process.cwd();
 
 		// Validate cwd exists

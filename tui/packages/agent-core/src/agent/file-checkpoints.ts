@@ -94,16 +94,12 @@ function readBlobFromTree(
 		);
 		if (!Number.isFinite(size) || size > MAX_SNAPSHOT_BYTES) return null;
 		// No trim: blob content must be byte-exact (trailing newlines matter).
-		return execFileSync(
-			"git",
-			["show", `${snapshot.tree}:${relPath}`],
-			{
-				cwd: snapshot.root,
-				timeout: GIT_TIMEOUT_MS,
-				stdio: ["ignore", "pipe", "ignore"],
-				maxBuffer: 64 * 1024 * 1024,
-			},
-		).toString("utf8");
+		return execFileSync("git", ["show", `${snapshot.tree}:${relPath}`], {
+			cwd: snapshot.root,
+			timeout: GIT_TIMEOUT_MS,
+			stdio: ["ignore", "pipe", "ignore"],
+			maxBuffer: 64 * 1024 * 1024,
+		}).toString("utf8");
 	} catch (_e: unknown) {
 		return null;
 	}
@@ -173,7 +169,7 @@ export function recordBashMutations(before: WorkspaceSnapshot | null): void {
 		]);
 		if (!raw) return;
 
-		const parts = raw.split("\0").filter((p) => p.length > 0);
+		const parts = raw.split("\0").filter(p => p.length > 0);
 		for (let i = 0; i + 1 < parts.length; i += 2) {
 			const status = parts[i];
 			const relPath = parts[i + 1];

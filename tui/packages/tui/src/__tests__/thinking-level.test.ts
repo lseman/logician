@@ -13,7 +13,7 @@ void test("thinking-level transition synchronizes runtime, local state, and stat
 	};
 	instance.thinkingLevel = "off";
 	instance.bridge = {
-		setThinkingLevel: (level) => {
+		setThinkingLevel: level => {
 			bridgeLevel = level;
 		},
 	};

@@ -5,10 +5,10 @@
 // Mirrors Pi's updatePendingMessagesDisplay() pattern.
 
 import {
-	clampLineToWidth,
 	type Component,
-	visibleWidth,
+	clampLineToWidth,
 	RESET,
+	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 
@@ -59,10 +59,10 @@ export class SteerQueue implements Component {
 			style: (s: string) => string;
 			msg: string;
 		}[] = [];
-		this.steering.forEach((msg) =>
+		this.steering.forEach(msg =>
 			rows.push({ mark: STEER_MARK, label: "QUEUE", style: steerStyle, msg }),
 		);
-		this.followUp.forEach((msg) =>
+		this.followUp.forEach(msg =>
 			rows.push({
 				mark: getFollowMark(),
 				label: "LATER",
@@ -111,7 +111,7 @@ const getCount = (): string => theme.fg("dim", "");
 const getNum = (): string => theme.fg("muted", "");
 const getLabel = (): string => theme.fg("dim", "");
 const STEER_MARK = " \x1b[36m▸\x1b[0m"; // cyan triangle ▸
-const getFollowMark = (): string => " " + theme.fg("dim", "") + "↳" + RESET;
+const getFollowMark = (): string => ` ${theme.fg("dim", "")}↳${RESET}`;
 const steerStyle = (s: string): string => theme.fg("text", "") + s + RESET;
 const followStyle = (s: string): string => theme.fg("muted", "") + s + RESET;
 

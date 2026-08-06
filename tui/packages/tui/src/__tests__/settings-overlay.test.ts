@@ -1,12 +1,12 @@
 // ── SettingsOverlay tests ────────────────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { initTheme } from "../terminal/theme.ts";
+import { describe, it } from "node:test";
 import {
-	SettingsSelectorOverlay,
 	type SettingDef,
+	SettingsSelectorOverlay,
 } from "../overlays/settings-overlay.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 // Initialize theme before any overlay rendering.
 const setupTheme = (): void => {
@@ -76,16 +76,16 @@ describe("SettingsSelectorOverlay", () => {
 
 		// Move down
 		overlay.handleInput("\x1b[B");
-		assert.strictEqual(overlay["selectedIndex"], 1);
+		assert.strictEqual(overlay.selectedIndex, 1);
 
 		// Wrap to top
 		overlay.handleInput("\x1b[A");
-		assert.strictEqual(overlay["selectedIndex"], 0);
+		assert.strictEqual(overlay.selectedIndex, 0);
 
 		// Wrap to bottom
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\x1b[B");
-		assert.strictEqual(overlay["selectedIndex"], 2);
+		assert.strictEqual(overlay.selectedIndex, 2);
 	});
 
 	it("escapes to close", () => {
@@ -107,7 +107,7 @@ describe("SettingsSelectorOverlay", () => {
 		// Model opens the dedicated model selector instead of inline options.
 		const action = overlay.handleInput("\r");
 		assert.deepStrictEqual(action, { type: "open", settingName: "Model" });
-		assert.strictEqual(overlay["inDetailView"], false);
+		assert.strictEqual(overlay.inDetailView, false);
 	});
 
 	it("applies option in detail view on enter", () => {
@@ -139,12 +139,12 @@ describe("SettingsSelectorOverlay", () => {
 		// Open a setting with inline options (Model has a dedicated selector).
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r");
-		assert.strictEqual(overlay["inDetailView"], true);
+		assert.strictEqual(overlay.inDetailView, true);
 
 		// Go back
 		const action = overlay.handleInput("\t");
 		assert.strictEqual(action, null);
-		assert.strictEqual(overlay["inDetailView"], false);
+		assert.strictEqual(overlay.inDetailView, false);
 	});
 
 	it("renders toggle indicators", () => {
@@ -190,27 +190,22 @@ describe("SettingsSelectorOverlay", () => {
 	it("scrolls with page up/down", () => {
 		setupTheme();
 		const overlay = new SettingsSelectorOverlay();
-		const manySettings: SettingDef[] = Array.from(
-			{ length: 20 },
-			(_, i) => ({
-				name: `Setting ${i}`,
-				currentValue: "val",
-				description: "desc",
-				options: [
-					{ label: "opt", value: "opt", current: i === 0 },
-				],
-			}),
-		);
+		const manySettings: SettingDef[] = Array.from({ length: 20 }, (_, i) => ({
+			name: `Setting ${i}`,
+			currentValue: "val",
+			description: "desc",
+			options: [{ label: "opt", value: "opt", current: i === 0 }],
+		}));
 		overlay.setSettings(manySettings);
 		overlay.show();
 
 		// Page down
 		overlay.handleInput("\x1b[6~");
-		assert.ok(overlay["selectedIndex"] >= 8);
+		assert.ok(overlay.selectedIndex >= 8);
 
 		// Page up
 		overlay.handleInput("\x1b[5~");
-		assert.ok(overlay["selectedIndex"] < 8);
+		assert.ok(overlay.selectedIndex < 8);
 	});
 
 	it("cycles option with j/k keys", () => {
@@ -222,14 +217,14 @@ describe("SettingsSelectorOverlay", () => {
 		// Open detail view for Thinking Level (index 1)
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\r");
-		assert.strictEqual(overlay["selectedOptionIndex"], 2); // medium is current at index 2
+		assert.strictEqual(overlay.selectedOptionIndex, 2); // medium is current at index 2
 
 		// Move down with j
 		overlay.handleInput("j");
-		assert.strictEqual(overlay["selectedOptionIndex"], 3); // high
+		assert.strictEqual(overlay.selectedOptionIndex, 3); // high
 
 		// Move up with k
 		overlay.handleInput("k");
-		assert.strictEqual(overlay["selectedOptionIndex"], 2); // medium
+		assert.strictEqual(overlay.selectedOptionIndex, 2); // medium
 	});
 });

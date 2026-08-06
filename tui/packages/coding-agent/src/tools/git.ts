@@ -47,7 +47,7 @@ export const git: Tool = {
 			/^reset\b.*--soft$/,
 		];
 
-		const isAllowed = allowedPatterns.some((p) => p.test(command));
+		const isAllowed = allowedPatterns.some(p => p.test(command));
 		if (!isAllowed) {
 			return `Error: Command not allowed: ${command}. Use safe git operations only.`;
 		}

@@ -73,7 +73,7 @@ export function computeFileLists(fileOps: FileOperations): {
 	modifiedFiles: string[];
 } {
 	const modified = new Set([...fileOps.edited, ...fileOps.written]);
-	const readOnly = [...fileOps.read].filter((f) => !modified.has(f)).sort();
+	const readOnly = [...fileOps.read].filter(f => !modified.has(f)).sort();
 	const modifiedFiles = [...modified].sort();
 	return { readFiles: readOnly, modifiedFiles };
 }
@@ -131,7 +131,7 @@ function textContent(content: unknown): string {
 				"text" in block &&
 				typeof block.text === "string",
 		)
-		.map((block) => block.text)
+		.map(block => block.text)
 		.join("");
 }
 

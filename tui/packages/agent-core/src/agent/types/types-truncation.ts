@@ -27,7 +27,11 @@ export interface TruncationConfig {
 
 export const DEFAULT_TRUNCATION: Required<
 	Omit<TruncationConfig, "microCompactMaxChars">
-> & { microCompactMaxChars: Required<NonNullable<TruncationConfig["microCompactMaxChars"]>> } = {
+> & {
+	microCompactMaxChars: Required<
+		NonNullable<TruncationConfig["microCompactMaxChars"]>
+	>;
+} = {
 	toolResultMaxChars: 100_000,
 	maxLines: 2000,
 	grepLineMaxChars: 500,

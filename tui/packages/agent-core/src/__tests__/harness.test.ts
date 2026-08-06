@@ -3,11 +3,11 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { BackendError } from "../agent/backend.ts";
 import { AgentHarness, HarnessBusyError } from "../agent/harness.ts";
 import { Session } from "../agent/session.ts";
 import type { AgentConfig } from "../agent/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";
-import { BackendError } from "../agent/backend.ts";
 
 function makeHarness(backend: FakeBackend): AgentHarness {
 	const config: AgentConfig = {
@@ -34,7 +34,7 @@ function makeHarness(backend: FakeBackend): AgentHarness {
 void test("prompt persists history; setHistory replaces it and drops system messages", async () => {
 	const harness = makeHarness(new FakeBackend([() => textResponse("hi!")]));
 	await harness.prompt("hello");
-	const roles = harness.messages.map((m) => m.role);
+	const roles = harness.messages.map(m => m.role);
 	assert.deepEqual(roles, ["system", "user", "assistant"]);
 
 	harness.setHistory([
@@ -43,7 +43,7 @@ void test("prompt persists history; setHistory replaces it and drops system mess
 		{ role: "assistant", content: "restored a" },
 	]);
 	assert.deepEqual(
-		harness.messages.map((m) => m.role),
+		harness.messages.map(m => m.role),
 		["user", "assistant"],
 	);
 });
@@ -71,7 +71,7 @@ void test("appendMessages adds to history without dropping prior turns", async (
 			name: "spawn_agent",
 		},
 	]);
-	const roles = harness.messages.map((m) => m.role);
+	const roles = harness.messages.map(m => m.role);
 	assert.deepEqual(roles, [
 		"system",
 		"user",
@@ -160,7 +160,7 @@ void test("retryBaseDelayMs configures output-guard retry events", async () => {
 		maxIterations: 1,
 	});
 	const delays: number[] = [];
-	harness.subscribe((event) => {
+	harness.subscribe(event => {
 		if (event.type === "auto_retry_start") delays.push(event.delayMs);
 	});
 
@@ -196,7 +196,7 @@ void test("context-full recovery compacts inside an active turn and persists it"
 	await harness.prompt("current prompt");
 	assert.equal(backend.calls, 2);
 	assert.ok(
-		harness.messages.some((message) =>
+		harness.messages.some(message =>
 			String(message.content).includes("context-compaction"),
 		),
 	);
@@ -295,11 +295,11 @@ void test("rewind restores the pre-prompt conversation, then returns null", asyn
 
 void test("nextTurn queue survives until the next prompt and is injected before it", async () => {
 	const backend = new FakeBackend([
-		(messages) => {
+		messages => {
 			// The queued note must appear as a user message before the prompt.
-			const contents = messages.map((m) => String(m.content ?? ""));
-			const noteAt = contents.findIndex((c) => c.includes("queued note"));
-			const promptAt = contents.findIndex((c) => c.includes("real prompt"));
+			const contents = messages.map(m => String(m.content ?? ""));
+			const noteAt = contents.findIndex(c => c.includes("queued note"));
+			const promptAt = contents.findIndex(c => c.includes("real prompt"));
 			assert.ok(noteAt >= 0, "queued note injected");
 			assert.ok(promptAt >= 0, "prompt present");
 			assert.ok(noteAt < promptAt, "note precedes the prompt");
@@ -320,7 +320,7 @@ void test("prompt hook messages remain adjacent to the prompt that produced them
 			() => textResponse("second answer"),
 		]),
 	);
-	harness.setBeforeAgentStart((prompt) => ({
+	harness.setBeforeAgentStart(prompt => ({
 		messages: [{ role: "user", content: `hook for ${prompt}` }],
 	}));
 
@@ -328,7 +328,7 @@ void test("prompt hook messages remain adjacent to the prompt that produced them
 	await harness.prompt("second prompt");
 
 	assert.deepEqual(
-		harness.messages.map((message) => message.content),
+		harness.messages.map(message => message.content),
 		[
 			"test",
 			"hook for first prompt",
@@ -349,10 +349,12 @@ void test("nextTurn queued during a run waits for the following user prompt", as
 			harness.nextTurn("future guidance");
 			return textResponse("first answer");
 		},
-		(messages) => {
-			const contents = messages.map((message) => String(message.content ?? ""));
+		messages => {
+			const contents = messages.map(message => String(message.content ?? ""));
 			assert.ok(contents.includes("future guidance"));
-			assert.ok(contents.indexOf("future guidance") < contents.indexOf("second prompt"));
+			assert.ok(
+				contents.indexOf("future guidance") < contents.indexOf("second prompt"),
+			);
 			return textResponse("second answer");
 		},
 	]);
@@ -368,7 +370,7 @@ void test("abort preserves nextTurn messages and waits for settlement", async ()
 	let providerSettled = false;
 	const backend = new FakeBackend([
 		(_messages, options) =>
-			new Promise((resolve) => {
+			new Promise(resolve => {
 				options.signal?.addEventListener("abort", () => {
 					providerSettled = true;
 					resolve(textResponse("aborted"));
@@ -377,7 +379,7 @@ void test("abort preserves nextTurn messages and waits for settlement", async ()
 	]);
 	const harness = makeHarness(backend);
 	const run = harness.prompt("work");
-	await new Promise((resolve) => setImmediate(resolve));
+	await new Promise(resolve => setImmediate(resolve));
 	harness.nextTurn("keep me");
 
 	const cleared = await harness.abort();
@@ -417,7 +419,7 @@ void test("enabled session persists real turn messages without placeholders", as
 	const resumed = makeHarness(new FakeBackend([]));
 	assert.equal(await resumed.resumeSession(persisted[0].id, dir), true);
 	assert.deepEqual(
-		resumed.messages.map((m) => `${m.role}:${m.content ?? ""}`),
+		resumed.messages.map(m => `${m.role}:${m.content ?? ""}`),
 		["user:question", "assistant:answer"],
 	);
 });
@@ -431,15 +433,17 @@ void test("enabled sessions journal operation and turn boundaries", async () => 
 	const sessionInfo = harness.listSessions()[0];
 	const session = new Session(sessionInfo.id, { baseDir: dir, enabled: true });
 	const events = session.loadJournalEvents();
-	assert.deepEqual(events.map((event) => event.type), [
-		"operation_start",
-		"turn_start",
-		"turn_end",
-		"operation_finish",
-	]);
-	assert.equal(new Set(events.map((event) => event.operationId)).size, 1);
+	assert.deepEqual(
+		events.map(event => event.type),
+		["operation_start", "turn_start", "turn_end", "operation_finish"],
+	);
+	assert.equal(new Set(events.map(event => event.operationId)).size, 1);
 
-	appendFileSync(join(session.dirPath, "operations.jsonl"), "{\"incomplete\":", "utf8");
+	appendFileSync(
+		join(session.dirPath, "operations.jsonl"),
+		'{"incomplete":',
+		"utf8",
+	);
 	assert.equal(session.loadJournalEvents().length, events.length);
 });
 
@@ -462,7 +466,7 @@ void test("session typed entries build deterministic context", () => {
 	assert.deepEqual(context.activeToolNames, ["read", "write"]);
 	assert.equal(context.labels.get(lastId!), "answer");
 	assert.deepEqual(
-		context.messages.map((message) => `${message.role}:${message.content ?? ""}`),
+		context.messages.map(message => `${message.role}:${message.content ?? ""}`),
 		[
 			"system:<compaction_summary>summarized old context</compaction_summary>",
 			"user:old",

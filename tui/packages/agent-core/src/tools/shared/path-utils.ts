@@ -2,10 +2,10 @@
 // Path resolution and CWD safety checks.
 // Extracted from helpers.ts to reduce its size.
 
-import * as path from "node:path";
-import * as fs from "node:fs";
 import { execFile } from "node:child_process";
+import * as fs from "node:fs";
 import { homedir } from "node:os";
+import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
@@ -128,9 +128,7 @@ export function ensureInsideCwd(
 		}
 	}
 
-	throw new Error(
-		`Path is outside CWD: ${resolvedPath} (CWD: ${resolvedCwd})`,
-	);
+	throw new Error(`Path is outside CWD: ${resolvedPath} (CWD: ${resolvedCwd})`);
 }
 
 function fileExists(filePath: string): boolean {

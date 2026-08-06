@@ -81,9 +81,24 @@ void describe("McpManagerOverlay rendering", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
 			servers: [
-				{ server_name: "server1", command: "cmd1", type: "stdio", enabled: true },
-				{ server_name: "server2", command: "cmd2", type: "http", enabled: false },
-				{ server_name: "server3", command: "cmd3", type: "streamable-http", enabled: true },
+				{
+					server_name: "server1",
+					command: "cmd1",
+					type: "stdio",
+					enabled: true,
+				},
+				{
+					server_name: "server2",
+					command: "cmd2",
+					type: "http",
+					enabled: false,
+				},
+				{
+					server_name: "server3",
+					command: "cmd3",
+					type: "streamable-http",
+					enabled: true,
+				},
 			],
 			loadedServers: {
 				server1: { toolCount: 5 },
@@ -113,28 +128,28 @@ void describe("McpManagerOverlay rendering", () => {
 			],
 		});
 		overlay.show();
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 
 		// Move down
 		overlay.handleInput("\x1b[B");
-		assert.equal(overlay["selection"].index, 1);
+		assert.equal(overlay.selection.index, 1);
 
 		// Move up
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 
 		// Wrap to bottom (2 down from 0 = index 2)
 		overlay.handleInput("\x1b[B");
 		overlay.handleInput("\x1b[B");
-		assert.equal(overlay["selection"].index, 2);
+		assert.equal(overlay.selection.index, 2);
 
 		// Wrap to top (1 up from 2 = index 1)
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selection"].index, 1);
+		assert.equal(overlay.selection.index, 1);
 
 		// One more up = wrap to 0
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 	});
 
 	void it("handles page up/down", () => {
@@ -148,15 +163,15 @@ void describe("McpManagerOverlay rendering", () => {
 			})),
 		});
 		overlay.show();
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 
 		// Page down
 		overlay.handleInput("\x1b[6~");
-		assert.ok(overlay["selection"].index >= 8);
+		assert.ok(overlay.selection.index >= 8);
 
 		// Page up
 		overlay.handleInput("\x1b[5~");
-		assert.ok(overlay["selection"].index < 8);
+		assert.ok(overlay.selection.index < 8);
 	});
 
 	void it("handles j/k navigation", () => {
@@ -172,17 +187,19 @@ void describe("McpManagerOverlay rendering", () => {
 
 		// j moves down
 		overlay.handleInput("j");
-		assert.equal(overlay["selection"].index, 1);
+		assert.equal(overlay.selection.index, 1);
 
 		// k moves up
 		overlay.handleInput("k");
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 	});
 
 	void it("handles refresh action", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		overlay.show();
 		assert.deepEqual(overlay.handleInput("r"), { type: "refresh" });
@@ -192,7 +209,9 @@ void describe("McpManagerOverlay rendering", () => {
 	void it("handles enter to close", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		overlay.show();
 		assert.deepEqual(overlay.handleInput("\r"), { type: "close" });
@@ -202,7 +221,9 @@ void describe("McpManagerOverlay rendering", () => {
 	void it("handles escape and ctrl-c", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		overlay.show();
 		assert.deepEqual(overlay.handleInput("\x1b"), { type: "close" });
@@ -221,7 +242,9 @@ void describe("McpManagerOverlay rendering", () => {
 	void it("renders busy indicator", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		overlay.show();
 		overlay.setBusy("a");
@@ -233,7 +256,9 @@ void describe("McpManagerOverlay rendering", () => {
 	void it("renders custom message", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		overlay.show();
 		overlay.setMessage("Custom message");
@@ -245,7 +270,9 @@ void describe("McpManagerOverlay rendering", () => {
 	void it("returns null for input when not visible", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		assert.equal(overlay.handleInput("q"), null);
 		assert.equal(overlay.handleInput("\r"), null);
@@ -255,7 +282,9 @@ void describe("McpManagerOverlay rendering", () => {
 		const overlay = new McpManagerOverlay();
 		overlay.setSnapshot({
 			configPath: "/home/user/.logician/mcp.json",
-			servers: [{ server_name: "a", command: "a", type: "stdio", enabled: true }],
+			servers: [
+				{ server_name: "a", command: "a", type: "stdio", enabled: true },
+			],
 		});
 		overlay.show();
 		const lines = overlay.render(80);
@@ -305,13 +334,13 @@ void describe("PluginManagerOverlay rendering", () => {
 			],
 		});
 		overlay.show();
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 
 		overlay.handleInput("\x1b[B");
-		assert.equal(overlay["selection"].index, 1);
+		assert.equal(overlay.selection.index, 1);
 
 		overlay.handleInput("\x1b[A");
-		assert.equal(overlay["selection"].index, 0);
+		assert.equal(overlay.selection.index, 0);
 	});
 
 	void it("handles refresh action", () => {

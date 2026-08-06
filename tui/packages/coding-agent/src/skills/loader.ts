@@ -5,8 +5,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
-import ignore from "ignore";
 import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
+import ignore from "ignore";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,11 +104,9 @@ const RESOURCE_DIR_NAMES = ["references", "scripts"];
  *   path strings, or objects with `{ dir, source? }` for explicit source tagging.
  */
 export async function loadSkills(
-	dirs: (
-	| string
-	| { dir: string; source?: "user" | "project" | "path" }
-	)[]
-	| string,
+	dirs:
+		| (string | { dir: string; source?: "user" | "project" | "path" })[]
+		| string,
 ): Promise<{ skills: Skill[]; diagnostics: SkillDiagnostic[] }> {
 	const skillsMap = new Map<string, Skill>();
 	const realPathSet = new Set<string>();
@@ -121,7 +119,7 @@ export async function loadSkills(
 	for (const entry of normalized) {
 		const dir = typeof entry === "string" ? entry : entry.dir;
 		const source: "user" | "project" | "path" =
-			(typeof entry === "string" ? "path" : entry.source ?? "path");
+			typeof entry === "string" ? "path" : (entry.source ?? "path");
 		const rootInfo = await safeStat(dir);
 		if (!rootInfo || rootInfo.isDirectory() === false) {
 			if (rootInfo?.isDirectory() === false) {
@@ -134,13 +132,7 @@ export async function loadSkills(
 			}
 			continue;
 		}
-		const result = await loadSkillsFromDir(
-			dir,
-			true,
-			ignore(),
-			dir,
-			source,
-		);
+		const result = await loadSkillsFromDir(dir, true, ignore(), dir, source);
 		for (const skill of result.skills) {
 			const realPath = await safeRealpath(skill.filePath);
 			if (realPathSet.has(realPath)) continue;
@@ -203,9 +195,9 @@ export function formatSkillCatalog(
 	options: { maxChars?: number } = {},
 ): string {
 	const maxChars = options.maxChars ?? 8_000;
-	const fullEntries = skills.map((skill) => formatCatalogEntry(skill));
+	const fullEntries = skills.map(skill => formatCatalogEntry(skill));
 	const nameEntries = skills.map(
-		(skill) =>
+		skill =>
 			`  <skill name="${escapeXml(skill.name)}" slash_command="/${escapeXml(skill.slashName)}" />`,
 	);
 	const header =
@@ -227,11 +219,7 @@ export function formatSkillCatalog(
 		entries.push(entry);
 		used += entry.length + 1;
 	}
-	return (
-		header +
-		entries.join("\n") +
-		footer
-	);
+	return header + entries.join("\n") + footer;
 }
 
 /**
@@ -240,7 +228,7 @@ export function formatSkillCatalog(
  * location for each visible skill (excludes disableModelInvocation skills).
  */
 export function formatSkillsForSystemPrompt(skills: Skill[]): string {
-	const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
+	const visibleSkills = skills.filter(s => !s.disableModelInvocation);
 	if (visibleSkills.length === 0) return "";
 
 	const lines = [
@@ -255,14 +243,22 @@ export function formatSkillsForSystemPrompt(skills: Skill[]): string {
 	for (const skill of visibleSkills) {
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-		lines.push(`    <display_name>${escapeXml(skill.displayName)}</display_name>`);
-		lines.push(`    <description>${escapeXml(skill.description)}</description>`);
+		lines.push(
+			`    <display_name>${escapeXml(skill.displayName)}</display_name>`,
+		);
+		lines.push(
+			`    <description>${escapeXml(skill.description)}</description>`,
+		);
 		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
 		if (skill.aliases?.length) {
-			lines.push(`    <aliases>${escapeXml(skill.aliases.join(", "))}</aliases>`);
+			lines.push(
+				`    <aliases>${escapeXml(skill.aliases.join(", "))}</aliases>`,
+			);
 		}
 		if (skill.triggers?.length) {
-			lines.push(`    <triggers>${escapeXml(skill.triggers.join("; "))}</triggers>`);
+			lines.push(
+				`    <triggers>${escapeXml(skill.triggers.join("; "))}</triggers>`,
+			);
 		}
 		lines.push("  </skill>");
 	}
@@ -279,17 +275,24 @@ export function skillLookupKeys(skill: Skill): string[] {
 		slugSegment(skill.displayName),
 		...skill.name.split("/").slice(-1),
 		...(skill.aliases ?? []),
-	]).flatMap((key) => uniqueStrings([key, normalizeSkillLookupKey(key)]));
+	]).flatMap(key => uniqueStrings([key, normalizeSkillLookupKey(key)]));
 }
 
 export function normalizeSkillLookupKey(name: string): string {
 	return name.trim().toLowerCase().replace(/^\/+/, "").replace(/\s+/g, "-");
 }
 
-export function findSkillByName(skills: Skill[], name: string): Skill | undefined {
+export function findSkillByName(
+	skills: Skill[],
+	name: string,
+): Skill | undefined {
 	const normalized = normalizeSkillLookupKey(name);
 	for (const skill of skills) {
-		if (skillLookupKeys(skill).some((key) => normalizeSkillLookupKey(key) === normalized)) {
+		if (
+			skillLookupKeys(skill).some(
+				key => normalizeSkillLookupKey(key) === normalized,
+			)
+		) {
 			return skill;
 		}
 	}
@@ -394,7 +397,7 @@ function loadIgnorePatterns(
 
 		const lines = content
 			.split(/\r?\n/)
-			.map((line) => prefixIgnorePattern(line, prefix))
+			.map(line => prefixIgnorePattern(line, prefix))
 			.filter((line): line is string => line !== null);
 
 		patterns.push(...lines);
@@ -516,7 +519,7 @@ async function loadSkillFromFile(
 					? frontmatter["argument-hint"]
 					: typeof frontmatter.argument_hint === "string"
 						? frontmatter.argument_hint
-					: undefined,
+						: undefined,
 			model:
 				typeof frontmatter.model === "string" ? frontmatter.model : undefined,
 			source,
@@ -562,22 +565,24 @@ function toPosixPath(p: string): string {
 }
 
 function slugSegment(value: string): string {
-	return value
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9_-]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.replace(/--+/g, "-") || "unnamed";
+	return (
+		value
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.replace(/--+/g, "-") || "unnamed"
+	);
 }
 
-function skillIdFromPath(skillDir: string, rootDir: string, fallbackName: string): string {
+function skillIdFromPath(
+	skillDir: string,
+	rootDir: string,
+	fallbackName: string,
+): string {
 	const rel = toPosixPath(relative(rootDir, skillDir));
 	if (rel && !rel.startsWith("..")) {
-		return rel
-			.split("/")
-			.filter(Boolean)
-			.map(slugSegment)
-			.join("/");
+		return rel.split("/").filter(Boolean).map(slugSegment).join("/");
 	}
 	return slugSegment(fallbackName);
 }
@@ -587,11 +592,15 @@ function slashNameForSkill(name: string): string {
 }
 
 function parseStringList(value: unknown): string[] {
-	if (Array.isArray(value)) return value.map(String).map((s) => s.trim()).filter(Boolean);
+	if (Array.isArray(value))
+		return value
+			.map(String)
+			.map(s => s.trim())
+			.filter(Boolean);
 	if (typeof value === "string") {
 		return value
 			.split(/\r?\n|,/)
-			.map((s) => s.trim())
+			.map(s => s.trim())
 			.filter(Boolean);
 	}
 	return [];
@@ -603,7 +612,7 @@ function optionalStringList(value: unknown): string[] | undefined {
 }
 
 function uniqueStrings(values: string[]): string[] {
-	return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean)));
+	return Array.from(new Set(values.map(v => v.trim()).filter(Boolean)));
 }
 
 function formatSkillMetadata(skill: Skill): string {
@@ -628,7 +637,8 @@ function formatSkillMetadata(skill: Skill): string {
 function appendListXml(lines: string[], tag: string, values?: string[]): void {
 	if (!values?.length) return;
 	lines.push(`  <${tag}>`);
-	for (const value of values) lines.push(`    <item>${escapeXml(value)}</item>`);
+	for (const value of values)
+		lines.push(`    <item>${escapeXml(value)}</item>`);
 	lines.push(`  </${tag}>`);
 }
 
@@ -638,10 +648,14 @@ function formatCatalogEntry(skill: Skill): string {
 		`display_name="${escapeXml(skill.displayName)}"`,
 		`slash_command="/${escapeXml(skill.slashName)}"`,
 	];
-	if (skill.aliases?.length) attrs.push(`aliases="${escapeXml(skill.aliases.join(", "))}"`);
-	if (skill.triggers?.length) attrs.push(`triggers="${escapeXml(skill.triggers.join("; "))}"`);
-	if (skill.allowedTools?.length) attrs.push(`preferred_tools="${escapeXml(skill.allowedTools.join(", "))}"`);
-	if (skill.nextSkills?.length) attrs.push(`next_skills="${escapeXml(skill.nextSkills.join(", "))}"`);
+	if (skill.aliases?.length)
+		attrs.push(`aliases="${escapeXml(skill.aliases.join(", "))}"`);
+	if (skill.triggers?.length)
+		attrs.push(`triggers="${escapeXml(skill.triggers.join("; "))}"`);
+	if (skill.allowedTools?.length)
+		attrs.push(`preferred_tools="${escapeXml(skill.allowedTools.join(", "))}"`);
+	if (skill.nextSkills?.length)
+		attrs.push(`next_skills="${escapeXml(skill.nextSkills.join(", "))}"`);
 	return `  <skill ${attrs.join(" ")}>${escapeXml(skill.description)}</skill>`;
 }
 

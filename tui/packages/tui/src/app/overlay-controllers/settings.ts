@@ -1,25 +1,26 @@
 // ── Settings selector controller ───────────────────────────────────────────
 
 import { saveConfigField } from "@logician/coding-agent/configuration";
-import type { SettingDef, SettingsSelectorAction } from "../../overlays/settings-overlay.ts";
-import { applyThinkingLevel, setExecutionProfile, setInferenceMode } from "../inference-settings.ts";
+import type {
+	SettingDef,
+	SettingsSelectorAction,
+} from "../../overlays/settings-overlay.ts";
+import {
+	applyThinkingLevel,
+	setExecutionProfile,
+	setInferenceMode,
+} from "../inference-settings.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 import { openModelSelector } from "./selectors.ts";
 
-
 // ── Settings selector ───────────────────────────────────────────────────
 
-export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<void> {
+export async function openSettingsSelector(
+	ctx: OverlayHandlersCtx,
+): Promise<void> {
 	try {
 		const data = ctx.bridge.getSettingsData();
-		const thinkingLevels = [
-			"off",
-			"minimal",
-			"low",
-			"medium",
-			"high",
-			"xhigh",
-		];
+		const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
 		const permissionModes = ["acceptAll", "acceptEdits", "ask", "plan"];
 		const settings: SettingDef[] = [
 			{
@@ -32,7 +33,7 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 				name: "Temperature",
 				currentValue: String(data.temperature),
 				description: "Sampling temperature (0–2)",
-				options: [0.0, 0.3, 0.5, 0.7, 1.0].map((v) => ({
+				options: [0.0, 0.3, 0.5, 0.7, 1.0].map(v => ({
 					label: String(v),
 					value: String(v),
 					current: Math.abs(data.temperature - v) < 0.001,
@@ -42,7 +43,7 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 				name: "Max tokens",
 				currentValue: String(data.maxTokens),
 				description: "Maximum response tokens",
-				options: [1024, 2048, 4096, 8192, 16384].map((v) => ({
+				options: [1024, 2048, 4096, 8192, 16384].map(v => ({
 					label: String(v),
 					value: String(v),
 					current: data.maxTokens === v,
@@ -52,7 +53,7 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 				name: "Max iterations",
 				currentValue: String(data.maxIterations),
 				description: "Maximum tool-use iterations per turn",
-				options: [10, 20, 30, 50, 100].map((v) => ({
+				options: [10, 20, 30, 50, 100].map(v => ({
 					label: String(v),
 					value: String(v),
 					current: data.maxIterations === v,
@@ -62,7 +63,7 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 				name: "Thinking level",
 				currentValue: data.thinkingLevel,
 				description: "Depth of reasoning before responding",
-				options: thinkingLevels.map((v) => ({
+				options: thinkingLevels.map(v => ({
 					label: v.charAt(0).toUpperCase() + v.slice(1),
 					value: v,
 					current: data.thinkingLevel === v,
@@ -72,7 +73,7 @@ export async function openSettingsSelector(ctx: OverlayHandlersCtx): Promise<voi
 				name: "Permission mode",
 				currentValue: data.permissionMode,
 				description: "How the agent handles tool permissions",
-				options: permissionModes.map((v) => ({
+				options: permissionModes.map(v => ({
 					label: v,
 					value: v,
 					current: data.permissionMode === v,
@@ -255,10 +256,7 @@ export function handleSettingsSelectorAction(
 		ctx.tui.requestRender();
 		return;
 	}
-	if (
-		action.type === "open" &&
-		action.settingName.toLowerCase() === "model"
-	) {
+	if (action.type === "open" && action.settingName.toLowerCase() === "model") {
 		ctx.tui.removeOverlay(ctx.settingsSelector);
 		openModelSelector(ctx);
 		return;
@@ -365,10 +363,7 @@ export function handleSettingsSelectorAction(
 			break;
 		}
 		case "execution policy": {
-			const valid: Array<"autonomous" | "minimal"> = [
-				"autonomous",
-				"minimal",
-			];
+			const valid: Array<"autonomous" | "minimal"> = ["autonomous", "minimal"];
 			if (!valid.includes(value as (typeof valid)[number])) {
 				ctx.notify(
 					`Invalid execution policy: ${value}. Valid: ${valid.join(", ")}`,

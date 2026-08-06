@@ -49,7 +49,10 @@ export class LoopManager {
 
 	/** Parse an interval token like "5m", "30s", or "1h". */
 	static parseInterval(arg: string): number | null {
-		const match = arg.trim().toLowerCase().match(/^(\d+)(ms|s|m|h|d)$/);
+		const match = arg
+			.trim()
+			.toLowerCase()
+			.match(/^(\d+)(ms|s|m|h|d)$/);
 		if (!match) return null;
 		const value = Number(match[1]);
 		if (!Number.isSafeInteger(value) || value <= 0) return null;

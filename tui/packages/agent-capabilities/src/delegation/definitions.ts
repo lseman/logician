@@ -11,15 +11,15 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
-import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import {
-	DEFAULT_TRUNCATION,
 	type AgentConfig,
 	type AgentEvent,
+	DEFAULT_TRUNCATION,
 	type Tool,
 	type ToolResult,
 } from "@logician/agent-core";
+import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import {
 	budgetFromArgs,
 	contractFromArgs,
@@ -52,7 +52,7 @@ const GENERIC_SUBAGENT_PROMPT =
 	"to the caller, so include every detail that matters (paths, names, " +
 	"conclusions). Do not pad it with process narration. The message content " +
 	"in the SAME turn as your task_status call is what gets returned — a " +
-	"closing line like \"the task is complete\" with no restated findings " +
+	'closing line like "the task is complete" with no restated findings ' +
 	"returns nothing useful. Restate the actual result there, not just that " +
 	"you finished.";
 
@@ -68,7 +68,7 @@ export const BUILTIN_AGENTS: AgentDefinition[] = [
 		name: "explorer",
 		description:
 			"Read-only researcher. Locates code, maps structure, answers " +
-			"\"where/how is X done\" questions without modifying anything.",
+			'"where/how is X done" questions without modifying anything.',
 		prompt:
 			`${GENERIC_SUBAGENT_PROMPT}\n\nYou are read-only: explore and report, ` +
 			"never modify. Report concrete file paths and line references.",
@@ -99,7 +99,7 @@ export async function loadAgentDefinitions(
 	dirs: string[],
 ): Promise<AgentDefinition[]> {
 	const byName = new Map<string, AgentDefinition>(
-		BUILTIN_AGENTS.map((a) => [a.name, a]),
+		BUILTIN_AGENTS.map(a => [a.name, a]),
 	);
 	for (const dir of dirs) {
 		let entries: string[];
@@ -127,7 +127,7 @@ export async function loadAgentDefinitions(
 				const tools = Array.isArray(frontmatter.tools)
 					? frontmatter.tools.map(String)
 					: typeof frontmatter.tools === "string"
-						? frontmatter.tools.split(",").map((t) => t.trim())
+						? frontmatter.tools.split(",").map(t => t.trim())
 						: undefined;
 				byName.set(name, {
 					name,
@@ -209,7 +209,11 @@ export function createSubagentConcurrencyLimiter(
 	maxParallelAgents: number | undefined,
 ): SubagentConcurrencyLimiter {
 	let limit = DEFAULT_CONCURRENCY_LIMIT;
-	if (typeof maxParallelAgents === "number" && Number.isInteger(maxParallelAgents) && maxParallelAgents > 0) {
+	if (
+		typeof maxParallelAgents === "number" &&
+		Number.isInteger(maxParallelAgents) &&
+		maxParallelAgents > 0
+	) {
 		limit = maxParallelAgents;
 	}
 	let activeCount = 0;
@@ -220,7 +224,9 @@ export function createSubagentConcurrencyLimiter(
 			const next = pendingQueue.shift();
 			if (!next) return;
 			if (next.signal?.aborted) {
-				next.reject(new DOMException("Subagent spawn cancelled.", "AbortError"));
+				next.reject(
+					new DOMException("Subagent spawn cancelled.", "AbortError"),
+				);
 				continue;
 			}
 			if (next.onAbort && next.signal) {
@@ -267,7 +273,8 @@ export function createSubagentConcurrencyLimiter(
 }
 
 function limiterFor(deps: SpawnAgentDeps): SubagentConcurrencyLimiter {
-	return deps.concurrencyLimiter ??= createSubagentConcurrencyLimiter(undefined);
+	return (deps.concurrencyLimiter ??=
+		createSubagentConcurrencyLimiter(undefined));
 }
 
 async function _runSpawn(
@@ -278,11 +285,11 @@ async function _runSpawn(
 	const task = typeof args.task === "string" ? args.task : "";
 	const agentName =
 		typeof args.agent === "string" && args.agent ? args.agent : "general";
-	const def = deps.agents().find((a) => a.name === agentName);
+	const def = deps.agents().find(a => a.name === agentName);
 	if (!def) {
 		const names = deps
 			.agents()
-			.map((a) => a.name)
+			.map(a => a.name)
 			.join(", ");
 		return `Error: Unknown agent "${agentName}". Available: ${names}`;
 	}
@@ -323,7 +330,7 @@ async function _runSpawn(
 		// "You stopped without completing your work. Continue." is enough
 		// to push them past that. Bounded by maxIterations on the child.
 		continuationEnabled: true,
-		onEvent: (event) => {
+		onEvent: event => {
 			if (event.type === "text_delta") {
 				ctx.onUpdate?.(event.delta);
 			}
@@ -336,9 +343,7 @@ async function _runSpawn(
 		},
 	};
 
-	const backend = def.model
-		? deps.backend.withModel(def.model)
-		: deps.backend;
+	const backend = def.model ? deps.backend.withModel(def.model) : deps.backend;
 
 	try {
 		const run = await runDelegatedAgent({
@@ -354,7 +359,7 @@ async function _runSpawn(
 				maxToolCalls: def.maxToolCalls,
 				toolLimits: def.toolLimits,
 			}),
-			onEvent: (event) => childConfig.onEvent?.(event),
+			onEvent: event => childConfig.onEvent?.(event),
 		});
 		const result = truncateResult(
 			run.content,
@@ -404,14 +409,14 @@ async function _runSpawn(
 /** Resolve the child tool set: allowlist (or all), never subagent spawners. */
 function resolveChildTools(def: AgentDefinition, parentTools: Tool[]): Tool[] {
 	const base = parentTools.filter(
-		(t) => t.name !== "spawn_agent" && t.name !== "spawn_agents",
+		t => t.name !== "spawn_agent" && t.name !== "spawn_agents",
 	);
 	if (!def.tools?.length) return base;
 	if (def.tools.includes("__read_only__")) {
-		return base.filter((t) => t.readOnly === true);
+		return base.filter(t => t.readOnly === true);
 	}
 	const allowed = new Set(def.tools);
-	return base.filter((t) => allowed.has(t.name));
+	return base.filter(t => allowed.has(t.name));
 }
 
 export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
@@ -426,7 +431,7 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 			"conversation). Agents: " +
 			deps
 				.agents()
-				.map((a) => `${a.name} (${a.description})`)
+				.map(a => `${a.name} (${a.description})`)
 				.join("; "),
 		parameters: {
 			type: "object",
@@ -453,22 +458,18 @@ export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 			if (!task.trim()) return "Error: spawn_agent requires a task.";
 			const agentName =
 				typeof args.agent === "string" && args.agent ? args.agent : "general";
-			const def = deps.agents().find((a) => a.name === agentName);
+			const def = deps.agents().find(a => a.name === agentName);
 			if (!def) {
 				const names = deps
 					.agents()
-					.map((a) => a.name)
+					.map(a => a.name)
 					.join(", ");
 				return `Error: Unknown agent "${agentName}". Available: ${names}`;
 			}
 
 			return limiterFor(deps).run(
 				() =>
-					_runSpawn(
-						args,
-						{ signal: ctx.signal, onUpdate: ctx.onUpdate },
-						deps,
-					),
+					_runSpawn(args, { signal: ctx.signal, onUpdate: ctx.onUpdate }, deps),
 				ctx.signal,
 			);
 		},
@@ -493,7 +494,7 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 			"Agents: " +
 			deps
 				.agents()
-				.map((a) => `${a.name} (${a.description})`)
+				.map(a => `${a.name} (${a.description})`)
 				.join("; "),
 		parameters: {
 			type: "object",
@@ -506,13 +507,11 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 						properties: {
 							task: {
 								type: "string",
-								description:
-									"Complete, self-contained task prompt.",
+								description: "Complete, self-contained task prompt.",
 							},
 							agent: {
 								type: "string",
-								description:
-									"Agent definition to use (default: general).",
+								description: "Agent definition to use (default: general).",
 							},
 							expected_output: {
 								type: "string",
@@ -547,18 +546,14 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 						},
 						required: ["task"],
 					},
-					description:
-						"Array of tasks to execute concurrently.",
+					description: "Array of tasks to execute concurrently.",
 				},
 			},
 			required: ["tasks"],
 		},
 		execute: async (args, ctx) => {
 			const rawTasks = args.tasks;
-			if (
-				!Array.isArray(rawTasks) ||
-				rawTasks.length < 2
-			) {
+			if (!Array.isArray(rawTasks) || rawTasks.length < 2) {
 				return "Error: spawn_agents requires at least two tasks.";
 			}
 
@@ -576,13 +571,9 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 					return `Error: tasks[${i}] is invalid. Each task must have a non-empty 'task' string.`;
 				}
 				const agentName =
-					typeof raw.agent === "string" && raw.agent
-						? raw.agent
-						: "general";
-				if (!agents.find((a) => a.name === agentName)) {
-					const names = agents
-						.map((a) => a.name)
-						.join(", ");
+					typeof raw.agent === "string" && raw.agent ? raw.agent : "general";
+				if (!agents.find(a => a.name === agentName)) {
+					const names = agents.map(a => a.name).join(", ");
 					return `Error: tasks[${i}] uses unknown agent "${agentName}". Available: ${names}`;
 				}
 				parsedTasks.push({
@@ -622,7 +613,7 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 				isError: boolean;
 			}> = [];
 
-			const runOne = async (item: typeof taskArgs[number]) => {
+			const runOne = async (item: (typeof taskArgs)[number]) => {
 				try {
 					const result = await limiterFor(deps).run(
 						() =>
@@ -636,8 +627,7 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 							),
 						ctx.signal,
 					);
-					const isError =
-						typeof result !== "string" && result.isError === true;
+					const isError = typeof result !== "string" && result.isError === true;
 					results.push({
 						index: item.taskIndex,
 						result,
@@ -668,7 +658,7 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 
 			// Sort results by original index and return.
 			results.sort((a, b) => a.index - b.index);
-			const toolResults = results.map((r) => {
+			const toolResults = results.map(r => {
 				if (typeof r.result === "string") {
 					return {
 						index: r.index,
@@ -685,12 +675,11 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 				};
 			});
 			const content = toolResults
-				.map((result) => {
+				.map(result => {
 					const task = parsedTasks[result.index];
 					const agent = task?.agent || "general";
 					const status = result.isError ? "failed" : "completed";
-					const report = result.content.trim() ||
-						"(No final report returned.)";
+					const report = result.content.trim() || "(No final report returned.)";
 					return [
 						`## Subagent ${result.index + 1}: ${agent} (${status})`,
 						report,
@@ -702,8 +691,8 @@ export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 				details: {
 					results: toolResults,
 					total: results.length,
-					completed: results.filter((r) => !r.isError).length,
-					failed: results.filter((r) => r.isError).length,
+					completed: results.filter(r => !r.isError).length,
+					failed: results.filter(r => r.isError).length,
 				},
 			};
 		},

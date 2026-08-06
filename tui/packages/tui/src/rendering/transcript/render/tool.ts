@@ -21,20 +21,24 @@ import {
 } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import {
+	sanitizeTerminalText,
+	sanitizeTerminalValue,
+} from "../../terminal-sanitize.ts";
+import { detectLanguage } from "../file-language.ts";
+import { wrapText } from "../layout.ts";
+import {
 	compactText,
 	diffLineColor,
 	extractPostEditDiagnostics,
 	formatDurationMs,
 	isPermissionRejection,
-	parseJsonMaybe,
 	type PostEditDiagnosticBlock,
-	stringArg,
+	parseJsonMaybe,
 	streamedStringArg,
 	streamedStringArgLive,
+	stringArg,
 	stripInternalHookGuidance,
 } from "../text-utils.ts";
-import { detectLanguage } from "../file-language.ts";
-import { wrapText } from "../layout.ts";
 import { truncateText, withTruncationMarker } from "./content.ts";
 import {
 	renderSubagentBatchActivityTail,
@@ -48,10 +52,6 @@ import {
 	renderMcpDetails,
 	renderWriteDetails,
 } from "./tool-details.ts";
-import {
-	sanitizeTerminalText,
-	sanitizeTerminalValue,
-} from "../../terminal-sanitize.ts";
 
 // ── Shared render context ────────────────────────────────────────────────────
 // TranscriptDisplay's instance state, as read by the free functions extracted
@@ -226,9 +226,7 @@ export function renderTool(
 		);
 	}
 	for (const block of postEdit.blocks) {
-		lines.push(
-			...renderPostEditDiagnostics(block, Math.max(20, width - 4)),
-		);
+		lines.push(...renderPostEditDiagnostics(block, Math.max(20, width - 4)));
 	}
 	if (!expanded && !subagent && !subagentBatch) return lines;
 	// Spawn_agents always shows compact per-task status cards, each
@@ -243,7 +241,12 @@ export function renderTool(
 		// instead of resolving one row up (the header) or one row off from
 		// the intended task.
 		const headerOffset = lines.length;
-		const collapsedLines = renderSubagentBatchCollapsed(ctx, tool, width, expanded);
+		const collapsedLines = renderSubagentBatchCollapsed(
+			ctx,
+			tool,
+			width,
+			expanded,
+		);
 		lines.push(...collapsedLines);
 		if (ctx._taskHitRegions) {
 			for (const region of ctx._taskHitRegions) {
@@ -257,7 +260,9 @@ export function renderTool(
 			// appended after everything pushed so far.
 			const tailOffset = lines.length;
 			const regionsBeforeTail = ctx._taskHitRegions?.length ?? 0;
-			lines.push(...renderSubagentBatchActivityTail(ctx, tool, width, expanded));
+			lines.push(
+				...renderSubagentBatchActivityTail(ctx, tool, width, expanded),
+			);
 			if (ctx._taskHitRegions) {
 				for (let i = regionsBeforeTail; i < ctx._taskHitRegions.length; i++) {
 					ctx._taskHitRegions[i].start += tailOffset;
@@ -360,7 +365,7 @@ export function collapsedToolPreview(tool: ToolExecution): string {
 	if (!raw.trim()) return "";
 	const firstLine = raw
 		.split("\n")
-		.map((line) => line.trim())
+		.map(line => line.trim())
 		.find(Boolean);
 	if (!firstLine) return "";
 	const preview = compactText(firstLine);
@@ -389,7 +394,10 @@ export function renderPostEditDiagnostics(
 		lines.push(
 			`${theme.fg("dim", "│ ")}${theme.fg("toolError", "×")} ${theme.fg("active", `${diagnostic.line}:${diagnostic.column}`)}${theme.fg("muted", label)}${RESET}`,
 		);
-		for (const messageLine of wrapText(diagnostic.message, Math.max(16, width - 6))) {
+		for (const messageLine of wrapText(
+			diagnostic.message,
+			Math.max(16, width - 6),
+		)) {
 			lines.push(`${theme.fg("dim", "│   ")}${messageLine}${RESET}`);
 		}
 	}
@@ -409,7 +417,8 @@ export function toolSummary(tool: ToolExecution): string {
 	) {
 		const content = writeFileContent(tool) || "";
 		const lineCount = content ? content.split("\n").length : 0;
-		const verb = tool.tool_name === "write_file_append" ? "appended" : "written";
+		const verb =
+			tool.tool_name === "write_file_append" ? "appended" : "written";
 		return `${lineCount} line${lineCount === 1 ? "" : "s"} ${verb}${
 			tool.isComplete ? "" : " so far"
 		}`;
@@ -517,7 +526,7 @@ export function toolDetailLines(
  * breakdown.
  */
 export function computeBatchTally(
-	ctx: RenderCtx,
+	_ctx: RenderCtx,
 	tool: ToolExecution,
 ): {
 	total: number;
@@ -537,7 +546,11 @@ export function computeBatchTally(
 	const taskStatus =
 		(details.taskStatus as Record<
 			number,
-			{ status: "running" | "completed" | "failed"; startedAt: number; endedAt?: number }
+			{
+				status: "running" | "completed" | "failed";
+				startedAt: number;
+				endedAt?: number;
+			}
 		>) ?? {};
 	const liveStatus = new Map<number, "running" | "completed" | "failed">();
 	const taskElapsedMs = new Map<number, number>();
@@ -551,19 +564,20 @@ export function computeBatchTally(
 	const completed =
 		typeof details.completed === "number" && Number.isFinite(details.completed)
 			? Math.max(0, Math.trunc(details.completed))
-			: [...liveStatus.values()].filter((s) => s === "completed").length;
+			: [...liveStatus.values()].filter(s => s === "completed").length;
 	const failed =
 		typeof details.failed === "number" && Number.isFinite(details.failed)
 			? Math.max(0, Math.trunc(details.failed))
-			: [...liveStatus.values()].filter((s) => s === "failed").length;
+			: [...liveStatus.values()].filter(s => s === "failed").length;
 	const running = [...liveStatus.values()].filter(
-		(status) => status === "running",
+		status => status === "running",
 	).length;
 	const reportedTotal =
 		typeof details.total === "number" && Number.isFinite(details.total)
 			? Math.max(0, Math.trunc(details.total))
 			: 0;
-	const observedTotal = liveStatus.size > 0 ? Math.max(...liveStatus.keys()) + 1 : 0;
+	const observedTotal =
+		liveStatus.size > 0 ? Math.max(...liveStatus.keys()) + 1 : 0;
 	// Tool arguments can still be streaming when the first progress marker
 	// arrives. Never render an impossible ratio such as "1/0", and also
 	// defend against stale or malformed structured totals.
@@ -714,7 +728,9 @@ export function previewBlock(
 ): string[] {
 	if (!text) return [`${DIM}(empty)${RESET}`];
 	const preview =
-		text.length > maxChars ? withTruncationMarker(text.slice(0, maxChars)) : text;
+		text.length > maxChars
+			? withTruncationMarker(text.slice(0, maxChars))
+			: text;
 	const rawLines = preview.split("\n");
 	const lines: string[] = [];
 	const bg = theme.bg("mdCodeBlockBg", "");

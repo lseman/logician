@@ -81,11 +81,19 @@ export function loadContextFiles(options: {
 	// 2. Global system files
 	const globalSystem = findSystemFile(options.agentDir, "SYSTEM.md");
 	if (globalSystem) {
-		systemFile = { path: globalSystem, content: readFileSync(globalSystem, "utf-8"), source: "global" };
+		systemFile = {
+			path: globalSystem,
+			content: readFileSync(globalSystem, "utf-8"),
+			source: "global",
+		};
 	}
 	const globalAppend = findSystemFile(options.agentDir, "APPEND_SYSTEM.md");
 	if (globalAppend) {
-		appendSystemFile = { path: globalAppend, content: readFileSync(globalAppend, "utf-8"), source: "global" };
+		appendSystemFile = {
+			path: globalAppend,
+			content: readFileSync(globalAppend, "utf-8"),
+			source: "global",
+		};
 	}
 
 	// 3. Walk from the filesystem root toward cwd so nearer instructions are
@@ -137,7 +145,7 @@ export function loadContextFiles(options: {
  */
 export function concatContextFiles(files: ContextFile[]): string {
 	if (files.length === 0) return "";
-	return files.map((f) => `<!-- ${f.path} -->\n${f.content}`).join("\n\n");
+	return files.map(f => `<!-- ${f.path} -->\n${f.content}`).join("\n\n");
 }
 
 /**
@@ -154,12 +162,16 @@ export function buildContextContent(options: {
 
 	// System override (replaces default)
 	if (systemFile) {
-		parts.push(`<!-- SYSTEM.md (${systemFile.path}) -->\n${systemFile.content}`);
+		parts.push(
+			`<!-- SYSTEM.md (${systemFile.path}) -->\n${systemFile.content}`,
+		);
 	}
 
 	// Appended system content
 	if (appendSystemFile) {
-		parts.push(`<!-- APPEND_SYSTEM.md (${appendSystemFile.path}) -->\n${appendSystemFile.content}`);
+		parts.push(
+			`<!-- APPEND_SYSTEM.md (${appendSystemFile.path}) -->\n${appendSystemFile.content}`,
+		);
 	}
 
 	// Concatenated context files

@@ -1,18 +1,18 @@
 // ── Built-in Tools Registry ──────────────────────────────────────────────────
 // Returns all built-in tools for automatic registration at startup.
 
-import type { Tool, AgentEvent, AgentConfig } from "@logician/agent-core";
+import type { AgentConfig, AgentEvent, Tool } from "@logician/agent-core";
 import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
-import { ask_user } from "./interaction/ask-user/index.ts";
-import { task_status } from "./tasks/task-status.ts";
-import { todo_tool } from "./tasks/todo.ts";
-import { rag_tools } from "./rag/index.ts";
 import {
-	createSubagentConcurrencyLimiter,
-	createSpawnAgentTool,
 	createSpawnAgentsTool,
+	createSpawnAgentTool,
+	createSubagentConcurrencyLimiter,
 	type SpawnAgentDeps,
 } from "./delegation/definitions.ts";
+import { ask_user } from "./interaction/ask-user/index.ts";
+import { rag_tools } from "./rag/index.ts";
+import { task_status } from "./tasks/task-status.ts";
+import { todo_tool } from "./tasks/todo.ts";
 
 export interface SubagentToolDeps {
 	config: () => AgentConfig;

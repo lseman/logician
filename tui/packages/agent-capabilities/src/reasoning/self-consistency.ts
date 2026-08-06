@@ -43,14 +43,14 @@ export class SelfConsistencyReasoner extends BaseReasoner {
 				),
 			),
 		);
-		const answers = samples.map((s) => BaseReasoner._extractAnswer(s));
+		const answers = samples.map(s => BaseReasoner._extractAnswer(s));
 		const counts = new Map<string, number>();
 		for (const a of answers) counts.set(a, (counts.get(a) ?? 0) + 1);
 		const [bestAnswer, count] = [...counts.entries()].sort(
 			(a, b) => b[1] - a[1],
 		)[0];
 		const best =
-			samples.find((s) => BaseReasoner._extractAnswer(s) === bestAnswer) ??
+			samples.find(s => BaseReasoner._extractAnswer(s) === bestAnswer) ??
 			samples[0];
 		const [reasoning, answer] = this._split(best);
 		return {

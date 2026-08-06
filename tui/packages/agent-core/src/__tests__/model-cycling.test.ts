@@ -1,7 +1,7 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { AgentHarness } from "../agent/harness.ts";
+import { describe, it } from "node:test";
 import type { LLMBackend } from "../agent/backend.ts";
+import { AgentHarness } from "../agent/harness.ts";
 import type { AgentEvent } from "../agent/types.ts";
 
 class FakeBackend implements LLMBackend {
@@ -127,13 +127,13 @@ describe("Model cycle events", () => {
 	it("emits model_cycle event with thinking level", () => {
 		const events: AgentEvent[] = [];
 		const h = makeHarness();
-		const unsub = h.subscribe((e) => events.push(e));
+		const unsub = h.subscribe(e => events.push(e));
 		h.setThinkingLevel("high");
 
 		h.cycleModel("forward");
 		unsub();
 		const cycleEvent = events.find(
-			(e) => e.type === "model_cycle" && e.fromModel !== e.model,
+			e => e.type === "model_cycle" && e.fromModel !== e.model,
 		);
 		assert.ok(cycleEvent !== undefined);
 		if (cycleEvent && cycleEvent.type === "model_cycle") {
@@ -146,11 +146,11 @@ describe("Model cycle events", () => {
 	it("setThinkingLevel emits model_cycle when level changes", () => {
 		const events: AgentEvent[] = [];
 		const h = makeHarness();
-		const unsub = h.subscribe((e) => events.push(e));
+		const unsub = h.subscribe(e => events.push(e));
 
 		h.setThinkingLevel("xhigh");
 		unsub();
-		const cycleEvent = events.find((e) => e.type === "model_cycle");
+		const cycleEvent = events.find(e => e.type === "model_cycle");
 		assert.ok(cycleEvent !== undefined);
 		if (cycleEvent && cycleEvent.type === "model_cycle") {
 			assert.strictEqual(cycleEvent.thinkingLevel, "xhigh");

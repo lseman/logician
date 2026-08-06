@@ -3,14 +3,17 @@
 // Features: line/byte truncation, context lines, ignoreCase, literal mode,
 // file caching for context, AbortSignal support, structured ToolResult.
 
-import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
+import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
-import { truncateHead, truncateLine, formatSize } from "./truncate.ts";
-import { ensureInsideCwd, resolvePath } from "@logician/agent-core/tools/shared/path-utils.ts";
+import {
+	ensureInsideCwd,
+	resolvePath,
+} from "@logician/agent-core/tools/shared/path-utils.ts";
 import { ensureTool } from "./shared/tools-manager.ts";
+import { formatSize, truncateHead, truncateLine } from "./truncate.ts";
 
 const grepSchema = {
 	type: "object",
@@ -88,8 +91,8 @@ interface SearchOperations {
 }
 
 const defaultOps: SearchOperations = {
-	isDirectory: async (p) => (await fsStat(p)).isDirectory(),
-	readFile: (p) => fsReadFile(p, "utf-8"),
+	isDirectory: async p => (await fsStat(p)).isDirectory(),
+	readFile: p => fsReadFile(p, "utf-8"),
 };
 
 export const grep: Tool = {
@@ -101,7 +104,9 @@ export const grep: Tool = {
 	description:
 		"Search file contents for a pattern. Returns matching lines with file paths and line numbers. Output is truncated to 100 matches or 50KB (whichever is hit first). Long lines are truncated to 500 chars.",
 	promptSnippet: "Search file contents with pattern matching and line numbers",
-	promptGuidelines: ["Use grep to search file contents; use find to search by name"],
+	promptGuidelines: [
+		"Use grep to search file contents; use find to search by name",
+	],
 	parameters: grepSchema,
 	prepareArguments,
 	execute: async (args, ctx): Promise<string | ToolResult> => {
@@ -162,13 +167,18 @@ export const grep: Tool = {
 			return lines;
 		};
 
-		const argsRg: string[] = ["--json", "--line-number", "--color=never", "--hidden"];
+		const argsRg: string[] = [
+			"--json",
+			"--line-number",
+			"--color=never",
+			"--hidden",
+		];
 		if (ignoreCase) argsRg.push("--ignore-case");
 		if (literal) argsRg.push("--fixed-strings");
 		if (glob) argsRg.push("--glob", glob);
 		argsRg.push("--", pattern, searchPath);
 
-		return new Promise<string | ToolResult>((resolve) => {
+		return new Promise<string | ToolResult>(resolve => {
 			if (ctx.signal?.aborted) {
 				resolve("Error: Command aborted");
 				return;
@@ -179,7 +189,9 @@ export const grep: Tool = {
 				settled = true;
 				resolve(value);
 			};
-			const child = spawn(rgPath, argsRg, { stdio: ["ignore", "pipe", "pipe"] });
+			const child = spawn(rgPath, argsRg, {
+				stdio: ["ignore", "pipe", "pipe"],
+			});
 			const rl = createInterface({ input: child.stdout });
 
 			let aborted = false;
@@ -194,9 +206,13 @@ export const grep: Tool = {
 			let matchCount = 0;
 			let matchLimitReached = false;
 			let linesTruncated = false;
-			const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
+			const matches: Array<{
+				filePath: string;
+				lineNumber: number;
+				lineText?: string;
+			}> = [];
 
-			rl.on("line", (line) => {
+			rl.on("line", line => {
 				if (!line.trim() || matchCount >= effectiveLimit) return;
 				let event: unknown;
 				try {
@@ -211,7 +227,11 @@ export const grep: Tool = {
 					(event as { type: string }).type === "match"
 				) {
 					const e = event as unknown as {
-						data: { path: { text: string }; line_number: number; lines?: { text?: string } };
+						data: {
+							path: { text: string };
+							line_number: number;
+							lines?: { text?: string };
+						};
 					};
 					if (e.data?.path?.text && typeof e.data.line_number === "number") {
 						matchCount++;
@@ -229,11 +249,11 @@ export const grep: Tool = {
 				}
 			});
 
-			child.stderr?.on("data", (chunk) => {
+			child.stderr?.on("data", chunk => {
 				stderr += chunk.toString();
 			});
 
-			child.on("close", (code) => {
+			child.on("close", code => {
 				ctx.signal?.removeEventListener("abort", onAbort);
 				rl.close();
 				void (async () => {
@@ -260,10 +280,17 @@ export const grep: Tool = {
 
 						// Fast-path (no context): use lineText from rg JSON, skip file re-read.
 						if (contextValue === 0) {
-							const rawLine = match.lineText ?? (await getFileLines(match.filePath))[match.lineNumber - 1] ?? "";
-							const { text: truncatedText, wasTruncated } = truncateLine(rawLine.replace(/\r\n?/g, ""));
+							const rawLine =
+								match.lineText ??
+								(await getFileLines(match.filePath))[match.lineNumber - 1] ??
+								"";
+							const { text: truncatedText, wasTruncated } = truncateLine(
+								rawLine.replace(/\r\n?/g, ""),
+							);
 							if (wasTruncated) linesTruncated = true;
-							outputLines.push(`${relativePath}:${match.lineNumber}: ${truncatedText}`);
+							outputLines.push(
+								`${relativePath}:${match.lineNumber}: ${truncatedText}`,
+							);
 							continue;
 						}
 
@@ -280,12 +307,17 @@ export const grep: Tool = {
 						for (let current = start; current <= end; current++) {
 							const lineText = lines[current - 1] ?? "";
 							const sanitized = lineText.replace(/\r/g, "");
-							const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
+							const { text: truncatedText, wasTruncated } =
+								truncateLine(sanitized);
 							if (wasTruncated) linesTruncated = true;
 							if (current === match.lineNumber) {
-								outputLines.push(`${relativePath}:${current}: ${truncatedText}`);
+								outputLines.push(
+									`${relativePath}:${current}: ${truncatedText}`,
+								);
 							} else {
-								outputLines.push(`${relativePath}-${current}- ${truncatedText}`);
+								outputLines.push(
+									`${relativePath}-${current}- ${truncatedText}`,
+								);
 							}
 						}
 					}
@@ -324,7 +356,7 @@ export const grep: Tool = {
 				})();
 			});
 
-			child.on("error", (error) => {
+			child.on("error", error => {
 				ctx.signal?.removeEventListener("abort", onAbort);
 				rl.close();
 				settle(`Error: Failed to run ripgrep (rg): ${error.message}`);

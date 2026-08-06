@@ -14,10 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { edit_file } from "../tools/edit-file.ts";
-import { write_file } from "../tools/write-file.ts";
-import { write_file_append } from "../tools/write-file-append.ts";
 import { read_file } from "../tools/read-file.ts";
 import { isStaleSinceRead, recordRead } from "../tools/read-tracker.ts";
+import { write_file } from "../tools/write-file.ts";
+import { write_file_append } from "../tools/write-file-append.ts";
 
 function setup(name: string, content: string): { cwd: string; file: string } {
 	const cwd = mkdtempSync(join(tmpdir(), `logician-${name}-`));
@@ -55,7 +55,10 @@ void test("edit_file preserves BOM and CRLF line endings", async () => {
 	const { cwd, file } = setup("edit", "\uFEFFline1\r\nline2\r\n");
 
 	await edit_file.execute(
-		{ path: "file.txt", edits: [{ oldText: "line2\n", newText: "line two\n" }] },
+		{
+			path: "file.txt",
+			edits: [{ oldText: "line2\n", newText: "line two\n" }],
+		},
 		{ cwd },
 	);
 
@@ -124,7 +127,10 @@ void test("edit_file fuzzy match does not rewrite untouched regions", async () =
 	const { cwd, file } = setup("edit", original);
 
 	await edit_file.execute(
-		{ path: "file.txt", edits: [{ oldText: "target\n", newText: "replaced\n" }] },
+		{
+			path: "file.txt",
+			edits: [{ oldText: "target\n", newText: "replaced\n" }],
+		},
 		{ cwd },
 	);
 
@@ -218,7 +224,9 @@ void test("write_file overwrites a read file and returns a diff", async () => {
 	);
 	assert.equal(readFileSync(file, "utf8"), "new content\n");
 	const text =
-		typeof result === "string" ? result : (result as { content: string }).content;
+		typeof result === "string"
+			? result
+			: (result as { content: string }).content;
 	// Strip ANSI escape codes from syntax-highlighted output
 	const plain = text.replace(/\x1b\[[\d;]*m/g, "");
 	assert.match(plain, /Wrote /);
@@ -291,12 +299,18 @@ void test("write_file_append appends across multiple chunked calls in order", as
 	const cwd = mkdtempSync(join(tmpdir(), "logician-append-"));
 	const file = join(cwd, "file.txt");
 
-	await write_file_append.execute({ path: "file.txt", content: "part1 " }, { cwd });
+	await write_file_append.execute(
+		{ path: "file.txt", content: "part1 " },
+		{ cwd },
+	);
 	const second = await write_file_append.execute(
 		{ path: "file.txt", content: "part2 " },
 		{ cwd },
 	);
-	await write_file_append.execute({ path: "file.txt", content: "part3" }, { cwd });
+	await write_file_append.execute(
+		{ path: "file.txt", content: "part3" },
+		{ cwd },
+	);
 
 	assert.match(String(second), /Appended to /);
 	assert.equal(readFileSync(file, "utf8"), "part1 part2 part3");
@@ -317,7 +331,10 @@ void test("write_file_append refuses to append to an unread existing file", asyn
 void test("write_file_append appends to an existing file once it has been read", async () => {
 	const { cwd, file } = setup("append", "original\n");
 
-	await write_file_append.execute({ path: "file.txt", content: "more\n" }, { cwd });
+	await write_file_append.execute(
+		{ path: "file.txt", content: "more\n" },
+		{ cwd },
+	);
 
 	assert.equal(readFileSync(file, "utf8"), "original\nmore\n");
 });

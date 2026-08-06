@@ -86,20 +86,34 @@ export function truncateHead(
 
 	if (totalLines <= maxLines && totalBytes <= maxBytes) {
 		return {
-			content, truncated: false, truncatedBy: null,
-			totalLines, totalBytes, outputLines: totalLines, outputBytes: totalBytes,
-			lastLinePartial: false, firstLineExceedsLimit: false,
-			maxLines, maxBytes,
+			content,
+			truncated: false,
+			truncatedBy: null,
+			totalLines,
+			totalBytes,
+			outputLines: totalLines,
+			outputBytes: totalBytes,
+			lastLinePartial: false,
+			firstLineExceedsLimit: false,
+			maxLines,
+			maxBytes,
 		};
 	}
 
 	const firstLineBytes = Buffer.byteLength(lines[0] ?? "", "utf-8");
 	if (firstLineBytes > maxBytes) {
 		return {
-			content: "", truncated: true, truncatedBy: "bytes",
-			totalLines, totalBytes, outputLines: 0, outputBytes: 0,
-			lastLinePartial: false, firstLineExceedsLimit: true,
-			maxLines, maxBytes,
+			content: "",
+			truncated: true,
+			truncatedBy: "bytes",
+			totalLines,
+			totalBytes,
+			outputLines: 0,
+			outputBytes: 0,
+			lastLinePartial: false,
+			firstLineExceedsLimit: true,
+			maxLines,
+			maxBytes,
 		};
 	}
 
@@ -123,12 +137,17 @@ export function truncateHead(
 
 	const outputContent = outputLinesArr.join("\n");
 	return {
-		content: outputContent, truncated: true, truncatedBy,
-		totalLines, totalBytes,
+		content: outputContent,
+		truncated: true,
+		truncatedBy,
+		totalLines,
+		totalBytes,
 		outputLines: outputLinesArr.length,
 		outputBytes: Buffer.byteLength(outputContent, "utf-8"),
-		lastLinePartial: false, firstLineExceedsLimit: false,
-		maxLines, maxBytes,
+		lastLinePartial: false,
+		firstLineExceedsLimit: false,
+		maxLines,
+		maxBytes,
 	};
 }
 
@@ -147,10 +166,17 @@ export function truncateTail(
 
 	if (totalLines <= maxLines && totalBytes <= maxBytes) {
 		return {
-			content, truncated: false, truncatedBy: null,
-			totalLines, totalBytes, outputLines: totalLines, outputBytes: totalBytes,
-			lastLinePartial: false, firstLineExceedsLimit: false,
-			maxLines, maxBytes,
+			content,
+			truncated: false,
+			truncatedBy: null,
+			totalLines,
+			totalBytes,
+			outputLines: totalLines,
+			outputBytes: totalBytes,
+			lastLinePartial: false,
+			firstLineExceedsLimit: false,
+			maxLines,
+			maxBytes,
 		};
 	}
 
@@ -187,12 +213,17 @@ export function truncateTail(
 
 	const outputContent = outputLinesArr.join("\n");
 	return {
-		content: outputContent, truncated: true, truncatedBy,
-		totalLines, totalBytes,
+		content: outputContent,
+		truncated: true,
+		truncatedBy,
+		totalLines,
+		totalBytes,
 		outputLines: outputLinesArr.length,
 		outputBytes: Buffer.byteLength(outputContent, "utf-8"),
-		lastLinePartial, firstLineExceedsLimit: false,
-		maxLines, maxBytes,
+		lastLinePartial,
+		firstLineExceedsLimit: false,
+		maxLines,
+		maxBytes,
 	};
 }
 
@@ -383,7 +414,9 @@ export class OutputAccumulator {
 	private getSnapshotText(): string {
 		if (this.tailStartsAtLineBoundary) return this.tailText;
 		const firstNewline = this.tailText.indexOf("\n");
-		return firstNewline === -1 ? this.tailText : this.tailText.slice(firstNewline + 1);
+		return firstNewline === -1
+			? this.tailText
+			: this.tailText.slice(firstNewline + 1);
 	}
 
 	private shouldUseTempFile(): boolean {
@@ -410,7 +443,7 @@ export class OutputAccumulator {
 /** Remove non-printable binary characters. Keeps tab, LF, CR. */
 export function sanitizeBinaryOutput(str: string): string {
 	return Array.from(str)
-		.filter((char) => {
+		.filter(char => {
 			const code = char.codePointAt(0);
 			if (code === undefined) return false;
 			if (code === 0x09 || code === 0x0a || code === 0x0d) return true;

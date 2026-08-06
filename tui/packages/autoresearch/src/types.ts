@@ -52,7 +52,10 @@ export interface RegisteredCommand {
 	description: string;
 	usage?: string;
 	acceptsArgs?: boolean;
-	handler: (args: string | undefined, ctx: CommandContext) => Promise<string> | string;
+	handler: (
+		args: string | undefined,
+		ctx: CommandContext,
+	) => Promise<string> | string;
 }
 
 export interface CommandContext {
@@ -67,9 +70,21 @@ export interface CommandContext {
 
 export interface ExtensionUI {
 	notify(message: string, type?: "info" | "warning" | "error"): void;
-	confirm(title: string, message: string, opts?: { timeoutMs?: number }): Promise<boolean>;
-	input(title: string, placeholder?: string, opts?: { timeoutMs?: number }): Promise<string | undefined>;
-	select(title: string, options: Array<{ label: string; description?: string }>, opts?: { timeoutMs?: number }): Promise<string | undefined>;
+	confirm(
+		title: string,
+		message: string,
+		opts?: { timeoutMs?: number },
+	): Promise<boolean>;
+	input(
+		title: string,
+		placeholder?: string,
+		opts?: { timeoutMs?: number },
+	): Promise<string | undefined>;
+	select(
+		title: string,
+		options: Array<{ label: string; description?: string }>,
+		opts?: { timeoutMs?: number },
+	): Promise<string | undefined>;
 }
 
 // ============================================================================
@@ -122,7 +137,11 @@ export interface ExtensionContextState {
 	features: Set<string>;
 	labels: Record<string, string>;
 	data: Record<string, unknown>;
-	diagnostics: Array<{ source: string; message: string; severity: "info" | "warning" | "error" }>;
+	diagnostics: Array<{
+		source: string;
+		message: string;
+		severity: "info" | "warning" | "error";
+	}>;
 }
 
 export interface ExtensionContextActions {
@@ -131,10 +150,16 @@ export interface ExtensionContextActions {
 	setLabel: (label: string) => void;
 	storeData: (extension: string, key: string, value: unknown) => void;
 	fetchData: (extension: string, key: string) => unknown;
-	addDiagnostic: (source: string, message: string, severity?: "info" | "warning" | "error") => void;
+	addDiagnostic: (
+		source: string,
+		message: string,
+		severity?: "info" | "warning" | "error",
+	) => void;
 }
 
-export interface ExtensionContext extends ExtensionContextState, ExtensionContextActions {
+export interface ExtensionContext
+	extends ExtensionContextState,
+		ExtensionContextActions {
 	cwd: string;
 	sessionId: string;
 	ui: ExtensionUI;

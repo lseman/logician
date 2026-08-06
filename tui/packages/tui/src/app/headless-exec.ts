@@ -64,7 +64,7 @@ export async function runHeadlessExec(
 		);
 	};
 
-	const unsubscribe = bridge.on((event) => {
+	const unsubscribe = bridge.on(event => {
 		switch (event.type) {
 			case "token":
 				output += event.token;
@@ -73,7 +73,8 @@ export async function runHeadlessExec(
 				break;
 			case "tool_start":
 			case "tool_execution_start": {
-				const id = event.tool_call_id ?? `${event.tool_name}:${toolStarts.size}`;
+				const id =
+					event.tool_call_id ?? `${event.tool_name}:${toolStarts.size}`;
 				toolStarts.set(id, now());
 				emit({
 					type: "tool_use",
@@ -128,7 +129,7 @@ export async function runHeadlessExec(
 		}
 	});
 
-	bridge.onError((error) => {
+	bridge.onError(error => {
 		lastError = error.message;
 	});
 

@@ -43,7 +43,17 @@ void test("isValidInferenceMode returns correct values", () => {
 });
 
 void test("cycleInferenceMode cycles through all modes in order", () => {
-	const modes = ["auto", "thinking-general", "thinking-coding", "instruct-general", "instruct-reasoning", "instruct-coding", "deterministic", "creative", "analytical"] as const;
+	const modes = [
+		"auto",
+		"thinking-general",
+		"thinking-coding",
+		"instruct-general",
+		"instruct-reasoning",
+		"instruct-coding",
+		"deterministic",
+		"creative",
+		"analytical",
+	] as const;
 	for (let i = 0; i < modes.length; i++) {
 		assert.equal(cycleInferenceMode(modes[i]), modes[(i + 1) % modes.length]);
 	}

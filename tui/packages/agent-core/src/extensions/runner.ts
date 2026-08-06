@@ -4,6 +4,14 @@
 // Provides both the legacy untyped EventBus and a structured typed event system.
 
 import type { AgentHooks } from "../agent/types.ts";
+import { createExtensionContext } from "../hooks/extensions/context.ts";
+import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import type {
+	ExtensionEventName,
+	ExtensionEvent as TypedExtensionEvent,
+} from "../hooks/extensions/events.ts";
+import { createEventBus, type EventBus } from "./event-bus.ts";
+import { createExtensionState } from "./state.ts";
 import type {
 	AfterToolCallExtensionResult,
 	BeforeToolCallExtensionResult,
@@ -18,11 +26,6 @@ import type {
 	RegisteredCommand,
 	RegisteredTool,
 } from "./types.ts";
-import { createEventBus, type EventBus } from "./event-bus.ts";
-import { createExtensionState } from "./state.ts";
-import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
-import { createExtensionContext } from "../hooks/extensions/context.ts";
-import type { ExtensionEventName, ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
 
 // ============================================================================
 // No-op UI (for headless/non-TUI contexts)
@@ -52,7 +55,8 @@ function createStateWrapper(extId: string): ExtensionState {
 			}
 		},
 		set: async (key: string, value: unknown): Promise<void> => {
-			const serialized = typeof value === "string" ? value : JSON.stringify(value);
+			const serialized =
+				typeof value === "string" ? value : JSON.stringify(value);
 			db.set(key, serialized);
 		},
 		delete: async (key: string): Promise<void> => {
@@ -83,7 +87,8 @@ export class ExtensionRunner {
 	private handlers = new Map<ExtensionEventType, HandlerEntry[]>();
 	private tools: Array<{ tool: RegisteredTool; source: string }> = [];
 	private commands: Array<{ command: RegisteredCommand; source: string }> = [];
-	private extensions: Array<{ def: ExtensionDefinition; unload?: () => void }> = [];
+	private extensions: Array<{ def: ExtensionDefinition; unload?: () => void }> =
+		[];
 	private eventBus: EventBus;
 	/** Structured typed event bus for lifecycle events */
 	private typedBus: ExtensionEventBus;
@@ -108,10 +113,16 @@ export class ExtensionRunner {
 	async load(definitions: ExtensionDefinition[]): Promise<void> {
 		for (const def of definitions) {
 			try {
-				const mod = await import(/* @vite-ignore */ /* @webpackIgnore: true */ def.path);
-				const factory = mod.default as ((api: ExtensionAPI) => void) | undefined;
+				const mod = await import(
+					/* @vite-ignore */ /* @webpackIgnore: true */ def.path
+				);
+				const factory = mod.default as
+					| ((api: ExtensionAPI) => void)
+					| undefined;
 				if (!factory) {
-					console.warn(`[logician] extension "${def.name}" has no default export`);
+					console.warn(
+						`[logician] extension "${def.name}" has no default export`,
+					);
 					continue;
 				}
 
@@ -120,12 +131,16 @@ export class ExtensionRunner {
 				this.extensions.push({ def, unload: api.unload });
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				console.error(`[logician] failed to load extension "${def.name}": ${message}`);
+				console.error(
+					`[logician] failed to load extension "${def.name}": ${message}`,
+				);
 			}
 		}
 	}
 
-	private createAPI(def: ExtensionDefinition): ExtensionAPI & { unload?: () => void } {
+	private createAPI(
+		def: ExtensionDefinition,
+	): ExtensionAPI & { unload?: () => void } {
 		const ownedHandlers: HandlerEntry[] = [];
 		const state = createStateWrapper(def.name);
 		const ctx: ExtensionContext = {
@@ -135,7 +150,10 @@ export class ExtensionRunner {
 			sessionId: this.options.sessionId,
 		};
 
-		const on = (event: ExtensionEventType, handler: ExtensionEventHandler): (() => void) => {
+		const on = (
+			event: ExtensionEventType,
+			handler: ExtensionEventHandler,
+		): (() => void) => {
 			const entry: HandlerEntry = { handler, ctx, source: def.name };
 			ownedHandlers.push(entry);
 			const list = this.handlers.get(event) ?? [];
@@ -143,7 +161,7 @@ export class ExtensionRunner {
 			this.handlers.set(event, list);
 			return () => {
 				const current = this.handlers.get(event) ?? [];
-				const filtered = current.filter((h) => h !== entry);
+				const filtered = current.filter(h => h !== entry);
 				if (filtered.length === 0) {
 					this.handlers.delete(event);
 				} else {
@@ -167,10 +185,10 @@ export class ExtensionRunner {
 		};
 
 		const unload = (): void => {
-			this.tools = this.tools.filter((t) => t.source !== def.name);
-			this.commands = this.commands.filter((c) => c.source !== def.name);
+			this.tools = this.tools.filter(t => t.source !== def.name);
+			this.commands = this.commands.filter(c => c.source !== def.name);
 			for (const [event, list] of this.handlers) {
-				const filtered = list.filter((entry) => entry.source !== def.name);
+				const filtered = list.filter(entry => entry.source !== def.name);
 				if (filtered.length === 0) {
 					this.handlers.delete(event);
 				} else {
@@ -180,17 +198,25 @@ export class ExtensionRunner {
 			ownedHandlers.length = 0;
 		};
 
-		return { on, registerTool, registerCommand, emit, events: this.eventBus, info: { name: def.name, path: def.path }, unload };
+		return {
+			on,
+			registerTool,
+			registerCommand,
+			emit,
+			events: this.eventBus,
+			info: { name: def.name, path: def.path },
+			unload,
+		};
 	}
 
 	/** Get all registered tools from loaded extensions. */
 	getTools(): RegisteredTool[] {
-		return this.tools.map((entry) => entry.tool);
+		return this.tools.map(entry => entry.tool);
 	}
 
 	/** Get all registered commands from loaded extensions. */
 	getCommands(): RegisteredCommand[] {
-		return this.commands.map((entry) => entry.command);
+		return this.commands.map(entry => entry.command);
 	}
 
 	hasHandlers(event: ExtensionEventType): boolean {
@@ -246,23 +272,25 @@ export class ExtensionRunner {
 	}
 
 	/** Map typed event name to legacy ExtensionEventType. */
-	private mapToLegacyEvent(type: ExtensionEventName): ExtensionEventType | null {
+	private mapToLegacyEvent(
+		type: ExtensionEventName,
+	): ExtensionEventType | null {
 		const mapping: Record<string, ExtensionEventType> = {
-			"before_agent_start": "user_prompt_submit",
-			"agent_end": "agent_end",
-			"turn_start": "turn_start",
-			"turn_end": "turn_end",
-			"message_start": "message_start",
-			"message_update": "message_update",
-			"message_end": "message_end",
-			"tool_execution_start": "tool_call_start",
-			"tool_execution_end": "tool_call_end",
-			"session_before_switch": "session_start",
-			"session_before_compact": "before_compact",
-			"session_compact": "after_compact",
-			"session_shutdown": "session_end",
-			"before_provider_request": "agent_start",
-			"after_provider_response": "agent_end",
+			before_agent_start: "user_prompt_submit",
+			agent_end: "agent_end",
+			turn_start: "turn_start",
+			turn_end: "turn_end",
+			message_start: "message_start",
+			message_update: "message_update",
+			message_end: "message_end",
+			tool_execution_start: "tool_call_start",
+			tool_execution_end: "tool_call_end",
+			session_before_switch: "session_start",
+			session_before_compact: "before_compact",
+			session_compact: "after_compact",
+			session_shutdown: "session_end",
+			before_provider_request: "agent_start",
+			after_provider_response: "agent_end",
 		};
 		return mapping[type] ?? null;
 	}
@@ -278,7 +306,9 @@ export class ExtensionRunner {
 	}
 
 	/** Update the shared extension context with current run state. */
-	updateContext(updates: Partial<ReturnType<typeof createExtensionContext>>): void {
+	updateContext(
+		updates: Partial<ReturnType<typeof createExtensionContext>>,
+	): void {
 		Object.assign(this.extContext, updates);
 	}
 
@@ -301,7 +331,8 @@ export class ExtensionRunner {
 				const hookResult = result as BeforeToolCallExtensionResult;
 				if (hookResult.block) {
 					return {
-						content: hookResult.reason || hookResult.content || "Blocked by extension",
+						content:
+							hookResult.reason || hookResult.content || "Blocked by extension",
 						isError: true,
 					};
 				}

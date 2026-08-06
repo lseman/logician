@@ -98,7 +98,7 @@ export function createSlashCommands(
 				argHint: "[topic]",
 				examples: ["/help", "/help session"],
 			},
-			(args) => formatSlashHelp(commands, args),
+			args => formatSlashHelp(commands, args),
 		),
 		cmd("/?", "Alias for /help", "local", false, { category: "help" }, () =>
 			formatSlashHelp(commands, ""),
@@ -118,9 +118,11 @@ export function createSlashCommands(
 				argHint: "[clean]",
 				examples: ["/sessions", "/sessions clean"],
 			},
-			(args) => {
+			args => {
 				if (!args.trim()) return undefined;
-				return String(localHandlers.sessions?.(args) ?? "Session cleanup unavailable.");
+				return String(
+					localHandlers.sessions?.(args) ?? "Session cleanup unavailable.",
+				);
 			},
 		),
 		cmd("/save", "Save current session", "local", false, {
@@ -186,9 +188,15 @@ export function createSlashCommands(
 			category: "agent",
 			examples: ["/steer-now"],
 		}),
-		cmd("/queue", "Show queued steering and follow-up messages", "bridge", false, {
-			category: "agent",
-		}),
+		cmd(
+			"/queue",
+			"Show queued steering and follow-up messages",
+			"bridge",
+			false,
+			{
+				category: "agent",
+			},
+		),
 		cmd("/queue-drop", "Remove one queued message by number", "bridge", true, {
 			category: "agent",
 			argHint: "<number>",
@@ -224,9 +232,21 @@ export function createSlashCommands(
 				category: "context",
 				argHint: "[list | search <query>]",
 				examples: ["/memory", "/memory list", "/memory search auth"],
-				subcommands: ["list", "search", "obs", "stats", "tiers", "auto-tier", "forget", "clean", "consolidate", "context", "retention"],
+				subcommands: [
+					"list",
+					"search",
+					"obs",
+					"stats",
+					"tiers",
+					"auto-tier",
+					"forget",
+					"clean",
+					"consolidate",
+					"context",
+					"retention",
+				],
 			},
-			(args) => String(localHandlers.memory?.(args as any) ?? ''),
+			args => String(localHandlers.memory?.(args as any) ?? ""),
 		),
 		cmd(
 			"/obs",
@@ -235,7 +255,8 @@ export function createSlashCommands(
 			true,
 			{
 				category: "context",
-				argHint: "[list [type] [limit] | search <query> [limit] | stats | sessions | by-session <sid> [limit]]",
+				argHint:
+					"[list [type] [limit] | search <query> [limit] | stats | sessions | by-session <sid> [limit]]",
 				examples: [
 					"/obs",
 					"/obs list",
@@ -245,9 +266,16 @@ export function createSlashCommands(
 					"/obs sessions",
 					"/obs by-session sess-abc123 50",
 				],
-				subcommands: ["list", "search", "stats", "sessions", "by-session", "clean"],
+				subcommands: [
+					"list",
+					"search",
+					"stats",
+					"sessions",
+					"by-session",
+					"clean",
+				],
 			},
-			(args) => String(localHandlers.obs?.(args as any) ?? ''),
+			args => String(localHandlers.obs?.(args as any) ?? ""),
 		),
 		cmd("/compact", "Summarize older conversation history", "bridge", false, {
 			category: "context",
@@ -303,7 +331,18 @@ export function createSlashCommands(
 			category: "reasoning",
 			argHint: "<mode>",
 			examples: ["/reasoner none", "/reasoner tot", "/reasoner reflexion"],
-			subcommands: ["list", "none", "tot", "reflexion", "ssr", "auto-cot", "best-of-n", "self-consistency", "got", "cover"],
+			subcommands: [
+				"list",
+				"none",
+				"tot",
+				"reflexion",
+				"ssr",
+				"auto-cot",
+				"best-of-n",
+				"self-consistency",
+				"got",
+				"cover",
+			],
 		}),
 		cmd(
 			"/eoh",
@@ -321,8 +360,7 @@ export function createSlashCommands(
 				],
 				subcommands: ["status", "stop", "best", "reset"],
 			},
-			(args: string) =>
-				String(localHandlers.eoh?.(args) ?? "EoH unavailable."),
+			(args: string) => String(localHandlers.eoh?.(args) ?? "EoH unavailable."),
 		),
 
 		// ── Display ──────────────────────────────────────────────────────────
@@ -416,7 +454,7 @@ export function createSlashCommands(
 			(args: string) => {
 				const valid = ["acceptAll", "acceptEdits", "ask", "plan"];
 				const mode = valid.find(
-					(m) => m.toLowerCase() === args.trim().toLowerCase(),
+					m => m.toLowerCase() === args.trim().toLowerCase(),
 				);
 				if (mode) {
 					localHandlers.setPermissionMode?.(mode);
@@ -484,13 +522,11 @@ export function createSlashCommands(
 			{
 				category: "agent",
 				argHint: "<task description>",
-				examples: [
-					"/spawn Review auth changes and run tests",
-					"/spawn",
-				],
+				examples: ["/spawn Review auth changes and run tests", "/spawn"],
 			},
-			(args) => {
-				const task = args.trim() || "Investigate the codebase and report findings";
+			args => {
+				const task =
+					args.trim() || "Investigate the codebase and report findings";
 				localHandlers.spawnAgentDirectly?.(task);
 				return undefined;
 			},
@@ -521,10 +557,7 @@ export function createSlashCommands(
 			"local",
 			false,
 			{ category: "misc", examples: ["/notifications"] },
-			() =>
-				String(
-					localHandlers.notifications?.() ?? "No notifications yet.",
-				),
+			() => String(localHandlers.notifications?.() ?? "No notifications yet."),
 		),
 		cmd(
 			"/version",
@@ -550,7 +583,15 @@ export function createSlashCommands(
 					"/sandbox profile code",
 					"/sandbox status",
 				],
-				subcommands: ["status", "profile", "none", "code", "file", "dev", "full"],
+				subcommands: [
+					"status",
+					"profile",
+					"none",
+					"code",
+					"file",
+					"dev",
+					"full",
+				],
 			},
 		),
 		cmd(
@@ -624,7 +665,7 @@ export function createSlashCommands(
 					"permissions",
 				],
 			},
-			(args) => {
+			args => {
 				return String(
 					localHandlers.settings?.(args) ?? "Settings are unavailable.",
 				);
@@ -657,7 +698,7 @@ export function formatSlashHelp(
 	const normalized = topic.trim().toLowerCase().replace(/^\//, "");
 	const matches = normalized
 		? commands.filter(
-				(command) =>
+				command =>
 					command.category === normalized ||
 					command.command.slice(1).toLowerCase().includes(normalized) ||
 					command.description.toLowerCase().includes(normalized),
@@ -728,19 +769,21 @@ export function filterSlashCommands(
 		.filter(Boolean) as { cmd: SlashCommandDef; score: number; idx: number }[];
 
 	scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
-	return scored.map((s) => s.cmd).slice(0, limit);
+	return scored.map(s => s.cmd).slice(0, limit);
 }
 
 /** Score a field while rewarding compact runs and word-boundary matches. */
 function fuzzyFieldScore(query: string, text: string, base: number): number {
 	if (text === query) return base + 4_000;
-	if (text.startsWith(query)) return base + 3_000 - (text.length - query.length);
+	if (text.startsWith(query))
+		return base + 3_000 - (text.length - query.length);
 
 	const containedAt = text.indexOf(query);
 	if (containedAt >= 0) {
-		const boundaryBonus = containedAt === 0 || /[\s_/-]/.test(text[containedAt - 1] ?? "")
-			? 800
-			: 0;
+		const boundaryBonus =
+			containedAt === 0 || /[\s_/-]/.test(text[containedAt - 1] ?? "")
+				? 800
+				: 0;
 		return base + 1_800 + boundaryBonus - containedAt * 4;
 	}
 
@@ -750,15 +793,22 @@ function fuzzyFieldScore(query: string, text: string, base: number): number {
 	let gaps = 0;
 	let consecutive = 0;
 	let boundaries = 0;
-	for (let textIndex = 0; textIndex < text.length && queryIndex < query.length; textIndex++) {
+	for (
+		let textIndex = 0;
+		textIndex < text.length && queryIndex < query.length;
+		textIndex++
+	) {
 		if (text[textIndex] !== query[queryIndex]) continue;
 		if (first < 0) first = textIndex;
 		if (textIndex === previous + 1) consecutive++;
 		else if (previous >= 0) gaps += textIndex - previous - 1;
-		if (textIndex === 0 || /[\s_/-]/.test(text[textIndex - 1] ?? "")) boundaries++;
+		if (textIndex === 0 || /[\s_/-]/.test(text[textIndex - 1] ?? ""))
+			boundaries++;
 		previous = textIndex;
 		queryIndex++;
 	}
 	if (queryIndex !== query.length) return -1;
-	return base + 700 + boundaries * 100 + consecutive * 35 - gaps * 12 - first * 3;
+	return (
+		base + 700 + boundaries * 100 + consecutive * 35 - gaps * 12 - first * 3
+	);
 }

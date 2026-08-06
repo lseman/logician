@@ -203,7 +203,7 @@ function decodeInlineDisplayEscapes(text: string): string {
 	return text
 		.replace(
 			/&(?:quot|apos|amp|lt|gt|#\d+|#x[\da-f]+);/gi,
-			(entity) => decodeXmlEntity(entity.slice(1, -1)) ?? entity,
+			entity => decodeXmlEntity(entity.slice(1, -1)) ?? entity,
 		)
 		.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, "$1");
 }
@@ -221,7 +221,8 @@ function decodeXmlEntity(entity: string): string | null {
 	const radix = normalized.startsWith("#x") ? 16 : 10;
 	const rawCodePoint = normalized.slice(radix === 16 ? 2 : 1);
 	const codePoint = Number.parseInt(rawCodePoint, radix);
-	if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return null;
+	if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff)
+		return null;
 	return String.fromCodePoint(codePoint);
 }
 
@@ -373,7 +374,7 @@ export function streamedStringArgLive(
 	let escaped = false;
 	for (let index = start; index < json.length; index++) {
 		const char = json[index];
-		if (char === "\"" && !escaped) break;
+		if (char === '"' && !escaped) break;
 		encoded += char;
 		if (char === "\\" && !escaped) escaped = true;
 		else escaped = false;
@@ -386,7 +387,7 @@ export function streamedStringArgLive(
 			.replace(/\\n/g, "\n")
 			.replace(/\\r/g, "\r")
 			.replace(/\\t/g, "\t")
-			.replace(/\\"/g, "\"")
+			.replace(/\\"/g, '"')
 			.replace(/\\\\/g, "\\");
 	}
 }
@@ -434,7 +435,7 @@ export function isPermissionRejection(value: string): boolean {
 		"denied",
 		"blocked",
 		"rejected",
-	].some((pattern) => text.includes(pattern));
+	].some(pattern => text.includes(pattern));
 }
 
 export function normalizeEditArgs(
@@ -500,7 +501,7 @@ export function escapeMarkdownTableCell(value: string): string {
 }
 
 export function hasStreamingChunk(chunks: AssistantChunk[]): boolean {
-	return chunks.some((c) => !c.isComplete);
+	return chunks.some(c => !c.isComplete);
 }
 
 export function revisionText(value: string | undefined): string {

@@ -4,17 +4,21 @@
 // call stays comfortably under the completion's max_tokens budget instead of
 // emitting one giant write_file call that gets truncated mid-argument.
 
-import * as path from "node:path";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
-import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
-import { appendToFile } from "./shared/atomic-write.ts";
 import {
 	ensureInsideCwd,
 	readUtf8IfExists,
 	resolvePath,
 } from "@logician/agent-core/tools/shared/path-utils.ts";
-import { hasBeenRead, isStaleSinceRead, refreshAfterWrite } from "./read-tracker.ts";
+import {
+	hasBeenRead,
+	isStaleSinceRead,
+	refreshAfterWrite,
+} from "./read-tracker.ts";
+import { appendToFile } from "./shared/atomic-write.ts";
+import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
 
 export const write_file_append: Tool = {
 	name: "write_file_append",
@@ -58,17 +62,22 @@ export const write_file_append: Tool = {
 			const before = readUtf8IfExists(resolved);
 			if (before !== null) {
 				if (!hasBeenRead(resolved)) {
-					return `${resolved} already exists but has not been read. ` +
-						"Read it with read_file before appending, or use write_file / edit_file for targeted changes.";
+					return (
+						`${resolved} already exists but has not been read. ` +
+						"Read it with read_file before appending, or use write_file / edit_file for targeted changes."
+					);
 				}
 				if (isStaleSinceRead(resolved)) {
-					return `${resolved} has been modified since it was last read. ` +
-						"Read it again before appending.";
+					return (
+						`${resolved} has been modified since it was last read. ` +
+						"Read it again before appending."
+					);
 				}
 			}
 
 			fs.mkdirSync(path.dirname(resolved), { recursive: true });
-			const beforeBytes = before === null ? 0 : Buffer.byteLength(before, "utf-8");
+			const beforeBytes =
+				before === null ? 0 : Buffer.byteLength(before, "utf-8");
 			const { newSize } = await appendToFile(resolved, content, {
 				expectedSizeBefore: beforeBytes,
 			});
@@ -78,8 +87,10 @@ export const write_file_append: Tool = {
 			const totalLines = fs.readFileSync(resolved, "utf-8").split("\n").length;
 			const verb = before === null ? "Created" : "Appended to";
 			const lineInfo = totalLines > 0 ? ` · ${totalLines} lines total` : "";
-			return `${verb} ${resolved} (+${chunkBytes} bytes, ${newSize} bytes total${lineInfo}). ` +
-				"Call write_file_append again with the next chunk, or stop if this was the last one.";
+			return (
+				`${verb} ${resolved} (+${chunkBytes} bytes, ${newSize} bytes total${lineInfo}). ` +
+				"Call write_file_append again with the next chunk, or stop if this was the last one."
+			);
 		});
 	},
 };

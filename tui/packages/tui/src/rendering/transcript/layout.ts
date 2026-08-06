@@ -63,7 +63,11 @@ function scanUnits(rawLine: string, initialCodes: string): Unit[] {
 
 	const flush = () => {
 		if (!inWord) return;
-		units.push({ text: current, width: currentWidth, trailingCodes: activeCodes });
+		units.push({
+			text: current,
+			width: currentWidth,
+			trailingCodes: activeCodes,
+		});
 		current = "";
 		currentWidth = 0;
 		inWord = false;
@@ -81,7 +85,9 @@ function scanUnits(rawLine: string, initialCodes: string): Unit[] {
 		}
 		const codePoint = rawLine.codePointAt(index);
 		const character =
-			codePoint === undefined ? rawLine[index] : String.fromCodePoint(codePoint);
+			codePoint === undefined
+				? rawLine[index]
+				: String.fromCodePoint(codePoint);
 		if (/\s/.test(character)) {
 			flush();
 			index += character.length;
@@ -126,10 +132,16 @@ function hardWrapUnit(unit: Unit, leadingCodes: string, width: number): Unit[] {
 		}
 		const codePoint = unit.text.codePointAt(index);
 		const character =
-			codePoint === undefined ? unit.text[index] : String.fromCodePoint(codePoint);
+			codePoint === undefined
+				? unit.text[index]
+				: String.fromCodePoint(codePoint);
 		const characterWidth = visibleWidth(character);
 		if (slice && sliceWidth + characterWidth > width) {
-			slices.push({ text: slice, width: sliceWidth, trailingCodes: activeCodes });
+			slices.push({
+				text: slice,
+				width: sliceWidth,
+				trailingCodes: activeCodes,
+			});
 			slice = "";
 			sliceWidth = 0;
 		}
@@ -137,7 +149,8 @@ function hardWrapUnit(unit: Unit, leadingCodes: string, width: number): Unit[] {
 		sliceWidth += characterWidth;
 		index += character.length;
 	}
-	if (slice) slices.push({ text: slice, width: sliceWidth, trailingCodes: activeCodes });
+	if (slice)
+		slices.push({ text: slice, width: sliceWidth, trailingCodes: activeCodes });
 	return slices;
 }
 

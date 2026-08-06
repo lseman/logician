@@ -29,15 +29,13 @@ interface CancellationTestTui {
 
 void test("interruption waits for settlement and restores the active prompt", async () => {
 	let settle!: () => void;
-	const settled = new Promise<void>((resolve) => {
+	const settled = new Promise<void>(resolve => {
 		settle = resolve;
 	});
 	const phases: string[] = [];
 	const transcript = new Transcript();
 	transcript.addTurn("repair the renderer");
-	const instance = Object.create(
-		LogicianTUI.prototype,
-	) as CancellationTestTui;
+	const instance = Object.create(LogicianTUI.prototype) as CancellationTestTui;
 	instance.cancellationPending = false;
 	instance.pendingPermission = { toolCallId: "tool-1", toolName: "bash" };
 	instance.transcript = transcript;
@@ -81,9 +79,7 @@ void test("interruption waits for settlement and restores the active prompt", as
 void test("interruption never overwrites text entered while cancellation settles", async () => {
 	const transcript = new Transcript();
 	transcript.addTurn("original prompt");
-	const instance = Object.create(
-		LogicianTUI.prototype,
-	) as CancellationTestTui;
+	const instance = Object.create(LogicianTUI.prototype) as CancellationTestTui;
 	instance.cancellationPending = false;
 	instance.pendingPermission = null;
 	instance.transcript = transcript;

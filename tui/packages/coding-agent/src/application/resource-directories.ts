@@ -8,11 +8,7 @@ export async function getSkillsDirs(cwd: string): Promise<string[]> {
 		const registry = await runPluginBackend("list", []);
 		for (const plugin of registry.plugins || []) {
 			const installPath = String(plugin.install_path || "");
-			if (
-				plugin.enabled !== false &&
-				plugin.on_disk !== false &&
-				installPath
-			) {
+			if (plugin.enabled !== false && plugin.on_disk !== false && installPath) {
 				dirs.push(path.join(installPath, "skills"));
 			}
 		}

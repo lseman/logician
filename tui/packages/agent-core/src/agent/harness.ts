@@ -4,60 +4,80 @@
 // nextTurn queues drained at save points.
 //
 
+import { randomUUID } from "node:crypto";
+import type { CompactionSettings } from "../compaction/index.ts";
+import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
+import {
+	buildBuiltinHooks,
+	composeHooks,
+	type HookLayer,
+} from "../hooks/builtin/builtin-hooks.ts";
+import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import {
+	type ClaudeCodeHookLayer,
+	claudeToolMatcherName,
+	createClaudeCodeHookLayer,
+} from "../plugins/claude-code/hook-layer.ts";
+import { type DeliveryMode, MessageDeliveryManager } from "../queue/manager.ts";
+import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
+import { ToolRegistry } from "../tools/shared/registry.ts";
+import {
+	type RunAgentLoopConfig,
+	runAgentLoop,
+	runAgentLoopContinue,
+} from "./agent-loop-runner.ts";
+import type { LLMBackend } from "./backend.ts";
+import {
+	throwOnValidationErrors,
+	validateConfig,
+} from "./configuration/config-validator.ts";
 import {
 	beginFileFrame,
 	clearFileFrames,
 	restoreFileFrame,
 } from "./file-checkpoints.ts";
-import { randomUUID } from "node:crypto";
-import type { LLMBackend } from "./backend.ts";
-import {
-	runAgentLoop,
-	runAgentLoopContinue,
-	type RunAgentLoopConfig,
-} from "./agent-loop-runner.ts";
-import { Session } from "./session.ts";
-import { createUserMessage, estimateChatPayloadTokens } from "./messages.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
-import {
-	MessageDeliveryManager,
-	type DeliveryMode,
-} from "../queue/manager.ts";
-import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
-import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
-import {
-	composeHooks,
-	buildBuiltinHooks,
-	type HookLayer,
-} from "../hooks/builtin/builtin-hooks.ts";
-import {
-	claudeToolMatcherName,
-	createClaudeCodeHookLayer,
-	type ClaudeCodeHookLayer,
-} from "../plugins/claude-code/hook-layer.ts";
 import { LoopDetector } from "./guards/loop-detector.ts";
+import { OutputGuard } from "./guards/output-guard.ts";
 import { ThinkingLoopDetector } from "./guards/thinking-loop-detector.ts";
 import {
+	type Branch,
 	forkBranch,
-	summarizeAndMergeBranch,
+	listBranches as listBranchesHelper,
 	navigateToCheckpoint as navigateToCheckpointHelper,
 	renderBranchTree,
-	listBranches as listBranchesHelper,
-	type Branch,
+	summarizeAndMergeBranch,
 } from "./harness/branching.ts";
 import { runCompaction, shouldAutoCompact } from "./harness/compaction.ts";
-import { cycleModel as cycleModelHelper, resolveModelUrl } from "./harness/model.ts";
-import * as queueOps from "./harness/queue-ops.ts";
-import type { QueueOpsDeps } from "./harness/queue-ops.ts";
+import type {
+	AbortResult,
+	AgentHarnessOptions,
+	HarnessQueues,
+	HarnessTurnSnapshot,
+} from "./harness/contracts.ts";
 import {
-	emitSessionStart as emitSessionStartHelper,
-	emitSessionEnd as emitSessionEndHelper,
-	emitPreCompact as emitPreCompactHelper,
+	cycleModel as cycleModelHelper,
+	resolveModelUrl,
+} from "./harness/model.ts";
+import { assertIdlePhase, assertPhaseTransition } from "./harness/phase.ts";
+import type { QueueOpsDeps } from "./harness/queue-ops.ts";
+import * as queueOps from "./harness/queue-ops.ts";
+import {
 	emitPostCompact as emitPostCompactHelper,
-	loadSessionMessages,
+	emitPreCompact as emitPreCompactHelper,
+	emitSessionEnd as emitSessionEndHelper,
+	emitSessionStart as emitSessionStartHelper,
 	listSessions as listSessionsHelper,
+	loadSessionMessages,
 } from "./harness/session-lifecycle.ts";
-import type { BranchSummaryData, BranchInfo } from "./summaries/types.ts";
+import { createUserMessage, estimateChatPayloadTokens } from "./messages.ts";
+import {
+	type AgentRuntimeState,
+	createRuntimeState,
+	type HarnessPhase,
+	reduceRuntimeState,
+} from "./runtime-state.ts";
+import { Session } from "./session.ts";
+import type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -70,33 +90,15 @@ import type {
 	QueueMode,
 	Tool,
 } from "./types.ts";
-import type { CompactionSettings } from "../compaction/index.ts";
-import { OutputGuard } from "./guards/output-guard.ts";
-import { validateConfig, throwOnValidationErrors } from "./configuration/config-validator.ts";
-import {
-	createRuntimeState,
-	reduceRuntimeState,
-	type AgentRuntimeState,
-	type HarnessPhase,
-} from "./runtime-state.ts";
-import { withHarnessQueueHooks } from "../runtime/harness-queue-hooks.ts";
-import { assertIdlePhase, assertPhaseTransition } from "./harness/phase.ts";
-import type {
-	AbortResult,
-	AgentHarnessOptions,
-	HarnessQueues,
-	HarnessTurnSnapshot,
-} from "./harness/contracts.ts";
 
-export type { BranchSummaryData, BranchInfo } from "./summaries/types.ts";
-
-export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
-export { HarnessBusyError } from "./harness/phase.ts";
 export type {
 	AbortResult,
 	AgentHarnessOptions,
 	HarnessQueues,
 } from "./harness/contracts.ts";
+export { HarnessBusyError } from "./harness/phase.ts";
+export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
+export type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 
 // Conversation checkpoints: a snapshot of history is pushed before each
 // prompt so a bad turn can be rewound. Bounded ring (newest last).
@@ -125,7 +127,6 @@ export class AgentHarness {
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
 	private onSavePoint?: () => void;
-	private onShutdown?: () => void;
 	private onCompaction?: (
 		reason: "auto" | "manual",
 		tokensBefore: number,
@@ -339,7 +340,7 @@ export class AgentHarness {
 	// ── Structural operation: prompt ───────────────────────────────────────
 
 	async prompt(userMessage: string): Promise<Message[]> {
-		this._runPromise = new Promise<void>((resolve) => {
+		this._runPromise = new Promise<void>(resolve => {
 			this._runResolve = resolve;
 		});
 
@@ -348,23 +349,22 @@ export class AgentHarness {
 			if (compacted) {
 				return this.prompt(userMessage);
 			}
-			}
+		}
 
-			// Initialize output guard if not already done
-			if (!this.outputGuard && this.config.contextWindowTokens) {
-				this.setOutputGuardConfig({
-					maxRetries:
-						this.config.autoRetryEnabled === false
-							? 0
-							: (this.config.streamOptions?.maxRetries ??
-								this.config.maxRetries ??
-								3),
-					retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
-					maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
-					autoCompactOnContextFull:
-						this.config.autoRetryEnabled !== false,
-				});
-			}
+		// Initialize output guard if not already done
+		if (!this.outputGuard && this.config.contextWindowTokens) {
+			this.setOutputGuardConfig({
+				maxRetries:
+					this.config.autoRetryEnabled === false
+						? 0
+						: (this.config.streamOptions?.maxRetries ??
+							this.config.maxRetries ??
+							3),
+				retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
+				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
+				autoCompactOnContextFull: this.config.autoRetryEnabled !== false,
+			});
+		}
 
 		return this.runInPhase("turn", "prompt", async () => {
 			this.abortController = new AbortController();
@@ -412,11 +412,11 @@ export class AgentHarness {
 						extensionBus: this._extensionBus,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
-						onContextCompacted: (messages) => {
+						onContextCompacted: messages => {
 							compactedContext = messages;
 						},
 					} satisfies RunAgentLoopConfig,
-					async (event) => {
+					async event => {
 						await this.handleAgentEvent(event);
 					},
 				);
@@ -427,7 +427,7 @@ export class AgentHarness {
 							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
 					},
 					...snapshot.initialMessages.filter(
-						(message) => message.role !== "system",
+						message => message.role !== "system",
 					),
 					...newMessages,
 				];
@@ -460,7 +460,9 @@ export class AgentHarness {
 	 * the caller wants to re-enter the loop without fabricating a follow-up prompt.
 	 */
 	async continue(): Promise<Message[]> {
-		const nonSystem = this.history.filter((m): m is Message => m != null && m.role !== "system");
+		const nonSystem = this.history.filter(
+			(m): m is Message => m != null && m.role !== "system",
+		);
 		if (nonSystem.length === 0) {
 			throw new Error("Cannot continue: no messages in history");
 		}
@@ -469,7 +471,7 @@ export class AgentHarness {
 			throw new Error("Cannot continue from message role: assistant");
 		}
 
-		this._runPromise = new Promise<void>((resolve) => {
+		this._runPromise = new Promise<void>(resolve => {
 			this._runResolve = resolve;
 		});
 
@@ -483,8 +485,7 @@ export class AgentHarness {
 							3),
 				retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
 				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
-				autoCompactOnContextFull:
-					this.config.autoRetryEnabled !== false,
+				autoCompactOnContextFull: this.config.autoRetryEnabled !== false,
 			});
 		}
 
@@ -531,11 +532,11 @@ export class AgentHarness {
 						extensionBus: this._extensionBus,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
-						onContextCompacted: (messages) => {
+						onContextCompacted: messages => {
 							compactedContext = messages;
 						},
 					} satisfies RunAgentLoopConfig,
-					async (event) => {
+					async event => {
 						await this.handleAgentEvent(event);
 					},
 				);
@@ -545,7 +546,9 @@ export class AgentHarness {
 						content:
 							snapshot.config.systemPrompt ?? "You are a helpful assistant.",
 					},
-					...snapshot.initialMessages.filter((m): m is Message => m != null && m.role !== "system"),
+					...snapshot.initialMessages.filter(
+						(m): m is Message => m != null && m.role !== "system",
+					),
 					...newMessages,
 				];
 				this.history = result;
@@ -614,7 +617,9 @@ export class AgentHarness {
 
 		// nextTurn guidance belongs to the next user-initiated prompt. Consume it
 		// exactly once here, never from an iteration of the currently active run.
-		const nextTurnMessages = this._nextTurnQueue.splice(0).map(createUserMessage);
+		const nextTurnMessages = this._nextTurnQueue
+			.splice(0)
+			.map(createUserMessage);
 		if (nextTurnMessages.length > 0) {
 			initialMessages = [...initialMessages, ...nextTurnMessages];
 			this.emitQueueChange();
@@ -682,13 +687,12 @@ export class AgentHarness {
 			sessionId: this._sessionId || "",
 			transcriptPath: this._transcriptPath || "",
 			cwd: this.cwd || process.cwd(),
-				getMatcherValue: (toolName) => {
-					const tool = this.config.tools?.find(
-						(candidate) => candidate.name === toolName,
-					);
-					return tool?.hookAliases?.join("|") ||
-						claudeToolMatcherName(toolName);
-				},
+			getMatcherValue: toolName => {
+				const tool = this.config.tools?.find(
+					candidate => candidate.name === toolName,
+				);
+				return tool?.hookAliases?.join("|") || claudeToolMatcherName(toolName);
+			},
 		});
 	}
 
@@ -698,7 +702,7 @@ export class AgentHarness {
 	): AgentConfig {
 		const runner = this._extensionRunner;
 		const extensionTools = runner
-			? runner.getTools().map((tool) => this.wrapExtensionTool(tool))
+			? runner.getTools().map(tool => this.wrapExtensionTool(tool))
 			: [];
 		const tools = [...(config.tools ?? []), ...extensionTools];
 		const extensionHooks = runner?.getHooks();
@@ -723,7 +727,10 @@ export class AgentHarness {
 		const layers: HookLayer[] = [
 			{ source: "builtin", hooks: builtinHooks },
 			{ source: "extensions", hooks: extensionHooks },
-			{ source: "claude-code-compat", hooks: (pluginHookLayer ?? this.createClaudeCodeHookLayer()).hooks },
+			{
+				source: "claude-code-compat",
+				hooks: (pluginHookLayer ?? this.createClaudeCodeHookLayer()).hooks,
+			},
 			{ source: "user", hooks: config.hooks },
 		];
 
@@ -861,7 +868,7 @@ export class AgentHarness {
 				const result = await this.compact();
 				return result ?? null;
 			},
-			onEvent: (event) => {
+			onEvent: event => {
 				if (
 					event.type === "auto_retry_start" ||
 					event.type === "auto_retry_end" ||
@@ -948,10 +955,10 @@ export class AgentHarness {
 	setTools(tools: Tool[]): void {
 		this.config.tools = tools;
 		this.idleTools = this.createToolRegistry(tools);
-		this._session?.appendActiveToolsChange(tools.map((t) => t.name));
+		this._session?.appendActiveToolsChange(tools.map(t => t.name));
 		this.emitToSubscribers({
 			type: "tools_update",
-			toolNames: tools.map((t) => t.name),
+			toolNames: tools.map(t => t.name),
 		});
 	}
 
@@ -976,7 +983,7 @@ export class AgentHarness {
 			msgManager: this.msgManager,
 			getPhase: () => this._phase,
 			getNextTurnQueue: () => this._nextTurnQueue,
-			setNextTurnQueue: (queue) => {
+			setNextTurnQueue: queue => {
 				this._nextTurnQueue = queue;
 			},
 			emitQueueChange: () => this.emitQueueChange(),
@@ -1019,9 +1026,9 @@ export class AgentHarness {
 				this.runtime = { ...this.runtime, abortRequested: true };
 			},
 			waitForIdle: () => this.waitForIdle(),
-			emitAbortEvent: (result) =>
+			emitAbortEvent: result =>
 				this.emitToSubscribers({ type: "abort", ...result }),
-			emitSessionEnd: (reason) => this.emitSessionEnd(reason),
+			emitSessionEnd: reason => this.emitSessionEnd(reason),
 		});
 	}
 
@@ -1091,7 +1098,11 @@ export class AgentHarness {
 		this.config.hookTranscriptPath = path;
 	}
 
-	private hookContext(): { sessionId: string; transcriptPath: string; cwd: string } {
+	private hookContext(): {
+		sessionId: string;
+		transcriptPath: string;
+		cwd: string;
+	} {
 		return {
 			sessionId: this._sessionId || "",
 			transcriptPath: this._transcriptPath || "",
@@ -1100,7 +1111,11 @@ export class AgentHarness {
 	}
 
 	private async emitSessionStart(source: string = "startup"): Promise<void> {
-		const started = await emitSessionStartHelper(this._hooksEnabled, this.hookContext(), source);
+		const started = await emitSessionStartHelper(
+			this._hooksEnabled,
+			this.hookContext(),
+			source,
+		);
 		if (started) this._hasStartedSession = true;
 	}
 
@@ -1163,7 +1178,11 @@ export class AgentHarness {
 		if (!resumed) return false;
 
 		if (resumed.messages.length > 0) {
-			this.setActiveHistory(resumed.messages.filter((m): m is Message => m != null && m.role !== "system"));
+			this.setActiveHistory(
+				resumed.messages.filter(
+					(m): m is Message => m != null && m.role !== "system",
+				),
+			);
 		}
 		this._sessionBaseDir = sessionBaseDir;
 		this._session = resumed.session;
@@ -1204,7 +1223,9 @@ export class AgentHarness {
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
-		this.setActiveHistory(messages.filter((m): m is Message => m != null && m.role !== "system"));
+		this.setActiveHistory(
+			messages.filter((m): m is Message => m != null && m.role !== "system"),
+		);
 		this.emitSessionStart("resume").catch(() => {});
 		this._hasStartedSession = false;
 	}
@@ -1245,7 +1266,12 @@ export class AgentHarness {
 	fork(customSummary?: BranchSummaryData): string {
 		this.assertIdle("fork");
 		const current = this.activeHistory();
-		const { branch, nextBranchSeq } = forkBranch(this.branches, this.branchSeq, current, customSummary);
+		const { branch, nextBranchSeq } = forkBranch(
+			this.branches,
+			this.branchSeq,
+			current,
+			customSummary,
+		);
 		this.branchSeq = nextBranchSeq;
 		this.branches.push(branch);
 		this.setActiveHistory([...current]);
@@ -1275,12 +1301,17 @@ export class AgentHarness {
 		}
 
 		return this.runInPhase("branch_summary", "branchSummary", async () => {
-			const outcome = await summarizeAndMergeBranch(this.backend, branch, current, {
-				customInstructions: options?.customInstructions,
-				contextWindowTokens: this.config.contextWindowTokens,
-				maxTokens: this.config.maxTokens,
-				thinkingLevel: this.config.thinkingLevel,
-			});
+			const outcome = await summarizeAndMergeBranch(
+				this.backend,
+				branch,
+				current,
+				{
+					customInstructions: options?.customInstructions,
+					contextWindowTokens: this.config.contextWindowTokens,
+					maxTokens: this.config.maxTokens,
+					thinkingLevel: this.config.thinkingLevel,
+				},
+			);
 			this.branches.pop();
 			this.setActiveHistory(outcome.history);
 			return outcome.summaryText;
@@ -1561,17 +1592,19 @@ export class AgentHarness {
 	getModels(): string[] {
 		const configured = this.config.models ?? [];
 		return [
-			...(configured.some((option) => option.model === this.config.model)
+			...(configured.some(option => option.model === this.config.model)
 				? []
 				: [this.config.model]),
-			...configured.map((option) => option.model),
+			...configured.map(option => option.model),
 		];
 	}
 
 	setModelEndpoint(model: string, baseUrl: string): void {
 		this.config.model = model;
 		this.config.baseUrl = baseUrl;
-		this.backend = this.backend.withEndpoint?.(model, baseUrl) ?? this.backend.withModel(model);
+		this.backend =
+			this.backend.withEndpoint?.(model, baseUrl) ??
+			this.backend.withModel(model);
 	}
 
 	/** Resolve the baseUrl for a given model identifier. */

@@ -29,7 +29,7 @@ function openStateDB(extId: string): StateDB {
 		try {
 			const parsed = JSON.parse(readFileSync(dbPath, "utf8")) as unknown;
 			return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-				? parsed as Record<string, string>
+				? (parsed as Record<string, string>)
 				: {};
 		} catch (_e: unknown) {
 			return {};

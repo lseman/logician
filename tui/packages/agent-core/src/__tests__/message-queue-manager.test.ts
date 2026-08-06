@@ -7,9 +7,18 @@ void test("one-at-a-time steering drains without dropping later messages", () =>
 	manager.queue.steering("one");
 	manager.queue.steering("two");
 
-	assert.deepEqual(manager.afterTurn().map((message) => message.content), ["one"]);
-	assert.deepEqual(manager.queue.getSteering().map((message) => message.content), ["two"]);
-	assert.deepEqual(manager.afterTurn().map((message) => message.content), ["two"]);
+	assert.deepEqual(
+		manager.afterTurn().map(message => message.content),
+		["one"],
+	);
+	assert.deepEqual(
+		manager.queue.getSteering().map(message => message.content),
+		["two"],
+	);
+	assert.deepEqual(
+		manager.afterTurn().map(message => message.content),
+		["two"],
+	);
 });
 
 void test("one-at-a-time idle drain preserves remaining steering and follow-ups", () => {
@@ -22,10 +31,16 @@ void test("one-at-a-time idle drain preserves remaining steering and follow-ups"
 	manager.queue.followUp("follow-one");
 	manager.queue.followUp("follow-two");
 
-	assert.deepEqual(manager.onIdle().map((message) => message.content), [
-		"steer-one",
-		"follow-one",
-	]);
-	assert.deepEqual(manager.queue.getSteering().map((message) => message.content), ["steer-two"]);
-	assert.deepEqual(manager.queue.getFollowUp().map((message) => message.content), ["follow-two"]);
+	assert.deepEqual(
+		manager.onIdle().map(message => message.content),
+		["steer-one", "follow-one"],
+	);
+	assert.deepEqual(
+		manager.queue.getSteering().map(message => message.content),
+		["steer-two"],
+	);
+	assert.deepEqual(
+		manager.queue.getFollowUp().map(message => message.content),
+		["follow-two"],
+	);
 });

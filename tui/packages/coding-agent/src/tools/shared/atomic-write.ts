@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { appendFile, lstat, open, readFile, rename, stat, chmod, unlink } from "node:fs/promises";
+import {
+	appendFile,
+	chmod,
+	lstat,
+	open,
+	readFile,
+	rename,
+	stat,
+	unlink,
+} from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 export interface AtomicWriteOptions {
@@ -38,7 +47,14 @@ export async function atomicWriteFile(
 		}
 		mode = (await stat(filePath)).mode;
 	} catch (error) {
-		if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) {
+		if (
+			!(
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				error.code === "ENOENT"
+			)
+		) {
 			throw error;
 		}
 	}
@@ -65,8 +81,8 @@ export async function atomicWriteFile(
 				const where = line !== null ? ` First difference at line ${line}.` : "";
 				throw new Error(
 					`${filePath} changed on disk after it was read but before this write ` +
-					`landed — likely another edit or an external process ran concurrently.${where} ` +
-					"Read it again before editing.",
+						`landed — likely another edit or an external process ran concurrently.${where} ` +
+						"Read it again before editing.",
 				);
 			}
 		}
@@ -77,7 +93,14 @@ export async function atomicWriteFile(
 					`${filePath} was created while the write was being prepared. Read it before overwriting.`,
 				);
 			} catch (error) {
-				if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) {
+				if (
+					!(
+						typeof error === "object" &&
+						error !== null &&
+						"code" in error &&
+						error.code === "ENOENT"
+					)
+				) {
 					throw error;
 				}
 			}
@@ -112,7 +135,7 @@ export async function appendToFile(
 		if (currentSize !== options.expectedSizeBefore) {
 			throw new Error(
 				`${filePath} size changed on disk (expected ${options.expectedSizeBefore} bytes, found ${currentSize}) ` +
-				"— another writer touched this file. Re-read it before continuing to append.",
+					"— another writer touched this file. Re-read it before continuing to append.",
 			);
 		}
 	}

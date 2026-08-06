@@ -63,7 +63,7 @@ function globToRegExp(glob: string): RegExp {
 
 function primaryArgStrings(args: Record<string, unknown>): string[] {
 	if (Array.isArray(args.commands)) {
-		const commands = args.commands.flatMap((entry) => {
+		const commands = args.commands.flatMap(entry => {
 			if (!entry || typeof entry !== "object") return [];
 			const command = (entry as Record<string, unknown>).command;
 			return typeof command === "string" ? [command] : [];
@@ -123,8 +123,8 @@ export class PermissionManager {
 	): PermissionVerdict {
 		const commandArgs = primaryArgStrings(args);
 		const denied = commandArgs
-			.map((arg) => this.matchRules(this.denyRules, call.name, arg))
-			.find((rule) => rule !== undefined);
+			.map(arg => this.matchRules(this.denyRules, call.name, arg))
+			.find(rule => rule !== undefined);
 		if (denied) {
 			return {
 				decision: "deny",
@@ -134,7 +134,7 @@ export class PermissionManager {
 		}
 		const allowRules = [...this.allowRules, ...this.sessionAllow];
 		const allowed = commandArgs.every(
-			(arg) => this.matchRules(allowRules, call.name, arg) !== undefined,
+			arg => this.matchRules(allowRules, call.name, arg) !== undefined,
 		);
 		if (allowed) return { decision: "allow", source: "rule" };
 
@@ -169,7 +169,7 @@ export class PermissionManager {
 		arg: string,
 	): ParsedRule | undefined {
 		return rules.find(
-			(rule) =>
+			rule =>
 				rule.tool === toolName &&
 				(rule.pattern === undefined || rule.pattern.test(arg)),
 		);

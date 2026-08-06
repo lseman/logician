@@ -5,18 +5,33 @@
 //   3. Evaluate fitness on instance set
 //   4. Keep top-N into next generation
 
-import type { Heuristic, EohProblem, EohConfig, EohOperator, EohState } from "./types.ts";
 import {
-	promptInit,
+	evaluateHeuristic,
+	parseHeuristicOutput,
+	validateCode,
+} from "./evaluator.ts";
+import { callLLM } from "./llm.ts";
+import {
+	populationStats,
+	rankPopulation,
+	selectNextGeneration,
+	selectParents,
+} from "./population.ts";
+import {
 	promptE1Diversity,
 	promptE2Convergence,
+	promptInit,
 	promptM1Improve,
 	promptM2Tune,
 	promptM3Simplify,
 } from "./prompts.ts";
-import { parseHeuristicOutput, validateCode, evaluateHeuristic } from "./evaluator.ts";
-import { rankPopulation, selectParents, selectNextGeneration, populationStats } from "./population.ts";
-import { callLLM } from "./llm.ts";
+import type {
+	EohConfig,
+	EohOperator,
+	EohProblem,
+	EohState,
+	Heuristic,
+} from "./types.ts";
 
 let _idCounter = 0;
 function newId(): string {
@@ -25,7 +40,11 @@ function newId(): string {
 
 export type EohProgressEvent =
 	| { type: "generation_start"; generation: number }
-	| { type: "generation_end"; generation: number; stats: ReturnType<typeof populationStats> }
+	| {
+			type: "generation_end";
+			generation: number;
+			stats: ReturnType<typeof populationStats>;
+	  }
 	| { type: "heuristic_evaluated"; heuristic: Heuristic; operator: EohOperator }
 	| { type: "heuristic_failed"; reason: string; operator: EohOperator }
 	| { type: "init_complete"; population: Heuristic[] }
@@ -83,8 +102,13 @@ export class EohEngine {
 	}
 
 	/** Seed evolution from an existing, already evaluated heuristic. */
-	seedHeuristic(code: string, fitness: number, thought = "Current implementation"): Heuristic {
-		if (!Number.isFinite(fitness)) throw new Error("Seed fitness must be finite");
+	seedHeuristic(
+		code: string,
+		fitness: number,
+		thought = "Current implementation",
+	): Heuristic {
+		if (!Number.isFinite(fitness))
+			throw new Error("Seed fitness must be finite");
 		const heuristic: Heuristic = {
 			id: newId(),
 			thought,
@@ -115,7 +139,10 @@ export class EohEngine {
 		for (let i = 0; i < populationSize && !this.stopRequested; i++) {
 			const h = await this.generateHeuristic(
 				"init",
-				promptInit(problem, population.map((h) => h.thought)),
+				promptInit(
+					problem,
+					population.map(h => h.thought),
+				),
 				[],
 				problem,
 				evalTimeoutMs,
@@ -130,8 +157,10 @@ export class EohEngine {
 	/** Run one generation of evolution. Returns new candidates generated. */
 	async runGeneration(): Promise<Heuristic[]> {
 		if (!this.state.problem) throw new Error("No problem set");
-		if (!this.state.config.baseUrl || !this.state.config.model) throw new Error("No LLM config");
-		if (this.state.population.length === 0) throw new Error("Population empty — call initialize() first");
+		if (!this.state.config.baseUrl || !this.state.config.model)
+			throw new Error("No LLM config");
+		if (this.state.population.length === 0)
+			throw new Error("Population empty — call initialize() first");
 
 		const { numParents, evalTimeoutMs } = this.state.config;
 		const problem = this.state.problem;
@@ -153,10 +182,20 @@ export class EohEngine {
 		for (const { op, parentsNeeded } of operatorRuns) {
 			if (this.stopRequested) break;
 			// Run N candidates per operator (one per population slot)
-			for (let i = 0; i < this.state.config.populationSize && !this.stopRequested; i++) {
+			for (
+				let i = 0;
+				i < this.state.config.populationSize && !this.stopRequested;
+				i++
+			) {
 				const parents = selectParents(sorted, parentsNeeded);
 				const messages = buildOperatorPrompt(op, problem, parents);
-				const h = await this.generateHeuristic(op, messages, parents, problem, evalTimeoutMs);
+				const h = await this.generateHeuristic(
+					op,
+					messages,
+					parents,
+					problem,
+					evalTimeoutMs,
+				);
 				if (h) candidates.push(h);
 			}
 		}
@@ -185,7 +224,10 @@ export class EohEngine {
 				await this.initialize(baseUrl, model);
 			}
 			const { maxGenerations } = this.state.config;
-			while (!this.stopRequested && (maxGenerations === 0 || this.state.generation < maxGenerations)) {
+			while (
+				!this.stopRequested &&
+				(maxGenerations === 0 || this.state.generation < maxGenerations)
+			) {
 				await this.runGeneration();
 			}
 		} finally {
@@ -215,20 +257,40 @@ export class EohEngine {
 
 			const parsed = parseHeuristicOutput(raw);
 			if (!parsed) {
-				this.emit({ type: "heuristic_failed", reason: "parse failed", operator });
+				this.emit({
+					type: "heuristic_failed",
+					reason: "parse failed",
+					operator,
+				});
 				return null;
 			}
 
-			const sigLine = problem.functionSignature.trim().split("(")[0].replace("def ", "").trim();
+			const sigLine = problem.functionSignature
+				.trim()
+				.split("(")[0]
+				.replace("def ", "")
+				.trim();
 			const validationError = validateCode(parsed.code, sigLine);
 			if (validationError) {
-				this.emit({ type: "heuristic_failed", reason: `validation: ${validationError}`, operator });
+				this.emit({
+					type: "heuristic_failed",
+					reason: `validation: ${validationError}`,
+					operator,
+				});
 				return null;
 			}
 
-			const fitness = await evaluateHeuristic(parsed.code, problem, evalTimeoutMs);
-			if (!isFinite(fitness)) {
-				this.emit({ type: "heuristic_failed", reason: "eval failed (non-finite fitness)", operator });
+			const fitness = await evaluateHeuristic(
+				parsed.code,
+				problem,
+				evalTimeoutMs,
+			);
+			if (!Number.isFinite(fitness)) {
+				this.emit({
+					type: "heuristic_failed",
+					reason: "eval failed (non-finite fitness)",
+					operator,
+				});
 				return null;
 			}
 
@@ -239,7 +301,7 @@ export class EohEngine {
 				fitness,
 				generation: this.state.generation,
 				createdBy: operator,
-				parentIds: parents.map((p) => p.id),
+				parentIds: parents.map(p => p.id),
 			};
 
 			this.emit({ type: "heuristic_evaluated", heuristic, operator });
@@ -262,11 +324,17 @@ function buildOperatorPrompt(
 	parents: Heuristic[],
 ): Array<{ role: string; content: string }> {
 	switch (op) {
-		case "e1_diversity": return promptE1Diversity(problem, parents);
-		case "e2_convergence": return promptE2Convergence(problem, parents);
-		case "m1_improve": return promptM1Improve(problem, parents[0]);
-		case "m2_tune": return promptM2Tune(problem, parents[0]);
-		case "m3_simplify": return promptM3Simplify(problem, parents[0]);
-		case "init": return promptInit(problem, []);
+		case "e1_diversity":
+			return promptE1Diversity(problem, parents);
+		case "e2_convergence":
+			return promptE2Convergence(problem, parents);
+		case "m1_improve":
+			return promptM1Improve(problem, parents[0]);
+		case "m2_tune":
+			return promptM2Tune(problem, parents[0]);
+		case "m3_simplify":
+			return promptM3Simplify(problem, parents[0]);
+		case "init":
+			return promptInit(problem, []);
 	}
 }

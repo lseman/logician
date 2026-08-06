@@ -80,9 +80,7 @@ export function reduceTurnState(
 			return {
 				...state,
 				phase: isVerificationTool(event) ? "verifying" : "tool",
-				runningTools: duplicate
-					? state.runningTools
-					: state.runningTools + 1,
+				runningTools: duplicate ? state.runningTools : state.runningTools + 1,
 				runningToolIds:
 					id === undefined || duplicate
 						? state.runningToolIds
@@ -98,13 +96,15 @@ export function reduceTurnState(
 					? Math.max(0, state.runningTools - 1)
 					: state.runningTools;
 			const runningToolIds = knownId
-				? state.runningToolIds.filter((runningId) => runningId !== id)
+				? state.runningToolIds.filter(runningId => runningId !== id)
 				: state.runningToolIds;
 			return {
 				...state,
 				phase: event.is_error
 					? "failed"
-					: runningTools > 0 ? state.phase : "thinking",
+					: runningTools > 0
+						? state.phase
+						: "thinking",
 				runningTools,
 				runningToolIds,
 			};

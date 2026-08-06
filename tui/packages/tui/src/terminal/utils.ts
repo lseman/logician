@@ -32,7 +32,7 @@ export const getGraphemeSegmenter = (): Intl.Segmenter => {
 export function findWordBackward(text: string, cursor: number): number {
 	if (cursor === 0) return 0;
 	const segmenter = getGraphemeSegmenter();
-	const segments = [...segmenter.segment(text)].map((s) => s.segment);
+	const segments = [...segmenter.segment(text)].map(s => s.segment);
 
 	// Skip non-word chars going backward
 	let i = cursor;
@@ -47,7 +47,7 @@ export function findWordBackward(text: string, cursor: number): number {
 export function findWordForward(text: string, cursor: number): number {
 	if (cursor >= text.length) return text.length;
 	const segmenter = getGraphemeSegmenter();
-	const segments = [...segmenter.segment(text)].map((s) => s.segment);
+	const segments = [...segmenter.segment(text)].map(s => s.segment);
 
 	// Skip non-word chars going forward
 	let i = cursor;
@@ -89,7 +89,7 @@ export function graphemeSlice(text: string, from: number, to?: number): string {
 	const end = to !== undefined ? to : segments.length;
 	return segments
 		.slice(from, end)
-		.map((s) => s.segment)
+		.map(s => s.segment)
 		.join("");
 }
 
@@ -152,7 +152,7 @@ export function fuzzyFilter<T>(
 	getKey: (item: T) => string,
 ): (T & { score: number })[] {
 	const scored = items
-		.map((item) => {
+		.map(item => {
 			const key = getKey(item);
 			const result = fuzzyMatch(query, key);
 			if (!result) {
@@ -168,4 +168,3 @@ export function fuzzyFilter<T>(
 	scored.sort((a, b) => b.score - a.score);
 	return scored;
 }
-

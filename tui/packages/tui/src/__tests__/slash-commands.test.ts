@@ -1,23 +1,76 @@
 // ── Slash command tests ──────────────────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
+import { describe, it } from "node:test";
 import {
+	CATEGORY_ORDER,
 	filterSlashCommands,
 	groupByCategory,
-	CATEGORY_ORDER,
 	type SlashCommandDef,
 } from "@logician/coding-agent/commands";
 
 const TEST_COMMANDS: SlashCommandDef[] = [
-	{ command: "/new", description: "New session", dispatch: "bridge", acceptsArgs: false, category: "session" },
-	{ command: "/sessions", description: "List sessions", dispatch: "local", acceptsArgs: true, category: "session", argHint: "[filter]" },
-	{ command: "/compact", description: "Compact history", dispatch: "bridge", acceptsArgs: false, category: "context" },
-	{ command: "/fork", description: "Fork branch", dispatch: "local", acceptsArgs: false, category: "context", examples: ["/fork"] },
-	{ command: "/thinking", description: "Set thinking level", dispatch: "local", acceptsArgs: true, category: "display", argHint: "<level>", examples: ["/thinking high", "/thinking off"] },
-	{ command: "/quit", description: "Exit", dispatch: "quit", acceptsArgs: false, category: "shortcuts" },
-	{ command: "/reasoner", description: "Select reasoning mode", dispatch: "local", acceptsArgs: true, category: "reasoning", argHint: "<mode>" },
-	{ command: "/plugins", description: "Manage plugins", dispatch: "local", acceptsArgs: true, category: "skills" },
+	{
+		command: "/new",
+		description: "New session",
+		dispatch: "bridge",
+		acceptsArgs: false,
+		category: "session",
+	},
+	{
+		command: "/sessions",
+		description: "List sessions",
+		dispatch: "local",
+		acceptsArgs: true,
+		category: "session",
+		argHint: "[filter]",
+	},
+	{
+		command: "/compact",
+		description: "Compact history",
+		dispatch: "bridge",
+		acceptsArgs: false,
+		category: "context",
+	},
+	{
+		command: "/fork",
+		description: "Fork branch",
+		dispatch: "local",
+		acceptsArgs: false,
+		category: "context",
+		examples: ["/fork"],
+	},
+	{
+		command: "/thinking",
+		description: "Set thinking level",
+		dispatch: "local",
+		acceptsArgs: true,
+		category: "display",
+		argHint: "<level>",
+		examples: ["/thinking high", "/thinking off"],
+	},
+	{
+		command: "/quit",
+		description: "Exit",
+		dispatch: "quit",
+		acceptsArgs: false,
+		category: "shortcuts",
+	},
+	{
+		command: "/reasoner",
+		description: "Select reasoning mode",
+		dispatch: "local",
+		acceptsArgs: true,
+		category: "reasoning",
+		argHint: "<mode>",
+	},
+	{
+		command: "/plugins",
+		description: "Manage plugins",
+		dispatch: "local",
+		acceptsArgs: true,
+		category: "skills",
+	},
 ];
 
 describe("filterSlashCommands", () => {
@@ -34,12 +87,14 @@ describe("filterSlashCommands", () => {
 
 	it("filters by prefix match", () => {
 		const result = filterSlashCommands(TEST_COMMANDS, "/com");
-		assert.ok(result.some((c) => c.command.startsWith("/comp")));
+		assert.ok(result.some(c => c.command.startsWith("/comp")));
 	});
 
 	it("filters by description match", () => {
 		const result = filterSlashCommands(TEST_COMMANDS, "session");
-		assert.ok(result.some((c) => c.command === "/new" || c.command === "/sessions"));
+		assert.ok(
+			result.some(c => c.command === "/new" || c.command === "/sessions"),
+		);
 	});
 
 	it("respects limit", () => {
@@ -89,7 +144,12 @@ describe("groupByCategory", () => {
 
 	it("puts uncategorized commands in misc", () => {
 		const uncategorized: SlashCommandDef[] = [
-			{ command: "/test", description: "No category", dispatch: "local", acceptsArgs: false },
+			{
+				command: "/test",
+				description: "No category",
+				dispatch: "local",
+				acceptsArgs: false,
+			},
 		];
 		const groups = groupByCategory(uncategorized);
 		assert.strictEqual(groups.size, 1);
@@ -101,8 +161,8 @@ describe("groupByCategory", () => {
 		const grouped = groupByCategory(TEST_COMMANDS);
 		const sessionCmds = grouped.get("session");
 		assert.strictEqual(sessionCmds?.length, 2);
-		assert.strictEqual(sessionCmds![0].command, "/new");
-		assert.strictEqual(sessionCmds![1].command, "/sessions");
+		assert.strictEqual(sessionCmds?.[0].command, "/new");
+		assert.strictEqual(sessionCmds?.[1].command, "/sessions");
 	});
 });
 
@@ -119,8 +179,8 @@ describe("category metadata", () => {
 	it("commands with argHint are marked correctly", () => {
 		const groups = groupByCategory(TEST_COMMANDS);
 		const contextCmds = groups.get("context") || [];
-		const compact = contextCmds.find((c) => c.command === "/compact");
-		const fork = contextCmds.find((c) => c.command === "/fork");
+		const compact = contextCmds.find(c => c.command === "/compact");
+		const fork = contextCmds.find(c => c.command === "/fork");
 		assert.ok(compact !== undefined);
 		assert.strictEqual(compact?.argHint, undefined);
 		assert.strictEqual(fork?.argHint, undefined);
@@ -130,9 +190,9 @@ describe("category metadata", () => {
 	it("commands with examples are marked correctly", () => {
 		const groups = groupByCategory(TEST_COMMANDS);
 		const displayCmds = groups.get("display") || [];
-		const thinking = displayCmds.find((c) => c.command === "/thinking");
+		const thinking = displayCmds.find(c => c.command === "/thinking");
 		assert.ok(thinking !== undefined);
 		assert.strictEqual(thinking?.examples?.length, 2);
-		assert.strictEqual(thinking?.examples![0], "/thinking high");
+		assert.strictEqual(thinking?.examples?.[0], "/thinking high");
 	});
 });

@@ -38,7 +38,7 @@ export interface AgentEndEvent {
 }
 
 /** No result — extensions may inspect messages for diagnostics */
-export interface AgentEndResult {}
+export type AgentEndResult = {};
 
 // ============================================================================
 // Turn events
@@ -50,7 +50,7 @@ export interface TurnStartEvent {
 	turnIndex: number;
 }
 
-export interface TurnStartResult {}
+export type TurnStartResult = {};
 
 /** Fired at the end of each turn */
 export interface TurnEndEvent {
@@ -76,7 +76,7 @@ export interface MessageStartEvent {
 	message: Message;
 }
 
-export interface MessageStartResult {}
+export type MessageStartResult = {};
 
 /** Fired when a message is updated (streaming) */
 export interface MessageUpdateEvent {
@@ -84,7 +84,7 @@ export interface MessageUpdateEvent {
 	message: Message;
 }
 
-export interface MessageUpdateResult {}
+export type MessageUpdateResult = {};
 
 /** Fired when a message is fully written */
 export interface MessageEndEvent {
@@ -123,7 +123,7 @@ export interface ToolExecutionUpdateEvent {
 	partialResult: string;
 }
 
-export interface ToolExecutionUpdateResult {}
+export type ToolExecutionUpdateResult = {};
 
 /** Fired after a tool finishes */
 export interface ToolExecutionEndEvent {
@@ -160,7 +160,7 @@ export interface ContextUpdateEvent {
 	completionTokens?: number | null;
 }
 
-export interface ContextUpdateResult {}
+export type ContextUpdateResult = {};
 
 // ============================================================================
 // Session events
@@ -206,14 +206,14 @@ export interface SessionCompactEvent {
 	reason: "auto" | "manual" | "overflow" | "threshold";
 }
 
-export interface SessionCompactResult {}
+export type SessionCompactResult = {};
 
 /** Fired when the agent shuts down */
 export interface SessionShutdownEvent {
 	type: "session_shutdown";
 }
 
-export interface SessionShutdownResult {}
+export type SessionShutdownResult = {};
 
 // ============================================================================
 // Provider events
@@ -248,7 +248,7 @@ export interface AfterProviderResponseEvent {
 	iteration: number;
 }
 
-export interface AfterProviderResponseResult {}
+export type AfterProviderResponseResult = {};
 
 // ============================================================================
 // Event union and handler types

@@ -50,11 +50,11 @@ export function withTimeout<T>(
 			);
 		}, timeoutMs);
 		promise.then(
-			(value) => {
+			value => {
 				clearTimeout(timer);
 				resolve(value);
 			},
-			(reason) => {
+			reason => {
 				clearTimeout(timer);
 				reject(reason);
 			},

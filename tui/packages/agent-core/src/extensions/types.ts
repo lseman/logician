@@ -126,13 +126,25 @@ export interface ExtensionUI {
 	notify(message: string, type?: "info" | "warning" | "error"): void;
 
 	/** Show a confirmation dialog. Returns user choice. */
-	confirm(title: string, message: string, opts?: { timeoutMs?: number }): Promise<boolean>;
+	confirm(
+		title: string,
+		message: string,
+		opts?: { timeoutMs?: number },
+	): Promise<boolean>;
 
 	/** Show a text input dialog. Returns user input or undefined. */
-	input(title: string, placeholder?: string, opts?: { timeoutMs?: number }): Promise<string | undefined>;
+	input(
+		title: string,
+		placeholder?: string,
+		opts?: { timeoutMs?: number },
+	): Promise<string | undefined>;
 
 	/** Show a selector (single choice). Returns selected option or undefined. */
-	select(title: string, options: Array<{ label: string; description?: string }>, opts?: { timeoutMs?: number }): Promise<string | undefined>;
+	select(
+		title: string,
+		options: Array<{ label: string; description?: string }>,
+		opts?: { timeoutMs?: number },
+	): Promise<string | undefined>;
 }
 
 // ============================================================================

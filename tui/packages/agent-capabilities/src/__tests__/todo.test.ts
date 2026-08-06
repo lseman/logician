@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	getTasks,
-	onTodosChanged,
-	todo_tool,
-} from "../tasks/todo.ts";
+import { getTasks, onTodosChanged, todo_tool } from "../tasks/todo.ts";
 
 void test("todo store rejects invisible subjects and publishes immutable snapshots", async () => {
 	await todo_tool.execute({ action: "clear" }, {});
@@ -15,7 +11,7 @@ void test("todo store rejects invisible subjects and publishes immutable snapsho
 	assert.match(String(invisible), /subject is required/i);
 
 	let observed = false;
-	const unsubscribe = onTodosChanged((tasks) => {
+	const unsubscribe = onTodosChanged(tasks => {
 		observed = true;
 		tasks[0].subject = "mutated outside store";
 	});

@@ -9,8 +9,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { McpManager } from "../mcp/manager.ts";
 import type { McpClient } from "../mcp/client.ts";
+import { McpManager } from "../mcp/manager.ts";
 
 function withIsolatedMcpEnvironment(
 	run: (home: string, workspace: string) => Promise<void>,
@@ -72,7 +72,7 @@ void test("MCP snapshot merges plugin, global, and project servers with project 
 		});
 		const snapshot = await manager.getSnapshot(workspace);
 		const byName = Object.fromEntries(
-			snapshot.servers.map((server) => [server.serverName, server]),
+			snapshot.servers.map(server => [server.serverName, server]),
 		);
 
 		assert.deepEqual(Object.keys(byName).sort(), [
@@ -109,9 +109,7 @@ void test("MCP snapshot includes loaded plugin-provided servers", async () => {
 			callTool: async () => ({}),
 			close: () => {},
 		};
-		(
-			manager as unknown as { clients: McpClient[] }
-		).clients = [client];
+		(manager as unknown as { clients: McpClient[] }).clients = [client];
 
 		const snapshot = await manager.getSnapshot(workspace);
 
@@ -129,7 +127,7 @@ void test("MCP snapshot asks live servers for tools concurrently", async () => {
 	await withIsolatedMcpEnvironment(async (_home, workspace) => {
 		let started = 0;
 		let release!: () => void;
-		const gate = new Promise<void>((resolve) => {
+		const gate = new Promise<void>(resolve => {
 			release = resolve;
 		});
 		const client = (name: string): McpClient => ({
@@ -155,7 +153,7 @@ void test("MCP snapshot asks live servers for tools concurrently", async () => {
 		];
 
 		const snapshotPromise = manager.getSnapshot(workspace);
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await new Promise<void>(resolve => setImmediate(resolve));
 		assert.equal(started, 2);
 		release();
 		await snapshotPromise;

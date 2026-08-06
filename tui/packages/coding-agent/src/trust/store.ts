@@ -15,7 +15,11 @@ function readTrustFile(): TrustFile {
 	if (!existsSync(TRUST_FILE)) return {};
 	try {
 		const parsed = JSON.parse(readFileSync(TRUST_FILE, "utf-8"));
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		if (
+			typeof parsed !== "object" ||
+			parsed === null ||
+			Array.isArray(parsed)
+		) {
 			return {};
 		}
 		const data: TrustFile = {};
@@ -39,14 +43,17 @@ function writeTrustFile(data: TrustFile): void {
 			sorted[key] = value;
 		}
 	}
-	writeFileSync(TRUST_FILE, JSON.stringify(sorted, null, 2) + "\n", "utf-8");
+	writeFileSync(TRUST_FILE, `${JSON.stringify(sorted, null, 2)}\n`, "utf-8");
 }
 
 function normalizeCwd(cwd: string): string {
 	return cwd.replace(/\/+$/, "") || "/";
 }
 
-function findNearestEntry(data: TrustFile, cwd: string): { path: string; decision: boolean } | null {
+function findNearestEntry(
+	data: TrustFile,
+	cwd: string,
+): { path: string; decision: boolean } | null {
 	let currentDir = normalizeCwd(cwd);
 	while (true) {
 		const value = data[currentDir];
@@ -61,7 +68,7 @@ function findNearestEntry(data: TrustFile, cwd: string): { path: string; decisio
 
 export interface TrustDecision {
 	decision: boolean | null; // null = undecided
-	savedPath: string;         // directory where the decision is stored
+	savedPath: string; // directory where the decision is stored
 }
 
 export class TrustStore {

@@ -26,7 +26,9 @@ function keyFor(absolutePath: string): string {
 export function recordRead(absolutePath: string): void {
 	try {
 		const info = statSync(absolutePath);
-		const sha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+		const sha256 = createHash("sha256")
+			.update(readFileSync(absolutePath))
+			.digest("hex");
 		lastReadSnapshot.set(keyFor(absolutePath), {
 			mtimeMs: info.mtimeMs,
 			size: info.size,
@@ -53,8 +55,11 @@ export function isStaleSinceRead(absolutePath: string): boolean {
 	if (recorded === undefined) return false;
 	try {
 		const info = statSync(absolutePath);
-		if (info.mtimeMs !== recorded.mtimeMs || info.size !== recorded.size) return true;
-		const sha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+		if (info.mtimeMs !== recorded.mtimeMs || info.size !== recorded.size)
+			return true;
+		const sha256 = createHash("sha256")
+			.update(readFileSync(absolutePath))
+			.digest("hex");
 		return sha256 !== recorded.sha256;
 	} catch (_e: unknown) {
 		return false;

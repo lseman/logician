@@ -42,14 +42,11 @@ function configuredWorkspace(): string {
 }
 
 void test("runtime resolver applies shared environment precedence", () => {
-	const resolved = resolveRuntimeConfig(
-		configuredWorkspace(),
-		{
-			LOGICIAN_LLM_URL: "http://env.test:9000",
-			LOGICIAN_MODEL: "env-model",
-			LOGICIAN_HOOKS: "0",
-		},
-	);
+	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		LOGICIAN_LLM_URL: "http://env.test:9000",
+		LOGICIAN_MODEL: "env-model",
+		LOGICIAN_HOOKS: "0",
+	});
 
 	assert.equal(resolved.bridge.baseUrl, "http://env.test:9000");
 	assert.equal(resolved.bridge.model, "env-model");
@@ -65,7 +62,10 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.turnTimeoutMs, 5000);
 	assert.equal(resolved.bridge.cacheSize, 64);
 	assert.equal(resolved.bridge.cacheTtlMs, 2000);
-	assert.equal(resolved.bridge.memoryExtractorBaseUrl, "http://memory.test:8081");
+	assert.equal(
+		resolved.bridge.memoryExtractorBaseUrl,
+		"http://memory.test:8081",
+	);
 	assert.equal(resolved.bridge.memoryExtractorModel, "small-extractor");
 	assert.equal(resolved.bridge.memoryViewerEnabled, false);
 	assert.equal(resolved.bridge.memoryViewerPort, 4321);

@@ -1,7 +1,7 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { OutputGuard } from "../agent/guards/output-guard.ts";
+import { describe, it } from "node:test";
 import { BackendError } from "../agent/backend.ts";
+import { OutputGuard } from "../agent/guards/output-guard.ts";
 
 describe("OutputGuard", () => {
 	const makeGuard = (overrides = {}) =>
@@ -109,7 +109,10 @@ describe("OutputGuard", () => {
 
 	it("aborts after max retries exhausted", () => {
 		const guard = makeGuard({ maxRetries: 2 });
-		const err = new BackendError({ category: "transient", message: "502 Bad Gateway" });
+		const err = new BackendError({
+			category: "transient",
+			message: "502 Bad Gateway",
+		});
 
 		guard.handleError(err);
 		guard.handleError(err);
@@ -177,7 +180,7 @@ describe("OutputGuard", () => {
 		});
 
 		guard.processResponse(5000, 10000);
-		assert.ok(events.some((e) => e.type === "context_update"));
+		assert.ok(events.some(e => e.type === "context_update"));
 	});
 
 	it("emits budget_exhausted when near limit", () => {
@@ -188,7 +191,7 @@ describe("OutputGuard", () => {
 
 		const result = guard.processResponse(9600, 10000);
 		assert.strictEqual(result.action, "budget_exhausted");
-		assert.ok(events.some((e) => e.type === "budget_exhausted"));
+		assert.ok(events.some(e => e.type === "budget_exhausted"));
 	});
 
 	it("returns proceed when under budget", () => {
@@ -228,7 +231,10 @@ describe("OutputGuard", () => {
 
 	it("uses exponential backoff when no retryAfter header", () => {
 		const guard = makeGuard();
-		const err = new BackendError({ category: "transient", message: "502 Bad Gateway" });
+		const err = new BackendError({
+			category: "transient",
+			message: "502 Bad Gateway",
+		});
 
 		const r0 = guard.handleError(err);
 		assert.strictEqual(r0.retryDelayMs, 500);
@@ -264,7 +270,9 @@ describe("OutputGuard", () => {
 
 	it("recovers from malformed assistant message even without BackendError wrapper", () => {
 		const guard = makeGuard();
-		const err = new Error("Assistant message must contain either 'content' or 'tool_calls'!");
+		const err = new Error(
+			"Assistant message must contain either 'content' or 'tool_calls'!",
+		);
 		const result = guard.handleError(err);
 
 		assert.strictEqual(result.action, "compact_then_retry");

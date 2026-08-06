@@ -16,17 +16,17 @@
 // plus optional checkpoint markers. Sessions are stored under
 // <cwd>/.logician/sessions/<sessionId>/
 
+import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
 	mkdirSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { markPathIgnoredByCloudSync } from "../tools/shared/path-utils.ts";
 
@@ -334,12 +334,22 @@ export class Session {
 	}
 
 	appendModelChange(model: string): void {
-		this.appendEntry({ type: "model_change", id: randomUUID(), timestamp: Date.now(), model });
+		this.appendEntry({
+			type: "model_change",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			model,
+		});
 		this.appendSettingsChange("model", model);
 	}
 
 	appendThinkingLevelChange(thinkingLevel: string): void {
-		this.appendEntry({ type: "thinking_level_change", id: randomUUID(), timestamp: Date.now(), thinkingLevel });
+		this.appendEntry({
+			type: "thinking_level_change",
+			id: randomUUID(),
+			timestamp: Date.now(),
+			thinkingLevel,
+		});
 		this.appendSettingsChange("thinking_level", thinkingLevel);
 	}
 
@@ -367,7 +377,11 @@ export class Session {
 		});
 	}
 
-	appendCompaction(summary: string, tokensBefore: number, firstKeptEntryId?: string): void {
+	appendCompaction(
+		summary: string,
+		tokensBefore: number,
+		firstKeptEntryId?: string,
+	): void {
 		this.appendEntry({
 			type: "compaction",
 			id: randomUUID(),
@@ -417,14 +431,14 @@ export class Session {
 	load(): SessionMessage[] {
 		return this.loadEntries()
 			.filter((entry): entry is MessageSessionEntry => entry.type === "message")
-			.map((entry) => entry.message);
+			.map(entry => entry.message);
 	}
 
 	loadEntries(): SessionEntry[] {
 		if (!existsSync(this.filePath)) return [];
 		const content = readFileSync(this.filePath, "utf8");
 		const lines = content.trim().split("\n").filter(Boolean);
-		return lines.map((line) => this.parseEntryLine(line));
+		return lines.map(line => this.parseEntryLine(line));
 	}
 
 	buildContext(): SessionContext {
@@ -465,14 +479,17 @@ export class Session {
 				parentId: lastCompaction.parentId,
 			});
 		}
-		const compactionIndex = lastCompaction ? entries.indexOf(lastCompaction) : -1;
-		const keptStartIndex =
-			lastCompaction?.firstKeptEntryId
-				? entries.findIndex((entry) => entry.id === lastCompaction.firstKeptEntryId)
-				: -1;
+		const compactionIndex = lastCompaction
+			? entries.indexOf(lastCompaction)
+			: -1;
+		const keptStartIndex = lastCompaction?.firstKeptEntryId
+			? entries.findIndex(entry => entry.id === lastCompaction.firstKeptEntryId)
+			: -1;
 		const contextEntries = lastCompaction
 			? [
-					...(keptStartIndex >= 0 ? entries.slice(keptStartIndex, compactionIndex) : []),
+					...(keptStartIndex >= 0
+						? entries.slice(keptStartIndex, compactionIndex)
+						: []),
 					...entries.slice(compactionIndex + 1),
 				]
 			: entries;
@@ -520,8 +537,8 @@ export class Session {
 	}> {
 		if (!existsSync(this.checkpointDir)) return [];
 		return readdirSync(this.checkpointDir)
-			.filter((f) => f.startsWith("checkpoint_") && f.endsWith(".json"))
-			.map((f) => {
+			.filter(f => f.startsWith("checkpoint_") && f.endsWith(".json"))
+			.map(f => {
 				const content = JSON.parse(
 					readFileSync(join(this.checkpointDir, f), "utf8"),
 				);
@@ -537,7 +554,7 @@ export class Session {
 	/** Load a checkpoint by message count. Returns null if not found. */
 	loadCheckpoint(messageCount: number): SessionMessage[] | null {
 		const checkpoint = this.listCheckpoints().find(
-			(c) => c.messageCount === messageCount,
+			c => c.messageCount === messageCount,
 		);
 		if (!checkpoint) return null;
 		return JSON.parse(readFileSync(checkpoint.dataFile, "utf8"));
@@ -574,7 +591,7 @@ export class Session {
 	getPathToRoot(): SessionMessage[] {
 		return this.getPathToRootEntries()
 			.filter((entry): entry is MessageSessionEntry => entry.type === "message")
-			.map((entry) => entry.message);
+			.map(entry => entry.message);
 	}
 
 	getPathToRootEntries(): SessionEntry[] {
@@ -614,13 +631,17 @@ export class Session {
 		this.messageCount = truncated.length;
 		writeFileSync(
 			this.filePath,
-			truncated.map((m) => JSON.stringify({
-				type: "message",
-				id: m.entryId ?? randomUUID(),
-				parentId: m.parentId,
-				timestamp: m.timestamp,
-				message: m,
-			} satisfies MessageSessionEntry)).join("\n") + "\n",
+			`${truncated
+				.map(m =>
+					JSON.stringify({
+						type: "message",
+						id: m.entryId ?? randomUUID(),
+						parentId: m.parentId,
+						timestamp: m.timestamp,
+						message: m,
+					} satisfies MessageSessionEntry),
+				)
+				.join("\n")}\n`,
 			"utf8",
 		);
 		this.lastActivity = Date.now();
@@ -647,7 +668,11 @@ export class Session {
 
 	private parseEntryLine(line: string): SessionEntry {
 		const parsed = JSON.parse(line);
-		if (parsed && typeof parsed === "object" && typeof parsed.type === "string") {
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			typeof parsed.type === "string"
+		) {
 			return parsed as SessionEntry;
 		}
 		const message = parsed as SessionMessage;
@@ -718,11 +743,11 @@ export class SessionManager {
 	listSessions(): SessionMeta[] {
 		if (!existsSync(this.baseDir)) return [];
 		return readdirSync(this.baseDir)
-			.filter((id) => {
+			.filter(id => {
 				const dir = join(this.baseDir, id);
 				return statSync(dir).isDirectory();
 			})
-			.map((id) => {
+			.map(id => {
 				const metaPath = join(this.baseDir, id, META_FILE);
 				if (!existsSync(metaPath)) return null;
 				return JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta;

@@ -2,7 +2,10 @@
 // CLI entry points and re-exports. All imports that previously used
 // `plugins.ts` continue to work unchanged.
 
-import { TsPluginManager, type PluginCommandResult } from "../../plugins/claude-code/plugin-manager.ts";
+import {
+	type PluginCommandResult,
+	TsPluginManager,
+} from "../../plugins/claude-code/plugin-manager.ts";
 
 // ── CLI functions ─────────────────────────────────────────────────────────────
 
@@ -35,7 +38,7 @@ export function splitPluginArgs(input: string): string[] {
 			else current += ch;
 			continue;
 		}
-		if (ch === "'" || ch === "\"") {
+		if (ch === "'" || ch === '"') {
 			quote = ch;
 			continue;
 		}
@@ -170,7 +173,8 @@ function parseJsonArg(raw?: string): Record<string, unknown> {
 	try {
 		const parsed = JSON.parse(raw);
 		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? parsed : {};
+			? parsed
+			: {};
 	} catch (_e: unknown) {
 		return {};
 	}
@@ -178,25 +182,27 @@ function parseJsonArg(raw?: string): Record<string, unknown> {
 
 // ── Re-exports from sub-modules ──────────────────────────────────────────────
 
-// Manager exports
-export { TsPluginManager } from "../../plugins/claude-code/plugin-manager.ts";
-export type { PluginCommandResult, PluginInstall } from "../../plugins/claude-code/plugin-manager.ts";
-
 // Executor exports
 export type {
-	HookEventType,
 	HookCommand,
-	HookDefinition,
-	LoadedHook,
 	HookContextMessage,
+	HookDefinition,
+	HookEventType,
 	HookExecutionResult,
+	LoadedHook,
 } from "../../plugins/claude-code/plugin-executor.ts";
 export {
-	loadPluginHooks,
-	executeLoadedHook,
-	executeCommand,
-	parseHookResponse,
 	buildHookInput,
-	parseHookEventType,
+	executeCommand,
+	executeLoadedHook,
+	loadPluginHooks,
 	matcherMatches,
+	parseHookEventType,
+	parseHookResponse,
 } from "../../plugins/claude-code/plugin-executor.ts";
+export type {
+	PluginCommandResult,
+	PluginInstall,
+} from "../../plugins/claude-code/plugin-manager.ts";
+// Manager exports
+export { TsPluginManager } from "../../plugins/claude-code/plugin-manager.ts";

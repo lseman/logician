@@ -11,7 +11,9 @@ test("stores the session database inside the project .logician directory", () =>
 		const store = new SessionStore(projectDir);
 		store.close();
 		assert.equal(
-			existsSync(join(projectDir, ".logician", "tui", "sessions", "history.db")),
+			existsSync(
+				join(projectDir, ".logician", "tui", "sessions", "history.db"),
+			),
 			true,
 		);
 	} finally {

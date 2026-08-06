@@ -11,12 +11,19 @@ export interface LLMCallOptions {
 }
 
 export async function callLLM(options: LLMCallOptions): Promise<string> {
-	const { baseUrl, model, messages, temperature = 0.8, maxTokens = 2048 } = options;
-	const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+	const {
+		baseUrl,
+		model,
+		messages,
+		temperature = 0.8,
+		maxTokens = 2048,
+	} = options;
+	const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-	const apiKey = process.env.ANTHROPIC_API_KEY
-		?? process.env.OPENAI_API_KEY
-		?? process.env.LLM_API_KEY;
+	const apiKey =
+		process.env.ANTHROPIC_API_KEY ??
+		process.env.OPENAI_API_KEY ??
+		process.env.LLM_API_KEY;
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 	};
@@ -41,7 +48,7 @@ export async function callLLM(options: LLMCallOptions): Promise<string> {
 		throw new Error(`LLM API error ${res.status}: ${text.slice(0, 200)}`);
 	}
 
-	const data = await res.json() as {
+	const data = (await res.json()) as {
 		choices: Array<{ message: { content: string } }>;
 	};
 	const content = data.choices?.[0]?.message?.content;

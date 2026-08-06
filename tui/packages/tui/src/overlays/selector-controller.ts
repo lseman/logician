@@ -13,7 +13,7 @@ export class SelectorController {
 
 	move(delta: number, count: number): void {
 		if (count <= 0) return;
-		this.index = (this.index + delta % count + count) % count;
+		this.index = (this.index + (delta % count) + count) % count;
 	}
 
 	window(count: number, maxRows: number): SelectorWindow {

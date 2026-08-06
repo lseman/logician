@@ -4,19 +4,19 @@
 // (status/plugins/mcp/reasoner/theme). Extracted from the constructor's
 // inline slash-command wiring block.
 
-import {
+import type {
 	AgentCoreBridge,
 	GoalManager,
 	LoopManager,
 } from "@logician/coding-agent/application";
-import { SessionStore, Transcript } from "@logician/coding-agent/sessions";
+import type { SessionStore, Transcript } from "@logician/coding-agent/sessions";
 import type { MemoryStore } from "@logician/memory";
-import { ChoicePopup } from "../../overlays/choice-popup.ts";
-import { SlashPopup } from "../../overlays/slash-popup.ts";
-import { NotificationCenter } from "../../status/notification-center.ts";
-import { StatusBar } from "../../status/status-bar.ts";
-import { TranscriptDisplay } from "../../rendering/transcript/display.ts";
-import { TUI } from "../../terminal/core.ts";
+import type { ChoicePopup } from "../../overlays/choice-popup.ts";
+import type { SlashPopup } from "../../overlays/slash-popup.ts";
+import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
+import type { NotificationCenter } from "../../status/notification-center.ts";
+import type { StatusBar } from "../../status/status-bar.ts";
+import type { TUI } from "../../terminal/core.ts";
 
 export interface SlashCommandsCtx {
 	tui: TUI;

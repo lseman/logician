@@ -1,4 +1,4 @@
-import { Container, type Component } from "../terminal/primitives.ts";
+import { type Component, Container } from "../terminal/primitives.ts";
 import { LAYOUT_NODE, type ScrollLayoutNode } from "./layout-node.ts";
 
 export type ScrollViewScrollbar = "hidden" | "auto" | "always";
@@ -43,8 +43,13 @@ export class ScrollView extends Container {
 		this.overscroll = options.overscroll ?? "chain";
 		this.currentScrollbar = options.scrollbar ?? "hidden";
 		this.scrollbarStyle =
-			options.scrollbarStyle ?? ((glyph, isThumb) => (isThumb ? `\x1b[100m${glyph}\x1b[49m` : `\x1b[2m${glyph}\x1b[22m`));
-		this.scrollbarHideDelayMs = Math.max(0, Math.floor(options.scrollbarHideDelayMs ?? 1000));
+			options.scrollbarStyle ??
+			((glyph, isThumb) =>
+				isThumb ? `\x1b[100m${glyph}\x1b[49m` : `\x1b[2m${glyph}\x1b[22m`);
+		this.scrollbarHideDelayMs = Math.max(
+			0,
+			Math.floor(options.scrollbarHideDelayMs ?? 1000),
+		);
 	}
 
 	get scrollTop(): number {
@@ -90,7 +95,11 @@ export class ScrollView extends Container {
 	}
 
 	private markScrollbarActivity(): void {
-		if (this.scrollbar !== "auto" || this.contentHeight <= this.currentViewportHeight) return;
+		if (
+			this.scrollbar !== "auto" ||
+			this.contentHeight <= this.currentViewportHeight
+		)
+			return;
 		this.transientScrollbarVisible = true;
 		if (this.scrollbarHideTimer) {
 			clearTimeout(this.scrollbarHideTimer);
@@ -119,8 +128,13 @@ export class ScrollView extends Container {
 	}
 
 	scrollTo(scrollTop: number): void {
-		const requested = Number.isFinite(scrollTop) ? Math.trunc(scrollTop) : this.currentScrollTop;
-		const maxScrollTop = Math.max(0, this.contentHeight - this.currentViewportHeight);
+		const requested = Number.isFinite(scrollTop)
+			? Math.trunc(scrollTop)
+			: this.currentScrollTop;
+		const maxScrollTop = Math.max(
+			0,
+			this.contentHeight - this.currentViewportHeight,
+		);
 		const next = Math.max(0, Math.min(maxScrollTop, requested));
 		if (next === this.currentScrollTop) return;
 		this.currentScrollTop = next;
@@ -132,7 +146,10 @@ export class ScrollView extends Container {
 	scrollBy(lines: number): number {
 		const requested = Number.isFinite(lines) ? Math.trunc(lines) : 0;
 		if (requested === 0) return 0;
-		const maxScrollTop = Math.max(0, this.contentHeight - this.currentViewportHeight);
+		const maxScrollTop = Math.max(
+			0,
+			this.contentHeight - this.currentViewportHeight,
+		);
 		const start = this.followingEnd ? maxScrollTop : this.currentScrollTop;
 		const next = Math.max(0, Math.min(maxScrollTop, start + requested));
 		const moved = next - start;
@@ -148,9 +165,11 @@ export class ScrollView extends Container {
 	scrollToStart(): void {
 		const changed =
 			this.currentScrollTop !== 0 ||
-			this.followingEnd !== (this.followEnd && this.contentHeight <= this.currentViewportHeight);
+			this.followingEnd !==
+				(this.followEnd && this.contentHeight <= this.currentViewportHeight);
 		this.currentScrollTop = 0;
-		this.followingEnd = this.followEnd && this.contentHeight <= this.currentViewportHeight;
+		this.followingEnd =
+			this.followEnd && this.contentHeight <= this.currentViewportHeight;
 		if (changed) {
 			this.markScrollbarActivity();
 			this.requestRenderCallback?.();
@@ -159,7 +178,8 @@ export class ScrollView extends Container {
 
 	scrollToEnd(): void {
 		const next = Math.max(0, this.contentHeight - this.currentViewportHeight);
-		const changed = this.currentScrollTop !== next || this.followingEnd !== this.followEnd;
+		const changed =
+			this.currentScrollTop !== next || this.followingEnd !== this.followEnd;
 		this.currentScrollTop = next;
 		this.followingEnd = this.followEnd;
 		if (changed) {
@@ -168,15 +188,28 @@ export class ScrollView extends Container {
 		}
 	}
 
-	updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void {
+	updateLayout(
+		contentHeight: number,
+		viewportHeight: number,
+		requestRender: () => void,
+	): void {
 		this.contentHeight = Math.max(0, Math.floor(contentHeight));
 		this.currentViewportHeight = Math.max(0, Math.floor(viewportHeight));
 		this.requestRenderCallback = requestRender;
-		const maxScrollTop = Math.max(0, this.contentHeight - this.currentViewportHeight);
+		const maxScrollTop = Math.max(
+			0,
+			this.contentHeight - this.currentViewportHeight,
+		);
 		if (this.followingEnd) this.currentScrollTop = maxScrollTop;
-		else this.currentScrollTop = Math.max(0, Math.min(this.currentScrollTop, maxScrollTop));
-		if (this.followEnd && this.currentScrollTop === maxScrollTop) this.followingEnd = true;
-		if (this.contentHeight <= this.currentViewportHeight) this.hideTransientScrollbar();
+		else
+			this.currentScrollTop = Math.max(
+				0,
+				Math.min(this.currentScrollTop, maxScrollTop),
+			);
+		if (this.followEnd && this.currentScrollTop === maxScrollTop)
+			this.followingEnd = true;
+		if (this.contentHeight <= this.currentViewportHeight)
+			this.hideTransientScrollbar();
 	}
 
 	override addChild(_component: Component): void {
@@ -194,7 +227,7 @@ export class ScrollView extends Container {
 	override render(width: number): string[] {
 		const contentWidth = this.getContentWidth(width);
 		const lines = this.child.render(contentWidth);
-		return contentWidth === width ? lines : lines.map((line) => `${line} `);
+		return contentWidth === width ? lines : lines.map(line => `${line} `);
 	}
 
 	[LAYOUT_NODE](): ScrollLayoutNode {

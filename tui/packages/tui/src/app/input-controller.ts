@@ -455,7 +455,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			// Unknown command — do not silently turn a typo into an agent prompt.
 			ctx.transcript.addTurn(text.trim());
 			const suggestions = filterSlashCommands(allCmds, cmdName, 3).map(
-				(command) => command.command,
+				command => command.command,
 			);
 			ctx.transcript.addSystemMessage(
 				`Unknown command: ${cmdName}.` +
@@ -481,7 +481,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			setImmediate(() => {
 				void ctx.bridge
 					.sendMessage(text)
-					.catch((err) => ctx.bridge.reportError(err));
+					.catch(err => ctx.bridge.reportError(err));
 				if (intent === "steer-now") {
 					const count = ctx.bridge.flushSteeringNow();
 					ctx.notify(
@@ -505,7 +505,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		setImmediate(() => {
 			void ctx.bridge
 				.sendMessage(text)
-				.catch((err) => ctx.bridge.reportError(err));
+				.catch(err => ctx.bridge.reportError(err));
 		});
 	};
 

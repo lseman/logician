@@ -26,7 +26,7 @@ void test("trust prompt explains scope and renders within terminal width", () =>
 		assert.match(text, /Trust for this session/);
 		assert.match(text, /Exit without saving/);
 		assert.match(text, /\.logician\.json/);
-		assert.ok(lines.every((line) => visibleWidth(line) <= width));
+		assert.ok(lines.every(line => visibleWidth(line) <= width));
 	}
 });
 

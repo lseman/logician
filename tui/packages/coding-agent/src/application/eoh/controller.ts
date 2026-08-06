@@ -10,13 +10,13 @@ import {
 	type EohProgressEvent,
 } from "@logician/agent-capabilities/eoh/engine.ts";
 import { populationStats } from "@logician/agent-capabilities/eoh/population.ts";
+import type { ParsedBridgeEvent } from "../../runtime/events.ts";
 import {
 	applyEohCandidate,
 	type EohFileTarget,
 	evaluateEohCandidate,
 	loadEohFile,
 } from "./file.ts";
-import type { ParsedBridgeEvent } from "../../runtime/events.ts";
 
 export interface EohControllerDeps {
 	cwd: string;
@@ -119,7 +119,7 @@ export class EohController {
 					"The file's evaluate(heuristic) function returns fitness; higher is better.",
 				functionSignature: target.functionSignature,
 				instances: [null],
-				evaluateInstance: (code) => evaluateEohCandidate(target, code, 30_000),
+				evaluateInstance: code => evaluateEohCandidate(target, code, 30_000),
 			});
 			const initialFitness = await evaluateEohCandidate(
 				target,

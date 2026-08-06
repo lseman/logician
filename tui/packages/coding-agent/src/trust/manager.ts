@@ -2,8 +2,8 @@
 // Combines the trust store (persisted decisions) with the checker (resource
 // detection) and provides a unified API for trust resolution.
 
-import { TrustStore } from "./store.ts";
 import { formatTrustPrompt, getTrustRequiringPaths } from "./checker.ts";
+import { TrustStore } from "./store.ts";
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
@@ -12,7 +12,12 @@ export interface TrustOptions {
 	trustStore?: TrustStore;
 	defaultProjectTrust?: DefaultProjectTrust;
 	hasUI: boolean;
-	onSelectTrust?: (prompt: string, paths: string[]) => Promise<"trust" | "trust-parent" | "session-only" | "deny" | "deny-session">;
+	onSelectTrust?: (
+		prompt: string,
+		paths: string[],
+	) => Promise<
+		"trust" | "trust-parent" | "session-only" | "deny" | "deny-session"
+	>;
 }
 
 export interface TrustResult {
@@ -72,7 +77,9 @@ export function applyTrustChoice(
  * exists, returns immediately. Otherwise, if hasUI is true and
  * onSelectTrust is provided, prompts the user.
  */
-export async function resolveTrust(options: TrustOptions): Promise<TrustResult> {
+export async function resolveTrust(
+	options: TrustOptions,
+): Promise<TrustResult> {
 	const { cwd, defaultProjectTrust = "ask", hasUI, onSelectTrust } = options;
 	const store = options.trustStore ?? new TrustStore();
 
@@ -101,7 +108,12 @@ export async function resolveTrust(options: TrustOptions): Promise<TrustResult> 
 	const paths = getTrustRequiringPaths(cwd);
 	const prompt = formatTrustPrompt(cwd, paths);
 
-	let choice: "trust" | "trust-parent" | "session-only" | "deny" | "deny-session";
+	let choice:
+		| "trust"
+		| "trust-parent"
+		| "session-only"
+		| "deny"
+		| "deny-session";
 	if (onSelectTrust) {
 		choice = await onSelectTrust(prompt, paths);
 	} else {

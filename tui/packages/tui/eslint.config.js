@@ -32,7 +32,11 @@ export default [
 			// ── Errors ──────────────────────────────────────────────────
 			"@typescript-eslint/no-unused-vars": [
 				"error",
-				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+				{
+					argsIgnorePattern: "^_",
+					varsIgnorePattern: "^_",
+					caughtErrorsIgnorePattern: "^_",
+				},
 			],
 			"@typescript-eslint/no-explicit-any": "warn",
 			"@typescript-eslint/no-non-null-assertion": "warn",

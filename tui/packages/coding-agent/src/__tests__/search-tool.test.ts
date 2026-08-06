@@ -12,7 +12,7 @@ void test("grep prepareArguments does not turn the search pattern into a glob", 
 	assert.equal(args.glob, undefined);
 });
 
-void test("grep finds plain prepared searches across normal filenames", async (t) => {
+void test("grep finds plain prepared searches across normal filenames", async t => {
 	if (!(await ensureTool("rg"))) {
 		t.skip("ripgrep is not available");
 		return;
@@ -29,7 +29,7 @@ void test("grep finds plain prepared searches across normal filenames", async (t
 	assert.match(content, /notes\.txt:2: needle/);
 });
 
-void test("grep reports ripgrep pattern errors instead of no matches", async (t) => {
+void test("grep reports ripgrep pattern errors instead of no matches", async t => {
 	if (!(await ensureTool("rg"))) {
 		t.skip("ripgrep is not available");
 		return;

@@ -7,15 +7,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
-import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
-import { atomicWriteFile } from "./shared/atomic-write.ts";
 import {
 	ensureInsideCwd,
 	readUtf8IfExists,
 	resolvePath,
 } from "@logician/agent-core/tools/shared/path-utils.ts";
-import { hasBeenRead, isStaleSinceRead, refreshAfterWrite } from "./read-tracker.ts";
 import { highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import {
+	hasBeenRead,
+	isStaleSinceRead,
+	refreshAfterWrite,
+} from "./read-tracker.ts";
+import { atomicWriteFile } from "./shared/atomic-write.ts";
+import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
 
 export const write_file: Tool = {
 	name: "write_file",
@@ -59,12 +63,16 @@ export const write_file: Tool = {
 			const before = readUtf8IfExists(resolved);
 			if (before !== null) {
 				if (!hasBeenRead(resolved)) {
-					return `${resolved} already exists but has not been read. ` +
-						"Read it with read_file before overwriting, or use edit_file for targeted changes.";
+					return (
+						`${resolved} already exists but has not been read. ` +
+						"Read it with read_file before overwriting, or use edit_file for targeted changes."
+					);
 				}
 				if (isStaleSinceRead(resolved)) {
-					return `${resolved} has been modified since it was last read. ` +
-						"Read it again before overwriting.";
+					return (
+						`${resolved} has been modified since it was last read. ` +
+						"Read it again before overwriting."
+					);
 				}
 			}
 			if (before === content) {

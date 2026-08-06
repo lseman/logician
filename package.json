@@ -10,17 +10,20 @@
   "scripts": {
     "dev": "tsx tui/packages/tui/src/index.ts",
     "start": "tsx tui/packages/tui/src/index.ts",
-    "lint": "tui/packages/tui/node_modules/.bin/eslint --config tui/packages/tui/eslint.config.js tui/packages/",
-    "lint:fix": "tui/packages/tui/node_modules/.bin/eslint --config tui/packages/tui/eslint.config.js tui/packages/ --fix",
+    "lint": "biome check tui/packages/",
+    "lint:fix": "biome check --fix tui/packages/",
+    "format": "biome format --write tui/packages/",
+    "format:check": "biome check --linter-enabled=false tui/packages/",
     "test": "bun test tui/packages/agent-core/src/__tests__/*.test.ts tui/packages/agent-capabilities/src/__tests__/*.test.ts tui/packages/coding-agent/src/__tests__/*.test.ts tui/packages/tui/src/__tests__/*.test.ts tui/packages/tui/__tests__/*.test.ts",
     "typecheck": "bun run --workspaces --if-present typecheck",
-    "ci": "bun run typecheck && bun run lint && bun run test"
+    "ci": "bun run typecheck && bun run lint && bun run format:check && bun run test"
   },
   "engines": {
     "bun": ">=1.3.14",
     "node": ">=22.19.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.7",
     "@sinclair/typebox": "^0.34.41",
     "@types/bun": "^1.3.14",
     "bun-types": "^1.3.14",

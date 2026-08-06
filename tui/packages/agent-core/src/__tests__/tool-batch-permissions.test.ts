@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
-import { PermissionManager } from "../tools/shared/permissions.ts";
 import type { AgentEvent, Tool, ToolCall } from "../agent/types.ts";
 import type { ExtensionEvent } from "../hooks/extensions/events.ts";
+import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
+import { PermissionManager } from "../tools/shared/permissions.ts";
+import { ToolRegistry } from "../tools/shared/registry.ts";
 
 function registryWithBash(): ToolRegistry {
 	const registry = new ToolRegistry({ cache: null });
@@ -14,7 +14,9 @@ function registryWithBash(): ToolRegistry {
 		description: "run a shell command",
 		readOnly: false,
 		parameters: { type: "object", properties: {} },
-		execute: async (args) => ({ content: `ran: ${(args as { command?: string }).command}` }),
+		execute: async args => ({
+			content: `ran: ${(args as { command?: string }).command}`,
+		}),
 	};
 	registry.register(bash);
 	return registry;
@@ -28,7 +30,9 @@ async function run(
 	registry: ToolRegistry,
 	call: ToolCall,
 	permissions: PermissionManager,
-	onPermissionRequest?: Parameters<typeof executeToolBatch>[0]["onPermissionRequest"],
+	onPermissionRequest?: Parameters<
+		typeof executeToolBatch
+	>[0]["onPermissionRequest"],
 ) {
 	const events: AgentEvent[] = [];
 	return executeToolBatch({
@@ -38,7 +42,9 @@ async function run(
 		iteration: 1,
 		permissions,
 		onPermissionRequest,
-		emit: (e) => { events.push(e); },
+		emit: e => {
+			events.push(e);
+		},
 		emitExtension: async (_e: ExtensionEvent) => {},
 	});
 }
@@ -77,7 +83,12 @@ void test("ask verdict with no handler fails closed (denied, not silently execut
 void test("ask verdict resolved 'allow' by the handler executes the tool", async () => {
 	const registry = registryWithBash();
 	const permissions = new PermissionManager({ mode: "ask" });
-	const batch = await run(registry, callFor("make build"), permissions, async () => "allow");
+	const batch = await run(
+		registry,
+		callFor("make build"),
+		permissions,
+		async () => "allow",
+	);
 	const content = batch.messages[0].content as string;
 	assert.equal(content, "ran: make build");
 });
@@ -85,7 +96,12 @@ void test("ask verdict resolved 'allow' by the handler executes the tool", async
 void test("ask verdict resolved 'deny' by the handler blocks the tool", async () => {
 	const registry = registryWithBash();
 	const permissions = new PermissionManager({ mode: "ask" });
-	const batch = await run(registry, callFor("make build"), permissions, async () => "deny");
+	const batch = await run(
+		registry,
+		callFor("make build"),
+		permissions,
+		async () => "deny",
+	);
 	const content = batch.messages[0].content as string;
 	assert.match(content, /Tool call denied/);
 	assert.match(content, /user denied/);
@@ -99,13 +115,23 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 		asked++;
 		return "always" as const;
 	};
-	const first = await run(registry, callFor("make build"), permissions, onPermissionRequest);
+	const first = await run(
+		registry,
+		callFor("make build"),
+		permissions,
+		onPermissionRequest,
+	);
 	assert.equal(first.messages[0].content, "ran: make build");
 	assert.equal(asked, 1);
 
 	// Second call with the same tool name should now be auto-allowed without
 	// asking again, via the session-allow rule persisted by "always".
-	const second = await run(registry, callFor("make build"), permissions, onPermissionRequest);
+	const second = await run(
+		registry,
+		callFor("make build"),
+		permissions,
+		onPermissionRequest,
+	);
 	assert.equal(second.messages[0].content, "ran: make build");
 	assert.equal(asked, 1);
 });
@@ -114,10 +140,15 @@ void test("acceptAll mode never invokes the permission handler", async () => {
 	const registry = registryWithBash();
 	const permissions = new PermissionManager({ mode: "acceptAll" });
 	let asked = false;
-	const batch = await run(registry, callFor("make build"), permissions, async () => {
-		asked = true;
-		return "allow";
-	});
+	const batch = await run(
+		registry,
+		callFor("make build"),
+		permissions,
+		async () => {
+			asked = true;
+			return "allow";
+		},
+	);
 	assert.equal(asked, false);
 	assert.equal(batch.messages[0].content, "ran: make build");
 });

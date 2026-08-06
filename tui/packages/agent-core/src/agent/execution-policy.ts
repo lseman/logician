@@ -35,10 +35,7 @@ export type StopPolicyDecision =
  */
 export type AgentStopPolicy = (
 	context: StopPolicyContext,
-) =>
-	| Promise<StopPolicyDecision | undefined>
-	| StopPolicyDecision
-	| undefined;
+) => Promise<StopPolicyDecision | undefined> | StopPolicyDecision | undefined;
 
 export interface ResolvedExecutionPolicy {
 	profile: ExecutionProfile;

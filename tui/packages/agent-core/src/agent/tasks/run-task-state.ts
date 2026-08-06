@@ -4,8 +4,8 @@
 // agent loops without changing the public Tool execution API.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Task } from "./todo-state.ts";
 import type { TaskStatusRecord } from "./task-status-state.ts";
+import type { Task } from "./todo-state.ts";
 
 export interface RunTaskState {
 	tasks: Task[];
@@ -25,8 +25,5 @@ export function currentRunTaskState(): RunTaskState {
 }
 
 export function runWithTaskState<T>(fn: () => Promise<T>): Promise<T> {
-	return storage.run(
-		{ tasks: [], nextTaskId: 1, taskStatus: null },
-		fn,
-	);
+	return storage.run({ tasks: [], nextTaskId: 1, taskStatus: null }, fn);
 }

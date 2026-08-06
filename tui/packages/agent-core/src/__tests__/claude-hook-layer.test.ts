@@ -39,7 +39,7 @@ void test("non-blocking pre-tool guidance survives until the tool result", async
 	const toolCall = {
 		id: "read-1",
 		name: "read_file",
-		arguments: "{\"path\":\"large.log\"}",
+		arguments: '{"path":"large.log"}',
 	};
 
 	const before = await layer.hooks?.beforeToolCall?.({

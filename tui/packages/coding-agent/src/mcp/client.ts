@@ -77,8 +77,8 @@ class StdioMcpClient implements McpClient {
 			env: { ...process.env, ...expandEnvMap(this.config.env || {}) },
 			stdio: "pipe",
 		});
-		this.proc.stdout.on("data", (chunk) => this.handleStdout(chunk));
-		this.proc.stderr.on("data", (chunk) => {
+		this.proc.stdout.on("data", chunk => this.handleStdout(chunk));
+		this.proc.stderr.on("data", chunk => {
 			this.stderr = `${this.stderr}${chunk.toString("utf8")}`.slice(-2000);
 		});
 		this.proc.on("exit", (code, signal) => {

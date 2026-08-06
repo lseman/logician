@@ -3,9 +3,9 @@ import { test } from "node:test";
 import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
 import {
 	EXEC_STREAM_SCHEMA,
+	type ExecBridge,
 	parseExecArgs,
 	runHeadlessExec,
-	type ExecBridge,
 } from "../app/headless-exec.ts";
 
 class MemoryWriter {
@@ -94,14 +94,14 @@ void test("jsonl output is terminal-clean and ends with metadata then done", asy
 	const records = stdout.value
 		.trim()
 		.split("\n")
-		.map((line) => JSON.parse(line));
+		.map(line => JSON.parse(line));
 	assert.deepEqual(
-		records.map((record) => record.type),
+		records.map(record => record.type),
 		["content", "content", "metadata", "done"],
 	);
-	assert.ok(records.every((record) => record.schema === EXEC_STREAM_SCHEMA));
-	assert.ok(records.every((record) => record.schema_version === 1));
-	assert.ok(records.every((record) => record.run_id === "exec_test"));
+	assert.ok(records.every(record => record.schema === EXEC_STREAM_SCHEMA));
+	assert.ok(records.every(record => record.schema_version === 1));
+	assert.ok(records.every(record => record.run_id === "exec_test"));
 	assert.equal(records[2].meta.receipt_kind, "terminal");
 	assert.equal(records[2].meta.visible_final_answer_chars, 11);
 	assert.equal(records[2].meta.context_tokens, 42);
@@ -132,11 +132,11 @@ void test("interactive permission fails closed and still emits one done", async 
 	const records = stdout.value
 		.trim()
 		.split("\n")
-		.map((line) => JSON.parse(line));
+		.map(line => JSON.parse(line));
 	assert.equal(exitCode, 1);
-	assert.equal(records.filter((record) => record.type === "done").length, 1);
+	assert.equal(records.filter(record => record.type === "done").length, 1);
 	assert.deepEqual(
-		records.slice(-2).map((record) => record.type),
+		records.slice(-2).map(record => record.type),
 		["metadata", "done"],
 	);
 	assert.equal(records.at(-2)?.meta.status, "failed");

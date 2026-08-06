@@ -9,8 +9,8 @@ import { BackendError } from "../agent/backend.ts";
 import { OutputGuard } from "../agent/guards/output-guard.ts";
 import { recordTaskStatus } from "../agent/tasks/task-status-state.ts";
 import type { AgentConfig, AgentEvent, Message, Tool } from "../agent/types.ts";
-import { FakeBackend, textResponse } from "./fake-backend.ts";
 import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import { FakeBackend, textResponse } from "./fake-backend.ts";
 
 const noop: Tool = {
 	name: "noop",
@@ -27,7 +27,7 @@ const task_status: Tool = {
 	name: "task_status",
 	description: "test fixture",
 	parameters: { type: "object", properties: {} },
-	execute: async (args) => {
+	execute: async args => {
 		const status = args.status as "done" | "blocked" | "needs_input" | "failed";
 		const summary = typeof args.summary === "string" ? args.summary : "";
 		recordTaskStatus({ status, summary, ts: Date.now() });
@@ -54,8 +54,8 @@ function user(content: string): Message {
 
 void test("runAgentLoop injects steering before the next assistant call", async () => {
 	const backend = new FakeBackend([
-		(messages) => {
-			assert.ok(messages.some((m) => m.role === "user" && m.content === "steer"));
+		messages => {
+			assert.ok(messages.some(m => m.role === "user" && m.content === "steer"));
 			return textResponse("done");
 		},
 	]);
@@ -74,31 +74,33 @@ void test("runAgentLoop injects steering before the next assistant call", async 
 		},
 		() => {},
 	);
-	assert.deepEqual(newMessages.map((m) => `${m.role}:${m.content ?? ""}`), [
-		"user:prompt",
-		"user:steer",
-		"assistant:done",
-	]);
+	assert.deepEqual(
+		newMessages.map(m => `${m.role}:${m.content ?? ""}`),
+		["user:prompt", "user:steer", "assistant:done"],
+	);
 });
 
 void test("typed before_agent_start results augment provider context", async () => {
 	const extensionBus = new ExtensionEventBus();
-	extensionBus.on("before_agent_start", (event) => ({
+	extensionBus.on("before_agent_start", event => ({
 		systemPrompt: `${event.systemPrompt}\n\nretained memory`,
 		messages: [user("extension context")],
 	}));
 	const backend = new FakeBackend([
-		(messages) => {
-			assert.ok(messages.some(
-				(message) =>
-					message.role === "system" &&
-					String(message.content).includes("retained memory"),
-			));
-			assert.ok(messages.some(
-				(message) =>
-					message.role === "user" &&
-					message.content === "extension context",
-			));
+		messages => {
+			assert.ok(
+				messages.some(
+					message =>
+						message.role === "system" &&
+						String(message.content).includes("retained memory"),
+				),
+			);
+			assert.ok(
+				messages.some(
+					message =>
+						message.role === "user" && message.content === "extension context",
+				),
+			);
 			return textResponse("done");
 		},
 	]);
@@ -116,12 +118,14 @@ void test("auto inference selects a preset and injects explicit task state", asy
 		(messages, options) => {
 			assert.equal(options.temperature, 0.2);
 			assert.equal(options.topP, 0.7);
-			assert.ok(messages.some(
-				(message) =>
-					message.role === "system" &&
-					String(message.content).includes("<task_state>") &&
-					String(message.content).includes("phase: orient"),
-			));
+			assert.ok(
+				messages.some(
+					message =>
+						message.role === "system" &&
+						String(message.content).includes("<task_state>") &&
+						String(message.content).includes("phase: orient"),
+				),
+			);
 			return textResponse("Analysis complete.");
 		},
 	]);
@@ -129,15 +133,17 @@ void test("auto inference selects a preset and injects explicit task state", asy
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("Review and diagnose this authentication failure")],
 		{ ...makeConfig({ inferenceMode: "auto" }), backend },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
-	const selection = events.find((event) => event.type === "inference_mode_selected");
+	const selection = events.find(
+		event => event.type === "inference_mode_selected",
+	);
 	assert.ok(selection && selection.type === "inference_mode_selected");
 	assert.equal(selection.effectiveMode, "analytical");
 	assert.equal(selection.phase, "orient");
-	assert.ok(events.some((event) => event.type === "task_state_update"));
+	assert.ok(events.some(event => event.type === "task_state_update"));
 });
 
 void test("provider payload hooks preserve transport fields", async () => {
@@ -179,16 +185,18 @@ void test("runAgentLoop stamps events with monotonic sequence and timestamps", a
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("prompt")],
 		{ ...makeConfig(), backend: new FakeBackend([() => textResponse("done")]) },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.ok(events.length > 0);
 	assert.deepEqual(
-		events.map((event) => event.seq),
+		events.map(event => event.seq),
 		Array.from({ length: events.length }, (_, index) => index + 1),
 	);
-	assert.ok(events.every((event) => typeof event.ts === "number" && event.ts > 0));
+	assert.ok(
+		events.every(event => typeof event.ts === "number" && event.ts > 0),
+	);
 });
 
 void test("runAgentLoop estimates context usage when provider usage is absent", async () => {
@@ -198,26 +206,26 @@ void test("runAgentLoop estimates context usage when provider usage is absent", 
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("a prompt with enough content to consume context")],
 		{ ...makeConfig({ contextWindowTokens: 4096 }), backend },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
-	const update = events.find((event) => event.type === "context_update");
+	const update = events.find(event => event.type === "context_update");
 	assert.ok(update && update.type === "context_update");
 	assert.ok(update.tokens > 0);
 	assert.equal(update.maxTokens, 4096);
 	assert.equal(
-		events.filter((event) => event.type === "context_update").at(-1)
+		events.filter(event => event.type === "context_update").at(-1)
 			?.cachedTokens,
 		null,
 	);
 	assert.equal(
-		events.filter((event) => event.type === "context_update").at(-1)
+		events.filter(event => event.type === "context_update").at(-1)
 			?.promptTokens,
 		null,
 	);
 	assert.equal(
-		events.filter((event) => event.type === "context_update").at(-1)
+		events.filter(event => event.type === "context_update").at(-1)
 			?.completionTokens,
 		null,
 	);
@@ -240,11 +248,11 @@ void test("runAgentLoop propagates provider cache reads through context_update",
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("prompt")],
 		{ ...makeConfig({ contextWindowTokens: 32_768 }), backend },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
-	const updates = events.filter((event) => event.type === "context_update");
+	const updates = events.filter(event => event.type === "context_update");
 	assert.equal(updates.at(-1)?.cachedTokens, 12_400);
 	assert.equal(updates.at(-1)?.promptTokens, 20_000);
 	assert.equal(updates.at(-1)?.completionTokens, 50);
@@ -275,13 +283,13 @@ void test("structured run outcomes take precedence and reset between runs", asyn
 				() => textResponse("waiting"),
 			]),
 		},
-		(event) => {
+		event => {
 			structuredEvents.push(event);
 		},
 	);
 	assert.ok(
 		structuredEvents.some(
-			(event) =>
+			event =>
 				event.type === "run_outcome" &&
 				event.status === "needs_input" &&
 				event.source === "structured",
@@ -293,13 +301,13 @@ void test("structured run outcomes take precedence and reset between runs", asyn
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("another prompt")],
 		{ ...makeConfig(), backend: new FakeBackend([() => textResponse("done")]) },
-		(event) => {
+		event => {
 			nextEvents.push(event);
 		},
 	);
 	assert.ok(
 		nextEvents.some(
-			(event) =>
+			event =>
 				event.type === "run_outcome" &&
 				event.status === "completed" &&
 				event.source === "heuristic",
@@ -310,14 +318,14 @@ void test("structured run outcomes take precedence and reset between runs", asyn
 void test("concurrent loops isolate structured task status", async () => {
 	let arrivals = 0;
 	let release!: () => void;
-	const bothRecorded = new Promise<void>((resolve) => {
+	const bothRecorded = new Promise<void>(resolve => {
 		release = resolve;
 	});
 	const makeStatusTool = (): Tool => ({
 		name: "task_status",
 		description: "concurrent status fixture",
 		parameters: { type: "object", properties: {} },
-		execute: async (args) => {
+		execute: async args => {
 			recordTaskStatus({
 				status: args.status as "done" | "blocked",
 				summary: String(args.summary),
@@ -345,20 +353,22 @@ void test("concurrent loops isolate structured task status", async () => {
 				backend: new FakeBackend([
 					() => ({
 						content: "",
-						toolCalls: [{
-							id: `status-${status}`,
-							name: "task_status",
-							arguments: JSON.stringify({ status, summary: status }),
-						}],
+						toolCalls: [
+							{
+								id: `status-${status}`,
+								name: "task_status",
+								arguments: JSON.stringify({ status, summary: status }),
+							},
+						],
 						stopReason: "stop",
 					}),
 				]),
 			},
-			(event) => {
+			event => {
 				events.push(event);
 			},
 		);
-		return events.find((event) => event.type === "run_outcome");
+		return events.find(event => event.type === "run_outcome");
 	};
 
 	const [done, blocked] = await Promise.all([run("done"), run("blocked")]);
@@ -385,16 +395,19 @@ void test("provider retry stays within one iteration and ends only after success
 			maxIterations: 1,
 			outputGuard: new OutputGuard({ retryBaseDelayMs: 0 }),
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.equal(backend.calls, 2);
 	assert.equal(messages.at(-1)?.content, "recovered");
-	assert.equal(events.filter((event) => event.type === "turn_start").length, 1);
-	const retryEnds = events.filter((event) => event.type === "auto_retry_end");
-	assert.deepEqual(retryEnds.map((event) => event.success), [true]);
-	assert.equal(events.filter((event) => event.type === "error").length, 0);
+	assert.equal(events.filter(event => event.type === "turn_start").length, 1);
+	const retryEnds = events.filter(event => event.type === "auto_retry_end");
+	assert.deepEqual(
+		retryEnds.map(event => event.success),
+		[true],
+	);
+	assert.equal(events.filter(event => event.type === "error").length, 0);
 });
 
 void test("context-full retry compacts and publishes the live transcript", async () => {
@@ -406,7 +419,7 @@ void test("context-full retry compacts and publishes the live transcript", async
 		() => {
 			throw new BackendError({ category: "context_full", message: "too long" });
 		},
-		(messages) => {
+		messages => {
 			assert.ok(messages.length < history.length + 2);
 			return textResponse("recovered");
 		},
@@ -418,14 +431,18 @@ void test("context-full retry compacts and publishes the live transcript", async
 			...makeConfig({ contextWindowTokens: 4096 }),
 			backend,
 			outputGuard: new OutputGuard(),
-			onContextCompacted: (messages) => {
+			onContextCompacted: messages => {
 				compacted = messages;
 			},
 		},
 		() => {},
 	);
 	assert.ok(compacted);
-	assert.ok(compacted.some((message) => String(message.content).includes("context-compaction")));
+	assert.ok(
+		compacted.some(message =>
+			String(message.content).includes("context-compaction"),
+		),
+	);
 	assert.equal(compacted.at(-1)?.content, "recovered");
 });
 
@@ -451,14 +468,14 @@ void test("aborting retry backoff prevents another provider request", async () =
 			signal: controller.signal,
 			outputGuard: new OutputGuard(),
 		},
-		(event) => {
+		event => {
 			events.push(event);
 			if (event.type === "auto_retry_start") controller.abort();
 		},
 	);
 	assert.equal(backend.calls, 1);
 	assert.equal(
-		events.some((event) => event.type === "auto_retry_end"),
+		events.some(event => event.type === "auto_retry_end"),
 		false,
 	);
 });
@@ -481,19 +498,19 @@ void test("aborting an in-flight provider request does not emit a fake retry", a
 			signal: controller.signal,
 			outputGuard: new OutputGuard(),
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.equal(backend.calls, 1);
 	assert.equal(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "auto_retry_start" || event.type === "auto_retry_end",
 		),
 		false,
 	);
-	const outcome = events.find((event) => event.type === "run_outcome");
+	const outcome = events.find(event => event.type === "run_outcome");
 	assert.ok(outcome?.type === "run_outcome");
 	assert.equal(outcome.status, "cancelled");
 });
@@ -517,13 +534,13 @@ void test("steering interruption suppresses provider errors and retries", async 
 			signal: controller.signal,
 			outputGuard: new OutputGuard(),
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.equal(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "error" ||
 				event.type === "auto_retry_start" ||
 				event.type === "auto_retry_end",
@@ -532,7 +549,7 @@ void test("steering interruption suppresses provider errors and retries", async 
 	);
 	assert.ok(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "run_outcome" &&
 				event.status === "cancelled" &&
 				event.summary === STEERING_INTERRUPT_SUMMARY,
@@ -543,8 +560,10 @@ void test("steering interruption suppresses provider errors and retries", async 
 void test("runAgentLoop processes follow-up messages after a stop", async () => {
 	const backend = new FakeBackend([
 		() => textResponse("first"),
-		(messages) => {
-			assert.ok(messages.some((m) => m.role === "user" && m.content === "follow"));
+		messages => {
+			assert.ok(
+				messages.some(m => m.role === "user" && m.content === "follow"),
+			);
 			return textResponse("second");
 		},
 	]);
@@ -562,12 +581,10 @@ void test("runAgentLoop processes follow-up messages after a stop", async () => 
 		},
 		() => {},
 	);
-	assert.deepEqual(newMessages.map((m) => `${m.role}:${m.content ?? ""}`), [
-		"user:prompt",
-		"assistant:first",
-		"user:follow",
-		"assistant:second",
-	]);
+	assert.deepEqual(
+		newMessages.map(m => `${m.role}:${m.content ?? ""}`),
+		["user:prompt", "assistant:first", "user:follow", "assistant:second"],
+	);
 });
 
 void test("runAgentLoop executes a tool batch and returns ordered tool results", async () => {
@@ -575,7 +592,7 @@ void test("runAgentLoop executes a tool batch and returns ordered tool results",
 		name: "echo",
 		description: "echoes",
 		parameters: { type: "object", properties: { text: { type: "string" } } },
-		execute: async (args) => `echo:${String(args.text)}`,
+		execute: async args => `echo:${String(args.text)}`,
 	};
 	const backend = new FakeBackend([
 		() => ({
@@ -595,7 +612,9 @@ void test("runAgentLoop executes a tool batch and returns ordered tool results",
 		() => {},
 	);
 	assert.deepEqual(
-		newMessages.filter((m) => m.role === "tool").map((m) => `${m.tool_call_id}:${m.content ?? ""}`),
+		newMessages
+			.filter(m => m.role === "tool")
+			.map(m => `${m.tool_call_id}:${m.content ?? ""}`),
 		["a:echo:one", "b:echo:two"],
 	);
 });
@@ -606,7 +625,7 @@ void test("runAgentLoop promotes textual XML tool calls and hides their markup",
 		name: "grep",
 		description: "search",
 		parameters: { type: "object", properties: {} },
-		execute: async (args) => {
+		execute: async args => {
 			received = args;
 			return "match";
 		},
@@ -640,7 +659,7 @@ void test("runAgentLoop promotes textual XML tool calls and hides their markup",
 		limit: 50,
 	});
 	const promoted = messages.find(
-		(message) => message.role === "assistant" && message.tool_calls?.length,
+		message => message.role === "assistant" && message.tool_calls?.length,
 	);
 	assert.equal(promoted?.content, "Searching now.");
 	assert.doesNotMatch(String(promoted?.content), /tool_call|function=grep/);
@@ -652,9 +671,9 @@ void test("runAgentLoop executes independent tool calls in parallel and preserve
 		name: "wait",
 		description: "waits",
 		parameters: { type: "object", properties: {} },
-		execute: async (args) => {
+		execute: async args => {
 			const name = String(args.name);
-			await new Promise((resolve) => setTimeout(resolve, Number(args.delay)));
+			await new Promise(resolve => setTimeout(resolve, Number(args.delay)));
 			completions.push(name);
 			return name;
 		},
@@ -663,8 +682,16 @@ void test("runAgentLoop executes independent tool calls in parallel and preserve
 		() => ({
 			content: "",
 			toolCalls: [
-				{ id: "slow", name: "wait", arguments: JSON.stringify({ name: "slow", delay: 20 }) },
-				{ id: "fast", name: "wait", arguments: JSON.stringify({ name: "fast", delay: 0 }) },
+				{
+					id: "slow",
+					name: "wait",
+					arguments: JSON.stringify({ name: "slow", delay: 20 }),
+				},
+				{
+					id: "fast",
+					name: "wait",
+					arguments: JSON.stringify({ name: "fast", delay: 0 }),
+				},
 			],
 			stopReason: "stop",
 		}),
@@ -677,13 +704,16 @@ void test("runAgentLoop executes independent tool calls in parallel and preserve
 		() => {},
 	);
 	assert.deepEqual(completions, ["fast", "slow"]);
-	assert.deepEqual(messages.filter((m) => m.role === "tool").map((m) => m.tool_call_id), ["slow", "fast"]);
+	assert.deepEqual(
+		messages.filter(m => m.role === "tool").map(m => m.tool_call_id),
+		["slow", "fast"],
+	);
 });
 
 void test("sequential tools are barriers without disabling parallel stages", async () => {
 	const events: string[] = [];
 	let releaseReads!: () => void;
-	const readsDone = new Promise<void>((resolve) => {
+	const readsDone = new Promise<void>(resolve => {
 		releaseReads = resolve;
 	});
 	let completedReads = 0;
@@ -692,7 +722,7 @@ void test("sequential tools are barriers without disabling parallel stages", asy
 		description: "parallel read",
 		parameters: { type: "object", properties: {} },
 		executionMode: "parallel",
-		execute: async (args) => {
+		execute: async args => {
 			events.push(`start:${String(args.id)}`);
 			completedReads++;
 			if (completedReads === 2) releaseReads();
@@ -715,10 +745,10 @@ void test("sequential tools are barriers without disabling parallel stages", asy
 		() => ({
 			content: "",
 			toolCalls: [
-				{ id: "a", name: "read", arguments: "{\"id\":\"a\"}" },
-				{ id: "b", name: "read", arguments: "{\"id\":\"b\"}" },
+				{ id: "a", name: "read", arguments: '{"id":"a"}' },
+				{ id: "b", name: "read", arguments: '{"id":"b"}' },
 				{ id: "w", name: "write", arguments: "{}" },
-				{ id: "c", name: "read", arguments: "{\"id\":\"c\"}" },
+				{ id: "c", name: "read", arguments: '{"id":"c"}' },
 			],
 			stopReason: "stop",
 		}),
@@ -727,14 +757,19 @@ void test("sequential tools are barriers without disabling parallel stages", asy
 	const messages = await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [read, write] },
 		[user("prompt")],
-		{ ...makeConfig({ tools: [read, write], toolExecution: "parallel" }), backend },
+		{
+			...makeConfig({ tools: [read, write], toolExecution: "parallel" }),
+			backend,
+		},
 		() => {},
 	);
 	assert.ok(events.indexOf("start:b") < events.indexOf("end:a"));
 	assert.ok(events.indexOf("write") > events.indexOf("end:a"));
 	assert.ok(events.indexOf("start:c") > events.indexOf("write"));
 	assert.deepEqual(
-		messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id),
+		messages
+			.filter(message => message.role === "tool")
+			.map(message => message.tool_call_id),
 		["a", "b", "w", "c"],
 	);
 });
@@ -774,7 +809,7 @@ void test("cancelled sequential batches produce a result for every tool call", a
 		() => {},
 	);
 
-	const results = messages.filter((message) => message.role === "tool");
+	const results = messages.filter(message => message.role === "tool");
 	assert.equal(results.length, 3);
 	assert.deepEqual(calls, ["one"]);
 	assert.match(String(results[1].content), /cancelled/);
@@ -787,7 +822,7 @@ void test("parallel tool batches complete deterministic preflight before executi
 		name: "planned",
 		description: "planned tool",
 		parameters: { type: "object", properties: {} },
-		execute: async (args) => {
+		execute: async args => {
 			order.push(`execute:${String(args.id)}`);
 			return "ok";
 		},
@@ -819,7 +854,10 @@ void test("parallel tool batches complete deterministic preflight before executi
 		() => {},
 	);
 	assert.deepEqual(order.slice(0, 2), ["preflight:1", "preflight:2"]);
-	assert.deepEqual(new Set(order.slice(2)), new Set(["execute:1", "execute:2"]));
+	assert.deepEqual(
+		new Set(order.slice(2)),
+		new Set(["execute:1", "execute:2"]),
+	);
 });
 
 void test("tool progress and thrown failures produce accurate lifecycle events", async () => {
@@ -838,7 +876,11 @@ void test("tool progress and thrown failures produce accurate lifecycle events",
 			content: "",
 			toolCalls: [
 				{ id: "ok", name: "progress", arguments: "{}" },
-				{ id: "bad", name: "progress", arguments: JSON.stringify({ fail: true }) },
+				{
+					id: "bad",
+					name: "progress",
+					arguments: JSON.stringify({ fail: true }),
+				},
 			],
 			stopReason: "stop",
 		}),
@@ -849,14 +891,17 @@ void test("tool progress and thrown failures produce accurate lifecycle events",
 		{ systemPrompt: "test", messages: [], tools: [tool] },
 		[user("prompt")],
 		{ ...makeConfig({ tools: [tool], toolExecution: "parallel" }), backend },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
-	assert.equal(events.filter((event) => event.type === "tool_execution_update").length, 2);
+	assert.equal(
+		events.filter(event => event.type === "tool_execution_update").length,
+		2,
+	);
 	assert.ok(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "tool_call_end" &&
 				event.toolCallId === "bad" &&
 				event.isError === true,
@@ -879,7 +924,7 @@ void test("runAgentLoop does not execute tool calls from a length-truncated resp
 	const backend = new FakeBackend([
 		() => ({
 			content: "",
-			toolCalls: [{ id: "cut", name: "write", arguments: "{\"path\":\"partial" }],
+			toolCalls: [{ id: "cut", name: "write", arguments: '{"path":"partial' }],
 			stopReason: "length",
 		}),
 		() => textResponse("done"),
@@ -901,7 +946,10 @@ void test("runAgentLoop does not execute tool calls from a length-truncated resp
 	);
 	assert.equal(executions, 0);
 	assert.equal(preflights, 0);
-	assert.match(String(messages.find((m) => m.role === "tool")?.content), /not executed.*truncated/i);
+	assert.match(
+		String(messages.find(m => m.role === "tool")?.content),
+		/not executed.*truncated/i,
+	);
 });
 
 void test("async internal tool hooks fall through to user hooks", async () => {
@@ -947,19 +995,26 @@ void test("async internal tool hooks fall through to user hooks", async () => {
 void test("runAgentLoop reports provider errors as terminal new messages", async () => {
 	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
-		() => ({ content: null, toolCalls: [], stopReason: "error", errorMessage: "boom" }),
+		() => ({
+			content: null,
+			toolCalls: [],
+			stopReason: "error",
+			errorMessage: "boom",
+		}),
 	]);
 	const newMessages = await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("prompt")],
 		{ ...makeConfig(), backend },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.equal(newMessages.at(-1)?.role, "assistant");
-	assert.ok(events.some((event) => event.type === "error" && event.message === "boom"));
-	assert.ok(events.some((event) => event.type === "agent_end"));
+	assert.ok(
+		events.some(event => event.type === "error" && event.message === "boom"),
+	);
+	assert.ok(events.some(event => event.type === "agent_end"));
 });
 
 void test("runAgentLoop stops before provider call when aborted", async () => {
@@ -971,13 +1026,20 @@ void test("runAgentLoop stops before provider call when aborted", async () => {
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("prompt")],
 		{ ...makeConfig(), backend, signal: controller.signal },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.equal(backend.calls, 0);
-	assert.deepEqual(newMessages.map((m) => `${m.role}:${m.content ?? ""}`), ["user:prompt"]);
-	assert.ok(events.some((event) => event.type === "error" && event.message.includes("aborted")));
+	assert.deepEqual(
+		newMessages.map(m => `${m.role}:${m.content ?? ""}`),
+		["user:prompt"],
+	);
+	assert.ok(
+		events.some(
+			event => event.type === "error" && event.message.includes("aborted"),
+		),
+	);
 });
 
 void test("continuation does not turn a conversational reply into hidden extra turns", async () => {
@@ -998,10 +1060,10 @@ void test("continuation does not turn a conversational reply into hidden extra t
 void test("continuation still nudges an explicitly unfinished response", async () => {
 	const backend = new FakeBackend([
 		() => textResponse("I still need to check the test output."),
-		(messages) => {
+		messages => {
 			assert.ok(
 				messages.some(
-					(message) =>
+					message =>
 						message.role === "user" &&
 						String(message.content).includes("Continue with the next step"),
 				),
@@ -1021,10 +1083,11 @@ void test("continuation still nudges an explicitly unfinished response", async (
 
 void test("minimal profile stops naturally without embedded completion policies", async () => {
 	const backend = new FakeBackend([
-		(messages) => {
+		messages => {
 			assert.equal(
-				messages.some((message) =>
-					String(message.content).includes("acceptance-report")),
+				messages.some(message =>
+					String(message.content).includes("acceptance-report"),
+				),
 				false,
 			);
 			return textResponse("I still need to check the test output.");
@@ -1043,16 +1106,19 @@ void test("minimal profile stops naturally without embedded completion policies"
 			}),
 			backend,
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 
 	assert.equal(backend.calls, 1);
-	assert.equal(messages.at(-1)?.content, "I still need to check the test output.");
+	assert.equal(
+		messages.at(-1)?.content,
+		"I still need to check the test output.",
+	);
 	assert.ok(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "run_outcome" &&
 				event.status === "completed" &&
 				event.source === "runtime",
@@ -1060,7 +1126,7 @@ void test("minimal profile stops naturally without embedded completion policies"
 	);
 	assert.equal(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "reflection_start" ||
 				event.type === "acceptance_complete",
 		),
@@ -1071,12 +1137,11 @@ void test("minimal profile stops naturally without embedded completion policies"
 void test("external stop policy can continue the minimal mechanism", async () => {
 	const backend = new FakeBackend([
 		() => textResponse("first answer"),
-		(messages) => {
+		messages => {
 			assert.ok(
 				messages.some(
-					(message) =>
-						message.role === "user" &&
-						message.content === "policy follow-up",
+					message =>
+						message.role === "user" && message.content === "policy follow-up",
 				),
 			);
 			return textResponse("second answer");
@@ -1125,14 +1190,14 @@ void test("external stop policy can return a structured minimal outcome", async 
 				}),
 			],
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 
 	assert.ok(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "run_outcome" &&
 				event.status === "blocked" &&
 				event.summary === "Repository access is required." &&
@@ -1143,26 +1208,31 @@ void test("external stop policy can return a structured minimal outcome", async 
 
 void test("continuation pauses when the agent ends in a question", async () => {
 	const backend = new FakeBackend([
-		() => textResponse("I need to inspect one of these environments. Which one should I use?"),
+		() =>
+			textResponse(
+				"I need to inspect one of these environments. Which one should I use?",
+			),
 	]);
 	const events: AgentEvent[] = [];
 	const messages = await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("diagnose the issue")],
 		{ ...makeConfig({ continuationEnabled: true }), backend },
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 
 	assert.equal(backend.calls, 1);
 	assert.equal(messages.at(-1)?.role, "assistant");
-	assert.ok(events.some(
-		(event) =>
-			event.type === "run_outcome" &&
-			event.status === "needs_input" &&
-			event.source === "heuristic",
-	));
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "run_outcome" &&
+				event.status === "needs_input" &&
+				event.source === "heuristic",
+		),
+	);
 });
 
 void test("question after tool work beats the structured-conclusion nudge", async () => {
@@ -1172,7 +1242,8 @@ void test("question after tool work beats the structured-conclusion nudge", asyn
 			toolCalls: [{ id: "work", name: "noop", arguments: "{}" }],
 			stopReason: "stop",
 		}),
-		() => textResponse("The repository has two test suites. Which should I run?"),
+		() =>
+			textResponse("The repository has two test suites. Which should I run?"),
 	]);
 	const events: AgentEvent[] = [];
 	await runAgentLoop(
@@ -1185,15 +1256,17 @@ void test("question after tool work beats the structured-conclusion nudge", asyn
 			}),
 			backend,
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 
 	assert.equal(backend.calls, 2);
-	assert.ok(events.some(
-		(event) => event.type === "run_outcome" && event.status === "needs_input",
-	));
+	assert.ok(
+		events.some(
+			event => event.type === "run_outcome" && event.status === "needs_input",
+		),
+	);
 });
 
 void test("continuation requires a structured conclusion after tool work", async () => {
@@ -1203,14 +1276,14 @@ void test("continuation requires a structured conclusion after tool work", async
 			toolCalls: [{ id: "work", name: "noop", arguments: "{}" }],
 			stopReason: "stop",
 		}),
-		(messages) => {
-			assert.ok(messages.some((message) => message.role === "tool"));
+		messages => {
+			assert.ok(messages.some(message => message.role === "tool"));
 			return textResponse("I changed the file and the result looks good.");
 		},
-		(messages) => {
+		messages => {
 			assert.ok(
 				messages.some(
-					(message) =>
+					message =>
 						message.role === "user" &&
 						String(message.content).includes("call task_status"),
 				),
@@ -1245,7 +1318,7 @@ void test("continuation requires a structured conclusion after tool work", async
 			}),
 			backend,
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
@@ -1253,7 +1326,7 @@ void test("continuation requires a structured conclusion after tool work", async
 	assert.equal(backend.calls, 3);
 	assert.ok(
 		events.some(
-			(event) =>
+			event =>
 				event.type === "run_outcome" &&
 				event.status === "completed" &&
 				event.source === "structured",
@@ -1264,21 +1337,22 @@ void test("continuation requires a structured conclusion after tool work", async
 void test("reflection feedback re-enters the real provider loop", async () => {
 	const backend = new FakeBackend([
 		() => textResponse("I implemented the first part."),
-		() => textResponse(
-			"```reflection-report\n" +
-				JSON.stringify({
-					assessment: "incomplete",
-					reasoning: "Verification is missing.",
-					issues: ["Tests were not run"],
-					needsMoreWork: true,
-					suggestedSteps: ["Run tests"],
-				}) +
-				"\n```",
-		),
-		(messages) => {
+		() =>
+			textResponse(
+				"```reflection-report\n" +
+					JSON.stringify({
+						assessment: "incomplete",
+						reasoning: "Verification is missing.",
+						issues: ["Tests were not run"],
+						needsMoreWork: true,
+						suggestedSteps: ["Run tests"],
+					}) +
+					"\n```",
+			),
+		messages => {
 			assert.ok(
 				messages.some(
-					(message) =>
+					message =>
 						message.role === "user" &&
 						String(message.content).includes("Tests were not run"),
 				),
@@ -1301,8 +1375,9 @@ void test("reflection feedback re-enters the real provider loop", async () => {
 	assert.equal(backend.calls, 3);
 	assert.equal(messages.at(-1)?.content, "Task complete.");
 	assert.equal(
-		messages.some((message) =>
-			String(message.content).includes("reflection-report")),
+		messages.some(message =>
+			String(message.content).includes("reflection-report"),
+		),
 		false,
 	);
 });
@@ -1310,11 +1385,11 @@ void test("reflection feedback re-enters the real provider loop", async () => {
 void test("malformed reflection fails closed and re-enters the provider loop", async () => {
 	const backend = new FakeBackend([
 		() => textResponse("I implemented the first part."),
-		() => textResponse("```reflection-report\n{\"assessment\":\"complete\"}\n```"),
-		(messages) => {
+		() => textResponse('```reflection-report\n{"assessment":"complete"}\n```'),
+		messages => {
 			assert.ok(
 				messages.some(
-					(message) =>
+					message =>
 						message.role === "user" &&
 						String(message.content).includes(
 							"Reflection output could not be validated",
@@ -1346,21 +1421,23 @@ void test("failed acceptance gets a bounded corrective provider turn", async () 
 		"Task complete.",
 		"```acceptance-report",
 		JSON.stringify({
-			criteriaSatisfied: [{
-				id: "criterion-1",
-				status: "satisfied",
-				evidence: "verified",
-			}],
+			criteriaSatisfied: [
+				{
+					id: "criterion-1",
+					status: "satisfied",
+					evidence: "verified",
+				},
+			],
 			residualRisks: [],
 		}),
 		"```",
 	].join("\n");
 	const backend = new FakeBackend([
 		() => textResponse("Task complete, but no report."),
-		(messages) => {
+		messages => {
 			assert.ok(
 				messages.some(
-					(message) =>
+					message =>
 						message.role === "user" &&
 						String(message.content).includes("Acceptance validation failed"),
 				),
@@ -1381,19 +1458,20 @@ void test("failed acceptance gets a bounded corrective provider turn", async () 
 				maxFinalizationTurns: 1,
 			},
 		},
-		(event) => {
+		event => {
 			events.push(event);
 		},
 	);
 	assert.equal(backend.calls, 2);
 	assert.ok(
 		events.some(
-			(event) => event.type === "acceptance_complete" && event.status === "passed",
+			event =>
+				event.type === "acceptance_complete" && event.status === "passed",
 		),
 	);
 	assert.ok(
 		events.some(
-			(event) => event.type === "run_outcome" && event.status === "completed",
+			event => event.type === "run_outcome" && event.status === "completed",
 		),
 	);
 });
@@ -1407,7 +1485,8 @@ void test("a tool call with unparseable JSON arguments is sanitized before it re
 					id: "call1",
 					name: "write_file",
 					// Truncated mid-argument, as happens when stopReason is "length".
-					arguments: "{\"path\":\"big.txt\",\"content\":\"start of a huge file that got cut off",
+					arguments:
+						'{"path":"big.txt","content":"start of a huge file that got cut off',
 				},
 			],
 			stopReason: "length",
@@ -1425,13 +1504,18 @@ void test("a tool call with unparseable JSON arguments is sanitized before it re
 	// with the tool-result below), but its arguments must always be valid
 	// JSON so the backend never fails to re-parse it on a later turn.
 	const persistedCall = newMessages
-		.find((m) => m.role === "assistant" && m.tool_calls?.some((tc) => tc.id === "call1"))
-		?.tool_calls?.find((tc) => tc.id === "call1");
+		.find(
+			m =>
+				m.role === "assistant" && m.tool_calls?.some(tc => tc.id === "call1"),
+		)
+		?.tool_calls?.find(tc => tc.id === "call1");
 	assert.ok(persistedCall, "tool_call must still be present for id pairing");
-	assert.doesNotThrow(() => JSON.parse(persistedCall!.arguments));
+	assert.doesNotThrow(() => JSON.parse(persistedCall?.arguments));
 
 	// The executor's own truncation handling still produces the paired
 	// "not executed" tool-result using the real call id.
-	const toolResult = newMessages.find((m) => m.role === "tool" && m.tool_call_id === "call1");
+	const toolResult = newMessages.find(
+		m => m.role === "tool" && m.tool_call_id === "call1",
+	);
 	assert.match(String(toolResult?.content), /not executed.*truncated/i);
 });

@@ -13,48 +13,46 @@
  * - JSONL state persistence
  */
 
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-	ExtensionEventType,
-	RegisteredTool,
-	RegisteredCommand,
 	ExtensionToolResult,
-	ToolExecutionContext,
 	ExtensionUI,
-	ExtensionEventHandler,
 } from "./types.ts";
-import { execFile as execFileCb } from "node:child_process";
-import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { createServer, type Server, type ServerResponse } from "node:http";
-import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import { randomBytes } from "node:crypto";
-import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 
-import {
-	runHook,
-	steerMessageFor,
-	appendHookLogEntryIfConfigured,
-	type HookPayload,
-	type SessionSnapshot,
-} from "./hooks.ts";
-import {
-	parseJsonlEntry,
-	isAutoresearchRunEntry,
-	extractAutoresearchSessionName,
-	reconstructJsonlState,
-} from "./jsonl.ts";
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	autoresearchSummaryPathsFor,
 	buildAutoresearchCompactionSummary,
 } from "./compaction.ts";
-import { sessionFilePath, sessionFileCandidates, ensureParentDir, AUTO_DIR } from "./paths.ts";
+import {
+	appendHookLogEntryIfConfigured,
+	type HookPayload,
+	runHook,
+	type SessionSnapshot,
+	steerMessageFor,
+} from "./hooks.ts";
+import {
+	extractAutoresearchSessionName,
+	isAutoresearchRunEntry,
+	parseJsonlEntry,
+	reconstructJsonlState,
+} from "./jsonl.ts";
+import {
+	AUTO_DIR,
+	ensureParentDir,
+	sessionFileCandidates,
+	sessionFilePath,
+} from "./paths.ts";
 
 // ---------------------------------------------------------------------------
 // Experiment output limits (sent to LLM — keep small to save context)
@@ -116,7 +114,11 @@ interface ExperimentState {
 // Experiment state helpers
 // ---------------------------------------------------------------------------
 
-function isBetter(current: number, best: number, direction: "lower" | "higher"): boolean {
+function isBetter(
+	current: number,
+	best: number,
+	direction: "lower" | "higher",
+): boolean {
 	return direction === "lower" ? current < best : current > best;
 }
 
@@ -134,12 +136,12 @@ function computeConfidence(
 	segment: number,
 	direction: "lower" | "higher",
 ): number | null {
-	const cur = results.filter((r) => r.segment === segment && r.metric > 0);
+	const cur = results.filter(r => r.segment === segment && r.metric > 0);
 	if (cur.length < 3) return null;
 
-	const values = cur.map((r) => r.metric);
+	const values = cur.map(r => r.metric);
 	const median = sortedMedian(values);
-	const deviations = values.map((v) => Math.abs(v - median));
+	const deviations = values.map(v => Math.abs(v - median));
 	const mad = sortedMedian(deviations);
 
 	if (mad === 0) return null;
@@ -167,11 +169,17 @@ function computeConfidence(
 	return delta / mad;
 }
 
-function currentResults(results: ExperimentResult[], segment: number): ExperimentResult[] {
-	return results.filter((r) => r.segment === segment);
+function currentResults(
+	results: ExperimentResult[],
+	segment: number,
+): ExperimentResult[] {
+	return results.filter(r => r.segment === segment);
 }
 
-function findBaselineMetric(results: ExperimentResult[], segment: number): number | null {
+function findBaselineMetric(
+	results: ExperimentResult[],
+	segment: number,
+): number | null {
 	const cur = currentResults(results, segment);
 	return cur.length > 0 ? cur[0].metric : null;
 }
@@ -182,27 +190,26 @@ function findBestMetric(
 	direction: "lower" | "higher",
 ): number | null {
 	const kept = currentResults(results, segment)
-		.filter((r) => r.status === "keep")
-		.map((r) => r.metric);
+		.filter(r => r.status === "keep")
+		.map(r => r.metric);
 	if (kept.length === 0) return null;
 	return direction === "lower" ? Math.min(...kept) : Math.max(...kept);
 }
 
-function findBaselineSecondary(
+function _findBaselineSecondary(
 	results: ExperimentResult[],
 	segment: number,
 	knownMetrics?: MetricDef[],
 ): Record<string, number> {
 	const cur = currentResults(results, segment);
-	const base: Record<string, number> = cur.length > 0
-		? { ...(cur[0].metrics ?? {}) }
-		: {};
+	const base: Record<string, number> =
+		cur.length > 0 ? { ...(cur[0].metrics ?? {}) } : {};
 
 	if (knownMetrics) {
 		for (const sm of knownMetrics) {
 			if (base[sm.name] === undefined) {
 				for (const r of cur) {
-					const val = (r.metrics ?? {})[sm.name];
+					const val = r.metrics?.[sm.name];
 					if (val !== undefined) {
 						base[sm.name] = val;
 						break;
@@ -218,15 +225,15 @@ function findBaselineSecondary(
 function cloneExperimentState(state: ExperimentState): ExperimentState {
 	return {
 		...state,
-		results: state.results.map((result) => ({
+		results: state.results.map(result => ({
 			...result,
 			metrics: { ...result.metrics },
 		})),
-		secondaryMetrics: state.secondaryMetrics.map((metric) => ({ ...metric })),
+		secondaryMetrics: state.secondaryMetrics.map(metric => ({ ...metric })),
 	};
 }
 
-function clamp(value: number, min: number, max: number): number {
+function _clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
 }
 
@@ -239,7 +246,7 @@ function formatNum(value: number | null, unit: string): string {
 	return value.toFixed(2) + u;
 }
 
-function formatElapsed(ms: number): string {
+function _formatElapsed(ms: number): string {
 	const totalSec = Math.floor(ms / 1000);
 	const m = Math.floor(totalSec / 60);
 	const s = totalSec % 60;
@@ -259,7 +266,16 @@ function killTree(pid: number): void {
 	}
 }
 
-function truncateTail(output: string, maxLines: number, maxBytes: number): { content: string; truncated: boolean; outputLines: number; totalLines: number } {
+function truncateTail(
+	output: string,
+	maxLines: number,
+	maxBytes: number,
+): {
+	content: string;
+	truncated: boolean;
+	outputLines: number;
+	totalLines: number;
+} {
 	const lines = output.split("\n");
 	const totalLines = lines.length;
 	let truncated = false;
@@ -274,7 +290,12 @@ function truncateTail(output: string, maxLines: number, maxBytes: number): { con
 	const content = lines.join("\n");
 	if (Buffer.byteLength(content) > maxBytes) {
 		const limited = output.slice(-maxBytes);
-		return { content: limited, truncated: true, outputLines: Math.min(maxLines, output.split("\n").length), totalLines };
+		return {
+			content: limited,
+			truncated: true,
+			outputLines: Math.min(maxLines, output.split("\n").length),
+			totalLines,
+		};
 	}
 
 	return { content, truncated, outputLines: lines.length, totalLines };
@@ -311,7 +332,7 @@ function readConfig(cwd: string): AutoresearchConfig {
 
 function readMaxExperiments(cwd: string): number | null {
 	const config = readConfig(cwd);
-	return (typeof config.maxIterations === "number" && config.maxIterations > 0)
+	return typeof config.maxIterations === "number" && config.maxIterations > 0
 		? Math.floor(config.maxIterations)
 		: null;
 }
@@ -348,7 +369,10 @@ const DENIED_METRIC_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 
 function parseMetricLines(output: string): Map<string, number> {
 	const metrics = new Map<string, number>();
-	const regex = new RegExp(`^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`, "gm");
+	const regex = new RegExp(
+		`^${METRIC_LINE_PREFIX}\\s+([\\w.µ]+)=(\\S+)\\s*$`,
+		"gm",
+	);
 	let match;
 	while ((match = regex.exec(output)) !== null) {
 		const name = match[1];
@@ -419,7 +443,9 @@ let cachedPackageRoot: string | null = null;
 
 function packageRoot(): string {
 	if (cachedPackageRoot) return cachedPackageRoot;
-	const extensionDir = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url)));
+	const extensionDir = fs.realpathSync(
+		path.dirname(fileURLToPath(import.meta.url)),
+	);
 	cachedPackageRoot = path.resolve(extensionDir, "..");
 	return cachedPackageRoot;
 }
@@ -437,23 +463,31 @@ function logoDataUrl(): string {
 let dashboardServer: Server | null = null;
 let dashboardServerPort: number | null = null;
 let dashboardServerWorkDir: string | null = null;
-let dashboardServerHtmlPath: string | null = null;
+let _dashboardServerHtmlPath: string | null = null;
 const dashboardSSEClients = new Set<ServerResponse>();
 
 function stopDashboardServer(): void {
 	for (const client of dashboardSSEClients) {
-		try { client.end(); } catch { /* ignore */ }
+		try {
+			client.end();
+		} catch {
+			/* ignore */
+		}
 	}
 	dashboardSSEClients.clear();
 
 	if (dashboardServer) {
-		try { dashboardServer.close(); } catch { /* ignore */ }
+		try {
+			dashboardServer.close();
+		} catch {
+			/* ignore */
+		}
 	}
 
 	dashboardServer = null;
 	dashboardServerPort = null;
 	dashboardServerWorkDir = null;
-	dashboardServerHtmlPath = null;
+	_dashboardServerHtmlPath = null;
 }
 
 function escapeHtml(text: string): string {
@@ -461,15 +495,25 @@ function escapeHtml(text: string): string {
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
-		.replace(/\"/g, "&quot;")
+		.replace(/"/g, "&quot;")
 		.replace(/'/g, "&#39;");
 }
 
 function openInBrowser(url: string): void {
-	const child = process.platform === "win32"
-		? spawn("cmd", ["/c", "start", "", url], { detached: true, shell: true, stdio: "ignore" })
-		: spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" });
-	child.on("error", () => { /* ignore */ });
+	const child =
+		process.platform === "win32"
+			? spawn("cmd", ["/c", "start", "", url], {
+					detached: true,
+					shell: true,
+					stdio: "ignore",
+				})
+			: spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], {
+					detached: true,
+					stdio: "ignore",
+				});
+	child.on("error", () => {
+		/* ignore */
+	});
 	child.unref();
 }
 
@@ -485,19 +529,26 @@ function broadcastDashboardUpdate(workDir: string): void {
 	}
 }
 
-async function startDashboardServer(workDir: string, dashboardHtmlPath: string): Promise<number> {
+async function startDashboardServer(
+	workDir: string,
+	dashboardHtmlPath: string,
+): Promise<number> {
 	return new Promise((resolve, reject) => {
 		const resolvedWorkDir = path.resolve(workDir);
 		const resolvedHtmlPath = path.resolve(dashboardHtmlPath);
 
-		if (dashboardServer && dashboardServerWorkDir === resolvedWorkDir && dashboardServerPort) {
-			dashboardServerHtmlPath = resolvedHtmlPath;
+		if (
+			dashboardServer &&
+			dashboardServerWorkDir === resolvedWorkDir &&
+			dashboardServerPort
+		) {
+			_dashboardServerHtmlPath = resolvedHtmlPath;
 			resolve(dashboardServerPort);
 			return;
 		}
 
 		stopDashboardServer();
-		dashboardServerHtmlPath = resolvedHtmlPath;
+		_dashboardServerHtmlPath = resolvedHtmlPath;
 
 		const server = createServer((req, res) => {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -516,7 +567,11 @@ async function startDashboardServer(workDir: string, dashboardHtmlPath: string):
 
 			if (url.pathname === "/") {
 				fs.readFile(resolvedHtmlPath, (err, data) => {
-					if (err) { res.writeHead(404); res.end(); return; }
+					if (err) {
+						res.writeHead(404);
+						res.end();
+						return;
+					}
 					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 					res.end(data);
 				});
@@ -526,7 +581,11 @@ async function startDashboardServer(workDir: string, dashboardHtmlPath: string):
 			if (url.pathname === "/autoresearch.jsonl") {
 				const jsonlPath = sessionFilePath(resolvedWorkDir, "log");
 				fs.readFile(jsonlPath, (err, data) => {
-					if (err) { res.writeHead(404); res.end(); return; }
+					if (err) {
+						res.writeHead(404);
+						res.end();
+						return;
+					}
 					res.writeHead(200, { "Content-Type": "application/jsonl" });
 					res.end(data);
 				});
@@ -554,22 +613,32 @@ async function startDashboardServer(workDir: string, dashboardHtmlPath: string):
 }
 
 function writeDashboardFile(workDir: string): string {
-	const jsonlContent = fs.readFileSync(sessionFilePath(workDir, "log"), "utf-8").trim();
+	const jsonlContent = fs
+		.readFileSync(sessionFilePath(workDir, "log"), "utf-8")
+		.trim();
 	const sessionName = extractAutoresearchSessionName(jsonlContent);
 	const template = fs.readFileSync(templatePath(), "utf-8");
 	const html = template
 		.replace(TITLE_PLACEHOLDER, escapeHtml(sessionName))
 		.replace(LOGO_PLACEHOLDER, logoDataUrl());
-	const exportDir = fs.mkdtempSync(path.join(tmpdir(), "logician-autoresearch-dashboard-"));
+	const exportDir = fs.mkdtempSync(
+		path.join(tmpdir(), "logician-autoresearch-dashboard-"),
+	);
 	const dest = path.join(exportDir, "index.html");
 	fs.writeFileSync(dest, html);
 	return dest;
 }
 
-async function exportDashboard(ui: ExtensionUI, workDir: string): Promise<void> {
+async function exportDashboard(
+	ui: ExtensionUI,
+	workDir: string,
+): Promise<void> {
 	const jsonlPath = sessionFilePath(workDir, "log");
 	if (!fs.existsSync(jsonlPath)) {
-		ui.notify(`No ${path.basename(jsonlPath)} found — run some experiments first`, "error");
+		ui.notify(
+			`No ${path.basename(jsonlPath)} found — run some experiments first`,
+			"error",
+		);
 		return;
 	}
 
@@ -580,7 +649,10 @@ async function exportDashboard(ui: ExtensionUI, workDir: string): Promise<void> 
 		openInBrowser(url);
 		ui.notify(`Dashboard at ${url} (live updates)`, "info");
 	} catch (error) {
-		ui.notify(`Export failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+		ui.notify(
+			`Export failed: ${error instanceof Error ? error.message : String(error)}`,
+			"error",
+		);
 	}
 }
 
@@ -596,7 +668,7 @@ function autoresearchMdPath(dir: string): string {
 	return sessionFilePath(dir, "prompt");
 }
 
-function autoresearchIdeasPath(dir: string): string {
+function _autoresearchIdeasPath(dir: string): string {
 	return sessionFilePath(dir, "ideas");
 }
 
@@ -617,21 +689,32 @@ function reconstructState(ctx: ExtensionContext): ExperimentState {
 
 	try {
 		if (hasPersistedLog) {
-			const reconstructed = reconstructJsonlState(fs.readFileSync(jsonlPath, "utf-8"));
+			const reconstructed = reconstructJsonlState(
+				fs.readFileSync(jsonlPath, "utf-8"),
+			);
 			state.name = reconstructed.name;
 			state.metricName = reconstructed.metricName;
 			state.metricUnit = reconstructed.metricUnit;
 			state.bestDirection = reconstructed.bestDirection;
 			state.currentSegment = reconstructed.currentSegment;
-			state.results = reconstructed.results.map((r) => ({
+			state.results = reconstructed.results.map(r => ({
 				...r,
 				metrics: { ...r.metrics },
 			}));
-			state.secondaryMetrics = reconstructed.secondaryMetrics.map((m) => ({ ...m }));
+			state.secondaryMetrics = reconstructed.secondaryMetrics.map(m => ({
+				...m,
+			}));
 
 			if (state.results.length > 0) {
-				state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
-				state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
+				state.bestMetric = findBaselineMetric(
+					state.results,
+					state.currentSegment,
+				);
+				state.confidence = computeConfidence(
+					state.results,
+					state.currentSegment,
+					state.bestDirection,
+				);
 			}
 		}
 	} catch {
@@ -649,10 +732,13 @@ function reconstructState(ctx: ExtensionContext): ExperimentState {
 const BENCHMARK_GUARDRAIL =
 	"Be careful not to overfit to the benchmarks and do not cheat on the benchmarks.";
 
-export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): void {
+export function registerAutoresearch(
+	api: ExtensionAPI,
+	ctx: ExtensionContext,
+): void {
 	const runtime = createSessionRuntime();
 
-	const getRuntime = (): AutoresearchRuntime => runtime;
+	const _getRuntime = (): AutoresearchRuntime => runtime;
 	const getWorkDir = (): string => resolveWorkDir(ctx.cwd);
 
 	const setAutoresearchMode = (enabled: boolean): void => {
@@ -682,14 +768,22 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 		metric_unit: state.metricUnit,
 		direction: state.bestDirection,
 		baseline_metric: state.bestMetric,
-		best_metric: findBestMetric(state.results, state.currentSegment, state.bestDirection),
+		best_metric: findBestMetric(
+			state.results,
+			state.currentSegment,
+			state.bestDirection,
+		),
 		run_count: state.results.length,
 		goal: state.name ?? "",
 	});
 
 	const fireHook = async (payload: HookPayload): Promise<string | null> => {
 		const result = await runHook(payload);
-		appendHookLogEntryIfConfigured(autoresearchJsonlPath(payload.cwd), payload.event, result);
+		appendHookLogEntryIfConfigured(
+			autoresearchJsonlPath(payload.cwd),
+			payload.event,
+			result,
+		);
 		return steerMessageFor(payload.event, result);
 	};
 
@@ -705,14 +799,32 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 		parameters: {
 			type: "object",
 			properties: {
-				name: { type: "string", description: 'Human-readable name for this experiment session' },
-				metric_name: { type: "string", description: 'Display name for the primary metric' },
-				metric_unit: { type: "string", description: 'Unit for the primary metric (e.g. "µs", "ms", "s", "kb", "mb")' },
-				direction: { type: "string", description: 'Whether "lower" or "higher" is better. Default: "lower".' },
+				name: {
+					type: "string",
+					description: "Human-readable name for this experiment session",
+				},
+				metric_name: {
+					type: "string",
+					description: "Display name for the primary metric",
+				},
+				metric_unit: {
+					type: "string",
+					description:
+						'Unit for the primary metric (e.g. "µs", "ms", "s", "kb", "mb")',
+				},
+				direction: {
+					type: "string",
+					description:
+						'Whether "lower" or "higher" is better. Default: "lower".',
+				},
 			},
 			required: ["name", "metric_name"],
 		},
-		execute: async (_toolCallId, params, _execCtx): Promise<ExtensionToolResult> => {
+		execute: async (
+			_toolCallId,
+			params,
+			_execCtx,
+		): Promise<ExtensionToolResult> => {
 			const workDirError = validateWorkDir(ctx.cwd);
 			if (workDirError) {
 				return { content: `❌ ${workDirError}`, details: {} };
@@ -748,9 +860,9 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 					bestDirection: state.bestDirection,
 				});
 				if (fs.existsSync(jsonlPath)) {
-					fs.appendFileSync(jsonlPath, config + "\n");
+					fs.appendFileSync(jsonlPath, `${config}\n`);
 				} else {
-					fs.writeFileSync(jsonlPath, config + "\n");
+					fs.writeFileSync(jsonlPath, `${config}\n`);
 				}
 				broadcastDashboardUpdate(workDir);
 			} catch (e) {
@@ -762,7 +874,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 
 			setAutoresearchMode(true);
 
-			const steer = await fireHook({
+			const _steer = await fireHook({
 				event: "before",
 				cwd: workDir,
 				next_run: state.results.length + 1,
@@ -770,9 +882,15 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 				session: buildSessionSnapshot(state),
 			});
 
-			const reinitNote = isReinit ? " (re-initialized — new baseline needed)" : "";
-			const limitNote = state.maxExperiments !== null ? `\nMax iterations: ${state.maxExperiments}` : "";
-			const workDirNote = workDir !== ctx.cwd ? `\nWorking directory: ${workDir}` : "";
+			const reinitNote = isReinit
+				? " (re-initialized — new baseline needed)"
+				: "";
+			const limitNote =
+				state.maxExperiments !== null
+					? `\nMax iterations: ${state.maxExperiments}`
+					: "";
+			const workDirNote =
+				workDir !== ctx.cwd ? `\nWorking directory: ${workDir}` : "";
 
 			return {
 				content: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${workDirNote}\nConfig written to .auto/log.jsonl.`,
@@ -794,12 +912,23 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			type: "object",
 			properties: {
 				command: { type: "string", description: "Shell command to run" },
-				timeout_seconds: { type: "number", description: "Kill after this many seconds (default: 600)" },
-				checks_timeout_seconds: { type: "number", description: "Kill .auto/checks.sh after this many seconds (default: 300)" },
+				timeout_seconds: {
+					type: "number",
+					description: "Kill after this many seconds (default: 600)",
+				},
+				checks_timeout_seconds: {
+					type: "number",
+					description:
+						"Kill .auto/checks.sh after this many seconds (default: 300)",
+				},
 			},
 			required: ["command"],
 		},
-		execute: async (_toolCallId, params, _execCtx): Promise<ExtensionToolResult> => {
+		execute: async (
+			_toolCallId,
+			params,
+			_execCtx,
+		): Promise<ExtensionToolResult> => {
 			const workDirError = validateWorkDir(ctx.cwd);
 			if (workDirError) {
 				return { content: `❌ ${workDirError}`, details: {} };
@@ -808,7 +937,10 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			const state = runtime.state;
 
 			if (state.maxExperiments !== null) {
-				const segCount = currentResults(state.results, state.currentSegment).length;
+				const segCount = currentResults(
+					state.results,
+					state.currentSegment,
+				).length;
 				if (segCount >= state.maxExperiments) {
 					return {
 						content: `🛑 Maximum experiments reached (${state.maxExperiments}).`,
@@ -823,11 +955,22 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			// Guard: if benchmark script exists, only allow running it
 			const autoresearchShPath = autoresearchScriptPath(workDir);
 			if (fs.existsSync(autoresearchShPath)) {
-				const benchmarkScriptRel = path.relative(workDir, autoresearchShPath) || path.basename(autoresearchShPath);
-				if (!command.includes(benchmarkScriptRel) && !command.includes(".auto/measure.sh")) {
+				const benchmarkScriptRel =
+					path.relative(workDir, autoresearchShPath) ||
+					path.basename(autoresearchShPath);
+				if (
+					!command.includes(benchmarkScriptRel) &&
+					!command.includes(".auto/measure.sh")
+				) {
 					return {
 						content: `❌ ${benchmarkScriptRel} exists — you must run it instead of a custom command.`,
-						details: { command, exitCode: null, durationSeconds: 0, passed: false, crashed: true },
+						details: {
+							command,
+							exitCode: null,
+							durationSeconds: 0,
+							passed: false,
+							crashed: true,
+						},
 					};
 				}
 			}
@@ -835,7 +978,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			runtime.runningExperiment = { startedAt: Date.now(), command };
 			const t0 = Date.now();
 
-			return new Promise((resolve) => {
+			return new Promise(resolve => {
 				const child = spawn("bash", ["-c", command], {
 					cwd: workDir,
 					detached: true,
@@ -843,16 +986,18 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 				});
 
 				const chunks: Buffer[] = [];
-				let totalBytes = 0;
+				let _totalBytes = 0;
 
-				if (child.stdout) child.stdout.on("data", (d: Buffer) => {
-					totalBytes += d.length;
-					chunks.push(d);
-				});
-				if (child.stderr) child.stderr.on("data", (d: Buffer) => {
-					totalBytes += d.length;
-					chunks.push(d);
-				});
+				if (child.stdout)
+					child.stdout.on("data", (d: Buffer) => {
+						_totalBytes += d.length;
+						chunks.push(d);
+					});
+				if (child.stderr)
+					child.stderr.on("data", (d: Buffer) => {
+						_totalBytes += d.length;
+						chunks.push(d);
+					});
 
 				let timedOut = false;
 				if (timeout > 0) {
@@ -862,7 +1007,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 					}, timeout);
 				}
 
-				child.on("close", (code) => {
+				child.on("close", code => {
 					const durationSeconds = (Date.now() - t0) / 1000;
 					runtime.lastRunDuration = durationSeconds;
 					runtime.runningExperiment = null;
@@ -875,14 +1020,27 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 					let checksOutput = "";
 					let checksDuration = 0;
 
-					if (benchmarkPassed && fs.existsSync(autoresearchChecksPath(workDir))) {
-						const checksTimeout = ((params.checks_timeout_seconds as number) ?? 300) * 1000;
+					if (
+						benchmarkPassed &&
+						fs.existsSync(autoresearchChecksPath(workDir))
+					) {
+						const _checksTimeout =
+							((params.checks_timeout_seconds as number) ?? 300) * 1000;
 						const ct0 = Date.now();
 						try {
-							const checksResult = { code: 0, stdout: "", stderr: "", killed: false };
+							const checksResult = {
+								code: 0,
+								stdout: "",
+								stderr: "",
+								killed: false,
+							};
 							checksDuration = (Date.now() - ct0) / 1000;
 							checksPass = checksResult.code === 0 && !checksResult.killed;
-							checksOutput = (checksResult.stdout + "\n" + checksResult.stderr).trim();
+							checksOutput = (
+								checksResult.stdout +
+								"\n" +
+								checksResult.stderr
+							).trim();
 						} catch (e) {
 							checksDuration = (Date.now() - ct0) / 1000;
 							checksPass = false;
@@ -890,14 +1048,28 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 						}
 					}
 
-					runtime.lastRunChecks = checksPass !== null ? { pass: checksPass, output: checksOutput, duration: checksDuration } : null;
+					runtime.lastRunChecks =
+						checksPass !== null
+							? {
+									pass: checksPass,
+									output: checksOutput,
+									duration: checksDuration,
+								}
+							: null;
 
 					const passed = benchmarkPassed && (checksPass === null || checksPass);
-					const llmTruncation = truncateTail(output, EXPERIMENT_MAX_LINES, EXPERIMENT_MAX_BYTES);
+					const llmTruncation = truncateTail(
+						output,
+						EXPERIMENT_MAX_LINES,
+						EXPERIMENT_MAX_BYTES,
+					);
 
 					// Parse METRIC lines
 					const parsedMetricMap = parseMetricLines(output);
-					const parsedMetrics = parsedMetricMap.size > 0 ? Object.fromEntries(parsedMetricMap) : null;
+					const parsedMetrics =
+						parsedMetricMap.size > 0
+							? Object.fromEntries(parsedMetricMap)
+							: null;
 					const parsedPrimary = parsedMetricMap.get(state.metricName) ?? null;
 
 					let text = "";
@@ -918,17 +1090,21 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 					}
 
 					if (parsedMetrics) {
-						const secondary = Object.entries(parsedMetrics).filter(([k]) => k !== state.metricName);
+						const secondary = Object.entries(parsedMetrics).filter(
+							([k]) => k !== state.metricName,
+						);
 						text += `\n📐 Parsed metrics:`;
 						if (parsedPrimary !== null) {
 							text += ` ★ ${state.metricName}=${formatNum(parsedPrimary, state.metricUnit)}`;
 						}
 						for (const [name, value] of secondary) {
-							const sm = state.secondaryMetrics.find((m) => m.name === name);
+							const sm = state.secondaryMetrics.find(m => m.name === name);
 							const unit = sm?.unit ?? "";
 							text += ` ${name}=${formatNum(value, unit)}`;
 						}
-						const secArgs = secondary.map(([k, v]) => `"${k}": ${v}`).join(", ");
+						const secArgs = secondary
+							.map(([k, v]) => `"${k}": ${v}`)
+							.join(", ");
 						text += `\nUse these values: metric: ${parsedPrimary ?? "?"}, metrics: {${secArgs}}\n`;
 					}
 
@@ -973,16 +1149,32 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 		parameters: {
 			type: "object",
 			properties: {
-				commit: { type: "string", description: "Git commit hash (short, 7 chars)" },
-				metric: { type: "number", description: "The primary optimization metric value" },
-				status: { type: "string", enum: ["keep", "discard", "crash", "checks_failed"], description: "Result status" },
-				description: { type: "string", description: "Short description of what this experiment tried" },
+				commit: {
+					type: "string",
+					description: "Git commit hash (short, 7 chars)",
+				},
+				metric: {
+					type: "number",
+					description: "The primary optimization metric value",
+				},
+				status: {
+					type: "string",
+					enum: ["keep", "discard", "crash", "checks_failed"],
+					description: "Result status",
+				},
+				description: {
+					type: "string",
+					description: "Short description of what this experiment tried",
+				},
 				metrics: {
 					type: "object",
 					description: "Additional metrics to track as { name: value } pairs",
 					additionalProperties: { type: "number" },
 				},
-				force: { type: "boolean", description: "Force add new secondary metric" },
+				force: {
+					type: "boolean",
+					description: "Force add new secondary metric",
+				},
 				asi: {
 					type: "object",
 					description: "Actionable Side Information — structured diagnostics",
@@ -991,7 +1183,11 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			},
 			required: ["commit", "metric", "status", "description"],
 		},
-		execute: async (toolCallId, params, execCtx): Promise<ExtensionToolResult> => {
+		execute: async (
+			_toolCallId,
+			params,
+			_execCtx,
+		): Promise<ExtensionToolResult> => {
 			const workDirError = validateWorkDir(ctx.cwd);
 			if (workDirError) {
 				return { content: `❌ ${workDirError}`, details: {} };
@@ -1000,7 +1196,11 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			const state = runtime.state;
 
 			// Gate: prevent "keep" when last run's checks failed
-			if ((params.status as string) === "keep" && runtime.lastRunChecks && !runtime.lastRunChecks.pass) {
+			if (
+				(params.status as string) === "keep" &&
+				runtime.lastRunChecks &&
+				!runtime.lastRunChecks.pass
+			) {
 				return {
 					content: `❌ Cannot keep — checks failed.\n\n${runtime.lastRunChecks.output.slice(-500)}\n\nLog as 'checks_failed' instead.`,
 					details: {},
@@ -1008,9 +1208,10 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			}
 
 			const secondaryMetrics = (params.metrics as Record<string, number>) ?? {};
-			const mergedASI = (params.asi && Object.keys(params.asi).length > 0)
-				? params.asi as ASI
-				: undefined;
+			const mergedASI =
+				params.asi && Object.keys(params.asi).length > 0
+					? (params.asi as ASI)
+					: undefined;
 
 			const experiment: ExperimentResult = {
 				commit: (params.commit as string).slice(0, 7),
@@ -1029,7 +1230,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 
 			// Register secondary metrics
 			for (const name of Object.keys(secondaryMetrics)) {
-				if (!state.secondaryMetrics.find((m) => m.name === name)) {
+				if (!state.secondaryMetrics.find(m => m.name === name)) {
 					let unit = "";
 					if (name.endsWith("µs")) unit = "µs";
 					else if (name.endsWith("_ms")) unit = "ms";
@@ -1040,11 +1241,21 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 				}
 			}
 
-			state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
-			state.confidence = computeConfidence(state.results, state.currentSegment, state.bestDirection);
+			state.bestMetric = findBaselineMetric(
+				state.results,
+				state.currentSegment,
+			);
+			state.confidence = computeConfidence(
+				state.results,
+				state.currentSegment,
+				state.bestDirection,
+			);
 			experiment.confidence = state.confidence;
 
-			const segmentCount = currentResults(state.results, state.currentSegment).length;
+			const segmentCount = currentResults(
+				state.results,
+				state.currentSegment,
+			).length;
 			let text = `Logged #${state.results.length}: ${experiment.status} — ${experiment.description}`;
 
 			if (state.bestMetric !== null) {
@@ -1053,7 +1264,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 
 			if (Object.keys(secondaryMetrics).length > 0) {
 				const parts = Object.entries(secondaryMetrics).map(([name, value]) => {
-					const def = state.secondaryMetrics.find((m) => m.name === name);
+					const def = state.secondaryMetrics.find(m => m.name === name);
 					return `${name}: ${formatNum(value, def?.unit ?? "")}`;
 				});
 				text += `\nSecondary: ${parts.join("  ")}`;
@@ -1062,7 +1273,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			if (mergedASI) {
 				const asiParts = Object.entries(mergedASI).map(([k, v]) => {
 					const s = typeof v === "string" ? v : JSON.stringify(v);
-					return `${k}: ${s.length > 80 ? s.slice(0, 77) + "…" : s}`;
+					return `${k}: ${s.length > 80 ? `${s.slice(0, 77)}…` : s}`;
 				});
 				text += `\n📋 ASI: ${asiParts.join(" | ")}`;
 			}
@@ -1091,8 +1302,14 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 					const trailerJson = JSON.stringify(resultData);
 					const commitMsg = `${params.description}\n\nResult: ${trailerJson}`;
 
-					await execFile("git", ["add", "-A"], { cwd: workDir, timeout: 10000 });
-					await execFile("git", ["commit", "-m", commitMsg], { cwd: workDir, timeout: 10000 });
+					await execFile("git", ["add", "-A"], {
+						cwd: workDir,
+						timeout: 10000,
+					});
+					await execFile("git", ["commit", "-m", commitMsg], {
+						cwd: workDir,
+						timeout: 10000,
+					});
 					text += `\n📝 Git: committed`;
 				} catch (e) {
 					text += `\n⚠️ Git commit error: ${e instanceof Error ? e.message : String(e)}`;
@@ -1103,7 +1320,10 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 						git checkout -- . ':(exclude,glob)**/${AUTO_DIR}' ':(exclude,glob)**/${AUTO_DIR}/**'
 						git clean -fd -e '${AUTO_DIR}' -e '**/${AUTO_DIR}/**' 2>/dev/null || true
 					`;
-					await execFile("bash", ["-c", revertScript], { cwd: workDir, timeout: 10000 });
+					await execFile("bash", ["-c", revertScript], {
+						cwd: workDir,
+						timeout: 10000,
+					});
 					text += `\n📝 Git: reverted changes (${params.status}) — autoresearch files preserved`;
 				} catch (e) {
 					text += `\n⚠️ Git revert failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -1111,14 +1331,17 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			}
 
 			// Write to JSONL
-			const jsonlEntry: Record<string, unknown> = { run: state.results.length, ...experiment };
-			if (!mergedASI) delete jsonlEntry.asi;
+			const jsonlEntry: Record<string, unknown> = {
+				run: state.results.length,
+				...experiment,
+			};
+			if (!mergedASI) jsonlEntry.asi = undefined;
 			try {
 				const jsonlPath = autoresearchJsonlPath(workDir);
 				ensureParentDir(jsonlPath);
-				fs.appendFileSync(jsonlPath, JSON.stringify(jsonlEntry) + "\n");
+				fs.appendFileSync(jsonlPath, `${JSON.stringify(jsonlEntry)}\n`);
 				broadcastDashboardUpdate(workDir);
-			} catch (e) {
+			} catch (_e) {
 				text += `\n⚠️ Failed to write .auto/log.jsonl`;
 			}
 
@@ -1130,7 +1353,8 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 				session: buildSessionSnapshot(state),
 			});
 
-			const limitReached = state.maxExperiments !== null && segmentCount >= state.maxExperiments;
+			const limitReached =
+				state.maxExperiments !== null && segmentCount >= state.maxExperiments;
 			if (limitReached) {
 				text += `\n\n🛑 Maximum experiments reached (${state.maxExperiments}). STOP.`;
 				setAutoresearchMode(false);
@@ -1161,8 +1385,8 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 			"export opens a local live dashboard in your browser.",
 			"",
 			"Examples:",
-			'  /autoresearch optimize unit test runtime, monitor correctness',
-			'  /autoresearch export',
+			"  /autoresearch optimize unit test runtime, monitor correctness",
+			"  /autoresearch export",
 		].join("\n");
 
 	api.registerCommand({
@@ -1201,7 +1425,11 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 				const jsonlPaths = sessionFileCandidates(workDir, "log");
 				for (const jsonlPath of [jsonlPaths.current, jsonlPaths.legacy]) {
 					if (fs.existsSync(jsonlPath)) {
-						try { fs.unlinkSync(jsonlPath); } catch { /* ignore */ }
+						try {
+							fs.unlinkSync(jsonlPath);
+						} catch {
+							/* ignore */
+						}
 					}
 				}
 
@@ -1228,7 +1456,10 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 				session: buildSessionSnapshot(runtime.state),
 			});
 
-			const message = activationSteer && rulesLoaded ? `${activationSteer}\n\n${kickoff}` : kickoff;
+			const message =
+				activationSteer && rulesLoaded
+					? `${activationSteer}\n\n${kickoff}`
+					: kickoff;
 			// In logician, we can't send messages directly — this would need harness integration
 			// For now, just notify the user
 			ctx.ui.notify(
@@ -1262,7 +1493,7 @@ export function registerAutoresearch(api: ExtensionAPI, ctx: ExtensionContext): 
 		stopDashboardServer();
 	});
 
-	api.on("before_compact", async (_event) => {
+	api.on("before_compact", async _event => {
 		return {
 			compaction: {
 				summary: buildAutoresearchCompactionSummary(

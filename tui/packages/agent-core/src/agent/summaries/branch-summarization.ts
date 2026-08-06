@@ -47,7 +47,9 @@ export function createFileOps(): FileOperations {
 }
 
 /** Extract file operations from messages (reads from tool calls, modifications from assistant messages). */
-export function extractFileOpsFromMessages(messages: Message[]): FileOperations {
+export function extractFileOpsFromMessages(
+	messages: Message[],
+): FileOperations {
 	const ops = createFileOps();
 
 	for (const msg of messages) {
@@ -56,7 +58,10 @@ export function extractFileOpsFromMessages(messages: Message[]): FileOperations 
 
 		for (const tc of msg.tool_calls) {
 			const name = tc.name;
-			const argsStr = typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments ?? {});
+			const argsStr =
+				typeof tc.arguments === "string"
+					? tc.arguments
+					: JSON.stringify(tc.arguments ?? {});
 
 			try {
 				const args = JSON.parse(argsStr);
@@ -83,7 +88,12 @@ export function extractFileOpsFromMessages(messages: Message[]): FileOperations 
 				// Git operations imply file tracking
 				if (name === "git") {
 					const subCmd = args.subcommand ?? args.command ?? "";
-					const paths = args.paths ?? args.files ?? (typeof args.command === "string" ? extractGitPaths(args.command) : []);
+					const paths =
+						args.paths ??
+						args.files ??
+						(typeof args.command === "string"
+							? extractGitPaths(args.command)
+							: []);
 					for (const p of paths) {
 						ops.modified.add(p);
 					}
@@ -104,7 +114,18 @@ export function extractFileOpsFromMessages(messages: Message[]): FileOperations 
 function extractGitPaths(cmd: string): string[] {
 	const paths: string[] = [];
 	// Common git commands that take file paths
-	const gitActions = ["add", "checkout", "restore", "rm", "mv", "commit", "show", "diff", "log", "blame"];
+	const gitActions = [
+		"add",
+		"checkout",
+		"restore",
+		"rm",
+		"mv",
+		"commit",
+		"show",
+		"diff",
+		"log",
+		"blame",
+	];
 	for (const action of gitActions) {
 		const idx = cmd.indexOf(action);
 		if (idx >= 0) {
@@ -119,15 +140,22 @@ function extractGitPaths(cmd: string): string[] {
 }
 
 /** Format file operations for appending to a summary string. */
-export function formatFileOperations(readFiles: string[], modifiedFiles: string[]): string {
+export function formatFileOperations(
+	readFiles: string[],
+	modifiedFiles: string[],
+): string {
 	const parts: string[] = [];
 	if (readFiles.length > 0) parts.push(`Read files: ${readFiles.join(", ")}`);
-	if (modifiedFiles.length > 0) parts.push(`Modified files: ${modifiedFiles.join(", ")}`);
+	if (modifiedFiles.length > 0)
+		parts.push(`Modified files: ${modifiedFiles.join(", ")}`);
 	return parts.length > 0 ? `\n\n${parts.join("\n")}` : "";
 }
 
 /** Compute deduplicated file lists from file operations. */
-export function computeFileLists(ops: FileOperations): { readFiles: string[]; modifiedFiles: string[] } {
+export function computeFileLists(ops: FileOperations): {
+	readFiles: string[];
+	modifiedFiles: string[];
+} {
 	return {
 		readFiles: sorted(ops.read),
 		modifiedFiles: sorted(ops.modified),
@@ -193,7 +221,11 @@ export function collectMessagesForBranchSummary(
 		const msg = branchMessages[i];
 		const tokens = estimateMessageTokens(msg);
 
-		if (tokenBudget > 0 && totalTokens + tokens > tokenBudget && messages.length > 0) {
+		if (
+			tokenBudget > 0 &&
+			totalTokens + tokens > tokenBudget &&
+			messages.length > 0
+		) {
 			// Stop at budget, but always include at least one message
 			break;
 		}
@@ -247,22 +279,38 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 	}
 
 	// Constraints
-	const constraintsMatch = text.match(/## Constraints & Preferences\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/);
+	const constraintsMatch = text.match(
+		/## Constraints & Preferences\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
+	);
 	if (constraintsMatch) {
 		const items = parseListItems(constraintsMatch[1]);
-		result.constraints = items.filter((item) => !item.match(/^(none|\(none\))$/i) || item.match(/^\(none\) if none/));
-		if (result.constraints.length === 1 && /^(none|\(none\))$/i.test(result.constraints[0])) {
+		result.constraints = items.filter(
+			item =>
+				!item.match(/^(none|\(none\))$/i) || item.match(/^\(none\) if none/),
+		);
+		if (
+			result.constraints.length === 1 &&
+			/^(none|\(none\))$/i.test(result.constraints[0])
+		) {
 			result.constraints = [];
 		}
 	}
 
 	// Progress
-	const progressMatch = text.match(/## Progress\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/);
+	const progressMatch = text.match(
+		/## Progress\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
+	);
 	if (progressMatch) {
 		const progText = progressMatch[1];
-		const doneMatch = progText.match(/### Done\s*\n([\s\S]*?)(?=\n###(?!\d|#)|$)/);
-		const inProgMatch = progText.match(/### In Progress\s*\n([\s\S]*?)(?=\n###(?!\d|#)|$)/);
-		const blockedMatch = progText.match(/### Blocked\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/);
+		const doneMatch = progText.match(
+			/### Done\s*\n([\s\S]*?)(?=\n###(?!\d|#)|$)/,
+		);
+		const inProgMatch = progText.match(
+			/### In Progress\s*\n([\s\S]*?)(?=\n###(?!\d|#)|$)/,
+		);
+		const blockedMatch = progText.match(
+			/### Blocked\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
+		);
 
 		result.progress = {
 			done: doneMatch ? parseListItems(doneMatch[1]) : [],
@@ -272,14 +320,20 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 	}
 
 	// Key Decisions
-	const decisionsMatch = text.match(/## Key Decisions\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/);
+	const decisionsMatch = text.match(
+		/## Key Decisions\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
+	);
 	if (decisionsMatch) {
 		const items = parseListItems(decisionsMatch[1]);
-		result.keyDecisions = items.map((item) => {
+		result.keyDecisions = items.map(item => {
 			const colonIdx = item.indexOf(":");
 			if (colonIdx > 0) {
 				// Extract decision, stripping markdown bold markers
-				const decision = item.slice(0, colonIdx).replace(/^[-*]?\s*/, "").replace(/[*`]/g, "").trim();
+				const decision = item
+					.slice(0, colonIdx)
+					.replace(/^[-*]?\s*/, "")
+					.replace(/[*`]/g, "")
+					.trim();
 				const rationale = item.slice(colonIdx + 1).trim();
 				return { decision, rationale };
 			}
@@ -288,7 +342,9 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 	}
 
 	// Next Steps
-	const stepsMatch = text.match(/## Next Steps\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/);
+	const stepsMatch = text.match(
+		/## Next Steps\s*\n([\s\S]*?)(?=\n##(?!\d|#)|$)/,
+	);
 	if (stepsMatch) {
 		result.nextSteps = parseListItems(stepsMatch[1]);
 	}
@@ -300,8 +356,13 @@ export function parseBranchSummary(text: string): Partial<BranchSummary> {
 function parseListItems(text: string): string[] {
 	return text
 		.split("\n")
-		.map((line) => line.replace(/^[\-\*]\s*(?:\[[xX ]\]\s*)?/, "").replace(/^\d+\.\s*/, "").trim())
-		.filter((line) => line.length > 0 && !line.startsWith("###"));
+		.map(line =>
+			line
+				.replace(/^[-*]\s*(?:\[[xX ]\]\s*)?/, "")
+				.replace(/^\d+\.\s*/, "")
+				.trim(),
+		)
+		.filter(line => line.length > 0 && !line.startsWith("###"));
 }
 
 // ============================================================================
@@ -314,22 +375,46 @@ export function serializeMessages(messages: Message[]): string {
 
 	for (const msg of messages) {
 		if (!msg) continue;
-		const role = msg.role === "assistant" ? "Assistant" : msg.role === "user" ? "User" : msg.role === "system" ? "System" : msg.role;
+		const role =
+			msg.role === "assistant"
+				? "Assistant"
+				: msg.role === "user"
+					? "User"
+					: msg.role === "system"
+						? "System"
+						: msg.role;
 
-		if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0) {
+		if (
+			msg.role === "assistant" &&
+			msg.tool_calls &&
+			msg.tool_calls.length > 0
+		) {
 			for (const tc of msg.tool_calls) {
-				const argsStr = typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments ?? {});
+				const argsStr =
+					typeof tc.arguments === "string"
+						? tc.arguments
+						: JSON.stringify(tc.arguments ?? {});
 				parts.push(`[Tool Call: ${tc.name}(${argsStr})]`);
 			}
 			if (msg.content && typeof msg.content === "string" && msg.content) {
 				parts.push(`[${role}]: ${msg.content}`);
 			}
 		} else if (msg.role === "tool") {
-			const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
-			parts.push(`[Tool Result (${msg.tool_call_id ?? "unknown"})]: ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`);
+			const content =
+				typeof msg.content === "string"
+					? msg.content
+					: JSON.stringify(msg.content ?? "");
+			parts.push(
+				`[Tool Result (${msg.tool_call_id ?? "unknown"})]: ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`,
+			);
 		} else {
-			const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
-			parts.push(`[${role}]: ${content.slice(0, 500)}${content.length > 500 ? "..." : ""}`);
+			const content =
+				typeof msg.content === "string"
+					? msg.content
+					: JSON.stringify(msg.content ?? "");
+			parts.push(
+				`[${role}]: ${content.slice(0, 500)}${content.length > 500 ? "..." : ""}`,
+			);
 		}
 	}
 

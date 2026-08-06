@@ -117,7 +117,7 @@ export class GoTReasoner extends BaseReasoner {
 					if (!mergeCandidates.has(String(scoreBucket))) {
 						mergeCandidates.set(String(scoreBucket), []);
 					}
-					mergeCandidates.get(String(scoreBucket))!.push(childId);
+					mergeCandidates.get(String(scoreBucket))?.push(childId);
 				}
 			}
 
@@ -157,7 +157,7 @@ export class GoTReasoner extends BaseReasoner {
 									const parent = graph.get(parentId);
 									if (parent) {
 										parent.children = parent.children.filter(
-											(id) => id !== n1.id && id !== n2.id,
+											id => id !== n1.id && id !== n2.id,
 										);
 										parent.children.push(mergedId);
 									}
@@ -177,9 +177,9 @@ export class GoTReasoner extends BaseReasoner {
 			// Prune: keep only top beamWidth nodes
 			if (nextFrontier.length > beamWidth) {
 				const scored = nextFrontier
-					.map((id) => ({ id, score: graph.get(id)?.score || 0 }))
+					.map(id => ({ id, score: graph.get(id)?.score || 0 }))
 					.sort((a, b) => b.score - a.score);
-				frontier = scored.slice(0, beamWidth).map((s) => s.id);
+				frontier = scored.slice(0, beamWidth).map(s => s.id);
 			} else {
 				frontier = nextFrontier;
 			}

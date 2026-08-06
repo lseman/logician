@@ -6,18 +6,25 @@
 // BOM handling and line-ending preservation ported from pi's edit tool.
 
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
-import { ensureInsideCwd, resolveReadPath } from "@logician/agent-core/tools/shared/path-utils.ts";
 import {
+	ensureInsideCwd,
+	resolveReadPath,
+} from "@logician/agent-core/tools/shared/path-utils.ts";
+import { generateDiffString, generateUnifiedPatch } from "./diff-utils.ts";
+import {
+	defaultEditOperations,
 	detectLineEnding,
 	normalizeToLF,
 	restoreLineEndings,
 	stripBom,
-	defaultEditOperations,
 } from "./helpers.ts";
-import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
+import {
+	hasBeenRead,
+	isStaleSinceRead,
+	refreshAfterWrite,
+} from "./read-tracker.ts";
 import { atomicWriteFile } from "./shared/atomic-write.ts";
-import { hasBeenRead, isStaleSinceRead, refreshAfterWrite } from "./read-tracker.ts";
-import { generateDiffString, generateUnifiedPatch } from "./diff-utils.ts";
+import { withFileMutationQueue } from "./shared/file-mutation-queue.ts";
 
 // ============================================================================
 // Fuzzy matching
@@ -37,7 +44,7 @@ export interface ApplyEditsResult {
 /** Map smart quotes/dashes and uncommon Unicode spaces to their ASCII forms. */
 function normalizeChar(ch: string): string {
 	if (/[\u2018\u2019\u201A\u201B]/.test(ch)) return "'";
-	if (/[\u201C\u201D\u201E\u201F]/.test(ch)) return "\"";
+	if (/[\u201C\u201D\u201E\u201F]/.test(ch)) return '"';
 	if (/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/.test(ch)) return "-";
 	if (/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/.test(ch)) return " ";
 	return ch;
@@ -52,7 +59,7 @@ function normalizeChar(ch: string): string {
 export function normalizeForFuzzyMatch(text: string): string {
 	return text
 		.split("\n")
-		.map((line) => {
+		.map(line => {
 			const trimmed = line.trimEnd();
 			let out = "";
 			for (const ch of trimmed) out += normalizeChar(ch);
@@ -112,12 +119,17 @@ function leadingWhitespace(line: string): string {
  * spaces". Falls back to a flat prefix swap when depth can't be inferred
  * (searchIndent is empty, so there's no unit to scale by).
  */
-function reindent(newText: string, searchIndent: string, origIndent: string): string {
+function reindent(
+	newText: string,
+	searchIndent: string,
+	origIndent: string,
+): string {
 	if (searchIndent === origIndent) return newText;
-	const ratio = searchIndent.length > 0 ? origIndent.length / searchIndent.length : 1;
+	const ratio =
+		searchIndent.length > 0 ? origIndent.length / searchIndent.length : 1;
 	return newText
 		.split("\n")
-		.map((line) => {
+		.map(line => {
 			if (line.trim() === "") return line;
 			if (!line.startsWith(searchIndent)) return line;
 			const extra = leadingWhitespace(line).slice(searchIndent.length);
@@ -125,7 +137,8 @@ function reindent(newText: string, searchIndent: string, origIndent: string): st
 			if (extra.length === 0 || searchIndent.length === 0) {
 				return origIndent + line.slice(searchIndent.length);
 			}
-			const extraUnitChar = origIndent.length > 0 ? origIndent[origIndent.length - 1] : extra[0];
+			const extraUnitChar =
+				origIndent.length > 0 ? origIndent[origIndent.length - 1] : extra[0];
 			const scaledExtraLength = Math.max(0, Math.round(extra.length * ratio));
 			return origIndent + extraUnitChar.repeat(scaledExtraLength) + rest;
 		})
@@ -155,8 +168,8 @@ function lineTrimmedMatches(
 		searchLines.pop();
 		trailingNewline = true;
 	}
-	const searchTrimmed = searchLines.map((l) => normalizeForFuzzyMatch(l.trim()));
-	if (searchTrimmed.every((l) => l === "")) return [];
+	const searchTrimmed = searchLines.map(l => normalizeForFuzzyMatch(l.trim()));
+	if (searchTrimmed.every(l => l === "")) return [];
 
 	const lines = content.split("\n");
 	const lineStarts: number[] = [];
@@ -198,7 +211,10 @@ interface FuzzyMatchResult {
 }
 
 /** Compatibility helper: locate oldText in content, exact first then fuzzy. */
-export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResult {
+export function fuzzyFindText(
+	content: string,
+	oldText: string,
+): FuzzyMatchResult {
 	const exactIndex = content.indexOf(oldText);
 	if (exactIndex !== -1) {
 		return {
@@ -240,8 +256,10 @@ function lineNumberAt(content: string, offset: number): number {
  * inside the block is the first to diverge.
  */
 function closestLineHint(content: string, oldText: string): string {
-	const searchLines = oldText.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && arr[i] === ""));
-	const firstLine = searchLines.find((l) => l.trim() !== "");
+	const searchLines = oldText
+		.split("\n")
+		.filter((_, i, arr) => !(i === arr.length - 1 && arr[i] === ""));
+	const firstLine = searchLines.find(l => l.trim() !== "");
 	if (!firstLine) return "";
 	const needle = normalizeForFuzzyMatch(firstLine.trim());
 	const lines = content.split("\n");
@@ -293,9 +311,9 @@ function getNotFoundError(
 ): Error {
 	return new Error(
 		`Could not find ${editLabel(editIndex, totalEdits)} in ${path}. ` +
-		"The oldText must match the file content exactly, including whitespace and newlines. " +
-		"Read the file first to get the exact content, or provide more surrounding context to make it unique." +
-		hint,
+			"The oldText must match the file content exactly, including whitespace and newlines. " +
+			"Read the file first to get the exact content, or provide more surrounding context to make it unique." +
+			hint,
 	);
 }
 
@@ -310,29 +328,39 @@ function getDuplicateError(
 	const suffix = lineNumbers.length > 5 ? ", …" : "";
 	return new Error(
 		`Found ${occurrences} occurrences of ${editLabel(editIndex, totalEdits)} in ${path} ` +
-		`(lines ${lines}${suffix}). ` +
-		"Each oldText must uniquely identify a single location. " +
-		"Include 3-5 unchanged lines before and after the target text to make it unique, " +
-		"or set replaceAll: true to replace every occurrence.",
+			`(lines ${lines}${suffix}). ` +
+			"Each oldText must uniquely identify a single location. " +
+			"Include 3-5 unchanged lines before and after the target text to make it unique, " +
+			"or set replaceAll: true to replace every occurrence.",
 	);
 }
 
-function getEmptyOldTextError(path: string, editIndex: number, totalEdits: number): Error {
+function getEmptyOldTextError(
+	path: string,
+	editIndex: number,
+	totalEdits: number,
+): Error {
 	if (totalEdits === 1) {
-		return new Error(`oldText must not be empty in ${path}. Provide text to find and replace.`);
+		return new Error(
+			`oldText must not be empty in ${path}. Provide text to find and replace.`,
+		);
 	}
-	return new Error(`edits[${editIndex}].oldText must not be empty in ${path}. Provide text to find and replace.`);
+	return new Error(
+		`edits[${editIndex}].oldText must not be empty in ${path}. Provide text to find and replace.`,
+	);
 }
 
 function getNoChangeError(path: string, totalEdits: number): Error {
 	if (totalEdits === 1) {
 		return new Error(
 			`No changes made to ${path}. ` +
-			"The replacement produced identical content. " +
-			"Verify that oldText and newText are different, and that oldText exists in the file.",
+				"The replacement produced identical content. " +
+				"Verify that oldText and newText are different, and that oldText exists in the file.",
 		);
 	}
-	return new Error(`No changes made to ${path}. The replacements produced identical content.`);
+	return new Error(
+		`No changes made to ${path}. The replacements produced identical content.`,
+	);
 }
 
 // ============================================================================
@@ -344,7 +372,7 @@ export function applyEditsToNormalizedContent(
 	edits: Edit[],
 	filePath: string,
 ): ApplyEditsResult {
-	const normalizedEdits = edits.map((edit) => ({
+	const normalizedEdits = edits.map(edit => ({
 		oldText: normalizeToLF(edit.oldText),
 		newText: normalizeToLF(edit.newText),
 		replaceAll: edit.replaceAll === true,
@@ -364,7 +392,7 @@ export function applyEditsToNormalizedContent(
 
 		// Tier 1: exact match.
 		let matches: Array<{ start: number; end: number; newText: string }> =
-			indexOfAll(normalizedContent, edit.oldText).map((start) => ({
+			indexOfAll(normalizedContent, edit.oldText).map(start => ({
 				start,
 				end: start + edit.oldText.length,
 				newText: edit.newText,
@@ -374,7 +402,7 @@ export function applyEditsToNormalizedContent(
 		if (matches.length === 0) {
 			const normOld = normalizeForFuzzyMatch(edit.oldText);
 			if (normOld.trim() !== "") {
-				matches = indexOfAll(normCache.norm, normOld).map((start) => ({
+				matches = indexOfAll(normCache.norm, normOld).map(start => ({
 					start: normCache.map[start],
 					end: normCache.map[start + normOld.length - 1] + 1,
 					newText: edit.newText,
@@ -384,7 +412,11 @@ export function applyEditsToNormalizedContent(
 
 		// Tier 3: line-trimmed match with indentation re-application.
 		if (matches.length === 0) {
-			matches = lineTrimmedMatches(normalizedContent, edit.oldText, edit.newText);
+			matches = lineTrimmedMatches(
+				normalizedContent,
+				edit.oldText,
+				edit.newText,
+			);
 		}
 
 		if (matches.length === 0) {
@@ -401,7 +433,7 @@ export function applyEditsToNormalizedContent(
 				i,
 				normalizedEdits.length,
 				matches.length,
-				matches.map((m) => lineNumberAt(normalizedContent, m.start)),
+				matches.map(m => lineNumberAt(normalizedContent, m.start)),
 			);
 		}
 
@@ -417,8 +449,8 @@ export function applyEditsToNormalizedContent(
 		if (previous.end > current.start) {
 			throw new Error(
 				`edits[${previous.editIndex}] and edits[${current.editIndex}] ` +
-				`overlap in ${filePath}. ` +
-				"Merge them into one edit or target disjoint regions.",
+					`overlap in ${filePath}. ` +
+					"Merge them into one edit or target disjoint regions.",
 			);
 		}
 	}
@@ -548,12 +580,13 @@ export const edit_file: Tool = {
 	hookAliases: ["Edit"],
 	description:
 		"Edit a single file using exact text replacement. " +
-			"Every edits[].oldText must match a unique, " +
-			"non-overlapping region of the original file " +
-			"(or set replaceAll: true on an edit to replace every occurrence). " +
-			"The file must have been read with read_file first. " +
-			"Supports BOM handling and line-ending preservation.",
-	promptSnippet: "Edit files using exact text replacement with precise matching",
+		"Every edits[].oldText must match a unique, " +
+		"non-overlapping region of the original file " +
+		"(or set replaceAll: true on an edit to replace every occurrence). " +
+		"The file must have been read with read_file first. " +
+		"Supports BOM handling and line-ending preservation.",
+	promptSnippet:
+		"Edit files using exact text replacement with precise matching",
 	promptGuidelines: [
 		"Use edit_file for surgical edits; keep oldText unique in the file, or set replaceAll for renames",
 	],
@@ -587,13 +620,17 @@ export const edit_file: Tool = {
 		}
 
 		if (!hasBeenRead(resolved)) {
-			return `${resolved} has not been read yet. ` +
-				"Read it with read_file before editing.";
+			return (
+				`${resolved} has not been read yet. ` +
+				"Read it with read_file before editing."
+			);
 		}
 		return withFileMutationQueue(resolved, async () => {
 			if (isStaleSinceRead(resolved)) {
-				return `${resolved} has been modified since it was last read. ` +
-					"Read it again before editing.";
+				return (
+					`${resolved} has been modified since it was last read. ` +
+					"Read it again before editing."
+				);
 			}
 			const buffer = await defaultEditOperations.readFile(resolved);
 			const rawContent = buffer.toString("utf-8");

@@ -89,7 +89,7 @@ const CIRCLING_PATTERNS: ReadonlyArray<RegExp> = [
 export function looksNonCommittal(text: string): boolean {
 	return (
 		text.trim().length >= 10 &&
-		NON_COMMITTAL_PATTERNS.some((pattern) => pattern.test(text))
+		NON_COMMITTAL_PATTERNS.some(pattern => pattern.test(text))
 	);
 }
 
@@ -97,7 +97,7 @@ export function looksNonCommittal(text: string): boolean {
  * Check if a text response declares task completion.
  */
 export function looksComplete(text: string): boolean {
-	return Boolean(text) && COMPLETE_PATTERNS.some((pattern) => pattern.test(text));
+	return Boolean(text) && COMPLETE_PATTERNS.some(pattern => pattern.test(text));
 }
 
 /**
@@ -120,12 +120,12 @@ export function awaitsUserInput(text: string): boolean {
 		const trailingLines = trimmed
 			.slice(lastQuestion + 1)
 			.split(/\r?\n/)
-			.map((line) => line.trim())
+			.map(line => line.trim())
 			.filter(Boolean);
 		if (
 			trailingLines.length > 0 &&
-			trailingLines.every((line) =>
-				/^(?:[-*•]|\d+[.)]|[A-Za-z][.)])\s+\S/.test(line)
+			trailingLines.every(line =>
+				/^(?:[-*•]|\d+[.)]|[A-Za-z][.)])\s+\S/.test(line),
 			)
 		) {
 			return true;
@@ -134,9 +134,15 @@ export function awaitsUserInput(text: string): boolean {
 
 	const tail = trimmed.slice(-800);
 	return (
-		/\b(?:please|kindly)\s+(?:answer|choose|confirm|clarify|provide|select|share|tell me)\b[^.!?]*[.!:]?\s*$/i.test(tail) ||
-		/\b(?:let me know|tell me)\s+(?:which|whether|what|when|where|who|how|if)\b[^.!?]*[.!:]?\s*$/i.test(tail) ||
-		/\b(?:i need|we need)\s+(?:your|the user's)\s+(?:answer|choice|confirmation|decision|input|permission)\b[^.!?]*[.!:]?\s*$/i.test(tail)
+		/\b(?:please|kindly)\s+(?:answer|choose|confirm|clarify|provide|select|share|tell me)\b[^.!?]*[.!:]?\s*$/i.test(
+			tail,
+		) ||
+		/\b(?:let me know|tell me)\s+(?:which|whether|what|when|where|who|how|if)\b[^.!?]*[.!:]?\s*$/i.test(
+			tail,
+		) ||
+		/\b(?:i need|we need)\s+(?:your|the user's)\s+(?:answer|choice|confirmation|decision|input|permission)\b[^.!?]*[.!:]?\s*$/i.test(
+			tail,
+		)
 	);
 }
 
@@ -148,5 +154,5 @@ export function awaitsUserInput(text: string): boolean {
 export function detectsCircling(assistantText: string): boolean {
 	if (!assistantText || assistantText.trim().length < 10) return false;
 	const lower = assistantText.toLowerCase();
-	return CIRCLING_PATTERNS.some((re) => re.test(lower));
+	return CIRCLING_PATTERNS.some(re => re.test(lower));
 }

@@ -31,19 +31,25 @@ void test("bash executes a structured sequential batch and returns ordered detai
 	assert.equal(typeof result, "object");
 	if (typeof result === "string") return;
 	const commands = result.details?.commands as Array<Record<string, unknown>>;
-	assert.deepEqual(commands.map((entry) => entry.id), ["first", "second", "third"]);
-	assert.deepEqual(commands.map((entry) => entry.status), ["completed", "failed", "completed"]);
-	assert.deepEqual(commands.map((entry) => entry.exitCode), [0, 2, 0]);
+	assert.deepEqual(
+		commands.map(entry => entry.id),
+		["first", "second", "third"],
+	);
+	assert.deepEqual(
+		commands.map(entry => entry.status),
+		["completed", "failed", "completed"],
+	);
+	assert.deepEqual(
+		commands.map(entry => entry.exitCode),
+		[0, 2, 0],
+	);
 });
 
 void test("bash stopOnFailure skips remaining sequential commands", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-bash-stop-"));
 	const result = await bash.execute(
 		{
-			commands: [
-				{ command: "exit 3" },
-				{ command: "printf should-not-run" },
-			],
+			commands: [{ command: "exit 3" }, { command: "printf should-not-run" }],
 			stopOnFailure: true,
 		},
 		{ cwd },
@@ -51,7 +57,10 @@ void test("bash stopOnFailure skips remaining sequential commands", async () => 
 	assert.equal(typeof result, "object");
 	if (typeof result === "string") return;
 	const commands = result.details?.commands as Array<Record<string, unknown>>;
-	assert.deepEqual(commands.map((entry) => entry.status), ["failed", "skipped"]);
+	assert.deepEqual(
+		commands.map(entry => entry.status),
+		["failed", "skipped"],
+	);
 	assert.equal(commands[1].content, "Skipped after failure");
 });
 
@@ -71,8 +80,14 @@ void test("bash parallel batches preserve input order", async () => {
 	assert.equal(typeof result, "object");
 	if (typeof result === "string") return;
 	const commands = result.details?.commands as Array<Record<string, unknown>>;
-	assert.deepEqual(commands.map((entry) => entry.id), ["slow", "fast"]);
-	assert.deepEqual(commands.map((entry) => entry.content), ["slow", "fast"]);
+	assert.deepEqual(
+		commands.map(entry => entry.id),
+		["slow", "fast"],
+	);
+	assert.deepEqual(
+		commands.map(entry => entry.content),
+		["slow", "fast"],
+	);
 });
 
 void test("bash rejects ambiguous and invalid structured inputs", async () => {
@@ -81,10 +96,21 @@ void test("bash rejects ambiguous and invalid structured inputs", async () => {
 		{ command: "true", commands: [{ command: "true" }] },
 		{ cwd },
 	);
-	assert.match(typeof ambiguous === "string" ? ambiguous : ambiguous.content, /either command or commands/);
+	assert.match(
+		typeof ambiguous === "string" ? ambiguous : ambiguous.content,
+		/either command or commands/,
+	);
 	const duplicate = await bash.execute(
-		{ commands: [{ id: "same", command: "true" }, { id: "same", command: "true" }] },
+		{
+			commands: [
+				{ id: "same", command: "true" },
+				{ id: "same", command: "true" },
+			],
+		},
 		{ cwd },
 	);
-	assert.match(typeof duplicate === "string" ? duplicate : duplicate.content, /duplicate command id/);
+	assert.match(
+		typeof duplicate === "string" ? duplicate : duplicate.content,
+		/duplicate command id/,
+	);
 });

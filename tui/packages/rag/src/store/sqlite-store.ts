@@ -3,10 +3,10 @@
 // index persisted alongside it. Search queries the ANN index, then hydrates
 // hits from SQLite by id.
 
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { Index, MetricKind } from "usearch";
 import type { IVectorStore, RAGChunk, SearchHit } from "../types.ts";
 
@@ -31,12 +31,17 @@ type SqliteDatabaseConstructor = new (path: string) => SqliteDatabase;
 function resolveSqliteDatabase(): SqliteDatabaseConstructor {
 	const runtimeRequire = createRequire(import.meta.url);
 	const isBun = "Bun" in globalThis;
-	const mod = isBun ? runtimeRequire("bun:sqlite") : runtimeRequire("node:sqlite");
+	const mod = isBun
+		? runtimeRequire("bun:sqlite")
+		: runtimeRequire("node:sqlite");
 	return (isBun ? mod.Database : mod.DatabaseSync) as SqliteDatabaseConstructor;
 }
 
 /** Resolve storage paths (SQLite db + USearch index) using XDG data dir or fallback to user home. */
-function resolveStoragePaths(projectDir: string, dbName = "rag"): { dbPath: string; indexPath: string } {
+function resolveStoragePaths(
+	projectDir: string,
+	dbName = "rag",
+): { dbPath: string; indexPath: string } {
 	const base = "tui/rag-storage";
 	const storageRoot = process.env.XDG_DATA_HOME
 		? join(process.env.XDG_DATA_HOME, base)
@@ -70,9 +75,15 @@ export class SQLiteVectorStore implements IVectorStore {
 	private readonly indexPath: string;
 	private dimension: number;
 
-	constructor(projectDir: string, options?: { dbName?: string; dimension?: number }) {
+	constructor(
+		projectDir: string,
+		options?: { dbName?: string; dimension?: number },
+	) {
 		this.dimension = options?.dimension ?? 384;
-		const { dbPath, indexPath } = resolveStoragePaths(projectDir, options?.dbName || "chunks");
+		const { dbPath, indexPath } = resolveStoragePaths(
+			projectDir,
+			options?.dbName || "chunks",
+		);
 		this.indexPath = indexPath;
 
 		const dir = dirname(dbPath);
@@ -118,7 +129,9 @@ export class SQLiteVectorStore implements IVectorStore {
 			CREATE INDEX IF NOT EXISTS idx_chunks_created ON chunks(created_at DESC);
 		`);
 
-		const current = (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+		const current = (
+			this.db.prepare("PRAGMA user_version").get() as { user_version: number }
+		).user_version;
 		if (current < SCHEMA_VERSION) {
 			this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 		}
@@ -129,19 +142,34 @@ export class SQLiteVectorStore implements IVectorStore {
 	}
 
 	private prepareStatements(): void {
-		this.p("insertChunk", `
+		this.p(
+			"insertChunk",
+			`
 			INSERT OR REPLACE INTO chunks (id, document_id, filename, text, metadata_json, chunk_index)
 			VALUES (?, ?, ?, ?, ?, ?)
-		`);
+		`,
+		);
 		this.p("getRowId", `SELECT rowid FROM chunks WHERE id = ?`);
 		this.p("deleteById", `DELETE FROM chunks WHERE id = ?`);
-		this.p("selectByDocId", `SELECT rowid, id FROM chunks WHERE document_id = ?`);
+		this.p(
+			"selectByDocId",
+			`SELECT rowid, id FROM chunks WHERE document_id = ?`,
+		);
 		this.p("clearAll", "DELETE FROM chunks");
 		this.p("countChunks", "SELECT COUNT(*) AS cnt FROM chunks");
-		this.p("getAllDocs", `SELECT DISTINCT document_id FROM chunks ORDER BY created_at DESC`);
+		this.p(
+			"getAllDocs",
+			`SELECT DISTINCT document_id FROM chunks ORDER BY created_at DESC`,
+		);
 		this.p("getChunkById", "SELECT * FROM chunks WHERE id = ?");
-		this.p("getByRowIds", `SELECT * FROM chunks WHERE rowid IN (SELECT value FROM json_each(?))`);
-		this.p("listChunksByDoc", `SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC`);
+		this.p(
+			"getByRowIds",
+			`SELECT * FROM chunks WHERE rowid IN (SELECT value FROM json_each(?))`,
+		);
+		this.p(
+			"listChunksByDoc",
+			`SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC`,
+		);
 		this.p("listAll", `SELECT * FROM chunks`);
 	}
 
@@ -160,7 +188,8 @@ export class SQLiteVectorStore implements IVectorStore {
 
 		for (let i = 0; i < chunks.length; i++) {
 			const c = chunks[i];
-			if (!c.vector) throw new Error(`Chunk ${c.id} has no vector; embed before storing.`);
+			if (!c.vector)
+				throw new Error(`Chunk ${c.id} has no vector; embed before storing.`);
 
 			this.statements.insertChunk.run(
 				c.id,
@@ -186,11 +215,13 @@ export class SQLiteVectorStore implements IVectorStore {
 
 		const k = Math.min(topK, size);
 		const matches = this.index.search(Float32Array.from(vector), k, 0);
-		const rowIds = Array.from(matches.keys, (k) => Number(k));
+		const rowIds = Array.from(matches.keys, k => Number(k));
 		if (!rowIds.length) return [];
 
-		const rows = this.statements.getByRowIds.all(JSON.stringify(rowIds)) as ChunkRow[];
-		const byRowId = new Map(rows.map((r) => [r.rowid, r]));
+		const rows = this.statements.getByRowIds.all(
+			JSON.stringify(rowIds),
+		) as ChunkRow[];
+		const byRowId = new Map(rows.map(r => [r.rowid, r]));
 
 		const hits: SearchHit[] = [];
 		for (let i = 0; i < rowIds.length; i++) {
@@ -203,7 +234,9 @@ export class SQLiteVectorStore implements IVectorStore {
 	}
 
 	async search(_query: string, _topK = 5): Promise<SearchHit[]> {
-		throw new Error("Use searchByVector() with pre-computed embeddings. For text search use the RAGPipeline.");
+		throw new Error(
+			"Use searchByVector() with pre-computed embeddings. For text search use the RAGPipeline.",
+		);
 	}
 
 	async clear(): Promise<void> {
@@ -218,13 +251,18 @@ export class SQLiteVectorStore implements IVectorStore {
 	}
 
 	async documentIds(): Promise<string[]> {
-		const rows = this.statements.getAllDocs.all() as Array<{ document_id: string }>;
-		return rows.map((r) => r.document_id);
+		const rows = this.statements.getAllDocs.all() as Array<{
+			document_id: string;
+		}>;
+		return rows.map(r => r.document_id);
 	}
 
 	/** Remove all chunks belonging to a document, from both SQLite and the ANN index. */
 	async deleteDocument(docId: string): Promise<void> {
-		const rows = this.statements.selectByDocId.all(docId) as Array<{ rowid: number; id: string }>;
+		const rows = this.statements.selectByDocId.all(docId) as Array<{
+			rowid: number;
+			id: string;
+		}>;
 		for (const row of rows) {
 			const key = BigInt(row.rowid);
 			if (this.index.contains(key)) this.index.remove(key);
@@ -240,7 +278,9 @@ export class SQLiteVectorStore implements IVectorStore {
 	}
 
 	getChunkById(chunkId: string): RAGChunk | null {
-		const row = this.statements.getChunkById.get(chunkId) as ChunkRow | undefined;
+		const row = this.statements.getChunkById.get(chunkId) as
+			| ChunkRow
+			| undefined;
 		return row ? toRAGChunk(row) : null;
 	}
 

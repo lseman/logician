@@ -11,16 +11,27 @@ const BOLD = "\x1b[1m";
 void test("wrapText preserves color across every wrapped line, not just the first", () => {
 	const text = `${COLOR}This is a long notice body that should definitely wrap across multiple lines when the terminal width is narrow enough to force it${RESET}`;
 	const lines = wrapText(text, 40);
-	assert.ok(lines.length > 1, "text should actually wrap for this test to be meaningful");
+	assert.ok(
+		lines.length > 1,
+		"text should actually wrap for this test to be meaningful",
+	);
 	for (const line of lines) {
-		assert.match(line, /^\x1b\[38;5;8m/, `every wrapped line should reopen the color: ${JSON.stringify(line)}`);
+		assert.match(
+			line,
+			/^\x1b\[38;5;8m/,
+			`every wrapped line should reopen the color: ${JSON.stringify(line)}`,
+		);
 	}
 });
 
 void test("wrapText never splits a word mid-character when it fits on its own line", () => {
-	const original = "This is a long notice body that should definitely wrap across multiple lines when narrow";
+	const original =
+		"This is a long notice body that should definitely wrap across multiple lines when narrow";
 	const lines = wrapText(original, 40);
-	assert.ok(lines.length > 1, "text should actually wrap for this test to be meaningful");
+	assert.ok(
+		lines.length > 1,
+		"text should actually wrap for this test to be meaningful",
+	);
 	// Rejoining every wrapped line's words must reproduce the exact original
 	// word sequence — if any word got split (e.g. "definitely" -> "d" +
 	// "efinitely"), the rejoined word list would differ from the original.
@@ -33,7 +44,11 @@ void test("wrapText does not duplicate color codes when hard-wrapping a single l
 	const lines = wrapText(`${COLOR}${"x".repeat(60)}${RESET}`, 20);
 	for (const line of lines) {
 		const opens = line.match(/\x1b\[38;5;8m/g) ?? [];
-		assert.equal(opens.length, 1, `line should open the color exactly once: ${JSON.stringify(line)}`);
+		assert.equal(
+			opens.length,
+			1,
+			`line should open the color exactly once: ${JSON.stringify(line)}`,
+		);
 	}
 });
 
@@ -43,7 +58,11 @@ void test("wrapText carries color from a hard-wrapped word into the words that f
 		20,
 	);
 	for (const line of lines) {
-		assert.match(line, /^\x1b\[38;5;8m/, `line should still be colored: ${JSON.stringify(line)}`);
+		assert.match(
+			line,
+			/^\x1b\[38;5;8m/,
+			`line should still be colored: ${JSON.stringify(line)}`,
+		);
 	}
 });
 
@@ -74,17 +93,34 @@ void test("wrapText combines multiple active codes (bold + color) without duplic
 	for (const line of lines) {
 		const boldOpens = line.match(/\x1b\[1m/g) ?? [];
 		const colorOpens = line.match(/\x1b\[38;5;8m/g) ?? [];
-		assert.equal(boldOpens.length, 1, `bold should appear once: ${JSON.stringify(line)}`);
-		assert.equal(colorOpens.length, 1, `color should appear once: ${JSON.stringify(line)}`);
+		assert.equal(
+			boldOpens.length,
+			1,
+			`bold should appear once: ${JSON.stringify(line)}`,
+		);
+		assert.equal(
+			colorOpens.length,
+			1,
+			`color should appear once: ${JSON.stringify(line)}`,
+		);
 	}
 });
 
 void test("wrapText never produces a line wider than the requested width", () => {
 	const cases: Array<[string, number]> = [
-		[`${COLOR}This is a long notice body that should definitely wrap across multiple lines when the terminal width is narrow enough to force it${RESET}`, 40],
-		["This is a long notice body that should definitely wrap across multiple lines when narrow", 40],
+		[
+			`${COLOR}This is a long notice body that should definitely wrap across multiple lines when the terminal width is narrow enough to force it${RESET}`,
+			40,
+		],
+		[
+			"This is a long notice body that should definitely wrap across multiple lines when narrow",
+			40,
+		],
 		[`${COLOR}${"x".repeat(60)}${RESET}`, 20],
-		[`${BOLD}${COLOR}Bold and colored text that is long enough to wrap onto a second visual line for sure${RESET}`, 35],
+		[
+			`${BOLD}${COLOR}Bold and colored text that is long enough to wrap onto a second visual line for sure${RESET}`,
+			35,
+		],
 	];
 	for (const [text, width] of cases) {
 		for (const line of wrapText(text, width)) {
@@ -98,10 +134,17 @@ void test("wrapText never produces a line wider than the requested width", () =>
 
 void test("wrapText leaves plain uncolored text unchanged in behavior", () => {
 	const lines = wrapText("aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd", 15);
-	assert.deepEqual(lines, ["aaaaaaaaaa", "bbbbbbbbbb", "cccccccccc", "dddddddddd"]);
+	assert.deepEqual(lines, [
+		"aaaaaaaaaa",
+		"bbbbbbbbbb",
+		"cccccccccc",
+		"dddddddddd",
+	]);
 });
 
 void test("wrapText returns short text unchanged", () => {
 	assert.deepEqual(wrapText("short", 40), ["short"]);
-	assert.deepEqual(wrapText(`${COLOR}short${RESET}`, 40), [`${COLOR}short${RESET}`]);
+	assert.deepEqual(wrapText(`${COLOR}short${RESET}`, 40), [
+		`${COLOR}short${RESET}`,
+	]);
 });

@@ -1,8 +1,8 @@
 // ── Agent event → bridge event shape mapping ──────────────────────────────────
 
 import {
-	STEERING_INTERRUPT_SUMMARY,
 	type AgentEvent,
+	STEERING_INTERRUPT_SUMMARY,
 } from "@logician/agent-core";
 import type { ParsedBridgeEvent } from "./events.ts";
 

@@ -28,7 +28,8 @@ void test("a length-truncated tool call closes its spinner instead of hanging", 
 		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "call_abc123",
-		result: "Tool call \"write_file\" was not executed because the assistant response hit the output token limit...",
+		result:
+			'Tool call "write_file" was not executed because the assistant response hit the output token limit...',
 		is_error: true,
 	});
 
@@ -112,6 +113,6 @@ void test("two parallel same-name calls truncated together both close correctly"
 	});
 
 	const tools = transcript.getAssistantTools(transcript.getTurns()[0]);
-	const stillOpen = tools.filter((tool) => !tool.isComplete);
+	const stillOpen = tools.filter(tool => !tool.isComplete);
 	assert.equal(stillOpen.length, 0, "no spinner should be left stuck");
 });

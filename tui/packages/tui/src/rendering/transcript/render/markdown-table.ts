@@ -2,9 +2,13 @@
 // Block-level markdown line rendering (code fences, tables, JSON) and the
 // table layout helpers it depends on. No instance state.
 
-import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import {
+	highlight,
+	highlightAuto,
+} from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import { BOLD, DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import { wrapText } from "../layout.ts";
 import {
 	escapeMarkdownTableCell,
 	extractLangFromFence,
@@ -12,7 +16,6 @@ import {
 	renderInline,
 	renderMarkdownLine,
 } from "../text-utils.ts";
-import { wrapText } from "../layout.ts";
 
 export function renderMarkdownLines(
 	text: string,
@@ -81,7 +84,7 @@ export function renderMarkdownLines(
 					"| ID | Time | Type | Title |",
 					"| --- | --- | --- | --- |",
 					...rows.map(
-						(row) => `| ${row.map(escapeMarkdownTableCell).join(" | ")} |`,
+						row => `| ${row.map(escapeMarkdownTableCell).join(" | ")} |`,
 					),
 				],
 				maxLen,
@@ -194,7 +197,7 @@ export function isTableRow(line: string): boolean {
 export function isTableSeparator(line: string): boolean {
 	const cells = splitTableRow(line);
 	if (cells.length < 2) return false;
-	return cells.every((cell) => /^:?-+:?$/.test(stripAnsi(cell.trim())));
+	return cells.every(cell => /^:?-+:?$/.test(stripAnsi(cell.trim())));
 }
 
 export function splitTableRow(line: string): string[] {
@@ -230,11 +233,11 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 	if (rawLines.length < 2) return rawLines;
 
 	const header = splitTableRow(rawLines[0]);
-	const rows = rawLines.slice(2).map((line) => splitTableRow(line));
-	const columnCount = Math.max(header.length, ...rows.map((row) => row.length));
+	const rows = rawLines.slice(2).map(line => splitTableRow(line));
+	const columnCount = Math.max(header.length, ...rows.map(row => row.length));
 	if (columnCount < 2) return rawLines;
 
-	const normalizedRows = [header, ...rows].map((row) => {
+	const normalizedRows = [header, ...rows].map(row => {
 		const next = row.slice(0, columnCount);
 		while (next.length < columnCount) next.push("");
 		return next;
@@ -246,7 +249,7 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 	const naturalWidths = Array.from({ length: columnCount }, (_, col) => {
 		return Math.max(
 			minColumnWidth,
-			...normalizedRows.map((row) => visibleWidth(row[col] || "")),
+			...normalizedRows.map(row => visibleWidth(row[col] || "")),
 		);
 	});
 
@@ -280,7 +283,7 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 		return (
 			borderColor +
 			left +
-			widths.map((width) => fill.repeat(width + 2)).join(join) +
+			widths.map(width => fill.repeat(width + 2)).join(join) +
 			right +
 			RESET
 		);
@@ -295,7 +298,9 @@ export function renderTable(rawLines: string[], maxLen: number): string[] {
 		const normalized = row.slice(0, columnCount);
 		while (normalized.length < columnCount) normalized.push("");
 		const rowColor_ = ri % 2 === 0 ? rowColor : altRowColor;
-		out.push(...renderTableRow(normalized, widths, rowColor_, false, borderColor));
+		out.push(
+			...renderTableRow(normalized, widths, rowColor_, false, borderColor),
+		);
 	}
 	out.push(frame("└", "─", "┴", "┘"));
 	return out;
@@ -308,8 +313,10 @@ export function renderTableRow(
 	header: boolean,
 	borderColor: string,
 ): string[] {
-	const wrappedCells = cells.map((cell, idx) => wrapPlainCell(cell, widths[idx]));
-	const rowHeight = Math.max(1, ...wrappedCells.map((cell) => cell.length));
+	const wrappedCells = cells.map((cell, idx) =>
+		wrapPlainCell(cell, widths[idx]),
+	);
+	const rowHeight = Math.max(1, ...wrappedCells.map(cell => cell.length));
 	const lines: string[] = [];
 	const cellColor = header ? color + BOLD : color;
 	const border = borderColor;

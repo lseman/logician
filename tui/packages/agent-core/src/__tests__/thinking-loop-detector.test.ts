@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import { ThinkingLoopDetector } from "../agent/guards/thinking-loop-detector.ts";
 
 describe("ThinkingLoopDetector", () => {
@@ -31,8 +31,8 @@ describe("ThinkingLoopDetector", () => {
 			result !== null,
 			"should trigger on 3rd consecutive thinking turn",
 		);
-		assert.ok(result!.includes("Thinking loop detected"));
-		assert.ok(result!.includes("consecutive turns with no tool calls"));
+		assert.ok(result?.includes("Thinking loop detected"));
+		assert.ok(result?.includes("consecutive turns with no tool calls"));
 	});
 
 	it("resets consecutive counter when a tool call turns happens", () => {
@@ -60,7 +60,7 @@ describe("ThinkingLoopDetector", () => {
 		// Next turn is 2x longer — should trigger escalation
 		const result = detector.recordTurn("b".repeat(300), 0, 2);
 		assert.ok(result !== null, "should detect escalation");
-		assert.ok(result!.includes("spiral"));
+		assert.ok(result?.includes("spiral"));
 	});
 
 	it("resets escalation after non-thinking turn", () => {
@@ -88,7 +88,7 @@ describe("ThinkingLoopDetector", () => {
 		assert.strictEqual(detector.recordTurn(metaText1, 0, 1), null);
 		const result = detector.recordTurn(metaText2, 0, 2);
 		assert.ok(result !== null, "should detect meta-reasoning loop");
-		assert.ok(result!.includes("meta-reasoning"));
+		assert.ok(result?.includes("meta-reasoning"));
 	});
 
 	it("does not trip meta-reasoning on non-thinking turns", () => {
@@ -164,7 +164,7 @@ describe("ThinkingLoopDetector", () => {
 		detector.recordTurn(shortText, 0, 1);
 		const result = detector.recordTurn(shortText, 0, 2);
 		assert.ok(result !== null);
-		assert.ok(result!.includes("Thinking loop detected"));
+		assert.ok(result?.includes("Thinking loop detected"));
 	});
 
 	it("detects budget exhaustion", () => {
@@ -175,6 +175,6 @@ describe("ThinkingLoopDetector", () => {
 		detector.recordTurn("x".repeat(50), 0, 1, 60); // 60 tokens
 		const result = detector.recordTurn("y".repeat(50), 0, 2, 60); // total 120
 		assert.ok(result !== null);
-		assert.ok(result!.includes("budget"));
+		assert.ok(result?.includes("budget"));
 	});
 });

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ToolRegistry } from "../tools/shared/registry.ts";
 import type { Tool } from "../agent/types.ts";
 import { microCompactMessages } from "../compaction/compaction.ts";
+import { ToolRegistry } from "../tools/shared/registry.ts";
 
 function makeTool(overrides: Partial<Tool> & { name: string }): Tool {
 	return {
@@ -75,7 +75,7 @@ void test("registry aborts a tool when its timeout expires", async () => {
 			name: "abortable",
 			timeoutMs: 20,
 			execute: async (_args, ctx) =>
-				new Promise<string>((resolve) => {
+				new Promise<string>(resolve => {
 					ctx.signal?.addEventListener(
 						"abort",
 						() => {
@@ -178,7 +178,7 @@ void test("micro-compaction spares recent messages and user prompts", () => {
 		oldToolResult,
 		...Array.from({ length: 6 }, (_, i) => ({
 			role: "tool",
-			content: "R".repeat(10_000) + `#${i}`,
+			content: `${"R".repeat(10_000)}#${i}`,
 		})),
 	];
 

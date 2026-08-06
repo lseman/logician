@@ -6,7 +6,11 @@
 //   - rag_delete_doc(docId) — remove a document and its chunks
 
 import type { Tool, ToolContext } from "@logician/agent-core/agent/types.ts";
-import { IngestionPipeline, TransformersEmbedder, type SearchHit } from "@logician/rag";
+import {
+	IngestionPipeline,
+	type SearchHit,
+	TransformersEmbedder,
+} from "@logician/rag";
 
 const embedder = new TransformersEmbedder();
 const pipelines = new Map<string, IngestionPipeline>();
@@ -40,7 +44,8 @@ export const rag_ingest_pdf: Tool = {
 			},
 			docId: {
 				type: "string",
-				description: "Optional document ID. If omitted, a default is derived from the file.",
+				description:
+					"Optional document ID. If omitted, a default is derived from the file.",
 			},
 		},
 		required: ["path"],
@@ -51,7 +56,10 @@ export const rag_ingest_pdf: Tool = {
 
 		try {
 			const pipeline = getPipeline(requireCwd(ctx));
-			const doc = await pipeline.ingestFile(filePath, args.docId as string | undefined);
+			const doc = await pipeline.ingestFile(
+				filePath,
+				args.docId as string | undefined,
+			);
 			return {
 				content: JSON.stringify(
 					{
@@ -83,7 +91,10 @@ export const rag_search_docs: Tool = {
 		type: "object",
 		properties: {
 			query: { type: "string", description: "Search query text" },
-			k: { type: "number", description: "Number of results to return (default 5)" },
+			k: {
+				type: "number",
+				description: "Number of results to return (default 5)",
+			},
 		},
 		required: ["query"],
 	},
@@ -104,7 +115,11 @@ export const rag_search_docs: Tool = {
 			}));
 
 			return {
-				content: JSON.stringify({ query, results: hits, totalFound: results.length }, null, 2),
+				content: JSON.stringify(
+					{ query, results: hits, totalFound: results.length },
+					null,
+					2,
+				),
 			};
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
@@ -136,7 +151,8 @@ export const rag_list_docs: Tool = {
 export const rag_delete_doc: Tool = {
 	name: "rag_delete_doc",
 	label: "RAG: Delete Doc",
-	description: "Remove a document and all its chunks from the RAG vector store.",
+	description:
+		"Remove a document and all its chunks from the RAG vector store.",
 	promptSnippet: "Delete a document from the RAG vector store",
 	parameters: {
 		type: "object",
@@ -160,4 +176,9 @@ export const rag_delete_doc: Tool = {
 	},
 };
 
-export const rag_tools: Tool[] = [rag_ingest_pdf, rag_search_docs, rag_list_docs, rag_delete_doc];
+export const rag_tools: Tool[] = [
+	rag_ingest_pdf,
+	rag_search_docs,
+	rag_list_docs,
+	rag_delete_doc,
+];

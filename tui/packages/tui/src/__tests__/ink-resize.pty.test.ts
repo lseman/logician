@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
-import {
-	runInPty,
-	screenFromPtyResult,
-} from "../testing/pty-harness.ts";
 import { createPtyAppHome } from "../testing/pty-app-home.ts";
+import { runInPty, screenFromPtyResult } from "../testing/pty-harness.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
@@ -39,8 +36,12 @@ void test("resize repaints correctly at the new terminal dimensions", async () =
 		rows: 30,
 	});
 	// After the resize the PTY itself is 60x20; render against that.
-	const screen = screenFromPtyResult(result, 60, 20).text();
-	assert.match(result.output, /resized ok/, "input bar must reflect input typed post-resize");
+	const _screen = screenFromPtyResult(result, 60, 20).text();
+	assert.match(
+		result.output,
+		/resized ok/,
+		"input bar must reflect input typed post-resize",
+	);
 	assert.doesNotMatch(
 		result.output,
 		/ERR_UNSUPPORTED_ESM_URL_SCHEME|TypeError|\[TUI render error\]/,

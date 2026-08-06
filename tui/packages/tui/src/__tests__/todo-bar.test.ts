@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { TodoBar, type TaskItem } from "../status/todo-bar.ts";
+import { type TaskItem, TodoBar } from "../status/todo-bar.ts";
 import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
@@ -60,9 +60,9 @@ void test("TodoBar groups tasks by status", () => {
 	assert.match(rows[0], /Tasks 1\/3/);
 
 	// in_progress should appear before pending (order: in_progress, pending, completed)
-	const inProgIdx = rows.findIndex((r) => /Writing tests/.test(r));
-	const pendingIdx = rows.findIndex((r) => /Fix bug/.test(r));
-	const doneIdx = rows.findIndex((r) => /Done task/.test(r));
+	const inProgIdx = rows.findIndex(r => /Writing tests/.test(r));
+	const pendingIdx = rows.findIndex(r => /Fix bug/.test(r));
+	const doneIdx = rows.findIndex(r => /Done task/.test(r));
 	assert.ok(inProgIdx < pendingIdx, "in_progress before pending");
 	assert.ok(pendingIdx < doneIdx, "pending before completed");
 
@@ -81,7 +81,7 @@ void test("TodoBar shows dependencies", () => {
 	const rows = bar.render(80);
 
 	// Second task should show dependency
-	const depRow = rows.find((r) => /Depends on/.test(r))!;
+	const depRow = rows.find(r => /Depends on/.test(r))!;
 	assert.ok(depRow, "dependency task should be rendered");
 	assert.match(depRow, /→/);
 });
@@ -99,7 +99,7 @@ void test("TodoBar shows active form for in_progress tasks", () => {
 	const rows = bar.render(80);
 
 	// Should show active form indicator
-	const taskRow = rows.find((r) => /Running task/.test(r))!;
+	const taskRow = rows.find(r => /Running task/.test(r))!;
 	assert.match(taskRow, /—/);
 });
 
@@ -117,7 +117,7 @@ void test("TodoBar shows hidden count when too many tasks", () => {
 	const rows = bar.render(80);
 
 	// MAX_ROWS is 5, so 2 hidden (header + 5 tasks + hidden hint)
-	const hiddenIdx = rows.findIndex((r) => /more/.test(r));
+	const hiddenIdx = rows.findIndex(r => /more/.test(r));
 	assert.ok(hiddenIdx >= 0, "should show hidden count");
 	assert.match(rows[hiddenIdx], /2 more/);
 });

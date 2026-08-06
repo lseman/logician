@@ -4,8 +4,8 @@
 //            APPEND_SYSTEM.md, .agents/skills/
 
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 const TRUST_RESOURCES = [
 	"settings.json",
@@ -122,9 +122,10 @@ export function getTrustRequiringPaths(cwd: string): string[] {
  * Formats a trust prompt for display to the user.
  */
 export function formatTrustPrompt(cwd: string, paths: string[]): string {
-	const pathsSection = paths.length > 0
-		? `\n\nTrust-requiring resources found:\n  ${paths.join("\n  ")}`
-		: "";
+	const pathsSection =
+		paths.length > 0
+			? `\n\nTrust-requiring resources found:\n  ${paths.join("\n  ")}`
+			: "";
 
 	return `Trust project folder?\n${cwd}${pathsSection}\n\nThis allows Logician to load local settings, extensions, skills, and execute project resources.`;
 }

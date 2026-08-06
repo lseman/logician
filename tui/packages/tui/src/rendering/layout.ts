@@ -1,13 +1,13 @@
 import {
 	type Component,
 	CURSOR_MARKER,
-	compositeTuiLine,
 	clampLineToWidth,
+	compositeTuiLine,
 	visibleWidth,
 } from "../terminal/primitives.ts";
-import type { ScrollView } from "./scroll-view.ts";
 import { allocateFlexSizes, visibleFlexEntries } from "./flex.ts";
 import { getLayoutNode } from "./layout-node.ts";
+import type { ScrollView } from "./scroll-view.ts";
 
 export interface LayoutRect {
 	x: number;
@@ -58,10 +58,19 @@ function intersect(a: LayoutRect, b: LayoutRect): LayoutRect {
 	const y = Math.max(a.y, b.y);
 	const right = Math.min(a.x + a.width, b.x + b.width);
 	const bottom = Math.min(a.y + a.height, b.y + b.height);
-	return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+	return {
+		x,
+		y,
+		width: Math.max(0, right - x),
+		height: Math.max(0, bottom - y),
+	};
 }
 
-function renderCached(context: LayoutContext, component: Component, width: number): string[] {
+function renderCached(
+	context: LayoutContext,
+	component: Component,
+	width: number,
+): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
 	let widths = context.renderCache.get(component);
 	if (!widths) {
@@ -76,12 +85,23 @@ function renderCached(context: LayoutContext, component: Component, width: numbe
 	return lines;
 }
 
-function measureHeight(context: LayoutContext, component: Component, width: number): number {
+function measureHeight(
+	context: LayoutContext,
+	component: Component,
+	width: number,
+): number {
 	return renderCached(context, component, width).length;
 }
 
-function measureWidth(context: LayoutContext, component: Component, width: number): number {
-	return renderCached(context, component, width).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
+function measureWidth(
+	context: LayoutContext,
+	component: Component,
+	width: number,
+): number {
+	return renderCached(context, component, width).reduce(
+		(max, line) => Math.max(max, visibleWidth(line)),
+		0,
+	);
 }
 
 function withParent(box: LayoutBox, parent: LayoutBox): LayoutBox {
@@ -112,16 +132,23 @@ function layoutComponent(
 	const node = getLayoutNode(component);
 	if (!node) {
 		const lines = renderCached(context, component, safeWidth);
-		const allocatedHeight = height === undefined ? lines.length : Math.max(0, Math.floor(height));
+		const allocatedHeight =
+			height === undefined ? lines.length : Math.max(0, Math.floor(height));
 		let lineOffset = 0;
 		if (lines.length > allocatedHeight && allocatedHeight > 0) {
-			const cursorLine = lines.findIndex((line) => line.includes(CURSOR_MARKER));
-			if (cursorLine >= allocatedHeight) lineOffset = cursorLine - allocatedHeight + 1;
+			const cursorLine = lines.findIndex(line => line.includes(CURSOR_MARKER));
+			if (cursorLine >= allocatedHeight)
+				lineOffset = cursorLine - allocatedHeight + 1;
 		}
 		return {
 			component,
 			rect: { x, y, width: safeWidth, height: allocatedHeight },
-			clip: intersect(clip, { x, y, width: safeWidth, height: allocatedHeight }),
+			clip: intersect(clip, {
+				x,
+				y,
+				width: safeWidth,
+				height: allocatedHeight,
+			}),
 			children: [],
 			lines,
 			lineOffset,
@@ -142,11 +169,17 @@ function layoutComponent(
 			clip,
 		);
 		const contentHeight = childBox.rect.height;
-		const viewportHeight = height === undefined ? contentHeight : Math.max(0, Math.floor(height));
-		node.state.updateLayout(contentHeight, viewportHeight, context.requestRender);
+		const viewportHeight =
+			height === undefined ? contentHeight : Math.max(0, Math.floor(height));
+		node.state.updateLayout(
+			contentHeight,
+			viewportHeight,
+			context.requestRender,
+		);
 		translateBox(childBox, previousScrollTop - node.state.scrollTop);
 		const scrollView = node.state as ScrollView;
-		if (node.state.primary || !context.primaryScrollView) context.primaryScrollView = scrollView;
+		if (node.state.primary || !context.primaryScrollView)
+			context.primaryScrollView = scrollView;
 		const rect = { x, y, width: safeWidth, height: viewportHeight };
 		const childClip = intersect(clip, rect);
 		const box: LayoutBox = {
@@ -166,12 +199,20 @@ function layoutComponent(
 	const entries = visibleFlexEntries(node.entries, context.viewport);
 	const gapTotal = Math.max(0, entries.length - 1) * node.gap;
 	if (node.type === "vstack") {
-		const intrinsicHeights = entries.map((entry) =>
-			typeof entry.basis === "number" ? entry.basis : measureHeight(context, entry.component, safeWidth),
+		const intrinsicHeights = entries.map(entry =>
+			typeof entry.basis === "number"
+				? entry.basis
+				: measureHeight(context, entry.component, safeWidth),
 		);
-		const sizes = allocateFlexSizes(entries, intrinsicHeights, height, node.gap);
+		const sizes = allocateFlexSizes(
+			entries,
+			intrinsicHeights,
+			height,
+			node.gap,
+		);
 		const naturalHeight = sizes.reduce((sum, size) => sum + size, 0) + gapTotal;
-		const allocatedHeight = height === undefined ? naturalHeight : Math.max(0, Math.floor(height));
+		const allocatedHeight =
+			height === undefined ? naturalHeight : Math.max(0, Math.floor(height));
 		const rect = { x, y, width: safeWidth, height: allocatedHeight };
 		const box: LayoutBox = {
 			component,
@@ -184,7 +225,15 @@ function layoutComponent(
 		for (let index = 0; index < entries.length; index++) {
 			box.children.push(
 				withParent(
-					layoutComponent(context, entries[index]!.component, x, childY, safeWidth, sizes[index]!, box.clip),
+					layoutComponent(
+						context,
+						entries[index]?.component,
+						x,
+						childY,
+						safeWidth,
+						sizes[index]!,
+						box.clip,
+					),
 					box,
 				),
 			);
@@ -193,16 +242,26 @@ function layoutComponent(
 		return box;
 	}
 
-	const intrinsicWidths = entries.map((entry) =>
-		typeof entry.basis === "number" ? entry.basis : measureWidth(context, entry.component, safeWidth),
+	const intrinsicWidths = entries.map(entry =>
+		typeof entry.basis === "number"
+			? entry.basis
+			: measureWidth(context, entry.component, safeWidth),
 	);
-	const widths = allocateFlexSizes(entries, intrinsicWidths, safeWidth, node.gap);
+	const widths = allocateFlexSizes(
+		entries,
+		intrinsicWidths,
+		safeWidth,
+		node.gap,
+	);
 	const intrinsicHeights = entries.map((entry, index) =>
 		measureHeight(context, entry.component, Math.max(1, widths[index]!)),
 	);
 	const allocatedHeight =
 		height === undefined
-			? intrinsicHeights.reduce((max, childHeight) => Math.max(max, childHeight), 0)
+			? intrinsicHeights.reduce(
+					(max, childHeight) => Math.max(max, childHeight),
+					0,
+				)
 			: Math.max(0, height);
 	const rect = { x, y, width: safeWidth, height: allocatedHeight };
 	const box: LayoutBox = {
@@ -215,14 +274,18 @@ function layoutComponent(
 	let childX = x;
 	for (let index = 0; index < entries.length; index++) {
 		const naturalChildHeight = intrinsicHeights[index]!;
-		const childHeight = node.align === "stretch" ? allocatedHeight : Math.min(allocatedHeight, naturalChildHeight);
+		const childHeight =
+			node.align === "stretch"
+				? allocatedHeight
+				: Math.min(allocatedHeight, naturalChildHeight);
 		let childY = y;
-		if (node.align === "center") childY += Math.floor((allocatedHeight - childHeight) / 2);
+		if (node.align === "center")
+			childY += Math.floor((allocatedHeight - childHeight) / 2);
 		else if (node.align === "end") childY += allocatedHeight - childHeight;
 		const childWidth = widths[index]!;
 		if (childWidth === 0) {
 			box.children.push({
-				component: entries[index]!.component,
+				component: entries[index]?.component,
 				rect: { x: childX, y: childY, width: 0, height: childHeight },
 				clip: { x: childX, y: childY, width: 0, height: 0 },
 				children: [],
@@ -232,7 +295,15 @@ function layoutComponent(
 		} else {
 			box.children.push(
 				withParent(
-					layoutComponent(context, entries[index]!.component, childX, childY, childWidth, childHeight, box.clip),
+					layoutComponent(
+						context,
+						entries[index]?.component,
+						childX,
+						childY,
+						childWidth,
+						childHeight,
+						box.clip,
+					),
 					box,
 				),
 			);
@@ -257,22 +328,37 @@ function paintScrollbarCell(
 	return `${before}${beforePad}${style(glyph, isThumb)}`;
 }
 
-export function getScrollbarGeometry(box: LayoutBox): ScrollbarGeometry | undefined {
-	if (!box.scrollView?.isScrollbarVisible || box.rect.width <= 0 || box.rect.height <= 0) return undefined;
+export function getScrollbarGeometry(
+	box: LayoutBox,
+): ScrollbarGeometry | undefined {
+	if (
+		!box.scrollView?.isScrollbarVisible ||
+		box.rect.width <= 0 ||
+		box.rect.height <= 0
+	)
+		return undefined;
 
-	const contentHeight = box.children[0]?.rect.height ?? box.scrollContentLines?.length ?? 0;
+	const contentHeight =
+		box.children[0]?.rect.height ?? box.scrollContentLines?.length ?? 0;
 	const trackHeight = box.rect.height;
 
 	const minThumbHeight = Math.min(2, trackHeight);
 	const thumbHeight = Math.max(
 		minThumbHeight,
-		Math.min(trackHeight, Math.round((trackHeight * trackHeight) / contentHeight)),
+		Math.min(
+			trackHeight,
+			Math.round((trackHeight * trackHeight) / contentHeight),
+		),
 	);
 	const maxScrollTop = Math.max(0, contentHeight - trackHeight);
 	const maxThumbTop = trackHeight - thumbHeight;
-	const thumbOffset = maxScrollTop === 0 ? 0 : Math.round((box.scrollView.scrollTop / maxScrollTop) * maxThumbTop);
+	const thumbOffset =
+		maxScrollTop === 0
+			? 0
+			: Math.round((box.scrollView.scrollTop / maxScrollTop) * maxThumbTop);
 	const column = box.rect.x + box.rect.width - 1;
-	if (column < box.clip.x || column >= box.clip.x + box.clip.width) return undefined;
+	if (column < box.clip.x || column >= box.clip.x + box.clip.width)
+		return undefined;
 
 	return {
 		column,
@@ -284,16 +370,34 @@ export function getScrollbarGeometry(box: LayoutBox): ScrollbarGeometry | undefi
 	};
 }
 
-function paintScrollbar(box: LayoutBox, screen: string[], _totalWidth: number): void {
+function paintScrollbar(
+	box: LayoutBox,
+	screen: string[],
+	_totalWidth: number,
+): void {
 	const geometry = getScrollbarGeometry(box);
 	if (!geometry || !box.scrollView) return;
 
 	for (let offset = 0; offset < geometry.trackHeight; offset++) {
 		const row = geometry.trackTop + offset;
-		if (row < box.clip.y || row >= box.clip.y + box.clip.height || row < 0 || row >= screen.length) continue;
-		const isThumb = row >= geometry.thumbTop && row < geometry.thumbTop + geometry.thumbHeight;
+		if (
+			row < box.clip.y ||
+			row >= box.clip.y + box.clip.height ||
+			row < 0 ||
+			row >= screen.length
+		)
+			continue;
+		const isThumb =
+			row >= geometry.thumbTop &&
+			row < geometry.thumbTop + geometry.thumbHeight;
 		const glyph = isThumb ? "█" : "│";
-		screen[row] = paintScrollbarCell(screen[row] ?? "", geometry.column, glyph, isThumb, box.scrollView.scrollbarStyle);
+		screen[row] = paintScrollbarCell(
+			screen[row] ?? "",
+			geometry.column,
+			glyph,
+			isThumb,
+			box.scrollView.scrollbarStyle,
+		);
 	}
 }
 
@@ -301,11 +405,21 @@ function paintBox(box: LayoutBox, screen: string[], totalWidth: number): void {
 	if (box.lines) {
 		const offset = box.lineOffset ?? 0;
 		const firstRow = Math.max(box.rect.y, box.clip.y, 0);
-		const lastRow = Math.min(box.rect.y + box.rect.height, box.clip.y + box.clip.height, screen.length);
+		const lastRow = Math.min(
+			box.rect.y + box.rect.height,
+			box.clip.y + box.clip.height,
+			screen.length,
+		);
 		for (let row = firstRow; row < lastRow; row++) {
 			const sourceLine = box.lines[offset + row - box.rect.y];
 			if (sourceLine === undefined) continue;
-			screen[row] = compositeTuiLine(screen[row] ?? "", sourceLine, box.rect.x, box.rect.width, totalWidth);
+			screen[row] = compositeTuiLine(
+				screen[row] ?? "",
+				sourceLine,
+				box.rect.x,
+				box.rect.width,
+				totalWidth,
+			);
 		}
 	}
 	for (const child of box.children) paintBox(child, screen, totalWidth);
@@ -339,15 +453,25 @@ export function renderLayoutFrame(
 		width: safeWidth,
 		height: safeHeight,
 		lines,
-		...(context.primaryScrollView === undefined ? {} : { primaryScrollView: context.primaryScrollView }),
+		...(context.primaryScrollView === undefined
+			? {}
+			: { primaryScrollView: context.primaryScrollView }),
 	};
 }
 
 function containsPoint(rect: LayoutRect, x: number, y: number): boolean {
-	return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
+	return (
+		x >= rect.x &&
+		x < rect.x + rect.width &&
+		y >= rect.y &&
+		y < rect.y + rect.height
+	);
 }
 
-export function getScrollViewBox(frame: LayoutFrame, scrollView: ScrollView): LayoutBox | undefined {
+export function getScrollViewBox(
+	frame: LayoutFrame,
+	scrollView: ScrollView,
+): LayoutBox | undefined {
 	const visit = (box: LayoutBox): LayoutBox | undefined => {
 		if (box.scrollView === scrollView) return box;
 		for (const child of box.children) {
@@ -374,7 +498,9 @@ export function getComponentBoxAt(
 ): LayoutBox | undefined {
 	const visit = (box: LayoutBox): LayoutBox | undefined => {
 		if (box.component === component) {
-			return containsPoint(box.clip, x, y) && containsPoint(box.rect, x, y) ? box : undefined;
+			return containsPoint(box.clip, x, y) && containsPoint(box.rect, x, y)
+				? box
+				: undefined;
 		}
 		for (const child of box.children) {
 			const match = visit(child);
@@ -385,14 +511,19 @@ export function getComponentBoxAt(
 	return visit(frame.root);
 }
 
-export function getScrollViewsAt(frame: LayoutFrame, x: number, y: number): ScrollView[] {
+export function getScrollViewsAt(
+	frame: LayoutFrame,
+	x: number,
+	y: number,
+): ScrollView[] {
 	const result: Array<{ scrollView: ScrollView; depth: number }> = [];
 	const visit = (box: LayoutBox, depth: number): void => {
 		if (!containsPoint(box.clip, x, y)) return;
-		if (box.scrollView && containsPoint(box.rect, x, y)) result.push({ scrollView: box.scrollView, depth });
+		if (box.scrollView && containsPoint(box.rect, x, y))
+			result.push({ scrollView: box.scrollView, depth });
 		for (const child of box.children) visit(child, depth + 1);
 	};
 	visit(frame.root, 0);
 	result.sort((a, b) => b.depth - a.depth);
-	return result.map((entry) => entry.scrollView);
+	return result.map(entry => entry.scrollView);
 }

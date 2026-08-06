@@ -6,8 +6,11 @@
 import { readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
-import { truncateHead, formatSize } from "./truncate.ts";
-import { ensureInsideCwd, resolvePath } from "@logician/agent-core/tools/shared/path-utils.ts";
+import {
+	ensureInsideCwd,
+	resolvePath,
+} from "@logician/agent-core/tools/shared/path-utils.ts";
+import { formatSize, truncateHead } from "./truncate.ts";
 
 const lsSchema = {
 	type: "object",
@@ -53,7 +56,7 @@ interface LsOperations {
 }
 
 const defaultOps: LsOperations = {
-	exists: async (p) => {
+	exists: async p => {
 		try {
 			await fsStat(p);
 			return true;
@@ -74,7 +77,8 @@ export const list_files: Tool = {
 	hookAliases: ["LS"],
 	description:
 		"List directory contents. Returns entries sorted alphabetically with '/' suffix for directories. Supports glob filtering. Output is truncated to 500 entries or 50KB (whichever is hit first).",
-	promptSnippet: "List directory contents with sorted entries and directory indicators",
+	promptSnippet:
+		"List directory contents with sorted entries and directory indicators",
 	promptGuidelines: ["Use list_files (ls) for directory listings"],
 	parameters: lsSchema,
 	prepareArguments,
@@ -141,7 +145,9 @@ export const list_files: Tool = {
 		}
 
 		const rawOutput = results.join("\n");
-		const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+		const truncation = truncateHead(rawOutput, {
+			maxLines: Number.MAX_SAFE_INTEGER,
+		});
 		let output = truncation.content;
 
 		const details: ListFilesDetails = {};

@@ -3,8 +3,8 @@
 // Rendering follows chronological order: thinking → response → tool → thinking …
 
 import type {
-	ParsedBridgeEvent,
 	MessageUpdateEvent,
+	ParsedBridgeEvent,
 	SubagentChunkEvent,
 	ToolEndEvent,
 	ToolStartEvent,
@@ -281,14 +281,13 @@ export class Transcript {
 				.slice()
 				.reverse()
 				.find(
-					(chunk) =>
-						chunk.type === "tool" &&
-						chunk.tool?.tool_call_id === toolCallId,
+					chunk =>
+						chunk.type === "tool" && chunk.tool?.tool_call_id === toolCallId,
 				);
 			if (exact) return exact;
 		}
 		const incomplete = chunks.filter(
-			(chunk) =>
+			chunk =>
 				chunk.type === "tool" &&
 				!chunk.isComplete &&
 				(!toolName || chunk.tool?.tool_name === toolName),
@@ -355,8 +354,8 @@ export class Transcript {
 		if (!turn) return;
 		const message = this.ensureAssistant(turn);
 		const rendered = message.chunks
-			.filter((chunk) => chunk.type === "content")
-			.map((chunk) => chunk.contentText ?? "")
+			.filter(chunk => chunk.type === "content")
+			.map(chunk => chunk.contentText ?? "")
 			.join("");
 		let latestContentEnd = message.chunks.length;
 		while (
@@ -374,7 +373,7 @@ export class Transcript {
 		}
 		const latestRendered = message.chunks
 			.slice(latestContentStart, latestContentEnd)
-			.map((chunk) => chunk.contentText ?? "")
+			.map(chunk => chunk.contentText ?? "")
 			.join("");
 		// Textual tool calls stream as ordinary content before agent-core can
 		// promote them. The final snapshot contains structured tool_calls and
@@ -487,7 +486,9 @@ export class Transcript {
 					tool: "spawn_agent",
 					tool_name: "spawn_agent",
 					tool_call_id: `lifecycle_${Date.now()}`,
-					args: event.task ? { task: event.task, agent: event.agent } : undefined,
+					args: event.task
+						? { task: event.task, agent: event.agent }
+						: undefined,
 					result: event.result,
 					partialResult: undefined,
 					isError: event.isError ?? false,
@@ -504,7 +505,8 @@ export class Transcript {
 
 		if (toolChunk.tool.tool_name === "spawn_agents") {
 			if (event.taskIndex === undefined) return;
-			const taskStatus = (details.taskStatus as Record<number, TaskStatus>) ??
+			const taskStatus =
+				(details.taskStatus as Record<number, TaskStatus>) ??
 				(details.taskStatus = {});
 			if (event.phase === "start") {
 				taskStatus[event.taskIndex] = {
@@ -576,7 +578,8 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
-		const childToolCalls = (details.childToolCalls as ChildToolCall[]) ??
+		const childToolCalls =
+			(details.childToolCalls as ChildToolCall[]) ??
 			(details.childToolCalls = []);
 		const text = event.text.trim();
 		const match = /^([▶✓✗])\s+(\S+)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(text);
@@ -587,9 +590,7 @@ export class Transcript {
 
 		if (marker === "✓" || marker === "✗") {
 			const running = childToolCalls.find(
-				(call) =>
-					call.toolCallId === toolCallId &&
-					call.status === "running",
+				call => call.toolCallId === toolCallId && call.status === "running",
 			);
 			if (running) {
 				running.status = marker === "✗" ? "failed" : "completed";
@@ -605,11 +606,7 @@ export class Transcript {
 			toolName,
 			args: marker === "▶" ? payload : "",
 			status:
-				marker === "▶"
-					? "running"
-					: marker === "✗"
-						? "failed"
-						: "completed",
+				marker === "▶" ? "running" : marker === "✗" ? "failed" : "completed",
 			isError: marker === "✗" || event.level === "warn",
 			resultPreview: marker === "▶" ? undefined : payload,
 		});
@@ -660,12 +657,17 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
-		const childChunks = (details.childChunks as ChildChunk[]) ??
-			(details.childChunks = []);
+		const childChunks =
+			(details.childChunks as ChildChunk[]) ?? (details.childChunks = []);
 
 		if (event.kind === "thinking" || event.kind === "content") {
 			const last = childChunks[childChunks.length - 1];
-			if (last && last.type === event.kind && !last.isComplete && last.agentId === event.agentId) {
+			if (
+				last &&
+				last.type === event.kind &&
+				!last.isComplete &&
+				last.agentId === event.agentId
+			) {
 				last.contentText = (last.contentText ?? "") + event.delta;
 				last.seq = event.seq;
 				return;
@@ -689,9 +691,7 @@ export class Transcript {
 						.slice()
 						.reverse()
 						.find(
-							(c) =>
-								c.type === "tool" &&
-								c.tool?.toolCallId === event.toolCallId,
+							c => c.type === "tool" && c.tool?.toolCallId === event.toolCallId,
 						)
 				: undefined;
 			if (existingStart?.tool) {
@@ -732,9 +732,7 @@ export class Transcript {
 					.slice()
 					.reverse()
 					.find(
-						(c) =>
-							c.type === "tool" &&
-							c.tool?.toolCallId === event.toolCallId,
+						c => c.type === "tool" && c.tool?.toolCallId === event.toolCallId,
 					)
 			: undefined;
 		if (existingEnd?.tool) {
@@ -881,11 +879,9 @@ export class Transcript {
 			toolChunk = [...assistant.chunks]
 				.reverse()
 				.find(
-					(c) =>
+					c =>
 						c.type === "tool" &&
-						["spawn_agent", "spawn_agents"].includes(
-							c.tool?.tool_name ?? "",
-						),
+						["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? ""),
 				);
 			if (toolChunk?.tool && event.tool_call_id) {
 				toolChunk.tool.tool_call_id = event.tool_call_id;
@@ -918,8 +914,15 @@ export class Transcript {
 		if (tool.partialResult) {
 			try {
 				const streamedArgs = JSON.parse(tool.partialResult) as unknown;
-				if (streamedArgs && typeof streamedArgs === "object" && !Array.isArray(streamedArgs)) {
-					tool.args = { ...(tool.args ?? {}), ...(streamedArgs as Record<string, unknown>) };
+				if (
+					streamedArgs &&
+					typeof streamedArgs === "object" &&
+					!Array.isArray(streamedArgs)
+				) {
+					tool.args = {
+						...(tool.args ?? {}),
+						...(streamedArgs as Record<string, unknown>),
+					};
 				}
 			} catch {
 				// A provider may finish without a complete argument stream. The renderer
@@ -1000,11 +1003,11 @@ export class Transcript {
 
 	private getCurrentTurn(): Turn | undefined {
 		if (!this.state.currentTurnId) return undefined;
-		return this.state.turns.find((t) => t.id === this.state.currentTurnId);
+		return this.state.turns.find(t => t.id === this.state.currentTurnId);
 	}
 
 	private getTurnById(id: string): Turn | undefined {
-		return this.state.turns.find((t) => t.id === id);
+		return this.state.turns.find(t => t.id === id);
 	}
 
 	clear(): void {
@@ -1069,14 +1072,14 @@ export class Transcript {
 	getThinkingChunks(): AssistantChunk[] {
 		const turn = this.getCurrentTurn();
 		if (!turn?.assistantMessage) return [];
-		return turn.assistantMessage.chunks.filter((c) => c.type === "thinking");
+		return turn.assistantMessage.chunks.filter(c => c.type === "thinking");
 	}
 
 	/** Get thinking chunks from a completed turn. */
 	getTurnThinkingChunks(turn: Turn): AssistantChunk[] {
 		const assistant = turn.assistantMessage;
 		if (!assistant) return [];
-		return assistant.chunks.filter((c) => c.type === "thinking");
+		return assistant.chunks.filter(c => c.type === "thinking");
 	}
 
 	// ── Transcript query helpers ─────────────────────────────────────────
@@ -1096,8 +1099,8 @@ export class Transcript {
 		const turn = this.getCurrentTurn();
 		if (!turn?.assistantMessage) return null;
 		const text = turn.assistantMessage.chunks
-			.filter((c) => c.type === "content" && !c.isComplete)
-			.map((c) => c.contentText)
+			.filter(c => c.type === "content" && !c.isComplete)
+			.map(c => c.contentText)
 			.join("");
 		return text || null;
 	}
@@ -1105,7 +1108,7 @@ export class Transcript {
 	/** Return the current turn's thinking chunks as plain text. */
 	getStreamingThinking(): string[] {
 		const chunks = this.getThinkingChunks();
-		return chunks.map((c) => c.contentText || "").filter(Boolean);
+		return chunks.map(c => c.contentText || "").filter(Boolean);
 	}
 
 	hasStreamingContent(): boolean {
@@ -1115,15 +1118,15 @@ export class Transcript {
 
 	hasStreamingThinking(): boolean {
 		const chunks = this.getThinkingChunks();
-		return chunks.some((t) => (t.contentText || "").trim().length > 0);
+		return chunks.some(t => (t.contentText || "").trim().length > 0);
 	}
 
 	getAssistantThinking(turn: Turn): string | null {
 		const assistant = turn.assistantMessage;
 		if (!assistant) return null;
 		const thinking = assistant.chunks
-			.filter((c) => c.type === "thinking")
-			.map((c) => c.contentText || "")
+			.filter(c => c.type === "thinking")
+			.map(c => c.contentText || "")
 			.filter(Boolean);
 		if (thinking.length === 0) return null;
 		return thinking.join("\n\n");
@@ -1133,8 +1136,8 @@ export class Transcript {
 		const assistant = turn.assistantMessage;
 		if (!assistant) return null;
 		const text = assistant.chunks
-			.filter((c) => c.type === "content")
-			.map((c) => c.contentText)
+			.filter(c => c.type === "content")
+			.map(c => c.contentText)
 			.join("");
 		return text.length > 0 ? text : null;
 	}
@@ -1144,9 +1147,9 @@ export class Transcript {
 		if (!assistant) return [];
 		return (
 			assistant.chunks
-				.filter((c) => c.type === "tool" && c.tool)
+				.filter(c => c.type === "tool" && c.tool)
 				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-				.map((c) => c.tool!)
+				.map(c => c.tool!)
 		);
 	}
 
@@ -1155,7 +1158,7 @@ export class Transcript {
 	onChange(callback: () => void): () => void {
 		this.listeners.push(callback);
 		return () => {
-			this.listeners = this.listeners.filter((cb) => cb !== callback);
+			this.listeners = this.listeners.filter(cb => cb !== callback);
 		};
 	}
 

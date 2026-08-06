@@ -3,9 +3,9 @@ import {
 	configBool,
 	configNumber,
 	configString,
+	type LogicianTuiConfig,
 	loadGlobalLogicianConfig,
 	loadLogicianConfig,
-	type LogicianTuiConfig,
 } from "../configuration/config.ts";
 
 export interface ResolvedRuntimeConfig {
@@ -21,16 +21,16 @@ export function resolveRuntimeConfig(
 	options: { loadProjectConfig?: boolean } = {},
 ): ResolvedRuntimeConfig {
 	const global = loadGlobalLogicianConfig(environment.HOME);
-	const project = options.loadProjectConfig === false
-		? undefined
-		: loadLogicianConfig(cwd);
-	const loaded = !project || project.path === global.path
-		? global
-		: {
-				path: project.path ?? global.path,
-				config: { ...global.config, ...project.config },
-				warnings: [...global.warnings, ...project.warnings],
-			};
+	const project =
+		options.loadProjectConfig === false ? undefined : loadLogicianConfig(cwd);
+	const loaded =
+		!project || project.path === global.path
+			? global
+			: {
+					path: project.path ?? global.path,
+					config: { ...global.config, ...project.config },
+					warnings: [...global.warnings, ...project.warnings],
+				};
 	const config = loaded.config;
 
 	return {
@@ -43,14 +43,10 @@ export function resolveRuntimeConfig(
 				configString(config.baseUrl) ||
 				configString(config.llmUrl) ||
 				"http://127.0.0.1:8080",
-			model:
-				environment.LOGICIAN_MODEL ||
-				configString(config.model) ||
-				"",
+			model: environment.LOGICIAN_MODEL || configString(config.model) || "",
 			models: config.models,
 			systemPrompt:
-				environment.LOGICIAN_SYSTEM_PROMPT ||
-				configString(config.systemPrompt),
+				environment.LOGICIAN_SYSTEM_PROMPT || configString(config.systemPrompt),
 			chatTemplate: configString(config.chatTemplate),
 			temperature: configNumber(config.temperature),
 			maxTokens: configNumber(config.maxTokens),
@@ -89,7 +85,10 @@ export function resolveRuntimeConfig(
 			duplicateToolThreshold: configNumber(config.duplicateToolThreshold),
 			toolFailureLoopThreshold: configNumber(config.toolFailureLoopThreshold),
 			budgetStopEnabled: configBool(config.budgetStopEnabled),
-			thinkingLoopDetectionEnabled: configBool(config.thinkingLoopDetectionEnabled, true),
+			thinkingLoopDetectionEnabled: configBool(
+				config.thinkingLoopDetectionEnabled,
+				true,
+			),
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			reflectionConfig: config.reflectionConfig,
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),
@@ -118,7 +117,10 @@ export function resolveRuntimeConfig(
 			memoryEmbeddingModel:
 				environment.LOGICIAN_MEMORY_EMBEDDING_MODEL ||
 				configString(config.memoryEmbeddingModel),
-			reasoner: environment.LOGICIAN_REASONER || configString(config.reasoner) || "none",
+			reasoner:
+				environment.LOGICIAN_REASONER ||
+				configString(config.reasoner) ||
+				"none",
 			reasonerConfig: config.reasonerConfig,
 			cwd: config.cwd ?? cwd,
 			allowedPaths: config.allowedPaths,

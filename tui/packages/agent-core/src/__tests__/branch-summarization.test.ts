@@ -1,17 +1,17 @@
 // ── Branch summarization tests ──────────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import type { Message } from "../agent/types.ts";
+import { describe, it } from "node:test";
 import {
+	collectMessagesForBranchSummary,
+	computeFileLists,
 	createFileOps,
 	extractFileOpsFromMessages,
-	computeFileLists,
 	formatFileOperations,
-	collectMessagesForBranchSummary,
 	parseBranchSummary,
 	serializeMessages,
 } from "../agent/summaries/branch-summarization.ts";
+import type { Message } from "../agent/types.ts";
 
 describe("createFileOps", () => {
 	it("creates empty ops", () => {
@@ -27,7 +27,13 @@ describe("extractFileOpsFromMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "read_file", arguments: JSON.stringify({ path: "src/main.ts" }) }],
+				tool_calls: [
+					{
+						id: "1",
+						name: "read_file",
+						arguments: JSON.stringify({ path: "src/main.ts" }),
+					},
+				],
 			},
 		];
 		const ops = extractFileOpsFromMessages(messages);
@@ -39,7 +45,17 @@ describe("extractFileOpsFromMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "edit_file", arguments: JSON.stringify({ path: "src/main.ts", old_text: "foo", new_text: "bar" }) }],
+				tool_calls: [
+					{
+						id: "1",
+						name: "edit_file",
+						arguments: JSON.stringify({
+							path: "src/main.ts",
+							old_text: "foo",
+							new_text: "bar",
+						}),
+					},
+				],
 			},
 		];
 		const ops = extractFileOpsFromMessages(messages);
@@ -51,7 +67,16 @@ describe("extractFileOpsFromMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "write_file", arguments: JSON.stringify({ path: "README.md", content: "# Hello" }) }],
+				tool_calls: [
+					{
+						id: "1",
+						name: "write_file",
+						arguments: JSON.stringify({
+							path: "README.md",
+							content: "# Hello",
+						}),
+					},
+				],
 			},
 		];
 		const ops = extractFileOpsFromMessages(messages);
@@ -63,7 +88,13 @@ describe("extractFileOpsFromMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "git", arguments: JSON.stringify({ command: "diff src/main.ts" }) }],
+				tool_calls: [
+					{
+						id: "1",
+						name: "git",
+						arguments: JSON.stringify({ command: "diff src/main.ts" }),
+					},
+				],
 			},
 		];
 		const ops = extractFileOpsFromMessages(messages);
@@ -98,7 +129,13 @@ describe("extractFileOpsFromMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "read", arguments: JSON.stringify({ file: "config.json" }) }],
+				tool_calls: [
+					{
+						id: "1",
+						name: "read",
+						arguments: JSON.stringify({ file: "config.json" }),
+					},
+				],
 			},
 		];
 		const ops = extractFileOpsFromMessages(messages);
@@ -180,12 +217,20 @@ describe("collectMessagesForBranchSummary", () => {
 	});
 
 	it("tracks file ops", () => {
-		const parent: Message[] = [
-			{ role: "user", content: "hello" },
-		];
+		const parent: Message[] = [{ role: "user", content: "hello" }];
 		const current: Message[] = [
 			{ role: "user", content: "hello" },
-			{ role: "assistant", content: "", tool_calls: [{ id: "1", name: "read_file", arguments: JSON.stringify({ path: "src/main.ts" }) }] },
+			{
+				role: "assistant",
+				content: "",
+				tool_calls: [
+					{
+						id: "1",
+						name: "read_file",
+						arguments: JSON.stringify({ path: "src/main.ts" }),
+					},
+				],
+			},
 		];
 		const result = collectMessagesForBranchSummary(current, parent, 1);
 		assert.ok(result.fileOps.read.has("src/main.ts"));
@@ -234,8 +279,11 @@ describe("parseBranchSummary", () => {
 - **TypeScript only**: No JavaScript mixed`;
 		const result = parseBranchSummary(text);
 		assert.strictEqual(result.keyDecisions?.length, 2);
-		assert.strictEqual(result.keyDecisions![0].decision, "Use SQLite");
-		assert.strictEqual(result.keyDecisions![0].rationale, "Faster queries than JSON files");
+		assert.strictEqual(result.keyDecisions?.[0].decision, "Use SQLite");
+		assert.strictEqual(
+			result.keyDecisions?.[0].rationale,
+			"Faster queries than JSON files",
+		);
 	});
 
 	it("parses next steps", () => {
@@ -270,7 +318,13 @@ describe("serializeMessages", () => {
 			{
 				role: "assistant",
 				content: "",
-				tool_calls: [{ id: "1", name: "read_file", arguments: JSON.stringify({ path: "src/main.ts" }) }],
+				tool_calls: [
+					{
+						id: "1",
+						name: "read_file",
+						arguments: JSON.stringify({ path: "src/main.ts" }),
+					},
+				],
 			},
 		];
 		const result = serializeMessages(messages);

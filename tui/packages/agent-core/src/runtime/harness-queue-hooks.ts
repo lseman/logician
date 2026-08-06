@@ -1,6 +1,11 @@
-import type { MessageDeliveryManager } from "../queue/manager.ts";
 import { createUserMessage } from "../agent/messages.ts";
-import type { AgentConfig, AgentEvent, AgentHooks, Message } from "../agent/types.ts";
+import type {
+	AgentConfig,
+	AgentEvent,
+	AgentHooks,
+	Message,
+} from "../agent/types.ts";
+import type { MessageDeliveryManager } from "../queue/manager.ts";
 
 export interface HarnessQueueHookDependencies {
 	messageDelivery: MessageDeliveryManager;
@@ -19,14 +24,16 @@ export function withHarnessQueueHooks(
 		return texts.map(createUserMessage);
 	};
 	const internalHooks: AgentHooks = {
-		getSteeringMessages: async () => inject(deps.messageDelivery.afterTurn().map((message) => message.content)),
-		getFollowUpMessages: async () => inject(deps.messageDelivery.onIdle().map((message) => message.content)),
+		getSteeringMessages: async () =>
+			inject(deps.messageDelivery.afterTurn().map(message => message.content)),
+		getFollowUpMessages: async () =>
+			inject(deps.messageDelivery.onIdle().map(message => message.content)),
 	};
 	const originalOnEvent = config.onEvent;
 	return {
 		...config,
 		internalHooks,
-		onEvent: (event) => {
+		onEvent: event => {
 			originalOnEvent?.(event);
 			if (event.type === "turn_end") deps.onSavePoint?.();
 			for (const subscriber of deps.subscribers) subscriber(event);

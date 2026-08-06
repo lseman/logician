@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
-import {
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -64,26 +59,16 @@ void test("system prompt makes MCP the primary tool-selection workflow", () => {
 		/Use ctx_execute for repository commands with potentially large output\./,
 	);
 	assert.match(prompt, /MCP-first tool workflow:/);
-	assert.match(
-		prompt,
-		/MCP tools available: ctx_execute, fff__grep\./,
-	);
-	assert.match(
-		prompt,
-		/Content\/symbol search: fff__grep before local grep\./,
-	);
-	assert.match(
-		prompt,
-		/Large-output commands: ctx_execute before bash\./,
-	);
+	assert.match(prompt, /MCP tools available: ctx_execute, fff__grep\./);
+	assert.match(prompt, /Content\/symbol search: fff__grep before local grep\./);
+	assert.match(prompt, /Large-output commands: ctx_execute before bash\./);
 	assert.match(
 		prompt,
 		/Prefer the specialized MCP tool over grep\/find\/bash\/git\/web/,
 	);
 	assert.match(prompt, /Fall back to local\/web tools only when/);
 	assert.ok(
-		prompt.indexOf("MCP-first tool workflow:") <
-			prompt.indexOf("Workflow:"),
+		prompt.indexOf("MCP-first tool workflow:") < prompt.indexOf("Workflow:"),
 	);
 });
 
@@ -99,10 +84,7 @@ void test("system prompt omits MCP policy when no MCP tools are available", () =
 	const prompt = buildDefaultSystemPrompt("/workspace", [localTool]);
 
 	assert.doesNotMatch(prompt, /MCP-first tool workflow:/);
-	assert.match(
-		prompt,
-		/prefer the most specific tool for the source of truth/,
-	);
+	assert.match(prompt, /prefer the most specific tool for the source of truth/);
 });
 
 void test("system prompt injects global, ancestor, and project context files", () => {
@@ -119,7 +101,11 @@ void test("system prompt injects global, ancestor, and project context files", (
 	writeFileSync(join(agentDir, "SYSTEM.md"), "custom global system", "utf8");
 	writeFileSync(join(workspace, "AGENTS.md"), "workspace instructions", "utf8");
 	writeFileSync(join(projectDir, "AGENTS.md"), "project instructions", "utf8");
-	writeFileSync(join(agentDir, "APPEND_SYSTEM.md"), "global system append", "utf8");
+	writeFileSync(
+		join(agentDir, "APPEND_SYSTEM.md"),
+		"global system append",
+		"utf8",
+	);
 	delete process.env.LOGICIAN_AGENTS_FILE;
 
 	try {
@@ -162,7 +148,11 @@ void test("system prompt excludes untrusted .logician context", () => {
 	mkdirSync(projectDir, { recursive: true });
 	writeFileSync(join(agentDir, "AGENTS.md"), "global instructions", "utf8");
 	writeFileSync(join(workspace, "AGENTS.md"), "workspace instructions", "utf8");
-	writeFileSync(join(projectDir, "AGENTS.md"), "untrusted instructions", "utf8");
+	writeFileSync(
+		join(projectDir, "AGENTS.md"),
+		"untrusted instructions",
+		"utf8",
+	);
 	writeFileSync(join(projectDir, "SYSTEM.md"), "untrusted system", "utf8");
 
 	try {

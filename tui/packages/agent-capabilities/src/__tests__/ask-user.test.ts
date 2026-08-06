@@ -28,7 +28,7 @@ void test("ask_user forwards a tabbed questionnaire and returns structured answe
 			],
 		},
 		{
-			onQuestionRequest: async (questionnaire) => {
+			onQuestionRequest: async questionnaire => {
 				received = questionnaire;
 				return JSON.stringify({ scope: "small", tests: "full" });
 			},
@@ -57,7 +57,7 @@ void test("ask_user forwards a tabbed questionnaire and returns structured answe
 			},
 		],
 	});
-	assert.equal(result, "User responded: {\"scope\":\"small\",\"tests\":\"full\"}");
+	assert.equal(result, 'User responded: {"scope":"small","tests":"full"}');
 });
 
 void test("ask_user preserves the legacy single-question shape", async () => {

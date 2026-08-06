@@ -42,15 +42,15 @@ void test("choice popup renders a compact ask-user card with stacked details", (
 	assert.match(output, /○ Balanced refactor {2}2/);
 	assert.match(output, /Make the smallest safe change/);
 	assert.match(output, /↑↓ move {3}enter answer {3}esc dismiss/);
-	const selectedDescription = lines.find((line) =>
+	const selectedDescription = lines.find(line =>
 		plain(line).includes("Make the smallest safe change"),
 	);
 	assert.ok(selectedDescription?.includes(theme.fgRaw("active")));
-	const selectedLabel = lines.find((line) =>
+	const selectedLabel = lines.find(line =>
 		plain(line).includes("● Focused fix"),
 	);
 	assert.ok(selectedLabel?.includes(theme.fgRaw("selected")));
-	assert.ok(lines.every((line) => visibleWidth(line) <= 64));
+	assert.ok(lines.every(line => visibleWidth(line) <= 64));
 });
 
 void test("choice popup wraps copy and remains width-safe in narrow terminals", () => {
@@ -59,7 +59,7 @@ void test("choice popup wraps copy and remains width-safe in narrow terminals", 
 
 	assert.match(output, /next implementation\?/);
 	assert.match(output, /current structure\./);
-	assert.ok(lines.every((line) => visibleWidth(line) <= 34));
+	assert.ok(lines.every(line => visibleWidth(line) <= 34));
 });
 
 void test("choice popup supports arrows, vim keys, and direct number selection", () => {
@@ -146,7 +146,7 @@ void test("settings and selectors share the same dialog frame and focus style", 
 		assert.match(output, /└─/);
 		// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI background escape
 		assert.doesNotMatch(lines.join("\n"), /\x1b\[48;/);
-		assert.ok(lines.every((line) => visibleWidth(line) <= 64));
+		assert.ok(lines.every(line => visibleWidth(line) <= 64));
 	}
 
 	settings.handleInput("\n");

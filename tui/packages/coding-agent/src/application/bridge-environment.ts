@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { WebSearchConfig } from "@logician/agent-core";
-import { envNumber } from "../tui-utils.ts";
 import { DEFAULT_SEARXNG_URL } from "../tools/default-tools.ts";
+import { envNumber } from "../tui-utils.ts";
 
 export interface BridgeEndpoint {
 	baseUrl: string;
@@ -44,9 +44,7 @@ export function createHookTranscriptPath(
 	return transcriptPath;
 }
 
-export function eventLogPathFor(
-	transcriptPath: string,
-): string | undefined {
+export function eventLogPathFor(transcriptPath: string): string | undefined {
 	if (!transcriptPath) return undefined;
 	return transcriptPath.replace(/\.jsonl$/, ".events.jsonl");
 }

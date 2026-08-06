@@ -6,16 +6,18 @@
 
 import type { ExtensionAPI } from "@logician/agent-core/extensions/types.ts";
 import { EohEngine } from "./engine.ts";
-import type { EohProblem } from "./types.ts";
 import { populationStats } from "./population.ts";
+import type { EohProblem } from "./types.ts";
 
 // ── Built-in demo problem: Online Bin Packing ─────────────────────────────────
 // Fitness = lb / n (ratio to lower bound; 1.0 = optimal).
 
 const BIN_PACKING_PROBLEM: EohProblem = {
 	name: "Online Bin Packing",
-	description: "Given items of various sizes (0 < size ≤ 1) arriving online, pack them into bins of capacity 1.0 using a heuristic function. The heuristic selects which existing open bin to place the current item in, or opens a new bin.",
-	functionSignature: "def select_bin(item_size: float, bins: list[float]) -> int:",
+	description:
+		"Given items of various sizes (0 < size ≤ 1) arriving online, pack them into bins of capacity 1.0 using a heuristic function. The heuristic selects which existing open bin to place the current item in, or opens a new bin.",
+	functionSignature:
+		"def select_bin(item_size: float, bins: list[float]) -> int:",
 	instances: generateBinPackingInstances(10),
 	evaluateInstance: async (code: string, instance: unknown) => {
 		return evalBinPackingHeuristic(code, instance as number[]);
@@ -37,7 +39,7 @@ function generateBinPackingInstances(count: number): number[][] {
 }
 
 function mulberry32(seed: number): () => number {
-	return function () {
+	return () => {
 		seed |= 0;
 		seed = (seed + 0x6d2b79f5) | 0;
 		let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -72,11 +74,16 @@ function evalBinPackingHeuristic(code: string, items: number[]): number {
 	return lowerBound / bins.length; // 1.0 = optimal
 }
 
-function buildSelectFn(code: string): (itemSize: number, bins: number[]) => number {
+function buildSelectFn(
+	code: string,
+): (itemSize: number, bins: number[]) => number {
 	// Detect common bin packing strategies from code patterns
 	const lower = code.toLowerCase();
 
-	if (lower.includes("best fit") || (lower.includes("min") && lower.includes("remain"))) {
+	if (
+		lower.includes("best fit") ||
+		(lower.includes("min") && lower.includes("remain"))
+	) {
 		// Best Fit: choose bin with least remaining capacity that still fits
 		return (itemSize, bins) => {
 			let best = -1;
@@ -91,7 +98,10 @@ function buildSelectFn(code: string): (itemSize: number, bins: number[]) => numb
 		};
 	}
 
-	if (lower.includes("worst fit") || (lower.includes("max") && lower.includes("remain"))) {
+	if (
+		lower.includes("worst fit") ||
+		(lower.includes("max") && lower.includes("remain"))
+	) {
 		// Worst Fit: choose bin with most remaining capacity
 		return (itemSize, bins) => {
 			let best = -1;
@@ -147,18 +157,22 @@ export default function register(api: ExtensionAPI): void {
 	}
 
 	// Wire progress events to log
-	engine.setProgressHandler((event) => {
+	engine.setProgressHandler(event => {
 		switch (event.type) {
 			case "generation_start":
 				logLine(`Generation ${event.generation} started`);
 				break;
 			case "generation_end": {
 				const s = event.stats;
-				logLine(`Generation ${event.generation} done — best: ${s.best.toFixed(4)} mean: ${s.mean.toFixed(4)} size: ${s.size}`);
+				logLine(
+					`Generation ${event.generation} done — best: ${s.best.toFixed(4)} mean: ${s.mean.toFixed(4)} size: ${s.size}`,
+				);
 				break;
 			}
 			case "heuristic_evaluated":
-				logLine(`New heuristic (${event.operator}) fitness=${event.heuristic.fitness.toFixed(4)}`);
+				logLine(
+					`New heuristic (${event.operator}) fitness=${event.heuristic.fitness.toFixed(4)}`,
+				);
 				break;
 			case "heuristic_failed":
 				logLine(`Failed (${event.operator}): ${event.reason}`);
@@ -180,13 +194,15 @@ export default function register(api: ExtensionAPI): void {
 	api.registerTool({
 		name: "evolve_heuristics",
 		label: "EoH: Evolve Heuristics",
-		description: "Evolve algorithmic heuristics using the Evolution of Heuristics (EoH) framework. Actions: start, stop, status, best, run_generation.",
+		description:
+			"Evolve algorithmic heuristics using the Evolution of Heuristics (EoH) framework. Actions: start, stop, status, best, run_generation.",
 		parameters: {
 			type: "object",
 			properties: {
 				action: {
 					type: "string",
-					description: "One of: \"start\" (begin evolution), \"stop\" (halt), \"status\" (get stats), \"best\" (get best heuristic), \"run_generation\" (run single generation)",
+					description:
+						'One of: "start" (begin evolution), "stop" (halt), "status" (get stats), "best" (get best heuristic), "run_generation" (run single generation)',
 					required: true,
 				},
 				baseUrl: {
@@ -205,8 +221,14 @@ export default function register(api: ExtensionAPI): void {
 		},
 		execute: async (_id, params, _ctx) => {
 			const action = String(params.action ?? "status");
-			const baseUrl = String(params.baseUrl ?? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1");
-			const model = String(params.model ?? process.env.EOH_MODEL ?? "claude-haiku-4-5-20251001");
+			const baseUrl = String(
+				params.baseUrl ??
+					process.env.ANTHROPIC_BASE_URL ??
+					"https://api.anthropic.com/v1",
+			);
+			const model = String(
+				params.model ?? process.env.EOH_MODEL ?? "claude-haiku-4-5-20251001",
+			);
 
 			switch (action) {
 				case "start": {
@@ -215,10 +237,12 @@ export default function register(api: ExtensionAPI): void {
 					}
 					const gens = Number(params.generations ?? 5);
 					engine.setMaxGenerations(gens);
-					engine.run(baseUrl, model).catch((e) => {
+					engine.run(baseUrl, model).catch(e => {
 						logLine(`Error: ${e instanceof Error ? e.message : String(e)}`);
 					});
-					return { content: `Evolution started (${gens} generations, model=${model})` };
+					return {
+						content: `Evolution started (${gens} generations, model=${model})`,
+					};
 				}
 
 				case "stop": {
@@ -230,15 +254,19 @@ export default function register(api: ExtensionAPI): void {
 					const state = engine.getState();
 					const stats = populationStats(state.population);
 					return {
-						content: JSON.stringify({
-							running: state.running,
-							generation: state.generation,
-							totalLLMCalls: state.totalLLMCalls,
-							populationSize: stats.size,
-							bestFitness: stats.best,
-							meanFitness: stats.mean,
-							recentLog: log.slice(-10),
-						}, null, 2),
+						content: JSON.stringify(
+							{
+								running: state.running,
+								generation: state.generation,
+								totalLLMCalls: state.totalLLMCalls,
+								populationSize: stats.size,
+								bestFitness: stats.best,
+								meanFitness: stats.mean,
+								recentLog: log.slice(-10),
+							},
+							null,
+							2,
+						),
 					};
 				}
 
@@ -260,7 +288,10 @@ ${best.code}
 
 				case "run_generation": {
 					if (engine.getState().running) {
-						return { content: "Evolution already running — stop it first", isError: true };
+						return {
+							content: "Evolution already running — stop it first",
+							isError: true,
+						};
 					}
 					if (engine.getState().population.length === 0) {
 						await engine.initialize(baseUrl, model);
@@ -286,14 +317,19 @@ ${best.code}
 		usage: "/eoh-start [generations]",
 		acceptsArgs: true,
 		handler: async (args, _ctx) => {
-			const gens = parseInt(args.trim()) || 5;
+			const gens = parseInt(args.trim(), 10) || 5;
 			const state = engine.getState();
 			if (state.running) return "Evolution already running";
 
-			const baseUrl = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
+			const baseUrl =
+				process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
 			const model = process.env.EOH_MODEL ?? "claude-haiku-4-5-20251001";
 			engine.setMaxGenerations(gens);
-			engine.run(baseUrl, model).catch((e) => logLine(`Error: ${e instanceof Error ? e.message : String(e)}`));
+			engine
+				.run(baseUrl, model)
+				.catch(e =>
+					logLine(`Error: ${e instanceof Error ? e.message : String(e)}`),
+				);
 			return `EoH evolution started: ${gens} generations, model=${model}`;
 		},
 	});

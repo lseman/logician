@@ -15,11 +15,11 @@ import {
 	type SubagentToolDeps,
 } from "@logician/agent-capabilities/tools";
 import {
+	type AgentConfig,
+	type AgentHarness,
 	createAssistantMessage,
 	createToolResultMessage,
 	createUserMessage,
-	type AgentConfig,
-	type AgentHarness,
 	type Message,
 	type Tool,
 	type ToolContext,
@@ -71,7 +71,7 @@ export class SubagentCoordinator {
 			// Claude Code plugin agents (agents/*.md in each enabled plugin).
 			...this.deps
 				.getEnabledPluginRoots()
-				.map((p) => path.join(p.installPath, "agents")),
+				.map(p => path.join(p.installPath, "agents")),
 		]);
 
 		const userSettings = loadUserSettings();
@@ -85,10 +85,10 @@ export class SubagentCoordinator {
 			backend: this.deps.backend,
 			cwd,
 			agents: () => this.agentDefs,
-			emit: (event) => this.deps.config().onEvent?.(event),
+			emit: event => this.deps.config().onEvent?.(event),
 			maxParallelAgents,
 		};
-		const existing = new Set(this.deps.getDefaultTools().map((t) => t.name));
+		const existing = new Set(this.deps.getDefaultTools().map(t => t.name));
 		for (const tool of getBuiltInSubagentTools(subagentDeps)) {
 			if (!existing.has(tool.name)) this.deps.onToolAdded(tool);
 		}
@@ -119,10 +119,12 @@ export class SubagentCoordinator {
 		}
 		const spawnTool = this.deps
 			.getDefaultTools()
-			.find((t) => t.name === "spawn_agent");
+			.find(t => t.name === "spawn_agent");
 		if (!spawnTool) {
 			this.deps.reportError(
-				new Error("spawn_agent tool not available (subagent tools not injected)"),
+				new Error(
+					"spawn_agent tool not available (subagent tools not injected)",
+				),
 			);
 			return;
 		}
@@ -148,7 +150,7 @@ export class SubagentCoordinator {
 
 		const ctx: ToolContext = {
 			signal: controller.signal,
-			onUpdate: (delta) => {
+			onUpdate: delta => {
 				// Live stream into the open tool chunk. Child chunks (thinking,
 				// tool calls, content with agentId) arrive separately via
 				// deps.emit(subagent_event) → mapAgentEvent.
@@ -165,7 +167,7 @@ export class SubagentCoordinator {
 
 		void spawnTool
 			.execute({ task, agent }, ctx)
-			.then((result) => {
+			.then(result => {
 				const content = typeof result === "string" ? result : result.content;
 				const isError =
 					typeof result === "string" ? false : result.isError === true;
@@ -189,7 +191,7 @@ export class SubagentCoordinator {
 				}
 				this.recordInHistory(task, agent, toolCallId, content, isError);
 			})
-			.catch((err) => {
+			.catch(err => {
 				const error = err as Error;
 				this.deps.emit({
 					type: "tool_execution_end",

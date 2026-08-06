@@ -59,12 +59,10 @@ export async function handleStatus(ctx: SlashCommandsCtx): Promise<void> {
 			`Connected: ${state.connected !== false}`,
 		];
 		const mcpErrors = Array.isArray(state.mcp_errors)
-			? state.mcp_errors
-					.map((item) => String(item || "").trim())
-					.filter(Boolean)
+			? state.mcp_errors.map(item => String(item || "").trim()).filter(Boolean)
 			: [];
 		if (mcpErrors.length) {
-			lines.push("", "MCP errors:", ...mcpErrors.map((err) => `- ${err}`));
+			lines.push("", "MCP errors:", ...mcpErrors.map(err => `- ${err}`));
 		}
 		ctx.transcript.addSystemMessage(lines.join("\n"));
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
@@ -77,7 +75,10 @@ export async function handleStatus(ctx: SlashCommandsCtx): Promise<void> {
 	}
 }
 
-export async function handlePlugins(ctx: SlashCommandsCtx, args: string): Promise<void> {
+export async function handlePlugins(
+	ctx: SlashCommandsCtx,
+	args: string,
+): Promise<void> {
 	try {
 		const normalized = args.trim().toLowerCase();
 		if (!normalized || normalized === "list") {
@@ -96,7 +97,10 @@ export async function handlePlugins(ctx: SlashCommandsCtx, args: string): Promis
 	}
 }
 
-export async function handleMcp(ctx: SlashCommandsCtx, args: string): Promise<void> {
+export async function handleMcp(
+	ctx: SlashCommandsCtx,
+	args: string,
+): Promise<void> {
 	try {
 		const normalized = args.trim().toLowerCase();
 		if (normalized === "list" || normalized === "") {
@@ -111,7 +115,10 @@ export async function handleMcp(ctx: SlashCommandsCtx, args: string): Promise<vo
 	}
 }
 
-export async function handleReasoner(ctx: SlashCommandsCtx, args: string): Promise<void> {
+export async function handleReasoner(
+	ctx: SlashCommandsCtx,
+	args: string,
+): Promise<void> {
 	try {
 		const normalized = args.trim().toLowerCase();
 		if (!normalized || normalized === "list") {
@@ -135,7 +142,10 @@ export async function handleReasoner(ctx: SlashCommandsCtx, args: string): Promi
 	}
 }
 
-export async function handleTheme(ctx: SlashCommandsCtx, args: string): Promise<void> {
+export async function handleTheme(
+	ctx: SlashCommandsCtx,
+	args: string,
+): Promise<void> {
 	try {
 		const normalized = args.trim().toLowerCase();
 		if (!normalized || normalized === "list") {

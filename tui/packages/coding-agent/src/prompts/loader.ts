@@ -29,9 +29,12 @@ interface PromptFrontmatter {
 	[key: string]: unknown;
 }
 
-function toStringList(value: string[] | string | undefined): string[] | undefined {
+function toStringList(
+	value: string[] | string | undefined,
+): string[] | undefined {
 	if (value === undefined) return undefined;
-	if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string");
+	if (Array.isArray(value))
+		return value.filter((v): v is string => typeof v === "string");
 	return [value];
 }
 
@@ -63,7 +66,8 @@ export async function loadPrompts(dirs: string[]): Promise<Prompt[]> {
 			const body = parsed.ok ? parsed.value.body : raw;
 			const name = entry.slice(0, -3);
 			const description =
-				typeof frontmatter.description === "string" && frontmatter.description.trim()
+				typeof frontmatter.description === "string" &&
+				frontmatter.description.trim()
 					? frontmatter.description
 					: `Custom prompt: ${name}`;
 			const argumentHint =
@@ -95,10 +99,17 @@ function promptLookupKeys(prompt: Prompt): string[] {
 	);
 }
 
-export function findPromptByName(prompts: Prompt[], name: string): Prompt | undefined {
+export function findPromptByName(
+	prompts: Prompt[],
+	name: string,
+): Prompt | undefined {
 	const normalized = normalizeLookupKey(name);
 	for (const prompt of prompts) {
-		if (promptLookupKeys(prompt).some((key) => normalizeLookupKey(key) === normalized)) {
+		if (
+			promptLookupKeys(prompt).some(
+				key => normalizeLookupKey(key) === normalized,
+			)
+		) {
 			return prompt;
 		}
 	}

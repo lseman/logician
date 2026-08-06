@@ -1,7 +1,9 @@
 // ── Error types ───────────────────────────────────────────────────────────
 
 /** Result of a fallible operation. Expected failures are returned as `ok: false` instead of thrown. */
-export type Result<TValue, TError> = { ok: true; value: TValue } | { ok: false; error: TError };
+export type Result<TValue, TError> =
+	| { ok: true; value: TValue }
+	| { ok: false; error: TError };
 
 /** Create a successful Result. */
 export function ok<TValue, TError>(value: TValue): Result<TValue, TError> {
@@ -14,13 +16,17 @@ export function err<TValue, TError>(error: TError): Result<TValue, TError> {
 }
 
 /** Return the success value or throw the failure error. */
-export function getOrThrow<TValue, TError>(result: Result<TValue, TError>): TValue {
+export function getOrThrow<TValue, TError>(
+	result: Result<TValue, TError>,
+): TValue {
 	if (!result.ok) throw result.error;
 	return result.value;
 }
 
 /** Return the success value or undefined. Only object values are allowed. */
-export function getOrUndefined<TValue extends object, TError>(result: Result<TValue, TError>): TValue | undefined {
+export function getOrUndefined<TValue extends object, TError>(
+	result: Result<TValue, TError>,
+): TValue | undefined {
 	return result.ok ? result.value : undefined;
 }
 
@@ -51,7 +57,12 @@ export class FileError extends Error {
 	public code: FileErrorCode;
 	public path?: string;
 
-	constructor(code: FileErrorCode, message: string, path?: string, cause?: Error) {
+	constructor(
+		code: FileErrorCode,
+		message: string,
+		path?: string,
+		cause?: Error,
+	) {
 		super(message, cause === undefined ? undefined : { cause });
 		this.name = "FileError";
 		this.code = code;
@@ -80,7 +91,11 @@ export class ExecutionError extends Error {
 }
 
 /** Stable compaction error codes. */
-export type CompactionErrorCode = "aborted" | "summarization_failed" | "invalid_session" | "unknown";
+export type CompactionErrorCode =
+	| "aborted"
+	| "summarization_failed"
+	| "invalid_session"
+	| "unknown";
 
 /** Error returned by compaction helpers. */
 export class CompactionError extends Error {
@@ -94,7 +109,10 @@ export class CompactionError extends Error {
 }
 
 /** Stable branch-summary error codes. */
-export type BranchSummaryErrorCode = "aborted" | "summarization_failed" | "invalid_session";
+export type BranchSummaryErrorCode =
+	| "aborted"
+	| "summarization_failed"
+	| "invalid_session";
 
 /** Error returned by branch summarization helpers. */
 export class BranchSummaryError extends Error {

@@ -40,7 +40,15 @@ async function fetchFiles(cwd: string, limit: number): Promise<string[]> {
 		try {
 			const { stdout } = await execFileAsync(
 				fdPath,
-				["--type", "f", "--color=never", "--hidden", "--no-require-git", "--max-results", String(limit)],
+				[
+					"--type",
+					"f",
+					"--color=never",
+					"--hidden",
+					"--no-require-git",
+					"--max-results",
+					String(limit),
+				],
 				{ cwd, timeout: EXEC_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
 			);
 			return stdout.split("\n").filter(Boolean);
@@ -52,11 +60,11 @@ async function fetchFiles(cwd: string, limit: number): Promise<string[]> {
 	const rgPath = await ensureTool("rg");
 	if (rgPath) {
 		try {
-			const { stdout } = await execFileAsync(
-				rgPath,
-				["--files", "--hidden"],
-				{ cwd, timeout: EXEC_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
-			);
+			const { stdout } = await execFileAsync(rgPath, ["--files", "--hidden"], {
+				cwd,
+				timeout: EXEC_TIMEOUT_MS,
+				maxBuffer: 4 * 1024 * 1024,
+			});
 			return stdout.split("\n").filter(Boolean).slice(0, limit);
 		} catch {
 			return [];

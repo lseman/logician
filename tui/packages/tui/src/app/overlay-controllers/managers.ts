@@ -6,7 +6,9 @@ import type { OverlayHandlersCtx } from "./context.ts";
 
 // ── Plugin manager ───────────────────────────────────────────────────────
 
-export async function openPluginManager(ctx: OverlayHandlersCtx): Promise<void> {
+export async function openPluginManager(
+	ctx: OverlayHandlersCtx,
+): Promise<void> {
 	ctx.statusPanel.update({ phase: "plugins" });
 	// Show the popup immediately with a loading message rather than waiting on
 	// the disk-scanning snapshot fetch below — otherwise Enter appears to do
@@ -59,7 +61,7 @@ export function handlePluginManagerAction(
 	ctx.tui.requestRender();
 	void ctx.bridge
 		.setPluginEnabled(plugin.pluginId, nextEnabled)
-		.then(async (result) => {
+		.then(async result => {
 			ctx.pluginManager.setMessage(
 				String(result.message || `${plugin.pluginId} updated.`),
 			);
@@ -97,7 +99,7 @@ export async function openMcpManager(ctx: OverlayHandlersCtx): Promise<void> {
 		const snapshot = await ctx.bridge.getMcpSnapshot();
 		ctx.mcpManager.setSnapshot({
 			configPath: snapshot.configPath,
-			servers: snapshot.servers.map((s) => ({
+			servers: snapshot.servers.map(s => ({
 				server_name: s.serverName,
 				server: s.server,
 				url: s.server.url || "",
@@ -124,7 +126,7 @@ export async function openMcpManager(ctx: OverlayHandlersCtx): Promise<void> {
 
 /** Let the immediate loading frame reach the terminal before discovery work. */
 function yieldToRenderer(): Promise<void> {
-	return new Promise((resolve) => setImmediate(resolve));
+	return new Promise(resolve => setImmediate(resolve));
 }
 
 export function handleMcpManagerAction(
@@ -151,12 +153,12 @@ export function handleMcpManagerAction(
 	ctx.tui.requestRender();
 	void ctx.bridge
 		.setMcpServerEnabled(server.serverName, nextEnabled)
-		.then(async (result) => {
+		.then(async result => {
 			ctx.mcpManager.setMessage(result.message);
 			const snapshot = await ctx.bridge.getMcpSnapshot();
 			ctx.mcpManager.setSnapshot({
 				configPath: snapshot.configPath,
-				servers: snapshot.servers.map((s) => ({
+				servers: snapshot.servers.map(s => ({
 					server_name: s.serverName,
 					server: s.server,
 					url: s.server.url || "",

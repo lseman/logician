@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ParsedBridgeEvent } from "../runtime/events.ts";
 import { AgentCoreBridge } from "../application/agent-bridge.ts";
+import type { ParsedBridgeEvent } from "../runtime/events.ts";
 
 void test("direct /spawn records task and result in harness history", async () => {
 	const bridge = new AgentCoreBridge({
@@ -17,10 +17,15 @@ void test("direct /spawn records task and result in harness history", async () =
 				execute: (
 					args: Record<string, unknown>,
 					ctx: { onUpdate?: (delta: string) => void },
-				) => Promise<string | { content: string; isError?: boolean; details?: unknown }>;
+				) => Promise<
+					string | { content: string; isError?: boolean; details?: unknown }
+				>;
 			}>;
 		};
-		ensureHarness: () => { messages: unknown[]; appendMessages: (m: unknown[]) => void };
+		ensureHarness: () => {
+			messages: unknown[];
+			appendMessages: (m: unknown[]) => void;
+		};
 		subagents: { injected: boolean };
 	};
 	// defaultTools now lives on ToolRouter; stub its getter for this test's fake spawn_agent.
@@ -48,17 +53,18 @@ void test("direct /spawn records task and result in harness history", async () =
 	});
 	// Patch the private method path: spawnAgentDirectly uses this.ensureHarness
 	// which is a real method — override via prototype-style assignment on instance.
-	(bridge as unknown as { ensureHarness: () => unknown }).ensureHarness = () => ({
-		messages: fakeMessages,
-		appendMessages: (msgs: unknown[]) => {
-			recorded.push(msgs);
-			fakeMessages.push(...msgs);
-		},
-	});
+	(bridge as unknown as { ensureHarness: () => unknown }).ensureHarness =
+		() => ({
+			messages: fakeMessages,
+			appendMessages: (msgs: unknown[]) => {
+				recorded.push(msgs);
+				fakeMessages.push(...msgs);
+			},
+		});
 
 	bridge.spawnAgentDirectly("check readme.md");
 	// Wait for the async execute().then path
-	await new Promise((r) => setTimeout(r, 20));
+	await new Promise(r => setTimeout(r, 20));
 
 	assert.equal(recorded.length, 1);
 	const msgs = recorded[0] as Array<{
@@ -164,7 +170,7 @@ void test("MCP discovery never blocks the first turn — it loads in the backgro
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
 	let resolveLoad!: () => void;
-	internal.toolRouter.mcpLoadPromise = new Promise<void>((resolve) => {
+	internal.toolRouter.mcpLoadPromise = new Promise<void>(resolve => {
 		resolveLoad = resolve;
 	});
 	let delivered = false;
@@ -343,9 +349,18 @@ void test("/context renders the latest explicit task state", () => {
 		objective: "Fix authentication retries",
 		phase: "verify",
 		hypotheses: ["The retry cap is ignored"],
-		evidence: [{ kind: "change", tool: "edit_file", summary: "Updated retry cap", iteration: 2 }],
+		evidence: [
+			{
+				kind: "change",
+				tool: "edit_file",
+				summary: "Updated retry cap",
+				iteration: 2,
+			},
+		],
 		changedFiles: ["src/auth.ts"],
-		verification: [{ command: "bun test auth.test.ts", passed: true, summary: "4 pass" }],
+		verification: [
+			{ command: "bun test auth.test.ts", passed: true, summary: "4 pass" },
+		],
 		blockers: [],
 		toolCalls: 3,
 		toolFailures: 0,
@@ -380,10 +395,13 @@ void test("/context renders request-time memory injection", () => {
 		memoryViewerEnabled: false,
 	});
 	const store = bridge.getMemoryStore()!;
-	const memory = store.create("Authentication retries use bounded exponential backoff", {
-		strength: 9,
-		concepts: ["authentication", "retries"],
-	});
+	const memory = store.create(
+		"Authentication retries use bounded exponential backoff",
+		{
+			strength: 9,
+			concepts: ["authentication", "retries"],
+		},
+	);
 	store.update(memory.id, { title: "Authentication retry policy" });
 	const internal = bridge as unknown as Record<string, any>;
 	internal.harness = {
@@ -393,7 +411,10 @@ void test("/context renders request-time memory injection", () => {
 
 	const context = bridge.getContext();
 
-	assert.match(context, /Retrieved memory: ~\d+ tokens — request-time compact index/);
+	assert.match(
+		context,
+		/Retrieved memory: ~\d+ tokens — request-time compact index/,
+	);
 	assert.match(context, /\[SYSTEM\]\n# Agent Context/);
 	assert.match(context, new RegExp(memory.id));
 	assert.match(context, /Authentication retry policy/);
@@ -484,7 +505,7 @@ void test("automatic continuation retains the active skill", async () => {
 
 	await bridge.sendMessage("Diagnose this TypeScript error.");
 	for (let attempts = 0; seen.length < 2 && attempts < 20; attempts++) {
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		await new Promise<void>(resolve => setImmediate(resolve));
 	}
 
 	assert.equal(seen[1]?.message, "continue");
@@ -567,22 +588,20 @@ void test("core iterations reconcile output without completing the UI turn early
 		},
 	};
 	const events: ParsedBridgeEvent[] = [];
-	bridge.on((event) => events.push(event));
+	bridge.on(event => events.push(event));
 
 	await bridge.sendMessage("do work");
 
 	assert.deepEqual(
 		events
-			.filter((event) =>
-				event.type === "turn_start" ||
-				event.type === "message_update" ||
-				event.type === "turn_end"
+			.filter(
+				event =>
+					event.type === "turn_start" ||
+					event.type === "message_update" ||
+					event.type === "turn_end",
 			)
-			.map((event) => event.type),
+			.map(event => event.type),
 		["turn_start", "message_update", "message_update", "turn_end"],
 	);
-	assert.equal(
-		events.filter((event) => event.type === "turn_end").length,
-		1,
-	);
+	assert.equal(events.filter(event => event.type === "turn_end").length, 1);
 });

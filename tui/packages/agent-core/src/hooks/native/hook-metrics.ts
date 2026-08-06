@@ -53,12 +53,12 @@ export class HookMetricsCollector {
 
 	getSlowHooks(thresholdMs: number): HookMetrics[] {
 		return Array.from(this.metrics.values()).filter(
-			(m) => m.avgMs >= thresholdMs,
+			m => m.avgMs >= thresholdMs,
 		);
 	}
 
 	getFailingHooks(): HookMetrics[] {
-		return Array.from(this.metrics.values()).filter((m) => m.errors > 0);
+		return Array.from(this.metrics.values()).filter(m => m.errors > 0);
 	}
 
 	clear(): void {
@@ -69,8 +69,9 @@ export class HookMetricsCollector {
 		const all = this.getAll();
 		if (all.length === 0) return "No hook metrics recorded";
 
-		const lines = all.map((m) => {
-			const errRate = m.count > 0 ? ((m.errors / m.count) * 100).toFixed(1) : "0";
+		const lines = all.map(m => {
+			const errRate =
+				m.count > 0 ? ((m.errors / m.count) * 100).toFixed(1) : "0";
 			return `${m.eventType}: ${m.count} calls, avg ${m.avgMs.toFixed(1)}ms (min ${m.minMs.toFixed(1)}, max ${m.maxMs.toFixed(1)}), errors ${m.errors} (${errRate}%)`;
 		});
 		return lines.join("\n");

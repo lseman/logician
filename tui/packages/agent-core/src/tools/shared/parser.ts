@@ -33,7 +33,7 @@ function parseLooseJson(
 	try {
 		const repaired = text
 			.replace(/,\s*([}\]])/g, "$1")
-			.replace(/([{,]\s*)([A-Za-z_][\w-]*)(\s*:)/g, "$1\"$2\"$3")
+			.replace(/([{,]\s*)([A-Za-z_][\w-]*)(\s*:)/g, '$1"$2"$3')
 			.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, body: string) =>
 				JSON.stringify(body.replace(/\\'/g, "'")),
 			);

@@ -6,7 +6,7 @@
 //           in_progress first, then pending, then completed.
 
 import { type Component, visibleWidth } from "../terminal/core.ts";
-import { theme, type ThemeColor } from "../terminal/theme.ts";
+import { type ThemeColor, theme } from "../terminal/theme.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -74,7 +74,7 @@ export class TodoBar implements Component {
 	}
 
 	setTodos(tasks: TaskItem[]): void {
-		this.tasks = tasks.flatMap((task) => {
+		this.tasks = tasks.flatMap(task => {
 			const subject = normalizeLabel(task?.subject);
 			if (!subject) return [];
 			return [
@@ -90,7 +90,7 @@ export class TodoBar implements Component {
 		});
 
 		let anyTransition = false;
-		const liveIds = new Set(this.tasks.map((t) => t.id));
+		const liveIds = new Set(this.tasks.map(t => t.id));
 		for (const t of this.tasks) {
 			const prev = this.prevStatus.get(t.id);
 			if (prev !== undefined && prev !== t.status) {
@@ -145,7 +145,7 @@ export class TodoBar implements Component {
 	}
 
 	render(width: number): string[] {
-		const countKey = this.tasks.filter((t) => t.status !== "deleted").length;
+		const countKey = this.tasks.filter(t => t.status !== "deleted").length;
 
 		if (
 			width === this.cachedWidth &&
@@ -171,10 +171,10 @@ function renderRaw(
 	tasks: TaskItem[],
 	transitionFrame: Map<number, number>,
 ): string[] {
-	const visible = tasks.filter((t) => t.status !== "deleted");
+	const visible = tasks.filter(t => t.status !== "deleted");
 	if (visible.length === 0) return [];
 
-	const done = visible.filter((t) => t.status === "completed").length;
+	const done = visible.filter(t => t.status === "completed").length;
 	const total = visible.length;
 	const lines: string[] = [];
 
@@ -225,7 +225,7 @@ function buildTaskLine(t: TaskItem, mark: string): string {
 
 	if (t.blockedBy?.length) {
 		const deps = t.blockedBy
-			.map((id) => ` ${theme.fg("muted", `[→ #${id}]`)}${RESET}`)
+			.map(id => ` ${theme.fg("muted", `[→ #${id}]`)}${RESET}`)
 			.join("");
 		text += deps;
 	}

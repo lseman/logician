@@ -25,6 +25,11 @@
 		},
 		"types": ["node", "bun-types"]
 	},
-	"include": ["src/**/*", "../agent-core/src/**/*", "../coding-agent/src/**/*", "../agent-capabilities/src/**/*"],
+	"include": [
+		"src/**/*",
+		"../agent-core/src/**/*",
+		"../coding-agent/src/**/*",
+		"../agent-capabilities/src/**/*"
+	],
 	"exclude": ["node_modules", "dist"]
 }

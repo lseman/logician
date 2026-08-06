@@ -22,7 +22,7 @@ import { currentRunTaskState } from "./run-task-state.ts";
 const listeners = new Set<(tasks: Task[]) => void>();
 
 function snapshotTasks(): Task[] {
-	return currentRunTaskState().tasks.map((task) => ({
+	return currentRunTaskState().tasks.map(task => ({
 		...task,
 		blockedBy: task.blockedBy ? [...task.blockedBy] : undefined,
 		metadata: task.metadata ? { ...task.metadata } : undefined,

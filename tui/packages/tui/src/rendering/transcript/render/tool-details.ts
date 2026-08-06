@@ -1,16 +1,16 @@
 // ── Transcript per-tool-type detail renderers ───────────────────────────────
 // Expanded-detail rendering for write/edit/file_diff/bash/mcp tool executions.
 
+import type { ToolExecution } from "@logician/coding-agent/sessions";
 import { DIM, RESET } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
+import { detectLanguage } from "../file-language.ts";
 import {
 	normalizeEditArgs,
-	stringArg,
 	streamedStringArg,
+	stringArg,
 } from "../text-utils.ts";
-import { detectLanguage } from "../file-language.ts";
 import { renderFileContent } from "./content.ts";
-import type { ToolExecution } from "@logician/coding-agent/sessions";
 import {
 	detailSection,
 	previewBlock,
@@ -45,13 +45,9 @@ export function renderWriteDetails(
 		const meta = streaming
 			? `${DIM}${content.length} bytes · ${lineCount} lines · streaming${RESET}`
 			: `${DIM}${content.length} bytes · ${lineCount} lines${RESET}`;
-		lines.push(
-			detailSection(appending ? "append content" : "content", meta),
-		);
+		lines.push(detailSection(appending ? "append content" : "content", meta));
 		const lang = detectLanguage(path);
-		lines.push(
-			...renderFileContent(content, width, lineCount, lang, expanded),
-		);
+		lines.push(...renderFileContent(content, width, lineCount, lang, expanded));
 	} else if (streaming) {
 		lines.push(`${DIM}${appending ? "appending" : "writing"}…${RESET}`);
 	}

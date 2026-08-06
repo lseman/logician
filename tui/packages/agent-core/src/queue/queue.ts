@@ -52,49 +52,49 @@ export class MessageQueue {
 
 	/** Get steering messages. */
 	getSteering(): QueuedMessage[] {
-		return this.queue.filter((m) => m.type === "steering");
+		return this.queue.filter(m => m.type === "steering");
 	}
 
 	/** Get follow-up messages. */
 	getFollowUp(): QueuedMessage[] {
-		return this.queue.filter((m) => m.type === "followUp");
+		return this.queue.filter(m => m.type === "followUp");
 	}
 
 	/** Peek at the next steering message without removing it. */
 	peekSteering(): QueuedMessage | undefined {
-		return this.queue.find((m) => m.type === "steering");
+		return this.queue.find(m => m.type === "steering");
 	}
 
 	/** Remove and return all steering messages. */
 	dequeueSteering(): QueuedMessage[] {
-		const steering = this.queue.filter((m) => m.type === "steering");
-		this.queue = this.queue.filter((m) => m.type !== "steering");
+		const steering = this.queue.filter(m => m.type === "steering");
+		this.queue = this.queue.filter(m => m.type !== "steering");
 		return steering;
 	}
 
 	/** Remove and return the oldest steering message. */
 	dequeueOneSteering(): QueuedMessage[] {
-		const index = this.queue.findIndex((message) => message.type === "steering");
+		const index = this.queue.findIndex(message => message.type === "steering");
 		if (index < 0) return [];
 		return this.queue.splice(index, 1);
 	}
 
 	/** Remove and return all follow-up messages. */
 	dequeueFollowUp(): QueuedMessage[] {
-		const followUp = this.queue.filter((m) => m.type === "followUp");
-		this.queue = this.queue.filter((m) => m.type !== "followUp");
+		const followUp = this.queue.filter(m => m.type === "followUp");
+		this.queue = this.queue.filter(m => m.type !== "followUp");
 		return followUp;
 	}
 
 	/** Remove and return the oldest follow-up message. */
 	dequeueOneFollowUp(): QueuedMessage[] {
-		const index = this.queue.findIndex((message) => message.type === "followUp");
+		const index = this.queue.findIndex(message => message.type === "followUp");
 		if (index < 0) return [];
 		return this.queue.splice(index, 1);
 	}
 
 	remove(id: string): QueuedMessage | undefined {
-		const index = this.queue.findIndex((message) => message.id === id);
+		const index = this.queue.findIndex(message => message.id === id);
 		if (index < 0) return undefined;
 		return this.queue.splice(index, 1)[0];
 	}

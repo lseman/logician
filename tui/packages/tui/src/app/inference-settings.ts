@@ -2,10 +2,10 @@
 // Mixes bridge control + status display + disk config persistence for the
 // inference-mode and execution-profile settings.
 
-import { AgentCoreBridge } from "@logician/coding-agent/application";
+import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import { saveConfigField } from "@logician/coding-agent/configuration";
-import { StatusBar } from "../status/status-bar.ts";
-import { TUI } from "../terminal/core.ts";
+import type { StatusBar } from "../status/status-bar.ts";
+import type { TUI } from "../terminal/core.ts";
 
 export type InferenceMode =
 	| "auto"
@@ -36,11 +36,17 @@ export interface InferenceSettingsCtx {
 	tui: TUI;
 	inferenceMode: InferenceMode;
 	thinkingLevel: string;
-	notify: (message: string, level?: "info" | "success" | "warning" | "error") => void;
+	notify: (
+		message: string,
+		level?: "info" | "success" | "warning" | "error",
+	) => void;
 }
 
 // Inference mode helper — used by the keyboard shortcut and /settings.
-export function setInferenceMode(ctx: InferenceSettingsCtx, mode: string): void {
+export function setInferenceMode(
+	ctx: InferenceSettingsCtx,
+	mode: string,
+): void {
 	if (!INFERENCE_MODE_ORDER.includes(mode as InferenceMode)) return;
 	const oldMode = ctx.inferenceMode;
 	ctx.inferenceMode = mode as InferenceMode;
@@ -72,7 +78,10 @@ export function cycleInferenceMode(ctx: InferenceSettingsCtx): void {
 	ctx.tui.requestRender();
 }
 
-export function applyThinkingLevel(ctx: InferenceSettingsCtx, level: string): void {
+export function applyThinkingLevel(
+	ctx: InferenceSettingsCtx,
+	level: string,
+): void {
 	ctx.thinkingLevel = level;
 	ctx.bridge.setThinkingLevel(level);
 	ctx.statusPanel.update({ thinkingLevel: level });

@@ -1,5 +1,8 @@
 import { getBuiltInTools } from "@logician/agent-capabilities/tools";
-import type { Tool, WebSearchConfig } from "@logician/agent-core/agent/types.ts";
+import type {
+	Tool,
+	WebSearchConfig,
+} from "@logician/agent-core/agent/types.ts";
 import { bash } from "./bash.ts";
 import { edit_file } from "./edit-file.ts";
 import { file_diff } from "./file-diff.ts";
@@ -7,8 +10,8 @@ import { find } from "./find.ts";
 import { git } from "./git.ts";
 import { list_files } from "./list-files.ts";
 import { read_file } from "./read-file.ts";
-import { grep } from "./search.ts";
 import { sandbox } from "./sandbox.ts";
+import { grep } from "./search.ts";
 import { web_fetch } from "./web-fetch.ts";
 import { createWebSearchTool } from "./web-search.ts";
 import { write_file } from "./write-file.ts";

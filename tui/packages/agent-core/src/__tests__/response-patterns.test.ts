@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-	looksNonCommittal,
-	looksComplete,
 	awaitsUserInput,
 	detectsCircling,
+	looksComplete,
+	looksNonCommittal,
 } from "../agent/guards/response-patterns.ts";
 
 // ── looksNonCommittal ──────────────────────────────────────────────────────
@@ -61,7 +61,10 @@ void test("awaitsUserInput detects request phrases at end", () => {
 });
 
 void test("awaitsUserInput returns false for questions mid-text", () => {
-	assert.equal(awaitsUserInput("I checked the file. The issue is on line 5."), false);
+	assert.equal(
+		awaitsUserInput("I checked the file. The issue is on line 5."),
+		false,
+	);
 	assert.equal(awaitsUserInput("The function works as expected"), false);
 	assert.equal(awaitsUserInput(""), false);
 });

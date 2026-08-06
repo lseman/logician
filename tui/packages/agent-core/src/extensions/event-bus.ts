@@ -6,7 +6,10 @@
 
 export interface EventBus {
 	/** Subscribe to events on a channel. Returns unsubscribe function. */
-	on(channel: string, handler: (data: unknown) => void | Promise<void>): () => void;
+	on(
+		channel: string,
+		handler: (data: unknown) => void | Promise<void>,
+	): () => void;
 
 	/** Emit an event on a channel. */
 	emit(channel: string, data?: unknown): void;
@@ -18,11 +21,17 @@ export interface EventBus {
 export function createEventBus(): EventBus {
 	const listeners = new Map<string, Set<(data: unknown) => void>>();
 
-	const on = (channel: string, handler: (data: unknown) => void | Promise<void>): (() => void) => {
+	const on = (
+		channel: string,
+		handler: (data: unknown) => void | Promise<void>,
+	): (() => void) => {
 		const safeHandler = (data: unknown) => {
 			try {
-				Promise.resolve(handler(data)).catch((err) => {
-					console.error(`[logician] event bus handler error (${channel}):`, err);
+				Promise.resolve(handler(data)).catch(err => {
+					console.error(
+						`[logician] event bus handler error (${channel}):`,
+						err,
+					);
 				});
 			} catch (err) {
 				console.error(`[logician] event bus handler error (${channel}):`, err);

@@ -3,16 +3,16 @@
 // Not to be confused with agent-core's SessionManager, which manages an
 // internal JSONL crash-recovery journal, not this UI.
 
-import { type Component, visibleWidth, RESET, BOLD } from "../terminal/core.ts";
-import { theme } from "../terminal/theme.ts";
 import type { SessionStore } from "@logician/coding-agent/sessions";
+import { BOLD, type Component, RESET, visibleWidth } from "../terminal/core.ts";
+import { theme } from "../terminal/theme.ts";
 import {
+	clampPopupLines,
+	type ListItem,
+	POPUP_FRAME_OVERHEAD,
 	renderListItem,
 	renderSeparator,
 	renderStatusLine,
-	clampPopupLines,
-	POPUP_FRAME_OVERHEAD,
-	type ListItem,
 } from "./popup-utils.ts";
 
 const getHeaderColor = (): string => theme.fg("header", "");
@@ -67,7 +67,7 @@ export class SessionBrowserOverlay implements Component {
 	refresh(): void {
 		if (this.store) {
 			const summaries = this.store.listSessions();
-			this.sessions = summaries.map((s) => ({
+			this.sessions = summaries.map(s => ({
 				id: s.id,
 				title: s.title,
 				name: s.name,
@@ -237,7 +237,7 @@ export class SessionBrowserOverlay implements Component {
 		const query = this.renameInput.toLowerCase();
 		if (!query) {
 			this.sessions = this.store
-				? this.store.listSessions().map((s) => ({
+				? this.store.listSessions().map(s => ({
 						id: s.id,
 						title: s.title,
 						name: s.name,
@@ -249,7 +249,7 @@ export class SessionBrowserOverlay implements Component {
 		} else {
 			const all = this.store ? this.store.listSessions() : [];
 			this.sessions = all.filter(
-				(s) =>
+				s =>
 					s.title.toLowerCase().includes(query) ||
 					(s.name ?? "").toLowerCase().includes(query) ||
 					s.preview.toLowerCase().includes(query),
@@ -347,11 +347,14 @@ export class SessionBrowserOverlay implements Component {
 		// ── List mode ────────────────────────────────────────────────────────
 		if (this.mode === "list") {
 			const headerFg = getHeaderColor();
-			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+			lines.push(
+				`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`,
+			);
 
 			const titleText = "Sessions";
 			const subtitleText = ` (${this.sessions.length} total)`;
-			const hintsText = " enter switch · ' filter · ^R rename · ^D delete · ^N new";
+			const hintsText =
+				" enter switch · ' filter · ^R rename · ^D delete · ^N new";
 			const titleLine = `${titleText}${theme.fg("muted", "")}${subtitleText}${hintsText}`;
 			const titleVisible = visibleWidth(titleLine);
 			const titlePad = Math.max(0, innerWidth - titleVisible);
@@ -366,7 +369,11 @@ export class SessionBrowserOverlay implements Component {
 			const maxListItems = Math.min(12, this.sessions.length);
 			if (this.sessions.length === 0) {
 				lines.push(
-					renderStatusLine("No sessions found.", innerWidth, theme.fg("warning", "")),
+					renderStatusLine(
+						"No sessions found.",
+						innerWidth,
+						theme.fg("warning", ""),
+					),
 				);
 			}
 			for (let i = 0; i < maxListItems; i++) {
@@ -400,17 +407,21 @@ export class SessionBrowserOverlay implements Component {
 					innerWidth,
 				),
 			);
-			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+			lines.push(
+				`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`,
+			);
 		}
 
 		// ── Rename mode ──────────────────────────────────────────────────────
 		if (this.mode === "rename") {
 			const headerFg = getHeaderColor();
-			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+			lines.push(
+				`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`,
+			);
 
 			if (this.renameSessionId !== null) {
 				const title =
-					this.sessions.find((s) => s.id === this.renameSessionId)?.title ||
+					this.sessions.find(s => s.id === this.renameSessionId)?.title ||
 					"Untitled";
 				const titleLine = `Rename: ${title}`;
 				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
@@ -418,7 +429,9 @@ export class SessionBrowserOverlay implements Component {
 				lines.push(renderSeparator(popupWidth));
 				const display = `${getYellow()}${this.renameInput}${RESET}_`;
 				lines.push(renderStatusLine(display, innerWidth));
-				lines.push(renderStatusLine("Enter to confirm, Esc to cancel", innerWidth));
+				lines.push(
+					renderStatusLine("Enter to confirm, Esc to cancel", innerWidth),
+				);
 			} else {
 				const titleLine = `Filter: ${this.sessions.length} matches`;
 				const titlePad = Math.max(0, innerWidth - visibleWidth(titleLine));
@@ -426,10 +439,14 @@ export class SessionBrowserOverlay implements Component {
 				lines.push(renderSeparator(popupWidth));
 				const display = `${getYellow()}${this.renameInput}${RESET}_`;
 				lines.push(renderStatusLine(display, innerWidth));
-				lines.push(renderStatusLine("Enter to apply, Esc to cancel", innerWidth));
+				lines.push(
+					renderStatusLine("Enter to apply, Esc to cancel", innerWidth),
+				);
 			}
 			lines.push(renderSeparator(popupWidth));
-			lines.push(`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`);
+			lines.push(
+				`${headerFg}${"─".repeat(popupWidth)}${theme.fg("muted", "")}`,
+			);
 		}
 
 		// ── Delete confirm mode ──────────────────────────────────────────────

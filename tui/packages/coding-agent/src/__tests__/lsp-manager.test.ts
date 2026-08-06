@@ -10,7 +10,9 @@ void test("LspManager lazily collects publishDiagnostics", async () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-lsp-"));
 	const target = path.join(cwd, "sample.fake");
 	writeFileSync(target, "hello\nworld\n", "utf8");
-	const fixture = fileURLToPath(new URL("./fixtures/fake-lsp.mjs", import.meta.url));
+	const fixture = fileURLToPath(
+		new URL("./fixtures/fake-lsp.mjs", import.meta.url),
+	);
 	const manager = new LspManager(cwd, {
 		timeoutMs: 1_000,
 		servers: {

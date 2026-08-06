@@ -193,10 +193,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 	];
 
 	// Version
-	lines.push(
-		"  \x1b[1mVersion\x1b[0m" +
-			`  ${dim("v" + report.version)}`,
-	);
+	lines.push(`  \x1b[1mVersion\x1b[0m  ${dim(`v${report.version}`)}`);
 
 	// Workspace
 	const wsOk = report.workspace.present && report.workspace.readable;
@@ -246,19 +243,24 @@ export function formatDoctorReport(report: DoctorReport): string {
 	// Dependencies
 	const deps = [
 		{ name: "node", ver: report.dependencies.node, ok: true },
-		{ name: "rg", ver: report.dependencies.rg ? "found" : "missing", ok: report.dependencies.rg },
-		{ name: "fd", ver: report.dependencies.fd ? "found" : "missing", ok: report.dependencies.fd },
+		{
+			name: "rg",
+			ver: report.dependencies.rg ? "found" : "missing",
+			ok: report.dependencies.rg,
+		},
+		{
+			name: "fd",
+			ver: report.dependencies.fd ? "found" : "missing",
+			ok: report.dependencies.fd,
+		},
 	];
 	lines.push(
 		"",
 		"  \x1b[1mDependencies\x1b[0m" +
-			`  ${deps.every((d) => d.ok) ? tag(true) : tag(false)}`,
+			`  ${deps.every(d => d.ok) ? tag(true) : tag(false)}`,
 	);
 	for (const d of deps) {
-		lines.push(
-			`    ${pad(d.name + ":", 12)}${d.ver}` +
-				`  ${icon(d.ok)}`,
-		);
+		lines.push(`    ${pad(`${d.name}:`, 12)}${d.ver}` + `  ${icon(d.ok)}`);
 	}
 
 	// MCP
@@ -289,9 +291,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 		"  \x1b[1mPolicies\x1b[0m" +
 			`  ${tag(report.permissions.mode !== "denyAll")}`,
 	);
-	lines.push(
-		`    ${pad("permission mode:", 18)}${report.permissions.mode}`,
-	);
+	lines.push(`    ${pad("permission mode:", 18)}${report.permissions.mode}`);
 	lines.push(
 		`    ${pad("post-edit diagnostics:", 23)}${report.diagnostics.postEditEnabled ? "enabled" : "disabled"}`,
 	);
@@ -310,10 +310,7 @@ export function formatDoctorReport(report: DoctorReport): string {
 	);
 
 	// Footer
-	lines.push(
-		"",
-		`\x1b[1m${thin}\x1b[0m`,
-	);
+	lines.push("", `\x1b[1m${thin}\x1b[0m`);
 
 	return lines.join("\n");
 }

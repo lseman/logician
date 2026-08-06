@@ -40,20 +40,17 @@ void test("direct-mode /spawn: lifecycle summary written after tool_end closes c
 	assert.equal(assistant.isComplete, false); // not closed by turn_end yet
 
 	const toolChunk = assistant.chunks.find(
-		(c) => c.tool?.tool_name === "spawn_agent",
+		c => c.tool?.tool_name === "spawn_agent",
 	);
 	assert.ok(toolChunk?.tool, "tool chunk should exist");
 
 	// The lifecycle summary must be written even though tool_end came first
 	assert.equal(toolChunk.tool.details?.status, "completed");
-	assert.equal(
-		toolChunk.tool.details?.lifecycleSummary,
-		"done in 2 turn(s)",
-	);
+	assert.equal(toolChunk.tool.details?.lifecycleSummary, "done in 2 turn(s)");
 	assert.equal(toolChunk.tool.isComplete, true);
 	// Only one spawn card — no leftover "running" twin.
 	assert.equal(
-		assistant.chunks.filter((c) => c.tool?.tool_name === "spawn_agent").length,
+		assistant.chunks.filter(c => c.tool?.tool_name === "spawn_agent").length,
 		1,
 	);
 });
@@ -111,7 +108,7 @@ void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", (
 		transcript
 			.getTurns()[0]
 			?.assistantMessage?.chunks.filter(
-				(c) => c.tool?.tool_name === "spawn_agent",
+				c => c.tool?.tool_name === "spawn_agent",
 			).length,
 		1,
 	);
@@ -277,8 +274,8 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	assert.equal(metrics?.turns, 2);
 	const chunks = tool.details?.childChunks as Array<{ type: string }>;
 	assert.ok(Array.isArray(chunks) && chunks.length >= 2);
-	assert.ok(chunks.some((c) => c.type === "tool"));
-	assert.ok(chunks.some((c) => c.type === "content"));
+	assert.ok(chunks.some(c => c.type === "tool"));
+	assert.ok(chunks.some(c => c.type === "content"));
 });
 
 /** Dual tool_call_* + tool_execution_* events must not double child tools. */
@@ -339,7 +336,7 @@ void test("child tool_call and tool_execution events dedupe by toolCallId", () =
 		type: string;
 		tool?: { toolCallId?: string; resultPreview?: string; status?: string };
 	}>;
-	const tools = chunks.filter((c) => c.type === "tool");
+	const tools = chunks.filter(c => c.type === "tool");
 	assert.equal(tools.length, 1, "exactly one child tool row");
 	assert.equal(tools[0].tool?.toolCallId, "tc_bash");
 	assert.equal(tools[0].tool?.status, "completed");

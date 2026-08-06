@@ -2,65 +2,68 @@
 // Persistent memory for Logician agent — SQLite-backed with observation capture,
 // synthetic compression, consolidation, and context injection.
 
-export { createMemoryStore } from "./store.js";
 export {
-  registerMemoryHooks,
-  remember,
-  recall,
-  recallWithTier,
-  searchObservations,
-  listMemories,
-  forget,
-  consolidate,
-  getContext,
-  setSessionId,
-  autoForget,
-  autoTierMemories,
+	autoForget,
+	autoTierMemories,
+	consolidate,
+	forget,
+	getContext,
+	listMemories,
+	recall,
+	recallWithTier,
+	registerMemoryHooks,
+	remember,
+	searchObservations,
+	setSessionId,
 } from "./hook-adapter.js";
-export { createMemoryHooks, type MemoryHooksConfig } from "./memory-hooks.js";
 export { LocalMemoryEmbedder, type MemoryEmbedder } from "./local-embedder.js";
-export type { SemanticExtractor, SemanticExtractionRequest } from "./semantic-extractor.js";
+export { createMemoryHooks, type MemoryHooksConfig } from "./memory-hooks.js";
+export type {
+	SemanticExtractionRequest,
+	SemanticExtractor,
+} from "./semantic-extractor.js";
+export { createMemoryStore } from "./store.js";
 
 export type {
-  // Sessions
-  Session,
-  // Observations
-  RawObservation,
-  CompressedObservation,
-  ObservationType,
-  HookPhase,
-  HookPayload,
-  // Memories
-  Memory,
-  MemoryType,
-  // Memory Relations
-  MemoryRelation,
-  MemoryRelationType,
-  // Retrieval
-  MemoryQuery,
-  RecallOptions,
-  ContextBlock,
-  SearchResult,
-  ExpandedMemoryEntry,
-  SemanticSearchResult,
-  // Working Memory
-  WorkingMemoryTier,
-  // Retention Scoring
-  DecayConfig,
-  DecayConfigInput,
-  RetentionScore,
-  // File Context
-  FileContextEntry,
-  // Export/Import
-  ExportData,
-  ImportData,
-  ImportResult,
-  // Dedup / Auto-Forget
-  DedupConfig,
-  AutoForgetConfig,
-  // Options
-  CreateMemoryOptions,
-  ObserveOptions,
-  // Store
-  MemoryStore,
+	AutoForgetConfig,
+	CompressedObservation,
+	ContextBlock,
+	// Options
+	CreateMemoryOptions,
+	// Retention Scoring
+	DecayConfig,
+	DecayConfigInput,
+	// Dedup / Auto-Forget
+	DedupConfig,
+	ExpandedMemoryEntry,
+	// Export/Import
+	ExportData,
+	// File Context
+	FileContextEntry,
+	HookPayload,
+	HookPhase,
+	ImportData,
+	ImportResult,
+	// Memories
+	Memory,
+	// Retrieval
+	MemoryQuery,
+	// Memory Relations
+	MemoryRelation,
+	MemoryRelationType,
+	// Store
+	MemoryStore,
+	MemoryType,
+	ObservationType,
+	ObserveOptions,
+	// Observations
+	RawObservation,
+	RecallOptions,
+	RetentionScore,
+	SearchResult,
+	SemanticSearchResult,
+	// Sessions
+	Session,
+	// Working Memory
+	WorkingMemoryTier,
 } from "./types.js";

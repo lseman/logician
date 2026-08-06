@@ -58,7 +58,7 @@ export class NotificationCenter implements Component {
 		const timer = this.timers.get(id);
 		if (timer) clearTimeout(timer);
 		this.timers.delete(id);
-		const next = this.notifications.filter((item) => item.id !== id);
+		const next = this.notifications.filter(item => item.id !== id);
 		if (next.length === this.notifications.length) return;
 		this.notifications = next;
 		this.onInvalidate?.();
@@ -72,7 +72,7 @@ export class NotificationCenter implements Component {
 	}
 
 	render(width: number): string[] {
-		return this.notifications.map((notification) => {
+		return this.notifications.map(notification => {
 			const { icon, color } = notificationStyle(notification.level);
 			const content = `${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
 			const clipped = clampLineToWidth(content, Math.max(1, width - 2));

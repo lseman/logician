@@ -61,7 +61,7 @@ export class SSRReasoner extends BaseReasoner {
 			[reasoning, answer] = updated;
 			history.push({
 				iteration: it + 1,
-				steps: verified.map((s) => ({ index: s.index, conf: s.confidence })),
+				steps: verified.map(s => ({ index: s.index, conf: s.confidence })),
 			});
 		}
 
@@ -163,7 +163,7 @@ export class SSRReasoner extends BaseReasoner {
 			const step = steps[idx];
 			const prev = steps
 				.slice(0, idx)
-				.map((s) => `Step ${s.index}: ${s.answer}`)
+				.map(s => `Step ${s.index}: ${s.answer}`)
 				.join("\n");
 			const samples: string[] = [];
 			for (let s = 0; s < m; s++) {
@@ -179,9 +179,7 @@ export class SSRReasoner extends BaseReasoner {
 				samples.push(sample);
 			}
 			const norm = SSRReasoner._norm(step.answer);
-			const matches = samples.filter(
-				(s) => SSRReasoner._norm(s) === norm,
-			).length;
+			const matches = samples.filter(s => SSRReasoner._norm(s) === norm).length;
 			step.samples = samples;
 			step.confidence = matches / m;
 			results.push(step);
@@ -209,7 +207,7 @@ export class SSRReasoner extends BaseReasoner {
 		if (bestNorm === SSRReasoner._norm(bad.answer)) return null;
 
 		const bestRaw =
-			bad.samples?.find((s) => SSRReasoner._norm(s) === bestNorm) ?? bad.answer;
+			bad.samples?.find(s => SSRReasoner._norm(s) === bestNorm) ?? bad.answer;
 
 		const prompt = [
 			"[Problem]",

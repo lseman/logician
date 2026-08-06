@@ -1,10 +1,9 @@
 // ── Slash-command submission dispatcher ────────────────────────────────────
 
-import type { SlashCommandDef } from "@logician/coding-agent/commands";
 import { formatContextSize } from "@logician/coding-agent";
 import { GoalManager } from "@logician/coding-agent/application";
+import type { SlashCommandDef } from "@logician/coding-agent/commands";
 import { describeSandboxProfile, parseLoopInterval } from "../tui-helpers.ts";
-import type { SlashCommandsCtx } from "./context.ts";
 import {
 	handleMcp,
 	handlePlugins,
@@ -12,6 +11,7 @@ import {
 	handleStatus,
 	handleTheme,
 } from "./async-handlers.ts";
+import type { SlashCommandsCtx } from "./context.ts";
 
 export function createSlashSubmitHandler(
 	ctx: SlashCommandsCtx,
@@ -54,7 +54,7 @@ export function createSlashSubmitHandler(
 				void handleTheme(ctx, args);
 			}
 			if (match && match.command === "/compact") {
-				void ctx.bridge.compact().then((result) => {
+				void ctx.bridge.compact().then(result => {
 					if (result === null) {
 						ctx.transcript.addSystemMessage("Nothing to compact.");
 					} else {
@@ -81,7 +81,7 @@ export function createSlashSubmitHandler(
 				return;
 			}
 			if (match && match.command === "/branch-summary") {
-				void ctx.bridge.branchSummary().then((summary) => {
+				void ctx.bridge.branchSummary().then(summary => {
 					ctx.transcript.addSystemMessage(
 						summary === null
 							? "No active branch to summarize."
@@ -204,11 +204,11 @@ export function createSlashSubmitHandler(
 					const { spawnSync } = await import("node:child_process");
 					const { existsSync } = await import("node:fs");
 					const pathMod = await import("node:path");
-					const bwrapPath = process.env.PATH?.split(pathMod.delimiter).find(
-						(d) => existsSync(pathMod.join(d, "bwrap")),
+					const bwrapPath = process.env.PATH?.split(pathMod.delimiter).find(d =>
+						existsSync(pathMod.join(d, "bwrap")),
 					)
 						? pathMod.join(
-								process.env.PATH?.split(pathMod.delimiter).find((d) =>
+								process.env.PATH?.split(pathMod.delimiter).find(d =>
 									existsSync(pathMod.join(d, "bwrap")),
 								)!,
 								"bwrap",
@@ -302,7 +302,10 @@ export function createSlashSubmitHandler(
 			if (match && match.command === "/rename") {
 				if (ctx.currentSessionId && args.trim()) {
 					ctx.sessionStore.renameSession(ctx.currentSessionId, args.trim());
-					ctx.bridge.renameConversationSession(ctx.currentSessionId, args.trim());
+					ctx.bridge.renameConversationSession(
+						ctx.currentSessionId,
+						args.trim(),
+					);
 					ctx.statusPanel.update({ sessionTitle: args.trim() });
 					ctx.transcript.addSystemMessage(
 						`Session renamed to "${args.trim()}"`,

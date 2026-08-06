@@ -2,17 +2,71 @@
 // Pi-style loop contract for Logician's current backend/tool adapter:
 // context + prompts + config + emit => new messages.
 
+import { compactToFit } from "../compaction/index.ts";
+import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
+import {
+	emitConclusion,
+	lastAssistantContent,
+	lastHadToolCalls,
+} from "../runtime/conclusion-policy.ts";
+import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
+import { ToolRegistry } from "../tools/shared/registry.ts";
+import {
+	parseTextToolCalls,
+	stripTextToolCalls,
+} from "../tools/shared/text-to-tool-calls.ts";
 import type { LLMBackend } from "./backend.ts";
+import { getInferenceMode } from "./configuration/inference-modes.ts";
+import {
+	evaluateStopPolicies,
+	resolveExecutionPolicy,
+} from "./execution-policy.ts";
+import {
+	type AcceptanceConfig,
+	type AcceptanceReport,
+	formatAcceptancePrompt,
+	parseAcceptanceReport,
+	type ResolvedAcceptance,
+	resolveEffectiveAcceptance,
+	shouldRunAcceptanceFinalization,
+} from "./guards/acceptance-contract.ts";
+import type { OutputGuard } from "./guards/output-guard.ts";
+import {
+	awaitsUserInput,
+	looksComplete,
+	looksNonCommittal,
+} from "./guards/response-patterns.ts";
+import {
+	applyHeaderPatch,
+	assistantText,
+	emitMessagePair,
+	firstMessages,
+	type LoopCallbacks,
+	prepareMessages,
+	shouldStop,
+	stopReasonFor,
+	transformMessages,
+	waitForRetryDelay,
+	withSystemPrompt,
+} from "./loop/callbacks.ts";
+import { runReflection } from "./loop/reflection.ts";
 import {
 	convertToChatFormat,
 	createAssistantMessage,
 	createSystemMessage,
 	createUserMessage,
 	convertToLlm as defaultConvertToLlm,
-	sanitizeToolCallArguments,
 	estimateChatPayloadTokens,
+	sanitizeToolCallArguments,
 } from "./messages.ts";
-import { compactToFit } from "../compaction/index.ts";
+import { runWithTaskState } from "./tasks/run-task-state.ts";
+import {
+	TaskStateController,
+	taskObjectiveFromMessages,
+} from "./tasks/task-state-controller.ts";
+import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
+import { ToolResultCache } from "./tool-cache.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -21,55 +75,6 @@ import type {
 	Message,
 	Tool,
 } from "./types.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
-import { ToolResultCache } from "./tool-cache.ts";
-import {
-	getTaskStatus,
-	resetTaskStatus,
-} from "./tasks/task-status-state.ts";
-import type { OutputGuard } from "./guards/output-guard.ts";
-import type { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
-import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
-import {
-	resolveEffectiveAcceptance,
-	shouldRunAcceptanceFinalization,
-	formatAcceptancePrompt,
-	parseAcceptanceReport,
-	type AcceptanceConfig,
-	type ResolvedAcceptance,
-	type AcceptanceReport,
-} from "./guards/acceptance-contract.ts";
-import {
-	parseTextToolCalls,
-	stripTextToolCalls,
-} from "../tools/shared/text-to-tool-calls.ts";
-import { getInferenceMode } from "./configuration/inference-modes.ts";
-import { awaitsUserInput, looksComplete, looksNonCommittal } from "./guards/response-patterns.ts";
-import { emitConclusion, lastAssistantContent, lastHadToolCalls } from "../runtime/conclusion-policy.ts";
-import { executeToolBatch } from "../runtime/tool-batch-controller.ts";
-import { runWithTaskState } from "./tasks/run-task-state.ts";
-import {
-	TaskStateController,
-	taskObjectiveFromMessages,
-} from "./tasks/task-state-controller.ts";
-import {
-	evaluateStopPolicies,
-	resolveExecutionPolicy,
-} from "./execution-policy.ts";
-import { runReflection } from "./loop/reflection.ts";
-import {
-	applyHeaderPatch,
-	assistantText,
-	emitMessagePair,
-	firstMessages,
-	prepareMessages,
-	shouldStop,
-	stopReasonFor,
-	transformMessages,
-	waitForRetryDelay,
-	withSystemPrompt,
-	type LoopCallbacks,
-} from "./loop/callbacks.ts";
 
 export type { ReflectionConfig } from "./loop/reflection.ts";
 
@@ -136,7 +141,7 @@ async function runAgentLoopInTaskScope(
 ): Promise<Message[]> {
 	const downstreamEmit = emit;
 	let eventSequence = 0;
-	emit = (event) =>
+	emit = event =>
 		downstreamEmit({
 			...event,
 			seq: ++eventSequence,
@@ -243,14 +248,14 @@ async function runAgentLoopInTaskScope(
 
 		return Promise.all(
 			resolved.verify.map(
-				(v) =>
+				v =>
 					new Promise<
 						Array<{
 							command: string;
 							result: "passed" | "failed";
 							summary?: string;
 						}>
-					>((resolve) => {
+					>(resolve => {
 						const timeout = v.timeoutMs ?? 30_000;
 						const timeoutId = setTimeout(() => {
 							resolve([
@@ -302,7 +307,7 @@ async function runAgentLoopInTaskScope(
 						);
 					}),
 			),
-		).then((results) => results.flat());
+		).then(results => results.flat());
 	}
 
 	let pendingMessages = await firstMessages([
@@ -321,7 +326,7 @@ async function runAgentLoopInTaskScope(
 		| undefined;
 	for (const hook of beforeAgentStartHooks) {
 		const result = await hook?.({
-			prompt: prompts.map((p) => p.content).join("\n"),
+			prompt: prompts.map(p => p.content).join("\n"),
 			systemPrompt: context.systemPrompt ?? "",
 			messages: messages as AgentMessage[],
 		});
@@ -341,7 +346,7 @@ async function runAgentLoopInTaskScope(
 	const extensionBeforeStart = config.extensionBus
 		? await config.extensionBus.emit({
 				type: "before_agent_start",
-				prompt: prompts.map((p) => p.content).join("\n"),
+				prompt: prompts.map(p => p.content).join("\n"),
 				systemPrompt:
 					beforeAgentStartResult?.systemPrompt ?? context.systemPrompt ?? "",
 			})
@@ -388,8 +393,8 @@ async function runAgentLoopInTaskScope(
 		const accPrompt = formatAcceptancePrompt(resolved);
 		if (accPrompt) {
 			const existingSystem = messages
-				.filter((m) => m.role === "system")
-				.map((m) => m.content)
+				.filter(m => m.role === "system")
+				.map(m => m.content)
 				.join("\n\n");
 			messages = [
 				{
@@ -399,7 +404,7 @@ async function runAgentLoopInTaskScope(
 						: accPrompt,
 					timestamp: Date.now(),
 				},
-				...messages.filter((m) => m.role !== "system"),
+				...messages.filter(m => m.role !== "system"),
 			];
 		}
 	}
@@ -542,7 +547,8 @@ async function runAgentLoopInTaskScope(
 					const modeParams = effectiveMode
 						? getInferenceMode(effectiveMode)?.params
 						: undefined;
-					const effectiveTemp = modeParams?.temperature ?? config.temperature ?? 0.5;
+					const effectiveTemp =
+						modeParams?.temperature ?? config.temperature ?? 0.5;
 					response = await config.backend.generate(chatMessages, {
 						tools: registry.toToolDefinitions(),
 						temperature: effectiveTemp,
@@ -555,14 +561,13 @@ async function runAgentLoopInTaskScope(
 						signal: config.signal,
 						thinkingLevel: config.thinkingLevel,
 						callbacks: {
-							onDelta: (delta) =>
+							onDelta: delta =>
 								queueProviderEvent({ type: "text_delta", turnId, delta }),
-							onThinking: (delta) =>
+							onThinking: delta =>
 								queueProviderEvent({ type: "thinking_delta", turnId, delta }),
 							onTextStart: () =>
 								queueProviderEvent({ type: "text_start", turnId }),
-							onTextEnd: () =>
-								queueProviderEvent({ type: "text_end", turnId }),
+							onTextEnd: () => queueProviderEvent({ type: "text_end", turnId }),
 							onToolCallStart: (toolCallId, toolName, args) =>
 								queueProviderEvent({
 									type: "tool_call_start",
@@ -571,14 +576,18 @@ async function runAgentLoopInTaskScope(
 									args,
 								}),
 							onToolCallDelta: (toolCallId, delta) =>
-								queueProviderEvent({ type: "tool_call_delta", toolCallId, delta }),
+								queueProviderEvent({
+									type: "tool_call_delta",
+									toolCallId,
+									delta,
+								}),
 						},
 						headers: requestHeaders,
 						timeoutMs: requestTimeoutMs,
 						maxRetries: requestMaxRetries,
 						cacheRetention: requestCacheRetention,
 						metadata: requestMetadata,
-						transformPayload: async (basePayload) => {
+						transformPayload: async basePayload => {
 							let payload = basePayload;
 							for (const hook of payloadHooks) {
 								const result = await hook?.({
@@ -717,16 +726,15 @@ async function runAgentLoopInTaskScope(
 			// Fallback: when LLM emits tool calls as text instead of structured
 			// tool_calls array, extract them from the response content.
 			if (toolCalls.length === 0 && response?.content) {
-				const textCalls = parseTextToolCalls(
-					response.content,
-					(name) => registry.has(name),
+				const textCalls = parseTextToolCalls(response.content, name =>
+					registry.has(name),
 				);
 				if (textCalls.length > 0) {
 					toolCalls = textCalls;
 					assistantContent = stripTextToolCalls(response.content);
 				}
 			}
-			if (toolCalls.some((call) => call.name !== "task_status")) {
+			if (toolCalls.some(call => call.name !== "task_status")) {
 				performedToolWork = true;
 				lastToolWorkIteration = iteration;
 			}
@@ -829,7 +837,7 @@ async function runAgentLoopInTaskScope(
 				permissions: config.permissions,
 				onPermissionRequest: config.onPermissionRequest,
 				emit,
-				emitExtension: (event) => emitTyped(config.extensionBus, event),
+				emitExtension: event => emitTyped(config.extensionBus, event),
 			});
 			const toolResults = batch.messages;
 			const toolTerminated = batch.terminated;
@@ -889,10 +897,7 @@ async function runAgentLoopInTaskScope(
 			// omit it. Estimate the serialized conversation as a reliable fallback
 			// so context usage never remains stuck at zero.
 			const contextTokens = Math.max(
-				estimateChatPayloadTokens(
-					messages,
-					registry.toToolDefinitions(),
-				),
+				estimateChatPayloadTokens(messages, registry.toToolDefinitions()),
 				response?.usage?.totalTokens ?? 0,
 			);
 			await emit({
@@ -961,7 +966,7 @@ async function runAgentLoopInTaskScope(
 					createSystemMessage(
 						refreshedConfig.systemPrompt ?? "You are a helpful assistant.",
 					),
-					...messages.filter((message) => message.role !== "system"),
+					...messages.filter(message => message.role !== "system"),
 				];
 				registry = createRegistry(refreshedConfig.tools ?? []);
 			}
@@ -1269,9 +1274,10 @@ async function runAgentLoopInTaskScope(
 			reflectionCount++;
 			if (reflection.result.needsMoreWork) {
 				const suggested = reflection.result.suggestedSteps.join("; ");
-				const reflectionRetryContent = reflection.result.issues.length > 0
-					? `[continuation-nudge:reflection-retry] Reflection found issues: ${reflection.result.issues.join(", ")}. Address them and continue working.`
-					: `[continuation-nudge:reflection-retry] Reflection found the task incomplete. ${suggested ? `Suggested next steps: ${suggested}. ` : ""}Continue working.`;
+				const reflectionRetryContent =
+					reflection.result.issues.length > 0
+						? `[continuation-nudge:reflection-retry] Reflection found issues: ${reflection.result.issues.join(", ")}. Address them and continue working.`
+						: `[continuation-nudge:reflection-retry] Reflection found the task incomplete. ${suggested ? `Suggested next steps: ${suggested}. ` : ""}Continue working.`;
 				pendingMessages = [{ role: "user", content: reflectionRetryContent }];
 				await emit({
 					type: "guard_triggered",
@@ -1374,15 +1380,15 @@ async function runAgentLoopInTaskScope(
 
 		// Build verification summary
 		const verificationSummary = verificationResults.map(
-			(v) =>
+			v =>
 				`[${v.result.toUpperCase()}] ${v.command}${v.summary ? ` → ${v.summary.slice(0, 100)}` : ""}`,
 		);
 
 		// Validate criteria against report
 		const report = parsed.report;
-		const criteriaResults = resolved.criteria.map((c) => {
+		const criteriaResults = resolved.criteria.map(c => {
 			const satisfied = report?.criteriaSatisfied?.some(
-				(cs) =>
+				cs =>
 					cs.id === c.id &&
 					(cs.status === "satisfied" ||
 						(c.severity === "recommended" && cs.status === "partial")),
@@ -1398,17 +1404,17 @@ async function runAgentLoopInTaskScope(
 		let reviewStatus = "not-required";
 		if (resolved.review?.required) {
 			reviewStatus = report?.criteriaSatisfied?.every(
-				(cs) => cs.status === "satisfied",
+				cs => cs.status === "satisfied",
 			)
 				? "passed"
 				: "failed";
 		}
 
 		const allCriteriaPass = criteriaResults.every(
-			(c) => c.status === "satisfied",
+			c => c.status === "satisfied",
 		);
 		const allVerificationsPass = verificationResults.every(
-			(v) => v.result === "passed",
+			v => v.result === "passed",
 		);
 
 		return {

@@ -7,19 +7,19 @@ import { constants, access as fsAccess } from "node:fs/promises";
 
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
 import {
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
-	formatSize,
-	OutputAccumulator,
-	type TruncationResult,
-} from "./truncate.ts";
-import {
 	getShellConfig,
 	getShellEnv,
 	killProcessTree,
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "./shell.ts";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	formatSize,
+	OutputAccumulator,
+	type TruncationResult,
+} from "./truncate.ts";
 
 const bashSchema = {
 	type: "object",
@@ -33,7 +33,10 @@ const bashSchema = {
 			items: {
 				type: "object",
 				properties: {
-					id: { type: "string", description: "Optional identifier used in results" },
+					id: {
+						type: "string",
+						description: "Optional identifier used in results",
+					},
 					command: { type: "string", description: "Bash command to execute" },
 					timeout: { type: "number", description: "Timeout in seconds" },
 				},
@@ -119,8 +122,10 @@ export interface BashDetails {
 // bash must stay broadly usable.
 const DESTRUCTIVE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 	{
-		pattern: /\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(-[a-zA-Z]*\s+)*(\/|~|\$HOME|\.\.?\/?\s*$)/,
-		reason: "recursive/force delete of home, root, or relative parent directory",
+		pattern:
+			/\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(-[a-zA-Z]*\s+)*(\/|~|\$HOME|\.\.?\/?\s*$)/,
+		reason:
+			"recursive/force delete of home, root, or relative parent directory",
 	},
 	{
 		pattern: /\bgit\s+push\b[^|;&\n]*(--force(?!-with-lease)|(?<!--)\s-f\b)/,
@@ -131,7 +136,8 @@ const DESTRUCTIVE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 		reason: "fork bomb",
 	},
 	{
-		pattern: /\b(curl|wget)\b[^|;&\n]*\|\s*(sudo\s+)?(bash|sh|zsh|python[23]?)\b/,
+		pattern:
+			/\b(curl|wget)\b[^|;&\n]*\|\s*(sudo\s+)?(bash|sh|zsh|python[23]?)\b/,
 		reason: "curl/wget piped directly into a shell interpreter",
 	},
 	{
@@ -203,9 +209,9 @@ export const bash: Tool = {
 	prepareArguments,
 	// The registry enforces a default execution timeout; when the model passes
 	// an explicit timeout, allow it plus grace for the tool's own kill+cleanup.
-	resolveTimeoutMs: (args) => {
+	resolveTimeoutMs: args => {
 		const entries = Array.isArray(args.commands) ? args.commands : [];
-		const entryTimeouts = entries.map((entry) =>
+		const entryTimeouts = entries.map(entry =>
 			typeof entry === "object" && entry !== null
 				? Number((entry as Record<string, unknown>).timeout)
 				: 0,
@@ -239,164 +245,123 @@ async function executeSingleCommand(
 	{ command, timeout }: SingleBashArgs,
 	ctx: Parameters<Tool["execute"]>[1],
 ): Promise<CommandExecutionResult> {
-		// Resolve shell
-		const { shell, args: shellArgs } = getShellConfig();
+	// Resolve shell
+	const { shell, args: shellArgs } = getShellConfig();
 
-		// Resolve cwd
-		const cwd = ctx.cwd || process.cwd();
-		try {
-			await fsAccess(cwd, constants.F_OK);
-		} catch {
-			return {
-				content: `Error: Working directory does not exist: ${cwd}`,
-				exitCode: null,
-				signal: null,
-				status: "failed",
-			};
+	// Resolve cwd
+	const cwd = ctx.cwd || process.cwd();
+	try {
+		await fsAccess(cwd, constants.F_OK);
+	} catch {
+		return {
+			content: `Error: Working directory does not exist: ${cwd}`,
+			exitCode: null,
+			signal: null,
+			status: "failed",
+		};
+	}
+
+	const shellEnv = getShellEnv();
+	const output = new OutputAccumulator({ tempFilePrefix: "logician-bash" });
+	const timeoutSeconds = timeout;
+	const throttledUpdate = makeUpdateThrottler();
+
+	return new Promise<CommandExecutionResult>(resolve => {
+		let settled = false;
+		const settle = (fn: () => void) => {
+			if (!settled) {
+				settled = true;
+				fn();
+			}
+		};
+
+		const child = spawn(shell, [...shellArgs, command], {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: shellEnv,
+			detached: process.platform !== "win32",
+		});
+
+		// Track detached child for cleanup
+		if (child.pid) {
+			if (process.platform !== "win32") {
+				trackDetachedChildPid(child.pid);
+			}
 		}
 
-		const shellEnv = getShellEnv();
-		const output = new OutputAccumulator({ tempFilePrefix: "logician-bash" });
-		const timeoutSeconds = timeout;
-		const throttledUpdate = makeUpdateThrottler();
+		let timedOut = false;
+		let timeoutHandle: NodeJS.Timeout | undefined;
+		let hasError = false;
 
-		return new Promise<CommandExecutionResult>((resolve) => {
-			let settled = false;
-			const settle = (fn: () => void) => {
-				if (!settled) {
-					settled = true;
-					fn();
-				}
-			};
+		const onAbort = () => {
+			if (child.pid) killProcessTree(child.pid);
+		};
 
-			const child = spawn(shell, [...shellArgs, command], {
-				cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: shellEnv,
-				detached: process.platform !== "win32",
-			});
-
-			// Track detached child for cleanup
-			if (child.pid) {
-				if (process.platform !== "win32") {
-					trackDetachedChildPid(child.pid);
-				}
+		// Abort signal
+		if (ctx.signal) {
+			if (ctx.signal.aborted) {
+				onAbort();
+			} else {
+				ctx.signal.addEventListener("abort", onAbort, { once: true });
 			}
+		}
 
-			let timedOut = false;
-			let timeoutHandle: NodeJS.Timeout | undefined;
-			let hasError = false;
-
-			const onAbort = () => {
+		// Timeout
+		if (timeoutSeconds && timeoutSeconds > 0) {
+			timeoutHandle = setTimeout(() => {
+				timedOut = true;
 				if (child.pid) killProcessTree(child.pid);
-			};
+			}, timeoutSeconds * 1000);
+		}
 
-			// Abort signal
-			if (ctx.signal) {
-				if (ctx.signal.aborted) {
-					onAbort();
-				} else {
-					ctx.signal.addEventListener("abort", onAbort, { once: true });
-				}
-			}
-
-			// Timeout
-			if (timeoutSeconds && timeoutSeconds > 0) {
-				timeoutHandle = setTimeout(() => {
-					timedOut = true;
-					if (child.pid) killProcessTree(child.pid);
-				}, timeoutSeconds * 1000);
-			}
-
-			// Stream output
-			const handleData = (data: Buffer) => {
-				output.append(data);
-				// Stream updates to TUI (throttled)
-				const snapshot = output.snapshot();
-				if (snapshot.content && ctx.onUpdate) {
-					throttledUpdate(() => {
-						ctx.onUpdate?.(snapshot.content);
-					});
-				}
-			};
-
-			child.stdout?.on("data", handleData);
-			child.stderr?.on("data", handleData);
-
-			// Handle errors
-			child.on("error", (err) => {
-				hasError = true;
-				output.finish();
-				if (child.pid) untrackDetachedChildPid(child.pid);
-				settle(() => {
-					if (timeoutHandle) clearTimeout(timeoutHandle);
-					ctx.signal?.removeEventListener("abort", onAbort);
-					resolve({
-						content: `Error: ${err.message || "Command failed"}`,
-						exitCode: null,
-						signal: null,
-						status: "failed",
-					});
+		// Stream output
+		const handleData = (data: Buffer) => {
+			output.append(data);
+			// Stream updates to TUI (throttled)
+			const snapshot = output.snapshot();
+			if (snapshot.content && ctx.onUpdate) {
+				throttledUpdate(() => {
+					ctx.onUpdate?.(snapshot.content);
 				});
-			});
+			}
+		};
 
-			// Handle exit
-			child.on("close", (code, signal) => {
-				output.finish();
-				if (child.pid) untrackDetachedChildPid(child.pid);
+		child.stdout?.on("data", handleData);
+		child.stderr?.on("data", handleData);
+
+		// Handle errors
+		child.on("error", err => {
+			hasError = true;
+			output.finish();
+			if (child.pid) untrackDetachedChildPid(child.pid);
+			settle(() => {
 				if (timeoutHandle) clearTimeout(timeoutHandle);
 				ctx.signal?.removeEventListener("abort", onAbort);
+				resolve({
+					content: `Error: ${err.message || "Command failed"}`,
+					exitCode: null,
+					signal: null,
+					status: "failed",
+				});
+			});
+		});
 
-				settle(() => {
-					const snapshot = output.snapshot({ persistIfTruncated: true });
-					output.closeTempFile().catch(() => {});
+		// Handle exit
+		child.on("close", (code, signal) => {
+			output.finish();
+			if (child.pid) untrackDetachedChildPid(child.pid);
+			if (timeoutHandle) clearTimeout(timeoutHandle);
+			ctx.signal?.removeEventListener("abort", onAbort);
 
-					// If we already had an error (e.g. abort during close), skip
-					if (hasError) return;
+			settle(() => {
+				const snapshot = output.snapshot({ persistIfTruncated: true });
+				output.closeTempFile().catch(() => {});
 
-					// Check for abort
-					if (ctx.signal?.aborted) {
-						const { text, details } = formatOutput(
-							snapshot,
-							code,
-							signal,
-							output.getLastLineBytes(),
-						);
-						resolve({
-							content: appendStatus(
-								text === "(no output)" ? "" : text,
-								"Command aborted",
-							),
-							details,
-							exitCode: code,
-							signal,
-							status: "aborted",
-						});
-						return;
-					}
+				// If we already had an error (e.g. abort during close), skip
+				if (hasError) return;
 
-					// Check for timeout
-					if (timedOut) {
-						const { text, details } = formatOutput(
-							snapshot,
-							code,
-							signal,
-							output.getLastLineBytes(),
-						);
-						resolve({
-							content: appendStatus(
-								text === "(no output)" ? "" : text,
-								`Command timed out after ${timeoutSeconds} seconds`,
-							),
-							details,
-							exitCode: code,
-							signal,
-							status: "timed_out",
-						});
-						return;
-					}
-
-					// Build result
+				// Check for abort
+				if (ctx.signal?.aborted) {
 					const { text, details } = formatOutput(
 						snapshot,
 						code,
@@ -404,15 +369,56 @@ async function executeSingleCommand(
 						output.getLastLineBytes(),
 					);
 					resolve({
-						content: text,
+						content: appendStatus(
+							text === "(no output)" ? "" : text,
+							"Command aborted",
+						),
 						details,
 						exitCode: code,
 						signal,
-						status: code === 0 ? "completed" : "failed",
+						status: "aborted",
 					});
+					return;
+				}
+
+				// Check for timeout
+				if (timedOut) {
+					const { text, details } = formatOutput(
+						snapshot,
+						code,
+						signal,
+						output.getLastLineBytes(),
+					);
+					resolve({
+						content: appendStatus(
+							text === "(no output)" ? "" : text,
+							`Command timed out after ${timeoutSeconds} seconds`,
+						),
+						details,
+						exitCode: code,
+						signal,
+						status: "timed_out",
+					});
+					return;
+				}
+
+				// Build result
+				const { text, details } = formatOutput(
+					snapshot,
+					code,
+					signal,
+					output.getLastLineBytes(),
+				);
+				resolve({
+					content: text,
+					details,
+					exitCode: code,
+					signal,
+					status: code === 0 ? "completed" : "failed",
 				});
 			});
 		});
+	});
 }
 
 async function executeBatch(
@@ -423,10 +429,14 @@ async function executeBatch(
 	if (typeof entries === "string") return { content: entries, isError: true };
 	const mode = args.mode ?? "sequential";
 	if (mode !== "sequential" && mode !== "parallel") {
-		return { content: "Error: mode must be \"sequential\" or \"parallel\".", isError: true };
+		return {
+			content: 'Error: mode must be "sequential" or "parallel".',
+			isError: true,
+		};
 	}
 	const concurrency = normalizeConcurrency(args.maxConcurrency);
-	if (typeof concurrency === "string") return { content: concurrency, isError: true };
+	if (typeof concurrency === "string")
+		return { content: concurrency, isError: true };
 	const normalized = entries.map((entry, index) => ({
 		id: entry.id ?? `command-${index + 1}`,
 		command: entry.command,
@@ -437,12 +447,22 @@ async function executeBatch(
 	if (mode === "sequential") {
 		for (const entry of normalized) {
 			const blockedReason = findDestructiveMatch(entry.command);
-			if (ctx.signal?.aborted || (args.stopOnFailure && results.some(isBatchFailure))) {
-				results.push(skippedResult(entry, ctx.signal?.aborted ? "Batch aborted" : "Skipped after failure"));
+			if (
+				ctx.signal?.aborted ||
+				(args.stopOnFailure && results.some(isBatchFailure))
+			) {
+				results.push(
+					skippedResult(
+						entry,
+						ctx.signal?.aborted ? "Batch aborted" : "Skipped after failure",
+					),
+				);
 			} else if (blockedReason) {
 				results.push(blockedResult(entry, blockedReason));
 			} else {
-				results.push(toBatchResult(entry, await executeSingleCommand(entry, ctx)));
+				results.push(
+					toBatchResult(entry, await executeSingleCommand(entry, ctx)),
+				);
 			}
 		}
 	} else {
@@ -458,28 +478,37 @@ async function executeBatch(
 				} else if (blockedReason) {
 					ordered[index] = blockedResult(entry, blockedReason);
 				} else {
-					ordered[index] = toBatchResult(entry, await executeSingleCommand(entry, ctx));
+					ordered[index] = toBatchResult(
+						entry,
+						await executeSingleCommand(entry, ctx),
+					);
 				}
 			}
 		};
 		await Promise.all(
-			Array.from({ length: Math.min(concurrency, normalized.length) }, () => worker()),
+			Array.from({ length: Math.min(concurrency, normalized.length) }, () =>
+				worker(),
+			),
 		);
 		results.push(...ordered);
 	}
 
 	return {
 		content: results
-			.map((result) => `[${result.id}] ${result.status}: ${result.command}\n${result.content}`)
+			.map(
+				result =>
+					`[${result.id}] ${result.status}: ${result.command}\n${result.content}`,
+			)
 			.join("\n\n"),
 		details: {
 			mode,
 			commands: results,
 			summary: {
 				total: results.length,
-				completed: results.filter((result) => result.status === "completed").length,
+				completed: results.filter(result => result.status === "completed")
+					.length,
 				failed: results.filter(isBatchFailure).length,
-				skipped: results.filter((result) => result.status === "skipped").length,
+				skipped: results.filter(result => result.status === "skipped").length,
 			},
 		},
 	};
@@ -494,16 +523,21 @@ function validateBatchEntries(value: unknown): BashBatchEntry[] | string {
 	const ids = new Set<string>();
 	for (let index = 0; index < value.length; index++) {
 		const raw = value[index];
-		if (!raw || typeof raw !== "object") return `Error: commands[${index}] must be an object.`;
+		if (!raw || typeof raw !== "object")
+			return `Error: commands[${index}] must be an object.`;
 		const entry = raw as Record<string, unknown>;
 		if (typeof entry.command !== "string" || entry.command.trim() === "") {
 			return `Error: commands[${index}].command must be a non-empty string.`;
 		}
-		if (entry.id !== undefined && (typeof entry.id !== "string" || entry.id.trim() === "")) {
+		if (
+			entry.id !== undefined &&
+			(typeof entry.id !== "string" || entry.id.trim() === "")
+		) {
 			return `Error: commands[${index}].id must be a non-empty string.`;
 		}
 		if (typeof entry.id === "string") {
-			if (ids.has(entry.id)) return `Error: duplicate command id "${entry.id}".`;
+			if (ids.has(entry.id))
+				return `Error: duplicate command id "${entry.id}".`;
 			ids.add(entry.id);
 		}
 		if (
@@ -515,7 +549,9 @@ function validateBatchEntries(value: unknown): BashBatchEntry[] | string {
 		entries.push({
 			command: entry.command,
 			...(typeof entry.id === "string" ? { id: entry.id } : {}),
-			...(entry.timeout === undefined ? {} : { timeout: Number(entry.timeout) }),
+			...(entry.timeout === undefined
+				? {}
+				: { timeout: Number(entry.timeout) }),
 		});
 	}
 	return entries;

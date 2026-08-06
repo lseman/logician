@@ -1,20 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { SlashCommandDef } from "@logician/coding-agent/commands";
 import { SlashPopup } from "../overlays/slash-popup.ts";
 import { initTheme } from "../terminal/theme.ts";
-import type { SlashCommandDef } from "@logician/coding-agent/commands";
 
 initTheme("dark");
 
 void test("slash popup renders every command for a bare slash", () => {
 	const popup = new SlashPopup();
-	const commands: SlashCommandDef[] = Array.from({ length: 15 }, (_, index) => ({
-		command: `/command-${index}`,
-		description: `Command ${index}`,
-		dispatch: "local",
-		acceptsArgs: false,
-		category: index < 8 ? "session" : "context",
-	}));
+	const commands: SlashCommandDef[] = Array.from(
+		{ length: 15 },
+		(_, index) => ({
+			command: `/command-${index}`,
+			description: `Command ${index}`,
+			dispatch: "local",
+			acceptsArgs: false,
+			category: index < 8 ? "session" : "context",
+		}),
+	);
 	popup.setCommands(commands);
 	popup.setQuery("/");
 	popup.show();

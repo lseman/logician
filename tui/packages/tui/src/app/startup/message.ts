@@ -20,7 +20,7 @@ export function formatStartupMessage(
 	const hookMessages = Array.isArray(state.startup_hook_messages)
 		? state.startup_hook_messages
 				.map(normalizeStartupHookMessage)
-				.filter((item) => item.content)
+				.filter(item => item.content)
 		: [];
 	const initialMessage = String(
 		state.startup_hook_initial_message || "",
@@ -70,15 +70,11 @@ export function formatStartupMessage(
 		lines.push(
 			"",
 			"## Startup hook errors",
-			...errors.map((error) => `- ${error}`),
+			...errors.map(error => `- ${error}`),
 		);
 	}
 	if (mcpErrors.length) {
-		lines.push(
-			"",
-			"## MCP errors",
-			...mcpErrors.map((error) => `- ${error}`),
-		);
+		lines.push("", "## MCP errors", ...mcpErrors.map(error => `- ${error}`));
 	}
 	lines.push(...formatStartupMemory(state));
 	lines.push(
@@ -89,7 +85,7 @@ export function formatStartupMessage(
 		"",
 		`${dim}Skills (${skills.length})${reset}`,
 		skills.length
-			? skills.map((skill) => `/${skill.slashName}`).join(" · ")
+			? skills.map(skill => `/${skill.slashName}`).join(" · ")
 			: `${dim}None${reset}`,
 	);
 	return lines.join("\n");
@@ -97,7 +93,7 @@ export function formatStartupMessage(
 
 function stringList(value: unknown): string[] {
 	return Array.isArray(value)
-		? value.map((item) => String(item || "").trim()).filter(Boolean)
+		? value.map(item => String(item || "").trim()).filter(Boolean)
 		: [];
 }
 
@@ -107,7 +103,7 @@ function normalizeSkills(value: unknown): Array<{
 }> {
 	if (!Array.isArray(value)) return [];
 	return value
-		.map((item) => {
+		.map(item => {
 			if (!item || typeof item !== "object") return null;
 			const skill = item as Record<string, unknown>;
 			const slashName = String(skill.slash_name || skill.name || "").trim();

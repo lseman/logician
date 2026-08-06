@@ -126,8 +126,8 @@ function isReflectionResult(
 		typeof value.needsMoreWork === "boolean" &&
 		typeof value.reasoning === "string" &&
 		Array.isArray(value.issues) &&
-		value.issues.every((issue) => typeof issue === "string") &&
+		value.issues.every(issue => typeof issue === "string") &&
 		Array.isArray(value.suggestedSteps) &&
-		value.suggestedSteps.every((step) => typeof step === "string")
+		value.suggestedSteps.every(step => typeof step === "string")
 	);
 }

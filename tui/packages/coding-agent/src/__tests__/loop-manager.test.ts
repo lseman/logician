@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LoopManager } from "../application/loop-manager.ts";
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 void test("parseInterval validates units and bounds", () => {
 	assert.equal(LoopManager.parseInterval("30s"), 30_000);
@@ -34,13 +34,14 @@ void test("loop callbacks never overlap", async () => {
 void test("stop aborts an active callback and prevents rescheduling", async () => {
 	const manager = new LoopManager();
 	let aborted = false;
-	manager.setOnTick((_iteration, _prompt, signal) =>
-		new Promise<void>((resolve) => {
-			signal.addEventListener("abort", () => {
-				aborted = true;
-				resolve();
-			});
-		}),
+	manager.setOnTick(
+		(_iteration, _prompt, signal) =>
+			new Promise<void>(resolve => {
+				signal.addEventListener("abort", () => {
+					aborted = true;
+					resolve();
+				});
+			}),
 	);
 	manager.start("work", 100);
 	await delay(120);

@@ -3,11 +3,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { LoopDetector } from "../agent/guards/loop-detector.ts";
 import {
 	awaitsUserInput,
 	detectsCircling,
 } from "../agent/guards/response-patterns.ts";
-import { LoopDetector } from "../agent/guards/loop-detector.ts";
 import {
 	buildBuiltinHooks,
 	rewriteCommandWithRtk,
@@ -77,14 +77,22 @@ void test("detectsCircling: requires minimum length", () => {
 });
 
 void test("awaitsUserInput: detects final questions and direct input requests", () => {
-	assert.ok(awaitsUserInput("I found two valid approaches. Which one do you prefer?"));
+	assert.ok(
+		awaitsUserInput("I found two valid approaches. Which one do you prefer?"),
+	);
 	assert.ok(awaitsUserInput("Please choose one of the options below:"));
 	assert.ok(awaitsUserInput("I need your confirmation."));
-	assert.ok(awaitsUserInput("Which environment should I use?\n\n1. Staging\n2. Production"));
+	assert.ok(
+		awaitsUserInput(
+			"Which environment should I use?\n\n1. Staging\n2. Production",
+		),
+	);
 });
 
 void test("awaitsUserInput: ignores questions followed by continued work", () => {
-	assert.ok(!awaitsUserInput("What caused this? I will inspect the stack trace next."));
+	assert.ok(
+		!awaitsUserInput("What caused this? I will inspect the stack trace next."),
+	);
 	assert.ok(!awaitsUserInput("The tests answer the question. Task complete."));
 	assert.ok(!awaitsUserInput(""));
 });

@@ -4,7 +4,9 @@ import { createWebSearchTool } from "../tools/web-search.ts";
 
 void test("web_search sends bounded SearXNG parameters and renders rich metadata", async () => {
 	let requestedUrl = "";
-	const fakeFetch = async (input: string | URL | Request): Promise<Response> => {
+	const fakeFetch = async (
+		input: string | URL | Request,
+	): Promise<Response> => {
 		requestedUrl = String(input);
 		return new Response(
 			JSON.stringify({

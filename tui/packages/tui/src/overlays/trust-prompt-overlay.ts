@@ -3,11 +3,11 @@
 // trust-requiring resources (.logician/, extensions/, skills/, etc.).
 
 import {
-	visibleWidth,
-	clampLineToWidth,
 	BOLD,
+	clampLineToWidth,
 	DIM,
 	RESET,
+	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import { BOX, clampPopupLines } from "./popup-utils.ts";
@@ -76,7 +76,6 @@ export class TrustPromptOverlay {
 	private visible = false;
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
-	private onClose?: () => void;
 
 	setOptions(opts: TrustPromptOverlayOptions): void {
 		this.cwd = opts.cwd;
@@ -105,7 +104,7 @@ export class TrustPromptOverlay {
 
 	moveSelection(delta: number): void {
 		const n = OPTIONS.length;
-		this.selectedIndex = ((this.selectedIndex + delta) % n + n) % n;
+		this.selectedIndex = (((this.selectedIndex + delta) % n) + n) % n;
 		this.invalidate();
 	}
 
@@ -124,12 +123,22 @@ export class TrustPromptOverlay {
 			return { type: "trust-choice", choice };
 		}
 
-		if (data === "\x1b[A" || data === "\x1bOA" || data === "k" || data === "K") {
+		if (
+			data === "\x1b[A" ||
+			data === "\x1bOA" ||
+			data === "k" ||
+			data === "K"
+		) {
 			this.moveSelection(-1);
 			return null;
 		}
 
-		if (data === "\x1b[B" || data === "\x1bOB" || data === "j" || data === "J") {
+		if (
+			data === "\x1b[B" ||
+			data === "\x1bOB" ||
+			data === "j" ||
+			data === "J"
+		) {
 			this.moveSelection(1);
 			return null;
 		}
@@ -143,17 +152,20 @@ export class TrustPromptOverlay {
 				this.hide();
 				return { type: "trust-choice", choice };
 			}
-			const shortcut = data === "N"
-				? "deny-session"
-				: ({
-						y: "trust",
-						Y: "trust",
-						p: "trust-parent",
-						P: "trust-parent",
-						s: "session-only",
-						S: "session-only",
-						n: "deny",
-					} as Record<string, TrustChoice | undefined>)[data];
+			const shortcut =
+				data === "N"
+					? "deny-session"
+					: (
+							{
+								y: "trust",
+								Y: "trust",
+								p: "trust-parent",
+								P: "trust-parent",
+								s: "session-only",
+								S: "session-only",
+								n: "deny",
+							} as Record<string, TrustChoice | undefined>
+						)[data];
 			if (shortcut) {
 				this.hide();
 				return { type: "trust-choice", choice: shortcut };
@@ -199,7 +211,9 @@ export class TrustPromptOverlay {
 				`${theme.fg("warning", "◆")} ${BOLD}${theme.fg("header", "TRUST THIS WORKSPACE?")}${RESET}`,
 			),
 		);
-		lines.push(row(`${theme.fg("muted", "Folder")}  ${theme.fg("text", this.cwd)}`));
+		lines.push(
+			row(`${theme.fg("muted", "Folder")}  ${theme.fg("text", this.cwd)}`),
+		);
 		lines.push(separator());
 		lines.push(
 			row(

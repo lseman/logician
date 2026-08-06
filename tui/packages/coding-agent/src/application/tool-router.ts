@@ -6,30 +6,36 @@
 // router's mcpSystemContext/skillsContext with plugin-hook context) stays on
 // the bridge — that merge is cross-cutting, not a tool-management concern.
 
-import { readdir as readdirAsync, readFile as readFileAsync } from "node:fs/promises";
+import {
+	readdir as readdirAsync,
+	readFile as readFileAsync,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Tool } from "@logician/agent-core";
-import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
 import { parseFrontmatter } from "@logician/agent-core/tools/shared/frontmatter.ts";
 import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
-import { createDefaultTools } from "../tools/default-tools.ts";
-import { createReadSkillTool } from "../tools/read-skill.ts";
-import {
-	getDefaultSandboxProfile,
-	setDefaultSandboxProfile,
-	type SandboxProfile,
-} from "../tools/sandbox.ts";
-import { loadSkills, formatSkillCatalog, type Skill } from "../skills/index.ts";
-import { loadPrompts, type Prompt } from "../prompts/index.ts";
+import { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts";
 import {
 	McpManager,
 	type McpSnapshotResult,
 	type McpToggleResult,
 } from "../mcp/index.ts";
-import { resolveWebSearchConfig } from "./bridge-environment.ts";
-import { getProjectPromptDirs, getProjectSkillDirs } from "./resource-directories.ts";
+import { loadPrompts, type Prompt } from "../prompts/index.ts";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
+import { formatSkillCatalog, loadSkills, type Skill } from "../skills/index.ts";
+import { createDefaultTools } from "../tools/default-tools.ts";
+import { createReadSkillTool } from "../tools/read-skill.ts";
+import {
+	getDefaultSandboxProfile,
+	type SandboxProfile,
+	setDefaultSandboxProfile,
+} from "../tools/sandbox.ts";
+import { resolveWebSearchConfig } from "./bridge-environment.ts";
+import {
+	getProjectPromptDirs,
+	getProjectSkillDirs,
+} from "./resource-directories.ts";
 
 export interface ToolRouterDeps {
 	cwd: string;
@@ -94,7 +100,11 @@ export class ToolRouter {
 	private promptsInjected = false;
 	private loadedPrompts: Prompt[] = [];
 
-	private static readonly SANDBOX_CYCLE: SandboxProfile[] = ["none", "code", "full"];
+	private static readonly SANDBOX_CYCLE: SandboxProfile[] = [
+		"none",
+		"code",
+		"full",
+	];
 
 	constructor(deps: ToolRouterDeps) {
 		this.cwd = deps.cwd;
@@ -107,11 +117,16 @@ export class ToolRouter {
 			baseUrl: deps.webSearch?.baseUrl || defaultWebSearch.baseUrl,
 			maxResults: deps.webSearch?.maxResults ?? defaultWebSearch.maxResults,
 		};
-		this.defaultTools = deps.tools?.length ? deps.tools : createDefaultTools({ webSearch });
+		this.defaultTools = deps.tools?.length
+			? deps.tools
+			: createDefaultTools({ webSearch });
 		if (deps.extraTools?.length) {
 			this.defaultTools = [
 				...this.defaultTools,
-				...deps.extraTools.filter((tool) => !this.defaultTools.some((existing) => existing.name === tool.name)),
+				...deps.extraTools.filter(
+					tool =>
+						!this.defaultTools.some(existing => existing.name === tool.name),
+				),
 			];
 		}
 
@@ -131,7 +146,7 @@ export class ToolRouter {
 
 	/** Append a tool to the router's own set and notify the bridge to propagate it into config/harness/system prompt. */
 	private addTool(tool: Tool): void {
-		if (this.defaultTools.some((t) => t.name === tool.name)) return;
+		if (this.defaultTools.some(t => t.name === tool.name)) return;
 		this.defaultTools = [...this.defaultTools, tool];
 		this.onToolAdded(tool);
 	}
@@ -182,22 +197,24 @@ export class ToolRouter {
 			this.mcpLoadPromise = (async () => {
 				const result = await this.mcpManager.load(
 					this.cwd,
-					this.defaultTools.map((tool) => tool.name),
+					this.defaultTools.map(tool => tool.name),
 				);
 				this.mcpServerCount = result.servers;
 				this.mcpErrors = result.errors;
-				this.mcpToolNames = new Set(result.tools.map((tool) => tool.name));
+				this.mcpToolNames = new Set(result.tools.map(tool => tool.name));
 				// Tool presence alone doesn't tell the model whether a missing
 				// capability was never configured or failed to connect — surface
 				// connection failures in the system prompt so it can explain a gap
 				// instead of silently working around it or guessing.
 				this.mcpSystemContext = result.errors.length
-					? `<mcp-status>\n${result.errors.length} MCP server(s) failed to load:\n${result.errors.map((e) => `- ${e}`).join("\n")}\n` +
+					? `<mcp-status>\n${result.errors.length} MCP server(s) failed to load:\n${result.errors.map(e => `- ${e}`).join("\n")}\n` +
 						"Tools from these servers are unavailable this session.\n</mcp-status>"
 					: "";
 				if (result.tools.length || this.mcpSystemContext) {
-					const existing = new Set(this.defaultTools.map((tool) => tool.name));
-					const newTools = result.tools.filter((tool) => !existing.has(tool.name));
+					const existing = new Set(this.defaultTools.map(tool => tool.name));
+					const newTools = result.tools.filter(
+						tool => !existing.has(tool.name),
+					);
 					for (const tool of newTools) this.addTool(tool);
 					// addTool() already triggers onToolAdded (which rebuilds the system
 					// prompt); an errors-only load with no new tools still changed
@@ -322,11 +339,11 @@ export class ToolRouter {
 
 		// Namespace plugin skills as plugin:skill (Claude Code convention); the
 		// bare name stays available as an alias when unambiguous.
-		const skills = rawSkills.map((skill) => {
-			const owner = enabledPlugins.find((p) =>
+		const skills = rawSkills.map(skill => {
+			const owner = enabledPlugins.find(p =>
 				skill.filePath.startsWith(p.installPath + path.sep),
 			);
-			if (!owner || !owner.name || skill.name.startsWith(`${owner.name}:`)) {
+			if (!owner?.name || skill.name.startsWith(`${owner.name}:`)) {
 				return skill;
 			}
 			return {
@@ -352,7 +369,7 @@ export class ToolRouter {
 		// All loaded skills are user-invocable via /<skill-name>; only the ones
 		// not flagged disable-model-invocation are advertised to the model.
 		this.loadedSkills = skills;
-		const visible = skills.filter((s) => !s.disableModelInvocation);
+		const visible = skills.filter(s => !s.disableModelInvocation);
 		// Only skip catalog injection when there are no skills at all.
 		// Plugin commands (disableModelInvocation) still need read_skill.
 

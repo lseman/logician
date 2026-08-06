@@ -28,7 +28,8 @@ export interface PostEditDiagnostic {
 }
 
 function successfulMutation(toolName: string, result: string): boolean {
-	if (toolName === "edit_file") return result.startsWith("Successfully replaced ");
+	if (toolName === "edit_file")
+		return result.startsWith("Successfully replaced ");
 	if (toolName === "write_file") {
 		return result.startsWith("Created ") || result.startsWith("Wrote ");
 	}
@@ -78,25 +79,36 @@ function collectTypeScriptDiagnostics(
 		true,
 		scriptKindFor(extension),
 	);
-	return (output.diagnostics ?? []).slice(0, MAX_DIAGNOSTICS).map((diagnostic) => {
-		const position = sourceFile.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
-		return {
-			line: position.line + 1,
-			column: position.character + 1,
-			message: flattenMessage(diagnostic.messageText),
-			code: diagnostic.code,
-		};
-	});
+	return (output.diagnostics ?? [])
+		.slice(0, MAX_DIAGNOSTICS)
+		.map(diagnostic => {
+			const position = sourceFile.getLineAndCharacterOfPosition(
+				diagnostic.start ?? 0,
+			);
+			return {
+				line: position.line + 1,
+				column: position.character + 1,
+				message: flattenMessage(diagnostic.messageText),
+				code: diagnostic.code,
+			};
+		});
 }
 
 function collectProjectDiagnostics(
 	cwd: string,
 	filePath: string,
 ): PostEditDiagnostic[] {
-	const configPath = ts.findConfigFile(path.dirname(filePath), ts.sys.fileExists);
+	const configPath = ts.findConfigFile(
+		path.dirname(filePath),
+		ts.sys.fileExists,
+	);
 	if (!configPath) return [];
-	const relativeConfig = path.relative(path.resolve(cwd), path.resolve(configPath));
-	if (relativeConfig.startsWith("..") || path.isAbsolute(relativeConfig)) return [];
+	const relativeConfig = path.relative(
+		path.resolve(cwd),
+		path.resolve(configPath),
+	);
+	if (relativeConfig.startsWith("..") || path.isAbsolute(relativeConfig))
+		return [];
 
 	const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
 	if (loaded.error) return [];
@@ -116,7 +128,7 @@ function collectProjectDiagnostics(
 		...program.getSemanticDiagnostics(sourceFile),
 	]
 		.slice(0, MAX_DIAGNOSTICS)
-		.map((diagnostic) => {
+		.map(diagnostic => {
 			const position = sourceFile.getLineAndCharacterOfPosition(
 				diagnostic.start ?? 0,
 			);
@@ -129,9 +141,7 @@ function collectProjectDiagnostics(
 		});
 }
 
-function collectJsonDiagnostics(
-	source: string,
-): PostEditDiagnostic[] {
+function collectJsonDiagnostics(source: string): PostEditDiagnostic[] {
 	try {
 		JSON.parse(source);
 		return [];
@@ -141,11 +151,13 @@ function collectJsonDiagnostics(
 		const offset = Math.min(source.length, Number(offsetMatch?.[1] ?? 0));
 		const before = source.slice(0, offset);
 		const lines = before.split("\n");
-		return [{
-			line: lines.length,
-			column: (lines.at(-1)?.length ?? 0) + 1,
-			message,
-		}];
+		return [
+			{
+				line: lines.length,
+				column: (lines.at(-1)?.length ?? 0) + 1,
+				message,
+			},
+		];
 	}
 }
 
@@ -173,10 +185,12 @@ function formatDiagnostics(
 	fileName: string,
 	diagnostics: PostEditDiagnostic[],
 ): string {
-	const lines = diagnostics.map((diagnostic) => {
+	const lines = diagnostics.map(diagnostic => {
 		const metadata = diagnostic.source
-			? [diagnostic.source, diagnostic.code].filter((item) => item !== undefined)
-			: diagnostic.code === undefined ? [] : [`TS${diagnostic.code}`];
+			? [diagnostic.source, diagnostic.code].filter(item => item !== undefined)
+			: diagnostic.code === undefined
+				? []
+				: [`TS${diagnostic.code}`];
 		const label = metadata.length > 0 ? ` ${metadata.join(" ")}` : "";
 		return `- ${fileName}:${diagnostic.line}:${diagnostic.column}${label}: ${diagnostic.message}`;
 	});

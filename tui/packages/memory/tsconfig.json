@@ -1,13 +1,13 @@
 {
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "types": ["node", "bun-types"],
-    "composite": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*.ts"]
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"types": ["node", "bun-types"],
+		"composite": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*.ts"]
 }

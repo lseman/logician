@@ -110,7 +110,7 @@ export class FileMentionPopup implements Component {
 			if (score >= 0) scored.push({ path, score });
 		}
 		scored.sort((a, b) => b.score - a.score || a.path.length - b.path.length);
-		return scored.slice(0, MAX_MATCHES).map((s) => s.path);
+		return scored.slice(0, MAX_MATCHES).map(s => s.path);
 	}
 
 	invalidate(): void {

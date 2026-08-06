@@ -4,11 +4,11 @@
 // status instead of regex-sniffing the assistant text, and the afterToolCall
 // hook terminates the run cleanly.
 
-import type { Tool } from "@logician/agent-core/agent/types.ts";
 import {
 	recordTaskStatus,
 	type TaskStatusRecord,
 } from "@logician/agent-core/agent/tasks/task-status-state.ts";
+import type { Tool } from "@logician/agent-core/agent/types.ts";
 
 export const task_status: Tool = {
 	name: "task_status",
@@ -38,7 +38,7 @@ export const task_status: Tool = {
 		},
 		required: ["status", "summary"],
 	},
-	execute: async (args) => {
+	execute: async args => {
 		const allowed = new Set(["done", "blocked", "needs_input", "failed"]);
 		const status = allowed.has(String(args.status))
 			? (args.status as TaskStatusRecord["status"])

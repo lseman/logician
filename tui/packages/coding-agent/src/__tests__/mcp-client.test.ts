@@ -61,10 +61,10 @@ void test("MCP object results use compact JSON in model context", () => {
 			items: [{ path: "src/index.ts", line: 42 }],
 			more: 3,
 		}),
-		"{\"items\":[{\"path\":\"src/index.ts\",\"line\":42}],\"more\":3}",
+		'{"items":[{"path":"src/index.ts","line":42}],"more":3}',
 	);
 	assert.equal(
 		formatMcpToolResult({ isError: true, code: "failed" }),
-		"Error: {\"isError\":true,\"code\":\"failed\"}",
+		'Error: {"isError":true,"code":"failed"}',
 	);
 });

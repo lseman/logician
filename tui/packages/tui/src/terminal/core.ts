@@ -13,37 +13,38 @@
 // never the reverse) is safe.
 export {
 	BOLD,
-	CURSOR_MARKER,
+	type Component,
 	Container,
-	DIM,
-	RESET,
-	Spacer,
+	CURSOR_MARKER,
 	clampLineToWidth,
 	compositeTuiLine,
-	isFocusable,
-	visibleWidth,
-	type Component,
+	DIM,
 	type Focusable,
-	type Scrollable,
-} from "./primitives.ts";
-import {
-	Container,
-	CURSOR_MARKER,
-	clampLineToWidth,
 	isFocusable,
+	RESET,
+	type Scrollable,
 	Spacer,
 	visibleWidth,
-	type Component,
-	type Focusable,
-	type Scrollable,
 } from "./primitives.ts";
+
 import {
 	getComponentBoxAt,
 	getScrollViewsAt,
-	renderLayoutFrame,
 	type LayoutFrame,
 	type LayoutRect,
+	renderLayoutFrame,
 } from "../rendering/layout.ts";
+import {
+	type Component,
+	Container,
+	CURSOR_MARKER,
+	clampLineToWidth,
+	type Focusable,
+	isFocusable,
+	type Scrollable,
+	Spacer,
+	visibleWidth,
+} from "./primitives.ts";
 
 export interface RendererMetrics {
 	bytesWritten: number;
@@ -75,21 +76,23 @@ const EMPTY_RENDERER_METRICS: RendererMetrics = {
  * distinguishable from Tab and Enter and can reach their dedicated bindings.
  */
 export function normalizeKeyboardInput(data: string): string {
-	return data
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal CSI escape sequence
-		.replace(/\x1b\[27(?:;1)?u/g, "\x1b")
-		.replace(/\x1b\[(\d+);([56])u/g, (sequence, codepointText: string) => {
-			const codepoint = Number(codepointText);
-			const lowerCodepoint =
-				codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
-			if (lowerCodepoint === 105 || lowerCodepoint === 109) return sequence;
-			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
-			return String.fromCharCode(lowerCodepoint & 0x1f);
-		});
+	return (
+		data
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal CSI escape sequence
+			.replace(/\x1b\[27(?:;1)?u/g, "\x1b")
+			.replace(/\x1b\[(\d+);([56])u/g, (sequence, codepointText: string) => {
+				const codepoint = Number(codepointText);
+				const lowerCodepoint =
+					codepoint >= 65 && codepoint <= 90 ? codepoint + 32 : codepoint;
+				if (lowerCodepoint === 105 || lowerCodepoint === 109) return sequence;
+				if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
+				return String.fromCharCode(lowerCodepoint & 0x1f);
+			})
+	);
 }
 
-import { appendFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
+import { appendFileSync } from "node:fs";
 // ── Terminal input ───────────────────────────────────────────────────────────
 // Keyboard comes from process.stdin in raw mode (pi-style). The bridge child's
 // events arrive on its own stdout pipe, so stdin is free for the keyboard.
@@ -151,7 +154,10 @@ export class TUI extends Container {
 	private lastRenderMetrics: RendererMetrics = EMPTY_RENDERER_METRICS;
 	private layoutRoot: Component | null = null;
 	private currentLayoutFrame: LayoutFrame | null = null;
-	private paintedOverlayClickRects: Array<{ rect: LayoutRect; onClick: () => void }> = [];
+	private paintedOverlayClickRects: Array<{
+		rect: LayoutRect;
+		onClick: () => void;
+	}> = [];
 	private scrollableComponent: Scrollable | null = null;
 	private inputBarComponent: Component | null = null;
 	private fixedBottomComponent: Component | null = null;
@@ -231,7 +237,7 @@ export class TUI extends Container {
 
 	/** Remove a specific overlay from the stack and restore focus to its pre-focus target. */
 	removeOverlay(component: Component): void {
-		const idx = this.overlayStack.findIndex((e) => e.component === component);
+		const idx = this.overlayStack.findIndex(e => e.component === component);
 		if (idx >= 0) {
 			const entry = this.overlayStack[idx];
 			this.overlayStack.splice(idx, 1);
@@ -404,7 +410,7 @@ export class TUI extends Container {
 	private static readonly WHEEL_STEP = 2;
 
 	private handleInput(data: string): void {
-		const hasVisibleOverlay = this.overlayStack.some((entry) => {
+		const hasVisibleOverlay = this.overlayStack.some(entry => {
 			if (entry.hidden) return false;
 			if (
 				"visible" in entry.component &&
@@ -440,8 +446,13 @@ export class TUI extends Container {
 					wheelRow = row;
 				} else if (btn === 0 && m[4] === "M") {
 					if (this.layoutRoot) {
-						clicked = this.routeClick(column, row, hasVisibleOverlay) || clicked;
-					} else if (!hasVisibleOverlay && row >= 0 && row < this._viewportHeight) {
+						clicked =
+							this.routeClick(column, row, hasVisibleOverlay) || clicked;
+					} else if (
+						!hasVisibleOverlay &&
+						row >= 0 &&
+						row < this._viewportHeight
+					) {
 						clicked =
 							this.scrollableComponent?.handleMouse?.(column, row) === true ||
 							clicked;
@@ -476,14 +487,8 @@ export class TUI extends Container {
 		// sequences one at a time when the whole chunk is made of 2+ of them.
 		// Arrow keys are excluded — input-bar.ts already splits and handles a
 		// pure arrow-key batch with input/history-navigation semantics.
-		const navBatch = data.match(
-			/\x1b\[(?:5~|6~|1;5H|1;5F|H|F)/g,
-		);
-		if (
-			navBatch &&
-			navBatch.length > 1 &&
-			navBatch.join("") === data
-		) {
+		const navBatch = data.match(/\x1b\[(?:5~|6~|1;5H|1;5F|H|F)/g);
+		if (navBatch && navBatch.length > 1 && navBatch.join("") === data) {
 			for (const key of navBatch) this.handleInput(key);
 			return;
 		}
@@ -492,7 +497,9 @@ export class TUI extends Container {
 		// the prompt keeps focus. Plain arrows remain input/history navigation.
 		// But if any overlay is visible, skip scrolling so the overlay gets first
 		// crack at the keys (e.g. reasoner selector, plugin manager).
-		const primaryScrollView = this.layoutRoot ? this.currentLayoutFrame?.primaryScrollView : undefined;
+		const primaryScrollView = this.layoutRoot
+			? this.currentLayoutFrame?.primaryScrollView
+			: undefined;
 		if (!hasVisibleOverlay && (this.scrollableComponent || primaryScrollView)) {
 			const pageStep = Math.max(4, Math.floor(this._viewportHeight * 0.8));
 			if (data === "\x1b[5~") {
@@ -622,7 +629,12 @@ export class TUI extends Container {
 		const termHeight = Math.max(1, process.stdout.rows || 24);
 
 		if (this.layoutRoot) {
-			this._doRenderInnerLayoutEngine(this.layoutRoot, termWidth, termHeight, frameStartedAt);
+			this._doRenderInnerLayoutEngine(
+				this.layoutRoot,
+				termWidth,
+				termHeight,
+				frameStartedAt,
+			);
 			return;
 		}
 
@@ -662,15 +674,10 @@ export class TUI extends Container {
 		aboveInputLines.push(...this.renderAboveInputOverlays(termWidth));
 		const aboveInputHeight = aboveInputLines.length;
 
-
 		// Fixed layout: transcript + divider + [pinned + divider] + input bar + divider + status footer.
 		const transcriptHeight = Math.max(
 			1,
-			termHeight -
-				2 -
-				aboveInputHeight -
-				inputHeight -
-				statusHeight,
+			termHeight - 2 - aboveInputHeight - inputHeight - statusHeight,
 		);
 		const transcriptWidth = termWidth;
 
@@ -730,7 +737,6 @@ export class TUI extends Container {
 			lines.push(aboveInputLines[i] || " ".repeat(termWidth));
 		}
 
-
 		// 3. Input bar (fixed)
 		for (let i = 0; i < inputHeight; i++) {
 			lines.push(inputLines[i] || " ".repeat(termWidth));
@@ -763,7 +769,13 @@ export class TUI extends Container {
 			termHeight,
 			transcriptHeight + 2 + aboveInputHeight,
 		);
-		this._commitFrame(finalLines, termWidth, termHeight, frameStartedAt, fallbackRow);
+		this._commitFrame(
+			finalLines,
+			termWidth,
+			termHeight,
+			frameStartedAt,
+			fallbackRow,
+		);
 	}
 
 	/**
@@ -800,7 +812,8 @@ export class TUI extends Container {
 
 		for (let row = 0; row < termHeight; row++) {
 			const prevLine = this.previousLines[row];
-			const newLine = row < finalLines.length ? finalLines[row] : " ".repeat(termWidth);
+			const newLine =
+				row < finalLines.length ? finalLines[row] : " ".repeat(termWidth);
 			const hasMarker = newLine.includes(CURSOR_MARKER);
 
 			// Extract cursor marker position before stripping. Done for every
@@ -864,15 +877,12 @@ export class TUI extends Container {
 
 		this.previousLines = finalLines;
 		const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackCursorRow;
-		const cursorCol =
-			markerRow >= 0 ? Math.min(termWidth, markerCol + 1) : 1;
+		const cursorCol = markerRow >= 0 ? Math.min(termWidth, markerCol + 1) : 1;
 		const cursorMoved =
 			changes.length > 0 ||
 			cursorRow !== this.previousCursorRow ||
 			cursorCol !== this.previousCursorCol;
-		const cursorUpdate = cursorMoved
-			? `\x1b[${cursorRow};${cursorCol}H`
-			: "";
+		const cursorUpdate = cursorMoved ? `\x1b[${cursorRow};${cursorCol}H` : "";
 		const visibilityChanged =
 			this._showHardwareCursor !== this.previousCursorVisible;
 		const visibilityUpdate = visibilityChanged
@@ -936,20 +946,39 @@ export class TUI extends Container {
 		const layoutWidth = Math.max(1, termWidth - 1);
 		let frame: LayoutFrame;
 		try {
-			frame = renderLayoutFrame(root, layoutWidth, termHeight, () => this.requestRender());
+			frame = renderLayoutFrame(root, layoutWidth, termHeight, () =>
+				this.requestRender(),
+			);
 		} catch (_e: unknown) {
-			frame = renderLayoutFrame(new Spacer(termHeight), layoutWidth, termHeight, () => this.requestRender());
+			frame = renderLayoutFrame(
+				new Spacer(termHeight),
+				layoutWidth,
+				termHeight,
+				() => this.requestRender(),
+			);
 		}
 		this.currentLayoutFrame = frame;
-		this._viewportHeight = frame.primaryScrollView?.viewportHeight ?? termHeight;
-		const paddedLines = frame.lines.map((line) => `${line} `);
+		this._viewportHeight =
+			frame.primaryScrollView?.viewportHeight ?? termHeight;
+		const paddedLines = frame.lines.map(line => `${line} `);
 
 		// composeOverlays' transcriptHeight parameter only feeds center/bottom
 		// anchor math for non-aboveInput overlays; the primary scroll view's
 		// viewport height is the layout-engine equivalent of "the transcript
 		// area" those overlays float over.
-		const finalLines = this.composeOverlays(paddedLines, termWidth, termHeight, this._viewportHeight);
-		this._commitFrame(finalLines, termWidth, termHeight, frameStartedAt, termHeight);
+		const finalLines = this.composeOverlays(
+			paddedLines,
+			termWidth,
+			termHeight,
+			this._viewportHeight,
+		);
+		this._commitFrame(
+			finalLines,
+			termWidth,
+			termHeight,
+			frameStartedAt,
+			termHeight,
+		);
 	}
 
 	getLastRenderMetrics(): RendererMetrics {
@@ -965,7 +994,7 @@ export class TUI extends Container {
 		const result = [...lines];
 		this.paintedOverlayClickRects = [];
 
-		const visibleEntries = this.overlayStack.filter((e) => {
+		const visibleEntries = this.overlayStack.filter(e => {
 			if (e.options?.anchor === "aboveInput") return false;
 			if (e.hidden) return false;
 			// Also check component's visible property if it has one
@@ -1031,7 +1060,12 @@ export class TUI extends Container {
 
 			if (entry.options?.onClick) {
 				this.paintedOverlayClickRects.push({
-					rect: { x: margin, y: row, width: overlayWidth, height: overlayHeight },
+					rect: {
+						x: margin,
+						y: row,
+						width: overlayWidth,
+						height: overlayHeight,
+					},
 					onClick: entry.options.onClick,
 				});
 			}
@@ -1041,7 +1075,7 @@ export class TUI extends Container {
 	}
 
 	private renderAboveInputOverlays(termWidth: number): string[] {
-		const entries = this.overlayStack.filter((entry) => {
+		const entries = this.overlayStack.filter(entry => {
 			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
 			if (
 				"visible" in entry.component &&
@@ -1060,7 +1094,7 @@ export class TUI extends Container {
 		const width = Math.max(1, termWidth - 1);
 		const rendered = entry.component.render(width);
 		const maxHeight = entry.options?.maxHeight ?? rendered.length;
-		return rendered.slice(0, maxHeight).map((line) => {
+		return rendered.slice(0, maxHeight).map(line => {
 			const clamped = clampLineToWidth(line, width);
 			return (
 				clamped + " ".repeat(Math.max(0, termWidth - visibleWidth(clamped)))
@@ -1147,7 +1181,8 @@ export class TUI extends Container {
 			if (remaining === 0 || scrollView.overscroll === "contain") break;
 		}
 		const primary = frame.primaryScrollView;
-		if (remaining !== 0 && primary && !seen.has(primary)) primary.scrollBy(remaining);
+		if (remaining !== 0 && primary && !seen.has(primary))
+			primary.scrollBy(remaining);
 		this.requestRender();
 	}
 
@@ -1162,9 +1197,18 @@ export class TUI extends Container {
 	 * painted box, since content now renders at full unbounded height and is
 	 * clipped by the ScrollView rather than self-clipped.
 	 */
-	private routeClick(column: number, row: number, hasVisibleOverlay: boolean): boolean {
+	private routeClick(
+		column: number,
+		row: number,
+		hasVisibleOverlay: boolean,
+	): boolean {
 		for (const { rect, onClick } of this.paintedOverlayClickRects) {
-			if (column >= rect.x && column < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height) {
+			if (
+				column >= rect.x &&
+				column < rect.x + rect.width &&
+				row >= rect.y &&
+				row < rect.y + rect.height
+			) {
 				onClick();
 				this.requestRender();
 				return true;
@@ -1184,10 +1228,9 @@ export class TUI extends Container {
 		// double-count it and hit the wrong content row entirely.
 		const contentRow = row - box.rect.y;
 		const contentColumn = column - box.rect.x;
-		const handled = (child as unknown as { handleMouse: (c: number, r: number) => boolean }).handleMouse(
-			contentColumn,
-			contentRow,
-		);
+		const handled = (
+			child as unknown as { handleMouse: (c: number, r: number) => boolean }
+		).handleMouse(contentColumn, contentRow);
 		if (handled) this.requestRender();
 		return handled;
 	}

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { AgentHarness } from "../agent/harness.ts";
 import type { AgentConfig } from "../agent/types.ts";
 import { ExtensionRunner } from "../extensions/runner.ts";
@@ -97,18 +97,19 @@ void test("AgentHarness applies extension pre-turn context, tools, and lifecycle
 			`),
 		},
 	]);
-	runner.events.on("seen", (data) => {
+	runner.events.on("seen", data => {
 		seenEvents.push(String(data));
 	});
 
 	const backend = new FakeBackend([
 		(messages, options) => {
 			assert.equal(messages[0]?.content, "extension system");
-			assert.ok(messages.some((m) => m.content === "extension context"));
+			assert.ok(messages.some(m => m.content === "extension context"));
 			assert.ok(
 				options.tools?.some(
-					(tool) =>
-						(tool as { function?: { name?: string } }).function?.name === "ext_echo",
+					tool =>
+						(tool as { function?: { name?: string } }).function?.name ===
+						"ext_echo",
 				),
 			);
 			return {
@@ -127,6 +128,6 @@ void test("AgentHarness applies extension pre-turn context, tools, and lifecycle
 	});
 
 	await harness.prompt("hello");
-	assert.ok(harness.messages.some((m) => m.content === "extension tool result"));
+	assert.ok(harness.messages.some(m => m.content === "extension tool result"));
 	assert.ok(seenEvents.includes("extension tool result"));
 });

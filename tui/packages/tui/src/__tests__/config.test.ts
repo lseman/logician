@@ -75,8 +75,14 @@ void test("validateConfig rejects invalid toolExecution values", () => {
 
 void test("validateConfig accepts valid toolExecution", () => {
 	const w: string[] = [];
-	assert.equal(validateConfig({ toolExecution: "sequential" }, w).toolExecution, "sequential");
-	assert.equal(validateConfig({ toolExecution: "parallel" }, w).toolExecution, "parallel");
+	assert.equal(
+		validateConfig({ toolExecution: "sequential" }, w).toolExecution,
+		"sequential",
+	);
+	assert.equal(
+		validateConfig({ toolExecution: "parallel" }, w).toolExecution,
+		"parallel",
+	);
 });
 
 void test("validateConfig rejects invalid permissionMode", () => {
@@ -88,13 +94,22 @@ void test("validateConfig rejects invalid permissionMode", () => {
 
 void test("validateConfig accepts valid permissionMode", () => {
 	const w: string[] = [];
-	assert.equal(validateConfig({ permissionMode: "acceptAll" }, w).permissionMode, "acceptAll");
-	assert.equal(validateConfig({ permissionMode: "ask" }, w).permissionMode, "ask");
+	assert.equal(
+		validateConfig({ permissionMode: "acceptAll" }, w).permissionMode,
+		"acceptAll",
+	);
+	assert.equal(
+		validateConfig({ permissionMode: "ask" }, w).permissionMode,
+		"ask",
+	);
 });
 
 void test("validateConfig validates webSearch sub-object", () => {
 	const w: string[] = [];
-	const cfg = validateConfig({ webSearch: { baseUrl: "http://search.local", maxResults: 5 } }, w);
+	const cfg = validateConfig(
+		{ webSearch: { baseUrl: "http://search.local", maxResults: 5 } },
+		w,
+	);
 	assert.equal(cfg.webSearch?.baseUrl, "http://search.local");
 	assert.equal(cfg.webSearch?.maxResults, 5);
 	assert.equal(w.length, 0);
@@ -169,10 +184,13 @@ void test("validateConfig trims string values", () => {
 
 void test("validateConfig handles MCP and mcpServers passthrough", () => {
 	const w: string[] = [];
-	const cfg = validateConfig({
-		mcp: { server1: { url: "http://localhost:3000" } },
-		mcpServers: { server2: { args: ["--port", "3001"] } },
-	}, w);
+	const cfg = validateConfig(
+		{
+			mcp: { server1: { url: "http://localhost:3000" } },
+			mcpServers: { server2: { args: ["--port", "3001"] } },
+		},
+		w,
+	);
 	assert.ok(cfg.mcp);
 	assert.ok(cfg.mcpServers);
 });
@@ -206,12 +224,24 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 
 void test("validateConfig clamps maxTotalTokens > 0", () => {
 	const w: string[] = [];
-	assert.equal(validateConfig({ maxTotalTokens: -10 }, w).maxTotalTokens, undefined);
-	assert.equal(validateConfig({ maxTotalTokens: 10000 }, w).maxTotalTokens, 10000);
+	assert.equal(
+		validateConfig({ maxTotalTokens: -10 }, w).maxTotalTokens,
+		undefined,
+	);
+	assert.equal(
+		validateConfig({ maxTotalTokens: 10000 }, w).maxTotalTokens,
+		10000,
+	);
 });
 
 void test("validateConfig clamps contextWindow and contextWindowTokens > 0", () => {
 	const w: string[] = [];
-	assert.equal(validateConfig({ contextWindow: -5 }, w).contextWindow, undefined);
-	assert.equal(validateConfig({ contextWindowTokens: 4096 }, w).contextWindowTokens, 4096);
+	assert.equal(
+		validateConfig({ contextWindow: -5 }, w).contextWindow,
+		undefined,
+	);
+	assert.equal(
+		validateConfig({ contextWindowTokens: 4096 }, w).contextWindowTokens,
+		4096,
+	);
 });

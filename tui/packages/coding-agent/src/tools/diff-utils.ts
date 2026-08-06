@@ -58,14 +58,14 @@ function diffOps(before: string[], after: string[]): DiffOp[] {
 
 function diffMiddle(a: string[], b: string[]): DiffOp[] {
 	if (a.length === 0 && b.length === 0) return [];
-	if (a.length === 0) return b.map((line) => ({ type: "add" as const, line }));
-	if (b.length === 0) return a.map((line) => ({ type: "del" as const, line }));
+	if (a.length === 0) return b.map(line => ({ type: "add" as const, line }));
+	if (b.length === 0) return a.map(line => ({ type: "del" as const, line }));
 
 	// Fallback: whole-block replace when LCS would be too expensive.
 	if (a.length * b.length > MAX_LCS_CELLS) {
 		return [
-			...a.map((line) => ({ type: "del" as const, line })),
-			...b.map((line) => ({ type: "add" as const, line })),
+			...a.map(line => ({ type: "del" as const, line })),
+			...b.map(line => ({ type: "add" as const, line })),
 		];
 	}
 
@@ -241,7 +241,7 @@ export function syntheticUnifiedDiff(
 	const afterLabel = `b/${path.basename(filePath)}`;
 	const ops: DiffOp[] =
 		before === null
-			? after.split("\n").map((line) => ({ type: "add" as const, line }))
+			? after.split("\n").map(line => ({ type: "add" as const, line }))
 			: diffOps(before.split("\n"), after.split("\n"));
 	return renderUnified(beforeLabel, afterLabel, ops);
 }
@@ -250,5 +250,5 @@ export function syntheticUnifiedDiff(
 export function summarizeDiff(diff: string, maxChars = 512000): string {
 	if (!diff.trim()) return "(no diff)";
 	if (diff.length <= maxChars) return diff;
-	return diff.slice(0, maxChars) + "\n\n...(truncated)";
+	return `${diff.slice(0, maxChars)}\n\n...(truncated)`;
 }

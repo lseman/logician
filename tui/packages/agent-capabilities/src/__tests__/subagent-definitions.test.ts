@@ -3,14 +3,18 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import type { GenerateOptions, LLMBackend, LLMResponse } from "@logician/agent-core/agent/backend.ts";
 import type { AgentConfig, Tool } from "@logician/agent-core";
+import type {
+	GenerateOptions,
+	LLMBackend,
+	LLMResponse,
+} from "@logician/agent-core/agent/backend.ts";
 import {
 	BUILTIN_AGENTS,
-	loadAgentDefinitions,
-	createSpawnAgentTool,
 	createSpawnAgentsTool,
+	createSpawnAgentTool,
 	createSubagentConcurrencyLimiter,
+	loadAgentDefinitions,
 } from "../delegation/definitions.ts";
 
 function mkAgentDir(): string {
@@ -22,13 +26,15 @@ function mkAgentDir(): string {
 void test("loadAgentDefinitions returns just the builtins when no dirs are given", async () => {
 	const defs = await loadAgentDefinitions([]);
 	assert.deepEqual(
-		defs.map((d) => d.name).sort(),
-		BUILTIN_AGENTS.map((d) => d.name).sort(),
+		defs.map(d => d.name).sort(),
+		BUILTIN_AGENTS.map(d => d.name).sort(),
 	);
 });
 
 void test("loadAgentDefinitions silently skips a directory that does not exist", async () => {
-	const defs = await loadAgentDefinitions(["/definitely/does/not/exist/agents"]);
+	const defs = await loadAgentDefinitions([
+		"/definitely/does/not/exist/agents",
+	]);
 	assert.equal(defs.length, BUILTIN_AGENTS.length);
 });
 
@@ -53,7 +59,7 @@ void test("loadAgentDefinitions parses a markdown file with YAML frontmatter int
 	);
 	try {
 		const defs = await loadAgentDefinitions([dir]);
-		const reviewer = defs.find((d) => d.name === "reviewer");
+		const reviewer = defs.find(d => d.name === "reviewer");
 		assert.ok(reviewer);
 		assert.equal(reviewer.description, "Reviews code for correctness.");
 		assert.deepEqual(reviewer.tools, ["read_file", "grep"]);
@@ -83,7 +89,7 @@ void test("loadAgentDefinitions accepts a comma-separated tools string", async (
 	);
 	try {
 		const defs = await loadAgentDefinitions([dir]);
-		const fixer = defs.find((d) => d.name === "fixer");
+		const fixer = defs.find(d => d.name === "fixer");
 		assert.deepEqual(fixer?.tools, ["read_file", "edit_file", "grep"]);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -99,7 +105,7 @@ void test("loadAgentDefinitions falls back to the filename as name and generic p
 	);
 	try {
 		const defs = await loadAgentDefinitions([dir]);
-		const found = defs.find((d) => d.name === "no-name");
+		const found = defs.find(d => d.name === "no-name");
 		assert.ok(found);
 		assert.match(found.prompt, /subagent completing one delegated task/);
 	} finally {
@@ -109,10 +115,17 @@ void test("loadAgentDefinitions falls back to the filename as name and generic p
 
 void test("loadAgentDefinitions skips files missing both name and description", async () => {
 	const dir = mkAgentDir();
-	writeFileSync(path.join(dir, "invalid.md"), "---\n---\nNo frontmatter fields.", "utf8");
+	writeFileSync(
+		path.join(dir, "invalid.md"),
+		"---\n---\nNo frontmatter fields.",
+		"utf8",
+	);
 	try {
 		const defs = await loadAgentDefinitions([dir]);
-		assert.equal(defs.find((d) => d.description === ""), undefined);
+		assert.equal(
+			defs.find(d => d.description === ""),
+			undefined,
+		);
 		assert.equal(defs.length, BUILTIN_AGENTS.length);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -135,17 +148,21 @@ void test("loadAgentDefinitions lets later directories override earlier ones and
 	const dirB = mkAgentDir();
 	writeFileSync(
 		path.join(dirA, "general.md"),
-		["---", "name: general", "description: First version.", "---", "V1"].join("\n"),
+		["---", "name: general", "description: First version.", "---", "V1"].join(
+			"\n",
+		),
 		"utf8",
 	);
 	writeFileSync(
 		path.join(dirB, "general.md"),
-		["---", "name: general", "description: Second version.", "---", "V2"].join("\n"),
+		["---", "name: general", "description: Second version.", "---", "V2"].join(
+			"\n",
+		),
 		"utf8",
 	);
 	try {
 		const defs = await loadAgentDefinitions([dirA, dirB]);
-		const generals = defs.filter((d) => d.name === "general");
+		const generals = defs.filter(d => d.name === "general");
 		assert.equal(generals.length, 1);
 		assert.equal(generals[0].description, "Second version.");
 		assert.equal(generals[0].prompt, "V2");
@@ -157,7 +174,11 @@ void test("loadAgentDefinitions lets later directories override earlier ones and
 
 void test("loadAgentDefinitions skips a file with no frontmatter block (missing name/description)", async () => {
 	const dir = mkAgentDir();
-	writeFileSync(path.join(dir, "broken.md"), "not frontmatter at all, just text", "utf8");
+	writeFileSync(
+		path.join(dir, "broken.md"),
+		"not frontmatter at all, just text",
+		"utf8",
+	);
 	try {
 		const defs = await loadAgentDefinitions([dir]);
 		assert.equal(defs.length, BUILTIN_AGENTS.length);
@@ -185,7 +206,7 @@ function toolNamesBackend(capture: { names?: string[] }): LLMBackend {
 			options?: GenerateOptions,
 		): Promise<LLMResponse> {
 			capture.names = (options?.tools ?? []).map(
-				(t) => (t as { function?: { name?: string } }).function?.name ?? "",
+				t => (t as { function?: { name?: string } }).function?.name ?? "",
 			);
 			return { content: "done", toolCalls: [], stopReason: "stop" };
 		},
@@ -204,7 +225,11 @@ function fakeTool(name: string, readOnly = false): Tool {
 
 void test("spawn_agent never forwards spawn_agent/spawn_agents to the child, even with no tool allowlist", async () => {
 	const capture: { names?: string[] } = {};
-	const parentTools = [fakeTool("read_file"), fakeTool("spawn_agent"), fakeTool("spawn_agents")];
+	const parentTools = [
+		fakeTool("read_file"),
+		fakeTool("spawn_agent"),
+		fakeTool("spawn_agents"),
+	];
 	const tool = createSpawnAgentTool({
 		config: () => ({ ...baseConfig, tools: parentTools }),
 		backend: toolNamesBackend(capture),
@@ -234,7 +259,11 @@ void test("spawn_agent with the explorer definition restricts the child to read-
 
 void test("spawn_agent with a custom allowlist restricts the child to exactly those tools", async () => {
 	const capture: { names?: string[] } = {};
-	const parentTools = [fakeTool("read_file"), fakeTool("edit_file"), fakeTool("bash")];
+	const parentTools = [
+		fakeTool("read_file"),
+		fakeTool("edit_file"),
+		fakeTool("bash"),
+	];
 	const tool = createSpawnAgentTool({
 		config: () => ({ ...baseConfig, tools: parentTools }),
 		backend: toolNamesBackend(capture),
@@ -291,7 +320,10 @@ void test("spawn_agent rejects an unknown agent name and lists the available one
 		agents: () => BUILTIN_AGENTS,
 		emit: () => {},
 	});
-	const result = await tool.execute({ task: "do it", agent: "nonexistent" }, {});
+	const result = await tool.execute(
+		{ task: "do it", agent: "nonexistent" },
+		{},
+	);
 	assert.equal(typeof result, "string");
 	assert.match(result as string, /Unknown agent "nonexistent"/);
 	assert.match(result as string, /general/);
@@ -339,7 +371,10 @@ void test("spawn_agents rejects a task entry with a blank task string", async ()
 		agents: () => BUILTIN_AGENTS,
 		emit: () => {},
 	});
-	const result = await tool.execute({ tasks: [{ task: "ok" }, { task: "  " }] }, {});
+	const result = await tool.execute(
+		{ tasks: [{ task: "ok" }, { task: "  " }] },
+		{},
+	);
 	assert.equal(typeof result, "string");
 	assert.match(result as string, /tasks\[1\] is invalid/);
 });
@@ -358,13 +393,13 @@ void test("spawn_agent surfaces backend errors as an isError result instead of t
 			},
 		},
 		agents: () => BUILTIN_AGENTS,
-		emit: (event) => events.push(event),
+		emit: event => events.push(event),
 	});
 	const result = await tool.execute({ task: "do it" }, {});
 	assert.equal(typeof result, "object");
 	if (typeof result === "string") return;
 	assert.equal(result.isError, true);
-	assert.ok(events.some((e) => e.type === "subagent_end"));
+	assert.ok(events.some(e => e.type === "subagent_end"));
 });
 
 // ── spawn_agents: concurrency-limiter abort emits a synthetic subagent_end ──
@@ -377,7 +412,7 @@ void test("spawn_agents emits subagent_end for a task aborted while queued on th
 	// Cap of 1: task 0 acquires the slot and blocks forever; task 1 queues.
 	const limiter = createSubagentConcurrencyLimiter(1);
 	let releaseFirst: (() => void) | undefined;
-	const blocker = new Promise<void>((resolve) => {
+	const blocker = new Promise<void>(resolve => {
 		releaseFirst = resolve;
 	});
 
@@ -394,7 +429,7 @@ void test("spawn_agents emits subagent_end for a task aborted while queued on th
 			},
 		},
 		agents: () => BUILTIN_AGENTS,
-		emit: (event) => events.push(event as unknown as Record<string, unknown>),
+		emit: event => events.push(event as unknown as Record<string, unknown>),
 		concurrencyLimiter: limiter,
 	});
 
@@ -405,21 +440,26 @@ void test("spawn_agents emits subagent_end for a task aborted while queued on th
 
 	// Let task 0 acquire the limiter slot and start blocking in generate(),
 	// then abort before task 1 ever gets a turn.
-	await new Promise((resolve) => setTimeout(resolve, 10));
+	await new Promise(resolve => setTimeout(resolve, 10));
 	controller.abort();
 	releaseFirst?.();
 
 	const result = await run;
 	assert.equal(typeof result, "object");
 	if (typeof result === "string") return;
-	const details = result.details as { results: Array<{ index: number; isError: boolean }> };
-	const task1 = details.results.find((r) => r.index === 1);
+	const details = result.details as {
+		results: Array<{ index: number; isError: boolean }>;
+	};
+	const task1 = details.results.find(r => r.index === 1);
 	assert.ok(task1);
 	assert.equal(task1?.isError, true);
 
 	const task1End = events.find(
-		(e) => e.type === "subagent_end" && e.taskIndex === 1,
+		e => e.type === "subagent_end" && e.taskIndex === 1,
 	);
-	assert.ok(task1End, "expected a subagent_end event for the aborted queued task");
+	assert.ok(
+		task1End,
+		"expected a subagent_end event for the aborted queued task",
+	);
 	assert.equal(task1End?.isError, true);
 });

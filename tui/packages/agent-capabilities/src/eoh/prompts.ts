@@ -2,7 +2,7 @@
 // Five operator prompts from EoH paper (arxiv 2401.02051).
 // Each returns messages array for the LLM.
 
-import type { Heuristic, EohProblem } from "./types.ts";
+import type { EohProblem, Heuristic } from "./types.ts";
 
 function heuristicBlock(h: Heuristic, index: number): string {
 	return `Heuristic ${index + 1}:
@@ -38,7 +38,10 @@ Output only these two XML sections. No explanation outside them.`;
 }
 
 /** E1: Generate a heuristic maximally different from all parents. */
-export function promptE1Diversity(problem: EohProblem, parents: Heuristic[]): Array<{ role: string; content: string }> {
+export function promptE1Diversity(
+	problem: EohProblem,
+	parents: Heuristic[],
+): Array<{ role: string; content: string }> {
 	const parentBlocks = parents.map(heuristicBlock).join("\n\n");
 	return [
 		{ role: "system", content: baseSystemPrompt(problem) },
@@ -54,7 +57,10 @@ Design a NEW heuristic with a completely DIFFERENT algorithmic strategy from all
 }
 
 /** E2: Identify common core ideas, then build a new heuristic using those ideas but differently. */
-export function promptE2Convergence(problem: EohProblem, parents: Heuristic[]): Array<{ role: string; content: string }> {
+export function promptE2Convergence(
+	problem: EohProblem,
+	parents: Heuristic[],
+): Array<{ role: string; content: string }> {
 	const parentBlocks = parents.map(heuristicBlock).join("\n\n");
 	return [
 		{ role: "system", content: baseSystemPrompt(problem) },
@@ -73,7 +79,10 @@ First, identify the common algorithmic principles shared across these heuristics
 }
 
 /** M1: Improve a single heuristic's performance. */
-export function promptM1Improve(problem: EohProblem, parent: Heuristic): Array<{ role: string; content: string }> {
+export function promptM1Improve(
+	problem: EohProblem,
+	parent: Heuristic,
+): Array<{ role: string; content: string }> {
 	return [
 		{ role: "system", content: baseSystemPrompt(problem) },
 		{
@@ -88,7 +97,10 @@ Analyze this heuristic's weaknesses and design an IMPROVED version that achieves
 }
 
 /** M2: Tune parameters of a single heuristic. */
-export function promptM2Tune(problem: EohProblem, parent: Heuristic): Array<{ role: string; content: string }> {
+export function promptM2Tune(
+	problem: EohProblem,
+	parent: Heuristic,
+): Array<{ role: string; content: string }> {
 	return [
 		{ role: "system", content: baseSystemPrompt(problem) },
 		{
@@ -103,7 +115,10 @@ Keep the same overall algorithmic structure but TUNE the numerical parameters, t
 }
 
 /** M3: Simplify a heuristic by removing redundant components. */
-export function promptM3Simplify(problem: EohProblem, parent: Heuristic): Array<{ role: string; content: string }> {
+export function promptM3Simplify(
+	problem: EohProblem,
+	parent: Heuristic,
+): Array<{ role: string; content: string }> {
 	return [
 		{ role: "system", content: baseSystemPrompt(problem) },
 		{
@@ -121,10 +136,14 @@ Analyze this heuristic for redundant, unnecessary, or overly complex components.
 }
 
 /** Init: Generate a fresh heuristic from scratch. */
-export function promptInit(problem: EohProblem, existingThoughts: string[]): Array<{ role: string; content: string }> {
-	const avoidSection = existingThoughts.length > 0
-		? `\n\nExisting approaches to avoid duplicating:\n${existingThoughts.map((t, i) => `${i + 1}. ${t}`).join("\n")}`
-		: "";
+export function promptInit(
+	problem: EohProblem,
+	existingThoughts: string[],
+): Array<{ role: string; content: string }> {
+	const avoidSection =
+		existingThoughts.length > 0
+			? `\n\nExisting approaches to avoid duplicating:\n${existingThoughts.map((t, i) => `${i + 1}. ${t}`).join("\n")}`
+			: "";
 	return [
 		{ role: "system", content: baseSystemPrompt(problem) },
 		{

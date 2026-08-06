@@ -1,19 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-	stripJsonComments,
 	parseJsonWithComments,
 	parseJsonWithCommentsSafe,
+	stripJsonComments,
 } from "../tools/shared/json-utils.ts";
 
-function describe(name: string, fn: () => void) { fn(); }
-function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }
+function describe(_name: string, fn: () => void) {
+	fn();
+}
+function it(name: string, fn: () => void | Promise<void>) {
+	test(name, fn);
+}
 function expect<T>(actual: T) {
 	return {
-		toBe(expected: unknown) { assert.equal(actual, expected); },
+		toBe(expected: unknown) {
+			assert.equal(actual, expected);
+		},
 		toThrow() {
 			let threw = false;
-			try { (actual as () => void)(); } catch { threw = true; }
+			try {
+				(actual as () => void)();
+			} catch {
+				threw = true;
+			}
 			assert.ok(threw, "expected function to throw");
 		},
 	};
@@ -54,7 +64,7 @@ void describe("json-utils", () => {
     }`;
 		const stripped = stripJsonComments(input);
 		const parsed = JSON.parse(stripped);
-		expect(parsed.key).toBe("value with \"escaped\" quotes");
+		expect(parsed.key).toBe('value with "escaped" quotes');
 	});
 
 	void it("parseJsonWithComments works", () => {
@@ -62,7 +72,9 @@ void describe("json-utils", () => {
       "name": "test", // name field
       "value": 42 /* numeric */
     }`;
-		const result = parseJsonWithComments<{ name: string; value: number }>(input);
+		const result = parseJsonWithComments<{ name: string; value: number }>(
+			input,
+		);
 		expect(result.name).toBe("test");
 		expect(result.value).toBe(42);
 	});
@@ -79,8 +91,10 @@ void describe("json-utils", () => {
 	});
 
 	void it("parseJsonWithCommentsSafe parses valid JSON", () => {
-		const input = "{ \"key\": \"value\" // comment }";
-		const result = parseJsonWithCommentsSafe<{ key: string }>(input, { key: "default" });
+		const input = '{ "key": "value" // comment }';
+		const result = parseJsonWithCommentsSafe<{ key: string }>(input, {
+			key: "default",
+		});
 		expect(result.key).toBe("value");
 	});
 });

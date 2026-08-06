@@ -1,7 +1,4 @@
-import {
-	formatSkillInvocation,
-	type Skill,
-} from "./loader.ts";
+import { formatSkillInvocation, type Skill } from "./loader.ts";
 
 export interface SkillActivation {
 	skill: Skill;
@@ -24,7 +21,7 @@ export class SkillActivationSession {
 	select(skills: Skill[], prompt: string): SkillActivation[] {
 		if (this.reuseOnNextTurn) {
 			this.reuseOnNextTurn = false;
-			const inherited = this.continuation.map((activation) => ({
+			const inherited = this.continuation.map(activation => ({
 				...activation,
 				reason: "continuing from the previous turn",
 			}));
@@ -47,8 +44,28 @@ export class SkillActivationSession {
 }
 
 const STOP_WORDS = new Set([
-	"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in",
-	"is", "it", "of", "on", "or", "the", "this", "to", "use", "when", "with",
+	"a",
+	"an",
+	"and",
+	"are",
+	"as",
+	"at",
+	"be",
+	"by",
+	"for",
+	"from",
+	"in",
+	"is",
+	"it",
+	"of",
+	"on",
+	"or",
+	"the",
+	"this",
+	"to",
+	"use",
+	"when",
+	"with",
 ]);
 
 /**
@@ -68,25 +85,24 @@ export function selectSkillsForPrompt(
 	if (!normalizedPrompt) return [];
 	const promptTokens = new Set(tokens(normalizedPrompt));
 	const matches = skills
-		.filter((skill) => !skill.disableModelInvocation)
-		.map((skill) =>
+		.filter(skill => !skill.disableModelInvocation)
+		.map(skill =>
 			scoreSkill(skill, normalizedPrompt, explicitPrompt, promptTokens),
 		)
 		.filter((match): match is SkillActivation => match !== null)
-		.sort((a, b) =>
-			b.score - a.score ||
-			a.skill.name.localeCompare(b.skill.name),
+		.sort(
+			(a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
 		);
 	if (!matches.length) return [];
 
-	const explicit = matches.filter((match) => match.score >= 100);
+	const explicit = matches.filter(match => match.score >= 100);
 	if (explicit.length) return explicit.slice(0, options.maxSkills ?? 3);
 
 	const floor = Math.max(10, matches[0].score * 0.75);
 	const selected: SkillActivation[] = [];
 	for (const match of matches) {
 		if (match.score < floor) break;
-		if (selected.some((current) => sameSkillFamily(current.skill, match.skill))) {
+		if (selected.some(current => sameSkillFamily(current.skill, match.skill))) {
 			continue;
 		}
 		selected.push(match);
@@ -180,7 +196,9 @@ function scoreSkill(
 	}
 
 	const descriptionTokens = tokens(skill.description);
-	const overlap = descriptionTokens.filter((token) => promptTokens.has(token)).length;
+	const overlap = descriptionTokens.filter(token =>
+		promptTokens.has(token),
+	).length;
 	if (overlap >= 3) {
 		consider(Math.min(15, 6 + overlap * 2), "relevant to this request");
 	}
@@ -203,7 +221,7 @@ function phraseMatches(
 	if (prompt.includes(phrase)) return true;
 	const meaningful = tokens(phrase);
 	if (!meaningful.length) return false;
-	const overlap = meaningful.filter((token) => promptTokens.has(token)).length;
+	const overlap = meaningful.filter(token => promptTokens.has(token)).length;
 	return overlap >= 2 && overlap / meaningful.length >= minCoverage;
 }
 
@@ -288,7 +306,7 @@ function fuzzyReason(value: string, similarity: number): string {
 function tokens(value: string): string[] {
 	return normalize(value)
 		.split(" ")
-		.filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
+		.filter(token => token.length >= 2 && !STOP_WORDS.has(token));
 }
 
 function normalize(value: string): string {

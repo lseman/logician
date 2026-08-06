@@ -25,7 +25,10 @@ export function parseHeuristicOutput(raw: string): EohGenerateResult | null {
 }
 
 /** Basic Python syntax check via Function constructor heuristic (JS-side). */
-export function validateCode(code: string, expectedFnName: string): string | null {
+export function validateCode(
+	code: string,
+	expectedFnName: string,
+): string | null {
 	// Must define a function
 	if (!code.includes("def ")) return "No function definition found";
 	// Must contain the expected function name

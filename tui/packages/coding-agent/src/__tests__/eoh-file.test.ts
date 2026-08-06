@@ -29,7 +29,10 @@ void test("self-evaluating EoH files preserve their evaluator", async () => {
 		const target = await loadEohFile("heuristic.py", directory);
 
 		assert.equal(target.functionSignature, "def heuristic(value: int):");
-		assert.equal(await evaluateEohCandidate(target, target.heuristicCode, 5_000), 6);
+		assert.equal(
+			await evaluateEohCandidate(target, target.heuristicCode, 5_000),
+			6,
+		);
 
 		const improved = `def heuristic(value: int) -> int:
     return value * value`;

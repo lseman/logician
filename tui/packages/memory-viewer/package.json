@@ -1,18 +1,18 @@
 {
-  "name": "@logician/memory-viewer",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "description": "Web dashboard for the @logician/memory package",
-  "exports": {
-    ".": {
-      "import": "./src/index.ts"
-    }
-  },
-  "dependencies": {
-    "@logician/memory": "0.1.0"
-  },
-  "scripts": {
-    "start": "bun run src/index.ts"
-  }
+	"name": "@logician/memory-viewer",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Web dashboard for the @logician/memory package",
+	"exports": {
+		".": {
+			"import": "./src/index.ts"
+		}
+	},
+	"dependencies": {
+		"@logician/memory": "0.1.0"
+	},
+	"scripts": {
+		"start": "bun run src/index.ts"
+	}
 }

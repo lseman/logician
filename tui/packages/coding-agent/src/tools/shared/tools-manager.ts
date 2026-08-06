@@ -3,8 +3,8 @@
 // Returns null when not found — callers fall back gracefully.
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { existsSync } from "node:fs";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,9 +65,18 @@ export async function getToolPath(tool: string): Promise<string | null> {
  * Ensure a tool is available. Returns its path or null.
  * Pass `required = true` to get a thrown error instead of null.
  */
-export async function ensureTool(tool: "fd" | "rg", required?: false): Promise<string | null>;
-export async function ensureTool(tool: "fd" | "rg", required: true): Promise<string>;
-export async function ensureTool(tool: "fd" | "rg", required = false): Promise<string | null> {
+export async function ensureTool(
+	tool: "fd" | "rg",
+	required?: false,
+): Promise<string | null>;
+export async function ensureTool(
+	tool: "fd" | "rg",
+	required: true,
+): Promise<string>;
+export async function ensureTool(
+	tool: "fd" | "rg",
+	required = false,
+): Promise<string | null> {
 	const path = await getToolPath(tool);
 	if (!path && required) {
 		throw new Error(

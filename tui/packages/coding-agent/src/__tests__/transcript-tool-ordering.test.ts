@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Transcript } from "../sessions/transcript.ts";
 
-function start(
-	transcript: Transcript,
-	id: string,
-	path: string,
-): void {
+function start(transcript: Transcript, id: string, path: string): void {
 	transcript.handleEvent({
 		type: "tool_execution_start",
 		tool: "read_file",
@@ -55,7 +51,7 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 
 	const tools = transcript.getAssistantTools(transcript.getTurns()[0]);
 	assert.deepEqual(
-		tools.map((tool) => ({
+		tools.map(tool => ({
 			id: tool.tool_call_id,
 			path: tool.args?.path,
 			result: tool.result,
@@ -93,5 +89,5 @@ void test("ambiguous id-less updates never overwrite a parallel tool", () => {
 	});
 
 	const tools = transcript.getAssistantTools(transcript.getTurns()[0]);
-	assert.ok(tools.every((tool) => tool.streamOutput === undefined));
+	assert.ok(tools.every(tool => tool.streamOutput === undefined));
 });

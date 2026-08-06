@@ -46,7 +46,12 @@ export function buildSettingsSnapshot(opts: {
 	lines.push(fmtSetting("Temperature", opts.temperature.toFixed(2)));
 	lines.push(fmtSetting("Max Tokens", opts.maxTokens?.toString() ?? "unset"));
 	lines.push(fmtSetting("Max Iterations", opts.maxIterations.toString()));
-	lines.push(fmtSetting("Context Window (tokens)", opts.contextWindowTokens?.toString() ?? "unset"));
+	lines.push(
+		fmtSetting(
+			"Context Window (tokens)",
+			opts.contextWindowTokens?.toString() ?? "unset",
+		),
+	);
 
 	lines.push("");
 	lines.push("── Reasoning ──");
@@ -61,16 +66,36 @@ export function buildSettingsSnapshot(opts: {
 
 	lines.push("");
 	lines.push("── Compaction ──");
-	lines.push(fmtSetting("Proactive Compaction", boolStr(opts.proactiveCompactionEnabled)));
+	lines.push(
+		fmtSetting(
+			"Proactive Compaction",
+			boolStr(opts.proactiveCompactionEnabled),
+		),
+	);
 	if (opts.proactiveCompactionFraction !== undefined) {
-		lines.push(fmtSetting("  Activation threshold", `${(opts.proactiveCompactionFraction * 100).toFixed(0)}%`));
+		lines.push(
+			fmtSetting(
+				"  Activation threshold",
+				`${(opts.proactiveCompactionFraction * 100).toFixed(0)}%`,
+			),
+		);
 	}
 
 	lines.push("");
 	lines.push("── Execution ──");
 	lines.push(fmtSetting("Tool Execution", opts.toolExecution ?? "sequential"));
-	lines.push(fmtSetting("Steering Queue Mode", opts.steeringQueueMode ?? "one-at-a-time"));
-	lines.push(fmtSetting("Follow-up Queue Mode", opts.followUpQueueMode ?? "one-at-a-time"));
+	lines.push(
+		fmtSetting(
+			"Steering Queue Mode",
+			opts.steeringQueueMode ?? "one-at-a-time",
+		),
+	);
+	lines.push(
+		fmtSetting(
+			"Follow-up Queue Mode",
+			opts.followUpQueueMode ?? "one-at-a-time",
+		),
+	);
 	lines.push(fmtSetting("Auto Retry", boolStr(opts.autoRetryEnabled)));
 	if (opts.maxRetries !== undefined) {
 		lines.push(fmtSetting("  Max Retries", opts.maxRetries.toString()));
@@ -84,18 +109,24 @@ export function buildSettingsSnapshot(opts: {
 
 	lines.push("");
 	lines.push("── Permissions ──");
-	lines.push(fmtSetting("Default", opts.acceptAllPermissions ? "Accept All" : "Ask"));
+	lines.push(
+		fmtSetting("Default", opts.acceptAllPermissions ? "Accept All" : "Ask"),
+	);
 
 	lines.push("");
 	lines.push("── RTK Proxy ──");
 	lines.push(fmtSetting("RTK CLI Proxy", boolStr(opts.rtkProxyEnabled)));
 	if (opts.rtkProxyEnabled) {
-		lines.push("  All bash commands prefixed with `rtk` for 60-90% output compression.");
+		lines.push(
+			"  All bash commands prefixed with `rtk` for 60-90% output compression.",
+		);
 	}
 
 	lines.push("");
 	lines.push("── Quick Changes ──");
-	lines.push("  /settings thinking <level>     → off|minimal|low|medium|high|xhigh");
+	lines.push(
+		"  /settings thinking <level>     → off|minimal|low|medium|high|xhigh",
+	);
 	lines.push("  /settings model <name>         → set a specific model");
 	lines.push("  /settings model-cycle          → cycle to next model");
 	lines.push("  /settings temp <n>             → set temperature (0.0–2.0)");
@@ -103,8 +134,12 @@ export function buildSettingsSnapshot(opts: {
 	lines.push("  /settings max-iterations <n>   → set max iterations per turn");
 	lines.push("  /settings guards [on]          → toggle output guards");
 	lines.push("  /settings compaction [on]      → toggle proactive compaction");
-	lines.push("  /settings permissions <mode>   → acceptAll|acceptEdits|ask|plan");
-	lines.push("  /settings inference-mode <m>   → auto|thinking-general|thinking-coding|instruct-general|instruct-reasoning|instruct-coding|deterministic|creative|analytical");
+	lines.push(
+		"  /settings permissions <mode>   → acceptAll|acceptEdits|ask|plan",
+	);
+	lines.push(
+		"  /settings inference-mode <m>   → auto|thinking-general|thinking-coding|instruct-general|instruct-reasoning|instruct-coding|deterministic|creative|analytical",
+	);
 	lines.push("  /rtk                           → toggle RTK CLI proxy on/off");
 
 	return lines.join("\n");
@@ -117,9 +152,7 @@ export type SettingsAction =
 	| { type: "cycle" }
 	| { type: "error"; message: string };
 
-export function parseSettingsCommand(
-	args: string,
-): SettingsAction {
+export function parseSettingsCommand(args: string): SettingsAction {
 	const trimmed = args.trim();
 
 	// No args → view all
@@ -163,7 +196,7 @@ export function parseSettingsCommand(
 
 		case "temp": {
 			const n = parseFloat(parts[1]?.trim() ?? "");
-			if (isNaN(n) || n < 0 || n > 2.0) {
+			if (Number.isNaN(n) || n < 0 || n > 2.0) {
 				return {
 					type: "error",
 					message: `Invalid temperature "${parts[1]}". Must be 0.0–2.0`,
@@ -175,7 +208,7 @@ export function parseSettingsCommand(
 		case "max-tokens":
 		case "max_tokens": {
 			const n = parseInt(parts[1]?.trim() ?? "", 10);
-			if (isNaN(n) || n < 1) {
+			if (Number.isNaN(n) || n < 1) {
 				return {
 					type: "error",
 					message: `Invalid value "${parts[1]}". Must be a positive integer`,
@@ -187,7 +220,7 @@ export function parseSettingsCommand(
 		case "max-iterations":
 		case "max_iterations": {
 			const n = parseInt(parts[1]?.trim() ?? "", 10);
-			if (isNaN(n) || n < 1) {
+			if (Number.isNaN(n) || n < 1) {
 				return {
 					type: "error",
 					message: `Invalid value "${parts[1]}". Must be a positive integer`,
@@ -203,7 +236,8 @@ export function parseSettingsCommand(
 			}
 			return {
 				type: "error",
-				message: "Usage: /settings guards [on|off]\n\nToggle output guards (context recovery, loop detection).",
+				message:
+					"Usage: /settings guards [on|off]\n\nToggle output guards (context recovery, loop detection).",
 			};
 		}
 
@@ -214,7 +248,8 @@ export function parseSettingsCommand(
 			}
 			return {
 				type: "error",
-				message: "Usage: /settings compaction [on|off]\n\nToggle proactive compaction at 80% context window.",
+				message:
+					"Usage: /settings compaction [on|off]\n\nToggle proactive compaction at 80% context window.",
 			};
 		}
 
@@ -269,9 +304,7 @@ export function parseSettingsCommand(
 
 export type RtkProxyAction = "toggle" | "error";
 
-export function parseRtkCommand(
-	args: string,
-): RtkProxyAction {
+export function parseRtkCommand(args: string): RtkProxyAction {
 	const trimmed = args.trim();
 	if (trimmed === "") {
 		return "toggle";

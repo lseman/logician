@@ -11,7 +11,10 @@ void test("full message updates render non-streaming assistant responses", () =>
 		message: { role: "assistant", content: "Hello back" },
 	});
 	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
-	assert.equal(chunks.map((chunk) => chunk.contentText ?? "").join(""), "Hello back");
+	assert.equal(
+		chunks.map(chunk => chunk.contentText ?? "").join(""),
+		"Hello back",
+	);
 });
 
 void test("full message updates do not duplicate streamed prefixes", () => {
@@ -24,14 +27,20 @@ void test("full message updates do not duplicate streamed prefixes", () => {
 		message: { role: "assistant", content: "Hello back" },
 	});
 	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
-	assert.equal(chunks.map((chunk) => chunk.contentText ?? "").join(""), "Hello back");
+	assert.equal(
+		chunks.map(chunk => chunk.contentText ?? "").join(""),
+		"Hello back",
+	);
 });
 
 void test("completed streamed response remains committed when the next turn starts", () => {
 	const transcript = new Transcript();
 	const firstTurn = transcript.addTurn("first question");
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
-	transcript.handleEvent({ type: "token", token: "Persistent streamed answer" });
+	transcript.handleEvent({
+		type: "token",
+		token: "Persistent streamed answer",
+	});
 	transcript.handleEvent({
 		type: "turn_end",
 		turn_id: "turn_1",
@@ -47,7 +56,7 @@ void test("completed streamed response remains committed when the next turn star
 	);
 	assert.equal(firstTurn.assistantMessage?.isComplete, true);
 	assert.ok(
-		firstTurn.assistantMessage?.chunks.every((chunk) => chunk.isComplete),
+		firstTurn.assistantMessage?.chunks.every(chunk => chunk.isComplete),
 	);
 });
 
@@ -65,11 +74,13 @@ void test("empty structured-tool snapshot preserves streamed assistant prose", (
 		message: {
 			role: "assistant",
 			content: "",
-			tool_calls: [{
-				id: "call_1",
-				name: "read_file",
-				arguments: "{\"path\":\"implementation.ts\"}",
-			}],
+			tool_calls: [
+				{
+					id: "call_1",
+					name: "read_file",
+					arguments: '{"path":"implementation.ts"}',
+				},
+			],
 		},
 	});
 	transcript.handleEvent({
@@ -123,7 +134,7 @@ void test("terminal snapshot restores output missed after a Skills notice", () =
 	assert.equal(turn.isComplete, true);
 	assert.equal(turn.assistantMessage?.isComplete, true);
 	assert.deepEqual(
-		turn.assistantMessage?.chunks.map((chunk) => ({
+		turn.assistantMessage?.chunks.map(chunk => ({
 			type: chunk.type,
 			text: chunk.contentText,
 			label: chunk.notice?.label,
@@ -144,7 +155,8 @@ void test("promoted textual tool calls replace their streamed markup", () => {
 	transcript.addTurn("inspect the file");
 	transcript.handleEvent({
 		type: "token",
-		token: "**<tool\\_call>**\n<function=read_file>raw markup</function>\n**</tool\\_call>**",
+		token:
+			"**<tool\\_call>**\n<function=read_file>raw markup</function>\n**</tool\\_call>**",
 	});
 	transcript.handleEvent({
 		type: "message_update",
@@ -152,15 +164,17 @@ void test("promoted textual tool calls replace their streamed markup", () => {
 		message: {
 			role: "assistant",
 			content: "",
-			tool_calls: [{
-				id: "call_1",
-				name: "read_file",
-				arguments: "{\"path\":\"file.ts\"}",
-			}],
+			tool_calls: [
+				{
+					id: "call_1",
+					name: "read_file",
+					arguments: '{"path":"file.ts"}',
+				},
+			],
 		},
 	});
 	const chunks = transcript.getTurns().at(-1)?.assistantMessage?.chunks ?? [];
-	assert.equal(chunks.map((chunk) => chunk.contentText ?? "").join(""), "");
+	assert.equal(chunks.map(chunk => chunk.contentText ?? "").join(""), "");
 });
 
 void test("promoted tool calls preserve text and tool chronology across iterations", () => {
@@ -191,11 +205,13 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 		message: {
 			role: "assistant",
 			content: "I found another file.",
-			tool_calls: [{
-				id: "call_2",
-				name: "read_file",
-				arguments: "{\"path\":\"other.ts\"}",
-			}],
+			tool_calls: [
+				{
+					id: "call_2",
+					name: "read_file",
+					arguments: '{"path":"other.ts"}',
+				},
+			],
 		},
 	});
 	transcript.handleEvent({
@@ -215,7 +231,7 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 
 	const chunks = transcript.getTurns()[0].assistantMessage?.chunks ?? [];
 	assert.deepEqual(
-		chunks.map((chunk) => ({
+		chunks.map(chunk => ({
 			type: chunk.type,
 			text: chunk.contentText,
 			tool: chunk.tool?.tool_name,

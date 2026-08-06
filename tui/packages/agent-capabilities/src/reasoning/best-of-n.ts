@@ -44,8 +44,8 @@ export class BestOfNReasoner extends BaseReasoner {
 			),
 		);
 		const scored = await Promise.all(
-			samples.map((sample) =>
-				this._score(query, sample).then((score) => ({ sample, score })),
+			samples.map(sample =>
+				this._score(query, sample).then(score => ({ sample, score })),
 			),
 		);
 		const best = scored.reduce((a, b) => (b.score > a.score ? b : a));
@@ -62,7 +62,7 @@ export class BestOfNReasoner extends BaseReasoner {
 		return this._chat([{ role: "user", content: prompt }], {
 			temperature: 0.0,
 			maxTokens: 16,
-		}).then((raw) => {
+		}).then(raw => {
 			const match = raw.trim().match(/[0-1](?:\.\d+)?/);
 			return match ? parseFloat(match[0]) : 0.0;
 		});

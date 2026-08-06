@@ -1,15 +1,12 @@
 // ── Config types ──────────────────────────────────────────────────────────
 
-import type { AgentHooks } from "./types-hooks.ts";
-import type { EventHandler } from "./types-events.ts";
-import type { Tool } from "./types-tools.ts";
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
+import type { AgentStopPolicy, ExecutionProfile } from "../execution-policy.ts";
 import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
+import type { EventHandler } from "./types-events.ts";
+import type { AgentHooks } from "./types-hooks.ts";
+import type { Tool } from "./types-tools.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
-import type {
-	AgentStopPolicy,
-	ExecutionProfile,
-} from "../execution-policy.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
 
@@ -166,13 +163,13 @@ export interface WebSearchConfig {
 // Re-exported so consumers that import from types.ts get everything in one place.
 
 export type {
-	EvidenceKind,
-	CriterionSeverity,
-	AcceptanceLevel,
 	AcceptanceCriterion,
-	AcceptanceVerification,
-	AcceptanceReview,
-	ResolvedAcceptance,
-	AcceptanceReport,
 	AcceptanceLedger,
+	AcceptanceLevel,
+	AcceptanceReport,
+	AcceptanceReview,
+	AcceptanceVerification,
+	CriterionSeverity,
+	EvidenceKind,
+	ResolvedAcceptance,
 } from "../guards/acceptance-contract.ts";

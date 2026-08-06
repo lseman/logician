@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
-	sandbox,
 	getDefaultSandboxProfile,
+	sandbox,
 	setDefaultSandboxProfile,
 } from "../tools/sandbox.ts";
 
@@ -14,7 +14,7 @@ void test("detects bwrap on Linux when present on PATH", () => {
 	const pathEnv = process.env.PATH ?? "";
 	const bwrapDir = pathEnv
 		.split(path.delimiter)
-		.find((d) => existsSync(path.join(d, "bwrap")));
+		.find(d => existsSync(path.join(d, "bwrap")));
 	if (!bwrapDir) return;
 	const fullPath = path.join(bwrapDir, "bwrap");
 	const result = spawnSync(fullPath, ["--version"], {
@@ -51,28 +51,28 @@ void test("prepareArguments wraps a bare string as { command }", () => {
 		| ((raw: unknown) => Record<string, unknown>)
 		| undefined;
 	assert.ok(fn);
-	assert.deepEqual(fn!("echo hello"), { command: "echo hello" });
+	assert.deepEqual(fn?.("echo hello"), { command: "echo hello" });
 });
 
 void test("prepareArguments passes through an object with a command field", () => {
 	const fn = sandbox.prepareArguments as
 		| ((raw: unknown) => Record<string, unknown>)
 		| undefined;
-	assert.equal(fn!({ command: "ls -la" }).command, "ls -la");
+	assert.equal(fn?.({ command: "ls -la" }).command, "ls -la");
 });
 
 void test("prepareArguments accepts alternate keys (cmd) as command", () => {
 	const fn = sandbox.prepareArguments as
 		| ((raw: unknown) => Record<string, unknown>)
 		| undefined;
-	assert.equal(fn!({ cmd: "pwd" }).command, "pwd");
+	assert.equal(fn?.({ cmd: "pwd" }).command, "pwd");
 });
 
 void test("prepareArguments returns an empty object for null input", () => {
 	const fn = sandbox.prepareArguments as
 		| ((raw: unknown) => Record<string, unknown>)
 		| undefined;
-	assert.deepEqual(fn!(null), {});
+	assert.deepEqual(fn?.(null), {});
 });
 
 // ── Session default profile ─────────────────────────────────────────────

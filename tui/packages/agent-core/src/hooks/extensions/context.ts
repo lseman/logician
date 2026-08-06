@@ -15,7 +15,11 @@ export interface ExtensionContextState {
 	/** Arbitrary extension data store (keyed by extension name) */
 	data: Record<string, unknown>;
 	/** Turn-level diagnostics collected by extensions */
-	diagnostics: Array<{ source: string; message: string; severity: "info" | "warning" | "error" }>;
+	diagnostics: Array<{
+		source: string;
+		message: string;
+		severity: "info" | "warning" | "error";
+	}>;
 }
 
 export interface ExtensionContextActions {
@@ -30,10 +34,16 @@ export interface ExtensionContextActions {
 	/** Retrieve data keyed by extension name */
 	fetchData: (extension: string, key: string) => unknown;
 	/** Record a diagnostic */
-	addDiagnostic: (source: string, message: string, severity?: "info" | "warning" | "error") => void;
+	addDiagnostic: (
+		source: string,
+		message: string,
+		severity?: "info" | "warning" | "error",
+	) => void;
 }
 
-export interface ExtensionContext extends ExtensionContextState, ExtensionContextActions {
+export interface ExtensionContext
+	extends ExtensionContextState,
+		ExtensionContextActions {
 	/** Current turn index */
 	turnIndex: number;
 	/** Current agent iteration */

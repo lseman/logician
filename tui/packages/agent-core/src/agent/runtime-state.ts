@@ -23,8 +23,15 @@ export interface AgentRuntimeState {
 	};
 }
 
-export function createRuntimeState(phase: HarnessPhase = "idle"): AgentRuntimeState {
-	return { phase, isStreaming: false, pendingToolCalls: [], abortRequested: false };
+export function createRuntimeState(
+	phase: HarnessPhase = "idle",
+): AgentRuntimeState {
+	return {
+		phase,
+		isStreaming: false,
+		pendingToolCalls: [],
+		abortRequested: false,
+	};
 }
 
 /** Pure lifecycle reducer shared by harnesses, bridges, and tests. */
@@ -33,7 +40,8 @@ export function reduceRuntimeState(
 	event: AgentEvent,
 	phase: HarnessPhase = state.phase,
 ): AgentRuntimeState {
-	const current = event.seq === undefined ? state : { ...state, lastEventSeq: event.seq };
+	const current =
+		event.seq === undefined ? state : { ...state, lastEventSeq: event.seq };
 	const now = event.ts ?? Date.now();
 	switch (event.type) {
 		case "agent_start":
@@ -48,7 +56,11 @@ export function reduceRuntimeState(
 		case "run_outcome":
 			return {
 				...current,
-				outcome: { status: event.status, summary: event.summary, source: event.source },
+				outcome: {
+					status: event.status,
+					summary: event.summary,
+					source: event.source,
+				},
 			};
 		case "turn_start":
 			return { ...current, turnId: event.turnId, turnStartedAt: now };
@@ -93,7 +105,7 @@ export function reduceRuntimeState(
 			return {
 				...current,
 				pendingToolCalls: current.pendingToolCalls.filter(
-					(id) => id !== event.toolCallId,
+					id => id !== event.toolCallId,
 				),
 			};
 		case "auto_retry_start":

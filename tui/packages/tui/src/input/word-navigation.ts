@@ -8,7 +8,7 @@ const segmenter = getGraphemeSegmenter();
 export function findWordBackward(text: string, cursor: number): number {
 	if (cursor === 0) return 0;
 
-	const segments = [...segmenter.segment(text)].map((s) => s.segment);
+	const segments = [...segmenter.segment(text)].map(s => s.segment);
 	const segCursor = Math.min(cursor, segments.length);
 
 	// Skip non-word chars going backward
@@ -22,7 +22,7 @@ export function findWordBackward(text: string, cursor: number): number {
 export function findWordForward(text: string, cursor: number): number {
 	if (cursor >= text.length) return text.length;
 
-	const segments = [...segmenter.segment(text)].map((s) => s.segment);
+	const segments = [...segmenter.segment(text)].map(s => s.segment);
 	const segCursor = Math.min(cursor, segments.length);
 
 	// Skip non-word chars going forward

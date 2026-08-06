@@ -38,7 +38,7 @@ export async function withFileMutationQueue<T>(
 		const currentQueue = fileMutationQueues.get(key) ?? Promise.resolve();
 
 		let releaseNext!: () => void;
-		const nextQueue = new Promise<void>((resolveQueue) => {
+		const nextQueue = new Promise<void>(resolveQueue => {
 			releaseNext = resolveQueue;
 		});
 		const chainedQueue = currentQueue.then(() => nextQueue);

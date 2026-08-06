@@ -3,10 +3,14 @@
 // Calls the LLM directly (bypassing the bridge) and mixes goal logic,
 // transcript access, bridge config, and fetch.
 
-import { AgentCoreBridge, GoalManager, type GoalState } from "@logician/coding-agent/application";
-import { Transcript } from "@logician/coding-agent/sessions";
-import { TranscriptDisplay } from "../rendering/transcript/display.ts";
-import { TUI } from "../terminal/core.ts";
+import {
+	type AgentCoreBridge,
+	GoalManager,
+	type GoalState,
+} from "@logician/coding-agent/application";
+import type { Transcript } from "@logician/coding-agent/sessions";
+import type { TranscriptDisplay } from "../rendering/transcript/display.ts";
+import type { TUI } from "../terminal/core.ts";
 
 export interface GoalRunnerCtx {
 	bridge: AgentCoreBridge;
@@ -27,7 +31,7 @@ export async function evaluateGoal(
 	// Build conversation snapshot from transcript turns
 	const turns = ctx.transcript.getTurns();
 	const snapshot = turns
-		.map((t) => {
+		.map(t => {
 			const parts: string[] = [];
 			if (t.userMessage) parts.push(`User: ${t.userMessage}`);
 			if (t.assistantMessage) parts.push(`Assistant: ${t.assistantMessage}`);
@@ -77,9 +81,7 @@ export async function evaluateGoal(
 
 		if (!res.ok) {
 			const errText = await res.text().catch(() => "");
-			throw new Error(
-				`LLM API error ${res.status}: ${errText.slice(0, 200)}`,
-			);
+			throw new Error(`LLM API error ${res.status}: ${errText.slice(0, 200)}`);
 		}
 
 		const data = (await res.json()) as {

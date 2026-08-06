@@ -12,11 +12,9 @@
 // - Usage metrics: tokensBefore / tokensAfter on compaction results
 
 import { randomUUID } from "node:crypto";
-import type { AgentMessage, CompactableMessage } from "../agent/types.ts";
 import { DEFAULT_TRUNCATION } from "../agent/types/types-truncation.ts";
-import {
-	serializeConversation,
-} from "./utils";
+import type { AgentMessage, CompactableMessage } from "../agent/types.ts";
+import { serializeConversation } from "./utils";
 
 // ============================================================================
 // Types
@@ -466,8 +464,15 @@ export async function compactToFit(
 	}
 
 	// Full summarizing pass. Without an explicit target, one pass is enough.
-	const first = await compactToFitFull(micro.messages, effectiveSettings, summarize);
-	if (opts.targetTokens === undefined || first.tokensAfter <= opts.targetTokens) {
+	const first = await compactToFitFull(
+		micro.messages,
+		effectiveSettings,
+		summarize,
+	);
+	if (
+		opts.targetTokens === undefined ||
+		first.tokensAfter <= opts.targetTokens
+	) {
 		return first;
 	}
 
@@ -546,7 +551,10 @@ async function compactToFitFull(
 		settings.keepRecentTokens,
 	);
 
-	if (cutPoint.firstKeptIndex >= messages.length || cutPoint.firstKeptIndex <= 0) {
+	if (
+		cutPoint.firstKeptIndex >= messages.length ||
+		cutPoint.firstKeptIndex <= 0
+	) {
 		return {
 			messages,
 			tokensBefore: estimateContextTokens(messages).tokens,

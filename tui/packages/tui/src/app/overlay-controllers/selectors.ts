@@ -1,20 +1,35 @@
 // ── Selector and file-mention controllers ──────────────────────────────────
 
-import { getReasonerIds, getReasonerMeta, type ReasonerMeta } from "@logician/agent-capabilities/reasoning";
+import {
+	getReasonerIds,
+	getReasonerMeta,
+	type ReasonerMeta,
+} from "@logician/agent-capabilities/reasoning";
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import { listProjectFiles } from "@logician/coding-agent/context";
-import type { ModelInfo, ModelSelectorAction } from "../../overlays/model-selector.ts";
-import type { ReasonerInfo, ReasonerSelectorAction } from "../../overlays/reasoner-selector.ts";
-import type { ThemeInfo, ThemeSelectorAction } from "../../overlays/theme-selector.ts";
+import type {
+	ModelInfo,
+	ModelSelectorAction,
+} from "../../overlays/model-selector.ts";
+import type {
+	ReasonerInfo,
+	ReasonerSelectorAction,
+} from "../../overlays/reasoner-selector.ts";
+import type {
+	ThemeInfo,
+	ThemeSelectorAction,
+} from "../../overlays/theme-selector.ts";
 import { getAvailableThemes, setTheme } from "../../terminal/theme.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 
 // ── Reasoner selector ───────────────────────────────────────────────────
 
-export async function openReasonerSelector(ctx: OverlayHandlersCtx): Promise<void> {
+export async function openReasonerSelector(
+	ctx: OverlayHandlersCtx,
+): Promise<void> {
 	ctx.statusPanel.update({ phase: "reasoner" });
 	const currentId = ctx.bridge.getReasonerStatus();
-	const reasoners: ReasonerInfo[] = getReasonerIds().map((id) => {
+	const reasoners: ReasonerInfo[] = getReasonerIds().map(id => {
 		const meta = getReasonerMeta(id) as ReasonerMeta;
 		return {
 			id,
@@ -89,18 +104,14 @@ export async function updateFileMentionPopup(
 
 export function openModelSelector(ctx: OverlayHandlersCtx): void {
 	ctx.statusPanel.update({ phase: "model" });
-	const modelInfos: ModelInfo[] = ctx.bridge
-		.getModelOptions()
-		.map((option) => ({
-			id: option.key,
-			name: option.name,
-			active: option.active,
-			url: `${option.model} · ${option.url}`,
-		}));
+	const modelInfos: ModelInfo[] = ctx.bridge.getModelOptions().map(option => ({
+		id: option.key,
+		name: option.name,
+		active: option.active,
+		url: `${option.model} · ${option.url}`,
+	}));
 	ctx.modelSelector.setModels(modelInfos);
-	ctx.modelSelector.setMessage(
-		"Enter selects model for the current session.",
-	);
+	ctx.modelSelector.setMessage("Enter selects model for the current session.");
 	ctx.modelSelector.show();
 	const overlay = ctx.tui.showOverlay(ctx.modelSelector, {
 		anchor: "aboveInput",
@@ -138,9 +149,11 @@ export function handleModelSelectorAction(
 
 // ── Theme selector ───────────────────────────────────────────────────
 
-export async function openThemeSelector(ctx: OverlayHandlersCtx): Promise<void> {
+export async function openThemeSelector(
+	ctx: OverlayHandlersCtx,
+): Promise<void> {
 	const available = getAvailableThemes();
-	const themes: ThemeInfo[] = available.map((name) => ({
+	const themes: ThemeInfo[] = available.map(name => ({
 		name,
 		description: `${name.charAt(0).toUpperCase() + name.slice(1)} theme`,
 	}));

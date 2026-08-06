@@ -78,7 +78,8 @@ export const REASONER_METADATA: Record<string, ReasonerMeta> = {
 	},
 	cover: {
 		name: "Chain of Verification",
-		description: "Generate response, plan verification steps, execute, generate final verified response",
+		description:
+			"Generate response, plan verification steps, execute, generate final verified response",
 		defaultConfig: { maxVerificationSteps: 3 },
 	},
 };

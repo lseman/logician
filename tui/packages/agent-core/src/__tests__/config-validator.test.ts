@@ -1,19 +1,38 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateConfig, throwOnValidationErrors } from "../agent/configuration/config-validator.ts";
+import {
+	throwOnValidationErrors,
+	validateConfig,
+} from "../agent/configuration/config-validator.ts";
 import type { AgentConfig } from "../agent/types.ts";
 
-function describe(name: string, fn: () => void) { fn(); }
-function it(name: string, fn: () => void | Promise<void>) { test(name, fn); }
+function describe(_name: string, fn: () => void) {
+	fn();
+}
+function it(name: string, fn: () => void | Promise<void>) {
+	test(name, fn);
+}
 function expect<T>(actual: T) {
 	return {
-		toHaveLength(len: number) { assert.equal(Array.isArray(actual) ? actual.length : 0, len); },
-		toBe(expected: unknown) { assert.equal(actual, expected); },
-		toBeTrue() { assert.equal(actual, true); },
-		toBeFalse() { assert.equal(actual, false); },
+		toHaveLength(len: number) {
+			assert.equal(Array.isArray(actual) ? actual.length : 0, len);
+		},
+		toBe(expected: unknown) {
+			assert.equal(actual, expected);
+		},
+		toBeTrue() {
+			assert.equal(actual, true);
+		},
+		toBeFalse() {
+			assert.equal(actual, false);
+		},
 		toThrow() {
 			let threw = false;
-			try { (actual as () => void)(); } catch { threw = true; }
+			try {
+				(actual as () => void)();
+			} catch {
+				threw = true;
+			}
 			assert.ok(threw, "expected function to throw");
 		},
 	};
@@ -35,25 +54,25 @@ void describe("config validator", () => {
 	void it("rejects missing baseUrl", () => {
 		const config = { ...validConfig, baseUrl: "" };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "baseUrl")).toBeTrue();
+		expect(errors.some(e => e.field === "baseUrl")).toBeTrue();
 	});
 
 	void it("rejects invalid temperature", () => {
 		const config = { ...validConfig, temperature: 3 };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "temperature")).toBeTrue();
+		expect(errors.some(e => e.field === "temperature")).toBeTrue();
 	});
 
 	void it("rejects invalid thinkingLevel", () => {
 		const config = { ...validConfig, thinkingLevel: "ultra" as any };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "thinkingLevel")).toBeTrue();
+		expect(errors.some(e => e.field === "thinkingLevel")).toBeTrue();
 	});
 
 	void it("rejects invalid queue mode", () => {
 		const config = { ...validConfig, steeringQueueMode: "invalid" as any };
 		const errors = validateConfig(config);
-		expect(errors.some((e) => e.field === "steeringQueueMode")).toBeTrue();
+		expect(errors.some(e => e.field === "steeringQueueMode")).toBeTrue();
 	});
 
 	void it("throws on validation errors", () => {
@@ -81,7 +100,7 @@ void describe("config validator", () => {
 			cacheSize: 0,
 			cacheTtlMs: -1,
 		});
-		expect(errors.some((e) => e.field === "cacheSize")).toBeTrue();
-		expect(errors.some((e) => e.field === "cacheTtlMs")).toBeTrue();
+		expect(errors.some(e => e.field === "cacheSize")).toBeTrue();
+		expect(errors.some(e => e.field === "cacheTtlMs")).toBeTrue();
 	});
 });

@@ -4,23 +4,27 @@
 
 import type { LLMBackend } from "../backend.ts";
 import { convertToChatFormat } from "../messages.ts";
+import type { Message, ThinkingLevel } from "../types.ts";
 import {
 	computeFileLists,
 	extractFileOpsFromMessages,
+	type FileOperations,
 	formatFileOperations,
 	parseBranchSummary,
 	serializeMessages,
-	type FileOperations,
 } from "./branch-summarization.ts";
-import type { BranchSummaryData, BranchProgress } from "./types.ts";
-import type { Message, ThinkingLevel } from "../types.ts";
+import type { BranchProgress, BranchSummaryData } from "./types.ts";
 
 /** Condense older messages into a short plain-text summary for compaction. */
 export async function generateCompactionSummary(
 	backend: LLMBackend,
 	messages: Message[],
 	systemMessages: Message[],
-	options: { temperature?: number; maxTokens?: number; thinkingLevel?: ThinkingLevel },
+	options: {
+		temperature?: number;
+		maxTokens?: number;
+		thinkingLevel?: ThinkingLevel;
+	},
 ): Promise<string | null> {
 	try {
 		const chatMessages = [

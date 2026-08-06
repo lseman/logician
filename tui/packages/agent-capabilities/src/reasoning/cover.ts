@@ -36,10 +36,13 @@ export class CoVeReasoner extends BaseReasoner {
 
 		// Step 1: Generate initial response
 		const initialPrompt = `${query}\n\nThink step by step. End with 'Final answer: ...'.`;
-		const initialResponse = await this._chat([{ role: "user", content: initialPrompt }], {
-			temperature: temp,
-			maxTokens: this.config.maxTokens ?? 1024,
-		});
+		const initialResponse = await this._chat(
+			[{ role: "user", content: initialPrompt }],
+			{
+				temperature: temp,
+				maxTokens: this.config.maxTokens ?? 1024,
+			},
+		);
 
 		this._split(initialResponse);
 
@@ -53,13 +56,16 @@ export class CoVeReasoner extends BaseReasoner {
 			"",
 			"Plan verification steps to check the accuracy and completeness of the initial response.",
 			"Return a JSON array of verification steps, each with a 'step' description.",
-			"Example: [{\"step\": \"Verify factual claims about X\"}, {\"step\": \"Check logical consistency of Y\"}]",
+			'Example: [{"step": "Verify factual claims about X"}, {"step": "Check logical consistency of Y"}]',
 		].join("\n");
 
-		const planResponse = await this._chat([{ role: "user", content: planPrompt }], {
-			temperature: 0.1,
-			maxTokens: 512,
-		});
+		const planResponse = await this._chat(
+			[{ role: "user", content: planPrompt }],
+			{
+				temperature: 0.1,
+				maxTokens: 512,
+			},
+		);
 
 		// Parse verification steps
 		let verificationSteps: string[] = [];
@@ -70,7 +76,9 @@ export class CoVeReasoner extends BaseReasoner {
 				.trim();
 			const data = JSON.parse(cleaned);
 			if (Array.isArray(data)) {
-				verificationSteps = data.map((item: any) => item.step || JSON.stringify(item));
+				verificationSteps = data.map(
+					(item: any) => item.step || JSON.stringify(item),
+				);
 			}
 		} catch (_e: unknown) {
 			// Fallback to default verification steps if parsing fails
@@ -85,9 +93,13 @@ export class CoVeReasoner extends BaseReasoner {
 		let verifiedResponse = initialResponse;
 		const verificationHistory: string[] = [];
 
-		for (let step = 0; step < Math.min(maxSteps, verificationSteps.length); step++) {
+		for (
+			let step = 0;
+			step < Math.min(maxSteps, verificationSteps.length);
+			step++
+		) {
 			const verificationStep = verificationSteps[step];
-			
+
 			const verifyPrompt = [
 				"[Problem]",
 				query,
@@ -102,12 +114,17 @@ export class CoVeReasoner extends BaseReasoner {
 				"Return your findings and an improved version of the response if needed.",
 			].join("\n");
 
-			const verificationResult = await this._chat([{ role: "user", content: verifyPrompt }], {
-				temperature: 0.1,
-				maxTokens: 1024,
-			});
+			const verificationResult = await this._chat(
+				[{ role: "user", content: verifyPrompt }],
+				{
+					temperature: 0.1,
+					maxTokens: 1024,
+				},
+			);
 
-			verificationHistory.push(`Step ${step + 1}: ${verificationStep}\nFindings: ${verificationResult}`);
+			verificationHistory.push(
+				`Step ${step + 1}: ${verificationStep}\nFindings: ${verificationResult}`,
+			);
 
 			// Extract improved response from verification result
 			const improvedResponsePrompt = [
@@ -124,10 +141,13 @@ export class CoVeReasoner extends BaseReasoner {
 				"End with 'Final answer: ...'.",
 			].join("\n");
 
-			verifiedResponse = await this._chat([{ role: "user", content: improvedResponsePrompt }], {
-				temperature: temp,
-				maxTokens: this.config.maxTokens ?? 1024,
-			});
+			verifiedResponse = await this._chat(
+				[{ role: "user", content: improvedResponsePrompt }],
+				{
+					temperature: temp,
+					maxTokens: this.config.maxTokens ?? 1024,
+				},
+			);
 		}
 
 		const [finalReasoning, finalAnswer] = this._split(verifiedResponse);

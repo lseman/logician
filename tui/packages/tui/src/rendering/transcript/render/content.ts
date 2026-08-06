@@ -2,7 +2,10 @@
 // Pi-style line-numbered content rendering, syntax-highlighted file content,
 // and the shared truncation helpers used throughout the transcript renderers.
 
-import { highlight, highlightAuto } from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
+import {
+	highlight,
+	highlightAuto,
+} from "@logician/agent-core/tools/shared/syntax-highlighter.ts";
 import { DIM, RESET, visibleWidth } from "../../../terminal/core.ts";
 import { theme } from "../../../terminal/theme.ts";
 import { wrapText } from "../layout.ts";
@@ -97,7 +100,9 @@ export function renderFileContent(
 
 	if (language) {
 		// Highlighted rendering: split each line by ANSI sequences, apply line numbers
-		const highlighted = language ? highlight(text, language) : highlightAuto(text);
+		const highlighted = language
+			? highlight(text, language)
+			: highlightAuto(text);
 
 		// Parse highlighted output into lines, each line may have ANSI color spans
 		const hlLines = highlighted.value.split("\n");
@@ -163,7 +168,10 @@ export function renderFileContent(
 }
 
 /** Extract the portion of a highlighted line corresponding to a display line. */
-export function extractHlSpan(hlLine: string, displayLine: string): string | null {
+export function extractHlSpan(
+	hlLine: string,
+	displayLine: string,
+): string | null {
 	if (!hlLine || hlLine.trim().length === 0) return null;
 	// If the plain text of the hl line matches the display line, use it directly
 	const stripped = hlLine.replace(/\x1b\[[\d;]*m/g, "");

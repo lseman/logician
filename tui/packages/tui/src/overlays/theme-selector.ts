@@ -1,7 +1,7 @@
 // ── ThemeSelectorOverlay ───────────────────────────────────────────────────────
 // Overlay for selecting a color theme.
 
-import { ListSelectorOverlay, type ListItem } from "./popup-utils.ts";
+import { type ListItem, ListSelectorOverlay } from "./popup-utils.ts";
 
 export interface ThemeInfo {
 	name: string;
@@ -33,6 +33,8 @@ export class ThemeSelectorOverlay extends ListSelectorOverlay<ThemeInfo> {
 	handleInput(data: string): ThemeSelectorAction | null {
 		const action = this.handleListInput(data);
 		if (!action) return null;
-		return action.type === "select" ? { type: "select", theme: action.item } : action;
+		return action.type === "select"
+			? { type: "select", theme: action.item }
+			: action;
 	}
 }

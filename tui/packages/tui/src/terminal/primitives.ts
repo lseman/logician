@@ -48,15 +48,20 @@ export const DIM = "\x1b[2m";
 export function visibleWidth(text: string): number {
 	return stringWidth(
 		text
-			.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+			.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
 			.replace(/\x1b[\]_][\s\S]*?(?:\x07|\x1b\\)/g, ""),
 	);
 }
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+	granularity: "grapheme",
+});
 
 function graphemeAt(text: string, offset: number): string {
-	const segment = graphemeSegmenter.segment(text.slice(offset))[Symbol.iterator]().next();
+	const segment = graphemeSegmenter
+		.segment(text.slice(offset))
+		[Symbol.iterator]()
+		.next();
 	return segment.done ? "" : segment.value.segment;
 }
 
@@ -156,10 +161,15 @@ export function compositeTuiLine(
 	const beforeWidth = visibleWidth(before);
 	const beforePad = " ".repeat(Math.max(0, startCol - beforeWidth));
 	const overlay = clampLineToWidth(overlayLine, overlayWidth);
-	const overlayPad = " ".repeat(Math.max(0, overlayWidth - visibleWidth(overlay)));
+	const overlayPad = " ".repeat(
+		Math.max(0, overlayWidth - visibleWidth(overlay)),
+	);
 	const afterStart = startCol + overlayWidth;
 	const afterWidth = Math.max(0, totalWidth - afterStart);
-	const after = afterWidth > 0 ? clampLineToWidth(skipColumns(baseLine, afterStart), afterWidth) : "";
+	const after =
+		afterWidth > 0
+			? clampLineToWidth(skipColumns(baseLine, afterStart), afterWidth)
+			: "";
 	const afterPad = " ".repeat(Math.max(0, afterWidth - visibleWidth(after)));
 	return `${before}${beforePad}${RESET}${overlay}${overlayPad}${RESET}${after}${afterPad}`;
 }
@@ -176,13 +186,22 @@ function skipColumns(text: string, columns: number): string {
 			const next = text[i + 1];
 			if (next === "[") {
 				let j = i + 2;
-				while (j < text.length && !(text.charCodeAt(j) >= 0x40 && text.charCodeAt(j) <= 0x7e)) j++;
+				while (
+					j < text.length &&
+					!(text.charCodeAt(j) >= 0x40 && text.charCodeAt(j) <= 0x7e)
+				)
+					j++;
 				i = j + 1;
 				continue;
 			}
 			if (next === "]" || next === "_") {
 				let j = i + 2;
-				while (j < text.length && text[j] !== "\x07" && !(text[j] === "\x1b" && text[j + 1] === "\\")) j++;
+				while (
+					j < text.length &&
+					text[j] !== "\x07" &&
+					!(text[j] === "\x1b" && text[j + 1] === "\\")
+				)
+					j++;
 				i = text[j] === "\x07" ? j + 1 : j + 2;
 				continue;
 			}
@@ -190,7 +209,8 @@ function skipColumns(text: string, columns: number): string {
 			continue;
 		}
 		const codePoint = text.codePointAt(i);
-		const character = codePoint === undefined ? ch : String.fromCodePoint(codePoint);
+		const character =
+			codePoint === undefined ? ch : String.fromCodePoint(codePoint);
 		visible += visibleWidth(character);
 		i += character.length;
 	}

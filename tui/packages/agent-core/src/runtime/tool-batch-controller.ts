@@ -1,8 +1,13 @@
 import { createToolResultMessage } from "../agent/messages.ts";
-import type { AgentEvent, AgentHooks, Message, ToolCall } from "../agent/types.ts";
-import { ToolRegistry } from "../tools/shared/registry.ts";
+import type {
+	AgentEvent,
+	AgentHooks,
+	Message,
+	ToolCall,
+} from "../agent/types.ts";
 import type { ExtensionEvent as TypedExtensionEvent } from "../hooks/extensions/events.ts";
 import type { PermissionManager } from "../tools/shared/permissions.ts";
+import type { ToolRegistry } from "../tools/shared/registry.ts";
 
 type Emit = (event: AgentEvent) => void | Promise<void>;
 type EmitExtension = (event: TypedExtensionEvent) => Promise<void>;
@@ -62,7 +67,11 @@ async function evaluatePermission(
 	if (!onPermissionRequest) {
 		return `${PERMISSION_DENIED_PREFIX}: "${call.name}" requires approval, but no interactive handler is available.`;
 	}
-	const answer = await onPermissionRequest({ toolName: call.name, toolCallId: call.id, args });
+	const answer = await onPermissionRequest({
+		toolName: call.name,
+		toolCallId: call.id,
+		args,
+	});
 	if (answer === "deny") {
 		return `${PERMISSION_DENIED_PREFIX}: the user denied "${call.name}".`;
 	}
@@ -72,35 +81,93 @@ async function evaluatePermission(
 	return undefined;
 }
 
-export async function executeToolBatch(options: ToolBatchControllerOptions): Promise<ToolBatchResult> {
-	const { registry, toolCalls, rawStopReason, iteration, signal, emit, emitExtension } = options;
+export async function executeToolBatch(
+	options: ToolBatchControllerOptions,
+): Promise<ToolBatchResult> {
+	const {
+		registry,
+		toolCalls,
+		rawStopReason,
+		iteration,
+		signal,
+		emit,
+		emitExtension,
+	} = options;
 	if (rawStopReason === "length") {
 		const messages: Message[] = [];
 		for (const call of toolCalls) {
 			const prepared = registry.prepare(call);
-			await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
-			await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
-			const text = call.name === "write_file"
-				? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
-					"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
-				: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
-			await emit({ type: "tool_call_end", toolName: call.name, toolCallId: call.id, result: text, isError: true });
-			await emit({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: text, isError: true });
-			await emitExtension({ type: "tool_execution_end", toolCallId: call.id, toolName: call.name, result: text, isError: true });
+			await emit({
+				type: "tool_execution_start",
+				toolCallId: prepared.call.id,
+				toolName: prepared.call.name,
+				args: prepared.args,
+			});
+			await emitExtension({
+				type: "tool_execution_start",
+				toolCallId: prepared.call.id,
+				toolName: prepared.call.name,
+				args: prepared.args,
+			});
+			const text =
+				call.name === "write_file"
+					? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
+						"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
+					: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
+			await emit({
+				type: "tool_call_end",
+				toolName: call.name,
+				toolCallId: call.id,
+				result: text,
+				isError: true,
+			});
+			await emit({
+				type: "tool_execution_end",
+				toolCallId: call.id,
+				toolName: call.name,
+				result: text,
+				isError: true,
+			});
+			await emitExtension({
+				type: "tool_execution_end",
+				toolCallId: call.id,
+				toolName: call.name,
+				result: text,
+				isError: true,
+			});
 			messages.push(createToolResultMessage(call.id, call.name, text, true));
 		}
 		return { messages, terminated: false };
 	}
 
-	type Plan = { prepared: ReturnType<ToolRegistry["prepare"]>; args: Record<string, unknown>; immediateContent?: string; immediateError: boolean };
+	type Plan = {
+		prepared: ReturnType<ToolRegistry["prepare"]>;
+		args: Record<string, unknown>;
+		immediateContent?: string;
+		immediateError: boolean;
+	};
 	const plans: Plan[] = [];
 	for (const toolCall of toolCalls) {
 		const prepared = registry.prepare(toolCall);
-		await emit({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
-		await emitExtension({ type: "tool_execution_start", toolCallId: prepared.call.id, toolName: prepared.call.name, args: prepared.args });
+		await emit({
+			type: "tool_execution_start",
+			toolCallId: prepared.call.id,
+			toolName: prepared.call.name,
+			args: prepared.args,
+		});
+		await emitExtension({
+			type: "tool_execution_start",
+			toolCallId: prepared.call.id,
+			toolName: prepared.call.name,
+			args: prepared.args,
+		});
 
 		let permissionDenial: string | undefined;
-		if (!signal?.aborted && prepared.error === undefined && options.permissions) {
+		if (
+			!signal?.aborted &&
+			prepared.error === undefined &&
+			options.permissions
+		) {
 			permissionDenial = await evaluatePermission(
 				options.permissions,
 				options.onPermissionRequest,
@@ -111,10 +178,15 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		}
 
 		const context = { toolCall: prepared.call, args: prepared.args, iteration };
-		let before = signal?.aborted || permissionDenial !== undefined
-			? undefined
-			: await options.internalHooks?.beforeToolCall?.(context, signal);
-		if (!signal?.aborted && permissionDenial === undefined && before === undefined) {
+		let before =
+			signal?.aborted || permissionDenial !== undefined
+				? undefined
+				: await options.internalHooks?.beforeToolCall?.(context, signal);
+		if (
+			!signal?.aborted &&
+			permissionDenial === undefined &&
+			before === undefined
+		) {
 			before = await options.hooks?.beforeToolCall?.(context, signal);
 		}
 		const immediateContent =
@@ -134,34 +206,81 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		});
 	}
 
-	const execute = async (plan: Plan): Promise<{ message: Message; terminate: boolean }> => {
+	const execute = async (
+		plan: Plan,
+	): Promise<{ message: Message; terminate: boolean }> => {
 		const { prepared, args } = plan;
 		let resultText = plan.immediateContent;
 		let isError = plan.immediateError;
 		let terminate = false;
 		let accepting = true;
 		if (resultText === undefined) {
-			const result = await registry.execute(prepared.call, { signal, onUpdate: async (partialResult) => {
-				if (!accepting) return;
-				await emit({ type: "tool_execution_update", toolCallId: prepared.call.id, toolName: prepared.call.name, args, partialResult });
-			} }, args);
+			const result = await registry.execute(
+				prepared.call,
+				{
+					signal,
+					onUpdate: async partialResult => {
+						if (!accepting) return;
+						await emit({
+							type: "tool_execution_update",
+							toolCallId: prepared.call.id,
+							toolName: prepared.call.name,
+							args,
+							partialResult,
+						});
+					},
+				},
+				args,
+			);
 			accepting = false;
 			resultText = result.content;
 			isError = result.isError === true;
 			terminate = result.terminate === true;
 		}
 		accepting = false;
-		const context = { toolCall: prepared.call, args, result: resultText, isError, iteration };
+		const context = {
+			toolCall: prepared.call,
+			args,
+			result: resultText,
+			isError,
+			iteration,
+		};
 		let after = await options.internalHooks?.afterToolCall?.(context, signal);
 		if (after === undefined) {
 			after = await options.hooks?.afterToolCall?.(context, signal);
 		}
 		if (after?.content !== undefined) resultText = after.content;
 		if (after?.isError !== undefined) isError = after.isError;
-		await emit({ type: "tool_call_end", toolName: prepared.call.name, toolCallId: prepared.call.id, result: resultText, isError });
-		await emit({ type: "tool_execution_end", toolCallId: prepared.call.id, toolName: prepared.call.name, result: resultText, isError });
-		await emitExtension({ type: "tool_execution_end", toolCallId: prepared.call.id, toolName: prepared.call.name, result: resultText, isError });
-		return { message: createToolResultMessage(prepared.call.id, prepared.call.name, resultText, isError), terminate: after?.terminate ?? terminate };
+		await emit({
+			type: "tool_call_end",
+			toolName: prepared.call.name,
+			toolCallId: prepared.call.id,
+			result: resultText,
+			isError,
+		});
+		await emit({
+			type: "tool_execution_end",
+			toolCallId: prepared.call.id,
+			toolName: prepared.call.name,
+			result: resultText,
+			isError,
+		});
+		await emitExtension({
+			type: "tool_execution_end",
+			toolCallId: prepared.call.id,
+			toolName: prepared.call.name,
+			result: resultText,
+			isError,
+		});
+		return {
+			message: createToolResultMessage(
+				prepared.call.id,
+				prepared.call.name,
+				resultText,
+				isError,
+			),
+			terminate: after?.terminate ?? terminate,
+		};
 	};
 
 	const outcomes: Array<{ message: Message; terminate: boolean }> = [];
@@ -181,7 +300,7 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		let parallelStage: Plan[] = [];
 		const flushParallelStage = async () => {
 			if (parallelStage.length === 0) return;
-			outcomes.push(...await Promise.all(parallelStage.map(execute)));
+			outcomes.push(...(await Promise.all(parallelStage.map(execute))));
 			parallelStage = [];
 		};
 		for (let index = 0; index < plans.length; index++) {
@@ -196,5 +315,9 @@ export async function executeToolBatch(options: ToolBatchControllerOptions): Pro
 		}
 		await flushParallelStage();
 	}
-	return { messages: outcomes.map((outcome) => outcome.message), terminated: outcomes.length > 0 && outcomes.every((outcome) => outcome.terminate) };
+	return {
+		messages: outcomes.map(outcome => outcome.message),
+		terminated:
+			outcomes.length > 0 && outcomes.every(outcome => outcome.terminate),
+	};
 }

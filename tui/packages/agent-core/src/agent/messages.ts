@@ -1,6 +1,7 @@
 // ── Message handling ──────────────────────────────────────────────────────────────
 // Message creation, chat format conversion, and compaction integration.
 
+import { microCompactMessages as microCompactCompactable } from "../compaction/compaction.ts";
 import type {
 	AgentMessage,
 	BashExecutionMessage,
@@ -9,7 +10,6 @@ import type {
 	CustomMessage,
 	Message,
 } from "./types.ts";
-import { microCompactMessages as microCompactCompactable } from "../compaction/compaction.ts";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -119,11 +119,11 @@ export function createUserMessage(content: string): Message {
  * "not executed, truncated" result) — dropping it would orphan that result
  * and trip the provider's tool_call/tool_result pairing check instead.
  */
-export function sanitizeToolCallArguments<
-	T extends { arguments: string },
->(toolCalls: T[]): T[] {
+export function sanitizeToolCallArguments<T extends { arguments: string }>(
+	toolCalls: T[],
+): T[] {
 	let changed = false;
-	const sanitized = toolCalls.map((call) => {
+	const sanitized = toolCalls.map(call => {
 		try {
 			JSON.parse(call.arguments);
 			return call;
@@ -178,32 +178,32 @@ export function convertToChatFormat(
 ): Record<string, unknown>[] {
 	return messages
 		.filter((m): m is Message => m != null)
-		.map((m) => {
+		.map(m => {
 			const obj: Record<string, unknown> = { role: m.role };
-		if (m.content !== null && m.content !== undefined) {
-			obj.content = m.content;
-		}
-		if (m.tool_call_id) obj.tool_call_id = m.tool_call_id;
-		if (m.tool_calls?.length) {
-			obj.tool_calls = m.tool_calls.map((tc) => ({
-				id: tc.id,
-				type: "function",
-				function: {
-					name: tc.name,
-					arguments: tc.arguments,
-				},
-			}));
-		}
-		if (m.name) obj.name = m.name;
-		// Defensive: an assistant message must have at least 'content' or
-		// 'tool_calls' or the API rejects it with 400.  createAssistantMessage
-		// already prevents this, but guard here too so any stray message
-		// doesn't crash the loop.
-		if (m.role === "assistant" && !obj.content && !obj.tool_calls) {
-			obj.content = "";
-		}
-		return obj;
-	});
+			if (m.content !== null && m.content !== undefined) {
+				obj.content = m.content;
+			}
+			if (m.tool_call_id) obj.tool_call_id = m.tool_call_id;
+			if (m.tool_calls?.length) {
+				obj.tool_calls = m.tool_calls.map(tc => ({
+					id: tc.id,
+					type: "function",
+					function: {
+						name: tc.name,
+						arguments: tc.arguments,
+					},
+				}));
+			}
+			if (m.name) obj.name = m.name;
+			// Defensive: an assistant message must have at least 'content' or
+			// 'tool_calls' or the API rejects it with 400.  createAssistantMessage
+			// already prevents this, but guard here too so any stray message
+			// doesn't crash the loop.
+			if (m.role === "assistant" && !obj.content && !obj.tool_calls) {
+				obj.content = "";
+			}
+			return obj;
+		});
 }
 
 export function estimateTokens(text: string): number {

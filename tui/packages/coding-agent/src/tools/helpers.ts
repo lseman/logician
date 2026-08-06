@@ -57,9 +57,9 @@ export interface EditOperations {
 }
 
 const defaultEditOperations: EditOperations = {
-	readFile: (p) => readFile(p, "utf-8").then((b) => Buffer.from(b)),
+	readFile: p => readFile(p, "utf-8").then(b => Buffer.from(b)),
 	writeFile: (p, content) => writeFile(p, content, "utf-8"),
-	access: (p) => access(p, fs.constants.R_OK | fs.constants.W_OK),
+	access: p => access(p, fs.constants.R_OK | fs.constants.W_OK),
 };
 
 export { defaultEditOperations };

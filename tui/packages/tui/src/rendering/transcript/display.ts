@@ -16,24 +16,24 @@ import {
 	RESET,
 	visibleWidth,
 } from "../../terminal/core.ts";
-import type { ScrollView } from "../scroll-view.ts";
 import { theme } from "../../terminal/theme.ts";
+import type { ScrollView } from "../scroll-view.ts";
+import { wrapText } from "./layout.ts";
+import { truncateText } from "./render/content.ts";
+import { renderMarkdownLines } from "./render/markdown-table.ts";
+import { renderThinkingChunk } from "./render/thinking.ts";
+import {
+	getSanitizationMetrics,
+	type RenderCtx,
+	renderTool,
+	type SanitizedToolCache,
+} from "./render/tool.ts";
 import {
 	hasStreamingChunk,
 	renderInline,
 	revisionText,
 	stripThinkTags,
 } from "./text-utils.ts";
-import { wrapText } from "./layout.ts";
-import { renderMarkdownLines } from "./render/markdown-table.ts";
-import { renderThinkingChunk } from "./render/thinking.ts";
-import { truncateText } from "./render/content.ts";
-import {
-	getSanitizationMetrics,
-	renderTool,
-	type RenderCtx,
-	type SanitizedToolCache,
-} from "./render/tool.ts";
 
 // ── Options ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +87,8 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	private expandedAgentKeys = new Set<string>();
 	/** Per-child-tool expand state within a subagent flow, keyed by `${parentKey}:child:${childToolCallId}`. */
 	private expandedChildToolKeys = new Set<string>();
-	private toolHitRegions: Array<{ start: number; end: number; key: string }> = [];
+	private toolHitRegions: Array<{ start: number; end: number; key: string }> =
+		[];
 	private focusedToolKey: string | null = null;
 	/** Populated by renderTool for spawn_agent(s) per-task/per-child-tool hit regions. */
 	_taskHitRegions?: Array<{ start: number; end: number; key: string }>;
@@ -216,7 +217,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	 * rendering/layout.ts), not screen-relative. */
 	handleMouse(_column: number, row: number): boolean {
 		const region = this.toolHitRegions.find(
-			(candidate) => row >= candidate.start && row < candidate.end,
+			candidate => row >= candidate.start && row < candidate.end,
 		);
 		if (!region) return false;
 		this.toggleHitRegionKey(region.key);
@@ -271,7 +272,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	focusTool(direction: 1 | -1): { index: number; total: number } | null {
 		if (this.toolHitRegions.length === 0) return null;
 		const currentIndex = this.toolHitRegions.findIndex(
-			(region) => region.key === this.focusedToolKey,
+			region => region.key === this.focusedToolKey,
 		);
 		const nextIndex =
 			currentIndex < 0
@@ -400,12 +401,12 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			padToWidth,
 		);
 		this.toolHitRegions = pendingToolRegions
-			.map((region) => ({
+			.map(region => ({
 				...region,
 				start: region.start - visibleStart,
 				end: region.end - visibleStart,
 			}))
-			.filter((region) => region.end > 0);
+			.filter(region => region.end > 0);
 
 		this.cachedLines = visibleBuffer;
 		return visibleBuffer;
@@ -445,14 +446,14 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		const message = turn?.assistantMessage;
 		const chunks = message?.chunks ?? [];
 		const chunkRevision = chunks
-			.map((chunk) => {
+			.map(chunk => {
 				const tool = chunk.tool;
 				const details = tool?.details;
 				const childChunks = Array.isArray(details?.childChunks)
 					? details.childChunks
 					: [];
 				const childRevision = childChunks
-					.map((child) =>
+					.map(child =>
 						[
 							child.seq,
 							child.type,
@@ -494,7 +495,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	private turnStyleRevision(turn: Turn): string {
 		const keysForTurn = (set: Set<string>) =>
 			[...set]
-				.filter((key) => this.keyBelongsToTurn(key, turn))
+				.filter(key => this.keyBelongsToTurn(key, turn))
 				.sort()
 				.join(",");
 		return [
@@ -522,7 +523,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		const rootId = taskMatch?.[1] ?? childMatch?.[1] ?? key;
 		const chunks = turn.assistantMessage?.chunks ?? [];
 		return chunks.some(
-			(chunk) =>
+			chunk =>
 				chunk.type === "tool" &&
 				chunk.tool &&
 				(chunk.tool.tool_call_id === rootId ||
@@ -581,14 +582,19 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					"",
 				);
 				for (const line of sysLines)
-					lines.push(padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`));
+					lines.push(
+						padToWidth(`${theme.fgRaw("separator")}│${RESET} ${line}`),
+					);
 			} else {
 				lines.push(
 					padToWidth(
 						`${theme.fgRaw("separator")}›${RESET} ${theme.fgRaw("userLabel")}${BOLD}YOU${RESET}`,
 					),
 				);
-				const colored = theme.fgRaw("userText") + truncateText(content, this.maxMessageLength) + RESET;
+				const colored =
+					theme.fgRaw("userText") +
+					truncateText(content, this.maxMessageLength) +
+					RESET;
 				for (const rawLine of colored.split("\n")) {
 					for (const line of wrapText(rawLine, Math.max(1, contentWidth)))
 						lines.push(padToWidth(`  ${line}`));
@@ -623,7 +629,9 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				}
 				if (answer) {
 					lines.push(
-						padToWidth(`  ${theme.fgRaw("responseLabel")}${BOLD}RESPONSE${RESET}`),
+						padToWidth(
+							`  ${theme.fgRaw("responseLabel")}${BOLD}RESPONSE${RESET}`,
+						),
 					);
 					const contentLines = renderMarkdownLines(
 						answer,
@@ -762,7 +770,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		}
 		const desiredStart = renderedLines.length - (this.maxRenderedLines - 1);
 		const firstCompleteTurn = turnStartLines.findIndex(
-			(line) => line >= desiredStart,
+			line => line >= desiredStart,
 		);
 		const sliceStart =
 			firstCompleteTurn >= 0 ? turnStartLines[firstCompleteTurn] : desiredStart;

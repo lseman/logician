@@ -14,7 +14,11 @@ function rankWeights(population: Heuristic[]): number[] {
 	return population.map((_, i) => 1 / (i + N + 1));
 }
 
-function weightedSample(population: Heuristic[], weights: number[], count: number): Heuristic[] {
+function weightedSample(
+	population: Heuristic[],
+	weights: number[],
+	count: number,
+): Heuristic[] {
 	const totalWeight = weights.reduce((a, b) => a + b, 0);
 	const selected: Heuristic[] = [];
 	const used = new Set<number>();
@@ -50,7 +54,10 @@ export function rankPopulation(population: Heuristic[]): Heuristic[] {
 }
 
 /** Select p parents using rank-weighted sampling. Population must be sorted (best first). */
-export function selectParents(sortedPopulation: Heuristic[], count: number): Heuristic[] {
+export function selectParents(
+	sortedPopulation: Heuristic[],
+	count: number,
+): Heuristic[] {
 	if (sortedPopulation.length === 0) return [];
 	const count_ = Math.min(count, sortedPopulation.length);
 	const weights = rankWeights(sortedPopulation);
@@ -86,7 +93,7 @@ export function populationStats(population: Heuristic[]): {
 	size: number;
 } {
 	if (population.length === 0) return { best: 0, worst: 0, mean: 0, size: 0 };
-	const fitnesses = population.map((h) => h.fitness);
+	const fitnesses = population.map(h => h.fitness);
 	const best = Math.max(...fitnesses);
 	const worst = Math.min(...fitnesses);
 	const mean = fitnesses.reduce((a, b) => a + b, 0) / fitnesses.length;

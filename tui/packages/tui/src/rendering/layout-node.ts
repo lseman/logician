@@ -30,7 +30,11 @@ export interface ScrollLayoutState {
 	readonly overscroll: "chain" | "contain";
 	readonly viewportHeight: number;
 	getContentWidth(width: number): number;
-	updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void;
+	updateLayout(
+		contentHeight: number,
+		viewportHeight: number,
+		requestRender: () => void,
+	): void;
 }
 
 export interface ScrollLayoutNode {
@@ -47,5 +51,7 @@ export interface LayoutComponent extends Component {
 
 export function getLayoutNode(component: Component): LayoutNode | undefined {
 	const candidate = component as Partial<LayoutComponent>;
-	return typeof candidate[LAYOUT_NODE] === "function" ? candidate[LAYOUT_NODE]() : undefined;
+	return typeof candidate[LAYOUT_NODE] === "function"
+		? candidate[LAYOUT_NODE]()
+		: undefined;
 }

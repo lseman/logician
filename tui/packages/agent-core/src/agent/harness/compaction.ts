@@ -4,8 +4,11 @@
 // Delegates to the single compaction engine (compactToFit) shared with the
 // loop's context-full retry and the builtin proactive hook.
 
+import {
+	type CompactionSettings,
+	compactToFit,
+} from "../../compaction/index.ts";
 import type { LLMBackend } from "../backend.ts";
-import { compactToFit, type CompactionSettings } from "../../compaction/index.ts";
 import { estimateChatPayloadTokens } from "../messages.ts";
 import { generateCompactionSummary } from "../summaries/summary-generation.ts";
 import type { CompactableMessage, Message, ThinkingLevel } from "../types.ts";
@@ -56,7 +59,12 @@ export async function runCompaction(
 	});
 
 	if (!result.changed) {
-		return { changed: false, messages: history, tokensBefore, tokensAfter: tokensBefore };
+		return {
+			changed: false,
+			messages: history,
+			tokensBefore,
+			tokensAfter: tokensBefore,
+		};
 	}
 
 	return {

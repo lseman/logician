@@ -5,17 +5,17 @@
 //   mcp-manager.ts  : McpManager class and config functions
 
 export {
-	McpManager,
+	createMcpClient,
+	createMcpTool,
+	encodeMcpMessage,
+	formatMcpToolResult,
+	parseMcpToolDefinition,
+	tryDecodeMcpMessage,
+} from "./client.ts";
+export {
 	type McpLoadResult,
+	McpManager,
 	type McpServerInfo,
 	type McpSnapshotResult,
 	type McpToggleResult,
 } from "./manager.ts";
-export {
-	createMcpClient,
-	createMcpTool,
-	encodeMcpMessage,
-	tryDecodeMcpMessage,
-	parseMcpToolDefinition,
-	formatMcpToolResult,
-} from "./client.ts";

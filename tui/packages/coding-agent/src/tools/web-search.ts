@@ -1,7 +1,11 @@
 // ── web_search tool ──────────────────────────────────────────────────────────────
 // Search the web via SearXNG (self-hosted privacy-respecting metasearch engine).
 
-import type { Tool, ToolContext, WebSearchConfig } from "@logician/agent-core/agent/types.ts";
+import type {
+	Tool,
+	ToolContext,
+	WebSearchConfig,
+} from "@logician/agent-core/agent/types.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./truncate.ts";
 
 type FetchLike = (
@@ -24,7 +28,9 @@ export function createWebSearchTool(
 		executionMode: "parallel",
 		description: `Search the web via SearXNG (${baseUrl}). Returns title, URL, and snippet for each result.`,
 		promptSnippet: "Search the web for current information",
-		promptGuidelines: ["Use web_search for recent information not in training data"],
+		promptGuidelines: [
+			"Use web_search for recent information not in training data",
+		],
 		parameters: {
 			type: "object",
 			properties: {
@@ -78,8 +84,14 @@ export function createWebSearchTool(
 			const language = String(args.language || "");
 			const timeRange = String(args.time_range || "");
 			const requestedLimit = Number(args.max_results) || maxResults;
-			const resultsLimit = Math.min(100, Math.max(1, Math.floor(requestedLimit)));
-			const page = Math.min(20, Math.max(1, Math.floor(Number(args.page) || 1)));
+			const resultsLimit = Math.min(
+				100,
+				Math.max(1, Math.floor(requestedLimit)),
+			);
+			const page = Math.min(
+				20,
+				Math.max(1, Math.floor(Number(args.page) || 1)),
+			);
 			const safesearch = [0, 1, 2].includes(Number(args.safesearch))
 				? Number(args.safesearch)
 				: 1;

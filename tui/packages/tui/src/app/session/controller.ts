@@ -3,18 +3,18 @@
 // session browser overlay. handleSessionAction reaches into overlay
 // internals (tui.removeOverlay/requestRender) as well as session state.
 
-import { AgentCoreBridge } from "@logician/coding-agent/application";
+import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import {
-	SessionStore,
-	Transcript,
 	inferSessionTitle,
 	isGeneratedSessionTitle,
+	type SessionStore,
+	type Transcript,
 	type Turn,
 } from "@logician/coding-agent/sessions";
-import { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
-import { StatusBar } from "../../status/status-bar.ts";
-import { TUI } from "../../terminal/core.ts";
-import { TranscriptDisplay } from "../../rendering/transcript/display.ts";
+import type { SessionBrowserOverlay } from "../../overlays/session-manager.ts";
+import type { TranscriptDisplay } from "../../rendering/transcript/display.ts";
+import type { StatusBar } from "../../status/status-bar.ts";
+import type { TUI } from "../../terminal/core.ts";
 import { turnsToMessages } from "./messages.ts";
 
 export interface SessionControllerCtx {
@@ -49,17 +49,21 @@ export function autoSaveTurn(ctx: SessionControllerCtx): void {
 	if (!ctx.currentSessionId) return;
 	const turns = ctx.transcript.getTurns();
 	const latestTurn = turns[turns.length - 1];
-	if (latestTurn && latestTurn.isComplete) {
+	if (latestTurn?.isComplete) {
 		ctx.sessionStore.saveTurn(latestTurn);
 		// Generated placeholders follow the first meaningful topic. Explicitly
 		// renamed sessions are never overwritten.
 		if (latestTurn.userMessage?.content) {
 			const current = ctx.sessionStore.getSession(ctx.currentSessionId);
-			const agentResponse = latestTurn.assistantMessage?.chunks
-				.filter((chunk) => chunk.type === "content" && chunk.contentText)
-				.map((chunk) => chunk.contentText)
-				.join("") || "";
-			const inferred = inferSessionTitle(latestTurn.userMessage.content, agentResponse);
+			const agentResponse =
+				latestTurn.assistantMessage?.chunks
+					.filter(chunk => chunk.type === "content" && chunk.contentText)
+					.map(chunk => chunk.contentText)
+					.join("") || "";
+			const inferred = inferSessionTitle(
+				latestTurn.userMessage.content,
+				agentResponse,
+			);
 			if (current && inferred && isGeneratedSessionTitle(current.title)) {
 				ctx.sessionStore.renameSession(ctx.currentSessionId, inferred);
 				ctx.bridge.renameConversationSession(ctx.currentSessionId, inferred);

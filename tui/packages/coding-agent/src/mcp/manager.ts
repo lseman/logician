@@ -4,6 +4,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Tool } from "@logician/agent-core";
+import { parseJsonWithComments } from "@logician/agent-core/tools/shared/json-utils.ts";
+import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
 import {
 	allocateMcpToolName,
 	createMcpClient,
@@ -11,8 +13,6 @@ import {
 	type McpClient,
 	type McpServerConfig,
 } from "./client.ts";
-import { parseJsonWithComments } from "@logician/agent-core/tools/shared/json-utils.ts";
-import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
 
 // Temporary, opt-in tracing for the "MCP loaded but /mcp shows nothing"
 // investigation. LOGICIAN_MCP_DEBUG=1 prints resolved cwd/config paths/server
@@ -32,7 +32,6 @@ export interface McpLoadResult {
 	servers: number;
 	errors: string[];
 }
-
 
 export interface McpServerInfo {
 	serverName: string;
@@ -97,7 +96,7 @@ function readMcpServerConfigs(
 	);
 	const configs = raw.mcpServers ?? raw.mcp;
 	return configs && typeof configs === "object"
-		? configs as Record<string, McpServerConfig>
+		? (configs as Record<string, McpServerConfig>)
 		: {};
 }
 
@@ -127,7 +126,7 @@ function expandPluginRoot<T>(value: T, root: string): T {
 		return value.replaceAll("${CLAUDE_PLUGIN_ROOT}", root) as T;
 	}
 	if (Array.isArray(value)) {
-		return value.map((item) => expandPluginRoot(item, root)) as T;
+		return value.map(item => expandPluginRoot(item, root)) as T;
 	}
 	if (value && typeof value === "object") {
 		const out: Record<string, unknown> = {};
@@ -224,8 +223,9 @@ export class McpManager {
 	private async resolveConfigs(cwd: string): Promise<ResolvedMcpConfigs> {
 		const pluginConfigs = await this.pluginConfigLoader();
 		const configs = { ...pluginConfigs };
-		const configPaths: Record<string, string | undefined> =
-			Object.fromEntries(Object.keys(configs).map((name) => [name, undefined]));
+		const configPaths: Record<string, string | undefined> = Object.fromEntries(
+			Object.keys(configs).map(name => [name, undefined]),
+		);
 		const paths = fileMcpConfigPaths(cwd);
 		mcpDebug("resolveConfigs:paths", {
 			cwd,
@@ -295,9 +295,7 @@ export class McpManager {
 						usedToolNames,
 					);
 					usedToolNames.add(exposedName);
-					this.tools.push(
-						createMcpTool(client, def, exposedName) as Tool,
-					);
+					this.tools.push(createMcpTool(client, def, exposedName) as Tool);
 				}
 				this.clients.push(client);
 				client = null;
@@ -324,21 +322,20 @@ export class McpManager {
 
 	async getSnapshot(cwd: string): Promise<McpSnapshotResult> {
 		mcpDebug("getSnapshot:called", { cwd, clientCount: this.clients.length });
-		const {
-			configs,
-			configPaths,
-			primaryConfigPath,
-		} = await this.resolveConfigs(cwd);
+		const { configs, configPaths, primaryConfigPath } =
+			await this.resolveConfigs(cwd);
 
 		const loadedEntries = await Promise.all(
-			this.clients.map(async (client): Promise<[string, { toolCount: number }]> => {
-				try {
-					const tools = await client.listTools();
-					return [client.name, { toolCount: tools.length }];
-				} catch {
-					return [client.name, { toolCount: 0 }];
-				}
-			}),
+			this.clients.map(
+				async (client): Promise<[string, { toolCount: number }]> => {
+					try {
+						const tools = await client.listTools();
+						return [client.name, { toolCount: tools.length }];
+					} catch {
+						return [client.name, { toolCount: 0 }];
+					}
+				},
+			),
 		);
 		const loadedServers = Object.fromEntries(loadedEntries);
 
@@ -387,7 +384,9 @@ export class McpManager {
 			throw new Error(`MCP server '${serverName}' not found in config.`);
 		}
 
-		const raw = parseJsonWithComments<Record<string, unknown>>(readFileSync(configPath, "utf8"));
+		const raw = parseJsonWithComments<Record<string, unknown>>(
+			readFileSync(configPath, "utf8"),
+		);
 		const configKey = raw.mcpServers ? "mcpServers" : "mcp";
 		const config = (raw[configKey] as Record<string, McpServerConfig>) || {};
 
@@ -410,7 +409,7 @@ export class McpManager {
 		}
 
 		const snapshot = await this.getSnapshot(cwd);
-		const servers: McpServerInfo[] = snapshot.servers.map((server) => ({
+		const servers: McpServerInfo[] = snapshot.servers.map(server => ({
 			...server,
 			toolCount:
 				loadedServers[server.serverName]?.toolCount ?? server.toolCount,

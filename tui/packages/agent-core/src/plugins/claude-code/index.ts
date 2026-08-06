@@ -5,19 +5,19 @@
 // TypeScript extensions live under `extensions/`.
 
 export {
-	createClaudeCodeHookLayer,
 	type ClaudeCodeHookLayer,
 	type ClaudeCodeHookLayerOptions,
+	createClaudeCodeHookLayer,
 } from "./hook-layer.ts";
 
 export {
-	loadPluginHooks,
-	executeLoadedHook,
-	parseHookResponse,
 	buildHookInput,
-	type HookEventType as ClaudeCodeHookEventType,
+	executeLoadedHook,
 	type HookCommand as ClaudeCodeHookCommand,
 	type HookDefinition as ClaudeCodeHookDefinition,
+	type HookEventType as ClaudeCodeHookEventType,
 	type HookExecutionResult as ClaudeCodeHookExecutionResult,
+	loadPluginHooks,
+	parseHookResponse,
 } from "./plugin-executor.ts";
 export * from "./plugin-manager.ts";

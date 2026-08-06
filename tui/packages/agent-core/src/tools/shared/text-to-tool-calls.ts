@@ -77,11 +77,10 @@ export function parseTextToolCalls(
 	}
 
 	// Strategy 2: ReAct-style [[tool_call(...)]]
-	const reactRegex =
-		/\[\[tool_call\(([^)]+)\)\]\]/g;
+	const reactRegex = /\[\[tool_call\(([^)]+)\)\]\]/g;
 	while ((match = reactRegex.exec(content)) !== null) {
 		const inner = match[1];
-		const parts = inner.split(",").map((p) => p.trim());
+		const parts = inner.split(",").map(p => p.trim());
 		if (parts.length >= 1) {
 			const name = parts[0].replace(/["']/g, "").trim();
 			const args = parts.slice(1).join(", ").trim();
@@ -141,7 +140,8 @@ export function parseTextToolCalls(
 			// Match key="value" or key='value' or key=value
 			// Group 1: key for quoted value, Group 2: quoted value
 			// Group 3: key for unquoted value, Group 4: unquoted value
-			const argRegex = /([\w._-]+)\s*=\s*["']([^"']*)["']|([\w._-]+)\s*=\s*([^\s,)\n]+)/g;
+			const argRegex =
+				/([\w._-]+)\s*=\s*["']([^"']*)["']|([\w._-]+)\s*=\s*([^\s,)\n]+)/g;
 			let argMatch: RegExpExecArray | null;
 			while ((argMatch = argRegex.exec(argsStr)) !== null) {
 				let key: string | undefined;
@@ -169,7 +169,7 @@ export function parseTextToolCalls(
 
 	// Deduplicate by name+arguments
 	const seen = new Set<string>();
-	return calls.filter((call) => {
+	return calls.filter(call => {
 		if (isKnownTool && !isKnownTool(call.name)) return false;
 		const key = `${call.name}:${call.arguments}`;
 		if (seen.has(key)) return false;
@@ -194,10 +194,7 @@ export function stripTextToolCalls(content: string): string {
 		"",
 	);
 	// 3. Remove function-call style tool calls: tool_name(arg1=value1, ...)
-	stripped = stripped.replace(
-		/[a-zA-Z_][\w.-]*\s*\([^)]+\)/g,
-		"",
-	);
+	stripped = stripped.replace(/[a-zA-Z_][\w.-]*\s*\([^)]+\)/g, "");
 	// 4. Strip stray single-line markers left after steps 1-3:
 	//    - Angle-bracket tags like <ny>, </ny>, <tool_call>, </tool_call>
 	//    - Garbled closing tags rendered as standalone lines

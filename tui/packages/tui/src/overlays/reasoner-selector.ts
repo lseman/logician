@@ -2,7 +2,7 @@
 // Overlay for selecting an active reasoning mode.
 // Reasoner selection applies to the next turn (never mutates an in-flight run).
 
-import { ListSelectorOverlay, type ListItem } from "./popup-utils.ts";
+import { type ListItem, ListSelectorOverlay } from "./popup-utils.ts";
 
 export interface ReasonerInfo {
 	id: string;
@@ -37,6 +37,8 @@ export class ReasonerSelectorOverlay extends ListSelectorOverlay<ReasonerInfo> {
 	handleInput(data: string): ReasonerSelectorAction | null {
 		const action = this.handleListInput(data);
 		if (!action) return null;
-		return action.type === "select" ? { type: "select", reasoner: action.item } : action;
+		return action.type === "select"
+			? { type: "select", reasoner: action.item }
+			: action;
 	}
 }

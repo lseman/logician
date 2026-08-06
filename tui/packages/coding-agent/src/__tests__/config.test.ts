@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
-	validateConfig,
-	loadLogicianConfig,
-	findLogicianConfig,
-	configString,
-	configNumber,
 	configBool,
+	configNumber,
+	configString,
+	findLogicianConfig,
+	loadLogicianConfig,
 	saveConfigField,
+	validateConfig,
 } from "../configuration/config.ts";
 
 // ── validateConfig ───────────────────────────────────────────────────────
@@ -34,7 +40,7 @@ void test("validateConfig warns on unknown top-level keys but keeps known ones",
 	const warnings: string[] = [];
 	const cfg = validateConfig({ model: "gpt", bogusKey: 1 }, warnings);
 	assert.equal(cfg.model, "gpt");
-	assert.ok(warnings.some((w) => w.includes("Unknown config key: \"bogusKey\"")));
+	assert.ok(warnings.some(w => w.includes('Unknown config key: "bogusKey"')));
 });
 
 void test("validateConfig accepts valid baseUrl and llmUrl", () => {
@@ -52,7 +58,9 @@ void test("validateConfig rejects an invalid baseUrl", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ baseUrl: "not-a-url" }, warnings);
 	assert.equal(cfg.baseUrl, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"baseUrl\" must be a valid http/https URL")));
+	assert.ok(
+		warnings.some(w => w.includes('"baseUrl" must be a valid http/https URL')),
+	);
 });
 
 void test("validateConfig parses legacy string entries and object entries in models", () => {
@@ -72,14 +80,14 @@ void test("validateConfig parses legacy string entries and object entries in mod
 		{ name: "legacy-model", model: "legacy-model" },
 		{ name: "Named", model: "named-model", url: "http://x" },
 	]);
-	assert.ok(warnings.some((w) => w.includes("\"models\" entry invalid")));
+	assert.ok(warnings.some(w => w.includes('"models" entry invalid')));
 });
 
 void test("validateConfig clamps out-of-range temperature and warns", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ temperature: 5 }, warnings);
 	assert.equal(cfg.temperature, 2);
-	assert.ok(warnings.some((w) => w.includes("\"temperature\" out of range")));
+	assert.ok(warnings.some(w => w.includes('"temperature" out of range')));
 });
 
 void test("validateConfig accepts in-range temperature without warning", () => {
@@ -127,7 +135,7 @@ void test("validateConfig rejects invalid toolExecution enum", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ toolExecution: "bogus" }, warnings);
 	assert.equal(cfg.toolExecution, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"toolExecution\" must be")));
+	assert.ok(warnings.some(w => w.includes('"toolExecution" must be')));
 });
 
 void test("validateConfig accepts valid toolExecution and permissionMode", () => {
@@ -145,7 +153,7 @@ void test("validateConfig rejects invalid inferenceMode", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ inferenceMode: "bogus-mode" }, warnings);
 	assert.equal(cfg.inferenceMode, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"inferenceMode\" must be one of")));
+	assert.ok(warnings.some(w => w.includes('"inferenceMode" must be one of')));
 });
 
 void test("validateConfig accepts every inference preset", () => {
@@ -180,8 +188,9 @@ void test("validateConfig accepts execution profiles and rejects unknown profile
 	);
 	assert.equal(invalid.executionProfile, undefined);
 	assert.ok(
-		invalidWarnings.some((warning) =>
-			warning.includes("\"executionProfile\" must be one of")),
+		invalidWarnings.some(warning =>
+			warning.includes('"executionProfile" must be one of'),
+		),
 	);
 });
 
@@ -229,14 +238,17 @@ void test("validateConfig rejects relative allowedPaths but keeps absolute ones"
 		warnings,
 	);
 	assert.deepEqual(cfg.allowedPaths, ["/abs/path"]);
-	assert.ok(warnings.some((w) => w.includes("must be an absolute path")));
+	assert.ok(warnings.some(w => w.includes("must be an absolute path")));
 });
 
 void test("validateConfig rejects a cwd that does not exist", () => {
 	const warnings: string[] = [];
-	const cfg = validateConfig({ cwd: "/definitely/does/not/exist/xyz" }, warnings);
+	const cfg = validateConfig(
+		{ cwd: "/definitely/does/not/exist/xyz" },
+		warnings,
+	);
 	assert.equal(cfg.cwd, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"cwd\" path does not exist")));
+	assert.ok(warnings.some(w => w.includes('"cwd" path does not exist')));
 });
 
 void test("validateConfig accepts an existing cwd, resolved to an absolute path", () => {
@@ -255,7 +267,11 @@ void test("validateConfig parses lsp sub-object and warns on unknown lsp keys", 
 				timeoutMs: 5000,
 				bogus: 1,
 				serverOverrides: {
-					ts: { command: "tsserver", args: ["--stdio"], languageId: "typescript" },
+					ts: {
+						command: "tsserver",
+						args: ["--stdio"],
+						languageId: "typescript",
+					},
 					bad: { command: "" },
 				},
 			},
@@ -270,8 +286,8 @@ void test("validateConfig parses lsp sub-object and warns on unknown lsp keys", 
 		languageId: "typescript",
 	});
 	assert.equal(cfg.lsp?.serverOverrides?.bad, undefined);
-	assert.ok(warnings.some((w) => w.includes("Unknown lsp key: \"bogus\"")));
-	assert.ok(warnings.some((w) => w.includes("command")));
+	assert.ok(warnings.some(w => w.includes('Unknown lsp key: "bogus"')));
+	assert.ok(warnings.some(w => w.includes("command")));
 });
 
 void test("validateConfig parses compaction sub-object with positive-only numeric fields", () => {
@@ -301,8 +317,14 @@ void test("validateConfig parses truncation sub-object including nested microCom
 	assert.equal(cfg.truncation?.maxLines, undefined);
 	assert.equal(cfg.truncation?.microCompactMaxChars?.tool, 100);
 	assert.equal(cfg.truncation?.microCompactMaxChars?.assistant, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"truncation.maxLines\" must be > 0")));
-	assert.ok(warnings.some((w) => w.includes("Unknown truncation.microCompactMaxChars key")));
+	assert.ok(
+		warnings.some(w => w.includes('"truncation.maxLines" must be > 0')),
+	);
+	assert.ok(
+		warnings.some(w =>
+			w.includes("Unknown truncation.microCompactMaxChars key"),
+		),
+	);
 });
 
 void test("validateConfig passes through mcp/mcpServers objects and rejects non-object plugins", () => {
@@ -318,7 +340,7 @@ void test("validateConfig passes through mcp/mcpServers objects and rejects non-
 	assert.deepEqual(cfg.mcp, { foo: "bar" });
 	assert.deepEqual(cfg.mcpServers, { srv: {} });
 	assert.equal(cfg.plugins, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"plugins\" must be an object")));
+	assert.ok(warnings.some(w => w.includes('"plugins" must be an object')));
 });
 
 void test("validateConfig validates webSearch.baseUrl and clamps maxResults range", () => {
@@ -329,15 +351,23 @@ void test("validateConfig validates webSearch.baseUrl and clamps maxResults rang
 	);
 	assert.equal(cfg.webSearch?.baseUrl, undefined);
 	assert.equal(cfg.webSearch?.maxResults, undefined);
-	assert.ok(warnings.some((w) => w.includes("\"webSearch.baseUrl\" must be a valid")));
-	assert.ok(warnings.some((w) => w.includes("\"webSearch.maxResults\" must be 1")));
+	assert.ok(
+		warnings.some(w => w.includes('"webSearch.baseUrl" must be a valid')),
+	);
+	assert.ok(warnings.some(w => w.includes('"webSearch.maxResults" must be 1')));
 });
 
 void test("validateConfig accepts a dedicated memory extractor endpoint", () => {
 	const warnings: string[] = [];
-	const cfg = validateConfig({
-		memoryExtractor: { baseUrl: "http://127.0.0.1:8081", model: "small-extractor" },
-	}, warnings);
+	const cfg = validateConfig(
+		{
+			memoryExtractor: {
+				baseUrl: "http://127.0.0.1:8081",
+				model: "small-extractor",
+			},
+		},
+		warnings,
+	);
 	assert.deepEqual(cfg.memoryExtractor, {
 		baseUrl: "http://127.0.0.1:8081",
 		model: "small-extractor",
@@ -347,10 +377,15 @@ void test("validateConfig accepts a dedicated memory extractor endpoint", () => 
 
 void test("validateConfig rejects an invalid memory extractor endpoint", () => {
 	const warnings: string[] = [];
-	const cfg = validateConfig({ memoryExtractor: { baseUrl: "not-a-url", model: "small" } }, warnings);
+	const cfg = validateConfig(
+		{ memoryExtractor: { baseUrl: "not-a-url", model: "small" } },
+		warnings,
+	);
 	assert.equal(cfg.memoryExtractor?.baseUrl, undefined);
 	assert.equal(cfg.memoryExtractor?.model, "small");
-	assert.ok(warnings.some((warning) => warning.includes("memoryExtractor.baseUrl")));
+	assert.ok(
+		warnings.some(warning => warning.includes("memoryExtractor.baseUrl")),
+	);
 });
 
 void test("validateConfig filters non-string entries from permissions.allow/deny", () => {
@@ -516,10 +551,7 @@ void test("saveConfigField writes a field to ~/.logician/settings.json, creating
 		const ok = saveConfigField("theme", "dark");
 		assert.equal(ok, true);
 		const written = JSON.parse(
-			readFileSync(
-				path.join(fakeHome, ".logician", "settings.json"),
-				"utf8",
-			),
+			readFileSync(path.join(fakeHome, ".logician", "settings.json"), "utf8"),
 		);
 		assert.equal(written.theme, "dark");
 	} finally {
@@ -543,10 +575,7 @@ void test("saveConfigField merges into an existing settings file instead of over
 	try {
 		saveConfigField("theme", "light");
 		const written = JSON.parse(
-			readFileSync(
-				path.join(settingsDir, "settings.json"),
-				"utf8",
-			),
+			readFileSync(path.join(settingsDir, "settings.json"), "utf8"),
 		);
 		assert.equal(written.existing, "value");
 		assert.equal(written.theme, "light");

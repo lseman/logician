@@ -3,7 +3,10 @@
 
 import * as fs from "node:fs";
 import type { Tool } from "@logician/agent-core/agent/types.ts";
-import { ensureInsideCwd, resolveReadPath } from "@logician/agent-core/tools/shared/path-utils.ts";
+import {
+	ensureInsideCwd,
+	resolveReadPath,
+} from "@logician/agent-core/tools/shared/path-utils.ts";
 import { recordRead } from "./read-tracker.ts";
 import {
 	DEFAULT_MAX_BYTES,
@@ -24,7 +27,9 @@ export const read_file: Tool = {
 		`${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files; ` +
 		"continue with offset until complete.",
 	promptSnippet: "Read file contents with line numbers and truncation support",
-	promptGuidelines: ["Use read_file to read files; use bash cat for quick checks"],
+	promptGuidelines: [
+		"Use read_file to read files; use bash cat for quick checks",
+	],
 	parameters: {
 		type: "object",
 		properties: {

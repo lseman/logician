@@ -4,13 +4,13 @@
 // resolver keyed by id, emit a *_request event, and let respondToX() resolve
 // it later from the UI. Extracted from agent-bridge.ts.
 
+import type { AgentConfig } from "@logician/agent-core";
+import type { AskUserContext } from "@logician/agent-core/agent/types/types-tools.ts";
 import {
 	PermissionManager,
 	type PermissionMode,
 	type PermissionRules,
 } from "@logician/agent-core/tools/shared/permissions.ts";
-import type { AgentConfig } from "@logician/agent-core";
-import type { AskUserContext } from "@logician/agent-core/agent/types/types-tools.ts";
 import type { ParsedBridgeEvent } from "../runtime/events.ts";
 
 export interface InteractionCoordinatorDeps {
@@ -49,8 +49,8 @@ export class InteractionCoordinator {
 		"onPermissionRequest" | "onQuestionRequest"
 	> {
 		return {
-			onPermissionRequest: (ctx) =>
-				new Promise((resolve) => {
+			onPermissionRequest: ctx =>
+				new Promise(resolve => {
 					this.permissionResolvers.set(ctx.toolCallId, resolve);
 					this.emit({
 						type: "permission_request",
@@ -60,7 +60,7 @@ export class InteractionCoordinator {
 					});
 				}),
 			onQuestionRequest: (ctx: AskUserContext) =>
-				new Promise<string>((resolve) => {
+				new Promise<string>(resolve => {
 					const questionId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 					this.questionResolvers.set(questionId, {
 						allow: resolve,

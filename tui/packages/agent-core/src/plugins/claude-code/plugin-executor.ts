@@ -108,14 +108,18 @@ export async function mergeManifestHooks(
 	}
 	mergeHooks(merged, parseHooksDict(hooks));
 	try {
-		const hookJson = await readJson(path.join(pluginDir, "hooks", "hooks.json"));
+		const hookJson = await readJson(
+			path.join(pluginDir, "hooks", "hooks.json"),
+		);
 		mergeHooks(merged, parseHooksDict(hookJson.hooks || hookJson));
 	} catch (_e: unknown) {
 		// No hooks directory — that's fine.
 	}
 }
 
-export function parseHooksDict(data: unknown): Record<string, HookDefinition[]> {
+export function parseHooksDict(
+	data: unknown,
+): Record<string, HookDefinition[]> {
 	if (!data || typeof data !== "object" || Array.isArray(data)) return {};
 	const out: Record<string, HookDefinition[]> = {};
 	for (const [eventName, entries] of Object.entries(
@@ -134,7 +138,7 @@ export function parseHooksDict(data: unknown): Record<string, HookDefinition[]> 
 								typeof item === "object" &&
 								!Array.isArray(item),
 						)
-						.map((item) => ({
+						.map(item => ({
 							type: hookType(String(item.type || "command")),
 							command: stringOrUndefined(item.command),
 							prompt: stringOrUndefined(item.prompt),
@@ -306,7 +310,8 @@ export function applyHookResponseObject(
 			result.decision = decision;
 			if (typeof hookSpecific.reason === "string") {
 				result.reason = hookSpecific.reason;
-				if (decision === "block") result.additional_contexts.push(hookSpecific.reason);
+				if (decision === "block")
+					result.additional_contexts.push(hookSpecific.reason);
 			}
 		}
 		return;
@@ -325,7 +330,8 @@ export function applyHookResponseObject(
 		result.decision = data.decision;
 		if (typeof data.reason === "string") {
 			result.reason = data.reason;
-			if (data.decision === "block") result.additional_contexts.push(data.reason);
+			if (data.decision === "block")
+				result.additional_contexts.push(data.reason);
 		}
 	}
 	if (
@@ -404,10 +410,17 @@ export function buildHookInput(
 export function parseHookEventType(value: string): HookEventType | null {
 	const clean = value.trim().toLowerCase();
 	const events: HookEventType[] = [
-		"SessionStart", "SessionEnd", "Stop", "UserPromptSubmit",
-		"PreToolUse", "PostToolUse", "PostToolUseFailure", "PreCompact", "PostCompact",
+		"SessionStart",
+		"SessionEnd",
+		"Stop",
+		"UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"PostToolUseFailure",
+		"PreCompact",
+		"PostCompact",
 	];
-	return events.find((event) => event.toLowerCase() === clean) || null;
+	return events.find(event => event.toLowerCase() === clean) || null;
 }
 
 export function mergeHooks(
@@ -462,7 +475,7 @@ export function withHookMetadata(
 ): HookExecutionResult | null {
 	if (!result) return null;
 	if (!result.context_messages.length && result.additional_contexts.length) {
-		result.context_messages = result.additional_contexts.map((content) => ({
+		result.context_messages = result.additional_contexts.map(content => ({
 			plugin_id: hook.pluginId,
 			plugin_name: hook.pluginName,
 			matcher: hook.definition.matcher || "",
@@ -480,24 +493,24 @@ export function matcherMatches(
 	const clean = pattern.trim();
 	const sourceClean = source.trim();
 	if (clean === "*" || !sourceClean) return true;
-	const sourceParts = sourceClean.split("|").map((s) => s.trim());
+	const sourceParts = sourceClean.split("|").map(s => s.trim());
 	try {
 		const regex = new RegExp(clean, "i");
 		if (regex.test(sourceClean)) return true;
-		if (sourceParts.some((part) => regex.test(part))) return true;
+		if (sourceParts.some(part => regex.test(part))) return true;
 	} catch (_e: unknown) {
 		// Fall back to legacy substring matching.
 	}
 	const lowerSource = sourceClean.toLowerCase();
 	return clean
 		.split("|")
-		.map((p) => p.trim())
+		.map(p => p.trim())
 		.some(
-			(p) =>
+			p =>
 				p === "*" ||
 				lowerSource
 					.split("|")
-					.map((s) => s.trim())
+					.map(s => s.trim())
 					.includes(p.toLowerCase()) ||
 				lowerSource.includes(p.toLowerCase()),
 		);
@@ -523,26 +536,29 @@ export function runShellCommand(
 		});
 		let stdout = "";
 		let stderr = "";
-		const timer = setTimeout(() => {
-			child.kill("SIGTERM");
-			reject(new Error("hook command timed out"));
-		}, Math.max(1, options.timeoutMs));
+		const timer = setTimeout(
+			() => {
+				child.kill("SIGTERM");
+				reject(new Error("hook command timed out"));
+			},
+			Math.max(1, options.timeoutMs),
+		);
 
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
-		child.stdout.on("data", (chunk) => {
+		child.stdout.on("data", chunk => {
 			stdout += chunk;
 			if (stdout.length > 1024 * 1024) stdout = stdout.slice(-1024 * 1024);
 		});
-		child.stderr.on("data", (chunk) => {
+		child.stderr.on("data", chunk => {
 			stderr += chunk;
 			if (stderr.length > 1024 * 1024) stderr = stderr.slice(-1024 * 1024);
 		});
-		child.on("error", (error) => {
+		child.on("error", error => {
 			clearTimeout(timer);
 			reject(error);
 		});
-		child.on("close", (code) => {
+		child.on("close", code => {
 			clearTimeout(timer);
 			resolve({ stdout, stderr, code });
 		});
@@ -557,7 +573,10 @@ export function resolvePluginsDir(): string {
 	if (override)
 		return path.resolve(os.homedir(), override.replace(/^~(?=$|\/)/, ""));
 	const openclaude = path.join(
-		os.homedir(), ".claude", "openclaude", "plugins",
+		os.homedir(),
+		".claude",
+		"openclaude",
+		"plugins",
 	);
 	if (existsSync(openclaude)) return openclaude;
 	return path.join(os.homedir(), ".claude", "plugins");
@@ -576,13 +595,12 @@ export function normalizeInstall(
 		enabled: (install.enabled as boolean) !== false,
 		projectPath: (install.projectPath as string) || "",
 		dependencies: Array.isArray(install.dependencies)
-			? install.dependencies : [],
+			? install.dependencies
+			: [],
 	};
 }
 
-export async function readJson(
-	file: string,
-): Promise<Record<string, unknown>> {
+export async function readJson(file: string): Promise<Record<string, unknown>> {
 	try {
 		const content = await fs.readFile(file, "utf8");
 		const stripped = stripJsonComments(content);
@@ -604,8 +622,8 @@ export async function isDir(p: string): Promise<boolean> {
 export async function childDirNames(dir: string): Promise<string[]> {
 	try {
 		return (await fs.readdir(dir, { withFileTypes: true }))
-			.filter((d) => d.isDirectory())
-			.map((d) => d.name)
+			.filter(d => d.isDirectory())
+			.map(d => d.name)
 			.sort();
 	} catch (_e: unknown) {
 		return [];
@@ -621,7 +639,9 @@ export async function markdownNames(dir: string): Promise<string[]> {
 				if (entry.isDirectory()) await walk(full);
 				else if (entry.name.endsWith(".md")) out.push(path.relative(dir, full));
 			}
-		} catch { /* no-op */ }
+		} catch {
+			/* no-op */
+		}
 	}
 	await walk(dir);
 	return out.sort();
@@ -634,11 +654,16 @@ export async function findPluginManifest(root: string): Promise<string | null> {
 		for (const entry of await fs.readdir(root, { withFileTypes: true })) {
 			if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 			const nested = path.join(
-				root, entry.name, ".claude-plugin", "plugin.json",
+				root,
+				entry.name,
+				".claude-plugin",
+				"plugin.json",
 			);
 			if (await fileExists(nested)) return nested;
 		}
-	} catch { /* no-op */ }
+	} catch {
+		/* no-op */
+	}
 	return null;
 }
 
@@ -657,7 +682,8 @@ export async function pluginNameFor(
 ): Promise<string> {
 	const manifest = await readPluginManifest(pluginDir);
 	return typeof manifest.name === "string" && manifest.name
-		? manifest.name : pluginId.split("@")[0];
+		? manifest.name
+		: pluginId.split("@")[0];
 }
 
 export async function gitHead(cwd: string): Promise<string> {
@@ -666,7 +692,8 @@ export async function gitHead(cwd: string): Promise<string> {
 	const execFileAsync = promisify(execFile);
 	try {
 		const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-			cwd, timeout: 10_000,
+			cwd,
+			timeout: 10_000,
 		});
 		const sha = String(stdout).trim();
 		return /^[a-f0-9]{40}$/i.test(sha) ? sha : "";
@@ -691,7 +718,8 @@ export async function copyDir(src: string, dst: string): Promise<void> {
 
 export function hookType(value: string): HookCommand["type"] {
 	return value === "prompt" || value === "agent" || value === "http"
-		? value : "command";
+		? value
+		: "command";
 }
 
 export function stringOrUndefined(value: unknown): string | undefined {

@@ -43,9 +43,10 @@ void test("selects a specialist from routing metadata", () => {
 		[debugging, review],
 		"Please review this TypeScript service for correctness.",
 	);
-	assert.deepEqual(result.map(({ skill: selected }) => selected.name), [
-		"typescript-code-review",
-	]);
+	assert.deepEqual(
+		result.map(({ skill: selected }) => selected.name),
+		["typescript-code-review"],
+	);
 	assert.match(result[0].reason, /matched|relevant/);
 });
 
@@ -59,8 +60,8 @@ void test("explicit skill references force activation", () => {
 		"ariadne",
 	);
 	assert.equal(
-		selectSkillsForPrompt([other, ariadne], "Run /ariadne for this.")[0]
-			.skill.name,
+		selectSkillsForPrompt([other, ariadne], "Run /ariadne for this.")[0].skill
+			.name,
 		"ariadne",
 	);
 });
@@ -86,7 +87,10 @@ void test("hidden and contraindicated skills do not auto-activate", () => {
 
 void test("does not activate on weak generic overlap", () => {
 	const skillList = [
-		skill("ariadne", "Use for review, context, graph traversal, and code analysis."),
+		skill(
+			"ariadne",
+			"Use for review, context, graph traversal, and code analysis.",
+		),
 		skill("typescript-router", "Route TypeScript tasks to engineering skills."),
 	];
 	assert.deepEqual(
@@ -112,9 +116,10 @@ void test("fuzzy matches misspelled skill routing metadata", () => {
 		"Please help with this Typescrpit debuging failure.",
 	);
 
-	assert.deepEqual(result.map(({ skill: selected }) => selected.name), [
-		"typescript-debugging",
-	]);
+	assert.deepEqual(
+		result.map(({ skill: selected }) => selected.name),
+		["typescript-debugging"],
+	);
 	assert.match(result[0].reason, /fuzzy matched.*\d+%/);
 });
 
@@ -130,9 +135,10 @@ void test("fuzzy matching tolerates stems, not just typos", () => {
 		"Help me with TypeScript debugging please.",
 	);
 
-	assert.deepEqual(result.map(({ skill: selected }) => selected.name), [
-		"typescript-debugging",
-	]);
+	assert.deepEqual(
+		result.map(({ skill: selected }) => selected.name),
+		["typescript-debugging"],
+	);
 });
 
 void test("fuzzy matching rejects unrelated routing metadata", () => {
@@ -160,9 +166,13 @@ void test("formats full selected skill bodies for the turn", () => {
 });
 
 void test("formats concise human-facing activation reasons", () => {
-	const selected = skill("typescript-debugging", "Diagnose TypeScript errors.", {
-		displayName: "TypeScript Debugging",
-	});
+	const selected = skill(
+		"typescript-debugging",
+		"Diagnose TypeScript errors.",
+		{
+			displayName: "TypeScript Debugging",
+		},
+	);
 	assert.equal(
 		formatSkillActivationNotice([
 			{ skill: selected, score: 20, reason: "matched “TypeScript error”" },
@@ -183,9 +193,13 @@ void test("formats concise human-facing activation reasons", () => {
 });
 
 void test("continued activations are identified as continued", () => {
-	const selected = skill("typescript-debugging", "Diagnose TypeScript errors.", {
-		triggers: ["TypeScript error"],
-	});
+	const selected = skill(
+		"typescript-debugging",
+		"Diagnose TypeScript errors.",
+		{
+			triggers: ["TypeScript error"],
+		},
+	);
 	const session = new SkillActivationSession();
 	const initial = session.select([selected], "Diagnose this TypeScript error.");
 	session.continueWith(initial);

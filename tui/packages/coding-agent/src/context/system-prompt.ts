@@ -51,13 +51,13 @@ function formatSkillsForPrompt(skills: Skill[]): string {
 	for (const skill of skills) {
 		lines.push(
 			`\n<skill>\n  <name>${skill.name}</name>\n` +
-			(skill.description
-				? `  <description>${skill.description}</description>\n`
-				: "") +
-			`  <prompt>${skill.content}</prompt>\n</skill>`,
+				(skill.description
+					? `  <description>${skill.description}</description>\n`
+					: "") +
+				`  <prompt>${skill.content}</prompt>\n</skill>`,
 		);
 	}
-	return lines.join("\n") + "\n";
+	return `${lines.join("\n")}\n`;
 }
 
 // ============================================================================
@@ -93,18 +93,16 @@ function buildWebWorkflow(hasSearch: boolean, hasFetch: boolean): string[] {
 }
 
 function buildMcpWorkflow(tools: Tool[]): string[] {
-	const mcpTools = tools.filter((tool) => tool.label?.startsWith("MCP:"));
+	const mcpTools = tools.filter(tool => tool.label?.startsWith("MCP:"));
 	if (mcpTools.length === 0) return [];
 
-	const toolNames = mcpTools.map((tool) => tool.name);
+	const toolNames = mcpTools.map(tool => tool.name);
 	const matchesCapability = (tool: Tool, pattern: RegExp): boolean =>
-		pattern.test(
-			`${tool.name} ${tool.label ?? ""} ${tool.description ?? ""}`,
-		);
+		pattern.test(`${tool.name} ${tool.label ?? ""} ${tool.description ?? ""}`);
 	const toolsFor = (pattern: RegExp): string[] =>
 		mcpTools
-			.filter((tool) => matchesCapability(tool, pattern))
-			.map((tool) => tool.name);
+			.filter(tool => matchesCapability(tool, pattern))
+			.map(tool => tool.name);
 	const contentSearchTools = toolsFor(
 		/(?:^|[_\s-])(?:grep|search|search_code|search_text|find_text)(?:$|[_\s-])/i,
 	);
@@ -114,12 +112,12 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 	const executionTools = toolsFor(
 		/(?:ctx_execute|execute|run_command|shell|command)/i,
 	);
-	const repositoryTools = mcpTools.filter((tool) =>
+	const repositoryTools = mcpTools.filter(tool =>
 		/(?:ctx|context|repository|codebase|search|query|execute|command|diff)/i.test(
 			`${tool.name} ${tool.label ?? ""} ${tool.description ?? ""}`,
 		),
 	);
-	const repositoryToolNames = repositoryTools.map((tool) => tool.name);
+	const repositoryToolNames = repositoryTools.map(tool => tool.name);
 
 	return [
 		"",
@@ -127,18 +125,26 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 		`- MCP tools available: ${toolNames.join(", ")}.`,
 		"- Prefer the specialized MCP tool over grep/find/bash/git/web when it covers the same capability with server-owned context.",
 		...(contentSearchTools.length > 0
-			? [`- Content/symbol search: ${contentSearchTools.join(", ")} before local grep.`]
+			? [
+					`- Content/symbol search: ${contentSearchTools.join(", ")} before local grep.`,
+				]
 			: []),
 		...(fileDiscoveryTools.length > 0
-			? [`- File discovery: ${fileDiscoveryTools.join(", ")} before local find/ls.`]
+			? [
+					`- File discovery: ${fileDiscoveryTools.join(", ")} before local find/ls.`,
+				]
 			: []),
 		...(executionTools.length > 0
 			? [`- Large-output commands: ${executionTools.join(", ")} before bash.`]
 			: []),
 		...(repositoryToolNames.length > 0 &&
 		repositoryToolNames.length !==
-			contentSearchTools.length + fileDiscoveryTools.length + executionTools.length
-			? [`- Other repository work: prefer ${repositoryToolNames.join(", ")} over raw local tools when applicable.`]
+			contentSearchTools.length +
+				fileDiscoveryTools.length +
+				executionTools.length
+			? [
+					`- Other repository work: prefer ${repositoryToolNames.join(", ")} over raw local tools when applicable.`,
+				]
 			: []),
 		"- Fall back to local/web tools only when no MCP tool covers it, the MCP result is insufficient, or the work is strictly local.",
 	];
@@ -150,10 +156,10 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 
 function buildGuidelines(options: BuildSystemPromptOptions): string[] {
 	const tools = options.selectedTools ?? [];
-	const hasBash = tools.some((t) => t.name === "bash");
-	const hasGrep = tools.some((t) => t.name === "grep");
-	const hasFind = tools.some((t) => t.name === "find");
-	const hasLs = tools.some((t) => t.name === "list_files");
+	const hasBash = tools.some(t => t.name === "bash");
+	const hasGrep = tools.some(t => t.name === "grep");
+	const hasFind = tools.some(t => t.name === "find");
+	const hasLs = tools.some(t => t.name === "list_files");
 	// hasRead = tools.some((t) => t.name === "read_file");
 
 	const guidelines: string[] = [];
@@ -221,12 +227,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	// Build the tool list
 	const tools = selectedTools ?? [];
-	const visibleTools = tools.filter((t) => toolSnippets?.[t.name]);
+	const visibleTools = tools.filter(t => toolSnippets?.[t.name]);
 	const toolsList =
 		visibleTools.length > 0
 			? visibleTools
-				.map((t) => `- ${t.name}: ${toolSnippets?.[t.name] ?? "?"}`)
-				.join("\n")
+					.map(t => `- ${t.name}: ${toolSnippets?.[t.name] ?? "?"}`)
+					.join("\n")
 			: "(none)";
 
 	// Build guidelines
@@ -239,13 +245,13 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			if (!guidelinesList.includes(guideline)) guidelinesList.push(guideline);
 		}
 	}
-	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
+	const guidelines = guidelinesList.map(g => `- ${g}`).join("\n");
 
 	const mcpWorkflow = buildMcpWorkflow(tools);
 
 	// Web workflow (logician extension)
-	const hasWebSearch = tools.some((t) => t.name === "web_search");
-	const hasWebFetch = tools.some((t) => t.name === "web_fetch");
+	const hasWebSearch = tools.some(t => t.name === "web_search");
+	const hasWebFetch = tools.some(t => t.name === "web_fetch");
 	const webWorkflow = buildWebWorkflow(hasWebSearch, hasWebFetch);
 
 	// Append section (custom or guidelines)
@@ -277,7 +283,8 @@ Workflow:
 - Keep changes scoped to the request. Never use destructive git operations (reset --hard, checkout --, deletions) unless explicitly asked.${webSection}`;
 
 	// Custom prompt overrides everything
-	const resolvedCustomPrompt = customPrompt ?? loadedContext.systemFile?.content;
+	const resolvedCustomPrompt =
+		customPrompt ?? loadedContext.systemFile?.content;
 	if (resolvedCustomPrompt) {
 		prompt = resolvedCustomPrompt;
 	}
@@ -297,7 +304,7 @@ Workflow:
 
 	// Append skills section (only if read tool is available)
 	if (
-		tools.some((t) => t.name === "read_file") &&
+		tools.some(t => t.name === "read_file") &&
 		providedSkills &&
 		providedSkills.length > 0
 	) {
@@ -318,7 +325,10 @@ Workflow:
 export function buildDefaultSystemPrompt(
 	cwd: string,
 	tools: Tool[],
-	options: Pick<BuildSystemPromptOptions, "agentDir" | "loadProjectContext"> = {},
+	options: Pick<
+		BuildSystemPromptOptions,
+		"agentDir" | "loadProjectContext"
+	> = {},
 ): string {
 	const snippets: Record<string, string> = {};
 	const guidelines: Record<string, string[]> = {};

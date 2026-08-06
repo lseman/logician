@@ -331,7 +331,7 @@
 
     function loadFromText(text) {
       const parsed = parseAutoresearchText(text);
-      if (!parsed.ok) return setMetaMessage('Invalid embedded data: ' + parsed.error, true);
+      if (!parsed.ok) return setMetaMessage(`Invalid embedded data: ${parsed.error}`, true);
 
       lastDataText = text;
       applyParsedData(parsed.config, parsed.runs);
@@ -499,14 +499,14 @@
     function renderHeader() {
       setText('title', session.config.name);
       setText('metric-header', session.config.metricName);
-      setMetaMessage('metric: ' + session.config.metricName + ' · ' + session.direction + ' is better', false);
+      setMetaMessage(`metric: ${session.config.metricName} · ${session.direction} is better`, false);
     }
 
     function renderCards() {
-      setText('baseline-best', formatMetric(session.baseline) + ' → ' + formatBestMetric());
+      setText('baseline-best', `${formatMetric(session.baseline)} → ${formatBestMetric()}`);
       setText('improvement', formatImprovement());
       setText('run-count', String(session.runs.length));
-      setText('kept-count', countKept() + '/' + session.runs.length);
+      setText('kept-count', `${countKept()}/${session.runs.length}`);
     }
 
     function formatBestMetric() {
@@ -515,7 +515,7 @@
 
     function formatImprovement() {
       const pct = computeImprovementPercent(session.baseline, session.best, session.direction);
-      return pct == null ? '—' : pct.toFixed(1) + '%';
+      return pct == null ? '—' : `${pct.toFixed(1)}%`;
     }
 
     function countKept() {
@@ -529,12 +529,12 @@
     }
 
     function td(content, className) {
-      if (!className) return '<td>' + content + '</td>';
-      return '<td class="' + className + '">' + content + '</td>';
+      if (!className) return `<td>${content}</td>`;
+      return `<td class="${className}">${content}</td>`;
     }
 
     function runLabel(run, index) {
-      return '#' + (run.run || (index + 1));
+      return `#${run.run || (index + 1)}`;
     }
 
     function metricDisplay(run) {
@@ -544,7 +544,7 @@
 
     function deltaDisplay(run) {
       const delta = computeDeltaPercent(run.metric, session.baseline);
-      return { text: formatDelta(delta), className: 'mono delta ' + classifyDelta(delta, session.direction) };
+      return { text: formatDelta(delta), className: `mono delta ${classifyDelta(delta, session.direction)}` };
     }
 
     function asiField(run, field) {
@@ -774,7 +774,7 @@
     function endpointTangent(h0, h1, d0, d1) {
       const neighborSpan = h1 == null ? h0 : h1;
       const neighborSlope = d1 == null ? d0 : d1;
-      let tangent = ((2 * h0 + neighborSpan) * d0 - h0 * neighborSlope) / (h0 + neighborSpan);
+      const tangent = ((2 * h0 + neighborSpan) * d0 - h0 * neighborSlope) / (h0 + neighborSpan);
 
       if (Math.sign(tangent) !== Math.sign(d0)) return 0;
       if (Math.sign(d0) !== Math.sign(neighborSlope) && Math.abs(tangent) > Math.abs(3 * d0)) {
@@ -869,15 +869,15 @@
       if (left + TOOLTIP_WIDTH > chartState.geometry.canvasWidth - CHART_MARGINS.right) {
         left = point.x - TOOLTIP_WIDTH - TOOLTIP_OFFSET;
       }
-      tooltip.style.left = left + 'px';
-      tooltip.style.top = Math.max(8, point.y - 18) + 'px';
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${Math.max(8, point.y - 18)}px`;
     }
 
     function positionCrosshair(point) {
       const crosshair = document.getElementById('chart-crosshair');
-      crosshair.style.left = point.x + 'px';
-      crosshair.style.top = CHART_MARGINS.top + 'px';
-      crosshair.style.height = chartState.geometry.plotHeight + 'px';
+      crosshair.style.left = `${point.x}px`;
+      crosshair.style.top = `${CHART_MARGINS.top}px`;
+      crosshair.style.height = `${chartState.geometry.plotHeight}px`;
       crosshair.style.opacity = '1';
     }
 
@@ -911,16 +911,16 @@
     function tooltipDeltaLine(delta, label) {
       if (delta == null) return '';
       const cls = classifyDelta(delta, session.direction);
-      return '<div class="tt-delta ' + cls + '">' + formatDelta(delta) + ' ' + label + '</div>';
+      return `<div class="tt-delta ${cls}">${formatDelta(delta)} ${label}</div>`;
     }
 
     function tooltipStatus(run) {
-      return '<span class="tt-status ' + run.status + '">' + escapeHtml(run.status) + '</span>';
+      return `<span class="tt-status ${run.status}">${escapeHtml(run.status)}</span>`;
     }
 
     function tooltipDescription(run) {
       if (!run.description) return '';
-      return '<div class="tt-desc">' + escapeHtml(run.description) + '</div>';
+      return `<div class="tt-desc">${escapeHtml(run.description)}</div>`;
     }
 
     function findBestBeforeRun(runIndex) {
@@ -935,7 +935,7 @@
 
     function chooseTickStep(range) {
       const rough = range / 6;
-      const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(rough, 1e-9))));
+      const magnitude = 10 ** Math.floor(Math.log10(Math.max(rough, 1e-9)));
       const normalized = rough / magnitude;
       if (normalized <= 1) return magnitude;
       if (normalized <= 2) return 2 * magnitude;
@@ -944,7 +944,7 @@
     }
 
     function statusBadge(status) {
-      return '<span class="status ' + status + '">' + escapeHtml(status) + '</span>';
+      return `<span class="status ${status}">${escapeHtml(status)}</span>`;
     }
 
     function computeImprovementPercent(baseline, best, direction) {
@@ -968,7 +968,7 @@
     function formatDelta(delta) {
       if (delta == null) return '—';
       if (Math.abs(delta) < 0.05) return '0%';
-      return (delta > 0 ? '+' : '') + delta.toFixed(1) + '%';
+      return `${(delta > 0 ? '+' : '') + delta.toFixed(1)}%`;
     }
 
     function formatMetric(value) {
@@ -978,7 +978,7 @@
 
     function formatConfidence(confidence) {
       if (confidence == null || confidence === false) return '—';
-      if (typeof confidence === 'number') return confidence.toFixed(1) + '×';
+      if (typeof confidence === 'number') return `${confidence.toFixed(1)}×`;
       return String(confidence);
     }
 
@@ -1064,13 +1064,13 @@
       });
     }
 
-    async function downloadShareCard() {
+    async function _downloadShareCard() {
       await loadShareLogo();
       const canvas = createShareCanvas();
       renderShareCard(canvas);
 
       const link = document.createElement('a');
-      link.download = 'autoresearch-' + (session.config?.metricName || 'result') + '.png';
+      link.download = `autoresearch-${session.config?.metricName || 'result'}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
     }
@@ -1126,12 +1126,12 @@
       if (shareLogoImage) {
         const logoW = shareLogoImage.width * (logoH / shareLogoImage.height);
         ctx.drawImage(shareLogoImage, x, y - 8, logoW, logoH);
-        ctx.font = '800 ' + shareSettings.brandFont + 'px ' + SHARE_SANS;
+        ctx.font = `800 ${shareSettings.brandFont}px ${SHARE_SANS}`;
         ctx.fillStyle = '#fff';
         ctx.textBaseline = 'middle';
         ctx.fillText('pi-autoresearch', x + logoW + 14, y + logoH / 2 - 8);
       } else {
-        ctx.font = '800 ' + shareSettings.brandFont + 'px ' + SHARE_SANS;
+        ctx.font = `800 ${shareSettings.brandFont}px ${SHARE_SANS}`;
         ctx.fillStyle = '#fff';
         ctx.textBaseline = 'top';
         ctx.fillText('pi-autoresearch', x, y);
@@ -1154,7 +1154,7 @@
     }
 
     function shareDrawSessionName(ctx, anchor) {
-      ctx.font = '600 ' + shareSettings.titleSize + 'px ' + SHARE_SANS;
+      ctx.font = `600 ${shareSettings.titleSize}px ${SHARE_SANS}`;
       ctx.fillStyle = '#8b949e';
       ctx.textBaseline = 'top';
       ctx.fillText(session.config?.name || '', anchor.x, anchor.y);
@@ -1162,9 +1162,9 @@
     }
 
     function shareDrawMetricName(ctx, anchor, y) {
-      ctx.font = '700 ' + shareSettings.subtitleSize + 'px ' + SHARE_SANS;
+      ctx.font = `700 ${shareSettings.subtitleSize}px ${SHARE_SANS}`;
       ctx.fillStyle = '#58a6ff';
-      ctx.fillText('\u2605 ' + (session.config?.metricName || 'metric').toUpperCase(), anchor.x, y);
+      ctx.fillText(`\u2605 ${(session.config?.metricName || 'metric').toUpperCase()}`, anchor.x, y);
       return y + 50;
     }
 
@@ -1181,7 +1181,7 @@
 
     function shareDrawBaselineMetric(ctx, x, y, text) {
       ctx.textBaseline = 'alphabetic';
-      ctx.font = '800 ' + shareSettings.metricSize + 'px ' + SHARE_MONO;
+      ctx.font = `800 ${shareSettings.metricSize}px ${SHARE_MONO}`;
       ctx.fillStyle = '#8b949e';
       ctx.fillText(text, x, y);
     }
@@ -1189,14 +1189,14 @@
     function shareDrawMetricArrow(ctx, x, y, baselineText) {
       const baselineWidth = ctx.measureText(baselineText).width;
       const arrowX = x + baselineWidth + 20;
-      ctx.font = '700 ' + shareSettings.arrowSize + 'px ' + SHARE_SANS;
+      ctx.font = `700 ${shareSettings.arrowSize}px ${SHARE_SANS}`;
       ctx.fillStyle = '#8b949e';
       ctx.fillText('\u2192', arrowX, y);
       return arrowX + ctx.measureText('\u2192').width + 20;
     }
 
     function shareDrawBestMetric(ctx, x, y, text) {
-      ctx.font = '800 ' + shareSettings.metricSize + 'px ' + SHARE_MONO;
+      ctx.font = `800 ${shareSettings.metricSize}px ${SHARE_MONO}`;
       ctx.fillStyle = '#fff';
       const bestWidth = ctx.measureText(text).width;
       ctx.fillText(text, x, y);
@@ -1208,10 +1208,10 @@
       if (percent == null) return;
 
       const directionArrow = session.direction === 'lower' ? '\u2193' : '\u2191';
-      ctx.font = '800 ' + shareSettings.deltaSize + 'px ' + SHARE_MONO;
+      ctx.font = `800 ${shareSettings.deltaSize}px ${SHARE_MONO}`;
       ctx.fillStyle = percent > 0 ? '#3fb950' : '#f85149';
       ctx.fillText(
-        directionArrow + Math.abs(percent).toFixed(1) + '%',
+        `${directionArrow + Math.abs(percent).toFixed(1)}%`,
         layout.bestX + layout.bestWidth + 24,
         layout.baselineY
       );
@@ -1317,7 +1317,7 @@
     function shareEndpointTangent(h0, h1, d0, d1) {
       const fallbackH1 = h1 == null ? h0 : h1;
       const fallbackD1 = d1 == null ? d0 : d1;
-      let tangent = ((2 * h0 + fallbackH1) * d0 - h0 * fallbackD1) / (h0 + fallbackH1);
+      const tangent = ((2 * h0 + fallbackH1) * d0 - h0 * fallbackD1) / (h0 + fallbackH1);
 
       if (Math.sign(tangent) !== Math.sign(d0)) return 0;
       if (Math.sign(d0) !== Math.sign(fallbackD1) && Math.abs(tangent) > Math.abs(3 * d0)) {
@@ -1411,11 +1411,11 @@
       const spacing = (SHARE_W - pad.left - pad.right) / stats.length;
       let x = pad.left;
       stats.forEach(s => {
-        ctx.font = '700 ' + shareSettings.statsLabelSize + 'px ' + SHARE_SANS;
+        ctx.font = `700 ${shareSettings.statsLabelSize}px ${SHARE_SANS}`;
         ctx.fillStyle = '#8b949e';
         ctx.textBaseline = 'top';
         ctx.fillText(s.label, x, y);
-        ctx.font = '800 ' + shareSettings.statsValueSize + 'px ' + SHARE_MONO;
+        ctx.font = `800 ${shareSettings.statsValueSize}px ${SHARE_MONO}`;
         ctx.fillStyle = s.color;
         ctx.fillText(s.value, x, y + 28);
         x += spacing;

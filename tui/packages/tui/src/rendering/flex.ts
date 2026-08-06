@@ -6,8 +6,18 @@
 // (`StackLayoutNode.type: "vstack" | "hstack"`), so keeping "row" here costs
 // nothing and avoids re-deriving the algorithm if a row layout is needed.
 
-import { Container, compositeTuiLine, type Component, visibleWidth } from "../terminal/primitives.ts";
-import { LAYOUT_NODE, type LayoutViewport, type StackLayoutEntry, type StackLayoutNode } from "./layout-node.ts";
+import {
+	type Component,
+	Container,
+	compositeTuiLine,
+	visibleWidth,
+} from "../terminal/primitives.ts";
+import {
+	LAYOUT_NODE,
+	type LayoutViewport,
+	type StackLayoutEntry,
+	type StackLayoutNode,
+} from "./layout-node.ts";
 
 export interface FlexEntryOptions {
 	basis?: number | "auto";
@@ -35,7 +45,9 @@ function isFlexEntry(child: FlexChild): child is FlexEntry {
 }
 
 function normalizeSize(value: number | undefined, fallback: number): number {
-	return value === undefined || !Number.isFinite(value) ? fallback : Math.max(0, Math.floor(value));
+	return value === undefined || !Number.isFinite(value)
+		? fallback
+		: Math.max(0, Math.floor(value));
 }
 
 export class Flex extends Container {
@@ -55,22 +67,35 @@ export class Flex extends Container {
 		}
 	}
 
-	override addChild(component: Component, options: FlexEntryOptions = {}): void {
+	override addChild(
+		component: Component,
+		options: FlexEntryOptions = {},
+	): void {
 		super.addChild(component);
 		this.entries.push({
 			component,
 			...(options.basis === undefined ? {} : { basis: options.basis }),
-			...(options.grow === undefined ? {} : { grow: normalizeSize(options.grow, 0) }),
-			...(options.shrink === undefined ? {} : { shrink: normalizeSize(options.shrink, 1) }),
-			...(options.minSize === undefined ? {} : { minSize: normalizeSize(options.minSize, 0) }),
-			...(options.maxSize === undefined ? {} : { maxSize: normalizeSize(options.maxSize, Number.MAX_SAFE_INTEGER) }),
+			...(options.grow === undefined
+				? {}
+				: { grow: normalizeSize(options.grow, 0) }),
+			...(options.shrink === undefined
+				? {}
+				: { shrink: normalizeSize(options.shrink, 1) }),
+			...(options.minSize === undefined
+				? {}
+				: { minSize: normalizeSize(options.minSize, 0) }),
+			...(options.maxSize === undefined
+				? {}
+				: { maxSize: normalizeSize(options.maxSize, Number.MAX_SAFE_INTEGER) }),
 			...(options.visible === undefined ? {} : { visible: options.visible }),
 		});
 	}
 
 	override removeChild(component: Component): void {
 		super.removeChild(component);
-		const index = this.entries.findIndex((entry) => entry.component === component);
+		const index = this.entries.findIndex(
+			entry => entry.component === component,
+		);
 		if (index !== -1) this.entries.splice(index, 1);
 	}
 
@@ -89,16 +114,23 @@ export class Flex extends Container {
 	}
 
 	override render(width: number): string[] {
-		return this.direction === "column" ? this.renderColumn(width) : this.renderRow(width);
+		return this.direction === "column"
+			? this.renderColumn(width)
+			: this.renderRow(width);
 	}
 
 	private renderColumn(width: number): string[] {
-		const viewport = { width: Math.max(1, width), height: Number.MAX_SAFE_INTEGER };
+		const viewport = {
+			width: Math.max(1, width),
+			height: Number.MAX_SAFE_INTEGER,
+		};
 		const entries = visibleFlexEntries(this.entries, viewport);
-		const rendered = entries.map((entry) => entry.component.render(viewport.width));
+		const rendered = entries.map(entry =>
+			entry.component.render(viewport.width),
+		);
 		const sizes = allocateFlexSizes(
 			entries,
-			rendered.map((lines) => lines.length),
+			rendered.map(lines => lines.length),
 			undefined,
 			this.gap,
 		);
@@ -107,9 +139,10 @@ export class Flex extends Container {
 			if (index > 0) {
 				for (let gap = 0; gap < this.gap; gap++) lines.push("");
 			}
-			const childLines = rendered[index]!.slice(0, sizes[index]);
+			const childLines = rendered[index]?.slice(0, sizes[index]);
 			lines.push(...childLines);
-			for (let padding = childLines.length; padding < sizes[index]!; padding++) lines.push("");
+			for (let padding = childLines.length; padding < sizes[index]!; padding++)
+				lines.push("");
 		}
 		return lines;
 	}
@@ -120,27 +153,42 @@ export class Flex extends Container {
 		const entries = visibleFlexEntries(this.entries, viewport);
 		if (entries.length === 0) return [];
 
-		const intrinsicWidths = entries.map((entry) => {
+		const intrinsicWidths = entries.map(entry => {
 			const lines = entry.component.render(safeWidth);
 			return lines.reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 		});
-		const widths = allocateFlexSizes(entries, intrinsicWidths, safeWidth, this.gap);
+		const widths = allocateFlexSizes(
+			entries,
+			intrinsicWidths,
+			safeWidth,
+			this.gap,
+		);
 		const rendered = entries.map((entry, index) =>
 			widths[index] === 0 ? [] : entry.component.render(widths[index]!),
 		);
-		const height = rendered.reduce((max, lines) => Math.max(max, lines.length), 0);
+		const height = rendered.reduce(
+			(max, lines) => Math.max(max, lines.length),
+			0,
+		);
 		const result = Array.from({ length: height }, () => "");
 		let x = 0;
 		for (let index = 0; index < rendered.length; index++) {
 			const lines = rendered[index]!;
 			const childWidth = widths[index]!;
 			let offset = 0;
-			if (this.align === "center") offset = Math.floor((height - lines.length) / 2);
+			if (this.align === "center")
+				offset = Math.floor((height - lines.length) / 2);
 			else if (this.align === "end") offset = height - lines.length;
 			for (let row = 0; row < lines.length; row++) {
 				const target = row + offset;
 				if (target < 0 || target >= result.length) continue;
-				result[target] = compositeTuiLine(result[target]!, lines[row]!, x, childWidth, safeWidth);
+				result[target] = compositeTuiLine(
+					result[target]!,
+					lines[row]!,
+					x,
+					childWidth,
+					safeWidth,
+				);
 			}
 			x += childWidth + this.gap;
 		}
@@ -152,12 +200,15 @@ export function visibleFlexEntries(
 	entries: readonly StackLayoutEntry[],
 	viewport: LayoutViewport,
 ): StackLayoutEntry[] {
-	return entries.filter((entry) => entry.visible?.(viewport) ?? true);
+	return entries.filter(entry => entry.visible?.(viewport) ?? true);
 }
 
 function clampSize(size: number, entry: StackLayoutEntry): number {
 	const min = Math.max(0, Math.floor(entry.minSize ?? 0));
-	const max = Math.max(min, Math.floor(entry.maxSize ?? Number.MAX_SAFE_INTEGER));
+	const max = Math.max(
+		min,
+		Math.floor(entry.maxSize ?? Number.MAX_SAFE_INTEGER),
+	);
 	return Math.max(min, Math.min(max, Math.max(0, Math.floor(size))));
 }
 
@@ -173,20 +224,34 @@ function distribute(
 			.map((entry, index) => ({ entry, index }))
 			.filter(({ entry, index }) => {
 				if (mode === "grow") {
-					return (entry.grow ?? 0) > 0 && sizes[index]! < (entry.maxSize ?? Number.MAX_SAFE_INTEGER);
+					return (
+						(entry.grow ?? 0) > 0 &&
+						sizes[index]! < (entry.maxSize ?? Number.MAX_SAFE_INTEGER)
+					);
 				}
 				return (entry.shrink ?? 1) > 0 && sizes[index]! > (entry.minSize ?? 0);
 			});
 		if (candidates.length === 0) return;
 
 		const totalWeight = candidates.reduce((sum, { entry, index }) => {
-			return sum + (mode === "grow" ? (entry.grow ?? 0) : (entry.shrink ?? 1) * Math.max(1, sizes[index]!));
+			return (
+				sum +
+				(mode === "grow"
+					? (entry.grow ?? 0)
+					: (entry.shrink ?? 1) * Math.max(1, sizes[index]!))
+			);
 		}, 0);
 		let distributed = 0;
 		for (const { entry, index } of candidates) {
 			if (remaining <= 0) break;
-			const weight = mode === "grow" ? (entry.grow ?? 0) : (entry.shrink ?? 1) * Math.max(1, sizes[index]!);
-			const proposed = Math.max(1, Math.floor((remaining * weight) / totalWeight));
+			const weight =
+				mode === "grow"
+					? (entry.grow ?? 0)
+					: (entry.shrink ?? 1) * Math.max(1, sizes[index]!);
+			const proposed = Math.max(
+				1,
+				Math.floor((remaining * weight) / totalWeight),
+			);
 			const capacity =
 				mode === "grow"
 					? (entry.maxSize ?? Number.MAX_SAFE_INTEGER) - sizes[index]!
@@ -209,15 +274,22 @@ export function allocateFlexSizes(
 ): number[] {
 	const sizes = entries.map((entry, index) =>
 		clampSize(
-			entry.basis === undefined || entry.basis === "auto" ? (intrinsicSizes[index] ?? 0) : entry.basis,
+			entry.basis === undefined || entry.basis === "auto"
+				? (intrinsicSizes[index] ?? 0)
+				: entry.basis,
 			entry,
 		),
 	);
 	if (availableSize === undefined) return sizes;
 
-	const contentSize = Math.max(0, Math.floor(availableSize) - Math.max(0, entries.length - 1) * gap);
+	const contentSize = Math.max(
+		0,
+		Math.floor(availableSize) - Math.max(0, entries.length - 1) * gap,
+	);
 	const total = sizes.reduce((sum, size) => sum + size, 0);
-	if (total < contentSize) distribute(sizes, entries, contentSize - total, "grow");
-	else if (total > contentSize) distribute(sizes, entries, total - contentSize, "shrink");
+	if (total < contentSize)
+		distribute(sizes, entries, contentSize - total, "grow");
+	else if (total > contentSize)
+		distribute(sizes, entries, total - contentSize, "shrink");
 	return sizes;
 }

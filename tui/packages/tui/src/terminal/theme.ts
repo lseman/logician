@@ -89,7 +89,7 @@ export type ThemeColor =
 	| "memoryTag"
 	| "memoryId"
 	| "memoryContent"
-	| "memoryCount"
+	| "memoryCount";
 
 export type ThemeBg = "mdCodeBlockBg";
 
@@ -167,7 +167,11 @@ function resolveVarRefs(
 		throw new Error(`Variable not found: ${value}`);
 	}
 	visited.add(value);
-	const resolvedValue = vars[value] ?? (() => { throw new Error(`Variable not found: ${value}`); })();
+	const resolvedValue =
+		vars[value] ??
+		(() => {
+			throw new Error(`Variable not found: ${value}`);
+		})();
 	return resolveVarRefs(resolvedValue, vars, visited);
 }
 
@@ -334,7 +338,7 @@ function getThemesDir(): string {
 	return join(home, ".logician", "themes");
 }
 
-function loadThemeJson(name: string, path: string): ThemeJson {
+function loadThemeJson(_name: string, path: string): ThemeJson {
 	const content = readFileSync(path, "utf-8");
 	let json: unknown;
 	try {

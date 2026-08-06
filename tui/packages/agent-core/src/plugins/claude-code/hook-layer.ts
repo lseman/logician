@@ -4,12 +4,11 @@
 // This is a compatibility boundary, not Logician's general hook system.
 
 import { createUserMessage } from "../../agent/messages.ts";
-import type {
-	AgentHooks,
-	Message,
-	ToolCall,
-} from "../../agent/types.ts";
-import { runHookEvent, type PluginCommandResult } from "../../tools/shared/plugins.ts";
+import type { AgentHooks, Message, ToolCall } from "../../agent/types.ts";
+import {
+	type PluginCommandResult,
+	runHookEvent,
+} from "../../tools/shared/plugins.ts";
 
 export interface ClaudeCodeHookLayerOptions {
 	enabled: boolean;
@@ -56,7 +55,8 @@ class RuntimeClaudeCodeHookLayer implements ClaudeCodeHookLayer {
 
 				this.options.onHookPermissionDenied?.(toolCall);
 				this.preToolContext.delete(toolCall.id);
-				const reason = result.permission_reason || context || "Blocked by hook.";
+				const reason =
+					result.permission_reason || context || "Blocked by hook.";
 				return {
 					content: `Permission denied by hook: ${reason}`,
 					isError: true,
@@ -181,7 +181,7 @@ export function claudeToolMatcherName(toolName: string): string {
 
 function contextText(result: PluginCommandResult | null): string {
 	return (result?.additional_contexts || [])
-		.map((item) => String(item || "").trim())
+		.map(item => String(item || "").trim())
 		.filter(Boolean)
 		.join("\n\n");
 }

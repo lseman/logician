@@ -2,6 +2,7 @@
 // Rounded-corner overlay popup for agent questions with numbered selectable options.
 // Uses the shared popup-utils design system.
 
+import { wrapText } from "../rendering/transcript/layout.ts";
 import {
 	BOLD,
 	type Component,
@@ -11,7 +12,6 @@ import {
 	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import { wrapText } from "../rendering/transcript/layout.ts";
 
 export interface ChoiceItem {
 	/** The value sent back to the agent when selected. */
@@ -275,7 +275,7 @@ export class ChoicePopup implements Component {
 			lines.push(line());
 			for (const question of this.questions) {
 				const answer = this.answers.get(question.id);
-				const choice = question.choices.find((item) => item.value === answer);
+				const choice = question.choices.find(item => item.value === answer);
 				lines.push(
 					line(
 						`${answer ? active : muted}${answer ? "✓" : "□"} ${question.header || question.question}: ${choice?.label ?? "Not answered"}${RESET}`,
@@ -289,7 +289,7 @@ export class ChoicePopup implements Component {
 				),
 			);
 			lines.push(`${border}╰${"─".repeat(popupWidth - 2)}╯${RESET}`);
-			this.cachedLines = lines.map((value) => clampLineToWidth(value, width));
+			this.cachedLines = lines.map(value => clampLineToWidth(value, width));
 			return this.cachedLines;
 		}
 
@@ -356,7 +356,7 @@ export class ChoicePopup implements Component {
 		);
 		lines.push(`${border}╰${"─".repeat(popupWidth - 2)}╯${RESET}`);
 
-		this.cachedLines = lines.map((value) => clampLineToWidth(value, width));
+		this.cachedLines = lines.map(value => clampLineToWidth(value, width));
 		return this.cachedLines;
 	}
 }

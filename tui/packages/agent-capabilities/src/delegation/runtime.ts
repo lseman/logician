@@ -1,16 +1,16 @@
-import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
-import { runAgentLoop } from "@logician/agent-core/agent/agent-loop-runner.ts";
-import {
-	stripAcceptanceReport,
-	type AcceptanceConfig,
-	type AcceptanceLedger,
-} from "@logician/agent-core/agent/guards/acceptance-contract.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
 	Message,
 	Tool,
 } from "@logician/agent-core";
+import { runAgentLoop } from "@logician/agent-core/agent/agent-loop-runner.ts";
+import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
+import {
+	type AcceptanceConfig,
+	type AcceptanceLedger,
+	stripAcceptanceReport,
+} from "@logician/agent-core/agent/guards/acceptance-contract.ts";
 import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
@@ -72,7 +72,10 @@ export function contractFromArgs(
 				? args.expected_output.trim()
 				: undefined,
 		successCriteria: Array.isArray(args.success_criteria)
-			? args.success_criteria.map(String).map((v) => v.trim()).filter(Boolean)
+			? args.success_criteria
+					.map(String)
+					.map(v => v.trim())
+					.filter(Boolean)
 			: undefined,
 		maxValidationRetries: nonNegativeInt(args.max_validation_retries),
 	};
@@ -103,7 +106,8 @@ export const DELEGATION_CONTRACT_PROPERTIES = {
 		type: "integer",
 		minimum: 0,
 		maximum: 5,
-		description: "Correction attempts after contract validation fails (default: 2).",
+		description:
+			"Correction attempts after contract validation fails (default: 2).",
 	},
 	timeout_ms: {
 		type: "integer",
@@ -117,10 +121,14 @@ export const DELEGATION_CONTRACT_PROPERTIES = {
 	},
 } as const;
 
-function acceptanceFor(contract: DelegationContract): AcceptanceConfig | undefined {
+function acceptanceFor(
+	contract: DelegationContract,
+): AcceptanceConfig | undefined {
 	const criteria = [
 		...(contract.expectedOutput
-			? [`Final result matches this expected output: ${contract.expectedOutput}`]
+			? [
+					`Final result matches this expected output: ${contract.expectedOutput}`,
+				]
 			: []),
 		...(contract.successCriteria ?? []),
 	];
@@ -129,7 +137,10 @@ function acceptanceFor(contract: DelegationContract): AcceptanceConfig | undefin
 		: undefined;
 }
 
-function combineSignal(parent: AbortSignal | undefined, timeoutMs?: number): AbortSignal | undefined {
+function combineSignal(
+	parent: AbortSignal | undefined,
+	timeoutMs?: number,
+): AbortSignal | undefined {
 	const timeout = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
 	if (parent && timeout) return AbortSignal.any([parent, timeout]);
 	return parent ?? timeout;
@@ -146,20 +157,18 @@ function budgetTools(
 ): Tool[] {
 	// No budget active — return tools unmodified (no wrapper overhead).
 	if (!budget.maxToolCalls && !budget.toolLimits) return tools;
-	return tools.map((tool) => ({
+	return tools.map(tool => ({
 		...tool,
 		execute: async (args, ctx) => {
 			const nextTotal = counters.total + 1;
 			const nextForTool = (counters.byName[tool.name] ?? 0) + 1;
 			if (budget.maxToolCalls && nextTotal > budget.maxToolCalls) {
-				counters.violation =
-					`Delegated task exceeded its ${budget.maxToolCalls}-call tool budget.`;
+				counters.violation = `Delegated task exceeded its ${budget.maxToolCalls}-call tool budget.`;
 				throw new Error(counters.violation);
 			}
 			const toolLimit = budget.toolLimits?.[tool.name];
 			if (toolLimit && nextForTool > toolLimit) {
-				counters.violation =
-					`Tool "${tool.name}" exceeded its delegated-task limit of ${toolLimit}.`;
+				counters.violation = `Tool "${tool.name}" exceeded its delegated-task limit of ${toolLimit}.`;
 				throw new Error(counters.violation);
 			}
 			counters.total = nextTotal;
@@ -246,7 +255,7 @@ export async function runDelegatedAgent(params: {
 					? { ...acceptance, maxFinalizationTurns: 0 }
 					: undefined,
 			},
-			(event) => {
+			event => {
 				if (event.type === "turn_start") turns++;
 				if (event.type === "run_outcome") status = event.status;
 				if (event.type === "acceptance_complete") {
@@ -261,19 +270,21 @@ export async function runDelegatedAgent(params: {
 		messages = [...messages, ...produced];
 		if (acceptancePassed || !acceptance || signal?.aborted) break;
 		if (attempt + 1 >= maxAttempts || turns >= params.maxIterations) break;
-		prompts = [{
-			role: "user",
-			content:
-				"The delegated result failed its acceptance contract. Correct the result, " +
-				"provide concrete evidence for every required criterion, and emit a new " +
-				"acceptance-report. Do not repeat work that is already complete.",
-			timestamp: Date.now(),
-		}];
+		prompts = [
+			{
+				role: "user",
+				content:
+					"The delegated result failed its acceptance contract. Correct the result, " +
+					"provide concrete evidence for every required criterion, and emit a new " +
+					"acceptance-report. Do not repeat work that is already complete.",
+				timestamp: Date.now(),
+			},
+		];
 	}
 
 	const final = [...messages]
 		.reverse()
-		.find((message) => message.role === "assistant" && message.content?.trim());
+		.find(message => message.role === "assistant" && message.content?.trim());
 	const raw = final?.content?.trim() || "(subagent produced no final message)";
 	if (counters.violation) status = "failed";
 	return {

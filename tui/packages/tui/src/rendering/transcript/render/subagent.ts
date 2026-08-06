@@ -3,13 +3,13 @@
 // tallies, per-child-agent streamed output, and the chronological child
 // thinking/response/tool flow.
 
-import { clampLineToWidth, DIM, RESET } from "../../../terminal/core.ts";
-import { theme } from "../../../terminal/theme.ts";
 import type {
 	ChildChunk,
 	ChildToolCall,
 	ToolExecution,
 } from "@logician/coding-agent/sessions";
+import { clampLineToWidth, DIM, RESET } from "../../../terminal/core.ts";
+import { theme } from "../../../terminal/theme.ts";
 import {
 	compactText,
 	formatDurationMs,
@@ -18,9 +18,9 @@ import {
 	stripAcceptanceForDisplay,
 	stripThinkTags,
 } from "../text-utils.ts";
+import { withTruncationMarker } from "./content.ts";
 import { renderMarkdownLines } from "./markdown-table.ts";
 import { renderThinkingChunk } from "./thinking.ts";
-import { withTruncationMarker } from "./content.ts";
 import {
 	computeBatchTally,
 	detailSection,
@@ -110,7 +110,7 @@ export function renderSubagentFlow(
 		: undefined;
 	if (showFrame) {
 		const agentIds = [
-			...new Set(chunks.map((chunk) => chunk.agentId).filter(Boolean)),
+			...new Set(chunks.map(chunk => chunk.agentId).filter(Boolean)),
 		];
 		const plural = showAgent || agentIds.length > 1;
 		const runLabel = plural
@@ -135,7 +135,11 @@ export function renderSubagentFlow(
 			lines.push(`${theme.fgRaw("separator")}${DIM}─── response ───${RESET}`);
 		}
 		const visible = stripAcceptanceForDisplay(stripThinkTags(contentBuffer));
-		for (const line of renderMarkdownLines(visible, Math.max(16, width), true)) {
+		for (const line of renderMarkdownLines(
+			visible,
+			Math.max(16, width),
+			true,
+		)) {
 			lines.push(line);
 		}
 		contentBuffer = "";
@@ -180,7 +184,12 @@ export function renderSubagentFlow(
 					: expanded;
 			const regionStart = lines.length;
 			lines.push(
-				...renderTool(ctx, childToolExecution(chunk.tool), Math.max(20, width), childExpanded),
+				...renderTool(
+					ctx,
+					childToolExecution(chunk.tool),
+					Math.max(20, width),
+					childExpanded,
+				),
 			);
 			if (hitRegions && childToolCallId) {
 				hitRegions.push({
@@ -258,7 +267,9 @@ export function renderSubagentDetails(
 			: undefined;
 	const metadata = [
 		typeof metrics.turns === "number" ? `${metrics.turns} turn(s)` : "",
-		typeof metrics.toolCalls === "number" ? `${metrics.toolCalls} tool call(s)` : "",
+		typeof metrics.toolCalls === "number"
+			? `${metrics.toolCalls} tool call(s)`
+			: "",
 		typeof metrics.durationMs === "number"
 			? formatDurationMs(metrics.durationMs)
 			: liveElapsedMs !== undefined
@@ -301,7 +312,9 @@ export function renderSubagentDetails(
 			),
 		);
 	} else {
-		const childToolCalls = details.childToolCalls as ChildToolCall[] | undefined;
+		const childToolCalls = details.childToolCalls as
+			| ChildToolCall[]
+			| undefined;
 		lines.push(
 			...renderSubagentActivity(
 				childToolCalls,
@@ -316,12 +329,16 @@ export function renderSubagentDetails(
 	}
 
 	const storedTranscript =
-		typeof details.streamTranscript === "string" ? details.streamTranscript : "";
-	const liveOutput = tool.isComplete ? storedTranscript : (tool.streamOutput ?? "");
+		typeof details.streamTranscript === "string"
+			? details.streamTranscript
+			: "";
+	const liveOutput = tool.isComplete
+		? storedTranscript
+		: (tool.streamOutput ?? "");
 	const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
 	const orderedContent = childChunks
-		.filter((chunk) => chunk.type === "content")
-		.map((chunk) => chunk.contentText ?? "")
+		.filter(chunk => chunk.type === "content")
+		.map(chunk => chunk.contentText ?? "")
 		.join("");
 	const outputs =
 		childChunks.length === 0
@@ -370,7 +387,9 @@ export function renderSubagentActivity(
 				),
 			]
 		: hidden
-			? [`  ${theme.fg("dim", `⋯ ${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`]
+			? [
+					`  ${theme.fg("dim", `⋯ ${hidden} earlier tool call${hidden === 1 ? "" : "s"} hidden`)}`,
+				]
 			: [];
 	const bg = theme.bg("mdCodeBlockBg", "");
 	for (const call of visible) {
@@ -433,7 +452,9 @@ export function renderSubagentLiveOutput(
 		typeof tool.details?.streamTranscript === "string"
 			? tool.details.streamTranscript
 			: "";
-	const liveOutput = tool.isComplete ? storedTranscript : (tool.streamOutput ?? "");
+	const liveOutput = tool.isComplete
+		? storedTranscript
+		: (tool.streamOutput ?? "");
 	const finalOutput = tool.isComplete ? (tool.result ?? "") : "";
 	const outputs = distinctSubagentOutputs(liveOutput, finalOutput);
 	for (const output of outputs) {
@@ -444,7 +465,7 @@ export function renderSubagentLiveOutput(
 			ctx,
 			false,
 		)) {
-			lines.push("  " + line);
+			lines.push(`  ${line}`);
 		}
 	}
 	return lines;
@@ -484,7 +505,7 @@ export function renderSubagentBatchCollapsed(
 					typeof r === "object" && r !== null,
 			)
 		: [];
-	const resultByIndex = new Map(results.map((r) => [Number(r.index), r]));
+	const resultByIndex = new Map(results.map(r => [Number(r.index), r]));
 
 	for (let index = 0; index < tasks.length; index++) {
 		const task = tasks[index];
@@ -495,7 +516,7 @@ export function renderSubagentBatchCollapsed(
 			? result.isError === true
 				? "failed"
 				: "completed"
-			: liveStatus.get(index) ?? "queued";
+			: (liveStatus.get(index) ?? "queued");
 
 		// Status icon (mirrors renderSubagentBatchDetails's icon logic).
 		const icon =
@@ -513,14 +534,25 @@ export function renderSubagentBatchCollapsed(
 		const taskText =
 			typeof task.task === "string"
 				? compactText(task.task).slice(0, 120)
-				: "Task " + (index + 1);
+				: `Task ${index + 1}`;
 
 		const elapsedMs = taskElapsedMs.get(index);
 		const elapsed =
-			elapsedMs !== undefined ? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}` : "";
+			elapsedMs !== undefined
+				? ` ${DIM}${formatDurationMs(elapsedMs)}${RESET}`
+				: "";
 		const queuedTag = state === "queued" ? ` ${DIM}queued${RESET}` : "";
 		const line =
-			"  " + icon + " " + theme.fg("active", "" + (index + 1) + ". " + agent) + " " + DIM + taskText + RESET + queuedTag + elapsed;
+			"  " +
+			icon +
+			" " +
+			theme.fg("active", `${index + 1}. ${agent}`) +
+			" " +
+			DIM +
+			taskText +
+			RESET +
+			queuedTag +
+			elapsed;
 		const maxLine = Math.max(20, width - 4);
 		lines.push(clampLineToWidth(line, maxLine));
 
@@ -529,7 +561,7 @@ export function renderSubagentBatchCollapsed(
 			hitRegions.push({
 				start: lines.length - 1,
 				end: lines.length,
-				key: toolCallId + ":task:" + index,
+				key: `${toolCallId}:task:${index}`,
 			});
 		}
 
@@ -542,7 +574,7 @@ export function renderSubagentBatchCollapsed(
 			const allChunks = Array.isArray(tool.details?.childChunks)
 				? (tool.details.childChunks as ChildChunk[])
 				: [];
-			const taskChunks = allChunks.filter((c) => c.taskIndex === index);
+			const taskChunks = allChunks.filter(c => c.taskIndex === index);
 			if (taskChunks.length > 0) {
 				const regionBase = lines.length;
 				const hitRegionsBefore = hitRegions?.length ?? 0;
@@ -559,7 +591,7 @@ export function renderSubagentBatchCollapsed(
 					true,
 				);
 				for (const fl of flowLines) {
-					lines.push("  " + fl);
+					lines.push(`  ${fl}`);
 				}
 				// renderSubagentFlow pushed child-tool hit regions relative to its
 				// own local `lines` (starting at 0) — translate only the entries it
@@ -574,13 +606,20 @@ export function renderSubagentBatchCollapsed(
 					}
 				}
 			} else {
-				const resultText = result && typeof result.content === "string" ? result.content : "";
+				const resultText =
+					result && typeof result.content === "string" ? result.content : "";
 				if (resultText) {
-					for (const fl of renderSubagentText(resultText, Math.max(16, width - 4), false, ctx, true)) {
-						lines.push("  " + fl);
+					for (const fl of renderSubagentText(
+						resultText,
+						Math.max(16, width - 4),
+						false,
+						ctx,
+						true,
+					)) {
+						lines.push(`  ${fl}`);
 					}
 				} else if (!tool.isComplete) {
-					lines.push("  " + theme.fg("dim", "waiting for output...") + RESET);
+					lines.push(`  ${theme.fg("dim", "waiting for output...")}${RESET}`);
 				}
 			}
 		}

@@ -4,8 +4,7 @@
 // user-supplied hooks via the typed HookBus so both run.
 
 import { spawnSync } from "node:child_process";
-import { BudgetTracker } from "./budget.ts";
-import { ThinkingLoopDetector } from "../../agent/guards/thinking-loop-detector.ts";
+import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
@@ -17,21 +16,22 @@ import {
 	awaitsUserInput,
 	detectsCircling,
 } from "../../agent/guards/response-patterns.ts";
-import { HookBus } from "../native/hook-bus.ts";
+import { ThinkingLoopDetector } from "../../agent/guards/thinking-loop-detector.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
 } from "../../agent/messages.ts";
-import { compactToFit } from "../../compaction/compaction.ts";
 import { getTaskStatus } from "../../agent/tasks/task-status-state.ts";
 import { getTasks } from "../../agent/tasks/todo-state.ts";
-import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
 import type {
 	AgentConfig,
 	AgentHooks,
 	CompactableMessage,
 	Message,
 } from "../../agent/types.ts";
+import { compactToFit } from "../../compaction/compaction.ts";
+import { HookBus } from "../native/hook-bus.ts";
+import { BudgetTracker } from "./budget.ts";
 
 // Proactive compaction triggers when the payload exceeds this fraction of the
 // context window (higher than the post-compaction target so it fires before the
@@ -68,7 +68,9 @@ export interface BuiltinHookDeps {
 	// Loop detector instance for guard integration (merged from GuardEngine).
 	loopDetector: LoopDetector;
 	// Typed event emitter for structured events (optional).
-	eventBus?: { emit: (event: { type: string; [key: string]: unknown }) => void };
+	eventBus?: {
+		emit: (event: { type: string; [key: string]: unknown }) => void;
+	};
 }
 
 // Build the default safeguard hooks. Returns undefined per-event when a
@@ -325,7 +327,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 
 			const tasks = getTasks();
 			const remaining = tasks.filter(
-				(t) => t.status !== "completed" && t.status !== "deleted",
+				t => t.status !== "completed" && t.status !== "deleted",
 			);
 			// Nudge whenever tasks remain — the only clean exits are: no remaining
 			// tasks (model used the todo tool correctly) or task_status (checked above).
@@ -340,7 +342,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// only decides content — the loop continues until shouldStopAfterTurn
 			// returns true.
 			const next =
-				remaining.find((t) => t.status === "in_progress") ?? remaining[0];
+				remaining.find(t => t.status === "in_progress") ?? remaining[0];
 
 			let content: string;
 			if (isCircling) {
@@ -353,7 +355,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					"Stop and assess: what have you actually tried so far? " +
 					"What specifically failed or didn't work? " +
 					"You need to try a different approach, not just repeat. " +
-					`Remaining items: ${remaining.map((t) => `#${t.id} ${t.subject}`).join(", ")}. ` +
+					`Remaining items: ${remaining.map(t => `#${t.id} ${t.subject}`).join(", ")}. ` +
 					"If you're truly stuck, explain why and stop.";
 			} else {
 				// Standard nudge — context-rich. Include the next task and

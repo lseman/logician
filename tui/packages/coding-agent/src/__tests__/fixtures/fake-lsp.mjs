@@ -2,10 +2,12 @@ let buffer = Buffer.alloc(0);
 
 function send(message) {
 	const body = JSON.stringify(message);
-	process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+	process.stdout.write(
+		`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+	);
 }
 
-process.stdin.on("data", (chunk) => {
+process.stdin.on("data", chunk => {
 	buffer = Buffer.concat([buffer, chunk]);
 	while (true) {
 		const headerEnd = buffer.indexOf("\r\n\r\n");
@@ -16,7 +18,9 @@ process.stdin.on("data", (chunk) => {
 		const length = Number(match[1]);
 		const start = headerEnd + 4;
 		if (buffer.length < start + length) return;
-		const message = JSON.parse(buffer.subarray(start, start + length).toString("utf8"));
+		const message = JSON.parse(
+			buffer.subarray(start, start + length).toString("utf8"),
+		);
 		buffer = buffer.subarray(start + length);
 		if (message.method === "initialize") {
 			send({ jsonrpc: "2.0", id: message.id, result: { capabilities: {} } });
@@ -31,13 +35,18 @@ process.stdin.on("data", (chunk) => {
 				method: "textDocument/publishDiagnostics",
 				params: {
 					uri: document.uri,
-					diagnostics: [{
-						range: { start: { line: 1, character: 2 }, end: { line: 1, character: 3 } },
-						severity: 1,
-						code: "fake-1",
-						source: "fake-lsp",
-						message: "synthetic diagnostic",
-					}],
+					diagnostics: [
+						{
+							range: {
+								start: { line: 1, character: 2 },
+								end: { line: 1, character: 3 },
+							},
+							severity: 1,
+							code: "fake-1",
+							source: "fake-lsp",
+							message: "synthetic diagnostic",
+						},
+					],
 				},
 			});
 		}

@@ -1,9 +1,9 @@
 // ── Extension event system tests ─────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
+import { describe, it } from "node:test";
 import { createExtensionContext } from "../hooks/extensions/context.ts";
+import { ExtensionEventBus } from "../hooks/extensions/event-bus.ts";
 
 describe("ExtensionEventBus", () => {
 	it("emits event to registered handler", async () => {
@@ -65,7 +65,7 @@ describe("ExtensionEventBus", () => {
 		let called = false;
 		const slowHandler: any = async () => {
 			called = true;
-			await new Promise((r) => setTimeout(r, 200));
+			await new Promise(r => setTimeout(r, 200));
 			return {};
 		};
 		bus.on("turn_start", slowHandler);
@@ -99,8 +99,18 @@ describe("ExtensionEventBus", () => {
 		const received: string[] = [];
 
 		const off = bus.onMultiple([
-			{ eventType: "turn_start", handler: async () => { received.push("turn_start"); } },
-			{ eventType: "turn_end", handler: async () => { received.push("turn_end"); } },
+			{
+				eventType: "turn_start",
+				handler: async () => {
+					received.push("turn_start");
+				},
+			},
+			{
+				eventType: "turn_end",
+				handler: async () => {
+					received.push("turn_end");
+				},
+			},
 		]);
 
 		await bus.emit({ type: "turn_start", turnIndex: 1 } as any);
@@ -111,7 +121,11 @@ describe("ExtensionEventBus", () => {
 
 		off();
 		await bus.emit({ type: "turn_start", turnIndex: 2 } as any);
-		assert.strictEqual(received.length, 2, "Should not have new events after off()");
+		assert.strictEqual(
+			received.length,
+			2,
+			"Should not have new events after off()",
+		);
 	});
 
 	it("hasHandlers returns true when handlers exist", () => {
@@ -208,7 +222,7 @@ describe("ExtensionContext", () => {
 	it("sets labels", () => {
 		const ctx = createExtensionContext();
 		ctx.setLabel("important");
-		assert.strictEqual(ctx.labels["important"], "important");
+		assert.strictEqual(ctx.labels.important, "important");
 	});
 
 	it("adds diagnostics", () => {

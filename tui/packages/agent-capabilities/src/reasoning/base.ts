@@ -47,7 +47,7 @@ export abstract class BaseReasoner implements Reasoner {
 		const maxTokens = overrides.maxTokens ?? this.config.maxTokens ?? 2048;
 		return this.llm
 			.generate(messages, { temperature, maxTokens })
-			.then((resp) => resp.content?.trim() ?? "");
+			.then(resp => resp.content?.trim() ?? "");
 	}
 
 	protected static _extractAnswer(text: string): string {
@@ -57,7 +57,7 @@ export abstract class BaseReasoner implements Reasoner {
 		}
 		const lines = text
 			.split("\n")
-			.map((l) => l.trim())
+			.map(l => l.trim())
 			.filter(Boolean);
 		return lines[lines.length - 1] ?? text.trim();
 	}

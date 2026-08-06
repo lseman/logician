@@ -1,10 +1,10 @@
 // ── StatusBar tests ──────────────────────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { initTheme } from "../terminal/theme.ts";
+import { describe, it } from "node:test";
 import { StatusBar } from "../status/status-bar.ts";
 import { visibleWidth } from "../terminal/core.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 const setupTheme = (): void => {
 	try {
@@ -18,7 +18,12 @@ void describe("StatusBar", () => {
 	it("renders minimal line with phase, model, context", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "claude-sonnet-4", contextTokens: 5000, contextMaxTokens: 150000 });
+		bar.update({
+			phase: "ready",
+			model: "claude-sonnet-4",
+			contextTokens: 5000,
+			contextMaxTokens: 150000,
+		});
 		const lines = bar.render(120);
 		assert.strictEqual(lines.length, 1);
 		assert.ok(lines[0].includes("READY"));
@@ -28,7 +33,13 @@ void describe("StatusBar", () => {
 	it("shows MCP server count when set", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "test", contextTokens: 0, contextMaxTokens: 100000, mcpServerCount: 3 });
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+			mcpServerCount: 3,
+		});
 		const lines = bar.render(120);
 		assert.ok(lines[0].includes("mcp"));
 		assert.ok(lines[0].includes("3"));
@@ -37,7 +48,13 @@ void describe("StatusBar", () => {
 	it("omits MCP section when count is zero or undefined", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "test", contextTokens: 0, contextMaxTokens: 100000, mcpServerCount: 0 });
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+			mcpServerCount: 0,
+		});
 		const lines = bar.render(120);
 		assert.ok(!lines[0].toLowerCase().includes("mcp"));
 	});
@@ -45,7 +62,12 @@ void describe("StatusBar", () => {
 	it("omits MCP section when mcpServerCount is not set", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "test", contextTokens: 0, contextMaxTokens: 100000 });
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+		});
 		const lines = bar.render(120);
 		assert.ok(!lines[0].toLowerCase().includes("mcp"));
 	});
@@ -60,8 +82,7 @@ void describe("StatusBar", () => {
 			contextMaxTokens: 100000,
 			executionProfile: "minimal",
 		});
-		const plain = bar.render(160)[0]
-			.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		const plain = bar.render(160)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(plain.includes("exec: minimal"));
 	});
 
@@ -106,7 +127,13 @@ void describe("StatusBar", () => {
 	it("shows thinking level", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "test", contextTokens: 0, contextMaxTokens: 100000, thinkingLevel: "high" });
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+			thinkingLevel: "high",
+		});
 		const lines = bar.render(120);
 		assert.ok(lines[0].includes("think:"));
 		assert.ok(lines[0].includes("HIGH"));
@@ -115,7 +142,13 @@ void describe("StatusBar", () => {
 	it("shows thinking off", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "test", contextTokens: 0, contextMaxTokens: 100000, thinkingLevel: "off" });
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+			thinkingLevel: "off",
+		});
 		const lines = bar.render(120);
 		assert.ok(lines[0].includes("think:"));
 		assert.ok(lines[0].includes("off"));
@@ -132,7 +165,7 @@ void describe("StatusBar", () => {
 			inferenceMode: "thinking-general",
 		});
 		const lines = bar.render(120);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(plain.includes("THINK GEN") || plain.includes("mode:"));
 	});
 
@@ -201,7 +234,12 @@ void describe("StatusBar", () => {
 	it("updates on tick animation", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "streaming", model: "test", contextTokens: 0, contextMaxTokens: 100000 });
+		bar.update({
+			phase: "streaming",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+		});
 		const lines1 = bar.render(80);
 		bar.setTick(4);
 		const lines2 = bar.render(80);
@@ -211,9 +249,19 @@ void describe("StatusBar", () => {
 	it("invalidates cache on update", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "ready", model: "test", contextTokens: 0, contextMaxTokens: 100000 });
+		bar.update({
+			phase: "ready",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+		});
 		const lines1 = bar.render(80);
-		bar.update({ phase: "thinking", model: "test2", contextTokens: 1000, contextMaxTokens: 100000 });
+		bar.update({
+			phase: "thinking",
+			model: "test2",
+			contextTokens: 1000,
+			contextMaxTokens: 100000,
+		});
 		const lines2 = bar.render(80);
 		assert.ok(lines1[0] !== lines2[0]);
 	});
@@ -221,11 +269,16 @@ void describe("StatusBar", () => {
 	it("starts and stops animation timer", () => {
 		setupTheme();
 		const bar = new StatusBar();
-		bar.update({ phase: "streaming", model: "test", contextTokens: 0, contextMaxTokens: 100000 });
+		bar.update({
+			phase: "streaming",
+			model: "test",
+			contextTokens: 0,
+			contextMaxTokens: 100000,
+		});
 		bar.startAnimation();
-		assert.ok(bar["timer"] !== null);
+		assert.ok(bar.timer !== null);
 		bar.stopAnimation();
-		assert.ok(bar["timer"] === null);
+		assert.ok(bar.timer === null);
 	});
 
 	it("renders empty line when not visible", () => {
@@ -274,7 +327,7 @@ void describe("StatusBar", () => {
 			completionTokens: 200,
 		});
 		const lines = bar.render(160);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(plain.includes("↑"));
 		assert.ok(plain.includes("↓"));
 		assert.ok(plain.includes("4.8k"));
@@ -292,7 +345,7 @@ void describe("StatusBar", () => {
 			promptTokens: 4800,
 		});
 		const lines = bar.render(160);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(plain.includes("↑"));
 		assert.ok(plain.includes("–"));
 	});
@@ -307,7 +360,7 @@ void describe("StatusBar", () => {
 			contextMaxTokens: 150000,
 		});
 		const lines = bar.render(120);
-		const plain = lines[0].replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
+		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(!plain.includes("↑"));
 		assert.ok(!plain.includes("↓"));
 	});

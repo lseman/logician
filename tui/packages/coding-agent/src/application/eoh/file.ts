@@ -1,12 +1,6 @@
 import { execFile } from "node:child_process";
-import {
-	mkdtemp,
-	readFile,
-	rm,
-	stat,
-	writeFile,
-} from "node:fs/promises";
 import { chmodSync, renameSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -71,10 +65,13 @@ export async function loadEohFile(
 		stat(targetPath),
 	]);
 	const range = markerRange(source);
-	const heuristicCode = source.slice(range.contentStart, range.contentEnd).trim();
-	const functionMatch = /^\s*def\s+([A-Za-z_]\w*)\s*(\([^]*?\))\s*(?:->\s*[^:]+)?\s*:/m.exec(
-		heuristicCode,
-	);
+	const heuristicCode = source
+		.slice(range.contentStart, range.contentEnd)
+		.trim();
+	const functionMatch =
+		/^\s*def\s+([A-Za-z_]\w*)\s*(\([^]*?\))\s*(?:->\s*[^:]+)?\s*:/m.exec(
+			heuristicCode,
+		);
 	if (!functionMatch) {
 		throw new Error("The EoH region must define a Python function");
 	}
@@ -149,8 +146,9 @@ export async function evaluateEohCandidate(
 		);
 		const scoreLine = stdout
 			.split(/\r?\n/)
-			.findLast((line) => line.startsWith("__LOGICIAN_EOH_SCORE__"));
-		if (!scoreLine) throw new Error("evaluate() did not produce a fitness score");
+			.findLast(line => line.startsWith("__LOGICIAN_EOH_SCORE__"));
+		if (!scoreLine)
+			throw new Error("evaluate() did not produce a fitness score");
 		const score = Number(scoreLine.slice("__LOGICIAN_EOH_SCORE__".length));
 		if (!Number.isFinite(score)) {
 			throw new Error("evaluate() returned a non-finite score");

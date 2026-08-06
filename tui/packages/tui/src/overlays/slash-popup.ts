@@ -85,7 +85,7 @@ export class SlashPopup implements Component {
 				isFiltered: true,
 				selectedCmd: filtered.length > 0 ? filtered[this.selectedIndex] : null,
 				groups: [],
-				flatEntries: filtered.map((cmd) => ({ cmd, isHeader: false })),
+				flatEntries: filtered.map(cmd => ({ cmd, isHeader: false })),
 				flatSelection: Math.min(this.selectedIndex, filtered.length - 1),
 			};
 		}
@@ -254,13 +254,15 @@ export class SlashPopup implements Component {
 		if (subcommandMatch) {
 			const [, commandName = "", fragment = ""] = subcommandMatch;
 			const parent = this.commands.find(
-				(command) => command.command.toLowerCase() === commandName.toLowerCase(),
+				command => command.command.toLowerCase() === commandName.toLowerCase(),
 			);
 			if (!parent?.subcommands) return [];
 			const normalizedFragment = fragment.toLowerCase();
 			return parent.subcommands
-				.filter((subcommand) => subcommand.toLowerCase().startsWith(normalizedFragment))
-				.map((subcommand) => ({
+				.filter(subcommand =>
+					subcommand.toLowerCase().startsWith(normalizedFragment),
+				)
+				.map(subcommand => ({
 					...parent,
 					command: `${parent.command} ${subcommand}`,
 					description: `${subcommand} — ${parent.description}`,
@@ -286,7 +288,7 @@ export class SlashPopup implements Component {
 		this._lastCommand = raw.trim();
 		const commandName = this._lastCommand.split(/\s+/, 1)[0]?.toLowerCase();
 		const cmd = this.commands.find(
-			(command) => command.command.toLowerCase() === commandName,
+			command => command.command.toLowerCase() === commandName,
 		);
 		if (!cmd) return false;
 		const args = this._lastCommand.replace(/^\/[^\s]+\s*/, "").trim();
@@ -485,7 +487,10 @@ function highlightCommandMatch(command: string, query: string): string {
 	let output = command.startsWith("/") ? "/" : "";
 	const name = command.replace(/^\/+/, "");
 	for (const character of name) {
-		if (needleIndex < needle.length && character.toLowerCase() === needle[needleIndex]) {
+		if (
+			needleIndex < needle.length &&
+			character.toLowerCase() === needle[needleIndex]
+		) {
 			output += `${theme.fgRaw("accent")}${BOLD}${character}${RESET}`;
 			needleIndex++;
 		} else {

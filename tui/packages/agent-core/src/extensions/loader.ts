@@ -5,9 +5,17 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import ignore from "ignore";
-import type { Diagnostic, ExtensionDefinition, LoadExtensionsResult } from "./types.ts";
+import type {
+	Diagnostic,
+	ExtensionDefinition,
+	LoadExtensionsResult,
+} from "./types.ts";
 
-function addIgnoreRules(dir: string, matcher: ReturnType<typeof ignore>, rootDir: string): void {
+function addIgnoreRules(
+	dir: string,
+	matcher: ReturnType<typeof ignore>,
+	rootDir: string,
+): void {
 	const relativeDir = relative(rootDir, dir);
 	const prefix = relativeDir ? `${relativeDir}/` : "";
 
@@ -18,7 +26,7 @@ function addIgnoreRules(dir: string, matcher: ReturnType<typeof ignore>, rootDir
 			const content = readFileSync(ignorePath, "utf-8");
 			const patterns = content
 				.split(/\r?\n/)
-				.map((line) => {
+				.map(line => {
 					const trimmed = line.trim();
 					if (!trimmed || trimmed.startsWith("#")) return null;
 					let pattern = trimmed.startsWith("!") ? trimmed.slice(1) : trimmed;
@@ -43,8 +51,14 @@ function relative(from: string, to: string): string {
 	return to;
 }
 
-function discoverFiles(dir: string, rootDir: string, matcher: ReturnType<typeof ignore>, source: "user" | "project" | "path"): Array<{ path: string; source: "user" | "project" | "path" }> {
-	const results: Array<{ path: string; source: "user" | "project" | "path" }> = [];
+function discoverFiles(
+	dir: string,
+	rootDir: string,
+	matcher: ReturnType<typeof ignore>,
+	source: "user" | "project" | "path",
+): Array<{ path: string; source: "user" | "project" | "path" }> {
+	const results: Array<{ path: string; source: "user" | "project" | "path" }> =
+		[];
 
 	if (!existsSync(dir) || !statSync(dir).isDirectory()) {
 		return results;
@@ -154,7 +168,11 @@ export function loadExtensions(options: {
 		for (const p of explicitPaths) {
 			const resolved = resolve(p);
 			if (!existsSync(resolved)) {
-				allDiagnostics.push({ type: "warning", message: `extension path does not exist: ${p}`, path: p });
+				allDiagnostics.push({
+					type: "warning",
+					message: `extension path does not exist: ${p}`,
+					path: p,
+				});
 				continue;
 			}
 			const result = loadExtensionsFromDir(resolved, "path");

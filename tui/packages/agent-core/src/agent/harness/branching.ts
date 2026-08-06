@@ -10,7 +10,7 @@ import {
 	extractFileOpsFromMessages,
 } from "../summaries/branch-summarization.ts";
 import { generateBranchSummaryText } from "../summaries/summary-generation.ts";
-import type { BranchSummaryData, BranchInfo } from "../summaries/types.ts";
+import type { BranchInfo, BranchSummaryData } from "../summaries/types.ts";
 import type { Message, ThinkingLevel } from "../types.ts";
 
 export interface Branch {
@@ -22,7 +22,7 @@ export interface Branch {
 
 /** Fork the current history into a new branch. Mutates `branches` in place, returns the new branch id. */
 export function forkBranch(
-	branches: Branch[],
+	_branches: Branch[],
 	branchSeq: number,
 	currentHistory: Message[],
 	customSummary?: BranchSummaryData,
@@ -74,12 +74,16 @@ export async function summarizeAndMergeBranch(
 		tokenBudget,
 	);
 
-	const summary = await generateBranchSummaryText(backend, collection.messages, {
-		customInstructions: options.customInstructions,
-		fileOps: collection.fileOps,
-		maxTokens: options.maxTokens,
-		thinkingLevel: options.thinkingLevel,
-	});
+	const summary = await generateBranchSummaryText(
+		backend,
+		collection.messages,
+		{
+			customInstructions: options.customInstructions,
+			fileOps: collection.fileOps,
+			maxTokens: options.maxTokens,
+			thinkingLevel: options.thinkingLevel,
+		},
+	);
 
 	branch.summary = summary;
 
@@ -93,7 +97,10 @@ export async function summarizeAndMergeBranch(
 		tool_calls: [],
 	};
 
-	return { history: [...branch.parent, summaryEntry], summaryText: summary.full };
+	return {
+		history: [...branch.parent, summaryEntry],
+		summaryText: summary.full,
+	};
 }
 
 export interface CheckpointNavigationOutcome {
@@ -159,11 +166,13 @@ export function renderBranchTree(branches: Branch[]): string {
 
 		if (branch.summary) {
 			const goal = branch.summary.goal;
-			const preview = goal.length > 60 ? goal.slice(0, 60) + "..." : goal;
+			const preview = goal.length > 60 ? `${goal.slice(0, 60)}...` : goal;
 			lines.push(`${"  ".repeat(depth + 1)}Goal: ${preview}`);
 
 			if (branch.summary.progress.done.length > 0) {
-				lines.push(`${"  ".repeat(depth + 1)}Done: ${branch.summary.progress.done.length} items`);
+				lines.push(
+					`${"  ".repeat(depth + 1)}Done: ${branch.summary.progress.done.length} items`,
+				);
 			}
 			if (branch.summary.progress.inProgress.length > 0) {
 				lines.push(

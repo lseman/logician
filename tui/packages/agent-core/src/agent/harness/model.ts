@@ -3,7 +3,14 @@
 
 import type { AgentModelConfig, ThinkingLevel } from "../types.ts";
 
-const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_LEVELS: ThinkingLevel[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+];
 
 /** Clamp an arbitrary string to a known ThinkingLevel, defaulting to "medium". */
 export function clampThinkingLevel(level: string): ThinkingLevel {
@@ -18,7 +25,7 @@ export function resolveModelUrl(
 	modelName: string,
 	defaultBaseUrl: string,
 ): string {
-	const found = models?.find((m) => m.model === modelName);
+	const found = models?.find(m => m.model === modelName);
 	return found?.url ?? defaultBaseUrl;
 }
 
@@ -57,12 +64,13 @@ export function cycleModel(
 		return noop;
 	}
 
-	const cycleModels: Array<{ name: string; model: string }> = configuredModels.map((m) => ({
-		name: m.name,
-		model: m.model,
-	}));
+	const cycleModels: Array<{ name: string; model: string }> =
+		configuredModels.map(m => ({
+			name: m.name,
+			model: m.model,
+		}));
 
-	const currentInList = cycleModels.some((m) => m.model === currentModel);
+	const currentInList = cycleModels.some(m => m.model === currentModel);
 	if (!currentInList) {
 		cycleModels.unshift({ name: currentModel, model: currentModel });
 	}
@@ -71,7 +79,7 @@ export function cycleModel(
 		return noop;
 	}
 
-	const currentIndex = cycleModels.findIndex((m) => m.model === currentModel);
+	const currentIndex = cycleModels.findIndex(m => m.model === currentModel);
 	const nextIndex =
 		direction === "forward"
 			? (currentIndex + 1) % cycleModels.length

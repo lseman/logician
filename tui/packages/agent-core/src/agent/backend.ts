@@ -70,7 +70,7 @@ export function classifyHttpError(
 		"failed to parse tool call arguments",
 		"failed to parse tool calls",
 		"invalid tool call arguments",
-	].some((p) => lower.includes(p));
+	].some(p => lower.includes(p));
 	if (looksPoisonedHistory) {
 		return new BackendError({
 			category: "poisoned_history",
@@ -90,7 +90,7 @@ export function classifyHttpError(
 		"maximum context",
 		"reduce the length",
 		"n_ctx",
-	].some((p) => lower.includes(p));
+	].some(p => lower.includes(p));
 	const message = `LLM request failed: ${status} ${body}`;
 
 	if (looksContextFull) {
@@ -145,7 +145,7 @@ export function classifyNetworkError(error: Error): BackendError {
 		"connection timeout",
 		"network error",
 		"fetch failed",
-	].some((p) => msg.includes(p));
+	].some(p => msg.includes(p));
 	return new BackendError({
 		category: transient ? "transient" : "unknown",
 		message: error.message,
@@ -183,9 +183,7 @@ interface ProviderTimings {
 }
 
 function tokenCount(value: unknown): number | undefined {
-	return typeof value === "number" &&
-		Number.isFinite(value) &&
-		value >= 0
+	return typeof value === "number" && Number.isFinite(value) && value >= 0
 		? Math.floor(value)
 		: undefined;
 }
@@ -195,14 +193,16 @@ export function parseProviderUsage(
 	raw: unknown,
 	rawTimings?: unknown,
 ): LLMResponse["usage"] {
-	if ((!raw || typeof raw !== "object") &&
-		(!rawTimings || typeof rawTimings !== "object")) {
+	if (
+		(!raw || typeof raw !== "object") &&
+		(!rawTimings || typeof rawTimings !== "object")
+	) {
 		return undefined;
 	}
 	const usage = (raw && typeof raw === "object" ? raw : {}) as ProviderUsage;
-	const timings = (rawTimings && typeof rawTimings === "object"
-		? rawTimings
-		: {}) as ProviderTimings;
+	const timings = (
+		rawTimings && typeof rawTimings === "object" ? rawTimings : {}
+	) as ProviderTimings;
 	const cachedTokens = tokenCount(
 		usage.prompt_tokens_details?.cached_tokens ??
 			usage.input_tokens_details?.cached_tokens ??
@@ -368,8 +368,12 @@ export class OpenAIBackend implements LLMBackend {
 			...(topP !== undefined && { top_p: topP }),
 			...(topK !== undefined && { top_k: topK }),
 			...(minP !== undefined && { min_p: minP }),
-			...(presencePenalty !== undefined && { presence_penalty: presencePenalty }),
-			...(repetitionPenalty !== undefined && { repetition_penalty: repetitionPenalty }),
+			...(presencePenalty !== undefined && {
+				presence_penalty: presencePenalty,
+			}),
+			...(repetitionPenalty !== undefined && {
+				repetition_penalty: repetitionPenalty,
+			}),
 		};
 
 		// Pass reasoning/thinking level to OpenAI-compatible providers.
@@ -542,7 +546,7 @@ export class OpenAIBackend implements LLMBackend {
 		}
 
 		toolCalls = toolCalls
-			.filter((tc) => tc?.name)
+			.filter(tc => tc?.name)
 			.map((tc, index) => ({
 				id: tc.id || `tool_${index}`,
 				name: tc.name,

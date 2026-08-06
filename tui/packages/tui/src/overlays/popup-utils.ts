@@ -8,10 +8,10 @@
 
 import {
 	BOLD,
+	type Component,
 	clampLineToWidth,
 	DIM,
 	RESET,
-	type Component,
 	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
@@ -402,7 +402,7 @@ export function renderListPopupBody<T>(
 // ── Clamp all lines to terminal width ───────────────────────────────────────
 
 export function clampPopupLines(lines: string[], width: number): string[] {
-	return lines.map((line) => clampLineToWidth(line, width));
+	return lines.map(line => clampLineToWidth(line, width));
 }
 
 // ── Render a section divider ────────────────────────────────────────────────
@@ -524,7 +524,11 @@ export class ListSelectorOverlay<T> implements Component {
 			this.selection,
 			innerWidth,
 			this.config.maxRows ?? 10,
-			(item, i) => renderListItem(this.config.toItem(item, i, this.selection.index), innerWidth),
+			(item, i) =>
+				renderListItem(
+					this.config.toItem(item, i, this.selection.index),
+					innerWidth,
+				),
 			this.config.emptyText,
 		);
 

@@ -20,13 +20,13 @@ export function stripJsonComments(input: string): string {
 				i += 2;
 				continue;
 			}
-			if (ch === "\"") inString = false;
+			if (ch === '"') inString = false;
 			output += ch;
 			i++;
 			continue;
 		}
 
-		if (ch === "\"") {
+		if (ch === '"') {
 			inString = true;
 			output += ch;
 			i++;
@@ -50,7 +50,8 @@ export function stripJsonComments(input: string): string {
 		// Multi-line comment
 		if (ch === "/" && input[i + 1] === "*") {
 			i += 2;
-			while (i < input.length && !(input[i] === "*" && input[i + 1] === "/")) i++;
+			while (i < input.length && !(input[i] === "*" && input[i + 1] === "/"))
+				i++;
 			i += 2;
 			continue;
 		}

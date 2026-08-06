@@ -158,7 +158,7 @@ export class ThinkingLoopDetector {
 
 	// ── Pattern matching ──────────────────────────────────────────────────
 	private countMetaReasoningPatterns(text: string): number {
-		return META_REASONING_PATTERNS.filter((re) => re.test(text)).length;
+		return META_REASONING_PATTERNS.filter(re => re.test(text)).length;
 	}
 
 	// ── Diagnostic builders ───────────────────────────────────────────────
@@ -188,7 +188,7 @@ export class ThinkingLoopDetector {
 	private buildMetaReasoningDiagnostic(hits: number, lastText: string): string {
 		return (
 			`Meta-reasoning loop detected: ${hits} turns with meta-reasoning patterns ` +
-			"(\"let me think\", \"I need to consider\", etc.). You're reasoning about reasoning " +
+			'("let me think", "I need to consider", etc.). You\'re reasoning about reasoning ' +
 			`instead of acting. ${lastText.slice(0, 100)}... Stop and decide: what's the next action?`
 		);
 	}

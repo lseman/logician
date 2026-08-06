@@ -1,10 +1,10 @@
 // ── Settings command tests ───────────────────────────────────────────────────
 
-import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
+import { describe, it } from "node:test";
 import {
-	parseSettingsCommand,
 	buildSettingsSnapshot,
+	parseSettingsCommand,
 } from "../agent/configuration/settings.ts";
 
 describe("buildSettingsSnapshot", () => {
@@ -327,7 +327,9 @@ describe("parseSettingsCommand — compaction", () => {
 describe("parseSettingsCommand — permissions", () => {
 	it("accepts valid modes", () => {
 		for (const mode of ["acceptAll", "acceptEdits", "ask", "plan"]) {
-			const result = parseSettingsCommand(`permissions ${mode}`) as ChangeResult;
+			const result = parseSettingsCommand(
+				`permissions ${mode}`,
+			) as ChangeResult;
 			assert.strictEqual(result.type, "change");
 			assert.strictEqual(result.key, "permissions");
 		}

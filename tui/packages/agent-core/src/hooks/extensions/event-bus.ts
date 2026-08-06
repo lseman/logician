@@ -9,11 +9,11 @@
 //   off(); // unsubscribe
 
 import type {
+	ExtensionErrorHandler,
 	ExtensionEvent,
+	ExtensionEventHandler,
 	ExtensionEventName,
 	ExtensionEventResult,
-	ExtensionEventHandler,
-	ExtensionErrorHandler,
 } from "./events.ts";
 
 export interface ExtensionEventBusOptions {
@@ -59,15 +59,17 @@ export class ExtensionEventBus {
 	}
 
 	/** Register handlers for multiple event types at once. Returns batch unsubscribe. */
-	onMultiple(registrations: Array<{
-		eventType: ExtensionEventName;
-		handler: ExtensionEventHandler<ExtensionEventName>;
-		timeoutMs?: number;
-	}>): () => void {
-		const unsubscribes = registrations.map((r) =>
+	onMultiple(
+		registrations: Array<{
+			eventType: ExtensionEventName;
+			handler: ExtensionEventHandler<ExtensionEventName>;
+			timeoutMs?: number;
+		}>,
+	): () => void {
+		const unsubscribes = registrations.map(r =>
 			this.on(r.eventType, r.handler, { timeoutMs: r.timeoutMs }),
 		);
-		return () => unsubscribes.forEach((u) => u());
+		return () => unsubscribes.forEach(u => u());
 	}
 
 	/** Check if any handlers are registered for an event type. */
@@ -88,7 +90,9 @@ export class ExtensionEventBus {
 			if (result !== undefined) results.push(result);
 		}
 		// Last handler's result wins (like hook reducer semantics)
-		return (results.length > 0 ? results[results.length - 1] : undefined) as ExtensionEventResult<T>;
+		return (
+			results.length > 0 ? results[results.length - 1] : undefined
+		) as ExtensionEventResult<T>;
 	}
 
 	/**
@@ -96,12 +100,19 @@ export class ExtensionEventBus {
 	 * contract (e.g. builtin-hook internals like thinking_loop_detected). Delivered
 	 * only to handlers registered for that exact type string; skipped if none.
 	 */
-	async emitLegacy(event: { type: string; [key: string]: unknown }): Promise<void> {
-		const registrations = this.handlers.get(event.type as ExtensionEventName) ?? [];
+	async emitLegacy(event: {
+		type: string;
+		[key: string]: unknown;
+	}): Promise<void> {
+		const registrations =
+			this.handlers.get(event.type as ExtensionEventName) ?? [];
 		for (const { handler, timeoutMs } of registrations) {
 			await this.guardHandler(
 				handler,
-				event as unknown as Extract<ExtensionEvent, { type: ExtensionEventName }>,
+				event as unknown as Extract<
+					ExtensionEvent,
+					{ type: ExtensionEventName }
+				>,
 				timeoutMs,
 			);
 		}
@@ -132,9 +143,10 @@ export class ExtensionEventBus {
 		const effectiveTimeout = timeoutMs ?? this.defaultTimeoutMs;
 		try {
 			const run = Promise.resolve(handler(event as ExtensionEvent));
-			const result = effectiveTimeout > 0
-				? await this.withTimeout(run, effectiveTimeout)
-				: await run;
+			const result =
+				effectiveTimeout > 0
+					? await this.withTimeout(run, effectiveTimeout)
+					: await run;
 			return result as ExtensionEventResult<T>;
 		} catch (error) {
 			this.onError(error as Error, event.type);
@@ -143,15 +155,27 @@ export class ExtensionEventBus {
 	}
 
 	private defaultOnError(error: Error, event: ExtensionEventName): void {
-		console.error(`[ExtensionEventBus] Handler error (${event}):`, error.message);
+		console.error(
+			`[ExtensionEventBus] Handler error (${event}):`,
+			error.message,
+		);
 	}
 
 	private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 		return new Promise((resolve, reject) => {
-			const timer = setTimeout(() => reject(new Error(`Extension handler timeout after ${ms}ms`)), ms);
+			const timer = setTimeout(
+				() => reject(new Error(`Extension handler timeout after ${ms}ms`)),
+				ms,
+			);
 			promise.then(
-				(value) => { clearTimeout(timer); resolve(value); },
-				(error) => { clearTimeout(timer); reject(error); },
+				value => {
+					clearTimeout(timer);
+					resolve(value);
+				},
+				error => {
+					clearTimeout(timer);
+					reject(error);
+				},
 			);
 		});
 	}

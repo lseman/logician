@@ -117,22 +117,22 @@ export class PermissionPopup implements Component {
 		// Single-letter shortcuts: a=allow, v=always, n=deny
 		if (data.length === 1) {
 			const lower = data.toLowerCase();
-			if (lower === "a" && this.choices.some((c) => c.value === "allow")) {
-				const idx = this.choices.findIndex((c) => c.value === "allow");
+			if (lower === "a" && this.choices.some(c => c.value === "allow")) {
+				const idx = this.choices.findIndex(c => c.value === "allow");
 				if (idx !== -1) {
 					this.selectedIndex = idx;
 					return { type: "select", choice: this.choices[idx] };
 				}
 			}
-			if (lower === "v" && this.choices.some((c) => c.value === "always")) {
-				const idx = this.choices.findIndex((c) => c.value === "always");
+			if (lower === "v" && this.choices.some(c => c.value === "always")) {
+				const idx = this.choices.findIndex(c => c.value === "always");
 				if (idx !== -1) {
 					this.selectedIndex = idx;
 					return { type: "select", choice: this.choices[idx] };
 				}
 			}
-			if (lower === "n" && this.choices.some((c) => c.value === "deny")) {
-				const idx = this.choices.findIndex((c) => c.value === "deny");
+			if (lower === "n" && this.choices.some(c => c.value === "deny")) {
+				const idx = this.choices.findIndex(c => c.value === "deny");
 				if (idx !== -1) {
 					this.selectedIndex = idx;
 					return { type: "select", choice: this.choices[idx] };

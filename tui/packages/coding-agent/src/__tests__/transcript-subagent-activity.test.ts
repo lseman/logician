@@ -42,12 +42,12 @@ void test("subagent tool notices become one integrated lifecycle entry", () => {
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
 	assert.ok(assistant);
 	assert.equal(
-		assistant.chunks.some((chunk) => chunk.type === "notice"),
+		assistant.chunks.some(chunk => chunk.type === "notice"),
 		false,
 		"child activity should not duplicate into top-level notices",
 	);
 	const calls = assistant.chunks.find(
-		(chunk) => chunk.tool?.tool_name === "spawn_agent",
+		chunk => chunk.tool?.tool_name === "spawn_agent",
 	)?.tool?.details?.childToolCalls as Array<Record<string, unknown>>;
 	assert.deepEqual(calls, [
 		{
@@ -103,11 +103,11 @@ void test("concurrent same-name child tool calls resolve to the correct call by 
 
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
 	const calls = assistant?.chunks.find(
-		(chunk) => chunk.tool?.tool_name === "spawn_agent",
+		chunk => chunk.tool?.tool_name === "spawn_agent",
 	)?.tool?.details?.childToolCalls as Array<Record<string, unknown>>;
 
-	const callA = calls.find((c) => c.toolCallId === "call-A");
-	const callB = calls.find((c) => c.toolCallId === "call-B");
+	const callA = calls.find(c => c.toolCallId === "call-A");
+	const callB = calls.find(c => c.toolCallId === "call-B");
 	assert.equal(callA?.status, "completed");
 	assert.equal(callA?.resultPreview, "120 lines");
 	assert.equal(callB?.status, "completed");
@@ -144,7 +144,7 @@ void test("multi-line child tool results do not break marker/id/name parsing", (
 
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
 	const calls = assistant?.chunks.find(
-		(chunk) => chunk.tool?.tool_name === "spawn_agent",
+		chunk => chunk.tool?.tool_name === "spawn_agent",
 	)?.tool?.details?.childToolCalls as Array<Record<string, unknown>>;
 
 	assert.equal(calls.length, 1);
@@ -185,11 +185,11 @@ void test("subagent lifecycle notices update the parent card without duplication
 	const assistant = transcript.getTurns()[0]?.assistantMessage;
 	assert.ok(assistant);
 	assert.equal(
-		assistant.chunks.some((chunk) => chunk.type === "notice"),
+		assistant.chunks.some(chunk => chunk.type === "notice"),
 		false,
 	);
 	const parent = assistant.chunks.find(
-		(chunk) => chunk.tool?.tool_call_id === "parent-tool",
+		chunk => chunk.tool?.tool_call_id === "parent-tool",
 	)?.tool;
 	assert.equal(parent?.details?.status, "completed");
 	assert.equal(parent?.details?.lifecycleSummary, "done in 2 turn(s)");
@@ -227,7 +227,9 @@ void test("final batch details preserve collected child tool activity", () => {
 	});
 
 	const batch = transcript.getAssistantTools(transcript.getTurns()[0])[0];
-	const activity = batch.details?.childToolCalls as Array<Record<string, unknown>>;
+	const activity = batch.details?.childToolCalls as Array<
+		Record<string, unknown>
+	>;
 	assert.equal(activity.length, 1);
 	assert.equal(activity[0].agentId, "agent-1");
 	assert.equal(batch.details?.total, 2);
@@ -296,7 +298,7 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		kind: "tool_start",
 		toolCallId: "read-1",
 		toolName: "read_file",
-		args: "{\"path\":\"src/index.ts\"}",
+		args: '{"path":"src/index.ts"}',
 	});
 	transcript.handleEvent({
 		type: "subagent_chunk",
@@ -322,12 +324,10 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		contentText?: string;
 		tool?: { toolName: string; resultPreview?: string };
 	}>;
-	assert.deepEqual(chunks.map((chunk) => chunk.type), [
-		"thinking",
-		"content",
-		"tool",
-		"content",
-	]);
+	assert.deepEqual(
+		chunks.map(chunk => chunk.type),
+		["thinking", "content", "tool", "content"],
+	);
 	assert.equal(chunks[0].contentText, "I should inspect first.");
 	assert.equal(chunks[2].tool?.toolName, "read_file");
 	assert.equal(chunks[2].tool?.resultPreview, "file contents");

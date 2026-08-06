@@ -2,18 +2,18 @@
 // Full-featured single-line text input — undo/redo, kill ring, word nav,
 // bracketed paste, history, grapheme-aware cursor. Mirrors pi TUI's input.
 
-import type { KillRing } from "./kill-ring.ts";
-import { theme } from "../terminal/theme.ts";
 import {
+	BOLD,
 	type Component,
 	CURSOR_MARKER,
 	type Focusable,
-	visibleWidth,
 	RESET,
-	BOLD,
+	visibleWidth,
 } from "../terminal/core.ts";
-import type { UndoStack } from "./undo-stack.ts";
+import { theme } from "../terminal/theme.ts";
 import { getGraphemeSegmenter } from "../terminal/utils.ts";
+import type { KillRing } from "./kill-ring.ts";
+import type { UndoStack } from "./undo-stack.ts";
 import { findWordBackward, findWordForward } from "./word-navigation.ts";
 
 const segmenter = getGraphemeSegmenter();
@@ -59,7 +59,7 @@ export class InputBar implements Component, Focusable {
 		if (text === this._segsCacheValue && this._segsCache !== null) {
 			return this._segsCache;
 		}
-		const segs = [...segmenter.segment(text)].map((s) => s.segment);
+		const segs = [...segmenter.segment(text)].map(s => s.segment);
 		if (text === this._value) {
 			this._segsCache = segs;
 			this._segsCacheValue = text;
@@ -72,7 +72,7 @@ export class InputBar implements Component, Focusable {
 	private _prompt: string | undefined;
 	private get _promptResolved(): string {
 		if (this._prompt === undefined) {
-			this._prompt = "  " + theme.fg("prompt", "") + BOLD + "› " + RESET;
+			this._prompt = `  ${theme.fg("prompt", "")}${BOLD}› ${RESET}`;
 		}
 		return this._prompt;
 	}
@@ -254,11 +254,7 @@ export class InputBar implements Component, Focusable {
 		// would otherwise be silently dropped instead of typed. Bracketed paste
 		// (\x1b[200~) and any other escape-sequence chunk are handled by their own
 		// branches below and must not be split here.
-		if (
-			data.length > 1 &&
-			!data.includes("\x1b") &&
-			!this.isInPaste
-		) {
+		if (data.length > 1 && !data.includes("\x1b") && !this.isInPaste) {
 			for (const ch of data) this.handleInput(ch);
 			return;
 		}
@@ -642,7 +638,9 @@ export class InputBar implements Component, Focusable {
 		}
 
 		// Grapheme segments for cursor positioning
-		const allSegments = isPlaceholder ? this._segments(displayText) : this._segments();
+		const allSegments = isPlaceholder
+			? this._segments(displayText)
+			: this._segments();
 		const graphCursor = Math.min(this.cursor, allSegments.length);
 		const viewport = this._inputViewport(
 			allSegments,
@@ -675,7 +673,7 @@ export class InputBar implements Component, Focusable {
 		const rawLine =
 			prompt +
 			(viewport.leftClipped
-				? theme.fg("inputPlaceholder", "") + "‹" + RESET
+				? `${theme.fg("inputPlaceholder", "")}‹${RESET}`
 				: "") +
 			color +
 			beforeCursor +
@@ -683,7 +681,7 @@ export class InputBar implements Component, Focusable {
 			afterCursor +
 			"\x1b[0m" +
 			(viewport.rightClipped
-				? theme.fg("inputPlaceholder", "") + "›" + RESET
+				? `${theme.fg("inputPlaceholder", "")}›${RESET}`
 				: "");
 
 		// Calculate visible width (strip CURSOR_MARKER for measurement)
@@ -711,7 +709,9 @@ export class InputBar implements Component, Focusable {
 			logicalLines.length - 1,
 			beforeCursor.split("\n").length - 1,
 		);
-		const cursorColumn = this._graphemeCount(beforeCursor.split("\n").at(-1) ?? "");
+		const cursorColumn = this._graphemeCount(
+			beforeCursor.split("\n").at(-1) ?? "",
+		);
 		let start = Math.max(0, cursorLine - maxVisibleLines + 1);
 		start = Math.min(start, Math.max(0, logicalLines.length - maxVisibleLines));
 		const end = Math.min(logicalLines.length, start + maxVisibleLines);
@@ -725,8 +725,9 @@ export class InputBar implements Component, Focusable {
 		const rows: string[] = [];
 
 		for (let lineIndex = start; lineIndex < end; lineIndex++) {
-			const lineSegments = [...segmenter.segment(logicalLines[lineIndex] ?? "")]
-				.map((item) => item.segment);
+			const lineSegments = [
+				...segmenter.segment(logicalLines[lineIndex] ?? ""),
+			].map(item => item.segment);
 			const isCursorLine = lineIndex === cursorLine;
 			const lineCursor = isCursorLine
 				? Math.min(cursorColumn, lineSegments.length)
@@ -742,9 +743,8 @@ export class InputBar implements Component, Focusable {
 			let body: string;
 			if (isCursorLine) {
 				const before = visible.slice(0, cursorInViewport).join("");
-				const at = cursorInViewport < visible.length
-					? visible[cursorInViewport]
-					: " ";
+				const at =
+					cursorInViewport < visible.length ? visible[cursorInViewport] : " ";
 				const after = visible.slice(cursorInViewport + 1).join("");
 				const cursor = this.focused
 					? `${CURSOR_MARKER}\x1b[7m${at}\x1b[27m`
@@ -759,10 +759,12 @@ export class InputBar implements Component, Focusable {
 			const belowMarker = hiddenBelow && lineIndex === end - 1 ? "↓" : "";
 			const leftMarker = viewport.leftClipped ? "‹" : aboveMarker;
 			const rightMarker = viewport.rightClipped ? "›" : belowMarker;
-			const raw = prefix +
+			const raw =
+				prefix +
 				theme.fg("inputPlaceholder", leftMarker) +
 				theme.fg("inputText", body) +
-				theme.fg("inputPlaceholder", rightMarker) + RESET;
+				theme.fg("inputPlaceholder", rightMarker) +
+				RESET;
 			const clean = raw.replace(CURSOR_MARKER, "");
 			rows.push(raw + " ".repeat(Math.max(0, width - visibleWidth(clean))));
 		}
@@ -771,22 +773,20 @@ export class InputBar implements Component, Focusable {
 	}
 
 	private _renderComposerHeader(width: number): string {
-		const hintText = width >= 72
-			? this.value
-				? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear  ·  Ctrl+O tools"
-				: "/ Enter commands  ·  Ctrl+Enter steer now  ·  Ctrl+O tools"
-			: width >= 52
+		const hintText =
+			width >= 72
 				? this.value
-					? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear"
-					: "/ commands  ·  Ctrl+Enter steer now"
-				: "Enter send  ·  Ctrl+Enter now";
+					? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear  ·  Ctrl+O tools"
+					: "/ Enter commands  ·  Ctrl+Enter steer now  ·  Ctrl+O tools"
+				: width >= 52
+					? this.value
+						? "Enter send  ·  Ctrl+Enter steer now  ·  Esc clear"
+						: "/ commands  ·  Ctrl+Enter steer now"
+					: "Enter send  ·  Ctrl+Enter now";
 		const hint = ` ${theme.fg("muted", hintText)} `;
 		const hintWidth = visibleWidth(hint);
 		const ruleWidth = Math.max(1, width - hintWidth);
-		return (
-			theme.fg("borderMuted", "─".repeat(ruleWidth)) +
-			hint
-		);
+		return theme.fg("borderMuted", "─".repeat(ruleWidth)) + hint;
 	}
 
 	private _inputViewport(

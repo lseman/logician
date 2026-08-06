@@ -1,4 +1,8 @@
-import { clampLineToWidth, type Component, visibleWidth } from "../../terminal/core.ts";
+import {
+	type Component,
+	clampLineToWidth,
+	visibleWidth,
+} from "../../terminal/core.ts";
 import { theme } from "../../terminal/theme.ts";
 import type { TranscriptDisplay } from "./display.ts";
 

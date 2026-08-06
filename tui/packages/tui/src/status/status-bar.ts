@@ -4,7 +4,7 @@
 // Sections (separated by |):
 //   phase | model | thinking | dir/git | context | cache | reasoner | mcp
 
-import { type Component, visibleWidth, RESET, DIM } from "../terminal/core.ts";
+import { type Component, DIM, RESET, visibleWidth } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 
 /** Max chars for a free-text label before it's ellipsis-truncated. */
@@ -183,7 +183,8 @@ export class StatusBar implements Component {
 		insertIfFits(this.formatTokenFlow());
 		insertIfFits(this.formatGoal());
 		insertIfFits(this.formatInferenceMode());
-		if (this.info.mcpServerCount || this.info.mcpLoading) insertIfFits(this.formatMcp());
+		if (this.info.mcpServerCount || this.info.mcpLoading)
+			insertIfFits(this.formatMcp());
 		insertIfFits(this.formatSandbox());
 		insertIfFits(this.formatExecutionProfile());
 		insertIfFits(this.formatPermissionMode());
@@ -205,9 +206,10 @@ export class StatusBar implements Component {
 		let line = refreshed.join(separator);
 		if (visibleWidth(line) > width) {
 			const compact = [phase, context].filter(Boolean).join(separator);
-			line = visibleWidth(compact) <= width
-				? compact
-				: this.truncateVisible(phase, width);
+			line =
+				visibleWidth(compact) <= width
+					? compact
+					: this.truncateVisible(phase, width);
 		}
 		return line + RESET;
 	}
@@ -216,20 +218,9 @@ export class StatusBar implements Component {
 		return theme.fg("text", this.info.model || "local");
 	}
 
-	private formatSession(): string {
-		const title = this.info.sessionTitle?.trim();
-		if (!title || title === "New Session") return "";
-		const compact = title.length > LABEL_TRUNCATE_LENGTH
-			? `${title.slice(0, LABEL_TRUNCATE_LENGTH - 1)}…`
-			: title;
-		return `${DIM}◇${RESET} ${theme.fg("muted", compact)}`;
-	}
-
 	private formatPhase(): string {
 		const phase = this.info.phase || "ready";
-		const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"][
-			this.tick % 8
-		];
+		const spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"][this.tick % 8];
 		const phaseLabels: Record<string, string> = {
 			ready: "● READY",
 			thinking: `${spinner} THINKING`,
@@ -384,9 +375,10 @@ export class StatusBar implements Component {
 		const mins = Math.floor(elapsed / 60);
 		const secs = elapsed % 60;
 		const timeStr = mins > 0 ? `${mins}m${secs}s` : `${secs}s`;
-		const truncated = cond.length > LABEL_TRUNCATE_LENGTH
-			? cond.slice(0, LABEL_TRUNCATE_LENGTH) + "…"
-			: cond;
+		const truncated =
+			cond.length > LABEL_TRUNCATE_LENGTH
+				? `${cond.slice(0, LABEL_TRUNCATE_LENGTH)}…`
+				: cond;
 		return `${theme.fg("accent", `◎ ${truncated}`)} ${DIM}(${turns} turns, ${timeStr})${RESET}`;
 	}
 

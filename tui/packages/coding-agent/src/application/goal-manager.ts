@@ -81,7 +81,7 @@ export class GoalManager {
 
 	/** Record one completed evaluator pass without cancelling an unmet goal. */
 	recordEvaluation(met: boolean, reason: string): void {
-		if (!this.state || this.state.status !== "active") return;
+		if (this.state?.status !== "active") return;
 		const turnCount = this.state.turnCount + 1;
 		if (met) {
 			this.state = { ...this.state, turnCount };
@@ -120,10 +120,15 @@ export class GoalManager {
 	}
 
 	/** Parse a condition string, extracting optional "or stop after N turns" clause. */
-	static parseCondition(text: string): { condition: string; maxTurns?: number } {
+	static parseCondition(text: string): {
+		condition: string;
+		maxTurns?: number;
+	} {
 		const turnMatch = text.match(/or\s+stop\s+after\s+(\d+)\s+turns?/i);
 		const maxTurns = turnMatch ? Number(turnMatch[1]) : undefined;
-		const condition = turnMatch ? text.replace(turnMatch[0], "").trim() : text.trim();
+		const condition = turnMatch
+			? text.replace(turnMatch[0], "").trim()
+			: text.trim();
 		return { condition: condition || text, maxTurns };
 	}
 
@@ -132,12 +137,18 @@ export class GoalManager {
 	}
 
 	/** Build the evaluator prompt from condition + conversation snapshot. */
-	static buildEvaluatorPrompt(condition: string, conversationSnapshot: string): string {
+	static buildEvaluatorPrompt(
+		condition: string,
+		conversationSnapshot: string,
+	): string {
 		return `${EVALUATOR_SYSTEM_PROMPT}\n\n---\n\nGoal condition:\n${condition}\n\n---\n\nConversation so far:\n${conversationSnapshot}\n\n---\n\nEvaluate the condition against the conversation above.`;
 	}
 
 	/** Parse evaluator response: "YES: reason" or "NO: reason". */
-	static parseEvaluatorResponse(response: string): { met: boolean; reason: string } {
+	static parseEvaluatorResponse(response: string): {
+		met: boolean;
+		reason: string;
+	} {
 		const trimmed = response.trim();
 		if (trimmed.toUpperCase().startsWith("YES")) {
 			const reason = trimmed.replace(/^[Yy][Ee][Ss]\s*:\s*/, "").trim();

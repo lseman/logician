@@ -25,11 +25,11 @@ void test("disjoint edits produce separate hunks, untouched lines stay context",
 	assert.ok(!diff.includes("middle 15"), "untouched middle must be elided");
 	// Only the actually-changed lines are -/+.
 	assert.deepEqual(
-		diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")),
+		diff.split("\n").filter(l => l.startsWith("-") && !l.startsWith("---")),
 		["-line 2 old", "-line 33 old"],
 	);
 	assert.deepEqual(
-		diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")),
+		diff.split("\n").filter(l => l.startsWith("+") && !l.startsWith("+++")),
 		["+line 2 new", "+line 33 new"],
 	);
 });
@@ -43,9 +43,9 @@ void test("replaceAll-style scattered changes never mark untouched lines removed
 	const { diff } = generateDiffString(before, after);
 	const removed = diff
 		.split("\n")
-		.filter((l) => l.startsWith("-") && !l.startsWith("---"));
+		.filter(l => l.startsWith("-") && !l.startsWith("---"));
 	assert.equal(removed.length, 5);
-	assert.ok(removed.every((l) => l.includes("call foo(")));
+	assert.ok(removed.every(l => l.includes("call foo(")));
 });
 
 void test("hunk headers carry correct line numbers", () => {

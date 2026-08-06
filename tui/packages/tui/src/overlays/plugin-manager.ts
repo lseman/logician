@@ -1,14 +1,14 @@
-import { type Component } from "../terminal/core.ts";
-import { SelectorController } from "./selector-controller.ts";
+import type { Component } from "../terminal/core.ts";
 import {
-	renderListItem,
 	clampPopupLines,
+	type ListItem,
 	POPUP_FRAME_OVERHEAD,
 	parsePopupListNav,
-	renderListPopupFrame,
+	renderListItem,
 	renderListPopupBody,
-	type ListItem,
+	renderListPopupFrame,
 } from "./popup-utils.ts";
+import { SelectorController } from "./selector-controller.ts";
 
 export interface PluginListItem {
 	pluginId: string;
@@ -43,7 +43,7 @@ export class PluginManagerOverlay implements Component {
 	}): void {
 		const hooks = snapshot.sessionStartHooks || {};
 		this.pluginsDir = snapshot.pluginsDir || "";
-		this.plugins = snapshot.plugins.map((plugin) => {
+		this.plugins = snapshot.plugins.map(plugin => {
 			const pluginId = String(plugin.plugin_id || plugin.name || "");
 			return {
 				pluginId,

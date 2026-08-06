@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { ToolCall } from "../agent/types.ts";
 import {
 	PermissionManager,
 	primaryArgString,
 } from "../tools/shared/permissions.ts";
-import type { ToolCall } from "../agent/types.ts";
 
 function call(name: string, args: Record<string, unknown>): ToolCall {
 	return { id: "t1", name, arguments: JSON.stringify(args) };
@@ -84,7 +84,7 @@ void test("session allow persists after an 'always' decision", () => {
 void test("primaryArgString prefers command, then path, then JSON", () => {
 	assert.equal(primaryArgString({ command: "ls", path: "x" }), "ls");
 	assert.equal(primaryArgString({ path: "src/a.ts" }), "src/a.ts");
-	assert.equal(primaryArgString({ n: 1 }), "{\"n\":1}");
+	assert.equal(primaryArgString({ n: 1 }), '{"n":1}');
 });
 
 void test("batch bash permissions deny if any command is denied", () => {

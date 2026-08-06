@@ -1,11 +1,11 @@
+import type { TurnPhase } from "../state/turn-state.ts";
 import {
-	clampLineToWidth,
 	type Component,
-	visibleWidth,
+	clampLineToWidth,
 	RESET,
+	visibleWidth,
 } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import type { TurnPhase } from "../state/turn-state.ts";
 
 const MUTATING_TOOLS = new Set(["edit_file", "write_file"]);
 const FILE_TOOLS = new Set(["read_file", "edit_file", "write_file"]);
@@ -49,16 +49,22 @@ export class WorkSurface implements Component {
 	}
 
 	setPhase(phase: TurnPhase): void {
-		this.active = !["idle", "complete", "failed", "waiting", "approval"].includes(
-			phase,
-		);
+		this.active = ![
+			"idle",
+			"complete",
+			"failed",
+			"waiting",
+			"approval",
+		].includes(phase);
 		this.onInvalidate?.();
 	}
 
 	setContext(tokens: number, maxTokens?: number): void {
 		this.context = maxTokens
 			? `${tokens.toLocaleString()}/${maxTokens.toLocaleString()}`
-			: tokens > 0 ? tokens.toLocaleString() : "";
+			: tokens > 0
+				? tokens.toLocaleString()
+				: "";
 		this.onInvalidate?.();
 	}
 
@@ -79,15 +85,17 @@ export class WorkSurface implements Component {
 
 	recordToolEnd(
 		id: string | undefined,
-		name: string,
+		_name: string,
 		result = "",
 		isError = false,
 	): void {
 		if (isError) this.evidence.failures++;
 		if (result.includes("<post_edit_diagnostics")) this.evidence.diagnostics++;
 		const call = id ? this.calls.get(id) : undefined;
-		const file = call && typeof call.args.path === "string" ? call.args.path : "";
-		if (file && (isError || result.includes("<post_edit_diagnostics"))) this.touch(file);
+		const file =
+			call && typeof call.args.path === "string" ? call.args.path : "";
+		if (file && (isError || result.includes("<post_edit_diagnostics")))
+			this.touch(file);
 		this.onInvalidate?.();
 	}
 
@@ -96,16 +104,22 @@ export class WorkSurface implements Component {
 	}
 
 	render(width: number): string[] {
-		if (this.workingSet.length === 0 && this.evidence.tools === 0 && !this.context) {
+		if (
+			this.workingSet.length === 0 &&
+			this.evidence.tools === 0 &&
+			!this.context
+		) {
 			return [];
 		}
 		const lines: string[] = [];
 		const work = this.workingSet.slice(0, 8).join("  ·  ");
 		if (work) {
-			lines.push(this.line(
-				`${theme.fg("muted", "Working set")}  ${theme.fg("text", work)}${RESET}`,
-				width,
-			));
+			lines.push(
+				this.line(
+					`${theme.fg("muted", "Working set")}  ${theme.fg("text", work)}${RESET}`,
+					width,
+				),
+			);
 		}
 		if (this.evidence.tools > 0 || this.context) {
 			const label = this.active ? "Activity" : "Turn summary";
@@ -114,27 +128,41 @@ export class WorkSurface implements Component {
 				: theme.fg("success", "✓");
 			const parts = [
 				`${this.evidence.tools} tools`,
-				this.evidence.changed.size ? `${this.evidence.changed.size} changed` : "",
+				this.evidence.changed.size
+					? `${this.evidence.changed.size} changed`
+					: "",
 				this.evidence.commands ? `${this.evidence.commands} commands` : "",
-				this.evidence.diagnostics ? `${this.evidence.diagnostics} diagnostics` : "",
+				this.evidence.diagnostics
+					? `${this.evidence.diagnostics} diagnostics`
+					: "",
 				this.evidence.failures ? `${this.evidence.failures} failed` : "",
 				this.context ? `context ${this.context}` : "",
 			].filter(Boolean);
-			lines.push(this.line(
-				`${theme.fg("muted", label)}  ${state}${RESET}  ${theme.fg("dim", parts.join(" · "))}${RESET}`,
-				width,
-			));
+			lines.push(
+				this.line(
+					`${theme.fg("muted", label)}  ${state}${RESET}  ${theme.fg("dim", parts.join(" · "))}${RESET}`,
+					width,
+				),
+			);
 		}
 		return lines;
 	}
 
 	private touch(file: string): void {
-		this.workingSet = [file, ...this.workingSet.filter((item) => item !== file)]
-			.slice(0, 8);
+		this.workingSet = [
+			file,
+			...this.workingSet.filter(item => item !== file),
+		].slice(0, 8);
 	}
 
 	private emptyEvidence(): Evidence {
-		return { tools: 0, changed: new Set(), commands: 0, failures: 0, diagnostics: 0 };
+		return {
+			tools: 0,
+			changed: new Set(),
+			commands: 0,
+			failures: 0,
+			diagnostics: 0,
+		};
 	}
 
 	private line(value: string, width: number): string {

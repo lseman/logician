@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
-import {
-	runInPty,
-	screenFromPtyResult,
-} from "../testing/pty-harness.ts";
 import { createPtyAppHome } from "../testing/pty-app-home.ts";
+import { runInPty, screenFromPtyResult } from "../testing/pty-harness.ts";
 
 const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
 const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
@@ -35,7 +32,11 @@ void test("LogicianTUI boots, accepts input, and starts a real turn", async () =
 		rows: 30,
 	});
 	const screen = screenFromPtyResult(result, 100, 30).text();
-	assert.match(screen, /YOU/, "submitted message must appear in the transcript");
+	assert.match(
+		screen,
+		/YOU/,
+		"submitted message must appear in the transcript",
+	);
 	assert.match(screen, /ping/, "input bar text must reach the transcript");
 	assert.doesNotMatch(
 		result.output,

@@ -8,8 +8,8 @@
 // colors (e.g. a light gray can render as the terminal's black/dark slot).
 if (!process.env.FORCE_COLOR) process.env.FORCE_COLOR = "3";
 
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readFileSync, existsSync } from "node:fs";
 
 // Load ~/.logician/.env so MCP servers can resolve env-var placeholders.
 (function loadHomeEnv(): void {
@@ -27,7 +27,7 @@ import { readFileSync, existsSync } from "node:fs";
 		// Strip surrounding quotes (single or double)
 		if (
 			value.length >= 2 &&
-			((value[0] === "\"" && value.at(-1) === "\"") ||
+			((value[0] === '"' && value.at(-1) === '"') ||
 				(value[0] === "'" && value.at(-1) === "'"))
 		) {
 			value = value.slice(1, -1);
@@ -36,15 +36,12 @@ import { readFileSync, existsSync } from "node:fs";
 	}
 })();
 
-import { getAvailableThemes, initTheme, theme } from "./terminal/theme.ts";
 import { AgentCoreBridge } from "@logician/coding-agent/application";
 import {
 	buildDoctorReport,
 	formatDoctorReport,
 } from "@logician/coding-agent/developer-tools";
-import {
-	resolveRuntimeConfig,
-} from "@logician/coding-agent/runtime";
+import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
 import {
 	applyTrustChoice,
 	resolveTrust,
@@ -52,16 +49,20 @@ import {
 	TrustStore,
 } from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
-import { TrustPromptOverlay, type TrustChoice } from "./overlays/trust-prompt-overlay.ts";
-import { visibleWidth } from "./terminal/core.ts";
 import { LogicianTUI } from "./app/tui.ts";
+import {
+	type TrustChoice,
+	TrustPromptOverlay,
+} from "./overlays/trust-prompt-overlay.ts";
+import { visibleWidth } from "./terminal/core.ts";
+import { getAvailableThemes, initTheme, theme } from "./terminal/theme.ts";
 
 /** Show the trust prompt as an interactive terminal card before the main TUI. */
 async function showTrustOverlay(
 	cwd: string,
 	paths: string[],
 ): Promise<TrustChoice> {
-	return new Promise((resolve) => {
+	return new Promise(resolve => {
 		initTheme();
 		const overlay = new TrustPromptOverlay();
 		overlay.setOptions({ cwd, paths });
@@ -72,9 +73,14 @@ async function showTrustOverlay(
 			const width = Math.max(24, process.stdout.columns ?? 80);
 			const height = Math.max(12, process.stdout.rows ?? 24);
 			const lines = overlay.render(width);
-			const left = Math.max(0, Math.floor((width - Math.max(...lines.map(visibleWidth))) / 2));
+			const left = Math.max(
+				0,
+				Math.floor((width - Math.max(...lines.map(visibleWidth))) / 2),
+			);
 			const top = Math.max(0, height - lines.length - 3);
-			process.stdout.write(`\x1b[?25l\x1b[2J\x1b[H${"\n".repeat(top)}${lines.map((line) => " ".repeat(left) + line).join("\n")}`);
+			process.stdout.write(
+				`\x1b[?25l\x1b[2J\x1b[H${"\n".repeat(top)}${lines.map(line => " ".repeat(left) + line).join("\n")}`,
+			);
 		};
 		const cleanup = (): void => {
 			stdin.off("data", onData);
@@ -172,7 +178,7 @@ async function main(): Promise<void> {
 		const trustInfo = resolveTrustInfo(cwd, defaultProjectTrust());
 
 		if (trustInfo.preDecided) {
-			loadProjectConfig = trustInfo.preDecidedResult!.trusted;
+			loadProjectConfig = trustInfo.preDecidedResult?.trusted;
 		} else {
 			// Show trust overlay via readline (visually formatted)
 			const choice = await showTrustOverlay(cwd, trustInfo.paths);
@@ -225,9 +231,7 @@ async function main(): Promise<void> {
 				}
 			}
 		} catch (error: unknown) {
-			const message = error instanceof Error
-				? error.message
-				: String(error);
+			const message = error instanceof Error ? error.message : String(error);
 			process.stderr.write(
 				`error: failed to load session ${resumeSessionId}: ${message}\n`,
 			);
