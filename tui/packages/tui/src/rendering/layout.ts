@@ -245,10 +245,16 @@ function layoutComponent(
 // Our scrollbar always repaints the whole trailing column, so painting it is
 // a plain per-row cell replacement rather than pi's grapheme-aware in-line
 // styling — nothing else ever shares that column.
-function paintScrollbarCell(line: string, column: number, glyph: string, style: (text: string) => string): string {
+function paintScrollbarCell(
+	line: string,
+	column: number,
+	glyph: string,
+	isThumb: boolean,
+	style: (glyph: string, isThumb: boolean) => string,
+): string {
 	const before = clampLineToWidth(line, column);
 	const beforePad = " ".repeat(Math.max(0, column - visibleWidth(before)));
-	return `${before}${beforePad}${style(glyph)}`;
+	return `${before}${beforePad}${style(glyph, isThumb)}`;
 }
 
 export function getScrollbarGeometry(box: LayoutBox): ScrollbarGeometry | undefined {
@@ -287,7 +293,7 @@ function paintScrollbar(box: LayoutBox, screen: string[], _totalWidth: number): 
 		if (row < box.clip.y || row >= box.clip.y + box.clip.height || row < 0 || row >= screen.length) continue;
 		const isThumb = row >= geometry.thumbTop && row < geometry.thumbTop + geometry.thumbHeight;
 		const glyph = isThumb ? "█" : "│";
-		screen[row] = paintScrollbarCell(screen[row] ?? "", geometry.column, glyph, box.scrollView.scrollbarStyle);
+		screen[row] = paintScrollbarCell(screen[row] ?? "", geometry.column, glyph, isThumb, box.scrollView.scrollbarStyle);
 	}
 }
 

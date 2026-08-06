@@ -10,6 +10,14 @@ import type { TranscriptDisplay } from "./display.ts";
 export class NewOutputIndicator implements Component {
 	constructor(private readonly transcriptDisplay: TranscriptDisplay) {}
 
+	// TUI.handleInput() treats a pushed overlay as capturing/"visible" by
+	// default unless it exposes this — without it, this always-in-the-stack
+	// overlay would permanently block scroll-key and click routing to the
+	// transcript, whether or not new output is actually pending.
+	get visible(): boolean {
+		return this.transcriptDisplay.hasNewOutputBelow();
+	}
+
 	render(width: number): string[] {
 		if (!this.transcriptDisplay.hasNewOutputBelow()) return [];
 		const barColor = theme.fgRaw("separator");

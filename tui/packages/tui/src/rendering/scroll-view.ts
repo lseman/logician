@@ -9,7 +9,7 @@ export interface ScrollViewOptions {
 	primary?: boolean;
 	overscroll?: "chain" | "contain";
 	scrollbar?: ScrollViewScrollbar;
-	scrollbarStyle?: (text: string) => string;
+	scrollbarStyle?: (glyph: string, isThumb: boolean) => string;
 	scrollbarHideDelayMs?: number;
 }
 
@@ -18,7 +18,7 @@ export class ScrollView extends Container {
 	private readonly followEnd: boolean;
 	readonly primary: boolean;
 	readonly overscroll: "chain" | "contain";
-	readonly scrollbarStyle: (text: string) => string;
+	readonly scrollbarStyle: (glyph: string, isThumb: boolean) => string;
 	private currentScrollbar: ScrollViewScrollbar;
 	private readonly scrollbarHideDelayMs: number;
 	private currentScrollTop = 0;
@@ -42,7 +42,8 @@ export class ScrollView extends Container {
 		this.primary = options.primary ?? false;
 		this.overscroll = options.overscroll ?? "chain";
 		this.currentScrollbar = options.scrollbar ?? "hidden";
-		this.scrollbarStyle = options.scrollbarStyle ?? ((text) => `\x1b[100m${text}\x1b[49m`);
+		this.scrollbarStyle =
+			options.scrollbarStyle ?? ((glyph, isThumb) => (isThumb ? `\x1b[100m${glyph}\x1b[49m` : `\x1b[2m${glyph}\x1b[22m`));
 		this.scrollbarHideDelayMs = Math.max(0, Math.floor(options.scrollbarHideDelayMs ?? 1000));
 	}
 
@@ -67,10 +68,13 @@ export class ScrollView extends Container {
 	}
 
 	get isScrollbarVisible(): boolean {
-		if (this.scrollbar === "always") return this.currentViewportHeight > 0;
-		return (
-			this.scrollbar === "auto" && this.contentHeight > this.currentViewportHeight && this.transientScrollbarVisible
-		);
+		if (this.scrollbar === "hidden") return false;
+		// Only show once content actually overflows the viewport — a track
+		// with no scrollable distance communicates nothing, and the legacy
+		// TranscriptDisplay scrollbar it replaces followed the same rule.
+		if (this.contentHeight <= this.currentViewportHeight) return false;
+		if (this.scrollbar === "always") return true;
+		return this.transientScrollbarVisible;
 	}
 
 	setScrollbar(scrollbar: ScrollViewScrollbar): void {

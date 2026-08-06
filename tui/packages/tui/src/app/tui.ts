@@ -57,6 +57,7 @@ import { Container, TUI } from "../terminal/core.ts";
 import { VStack } from "../rendering/v-stack.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { Separator } from "../rendering/separator.ts";
+import { theme } from "../terminal/theme.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
@@ -452,7 +453,13 @@ export class LogicianTUI {
 			follow: "end",
 			primary: true,
 			overscroll: "chain",
-			scrollbar: "auto",
+			// The legacy TranscriptDisplay scrollbar was always visible whenever
+			// content overflowed the viewport, with no fade — match that rather
+			// than ScrollView's "auto" mode, which only appears after the first
+			// scroll activity (via markScrollbarActivity) and then fades.
+			scrollbar: "always",
+			scrollbarStyle: (glyph, isThumb) =>
+				isThumb ? theme.fg("selected", glyph) : theme.fg("separator", glyph),
 		});
 		this.transcriptDisplay.setScrollView(transcriptScroll);
 		this.tui.showOverlay(new NewOutputIndicator(this.transcriptDisplay), {

@@ -452,7 +452,10 @@ export class TUI extends Container {
 			// Pure mouse chunk → apply coalesced scroll once, then stop.
 			if (net !== 0 && consumed === data.length) {
 				if (this.layoutRoot) {
-					const delta = -net * TUI.WHEEL_STEP; // ScrollView delta: +up / -down
+					// ScrollView.scrollBy: positive moves toward the end (down),
+					// negative toward the start (up) — same sign as `net` already
+					// uses (wheel up is -1, wheel down is +1), so no negation here.
+					const delta = net * TUI.WHEEL_STEP;
 					this.routeWheel(wheelColumn, wheelRow, delta);
 				} else if (net > 0) {
 					this.scrollDown(net * TUI.WHEEL_STEP);
@@ -925,20 +928,27 @@ export class TUI extends Container {
 		termHeight: number,
 		frameStartedAt: number,
 	): void {
+		// _commitFrame never writes the physical last column (avoids terminal
+		// autowrap on write) — see renderWidth there. Lay out one column
+		// narrower so nothing, including a full-width ScrollView's scrollbar,
+		// ever targets that reserved column; pad back out to termWidth after,
+		// matching what the legacy fixed layout always produced.
+		const layoutWidth = Math.max(1, termWidth - 1);
 		let frame: LayoutFrame;
 		try {
-			frame = renderLayoutFrame(root, termWidth, termHeight, () => this.requestRender());
+			frame = renderLayoutFrame(root, layoutWidth, termHeight, () => this.requestRender());
 		} catch (_e: unknown) {
-			frame = renderLayoutFrame(new Spacer(termHeight), termWidth, termHeight, () => this.requestRender());
+			frame = renderLayoutFrame(new Spacer(termHeight), layoutWidth, termHeight, () => this.requestRender());
 		}
 		this.currentLayoutFrame = frame;
 		this._viewportHeight = frame.primaryScrollView?.viewportHeight ?? termHeight;
+		const paddedLines = frame.lines.map((line) => `${line} `);
 
 		// composeOverlays' transcriptHeight parameter only feeds center/bottom
 		// anchor math for non-aboveInput overlays; the primary scroll view's
 		// viewport height is the layout-engine equivalent of "the transcript
 		// area" those overlays float over.
-		const finalLines = this.composeOverlays(frame.lines, termWidth, termHeight, this._viewportHeight);
+		const finalLines = this.composeOverlays(paddedLines, termWidth, termHeight, this._viewportHeight);
 		this._commitFrame(finalLines, termWidth, termHeight, frameStartedAt, termHeight);
 	}
 
@@ -1168,7 +1178,11 @@ export class TUI extends Container {
 		if (!("handleMouse" in child)) return false;
 		const box = getComponentBoxAt(frame, child, column, row);
 		if (!box) return false;
-		const contentRow = row - box.rect.y + primary.scrollTop;
+		// box.rect.y already bakes in the ScrollView's scroll offset (layout.ts
+		// translates the child box to y - scrollTop), so the click row only
+		// needs the box's own origin subtracted — adding scrollTop again would
+		// double-count it and hit the wrong content row entirely.
+		const contentRow = row - box.rect.y;
 		const contentColumn = column - box.rect.x;
 		const handled = (child as unknown as { handleMouse: (c: number, r: number) => boolean }).handleMouse(
 			contentColumn,
