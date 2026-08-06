@@ -1,31 +1,49 @@
 // ── Minimal TUI core ──────────────────────────────────────────────────────────
 // Differential rendering engine — minimal, no external deps
 
-import stringWidth from "string-width";
-
-// ── Interfaces ────────────────────────────────────────────────────────────────
-
-export interface Component {
-	render(width: number): string[];
-	invalidate?(): void;
-}
-
-export interface Focusable {
-	focused: boolean;
-}
-
-export interface Scrollable extends Component {
-	scrollOffset: number;
-	totalHeight: number;
-	scroll(delta: number): void;
-	scrollToBottom(): void;
-	isAtBottom: boolean;
-	handleMouse?(column: number, row: number): boolean;
-}
-
-export function isFocusable(c: Component | null): c is Component & Focusable {
-	return c !== null && "focused" in c;
-}
+// Component/Container/CURSOR_MARKER/ANSI string utilities live in
+// primitives.ts, which the layout engine (rendering/layout.ts and its
+// dependents) also imports. core.ts must not import the layout engine at
+// module scope: primitives.ts <- layout.ts <- core.ts would otherwise close
+// a cycle back through this file, and since stack.ts/scroll-view.ts extend
+// Container at module-evaluation time, Node's ESM loader hits Container
+// still in its temporal dead zone and crashes. The three layout-engine
+// functions core.ts needs are only ever called inside method bodies, so a
+// one-way, deferred-in-effect dependency (this file importing rendering/,
+// never the reverse) is safe.
+export {
+	BOLD,
+	CURSOR_MARKER,
+	Container,
+	DIM,
+	RESET,
+	Spacer,
+	clampLineToWidth,
+	compositeTuiLine,
+	isFocusable,
+	visibleWidth,
+	type Component,
+	type Focusable,
+	type Scrollable,
+} from "./primitives.ts";
+import {
+	Container,
+	CURSOR_MARKER,
+	clampLineToWidth,
+	isFocusable,
+	Spacer,
+	visibleWidth,
+	type Component,
+	type Focusable,
+	type Scrollable,
+} from "./primitives.ts";
+import {
+	getComponentBoxAt,
+	getScrollViewsAt,
+	renderLayoutFrame,
+	type LayoutFrame,
+	type LayoutRect,
+} from "../rendering/layout.ts";
 
 export interface RendererMetrics {
 	bytesWritten: number;
@@ -68,170 +86,6 @@ export function normalizeKeyboardInput(data: string): string {
 			if (lowerCodepoint < 96 || lowerCodepoint > 127) return sequence;
 			return String.fromCharCode(lowerCodepoint & 0x1f);
 		});
-}
-
-// ── Cursor marker ────────────────────────────────────────────────────────────
-
-export const CURSOR_MARKER = "\x1b_pi:c\x07";
-
-// ── Shared ANSI codes ─────────────────────────────────────────────────────────
-// Every component previously redeclared these identically — single source now.
-
-export const RESET = "\x1b[0m";
-export const BOLD = "\x1b[1m";
-export const DIM = "\x1b[2m";
-
-// ── Width utilities ──────────────────────────────────────────────────────────
-
-// Simple visible width calculator (handles ANSI escape codes)
-export function visibleWidth(text: string): number {
-	return stringWidth(
-		text
-			.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
-			.replace(/\x1b[\]_][\s\S]*?(?:\x07|\x1b\\)/g, ""),
-	);
-}
-
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-function graphemeAt(text: string, offset: number): string {
-	const segment = graphemeSegmenter.segment(text.slice(offset))[Symbol.iterator]().next();
-	return segment.done ? "" : segment.value.segment;
-}
-
-// Clamp a line to a visible width, preserving ALL escape sequences (CSI colors,
-// OSC hyperlinks/markers). Adds no ellipsis — it is used per-frame to guarantee
-// a line can never exceed the terminal width and wrap onto the next row (which
-// would desync the whole differential frame).
-export function clampLineToWidth(text: string, width: number): string {
-	let result = "";
-	let visible = 0;
-	let i = 0;
-	while (i < text.length) {
-		const ch = text[i];
-		if (ch === "\x1b") {
-			const next = text[i + 1];
-			if (next === "[") {
-				// CSI: ESC [ ... <final byte 0x40-0x7E>
-				let j = i + 2;
-				while (
-					j < text.length &&
-					!(text.charCodeAt(j) >= 0x40 && text.charCodeAt(j) <= 0x7e)
-				)
-					j++;
-				result += text.slice(i, j + 1);
-				i = j + 1;
-				continue;
-			}
-			if (next === "]") {
-				// OSC: ESC ] ... terminated by BEL (0x07) or ST (ESC \)
-				let j = i + 2;
-				while (
-					j < text.length &&
-					text[j] !== "\x07" &&
-					!(text[j] === "\x1b" && text[j + 1] === "\\")
-				)
-					j++;
-				const end = text[j] === "\x07" ? j + 1 : j + 2;
-				result += text.slice(i, end);
-				i = end;
-				continue;
-			}
-			if (next === "_") {
-				// APC (e.g. cursor marker): ESC _ ... ST/BEL
-				let j = i + 2;
-				while (
-					j < text.length &&
-					text[j] !== "\x07" &&
-					!(text[j] === "\x1b" && text[j + 1] === "\\")
-				)
-					j++;
-				const end = text[j] === "\x07" ? j + 1 : j + 2;
-				result += text.slice(i, end);
-				i = end;
-				continue;
-			}
-			// Lone ESC — pass through.
-			result += ch;
-			i++;
-			continue;
-		}
-		// Drop other C0 control bytes (NUL, etc.). A stray NUL — e.g. from
-		// reading a binary or corrupted file — truncates the terminal frame and
-		// freezes the TUI mid-render. Tabs are expanded to a single space.
-		const code = text.charCodeAt(i);
-		if (code < 0x20) {
-			if (code === 0x09) {
-				if (visible + 1 > width) break;
-				result += " ";
-				visible += 1;
-			}
-			i++;
-			continue;
-		}
-		const grapheme = graphemeAt(text, i);
-		if (!grapheme) break;
-		const w = visibleWidth(grapheme);
-		if (visible + w > width) break;
-		result += grapheme;
-		visible += w;
-		i += grapheme.length;
-	}
-	return result;
-}
-
-// ── Spacer ───────────────────────────────────────────────────────────────────
-
-export class Spacer implements Component {
-	private height: number;
-
-	constructor(height = 1) {
-		this.height = height;
-	}
-
-	render(width: number): string[] {
-		const line = " ".repeat(width);
-		return Array(this.height).fill(line);
-	}
-
-	invalidate(): void {
-		/* no-op */
-	}
-}
-
-// ── Container ────────────────────────────────────────────────────────────────
-
-export class Container implements Component {
-	children: Component[] = [];
-
-	addChild(component: Component): void {
-		this.children.push(component);
-	}
-
-	removeChild(component: Component): void {
-		const idx = this.children.indexOf(component);
-		if (idx >= 0) this.children.splice(idx, 1);
-	}
-
-	clear(): void {
-		this.children = [];
-	}
-
-	invalidate(): void {
-		for (const child of this.children) {
-			child.invalidate?.();
-		}
-	}
-
-	render(width: number): string[] {
-		const lines: string[] = [];
-		for (const child of this.children) {
-			for (const line of child.render(width)) {
-				lines.push(line);
-			}
-		}
-		return lines;
-	}
 }
 
 import { appendFileSync } from "node:fs";
@@ -295,6 +149,9 @@ export class TUI extends Container {
 	private previousCursorCol = -1;
 	private previousCursorVisible: boolean | null = null;
 	private lastRenderMetrics: RendererMetrics = EMPTY_RENDERER_METRICS;
+	private layoutRoot: Component | null = null;
+	private currentLayoutFrame: LayoutFrame | null = null;
+	private paintedOverlayClickRects: Array<{ rect: LayoutRect; onClick: () => void }> = [];
 	private scrollableComponent: Scrollable | null = null;
 	private inputBarComponent: Component | null = null;
 	private fixedBottomComponent: Component | null = null;
@@ -566,31 +423,42 @@ export class TUI extends Container {
 			let net = 0; // +down / -up, in wheel ticks
 			let consumed = 0;
 			let clicked = false;
+			let wheelColumn = 0;
+			let wheelRow = 0;
 			let m: RegExpExecArray | null;
 			while ((m = re.exec(data)) !== null) {
 				const btn = parseInt(m[1], 10);
 				const column = parseInt(m[2], 10) - 1;
 				const row = parseInt(m[3], 10) - 1;
-				if (btn === 64)
+				if (btn === 64) {
 					net -= 1; // wheel up → older content
-				else if (btn === 65) net += 1; // wheel down → newer content
-				else if (
-					btn === 0 &&
-					m[4] === "M" &&
-					!hasVisibleOverlay &&
-					row >= 0 &&
-					row < this._viewportHeight
-				) {
-					clicked =
-						this.scrollableComponent?.handleMouse?.(column, row) === true ||
-						clicked;
+					wheelColumn = column;
+					wheelRow = row;
+				} else if (btn === 65) {
+					net += 1; // wheel down → newer content
+					wheelColumn = column;
+					wheelRow = row;
+				} else if (btn === 0 && m[4] === "M") {
+					if (this.layoutRoot) {
+						clicked = this.routeClick(column, row, hasVisibleOverlay) || clicked;
+					} else if (!hasVisibleOverlay && row >= 0 && row < this._viewportHeight) {
+						clicked =
+							this.scrollableComponent?.handleMouse?.(column, row) === true ||
+							clicked;
+					}
 				}
 				consumed += m[0].length;
 			}
 			// Pure mouse chunk → apply coalesced scroll once, then stop.
 			if (net !== 0 && consumed === data.length) {
-				if (net > 0) this.scrollDown(net * TUI.WHEEL_STEP);
-				else this.scrollUp(-net * TUI.WHEEL_STEP);
+				if (this.layoutRoot) {
+					const delta = -net * TUI.WHEEL_STEP; // ScrollView delta: +up / -down
+					this.routeWheel(wheelColumn, wheelRow, delta);
+				} else if (net > 0) {
+					this.scrollDown(net * TUI.WHEEL_STEP);
+				} else {
+					this.scrollUp(-net * TUI.WHEEL_STEP);
+				}
 				return;
 			}
 			if (clicked && consumed === data.length) return;
@@ -621,27 +489,37 @@ export class TUI extends Container {
 		// the prompt keeps focus. Plain arrows remain input/history navigation.
 		// But if any overlay is visible, skip scrolling so the overlay gets first
 		// crack at the keys (e.g. reasoner selector, plugin manager).
-		if (!hasVisibleOverlay && this.scrollableComponent) {
+		const primaryScrollView = this.layoutRoot ? this.currentLayoutFrame?.primaryScrollView : undefined;
+		if (!hasVisibleOverlay && (this.scrollableComponent || primaryScrollView)) {
+			const pageStep = Math.max(4, Math.floor(this._viewportHeight * 0.8));
 			if (data === "\x1b[5~") {
-				this.scrollUp(Math.max(4, Math.floor(this._viewportHeight * 0.8)));
+				if (primaryScrollView) primaryScrollView.scrollBy(-pageStep);
+				else this.scrollUp(pageStep);
+				this.requestRender();
 				return;
 			}
 			if (data === "\x1b[6~") {
-				this.scrollDown(Math.max(4, Math.floor(this._viewportHeight * 0.8)));
+				if (primaryScrollView) primaryScrollView.scrollBy(pageStep);
+				else this.scrollDown(pageStep);
+				this.requestRender();
 				return;
 			}
 			if (
 				data === "\x1b[1;5H" ||
 				(data === "\x1b[H" && !this.isInputFocused())
 			) {
-				this.scrollToTop();
+				if (primaryScrollView) primaryScrollView.scrollToStart();
+				else this.scrollToTop();
+				this.requestRender();
 				return;
 			}
 			if (
 				data === "\x1b[1;5F" ||
 				(data === "\x1b[F" && !this.isInputFocused())
 			) {
-				this.scrollToBottom();
+				if (primaryScrollView) primaryScrollView.scrollToEnd();
+				else this.scrollToBottom();
+				this.requestRender();
 				return;
 			}
 
@@ -649,19 +527,31 @@ export class TUI extends Container {
 			const isInputFocused = this.focusedComponent === this.inputBarComponent;
 			if (!isInputFocused) {
 				if (data === "\x1b[A" || data === "\x1bOA") {
-					/* Up arrow */ this.scrollUp(1);
+					/* Up arrow */
+					if (primaryScrollView) primaryScrollView.scrollBy(-1);
+					else this.scrollUp(1);
+					this.requestRender();
 					return;
 				}
 				if (data === "\x1b[B" || data === "\x1bOB") {
-					/* Down arrow */ this.scrollDown(1);
+					/* Down arrow */
+					if (primaryScrollView) primaryScrollView.scrollBy(1);
+					else this.scrollDown(1);
+					this.requestRender();
 					return;
 				}
 				if (data === "\x1b[H" || data === "\x1bOH") {
-					/* Home */ this.scrollToTop();
+					/* Home */
+					if (primaryScrollView) primaryScrollView.scrollToStart();
+					else this.scrollToTop();
+					this.requestRender();
 					return;
 				}
 				if (data === "\x1b[F" || data === "\x1bOF") {
-					/* End */ this.scrollToBottom();
+					/* End */
+					if (primaryScrollView) primaryScrollView.scrollToEnd();
+					else this.scrollToBottom();
+					this.requestRender();
 					return;
 				}
 			}
@@ -727,6 +617,11 @@ export class TUI extends Container {
 		const frameStartedAt = performance.now();
 		const termWidth = Math.max(1, process.stdout.columns || 80);
 		const termHeight = Math.max(1, process.stdout.rows || 24);
+
+		if (this.layoutRoot) {
+			this._doRenderInnerLayoutEngine(this.layoutRoot, termWidth, termHeight, frameStartedAt);
+			return;
+		}
 
 		let inputLines: string[];
 		try {
@@ -858,6 +753,31 @@ export class TUI extends Container {
 			termHeight,
 			transcriptHeight,
 		);
+		// Park the hardware cursor at the input's edit position (under the
+		// visible InputBar cursor). Falls back to the input line's first column
+		// only if no marker was emitted, which keeps the cursor off the footer.
+		const fallbackRow = Math.min(
+			termHeight,
+			transcriptHeight + 2 + aboveInputHeight,
+		);
+		this._commitFrame(finalLines, termWidth, termHeight, frameStartedAt, fallbackRow);
+	}
+
+	/**
+	 * Diff `finalLines` against the last committed frame, write only the
+	 * changed cells, park the hardware cursor at CURSOR_MARKER (or
+	 * `fallbackCursorRow` if no component emitted one), and record render
+	 * metrics. Shared tail for both the legacy fixed-region layout and the
+	 * constrained layout engine — everything upstream of this differs only in
+	 * how `finalLines` and `fallbackCursorRow` were produced.
+	 */
+	private _commitFrame(
+		finalLines: string[],
+		termWidth: number,
+		termHeight: number,
+		frameStartedAt: number,
+		fallbackCursorRow: number,
+	): void {
 		const layoutFinishedAt = performance.now();
 
 		// Leave the physical last column unused: writing it can put terminals into
@@ -940,14 +860,7 @@ export class TUI extends Container {
 		}
 
 		this.previousLines = finalLines;
-		// Park the hardware cursor at the input's edit position (under the
-		// visible InputBar cursor). Falls back to the input line's first column
-		// only if no marker was emitted, which keeps the cursor off the footer.
-		const fallbackRow = Math.min(
-			termHeight,
-			transcriptHeight + 2 + aboveInputHeight,
-		);
-		const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackRow;
+		const cursorRow = markerRow >= 0 ? markerRow + 1 : fallbackCursorRow;
 		const cursorCol =
 			markerRow >= 0 ? Math.min(termWidth, markerCol + 1) : 1;
 		const cursorMoved =
@@ -1006,6 +919,29 @@ export class TUI extends Container {
 		if (RENDER_DEBUG_ENABLED) logRenderMetrics(this.lastRenderMetrics);
 	}
 
+	private _doRenderInnerLayoutEngine(
+		root: Component,
+		termWidth: number,
+		termHeight: number,
+		frameStartedAt: number,
+	): void {
+		let frame: LayoutFrame;
+		try {
+			frame = renderLayoutFrame(root, termWidth, termHeight, () => this.requestRender());
+		} catch (_e: unknown) {
+			frame = renderLayoutFrame(new Spacer(termHeight), termWidth, termHeight, () => this.requestRender());
+		}
+		this.currentLayoutFrame = frame;
+		this._viewportHeight = frame.primaryScrollView?.viewportHeight ?? termHeight;
+
+		// composeOverlays' transcriptHeight parameter only feeds center/bottom
+		// anchor math for non-aboveInput overlays; the primary scroll view's
+		// viewport height is the layout-engine equivalent of "the transcript
+		// area" those overlays float over.
+		const finalLines = this.composeOverlays(frame.lines, termWidth, termHeight, this._viewportHeight);
+		this._commitFrame(finalLines, termWidth, termHeight, frameStartedAt, termHeight);
+	}
+
 	getLastRenderMetrics(): RendererMetrics {
 		return { ...this.lastRenderMetrics };
 	}
@@ -1017,6 +953,7 @@ export class TUI extends Container {
 		transcriptHeight: number,
 	): string[] {
 		const result = [...lines];
+		this.paintedOverlayClickRects = [];
 
 		const visibleEntries = this.overlayStack.filter((e) => {
 			if (e.options?.anchor === "aboveInput") return false;
@@ -1081,6 +1018,13 @@ export class TUI extends Container {
 					result[idx] = basePad + srcLine + afterPad;
 				}
 			}
+
+			if (entry.options?.onClick) {
+				this.paintedOverlayClickRects.push({
+					rect: { x: margin, y: row, width: overlayWidth, height: overlayHeight },
+					onClick: entry.options.onClick,
+				});
+			}
 		}
 
 		return result;
@@ -1122,6 +1066,36 @@ export class TUI extends Container {
 		}
 	}
 
+	// ── Layout root ───────────────────────────────────────────────────────
+	// When set, _doRenderInner() builds the frame through the constrained
+	// layout engine (rendering/layout.ts) instead of the hand-assembled
+	// transcript/separator/pinned/input/status block below. Regions are then
+	// whatever VStack/HStack/ScrollView tree the caller composes.
+
+	setLayoutRoot(component: Component | null): void {
+		this.layoutRoot = component;
+		this.currentLayoutFrame = null;
+		this.requestRender();
+	}
+
+	private aboveInputOverlaysComponent: Component | undefined;
+
+	/**
+	 * Stable Component wrapping renderAboveInputOverlays() — the most-
+	 * recently-focused `anchor: "aboveInput"` overlay (slash popup, file
+	 * mention, plugin/MCP manager). Lets a layout-engine stack entry pick up
+	 * the same "one active picker, most-recent-focus-wins" behavior the
+	 * legacy fixed layout renders inline.
+	 */
+	getAboveInputOverlaysComponent(): Component {
+		if (!this.aboveInputOverlaysComponent) {
+			this.aboveInputOverlaysComponent = {
+				render: (width: number) => this.renderAboveInputOverlays(width),
+			};
+		}
+		return this.aboveInputOverlaysComponent;
+	}
+
 	// ── Scroll controls ───────────────────────────────────────────────────
 
 	setScrollableComponent(comp: Scrollable | null): void {
@@ -1140,6 +1114,68 @@ export class TUI extends Container {
 	// Renders nothing when the component returns no lines.
 	setFixedAboveInputComponent(comp: Component | null): void {
 		this.fixedAboveInputComponent = comp;
+	}
+
+	/**
+	 * Route a wheel event through the committed layout frame: hit-test at
+	 * (column, row), offer `delta` to each ScrollView found there deepest-first,
+	 * and stop once one consumes it unless it opts into `overscroll: "chain"`.
+	 * Falls back to the frame's primary ScrollView if nothing under the
+	 * pointer consumed the delta — mirrors the legacy scrollUp/scrollDown
+	 * behavior where wheel input always reaches the transcript even when the
+	 * pointer sits over a non-scrollable dock row.
+	 */
+	private routeWheel(column: number, row: number, delta: number): void {
+		const frame = this.currentLayoutFrame;
+		if (!frame) return;
+		const hitScrollViews = getScrollViewsAt(frame, column, row);
+		let remaining = delta;
+		const seen = new Set<unknown>();
+		for (const scrollView of hitScrollViews) {
+			seen.add(scrollView);
+			remaining = scrollView.scrollBy(remaining);
+			if (remaining === 0 || scrollView.overscroll === "contain") break;
+		}
+		const primary = frame.primaryScrollView;
+		if (remaining !== 0 && primary && !seen.has(primary)) primary.scrollBy(remaining);
+		this.requestRender();
+	}
+
+	/**
+	 * Route a left-click in layout-engine mode. Overlay click regions (e.g.
+	 * the "new output below" indicator) are checked first and work regardless
+	 * of what else is visible, since they're cosmetic, non-modal affordances.
+	 * Otherwise, when no modal overlay is capturing input, hit-test the
+	 * primary ScrollView's child for a `handleMouse` capability (mirrors the
+	 * legacy scrollableComponent?.handleMouse? path) — the click row is
+	 * translated to content-relative coordinates using that component's own
+	 * painted box, since content now renders at full unbounded height and is
+	 * clipped by the ScrollView rather than self-clipped.
+	 */
+	private routeClick(column: number, row: number, hasVisibleOverlay: boolean): boolean {
+		for (const { rect, onClick } of this.paintedOverlayClickRects) {
+			if (column >= rect.x && column < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height) {
+				onClick();
+				this.requestRender();
+				return true;
+			}
+		}
+		if (hasVisibleOverlay) return false;
+		const frame = this.currentLayoutFrame;
+		const primary = frame?.primaryScrollView;
+		if (!frame || !primary) return false;
+		const child = primary.contentComponent;
+		if (!("handleMouse" in child)) return false;
+		const box = getComponentBoxAt(frame, child, column, row);
+		if (!box) return false;
+		const contentRow = row - box.rect.y + primary.scrollTop;
+		const contentColumn = column - box.rect.x;
+		const handled = (child as unknown as { handleMouse: (c: number, r: number) => boolean }).handleMouse(
+			contentColumn,
+			contentRow,
+		);
+		if (handled) this.requestRender();
+		return handled;
 	}
 
 	private scrollUp(lines: number): void {
@@ -1422,4 +1458,7 @@ export interface OverlayOptions {
 	align?: "center" | "left";
 	maxHeight?: number;
 	nonCapturing?: boolean;
+	/** Invoked when a mouse click lands within this overlay's composited
+	 * screen rect. Only wired up in layout-engine mode (setLayoutRoot). */
+	onClick?: () => void;
 }

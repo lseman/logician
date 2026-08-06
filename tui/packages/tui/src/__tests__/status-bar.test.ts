@@ -198,20 +198,6 @@ void describe("StatusBar", () => {
 		assert.ok(lines[0].includes("2m0s"));
 	});
 
-	it("truncates long session titles", () => {
-		setupTheme();
-		const bar = new StatusBar();
-		bar.update({
-			phase: "ready",
-			model: "test",
-			contextTokens: 0,
-			contextMaxTokens: 100000,
-			sessionTitle: "A very long session title that should be truncated",
-		});
-		const lines = bar.render(80);
-		assert.ok(lines[0].includes("◇"));
-	});
-
 	it("updates on tick animation", () => {
 		setupTheme();
 		const bar = new StatusBar();

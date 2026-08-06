@@ -6,8 +6,28 @@ import { NotificationCenter } from "../status/notification-center.ts";
 import { SteerQueue } from "../status/steer-queue.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
+import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator.ts";
+import { ScrollView } from "../rendering/scroll-view.ts";
+import { renderLayoutFrame } from "../rendering/layout.ts";
 import { CURSOR_MARKER, visibleWidth } from "../terminal/core.ts";
 import { initTheme, theme } from "../terminal/theme.ts";
+
+/** Drive a TranscriptDisplay through a real ScrollView + layout pass, the
+ * same integration path app/tui.ts wires up in buildLayout(). Returns the
+ * ScrollView so tests can scroll/inspect follow state, plus a render()
+ * helper that produces the clipped, scrollbar-painted viewport lines a real
+ * frame would show. */
+function mountInScrollView(
+	display: TranscriptDisplay,
+	options: { width: number; height: number },
+): { scrollView: ScrollView; render: () => string[] } {
+	const scrollView = new ScrollView(display, { follow: "end", primary: true, scrollbar: "auto" });
+	display.setScrollView(scrollView);
+	return {
+		scrollView,
+		render: () => renderLayoutFrame(scrollView, options.width, options.height, () => {}).lines,
+	};
+}
 
 initTheme("dark");
 
@@ -217,7 +237,6 @@ void test("streaming updates reuse the rendered completed-turn prefix", () => {
 
 void test("clicking a tool card toggles only that tool's details", () => {
 	const display = new TranscriptDisplay();
-	display.setViewportHeight(20);
 	display.setTurns([{
 		id: "clickable-tools",
 		userMessage: { type: "user", content: "Run both commands." },
@@ -279,7 +298,6 @@ void test("clicking a tool card toggles only that tool's details", () => {
 
 void test("keyboard navigation focuses and toggles individual tool cards", () => {
 	const display = new TranscriptDisplay();
-	display.setViewportHeight(20);
 	display.setTurns([{
 		id: "keyboard-tools",
 		userMessage: { type: "user", content: "Run both." },
@@ -328,7 +346,6 @@ void test("clicking a tool card in a non-first turn expands the right card", () 
 	// so a broken rebase (e.g. forgetting to add turnStart) would expand the
 	// wrong card or fail to expand anything.
 	const display = new TranscriptDisplay();
-	display.setViewportHeight(20);
 	const makeToolTurn = (id: string, name: string): Turn => ({
 		id,
 		userMessage: { type: "user", content: `Run ${name}.` },
@@ -478,7 +495,6 @@ void test("click-expanded write_file shows every line without a Ctrl+O hint", ()
 	const content = Array.from({ length: 24 }, (_, index) => `line-${index + 1}`)
 		.join("\n");
 	const display = new TranscriptDisplay();
-	display.setViewportHeight(40);
 	display.setTurns([{
 		id: "large-clicked-write",
 		userMessage: { type: "user", content: "Write the fixture." },
@@ -563,7 +579,6 @@ void test("click-expanded write_file_append shows every appended line", () => {
 		(_, index) => `appended-${index + 1}`,
 	).join("\n");
 	const display = new TranscriptDisplay();
-	display.setViewportHeight(40);
 	display.setTurns([{
 		id: "large-clicked-append",
 		userMessage: { type: "user", content: "Append the fixture." },
@@ -1334,7 +1349,7 @@ void test("transcript line limits discard oldest turns and retain newest message
 
 void test("Ctrl+O expansion keeps a bottom-anchored viewport on newest content", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 200 });
-	display.setViewportHeight(7);
+	const { scrollView, render } = mountInScrollView(display, { width: 90, height: 7 });
 	display.setTurns([
 		{
 			id: "expanded-at-bottom",
@@ -1370,17 +1385,17 @@ void test("Ctrl+O expansion keeps a bottom-anchored viewport on newest content",
 			isComplete: true,
 		},
 	]);
-	display.scrollToBottom();
-	display.render(90);
+	render();
+	scrollView.scrollToEnd();
 	display.toggleToolsExpanded();
-	const output = plain(display.render(90).join("\n"));
+	const output = plain(render().join("\n"));
 
 	assert.match(output, /LATEST RESPONSE/);
 });
 
 void test("wheel-down reaches the new bottom while a streaming update awaits render", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 200 });
-	display.setViewportHeight(6);
+	const { scrollView, render } = mountInScrollView(display, { width: 80, height: 6 });
 	const streamingTurn = (contentText: string): Turn => ({
 		id: "streaming-scroll",
 		userMessage: { type: "user", content: "Keep streaming" },
@@ -1402,9 +1417,9 @@ void test("wheel-down reaches the new bottom while a streaming update awaits ren
 	display.setTurns([
 		streamingTurn(Array.from({ length: 16 }, (_, i) => `line-${i}`).join("\n")),
 	]);
-	display.render(80);
-	display.scroll(4);
-	assert.equal(display.isAtBottom, false);
+	render();
+	scrollView.scrollBy(-4);
+	assert.equal(scrollView.isFollowingEnd, false);
 
 	display.setTurns([
 		streamingTurn(
@@ -1414,16 +1429,17 @@ void test("wheel-down reaches the new bottom while a streaming update awaits ren
 			].join("\n"),
 		),
 	]);
-	display.scroll(-100);
-	const output = plain(display.render(80).join("\n"));
+	scrollView.scrollBy(100);
+	const output = plain(render().join("\n"));
 
-	assert.equal(display.isAtBottom, true);
+	assert.equal(scrollView.isFollowingEnd, true);
 	assert.match(output, /NEWEST STREAMED LINE/);
 });
 
 void test("new streamed output is signaled while the user is scrolled up", () => {
 	const display = new TranscriptDisplay({ maxRenderedLines: 200 });
-	display.setViewportHeight(6);
+	const { scrollView, render } = mountInScrollView(display, { width: 80, height: 6 });
+	const indicator = new NewOutputIndicator(display);
 	const streamingTurn = (contentText: string): Turn => ({
 		id: "streaming-indicator",
 		userMessage: { type: "user", content: "Keep streaming" },
@@ -1443,9 +1459,10 @@ void test("new streamed output is signaled while the user is scrolled up", () =>
 	display.setTurns([
 		streamingTurn(Array.from({ length: 18 }, (_, i) => `line-${i}`).join("\n")),
 	]);
-	display.render(80);
-	display.scroll(4);
-	assert.doesNotMatch(plain(display.render(80).join("\n")), /new output below/);
+	render();
+	scrollView.scrollBy(-4);
+	assert.equal(display.hasNewOutputBelow(), false);
+	assert.deepEqual(indicator.render(80), []);
 
 	display.setTurns([
 		streamingTurn(
@@ -1455,13 +1472,16 @@ void test("new streamed output is signaled while the user is scrolled up", () =>
 			].join("\n"),
 		),
 	]);
-	const scrolledOutput = plain(display.render(80).join("\n"));
-	assert.equal(display.isAtBottom, false);
-	assert.match(scrolledOutput, /↓ new output below/);
+	render();
+	assert.equal(scrollView.isFollowingEnd, false);
+	assert.equal(display.hasNewOutputBelow(), true);
+	assert.match(plain(indicator.render(80).join("\n")), /↓ new output below/);
 
-	assert.equal(display.handleMouse(4, 5), true);
-	const bottomOutput = plain(display.render(80).join("\n"));
-	assert.doesNotMatch(bottomOutput, /new output below/);
+	// Same click-to-catch-up app/tui.ts wires onto the indicator's overlay.
+	scrollView.scrollToEnd();
+	display.clearNewOutputIndicator();
+	const bottomOutput = plain(render().join("\n"));
+	assert.deepEqual(indicator.render(80), []);
 	assert.match(bottomOutput, /line-18/);
 });
 
@@ -2060,7 +2080,6 @@ void test("spawn_agents renders ordered live task status", () => {
 
 void test("clicking a spawn_agents task row expands that exact task, not a neighbor", () => {
 	const display = new TranscriptDisplay();
-	display.setViewportHeight(40);
 	display.setTurns([
 		{
 			id: "click-target-batch",

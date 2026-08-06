@@ -14,9 +14,9 @@ import {
 	clampLineToWidth,
 	DIM,
 	RESET,
-	type Scrollable,
 	visibleWidth,
 } from "../../terminal/core.ts";
+import type { ScrollView } from "../scroll-view.ts";
 import { theme } from "../../terminal/theme.ts";
 import {
 	hasStreamingChunk,
@@ -61,17 +61,17 @@ interface TurnRenderCache {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
-	public readonly rendersViewport = true;
+export class TranscriptDisplay implements Component, RenderCtx {
 	private cachedWidth: number = 0;
 	private cachedLines: string[] | null = null;
 	// Not private: read by the extracted render-*.ts functions through the
 	// RenderCtx interface, which TranscriptDisplay satisfies structurally.
 	currentWidth: number = 80;
-	private _scrollOffset: number = 0;
-	private _totalHeight: number = 0;
-	private _atBottom: boolean = true;
-	private _pendingScrollBottom: boolean = false;
+	/** Owning ScrollView, set once by app/tui.ts after construction. Scroll
+	 * position/clipping/scrollbar all live there now — this component only
+	 * renders full unbounded content and answers hit-testing in content-
+	 * relative coordinates. */
+	private scrollView: ScrollView | undefined;
 	private _newOutputBelow = false;
 	private contentRevision = "";
 	/** Per-turn render cache — a turn's own lines/hitRegions are only rebuilt
@@ -158,18 +158,14 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 
 	setThinkingMode(mode: ThinkingDisplayStyle): void {
 		if (this.thinkingMode === mode) return;
-		const keepBottomAnchored = this._atBottom;
 		this.thinkingMode = mode;
 		this.invalidate();
-		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 
 	setToolsExpanded(expanded: boolean): void {
 		if (this.toolsExpanded === expanded) return;
-		const keepBottomAnchored = this._atBottom;
 		this.toolsExpanded = expanded;
 		this.invalidate();
-		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 
 	toggleToolsExpanded(): boolean {
@@ -215,23 +211,15 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		this.invalidate();
 	}
 
+	/** `row` is content-relative (i.e. already translated by the caller using
+	 * the owning ScrollView's scrollTop — see getComponentBoxAt in
+	 * rendering/layout.ts), not screen-relative. */
 	handleMouse(_column: number, row: number): boolean {
-		if (
-			this._newOutputBelow &&
-			row === Math.max(0, this._viewportHeight - 1)
-		) {
-			this.scrollToBottom();
-			this.invalidate();
-			return true;
-		}
-		const contentRow = this._scrollOffset + row;
 		const region = this.toolHitRegions.find(
-			(candidate) => contentRow >= candidate.start && contentRow < candidate.end,
+			(candidate) => row >= candidate.start && row < candidate.end,
 		);
 		if (!region) return false;
-		const keepBottomAnchored = this._atBottom;
 		this.toggleHitRegionKey(region.key);
-		if (keepBottomAnchored) this._pendingScrollBottom = true;
 		return true;
 	}
 
@@ -294,17 +282,22 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 					this.toolHitRegions.length;
 		const region = this.toolHitRegions[nextIndex];
 		this.focusedToolKey = region.key;
-		const viewportHeight = Math.max(1, this._viewportHeight);
-		if (region.start < this._scrollOffset) {
-			this._scrollOffset = region.start;
-		} else if (region.end > this._scrollOffset + viewportHeight) {
-			this._scrollOffset = Math.max(0, region.end - viewportHeight);
+		if (this.scrollView) {
+			const viewportHeight = Math.max(1, this.scrollView.viewportHeight);
+			const scrollTop = this.scrollView.scrollTop;
+			if (region.start < scrollTop) {
+				this.scrollView.scrollTo(region.start);
+			} else if (region.end > scrollTop + viewportHeight) {
+				this.scrollView.scrollTo(Math.max(0, region.end - viewportHeight));
+			}
 		}
-		this._atBottom =
-			this._scrollOffset >= Math.max(0, this._totalHeight - viewportHeight);
-		this._pendingScrollBottom = false;
 		this.invalidate();
 		return { index: nextIndex + 1, total: this.toolHitRegions.length };
+	}
+
+	/** Called once by app/tui.ts after wrapping this component in a ScrollView. */
+	setScrollView(view: ScrollView): void {
+		this.scrollView = view;
 	}
 
 	/** Expand or collapse the keyboard-focused tool card. */
@@ -325,70 +318,24 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 		return getSanitizationMetrics(this);
 	}
 
-	setViewportHeight(height: number): void {
-		if (this._viewportHeight === height) return;
-		this._viewportHeight = height;
+	// ── Scroll-adjacent state ────────────────────────────────────────────────
+	// Actual scroll position/clipping/scrollbar live on the wrapping
+	// ScrollView (see setScrollView). This is just the "new output arrived
+	// while scrolled away from the end" signal, driven by scrollView's own
+	// isFollowingEnd — app/tui.ts surfaces it as a bottom-anchored overlay.
+
+	hasNewOutputBelow(): boolean {
+		return this._newOutputBelow && this.scrollView?.isFollowingEnd === false;
 	}
 
-	// ── Scroll interface ─────────────────────────────────────────────────────
-
-	get scrollOffset(): number {
-		return this._scrollOffset;
-	}
-
-	get totalHeight(): number {
-		return this._totalHeight;
-	}
-
-	get isAtBottom(): boolean {
-		return this._atBottom;
-	}
-
-	scroll(delta: number): void {
-		const maxScroll = Math.max(
-			0,
-			this._totalHeight - (this._viewportHeight || 0),
-		);
-		this._scrollOffset = Math.min(
-			maxScroll,
-			Math.max(0, this._scrollOffset - delta),
-		);
-		this._atBottom = this._scrollOffset >= maxScroll;
-		if (this._atBottom) this._newOutputBelow = false;
-		// A streamed update may have invalidated the cached lines without being
-		// rendered yet. If the user reaches the bottom of the last committed
-		// layout, keep that intent through the next render as its height grows.
-		this._pendingScrollBottom = this._atBottom;
-	}
-
-	scrollToBottom(): void {
-		this._pendingScrollBottom = true;
-		this._atBottom = true;
+	clearNewOutputIndicator(): void {
 		this._newOutputBelow = false;
-		// Apply offset immediately so isAtBottom reflects the new position
-		// right away — the TUI checks isAtBottom in the same frame loop.
-		const maxScroll = Math.max(
-			0,
-			this._totalHeight - (this._viewportHeight || 0),
-		);
-		this._scrollOffset = maxScroll;
-	}
-
-	set scrollOffset(offset: number) {
-		this._scrollOffset = offset;
-		const maxScroll = Math.max(
-			0,
-			this._totalHeight - (this._viewportHeight || 0),
-		);
-		this._atBottom = offset >= maxScroll;
-		if (this._atBottom) this._newOutputBelow = false;
 	}
 
 	render(width: number): string[] {
-		// Fast path: content unchanged → reuse cached body, only repaint viewport
+		// Fast path: content unchanged → reuse cached body
 		if (width === this.cachedWidth && this.cachedLines !== null) {
-			this.resolvePendingScroll();
-			return this.renderViewport(this.cachedLines, width);
+			return this.cachedLines;
 		}
 
 		this.currentWidth = width;
@@ -460,74 +407,15 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 			}))
 			.filter((region) => region.end > 0);
 
-		this._totalHeight = visibleBuffer.length;
-
 		this.cachedLines = visibleBuffer;
-		this.resolvePendingScroll();
-		return this.renderViewport(visibleBuffer, width);
-	}
-
-	// ── Scroll helpers ───────────────────────────────────────────────────────
-
-	private resolvePendingScroll(): void {
-		if (!this._pendingScrollBottom) return;
-		this._scrollOffset = Math.max(0, this._totalHeight - this._viewportHeight);
-		this._atBottom = true;
-		this._newOutputBelow = false;
-		this._pendingScrollBottom = false;
-	}
-
-	private renderViewport(content: string[], width: number): string[] {
-		const viewportHeight = this._viewportHeight || 0;
-		if (viewportHeight <= 0) return content;
-		if (content.length <= viewportHeight) return content;
-
-		const maxScroll = content.length - viewportHeight;
-		this._scrollOffset = Math.min(maxScroll, Math.max(0, this._scrollOffset));
-		this._atBottom = this._scrollOffset >= maxScroll;
-		if (this._atBottom) this._newOutputBelow = false;
-
-		const visible = content.slice(
-			this._scrollOffset,
-			this._scrollOffset + viewportHeight,
-		);
-		const thumbHeight = Math.max(
-			1,
-			Math.floor((viewportHeight * viewportHeight) / content.length),
-		);
-		const thumbStart =
-			maxScroll > 0
-				? Math.floor(
-						(this._scrollOffset / maxScroll) * (viewportHeight - thumbHeight),
-					)
-				: 0;
-		const thumbColor = theme.fgRaw("selected");
-		const barColor = theme.fgRaw("separator");
-		const reset = "\x1b[0m";
-		for (let i = 0; i < visible.length; i++) {
-			const line = visible[i];
-			const w = visibleWidth(line);
-			const pad = " ".repeat(Math.max(0, width - 2 - w));
-			const isThumb = i >= thumbStart && i < thumbStart + thumbHeight;
-			const bar = isThumb ? `${thumbColor}█${reset}` : `${barColor}│${reset}`;
-			visible[i] = line + pad + bar;
-		}
-		if (this._newOutputBelow && !this._atBottom && visible.length > 0) {
-			const indicator = `${theme.fg("accent", "↓")} ${theme.fg("muted", "new output below")}`;
-			const clipped = clampLineToWidth(indicator, Math.max(1, width - 2));
-			visible[visible.length - 1] =
-				" ".repeat(Math.max(0, width - 2 - visibleWidth(clipped))) +
-				clipped +
-				`${barColor}│${reset}`;
-		}
-		return visible;
+		return visibleBuffer;
 	}
 
 	setTurns(turns: Turn[]): void {
-		const keepBottomAnchored = this._atBottom;
+		const wasFollowingEnd = this.scrollView?.isFollowingEnd ?? true;
 		const nextRevision = this.revisionFor(turns);
 		if (
-			!keepBottomAnchored &&
+			!wasFollowingEnd &&
 			this.contentRevision !== "" &&
 			nextRevision !== this.contentRevision
 		) {
@@ -541,7 +429,6 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 			this.turns = turns;
 		}
 		this.invalidate();
-		if (keepBottomAnchored) this._pendingScrollBottom = true;
 	}
 
 	/** Fingerprints only the newest turn — drives the "new output below"
@@ -895,6 +782,4 @@ export class TranscriptDisplay implements Component, Scrollable, RenderCtx {
 			visibleStart: sliceStart - 1,
 		};
 	}
-
-	private _viewportHeight: number = 0;
 }

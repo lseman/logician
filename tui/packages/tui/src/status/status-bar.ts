@@ -175,7 +175,6 @@ export class StatusBar implements Component {
 
 		// Add detail by usefulness. Narrow terminals retain phase/model/context.
 		insertIfFits(this.formatDirWithGit(), 2);
-		insertIfFits(this.formatSession(), 2);
 		insertIfFits(this.formatThinking());
 		// An explicitly selected reasoner is active behavior, not telemetry. Give
 		// it priority over cache/token details so the user's choice stays visible.

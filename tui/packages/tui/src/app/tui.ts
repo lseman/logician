@@ -50,9 +50,13 @@ import {
 } from "../overlays/theme-selector.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
+import { NewOutputIndicator } from "../rendering/transcript/new-output-indicator.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { INITIAL_TURN_STATE, type TurnState } from "../state/turn-state.ts";
 import { Container, TUI } from "../terminal/core.ts";
+import { VStack } from "../rendering/v-stack.ts";
+import { ScrollView } from "../rendering/scroll-view.ts";
+import { Separator } from "../rendering/separator.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
@@ -326,9 +330,6 @@ export class LogicianTUI {
 		// Setup transcript change handling
 		this.setupTranscript();
 
-		// Wire up scrollable component
-		this.tui.setScrollableComponent(this.transcriptDisplay);
-
 		// Setup keyboard shortcuts
 		this.setupInputHandler();
 
@@ -385,12 +386,10 @@ export class LogicianTUI {
 				this.transcript.getThinkingDisplayMode(),
 			);
 			// Steer queue is driven directly by queue_update events (see
-			// handleBridgeEvent), not transcript state.
-			// Auto-scroll to bottom only when already at bottom
-			if (this.tui.isAtBottom) {
-				this.transcriptDisplay.scrollToBottom();
-				this.tui.scrollToBottom();
-			}
+			// handleBridgeEvent), not transcript state. Auto-scroll to bottom
+			// while already at bottom is handled by the transcript ScrollView's
+			// own `follow: "end"` behavior (see buildLayout()) — it re-pins to
+			// the new max scroll position on every layout pass as content grows.
 			this.tui.requestRender();
 		});
 	}
@@ -445,10 +444,25 @@ export class LogicianTUI {
 	// ── Layout ─────────────────────────────────────────────────────────────
 
 	private buildLayout(): void {
-		// Fixed layout: transcript (scrollable, top) + separator + input bar (fixed) + status bar (fixed, bottom)
-		this.tui.setInputBarComponent(this.inputBar);
-		this.tui.setScrollableComponent(this.transcriptDisplay);
-		this.tui.setFixedBottomComponent(this.statusPanel);
+		// Transcript scrolls independently and follows newly streamed output
+		// while positioned at the end; scrolling away disables follow until the
+		// user returns to the bottom (Home/End/PageDown or the new-output
+		// indicator's click-to-catch-up).
+		const transcriptScroll = new ScrollView(this.transcriptDisplay, {
+			follow: "end",
+			primary: true,
+			overscroll: "chain",
+			scrollbar: "auto",
+		});
+		this.transcriptDisplay.setScrollView(transcriptScroll);
+		this.tui.showOverlay(new NewOutputIndicator(this.transcriptDisplay), {
+			anchor: "bottom",
+			align: "left",
+			onClick: () => {
+				transcriptScroll.scrollToEnd();
+				this.transcriptDisplay.clearNewOutputIndicator();
+			},
+		});
 
 		// Stack todo bar + steer queue + question handler above the input bar
 		// (both render empty when there's nothing to show, so they only take
@@ -459,7 +473,6 @@ export class LogicianTUI {
 		pinnedContainer.addChild(this.todoBar);
 		pinnedContainer.addChild(this.workSurface);
 		pinnedContainer.addChild(this.steerQueue);
-		this.tui.setFixedAboveInputComponent(pinnedContainer);
 
 		// Interactive pickers join the fixed composer stack. They consume layout
 		// space above the input like the TODO/queue region instead of floating
@@ -484,6 +497,21 @@ export class LogicianTUI {
 			align: "left",
 			maxHeight: 18,
 		});
+
+		const dock = new VStack([
+			{ component: new Separator(), basis: 1 },
+			{ component: pinnedContainer, basis: "auto", shrink: 1, minSize: 0 },
+			{ component: this.tui.getAboveInputOverlaysComponent(), basis: "auto", shrink: 1, minSize: 0 },
+			{ component: this.inputBar, basis: "auto", shrink: 1, minSize: 1 },
+			{ component: new Separator(), basis: 1 },
+			{ component: this.statusPanel, basis: "auto", shrink: 1, minSize: 1 },
+		]);
+		const root = new VStack([
+			{ component: transcriptScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]);
+		this.tui.setLayoutRoot(root);
+		this.tui.setInputBarComponent(this.inputBar);
 	}
 
 	async openPluginManager(): Promise<void> {

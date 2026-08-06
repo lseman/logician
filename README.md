@@ -20,13 +20,13 @@ Logician turns natural-language instructions into verified code changes — with
 ### Binary (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/seman/logician/main/tui/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash
 ```
 
 Supports macOS and Linux on `x86_64` and `arm64`. Pin a version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/seman/logician/main/tui/install.sh | bash -s -- 0.3.0
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- 0.3.0
 ```
 
 ### From source
