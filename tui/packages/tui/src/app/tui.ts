@@ -483,32 +483,6 @@ export class LogicianTUI {
 			return;
 		}
 
-		// Transcript scrolls independently and follows newly streamed output
-		// while positioned at the end; scrolling away disables follow until the
-		// user returns to the bottom (Home/End/PageDown or the new-output
-		// indicator's click-to-catch-up).
-		const transcriptScroll = new ScrollView(this.transcriptDisplay, {
-			follow: "end",
-			primary: true,
-			overscroll: "chain",
-			// The legacy TranscriptDisplay scrollbar was always visible whenever
-			// content overflowed the viewport, with no fade — match that rather
-			// than ScrollView's "auto" mode, which only appears after the first
-			// scroll activity (via markScrollbarActivity) and then fades.
-			scrollbar: "always",
-			scrollbarStyle: (glyph, isThumb) =>
-				isThumb ? theme.fg("selected", glyph) : theme.fg("separator", glyph),
-		});
-		this.transcriptDisplay.setScrollView(transcriptScroll);
-		this.tui.showOverlay(new NewOutputIndicator(this.transcriptDisplay), {
-			anchor: "bottom",
-			align: "left",
-			onClick: () => {
-				transcriptScroll.scrollToEnd();
-				this.transcriptDisplay.clearNewOutputIndicator();
-			},
-		});
-
 		// Stack todo bar + steer queue + question handler above the input bar
 		// (both render empty when there's nothing to show, so they only take
 		// space when active).
@@ -543,24 +517,45 @@ export class LogicianTUI {
 			maxHeight: 18,
 		});
 
-		const dock = new Flex([
-			{ component: new Separator(), basis: 1 },
-			{ component: pinnedContainer, basis: "auto", shrink: 1, minSize: 0 },
-			{
-				component: this.tui.getAboveInputOverlaysComponent(),
-				basis: "auto",
-				shrink: 1,
-				minSize: 0,
+		// Implicit document: a flat Container that renders transcript + dock
+		// as a single scrollable list. Matches pi's implicitDocument pattern —
+		// no layout node, so it's always a leaf in the layout tree. The
+		// ScrollView clips the viewport; at the bottom the dock is visible,
+		// scrolling up hides it (user scrolls down to see it again).
+		const document = new Container();
+		document.addChild(this.transcriptDisplay);
+		document.addChild(new Separator());
+		document.addChild(pinnedContainer);
+		document.addChild(this.tui.getAboveInputOverlaysComponent());
+		document.addChild(this.inputBar);
+		document.addChild(new Separator());
+		document.addChild(this.statusPanel);
+
+		// Transcript scrolls and follows newly streamed output; scrolling away
+		// disables follow until the user returns to the bottom (Home/End/PageDown
+		// or the new-output indicator's click-to-catch-up).
+		const transcriptScroll = new ScrollView(document, {
+			follow: "end",
+			primary: true,
+			overscroll: "chain",
+			scrollbar: "always",
+			scrollbarStyle: (glyph, isThumb) =>
+				isThumb ? theme.fg("selected", glyph) : theme.fg("separator", glyph),
+		});
+		this.transcriptDisplay.setScrollView(transcriptScroll);
+		this.tui.showOverlay(new NewOutputIndicator(this.transcriptDisplay), {
+			anchor: "bottom",
+			align: "left",
+			onClick: () => {
+				transcriptScroll.scrollToEnd();
+				this.transcriptDisplay.clearNewOutputIndicator();
 			},
-			{ component: this.inputBar, basis: "auto", shrink: 1, minSize: 1 },
-			{ component: new Separator(), basis: 1 },
-			{ component: this.statusPanel, basis: "auto", shrink: 1, minSize: 1 },
-		]);
-		const root = new Flex([
-			{ component: transcriptScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
-			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
-		]);
-		this.tui.setLayoutRoot(root);
+		});
+
+		// ScrollView is the layout root — no intermediate Flex wrapper.
+		// This matches pi's implicit layout: 1 LayoutBox per frame (ScrollView)
+		// instead of 3+ (root Flex + ScrollView + dock Flex).
+		this.tui.setLayoutRoot(transcriptScroll);
 		this.tui.setInputBarComponent(this.inputBar);
 	}
 

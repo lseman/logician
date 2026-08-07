@@ -70,20 +70,10 @@ export interface ScrollbarGeometry {
 
 interface LayoutContext {
 	viewport: { width: number; height: number };
-	/** Flat render cache: composite key "componentId|width" → cached lines.
-	 * Flat design avoids the O(2) double-hash lookup of the old nested
-	 * Map<Component, Map<number, string[]>> structure and keeps every
-	 * entry directly addressable by a single key for fast lookup.
-	 *
-	 * Size-limited (max 2048 entries) with simple LRU-style eviction:
-	 * entries are reinserted on each hit to keep frequently-accessed
-	 * render results in the cache.  The cache is cleared each frame so
-	 * old frame data does not accumulate and cause GC pressure across
-	 * steady-state rendering — accumulated string-array references from
-	 * old nested Maps were a primary source of the every-other-call
-	 * ~20ms spikes observed during performance investigation.
-	 */
-	renderCache: Map<string, string[]>;
+	/** Render cache: Component → width → cached lines. Cleared each frame so
+	 * old frame data does not accumulate and cause GC pressure. Matches pi's
+	 * simpler design (no LRU, no WeakMap, no string-key hashing). */
+	renderCache: Map<Component, Map<number, string[]>>;
 	/** Cached visibleWidth results — avoids re-parsing ANSI escape sequences
 	 * on every line every frame. The layout engine calls visibleWidth on
 	 * nearly every rendered line during layout, so this cache eliminates
@@ -92,22 +82,6 @@ interface LayoutContext {
 	requestRender: () => void;
 	primaryScrollView: ScrollView | undefined;
 }
-
-/** Unique identity counter for components — used to build flat cache keys
- * without requiring Component to implement a stable id field. */
-let componentIdCounter = 0;
-const componentId = new WeakMap<Component, number>();
-
-function getComponentId(c: Component): number {
-	let id = componentId.get(c);
-	if (id === undefined) {
-		id = ++componentIdCounter;
-		componentId.set(c, id);
-	}
-	return id;
-}
-
-const RENDER_CACHE_MAX = 2048;
 
 function intersect(a: LayoutRect, b: LayoutRect): LayoutRect {
 	const x = Math.max(a.x, b.x);
@@ -122,32 +96,24 @@ function intersect(a: LayoutRect, b: LayoutRect): LayoutRect {
 	};
 }
 
-/* Cached render with flat composite-key cache and size-limited LRU eviction.
- * The key "${id}|${width}" is a single hash lookup instead of two nested
- * lookups, and the cache is bounded so old frame data never accumulates.
- * On a cache hit the entry is reinserted to implement LRU-style eviction.
- */
+/* Cached render with nested Map cache matching pi's design.
+ * Component identity → width → cached lines. The cache is cleared each frame
+ * so old frame data does not accumulate and cause GC pressure. */
 function renderCached(
 	context: LayoutContext,
 	component: Component,
 	width: number,
 ): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const cacheKey = `${getComponentId(component)}|${safeWidth}`;
-	let lines = context.renderCache.get(cacheKey);
-	if (lines === undefined) {
+	let widths = context.renderCache.get(component);
+	if (!widths) {
+		widths = new Map<number, string[]>();
+		context.renderCache.set(component, widths);
+	}
+	let lines = widths.get(safeWidth);
+	if (!lines) {
 		lines = component.render(safeWidth);
-		// LRU-style eviction: reinsert on hit keeps hot entries at the end.
-		if (context.renderCache.size >= RENDER_CACHE_MAX) {
-			// Evict the oldest entry (first key in iteration order).
-			const firstKey = context.renderCache.keys().next().value;
-			if (firstKey !== undefined) context.renderCache.delete(firstKey);
-		}
-		context.renderCache.set(cacheKey, lines);
-	} else {
-		// Reinsert on hit for LRU semantics.
-		context.renderCache.delete(cacheKey);
-		context.renderCache.set(cacheKey, lines);
+		widths.set(safeWidth, lines);
 	}
 	return lines;
 }
@@ -560,7 +526,7 @@ export function renderLayoutFrame(
 
 	const context: LayoutContext = {
 		viewport: { width: safeWidth, height: safeHeight },
-		renderCache: new Map<string, string[]>(),
+		renderCache: new Map<Component, Map<number, string[]>>(),
 		widthCache: new Map(),
 		requestRender,
 		primaryScrollView: undefined,

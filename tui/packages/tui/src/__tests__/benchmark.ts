@@ -81,6 +81,7 @@ import type {
 } from "@logician/coding-agent/sessions";
 
 import { initTheme } from "../terminal/theme.ts";
+import { Container } from "../terminal/core.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { Flex, VStack, HStack } from "../rendering/flex.ts";
@@ -304,13 +305,17 @@ function benchScrollDiff(transcript: TranscriptDisplay, scrollView: ScrollView, 
 // ── Scenario 6: Layout engine (VStack with ScrollView + overlay) ──────────────
 
 function benchLayoutEngine(transcript: TranscriptDisplay, width: number, termHeight: number): number {
-  // Build a simplified layout tree similar to what the TUI creates
-  const scrollView = new ScrollView(transcript, { primary: true, scrollbar: "auto" });
-  const flexRoot = new Flex([scrollView], { direction: "column", gap: 0 });
+  // Build the same layout tree the TUI creates: ScrollView root wrapping
+  // a Container (implicit document) — no intermediate Flex wrapper. This
+  // matches pi's implicit layout: 1 LayoutBox per frame (ScrollView) +
+  // 0 for the leaf (cached).
+  const document = new Container();
+  document.addChild(transcript);
+  const scrollView = new ScrollView(document, { primary: true, scrollbar: "auto" });
 
   const requestRender = () => {}; // no-op for benchmark
   const { ms } = measure(() => {
-    const frame = renderLayoutFrame(flexRoot, width, termHeight, requestRender);
+    const frame = renderLayoutFrame(scrollView, width, termHeight, requestRender);
     return { frame };
   });
   return ms;

@@ -48,11 +48,7 @@ import {
 
 export interface RendererMetrics {
 	bytesWritten: number;
-	changedCells: number;
-	cursorMoves: number;
 	diffTimeMs: number;
-	dirtyRegion: { top: number; bottom: number } | null;
-	dirtyRows: number;
 	frameTimeMs: number;
 	layoutTimeMs: number;
 	writeTimeMs: number;
@@ -60,11 +56,7 @@ export interface RendererMetrics {
 
 const EMPTY_RENDERER_METRICS: RendererMetrics = {
 	bytesWritten: 0,
-	changedCells: 0,
-	cursorMoves: 0,
 	diffTimeMs: 0,
-	dirtyRegion: null,
-	dirtyRows: 0,
 	frameTimeMs: 0,
 	layoutTimeMs: 0,
 	writeTimeMs: 0,
@@ -933,11 +925,6 @@ export class TUI extends Container {
 		// pending-autowrap state and shift the next update down a row.
 		const renderWidth = Math.max(1, termWidth - 1);
 		let changes = "";
-		let dirtyRows = 0;
-		let changedCells = 0;
-		let cursorMoves = 0;
-		let dirtyTop = Number.POSITIVE_INFINITY;
-		let dirtyBottom = -1;
 
 		// The InputBar marks the edit position with CURSOR_MARKER. Find it so we
 		// can park the hardware cursor exactly there, and strip it from output.
@@ -979,11 +966,6 @@ export class TUI extends Container {
 					changes += isImageLine(cleanNew)
 						? cleanNew
 						: clampLineToWidth(cleanNew, renderWidth);
-					dirtyRows++;
-					dirtyTop = Math.min(dirtyTop, row);
-					dirtyBottom = Math.max(dirtyBottom, row);
-					changedCells += renderWidth;
-					cursorMoves++;
 				}
 				continue;
 			}
@@ -999,11 +981,6 @@ export class TUI extends Container {
 			const closeHyperlink = "\x1b]8;;\x1b\\";
 			const clipped = clampLineToWidth(cleanNew, renderWidth);
 			changes += `\x1b[${row + 1};1H${closeHyperlink}\x1b[0m\x1b[2K${clipped}${closeHyperlink}`;
-			dirtyRows++;
-			dirtyTop = Math.min(dirtyTop, row);
-			dirtyBottom = Math.max(dirtyBottom, row);
-			changedCells += renderWidth;
-			cursorMoves++;
 		}
 
 		this.previousLines = finalLines;
@@ -1040,7 +1017,6 @@ export class TUI extends Container {
 			}
 		}
 		if (cursorMoved) {
-			cursorMoves++;
 			this.previousCursorRow = cursorRow;
 			this.previousCursorCol = cursorCol;
 		}
@@ -1050,12 +1026,7 @@ export class TUI extends Container {
 		const frameFinishedAt = performance.now();
 		this.lastRenderMetrics = {
 			bytesWritten,
-			changedCells,
-			cursorMoves,
 			diffTimeMs: diffFinishedAt - layoutFinishedAt,
-			dirtyRegion:
-				dirtyBottom >= 0 ? { top: dirtyTop, bottom: dirtyBottom } : null,
-			dirtyRows,
 			frameTimeMs: frameFinishedAt - frameStartedAt,
 			layoutTimeMs: layoutFinishedAt - frameStartedAt,
 			writeTimeMs: frameFinishedAt - writeStartedAt,
