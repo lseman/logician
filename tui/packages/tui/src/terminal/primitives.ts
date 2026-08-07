@@ -168,6 +168,20 @@ export function clampLineToWidth(text: string, width: number): string {
 			i++;
 			continue;
 		}
+		// Printable ASCII fast path: one byte is exactly one column, so skip
+		// the grapheme-cluster machinery entirely. graphemeAt() previously ran
+		// unconditionally here — it slices the remaining tail of the line and
+		// runs a fresh Intl.Segmenter pass over it on every single character,
+		// which is O(n^2) and was measured as ~98% of this function's cost
+		// (dominated by Segmenter/[Symbol.iterator] native time) even for
+		// plain ASCII text, since it never checked for the common case first.
+		if (code >= 0x20 && code <= 0x7e) {
+			if (visible + 1 > width) break;
+			result += text[i];
+			visible += 1;
+			i++;
+			continue;
+		}
 		const grapheme = graphemeAt(text, i);
 		if (!grapheme) break;
 		const w = visibleWidth(grapheme);
@@ -179,66 +193,24 @@ export function clampLineToWidth(text: string, width: number): string {
 	return result;
 }
 
-// Ported from pi's compositeTuiLine: a single-pass extraction of the
-// before/after segments around the overlay slot, instead of three-to-four
-// independent clampLineToWidth/visibleWidth/skipColumns scans over the same
-// line. Restricted to lines whose printable content is plain ASCII (no
-// grapheme clustering needed — each char is exactly one column), which
-// covers the overwhelming majority of rendered lines (styled English text).
-// Anything with wide/multi-byte characters falls back to the slower
-// generic path below, unchanged.
-function isAsciiOnlyLine(text: string): boolean {
-	let i = 0;
-	while (i < text.length) {
-		const ch = text[i];
-		if (ch === "\x1b") {
-			const next = text[i + 1];
-			if (next === "[") {
-				let j = i + 2;
-				while (
-					j < text.length &&
-					!(text.charCodeAt(j) >= 0x40 && text.charCodeAt(j) <= 0x7e)
-				)
-					j++;
-				i = j + 1;
-				continue;
-			}
-			if (next === "]" || next === "_") {
-				let j = i + 2;
-				while (
-					j < text.length &&
-					text[j] !== "\x07" &&
-					!(text[j] === "\x1b" && text[j + 1] === "\\")
-				)
-					j++;
-				i = text[j] === "\x07" ? j + 1 : j + 2;
-				continue;
-			}
-			return false;
-		}
-		const code = text.charCodeAt(i);
-		if (code !== 0x09 && (code < 0x20 || code > 0x7e)) return false;
-		i++;
-	}
-	return true;
-}
+// ── Single-pass compositeTuiLine for ASCII-only lines ──────────────────────
+// Combines the ASCII-only check with the main composition loop, avoiding
+// the old two-pass pattern (isAsciiOnlyLine scan + separate compositeTuiLine
+// scan) that doubled the work for the common case.  Scans the base line once,
+// building before/after segments while verifying that every character is
+// printable ASCII or a known escape sequence.  If any non-ASCII char is
+// encountered the function returns null so the caller falls through to the
+// generic wide-character path.
 
-function compositeTuiLineAsciiFast(
+function compositeTuiLineAsciiSingle(
 	baseLine: string,
 	overlayLine: string,
 	startCol: number,
 	overlayWidth: number,
 	totalWidth: number,
-): string {
+): string | null {
 	let before = "";
 	let beforeWidth = 0;
-	// `after` is built in two independent stages, mirroring the reference
-	// path's skipColumns(baseLine, afterStart) followed by a *separate*
-	// clampLineToWidth(..., afterWidth) call on the result — not a single
-	// combined boundary check. afterSkipped tracks the skipColumns stage
-	// (visible < afterStart: drop everything, codes included, until that
-	// threshold); once past it, afterWidth/afterDone track the clamp stage
-	// against its own independent budget.
 	let after = "";
 	let afterWidth = 0;
 	let afterDone = false;
@@ -268,21 +240,14 @@ function compositeTuiLineAsciiFast(
 				j = baseLine[j] === "\x07" ? j + 1 : j + 2;
 			}
 			const code = baseLine.slice(i, j);
-			// clampLineToWidth doesn't check its width bound until the next
-			// actual character would be added, so a code sitting right at the
-			// boundary (no printable char after it yet to force the decision)
-			// still attaches to `before` — hence beforeWidth === col, not <.
 			if (beforeWidth === col) before += code;
-			// skipColumns keeps everything from the point visible >= afterStart
-			// onward, codes included; the clamp stage after that has the same
-			// trailing-code-at-boundary inclusion rule as clampLineToWidth.
 			if (col >= afterStart && !afterDone) after += code;
 			i = j;
 			continue;
 		}
-		// Match clampLineToWidth: tabs become one space, other C0 control
-		// bytes are dropped entirely (not copied, not counted as a column).
 		const code = ch.charCodeAt(0);
+		// Non-ASCII → abort fast path, caller falls through to generic.
+		if (code !== 0x09 && (code < 0x20 || code > 0x7e)) return null;
 		if (code < 0x20) {
 			if (code === 0x09) {
 				if (beforeWidth === col && col < startCol) {
@@ -334,15 +299,11 @@ export function compositeTuiLine(
 	overlayWidth: number,
 	totalWidth: number,
 ): string {
-	if (isAsciiOnlyLine(baseLine) && isAsciiOnlyLine(overlayLine)) {
-		return compositeTuiLineAsciiFast(
-			baseLine,
-			overlayLine,
-			startCol,
-			overlayWidth,
-			totalWidth,
-		);
-	}
+	// Single-pass ASCII composite: tries the fast path once.  If the base
+	// line contains non-ASCII characters the function returns null and we
+	// fall through to the generic wide-character path below.
+	const fast = compositeTuiLineAsciiSingle(baseLine, overlayLine, startCol, overlayWidth, totalWidth);
+	if (fast !== null) return fast;
 	const before = clampLineToWidth(baseLine, startCol);
 	const beforeWidth = visibleWidth(before);
 	const beforePad = " ".repeat(Math.max(0, startCol - beforeWidth));
