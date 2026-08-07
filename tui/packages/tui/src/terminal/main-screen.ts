@@ -24,7 +24,12 @@ import {
 	isFocusable,
 	visibleWidth,
 } from "./primitives.ts";
-import { normalizeKeyboardInput, type OverlayOptions } from "./core.ts";
+import {
+	normalizeKeyboardInput,
+	parseSizeValue,
+	type OverlayHandle,
+	type OverlayOptions,
+} from "./core.ts";
 
 function isImageLine(line: string): boolean {
 	return line.includes("\x1b_G") || line.includes("\x1b]1337;");
@@ -43,7 +48,9 @@ export class TuiMainScreen extends Container {
 	private renderImmediateRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderFinishedAt = 0;
-	private static readonly MIN_RENDER_INTERVAL_MS = 16;
+	private static readonly IDLE_RENDER_INTERVAL_MS = 16;
+	private static readonly STREAMING_RENDER_INTERVAL_MS = 33;
+	private isStreaming = false;
 	private started = false;
 	private stopped = false;
 	private focusedComponent: Component | null = null;
@@ -91,6 +98,14 @@ export class TuiMainScreen extends Container {
 		this.requestRender();
 	}
 
+	/** Set whether the transcript is actively streaming.
+	 * During streaming, render interval increases from 16ms to 33ms
+	 * (60fps → 30fps) to halve layout work when only 1-2 lines change.
+	 * Switches back to 60fps for idle/spinner/key-interaction smoothness. */
+	setIsStreaming(isStreaming: boolean): void {
+		this.isStreaming = isStreaming;
+	}
+
 	setFocus(component: Component | null): void {
 		if (isFocusable(this.focusedComponent)) {
 			this.focusedComponent.focused = false;
@@ -123,11 +138,7 @@ export class TuiMainScreen extends Container {
 	showOverlay(
 		component: Component,
 		options?: OverlayOptions,
-	): {
-		hide: () => void;
-		setHidden: (hidden: boolean) => void;
-		focus: () => void;
-	} {
+	): OverlayHandle {
 		const entry = {
 			component,
 			options,
@@ -136,29 +147,68 @@ export class TuiMainScreen extends Container {
 			focusOrder: ++this.focusOrderCounter,
 		};
 		this.overlayStack.push(entry);
+		if (!options?.nonCapturing && this.isOverlayVisible(entry)) {
+			this.setFocus(component);
+		}
 		this.requestRender();
 
 		return {
 			hide: () => {
 				const idx = this.overlayStack.indexOf(entry);
-				if (idx >= 0) this.overlayStack.splice(idx, 1);
+				if (idx >= 0) {
+					this.overlayStack.splice(idx, 1);
+					if (this.focusedComponent === component) {
+						this.setFocus(entry.preFocus);
+					}
+				}
 				this.requestRender();
 			},
 			setHidden: (hidden: boolean) => {
 				entry.hidden = hidden;
 				this.requestRender();
 			},
+			isHidden: () => entry.hidden,
+			isFocused: () => this.focusedComponent === component,
 			focus: () => {
 				this.setFocus(component);
 				entry.focusOrder = ++this.focusOrderCounter;
+				this.requestRender();
+			},
+			unfocus: () => {
+				this.setFocus(entry.preFocus);
 				this.requestRender();
 			},
 		};
 	}
 
 	hideOverlay(): void {
-		this.overlayStack.pop();
+		const overlay = this.overlayStack[this.overlayStack.length - 1];
+		if (overlay) this.overlayStack.pop();
+		if (this.focusedComponent === overlay?.component) {
+			this.setFocus(overlay?.preFocus);
+		}
 		this.requestRender();
+	}
+
+	private isOverlayVisible(entry: {
+		component: Component;
+		options?: OverlayOptions;
+		hidden: boolean;
+	}): boolean {
+		if (entry.hidden) return false;
+		// Components like the slash popup / file mention popup / plugin manager
+		// stay mounted as overlays for the whole session but only actually show
+		// content once invoked; their own `visible` flag is the real signal.
+		if (
+			"visible" in entry.component &&
+			typeof (entry.component as { visible?: unknown }).visible === "boolean"
+		) {
+			return (entry.component as { visible: boolean }).visible;
+		}
+		if (entry.options?.visible) {
+			return true;
+		}
+		return true;
 	}
 
 	removeOverlay(component: Component): void {
@@ -184,6 +234,9 @@ export class TuiMainScreen extends Container {
 	private renderAboveInputOverlays(termWidth: number): string[] {
 		const entries = this.overlayStack.filter(entry => {
 			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
+			if (entry.options?.visible && !entry.options.visible(termWidth, 1000)) {
+				return false;
+			}
 			if (
 				"visible" in entry.component &&
 				typeof (entry.component as { visible?: unknown }).visible ===
@@ -200,7 +253,7 @@ export class TuiMainScreen extends Container {
 		);
 		const width = Math.max(1, termWidth - 1);
 		const rendered = entry.component.render(width);
-		const maxHeight = entry.options?.maxHeight ?? rendered.length;
+		const maxHeight = parseSizeValue(entry.options?.maxHeight, 200) ?? rendered.length;
 		return rendered.slice(0, maxHeight);
 	}
 
@@ -351,9 +404,12 @@ export class TuiMainScreen extends Container {
 	private scheduleRender(): void {
 		if (this.stopped || this.renderTimer || !this.renderRequested) return;
 		const elapsed = performance.now() - this.lastRenderFinishedAt;
+		const interval = this.isStreaming
+			? TuiMainScreen.STREAMING_RENDER_INTERVAL_MS
+			: TuiMainScreen.IDLE_RENDER_INTERVAL_MS;
 		const delay = this.renderImmediateRequested
 			? 0
-			: Math.max(0, TuiMainScreen.MIN_RENDER_INTERVAL_MS - elapsed);
+			: Math.max(0, interval - elapsed);
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = null;
 			if (this.stopped || !this.renderRequested) return;
@@ -368,6 +424,9 @@ export class TuiMainScreen extends Container {
 	private handleInput(data: string): void {
 		const hasVisibleOverlay = this.overlayStack.some(entry => {
 			if (entry.hidden) return false;
+			if (entry.options?.visible && !entry.options.visible(80, 24)) {
+				return false;
+			}
 			if (
 				"visible" in entry.component &&
 				typeof (entry.component as { visible?: unknown }).visible ===

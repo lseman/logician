@@ -16,6 +16,10 @@ export class SteerQueue implements Component {
 	private steering: string[] = [];
 	private followUp: string[] = [];
 	private onInvalidate: (() => void) | null = null;
+	private cachedWidth = -1;
+	private cachedSteering: string[] | null = null;
+	private cachedFollowUp: string[] | null = null;
+	private cachedLines: string[] | null = null;
 
 	setOnInvalidate(cb: () => void): void {
 		this.onInvalidate = cb;
@@ -32,6 +36,22 @@ export class SteerQueue implements Component {
 	}
 
 	render(width: number): string[] {
+		if (
+			this.cachedLines !== null &&
+			this.cachedWidth === width &&
+			this.cachedSteering === this.steering &&
+			this.cachedFollowUp === this.followUp
+		) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+		this.cachedSteering = this.steering;
+		this.cachedFollowUp = this.followUp;
+		this.cachedLines = this.renderUncached(width);
+		return this.cachedLines;
+	}
+
+	private renderUncached(width: number): string[] {
 		const total = this.steering.length + this.followUp.length;
 		if (total === 0) return [];
 

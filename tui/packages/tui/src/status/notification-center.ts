@@ -26,6 +26,9 @@ export class NotificationCenter implements Component {
 	private nextId = 1;
 	private timers = new Map<number, ReturnType<typeof setTimeout>>();
 	private onInvalidate: (() => void) | null = null;
+	private cachedWidth = -1;
+	private cachedNotifications: Notification[] | null = null;
+	private cachedLines: string[] | null = null;
 
 	setOnInvalidate(callback: () => void): void {
 		this.onInvalidate = callback;
@@ -72,13 +75,23 @@ export class NotificationCenter implements Component {
 	}
 
 	render(width: number): string[] {
-		return this.notifications.map(notification => {
+		if (
+			this.cachedLines !== null &&
+			this.cachedWidth === width &&
+			this.cachedNotifications === this.notifications
+		) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+		this.cachedNotifications = this.notifications;
+		this.cachedLines = this.notifications.map(notification => {
 			const { icon, color } = notificationStyle(notification.level);
 			const content = `${theme.fg(color, icon)} ${theme.fg("text", notification.message)}${RESET}`;
 			const clipped = clampLineToWidth(content, Math.max(1, width - 2));
 			const line = ` ${clipped}`;
 			return line + " ".repeat(Math.max(0, width - visibleWidth(line)));
 		});
+		return this.cachedLines;
 	}
 }
 

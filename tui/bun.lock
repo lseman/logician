@@ -38,6 +38,19 @@
         "typescript": "^6.0.3",
       },
     },
+    "packages/autoresearch": {
+      "name": "@logician/autoresearch",
+      "version": "0.2.0",
+      "dependencies": {
+        "@logician/agent-core": "0.2.0",
+      },
+      "devDependencies": {
+        "@sinclair/typebox": "^0.34.41",
+        "@types/node": "^22.0.0",
+        "tsx": "^4.23.1",
+        "typescript": "^6.0.3",
+      },
+    },
     "packages/coding-agent": {
       "name": "@logician/coding-agent",
       "version": "0.2.0",
@@ -241,6 +254,8 @@
 
     "@logician/agent-core": ["@logician/agent-core@workspace:packages/agent-core"],
 
+    "@logician/autoresearch": ["@logician/autoresearch@workspace:packages/autoresearch"],
+
     "@logician/coding-agent": ["@logician/coding-agent@workspace:packages/coding-agent"],
 
     "@logician/memory": ["@logician/memory@workspace:packages/memory"],
@@ -268,6 +283,8 @@
     "@protobufjs/pool": ["@protobufjs/pool@1.1.0", "", {}, "sha512-0kELaGSIDBKvcgS4zkjz1PeddatrjYcmMWOlAuAPwAeccUrPHdUqo/J6LiymHHEiJT5NrF1UVwxY14f+fy4WQw=="],
 
     "@protobufjs/utf8": ["@protobufjs/utf8@1.1.2", "", {}, "sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug=="],
+
+    "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 

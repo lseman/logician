@@ -31,6 +31,10 @@ export class WorkSurface implements Component {
 	private active = false;
 	private context = "";
 	private onInvalidate: (() => void) | null = null;
+	private revision = 0;
+	private cachedWidth = -1;
+	private cachedRevision = -1;
+	private cachedLines: string[] | null = null;
 
 	setOnInvalidate(cb: () => void): void {
 		this.onInvalidate = cb;
@@ -40,11 +44,13 @@ export class WorkSurface implements Component {
 		this.active = true;
 		this.calls.clear();
 		this.evidence = this.emptyEvidence();
+		this.revision++;
 		this.onInvalidate?.();
 	}
 
 	endTurn(): void {
 		this.active = false;
+		this.revision++;
 		this.onInvalidate?.();
 	}
 
@@ -56,6 +62,7 @@ export class WorkSurface implements Component {
 			"waiting",
 			"approval",
 		].includes(phase);
+		this.revision++;
 		this.onInvalidate?.();
 	}
 
@@ -65,6 +72,7 @@ export class WorkSurface implements Component {
 			: tokens > 0
 				? tokens.toLocaleString()
 				: "";
+		this.revision++;
 		this.onInvalidate?.();
 	}
 
@@ -80,6 +88,7 @@ export class WorkSurface implements Component {
 		if (file && FILE_TOOLS.has(name)) this.touch(file);
 		if (file && MUTATING_TOOLS.has(name)) this.evidence.changed.add(file);
 		if (name === "bash") this.evidence.commands++;
+		this.revision++;
 		this.onInvalidate?.();
 	}
 
@@ -96,6 +105,7 @@ export class WorkSurface implements Component {
 			call && typeof call.args.path === "string" ? call.args.path : "";
 		if (file && (isError || result.includes("<post_edit_diagnostics")))
 			this.touch(file);
+		this.revision++;
 		this.onInvalidate?.();
 	}
 
@@ -104,6 +114,20 @@ export class WorkSurface implements Component {
 	}
 
 	render(width: number): string[] {
+		if (
+			this.cachedLines !== null &&
+			this.cachedWidth === width &&
+			this.cachedRevision === this.revision
+		) {
+			return this.cachedLines;
+		}
+		this.cachedWidth = width;
+		this.cachedRevision = this.revision;
+		this.cachedLines = this.renderUncached(width);
+		return this.cachedLines;
+	}
+
+	private renderUncached(width: number): string[] {
 		if (
 			this.workingSet.length === 0 &&
 			this.evidence.tools === 0 &&

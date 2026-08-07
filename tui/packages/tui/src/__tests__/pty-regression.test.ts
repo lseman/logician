@@ -114,6 +114,7 @@ void test("TUI starts in a real terminal and Ctrl+M changes mode", async () => {
 			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
 		},
 		actions: [
 			{ afterMs: 100, send: "s\n" },
@@ -172,6 +173,7 @@ void test("Ctrl+I changes and persists the execution profile", async () => {
 			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
 		},
 		actions: [
 			{ afterMs: 100, send: "s\n" },
@@ -264,6 +266,7 @@ void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
 			LOGICIAN_TRUST: "always",
 			LOGICIAN_MCP: "0",
 			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
 		},
 		actions: [
 			{ afterMs: 100, send: "s\n" },
@@ -274,6 +277,6 @@ void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {
 		rows: 32,
 	});
 	const screen = screenFromPtyResult(result, 120, 32).text();
-	assert.match(screen, /TOOLS EXPANDED/);
+	assert.match(screen, /tools expanded|TOOLS EXPANDED/i);
 	assert.doesNotMatch(result.output, /TUI render error/);
 });

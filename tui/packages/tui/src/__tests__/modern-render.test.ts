@@ -243,7 +243,7 @@ void test("streaming updates reuse the rendered completed-turn prefix", () => {
 	display.render(100);
 	const cacheHitsAfterFirstFrame = display.getSanitizationMetrics().cacheHits;
 
-	streaming.assistantMessage?.chunks[0].contentText = "First second";
+	streaming.assistantMessage!.chunks[0].contentText = "First second";
 	display.setTurns(turns);
 	const output = plain(display.render(100).join("\n"));
 

@@ -127,18 +127,22 @@ export class TUI extends Container {
 	private renderImmediateRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderFinishedAt = 0;
-	private static readonly MIN_RENDER_INTERVAL_MS = 16;
+	// Adaptive frame pacing: 60fps (16ms) when idle, 30fps (33ms) during
+	// streaming. Halves layout work during streaming when only 1-2 lines
+	// change per frame, while keeping 60fps for spinner animation and
+	// key-interaction responsiveness.
+	private static readonly IDLE_RENDER_INTERVAL_MS = 16;
+	private static readonly STREAMING_RENDER_INTERVAL_MS = 33;
+	private isStreaming = false;
 	private started = false;
 	private stopped = false;
 	private focusedComponent: Component | null = null;
-	private overlayStack: Array<{
-		component: Component;
-		options?: OverlayOptions;
-		preFocus: Component | null;
-		hidden: boolean;
-		focusOrder: number;
-	}> = [];
+	private overlayStack: OverlayStackEntry[] = [];
 	private focusOrderCounter = 0;
+	/** Tracks overlay focus restore state for proper focus transfer when overlays
+	 * are hidden. Handles the case where a modal overlay (e.g., trust prompt)
+	 * temporarily blocks focus from returning to a list picker (e.g., theme selector). */
+	private overlayFocusRestore: OverlayFocusRestoreState = { status: "inactive" };
 	private inputListeners: Set<
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
@@ -175,6 +179,14 @@ export class TUI extends Container {
 		this.requestRender();
 	}
 
+	/** Set whether the transcript is actively streaming.
+	 * During streaming, render interval increases from 16ms to 33ms
+	 * (60fps → 30fps) to halve layout work when only 1-2 lines change.
+	 * Switches back to 60fps for idle/spinner/key-interaction smoothness. */
+	setIsStreaming(isStreaming: boolean): void {
+		this.isStreaming = isStreaming;
+	}
+
 	get scrollOffset(): number {
 		return this._scrollOffsetInternal;
 	}
@@ -197,12 +209,8 @@ export class TUI extends Container {
 	showOverlay(
 		component: Component,
 		options?: OverlayOptions,
-	): {
-		hide: () => void;
-		setHidden: (hidden: boolean) => void;
-		focus: () => void;
-	} {
-		const entry = {
+	): OverlayHandle {
+		const entry: OverlayStackEntry = {
 			component,
 			options,
 			preFocus: this.focusedComponent,
@@ -215,23 +223,60 @@ export class TUI extends Container {
 		return {
 			hide: () => {
 				const idx = this.overlayStack.indexOf(entry);
-				if (idx >= 0) this.overlayStack.splice(idx, 1);
+				if (idx >= 0) {
+					this.overlayStack.splice(idx, 1);
+					// Restore focus if this overlay had focus
+					if (this.focusedComponent === component) {
+						const topVisible = this.getTopmostVisibleOverlay();
+						this.setFocus(topVisible?.component ?? entry.preFocus);
+					}
+				}
 				this.requestRender();
 			},
 			setHidden: (hidden: boolean) => {
+				if (entry.hidden === hidden) return;
 				entry.hidden = hidden;
+				// Update focus when hiding/showing
+				if (hidden) {
+					// If this overlay had focus, move focus to next visible or preFocus
+					if (this.focusedComponent === component) {
+						const topVisible = this.getTopmostVisibleOverlay();
+						this.setFocus(topVisible?.component ?? entry.preFocus);
+					}
+				} else {
+					// Restore focus to this overlay when showing (if it's actually visible)
+					if (!options?.nonCapturing && this.isOverlayVisible(entry)) {
+						entry.focusOrder = ++this.focusOrderCounter;
+						this.setFocus(component);
+					}
+				}
 				this.requestRender();
 			},
+			isHidden: () => entry.hidden,
+			isFocused: () => this.focusedComponent === component,
 			focus: () => {
-				this.setFocus(component);
+				if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry)) return;
 				entry.focusOrder = ++this.focusOrderCounter;
+				this.setFocus(component);
+				this.requestRender();
+			},
+			unfocus: (target?: Component | null) => {
+				if (this.focusedComponent !== component) return;
+				const topVisible = this.getTopmostVisibleOverlay();
+				this.setFocus(target ?? (topVisible?.component ?? entry.preFocus));
 				this.requestRender();
 			},
 		};
 	}
 
 	hideOverlay(): void {
+		const overlay = this.overlayStack[this.overlayStack.length - 1];
+		if (!overlay) return;
 		this.overlayStack.pop();
+		if (this.focusedComponent === overlay.component) {
+			const topVisible = this.getTopmostVisibleOverlay();
+			this.setFocus(topVisible?.component ?? overlay.preFocus);
+		}
 		this.requestRender();
 	}
 
@@ -249,11 +294,103 @@ export class TUI extends Container {
 				(entry.component as { visible: boolean }).visible = false;
 			}
 			// Restore focus to whatever was focused before this overlay was shown
-			if (isFocusable(entry.preFocus)) {
-				(entry.preFocus as Focusable).focused = false;
+			if (this.focusedComponent === component) {
+				const topVisible = this.getTopmostVisibleOverlay();
+				this.setFocus(topVisible?.component ?? entry.preFocus);
 			}
-			this.setFocus(entry.preFocus);
 			this.requestRender();
+		}
+	}
+
+	// ── Overlay helpers ───────────────────────────────────────────────────
+
+	/** Check if an overlay entry is currently visible */
+	private isOverlayVisible(entry: OverlayStackEntry): boolean {
+		if (entry.hidden) return false;
+		// Components like the slash popup / file mention popup / plugin manager
+		// stay mounted as overlays for the whole session but only actually show
+		// content once invoked; their own `visible` flag is the real signal.
+		if (
+			"visible" in entry.component &&
+			typeof (entry.component as { visible?: unknown }).visible === "boolean"
+		) {
+			return (entry.component as { visible: boolean }).visible;
+		}
+		if (entry.options?.visible) {
+			// We'll use default dimensions during layout; actual dimensions come from doRender
+			return true;
+		}
+		return true;
+	}
+
+	/** Find the visual-frontmost visible capturing overlay, if any */
+	private getTopmostVisibleOverlay(): OverlayStackEntry | undefined {
+		let topmost: OverlayStackEntry | undefined;
+		for (const overlay of this.overlayStack) {
+			if (overlay.options?.nonCapturing || !this.isOverlayVisible(overlay)) continue;
+			if (!topmost || overlay.focusOrder > topmost.focusOrder) {
+				topmost = overlay;
+			}
+		}
+		return topmost;
+	}
+
+	/** Clear the overlay focus restore state for a given overlay */
+	private clearOverlayFocusRestoreFor(overlay: OverlayStackEntry): void {
+		if (
+			this.overlayFocusRestore.status !== "inactive" &&
+			this.overlayFocusRestore.overlay === overlay
+		) {
+			this.overlayFocusRestore = { status: "inactive" };
+		}
+	}
+
+	/** Get the current focus restore state, deactivating if overlay is no longer on stack */
+	private getVisibleOverlayFocusRestore(): OverlayFocusRestoreState {
+		const state = this.overlayFocusRestore;
+		if (state.status === "inactive") return state;
+		if (
+			!this.overlayStack.includes(state.overlay!) ||
+			!this.isOverlayVisible(state.overlay!)
+		) {
+			return { status: "inactive" };
+		}
+		return state;
+	}
+
+	/** Resolve a blocked focus restore state to the correct target component */
+	private resolveBlockedOverlayFocusRestore(
+		state: {
+			status: "blocked";
+			overlay: OverlayStackEntry;
+			blockedBy: Component;
+			resume: { status: "restore-overlay" } | { status: "focus-target"; target: Component | null };
+		},
+	): Component | null {
+		if (state.resume.status === "restore-overlay") return state.overlay.component;
+		this.overlayFocusRestore = { status: "inactive" };
+		return state.resume.status === "focus-target" ? state.resume.target : null;
+	}
+
+	/** Check if a component is an ancestor in the overlay pre-focus chain of an entry */
+	private isOverlayFocusAncestor(entry: OverlayStackEntry, component: Component): boolean {
+		const visited = new Set<Component>();
+		let current = entry.preFocus;
+		while (current && !visited.has(current)) {
+			visited.add(current);
+			if (current === component) return true;
+			const nextEntry = this.overlayStack.find(o => o.component === current);
+			current = nextEntry?.preFocus ?? null;
+		}
+		return false;
+	}
+
+	/** Retarget preFocus for all overlays when one is removed */
+	private retargetOverlayPreFocus(removed: OverlayStackEntry): void {
+		for (const overlay of this.overlayStack) {
+			if (overlay !== removed && overlay.preFocus === removed.component) {
+				overlay.preFocus = removed.preFocus;
+			}
 		}
 	}
 
@@ -390,9 +527,12 @@ export class TUI extends Container {
 		// expensive streaming frames schedule their successor immediately, creating
 		// bursts of layout work and terminal writes that could starve input handling.
 		const elapsed = performance.now() - this.lastRenderFinishedAt;
+		const interval = this.isStreaming
+			? TUI.STREAMING_RENDER_INTERVAL_MS
+			: TUI.IDLE_RENDER_INTERVAL_MS;
 		const delay = this.renderImmediateRequested
 			? 0
-			: Math.max(0, TUI.MIN_RENDER_INTERVAL_MS - elapsed);
+			: Math.max(0, interval - elapsed);
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = null;
 			if (this.stopped || !this.renderRequested) return;
@@ -988,7 +1128,7 @@ export class TUI extends Container {
 	private composeOverlays(
 		lines: string[],
 		termWidth: number,
-		_termHeight: number,
+		termHeight: number,
 		transcriptHeight: number,
 	): string[] {
 		const result = [...lines];
@@ -997,6 +1137,9 @@ export class TUI extends Container {
 		const visibleEntries = this.overlayStack.filter(e => {
 			if (e.options?.anchor === "aboveInput") return false;
 			if (e.hidden) return false;
+			if (e.options?.visible && !e.options.visible(termWidth, termHeight)) {
+				return false;
+			}
 			// Also check component's visible property if it has one
 			if (
 				"visible" in e.component &&
@@ -1008,62 +1151,114 @@ export class TUI extends Container {
 		});
 
 		for (const entry of visibleEntries) {
-			const leftAligned = entry.options?.align === "left";
-			const overlayWidth = leftAligned
-				? Math.max(1, termWidth)
-				: Math.max(
-						40,
-						Math.min(
-							termWidth - 8,
-							entry.options?.maxHeight ? termWidth * 0.6 : termWidth - 8,
-						),
-					);
-			const overlayLines = entry.component.render(Math.max(1, overlayWidth));
-			const overlayHeight = Math.min(
-				overlayLines.length,
-				entry.options?.maxHeight || 999,
-			);
+			const opt = entry.options ?? {};
+			const leftAligned = opt.align === "left";
 
-			// Calculate row position within transcript area
-			let row = 0;
-			switch (entry.options?.anchor) {
-				case "center":
-					row = Math.max(0, Math.floor((transcriptHeight - overlayHeight) / 2));
-					break;
-				case "bottom":
-					// Flush against the bottom of the transcript area, i.e. directly
-					// above the separator + input bar.
-					row = Math.max(0, transcriptHeight - overlayHeight);
-					break;
-				default:
-					row = 0;
-					break;
+			// ── Resolve margin ─────────────────────────────────────────────
+			const margin =
+				typeof opt.margin === "number"
+					? { top: opt.margin, right: opt.margin, bottom: opt.margin, left: opt.margin }
+					: (opt.margin ?? {});
+			const marginLeft = Math.max(0, margin.left ?? 0);
+			const marginRight = Math.max(0, margin.right ?? 0);
+			const availWidth = Math.max(1, termWidth - marginLeft - marginRight);
+
+			// ── Resolve width ──────────────────────────────────────────────
+			let width = leftAligned
+				? availWidth
+				: parseSizeValue(opt.width, termWidth) ?? Math.min(80, availWidth);
+			if (opt.minWidth) width = Math.max(width, opt.minWidth);
+			if (!leftAligned) {
+				width = Math.max(40, Math.min(width, availWidth));
 			}
 
-			// Horizontal offset: left-aligned overlays hug the left edge; otherwise
-			// center within the terminal.
-			const margin = leftAligned
-				? 0
-				: Math.max(2, Math.floor((termWidth - overlayWidth) / 2));
+			// ── Render at computed width ───────────────────────────────────
+			const overlayLines = entry.component.render(Math.max(1, width));
+
+			// ── Resolve maxHeight ──────────────────────────────────────────
+			let maxHeight = parseSizeValue(opt.maxHeight, termHeight);
+			const overlayHeight = maxHeight !== undefined
+				? Math.min(overlayLines.length, maxHeight)
+				: overlayLines.length;
+
+			// ── Resolve position ───────────────────────────────────────────
+			let row: number;
+			let col: number;
+
+			if (opt.row !== undefined) {
+				const absRow = parseSizeValue(opt.row, termHeight);
+				row = absRow !== undefined ? Math.max(0, absRow) : 0;
+			} else {
+				const anchor = (opt.anchor ?? "center") as OverlayAnchor;
+				const availHeight = Math.max(1, termHeight);
+				switch (anchor) {
+					case "top":
+					case "top-left":
+					case "top-center":
+					case "top-right":
+						row = 0;
+						break;
+					case "bottom":
+					case "bottom-left":
+					case "bottom-center":
+					case "bottom-right":
+						row = Math.max(0, termHeight - overlayHeight);
+						break;
+					case "center":
+					case "left-center":
+					case "right-center":
+						row = Math.max(0, Math.floor((termHeight - overlayHeight) / 2));
+						break;
+					default:
+						row = 0;
+					}
+				row += (margin.top ?? 0) + (opt.offsetY ?? 0);
+			}
+
+			if (opt.col !== undefined) {
+				const absCol = parseSizeValue(opt.col, termWidth);
+				col = absCol !== undefined ? Math.max(0, absCol) : marginLeft;
+			} else {
+				const anchor = (opt.anchor ?? "center") as OverlayAnchor;
+				switch (anchor) {
+					case "top-left":
+					case "left-center":
+					case "bottom-left":
+						col = marginLeft;
+						break;
+					case "top-right":
+					case "right-center":
+					case "bottom-right":
+						col = termWidth - marginRight - width;
+						break;
+					default: // center, top-center, bottom-center
+						col = marginLeft + Math.floor((availWidth - width) / 2);
+				}
+				col += opt.offsetX ?? 0;
+			}
+
+			// Clamp to terminal bounds
+			row = Math.max(0, Math.min(row, termHeight - overlayHeight));
+			col = Math.max(0, Math.min(col, termWidth - width));
 
 			for (let i = 0; i < overlayHeight; i++) {
 				const idx = row + i;
 				if (idx >= 0 && idx < result.length) {
 					const srcLine = overlayLines[i] || "";
-					const srcVis = visibleWidth(srcLine);
-					// Pad with spaces, then overlay the content at the correct offset
-					const basePad = " ".repeat(margin);
-					const afterPad = " ".repeat(Math.max(0, termWidth - margin - srcVis));
-					result[idx] = basePad + srcLine + afterPad;
+					const clipped = clampLineToWidth(srcLine, width);
+					const vis = visibleWidth(clipped);
+					const padRight = " ".repeat(Math.max(0, width - vis));
+					const padLeft = " ".repeat(Math.max(0, col - visibleWidth(result[idx] ?? "")));
+					result[idx] = (result[idx] ?? "") + padLeft + clipped + padRight;
 				}
 			}
 
 			if (entry.options?.onClick) {
 				this.paintedOverlayClickRects.push({
 					rect: {
-						x: margin,
+						x: col,
 						y: row,
-						width: overlayWidth,
+						width,
 						height: overlayHeight,
 					},
 					onClick: entry.options.onClick,
@@ -1077,6 +1272,10 @@ export class TUI extends Container {
 	private renderAboveInputOverlays(termWidth: number): string[] {
 		const entries = this.overlayStack.filter(entry => {
 			if (entry.hidden || entry.options?.anchor !== "aboveInput") return false;
+			if (entry.options?.visible) {
+				// For aboveInput overlays, always pass a large height since they float above input
+				if (!entry.options.visible(termWidth, termWidth * 10)) return false;
+			}
 			if (
 				"visible" in entry.component &&
 				typeof (entry.component as { visible?: unknown }).visible === "boolean"
@@ -1093,7 +1292,7 @@ export class TUI extends Container {
 		);
 		const width = Math.max(1, termWidth - 1);
 		const rendered = entry.component.render(width);
-		const maxHeight = entry.options?.maxHeight ?? rendered.length;
+		const maxHeight = parseSizeValue(entry.options?.maxHeight, 200) ?? rendered.length;
 		return rendered.slice(0, maxHeight).map(line => {
 			const clamped = clampLineToWidth(line, width);
 			return (
@@ -1286,140 +1485,22 @@ function isImageLine(line: string): boolean {
 	return line.includes("\x1b_G") || line.includes("\x1b]1337;");
 }
 
-// ── Cell-level rendering ──────────────────────────────────────────────────────
-// Each cell is { char: string, attr: string } where attr is the full ANSI
-// attribute string (e.g. "\x1b[38;5;46m\x1b[1m"). We parse each rendered line
-// into cells, compare cell-by-cell against the previous frame, and emit only
-// the changes (cursor movement + attribute change + character write).
-
-interface Cell {
-	char: string;
-	attr: string;
-	continuation: boolean;
-}
-
 /**
- * Parse an ANSI-styled line into an array of cells. Each cell has a character
- * and the accumulated attribute string that applies to it. Handles CSI, OSC,
- * and APC escape sequences.
- */
-function parseLineIntoCells(line: string, targetWidth: number): Cell[] {
-	const cells: Cell[] = [];
-	let attr = "";
-	let i = 0;
-	const len = line.length;
-
-	while (i < len && cells.length < targetWidth) {
-		const ch = line[i];
-
-		if (ch === "\x1b") {
-			const next = line[i + 1];
-			if (next === "[") {
-				// CSI sequence
-				let j = i + 2;
-				while (j < len) {
-					const fc = line.charCodeAt(j);
-					if (fc >= 0x40 && fc <= 0x7e) break;
-					j++;
-				}
-				const seq = line.slice(i, j + 1);
-				i = j + 1;
-
-				// Only SGR changes cell appearance. Other CSI commands must not
-				// leak into a style restoration sequence.
-				if (seq.endsWith("m")) {
-					if (seq === "\x1b[m" || seq === "\x1b[0m" || seq === "\x1b[0;0m") {
-						attr = "";
-					} else {
-						attr += seq;
-					}
-				}
-				continue;
-			}
-			if (next === "]") {
-				// OSC sequence
-				let j = i + 2;
-				while (j < len) {
-					if (line[j] === "\x07") break;
-					if (line[j] === "\x1b" && line[j + 1] === "\\") {
-						j++;
-						break;
-					}
-					j++;
-				}
-				const end = line[j] === "\x07" ? j + 1 : Math.min(len, j + 2);
-				const seq = line.slice(i, end);
-				i = end;
-				attr += seq;
-				continue;
-			}
-			if (next === "_") {
-				// APC sequence
-				let j = i + 2;
-				while (j < len) {
-					if (line[j] === "\x07") break;
-					if (line[j] === "\x1b" && line[j + 1] === "\\") {
-						j++;
-						break;
-					}
-					j++;
-				}
-				const end = line[j] === "\x07" ? j + 1 : Math.min(len, j + 2);
-				i = end;
-				continue;
-			}
-			// Lone ESC
-			attr += ch;
-			i++;
-			continue;
-		}
-
-		// Drop C0 control bytes (except tab which we handle below)
-		const code = ch.charCodeAt(0);
-		if (code < 0x20 && code !== 0x09) {
-			i++;
-			continue;
-		}
-
-		// Tab: expand to one space
-		if (code === 0x09) {
-			if (cells.length < targetWidth) {
-				cells.push({ char: " ", attr, continuation: false });
-			}
-			i++;
-			continue;
-		}
-
-		const codePoint = line.codePointAt(i);
-		if (codePoint === undefined) break;
-		const char = String.fromCodePoint(codePoint);
-		const width = visibleWidth(char);
-		if (width > 0 && cells.length + width <= targetWidth) {
-			cells.push({ char, attr, continuation: false });
-			for (let column = 1; column < width; column++) {
-				cells.push({ char: "", attr, continuation: true });
-			}
-		}
-		i += char.length;
-	}
-
-	// Styling blank padding is visually irrelevant and makes every trailing cell
-	// appear changed when a component happens to omit a final reset.
-	while (cells.length < targetWidth) {
-		cells.push({ char: " ", attr: "", continuation: false });
-	}
-
-	return cells;
-}
-
-/**
- * Generate ANSI escape sequence to transition from prevCells to newCells,
- * starting at the given row. Only emits cursor movement + attribute changes
- * + character writes for changed cells. Uses a smart strategy:
- *   1. Move cursor to first changed cell
- *   2. For each subsequent cell: if attr changed, emit attr; if char changed,
- *      emit char; if both, emit attr then char
- *   3. If we reach a run of unchanged cells, jump cursor past them
+ * Generate the ANSI escape sequence to repaint one dirty row, starting at
+ * the given row. `_commitFrame` already skips rows whose raw text is
+ * byte-identical to last frame (see `prevLine === newLine` there), so every
+ * call here is for a row that actually changed — there is no cheaper case
+ * to special-case beneath that.
+ *
+ * This clears and reprints the whole row rather than diffing individual
+ * cells: clear-line + full content is one cursor move and one write instead
+ * of a parse of both old and new lines into per-column Cell arrays (one
+ * object per column, per side, per dirty row, every frame) followed by a
+ * scan for minimal changed runs. That cell-level bookkeeping only pays for
+ * itself by shrinking the bytes written when a small run in the middle of a
+ * wide row changed; on a local tty or modern terminal that byte saving is
+ * not worth its CPU cost, and it was the dominant per-frame cost on wide
+ * terminals with many simultaneously-dirty rows (e.g. a full repaint).
  */
 export interface TerminalLineDiff {
 	output: string;
@@ -1427,65 +1508,6 @@ export interface TerminalLineDiff {
 	cursorMoves: number;
 }
 
-function cellLevelDiff(
-	prevCells: Cell[],
-	newCells: Cell[],
-	row: number,
-): TerminalLineDiff {
-	let out = "";
-	const closeHyperlink = "\x1b]8;;\x1b\\";
-	const changed = new Array<boolean>(newCells.length).fill(false);
-	for (let i = 0; i < newCells.length; i++) {
-		const prev = prevCells[i];
-		changed[i] =
-			!prev ||
-			prev.char !== newCells[i].char ||
-			prev.attr !== newCells[i].attr ||
-			prev.continuation !== newCells[i].continuation;
-	}
-
-	// A terminal cannot address the second half of a wide glyph independently.
-	// Expand changes leftward so replacing either half repaints the whole glyph.
-	for (let i = 1; i < changed.length; i++) {
-		if (
-			changed[i] &&
-			(newCells[i].continuation || prevCells[i]?.continuation)
-		) {
-			changed[i - 1] = true;
-		}
-	}
-
-	let column = 0;
-	let changedCells = 0;
-	let cursorMoves = 0;
-	while (column < newCells.length) {
-		if (!changed[column]) {
-			column++;
-			continue;
-		}
-		const start = column;
-		while (column < newCells.length && changed[column]) column++;
-		changedCells += column - start;
-		cursorMoves++;
-
-		out += `\x1b[${row + 1};${start + 1}H${closeHyperlink}\x1b[0m`;
-		let activeAttr = "";
-		for (let i = start; i < column; i++) {
-			const cell = newCells[i];
-			if (cell.continuation) continue;
-			if (cell.attr !== activeAttr) {
-				out += `\x1b[0m${cell.attr}`;
-				activeAttr = cell.attr;
-			}
-			out += cell.char;
-		}
-		out += closeHyperlink;
-	}
-
-	return { output: out, changedCells, cursorMoves };
-}
-
-/** Build the terminal update for one printable row. Exported for regression tests. */
 export function diffTerminalLine(
 	previousLine: string,
 	nextLine: string,
@@ -1496,29 +1518,144 @@ export function diffTerminalLine(
 }
 
 export function diffTerminalLineWithMetrics(
-	previousLine: string,
+	_previousLine: string,
 	nextLine: string,
 	row: number,
 	width: number,
 ): TerminalLineDiff {
-	return cellLevelDiff(
-		parseLineIntoCells(previousLine, width),
-		parseLineIntoCells(nextLine, width),
-		row,
-	);
+	const closeHyperlink = "\x1b]8;;\x1b\\";
+	const clipped = clampLineToWidth(nextLine, width);
+	const output =
+		`\x1b[${row + 1};1H${closeHyperlink}\x1b[0m\x1b[2K${clipped}${closeHyperlink}`;
+	return { output, changedCells: width, cursorMoves: 1 };
 }
 
 // ── Overlay options ──────────────────────────────────────────────────────────
 
+// ── Overlay options ──────────────────────────────────────────────────────────
+
+/** Value that can be absolute (number) or percentage (string like "50%") */
+export type SizeValue = number | `${number}%`;
+
+/** Parse a SizeValue into absolute value given a reference size */
+export function parseSizeValue(value: SizeValue | undefined, referenceSize: number): number | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === "number") return value;
+	const match = value.match(/^(\d+(?:\.\d+)?)%$/);
+	if (match) {
+		return Math.floor((referenceSize * parseFloat(match[1])) / 100);
+	}
+	return undefined;
+}
+
+/** Margin configuration for overlays */
+export interface OverlayMargin {
+	top?: number;
+	right?: number;
+	bottom?: number;
+	left?: number;
+}
+
+/** Anchor position for overlay positioning */
+export type OverlayAnchor =
+	| "center"
+	| "top-left"
+	| "top-center"
+	| "top-right"
+	| "bottom-left"
+	| "bottom-center"
+	| "bottom-right"
+	| "left-center"
+	| "right-center"
+	| "top"
+	| "bottom"
+	| "aboveInput";
+
+/**
+ * Options for overlay positioning and sizing.
+ * Values can be absolute numbers or percentage strings (e.g., "50%").
+ */
 export interface OverlayOptions {
-	anchor?: "center" | "top" | "bottom" | "aboveInput";
+	// === Sizing ===
+	/** Width in terminal columns, or percentage of terminal width (e.g., "50%") */
+	width?: SizeValue;
+	/** Minimum width in columns */
+	minWidth?: number;
+	/** Maximum height in rows, or percentage of terminal height (e.g., "50%") */
+	maxHeight?: SizeValue;
+
+	// === Positioning - anchor-based ===
+	/** Anchor point for positioning (default: 'center') */
+	anchor?: OverlayAnchor;
+	/** Horizontal offset from anchor position (positive = right) */
+	offsetX?: number;
+	/** Vertical offset from anchor position (positive = down) */
+	offsetY?: number;
+
+	// === Positioning - explicit row/col ===
+	/** Row position: absolute number, or percentage (e.g., "25%" = 25% from top) */
+	row?: SizeValue;
+	/** Column position: absolute number, or percentage (e.g., "50%" = centered) */
+	col?: SizeValue;
+
+	// === Margin from terminal edges ===
+	/** Margin from terminal edges. Number applies to all sides. */
+	margin?: OverlayMargin | number;
+
+	// === Alignment (for left/right anchored overlays) ===
+	/** Horizontal alignment within the overlay's bounding box */
 	align?: "center" | "left";
-	maxHeight?: number;
+
+	// === Visibility ===
+	/**
+	 * Control overlay visibility based on terminal dimensions.
+	 * If provided, overlay is only rendered when this returns true.
+	 * Called each render cycle with current terminal dimensions.
+	 */
+	visible?: (termWidth: number, termHeight: number) => boolean;
+	/** If true, don't capture keyboard focus when shown */
 	nonCapturing?: boolean;
 	/** Invoked when a mouse click lands within this overlay's composited
 	 * screen rect. Only wired up in layout-engine mode (setLayoutRoot). */
 	onClick?: () => void;
 }
+
+/** Handle returned by showOverlay for controlling the overlay */
+export interface OverlayHandle {
+	/** Permanently remove the overlay */
+	hide(): void;
+	/** Temporarily hide or show the overlay */
+	setHidden(hidden: boolean): void;
+	/** Check if overlay is temporarily hidden */
+	isHidden(): boolean;
+	/** Focus this overlay and bring it to the visual front */
+	focus(): void;
+	/** Release focus to the next visible overlay or a specific target */
+	unfocus(target?: Component | null): void;
+	/** Check if this overlay currently has focus */
+	isFocused(): boolean;
+}
+
+/** Options for {@link OverlayHandle.unfocus} */
+export interface OverlayUnfocusOptions {
+	/** Explicit target to focus after releasing this overlay */
+	target: Component | null;
+}
+
+type OverlayStackEntry = {
+	component: Component;
+	options?: OverlayOptions;
+	preFocus: Component | null;
+	hidden: boolean;
+	focusOrder: number;
+};
+
+type OverlayFocusRestoreState = {
+	status: "inactive" | "eligible" | "blocked";
+	overlay?: OverlayStackEntry;
+	blockedBy?: Component;
+	resume?: { status: "restore-overlay" } | { status: "focus-target"; target: Component | null };
+};
 
 // ── Shared renderer surface ──────────────────────────────────────────────────
 // The narrow slice of TUI that app/*.ts "Ctx" interfaces actually call

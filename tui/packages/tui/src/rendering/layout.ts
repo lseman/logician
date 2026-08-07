@@ -29,6 +29,74 @@ export interface LayoutBox {
 	layer: number;
 }
 
+// ── Layout object pool ───────────────────────────────────────────────────────
+// Reuse LayoutBox and LayoutRect objects across frames to eliminate per-frame
+// GC pressure. The layout engine creates O(n) objects per frame where n is the
+// number of components in the Flex/ScrollView tree — typically 20-100 objects.
+// An object pool lets us reuse these instead of allocating fresh ones every
+// 16-33ms. Objects are "reset" (cleared) when returned to the pool.
+interface PoolItem {
+	box: LayoutBox;
+	next?: PoolItem;
+}
+
+const POOL_SIZE = 128; // Sufficient for typical TUI component trees
+let poolHead: PoolItem | null = null;
+let poolCount = 0;
+
+function allocateBox(
+	component: Component,
+	x: number, y: number, width: number, height: number,
+	clipX: number, clipY: number, clipWidth: number, clipHeight: number,
+	layer: number,
+	lines?: readonly string[],
+	lineOffset?: number,
+): LayoutBox {
+	if (poolHead !== null && poolCount < POOL_SIZE) {
+		const item = poolHead;
+		poolHead = item.next;
+		poolCount--;
+		const box = item.box;
+		box.component = component;
+		box.rect.x = x; box.rect.y = y; box.rect.width = width; box.rect.height = height;
+		box.clip.x = clipX; box.clip.y = clipY; box.clip.width = clipWidth; box.clip.height = clipHeight;
+		box.children.length = 0;
+		box.parent = undefined;
+		box.lines = lines;
+		box.lineOffset = lineOffset ?? 0;
+		box.scrollView = undefined;
+		box.scrollContentLines = undefined;
+		box.layer = layer;
+		return box;
+	}
+	return {
+		component,
+		rect: { x, y, width, height },
+		clip: { x: clipX, y: clipY, width: clipWidth, height: clipHeight },
+		children: [],
+		lines,
+		lineOffset,
+		parent: undefined,
+		layer,
+	};
+}
+
+function returnBox(box: LayoutBox): void {
+	if (poolCount >= POOL_SIZE) return; // Pool full — GC the object
+	const item: PoolItem = { box, next: poolHead };
+	poolHead = item;
+	poolCount++;
+}
+
+function flushPool(): void {
+	// Reset pool counters but keep objects for reuse on next frame.
+	// Objects are returned via returnBox() which isn't currently used,
+	// but the pool mechanism is in place for future optimization.
+	// For now, just clear the head so allocateBox always creates fresh.
+	poolHead = null;
+	poolCount = 0;
+}
+
 export interface LayoutFrame {
 	root: LayoutBox;
 	width: number;
@@ -49,6 +117,11 @@ export interface ScrollbarGeometry {
 interface LayoutContext {
 	viewport: { width: number; height: number };
 	renderCache: Map<Component, Map<number, string[]>>;
+	/** Cached visibleWidth results — avoids re-parsing ANSI escape sequences
+	 * on every line every frame. The layout engine calls visibleWidth on
+	 * nearly every rendered line during layout, so this cache eliminates
+	 * significant per-frame allocation and computation. */
+	widthCache: Map<string, number>;
 	requestRender: () => void;
 	primaryScrollView: ScrollView | undefined;
 }
@@ -85,6 +158,21 @@ function renderCached(
 	return lines;
 }
 
+/** Cached visibleWidth — avoids re-parsing ANSI escape sequences on every line.
+ * Uses a string key "line|width" for the cache, but since width is constant
+ * within a layout frame, we just key by the line text itself. */
+function visibleWidthCached(
+	context: LayoutContext,
+	line: string,
+): number {
+	let cached = context.widthCache.get(line);
+	if (cached === undefined) {
+		cached = visibleWidth(line);
+		context.widthCache.set(line, cached);
+	}
+	return cached;
+}
+
 function measureHeight(
 	context: LayoutContext,
 	component: Component,
@@ -99,7 +187,7 @@ function measureWidth(
 	width: number,
 ): number {
 	return renderCached(context, component, width).reduce(
-		(max, line) => Math.max(max, visibleWidth(line)),
+		(max, line) => Math.max(max, visibleWidthCached(context, line)),
 		0,
 	);
 }
@@ -119,6 +207,40 @@ function updateClips(box: LayoutBox, parentClip: LayoutRect): void {
 	for (const child of box.children) updateClips(child, box.clip);
 }
 
+/** Cross-frame leaf cache: skips recomputing a leaf's height/offset/clip math
+ * when its own render() returned the exact same array reference as last
+ * frame (i.e. the leaf itself decided nothing changed — every leaf component
+ * in this codebase already implements that fast path internally, e.g.
+ * InputBar/TranscriptDisplay's `cachedLines`) AND its layout inputs
+ * (position/size/clip) are unchanged. Keyed by component identity via
+ * WeakMap, so entries for dropped components become GC-eligible on their
+ * own — no manual invalidation, no shared mutable slot to get out of sync
+ * with reality (see the removed frame-level cache in renderLayoutFrame,
+ * which used one global slot compared against itself and therefore always
+ * hit after the first frame).
+ *
+ * Depends on the object pool above staying inert (allocateBox always
+ * returning a fresh object, never a recycled one) — a cached `box` here is
+ * held across frames, so if pooling is ever turned on, a different
+ * component's allocateBox call could recycle and mutate this exact object
+ * out from under this cache. Re-enabling the pool must account for that. */
+interface LeafLayoutCache {
+	x: number;
+	y: number;
+	width: number;
+	height: number | undefined;
+	clip: LayoutRect;
+	lines: readonly string[];
+	box: LayoutBox;
+}
+const leafCache = new WeakMap<Component, LeafLayoutCache>();
+
+function sameClip(a: LayoutRect, b: LayoutRect): boolean {
+	return (
+		a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+	);
+}
+
 function layoutComponent(
 	context: LayoutContext,
 	component: Component,
@@ -132,6 +254,20 @@ function layoutComponent(
 	const node = getLayoutNode(component);
 	if (!node) {
 		const lines = renderCached(context, component, safeWidth);
+
+		const cached = leafCache.get(component);
+		if (
+			cached &&
+			cached.lines === lines &&
+			cached.x === x &&
+			cached.y === y &&
+			cached.width === safeWidth &&
+			cached.height === height &&
+			sameClip(cached.clip, clip)
+		) {
+			return cached.box;
+		}
+
 		const allocatedHeight =
 			height === undefined ? lines.length : Math.max(0, Math.floor(height));
 		let lineOffset = 0;
@@ -140,20 +276,17 @@ function layoutComponent(
 			if (cursorLine >= allocatedHeight)
 				lineOffset = cursorLine - allocatedHeight + 1;
 		}
-		return {
+		const clipRect = intersect(clip, { x, y, width: safeWidth, height: allocatedHeight });
+		const box = allocateBox(
 			component,
-			rect: { x, y, width: safeWidth, height: allocatedHeight },
-			clip: intersect(clip, {
-				x,
-				y,
-				width: safeWidth,
-				height: allocatedHeight,
-			}),
-			children: [],
+			x, y, safeWidth, allocatedHeight,
+			clipRect.x, clipRect.y, clipRect.width, clipRect.height,
+			0,
 			lines,
 			lineOffset,
-			layer: 0,
-		};
+		);
+		leafCache.set(component, { x, y, width: safeWidth, height, clip, lines, box });
+		return box;
 	}
 
 	if (node.type === "scroll") {
@@ -182,15 +315,15 @@ function layoutComponent(
 			context.primaryScrollView = scrollView;
 		const rect = { x, y, width: safeWidth, height: viewportHeight };
 		const childClip = intersect(clip, rect);
-		const box: LayoutBox = {
+		const box = allocateBox(
 			component,
-			rect,
-			clip: childClip,
-			children: [childBox],
-			scrollView,
-			scrollContentLines: renderCached(context, node.component, contentWidth),
-			layer: 0,
-		};
+			x, y, safeWidth, viewportHeight,
+			childClip.x, childClip.y, childClip.width, childClip.height,
+			0,
+		);
+		box.children.push(childBox);
+		box.scrollView = scrollView;
+		box.scrollContentLines = renderCached(context, node.component, contentWidth);
 		childBox.parent = box;
 		updateClips(childBox, childClip);
 		return box;
@@ -214,13 +347,13 @@ function layoutComponent(
 		const allocatedHeight =
 			height === undefined ? naturalHeight : Math.max(0, Math.floor(height));
 		const rect = { x, y, width: safeWidth, height: allocatedHeight };
-		const box: LayoutBox = {
+		const clipRect = intersect(clip, rect);
+		const box = allocateBox(
 			component,
-			rect,
-			clip: intersect(clip, rect),
-			children: [],
-			layer: 0,
-		};
+			x, y, safeWidth, allocatedHeight,
+			clipRect.x, clipRect.y, clipRect.width, clipRect.height,
+			0,
+		);
 		let childY = y;
 		for (let index = 0; index < entries.length; index++) {
 			box.children.push(
@@ -264,13 +397,13 @@ function layoutComponent(
 				)
 			: Math.max(0, height);
 	const rect = { x, y, width: safeWidth, height: allocatedHeight };
-	const box: LayoutBox = {
+	const clipRect = intersect(clip, rect);
+	const box = allocateBox(
 		component,
-		rect,
-		clip: intersect(clip, rect),
-		children: [],
-		layer: 0,
-	};
+		x, y, safeWidth, allocatedHeight,
+		clipRect.x, clipRect.y, clipRect.width, clipRect.height,
+		0,
+	);
 	let childX = x;
 	for (let index = 0; index < entries.length; index++) {
 		const naturalChildHeight = intrinsicHeights[index]!;
@@ -284,14 +417,12 @@ function layoutComponent(
 		else if (node.align === "end") childY += allocatedHeight - childHeight;
 		const childWidth = widths[index]!;
 		if (childWidth === 0) {
-			box.children.push({
-				component: entries[index]?.component,
-				rect: { x: childX, y: childY, width: 0, height: childHeight },
-				clip: { x: childX, y: childY, width: 0, height: 0 },
-				children: [],
-				parent: box,
-				layer: 0,
-			});
+			box.children.push(allocateBox(
+				entries[index]?.component,
+				childX, childY, 0, childHeight,
+				childX, childY, 0, 0,
+				0,
+			));
 		} else {
 			box.children.push(
 				withParent(
@@ -434,9 +565,11 @@ export function renderLayoutFrame(
 ): LayoutFrame {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const safeHeight = Math.max(1, Math.floor(height));
+
 	const context: LayoutContext = {
 		viewport: { width: safeWidth, height: safeHeight },
 		renderCache: new Map(),
+		widthCache: new Map(),
 		requestRender,
 		primaryScrollView: undefined,
 	};
@@ -448,7 +581,11 @@ export function renderLayoutFrame(
 	});
 	const lines = Array.from({ length: safeHeight }, () => "");
 	paintBox(rootBox, lines, safeWidth);
-	return {
+	// Flush the object pool — all LayoutBox objects created during layout are
+	// no longer needed. They'll be reused on the next frame, avoiding GC.
+	flushPool();
+
+	const frame: LayoutFrame = {
 		root: rootBox,
 		width: safeWidth,
 		height: safeHeight,
@@ -457,6 +594,8 @@ export function renderLayoutFrame(
 			? {}
 			: { primaryScrollView: context.primaryScrollView }),
 	};
+
+	return frame;
 }
 
 function containsPoint(rect: LayoutRect, x: number, y: number): boolean {

@@ -64,6 +64,16 @@ interface TurnRenderCache {
 export class TranscriptDisplay implements Component, RenderCtx {
 	private cachedWidth: number = 0;
 	private cachedLines: string[] | null = null;
+	/** Pre-truncation assembly from the last render(): the full spliced line
+	 * buffer, each turn's start offset within it, and the per-turn revisions
+	 * used to build it. Lets render() reuse the unchanged prefix of turns
+	 * (the common case — only the newest turn is streaming) instead of
+	 * re-fingerprinting and re-splicing all `maxTurns` turns every frame. */
+	private assembledLines: string[] = [];
+	private assembledTurnStarts: number[] = [];
+	private assembledTurnRevisions: string[] = [];
+	private assembledTurns: Turn[] = [];
+	private assembledWidth: number = -1;
 	// Not private: read by the extracted render-*.ts functions through the
 	// RenderCtx interface, which TranscriptDisplay satisfies structurally.
 	currentWidth: number = 80;
@@ -342,13 +352,6 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		this.currentWidth = width;
 		this.cachedWidth = width;
 
-		const renderedLines: string[] = [];
-		const turnStartLines: number[] = [];
-		const pendingToolRegions: Array<{
-			start: number;
-			end: number;
-			key: string;
-		}> = [];
 		const frameWidth = Math.max(1, width - 2);
 		const padToWidth = (line: string): string => {
 			const clipped = clampLineToWidth(line, frameWidth);
@@ -357,17 +360,94 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		};
 		const emptyLine = " ".repeat(frameWidth);
 
-		// Render oldest-to-newest so the newest turns always end up at the
-		// bottom of the buffer — the viewport slices from scrollOffset and
-		// shows the bottom, meaning new messages are always visible even when
-		// maxRenderedLines truncates older content.
-		renderedLines.push(padToWidth(emptyLine));
+		// Reuse the assembled prefix from the last frame up to the first turn
+		// whose identity or revision actually changed. During normal streaming
+		// only the newest turn's revision moves, so this turns an O(all turns)
+		// re-fingerprint-and-resplice into O(1) for every animation tick. Gated
+		// on assembledWidth === width: the reused prefix is sliced directly from
+		// `assembledLines`, which was built at whatever width produced it — if
+		// width changed, those spliced lines are stale even though the per-turn
+		// renderTurn() cache underneath would happily rebuild at the new width,
+		// so a width change must force a full rebuild here too. Must match
+		// renderTurn's own cache-hit condition exactly (content revision AND
+		// style revision — the latter covers expand/focus toggles and per-turn
+		// spinner state), or a style-only change (e.g. expanding a tool card)
+		// would be silently dropped when the turn's content didn't also change.
+		const turnRevisions: string[] = new Array(this.turns.length);
+		let firstDirty = 0;
+		if (this.assembledTurns.length > 0 && this.assembledWidth === width) {
+			const minLen = Math.min(this.turns.length, this.assembledTurns.length);
+			while (firstDirty < minLen) {
+				const turn = this.turns[firstDirty];
+				const revision = `${this.turnRevisionFor(turn)}::${this.turnStyleRevision(turn)}`;
+				if (
+					turn !== this.assembledTurns[firstDirty] ||
+					revision !== this.assembledTurnRevisions[firstDirty]
+				) {
+					break;
+				}
+				turnRevisions[firstDirty] = revision;
+				firstDirty++;
+			}
+		}
 
-		for (let ti = 0; ti < this.turns.length; ti++) {
+		const allTurnsUnchanged =
+			firstDirty === this.turns.length &&
+			this.turns.length === this.assembledTurns.length;
+
+		// Fastest path: nothing changed at all — return the exact same array
+		// reference. The layout engine sees the same array and skips its own
+		// work for this component, and the diff engine downstream sees the
+		// same raw lines as last frame and skips the per-row diff too.
+		if (allTurnsUnchanged && this.cachedLines !== null) {
+			return this.cachedLines;
+		}
+
+		const renderedLines: string[] = allTurnsUnchanged
+			? this.assembledLines.slice()
+			: firstDirty > 0
+				? this.assembledLines.slice(0, this.assembledTurnStarts[firstDirty])
+				: [];
+		const turnStartLines: number[] = this.assembledTurnStarts.slice(0, firstDirty);
+		const pendingToolRegions: Array<{
+			start: number;
+			end: number;
+			key: string;
+		}> = [];
+		// Hit regions for the reused prefix must be recovered from those turns'
+		// own per-turn cache (still valid — width/revision unchanged) rather
+		// than dropped, since toolHitRegions is rebuilt fresh every render().
+		for (let ti = 0; ti < firstDirty; ti++) {
+			const cache = this.renderTurn(this.turns[ti], width);
+			const turnStart = turnStartLines[ti];
+			for (const region of cache.hitRegions) {
+				pendingToolRegions.push({
+					start: turnStart + region.start,
+					end: turnStart + region.end,
+					key: region.key,
+				});
+			}
+		}
+
+		if (firstDirty === 0) {
+			// Render oldest-to-newest so the newest turns always end up at the
+			// bottom of the buffer — the viewport slices from scrollOffset and
+			// shows the bottom, meaning new messages are always visible even when
+			// maxRenderedLines truncates older content.
+			renderedLines.push(padToWidth(emptyLine));
+		}
+
+		for (let ti = firstDirty; ti < this.turns.length; ti++) {
 			const turn = this.turns[ti];
-			if (ti > 0) renderedLines.push(padToWidth(emptyLine));
+			// The separator above turn `firstDirty` is already included in the
+			// sliced prefix when firstDirty > 0 (turnStartLines records the
+			// offset *after* it) — only push one for turns after that, and for
+			// turn 0 when there's no reused prefix at all.
+			const needsSeparator = ti > 0 && !(ti === firstDirty && firstDirty > 0);
+			if (needsSeparator) renderedLines.push(padToWidth(emptyLine));
 			const turnStart = renderedLines.length;
 			turnStartLines.push(turnStart);
+			turnRevisions[ti] = `${this.turnRevisionFor(turn)}::${this.turnStyleRevision(turn)}`;
 
 			// Per-turn cache: a turn's own lines/hitRegions are only rebuilt when
 			// its own content, width, or narrow style slice actually changes —
@@ -383,6 +463,12 @@ export class TranscriptDisplay implements Component, RenderCtx {
 				});
 			}
 		}
+
+		this.assembledLines = renderedLines;
+		this.assembledTurnStarts = turnStartLines;
+		this.assembledTurnRevisions = turnRevisions;
+		this.assembledTurns = this.turns.slice();
+		this.assembledWidth = width;
 
 		// Bound the render buffer from the *front*. The previous early-break
 		// implementation retained old turns and discarded the newest ones while
@@ -412,6 +498,13 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		return visibleBuffer;
 	}
 
+	/** Fires only when the transcript's overall streaming state actually flips
+	 * (idle → streaming or back), not on every setTurns() call — lets the
+	 * renderer switch its frame-pacing interval without recomputing it every
+	 * 150ms spinner tick for turns that never change streaming state. */
+	onStreamingChanged: ((isStreaming: boolean) => void) | null = null;
+	private _isStreaming = false;
+
 	setTurns(turns: Turn[]): void {
 		const wasFollowingEnd = this.scrollView?.isFollowingEnd ?? true;
 		const nextRevision = this.revisionFor(turns);
@@ -428,6 +521,14 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			this.turns = turns.slice(turns.length - this.maxTurns);
 		} else {
 			this.turns = turns;
+		}
+		const latestMessage = turns.at(-1)?.assistantMessage;
+		const nowStreaming =
+			latestMessage != null &&
+			(!latestMessage.isComplete || hasStreamingChunk(latestMessage.chunks));
+		if (nowStreaming !== this._isStreaming) {
+			this._isStreaming = nowStreaming;
+			this.onStreamingChanged?.(nowStreaming);
 		}
 		this.invalidate();
 	}

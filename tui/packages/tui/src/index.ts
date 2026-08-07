@@ -129,16 +129,18 @@ async function main(): Promise<void> {
 		}
 	}
 
-	// ── Parse UI mode: main-screen (default) prints append-only into the
-	// terminal's own scrollback instead of taking over the alternate screen
-	// buffer. --fullscreen opts back into the old alt-screen, fixed-viewport
-	// behavior.
-	let uiMode: "fullscreen" | "regular" = "regular";
+	// ── Parse UI mode: fullscreen (default) takes over the alternate screen
+	// buffer with a fixed viewport — mouse clicks (e.g. click-to-expand on
+	// tool cards) and cursor positioning are fully supported there.
+	// --main-screen opts into the newer append-only mode that prints
+	// straight into the terminal's own scrollback instead; that mode
+	// doesn't support mouse clicks yet, so it's opt-in until it does.
+	let uiMode: "fullscreen" | "regular" = "fullscreen";
 	if (
-		args.includes("--fullscreen") ||
-		process.env.LOGICIAN_UI_MODE === "fullscreen"
+		args.includes("--main-screen") ||
+		process.env.LOGICIAN_UI_MODE === "regular"
 	) {
-		uiMode = "fullscreen";
+		uiMode = "regular";
 	}
 	if (args[0] === "exec") {
 		try {
