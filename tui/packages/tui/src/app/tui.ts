@@ -517,24 +517,23 @@ export class LogicianTUI {
 			maxHeight: 18,
 		});
 
-		// Implicit document: a flat Container that renders transcript + dock
-		// as a single scrollable list. Matches pi's implicitDocument pattern —
-		// no layout node, so it's always a leaf in the layout tree. The
-		// ScrollView clips the viewport; at the bottom the dock is visible,
-		// scrolling up hides it (user scrolls down to see it again).
-		const document = new Container();
-		document.addChild(this.transcriptDisplay);
-		document.addChild(new Separator());
-		document.addChild(pinnedContainer);
-		document.addChild(this.tui.getAboveInputOverlaysComponent());
-		document.addChild(this.inputBar);
-		document.addChild(new Separator());
-		document.addChild(this.statusPanel);
+		// The dock (input bar + status bar + aboveInput overlays) is OUTSIDE
+		// the ScrollView so it stays fixed at the bottom of the viewport even
+		// when the user scrolls the transcript up. The ScrollView clips only
+		// the TranscriptDisplay to its viewport; the dock renders at a
+		// separate y position below the clip region.
+		const dock = new Container();
+		dock.addChild(new Separator());
+		dock.addChild(pinnedContainer);
+		dock.addChild(this.tui.getAboveInputOverlaysComponent());
+		dock.addChild(this.inputBar);
+		dock.addChild(new Separator());
+		dock.addChild(this.statusPanel);
 
 		// Transcript scrolls and follows newly streamed output; scrolling away
 		// disables follow until the user returns to the bottom (Home/End/PageDown
 		// or the new-output indicator's click-to-catch-up).
-		const transcriptScroll = new ScrollView(document, {
+		const transcriptScroll = new ScrollView(this.transcriptDisplay, {
 			follow: "end",
 			primary: true,
 			overscroll: "chain",
@@ -552,10 +551,16 @@ export class LogicianTUI {
 			},
 		});
 
-		// ScrollView is the layout root — no intermediate Flex wrapper.
-		// This matches pi's implicit layout: 1 LayoutBox per frame (ScrollView)
-		// instead of 3+ (root Flex + ScrollView + dock Flex).
-		this.tui.setLayoutRoot(transcriptScroll);
+		// Root is a Flex (column) with ScrollView (grow: 1) + dock (auto).
+		// The Flex allocates the remaining height to the ScrollView after the
+		// dock takes its natural height. The ScrollView clips its content
+		// (TranscriptDisplay) to its rect; the dock is at a different y
+		// position, so it's never clipped — always visible at the bottom.
+		const root = new Flex([
+			{ component: transcriptScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+			{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+		]);
+		this.tui.setLayoutRoot(root);
 		this.tui.setInputBarComponent(this.inputBar);
 	}
 
