@@ -498,13 +498,6 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		return visibleBuffer;
 	}
 
-	/** Fires only when the transcript's overall streaming state actually flips
-	 * (idle → streaming or back), not on every setTurns() call — lets the
-	 * renderer switch its frame-pacing interval without recomputing it every
-	 * 150ms spinner tick for turns that never change streaming state. */
-	onStreamingChanged: ((isStreaming: boolean) => void) | null = null;
-	private _isStreaming = false;
-
 	setTurns(turns: Turn[]): void {
 		const wasFollowingEnd = this.scrollView?.isFollowingEnd ?? true;
 		const nextRevision = this.revisionFor(turns);
@@ -521,14 +514,6 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			this.turns = turns.slice(turns.length - this.maxTurns);
 		} else {
 			this.turns = turns;
-		}
-		const latestMessage = turns.at(-1)?.assistantMessage;
-		const nowStreaming =
-			latestMessage != null &&
-			(!latestMessage.isComplete || hasStreamingChunk(latestMessage.chunks));
-		if (nowStreaming !== this._isStreaming) {
-			this._isStreaming = nowStreaming;
-			this.onStreamingChanged?.(nowStreaming);
 		}
 		this.invalidate();
 	}

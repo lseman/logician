@@ -17,6 +17,60 @@ import {
 	renderMarkdownLine,
 } from "../text-utils.ts";
 
+/**
+ * Cache for syntax-highlighted code blocks.
+ *
+ * Keyed by `${lang}|${hash(content)}` — during streaming the same code
+ * blocks are re-highlighted every frame even though their content hasn't
+ * changed. This avoids the expensive highlighter calls (which may fork a
+ * tree-sitter binary) on unchanged blocks.
+ *
+ * Bounded at 512 entries (FIFO). Typical transcripts have <20 code blocks
+ * so overflow is rare.
+ */
+const highlightCache = new Map<string, string>();
+const highlightCacheOrder: string[] = [];
+const HIGHLIGHT_CACHE_MAX = 512;
+
+/** Simple djb2 hash for cache keys (fast, no crypto deps). */
+function hashString(s: string): number {
+	let hash = 5381;
+	for (let i = 0; i < s.length; i++) {
+		hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
+	}
+	return hash;
+}
+
+function cachedHighlight(content: string, lang: string | null): string {
+	const key = lang ? `${lang}|${hashString(content)}` : `auto|${hashString(content)}`;
+	const hit = highlightCache.get(key);
+	if (hit !== undefined) return hit;
+
+	let result = content;
+	try {
+		result = lang
+			? highlight(content, lang).value
+			: highlightAuto(content).value;
+	} catch {
+		/* keep raw content on failure */
+	}
+
+	/* Insert / update cache */
+	if (highlightCache.has(key)) {
+		/* key already exists — just in case the first attempt failed and now
+		   succeeded, update the cached value. */
+		highlightCache.set(key, result);
+	} else {
+		if (highlightCacheOrder.length >= HIGHLIGHT_CACHE_MAX) {
+			const evicted = highlightCacheOrder.shift();
+			if (evicted !== undefined) highlightCache.delete(evicted);
+		}
+		highlightCache.set(key, result);
+		highlightCacheOrder.push(key);
+	}
+	return result;
+}
+
 export function renderMarkdownLines(
 	text: string,
 	maxLen: number,
@@ -37,16 +91,9 @@ export function renderMarkdownLines(
 
 		if (rawLine.startsWith("```")) {
 			if (inCodeBlock) {
-				// Flush code block with syntax highlighting
+				// Flush code block — use cached highlight when content unchanged
 				const lang = codeBlockLang || null;
-				let renderedCode = codeContent;
-				try {
-					renderedCode = lang
-						? highlight(codeContent, lang).value
-						: highlightAuto(codeContent).value;
-				} catch {
-					// Fall back to the original code when no grammar matches.
-				}
+				const renderedCode = cachedHighlight(codeContent, lang);
 				for (const cl of renderedCode.split("\n")) {
 					lines.push(`${bg}  ${cl}${bgReset}`);
 				}
@@ -146,14 +193,9 @@ export function renderMarkdownLines(
 	}
 
 	if (inCodeBlock && codeContent) {
-		let renderedCode = codeContent;
-		try {
-			renderedCode = codeBlockLang
-				? highlight(codeContent, codeBlockLang).value
-				: highlightAuto(codeContent).value;
-		} catch {
-			// Keep incomplete streaming code readable when its grammar is unknown.
-		}
+		// Streaming code block — also cached so repeated renders of the
+			// same partial content skip re-highlighting.
+		const renderedCode = cachedHighlight(codeContent, codeBlockLang);
 		for (const cl of renderedCode.split("\n")) {
 			lines.push(`${bg}  ${cl}${bgReset}`);
 		}

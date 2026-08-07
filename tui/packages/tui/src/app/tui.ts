@@ -286,11 +286,6 @@ export class LogicianTUI {
 					: runtimeConfig.source.transcriptMaxRenderedLines,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
-		// Wire streaming detection for adaptive frame pacing (30fps during streaming,
-		// 60fps idle). Called from transcript display's render() when streaming state
-		// changes — only triggers when actual state flips, not on every frame.
-		this.transcriptDisplay.onStreamingChanged = (isStreaming: boolean) =>
-			this.tui.setIsStreaming(isStreaming);
 		// Apply inference mode only after its transcript/status dependencies exist.
 		if (runtimeConfig.source.inferenceMode) {
 			this.setInferenceMode(runtimeConfig.source.inferenceMode);

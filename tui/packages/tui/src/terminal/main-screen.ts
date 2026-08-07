@@ -48,9 +48,7 @@ export class TuiMainScreen extends Container {
 	private renderImmediateRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderFinishedAt = 0;
-	private static readonly IDLE_RENDER_INTERVAL_MS = 16;
-	private static readonly STREAMING_RENDER_INTERVAL_MS = 33;
-	private isStreaming = false;
+	// Constant 60fps frame pacing (16ms interval).
 	private started = false;
 	private stopped = false;
 	private focusedComponent: Component | null = null;
@@ -98,12 +96,10 @@ export class TuiMainScreen extends Container {
 		this.requestRender();
 	}
 
-	/** Set whether the transcript is actively streaming.
-	 * During streaming, render interval increases from 16ms to 33ms
-	 * (60fps → 30fps) to halve layout work when only 1-2 lines change.
-	 * Switches back to 60fps for idle/spinner/key-interaction smoothness. */
-	setIsStreaming(isStreaming: boolean): void {
-		this.isStreaming = isStreaming;
+	/** Deprecated no-op. Frame pacing is a constant 60fps. Kept as a public
+	 * method only so callers don't crash. */
+	setIsStreaming(_isStreaming: boolean): void {
+		// no-op: frame pacing is always 60fps
 	}
 
 	setFocus(component: Component | null): void {
@@ -404,12 +400,9 @@ export class TuiMainScreen extends Container {
 	private scheduleRender(): void {
 		if (this.stopped || this.renderTimer || !this.renderRequested) return;
 		const elapsed = performance.now() - this.lastRenderFinishedAt;
-		const interval = this.isStreaming
-			? TuiMainScreen.STREAMING_RENDER_INTERVAL_MS
-			: TuiMainScreen.IDLE_RENDER_INTERVAL_MS;
 		const delay = this.renderImmediateRequested
 			? 0
-			: Math.max(0, interval - elapsed);
+			: Math.max(0, 16 - elapsed);
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = null;
 			if (this.stopped || !this.renderRequested) return;

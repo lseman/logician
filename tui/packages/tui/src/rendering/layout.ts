@@ -29,20 +29,7 @@ export interface LayoutBox {
 	layer: number;
 }
 
-// ── Layout object pool ───────────────────────────────────────────────────────
-// Reuse LayoutBox and LayoutRect objects across frames to eliminate per-frame
-// GC pressure. The layout engine creates O(n) objects per frame where n is the
-// number of components in the Flex/ScrollView tree — typically 20-100 objects.
-// An object pool lets us reuse these instead of allocating fresh ones every
-// 16-33ms. Objects are "reset" (cleared) when returned to the pool.
-interface PoolItem {
-	box: LayoutBox;
-	next?: PoolItem;
-}
-
-const POOL_SIZE = 128; // Sufficient for typical TUI component trees
-let poolHead: PoolItem | null = null;
-let poolCount = 0;
+// ── Layout helpers ───────────────────────────────────────────────────────────
 
 function allocateBox(
 	component: Component,
@@ -52,23 +39,6 @@ function allocateBox(
 	lines?: readonly string[],
 	lineOffset?: number,
 ): LayoutBox {
-	if (poolHead !== null && poolCount < POOL_SIZE) {
-		const item = poolHead;
-		poolHead = item.next;
-		poolCount--;
-		const box = item.box;
-		box.component = component;
-		box.rect.x = x; box.rect.y = y; box.rect.width = width; box.rect.height = height;
-		box.clip.x = clipX; box.clip.y = clipY; box.clip.width = clipWidth; box.clip.height = clipHeight;
-		box.children.length = 0;
-		box.parent = undefined;
-		box.lines = lines;
-		box.lineOffset = lineOffset ?? 0;
-		box.scrollView = undefined;
-		box.scrollContentLines = undefined;
-		box.layer = layer;
-		return box;
-	}
 	return {
 		component,
 		rect: { x, y, width, height },
@@ -79,22 +49,6 @@ function allocateBox(
 		parent: undefined,
 		layer,
 	};
-}
-
-function returnBox(box: LayoutBox): void {
-	if (poolCount >= POOL_SIZE) return; // Pool full — GC the object
-	const item: PoolItem = { box, next: poolHead };
-	poolHead = item;
-	poolCount++;
-}
-
-function flushPool(): void {
-	// Reset pool counters but keep objects for reuse on next frame.
-	// Objects are returned via returnBox() which isn't currently used,
-	// but the pool mechanism is in place for future optimization.
-	// For now, just clear the head so allocateBox always creates fresh.
-	poolHead = null;
-	poolCount = 0;
 }
 
 export interface LayoutFrame {
@@ -259,11 +213,9 @@ function updateClips(box: LayoutBox, parentClip: LayoutRect): void {
  * which used one global slot compared against itself and therefore always
  * hit after the first frame).
  *
- * Depends on the object pool above staying inert (allocateBox always
- * returning a fresh object, never a recycled one) — a cached `box` here is
- * held across frames, so if pooling is ever turned on, a different
- * component's allocateBox call could recycle and mutate this exact object
- * out from under this cache. Re-enabling the pool must account for that. */
+ * A cached `box` is held across frames — it must not be mutated by the
+ * allocateBox call (allocateBox always returns a fresh object, never a
+ * recycled one). */
 interface LeafLayoutCache {
 	x: number;
 	y: number;
@@ -621,9 +573,6 @@ export function renderLayoutFrame(
 	});
 	const lines = Array.from({ length: safeHeight }, () => "");
 	paintBox(rootBox, lines, safeWidth);
-	// Flush the object pool — all LayoutBox objects created during layout are
-	// no longer needed. They'll be reused on the next frame, avoiding GC.
-	flushPool();
 
 	const frame: LayoutFrame = {
 		root: rootBox,

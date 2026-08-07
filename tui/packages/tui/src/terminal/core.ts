@@ -127,13 +127,11 @@ export class TUI extends Container {
 	private renderImmediateRequested = false;
 	private renderTimer: ReturnType<typeof setTimeout> | null = null;
 	private lastRenderFinishedAt = 0;
-	// Adaptive frame pacing: 60fps (16ms) when idle, 30fps (33ms) during
-	// streaming. Halves layout work during streaming when only 1-2 lines
-	// change per frame, while keeping 60fps for spinner animation and
-	// key-interaction responsiveness.
-	private static readonly IDLE_RENDER_INTERVAL_MS = 16;
-	private static readonly STREAMING_RENDER_INTERVAL_MS = 33;
-	private isStreaming = false;
+	// Constant 60fps frame pacing (16ms interval). Pi's alt-screen renderer
+	// uses the same constant interval — during streaming the per-frame work
+	// is dominated by unchanged rows that the row-level diff skips, so there
+	// is no benefit to throttling. Keeping 60fps avoids the perceptible
+	// choppiness that 30fps streaming introduced.
 	private started = false;
 	private stopped = false;
 	private focusedComponent: Component | null = null;
@@ -179,12 +177,11 @@ export class TUI extends Container {
 		this.requestRender();
 	}
 
-	/** Set whether the transcript is actively streaming.
-	 * During streaming, render interval increases from 16ms to 33ms
-	 * (60fps → 30fps) to halve layout work when only 1-2 lines change.
-	 * Switches back to 60fps for idle/spinner/key-interaction smoothness. */
-	setIsStreaming(isStreaming: boolean): void {
-		this.isStreaming = isStreaming;
+	/** Deprecated no-op. Frame pacing is now a constant 60fps (see class
+	 * comment above). Kept as a public method only so callers don't crash
+	 * when they invoke it — the call is silently ignored. */
+	setIsStreaming(_isStreaming: boolean): void {
+		// no-op: frame pacing is always 60fps
 	}
 
 	get scrollOffset(): number {
@@ -527,12 +524,9 @@ export class TUI extends Container {
 		// expensive streaming frames schedule their successor immediately, creating
 		// bursts of layout work and terminal writes that could starve input handling.
 		const elapsed = performance.now() - this.lastRenderFinishedAt;
-		const interval = this.isStreaming
-			? TUI.STREAMING_RENDER_INTERVAL_MS
-			: TUI.IDLE_RENDER_INTERVAL_MS;
 		const delay = this.renderImmediateRequested
 			? 0
-			: Math.max(0, interval - elapsed);
+			: Math.max(0, 16 - elapsed);
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = null;
 			if (this.stopped || !this.renderRequested) return;
@@ -999,20 +993,17 @@ export class TUI extends Container {
 			// left to diff.
 			if (cleanPrev === cleanNew) continue;
 
-			const lineDiff = diffTerminalLineWithMetrics(
-				cleanPrev,
-				cleanNew,
-				row,
-				renderWidth,
-			);
-			changes += lineDiff.output;
-			if (lineDiff.changedCells > 0) {
-				dirtyRows++;
-				dirtyTop = Math.min(dirtyTop, row);
-				dirtyBottom = Math.max(dirtyBottom, row);
-			}
-			changedCells += lineDiff.changedCells;
-			cursorMoves += lineDiff.cursorMoves;
+			// Rewrite the changed row atomically. No cell-level diff needed:
+			// \x1b[2K clears the line, the content replaces it, and the
+			// hyperlink is restored. This matches pi's approach.
+			const closeHyperlink = "\x1b]8;;\x1b\\";
+			const clipped = clampLineToWidth(cleanNew, renderWidth);
+			changes += `\x1b[${row + 1};1H${closeHyperlink}\x1b[0m\x1b[2K${clipped}${closeHyperlink}`;
+			dirtyRows++;
+			dirtyTop = Math.min(dirtyTop, row);
+			dirtyBottom = Math.max(dirtyBottom, row);
+			changedCells += renderWidth;
+			cursorMoves++;
 		}
 
 		this.previousLines = finalLines;
@@ -1486,55 +1477,7 @@ function isImageLine(line: string): boolean {
 }
 
 /**
- * Generate the ANSI escape sequence to repaint one dirty row, starting at
- * the given row. `_commitFrame` already skips rows whose raw text is
- * byte-identical to last frame (see `prevLine === newLine` there), so every
- * call here is for a row that actually changed — there is no cheaper case
- * to special-case beneath that.
- *
- * This clears and reprints the whole row rather than diffing individual
- * cells: clear-line + full content is one cursor move and one write instead
- * of a parse of both old and new lines into per-column Cell arrays (one
- * object per column, per side, per dirty row, every frame) followed by a
- * scan for minimal changed runs. That cell-level bookkeeping only pays for
- * itself by shrinking the bytes written when a small run in the middle of a
- * wide row changed; on a local tty or modern terminal that byte saving is
- * not worth its CPU cost, and it was the dominant per-frame cost on wide
- * terminals with many simultaneously-dirty rows (e.g. a full repaint).
- */
-export interface TerminalLineDiff {
-	output: string;
-	changedCells: number;
-	cursorMoves: number;
-}
-
-export function diffTerminalLine(
-	previousLine: string,
-	nextLine: string,
-	row: number,
-	width: number,
-): string {
-	return diffTerminalLineWithMetrics(previousLine, nextLine, row, width).output;
-}
-
-export function diffTerminalLineWithMetrics(
-	_previousLine: string,
-	nextLine: string,
-	row: number,
-	width: number,
-): TerminalLineDiff {
-	const closeHyperlink = "\x1b]8;;\x1b\\";
-	const clipped = clampLineToWidth(nextLine, width);
-	const output =
-		`\x1b[${row + 1};1H${closeHyperlink}\x1b[0m\x1b[2K${clipped}${closeHyperlink}`;
-	return { output, changedCells: width, cursorMoves: 1 };
-}
-
-// ── Overlay options ──────────────────────────────────────────────────────────
-
-// ── Overlay options ──────────────────────────────────────────────────────────
-
-/** Value that can be absolute (number) or percentage (string like "50%") */
+ /** Value that can be absolute (number) or percentage (string like "50%") */
 export type SizeValue = number | `${number}%`;
 
 /** Parse a SizeValue into absolute value given a reference size */
