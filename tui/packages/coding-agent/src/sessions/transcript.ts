@@ -115,6 +115,9 @@ export interface Turn {
 	userMessage: UserMessage | null;
 	assistantMessage: AssistantMessage | null;
 	isComplete: boolean;
+	/** Monotonically increasing content revision. Incremented on every chunk/tool mutation.
+	 * The TUI uses this for O(1) prefix-scan comparisons instead of full turnRevisionFor(). */
+	contentRevision?: number;
 }
 
 export interface SessionState {
@@ -143,6 +146,9 @@ function containsTextualToolMarkup(content: string): boolean {
 export class Transcript {
 	private state: SessionState = createDefaultState();
 	private listeners: Array<() => void> = [];
+	/** Global content revision counter — incremented each time any turn's content changes.
+	 * The TUI tracks the last-seen value to skip prefix scans when nothing changed. */
+	private _contentRevision = 0;
 
 	// ── Event handling ─────────────────────────────────────────────────────
 
@@ -206,6 +212,7 @@ export class Transcript {
 			// Reuse the open turn (e.g. slash /spawn after addTurn, or a
 			// user message already registered by the TUI).
 			pending.id = event.turn_id;
+			pending.contentRevision = this._contentRevision;
 			this.state.currentTurnId = event.turn_id;
 			return;
 		}
@@ -221,9 +228,19 @@ export class Transcript {
 				isComplete: false,
 			},
 			isComplete: false,
+			contentRevision: this._contentRevision,
 		};
 		this.state.turns.push(turn);
 		this.state.currentTurnId = event.turn_id;
+	}
+
+	/** Marks a turn's content as changed: advances the global counter and
+	 * stamps it onto the turn, so the TUI's O(1) prefix-scan (comparing a
+	 * turn's stored contentRevision against this stamp) correctly detects the
+	 * change instead of treating the turn as unchanged. */
+	private bumpTurnRevision(turn: Turn): void {
+		this._contentRevision++;
+		turn.contentRevision = this._contentRevision;
 	}
 
 	// ── Chunk helpers ──────────────────────────────────────────────────────
@@ -344,6 +361,7 @@ export class Transcript {
 				isComplete: false,
 			});
 		}
+		this.bumpTurnRevision(turn);
 	}
 
 	/** Reconcile a provider's full assistant snapshot with streamed deltas. */
@@ -405,6 +423,7 @@ export class Transcript {
 			message.chunks.forEach((chunk, index) => {
 				chunk.seq = index;
 			});
+			this.bumpTurnRevision(turn);
 			return;
 		}
 		if (!full) return;
@@ -414,6 +433,7 @@ export class Transcript {
 			const missing = full.slice(rendered.length);
 			if (missing) this.handleToken(missing);
 		}
+		this.bumpTurnRevision(turn);
 	}
 
 	// Push a status line as its own chunk so it renders distinctly (iconed,
@@ -453,6 +473,7 @@ export class Transcript {
 			notice: { level: event.level, label: event.label, text: event.text },
 			isComplete: true,
 		});
+		this.bumpTurnRevision(turn);
 	}
 
 	/**
@@ -472,6 +493,7 @@ export class Transcript {
 		taskIndex?: number;
 	}): void {
 		let toolChunk = this.findOpenSubagentToolChunk();
+		const turn = this.getCurrentTurn();
 		// Direct-mode /spawn: lifecycle can race tool_end. Only create a
 		// placeholder on end (never on start) so we don't leave a second
 		// incomplete spawn_agent card stuck on "running".
@@ -554,6 +576,7 @@ export class Transcript {
 		}
 		toolChunk.tool.isComplete = true;
 		toolChunk.isComplete = true;
+		if (turn) this.bumpTurnRevision(turn);
 		if (
 			toolChunk.tool.startedAt !== undefined &&
 			toolChunk.tool.durationMs === undefined
@@ -578,6 +601,7 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
+		const turn = this.getCurrentTurn();
 		const childToolCalls =
 			(details.childToolCalls as ChildToolCall[]) ??
 			(details.childToolCalls = []);
@@ -656,6 +680,7 @@ export class Transcript {
 		const toolChunk = this.findOpenSubagentToolChunk();
 		if (!toolChunk?.tool) return;
 
+		const turn = this.getCurrentTurn();
 		const details = (toolChunk.tool.details ??= {});
 		const childChunks =
 			(details.childChunks as ChildChunk[]) ?? (details.childChunks = []);
@@ -670,6 +695,7 @@ export class Transcript {
 			) {
 				last.contentText = (last.contentText ?? "") + event.delta;
 				last.seq = event.seq;
+				if (turn) this.bumpTurnRevision(turn);
 				return;
 			}
 			childChunks.push({
@@ -680,6 +706,7 @@ export class Transcript {
 				isComplete: false,
 				taskIndex: event.taskIndex,
 			});
+			if (turn) this.bumpTurnRevision(turn);
 			return;
 		}
 
@@ -705,6 +732,7 @@ export class Transcript {
 					existingStart.tool.status = "running";
 					existingStart.isComplete = false;
 				}
+				if (turn) this.bumpTurnRevision(turn);
 				return;
 			}
 			childChunks.push({
@@ -722,6 +750,7 @@ export class Transcript {
 				isComplete: false,
 				taskIndex: event.taskIndex,
 			});
+			if (turn) this.bumpTurnRevision(turn);
 			return;
 		}
 		if (event.kind !== "tool_end") return;
@@ -787,6 +816,7 @@ export class Transcript {
 				isComplete: false,
 			});
 		}
+		this.bumpTurnRevision(turn);
 	}
 
 	private handleToolStart(event: ToolStartEvent): void {
@@ -813,6 +843,7 @@ export class Transcript {
 					| Record<string, unknown>
 					| undefined;
 			}
+			this.bumpTurnRevision(turn);
 			return;
 		}
 
@@ -832,6 +863,7 @@ export class Transcript {
 			},
 			isComplete: false,
 		});
+		this.bumpTurnRevision(turn);
 	}
 
 	private handleToolUpdate(event: ToolUpdateEvent): void {
@@ -855,6 +887,7 @@ export class Transcript {
 					(toolChunk.tool.partialResult || "") + String(event.partial_result);
 			}
 		}
+		this.bumpTurnRevision(turn);
 		this.notify();
 	}
 
@@ -947,6 +980,7 @@ export class Transcript {
 			tool.isError = Boolean(isError);
 		}
 		tool.isComplete = true;
+		this.bumpTurnRevision(turn);
 		// Prefer the tool's own measured duration (subagent metrics) when
 		// present; otherwise fall back to wall-clock from tool_start.
 		const metrics = tool.details?.metrics as
@@ -983,6 +1017,7 @@ export class Transcript {
 				turn.assistantMessage.isComplete = true;
 			}
 			turn.isComplete = true;
+			this.bumpTurnRevision(turn);
 		}
 	}
 
@@ -994,6 +1029,7 @@ export class Transcript {
 			userMessage: { type: "user", content: userContent },
 			assistantMessage: null,
 			isComplete: false,
+			contentRevision: this._contentRevision,
 		};
 		this.state.turns.push(turn);
 		this.state.currentTurnId = turn.id;
@@ -1034,6 +1070,7 @@ export class Transcript {
 			},
 			assistantMessage: null,
 			isComplete: true,
+			contentRevision: this._contentRevision,
 		});
 		this.notify();
 	}
