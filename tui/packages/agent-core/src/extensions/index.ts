@@ -14,6 +14,8 @@ export type {
 	AgentEndEvent,
 	BeforeAgentStartEvent,
 	BeforeProviderRequestEvent,
+	ContextEvent,
+	ContextResult,
 	ContextUpdateEvent,
 	ExtensionErrorHandler,
 	ExtensionEvent,
@@ -38,3 +40,6 @@ export * from "./loader.ts";
 export * from "./runner.ts";
 export * from "./state.ts";
 export * from "./types.ts";
+// Pi adapter and type guard helpers (for Pi extensions running on Logician)
+export { PiAdapter, isToolCallEventType, isBashToolResult } from "./pi-adapter.ts";
+export type { PiAdapterOptions, PiExtensionAPI } from "./pi-adapter.ts";

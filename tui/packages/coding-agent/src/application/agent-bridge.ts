@@ -24,6 +24,10 @@ import {
 	type TruncationConfig,
 	type WebSearchConfig,
 } from "@logician/agent-core";
+import {
+	ExtensionRunner,
+	loadExtensions,
+} from "@logician/agent-core/extensions/index.ts";
 import { OpenAIBackend } from "@logician/agent-core/agent/backend.ts";
 import {
 	estimateChatPayloadTokens,
@@ -215,6 +219,7 @@ export class AgentCoreBridge {
 	private cwd: string;
 	private toolRouter: ToolRouter;
 	private baseSystemPrompt: string;
+	private extensionRunner: ExtensionRunner | null = null;
 	private additionalSystemPrompt?: string;
 	private pluginSystemContext = "";
 	private sessionId =
@@ -346,6 +351,28 @@ export class AgentCoreBridge {
 
 		this.additionalSystemPrompt = opts.systemPrompt;
 		this.baseSystemPrompt = this.buildBaseSystemPrompt();
+
+		// Create and load extension runner (handles both native and Pi extensions)
+		this.extensionRunner = new ExtensionRunner({
+			sessionId: this.sessionId,
+			cwd: this.cwd,
+		});
+
+		// Load extensions from user, project, and explicit paths
+		try {
+			const extResult = loadExtensions({
+				userDir: opts.extensionDirs?.user,
+				projectDir: this.cwd,
+				explicitPaths: opts.extensionDirs?.paths,
+			});
+			if (extResult.extensions.length > 0) {
+				this.extensionRunner.load(extResult.extensions).catch(err =>
+					console.error("[logician] extension load error:", err),
+				);
+			}
+		} catch (err) {
+			console.error("[logician] extension load error:", err);
+		}
 
 		this.interaction = new InteractionCoordinator({
 			emit: event => this.emit(event),
@@ -671,6 +698,19 @@ export class AgentCoreBridge {
 	// ── High-level commands ──────────────────────────────────────────────
 
 	async sendMessage(message: string): Promise<void> {
+		// Emit Pi input event for Pi extension interception.
+		// If a Pi extension handles the input (returns 'handled'), skip processing.
+		// If it transforms, use the transformed text.
+		if (this.extensionRunner) {
+			const inputResult = await this.extensionRunner.emitInputEvent(message, [], "interactive");
+			if (inputResult) {
+				if (inputResult.action === "handled") return;
+				if (inputResult.action === "transform" && inputResult.text !== undefined) {
+					message = inputResult.text;
+				}
+			}
+		}
+
 		// A message submitted while a turn is in flight steers the running
 		// turn instead of starting a second concurrent run. Route through
 		// steer() so the queue update reaches the UI.
@@ -795,6 +835,7 @@ export class AgentCoreBridge {
 				backend: this.backend,
 				cwd: this.config.cwd,
 				maxIterations: this.config.maxIterations,
+				extensionRunner: this.extensionRunner || undefined,
 			});
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
@@ -2149,6 +2190,73 @@ export class AgentCoreBridge {
 		} catch (_e: unknown) {
 			// SessionEnd hooks are best-effort during shutdown/reset.
 		}
+	}
+
+	/**
+	 * Emit a Pi user_bash event for Pi extension interception.
+	 * Call from bash execution before running the command.
+	 * @returns {action: 'continue'|'intercept'|'replace', result?, operations?} from the first non-null handler.
+	 */
+	async emitUserBashEvent(
+		command: string,
+		excludeFromContext: boolean = false,
+	): Promise<{
+		action: "continue" | "intercept" | "replace";
+		result?: { output: string; exitCode: number; cancelled: boolean };
+		operations?: unknown;
+	} | null> {
+		return this.extensionRunner?.emitUserBashEvent(command, excludeFromContext) ?? null;
+	}
+
+	/**
+	 * Emit a Pi project_trust event for Pi extension interception.
+	 * Call before making a trust decision.
+	 * @returns {trusted: 'yes'|'no'|'undecided', remember?} from the first non-null handler.
+	 */
+	async emitProjectTrustEvent(cwd: string): Promise<{
+		trusted: "yes" | "no" | "undecided";
+		remember?: boolean;
+	} | null> {
+		return this.extensionRunner?.emitProjectTrustEvent(cwd) ?? null;
+	}
+
+	/**
+	 * Execute a bash command directly (for user_bash / !command in the input bar).
+	 * Returns the command output and exit code.
+	 */
+	async executeBashCommand(command: string): Promise<{
+		output: string;
+		exitCode: number;
+	}> {
+		return new Promise((resolve, reject) => {
+			const { spawn } = require("node:child_process");
+			const { getShellConfig } = require("./tools/shell.ts");
+			const { shell, args: shellArgs } = getShellConfig();
+
+			const child = spawn(shell, [...shellArgs, command], {
+				cwd: this.cwd,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+
+			let output = "";
+			child.stdout?.on("data", (data: Buffer) => {
+				output += data.toString();
+			});
+			child.stderr?.on("data", (data: Buffer) => {
+				output += data.toString();
+			});
+
+			child.on("close", (code: number | null) => {
+				resolve({
+					output: output || "(no output)",
+					exitCode: code ?? 1,
+				});
+			});
+
+			child.on("error", (err: Error) => {
+				reject(err);
+			});
+		});
 	}
 }
 

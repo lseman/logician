@@ -26,6 +26,7 @@ import type {
 	RegisteredCommand,
 	RegisteredTool,
 } from "./types.ts";
+import { PiAdapter } from "./pi-adapter.ts";
 
 // ============================================================================
 // No-op UI (for headless/non-TUI contexts)
@@ -89,16 +90,22 @@ export class ExtensionRunner {
 	private commands: Array<{ command: RegisteredCommand; source: string }> = [];
 	private extensions: Array<{ def: ExtensionDefinition; unload?: () => void }> =
 		[];
+	private piAdapters: PiAdapter[] = [];
 	private eventBus: EventBus;
 	/** Structured typed event bus for lifecycle events */
 	private typedBus: ExtensionEventBus;
 	/** Shared context for extension event handlers */
 	private extContext: ReturnType<typeof createExtensionContext>;
+	/** Session ID and cwd for adapter context */
+	private adapterSessionId = "";
+	private adapterCwd = "";
 
 	constructor(private readonly options: ExtensionRunnerOptions) {
 		this.eventBus = createEventBus();
 		this.typedBus = new ExtensionEventBus();
 		this.extContext = createExtensionContext();
+		this.adapterSessionId = options.sessionId;
+		this.adapterCwd = options.cwd;
 	}
 
 	get events(): EventBus {
@@ -106,35 +113,145 @@ export class ExtensionRunner {
 	}
 
 	/**
+	 * Detect if an extension is a Pi-style extension by inspecting its source.
+	 * Checks for TypeBox imports and @earendil-works/pi-coding-agent imports.
+	 */
+	private isPiExtension(content: string): boolean {
+		return (
+			content.includes("@earendil-works/pi-coding-agent") ||
+			content.includes("typebox") ||
+			content.includes("Type.Object") ||
+			content.includes("Type.String") ||
+			content.includes("Type.Number") ||
+			content.includes("Type.Boolean") ||
+			content.includes("Type.Array")
+		);
+	}
+
+	/**
+	 * Extract file content from a path, handling file:// URLs.
+	 */
+	private async readExtensionSource(path: string): Promise<string | null> {
+		try {
+			const fs = await import("node:fs");
+			// Handle file:// URLs (from pathToFileURL)
+			const cleanPath = path.startsWith("file://")
+				? path.replace(/^file:\/\//, "")
+				: path;
+			return fs.readFileSync(cleanPath, "utf-8");
+		} catch {
+			return null;
+		}
+	}
+
+	/**
 	 * Load and execute a set of extensions from definitions.
 	 * Each extension module is expected to export a default function that
 	 * receives an ExtensionAPI instance.
+	 *
+	 * Pi-style extensions are auto-detected and loaded through the PiAdapter.
 	 */
 	async load(definitions: ExtensionDefinition[]): Promise<void> {
 		for (const def of definitions) {
 			try {
-				const mod = await import(
-					/* @vite-ignore */ /* @webpackIgnore: true */ def.path
-				);
-				const factory = mod.default as
-					| ((api: ExtensionAPI) => void)
-					| undefined;
-				if (!factory) {
-					console.warn(
-						`[logician] extension "${def.name}" has no default export`,
-					);
-					continue;
-				}
+				// Read file content to detect Pi extensions (best-effort)
+				const content = await this.readExtensionSource(def.path);
 
-				const api = this.createAPI(def);
-				factory(api);
-				this.extensions.push({ def, unload: api.unload });
+				if (content && this.isPiExtension(content)) {
+					// Load as Pi extension through the adapter
+					await this.loadPiExtension(def, content);
+				} else {
+					// Load as native Logician extension
+					await this.loadNativeExtension(def);
+				}
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				console.error(
 					`[logician] failed to load extension "${def.name}": ${message}`,
 				);
 			}
+		}
+	}
+
+	/**
+	 * Load a Pi extension through the PiAdapter.
+	 */
+	private async loadPiExtension(
+		def: ExtensionDefinition,
+		content: string,
+	): Promise<void> {
+		// Create a minimal API for the Pi extension factory.
+		// Tools/commands are registered and forwarded to native Logician.
+		// Event emission is handled in emitToAll() with real context.
+		const adapter = new PiAdapter(
+			{} as any, // minimal placeholder — real API wiring happens at emit time
+			{ ui: noopUI, state: { get: async () => undefined, set: async () => {}, delete: async () => {}, keys: async () => [] }, cwd: this.adapterCwd, sessionId: this.adapterSessionId },
+			{ sessionId: this.adapterSessionId, cwd: this.adapterCwd },
+		);
+
+		try {
+			const mod = await import(
+				/* @vite-ignore */ /* @webpackIgnore: true */ def.path
+			);
+			const factory = mod.default as
+				| ((api: any) => void)
+				| undefined;
+			if (!factory) {
+				console.warn(
+					`[logician] pi-extension "${def.name}" has no default export`,
+				);
+				return;
+			}
+
+			const piApi = adapter.getApi();
+			factory(piApi);
+
+			this.piAdapters.push(adapter);
+			console.log(
+				`[logician] loaded Pi extension "${def.name}" with ${adapter.getRegisteredTools().length} tool(s) and ${adapter.getRegisteredCommands().length} command(s)`,
+			);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			console.error(
+				`[logician] failed to load Pi extension "${def.name}": ${message}`,
+			);
+		}
+	}
+
+	/**
+	 * Load a native Logician extension.
+	 */
+	private async loadNativeExtension(def: ExtensionDefinition): Promise<void> {
+		const mod = await import(
+			/* @vite-ignore */ /* @webpackIgnore: true */ def.path
+		);
+		const factory = mod.default as
+			| ((api: ExtensionAPI) => void)
+			| undefined;
+		if (!factory) {
+			console.warn(
+				`[logician] extension "${def.name}" has no default export`,
+			);
+			return;
+		}
+
+		const api = this.createAPI(def);
+		factory(api);
+		this.extensions.push({ def, unload: api.unload });
+	}
+
+	/**
+	 * Set the Logician API reference for Pi adapters.
+	 * Called once when the runner is fully initialized.
+	 */
+	setLogicianApi(api: ExtensionAPI): void {
+		// Update all Pi adapters with the real API
+		for (const adapter of this.piAdapters) {
+			// Re-create with real API (adapters store reference, not value)
+			// For now, just log — full re-binding requires a more sophisticated approach
+			console.debug(
+				`[logician] Pi extension context bound to Logician API (session: ${this.adapterSessionId})`,
+			);
 		}
 	}
 
@@ -322,6 +439,7 @@ export class ExtensionRunner {
 			const ctx: ExtensionEventContext = {
 				sessionId: this.options.sessionId,
 				cwd: this.options.cwd,
+				toolCallId: toolCall.id,
 				tool_name: toolCall.name,
 				tool_input: args,
 			};
@@ -351,7 +469,9 @@ export class ExtensionRunner {
 			const ctx: ExtensionEventContext = {
 				sessionId: this.options.sessionId,
 				cwd: this.options.cwd,
+				toolCallId: toolCall.id,
 				tool_name: toolCall.name,
+				tool_input: JSON.parse(toolCall.arguments || "{}"),
 				tool_result: result,
 				is_error: isError,
 			};
@@ -384,5 +504,137 @@ export class ExtensionRunner {
 		this.eventBus.clear();
 		this.typedBus.clear();
 		this.extContext = createExtensionContext();
+		this.piAdapters.length = 0;
+	}
+
+	/**
+	 * Emit a Logician event to all registered systems — both native extensions
+	 * and Pi extensions via the adapter.
+	 */
+	async emitToAll(event: ExtensionEvent): Promise<unknown | undefined> {
+		const nativeResult = await this.emit(event);
+
+		// Also emit to all Pi adapters
+		for (const adapter of this.piAdapters) {
+			await adapter.emitFromLogician(event);
+		}
+
+		return nativeResult;
+	}
+
+	/** Get the number of loaded Pi extensions. */
+	getPiExtensionCount(): number {
+		return this.piAdapters.length;
+	}
+
+	/** Get all Pi-registered tools from adapters. */
+	getPiTools(): Array<{ name: string; description: string }> {
+		const tools: Array<{ name: string; description: string }> = [];
+		for (const adapter of this.piAdapters) {
+			for (const tool of adapter.getRegisteredTools()) {
+				tools.push({ name: tool.name, description: tool.description });
+			}
+		}
+		return tools;
+	}
+
+	/** Get all Pi-registered commands from adapters. */
+	getPiCommands(): Array<{ name: string; description?: string }> {
+		const commands: Array<{ name: string; description?: string }> = [];
+		for (const adapter of this.piAdapters) {
+			for (const cmd of adapter.getRegisteredCommands()) {
+				commands.push({ name: cmd.name, description: cmd.description });
+			}
+		}
+		return commands;
+	}
+
+	/**
+	 * Emit an event that can return handler results (messages, systemPrompt).
+	 * Used for context / before_agent_start events where Pi extensions return
+	 * modifications that the harness needs to apply.
+	 */
+	async emitWithContext(
+		eventType: ExtensionEventType,
+		context: ExtensionEventContext,
+	): Promise<{ messages?: unknown[]; systemPrompt?: string } | undefined> {
+		if (this.piAdapters.length === 0) return undefined;
+
+		const event: ExtensionEvent = {
+			type: eventType,
+			context,
+		};
+
+		// Collect return values from all Pi adapters
+		let mergedMessages: unknown[] | undefined;
+		let mergedSystemPrompt: string | undefined;
+
+		for (const adapter of this.piAdapters) {
+			const result = await adapter.emitFromLogician(event as any);
+			if (result?.messages) mergedMessages = result.messages;
+			if (result?.systemPrompt) mergedSystemPrompt = result.systemPrompt;
+		}
+
+		if (mergedMessages || mergedSystemPrompt) {
+			return { messages: mergedMessages, systemPrompt: mergedSystemPrompt };
+		}
+		return undefined;
+	}
+
+	/**
+	 * Emit a Pi input event to all loaded Pi adapters.
+	 * Call from the input controller before processing user input.
+	 * @returns {action: 'continue'|'transform'|'handled', text?, images?} from the first non-null handler.
+	 */
+	async emitInputEvent(
+		text: string,
+		images: unknown[] = [],
+		source: "interactive" | "rpc" | "extension" = "interactive",
+	): Promise<{
+		action: "continue" | "transform" | "handled";
+		text?: string;
+		images?: unknown[];
+	} | null> {
+		for (const adapter of this.piAdapters) {
+			const result = await adapter.emitInputEvent(text, images, source);
+			if (result) return result;
+		}
+		return null; // default: continue
+	}
+
+	/**
+	 * Emit a Pi user_bash event to all loaded Pi adapters.
+	 * Call from the bash execution layer before running.
+	 * @returns {action: 'continue'|'intercept'|'replace', result?, operations?} from the first non-null handler.
+	 */
+	async emitUserBashEvent(
+		command: string,
+		excludeFromContext: boolean = false,
+	): Promise<{
+		action: "continue" | "intercept" | "replace";
+		result?: { output: string; exitCode: number; cancelled: boolean };
+		operations?: unknown;
+	} | null> {
+		for (const adapter of this.piAdapters) {
+			const result = await adapter.emitUserBashEvent(command, excludeFromContext);
+			if (result) return result;
+		}
+		return null; // default: continue
+	}
+
+	/**
+	 * Emit a Pi project_trust event to all loaded Pi adapters.
+	 * Call from the trust prompt before showing the overlay.
+	 * @returns {trusted: 'yes'|'no'|'undecided', remember?} from the first non-null handler.
+	 */
+	async emitProjectTrustEvent(cwd: string): Promise<{
+		trusted: "yes" | "no" | "undecided";
+		remember?: boolean;
+	} | null> {
+		for (const adapter of this.piAdapters) {
+			const result = await adapter.emitProjectTrustEvent(cwd);
+			if (result) return result;
+		}
+		return null; // default: continue (let Logician handle it)
 	}
 }

@@ -19,6 +19,7 @@ export type ExtensionEventType =
 	| "session_start"
 	| "session_end"
 	| "user_prompt_submit"
+	| "context"
 	| "message_start"
 	| "message_update"
 	| "message_end"

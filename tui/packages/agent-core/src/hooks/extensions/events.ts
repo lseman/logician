@@ -162,6 +162,23 @@ export interface ContextUpdateEvent {
 
 export type ContextUpdateResult = {};
 
+/**
+ * Fired before each LLM call, allowing extensions to modify messages.
+ * Mirrors Pi's `context` event.
+ */
+export interface ContextEvent {
+	type: "context";
+	/** Messages that will be sent to the provider (deep copy, safe to modify). */
+	messages: unknown[];
+	/** Current system prompt (read-only reference). */
+	systemPrompt?: string;
+}
+
+export type ContextResult = {
+	/** Return modified messages to replace what gets sent to the provider. */
+	messages?: unknown[];
+};
+
 // ============================================================================
 // Session events
 // ============================================================================
@@ -266,6 +283,7 @@ export type ExtensionEvent =
 	| ToolExecutionUpdateEvent
 	| ToolExecutionEndEvent
 	| ContextUpdateEvent
+	| ContextEvent
 	| SessionBeforeSwitchEvent
 	| SessionBeforeForkEvent
 	| SessionBeforeCompactEvent

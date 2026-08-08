@@ -662,23 +662,55 @@ export class AgentHarness {
 	private async runExtensionBeforeAgentStart(
 		promptText: string,
 	): Promise<{ messages?: Message[]; systemPrompt?: string } | undefined> {
-		if (!this._extensionRunner?.hasHandlers("user_prompt_submit")) {
-			return undefined;
+		if (!this._extensionRunner) return undefined;
+
+		const ctx = {
+			sessionId: this._sessionId || "",
+			cwd: this.cwd || "",
+			prompt: promptText,
+			systemPrompt: this.config.systemPrompt ?? "",
+			messages: [...this.history],
+		};
+
+		let nativeMessages: Message[] | undefined;
+		let nativeSystemPrompt: string | undefined;
+
+		// Emit user_prompt_submit (→ native extensions + Pi's before_agent_start)
+		if (this._extensionRunner.hasHandlers("user_prompt_submit")) {
+			const result = await this._extensionRunner.emit({
+				type: "user_prompt_submit",
+				context: ctx,
+			});
+			// Native extensions return { messages, systemPrompt } directly
+			if (result && typeof result === "object") {
+				const value = result as { messages?: Message[]; systemPrompt?: string };
+				nativeMessages = Array.isArray(value.messages) ? value.messages : undefined;
+				nativeSystemPrompt =
+					typeof value.systemPrompt === "string" ? value.systemPrompt : undefined;
+			}
 		}
-		const result = await this._extensionRunner.emit({
-			type: "user_prompt_submit",
-			context: {
-				sessionId: this._sessionId || "",
-				cwd: this.cwd || "",
-				prompt: promptText,
-			},
-		});
-		if (!result || typeof result !== "object") return undefined;
-		const value = result as { messages?: Message[]; systemPrompt?: string };
+
+		// Emit context (→ Pi's context) — fires before every LLM call
+		// Pi extensions can modify messages via context handler return values
+		let piContextResult: { messages?: unknown[]; systemPrompt?: string } | undefined;
+		if (this._extensionRunner.hasHandlers("context")) {
+			piContextResult = await this._extensionRunner.emitWithContext(
+				"context",
+				{ ...ctx, prompt: undefined }, // Pi's context has no prompt field
+			);
+		}
+
+		// Collect all handler return values (native + Pi)
+		const piMessages = piContextResult?.messages;
+		const piSystemPrompt = piContextResult?.systemPrompt;
+
+		// Native values take precedence (backward compat)
+		const finalMessages = nativeMessages ?? (Array.isArray(piMessages) ? piMessages as Message[] : undefined);
+		const finalSystemPrompt = nativeSystemPrompt ?? piSystemPrompt;
+
 		return {
-			messages: Array.isArray(value.messages) ? value.messages : undefined,
-			systemPrompt:
-				typeof value.systemPrompt === "string" ? value.systemPrompt : undefined,
+			messages: finalMessages,
+			systemPrompt: finalSystemPrompt,
 		};
 	}
 
@@ -1404,6 +1436,7 @@ export class AgentHarness {
 					cwd: this.cwd || "",
 					reason: "manual",
 					tokensBefore: before,
+					messages: [...messages],
 				},
 			});
 			const preResult = await this.emitPreCompact({
@@ -1454,6 +1487,7 @@ export class AgentHarness {
 					tokensBefore: before,
 					tokensAfter: after,
 					changed: true,
+					messages: [...result.messages],
 				},
 			});
 			this.emitToSubscribers({
@@ -1511,6 +1545,7 @@ export class AgentHarness {
 					cwd: this.cwd || "",
 					reason,
 					tokensBefore: before,
+					messages: [...messages],
 				},
 			});
 
@@ -1547,6 +1582,7 @@ export class AgentHarness {
 					tokensBefore: before,
 					tokensAfter: after,
 					changed: true,
+					messages: [...result.messages],
 				},
 			});
 			this.emitToSubscribers({
