@@ -175,6 +175,8 @@ export interface AgentBridgeOptions {
 	projectTrusted?: boolean;
 	/** Whether to auto-resume the most recent session on startup (default: true). */
 	autoResumeSession?: boolean;
+	// ── Extensions ──────────────────────────────────────────────────────────
+	extensionDirs?: { user?: string; paths?: string[] };
 	// ── Memory ────────────────────────────────────────────────────────────
 	/** Whether to enable memory hooks. Default: false (opt-in). */
 	memoryEnabled?: boolean;
@@ -2230,7 +2232,7 @@ export class AgentCoreBridge {
 	}> {
 		return new Promise((resolve, reject) => {
 			const { spawn } = require("node:child_process");
-			const { getShellConfig } = require("./tools/shell.ts");
+			const { getShellConfig } = require("../tools/shell.ts");
 			const { shell, args: shellArgs } = getShellConfig();
 
 			const child = spawn(shell, [...shellArgs, command], {
