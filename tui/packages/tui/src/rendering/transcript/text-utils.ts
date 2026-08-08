@@ -2,6 +2,8 @@
 // Pure text stripping, inline/block markdown rendering, JSON coloring, and
 // arg-parsing helpers used by TranscriptDisplay. No instance state.
 
+import { isAbsolute } from "node:path";
+import { pathToFileURL } from "node:url";
 import { stripAcceptanceReport } from "@logician/agent-core/agent/guards/acceptance-contract.ts";
 import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
 import type { AssistantChunk } from "@logician/coding-agent/sessions";
@@ -155,6 +157,18 @@ function renderMarkdownLink(
 	if (supportsHyperlinks()) return hyperlink(styledText, url) + baseColor;
 	if (linkText === url) return styledText + baseColor;
 	return `${styledText} ${theme.fgRaw("dim")}(${url})${RESET}${baseColor}`;
+}
+
+/**
+ * Wraps `displayText` (typically an already-styled rendering of `path`) in a
+ * `file://` OSC 8 hyperlink when the terminal supports it and `path` is
+ * absolute. Relative paths have no unambiguous filesystem root to resolve
+ * against here, so they're left as plain text rather than guessed at.
+ * Returns `displayText` unchanged when hyperlinking isn't applicable.
+ */
+export function hyperlinkedFilePath(path: string, displayText: string): string {
+	if (!supportsHyperlinks() || !isAbsolute(path)) return displayText;
+	return hyperlink(displayText, pathToFileURL(path).href);
 }
 
 export function renderInline(text: string, baseColor: string): string {

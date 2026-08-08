@@ -31,6 +31,7 @@ import {
 	diffLineColor,
 	extractPostEditDiagnostics,
 	formatDurationMs,
+	hyperlinkedFilePath,
 	isPermissionRejection,
 	type PostEditDiagnosticBlock,
 	parseJsonMaybe,
@@ -167,7 +168,7 @@ export function renderTool(
 		: subagentBatch
 			? `${glyph} ${theme.fg("toolTitle", "subagents")} ${status}`
 			: filePath
-				? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${DIM}${filePath}${RESET} ${status}`
+				? `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${hyperlinkedFilePath(filePath, `${DIM}${filePath}${RESET}`)} ${status}`
 				: `${glyph} ${theme.fg("toolTitle", tool.tool_name)} ${status}`;
 	const middle = summary ? `${DIM}${summary}${RESET}` : "";
 	const right = elapsed ? `${DIM}${elapsed}${RESET}` : "";
@@ -408,6 +409,12 @@ export function detailSection(label: string, meta = ""): string {
 	return `${theme.fg("active", "── ")}${BOLD}${label.toUpperCase()}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`;
 }
 
+/** detailSection("file", path), with the path wrapped as a clickable
+ * file:// hyperlink when the terminal supports OSC 8. */
+export function detailSectionFile(path: string): string {
+	return `${theme.fg("active", "── ")}${BOLD}FILE${RESET}  ${hyperlinkedFilePath(path, `${DIM}${path}${RESET}`)}`;
+}
+
 export function toolSummary(tool: ToolExecution): string {
 	const args = tool.args || {};
 	const path = stringArg(args, "path") || stringArg(args, "file_path");
@@ -431,7 +438,7 @@ export function toolSummary(tool: ToolExecution): string {
 		return compactText(stringArg(args, "command") || "");
 	}
 	if (tool.tool_name === "read_file") {
-		return path || "";
+		return path ? hyperlinkedFilePath(path, path) : "";
 	}
 	if (tool.tool_name === "rg_search") {
 		return compactText(stringArg(args, "pattern") || "");

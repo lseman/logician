@@ -13,6 +13,7 @@ import {
 import { renderFileContent } from "./content.ts";
 import {
 	detailSection,
+	detailSectionFile,
 	previewBlock,
 	type RenderCtx,
 	renderDiffBlock,
@@ -38,7 +39,7 @@ export function renderWriteDetails(
 	const streaming = !tool.isComplete;
 	const appending = tool.tool_name === "write_file_append";
 
-	if (path) lines.push(detailSection("file", path));
+	if (path) lines.push(detailSectionFile(path));
 
 	if (content !== undefined && content !== "") {
 		const lineCount = content.split("\n").length;
@@ -86,7 +87,7 @@ export function renderEditDetails(
 	const edits = normalizeEditArgs(args);
 	const language = detectLanguage(path);
 
-	if (path) lines.push(detailSection("file", path));
+	if (path) lines.push(detailSectionFile(path));
 
 	for (let i = 0; i < edits.length; i++) {
 		lines.push(detailSection(`edit ${i + 1}`, `${i + 1} of ${edits.length}`));
@@ -146,7 +147,7 @@ export function renderFileDiffDetails(
 	const args = tool.args || {};
 	const lines: string[] = [];
 	const path = stringArg(args, "path") || stringArg(args, "file_path");
-	if (path) lines.push(detailSection("file", path));
+	if (path) lines.push(detailSectionFile(path));
 	if (args.staged) lines.push(`${DIM}staged changes${RESET}`);
 	const result = tool.result ?? tool.partialResult;
 	if (result) {
