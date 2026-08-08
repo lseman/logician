@@ -32,12 +32,13 @@ sequenceDiagram
 
 ## Stream stages
 
-| Stage | Prefix | Description |
+| Stage | Events | Description |
 |---|---|---|
-| Reasoning | `💭` | Agent's internal thought process |
-| Tool call | `🔧` | Tool being invoked with arguments |
-| Tool result | `✅` / `❌` | Tool execution result |
-| Response | `→` | Final answer to user |
+| Turn start | `turn_start`, `message_start` | New turn begins |
+| Thinking | `thinking_token` | Agent's internal thought process |
+| Response | `token`, `message_update` | Streaming text output |
+| Tool execution | `tool_execution_start`, `tool_execution_update`, `tool_execution_end` | Tool invocation with progress |
+| Turn end | `turn_end`, `agent_settled` | Turn completes, agent settles |
 
 ## Configuration
 
@@ -62,10 +63,12 @@ In headless mode, streaming outputs as JSONL:
 npm start -- exec --jsonl "analyze src/auth.ts"
 ```
 
-Each line is a JSON object:
+Each line is a typed JSON event:
 ```json
-{"type":"thinking","content":"Analyzing auth flow..."}
-{"type":"tool_call","tool":"read_file","args":{"path":"src/auth.ts"}}
-{"type":"tool_result","tool":"read_file","success":true,"content":"..."}
-{"type":"response","content":"Found 3 auth middleware functions..."}
+{"type":"turn_start","turn_id":"turn_1"}
+{"type":"thinking_token","token":"Analyzing auth flow..."}
+{"type":"tool_execution_start","tool":"read_file","tool_name":"read_file","tool_call_id":"tc_1","tool_args":{"path":"src/auth.ts"}}
+{"type":"tool_execution_end","tool":"read_file","tool_name":"read_file","tool_call_id":"tc_1","result":"...","is_error":false}
+{"type":"message_update","turnId":"turn_1","message":{"role":"assistant","content":"Found 3 auth middleware functions..."}}
+{"type":"turn_end","turn_id":"turn_1","message":""}
 ```

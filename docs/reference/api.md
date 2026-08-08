@@ -67,9 +67,20 @@ interface AgentResult {
 }
 
 interface StreamEvent {
-  type: 'thinking' | 'tool_call' | 'tool_result' | 'response'
-  content: string
-  metadata?: Record<string, unknown>
+  type: 'token' | 'thinking_token' | 'message_start' | 'message_update' | 'message_end'
+       | 'text_start' | 'text_end' | 'turn_start' | 'turn_end'
+       | 'tool_execution_start' | 'tool_execution_update' | 'tool_execution_end'
+       | 'tool_start' | 'tool_end'
+       | 'context_update' | 'compaction' | 'phase' | 'notice'
+       | 'guardrail_nudge' | 'repair_nudge' | 'classified'
+       | 'queue_update' | 'todos' | 'steered' | 'model_select'
+       | 'permission_request' | 'question_request'
+       | 'agent_start' | 'agent_end' | 'agent_settled'
+       | 'agent_retry_start' | 'agent_retry_end' | 'agent_error'
+       | 'session_delete' | 'save_point'
+       | 'subagent_chunk' | 'subagent_lifecycle'
+       | 'memory_update'
+  [key: string]: unknown
 }
 ```
 

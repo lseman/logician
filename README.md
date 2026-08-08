@@ -153,7 +153,7 @@ flowchart TD
 
 1. **TUI** collects input, renders the transcript, and manages overlays (permissions, session browser, settings).
 2. **AgentCoreBridge** (in `coding-agent`) wires the bridge between the TUI and `agent-core`. It resolves configuration, loads MCP servers, registers tools, and translates agent events to TUI display formats.
-3. **AgentHarness** runs the main loop: receive user input → call backend → parse response → execute tools → repeat. Each iteration is a "turn" with lifecycle events (`turn_start`, `tool_call`, `tool_result`, `turn_end`).
+3. **AgentHarness** runs the main loop: receive user input → call backend → parse response → execute tools → repeat. Each iteration is a "turn" with granular lifecycle events (`turn_start`, `message_start`, `text_delta`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `message_update`, `turn_end`, `agent_settled`).
 4. **Hooks** intercept every event via a `HookBus` with per-event reducer semantics. Built-in hooks include duplicate-call guard, failure-loop guard, thinking-loop detector, budget tracker, proactive compaction, and file checkpointing. Skills and plugins register custom hooks.
 5. **ToolRegistry** dispatches tool calls to implementations (`bash`, `edit_file`, `git`, etc.). Permission checks gate execution based on the configured mode.
 
