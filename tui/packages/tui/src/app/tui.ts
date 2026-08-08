@@ -19,6 +19,10 @@ import { createAutoresearchTools } from "@logician/coding-agent/tools";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
+import {
+	type AutoresearchDashboardAction,
+	AutoresearchDashboardOverlay,
+} from "../overlays/autoresearch-dashboard.ts";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
 import {
@@ -86,6 +90,7 @@ import {
 } from "./inference-settings.ts";
 import { setupInputHandler as setupInputHandlerImpl } from "./input-controller.ts";
 import {
+	handleAutoresearchDashboardAction as handleAutoresearchDashboardActionImpl,
 	handleInferenceModeSelectorAction as handleInferenceModeSelectorActionImpl,
 	handleMcpManagerAction as handleMcpManagerActionImpl,
 	handleModelSelectorAction as handleModelSelectorActionImpl,
@@ -93,6 +98,7 @@ import {
 	handleReasonerSelectorAction as handleReasonerSelectorActionImpl,
 	handleSettingsSelectorAction as handleSettingsSelectorActionImpl,
 	handleThemeSelectorAction as handleThemeSelectorActionImpl,
+	openAutoresearchDashboard as openAutoresearchDashboardImpl,
 	openInferenceModeSelector as openInferenceModeSelectorImpl,
 	openMcpManager as openMcpManagerImpl,
 	openModelSelector as openModelSelectorImpl,
@@ -135,6 +141,7 @@ export class LogicianTUI {
 	choicePopupPreview = false;
 	permissionPopup: PermissionPopup;
 	pluginManager: PluginManagerOverlay;
+	autoresearchDashboard: AutoresearchDashboardOverlay;
 	mcpManager: McpManagerOverlay;
 	reasonerSelector: ReasonerSelectorOverlay;
 	modelSelector: ModelSelectorOverlay;
@@ -261,6 +268,9 @@ export class LogicianTUI {
 		this.choicePopup = new ChoicePopup();
 		this.permissionPopup = new PermissionPopup();
 		this.pluginManager = new PluginManagerOverlay();
+		this.autoresearchDashboard = new AutoresearchDashboardOverlay(
+			this.researchManager,
+		);
 		this.mcpManager = new McpManagerOverlay();
 		this.reasonerSelector = new ReasonerSelectorOverlay();
 		this.modelSelector = new ModelSelectorOverlay();
@@ -509,6 +519,14 @@ export class LogicianTUI {
 			align: "left",
 			maxHeight: 18,
 		});
+		// Center-anchored and large, unlike the aboveInput popups above — this
+		// is meant to read as a fullscreen dashboard (README: "Ctrl+Shift+F
+		// opens a scrollable full-terminal dashboard"), not a compact picker.
+		this.tui.showOverlay(this.autoresearchDashboard, {
+			anchor: "center",
+			width: "90%",
+			maxHeight: "90%",
+		});
 
 		// The dock (input bar + status bar + aboveInput overlays) is OUTSIDE
 		// the ScrollView so it stays fixed at the bottom of the viewport even
@@ -573,6 +591,16 @@ export class LogicianTUI {
 
 	handleMcpManagerAction(action: McpManagerAction): void {
 		handleMcpManagerActionImpl(this, action);
+	}
+
+	// ── Autoresearch dashboard ───────────────────────────────────────────────
+
+	openAutoresearchDashboard(): void {
+		openAutoresearchDashboardImpl(this);
+	}
+
+	handleAutoresearchDashboardAction(action: AutoresearchDashboardAction): void {
+		handleAutoresearchDashboardActionImpl(this, action);
 	}
 
 	// ── Reasoner selector ───────────────────────────────────────────────────

@@ -1,6 +1,8 @@
+import type { AutoresearchSession } from "@logician/autoresearch";
 import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import type { Transcript } from "@logician/coding-agent/sessions";
 import type { InputBar } from "../../input/input-bar.ts";
+import type { AutoresearchDashboardOverlay } from "../../overlays/autoresearch-dashboard.ts";
 import type { FileMentionPopup } from "../../overlays/file-mention-popup.ts";
 import type { InferenceModeSelector } from "../../overlays/inference-mode-selector.ts";
 import type { McpManagerOverlay } from "../../overlays/mcp-manager.ts";
@@ -28,6 +30,8 @@ export interface OverlayHandlersCtx {
 	inputBar: InputBar;
 	notify: NotifyFn;
 	pluginManager: PluginManagerOverlay;
+	autoresearchDashboard: AutoresearchDashboardOverlay;
+	researchManager: AutoresearchSession;
 	mcpManager: McpManagerOverlay;
 	reasonerSelector: ReasonerSelectorOverlay;
 	fileMentionPopup: FileMentionPopup;

@@ -1,5 +1,6 @@
-// ── Plugin and MCP manager controllers ─────────────────────────────────────
+// ── Plugin, MCP, and autoresearch dashboard manager controllers ────────────
 
+import type { AutoresearchDashboardAction } from "../../overlays/autoresearch-dashboard.ts";
 import type { McpManagerAction } from "../../overlays/mcp-manager.ts";
 import type { PluginManagerAction } from "../../overlays/plugin-manager.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
@@ -180,4 +181,24 @@ export function handleMcpManagerAction(
 			ctx.statusPanel.update({ phase: "ready" });
 			ctx.tui.requestRender();
 		});
+}
+
+// ── Autoresearch dashboard ──────────────────────────────────────────────
+
+/** Opens the fullscreen dashboard (Ctrl+Shift+F). All data is local/sync
+ * (AutoresearchSession.getDashboardData() just reads in-memory state), so
+ * unlike plugin/MCP managers there's no loading round-trip to show first. */
+export function openAutoresearchDashboard(ctx: OverlayHandlersCtx): void {
+	ctx.autoresearchDashboard.show();
+	ctx.tui.requestRender();
+}
+
+export function handleAutoresearchDashboardAction(
+	ctx: OverlayHandlersCtx,
+	action: AutoresearchDashboardAction,
+): void {
+	if (action.type === "close") {
+		ctx.autoresearchDashboard.hide();
+		ctx.tui.requestRender();
+	}
 }

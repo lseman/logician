@@ -65,6 +65,14 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
+		if (ctx.autoresearchDashboard.isVisibleOverlay()) {
+			const action = ctx.autoresearchDashboard.handleInput(data);
+			if (action) {
+				ctx.handleAutoresearchDashboardAction(action);
+			}
+			ctx.tui.requestRender();
+			return { consume: true };
+		}
 		if (ctx.reasonerSelector.isVisibleOverlay()) {
 			const action = ctx.reasonerSelector.handleInput(data);
 			if (action) {
@@ -373,6 +381,14 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			const next = ctx.cycleExecutionProfile();
 			ctx.notify(`Execution policy: ${next}`, "success");
 			ctx.tui.requestRender();
+			return { consume: true };
+		}
+
+		// Ctrl+Shift+F — open the autoresearch fullscreen dashboard. Codepoint
+		// 102 = 'f'; modifier 6 = Shift+Ctrl (matches Ctrl+M/Ctrl+I's pattern —
+		// case alone doesn't disambiguate Shift, the modifier bit does).
+		if (data === "\x1b[102;6u") {
+			ctx.openAutoresearchDashboard();
 			return { consume: true };
 		}
 

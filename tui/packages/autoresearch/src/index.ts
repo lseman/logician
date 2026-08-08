@@ -37,12 +37,38 @@ export interface AutoresearchWidgetSummary {
 	name: string | null;
 	metricName: string;
 	metricUnit: string;
+	/** First run's metric in the current segment — the point of comparison,
+	 * not necessarily the best value seen (that's bestMetric below). Despite
+	 * the name, the internal ExperimentState.bestMetric field this is sourced
+	 * from is actually the baseline; kept distinct here to avoid repeating
+	 * that confusion in every consumer. */
+	baselineMetric: number | null;
+	/** Best (min/max per bestDirection) metric among all "keep" runs in the
+	 * current segment. This is what a dashboard/widget should highlight. */
 	bestMetric: number | null;
 	bestDirection: "lower" | "higher";
 	runCount: number;
 	confidence: number | null;
 	running: { command: string; elapsedMs: number } | null;
 	maxExperiments: number | null;
+}
+
+/** One row of the full-screen dashboard's results table. */
+export interface AutoresearchDashboardRow {
+	run: number;
+	commit: string;
+	status: "keep" | "discard" | "crash" | "checks_failed";
+	metric: number;
+	metricFormatted: string;
+	description: string;
+	timestamp: number;
+	isBest: boolean;
+}
+
+/** Full-screen dashboard snapshot — see AutoresearchSession.getDashboardData(). */
+export interface AutoresearchDashboardData {
+	summary: AutoresearchWidgetSummary | null;
+	rows: AutoresearchDashboardRow[];
 }
 
 import { spawn } from "node:child_process";
@@ -883,7 +909,12 @@ export class AutoresearchSession {
 			name: state.name,
 			metricName: state.metricName,
 			metricUnit: state.metricUnit,
-			bestMetric: state.bestMetric,
+			baselineMetric: state.bestMetric,
+			bestMetric: findBestMetric(
+				state.results,
+				state.currentSegment,
+				state.bestDirection,
+			),
 			bestDirection: state.bestDirection,
 			runCount,
 			confidence: state.confidence,
@@ -895,6 +926,33 @@ export class AutoresearchSession {
 				: null,
 			maxExperiments: state.maxExperiments,
 		};
+	}
+
+	/** Full results table for the fullscreen dashboard overlay — every run
+	 * in the current segment, most recent last, with the current best-metric
+	 * run flagged for highlighting. */
+	getDashboardData(): AutoresearchDashboardData {
+		const state = this.runtime.state;
+		const segmentResults = currentResults(state.results, state.currentSegment);
+		const bestMetric = findBestMetric(
+			state.results,
+			state.currentSegment,
+			state.bestDirection,
+		);
+		const rows: AutoresearchDashboardRow[] = segmentResults.map((result, i) => ({
+			run: i + 1,
+			commit: result.commit,
+			status: result.status,
+			metric: result.metric,
+			metricFormatted: formatNum(result.metric, state.metricUnit),
+			description: result.description,
+			timestamp: result.timestamp,
+			isBest:
+				result.status === "keep" &&
+				bestMetric !== null &&
+				result.metric === bestMetric,
+		}));
+		return { summary: this.getWidgetSummary(), rows };
 	}
 
 	onAgentStart(): void {
