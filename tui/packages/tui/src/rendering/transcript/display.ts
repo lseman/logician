@@ -623,7 +623,16 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	 * unconditionally so they still invalidate every turn's cache when
 	 * changed; expand-key sets and focus are narrowed to just the keys that
 	 * belong to this turn, so toggling one tool card no longer invalidates
-	 * every other turn the way one global revision string used to. */
+	 * every other turn the way one global revision string used to.
+	 *
+	 * spinnerTick is folded in only while the turn itself is incomplete: a
+	 * running tool's glyph (renderTool's ctx.spinnerFrame()) is read purely
+	 * from spinner state, not from any turn content field, so without this
+	 * the per-turn cache never saw the tick change and the glyph only ever
+	 * advanced when something else (e.g. clicking the tool) happened to
+	 * touch a field that IS in this revision. Gating on turn.isComplete
+	 * avoids paying a spinner-driven rebuild for turns that have nothing
+	 * left running. */
 	private turnStyleRevision(turn: Turn): string {
 		const keysForTurn = (set: Set<string>) =>
 			[...set]
@@ -641,6 +650,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			keysForTurn(this.expandedToolKeys),
 			keysForTurn(this.expandedAgentKeys),
 			keysForTurn(this.expandedChildToolKeys),
+			turn.isComplete ? "" : this.spinnerTick,
 		].join("|");
 	}
 
