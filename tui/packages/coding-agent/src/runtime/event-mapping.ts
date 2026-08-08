@@ -150,21 +150,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 			};
 		case "agent_retry_start":
 			return {
-				type: "notice",
-				level: "warn",
-				label: `Retry ${event.attempt}/${event.maxRetries}`,
-				text: `${event.error} — retrying in ${formatDelay(event.delayMs)}`,
-			};
-		case "agent_retry_end":
-			return {
-				type: "notice",
-				level: event.success ? "success" : "warn",
-				label: `Retry ${event.attempt}`,
-				text: event.success ? "succeeded" : "failed",
-			};
-		// New observability events (also emitted as structured bridge events)
-		case "agent_retry_start":
-			return {
 				type: "agent_retry_start",
 				attempt: event.attempt,
 				maxRetries: event.maxRetries,
@@ -376,14 +361,133 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				label: `Guard: ${event.guard}`,
 				text: event.message,
 			};
+		// ── Acceptance / reflection observability ────────────────────────
+		case "acceptance_start":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Acceptance",
+				text: `Starting acceptance level "${event.level}" (${event.criteriaCount} criteria)`,
+			};
+		case "acceptance_check":
+			return {
+				type: "notice",
+				level: event.status === "failed" ? "warn" : "info",
+				label: `Acceptance: ${event.criterionId}`,
+				text: `${event.status} (${event.severity})`,
+			};
+		case "acceptance_verify":
+			return {
+				type: "notice",
+				level: event.result === "failed" ? "warn" : "info",
+				label: `Verify: ${event.command.slice(0, 60)}`,
+				text: `${event.result}${event.summary ? ` — ${event.summary}` : ""}`,
+			};
+		case "acceptance_complete":
+			return {
+				type: "notice",
+				level: event.status === "passed" ? "success" : event.status === "failed" ? "error" : "warn",
+				label: "Acceptance",
+				text: `Status: ${event.status}`,
+			};
+		case "reflection_start":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Reflection",
+				text: "Starting reflection on this turn",
+			};
+		case "reflection_end":
+			return {
+				type: "notice",
+				level: event.assessment === "complete" ? "info" : "warn",
+				label: "Reflection",
+				text: event.needsMoreWork
+					? `Incomplete — ${event.issues.length} issue(s) need work`
+					: "Complete",
+			};
+		// ── Loop detection ───────────────────────────────────────────────
+		case "loop_detected":
+			return {
+				type: "notice",
+				level: "warn",
+				label: "Loop detected",
+				text: `${event.message}${event.attempt !== undefined ? ` (attempt ${event.attempt})` : ""}`,
+			};
+		case "thinking_loop_detected":
+			return {
+				type: "notice",
+				level: "warn",
+				label: "Thinking loop",
+				text: `${event.message} — strategy: ${event.strategy} (iteration ${event.iteration})`,
+			};
+		case "thinking_loop_stats":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Thinking stats",
+				text: `consecutive ${event.consecutiveThinkingOnly}, total turns ${event.totalThinkingTurns}, tokens ${event.totalThinkingTokens}, meta ${event.metaReasoningHits}`,
+			};
+		// ── Model / tool lifecycle ───────────────────────────────────────
+		case "model_cycle":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Model cycle",
+				text: `${event.fromModel} → ${event.model}${event.thinkingLevel ? ` (thinking: ${event.thinkingLevel})` : ""}`,
+			};
+		case "model_change":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Model",
+				text: `${event.provider}: ${event.modelId}`,
+			};
+		case "thinking_level_changed":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Thinking",
+				text: `Level changed to "${event.level}"`,
+			};
+		case "thinking_level_clamped":
+			return {
+				type: "notice",
+				level: "warn",
+				label: "Thinking",
+				text: `Level clamped to "${event.level}" — ${event.reason}`,
+			};
+		case "tools_update":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Tools",
+				text: `Active tools: ${event.toolNames.join(", ")}`,
+			};
+		case "active_tools_change":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Active tools",
+				text: event.activeToolNames.join(", "),
+			};
+		case "abort":
+			return {
+				type: "notice",
+				level: "info",
+				label: "Aborted",
+				text: `Cleared ${event.clearedSteering.length} steering, ${event.clearedFollowUp.length} follow-up, ${event.clearedNextTurn.length} next-turn messages`,
+			};
+		case "task_failed":
+			return {
+				type: "notice",
+				level: "error",
+				label: "Task failed",
+				text: `${event.reason} (iteration ${event.iteration})${event.lastContent ? ` — ${event.lastContent.slice(0, 100)}` : ""}`,
+			};
 		default:
 			return null;
 	}
-}
-
-// Humanize a backoff delay for retry notices: "500ms", "1.0s", "4.0s".
-function formatDelay(ms: number): string {
-	return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 function parseToolArgs(args: string): Record<string, unknown> | undefined {

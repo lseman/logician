@@ -32,20 +32,14 @@ export type BridgeEventType =
 	| "tool_execution_end"
 	// Steering
 	// Guardrail/repair
-	| "guardrail_nudge"
 	| "repair_nudge"
-	// Classification
-	| "classified"
 	// UI state
 	| "phase"
-	| "decision"
 	| "context_update"
 	| "compaction"
 	| "memory_update"
 	// Agent question / interactive prompt
 	| "question_request"
-	// Media
-	| "image"
 	// Session lifecycle
 	| "session_delete"
 	| "message_end"
@@ -62,11 +56,6 @@ export interface MemoryUpdateEvent {
 		| "cleared";
 	count: number;
 	items?: Array<{ id: string; content: string; relevance?: string }>;
-}
-
-export interface BridgeEvent {
-	type: BridgeEventType;
-	[key: string]: unknown;
 }
 
 // ── Parsed event shapes ───────────────────────────────────────────────────────
@@ -166,13 +155,6 @@ export interface PhaseEvent {
 	note?: string;
 }
 
-export interface DecisionEvent {
-	type: "decision";
-	stage?: string;
-	model?: string;
-	turn_id?: string;
-}
-
 export interface ContextUpdateEvent {
 	type: "context_update";
 	tokens: number;
@@ -193,13 +175,6 @@ export interface CompactionEvent {
 	tokens_after?: number;
 }
 
-export interface GuardrailEvent {
-	type: "guardrail_nudge";
-	turn_id?: string;
-	guard_name?: string;
-	nudge?: string;
-}
-
 export interface RepairEvent {
 	type: "repair_nudge";
 	turn_id?: string;
@@ -208,20 +183,6 @@ export interface RepairEvent {
 	tool_name?: string;
 	error_type?: string;
 	message?: string;
-}
-
-export interface ClassifiedEvent {
-	type: "classified";
-	turn_id?: string;
-	intent?: string;
-	domain_groups?: string[];
-}
-
-export interface ImageEvent {
-	type: "image";
-	tool?: string;
-	path?: string;
-	source?: string;
 }
 
 export interface TodosEvent {
@@ -419,13 +380,9 @@ export type ParsedBridgeEvent =
 	| MessageEndEvent
 	| QueueUpdateEvent
 	| PhaseEvent
-	| DecisionEvent
 	| ContextUpdateEvent
 	| CompactionEvent
-	| GuardrailEvent
 	| RepairEvent
-	| ClassifiedEvent
-	| ImageEvent
 	| TodosEvent
 	| SteeredEvent
 	| ModelSelectEvent
