@@ -9,6 +9,7 @@
 		"start": "tsx src/index.ts",
 		"test": "tsx --test $(find src -name '*.test.ts' -type f -print)",
 		"bench": "tsx packages/tui/src/__tests__/benchmark.ts",
+		"bench:keystroke": "tsx packages/tui/src/__tests__/benchmark-keystroke.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

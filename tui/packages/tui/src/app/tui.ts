@@ -258,32 +258,19 @@ export class LogicianTUI {
 			thinkingMode: this.thinkingDisplayMode,
 			maxMessageLength:
 				runtimeConfig.source.truncation?.transcriptMessageMaxChars,
-			// Both caps below exist to bound rendering cost against a fixed-height
-			// viewport that only ever shows its last screenful (fullscreen mode).
-			// In "regular" mode, printed lines are handed off to the terminal's
-			// own scrollback and never re-rendered or re-walked, so dropping old
-			// turns/lines only fights that model — the terminal already holds the
-			// durable record, unbounded, for free. Forced unconditionally in
-			// "regular" mode — a user's transcriptMaxTurns/transcriptMaxRenderedLines
-			// setting in settings.json is a fullscreen-mode tuning knob and must
-			// not re-enable this behavior there.
-			maxTurns:
-				this.uiMode === "regular"
-					? Number.POSITIVE_INFINITY
-					: runtimeConfig.source.transcriptMaxTurns,
-			// maxRenderedLines exists to bound the cost of re-rendering the whole
-			// transcript every frame against a fixed-height viewport (fullscreen
-			// mode only ever shows the last viewportHeight rows anyway). In
-			// "regular" mode there is no fixed viewport — printed lines are handed
-			// off to the terminal's own scrollback and never re-rendered, so the
-			// truncation banner ("N older turns not shown") only fights that model
-			// instead of protecting anything. Forced unconditionally — see maxTurns
-			// above for why a configured value must not override this in "regular"
-			// mode.
-			maxRenderedLines:
-				this.uiMode === "regular"
-					? Number.POSITIVE_INFINITY
-					: runtimeConfig.source.transcriptMaxRenderedLines,
+			// Both caps default to unbounded in every mode. Fullscreen mode's
+			// ScrollView already clips painted output to the viewport (only
+			// termHeight rows are walked per frame — see paintBox), so dropping
+			// old turns/lines here doesn't save render cost, it just stops the
+			// user from scrolling back to see them and adds a truncation banner
+			// nobody asked for. "regular" mode has no fixed viewport at all —
+			// printed lines are handed off to the terminal's own scrollback and
+			// never re-rendered, so unbounded is the only sensible behavior
+			// there too. transcriptMaxTurns/transcriptMaxRenderedLines in
+			// settings.json remain available as an explicit opt-in cap in either
+			// mode, for anyone who wants one.
+			maxTurns: runtimeConfig.source.transcriptMaxTurns,
+			maxRenderedLines: runtimeConfig.source.transcriptMaxRenderedLines,
 		});
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.

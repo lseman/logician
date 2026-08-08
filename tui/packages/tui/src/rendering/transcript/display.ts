@@ -71,7 +71,14 @@ export class TranscriptDisplay implements Component, RenderCtx {
 	 * re-fingerprinting and re-splicing all `maxTurns` turns every frame. */
 	private assembledLines: string[] = [];
 	private assembledTurnStarts: number[] = [];
+	/** Full revision per turn: `${turnRevision}::${styleRevision}`. */
 	private assembledTurnRevisions: string[] = [];
+	/** Per-turn contentRevision (O(1) number) for fast prefix-scan comparison.
+	 * When this matches the turn's current value AND the turn object identity
+	 * matches, we can skip the expensive turnRevisionFor() call — but we still
+	 * need to compare the stored styleRevision vs current styleRevision.
+	 * Stored alongside assembledTurnRevisions for O(1) content checks. */
+	private assembledTurnContentRevisions: number[] = [];
 	private assembledTurns: Turn[] = [];
 	private assembledWidth: number = -1;
 	// Not private: read by the extracted render-*.ts functions through the
@@ -116,15 +123,16 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		this.thinkingMode = options.thinkingMode ?? "collapsed";
 		this.maxMessageLength =
 			options.maxMessageLength ?? DEFAULT_TRUNCATION.transcriptMessageMaxChars;
-		// A terminal viewport is typically 30-60 rows, so both budgets stay a
-		// small multiple of that rather than the old 200-turn/2000-line
-		// defaults — those forced every full rebuild (any cache miss, e.g. a
-		// theme change or a fresh streaming turn joining the prefix) to
-		// markdown-parse and word-wrap far more content than a screen could
-		// ever show, while still only ever displaying the last viewportHeight
-		// rows. Scrollback is intentionally shallow now, not unbounded.
-		this.maxTurns = options.maxTurns ?? 40;
-		this.maxRenderedLines = options.maxRenderedLines ?? 400;
+		// Unbounded by default: painting is already clipped to the viewport
+		// (paintBox only walks firstRow..lastRow of the visible rect) and
+		// render() caches its output and returns the identical array reference
+		// when nothing changed, so keeping the full history around doesn't add
+		// per-frame cost — it just lets the user scroll back through the whole
+		// session instead of hitting a truncation banner. Callers that want a
+		// hard cap (e.g. to bound memory on very long-running sessions) can
+		// still pass maxTurns/maxRenderedLines explicitly.
+		this.maxTurns = options.maxTurns ?? Number.POSITIVE_INFINITY;
+		this.maxRenderedLines = options.maxRenderedLines ?? Number.POSITIVE_INFINITY;
 	}
 
 	private static readonly SPINNER_FRAMES = [
@@ -363,22 +371,52 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		// Reuse the assembled prefix from the last frame up to the first turn
 		// whose identity or revision actually changed. During normal streaming
 		// only the newest turn's revision moves, so this turns an O(all turns)
-		// re-fingerprint-and-resplice into O(1) for every animation tick. Gated
-		// on assembledWidth === width: the reused prefix is sliced directly from
-		// `assembledLines`, which was built at whatever width produced it — if
-		// width changed, those spliced lines are stale even though the per-turn
-		// renderTurn() cache underneath would happily rebuild at the new width,
-		// so a width change must force a full rebuild here too. Must match
-		// renderTurn's own cache-hit condition exactly (content revision AND
-		// style revision — the latter covers expand/focus toggles and per-turn
-		// spinner state), or a style-only change (e.g. expanding a tool card)
-		// would be silently dropped when the turn's content didn't also change.
+		// re-fingerprint-and-resplice into O(1) for every animation tick.
+		//
+		// O(1) content check via per-turn contentRevision: the Transcript bumps
+		// this counter on every chunk mutation. We compare it against the stored
+		// contentRevision from the previous frame — a match means the Transcript
+		// has not mutated the turn's content since we last rendered, so we can
+		// skip the expensive turnRevisionFor() call entirely. We still compare
+		// the style revision (spinner state, expand toggles) because those can
+		// change without content mutations.
+		//
+		// When width changes we still need a full rebuild because
+		// assembledLines carries the old width's padding. But the prefix scan
+		// now finds the first dirty turn in O(1) per turn, and renderTurn()
+		// below rebuilds only the dirty turns at the new width.
 		const turnRevisions: string[] = new Array(this.turns.length);
 		let firstDirty = 0;
 		if (this.assembledTurns.length > 0 && this.assembledWidth === width) {
 			const minLen = Math.min(this.turns.length, this.assembledTurns.length);
 			while (firstDirty < minLen) {
 				const turn = this.turns[firstDirty];
+				const storedContentRevision =
+					this.assembledTurnContentRevisions[firstDirty];
+				// Fast path: content unchanged AND turn identity unchanged
+				if (
+					storedContentRevision !== undefined &&
+					storedContentRevision === turn.contentRevision &&
+					turn === this.assembledTurns[firstDirty]
+				) {
+					// Content is the same — only style might have changed.
+					// Extract the stored style revision from the full revision
+					// string (format: "contentRevision::styleRevision").
+					const storedFullRev =
+						this.assembledTurnRevisions[firstDirty];
+					const storedStyleRev = storedFullRev.slice(
+						storedFullRev.indexOf("::") + 2,
+					);
+					const currentStyleRev = this.turnStyleRevision(turn);
+					if (currentStyleRev === storedStyleRev) {
+						// Nothing changed — reuse stored revision
+						turnRevisions[firstDirty] = storedFullRev;
+						firstDirty++;
+						continue;
+					}
+					// Style changed — fall through to recompute full revision
+				}
+				// Content or style changed — compute full revision
 				const revision = `${this.turnRevisionFor(turn)}::${this.turnStyleRevision(turn)}`;
 				if (
 					turn !== this.assembledTurns[firstDirty] ||
@@ -467,6 +505,14 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		this.assembledLines = renderedLines;
 		this.assembledTurnStarts = turnStartLines;
 		this.assembledTurnRevisions = turnRevisions;
+		// Store per-turn content revisions for O(1) prefix-scan comparison on
+		// the next frame. A matching contentRevision + turn identity means we
+		// can skip the expensive turnRevisionFor() call entirely.
+		this.assembledTurnContentRevisions = new Array(this.turns.length);
+		for (let ti = 0; ti < this.turns.length; ti++) {
+			this.assembledTurnContentRevisions[ti] =
+				this.turns[ti].contentRevision ?? -1;
+		}
 		this.assembledTurns = this.turns.slice();
 		this.assembledWidth = width;
 
