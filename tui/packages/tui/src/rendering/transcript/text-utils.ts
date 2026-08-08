@@ -6,6 +6,7 @@ import { stripAcceptanceReport } from "@logician/agent-core/agent/guards/accepta
 import { stripTextToolCalls } from "@logician/agent-core/tools/shared/text-to-tool-calls.ts";
 import type { AssistantChunk } from "@logician/coding-agent/sessions";
 import { BOLD, DIM, RESET } from "../../terminal/core.ts";
+import { hyperlink, supportsHyperlinks } from "../../terminal/hyperlinks.ts";
 import { theme } from "../../terminal/theme.ts";
 
 const UNDERLINE = "\x1b[4m";
@@ -130,6 +131,32 @@ export function matchTagAt(text: string, i: number): number {
 	return m ? m[0].length : 0;
 }
 
+const MARKDOWN_LINK_RE = /^\[([^[\]]*)\]\((\S+?)\)/;
+
+/** Matches a `[text](url)` markdown link at position `i`, if any. */
+function matchMarkdownLinkAt(
+	text: string,
+	i: number,
+): { length: number; linkText: string; url: string } | null {
+	const m = MARKDOWN_LINK_RE.exec(text.slice(i, i + 2000));
+	if (!m) return null;
+	return { length: m[0].length, linkText: m[1], url: m[2] };
+}
+
+/** Renders a markdown link's visible text + styling, as a real OSC 8
+ * hyperlink when the terminal supports it, or `text (url)` otherwise. */
+function renderMarkdownLink(
+	linkText: string,
+	url: string,
+	baseColor: string,
+): string {
+	const styledText =
+		theme.fgRaw("mdLink") + UNDERLINE + renderInline(linkText, "") + RESET;
+	if (supportsHyperlinks()) return hyperlink(styledText, url) + baseColor;
+	if (linkText === url) return styledText + baseColor;
+	return `${styledText} ${theme.fgRaw("dim")}(${url})${RESET}${baseColor}`;
+}
+
 export function renderInline(text: string, baseColor: string): string {
 	text = decodeInlineDisplayEscapes(text);
 	let out = baseColor;
@@ -190,6 +217,14 @@ export function renderInline(text: string, baseColor: string): string {
 			if (end !== -1 && end !== i + 1) {
 				out += `\x1b[3m${text.slice(i + 1, end)}${RESET}${baseColor}`;
 				i = end + 1;
+				continue;
+			}
+		}
+		if (text[i] === "[") {
+			const link = matchMarkdownLinkAt(text, i);
+			if (link) {
+				out += renderMarkdownLink(link.linkText, link.url, baseColor);
+				i += link.length;
 				continue;
 			}
 		}
