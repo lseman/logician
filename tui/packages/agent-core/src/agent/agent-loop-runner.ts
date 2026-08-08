@@ -544,20 +544,30 @@ async function runAgentLoopInTaskScope(
 							});
 						}
 					}
-					const modeParams = effectiveMode
-						? getInferenceMode(effectiveMode)?.params
+					const modeDef = effectiveMode
+						? getInferenceMode(effectiveMode)
 						: undefined;
+					// When the mode asks for provider defaults, omit all sampling
+					// params so the provider uses its own built-in defaults.
+					const useProviderDefaults = modeDef?.useProviderDefaults ?? false;
+					const modeParams = useProviderDefaults
+						? undefined
+						: modeDef?.params;
 					const effectiveTemp =
 						modeParams?.temperature ?? config.temperature ?? 0.5;
 					response = await config.backend.generate(chatMessages, {
 						tools: registry.toToolDefinitions(),
-						temperature: effectiveTemp,
+						...(!useProviderDefaults && { temperature: effectiveTemp }),
 						maxTokens: config.maxTokens ?? 4096,
-						topP: modeParams?.top_p,
-						topK: modeParams?.top_k,
-						minP: modeParams?.min_p,
-						presencePenalty: modeParams?.presence_penalty,
-						repetitionPenalty: modeParams?.repetition_penalty,
+						...(modeParams?.top_p !== undefined && { topP: modeParams.top_p }),
+						...(modeParams?.top_k !== undefined && { topK: modeParams.top_k }),
+						...(modeParams?.min_p !== undefined && { minP: modeParams.min_p }),
+						...(modeParams?.presence_penalty !== undefined && {
+							presencePenalty: modeParams.presence_penalty,
+						}),
+						...(modeParams?.repetition_penalty !== undefined && {
+							repetitionPenalty: modeParams.repetition_penalty,
+						}),
 						signal: config.signal,
 						thinkingLevel: config.thinkingLevel,
 						callbacks: {

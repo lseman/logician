@@ -274,6 +274,7 @@ export class StatusBar implements Component {
 			"thinking-coding": "THINK CODE",
 			"instruct-general": "INSTRUCT",
 			"instruct-reasoning": "REASON",
+			none: "PROVIDER",
 		};
 		const label = modeLabels[mode] ?? mode.toUpperCase();
 		return `${DIM}mode:${RESET} ${theme.fg("accent", label)}`;

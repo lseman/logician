@@ -2,6 +2,7 @@ import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import type { Transcript } from "@logician/coding-agent/sessions";
 import type { InputBar } from "../../input/input-bar.ts";
 import type { FileMentionPopup } from "../../overlays/file-mention-popup.ts";
+import type { InferenceModeSelector } from "../../overlays/inference-mode-selector.ts";
 import type { McpManagerOverlay } from "../../overlays/mcp-manager.ts";
 import type { ModelSelectorOverlay } from "../../overlays/model-selector.ts";
 import type { PluginManagerOverlay } from "../../overlays/plugin-manager.ts";
@@ -33,6 +34,7 @@ export interface OverlayHandlersCtx {
 	fileMentionListedCwd: string | null;
 	fileMentionListing: Promise<string[]> | null;
 	modelSelector: ModelSelectorOverlay;
+	inferenceModeSelector: InferenceModeSelector;
 	themeSelector: ThemeSelectorOverlay;
 	settingsSelector: SettingsSelectorOverlay;
 	thinkingLevel: string;

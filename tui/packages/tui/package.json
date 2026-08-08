@@ -15,6 +15,7 @@
 	"dependencies": {
 		"@logician/agent-capabilities": "0.2.0",
 		"@logician/agent-core": "0.2.0",
+		"@logician/autoresearch": "0.2.0",
 		"@logician/coding-agent": "0.2.0",
 		"string-width": "^8.2.2"
 	},

@@ -1,6 +1,7 @@
 // ── Main TUI ──────────────────────────────────────────────────────────────────
 // Wires agent-core, transcript, and components together.
 
+import { AutoresearchSession } from "@logician/autoresearch";
 import {
 	AgentCoreBridge,
 	GoalManager,
@@ -14,11 +15,16 @@ import {
 	Transcript,
 	type Turn,
 } from "@logician/coding-agent/sessions";
+import { createAutoresearchTools } from "@logician/coding-agent/tools";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
+import {
+	type InferenceModeSelectorAction,
+	InferenceModeSelector,
+} from "../overlays/inference-mode-selector.ts";
 import {
 	type McpManagerAction,
 	McpManagerOverlay,
@@ -79,12 +85,14 @@ import {
 } from "./inference-settings.ts";
 import { setupInputHandler as setupInputHandlerImpl } from "./input-controller.ts";
 import {
+	handleInferenceModeSelectorAction as handleInferenceModeSelectorActionImpl,
 	handleMcpManagerAction as handleMcpManagerActionImpl,
 	handleModelSelectorAction as handleModelSelectorActionImpl,
 	handlePluginManagerAction as handlePluginManagerActionImpl,
 	handleReasonerSelectorAction as handleReasonerSelectorActionImpl,
 	handleSettingsSelectorAction as handleSettingsSelectorActionImpl,
 	handleThemeSelectorAction as handleThemeSelectorActionImpl,
+	openInferenceModeSelector as openInferenceModeSelectorImpl,
 	openMcpManager as openMcpManagerImpl,
 	openModelSelector as openModelSelectorImpl,
 	openPluginManager as openPluginManagerImpl,
@@ -128,6 +136,7 @@ export class LogicianTUI {
 	mcpManager: McpManagerOverlay;
 	reasonerSelector: ReasonerSelectorOverlay;
 	modelSelector: ModelSelectorOverlay;
+	inferenceModeSelector: InferenceModeSelector;
 	themeSelector: ThemeSelectorOverlay;
 	settingsSelector: SettingsSelectorOverlay;
 	transcriptDisplay: TranscriptDisplay;
@@ -137,6 +146,7 @@ export class LogicianTUI {
 	private undoStack: UndoStack<{ value: string; cursor: number }>;
 	loopManager: LoopManager;
 	goalManager: GoalManager;
+	researchManager: AutoresearchSession;
 	turnState: TurnState = INITIAL_TURN_STATE;
 	loopActive = false;
 	goalActive = false;
@@ -221,7 +231,17 @@ export class LogicianTUI {
 		}),
 	) {
 		this.configPath = runtimeConfig.configPath;
-		this.bridge = new AgentCoreBridge(runtimeConfig.bridge);
+		this.researchManager = new AutoresearchSession(
+			runtimeConfig.bridge.cwd ?? process.cwd(),
+			(message, level) => this.notifications.show(message, level),
+		);
+		this.bridge = new AgentCoreBridge({
+			...runtimeConfig.bridge,
+			extraTools: [
+				...(runtimeConfig.bridge.extraTools ?? []),
+				...createAutoresearchTools(this.researchManager),
+			],
+		});
 		this.transcript = new Transcript();
 		this.statusPanel = new StatusBar();
 		this.todoBar = new TodoBar();
@@ -237,6 +257,7 @@ export class LogicianTUI {
 		this.mcpManager = new McpManagerOverlay();
 		this.reasonerSelector = new ReasonerSelectorOverlay();
 		this.modelSelector = new ModelSelectorOverlay();
+		this.inferenceModeSelector = new InferenceModeSelector();
 		this.themeSelector = new ThemeSelectorOverlay();
 		this.settingsSelector = new SettingsSelectorOverlay();
 		this.transcriptDisplay = new TranscriptDisplay({
@@ -573,6 +594,14 @@ export class LogicianTUI {
 
 	handleModelSelectorAction(action: ModelSelectorAction): void {
 		handleModelSelectorActionImpl(this, action);
+	}
+
+	openInferenceModeSelector(): void {
+		openInferenceModeSelectorImpl(this);
+	}
+
+	handleInferenceModeSelectorAction(action: InferenceModeSelectorAction): void {
+		handleInferenceModeSelectorActionImpl(this, action);
 	}
 
 	// ── Theme selector ───────────────────────────────────────────────────

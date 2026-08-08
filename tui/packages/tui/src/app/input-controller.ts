@@ -81,6 +81,14 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			ctx.tui.requestRender();
 			return { consume: true };
 		}
+		if (ctx.inferenceModeSelector.isVisibleOverlay()) {
+			const action = ctx.inferenceModeSelector.handleInput(data);
+			if (action) {
+				ctx.handleInferenceModeSelectorAction(action);
+			}
+			ctx.tui.requestRender();
+			return { consume: true };
+		}
 		if (ctx.themeSelector.isVisibleOverlay()) {
 			const action = ctx.themeSelector.handleInput(data);
 			if (action) {
@@ -347,16 +355,16 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return { consume: true };
 		}
 
-		// Ctrl+M requires an enhanced keyboard protocol because legacy
-		// terminals encode it exactly like Enter. TUI.start() requests CSI-u;
-		// Alt+M remains the portable fallback for terminals that ignore it.
+		// Ctrl+M — open inference-mode selector (replaces old cycle behavior).
+		// Requires CSI-u because legacy terminals encode it like Enter.
+		// Alt+M remains the portable fallback.
 		if (
 			data === "\x1bm" ||
 			data === "\x1bM" ||
 			data === "\x1b[109;5u" ||
 			data === "\x1b[109;6u"
 		) {
-			ctx.cycleInferenceMode();
+			ctx.openInferenceModeSelector();
 			return { consume: true };
 		}
 

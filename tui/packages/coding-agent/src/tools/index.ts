@@ -1,4 +1,5 @@
 export { ask_user } from "@logician/agent-capabilities/interaction/ask-user/index.ts";
+export { createAutoresearchTools } from "./autoresearch.ts";
 export { type BashDetails, bash } from "./bash.ts";
 export {
 	createDefaultTools,

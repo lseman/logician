@@ -32,6 +32,7 @@
 	"dependencies": {
 		"@logician/agent-core": "0.2.0",
 		"@logician/agent-capabilities": "0.2.0",
+		"@logician/autoresearch": "0.2.0",
 		"@logician/memory": "0.1.0",
 		"ignore": "^7.0.5"
 	},

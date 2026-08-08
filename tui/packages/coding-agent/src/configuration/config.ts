@@ -307,6 +307,7 @@ export function validateConfig(
 		const im = configString(obj.inferenceMode);
 		const validModes = [
 			"auto",
+			"none",
 			"thinking-general",
 			"thinking-coding",
 			"instruct-general",
@@ -847,6 +848,7 @@ export interface LogicianTuiConfig {
 	// Inference mode — pre-defined sampling parameter set, cycled via Alt+M.
 	inferenceMode?:
 		| "auto"
+		| "none"
 		| "thinking-general"
 		| "thinking-coding"
 		| "instruct-general"

@@ -30,6 +30,7 @@ export type ThinkingLevel =
 
 export type InferenceMode =
 	| "auto"
+	| "none"
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"

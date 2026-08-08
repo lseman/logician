@@ -923,6 +923,7 @@ export class AgentHarness {
 		// Validate mode name before accepting it.
 		const valid = [
 			"auto",
+			"none",
 			"thinking-general",
 			"thinking-coding",
 			"instruct-general",

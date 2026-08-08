@@ -9,6 +9,7 @@ import type { TuiHandle } from "../terminal/core.ts";
 
 export type InferenceMode =
 	| "auto"
+	| "none"
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"
@@ -20,6 +21,7 @@ export type InferenceMode =
 
 export const INFERENCE_MODE_ORDER: readonly InferenceMode[] = [
 	"auto",
+	"none",
 	"thinking-general",
 	"thinking-coding",
 	"instruct-general",
@@ -55,6 +57,7 @@ export function setInferenceMode(
 	if (oldMode !== mode) {
 		const labels: Record<string, string> = {
 			auto: "Auto",
+			none: "Provider",
 			"thinking-general": "Thinking (General)",
 			"thinking-coding": "Thinking (Precise Code)",
 			"instruct-general": "Instruct (General)",

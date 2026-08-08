@@ -139,6 +139,9 @@ export interface AgentBridgeOptions {
 	 * Real app startup never sets this — MCP always auto-starts on open. */
 	autoStartMcp?: boolean;
 	tools?: Tool[];
+	/** Additional tools merged in alongside the default set and any
+	 * memory tools, deduped by name (see ToolRouterDeps.extraTools). */
+	extraTools?: Tool[];
 	cwd?: string;
 	systemPrompt?: string;
 	webSearch?: Partial<WebSearchConfig>;
@@ -320,13 +323,15 @@ export class AgentCoreBridge {
 			cwd: this.cwd,
 			projectTrusted: this.projectTrusted,
 			tools: opts.tools,
-			extraTools:
-				opts.memoryEnabled !== false
+			extraTools: [
+				...(opts.memoryEnabled !== false
 					? [
 							createMemorySearchTool(() => this.memoryStore),
 							createMemoryGetTool(() => this.memoryStore),
 						]
-					: [],
+					: []),
+				...(opts.extraTools ?? []),
+			],
 			webSearch: opts.webSearch,
 			emit: event => this.emit(event),
 			onToolAdded: () => this.addDefaultTool(),

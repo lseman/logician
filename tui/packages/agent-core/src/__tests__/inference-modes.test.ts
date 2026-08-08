@@ -7,8 +7,8 @@ import {
 	isValidInferenceMode,
 } from "../agent/configuration/inference-modes.ts";
 
-void test("INFERENCE_MODES has exactly 9 entries", () => {
-	assert.equal(INFERENCE_MODES.size, 9);
+void test("INFERENCE_MODES has exactly 10 entries", () => {
+	assert.equal(INFERENCE_MODES.size, 10);
 });
 
 void test("getInferenceMode returns correct params", () => {
@@ -31,6 +31,7 @@ void test("getInferenceMode returns undefined for unknown mode", () => {
 
 void test("isValidInferenceMode returns correct values", () => {
 	assert.equal(isValidInferenceMode("auto"), true);
+	assert.equal(isValidInferenceMode("none"), true);
 	assert.equal(isValidInferenceMode("thinking-general"), true);
 	assert.equal(isValidInferenceMode("thinking-coding"), true);
 	assert.equal(isValidInferenceMode("instruct-general"), true);
@@ -45,6 +46,7 @@ void test("isValidInferenceMode returns correct values", () => {
 void test("cycleInferenceMode cycles through all modes in order", () => {
 	const modes = [
 		"auto",
+		"none",
 		"thinking-general",
 		"thinking-coding",
 		"instruct-general",
@@ -124,4 +126,13 @@ void test("analytical has low temperature and tight top_p", () => {
 	assert.equal(mode.params.top_p, 0.7);
 	assert.equal(mode.params.presence_penalty, 0.5);
 	assert.equal(mode.params.repetition_penalty, 1.1);
+});
+
+void test("none mode omits sampling params to provider", () => {
+	const mode = getInferenceMode("none");
+	assert.ok(mode);
+	assert.equal(mode.label, "Provider");
+	assert.equal(mode.thinking, false);
+	assert.equal(mode.useProviderDefaults, true);
+	assert.equal(isValidInferenceMode("none"), true);
 });

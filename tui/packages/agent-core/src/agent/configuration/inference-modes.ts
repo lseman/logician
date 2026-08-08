@@ -4,6 +4,7 @@
 
 export type InferenceMode =
 	| "auto"
+	| "none"
 	| "thinking-general"
 	| "thinking-coding"
 	| "instruct-general"
@@ -29,7 +30,9 @@ export interface InferenceModeDef {
 	description: string;
 	/** Whether this mode enables chain-of-thought / extended thinking. */
 	thinking: boolean;
-	/** The sampling parameters to send with each model request. */
+	/** When true, omit all sampling params so the provider uses its own defaults. */
+	useProviderDefaults: boolean;
+	/** The sampling parameters to send with each model request (ignored when useProviderDefaults is true). */
 	params: SamplingParams;
 }
 
@@ -42,6 +45,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				description:
 					"Automatically selects a preset from the live task phase and evidence.",
 				thinking: true,
+				useProviderDefaults: false,
 				// Adaptive is resolved before requests; these are safe fallback values.
 				params: {
 					temperature: 0.7,
@@ -54,12 +58,31 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 			},
 		],
 		[
+			"none",
+			{
+				label: "Provider",
+				description:
+					"Pass nothing — let the provider use its own defaults.",
+				thinking: false,
+				useProviderDefaults: true,
+				params: {
+					temperature: 0.7,
+					top_p: 0.8,
+					top_k: 20,
+					min_p: 0.0,
+					presence_penalty: 0.0,
+					repetition_penalty: 1.0,
+				},
+			},
+		],
+		[
 			"thinking-general",
 			{
 				label: "Think Gen",
 				description:
 					"General thinking — high creativity, strong diversity push.",
 				thinking: true,
+				useProviderDefaults: false,
 				params: {
 					temperature: 1.0,
 					top_p: 0.95,
@@ -76,6 +99,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				label: "Think Code",
 				description: "Precise coding — lower temperature, no presence penalty.",
 				thinking: true,
+				useProviderDefaults: false,
 				params: {
 					temperature: 0.6,
 					top_p: 0.95,
@@ -92,6 +116,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				label: "Instruct",
 				description: "Non-thinking general tasks — balanced sampling.",
 				thinking: false,
+				useProviderDefaults: false,
 				params: {
 					temperature: 0.7,
 					top_p: 0.8,
@@ -109,6 +134,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				description:
 					"Non-thinking reasoning — high temperature for exploration.",
 				thinking: false,
+				useProviderDefaults: false,
 				params: {
 					temperature: 1.0,
 					top_p: 0.95,
@@ -126,6 +152,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				description:
 					"Non-thinking coding — low temperature, no presence penalty for precise output.",
 				thinking: false,
+				useProviderDefaults: false,
 				params: {
 					temperature: 0.3,
 					top_p: 0.9,
@@ -143,6 +170,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				description:
 					"Deterministic — near-zero temperature for reproducible, factual outputs.",
 				thinking: false,
+				useProviderDefaults: false,
 				params: {
 					temperature: 0.0,
 					top_p: 0.0,
@@ -160,6 +188,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				description:
 					"High creativity — ultra-high temperature for brainstorming and ideation.",
 				thinking: false,
+				useProviderDefaults: false,
 				params: {
 					temperature: 1.3,
 					top_p: 0.99,
@@ -177,6 +206,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 				description:
 					"Careful analysis — low temperature, tight top_p for code review and comparison.",
 				thinking: false,
+				useProviderDefaults: false,
 				params: {
 					temperature: 0.2,
 					top_p: 0.7,
@@ -191,6 +221,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 
 const MODE_ORDER: InferenceMode[] = [
 	"auto",
+	"none",
 	"thinking-general",
 	"thinking-coding",
 	"instruct-general",

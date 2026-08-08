@@ -23,6 +23,7 @@ const VALID_QUEUE_MODES: ReadonlySet<QueueMode> = new Set([
 const VALID_TOOL_EXECUTION = new Set(["sequential", "parallel"]);
 const VALID_INFERENCE_MODES: ReadonlySet<InferenceMode> = new Set([
 	"auto",
+	"none",
 	"thinking-general",
 	"thinking-coding",
 	"instruct-general",
