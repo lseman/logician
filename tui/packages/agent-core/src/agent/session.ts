@@ -67,7 +67,7 @@ export interface ModelChangeSessionEntry {
 }
 
 export interface ThinkingLevelSessionEntry {
-	type: "thinking_level_change";
+	type: "thinking_level_changed";
 	id: string;
 	parentId?: string;
 	timestamp: number;
@@ -345,7 +345,7 @@ export class Session {
 
 	appendThinkingLevelChange(thinkingLevel: string): void {
 		this.appendEntry({
-			type: "thinking_level_change",
+			type: "thinking_level_changed",
 			id: randomUUID(),
 			timestamp: Date.now(),
 			thinkingLevel,
@@ -451,7 +451,7 @@ export class Session {
 			if (entry.type === "model_change") {
 				context.model = entry.model;
 				settings.set("model", entry.model);
-			} else if (entry.type === "thinking_level_change") {
+			} else if (entry.type === "thinking_level_changed") {
 				context.thinkingLevel = entry.thinkingLevel;
 				settings.set("thinking_level", entry.thinkingLevel);
 			} else if (entry.type === "settings_change") {

@@ -225,6 +225,17 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				label: "Model",
 				text: event.model,
 			};
+		case "message_end":
+			return {
+				type: "message_end",
+				turnId: event.turnId,
+				message: event.message,
+			} as ParsedBridgeEvent;
+		case "agent_settled":
+			return {
+				type: "agent_settled",
+				nextTurnCount: event.nextTurnCount,
+			} as ParsedBridgeEvent;
 		case "subagent_start":
 			return {
 				type: "subagent_lifecycle",

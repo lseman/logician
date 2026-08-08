@@ -1428,7 +1428,7 @@ export class AgentHarness {
 		const before = this.estimatePayloadTokens();
 
 		return this.runInPhase("compaction", "compact", async () => {
-			this.emitToSubscribers({ type: "compaction_start", reason: "manual" });
+			this.emitToSubscribers({ type: "compaction", reason: "manual" });
 			await this._extensionRunner?.emit({
 				type: "session_before_compact",
 				context: {
@@ -1446,11 +1446,10 @@ export class AgentHarness {
 			});
 			if (preResult?.cancel) {
 				this.emitToSubscribers({
-					type: "compaction_end",
+					type: "compaction",
 					reason: "manual",
 					tokensBefore: before,
 					tokensAfter: before,
-					changed: false,
 				});
 				return 0;
 			}
@@ -1466,11 +1465,10 @@ export class AgentHarness {
 			if (!result.changed) {
 				await this.emitPostCompact();
 				this.emitToSubscribers({
-					type: "compaction_end",
+					type: "compaction",
 					reason: "manual",
 					tokensBefore: before,
 					tokensAfter: before,
-					changed: false,
 				});
 				return 0;
 			}
@@ -1491,11 +1489,10 @@ export class AgentHarness {
 				},
 			});
 			this.emitToSubscribers({
-				type: "compaction_end",
+				type: "compaction",
 				reason: "manual",
 				tokensBefore: before,
 				tokensAfter: after,
-				changed: true,
 			});
 			return before - after;
 		});
@@ -1506,16 +1503,15 @@ export class AgentHarness {
 		if (!messages.length || !this.autoCompactionSettings.enabled) return false;
 
 		return this.runInPhase("compaction", "autoCompact", async () => {
-			this.emitToSubscribers({ type: "compaction_start", reason });
+			this.emitToSubscribers({ type: "compaction", reason });
 
 			if (!this.shouldCompact(messages)) {
 				await this.emitPostCompact();
 				this.emitToSubscribers({
-					type: "compaction_end",
+					type: "compaction",
 					reason,
 					tokensBefore: this.estimateContextTokens(),
 					tokensAfter: this.estimateContextTokens(),
-					changed: false,
 				});
 				return false;
 			}
@@ -1529,11 +1525,10 @@ export class AgentHarness {
 			if (preResult?.cancel) {
 				await this.emitPostCompact();
 				this.emitToSubscribers({
-					type: "compaction_end",
+					type: "compaction",
 					reason,
 					tokensBefore: before,
 					tokensAfter: before,
-					changed: false,
 				});
 				return false;
 			}
@@ -1560,11 +1555,10 @@ export class AgentHarness {
 			if (!result.changed) {
 				await this.emitPostCompact();
 				this.emitToSubscribers({
-					type: "compaction_end",
+					type: "compaction",
 					reason,
 					tokensBefore: before,
 					tokensAfter: before,
-					changed: false,
 				});
 				return false;
 			}
@@ -1586,11 +1580,10 @@ export class AgentHarness {
 				},
 			});
 			this.emitToSubscribers({
-				type: "compaction_end",
+				type: "compaction",
 				reason,
 				tokensBefore: before,
 				tokensAfter: after,
-				changed: true,
 			});
 			return true;
 		});
@@ -1723,13 +1716,19 @@ export class AgentHarness {
 	// ── Model & provider ──────────────────────────────────────────────────
 
 	setModel(model: string): void {
+		const oldModel = this.config.model;
 		const targetUrl = this.getModelUrl(model);
 		if (targetUrl !== this.config.baseUrl) {
 			this.config.baseUrl = targetUrl;
 		}
 		this.config.model = model;
 		this._session?.appendModelChange(model);
-		this.emitToSubscribers({ type: "model_update", model });
+		this.emitToSubscribers({
+			type: "model_cycle",
+			model: this.config.model,
+			fromModel: oldModel,
+			thinkingLevel: this.config.thinkingLevel,
+		});
 	}
 
 	setBackend(backend: LLMBackend): void {

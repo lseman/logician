@@ -47,7 +47,10 @@ export type BridgeEventType =
 	// Media
 	| "image"
 	// Session lifecycle
-	| "session_delete";
+	| "session_delete"
+	| "message_end"
+	| "agent_settled"
+	| "model_select";
 
 export interface MemoryUpdateEvent {
 	type: "memory_update";
@@ -82,6 +85,12 @@ export interface MessageStartEvent {
 	type: "message_start";
 	turnId: string;
 	role: string;
+}
+
+export interface MessageEndEvent {
+	type: "message_end";
+	turnId: string;
+	message?: { role: string; content: string };
 }
 
 export interface TextStartEvent {
@@ -180,8 +189,8 @@ export interface ContextUpdateEvent {
 export interface CompactionEvent {
 	type: "compaction";
 	reason: string;
-	tokens_before: number;
-	tokens_after: number;
+	tokens_before?: number;
+	tokens_after?: number;
 }
 
 export interface GuardrailEvent {
@@ -262,6 +271,11 @@ export interface AgentEndEvent {
 	};
 }
 
+export interface AgentSettledEvent {
+	type: "agent_settled";
+	nextTurnCount?: number;
+}
+
 // Retry / error observability
 export interface AgentRetryStartEvent {
 	type: "agent_retry_start";
@@ -269,14 +283,14 @@ export interface AgentRetryStartEvent {
 	maxRetries: number;
 	delayMs: number;
 	error: string;
-	reason: "compaction" | "error" | "overflow" | "rate_limit";
+	reason?: "compaction" | "error" | "overflow" | "rate_limit";
 }
 
 export interface AgentRetryEndEvent {
 	type: "agent_retry_end";
 	attempt: number;
 	success: boolean;
-	reason: "compaction" | "error" | "overflow" | "rate_limit";
+	reason?: "compaction" | "error" | "overflow" | "rate_limit";
 }
 
 export interface AgentErrorEvent {
@@ -390,6 +404,7 @@ export interface SavePointEvent {
 export type ParsedBridgeEvent =
 	| AgentStartEvent
 	| AgentEndEvent
+	| AgentSettledEvent
 	| TokenEvent
 	| ThinkingTokenEvent
 	| TextStartEvent
@@ -401,6 +416,7 @@ export type ParsedBridgeEvent =
 	| ToolUpdateEvent
 	| ToolEndEvent
 	| MessageStartEvent
+	| MessageEndEvent
 	| QueueUpdateEvent
 	| PhaseEvent
 	| DecisionEvent

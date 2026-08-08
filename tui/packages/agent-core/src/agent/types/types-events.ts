@@ -68,22 +68,11 @@ export type AgentEventBody =
 	  }
 	| {
 			type: "compaction";
-			reason: "context_full" | "manual";
-			tokensBefore: number;
-			tokensAfter: number;
+			reason: "manual" | "context_full" | "auto" | "overflow" | "threshold";
+			tokensBefore?: number;
+			tokensAfter?: number;
 	  }
-	| {
-			type: "compaction_start";
-			reason: "manual" | "auto" | "threshold" | "overflow";
-	  }
-	| {
-			type: "compaction_end";
-			reason: "manual" | "auto" | "threshold" | "overflow";
-			tokensBefore: number;
-			tokensAfter: number;
-			changed: boolean;
-			errorMessage?: string;
-	  }
+
 	| { type: "thinking_delta"; turnId?: string; delta: string }
 	| {
 			type: "tool_call_start";
@@ -185,12 +174,11 @@ export type AgentEventBody =
 	  }
 	| { type: "budget_exhausted"; usedTokens: number; limitTokens: number }
 	| { type: "error"; message: string; error?: unknown }
-	| { type: "model_update"; model: string }
 	| {
 			type: "model_cycle";
 			model: string;
 			fromModel: string;
-			thinkingLevel: string;
+			thinkingLevel?: string;
 	  }
 	| { type: "thinking_level_changed"; level: string }
 	| { type: "thinking_level_clamped"; level: string; reason: string }
@@ -265,10 +253,6 @@ export type AgentEventBody =
 			issues: string[];
 	  }
 	// Session tree entries
-	| {
-			type: "thinking_level_change";
-			thinkingLevel: string;
-	  }
 	| {
 			type: "model_change";
 			provider: string;
