@@ -40,12 +40,12 @@ sequenceDiagram
 | Stage | Description | Hook points |
 |---|---|---|
 | 1. Input | Receive user instruction | — |
-| 2. Context | Load skills, tools, context files | `beforeLLMRequest` |
-| 3. Prompt | Build system prompt with tools | — |
-| 4. Request | Call LLM with streaming | `beforeLLMRequest` |
-| 5. Parse | Extract tool calls from response | `afterLLMResponse` |
+| 2. Context | Load skills, tools, context files | `beforeAgentStart`, `transformContext` |
+| 3. Prompt | Build system prompt with tools | `beforeProviderRequest`, `beforeProviderPayload` |
+| 4. Request | Call LLM with streaming | — |
+| 5. Parse | Extract tool calls from response | `afterProviderResponse` |
 | 6. Execute | Run tool calls | `beforeToolCall`, `afterToolCall` |
-| 7. Repeat | Feed results back to LLM | — |
+| 7. Repeat | Feed results back to LLM | `prepareNextTurn`, `shouldStopAfterTurn` |
 | 8. Output | Render final response | — |
 
 ## Error handling

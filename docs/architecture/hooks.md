@@ -5,103 +5,256 @@ description: Lifecycle hooks — when they fire, what they receive, and how to u
 
 # Hook System
 
-The hook system provides lifecycle callbacks at key points in the agent loop. Plugins register hooks to observe or modify behavior.
+The hook system provides lifecycle callbacks at key points in the agent loop. Hooks are registered on the `HookBus` and can observe, modify, or short-circuit agent behavior.
 
-## Hook types
+## Hook lifecycle
 
 ```mermaid
 graph TD
-    A[User Input] --> B[beforeLLMRequest]
-    B --> C[Build Prompt]
-    C --> D[LLM Request]
-    D --> E[afterLLMResponse]
-    E --> F{Tool calls?}
-    F -->|Yes| G[beforeToolCall]
-    G --> H[Execute Tool]
-    H --> I[afterToolCall]
-    I --> J[Parse Result]
-    J --> D
-    F -->|No| K[Final Response]
-    K --> L[afterSessionSave]
+    A[User Input] --> B[beforeAgentStart]
+    B --> C[Transform Context]
+    C --> D[beforeProviderRequest]
+    D --> E[LLM Request]
+    E --> F[afterProviderResponse]
+    F --> G{Tool calls?}
+    G -->|Yes| H[beforeToolCall]
+    H --> I[Execute Tool]
+    I --> J[afterToolCall]
+    J --> K[prepareNextTurn]
+    K --> L{More work?}
+    L -->|Yes| D
+    L -->|No| M[shouldStopAfterTurn]
+    M --> N[End]
+    C --> O[beforeCompact]
+    O --> P[Compact]
 ```
 
-## Hook signatures
+## Available hooks
 
-### beforeLLMRequest
+### beforeAgentStart
 
 ```typescript
-type BeforeLLMRequestHook = (ctx: {
-  messages: Message[]
-  tools: Tool[]
-  config: Config
-}) => void | Promise<void>
+interface BeforeAgentStartContext {
+  prompt: string
+  systemPrompt: string
+  messages: AgentMessage[]
+}
+
+interface BeforeAgentStartResult {
+  messages?: AgentMessage[]
+  systemPrompt?: string
+}
 ```
 
-Fired before the LLM is called. Use to:
-- Log requests
-- Modify messages
-- Add system prompts dynamically
-
-### afterLLMResponse
-
-```typescript
-type AfterLLMResponseHook = (ctx: {
-  response: LLMResponse
-  toolCalls: ToolCall[]
-}) => void | Promise<void>
-```
-
-Fired after the LLM returns. Use to:
-- Log responses
-- Parse and validate tool calls
-- Trigger alerts on specific patterns
+Fired before the agent starts processing. Use to:
+- Modify the system prompt dynamically
+- Prepend or append messages
+- Inject context from external sources
 
 ### beforeToolCall
 
 ```typescript
-type BeforeToolCallHook = (ctx: {
-  toolName: string
+interface BeforeToolCallContext {
+  toolCall: ToolCall
   args: Record<string, unknown>
-}) => void | Promise<void>
+  iteration: number
+}
+
+interface BeforeToolCallResult {
+  content?: string          // Short-circuit with content
+  isError?: boolean         // Treat as error
+  args?: Record<string, unknown>  // Rewrite arguments
+}
 ```
 
 Fired before a tool executes. Use to:
 - Log tool invocations
-- Validate arguments
-- Implement custom access control
+- Validate or rewrite arguments
+- Short-circuit execution (return `{ content }` or `{ isError }`)
 
 ### afterToolCall
 
 ```typescript
-type AfterToolCallHook = (ctx: {
-  toolName: string
-  result: unknown
-  error?: Error
-}) => void | Promise<void>
+interface AfterToolCallContext {
+  toolCall: ToolCall
+  args: Record<string, unknown>
+  result: string
+  isError: boolean
+  iteration: number
+}
+
+interface AfterToolCallResult {
+  content?: string    // Override result
+  isError?: boolean   // Mark as error
+  terminate?: boolean // Stop the loop
+}
 ```
 
 Fired after tool completion. Use to:
 - Log results
-- Handle errors
-- Trigger side effects
+- Handle or transform errors
+- Terminate the loop on specific conditions
 
-### beforeSessionSave / afterSessionSave
+### prepareNextTurn
 
 ```typescript
-type BeforeSessionSaveHook = (ctx: {
-  sessionId: string
+interface PrepareNextTurnContext {
   messages: Message[]
-}) => void | Promise<void>
+  iteration: number
+  hadToolCalls: boolean
+}
 
-type AfterSessionSaveHook = (ctx: {
-  sessionId: string
-}) => void | Promise<void>
+interface PrepareNextTurnResult {
+  messages: Message[]  // Return modified messages
+}
 ```
 
-Fired around session persistence. Use to:
-- Backup sessions
-- Sync to remote storage
-- Export to external systems
+Fired before preparing the next turn. Use to:
+- Transform messages before sending to the provider
+- Inject context or instructions
+- Remove or modify conversation history
+
+### transformContext
+
+```typescript
+interface TransformContext {
+  messages: AgentMessage[]
+  iteration: number
+  signal?: AbortSignal
+  taskState?: ExplicitTaskState  // Live structured task state
+}
+
+interface TransformContextResult {
+  messages: AgentMessage[]
+}
+```
+
+Fired during context assembly. Use to:
+- Modify messages based on task state
+- Abort transformation via signal
+- Apply task-aware context shaping
+
+### beforeProviderRequest
+
+```typescript
+interface BeforeProviderRequestContext {
+  model: string
+  sessionId: string
+  iteration: number
+  streamOptions: AgentHarnessStreamOptions
+}
+
+interface BeforeProviderRequestResult {
+  headers?: Record<string, string | undefined>  // Header patch
+  timeoutMs?: number                            // Timeout override
+  maxRetries?: number                           // Retry override
+  cacheRetention?: string                       // Cache hint
+  metadata?: Record<string, unknown>            // Additional headers
+  transport?: string                            // Provider metadata
+}
+```
+
+Fired before sending a request to the LLM provider. Use to:
+- Add custom headers
+- Override timeout or retry settings
+- Inject provider metadata
+
+### beforeProviderPayload
+
+```typescript
+interface BeforeProviderPayloadContext {
+  model: string
+  payload: Record<string, unknown>
+}
+
+interface BeforeProviderPayloadResult {
+  payload: Record<string, unknown>
+}
+```
+
+Fired before sending the request payload. Use to:
+- Modify the payload structure
+- Add or remove fields
+- Inject provider-specific options
+
+### afterProviderResponse
+
+```typescript
+interface AfterProviderResponseContext {
+  model: string
+  content: string
+  toolCallCount: number
+  stopReason: StopReason
+  usageTokens?: number
+  iteration: number
+}
+```
+
+Fired after receiving a response from the LLM provider. Use to:
+- Log responses
+- Track token usage
+- Trigger alerts on specific patterns
+
+### shouldStopAfterTurn
+
+```typescript
+interface ShouldStopAfterTurnContext {
+  messages: Message[]
+  iteration: number
+  hadToolCalls: boolean
+}
+```
+
+Fired after each turn. Use to:
+- Implement custom termination conditions
+- Stop the loop based on message content
+
+### getSteeringMessages
+
+```typescript
+interface GetSteeringMessagesContext {
+  messages: Message[]
+  iteration: number
+}
+```
+
+Fired when building steering messages. Use to:
+- Inject steering context
+- Modify steering behavior
+
+### getFollowUpMessages
+
+```typescript
+interface GetFollowUpMessagesContext {
+  messages: Message[]
+  iteration: number
+  assistantText: string
+  stopReason?: StopReason
+}
+```
+
+Fired when building follow-up messages. Use to:
+- Inject follow-up context
+- Modify follow-up behavior
+
+### beforeCompact
+
+```typescript
+interface BeforeCompactContext {
+  messages: Message[]
+  tokensBefore: number
+  reason: "manual" | "auto"
+}
+
+interface BeforeCompactResult {
+  cancel?: boolean     // Skip compaction
+  summary?: string     // Pre-built summary
+}
+```
+
+Fired before compaction. Use to:
+- Skip compaction entirely
+- Provide a pre-built summary
 
 ## Writing a hook
 
@@ -110,18 +263,18 @@ Fired around session persistence. Use to:
 export default {
   name: 'logging',
   hooks: {
-    beforeToolCall({ toolName, args }) {
-      console.log(`[log] ${toolName}(${JSON.stringify(args)})`)
+    beforeToolCall({ toolCall, args, iteration }) {
+      console.log(`[log] ${toolCall.name}(${JSON.stringify(args)})`)
     },
-    afterToolCall({ toolName, result, error }) {
-      if (error) {
-        console.error(`[log] ${toolName} failed: ${error.message}`)
+    afterToolCall({ toolCall, result, isError }) {
+      if (isError) {
+        console.error(`[log] ${toolCall.name} failed: ${result}`)
       }
     },
   },
 }
 ```
 
-## Hook priority
+## Hook execution order
 
-Hooks execute in registration order. No priority system — order matters.
+Hooks execute in registration order within each event type. Each hook can return a result that modifies behavior (e.g., short-circuiting tool execution, overriding results).

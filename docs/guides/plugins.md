@@ -27,15 +27,20 @@ stateDiagram-v2
 
 ## Available hooks
 
-| Hook | When it runs | Parameters |
+| Hook | When it runs | Key parameters |
 |---|---|---|
-| `beforeLLMRequest` | Before calling the LLM | `{ messages, tools, config }` |
-| `afterLLMResponse` | After LLM returns | `{ response, toolCalls }` |
-| `beforeToolCall` | Before executing a tool | `{ toolName, args }` |
-| `afterToolCall` | After tool completes | `{ toolName, result, error }` |
-| `beforeSessionSave` | Before persisting session | `{ sessionId, messages }` |
-| `afterSessionSave` | After session persisted | `{ sessionId }` |
-| `onError` | On any error | `{ error, context }` |
+| `beforeAgentStart` | Before agent starts | `{ prompt, systemPrompt, messages }` |
+| `transformContext` | During context assembly | `{ messages, taskState }` |
+| `beforeProviderRequest` | Before LLM request | `{ model, sessionId, streamOptions }` |
+| `beforeProviderPayload` | Before request payload | `{ model, payload }` |
+| `afterProviderResponse` | After LLM response | `{ model, content, toolCallCount, stopReason }` |
+| `beforeToolCall` | Before tool executes | `{ toolCall, args, iteration }` |
+| `afterToolCall` | After tool completes | `{ toolCall, result, isError, iteration }` |
+| `prepareNextTurn` | Before next turn | `{ messages, iteration, hadToolCalls }` |
+| `shouldStopAfterTurn` | After each turn | `{ messages, iteration, hadToolCalls }` |
+| `beforeCompact` | Before compaction | `{ messages, tokensBefore, reason }` |
+| `getSteeringMessages` | Building steering | `{ messages, iteration }` |
+| `getFollowUpMessages` | Building follow-up | `{ messages, iteration, assistantText }` |
 
 ## Writing a plugin
 
