@@ -81,4 +81,7 @@ Untitled-*
 .codex
 .claude/
 
+# ── Planning docs (local scratch) ───────────────────────
+.planning/
+
 .cache/
