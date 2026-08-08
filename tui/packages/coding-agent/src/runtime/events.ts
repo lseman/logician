@@ -246,6 +246,22 @@ export interface ModelSelectEvent {
 	model: string;
 }
 
+// Agent lifecycle
+export interface AgentStartEvent {
+	type: "agent_start";
+	iteration?: number;
+}
+
+export interface AgentEndEvent {
+	type: "agent_end";
+	messages?: Array<{ role: string; content: string }>;
+	outcome?: {
+		status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
+		summary?: string;
+		source: "structured" | "heuristic" | "runtime";
+	};
+}
+
 // Retry / error observability
 export interface AgentRetryStartEvent {
 	type: "agent_retry_start";
@@ -372,6 +388,8 @@ export interface SavePointEvent {
 }
 
 export type ParsedBridgeEvent =
+	| AgentStartEvent
+	| AgentEndEvent
 	| TokenEvent
 	| ThinkingTokenEvent
 	| TextStartEvent
