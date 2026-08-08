@@ -62,6 +62,7 @@ import {
 	NotificationCenter,
 	type NotificationLevel,
 } from "../status/notification-center.ts";
+import { ResearchWidget } from "../status/research-widget.ts";
 import { StatusBar } from "../status/status-bar.ts";
 import { SteerQueue } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
@@ -124,6 +125,7 @@ export class LogicianTUI {
 	statusPanel: StatusBar;
 	todoBar: TodoBar;
 	workSurface: WorkSurface;
+	researchWidget: ResearchWidget;
 	notifications: NotificationCenter;
 	steerQueue: SteerQueue;
 	inputBar: InputBar;
@@ -239,6 +241,7 @@ export class LogicianTUI {
 		// pi-autoresearch's session_start hook, since this app has one
 		// AutoresearchSession per process rather than per pi-session.
 		this.researchManager.reload();
+		this.researchWidget = new ResearchWidget(this.researchManager);
 		this.bridge = new AgentCoreBridge({
 			...runtimeConfig.bridge,
 			extraTools: [
@@ -480,6 +483,7 @@ export class LogicianTUI {
 		pinnedContainer.addChild(this.notifications);
 		pinnedContainer.addChild(this.todoBar);
 		pinnedContainer.addChild(this.workSurface);
+		pinnedContainer.addChild(this.researchWidget);
 		pinnedContainer.addChild(this.steerQueue);
 
 		// Interactive pickers join the fixed composer stack. They consume layout

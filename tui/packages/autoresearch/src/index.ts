@@ -30,6 +30,21 @@ export interface AutoresearchResult {
 export type NotifyLevel = "info" | "warning" | "error";
 export type NotifyFn = (message: string, level?: NotifyLevel) => void;
 
+/** Render-ready snapshot for a persistent status widget — see
+ * AutoresearchSession.getWidgetSummary(). */
+export interface AutoresearchWidgetSummary {
+	active: boolean;
+	name: string | null;
+	metricName: string;
+	metricUnit: string;
+	bestMetric: number | null;
+	bestDirection: "lower" | "higher";
+	runCount: number;
+	confidence: number | null;
+	running: { command: string; elapsedMs: number } | null;
+	maxExperiments: number | null;
+}
+
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -243,7 +258,7 @@ function _clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
 }
 
-function formatNum(value: number | null, unit: string): string {
+export function formatNum(value: number | null, unit: string): string {
 	if (value === null) return "—";
 	const u = unit || "";
 	if (value === Math.round(value)) {
@@ -850,6 +865,36 @@ export class AutoresearchSession {
 
 	getRuntime(): Readonly<AutoresearchRuntime> {
 		return this.runtime;
+	}
+
+	/**
+	 * Compact, render-ready snapshot for a persistent status widget. Returns
+	 * null when there's nothing worth showing (mode off and no results yet),
+	 * so the widget can render zero lines rather than an empty-state message.
+	 */
+	getWidgetSummary(): AutoresearchWidgetSummary | null {
+		const state = this.runtime.state;
+		if (!this.runtime.autoresearchMode && state.results.length === 0) {
+			return null;
+		}
+		const runCount = currentResults(state.results, state.currentSegment).length;
+		return {
+			active: this.runtime.autoresearchMode,
+			name: state.name,
+			metricName: state.metricName,
+			metricUnit: state.metricUnit,
+			bestMetric: state.bestMetric,
+			bestDirection: state.bestDirection,
+			runCount,
+			confidence: state.confidence,
+			running: this.runtime.runningExperiment
+				? {
+						command: this.runtime.runningExperiment.command,
+						elapsedMs: Date.now() - this.runtime.runningExperiment.startedAt,
+					}
+				: null,
+			maxExperiments: state.maxExperiments,
+		};
 	}
 
 	onAgentStart(): void {
