@@ -131,7 +131,7 @@ export class OutputGuard {
 			}
 			this.retryCount = 0;
 			this.emitEvent({
-				type: "auto_retry_start",
+				type: "agent_retry_start",
 				attempt: 1,
 				maxRetries: 1,
 				delayMs: 0,
@@ -180,7 +180,7 @@ export class OutputGuard {
 					this.consecutiveCompactions > this.config.maxConsecutiveCompactions
 				) {
 					this.emitEvent({
-						type: "auto_retry_end",
+						type: "agent_retry_end",
 						attempt: this.consecutiveCompactions,
 						success: false,
 					});
@@ -193,7 +193,7 @@ export class OutputGuard {
 					};
 				}
 				this.emitEvent({
-					type: "auto_retry_start",
+					type: "agent_retry_start",
 					attempt: 1,
 					maxRetries: 1,
 					delayMs: 0,
@@ -228,7 +228,7 @@ export class OutputGuard {
 			this.consecutiveCompactions++;
 			if (this.consecutiveCompactions > this.config.maxConsecutiveCompactions) {
 				this.emitEvent({
-					type: "auto_retry_end",
+					type: "agent_retry_end",
 					attempt: this.consecutiveCompactions,
 					success: false,
 				});
@@ -241,7 +241,7 @@ export class OutputGuard {
 				};
 			}
 			this.emitEvent({
-				type: "auto_retry_start",
+				type: "agent_retry_start",
 				attempt: 1,
 				maxRetries: 1,
 				delayMs: 0,
@@ -262,7 +262,7 @@ export class OutputGuard {
 			this.retryCount++;
 			const delay = this.computeRetryDelay(backendErr);
 			this.emitEvent({
-				type: "auto_retry_start",
+				type: "agent_retry_start",
 				attempt: this.retryCount,
 				maxRetries: this.config.maxRetries,
 				delayMs: delay,
@@ -281,7 +281,7 @@ export class OutputGuard {
 		// Non-retryable or exhausted retries
 		if (backendErr?.retryable && this.retryCount >= this.config.maxRetries) {
 			this.emitEvent({
-				type: "auto_retry_end",
+				type: "agent_retry_end",
 				attempt: this.retryCount,
 				success: false,
 			});
@@ -307,7 +307,7 @@ export class OutputGuard {
 
 		// Final fallback
 		this.emitEvent({
-			type: "auto_retry_end",
+			type: "agent_retry_end",
 			attempt: this.retryCount,
 			success: false,
 		});

@@ -404,7 +404,7 @@ export class ExtensionRunner {
 		const hooks: AgentHooks = {};
 
 		hooks.beforeToolCall = async ({ toolCall, args }) => {
-			// Use typed event name: tool_execution_start (maps to tool_call in legacy)
+			// Use typed event name: tool_execution_start 
 			const event: ExtensionEvent = {
 				type: "tool_execution_start",
 				context: {
@@ -437,7 +437,7 @@ export class ExtensionRunner {
 		};
 
 		hooks.afterToolCall = async ({ toolCall, result, isError }) => {
-			// Use typed event name: tool_execution_end (maps to tool_result in legacy)
+			// Use typed event name: tool_execution_end 
 			const event: ExtensionEvent = {
 				type: "tool_execution_end",
 				context: {

@@ -612,7 +612,7 @@ async function runAgentLoopInTaskScope(
 					await Promise.all(providerEvents);
 					if (activeRetryAttempt > 0) {
 						await emit({
-							type: "auto_retry_end",
+							type: "agent_retry_end",
 							attempt: activeRetryAttempt,
 							success: true,
 						});
@@ -649,7 +649,7 @@ async function runAgentLoopInTaskScope(
 						});
 						if (!cancelled && activeRetryAttempt > 0) {
 							await emit({
-								type: "auto_retry_end",
+								type: "agent_retry_end",
 								attempt: guardResult?.attempt ?? activeRetryAttempt,
 								success: false,
 							});
@@ -663,7 +663,7 @@ async function runAgentLoopInTaskScope(
 
 					activeRetryAttempt = guardResult.attempt ?? activeRetryAttempt + 1;
 					await emit({
-						type: "auto_retry_start",
+						type: "agent_retry_start",
 						attempt: activeRetryAttempt,
 						maxRetries: guardResult.maxRetries ?? 3,
 						delayMs: guardResult.retryDelayMs ?? 0,
@@ -682,7 +682,7 @@ async function runAgentLoopInTaskScope(
 						);
 						if (!compacted.changed) {
 							await emit({
-								type: "auto_retry_end",
+								type: "agent_retry_end",
 								attempt: activeRetryAttempt,
 								success: false,
 							});

@@ -64,7 +64,7 @@ export interface AgentRetryStartEvent {
 	maxRetries: number;
 	delayMs: number;
 	error: string;
-	reason: "compaction" | "error" | "overflow" | "rate_limit";
+	reason?: "compaction" | "error" | "overflow" | "rate_limit";
 }
 
 export type AgentRetryStartResult = {};
@@ -74,52 +74,11 @@ export interface AgentRetryEndEvent {
 	type: "agent_retry_end";
 	attempt: number;
 	success: boolean;
-	reason: "compaction" | "error" | "overflow" | "rate_limit";
+	reason?: "compaction" | "error" | "overflow" | "rate_limit";
 }
 
 export type AgentRetryEndResult = {};
 
-// ============================================================================
-// Tool events
-// ============================================================================
-
-/** Fired before a tool executes — extensions can block or modify args */
-export interface ToolCallEvent {
-	type: "tool_call";
-	toolCallId: string;
-	toolName: string;
-	input: Record<string, unknown>;
-}
-
-export interface ToolCallResult {
-	/** Return { block: true, reason } to block execution */
-	block?: boolean;
-	reason?: string;
-	/** Return { terminate: true } to hint the agent should stop after this batch */
-	terminate?: boolean;
-}
-
-/** Fired after a tool finishes — extensions can modify the result */
-export interface ToolResultEvent {
-	type: "tool_result";
-	toolCallId: string;
-	toolName: string;
-	input: Record<string, unknown>;
-	content: Array<{ type: string; text: string }>;
-	details?: Record<string, unknown>;
-	isError: boolean;
-	usage?: Record<string, unknown>;
-}
-
-export interface ToolResultResult {
-	/** Modify the result content */
-	content?: Array<{ type: string; text: string }>;
-	details?: Record<string, unknown>;
-	isError?: boolean;
-	usage?: Record<string, unknown>;
-}
-
-// ============================================================================
 // Turn events
 // ============================================================================
 
@@ -366,12 +325,12 @@ export type ModelSelectResult = {};
 
 /** Fired when the thinking level changes */
 export interface ThinkingLevelSelectEvent {
-	type: "thinking_level_select";
+	type: "thinking_level_changed";
 	level: string;
 	previousLevel?: string;
 }
 
-export type ThinkingLevelSelectResult = {};
+export type ThinkingLevelChangedResult = {};
 
 // ============================================================================
 // Provider events
@@ -420,8 +379,6 @@ export type ExtensionEvent =
 	| AgentErrorEvent
 	| AgentRetryStartEvent
 	| AgentRetryEndEvent
-	| ToolCallEvent
-	| ToolResultEvent
 	| TurnStartEvent
 	| TurnEndEvent
 	| MessageStartEvent
@@ -462,11 +419,7 @@ export type ExtensionEventResult<T extends ExtensionEventName> =
 							? AgentRetryStartResult | undefined
 							: T extends "agent_retry_end"
 								? AgentRetryEndResult | undefined
-								: T extends "tool_call"
-									? ToolCallResult | undefined
-									: T extends "tool_result"
-										? ToolResultResult | undefined
-										: T extends "turn_start"
+								: T extends "turn_start"
 											? TurnStartResult | undefined
 											: T extends "turn_end"
 												? TurnEndResult | undefined
@@ -502,8 +455,8 @@ export type ExtensionEventResult<T extends ExtensionEventName> =
 																										? SessionDeleteResult | undefined
 																										: T extends "model_select"
 																											? ModelSelectResult | undefined
-																											: T extends "thinking_level_select"
-																												? ThinkingLevelSelectResult | undefined
+																											: T extends "thinking_level_changed"
+																												? ThinkingLevelChangedResult | undefined
 																												: T extends "before_provider_request"
 																													? BeforeProviderRequestResult | undefined
 																													: T extends "after_provider_response"

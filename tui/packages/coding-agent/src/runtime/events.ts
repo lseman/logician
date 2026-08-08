@@ -31,7 +31,6 @@ export type BridgeEventType =
 	| "tool_execution_update"
 	| "tool_execution_end"
 	// Steering
-	| "queue_update"
 	// Guardrail/repair
 	| "guardrail_nudge"
 	| "repair_nudge"

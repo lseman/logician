@@ -108,7 +108,7 @@ export function reduceRuntimeState(
 					id => id !== event.toolCallId,
 				),
 			};
-		case "auto_retry_start":
+		case "agent_retry_start":
 			return {
 				...current,
 				retry: {
@@ -117,7 +117,7 @@ export function reduceRuntimeState(
 					delayMs: event.delayMs,
 				},
 			};
-		case "auto_retry_end":
+		case "agent_retry_end":
 			return { ...current, retry: undefined };
 		case "error":
 			return { ...current, lastError: event.message };

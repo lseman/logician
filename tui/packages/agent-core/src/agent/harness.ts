@@ -449,7 +449,7 @@ export class AgentHarness {
 				this._runResolve = undefined;
 				const nextTurnCount = this._nextTurnQueue.length;
 				this.onSettled?.(nextTurnCount);
-				this.emitToSubscribers({ type: "settled", nextTurnCount });
+				this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 			}
 		});
 	}
@@ -569,7 +569,7 @@ export class AgentHarness {
 				this._runResolve = undefined;
 				const nextTurnCount = this._nextTurnQueue.length;
 				this.onSettled?.(nextTurnCount);
-				this.emitToSubscribers({ type: "settled", nextTurnCount });
+				this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 			}
 		});
 	}
@@ -903,8 +903,8 @@ export class AgentHarness {
 			},
 			onEvent: event => {
 				if (
-					event.type === "auto_retry_start" ||
-					event.type === "auto_retry_end" ||
+					event.type === "agent_retry_start" ||
+					event.type === "agent_retry_end" ||
 					event.type === "error" ||
 					event.type === "context_update"
 				) {

@@ -402,7 +402,7 @@ void test("provider retry stays within one iteration and ends only after success
 	assert.equal(backend.calls, 2);
 	assert.equal(messages.at(-1)?.content, "recovered");
 	assert.equal(events.filter(event => event.type === "turn_start").length, 1);
-	const retryEnds = events.filter(event => event.type === "auto_retry_end");
+	const retryEnds = events.filter(event => event.type === "agent_retry_end");
 	assert.deepEqual(
 		retryEnds.map(event => event.success),
 		[true],
@@ -470,12 +470,12 @@ void test("aborting retry backoff prevents another provider request", async () =
 		},
 		event => {
 			events.push(event);
-			if (event.type === "auto_retry_start") controller.abort();
+			if (event.type === "agent_retry_start") controller.abort();
 		},
 	);
 	assert.equal(backend.calls, 1);
 	assert.equal(
-		events.some(event => event.type === "auto_retry_end"),
+		events.some(event => event.type === "agent_retry_end"),
 		false,
 	);
 });
@@ -506,7 +506,7 @@ void test("aborting an in-flight provider request does not emit a fake retry", a
 	assert.equal(
 		events.some(
 			event =>
-				event.type === "auto_retry_start" || event.type === "auto_retry_end",
+				event.type === "agent_retry_start" || event.type === "agent_retry_end",
 		),
 		false,
 	);
@@ -542,8 +542,8 @@ void test("steering interruption suppresses provider errors and retries", async 
 		events.some(
 			event =>
 				event.type === "error" ||
-				event.type === "auto_retry_start" ||
-				event.type === "auto_retry_end",
+				event.type === "agent_retry_start" ||
+				event.type === "agent_retry_end",
 		),
 		false,
 	);

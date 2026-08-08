@@ -184,7 +184,7 @@ describe("PiAdapter", () => {
 		const piApi = adapter.getApi();
 
 		let receivedEvent: any = null;
-		piApi.on("tool_call", async (event, _ctx) => {
+		piApi.on("tool_execution_start", async (event, _ctx) => {
 			receivedEvent = event;
 			if (event.toolName === "bash" && (event.input as any).command?.includes("rm -rf")) {
 				return { block: true, reason: "Dangerous command" };
@@ -192,7 +192,7 @@ describe("PiAdapter", () => {
 		});
 
 		await adapter.emitFromLogician({
-			type: "tool_call",
+			type: "tool_execution_start",
 			context: {
 				sessionId: "test",
 				cwd: "/test",
@@ -203,7 +203,7 @@ describe("PiAdapter", () => {
 		});
 
 		expect(receivedEvent).not.toBeNull();
-		expect(receivedEvent.type).toBe("tool_call");
+		expect(receivedEvent.type).toBe("tool_execution_start");
 		expect(receivedEvent.toolName).toBe("bash");
 	});
 

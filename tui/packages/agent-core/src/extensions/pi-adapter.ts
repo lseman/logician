@@ -64,7 +64,7 @@
 //   session_info_changed, session_before_switch, session_before_fork,
 //   session_before_tree, session_tree,
 //   before_provider_request, before_provider_headers, after_provider_response,
-//   agent_settled, tool_execution_update, model_select, thinking_level_select
+//   agent_settled, tool_execution_update, model_select, thinking_level_changed
 //
 // No-op (UI features not supported in Logician):
 //   registerShortcut, registerMessageRenderer, registerMarkdownTransformer,
@@ -307,9 +307,7 @@ type PiEventType =
 	| "tool_execution_update"
 	| "tool_execution_end"
 	| "model_select"
-	| "thinking_level_select"
-	| "tool_call"
-	| "tool_result"
+	| "thinking_level_changed"
 	| "user_bash"
 	| "input"
 	// Retry / error observability
@@ -322,9 +320,8 @@ type PiEventType =
 /**
  * Map a Pi event type to a Logician event type.
  * Returns null if there's no equivalent.
- * Note: Some Pi events (tool_call, tool_result, agent_retry_*, agent_error)
- * are handled specially in translateLogicianToPi — they map from Logician
- * events that don't exist in Pi's event set.
+ * Note: Some Pi events (agent_retry_*, agent_error)
+ * are handled specially — they map from Logician events that don't exist in Pi's event set.
  */
 function mapToLogician(type: PiEventType): LEventType | null {
 	const mapping: Record<PiEventType, LEventType | null> = {
@@ -356,9 +353,7 @@ function mapToLogician(type: PiEventType): LEventType | null {
 		tool_execution_update: null, // not emitted by Logician
 		tool_execution_end: "tool_execution_end",
 		model_select: null, // not emitted by Logician
-		thinking_level_select: null, // not emitted by Logician
-		tool_call: "tool_execution_start", // maps to tool_call_start in legacy
-		tool_result: "tool_execution_end", // maps to tool_result in legacy
+		thinking_level_changed: null, // not emitted by Logician
 		user_bash: null, // N/A (handler)
 		input: null, // N/A (handler)
 		agent_retry_start: "agent_retry_start",
@@ -927,10 +922,10 @@ export class PiAdapter {
 	 * tool_execution_update     │ ─                   │ Not emitted
 	 * tool_execution_end        │ tool_call_end       │ toolCallId, toolName, result, isError
 	 * model_select              │ ─                   │ Not emitted
-	 * thinking_level_select     │ ─                   │ Not emitted
-	 * tool_call                 │ before_tool_call    │ toolCallId, toolName, input
+	 * thinking_level_changed     │ ─                   │ Not emitted
+	 * tool_call                 │ tool_execution_start  │ toolCallId, toolName, input
 	 *                           │                     │ (mutable) + block/terminate
-	 * tool_result               │ after_tool_call     │ toolCallId, toolName, input,
+	 * tool_result               │ tool_execution_end    │ toolCallId, toolName, input,
 	 *                           │                     │ content[], details, isError, usage
 	 *                           │                     │ (+ result→modify)
 	 * user_bash                 │ ─                   │ N/A (handler)
@@ -1091,30 +1086,6 @@ export class PiAdapter {
 					sessionFile: (event.context as any).sessionFile,
 					sessionId: (event.context as any).sessionId,
 				};
-			case "tool_call": {
-				// Pi's ToolCallEvent: toolCallId, toolName, input (mutable)
-				const ctx = event.context as any;
-				return {
-					type: "tool_call",
-					toolCallId: ctx.toolCallId,
-					toolName: ctx.tool_name ?? ctx.toolName,
-					input: ctx.tool_input ?? ctx.args,
-				};
-			}
-			case "tool_result": {
-				// Pi's ToolResultEvent: toolCallId, toolName, input, content, details, isError, usage
-				const ctx = event.context as any;
-				return {
-					type: "tool_result",
-					toolCallId: ctx.toolCallId,
-					toolName: ctx.tool_name ?? ctx.toolName,
-					input: ctx.tool_input ?? ctx.args,
-					content: ctx.content,
-					details: ctx.tool_details,
-					isError: ctx.is_error,
-					usage: ctx.usage,
-				};
-			}
 			case "queue_update":
 				// Generic — map to a reasonable default or skip
 				return null;

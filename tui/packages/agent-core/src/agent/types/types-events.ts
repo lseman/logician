@@ -19,6 +19,7 @@ export interface AgentEventEnvelope {
 export type AgentEventBody =
 	| { type: "agent_start" }
 	| { type: "agent_end"; messages?: Message[] }
+	| { type: "agent_settled"; nextTurnCount?: number }
 	| {
 			type: "run_outcome";
 			status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
@@ -131,14 +132,6 @@ export type AgentEventBody =
 			message: string;
 	  }
 	| { type: "phase"; phase: "thinking" | "tool" | "idle" }
-	| {
-			type: "auto_retry_start";
-			attempt: number;
-			maxRetries: number;
-			delayMs: number;
-			error: string;
-	  }
-	| { type: "auto_retry_end"; attempt: number; success: boolean }
 	| { type: "model_select"; model: string; index: number }
 	| { type: "max_iterations"; iterations: number; limit: number }
 	| {
@@ -208,7 +201,6 @@ export type AgentEventBody =
 			clearedFollowUp: readonly string[];
 			clearedNextTurn: readonly string[];
 	  }
-	| { type: "settled"; nextTurnCount: number }
 	| {
 			type: "thinking_loop_detected";
 			message: string;
@@ -293,13 +285,13 @@ export type AgentEventBody =
 			maxRetries: number;
 			delayMs: number;
 			error: string;
-			reason: "compaction" | "error" | "overflow" | "rate_limit";
+			reason?: "compaction" | "error" | "overflow" | "rate_limit";
 		}
 	| {
 			type: "agent_retry_end";
 			attempt: number;
 			success: boolean;
-			reason: "compaction" | "error" | "overflow" | "rate_limit";
+			reason?: "compaction" | "error" | "overflow" | "rate_limit";
 		}
 	| {
 			type: "agent_error";

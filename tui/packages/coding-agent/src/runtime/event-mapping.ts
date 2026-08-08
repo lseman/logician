@@ -148,14 +148,14 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				label: "Error",
 				text: event.message,
 			};
-		case "auto_retry_start":
+		case "agent_retry_start":
 			return {
 				type: "notice",
 				level: "warn",
 				label: `Retry ${event.attempt}/${event.maxRetries}`,
 				text: `${event.error} — retrying in ${formatDelay(event.delayMs)}`,
 			};
-		case "auto_retry_end":
+		case "agent_retry_end":
 			return {
 				type: "notice",
 				level: event.success ? "success" : "warn",
