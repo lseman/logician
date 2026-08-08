@@ -179,7 +179,7 @@ async function main(): Promise<void> {
 		const trustInfo = resolveTrustInfo(cwd, defaultProjectTrust());
 
 		if (trustInfo.preDecided) {
-			loadProjectConfig = trustInfo.preDecidedResult?.trusted;
+			loadProjectConfig = trustInfo.preDecidedResult?.trusted ?? false;
 		} else {
 			// Show trust overlay via readline (visually formatted)
 			const choice = await showTrustOverlay(cwd, trustInfo.paths);

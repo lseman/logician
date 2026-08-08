@@ -310,7 +310,6 @@ export class AgentCoreBridge {
 			servers:
 				Object.keys(serverOverrides).length > 0 ? serverOverrides : undefined,
 		});
-		this.lspManagerEnabled = lspEnabled;
 		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		const defaultWebSearch = resolveWebSearchConfig();
 		const webSearch = {

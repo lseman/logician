@@ -127,6 +127,7 @@ export class AgentHarness {
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
 	private onSavePoint?: () => void;
+	private onShutdown?: () => void;
 	private onCompaction?: (
 		reason: "auto" | "manual",
 		tokensBefore: number,

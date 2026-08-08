@@ -84,10 +84,6 @@ export class TrustPromptOverlay {
 		this.invalidate();
 	}
 
-	setOnClose(cb: () => void): void {
-		this.onClose = cb;
-	}
-
 	show(): void {
 		this.visible = true;
 		this.invalidate();

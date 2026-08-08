@@ -73,10 +73,13 @@ const DEFAULT_INFO: StatusInfo = {
 export class StatusBar implements Component {
 	private info: StatusInfo = { ...DEFAULT_INFO };
 	private tick = 0;
-	private timer: ReturnType<typeof setInterval> | null = null;
+	private _timer: ReturnType<typeof setInterval> | null = null;
 	private cachedLine: string | null = null;
 	private cachedWidth = -1;
 	private onInvalidate: (() => void) | null = null;
+
+	/** @internal Exposed for tests. */
+	get timer(): ReturnType<typeof setInterval> | null { return this._timer; }
 	/** Non-phase parts that fit at cachedWidth, from the last full layout pass.
 	 * A tick-only update reuses this instead of rerunning the fit probing. */
 	private cachedParts: string[] = [];
@@ -108,8 +111,8 @@ export class StatusBar implements Component {
 
 	// Start animation timer for streaming phases
 	startAnimation(): void {
-		if (this.timer) return;
-		this.timer = setInterval(() => {
+		if (this._timer) return;
+		this._timer = setInterval(() => {
 			this.tick = (this.tick + 1) % 8;
 			// A spinner-only change never affects layout (every frame glyph is one
 			// column wide, so which parts fit and the truncation fallback can't
@@ -124,9 +127,9 @@ export class StatusBar implements Component {
 	}
 
 	stopAnimation(): void {
-		if (this.timer) {
-			clearInterval(this.timer);
-			this.timer = null;
+		if (this._timer) {
+			clearInterval(this._timer);
+			this._timer = null;
 		}
 		this.tick = 0;
 		this._invalidate();

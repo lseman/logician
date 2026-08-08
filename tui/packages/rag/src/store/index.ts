@@ -13,10 +13,6 @@ export { SQLiteVectorStore } from "./sqlite-store.ts";
 export class MemoryVectorStore implements IVectorStore {
 	private chunks: RAGChunk[] = [];
 
-	constructor(dimension = 384) {
-		this.dimension = dimension;
-	}
-
 	/** Add pre-embedded chunks to the store. */
 	async add(chunks: RAGChunk[]): Promise<void> {
 		for (const chunk of chunks) {

@@ -48,19 +48,24 @@ export class SettingsSelectorOverlay implements Component {
 	public visible = false;
 	private settings: SettingDef[] = [];
 	/** Index into `settings` array (main menu view). */
-	private selectedIndex = 0;
+	private _selectedIndex = 0;
 	/** When in detail view, the selected setting's option index. */
-	private selectedOptionIndex = 0;
+	private _selectedOptionIndex = 0;
 	/** `true` when showing the detail/option-selection view. */
-	private inDetailView = false;
+	private _inDetailView = false;
 	private message = "";
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
 
+	/** @internal Exposed for tests. */
+	get selectedIndex(): number { return this._selectedIndex; }
+	get selectedOptionIndex(): number { return this._selectedOptionIndex; }
+	get inDetailView(): boolean { return this._inDetailView; }
+
 	setSettings(settings: SettingDef[]): void {
 		this.settings = settings;
-		if (this.selectedIndex >= this.settings.length) {
-			this.selectedIndex = Math.max(0, this.settings.length - 1);
+		if (this._selectedIndex >= this.settings.length) {
+			this._selectedIndex = Math.max(0, this.settings.length - 1);
 		}
 		this.invalidate();
 	}
@@ -72,9 +77,9 @@ export class SettingsSelectorOverlay implements Component {
 
 	show(): void {
 		this.visible = true;
-		this.inDetailView = false;
-		this.selectedIndex = 0;
-		this.selectedOptionIndex = 0;
+		this._inDetailView = false;
+		this._selectedIndex = 0;
+		this._selectedOptionIndex = 0;
 		this.invalidate();
 	}
 
@@ -94,7 +99,7 @@ export class SettingsSelectorOverlay implements Component {
 			return { type: "close" };
 		}
 
-		if (this.inDetailView) {
+		if (this._inDetailView) {
 			return this.handleDetailInput(data);
 		}
 
@@ -104,12 +109,12 @@ export class SettingsSelectorOverlay implements Component {
 	private handleMenuInput(data: string): SettingsSelectorAction | null {
 		if (data === "\r" || data === "\n") {
 			// Enter opens detail view for the selected setting
-			const s = this.settings[this.selectedIndex];
+			const s = this.settings[this._selectedIndex];
 			if (s?.name.toLowerCase() === "model") {
 				return { type: "open", settingName: s.name };
 			}
-			this.inDetailView = true;
-			this.selectedOptionIndex = s
+			this._inDetailView = true;
+			this._selectedOptionIndex = s
 				? s.options.findIndex(o => o.current) >= 0
 					? s.options.findIndex(o => o.current)
 					: 0
@@ -137,19 +142,19 @@ export class SettingsSelectorOverlay implements Component {
 	}
 
 	private handleDetailInput(data: string): SettingsSelectorAction | null {
-		const s = this.settings[this.selectedIndex];
+		const s = this.settings[this._selectedIndex];
 		if (!s) return { type: "close" };
 
 		// Tab or backspace goes back to menu
 		if (data === "\t" || data === "\x08") {
-			this.inDetailView = false;
+			this._inDetailView = false;
 			this.invalidate();
 			return null;
 		}
 
 		if (data === "\r" || data === "\n") {
 			// Apply the selected option
-			const opt = s.options[this.selectedOptionIndex];
+			const opt = s.options[this._selectedOptionIndex];
 			if (opt) {
 				return { type: "change", settingName: s.name, value: opt.value };
 			}
@@ -192,29 +197,29 @@ export class SettingsSelectorOverlay implements Component {
 		const bodyLines: string[] = [];
 
 		// ── Content ──
-		if (!this.inDetailView) {
+		if (!this._inDetailView) {
 			this.renderMainMenu(bodyLines, innerWidth, popupWidth);
 		} else {
 			this.renderDetailView(bodyLines, innerWidth, popupWidth);
 		}
 
-		const setting = this.settings[this.selectedIndex];
+		const setting = this.settings[this._selectedIndex];
 		const lines = renderListPopupFrame({
 			popupWidth,
 			innerWidth,
-			title: this.inDetailView
+			title: this._inDetailView
 				? (setting?.name ?? "Settings")
 				: "Runtime Settings",
-			subtitle: this.inDetailView
+			subtitle: this._inDetailView
 				? ` (${setting?.options.length ?? 0} options)`
 				: ` (${this.settings.length})`,
-			hints: this.inDetailView
+			hints: this._inDetailView
 				? "↑↓ navigate · enter apply · tab back · esc close"
 				: "↑↓ navigate · enter configure · esc close",
 			bodyLines,
 			bottomText:
 				this.message ||
-				(this.inDetailView
+				(this._inDetailView
 					? "Select an option to apply."
 					: "Select a setting to configure."),
 		});
@@ -237,7 +242,7 @@ export class SettingsSelectorOverlay implements Component {
 		const start = Math.max(
 			0,
 			Math.min(
-				this.selectedIndex - Math.floor(maxRows / 2),
+				this._selectedIndex - Math.floor(maxRows / 2),
 				Math.max(0, this.settings.length - maxRows),
 			),
 		);
@@ -247,7 +252,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 		for (let i = start; i < end; i++) {
 			const s = this.settings[i];
-			const isSelected = i === this.selectedIndex;
+			const isSelected = i === this._selectedIndex;
 
 			// Build the item with a gear icon for settings
 			const item: ListItem = {
@@ -270,7 +275,7 @@ export class SettingsSelectorOverlay implements Component {
 		innerWidth: number,
 		popupWidth: number,
 	): void {
-		const s = this.settings[this.selectedIndex];
+		const s = this.settings[this._selectedIndex];
 		if (!s) {
 			lines.push(renderStatusLine("No setting selected.", innerWidth));
 			return;
@@ -296,7 +301,7 @@ export class SettingsSelectorOverlay implements Component {
 		const start = Math.max(
 			0,
 			Math.min(
-				this.selectedOptionIndex - Math.floor(maxRows / 2),
+				this._selectedOptionIndex - Math.floor(maxRows / 2),
 				Math.max(0, s.options.length - maxRows),
 			),
 		);
@@ -306,7 +311,7 @@ export class SettingsSelectorOverlay implements Component {
 		}
 		for (let i = start; i < end; i++) {
 			const opt = s.options[i];
-			const isSelected = i === this.selectedOptionIndex;
+			const isSelected = i === this._selectedOptionIndex;
 
 			// Build the item
 			const item: ListItem = {
@@ -335,16 +340,16 @@ export class SettingsSelectorOverlay implements Component {
 	private moveSelection(delta: number): void {
 		const n = this.settings.length;
 		if (!n) return;
-		this.selectedIndex = (this.selectedIndex + delta + n) % n;
+		this._selectedIndex = (this._selectedIndex + delta + n) % n;
 		this.invalidate();
 	}
 
 	private moveOptionSelection(delta: number): void {
-		const s = this.settings[this.selectedIndex];
+		const s = this.settings[this._selectedIndex];
 		if (!s) return;
 		const n = s.options.length;
 		if (!n) return;
-		this.selectedOptionIndex = (this.selectedOptionIndex + delta + n) % n;
+		this._selectedOptionIndex = (this._selectedOptionIndex + delta + n) % n;
 		this.invalidate();
 	}
 }

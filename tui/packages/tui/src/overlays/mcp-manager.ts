@@ -29,11 +29,14 @@ export class McpManagerOverlay implements Component {
 	public visible = false;
 	private servers: McpServerItem[] = [];
 	private configPath = "";
-	private selection = new SelectorController();
+	private _selection = new SelectorController();
 	private busyServerName: string | null = null;
 	private message = "";
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
+
+	/** @internal Exposed for tests. */
+	get selection(): SelectorController { return this._selection; }
 
 	setSnapshot(snapshot: {
 		configPath?: string;
@@ -61,7 +64,7 @@ export class McpManagerOverlay implements Component {
 				configPath: snapshot.configPath || "",
 			};
 		});
-		this.selection.set(this.selection.index, this.servers.length);
+		this._selection.set(this._selection.index, this.servers.length);
 		this.invalidate();
 	}
 
@@ -97,7 +100,7 @@ export class McpManagerOverlay implements Component {
 			return { type: "refresh" };
 		}
 		if (data === " ") {
-			const server = this.servers[this.selection.index];
+			const server = this.servers[this._selection.index];
 			return server ? { type: "toggle", server } : null;
 		}
 
@@ -149,7 +152,7 @@ export class McpManagerOverlay implements Component {
 				const item: ListItem = {
 					label: `${server.serverName} (${typeIcon})`,
 					metadata: `${toolText} · ${urlText}${busy}`,
-					selected: i === this.selection.index,
+					selected: i === this._selection.index,
 					statusDot:
 						this.busyServerName === server.serverName
 							? "yellow"
@@ -183,7 +186,7 @@ export class McpManagerOverlay implements Component {
 	}
 
 	private moveSelection(delta: number): void {
-		this.selection.move(delta, this.servers.length);
+		this._selection.move(delta, this.servers.length);
 		this.invalidate();
 	}
 }

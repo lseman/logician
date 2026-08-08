@@ -30,11 +30,14 @@ export class PluginManagerOverlay implements Component {
 	public visible = false;
 	private plugins: PluginListItem[] = [];
 	private pluginsDir = "";
-	private selection = new SelectorController();
+	private _selection = new SelectorController();
 	private busyPluginId: string | null = null;
 	private message = "";
 	private cachedLines: string[] | null = null;
 	private cachedWidth = -1;
+
+	/** @internal Exposed for tests. */
+	get selection(): SelectorController { return this._selection; }
 
 	setSnapshot(snapshot: {
 		pluginsDir?: string;
@@ -56,7 +59,7 @@ export class PluginManagerOverlay implements Component {
 				onDisk: plugin.on_disk !== false,
 			};
 		});
-		this.selection.set(this.selection.index, this.plugins.length);
+		this._selection.set(this._selection.index, this.plugins.length);
 		this.invalidate();
 	}
 
@@ -92,7 +95,7 @@ export class PluginManagerOverlay implements Component {
 			return { type: "refresh" };
 		}
 		if (data === " ") {
-			const plugin = this.plugins[this.selection.index];
+			const plugin = this.plugins[this._selection.index];
 			return plugin ? { type: "toggle", plugin } : null;
 		}
 
@@ -143,7 +146,7 @@ export class PluginManagerOverlay implements Component {
 				const item: ListItem = {
 					label: plugin.pluginId,
 					metadata: meta,
-					selected: i === this.selection.index,
+					selected: i === this._selection.index,
 					statusDot: !plugin.onDisk
 						? "red"
 						: this.busyPluginId === plugin.pluginId
@@ -176,7 +179,7 @@ export class PluginManagerOverlay implements Component {
 	}
 
 	private moveSelection(delta: number): void {
-		this.selection.move(delta, this.plugins.length);
+		this._selection.move(delta, this.plugins.length);
 		this.invalidate();
 	}
 }
