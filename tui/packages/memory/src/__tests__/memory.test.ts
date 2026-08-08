@@ -11,8 +11,8 @@ import {
 	recall,
 	remember,
 	searchObservations,
-} from "../hook-adapter.js";
-import { createMemoryStore } from "../store.js";
+} from "../hooks/hook-adapter.js";
+import { createMemoryStore } from "../store/index.js";
 
 let counter = 0;
 function dbPath(): string {

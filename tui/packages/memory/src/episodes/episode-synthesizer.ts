@@ -2,7 +2,7 @@ import type {
 	CompressedObservation,
 	ObservationType,
 	RawObservation,
-} from "./types.js";
+} from "../types.js";
 
 export interface TurnToolEvidence {
 	id: string;

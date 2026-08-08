@@ -7,7 +7,7 @@ import type {
 	MemoryStore,
 	MemoryType,
 	WorkingMemoryTier,
-} from "./types.js";
+} from "../types.js";
 
 /**
  * Register memory hooks on a HookBus.

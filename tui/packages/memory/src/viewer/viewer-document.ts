@@ -1,4 +1,4 @@
-// ── @logician/memory-viewer — Dashboard HTML Document ────────────────────────
+// ── @logician/memory — Dashboard HTML Document ───────────────────────────────
 // Single-page app with all tabs, CSS, and client-side JS.
 // Self-hosted, zero dependencies.
 
@@ -837,7 +837,7 @@ const HTML = `<!DOCTYPE html>
       loadWorkingMemory();
     } catch (e) { console.error('[auto-tier] error:', e); }
   });
-  function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); }; }
+  function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); };
   loadDashboard();
   state.refreshInterval = setInterval(() => {
     if (state.activeTab === 'observations') loadObservations();

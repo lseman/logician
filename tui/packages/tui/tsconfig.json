@@ -20,8 +20,7 @@
 			"@logician/coding-agent/*": ["../coding-agent/src/*"],
 			"@logician/agent-capabilities": ["../agent-capabilities/src/index.ts"],
 			"@logician/agent-capabilities/*": ["../agent-capabilities/src/*"],
-			"@logician/memory": ["../memory/src/index.ts"],
-			"@logician/memory-viewer": ["../memory-viewer/src/index.ts"]
+			"@logician/memory": ["../memory/src/index.ts"]
 		},
 		"types": ["node", "bun-types"]
 	},

@@ -32,7 +32,7 @@ import type {
 	SemanticSearchResult,
 	Session,
 	WorkingMemoryTier,
-} from "./types.js";
+} from "../types.js";
 
 function generateId(): string {
 	return crypto.randomUUID();

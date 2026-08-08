@@ -15,14 +15,19 @@ export {
 	remember,
 	searchObservations,
 	setSessionId,
-} from "./hook-adapter.js";
-export { LocalMemoryEmbedder, type MemoryEmbedder } from "./local-embedder.js";
-export { createMemoryHooks, type MemoryHooksConfig } from "./memory-hooks.js";
+} from "./hooks/hook-adapter.js";
+export { LocalMemoryEmbedder, type MemoryEmbedder } from "./embeddings/local-embedder.js";
+export { createMemoryHooks, type MemoryHooksConfig } from "./hooks/memory-hooks.js";
 export type {
 	SemanticExtractionRequest,
 	SemanticExtractor,
-} from "./semantic-extractor.js";
-export { createMemoryStore } from "./store.js";
+} from "./episodes/semantic-extractor.js";
+export { createMemoryStore } from "./store/index.js";
+export {
+	getBoundViewerPort,
+	startViewerServer,
+} from "./viewer/viewer-server.js";
+export type { ViewerOptions } from "./viewer/viewer-server.js";
 
 export type {
 	AutoForgetConfig,

@@ -1,6 +1,6 @@
-// @logician/memory-viewer — HTTP + WebSocket Server
+// ── @logician/memory — HTTP + WebSocket Server (Memory Viewer Dashboard) ─────
 
-import type { MemoryStore, ObservationType } from "@logician/memory";
+import type { MemoryStore, ObservationType } from "../types.js";
 
 interface DashboardStats {
 	workspace: string;
@@ -318,7 +318,7 @@ export function startViewerServer(opts: ViewerOptions): {
 	});
 
 	boundPort = server.port ?? port;
-	console.log(`[memory-viewer] Dashboard: http://localhost:${boundPort}`);
+	console.log(`[memory/viewer] Dashboard: http://localhost:${boundPort}`);
 
 	const wrapped = {
 		port: server.port ?? port,
@@ -333,6 +333,6 @@ export function startViewerServer(opts: ViewerOptions): {
 	};
 }
 
-import HTML from "./document.js";
+import HTML from "./viewer-document.js";
 
 const documentHTML = HTML as string;

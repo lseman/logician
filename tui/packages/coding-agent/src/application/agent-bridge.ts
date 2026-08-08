@@ -46,10 +46,11 @@ import type { ToolRegistry } from "@logician/agent-core/tools/shared/registry.ts
 import {
 	createMemoryHooks,
 	createMemoryStore,
+	getBoundViewerPort,
 	LocalMemoryEmbedder,
 	setSessionId,
+	startViewerServer,
 } from "@logician/memory";
-import { getBoundViewerPort, startViewerServer } from "@logician/memory-viewer";
 import {
 	findLogicianConfig,
 	loadLogicianConfig,

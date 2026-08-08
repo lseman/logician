@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { unlinkSync } from "node:fs";
 import { afterEach, describe, test } from "node:test";
-import type { MemoryHooksConfig } from "../memory-hooks.js";
-import { createMemoryHooks as createHooks } from "../memory-hooks.js";
-import { createMemoryStore } from "../store.js";
+import type { MemoryHooksConfig } from "../hooks/memory-hooks.js";
+import { createMemoryHooks as createHooks } from "../hooks/memory-hooks.js";
+import { createMemoryStore } from "../store/index.js";
 import type { CompressedObservation } from "../types.js";
 
 let counter = 0;
