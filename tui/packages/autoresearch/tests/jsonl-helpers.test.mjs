@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 
-import { appendHookLogEntryIfConfigured } from "../extensions/pi-autoresearch/hooks.ts";
+import { appendHookLogEntryIfConfigured } from "../src/hooks.ts";
 import {
 	extractAutoresearchSessionName,
 	hasAutoresearchConfigHeader,
@@ -12,7 +12,7 @@ import {
 	isAutoresearchRunEntry,
 	parseJsonlEntry,
 	reconstructJsonlState,
-} from "../extensions/pi-autoresearch/jsonl.ts";
+} from "../src/jsonl.ts";
 
 test("hook entries are skipped when identifying run entries", () => {
 	const hookEntry = parseJsonlEntry(

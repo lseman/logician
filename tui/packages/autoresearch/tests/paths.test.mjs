@@ -10,7 +10,7 @@ import {
 	hookScriptPath,
 	sessionFileCandidates,
 	sessionFilePath,
-} from "../extensions/pi-autoresearch/paths.ts";
+} from "../src/paths.ts";
 
 function freshDir() {
 	return fs.mkdtempSync(path.join(tmpdir(), "pi-autoresearch-paths-"));

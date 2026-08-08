@@ -7,7 +7,7 @@ import test from "node:test";
 import {
 	autoresearchSummaryPathsFor,
 	buildAutoresearchCompactionSummary,
-} from "../extensions/pi-autoresearch/compaction.ts";
+} from "../src/compaction.ts";
 
 function withTempWorkDir(fn) {
 	const dir = fs.mkdtempSync(path.join(tmpdir(), "pi-autoresearch-compact-"));
