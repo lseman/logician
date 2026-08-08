@@ -13,8 +13,6 @@ import type {
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import { createExtensionState } from "./state.ts";
 import type {
-	AfterToolCallExtensionResult,
-	BeforeToolCallExtensionResult,
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionDefinition,
@@ -359,7 +357,7 @@ export class ExtensionRunner {
 
 	/**
 	 * Emit a structured typed event to extension handlers.
-	 * Bridges to the legacy ExtensionEvent format for backward-compatible handlers.
+	 * Also emits to legacy handlers using the same event name (now unified).
 	 */
 	async emitTyped<T extends ExtensionEventName>(
 		event: Extract<TypedExtensionEvent, { type: T }>,
@@ -367,49 +365,19 @@ export class ExtensionRunner {
 		// First, notify typed event bus
 		await this.typedBus.emit(event);
 
-		// Bridge to legacy event format for backward-compatible handlers
-		const legacyEventType = this.mapToLegacyEvent(event.type);
-		if (!legacyEventType) return undefined;
-
-		const ctx: ExtensionEventContext = {
-			sessionId: this.options.sessionId,
-			cwd: this.options.cwd,
-			...("toolName" in event ? { tool_name: event.toolName } : {}),
-			...("toolCallId" in event ? { tool_call_id: event.toolCallId } : {}),
-			...("turnIndex" in event ? { turn_index: event.turnIndex } : {}),
-		};
-
+		// Emit to legacy handlers using the unified event name.
+		// Cast to legacy shape — typed events don't have a `context` field,
+		// so we add one with the same data spread into the event object.
 		const legacyEvent: ExtensionEvent = {
-			...(event as unknown as Record<string, unknown>),
-			type: legacyEventType,
-			context: ctx,
-		};
+			type: event.type as ExtensionEventType,
+			context: {
+				sessionId: this.options.sessionId,
+				cwd: this.options.cwd,
+				...event,
+			},
+		} as unknown as ExtensionEvent;
 
 		return this.emit(legacyEvent);
-	}
-
-	/** Map typed event name to legacy ExtensionEventType. */
-	private mapToLegacyEvent(
-		type: ExtensionEventName,
-	): ExtensionEventType | null {
-		const mapping: Record<string, ExtensionEventType> = {
-			before_agent_start: "user_prompt_submit",
-			agent_end: "agent_end",
-			turn_start: "turn_start",
-			turn_end: "turn_end",
-			message_start: "message_start",
-			message_update: "message_update",
-			message_end: "message_end",
-			tool_execution_start: "tool_call_start",
-			tool_execution_end: "tool_call_end",
-			session_before_switch: "session_start",
-			session_before_compact: "before_compact",
-			session_compact: "after_compact",
-			session_shutdown: "session_end",
-			before_provider_request: "agent_start",
-			after_provider_response: "agent_end",
-		};
-		return mapping[type] ?? null;
 	}
 
 	/** Access the structured typed event bus for direct extension subscriptions. */
@@ -436,17 +404,20 @@ export class ExtensionRunner {
 		const hooks: AgentHooks = {};
 
 		hooks.beforeToolCall = async ({ toolCall, args }) => {
-			const ctx: ExtensionEventContext = {
-				sessionId: this.options.sessionId,
-				cwd: this.options.cwd,
-				toolCallId: toolCall.id,
-				tool_name: toolCall.name,
-				tool_input: args,
-			};
-			const event: ExtensionEvent = { type: "before_tool_call", context: ctx };
+			// Use typed event name: tool_execution_start (maps to tool_call in legacy)
+			const event: ExtensionEvent = {
+				type: "tool_execution_start",
+				context: {
+					sessionId: this.options.sessionId,
+					cwd: this.options.cwd,
+					toolCallId: toolCall.id,
+					tool_name: toolCall.name,
+					tool_input: args,
+				},
+			} as unknown as ExtensionEvent;
 			const result = await this.emit(event);
 			if (result && typeof result === "object") {
-				const hookResult = result as BeforeToolCallExtensionResult;
+				const hookResult = result as { block?: boolean; reason?: string; args?: Record<string, unknown>; content?: string; isError?: boolean };
 				if (hookResult.block) {
 					return {
 						content:
@@ -466,19 +437,22 @@ export class ExtensionRunner {
 		};
 
 		hooks.afterToolCall = async ({ toolCall, result, isError }) => {
-			const ctx: ExtensionEventContext = {
-				sessionId: this.options.sessionId,
-				cwd: this.options.cwd,
-				toolCallId: toolCall.id,
-				tool_name: toolCall.name,
-				tool_input: JSON.parse(toolCall.arguments || "{}"),
-				tool_result: result,
-				is_error: isError,
-			};
-			const event: ExtensionEvent = { type: "after_tool_call", context: ctx };
+			// Use typed event name: tool_execution_end (maps to tool_result in legacy)
+			const event: ExtensionEvent = {
+				type: "tool_execution_end",
+				context: {
+					sessionId: this.options.sessionId,
+					cwd: this.options.cwd,
+					toolCallId: toolCall.id,
+					tool_name: toolCall.name,
+					tool_input: JSON.parse(toolCall.arguments || "{}"),
+					tool_result: result,
+					is_error: isError,
+				},
+			} as unknown as ExtensionEvent;
 			const emitted = await this.emit(event);
 			if (emitted && typeof emitted === "object") {
-				const hookResult = emitted as AfterToolCallExtensionResult;
+				const hookResult = emitted as { content?: string; isError?: boolean; terminate?: boolean };
 				if (
 					hookResult.content !== undefined ||
 					hookResult.isError !== undefined ||

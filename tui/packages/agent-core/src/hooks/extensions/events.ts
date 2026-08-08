@@ -40,6 +40,85 @@ export interface AgentEndEvent {
 /** No result — extensions may inspect messages for diagnostics */
 export type AgentEndResult = {};
 
+/** Fired when the agent starts processing a prompt */
+export interface AgentStartEvent {
+	type: "agent_start";
+}
+
+export type AgentStartResult = {};
+
+/** Fired when an agent-level error occurs */
+export interface AgentErrorEvent {
+	type: "agent_error";
+	message: string;
+	phase: "model" | "tool" | "compaction" | "network" | "other";
+	recoverable: boolean;
+}
+
+export type AgentErrorResult = {};
+
+/** Fired when the agent auto-retries a failed run */
+export interface AgentRetryStartEvent {
+	type: "agent_retry_start";
+	attempt: number;
+	maxRetries: number;
+	delayMs: number;
+	error: string;
+	reason: "compaction" | "error" | "overflow" | "rate_limit";
+}
+
+export type AgentRetryStartResult = {};
+
+/** Fired after the agent auto-retry completes */
+export interface AgentRetryEndEvent {
+	type: "agent_retry_end";
+	attempt: number;
+	success: boolean;
+	reason: "compaction" | "error" | "overflow" | "rate_limit";
+}
+
+export type AgentRetryEndResult = {};
+
+// ============================================================================
+// Tool events
+// ============================================================================
+
+/** Fired before a tool executes — extensions can block or modify args */
+export interface ToolCallEvent {
+	type: "tool_call";
+	toolCallId: string;
+	toolName: string;
+	input: Record<string, unknown>;
+}
+
+export interface ToolCallResult {
+	/** Return { block: true, reason } to block execution */
+	block?: boolean;
+	reason?: string;
+	/** Return { terminate: true } to hint the agent should stop after this batch */
+	terminate?: boolean;
+}
+
+/** Fired after a tool finishes — extensions can modify the result */
+export interface ToolResultEvent {
+	type: "tool_result";
+	toolCallId: string;
+	toolName: string;
+	input: Record<string, unknown>;
+	content: Array<{ type: string; text: string }>;
+	details?: Record<string, unknown>;
+	isError: boolean;
+	usage?: Record<string, unknown>;
+}
+
+export interface ToolResultResult {
+	/** Modify the result content */
+	content?: Array<{ type: string; text: string }>;
+	details?: Record<string, unknown>;
+	isError?: boolean;
+	usage?: Record<string, unknown>;
+}
+
 // ============================================================================
 // Turn events
 // ============================================================================
@@ -232,6 +311,68 @@ export interface SessionShutdownEvent {
 
 export type SessionShutdownResult = {};
 
+/** Fired when the steering/follow-up queue changes */
+export interface QueueUpdateEvent {
+	type: "queue_update";
+	steering: string[];
+	followUp: string[];
+	nextTurn?: string[];
+}
+
+export type QueueUpdateResult = {};
+
+// ============================================================================
+// Session lifecycle events
+// ============================================================================
+
+/** Fired when a session is started, loaded, or reloaded */
+export interface SessionStartEvent {
+	type: "session_start";
+	reason: "startup" | "reload" | "new" | "resume" | "fork";
+	previousSessionFile?: string;
+}
+
+export type SessionStartResult = {};
+
+/** Fired when a session is deleted */
+export interface SessionDeleteEvent {
+	type: "session_delete";
+	sessionFile: string;
+	sessionId: string;
+}
+
+export type SessionDeleteResult = {};
+
+/** Fired after the agent loop completes and no more retries/compaction/follow-ups remain */
+export interface AgentSettledEvent {
+	type: "agent_settled";
+}
+
+export type AgentSettledResult = {};
+
+// ============================================================================
+// Model events
+// ============================================================================
+
+/** Fired when the model changes */
+export interface ModelSelectEvent {
+	type: "model_select";
+	model: { provider: string; id: string; name?: string };
+	previousModel?: { provider: string; id: string; name?: string };
+	source: "set" | "cycle" | "restore";
+}
+
+export type ModelSelectResult = {};
+
+/** Fired when the thinking level changes */
+export interface ThinkingLevelSelectEvent {
+	type: "thinking_level_select";
+	level: string;
+	previousLevel?: string;
+}
+
+export type ThinkingLevelSelectResult = {};
+
 // ============================================================================
 // Provider events
 // ============================================================================
@@ -273,7 +414,14 @@ export type AfterProviderResponseResult = {};
 
 export type ExtensionEvent =
 	| BeforeAgentStartEvent
+	| AgentStartEvent
 	| AgentEndEvent
+	| AgentSettledEvent
+	| AgentErrorEvent
+	| AgentRetryStartEvent
+	| AgentRetryEndEvent
+	| ToolCallEvent
+	| ToolResultEvent
 	| TurnStartEvent
 	| TurnEndEvent
 	| MessageStartEvent
@@ -289,6 +437,11 @@ export type ExtensionEvent =
 	| SessionBeforeCompactEvent
 	| SessionCompactEvent
 	| SessionShutdownEvent
+	| QueueUpdateEvent
+	| SessionStartEvent
+	| SessionDeleteEvent
+	| ModelSelectEvent
+	| ThinkingLevelSelectEvent
 	| BeforeProviderRequestEvent
 	| AfterProviderResponseEvent;
 
@@ -297,41 +450,65 @@ export type ExtensionEventName = ExtensionEvent["type"];
 export type ExtensionEventResult<T extends ExtensionEventName> =
 	T extends "before_agent_start"
 		? BeforeAgentStartResult | undefined
-		: T extends "agent_end"
-			? AgentEndResult | undefined
-			: T extends "turn_start"
-				? TurnStartResult | undefined
-				: T extends "turn_end"
-					? TurnEndResult | undefined
-					: T extends "message_start"
-						? MessageStartResult | undefined
-						: T extends "message_update"
-							? MessageUpdateResult | undefined
-							: T extends "message_end"
-								? MessageEndResult | undefined
-								: T extends "tool_execution_start"
-									? ToolExecutionStartResult | undefined
-									: T extends "tool_execution_update"
-										? ToolExecutionUpdateResult | undefined
-										: T extends "tool_execution_end"
-											? ToolExecutionEndResult | undefined
-											: T extends "context_update"
-												? ContextUpdateResult | undefined
-												: T extends "session_before_switch"
-													? SessionBeforeSwitchResult | undefined
-													: T extends "session_before_fork"
-														? SessionBeforeForkResult | undefined
-														: T extends "session_before_compact"
-															? SessionBeforeCompactResult | undefined
-															: T extends "session_compact"
-																? SessionCompactResult | undefined
-																: T extends "session_shutdown"
-																	? SessionShutdownResult | undefined
-																	: T extends "before_provider_request"
-																		? BeforeProviderRequestResult | undefined
-																		: T extends "after_provider_response"
-																			? AfterProviderResponseResult | undefined
-																			: undefined;
+		: T extends "agent_start"
+			? AgentStartResult | undefined
+			: T extends "agent_end"
+				? AgentEndResult | undefined
+				: T extends "agent_settled"
+					? AgentSettledResult | undefined
+					: T extends "agent_error"
+						? AgentErrorResult | undefined
+						: T extends "agent_retry_start"
+							? AgentRetryStartResult | undefined
+							: T extends "agent_retry_end"
+								? AgentRetryEndResult | undefined
+								: T extends "tool_call"
+									? ToolCallResult | undefined
+									: T extends "tool_result"
+										? ToolResultResult | undefined
+										: T extends "turn_start"
+											? TurnStartResult | undefined
+											: T extends "turn_end"
+												? TurnEndResult | undefined
+												: T extends "message_start"
+													? MessageStartResult | undefined
+													: T extends "message_update"
+														? MessageUpdateResult | undefined
+														: T extends "message_end"
+															? MessageEndResult | undefined
+															: T extends "tool_execution_start"
+																? ToolExecutionStartResult | undefined
+																: T extends "tool_execution_update"
+																	? ToolExecutionUpdateResult | undefined
+																	: T extends "tool_execution_end"
+																		? ToolExecutionEndResult | undefined
+																		: T extends "context_update"
+																			? ContextUpdateResult | undefined
+																			: T extends "session_before_switch"
+																				? SessionBeforeSwitchResult | undefined
+																				: T extends "session_before_fork"
+																					? SessionBeforeForkResult | undefined
+																					: T extends "session_before_compact"
+																						? SessionBeforeCompactResult | undefined
+																						: T extends "session_compact"
+																							? SessionCompactResult | undefined
+																							: T extends "session_shutdown"
+																								? SessionShutdownResult | undefined
+																								: T extends "queue_update"
+																									? QueueUpdateResult | undefined
+																									: T extends "session_start"
+																									? SessionStartResult | undefined
+																									: T extends "session_delete"
+																										? SessionDeleteResult | undefined
+																										: T extends "model_select"
+																											? ModelSelectResult | undefined
+																											: T extends "thinking_level_select"
+																												? ThinkingLevelSelectResult | undefined
+																												: T extends "before_provider_request"
+																													? BeforeProviderRequestResult | undefined
+																													: T extends "after_provider_response"
+																														? AfterProviderResponseResult | undefined
+																															: undefined;
 
 export type ExtensionEventHandler<T extends ExtensionEventName> = (
 	event: Extract<ExtensionEvent, { type: T }>,

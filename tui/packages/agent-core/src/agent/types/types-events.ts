@@ -285,7 +285,34 @@ export type AgentEventBody =
 	| {
 			type: "active_tools_change";
 			activeToolNames: string[];
-	  };
+		}
+	// Retry / error observability
+	| {
+			type: "agent_retry_start";
+			attempt: number;
+			maxRetries: number;
+			delayMs: number;
+			error: string;
+			reason: "compaction" | "error" | "overflow" | "rate_limit";
+		}
+	| {
+			type: "agent_retry_end";
+			attempt: number;
+			success: boolean;
+			reason: "compaction" | "error" | "overflow" | "rate_limit";
+		}
+	| {
+			type: "agent_error";
+			message: string;
+			phase: "model" | "tool" | "compaction" | "network" | "other";
+			recoverable: boolean;
+		}
+	// Session lifecycle
+	| {
+			type: "session_delete";
+			sessionFile: string;
+			sessionId: string;
+		};
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;
 export type EventHandler = (event: AgentEvent) => void;

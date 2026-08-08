@@ -5,6 +5,10 @@ export type BridgeEventType =
 	// Agent lifecycle
 	| "agent_start"
 	| "agent_end"
+	// Retry / error observability
+	| "agent_retry_start"
+	| "agent_retry_end"
+	| "agent_error"
 	// Turn lifecycle
 	| "turn_start"
 	| "turn_end"
@@ -42,7 +46,9 @@ export type BridgeEventType =
 	// Agent question / interactive prompt
 	| "question_request"
 	// Media
-	| "image";
+	| "image"
+	// Session lifecycle
+	| "session_delete";
 
 export interface MemoryUpdateEvent {
 	type: "memory_update";
@@ -241,6 +247,37 @@ export interface ModelSelectEvent {
 	model: string;
 }
 
+// Retry / error observability
+export interface AgentRetryStartEvent {
+	type: "agent_retry_start";
+	attempt: number;
+	maxRetries: number;
+	delayMs: number;
+	error: string;
+	reason: "compaction" | "error" | "overflow" | "rate_limit";
+}
+
+export interface AgentRetryEndEvent {
+	type: "agent_retry_end";
+	attempt: number;
+	success: boolean;
+	reason: "compaction" | "error" | "overflow" | "rate_limit";
+}
+
+export interface AgentErrorEvent {
+	type: "agent_error";
+	message: string;
+	phase: "model" | "tool" | "compaction" | "network" | "other";
+	recoverable: boolean;
+}
+
+// Session lifecycle
+export interface SessionDeleteEvent {
+	type: "session_delete";
+	sessionFile: string;
+	sessionId: string;
+}
+
 // A standalone status line (retry / error / model / stopped) rendered as its
 // own iconed, coloured chunk rather than folded into assistant prose.
 export interface NoticeEvent {
@@ -365,7 +402,11 @@ export type ParsedBridgeEvent =
 	| PermissionRequestEvent
 	| QuestionRequestEvent
 	| MemoryUpdateEvent
-	| SavePointEvent;
+	| SavePointEvent
+	| AgentRetryStartEvent
+	| AgentRetryEndEvent
+	| AgentErrorEvent
+	| SessionDeleteEvent;
 
 // ── Bridge commands (TUI → bridge) ────────────────────────────────────────────
 

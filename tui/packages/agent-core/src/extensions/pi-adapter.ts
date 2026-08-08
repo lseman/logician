@@ -51,6 +51,14 @@
 //   Pi: context              ← Logician: beforeAgentStart
 //      messages[] — pre-LLM-call messages (same as before_agent_start
 //                   but without prompt field; return {messages} to modify)
+//   Pi: agent_retry_start    ← Logician: agent_retry_start
+//      attempt, maxRetries, delayMs, error, reason
+//   Pi: agent_retry_end      ← Logician: agent_retry_end
+//      attempt, success, reason
+//   Pi: agent_error          ← Logician: agent_error
+//      message, phase, recoverable
+//   Pi: session_delete       ← Logician: session_delete
+//      sessionFile, sessionId
 //
 // Not emitted (Logician doesn't produce these events):
 //   session_info_changed, session_before_switch, session_before_fork,
@@ -136,8 +144,6 @@ import type {
 	ExtensionEventHandler as LHandler,
 	RegisteredTool as LTool,
 	RegisteredCommand as LCommand,
-	BeforeToolCallExtensionResult,
-	AfterToolCallExtensionResult,
 	ToolExecutionContext,
 	ExtensionToolResult,
 } from "./types.ts";
@@ -305,47 +311,60 @@ type PiEventType =
 	| "tool_call"
 	| "tool_result"
 	| "user_bash"
-	| "input";
+	| "input"
+	// Retry / error observability
+	| "agent_retry_start"
+	| "agent_retry_end"
+	| "agent_error"
+	// Session lifecycle
+	| "session_delete";
 
 /**
  * Map a Pi event type to a Logician event type.
  * Returns null if there's no equivalent.
+ * Note: Some Pi events (tool_call, tool_result, agent_retry_*, agent_error)
+ * are handled specially in translateLogicianToPi — they map from Logician
+ * events that don't exist in Pi's event set.
  */
 function mapToLogician(type: PiEventType): LEventType | null {
 	const mapping: Record<PiEventType, LEventType | null> = {
 		project_trust: null,
 		resources_discover: null,
 		session_start: "session_start",
-		session_info_changed: "queue_update",
+		session_info_changed: null, // not emitted by Logician
 		session_before_switch: null,
 		session_before_fork: null,
-		session_before_compact: "before_compact",
-		session_compact: "after_compact",
-		session_shutdown: "session_end",
+		session_before_compact: "session_before_compact",
+		session_compact: "session_compact",
+		session_shutdown: "session_shutdown",
 		session_before_tree: null,
-		session_tree: "queue_update",
-		context: null, // mapped via tool_call bridge
-		before_provider_request: null,
-		before_provider_headers: null,
-		after_provider_response: null,
-		before_agent_start: "user_prompt_submit",
+		session_tree: null, // not emitted by Logician
+		context: "context", // mapped via emitWithContext
+		before_provider_request: null, // not emitted by Logician
+		before_provider_headers: null, // not emitted by Logician
+		after_provider_response: null, // not emitted by Logician
+		before_agent_start: "before_agent_start",
 		agent_start: "agent_start",
 		agent_end: "agent_end",
-		agent_settled: "agent_end", // combined with agent_end
+		agent_settled: "agent_end", // combined with agent_end in Logician
 		turn_start: "turn_start",
 		turn_end: "turn_end",
 		message_start: "message_start",
 		message_update: "message_update",
 		message_end: "message_end",
-		tool_execution_start: "tool_call_start",
-		tool_execution_update: null,
-		tool_execution_end: "tool_call_end",
-		model_select: null,
-	 thinking_level_select: null,
-		tool_call: null, // special handling below
-		tool_result: null, // special handling below
-		user_bash: null,
-		input: null,
+		tool_execution_start: "tool_execution_start",
+		tool_execution_update: null, // not emitted by Logician
+		tool_execution_end: "tool_execution_end",
+		model_select: null, // not emitted by Logician
+		thinking_level_select: null, // not emitted by Logician
+		tool_call: "tool_execution_start", // maps to tool_call_start in legacy
+		tool_result: "tool_execution_end", // maps to tool_result in legacy
+		user_bash: null, // N/A (handler)
+		input: null, // N/A (handler)
+		agent_retry_start: "agent_retry_start",
+		agent_retry_end: "agent_retry_end",
+		agent_error: "agent_error",
+		session_delete: "session_delete",
 	};
 	return mapping[type];
 }
@@ -806,12 +825,12 @@ export class PiAdapter {
 						const hookResult = result as { block?: boolean; reason?: string; terminate?: boolean };
 						if (hookResult.block) {
 							await this.logicianApi.emit({
-								type: "before_tool_call",
+								type: "tool_execution_start" as LEventType,
 								context: {
-									sessionId: this.logicianCtx.sessionId,
-									cwd: this.logicianCtx.cwd,
-									tool_name: piEvent.toolName,
-									tool_input: piEvent.input,
+										sessionId: this.logicianCtx.sessionId,
+										cwd: this.logicianCtx.cwd,
+										tool_name: piEvent.toolName,
+										tool_input: piEvent.input,
 								},
 								block: true,
 								reason: hookResult.reason ?? "Blocked by extension",
@@ -826,7 +845,7 @@ export class PiAdapter {
 						const piContent = (piEvent as any).content as Array<{ text?: string }> | undefined;
 						const toolResultText = mod.content?.[0]?.text ?? piContent?.[0]?.text ?? "";
 						await this.logicianApi.emit({
-							type: "after_tool_call",
+							type: "tool_execution_end" as LEventType,
 							context: {
 								sessionId: this.logicianCtx.sessionId,
 								cwd: this.logicianCtx.cwd,
@@ -917,6 +936,13 @@ export class PiAdapter {
 	 * user_bash                 │ ─                   │ N/A (handler)
 	 * input                     │ ─                   │ N/A (handler)
 	 *
+	 * agent_retry_start         │ agent_retry_start   │ attempt, maxRetries,
+	 *                           │                   │ delayMs, error, reason
+	 * agent_retry_end           │ agent_retry_end   │ attempt, success, reason
+	 * agent_error               │ agent_error       │ message, phase,
+	 *                           │                   │ recoverable
+	 * session_delete            │ session_delete    │ sessionFile, sessionId
+	 *
 	 * "Not emitted" = Logician doesn't produce this event.
 	 * "N/A (handler)" = handled via dedicated emit methods, not translation.
 	 * "result→X" = Pi handler return values are processed and fed back to Logician.
@@ -932,7 +958,7 @@ export class PiAdapter {
 					previousSessionFile: ctx.previousSessionFile,
 				};
 			}
-			case "session_end":
+			case "session_shutdown":
 				return {
 					type: "session_shutdown",
 					reason: "quit",
@@ -952,7 +978,7 @@ export class PiAdapter {
 					messages: ctx.messages ?? [],
 				};
 			}
-			case "user_prompt_submit": {
+			case "before_agent_start": {
 				// Pi's BeforeAgentStartEvent: prompt, images?, systemPrompt?, systemPromptOptions?
 				const ctx = event.context as any;
 				return {
@@ -992,14 +1018,14 @@ export class PiAdapter {
 			}
 			case "message_end":
 				return { type: "message_end", message: event.context.message };
-			case "tool_call_start":
+			case "tool_execution_start":
 				return {
 					type: "tool_execution_start",
 					toolCallId: (event.context as any).toolCallId,
 					toolName: event.context.tool_name ?? event.context.toolName,
 					args: event.context.tool_input ?? event.context.args,
 				};
-			case "tool_call_end":
+			case "tool_execution_end":
 				return {
 					type: "tool_execution_end",
 					toolCallId: (event.context as any).toolCallId,
@@ -1007,7 +1033,7 @@ export class PiAdapter {
 					result: event.context.tool_result,
 					isError: event.context.is_error,
 				};
-			case "before_compact": {
+			case "session_before_compact": {
 				// Pi's SessionBeforeCompactEvent: preparation, branchEntries, customInstructions?, reason, willRetry, signal
 				const ctx = event.context as any;
 				return {
@@ -1022,7 +1048,7 @@ export class PiAdapter {
 					messages: ctx.messages,
 				};
 			}
-			case "after_compact": {
+			case "session_compact": {
 				// Pi's SessionCompactEvent: compactionEntry, fromExtension, reason, willRetry
 				const ctx = event.context as any;
 				return {
@@ -1036,7 +1062,36 @@ export class PiAdapter {
 					messages: ctx.messages,
 				};
 			}
-			case "before_tool_call": {
+			case "agent_retry_start":
+				return {
+					type: "agent_retry_start",
+					attempt: (event.context as any).attempt,
+					maxRetries: (event.context as any).maxRetries,
+					delayMs: (event.context as any).delayMs,
+					error: (event.context as any).error,
+					reason: (event.context as any).reason ?? "error",
+				};
+			case "agent_retry_end":
+				return {
+					type: "agent_retry_end",
+					attempt: (event.context as any).attempt,
+					success: (event.context as any).success,
+					reason: (event.context as any).reason ?? "error",
+				};
+			case "agent_error":
+				return {
+					type: "agent_error",
+					message: (event.context as any).message,
+					phase: (event.context as any).phase ?? "other",
+					recoverable: (event.context as any).recoverable ?? true,
+				};
+			case "session_delete":
+				return {
+					type: "session_delete",
+					sessionFile: (event.context as any).sessionFile,
+					sessionId: (event.context as any).sessionId,
+				};
+			case "tool_call": {
 				// Pi's ToolCallEvent: toolCallId, toolName, input (mutable)
 				const ctx = event.context as any;
 				return {
@@ -1046,7 +1101,7 @@ export class PiAdapter {
 					input: ctx.tool_input ?? ctx.args,
 				};
 			}
-			case "after_tool_call": {
+			case "tool_result": {
 				// Pi's ToolResultEvent: toolCallId, toolName, input, content, details, isError, usage
 				const ctx = event.context as any;
 				return {

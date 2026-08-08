@@ -162,6 +162,36 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				label: `Retry ${event.attempt}`,
 				text: event.success ? "succeeded" : "failed",
 			};
+		// New observability events (also emitted as structured bridge events)
+		case "agent_retry_start":
+			return {
+				type: "agent_retry_start",
+				attempt: event.attempt,
+				maxRetries: event.maxRetries,
+				delayMs: event.delayMs,
+				error: event.error,
+				reason: event.reason,
+			} as ParsedBridgeEvent;
+		case "agent_retry_end":
+			return {
+				type: "agent_retry_end",
+				attempt: event.attempt,
+				success: event.success,
+				reason: event.reason,
+			} as ParsedBridgeEvent;
+		case "agent_error":
+			return {
+				type: "agent_error",
+				message: event.message,
+				phase: event.phase,
+				recoverable: event.recoverable,
+			} as ParsedBridgeEvent;
+		case "session_delete":
+			return {
+				type: "session_delete",
+				sessionFile: event.sessionFile,
+				sessionId: event.sessionId,
+			} as ParsedBridgeEvent;
 		case "run_outcome":
 			if (event.status === "completed" && event.source === "heuristic") {
 				return null;

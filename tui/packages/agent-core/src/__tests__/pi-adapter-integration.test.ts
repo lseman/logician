@@ -92,7 +92,7 @@ void test("Native extensions are not loaded through Pi adapter", async () => {
 			source: "path",
 			path: nativeExtensionFile(`
 				export default function(api) {
-					api.on("before_tool_call", () => ({ block: true, reason: "blocked" }));
+					api.on("tool_execution_start", () => ({ block: true, reason: "blocked" }));
 					api.registerTool({
 						name: "native_tool",
 						description: "A native tool",
@@ -105,7 +105,7 @@ void test("Native extensions are not loaded through Pi adapter", async () => {
 	]);
 
 	// Native extension should register directly with the runner
-	assert.equal(runner.hasHandlers("before_tool_call"), true);
+	assert.equal(runner.hasHandlers("tool_execution_start"), true);
 	assert.equal(runner.getTools().length, 1);
 	runner.destroy();
 });

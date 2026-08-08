@@ -192,7 +192,7 @@ describe("PiAdapter", () => {
 		});
 
 		await adapter.emitFromLogician({
-			type: "before_tool_call",
+			type: "tool_call",
 			context: {
 				sessionId: "test",
 				cwd: "/test",

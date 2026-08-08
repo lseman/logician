@@ -1,6 +1,6 @@
 // ── Extension system types ────────────────────────────────────────────────────
 // TypeScript extension API for Logician. Extensions can:
-// - Subscribe to agent lifecycle events
+// - Subscribe to agent lifecycle events (typed system from hooks/extensions/events.ts)
 // - Register LLM-callable tools
 // - Register slash commands
 // - Interact with the user via UI primitives
@@ -8,61 +8,50 @@
 
 import type { ToolCall } from "../agent/types.ts";
 import type { EventBus } from "./event-bus.ts";
+import type {
+	ExtensionEventName,
+	ExtensionEventResult,
+	ExtensionEventHandler as TypedEventHandler,
+} from "../hooks/extensions/events.ts";
 
 // ============================================================================
-// Event System
+// Event System (typed, from hooks/extensions/events.ts)
 // ============================================================================
 
-export type ExtensionEventType =
-	| "agent_start"
-	| "agent_end"
-	| "session_start"
-	| "session_end"
-	| "user_prompt_submit"
-	| "context"
-	| "message_start"
-	| "message_update"
-	| "message_end"
-	| "before_tool_call"
-	| "after_tool_call"
-	| "tool_call_start"
-	| "tool_call_end"
-	| "before_compact"
-	| "after_compact"
-	| "queue_update"
-	| "turn_start"
-	| "turn_end";
+// Re-export the typed event types so extensions can use them directly
+export type {
+	ExtensionEventName,
+	ExtensionEventResult,
+	ExtensionEventHandler as ExtensionEventHandlerTyped,
+} from "../hooks/extensions/events.ts";
 
+// Legacy-compatible event type union (maps to typed event names)
+// This is the set of event names the legacy `on()` API accepts.
+// Each name corresponds to a typed event in hooks/extensions/events.ts.
+export type ExtensionEventType = ExtensionEventName;
+
+// Legacy event context — used internally by the runner to pass extra fields
+// to legacy handlers. Typed events have their own per-event context shapes.
 export interface ExtensionEventContext {
 	sessionId: string;
 	cwd: string;
 	[key: string]: unknown;
 }
 
+// Legacy event interface — used internally by the runner.
+// Extension handlers receive this shape with { type, context }.
 export interface ExtensionEvent {
 	type: ExtensionEventType;
 	context: ExtensionEventContext;
 	[key: string]: unknown;
 }
 
+// Legacy handler type (untyped, for backward compatibility)
+// Extensions using the old signature still work; the runner bridges to typed.
 export type ExtensionEventHandler = (
 	event: ExtensionEvent,
 	ctx: ExtensionContext,
 ) => Promise<unknown> | unknown;
-
-export interface BeforeToolCallExtensionResult {
-	block?: boolean;
-	reason?: string;
-	args?: Record<string, unknown>;
-	content?: string;
-	isError?: boolean;
-}
-
-export interface AfterToolCallExtensionResult {
-	content?: string;
-	isError?: boolean;
-	terminate?: boolean;
-}
 
 // ============================================================================
 // Tool Registration
@@ -189,7 +178,10 @@ export interface ExtensionContext {
 // ============================================================================
 
 export interface ExtensionAPI {
-	/** Subscribe to agent lifecycle events. */
+	/** Subscribe to agent lifecycle events.
+	 *  Uses the typed event system from hooks/extensions/events.ts.
+	 *  Returns an unsubscribe function.
+	 */
 	on(event: ExtensionEventType, handler: ExtensionEventHandler): () => void;
 
 	/** Register a custom tool callable by the LLM. */
@@ -206,6 +198,9 @@ export interface ExtensionAPI {
 
 	/** Get the current extension's name and path. */
 	info: { name: string; path: string };
+
+	/** Optional cleanup when extension is unloaded. */
+	unload?: () => void;
 }
 
 // ============================================================================

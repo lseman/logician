@@ -36,7 +36,7 @@ void test("ExtensionRunner registers handlers centrally and unloads extension re
 			source: "path",
 			path: extensionFile(`
 				export default function(api) {
-					api.on("before_tool_call", () => ({ block: true, reason: "blocked" }));
+					api.on("tool_execution_start", () => ({ block: true, reason: "blocked" }));
 					api.registerTool({
 						name: "ext_tool",
 						description: "extension tool",
@@ -53,7 +53,7 @@ void test("ExtensionRunner registers handlers centrally and unloads extension re
 		},
 	]);
 
-	assert.equal(runner.hasHandlers("before_tool_call"), true);
+	assert.equal(runner.hasHandlers("tool_execution_start"), true);
 	assert.equal(runner.getTools().length, 1);
 	assert.equal(runner.getCommands().length, 1);
 
@@ -66,7 +66,7 @@ void test("ExtensionRunner registers handlers centrally and unloads extension re
 	assert.equal(result?.isError, true);
 
 	runner.destroy();
-	assert.equal(runner.hasHandlers("before_tool_call"), false);
+	assert.equal(runner.hasHandlers("tool_execution_start"), false);
 	assert.equal(runner.getTools().length, 0);
 	assert.equal(runner.getCommands().length, 0);
 });
@@ -80,7 +80,7 @@ void test("AgentHarness applies extension pre-turn context, tools, and lifecycle
 			source: "path",
 			path: extensionFile(`
 				export default function(api) {
-					api.on("user_prompt_submit", () => ({
+					api.on("before_agent_start", () => ({
 						messages: [{ role: "user", content: "extension context" }],
 						systemPrompt: "extension system",
 					}));

@@ -675,10 +675,10 @@ export class AgentHarness {
 		let nativeMessages: Message[] | undefined;
 		let nativeSystemPrompt: string | undefined;
 
-		// Emit user_prompt_submit (→ native extensions + Pi's before_agent_start)
-		if (this._extensionRunner.hasHandlers("user_prompt_submit")) {
+		// Emit before_agent_start (→ native extensions + Pi's before_agent_start)
+		if (this._extensionRunner.hasHandlers("before_agent_start")) {
 			const result = await this._extensionRunner.emit({
-				type: "user_prompt_submit",
+				type: "before_agent_start",
 				context: ctx,
 			});
 			// Native extensions return { messages, systemPrompt } directly
@@ -878,8 +878,8 @@ export class AgentHarness {
 			case "message_start":
 			case "message_update":
 			case "message_end":
-			case "tool_call_start":
-			case "tool_call_end":
+			case "tool_execution_start":
+			case "tool_execution_end":
 				await runner.emit({ type: event.type, context });
 				break;
 		}
@@ -1430,7 +1430,7 @@ export class AgentHarness {
 		return this.runInPhase("compaction", "compact", async () => {
 			this.emitToSubscribers({ type: "compaction_start", reason: "manual" });
 			await this._extensionRunner?.emit({
-				type: "before_compact",
+				type: "session_before_compact",
 				context: {
 					sessionId: this._sessionId || "",
 					cwd: this.cwd || "",
@@ -1479,7 +1479,7 @@ export class AgentHarness {
 			this.onCompaction?.("manual", before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
-				type: "after_compact",
+				type: "session_compact",
 				context: {
 					sessionId: this._sessionId || "",
 					cwd: this.cwd || "",
@@ -1539,7 +1539,7 @@ export class AgentHarness {
 			}
 
 			await this._extensionRunner?.emit({
-				type: "before_compact",
+				type: "session_before_compact",
 				context: {
 					sessionId: this._sessionId || "",
 					cwd: this.cwd || "",
@@ -1574,7 +1574,7 @@ export class AgentHarness {
 			this.onCompaction?.(reason, before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
-				type: "after_compact",
+				type: "session_compact",
 				context: {
 					sessionId: this._sessionId || "",
 					cwd: this.cwd || "",
