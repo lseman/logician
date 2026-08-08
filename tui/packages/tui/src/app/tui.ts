@@ -61,7 +61,6 @@ import { SteerQueue } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { WorkSurface } from "../status/work-surface.ts";
 import { Container, TUI } from "../terminal/core.ts";
-import { TuiMainScreen } from "../terminal/main-screen.ts";
 import { theme } from "../terminal/theme.ts";
 import { setupBridge as setupBridgeImpl } from "./bridge-event-handler.ts";
 import {
@@ -104,26 +103,14 @@ import {
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 
-/**
- * "fullscreen" enters the alternate screen buffer and owns a fixed-height,
- * self-managed scrollable viewport (TUI/core.ts). "regular" (the CLI's
- * default, see index.ts) writes append-only into the main screen and leaves
- * history to the terminal's own scrollback (TuiMainScreen) — no fixed
- * viewport, no app-owned mouse-wheel scrolling. This constructor's own
- * default stays "fullscreen" for any other caller that doesn't pass a mode
- * explicitly.
- */
-export type TuiUiMode = "fullscreen" | "regular";
-
 export class LogicianTUI {
 	private exitHandler: (() => void) | null = null;
 	private stopPromise: Promise<void> | null = null;
-	private readonly uiMode: TuiUiMode;
 	// Not private: read/written by the extracted app/*.ts functions through
 	// their Ctx interfaces, which LogicianTUI satisfies structurally. Typed as
-	// the narrow surface both TUI and TuiMainScreen implement — see each
-	// class's method list for what's actually called across app/*.ts.
-	tui: TUI | TuiMainScreen;
+	// the narrow surface TUI implements — see TuiHandle in terminal/core.ts
+	// for what's actually called across app/*.ts.
+	tui: TUI;
 	bridge: AgentCoreBridge;
 	transcript: Transcript;
 	statusPanel: StatusBar;
@@ -232,9 +219,7 @@ export class LogicianTUI {
 		runtimeConfig = resolveRuntimeConfig(process.cwd(), process.env, {
 			loadProjectConfig: false,
 		}),
-		uiMode: TuiUiMode = "fullscreen",
 	) {
-		this.uiMode = uiMode;
 		this.configPath = runtimeConfig.configPath;
 		this.bridge = new AgentCoreBridge(runtimeConfig.bridge);
 		this.transcript = new Transcript();
@@ -328,10 +313,7 @@ export class LogicianTUI {
 		});
 
 		// Create the TUI with hardware cursor support
-		this.tui =
-			this.uiMode === "regular"
-				? new TuiMainScreen(true)
-				: new TUI(process.stdout, true);
+		this.tui = new TUI(process.stdout, true);
 		this.statusPanel.setOnInvalidate(() => this.tui.requestRender());
 		this.todoBar.setOnInvalidate(() => this.tui.requestRender());
 		this.workSurface.setOnInvalidate(() => this.tui.requestRender());
@@ -465,11 +447,6 @@ export class LogicianTUI {
 	// ── Layout ─────────────────────────────────────────────────────────────
 
 	private buildLayout(): void {
-		if (this.uiMode === "regular") {
-			this.buildFlatLayout();
-			return;
-		}
-
 		// Stack todo bar + steer queue + question handler above the input bar
 		// (both render empty when there's nothing to show, so they only take
 		// space when active).
@@ -549,55 +526,6 @@ export class LogicianTUI {
 		]);
 		this.tui.setLayoutRoot(root);
 		this.tui.setInputBarComponent(this.inputBar);
-	}
-
-	/**
-	 * "regular" (main-screen) layout: no fixed viewport to clip a ScrollView
-	 * against, so the transcript and dock are mounted flat, in document order,
-	 * directly onto the TuiMainScreen container — every frame just prints
-	 * whatever's new at the tail and lets the terminal's own scrollback hold
-	 * everything that scrolled off. aboveInput overlays (slash popup, file
-	 * mention, plugin/MCP manager) still work via
-	 * getAboveInputOverlaysComponent(); center/bottom-anchored overlays
-	 * (currently only the "new output below" indicator, which has no
-	 * meaning without a clipped viewport to scroll within) are skipped.
-	 */
-	private buildFlatLayout(): void {
-		const pinnedContainer = new Container();
-		this.notifications.setOnInvalidate(() => this.tui.requestRender());
-		pinnedContainer.addChild(this.notifications);
-		pinnedContainer.addChild(this.todoBar);
-		pinnedContainer.addChild(this.workSurface);
-		pinnedContainer.addChild(this.steerQueue);
-
-		this.tui.showOverlay(this.slashPopup, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 12,
-		});
-		this.tui.showOverlay(this.fileMentionPopup, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 12,
-		});
-		this.tui.showOverlay(this.pluginManager, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 18,
-		});
-		this.tui.showOverlay(this.mcpManager, {
-			anchor: "aboveInput",
-			align: "left",
-			maxHeight: 18,
-		});
-
-		this.tui.addChild(this.transcriptDisplay);
-		this.tui.addChild(new Separator());
-		this.tui.addChild(pinnedContainer);
-		this.tui.addChild(this.tui.getAboveInputOverlaysComponent());
-		this.tui.addChild(this.inputBar);
-		this.tui.addChild(new Separator());
-		this.tui.addChild(this.statusPanel);
 	}
 
 	async openPluginManager(): Promise<void> {

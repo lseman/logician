@@ -1574,10 +1574,8 @@ type OverlayFocusRestoreState = {
 // ── Shared renderer surface ──────────────────────────────────────────────────
 // The narrow slice of TUI that app/*.ts "Ctx" interfaces actually call
 // (verified by grep: requestRender, renderNow, addInputListener, showOverlay,
-// removeOverlay). Both TUI (alt-screen, fixed viewport) and TuiMainScreen
-// (append-only, native scrollback — see terminal/main-screen.ts) implement
-// this structurally, so app/*.ts code stays renderer-agnostic without caring
-// which mode is active.
+// removeOverlay). TUI implements this structurally, so app/*.ts code depends
+// on this narrow surface instead of importing TUI's full API.
 export interface TuiHandle {
 	requestRender(force?: boolean, immediate?: boolean): void;
 	renderNow(): void;

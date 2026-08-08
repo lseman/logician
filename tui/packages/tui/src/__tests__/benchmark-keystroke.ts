@@ -6,37 +6,27 @@
 // and sweeps it across increasing transcript sizes to show whether/how
 // latency scales with backlog size.
 //
-// "End to end" here means the same path a real keypress takes:
+// "End to end" here means the same path a real keypress takes
+// (packages/tui/src/terminal/core.ts):
 //   stdin data -> handleInput() -> InputBar.handleInput() (mutates state)
-//   -> requestRender() -> doRender() -> render -> diff against the previous
-//      frame -> escape-sequence generation
+//   -> requestRender() -> doRender() -> renderLayoutFrame() (Flex + ScrollView
+//      + TranscriptDisplay layout/render) -> _commitFrame() (cell-level diff
+//      against the previous frame + escape-sequence generation)
 //
-// Two UI modes are benchmarked, because they take structurally different
-// paths and the difference is the point. TranscriptDisplay itself is
-// unbounded by default in both modes (maxTurns/maxRenderedLines default to
-// Infinity — app/tui.ts only passes an explicit cap through when a user sets
-// transcriptMaxTurns/transcriptMaxRenderedLines in settings.json):
-//
-//  - "fullscreen" (default, packages/tui/src/terminal/core.ts): a fixed
-//    viewport via Flex + ScrollView. Even with the full history retained,
-//    painting is clipped to the viewport (paintBox only walks the visible
-//    rect) and the diff is viewport-sized (termHeight rows), so latency
-//    should stay flat regardless of how much history exists.
-//
-//  - "regular" / --main-screen (packages/tui/src/terminal/main-screen.ts):
-//    append-only mode with no fixed viewport, so TranscriptDisplay.render()
-//    returns *every line of the whole conversation* and
-//    TuiMainScreen._doRender() diffs that entire array against the previous
-//    frame on every single keystroke. This is the scenario expected to
-//    reproduce the reported slowdown: latency should grow with transcript
-//    size here.
+// TranscriptDisplay is unbounded by default (maxTurns/maxRenderedLines
+// default to Infinity — app/tui.ts only passes an explicit cap through when
+// a user sets transcriptMaxTurns/transcriptMaxRenderedLines in
+// settings.json). Latency should stay flat regardless of how much history
+// exists: painting is clipped to the viewport (paintBox only walks the
+// visible rect) and the diff is viewport-sized (termHeight rows), not
+// proportional to total transcript size.
 //
 // The transcript content itself does not change on a keystroke — only the
-// input bar does — so any growth in latency as transcript size increases is
-// coming from re-walking/re-diffing a bigger tree, not from more work that's
+// input bar does — so any growth in latency as transcript size increases
+// would indicate re-walking/re-diffing a bigger tree, not more work that's
 // intrinsically necessary.
 //
-// Run:  npx tsx packages/tui/src/__tests__/benchmark-keystroke.ts [--json] [--mode=fullscreen|regular|both]
+// Run:  npx tsx packages/tui/src/__tests__/benchmark-keystroke.ts [--json]
 // Output: table (or JSON) of p50/p95/p99 keystroke latency per transcript size.
 
 import { performance } from "node:perf_hooks";
@@ -65,16 +55,16 @@ initTheme("dark");
 
 const args = process.argv.slice(2);
 const jsonMode = args.includes("--json");
-const modeArg = (args.find(a => a.startsWith("--mode=")) || "--mode=both").split("=")[1] || "both";
-const runFullscreen = modeArg === "fullscreen" || modeArg === "both";
-const runRegular = modeArg === "regular" || modeArg === "both";
 const width = process.stdout.columns ?? 120;
 const termHeight = process.stdout.rows ?? 40;
 const KEYSTROKES_PER_SIZE = 300; // sample size per transcript-size bucket
 
 // Transcript sizes to sweep, expressed as (turns, chunkSize) so both turn
 // count and per-turn content size are covered — "a bunch of text" can mean
-// either many short turns or fewer very long ones.
+// either many short turns or fewer very long ones. The largest buckets model
+// long real coding sessions (hundreds-to-thousands of turns, some with large
+// tool outputs) to confirm the viewport clip keeps latency flat even at
+// extreme backlog sizes, not just small ones.
 const SIZES: Array<{ label: string; turns: number; chunkSize: number }> = [
 	{ label: "empty", turns: 0, chunkSize: 0 },
 	{ label: "small (5 turns)", turns: 5, chunkSize: 300 },
@@ -82,11 +72,6 @@ const SIZES: Array<{ label: string; turns: number; chunkSize: number }> = [
 	{ label: "large (75 turns)", turns: 75, chunkSize: 500 },
 	{ label: "huge (150 turns)", turns: 150, chunkSize: 600 },
 	{ label: "extreme (300 turns)", turns: 300, chunkSize: 800 },
-	// Long real coding sessions: hundreds-to-thousands of turns, some with
-	// large tool outputs (file reads, grep/search dumps, long diffs). These
-	// sizes exist specifically to stress-test "regular"/--main-screen mode,
-	// where maxTurns/maxRenderedLines are unbounded and every keystroke
-	// re-renders + re-diffs the whole thing.
 	{ label: "long session (600 turns)", turns: 600, chunkSize: 1000 },
 	{ label: "very long (1200 turns)", turns: 1200, chunkSize: 1200 },
 	{ label: "marathon (2500 turns)", turns: 2500, chunkSize: 1500 },
@@ -163,7 +148,7 @@ function percentile(values: number[], p: number): number {
 
 const KEY_SEQUENCE = "abcdefghijklmnopqrstuvwxyz          .,".split("");
 
-// ── Build the same tree app/tui.ts builds for fullscreen mode ─────────────
+// ── Build the same tree app/tui.ts builds ──────────────────────────────────
 // (ScrollView(transcriptDisplay) + dock(inputBar, statusBar) inside a Flex
 // column) so the benchmark exercises the real layout/diff cost, not a
 // simplified stand-in.
@@ -196,30 +181,6 @@ function buildFrame(numTurns: number, chunkSize: number) {
 		{ component: transcriptScroll, basis: 0, grow: 1, shrink: 1, minSize: 1 },
 		{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
 	]);
-
-	return { root, inputBar, transcriptDisplay };
-}
-
-// Mirrors app/tui.ts's buildFlatLayout() for "regular" (--main-screen) mode:
-// TranscriptDisplay mounted flat onto a plain Container, no ScrollView, no
-// viewport clipping — and maxTurns/maxRenderedLines forced to Infinity, same
-// as tui.ts does unconditionally in this mode.
-function buildFlatFrame(numTurns: number, chunkSize: number) {
-	const transcriptDisplay = new TranscriptDisplay({
-		thinkingMode: "collapsed",
-		maxTurns: Number.POSITIVE_INFINITY,
-		maxRenderedLines: Number.POSITIVE_INFINITY,
-	});
-	const turns = genTranscript(numTurns, chunkSize);
-	transcriptDisplay.setTurns(turns);
-
-	const inputBar = new InputBar();
-	const statusBar = new StatusBar();
-
-	const root = new Container();
-	root.addChild(transcriptDisplay);
-	root.addChild(inputBar);
-	root.addChild(statusBar);
 
 	return { root, inputBar, transcriptDisplay };
 }
@@ -268,41 +229,6 @@ function simulateKeystroke(
 	return elapsed;
 }
 
-// Regular/main-screen mode's real diff shape (main-screen.ts's _doRender):
-// walk the *entire* rendered array — not a fixed termHeight window — since
-// append-only mode has no viewport. This is O(total transcript lines), which
-// is exactly the cost fullscreen mode's viewport clip avoids.
-function flatDiffCost(prevLines: string[], newLines: string[], renderWidth: number): string {
-	let changes = "";
-	const maxLines = Math.max(prevLines.length, newLines.length);
-	for (let row = 0; row < maxLines; row++) {
-		const prevLine = row < prevLines.length ? prevLines[row] : "";
-		const newLine = row < newLines.length ? newLines[row] : "";
-		if (prevLine === newLine) continue;
-		changes += `\x1b[2K${newLine.slice(0, renderWidth)}`;
-	}
-	return changes;
-}
-
-function simulateKeystrokeFlat(
-	inputBar: InputBar,
-	root: Container,
-	prevLines: string[],
-	key: string,
-): number {
-	const start = performance.now();
-
-	inputBar.handleInput(key);
-	const newLines = root.render(width);
-	flatDiffCost(prevLines, newLines, width - 1);
-
-	const elapsed = performance.now() - start;
-
-	prevLines.length = 0;
-	prevLines.push(...newLines);
-	return elapsed;
-}
-
 // ── Main ────────────────────────────────────────────────────────────────
 
 interface SizeResult {
@@ -316,7 +242,7 @@ interface SizeResult {
 	minMs: number;
 }
 
-function runFullscreenMode(): SizeResult[] {
+function runBenchmark(): SizeResult[] {
 	const results: SizeResult[] = [];
 	for (const size of SIZES) {
 		const { root, inputBar } = buildFrame(size.turns, size.chunkSize);
@@ -344,30 +270,6 @@ function runFullscreenMode(): SizeResult[] {
 	return results;
 }
 
-function runRegularMode(): SizeResult[] {
-	const results: SizeResult[] = [];
-	for (const size of SIZES) {
-		const { root, inputBar } = buildFlatFrame(size.turns, size.chunkSize);
-
-		const warmLines = root.render(width);
-		const prevLines = [...warmLines];
-
-		for (let i = 0; i < 10; i++) {
-			simulateKeystrokeFlat(inputBar, root, prevLines, KEY_SEQUENCE[i % KEY_SEQUENCE.length]);
-		}
-		inputBar.handleInput("\x15");
-
-		const times: number[] = [];
-		for (let i = 0; i < KEYSTROKES_PER_SIZE; i++) {
-			const key = KEY_SEQUENCE[i % KEY_SEQUENCE.length];
-			times.push(simulateKeystrokeFlat(inputBar, root, prevLines, key));
-		}
-
-		results.push(summarize(size, times));
-	}
-	return results;
-}
-
 function summarize(size: { label: string; turns: number; chunkSize: number }, times: number[]): SizeResult {
 	const approxChars = size.turns * size.chunkSize * 6; // ~6 chunks/turn average
 	return {
@@ -382,8 +284,8 @@ function summarize(size: { label: string; turns: number; chunkSize: number }, ti
 	};
 }
 
-function reportMode(modeName: string, results: SizeResult[]): void {
-	console.log(`\n--- ${modeName}: per-keystroke latency ---\n`);
+function reportResults(results: SizeResult[]): void {
+	console.log(`\n--- Per-keystroke latency ---\n`);
 	const header = `  ${"Transcript".padEnd(22)} ${"p50".padStart(8)} ${"p95".padStart(8)} ${"p99".padStart(8)} ${"max".padStart(8)}`;
 	console.log(header);
 	console.log(`  ${"-".repeat(header.length - 2)}`);
@@ -423,23 +325,14 @@ async function main() {
 		console.log(`Node: ${process.version}, Platform: ${process.platform}, Cores: ${cpus().length}`);
 	}
 
-	const fullscreenResults = runFullscreen ? runFullscreenMode() : null;
-	const regularResults = runRegular ? runRegularMode() : null;
+	const results = runBenchmark();
 
 	if (jsonMode) {
-		console.log(JSON.stringify({
-			width, termHeight, keystrokesPerSize: KEYSTROKES_PER_SIZE,
-			fullscreen: fullscreenResults, regular: regularResults,
-		}, null, 2));
+		console.log(JSON.stringify({ width, termHeight, keystrokesPerSize: KEYSTROKES_PER_SIZE, results }, null, 2));
 		return;
 	}
 
-	if (fullscreenResults) {
-		reportMode("fullscreen mode (default, viewport-clipped)", fullscreenResults);
-	}
-	if (regularResults) {
-		reportMode("regular/--main-screen mode (append-only, unbounded)", regularResults);
-	}
+	reportResults(results);
 	console.log();
 }
 
