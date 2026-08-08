@@ -194,6 +194,28 @@ export function createSlashSubmitHandler(
 				ctx.tui.requestRender();
 				return;
 			}
+			if (match && match.command === "/autoresearch") {
+				const args = command.trim().split(/\s+/).slice(1).join(" ");
+				void ctx.researchManager
+					.handleCommand(args)
+					.then(async ({ message, injectAsTurn }) => {
+						if (injectAsTurn) {
+							// Activation: the kickoff prompt becomes the agent's next
+							// turn (same pattern as /loop's onTick), not just a status
+							// line — the agent needs to actually receive the goal and
+							// guardrail text to start the loop.
+							ctx.transcript.addTurn(message);
+							ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+							ctx.tui.requestRender();
+							await ctx.bridge.sendMessage(message);
+						} else if (message) {
+							ctx.transcript.addSystemMessage(message);
+							ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+							ctx.tui.requestRender();
+						}
+					});
+				return;
+			}
 			if (match && match.command === "/sandbox") {
 				const parts = args.trim().split(/\s+/);
 				const sub = parts[0]?.toLowerCase() ?? "";

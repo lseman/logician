@@ -235,6 +235,10 @@ export class LogicianTUI {
 			runtimeConfig.bridge.cwd ?? process.cwd(),
 			(message, level) => this.notifications.show(message, level),
 		);
+		// Reload persisted .auto/log.jsonl state now — equivalent to
+		// pi-autoresearch's session_start hook, since this app has one
+		// AutoresearchSession per process rather than per pi-session.
+		this.researchManager.reload();
 		this.bridge = new AgentCoreBridge({
 			...runtimeConfig.bridge,
 			extraTools: [
@@ -663,6 +667,7 @@ export class LogicianTUI {
 	stop(): Promise<void> {
 		if (!this.stopPromise) {
 			this.stopPromise = (async () => {
+				this.researchManager.shutdown();
 				this.tui.stop();
 				await this.bridge.stop();
 			})();

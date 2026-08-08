@@ -512,6 +512,23 @@ export function createSlashCommands(
 				],
 			},
 		),
+		cmd(
+			"/autoresearch",
+			"Start, stop, clear, or export an autonomous experiment loop",
+			"local",
+			true,
+			{
+				category: "loop",
+				argHint: "[off|clear|export|<goal>]",
+				examples: [
+					"/autoresearch optimize unit test runtime, monitor correctness",
+					"/autoresearch export",
+					"/autoresearch off",
+					"/autoresearch clear",
+				],
+				subcommands: ["off", "clear", "export"],
+			},
+		),
 
 		// ── Agent ────────────────────────────────────────────────────────────
 		cmd(

@@ -3,6 +3,7 @@
 // bridge-event handling with overlay-opening side effects for
 // permission/question requests.
 
+import type { AutoresearchSession } from "@logician/autoresearch";
 import { formatContextSize } from "@logician/coding-agent";
 import type {
 	AgentCoreBridge,
@@ -48,6 +49,7 @@ export interface BridgeEventHandlerCtx {
 	turnState: TurnState;
 	goalManager: GoalManager;
 	goalActive: boolean;
+	researchManager: AutoresearchSession;
 	configPath?: string;
 	_autoSaveTurn: () => void;
 	evaluateGoal: (goalState: Readonly<GoalState>) => Promise<void>;
@@ -250,9 +252,11 @@ export function handleEvent(
 					void ctx.evaluateGoal(goalState);
 				}
 			}
+			ctx.researchManager.onAgentEnd();
 			break;
 		case "turn_start":
 			ctx.workSurface.startTurn();
+			ctx.researchManager.onAgentStart();
 			break;
 		case "phase":
 			if (event.state === "ready") {

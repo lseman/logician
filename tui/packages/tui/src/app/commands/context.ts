@@ -4,6 +4,7 @@
 // (status/plugins/mcp/reasoner/theme). Extracted from the constructor's
 // inline slash-command wiring block.
 
+import type { AutoresearchSession } from "@logician/autoresearch";
 import type {
 	AgentCoreBridge,
 	GoalManager,
@@ -35,6 +36,7 @@ export interface SlashCommandsCtx {
 	loopActive: boolean;
 	goalManager: GoalManager;
 	goalActive: boolean;
+	researchManager: AutoresearchSession;
 	inferenceMode: string;
 	applyThinkingLevel: (level: string) => void;
 	setInferenceMode: (mode: string) => void;
