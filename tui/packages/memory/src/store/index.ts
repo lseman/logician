@@ -4,6 +4,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, normalize, resolve } from "node:path";
+import { selectContextCandidates } from "../retrieval/context-selector.js";
 import type {
 	CompressedObservation,
 	ContextBlock,
@@ -2101,6 +2102,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			id: string;
 			score: number;
 			sourceKey: string;
+			similarityText: string;
 			memoryId?: string;
 		};
 		const candidates: Candidate[] = [];
@@ -2175,6 +2177,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				recency: nowMs,
 				score: 8 + overlapScore(session.summary) * 12,
 				sourceKey: sessionId,
+				similarityText: session.summary,
 			});
 		}
 
@@ -2295,6 +2298,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				recency: Date.parse(obs.timestamp),
 				score,
 				sourceKey: obs.sessionId,
+				similarityText: body,
 			});
 		}
 
@@ -2347,6 +2351,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					rrfBoost(lexicalMemoryRank.get(mem.id), 14) +
 					rrfBoost(semanticMemoryRank.get(mem.id), 12),
 				sourceKey: mem.sessionIds[0] || `memory:${mem.type}`,
+				similarityText: body,
 				memoryId: mem.id,
 			});
 			memoryCandidateCount++;
@@ -2362,35 +2367,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				.forEach(candidate => candidates.push(candidate));
 		}
 
-		candidates.sort(
-			(a, b) =>
-				b.score - a.score ||
-				b.score / Math.max(1, b.tokens) - a.score / Math.max(1, a.tokens) ||
-				b.recency - a.recency,
-		);
-
-		const diversified: Candidate[] = [];
-		const deferred: Candidate[] = [];
-		const sourceCounts = new Map<string, number>();
-		for (const candidate of candidates) {
-			const count = sourceCounts.get(candidate.sourceKey) || 0;
-			if (count >= 2) deferred.push(candidate);
-			else {
-				diversified.push(candidate);
-				sourceCounts.set(candidate.sourceKey, count + 1);
-			}
-		}
-		diversified.push(...deferred);
-
-		const blocks: Candidate[] = [];
-		let tokenCount = 0;
-		for (const candidate of diversified) {
-			if (blocks.length >= 40) break;
-			if (blocks.some(block => block.id === candidate.id)) continue;
-			if (tokenCount + candidate.tokens > budget) continue;
-			blocks.push(candidate);
-			tokenCount += candidate.tokens;
-		}
+		const blocks = selectContextCandidates(candidates, {
+			budget,
+			maxItems: 40,
+			preferredItemsPerSource: 2,
+		});
+		const tokenCount = blocks.reduce((sum, block) => sum + block.tokens, 0);
 		if (!blocks.length) return "";
 		for (const memoryId of new Set(
 			blocks.flatMap(block => (block.memoryId ? [block.memoryId] : [])),
