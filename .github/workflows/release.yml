@@ -34,10 +34,17 @@ jobs:
           cp dist/logician release/
           tar -czf logician-linux-x86_64.tar.gz -C release logician
 
-      - name: Upload release asset
+      - name: Generate checksum
+        working-directory: tui
+        run: |
+          sha256sum logician-linux-x86_64.tar.gz > logician-linux-x86_64.tar.gz.sha256
+
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: tui/logician-linux-x86_64.tar.gz
+          files: |
+            tui/logician-linux-x86_64.tar.gz
+            tui/logician-linux-x86_64.tar.gz.sha256
           draft: false
           generate_release_notes: true
 
@@ -66,9 +73,16 @@ jobs:
           cp dist/logician release/
           tar -czf logician-darwin-arm64.tar.gz -C release logician
 
-      - name: Upload release asset
+      - name: Generate checksum
+        working-directory: tui
+        run: |
+          sha256sum logician-darwin-arm64.tar.gz > logician-darwin-arm64.tar.gz.sha256
+
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: tui/logician-darwin-arm64.tar.gz
+          files: |
+            tui/logician-darwin-arm64.tar.gz
+            tui/logician-darwin-arm64.tar.gz.sha256
           draft: false
           generate_release_notes: true

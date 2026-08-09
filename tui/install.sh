@@ -140,10 +140,11 @@ fi
 
 if [ "$resolved_version" = "latest" ]; then
   verbose "Fetching latest release from GitHub"
-  release_json="$(download_text "https://api.github.com/repos/lseman/logician/releases/latest")"
+  release_json="$(download_text "https://api.github.com/repos/lseman/logician/releases/latest")" || true
   resolved_version="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":"v\{0,1\}\([^",]*\)".*/\1/p' | head -n 1)"
   if [ -z "$resolved_version" ]; then
-    fail "Failed to resolve latest version. Check your internet connection."
+    warn "Could not fetch latest version (rate limited or offline). Falling back to v0.1.0."
+    resolved_version="0.1.0"
   fi
   ok "Latest release: ${C_BOLD}${resolved_version}${C_RESET}"
 fi
@@ -164,7 +165,7 @@ if [ -x "$INSTALL_BIN_DIR/logician" ]; then
 fi
 
 # ── Resolve URL ──────────────────────────────────────────────────────────────
-asset_name="logician-${os}-${arch}"
+asset_name="logician-${os}-${arch}.tar.gz"
 base_url="https://github.com/lseman/logician/releases/download/v${resolved_version}"
 download_url="${base_url}/${asset_name}"
 
@@ -178,6 +179,27 @@ if ! download_file "$download_url" "$tmp_dir/${asset_name}.tar.gz"; then
   fail "Download failed. Check your connection or pin a version."
 fi
 ok "Downloaded ${C_BOLD}${asset_name}${C_RESET}"
+
+# ── Verify checksum ──────────────────────────────────────────────────────────
+step "Verifying checksum"
+
+checksum_url="${base_url}/${asset_name}.sha256"
+checksum_file=""
+if download_file "$checksum_url" "$tmp_dir/${asset_name}.sha256" 2>/dev/null; then
+  checksum_file="$tmp_dir/${asset_name}.sha256"
+fi
+
+if [ -n "$checksum_file" ] && [ -f "$checksum_file" ]; then
+  expected_hash="$(awk '{print $1}' "$checksum_file" 2>/dev/null)"
+  actual_hash="$(sha256sum "$tmp_dir/${asset_name}.tar.gz" | awk '{print $1}')"
+  if [ "$expected_hash" = "$actual_hash" ]; then
+    ok "Checksum verified (${C_BOLD}${actual_hash:0:12}...${C_RESET})"
+  else
+    fail "Checksum mismatch! Expected ${C_BOLD}${expected_hash}${C_RESET}, got ${C_BOLD}${actual_hash}${C_RESET}."
+  fi
+else
+  warn "No checksum file found at ${checksum_url} — skipping verification."
+fi
 
 # ── Dry run exit ─────────────────────────────────────────────────────────────
 if [ "$DRY_RUN" = "1" ]; then
