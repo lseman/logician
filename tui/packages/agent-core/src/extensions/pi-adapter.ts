@@ -306,6 +306,8 @@ type PiEventType =
 	| "tool_execution_start"
 	| "tool_execution_update"
 	| "tool_execution_end"
+	| "tool_call"
+	| "tool_result"
 	| "model_select"
 	| "thinking_level_changed"
 	| "user_bash"
@@ -343,16 +345,18 @@ function mapToLogician(type: PiEventType): LEventType | null {
 		before_agent_start: "before_agent_start",
 		agent_start: "agent_start",
 		agent_end: "agent_end",
-		agent_settled: "agent_end", // combined with agent_end in Logician
+		agent_settled: "agent_settled",
 		turn_start: "turn_start",
 		turn_end: "turn_end",
 		message_start: "message_start",
 		message_update: "message_update",
 		message_end: "message_end",
 		tool_execution_start: "tool_execution_start",
-		tool_execution_update: null, // not emitted by Logician
+		tool_execution_update: "tool_execution_update",
 		tool_execution_end: "tool_execution_end",
-		model_select: null, // not emitted by Logician
+		tool_call: "tool_execution_start",
+		tool_result: "tool_execution_end",
+		model_select: "model_select",
 		thinking_level_changed: null, // not emitted by Logician
 		user_bash: null, // N/A (handler)
 		input: null, // N/A (handler)
@@ -549,9 +553,10 @@ interface PiCommandContext extends PiExtensionContext {
 	reload(): Promise<void>;
 }
 
-function createPiContext(logicianCtx: LContext): PiExtensionContext {
-	let _idle = true;
-
+function createPiContext(
+	logicianCtx: LContext,
+	runtime?: PiRuntimePort,
+): PiExtensionContext {
 	return {
 		ui: createPiUI(logicianCtx.ui),
 		mode: "tui",
@@ -562,20 +567,23 @@ function createPiContext(logicianCtx: LContext): PiExtensionContext {
 		model: undefined,
 		scopedModels: [],
 		thinkingLevel: undefined,
-		isIdle: () => _idle,
+		isIdle: () => runtime?.isIdle?.() ?? true,
 		isProjectTrusted: () => true,
 		signal: undefined,
-		abort: () => {},
-		hasPendingMessages: () => false,
-		shutdown: () => {},
+		abort: () => runtime?.abort?.(),
+		hasPendingMessages: () => runtime?.hasPendingMessages?.() ?? false,
+		shutdown: () => runtime?.shutdown?.(),
 		getContextUsage: () => undefined,
-		compact: () => {},
-		getSystemPrompt: () => "",
+		compact: () => runtime?.compact?.(),
+		getSystemPrompt: () => runtime?.getSystemPrompt?.() ?? "",
 	};
 }
 
-function createPiCommandContext(logicianCtx: LContext): PiCommandContext {
-	const ctx = createPiContext(logicianCtx) as PiCommandContext;
+function createPiCommandContext(
+	logicianCtx: LContext,
+	runtime?: PiRuntimePort,
+): PiCommandContext {
+	const ctx = createPiContext(logicianCtx, runtime) as PiCommandContext;
 	ctx.getSystemPromptOptions = () => ({});
 	ctx.waitForIdle = async () => {};
 	ctx.newSession = async () => ({ cancelled: true });
@@ -658,6 +666,23 @@ export interface PiExtensionAPI {
 export interface PiAdapterOptions {
 	sessionId: string;
 	cwd: string;
+	runtime?: PiRuntimePort;
+}
+
+export interface PiRuntimePort {
+	isIdle?(): boolean;
+	hasPendingMessages?(): boolean;
+	abort?(): void;
+	shutdown?(): void;
+	compact?(): void;
+	getSystemPrompt?(): string;
+	sendUserMessage?(content: string): void;
+	getActiveTools?(): string[];
+	getAllTools?(): unknown[];
+	setActiveTools?(names: string[]): void;
+	setModel?(model: unknown): Promise<boolean>;
+	getThinkingLevel?(): unknown;
+	setThinkingLevel?(level: unknown): void;
 }
 
 export class PiAdapter {
@@ -677,12 +702,79 @@ export class PiAdapter {
 	private inputHandlers: InputEventHandler[] = [];
 	private userBashHandlers: UserBashEventHandler[] = [];
 	private projectTrustHandlers: ProjectTrustEventHandler[] = [];
+	private readonly runtime?: PiRuntimePort;
 
 	constructor(api: LApi, ctx: LContext, options: PiAdapterOptions) {
 		this.logicianApi = api;
 		this.logicianCtx = ctx;
-		this.piContext = createPiContext(ctx);
-		this.piCommandCtx = createPiCommandContext(ctx);
+		this.runtime = options.runtime;
+		this.piContext = createPiContext(ctx, this.runtime);
+		this.piCommandCtx = createPiCommandContext(ctx, this.runtime);
+	}
+
+	hasHandlers(event: string): boolean {
+		return this.piHandlers.some(handler => handler.event === event);
+	}
+
+	async emitToolCall(event: {
+		toolCallId: string;
+		toolName: string;
+		input: Record<string, unknown>;
+	}): Promise<{
+		input: Record<string, unknown>;
+		block?: boolean;
+		reason?: string;
+		terminate?: boolean;
+	}> {
+		const piEvent: Record<string, unknown> = {
+			type: "tool_call",
+			...event,
+			input: { ...event.input },
+		};
+		const ctx = createPiContext(this.logicianCtx, this.runtime);
+		let decision: { block?: boolean; reason?: string; terminate?: boolean } = {};
+		for (const entry of this.piHandlers) {
+			if (entry.event !== "tool_call") continue;
+			try {
+				const result = await entry.handler(piEvent, ctx);
+				if (result && typeof result === "object") {
+					decision = { ...decision, ...(result as typeof decision) };
+				}
+			} catch (error) {
+				console.error("[pi-adapter] handler error for tool_call:", error);
+			}
+		}
+		return {
+			input: (piEvent.input as Record<string, unknown>) ?? event.input,
+			...decision,
+		};
+	}
+
+	async emitToolResult(event: {
+		toolCallId: string;
+		toolName: string;
+		input: Record<string, unknown>;
+		content: Array<{ type: string; text: string }>;
+		details?: Record<string, unknown>;
+		isError: boolean;
+	}): Promise<typeof event> {
+		const piEvent: Record<string, unknown> = { type: "tool_result", ...event };
+		const ctx = createPiContext(this.logicianCtx, this.runtime);
+		for (const entry of this.piHandlers) {
+			if (entry.event !== "tool_result") continue;
+			try {
+				const result = await entry.handler(piEvent, ctx);
+				if (result && typeof result === "object") Object.assign(piEvent, result);
+			} catch (error) {
+				console.error("[pi-adapter] handler error for tool_result:", error);
+			}
+		}
+		return {
+			...event,
+			content: (piEvent.content as typeof event.content) ?? event.content,
+			details: (piEvent.details as Record<string, unknown> | undefined) ?? event.details,
+			isError: (piEvent.isError as boolean | undefined) ?? event.isError,
+		};
 	}
 
 	/**
@@ -720,7 +812,7 @@ export class PiAdapter {
 				this.projectTrustHandlers.push(handler);
 			},
 			sendMessage: () => {}, // no-op
-			sendUserMessage: () => {}, // no-op
+			sendUserMessage: (content) => this.runtime?.sendUserMessage?.(content),
 			appendEntry: () => {}, // no-op
 			setSessionName: () => {}, // no-op
 			getSessionName: () => this.logicianCtx.sessionId,
@@ -729,13 +821,15 @@ export class PiAdapter {
 				// Forward to bash tool
 				return { output: "", exitCode: 0 };
 			},
-			getActiveTools: () => [],
-			getAllTools: () => this.registeredTools.map(t => ({ name: t.name, description: t.description })),
-			setActiveTools: () => {}, // no-op
+			getActiveTools: () => this.runtime?.getActiveTools?.() ?? [],
+			getAllTools: () =>
+				this.runtime?.getAllTools?.() ??
+				this.registeredTools.map(t => ({ name: t.name, description: t.description })),
+			setActiveTools: names => this.runtime?.setActiveTools?.(names),
 			getCommands: () => this.registeredCommands.map(c => ({ name: c.name, description: c.description })),
-			setModel: async () => false,
-			getThinkingLevel: () => undefined,
-			setThinkingLevel: () => {},
+			setModel: model => this.runtime?.setModel?.(model) ?? Promise.resolve(false),
+			getThinkingLevel: () => this.runtime?.getThinkingLevel?.(),
+			setThinkingLevel: level => this.runtime?.setThinkingLevel?.(level),
 			registerProvider: () => {}, // no-op
 			unregisterProvider: () => {},
 			events: this.logicianApi.events,
@@ -760,7 +854,7 @@ export class PiAdapter {
 						state: this.logicianCtx.state,
 						cwd: lctx.cwd,
 						sessionId: lctx.sessionId,
-					});
+					}, this.runtime);
 					const result = await piTool.execute(toolCallId, params, undefined, undefined, ctx);
 					return {
 						content: result.content.map(c => c.text).join("\n"),
@@ -780,7 +874,7 @@ export class PiAdapter {
 			name,
 			description: options.description ?? "",
 			handler: async (args) => {
-				const ctx = createPiContext(this.logicianCtx) as PiCommandContext;
+				const ctx = createPiCommandContext(this.logicianCtx, this.runtime);
 				await options.handler(args, ctx);
 				return "";
 			},
@@ -805,7 +899,7 @@ export class PiAdapter {
 			state: this.logicianCtx.state,
 			cwd: this.logicianCtx.cwd,
 			sessionId: this.logicianCtx.sessionId,
-		});
+		}, this.runtime);
 
 		let collectedMessages: unknown[] | undefined;
 		let collectedSystemPrompt: string | undefined;
@@ -862,6 +956,7 @@ export class PiAdapter {
 						};
 						if (agentStartResult.systemPrompt) {
 							collectedSystemPrompt = agentStartResult.systemPrompt;
+							piEvent.systemPrompt = agentStartResult.systemPrompt;
 						}
 					}
 
@@ -870,6 +965,7 @@ export class PiAdapter {
 						const contextResult = result as { messages?: unknown[] };
 						if (contextResult.messages) {
 							collectedMessages = contextResult.messages;
+							piEvent.messages = contextResult.messages;
 						}
 					}
 				} catch (err) {
@@ -960,6 +1056,8 @@ export class PiAdapter {
 				};
 			case "agent_start":
 				return { type: "agent_start" };
+			case "agent_settled":
+				return { type: "agent_settled" };
 			case "agent_end": {
 				// Pi's AgentEndEvent: messages
 				const ctx = event.context as any;
@@ -1014,12 +1112,21 @@ export class PiAdapter {
 			case "message_end":
 				return { type: "message_end", message: event.context.message };
 			case "tool_execution_start":
+				{
+					const args =
+						event.context.tool_input ??
+						event.context.toolInput ??
+						event.context.args ??
+						{};
 				return {
 					type: "tool_execution_start",
 					toolCallId: (event.context as any).toolCallId,
 					toolName: event.context.tool_name ?? event.context.toolName,
-					args: event.context.tool_input ?? event.context.args,
+					args,
+					// Compatibility alias used by early Logician Pi adapters.
+					input: args,
 				};
+				}
 			case "tool_execution_end":
 				return {
 					type: "tool_execution_end",
@@ -1027,6 +1134,22 @@ export class PiAdapter {
 					toolName: event.context.tool_name ?? event.context.toolName,
 					result: event.context.tool_result,
 					isError: event.context.is_error,
+				};
+			case "tool_execution_update":
+				return {
+					type: "tool_execution_update",
+					toolCallId: (event.context as any).toolCallId,
+					toolName: event.context.tool_name ?? event.context.toolName,
+					args: event.context.tool_input ?? event.context.args,
+					partialResult:
+						event.context.partial_result ?? event.context.partialResult,
+				};
+			case "model_select":
+				return {
+					type: "model_select",
+					model: event.context.model,
+					previousModel: event.context.previousModel,
+					source: event.context.source ?? "set",
 				};
 			case "session_before_compact": {
 				// Pi's SessionBeforeCompactEvent: preparation, branchEntries, customInstructions?, reason, willRetry, signal
@@ -1127,7 +1250,7 @@ export class PiAdapter {
 			state: this.logicianCtx.state,
 			cwd: this.logicianCtx.cwd,
 			sessionId: this.logicianCtx.sessionId,
-		});
+		}, this.runtime);
 
 		for (const handler of this.inputHandlers) {
 			try {
@@ -1158,7 +1281,7 @@ export class PiAdapter {
 			state: this.logicianCtx.state,
 			cwd: this.logicianCtx.cwd,
 			sessionId: this.logicianCtx.sessionId,
-		});
+		}, this.runtime);
 
 		for (const handler of this.userBashHandlers) {
 			try {
@@ -1185,7 +1308,7 @@ export class PiAdapter {
 			state: this.logicianCtx.state,
 			cwd: cwd,
 			sessionId: this.logicianCtx.sessionId,
-		});
+		}, this.runtime);
 
 		for (const handler of this.projectTrustHandlers) {
 			try {

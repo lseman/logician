@@ -6,13 +6,13 @@ import { Transcript } from "../sessions/transcript.ts";
 void test("direct-mode /spawn: lifecycle summary written after tool_end closes chunk", () => {
 	const transcript = new Transcript();
 	// turn_start creates synthetic assistant-only turn (no user message)
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-1" });
 
 	// Tool execution completes before any lifecycle events
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
 		result: "Agent done in 2 turns",
 	});
 
@@ -57,12 +57,12 @@ void test("direct-mode /spawn: lifecycle summary written after tool_end closes c
 /** Normal direct /spawn order: start → lifecycle → end → turn_end. */
 void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", () => {
 	const transcript = new Transcript();
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-direct" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-direct" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "spawn_1",
-		tool_args: { task: "list files", agent: "general" },
+		toolName: "spawn_agent",
+		toolCallId: "spawn_1",
+		args: { task: "list files", agent: "general" },
 	});
 	transcript.handleEvent({
 		type: "subagent_lifecycle",
@@ -90,8 +90,8 @@ void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", (
 	// tool_end should reuse the same card and prefer metrics duration
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agent",
-		tool_call_id: "spawn_1",
+		toolName: "spawn_agent",
+		toolCallId: "spawn_1",
 		result: "file a, file b",
 		details: {
 			agent: "general",
@@ -112,8 +112,7 @@ void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", (
 
 	transcript.handleEvent({
 		type: "turn_end",
-		turn_id: "turn-direct",
-		message: "",
+		turnId: "turn-direct",
 	});
 	assert.equal(transcript.getTurns()[0]?.isComplete, true);
 });
@@ -121,13 +120,13 @@ void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", (
 /** spawn_agents batch: lifecycle arrives after all tasks end. */
 void test("direct-mode /spawn-test: batch lifecycle captured after tool_end", () => {
 	const transcript = new Transcript();
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-2" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-2" });
 
 	// Tool ends first
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agents",
-		tool_call_id: "batch",
+		toolName: "spawn_agents",
+		toolCallId: "batch",
 		result: "",
 		details: { total: 2, completed: 2 },
 	});
@@ -181,12 +180,12 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	const transcript = new Transcript();
 	// TUI addTurn happens before spawnAgentDirectly after the slash-popup fix
 	transcript.addTurn("/spawn list files");
-	transcript.handleEvent({ type: "turn_start", turn_id: "spawn_turn" });
+	transcript.handleEvent({ type: "turn_start", turnId: "spawn_turn" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "spawn_1",
-		tool_args: { task: "list files", agent: "general" },
+		toolName: "spawn_agent",
+		toolCallId: "spawn_1",
+		args: { task: "list files", agent: "general" },
 	});
 	transcript.handleEvent({
 		type: "subagent_lifecycle",
@@ -197,10 +196,9 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool_name: "spawn_agent",
-		tool_call_id: "spawn_1",
-		partial_result: "Listing files…\n",
-		update_kind: "output",
+		toolName: "spawn_agent",
+		toolCallId: "spawn_1",
+		partialResult: "Listing files…\n",
 	});
 	transcript.handleEvent({
 		type: "subagent_chunk",
@@ -213,7 +211,7 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 		type: "subagent_chunk",
 		agentId: "agent_1",
 		seq: 2,
-		kind: "tool_start",
+		kind: "tool_execution_start",
 		toolCallId: "tc1",
 		toolName: "bash",
 		args: '{"command":"ls"}',
@@ -222,7 +220,7 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 		type: "subagent_chunk",
 		agentId: "agent_1",
 		seq: 3,
-		kind: "tool_end",
+		kind: "tool_execution_end",
 		toolCallId: "tc1",
 		toolName: "bash",
 		result: "a.md\nb.md",
@@ -239,8 +237,8 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agent",
-		tool_call_id: "spawn_1",
+		toolName: "spawn_agent",
+		toolCallId: "spawn_1",
 		result: "Two markdown files.",
 		details: {
 			agent: "general",
@@ -250,8 +248,7 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	});
 	transcript.handleEvent({
 		type: "turn_end",
-		turn_id: "spawn_turn",
-		message: "",
+		turnId: "spawn_turn",
 	});
 
 	assert.equal(transcript.getTurns().length, 1, "single turn");
@@ -274,19 +271,19 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 /** Dual tool_call_* + tool_execution_* events must not double child tools. */
 void test("child tool_call and tool_execution events dedupe by toolCallId", () => {
 	const transcript = new Transcript();
-	transcript.handleEvent({ type: "turn_start", turn_id: "t1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "t1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "spawn_1",
-		tool_args: { task: "list", agent: "general" },
+		toolName: "spawn_agent",
+		toolCallId: "spawn_1",
+		args: { task: "list", agent: "general" },
 	});
 	// Streaming start
 	transcript.handleEvent({
 		type: "subagent_chunk",
 		agentId: "a1",
 		seq: 1,
-		kind: "tool_start",
+		kind: "tool_execution_start",
 		toolCallId: "tc_bash",
 		toolName: "bash",
 		args: '{"command":"ls"}',
@@ -296,7 +293,7 @@ void test("child tool_call and tool_execution events dedupe by toolCallId", () =
 		type: "subagent_chunk",
 		agentId: "a1",
 		seq: 2,
-		kind: "tool_start",
+		kind: "tool_execution_start",
 		toolCallId: "tc_bash",
 		toolName: "bash",
 		args: JSON.stringify({ command: "ls" }),
@@ -305,7 +302,7 @@ void test("child tool_call and tool_execution events dedupe by toolCallId", () =
 		type: "subagent_chunk",
 		agentId: "a1",
 		seq: 3,
-		kind: "tool_end",
+		kind: "tool_execution_end",
 		toolCallId: "tc_bash",
 		toolName: "bash",
 		result: "a.md",
@@ -316,7 +313,7 @@ void test("child tool_call and tool_execution events dedupe by toolCallId", () =
 		type: "subagent_chunk",
 		agentId: "a1",
 		seq: 4,
-		kind: "tool_end",
+		kind: "tool_execution_end",
 		toolCallId: "tc_bash",
 		toolName: "bash",
 		result: "a.md\nb.md",
@@ -339,11 +336,11 @@ void test("child tool_call and tool_execution events dedupe by toolCallId", () =
 void test("turn_start without pending turn opens a fresh synthetic turn", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("old prompt");
-	transcript.handleEvent({ type: "turn_start", turn_id: "old" });
-	transcript.handleEvent({ type: "turn_end", turn_id: "old", message: "" });
+	transcript.handleEvent({ type: "turn_start", turnId: "old" });
+	transcript.handleEvent({ type: "turn_end", turnId: "old" });
 	assert.equal(transcript.getTurns()[0]?.isComplete, true);
 
-	transcript.handleEvent({ type: "turn_start", turn_id: "spawn_fresh" });
+	transcript.handleEvent({ type: "turn_start", turnId: "spawn_fresh" });
 	assert.equal(transcript.getTurns().length, 2);
 	assert.equal(transcript.getTurns()[1]?.id, "spawn_fresh");
 	assert.equal(transcript.getTurns()[1]?.isComplete, false);
@@ -352,14 +349,14 @@ void test("turn_start without pending turn opens a fresh synthetic turn", () => 
 /** Normal flow still works: lifecycle before tool_end. */
 void test("normal flow: lifecycle before tool_end still captures summary", () => {
 	const transcript = new Transcript();
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-3" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-3" });
 
 	// Tool start creates the chunk first (as agent-loop does)
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
-		tool_args: { agent: "explorer", task: "Inspect files" },
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
+		args: { agent: "explorer", task: "Inspect files" },
 	});
 
 	// Lifecycle events arrive before tool_end
@@ -383,8 +380,8 @@ void test("normal flow: lifecycle before tool_end still captures summary", () =>
 	// Tool ends after
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
 		result: "done",
 	});
 

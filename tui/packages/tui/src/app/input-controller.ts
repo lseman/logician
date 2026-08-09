@@ -454,17 +454,14 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		// `!!` = execute and exclude from LLM context (same as `!` but double-bang)
 		if (text.startsWith("!")) {
 			const excludeFromContext = text.startsWith("!!");
-			const command = excludeFromContext
-				? text.slice(2)
-				: text.slice(1);
+			const command = excludeFromContext ? text.slice(2) : text.slice(1);
 			if (command.trim()) {
 				// Emit Pi user_bash event for Pi extension interception
 				void (async () => {
-					const result =
-						await ctx.bridge.emitUserBashEvent(
-							command.trim(),
-							excludeFromContext,
-						);
+					const result = await ctx.bridge.emitUserBashEvent(
+						command.trim(),
+						excludeFromContext,
+					);
 					if (result) {
 						if (result.action === "replace" && result.result) {
 							const output = result.result.output || "(no output)";
@@ -556,7 +553,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 				intent === "steer-now" ? "Steering now…" : "Steering queued…",
 				"info",
 			);
-			ctx.tui.renderNow();
+			ctx.tui.requestRender(false, true);
 			setImmediate(() => {
 				void ctx.bridge
 					.sendMessage(text)
@@ -577,10 +574,12 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 		ctx.statusPanel.update({ phase: "streaming" });
 		ctx.statusPanel.startAnimation();
-		// Paint the submitted turn and active status before bridge setup. Model,
-		// plugin, and skill initialization can do synchronous work before their
-		// first await; deferring it keeps Enter-to-feedback latency near one frame.
-		ctx.tui.renderNow();
+		// Queue an immediate frame before bridge setup. Rendering synchronously in
+		// the stdin callback made Enter block on full transcript layout and terminal
+		// writes; with a long session that also froze typing and spinner timers.
+		// requestRender uses nextTick, so this frame still precedes the setImmediate
+		// bridge work while allowing the input callback to return promptly.
+		ctx.tui.requestRender(false, true);
 		setImmediate(() => {
 			void ctx.bridge
 				.sendMessage(text)

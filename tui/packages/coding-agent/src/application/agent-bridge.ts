@@ -65,7 +65,7 @@ import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diag
 import type { McpSnapshotResult, McpToggleResult } from "../mcp/index.ts";
 import { findPromptByName, type Prompt } from "../prompts/index.ts";
 import { mapAgentEvent } from "../runtime/event-mapping.ts";
-import type { ParsedBridgeEvent } from "../runtime/events.ts";
+import type { RuntimeEvent } from "../runtime/events.ts";
 import { formatPluginResult } from "../runtime/plugin-result-formatter.ts";
 import {
 	formatActivatedSkills,
@@ -98,7 +98,7 @@ import { EohController } from "./eoh/controller.ts";
 import { InteractionCoordinator } from "./interaction-coordinator.ts";
 import { SubagentCoordinator } from "./subagent-coordinator.ts";
 import { ToolRouter } from "./tool-router.ts";
-export type EventCallback = (event: ParsedBridgeEvent) => void;
+export type EventCallback = (event: RuntimeEvent) => void;
 export type ErrorCallback = (err: Error) => void;
 
 export function findJbPrompt(cwd: string): string | null {
@@ -222,6 +222,7 @@ export class AgentCoreBridge {
 	private toolRouter: ToolRouter;
 	private baseSystemPrompt: string;
 	private extensionRunner: ExtensionRunner | null = null;
+	private extensionLoadPromise: Promise<void> = Promise.resolve();
 	private additionalSystemPrompt?: string;
 	private pluginSystemContext = "";
 	private sessionId =
@@ -358,19 +359,58 @@ export class AgentCoreBridge {
 		this.extensionRunner = new ExtensionRunner({
 			sessionId: this.sessionId,
 			cwd: this.cwd,
+			piRuntime: {
+				isIdle: () => !this.running,
+				hasPendingMessages: () => {
+					const queues = this.harness?.getQueues();
+					return (
+						!!queues &&
+						queues.steering.length +
+							queues.followUp.length +
+							queues.nextTurn.length >
+							0
+					);
+				},
+				abort: () => void this.cancel(),
+				shutdown: () => void this.stop(),
+				compact: () => void this.compact(),
+				getSystemPrompt: () =>
+					this.config.systemPrompt ?? this.baseSystemPrompt,
+				sendUserMessage: content => void this.sendMessage(content),
+				getActiveTools: () =>
+					this.harness?.tools?.list().map((tool: Tool) => tool.name) ??
+					this.toolRouter.getDefaultTools().map(tool => tool.name),
+				getAllTools: () =>
+					(
+						this.harness?.tools?.list() ?? this.toolRouter.getDefaultTools()
+					).map(tool => ({ name: tool.name, description: tool.description })),
+				setModel: async model => {
+					const id =
+						typeof model === "string"
+							? model
+							: typeof model === "object" && model !== null && "id" in model
+								? String((model as { id: unknown }).id)
+								: "";
+					if (!id) return false;
+					this.setModel(id);
+					return true;
+				},
+				getThinkingLevel: () => this.config.thinkingLevel,
+				setThinkingLevel: level => this.setThinkingLevel(String(level)),
+			},
 		});
 
 		// Load extensions from user, project, and explicit paths
 		try {
 			const extResult = loadExtensions({
 				userDir: opts.extensionDirs?.user,
-				projectDir: this.cwd,
+				projectDir: this.projectTrusted ? this.cwd : undefined,
 				explicitPaths: opts.extensionDirs?.paths,
 			});
 			if (extResult.extensions.length > 0) {
-				this.extensionRunner.load(extResult.extensions).catch(err =>
-					console.error("[logician] extension load error:", err),
-				);
+				this.extensionLoadPromise = this.extensionRunner
+					.load(extResult.extensions)
+					.catch(err => console.error("[logician] extension load error:", err));
 			}
 		} catch (err) {
 			console.error("[logician] extension load error:", err);
@@ -496,7 +536,7 @@ export class AgentCoreBridge {
 				),
 			),
 			turnEndCallback: (turnId: string) => {
-				this.emit({ type: "turn_end", turn_id: turnId, message: "" });
+				this.emit({ type: "turn_end", turnId });
 			},
 			onEvent: (event: AgentEvent) => {
 				if (event.type === "context_update") {
@@ -687,7 +727,7 @@ export class AgentCoreBridge {
 		this.errorCb?.(normalized);
 	}
 
-	private emit(event: ParsedBridgeEvent): void {
+	private emit(event: RuntimeEvent): void {
 		for (const cb of this.callbacks) {
 			try {
 				cb(event);
@@ -700,14 +740,22 @@ export class AgentCoreBridge {
 	// ── High-level commands ──────────────────────────────────────────────
 
 	async sendMessage(message: string): Promise<void> {
+		await this.extensionLoadPromise;
 		// Emit Pi input event for Pi extension interception.
 		// If a Pi extension handles the input (returns 'handled'), skip processing.
 		// If it transforms, use the transformed text.
 		if (this.extensionRunner) {
-			const inputResult = await this.extensionRunner.emitInputEvent(message, [], "interactive");
+			const inputResult = await this.extensionRunner.emitInputEvent(
+				message,
+				[],
+				"interactive",
+			);
 			if (inputResult) {
 				if (inputResult.action === "handled") return;
-				if (inputResult.action === "transform" && inputResult.text !== undefined) {
+				if (
+					inputResult.action === "transform" &&
+					inputResult.text !== undefined
+				) {
 					message = inputResult.text;
 				}
 			}
@@ -798,7 +846,7 @@ export class AgentCoreBridge {
 				});
 			}
 
-			this.emit({ type: "turn_start", turn_id: turnId });
+			this.emit({ type: "turn_start", turnId: turnId });
 			await harness.prompt(message);
 		} catch (err: unknown) {
 			const error = err as Error;
@@ -818,7 +866,7 @@ export class AgentCoreBridge {
 			}
 			this.running = false;
 			this.publishContextUsage();
-			this.emit({ type: "turn_end", turn_id: turnId, message: "" });
+			this.emit({ type: "turn_end", turnId });
 			// Keep the harness alive to retain history across turns.
 			this.emit({ type: "phase", state: "ready" });
 			if (this.pendingAutoContinue) {
@@ -851,11 +899,6 @@ export class AgentCoreBridge {
 			// injected before the trigger message by the transformContext hook.
 			this.harness.setOnSettled(nextTurnCount => {
 				if (nextTurnCount > 0) this.pendingAutoContinue = true;
-			});
-			// Emit a save_point event after every completed turn so the UI can
-			// show autosave status and know a rewind point exists.
-			this.harness.setOnSavePoint(() => {
-				this.emit({ type: "save_point" });
 			});
 			// Apply compaction settings from user settings (~/.logician/settings.json).
 			const userSettings = loadUserSettings();
@@ -1117,8 +1160,7 @@ export class AgentCoreBridge {
 		// Send reload confirmation (not via sendMessage to avoid starting a turn)
 		this.emit({
 			type: "turn_end",
-			turn_id: "reload",
-			message: "**Session reloaded.**",
+			turnId: "reload",
 		});
 	}
 
@@ -1708,8 +1750,7 @@ export class AgentCoreBridge {
 		this.publishContextUsage();
 		this.emit({
 			type: "turn_end",
-			turn_id: "reset",
-			message: "Tool state reset.",
+			turnId: "reset",
 		});
 	}
 
@@ -1743,9 +1784,9 @@ export class AgentCoreBridge {
 		this.emit({
 			type: "compaction",
 			reason: "manual",
-			tokens_before: before,
-			tokens_after: after,
-		} as ParsedBridgeEvent);
+			tokensBefore: before,
+			tokensAfter: after,
+		} as RuntimeEvent);
 		return { tokensSaved: saved, tokensBefore: before, tokensAfter: after };
 	}
 
@@ -1796,6 +1837,7 @@ export class AgentCoreBridge {
 	// ── State management ─────────────────────────────────────────────────
 
 	async init(): Promise<Record<string, unknown>> {
+		await this.extensionLoadPromise;
 		await this.runStartupHooksOnce();
 		this.ensureHarness();
 		// MCP discovery already started in ToolRouter's constructor — fire-
@@ -1859,6 +1901,30 @@ export class AgentCoreBridge {
 		// streaming after init.
 		this.emit({ type: "phase", state: "ready" });
 		return info;
+	}
+
+	getExtensionCommands(): Array<{
+		name: string;
+		description: string;
+		usage?: string;
+		acceptsArgs?: boolean;
+	}> {
+		return (this.extensionRunner?.getCommands() ?? []).map(command => ({
+			name: command.name,
+			description: command.description,
+			usage: command.usage,
+			acceptsArgs: command.acceptsArgs,
+		}));
+	}
+
+	invokeExtensionCommand(
+		name: string,
+		args: string,
+	): Promise<string | undefined> {
+		return (
+			this.extensionRunner?.executeCommand(name, args) ??
+			Promise.resolve(undefined)
+		);
 	}
 
 	async stop(): Promise<void> {
@@ -2038,7 +2104,7 @@ export class AgentCoreBridge {
 		this.emit({
 			type: "context_update",
 			tokens: this.contextTokens,
-			max_tokens: this.contextMaxTokens,
+			maxTokens: this.contextMaxTokens,
 			compacted: false,
 		});
 	}
@@ -2207,7 +2273,10 @@ export class AgentCoreBridge {
 		result?: { output: string; exitCode: number; cancelled: boolean };
 		operations?: unknown;
 	} | null> {
-		return this.extensionRunner?.emitUserBashEvent(command, excludeFromContext) ?? null;
+		return (
+			this.extensionRunner?.emitUserBashEvent(command, excludeFromContext) ??
+			null
+		);
 	}
 
 	/**

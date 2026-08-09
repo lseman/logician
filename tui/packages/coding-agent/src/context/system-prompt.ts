@@ -1,7 +1,6 @@
 // ── System prompt builder ────────────────────────────────────────────────────────
 // Config-driven system prompt construction, ported from Pi with logician extensions.
-// Supports tool snippets, custom guidelines, project context files, skills,
-// and dynamic tool-based guidelines.
+// Supports tool snippets, project context files, skills, and workflow policy.
 
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -20,10 +19,6 @@ export interface BuildSystemPromptOptions {
 	selectedTools?: Tool[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
-	/** Optional tool-level guidelines keyed by tool name. */
-	toolGuidelines?: Record<string, string[]>;
-	/** Additional guideline bullets appended to the default system prompt. */
-	promptGuidelines?: string[];
 	/** Text to append to system prompt. */
 	appendSystemPrompt?: string;
 	/** Working directory. */
@@ -151,45 +146,6 @@ function buildMcpWorkflow(tools: Tool[]): string[] {
 }
 
 // ============================================================================
-// Dynamic guidelines (Pi-style)
-// ============================================================================
-
-function buildGuidelines(options: BuildSystemPromptOptions): string[] {
-	const tools = options.selectedTools ?? [];
-	const hasBash = tools.some(t => t.name === "bash");
-	const hasGrep = tools.some(t => t.name === "grep");
-	const hasFind = tools.some(t => t.name === "find");
-	const hasLs = tools.some(t => t.name === "list_files");
-	// hasRead = tools.some((t) => t.name === "read_file");
-
-	const guidelines: string[] = [];
-	const seen = new Set<string>();
-	const add = (g: string) => {
-		const normalized = g.trim();
-		if (normalized && !seen.has(normalized)) {
-			seen.add(normalized);
-			guidelines.push(normalized);
-		}
-	};
-
-	// Tool-based file exploration guidelines
-	if (hasBash && !hasGrep && !hasFind && !hasLs) {
-		add("Use bash for file operations like ls, rg, find");
-	}
-
-	// Always include
-	add("Be concise in your responses");
-	add("Show file paths clearly when working with files");
-
-	// Custom guidelines from options
-	for (const g of options.promptGuidelines ?? []) {
-		add(g);
-	}
-
-	return guidelines;
-}
-
-// ============================================================================
 // Main builder
 // ============================================================================
 
@@ -198,8 +154,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		customPrompt,
 		selectedTools,
 		toolSnippets,
-		toolGuidelines,
-		promptGuidelines: extraGuidelines,
 		appendSystemPrompt,
 		cwd,
 		contextFiles: providedContextFiles,
@@ -235,18 +189,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 					.join("\n")
 			: "(none)";
 
-	// Build guidelines
-	const guidelinesList = buildGuidelines({
-		...options,
-		promptGuidelines: extraGuidelines,
-	});
-	for (const tool of selectedTools ?? []) {
-		for (const guideline of toolGuidelines?.[tool.name] ?? []) {
-			if (!guidelinesList.includes(guideline)) guidelinesList.push(guideline);
-		}
-	}
-	const guidelines = guidelinesList.map(g => `- ${g}`).join("\n");
-
 	const mcpWorkflow = buildMcpWorkflow(tools);
 
 	// Web workflow (logician extension)
@@ -254,14 +196,13 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const hasWebFetch = tools.some(t => t.name === "web_fetch");
 	const webWorkflow = buildWebWorkflow(hasWebSearch, hasWebFetch);
 
-	// Append section (custom or guidelines)
+	// Append custom/project system text.
 	const resolvedAppendSystemPrompt = [
 		appendSystemPrompt,
 		loadedContext.appendSystemFile?.content,
 	]
 		.filter((part): part is string => Boolean(part))
 		.join("\n\n");
-	const guidelinesSection = guidelines ? `\n\nGuidelines:\n${guidelines}` : "";
 	const webSection = webWorkflow.length > 0 ? webWorkflow.join("\n") : "";
 
 	// Build the base prompt
@@ -272,7 +213,7 @@ Work each task to completion: don't stop after one step if more remains. Signal 
 Available tools:
 ${toolsList}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.${guidelinesSection}
+In addition to the tools above, you may have access to other custom tools depending on the project.
 ${mcpWorkflow.join("\n")}
 
 Workflow:
@@ -331,7 +272,6 @@ export function buildDefaultSystemPrompt(
 	> = {},
 ): string {
 	const snippets: Record<string, string> = {};
-	const guidelines: Record<string, string[]> = {};
 	for (const tool of tools) {
 		if (tool.promptSnippet) {
 			snippets[tool.name] = tool.promptSnippet;
@@ -340,16 +280,12 @@ export function buildDefaultSystemPrompt(
 			const firstSentence = desc.split(".")[0];
 			snippets[tool.name] = firstSentence || desc;
 		}
-		if (tool.promptGuidelines) {
-			guidelines[tool.name] = tool.promptGuidelines;
-		}
 	}
 
 	return buildSystemPrompt({
 		cwd,
 		selectedTools: tools,
 		toolSnippets: snippets,
-		toolGuidelines: guidelines,
 		...options,
 	});
 }

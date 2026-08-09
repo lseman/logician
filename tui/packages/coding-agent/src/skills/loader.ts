@@ -665,7 +665,7 @@ function formatSkillResources(skill: Skill): string {
 		const dir = join(skill.baseDir, dirName);
 		if (!existsSync(dir)) continue;
 		lines.push(`  <${dirName} dir="${escapeXml(dir)}">`);
-		for (const item of listResourceFiles(dir).slice(0, 40)) {
+		for (const item of listResourceFiles(dir, 40)) {
 			lines.push(`    <file>${escapeXml(item)}</file>`);
 		}
 		lines.push(`  </${dirName}>`);
@@ -674,7 +674,8 @@ function formatSkillResources(skill: Skill): string {
 	return lines.length > 2 ? lines.join("\n") : "";
 }
 
-function listResourceFiles(dir: string, base = dir): string[] {
+function listResourceFiles(dir: string, limit: number, base = dir): string[] {
+	if (limit <= 0) return [];
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
@@ -683,12 +684,14 @@ function listResourceFiles(dir: string, base = dir): string[] {
 	}
 	const files: string[] = [];
 	for (const entry of entries.sort((a, b) => a.localeCompare(b))) {
+		if (files.length >= limit) break;
 		if (entry.startsWith(".")) continue;
 		const full = join(dir, entry);
 		const info = safeStatSync(full);
 		if (!info) continue;
-		if (info.isDirectory()) files.push(...listResourceFiles(full, base));
-		else files.push(toPosixPath(relative(base, full)));
+		if (info.isDirectory()) {
+			files.push(...listResourceFiles(full, limit - files.length, base));
+		} else files.push(toPosixPath(relative(base, full)));
 	}
 	return files;
 }

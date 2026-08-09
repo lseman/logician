@@ -25,7 +25,7 @@ import {
 	type ToolContext,
 } from "@logician/agent-core";
 import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
-import type { ParsedBridgeEvent } from "../runtime/events.ts";
+import type { RuntimeEvent } from "../runtime/events.ts";
 import { loadUserSettings } from "./bridge-settings.ts";
 
 export interface SubagentCoordinatorDeps {
@@ -38,7 +38,7 @@ export interface SubagentCoordinatorDeps {
 	onToolAdded: (tool: Tool) => void;
 	getDefaultTools: () => Tool[];
 	ensureHarness: () => AgentHarness;
-	emit: (event: ParsedBridgeEvent) => void;
+	emit: (event: RuntimeEvent) => void;
 	reportError: (error: unknown) => void;
 }
 
@@ -136,15 +136,15 @@ export class SubagentCoordinator {
 		// Create a synthetic turn so the transcript has a context for the
 		// tool chunk. handleToolStart / subagent lifecycle both need a
 		// current turn.
-		this.deps.emit({ type: "turn_start", turn_id: turnId });
+		this.deps.emit({ type: "turn_start", turnId: turnId });
 
 		// Emit tool_execution_start so the transcript creates a tool chunk
 		// before the tool fires subagent_start/subagent_event.
 		this.deps.emit({
 			type: "tool_execution_start",
-			tool_name: "spawn_agent",
-			tool_args: { task, agent },
-			tool_call_id: toolCallId,
+			toolName: "spawn_agent",
+			args: { task, agent },
+			toolCallId: toolCallId,
 		});
 
 		const ctx: ToolContext = {
@@ -155,10 +155,9 @@ export class SubagentCoordinator {
 				// deps.emit(subagent_event) → mapAgentEvent.
 				this.deps.emit({
 					type: "tool_execution_update",
-					tool_name: "spawn_agent",
-					partial_result: delta,
-					update_kind: "output" as const,
-					tool_call_id: toolCallId,
+					toolName: "spawn_agent",
+					partialResult: delta,
+					toolCallId: toolCallId,
 				});
 			},
 		};
@@ -174,10 +173,10 @@ export class SubagentCoordinator {
 				// emitted by the tool via deps.emit during execute().
 				this.deps.emit({
 					type: "tool_execution_end",
-					tool_name: "spawn_agent",
+					toolName: "spawn_agent",
 					result: content,
-					is_error: isError,
-					tool_call_id: toolCallId,
+					isError: isError,
+					toolCallId: toolCallId,
 					details:
 						typeof result === "object" && result.details
 							? result.details
@@ -192,10 +191,10 @@ export class SubagentCoordinator {
 				const error = err as Error;
 				this.deps.emit({
 					type: "tool_execution_end",
-					tool_name: "spawn_agent",
+					toolName: "spawn_agent",
 					result: error.message,
-					is_error: true,
-					tool_call_id: toolCallId,
+					isError: true,
+					toolCallId: toolCallId,
 				});
 				this.deps.reportError(error);
 				this.recordInHistory(task, agent, toolCallId, error.message, true);
@@ -203,7 +202,7 @@ export class SubagentCoordinator {
 			.finally(() => {
 				// Close the synthetic turn and return the UI to ready. Mirror
 				// runMessage's phase emit so status/animation settle.
-				this.deps.emit({ type: "turn_end", turn_id: turnId, message: "" });
+				this.deps.emit({ type: "turn_end", turnId });
 				this.deps.emit({ type: "phase", state: "ready" });
 			});
 	}

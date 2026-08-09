@@ -11,17 +11,17 @@ import {
 	type PermissionMode,
 	type PermissionRules,
 } from "@logician/agent-core/tools/shared/permissions.ts";
-import type { ParsedBridgeEvent } from "../runtime/events.ts";
+import type { RuntimeEvent } from "../runtime/events.ts";
 
 export interface InteractionCoordinatorDeps {
-	emit: (event: ParsedBridgeEvent) => void;
+	emit: (event: RuntimeEvent) => void;
 	permissionMode: PermissionMode;
 	permissionRules?: PermissionRules;
 }
 
 export class InteractionCoordinator {
 	private readonly permissionManager: PermissionManager;
-	private readonly emit: (event: ParsedBridgeEvent) => void;
+	private readonly emit: (event: RuntimeEvent) => void;
 	private readonly permissionResolvers = new Map<
 		string,
 		(decision: "allow" | "deny" | "always") => void
@@ -54,8 +54,8 @@ export class InteractionCoordinator {
 					this.permissionResolvers.set(ctx.toolCallId, resolve);
 					this.emit({
 						type: "permission_request",
-						tool_name: ctx.toolName,
-						tool_call_id: ctx.toolCallId,
+						toolName: ctx.toolName,
+						toolCallId: ctx.toolCallId,
 						args: ctx.args,
 					});
 				}),
@@ -68,7 +68,7 @@ export class InteractionCoordinator {
 					});
 					this.emit({
 						type: "question_request",
-						question_id: questionId,
+						questionId: questionId,
 						questions: ctx.questions,
 					});
 				}),
@@ -134,7 +134,7 @@ export class InteractionCoordinator {
 		});
 		this.emit({
 			type: "question_request",
-			question_id: questionId,
+			questionId: questionId,
 			questions: [{ id: "answer", question, choices }],
 		});
 		return questionId;

@@ -25,6 +25,7 @@ import type {
 	RegisteredTool,
 } from "./types.ts";
 import { PiAdapter } from "./pi-adapter.ts";
+import type { PiRuntimePort } from "./pi-adapter.ts";
 
 // ============================================================================
 // No-op UI (for headless/non-TUI contexts)
@@ -74,6 +75,7 @@ function createStateWrapper(extId: string): ExtensionState {
 export interface ExtensionRunnerOptions {
 	sessionId: string;
 	cwd: string;
+	piRuntime?: PiRuntimePort;
 }
 
 interface HandlerEntry {
@@ -131,12 +133,12 @@ export class ExtensionRunner {
 	 */
 	private async readExtensionSource(path: string): Promise<string | null> {
 		try {
-			const fs = await import("node:fs");
+			const fs = await import("node:fs/promises");
 			// Handle file:// URLs (from pathToFileURL)
 			const cleanPath = path.startsWith("file://")
 				? path.replace(/^file:\/\//, "")
 				: path;
-			return fs.readFileSync(cleanPath, "utf-8");
+			return await fs.readFile(cleanPath, "utf-8");
 		} catch {
 			return null;
 		}
@@ -155,7 +157,10 @@ export class ExtensionRunner {
 				// Read file content to detect Pi extensions (best-effort)
 				const content = await this.readExtensionSource(def.path);
 
-				if (content && this.isPiExtension(content)) {
+				if (
+					def.compatibility === "pi" ||
+					(def.compatibility !== "native" && content && this.isPiExtension(content))
+				) {
 					// Load as Pi extension through the adapter
 					await this.loadPiExtension(def, content);
 				} else {
@@ -176,15 +181,20 @@ export class ExtensionRunner {
 	 */
 	private async loadPiExtension(
 		def: ExtensionDefinition,
-		content: string,
+		_content: string | null,
 	): Promise<void> {
-		// Create a minimal API for the Pi extension factory.
-		// Tools/commands are registered and forwarded to native Logician.
-		// Event emission is handled in emitToAll() with real context.
+		// Give the adapter the same live registration interface native extensions
+		// use. Pi contributions then enter the actual tool/command registries at
+		// factory time instead of being stranded in adapter-local bookkeeping.
+		const logicianApi = this.createAPI(def);
 		const adapter = new PiAdapter(
-			{} as any, // minimal placeholder — real API wiring happens at emit time
+			logicianApi,
 			{ ui: noopUI, state: { get: async () => undefined, set: async () => {}, delete: async () => {}, keys: async () => [] }, cwd: this.adapterCwd, sessionId: this.adapterSessionId },
-			{ sessionId: this.adapterSessionId, cwd: this.adapterCwd },
+			{
+				sessionId: this.adapterSessionId,
+				cwd: this.adapterCwd,
+				runtime: this.options.piRuntime,
+			},
 		);
 
 		try {
@@ -205,6 +215,7 @@ export class ExtensionRunner {
 			factory(piApi);
 
 			this.piAdapters.push(adapter);
+			this.extensions.push({ def, unload: logicianApi.unload });
 			console.log(
 				`[logician] loaded Pi extension "${def.name}" with ${adapter.getRegisteredTools().length} tool(s) and ${adapter.getRegisteredCommands().length} command(s)`,
 			);
@@ -334,8 +345,23 @@ export class ExtensionRunner {
 		return this.commands.map(entry => entry.command);
 	}
 
+	async executeCommand(name: string, args: string): Promise<string | undefined> {
+		const command = this.commands.find(
+			entry => entry.command.name.toLowerCase() === name.toLowerCase(),
+		)?.command;
+		if (!command) return undefined;
+		return command.handler(args, {
+			sessionId: this.options.sessionId,
+			cwd: this.options.cwd,
+			ui: noopUI,
+		});
+	}
+
 	hasHandlers(event: ExtensionEventType): boolean {
-		return (this.handlers.get(event)?.length ?? 0) > 0;
+		return (
+			(this.handlers.get(event)?.length ?? 0) > 0 ||
+			this.piAdapters.some(adapter => adapter.hasHandlers(event))
+		);
 	}
 
 	async emit(event: ExtensionEvent): Promise<unknown | undefined> {
@@ -399,9 +425,27 @@ export class ExtensionRunner {
 
 	/** Get hooks to wire into the agent runner. */
 	getHooks(): AgentHooks | undefined {
-		if (this.handlers.size === 0) return undefined;
+		if (this.handlers.size === 0 && this.piAdapters.length === 0) return undefined;
 
 		const hooks: AgentHooks = {};
+
+		hooks.transformContext = async ({ messages, iteration }) => {
+			if (!this.hasHandlers("context")) return undefined;
+			const result = await this.emitToAll({
+				type: "context",
+				context: {
+					sessionId: this.options.sessionId,
+					cwd: this.options.cwd,
+					messages: [...messages],
+					iteration,
+				},
+			});
+			if (result && typeof result === "object") {
+				const transformed = (result as { messages?: unknown[] }).messages;
+				if (Array.isArray(transformed)) return { messages: transformed as typeof messages };
+			}
+			return undefined;
+		};
 
 		hooks.beforeToolCall = async ({ toolCall, args }) => {
 			// Use typed event name: tool_execution_start 
@@ -416,6 +460,21 @@ export class ExtensionRunner {
 				},
 			} as unknown as ExtensionEvent;
 			const result = await this.emit(event);
+			let piArgs = args;
+			for (const adapter of this.piAdapters) {
+				const piResult = await adapter.emitToolCall({
+					toolCallId: toolCall.id,
+					toolName: toolCall.name,
+					input: piArgs,
+				});
+				piArgs = piResult.input;
+				if (piResult.block) {
+					return {
+						content: piResult.reason ?? "Blocked by extension",
+						isError: true,
+					};
+				}
+			}
 			if (result && typeof result === "object") {
 				const hookResult = result as { block?: boolean; reason?: string; args?: Record<string, unknown>; content?: string; isError?: boolean };
 				if (hookResult.block) {
@@ -433,7 +492,7 @@ export class ExtensionRunner {
 					};
 				}
 			}
-			return undefined;
+			return piArgs !== args ? { args: piArgs } : undefined;
 		};
 
 		hooks.afterToolCall = async ({ toolCall, result, isError }) => {
@@ -461,6 +520,27 @@ export class ExtensionRunner {
 					return hookResult;
 				}
 			}
+			let piResult: {
+				toolCallId: string;
+				toolName: string;
+				input: Record<string, unknown>;
+				content: Array<{ type: string; text: string }>;
+				isError: boolean;
+				details?: Record<string, unknown>;
+			} = {
+				toolCallId: toolCall.id,
+				toolName: toolCall.name,
+				input: JSON.parse(toolCall.arguments || "{}") as Record<string, unknown>,
+				content: [{ type: "text", text: result }],
+				isError,
+			};
+			for (const adapter of this.piAdapters) {
+				piResult = await adapter.emitToolResult(piResult);
+			}
+			const content = piResult.content.map(part => part.text).join("\n");
+			if (content !== result || piResult.isError !== isError || piResult.details) {
+				return { content, isError: piResult.isError, details: piResult.details };
+			}
 			return undefined;
 		};
 
@@ -487,13 +567,22 @@ export class ExtensionRunner {
 	 */
 	async emitToAll(event: ExtensionEvent): Promise<unknown | undefined> {
 		const nativeResult = await this.emit(event);
+		let combinedResult = nativeResult;
 
 		// Also emit to all Pi adapters
 		for (const adapter of this.piAdapters) {
-			await adapter.emitFromLogician(event);
+			const result = await adapter.emitFromLogician(event);
+			if (result.messages || result.systemPrompt) {
+				combinedResult = {
+					...(typeof combinedResult === "object" && combinedResult !== null
+						? combinedResult
+						: {}),
+					...result,
+				};
+			}
 		}
 
-		return nativeResult;
+		return combinedResult;
 	}
 
 	/** Get the number of loaded Pi extensions. */

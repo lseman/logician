@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Transcript } from "../sessions/transcript.ts";
 
+void test("events that do not change transcript state do not notify listeners", () => {
+	const transcript = new Transcript();
+	let notifications = 0;
+	transcript.onChange(() => notifications++);
+
+	transcript.handleEvent({
+		type: "tool_call_update",
+		toolCallId: "missing",
+		delta: "{}",
+	});
+
+	assert.equal(notifications, 0);
+});
+
 void test("full message updates render non-streaming assistant responses", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("hello");
@@ -36,19 +50,18 @@ void test("full message updates do not duplicate streamed prefixes", () => {
 void test("completed streamed response remains committed when the next turn starts", () => {
 	const transcript = new Transcript();
 	const firstTurn = transcript.addTurn("first question");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn_1" });
 	transcript.handleEvent({
 		type: "token",
 		token: "Persistent streamed answer",
 	});
 	transcript.handleEvent({
 		type: "turn_end",
-		turn_id: "turn_1",
-		message: "",
+		turnId: "turn_1",
 	});
 
 	transcript.addTurn("second question");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn_2" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn_2" });
 
 	assert.equal(
 		transcript.getAssistantContent(firstTurn),
@@ -63,7 +76,7 @@ void test("completed streamed response remains committed when the next turn star
 void test("empty structured-tool snapshot preserves streamed assistant prose", () => {
 	const transcript = new Transcript();
 	const firstTurn = transcript.addTurn("inspect the project");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn_1" });
 	transcript.handleEvent({
 		type: "token",
 		token: "I found the relevant implementation.",
@@ -85,20 +98,19 @@ void test("empty structured-tool snapshot preserves streamed assistant prose", (
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "read_file",
-		tool_call_id: "call_1",
-		tool_args: { path: "implementation.ts" },
+		toolName: "read_file",
+		toolCallId: "call_1",
+		args: { path: "implementation.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "read_file",
-		tool_call_id: "call_1",
+		toolName: "read_file",
+		toolCallId: "call_1",
 		result: "contents",
 	});
 	transcript.handleEvent({
 		type: "turn_end",
-		turn_id: "turn_1",
-		message: "",
+		turnId: "turn_1",
 	});
 	transcript.addTurn("next question");
 
@@ -117,12 +129,11 @@ void test("terminal snapshot restores output missed after a Skills notice", () =
 		label: "Skills",
 		text: "context-mode · relevant to this request",
 	});
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn_1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn_1" });
 	transcript.handleEvent({
 		type: "turn_end",
-		turn_id: "turn_1",
-		message: "",
-		final_message: {
+		turnId: "turn_1",
+		finalMessage: {
 			role: "assistant",
 			content: "ctx_batch_execute — run multiple commands in one call.",
 		},
@@ -181,14 +192,14 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 	transcript.handleEvent({ type: "token", token: "I will inspect the file." });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "read_file",
-		tool_call_id: "call_1",
-		tool_args: { path: "file.ts" },
+		toolName: "read_file",
+		toolCallId: "call_1",
+		args: { path: "file.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "read_file",
-		tool_call_id: "call_1",
+		toolName: "read_file",
+		toolCallId: "call_1",
 		result: "file contents",
 	});
 	transcript.handleEvent({
@@ -212,14 +223,14 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "read_file",
-		tool_call_id: "call_2",
-		tool_args: { path: "other.ts" },
+		toolName: "read_file",
+		toolCallId: "call_2",
+		args: { path: "other.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "read_file",
-		tool_call_id: "call_2",
+		toolName: "read_file",
+		toolCallId: "call_2",
 		result: "other contents",
 	});
 

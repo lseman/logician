@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Writable } from "node:stream";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
+import type { RuntimeEvent } from "@logician/coding-agent/runtime";
 
 export const EXEC_STREAM_SCHEMA = "logician.exec-stream";
 export const EXEC_STREAM_SCHEMA_VERSION = 1;
 
 export interface ExecBridge {
-	on(callback: (event: ParsedBridgeEvent) => void): () => void;
+	on(callback: (event: RuntimeEvent) => void): () => void;
 	onError(callback: (error: Error) => void): void;
 	init(): Promise<Record<string, unknown>>;
 	sendMessage(message: string): Promise<void>;
@@ -71,32 +71,30 @@ export async function runHeadlessExec(
 				if (options.jsonl) emit({ type: "content", content: event.token });
 				else options.stdout.write(event.token);
 				break;
-			case "tool_start":
 			case "tool_execution_start": {
 				const id =
-					event.tool_call_id ?? `${event.tool_name}:${toolStarts.size}`;
+					event.toolCallId ?? `${event.toolName}:${toolStarts.size}`;
 				toolStarts.set(id, now());
 				emit({
 					type: "tool_use",
 					id,
-					name: event.tool_name,
-					input: event.tool_args ?? {},
+					name: event.toolName,
+					input: event.args ?? {},
 					started_at: new Date(toolStarts.get(id) ?? now()).toISOString(),
 				});
-				if (!options.jsonl) options.stderr.write(`tool: ${event.tool_name}\n`);
+				if (!options.jsonl) options.stderr.write(`tool: ${event.toolName}\n`);
 				break;
 			}
-			case "tool_end":
 			case "tool_execution_end": {
-				const id = event.tool_call_id ?? event.tool_name;
+				const id = event.toolCallId ?? event.toolName;
 				const completedAt = now();
 				const toolStartedAt = toolStarts.get(id) ?? completedAt;
 				emit({
 					type: "tool_result",
 					id,
-					name: event.tool_name,
+					name: event.toolName,
 					output: event.result ?? "",
-					status: event.is_error ? "error" : "success",
+					status: event.isError ? "error" : "success",
 					started_at: new Date(toolStartedAt).toISOString(),
 					completed_at: new Date(completedAt).toISOString(),
 					duration_ms: Math.max(0, completedAt - toolStartedAt),
@@ -106,16 +104,16 @@ export async function runHeadlessExec(
 			}
 			case "context_update":
 				contextTokens = event.tokens;
-				maxContextTokens = event.max_tokens;
+				maxContextTokens = event.maxTokens;
 				break;
 			case "permission_request":
-				lastError = `Headless execution denied interactive permission for ${event.tool_name}`;
-				bridge.respondToPermission(event.tool_call_id, "deny");
+				lastError = `Headless execution denied interactive permission for ${event.toolName}`;
+				bridge.respondToPermission(event.toolCallId, "deny");
 				emit({ type: "error", error: lastError });
 				break;
 			case "question_request":
 				lastError = "Headless execution cannot answer an interactive question";
-				bridge.respondToQuestion(event.question_id, "__dismissed__");
+				bridge.respondToQuestion(event.questionId, "__dismissed__");
 				emit({ type: "error", error: lastError });
 				break;
 			case "notice":

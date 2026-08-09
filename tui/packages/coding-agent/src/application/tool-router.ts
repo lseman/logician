@@ -22,7 +22,7 @@ import {
 	type McpToggleResult,
 } from "../mcp/index.ts";
 import { loadPrompts, type Prompt } from "../prompts/index.ts";
-import type { ParsedBridgeEvent } from "../runtime/events.ts";
+import type { RuntimeEvent } from "../runtime/events.ts";
 import { formatSkillCatalog, loadSkills, type Skill } from "../skills/index.ts";
 import { createDefaultTools } from "../tools/default-tools.ts";
 import { createReadSkillTool } from "../tools/read-skill.ts";
@@ -43,7 +43,7 @@ export interface ToolRouterDeps {
 	tools?: Tool[];
 	extraTools?: Tool[];
 	webSearch?: Partial<{ baseUrl: string; maxResults: number }>;
-	emit: (event: ParsedBridgeEvent) => void;
+	emit: (event: RuntimeEvent) => void;
 	/** Add a tool to the live default set (propagates into config.tools / harness.setTools). */
 	onToolAdded: (tool: Tool) => void;
 	/** MCP/skills context changed (even with no new tools) — bridge should rebuild the system prompt. */
@@ -79,7 +79,7 @@ export interface ToolRouterStatus {
 export class ToolRouter {
 	private readonly cwd: string;
 	private readonly projectTrusted: boolean;
-	private readonly emit: (event: ParsedBridgeEvent) => void;
+	private readonly emit: (event: RuntimeEvent) => void;
 	private readonly onToolAdded: (tool: Tool) => void;
 	private readonly onContextChanged: () => void;
 

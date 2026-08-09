@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AgentCoreBridge } from "../application/agent-bridge.ts";
-import type { ParsedBridgeEvent } from "../runtime/events.ts";
+import type { RuntimeEvent } from "../runtime/events.ts";
 
 void test("direct /spawn records task and result in harness history", async () => {
 	const bridge = new AgentCoreBridge({
@@ -587,7 +587,7 @@ void test("core iterations reconcile output without completing the UI turn early
 			});
 		},
 	};
-	const events: ParsedBridgeEvent[] = [];
+	const events: RuntimeEvent[] = [];
 	bridge.on(event => events.push(event));
 
 	await bridge.sendMessage("do work");

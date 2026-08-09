@@ -677,7 +677,7 @@ export class AgentHarness {
 
 		// Emit before_agent_start (→ native extensions + Pi's before_agent_start)
 		if (this._extensionRunner.hasHandlers("before_agent_start")) {
-			const result = await this._extensionRunner.emit({
+			const result = await this._extensionRunner.emitToAll({
 				type: "before_agent_start",
 				context: ctx,
 			});
@@ -690,27 +690,9 @@ export class AgentHarness {
 			}
 		}
 
-		// Emit context (→ Pi's context) — fires before every LLM call
-		// Pi extensions can modify messages via context handler return values
-		let piContextResult: { messages?: unknown[]; systemPrompt?: string } | undefined;
-		if (this._extensionRunner.hasHandlers("context")) {
-			piContextResult = await this._extensionRunner.emitWithContext(
-				"context",
-				{ ...ctx, prompt: undefined }, // Pi's context has no prompt field
-			);
-		}
-
-		// Collect all handler return values (native + Pi)
-		const piMessages = piContextResult?.messages;
-		const piSystemPrompt = piContextResult?.systemPrompt;
-
-		// Native values take precedence (backward compat)
-		const finalMessages = nativeMessages ?? (Array.isArray(piMessages) ? piMessages as Message[] : undefined);
-		const finalSystemPrompt = nativeSystemPrompt ?? piSystemPrompt;
-
 		return {
-			messages: finalMessages,
-			systemPrompt: finalSystemPrompt,
+			messages: nativeMessages,
+			systemPrompt: nativeSystemPrompt,
 		};
 	}
 
@@ -879,8 +861,15 @@ export class AgentHarness {
 			case "message_update":
 			case "message_end":
 			case "tool_execution_start":
+			case "tool_execution_update":
 			case "tool_execution_end":
-				await runner.emit({ type: event.type, context });
+			case "agent_retry_start":
+			case "agent_retry_end":
+			case "agent_error":
+			case "agent_settled":
+			case "session_delete":
+			case "model_select":
+					await runner.emitToAll({ type: event.type, context });
 				break;
 		}
 	}

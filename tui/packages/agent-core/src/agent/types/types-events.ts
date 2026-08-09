@@ -72,7 +72,6 @@ export type AgentEventBody =
 			tokensBefore?: number;
 			tokensAfter?: number;
 	  }
-
 	| { type: "thinking_delta"; turnId?: string; delta: string }
 	| {
 			type: "tool_call_start";
@@ -84,6 +83,11 @@ export type AgentEventBody =
 			type: "tool_call_delta";
 			toolCallId: string;
 			delta: string;
+	  }
+	| {
+			type: "tool_call_id_update";
+			previousToolCallId: string;
+			toolCallId: string;
 	  }
 	| {
 			type: "tool_call_end";
@@ -261,7 +265,7 @@ export type AgentEventBody =
 	| {
 			type: "active_tools_change";
 			activeToolNames: string[];
-		}
+	  }
 	// Retry / error observability
 	| {
 			type: "agent_retry_start";
@@ -270,25 +274,25 @@ export type AgentEventBody =
 			delayMs: number;
 			error: string;
 			reason?: "compaction" | "error" | "overflow" | "rate_limit";
-		}
+	  }
 	| {
 			type: "agent_retry_end";
 			attempt: number;
 			success: boolean;
 			reason?: "compaction" | "error" | "overflow" | "rate_limit";
-		}
+	  }
 	| {
 			type: "agent_error";
 			message: string;
 			phase: "model" | "tool" | "compaction" | "network" | "other";
 			recoverable: boolean;
-		}
+	  }
 	// Session lifecycle
 	| {
 			type: "session_delete";
 			sessionFile: string;
 			sessionId: string;
-		};
+	  };
 
 export type AgentEvent = AgentEventBody & AgentEventEnvelope;
 export type EventHandler = (event: AgentEvent) => void;

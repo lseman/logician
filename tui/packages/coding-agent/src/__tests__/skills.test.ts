@@ -154,6 +154,31 @@ void test("skill catalog and invocation render openclaude metadata and resources
 	assert.match(invocation, /workflow\.md/);
 });
 
+void test("skill invocation bounds resource traversal while scanning", async () => {
+	const root = mkdtempSync(join(tmpdir(), "skills-"));
+	const skillDir = join(root, "bounded-resources");
+	const references = join(skillDir, "references");
+	mkdirSync(references, { recursive: true });
+	writeFileSync(
+		join(skillDir, "SKILL.md"),
+		"---\nname: bounded-resources\ndescription: Test bounded resources.\n---\nBody.",
+		"utf8",
+	);
+	for (let index = 0; index < 50; index++) {
+		writeFileSync(
+			join(references, `${String(index).padStart(2, "0")}.md`),
+			"x",
+		);
+	}
+
+	const { skills } = await loadSkills(root);
+	const skill = findSkillByName(skills, "bounded-resources");
+	assert.ok(skill);
+	const invocation = formatSkillInvocation(skill);
+	assert.equal(invocation.match(/<file>/g)?.length, 40);
+	assert.doesNotMatch(invocation, /49\.md/);
+});
+
 void test("metadata-only and lenient frontmatter skills are accepted", async () => {
 	const root = mkdtempSync(join(tmpdir(), "skills-"));
 	const dir = join(root, "coding", "web");

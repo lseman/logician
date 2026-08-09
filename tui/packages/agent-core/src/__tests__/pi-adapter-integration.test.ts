@@ -79,7 +79,16 @@ void test("Pi adapter handles missing registerTool gracefully", async () => {
 		} as unknown as ExtensionDefinition,
 	]);
 
-	// Runner should still be functional after gracefully handling missing registerTool
+	// Pi tools now enter the live Logician registry rather than remaining only
+	// in adapter-local bookkeeping.
+	assert.equal(runner.getTools().length, 1);
+	assert.equal(runner.getTools()[0].name, "greet");
+	const result = await runner.getTools()[0].execute(
+		"call-1",
+		{},
+		{ cwd: "/tmp", sessionId: "pi-test2", toolCall: {} as never },
+	);
+	assert.equal(result.content, "hello");
 	runner.destroy();
 });
 
@@ -118,6 +127,7 @@ void test("Pi adapter emits session_start to Pi handlers", async () => {
 			name: "pi-emit",
 			source: "path",
 			path: piExtensionFile(`
+				// Type.String marks this fixture as a Pi-style extension.
 				export default function(api) {
 					let receivedSession = null;
 					api.on("session_start", async (event) => {
@@ -134,7 +144,85 @@ void test("Pi adapter emits session_start to Pi handlers", async () => {
 		type: "session_start",
 		context: { sessionId: "emit-test", cwd: "/tmp" },
 	});
+	assert.equal(runner.getPiExtensionCount(), 1);
+	assert.equal(
+		(globalThis as typeof globalThis & {
+			_piReceivedSession?: () => { type?: string } | null;
+		})._piReceivedSession?.()?.type,
+		"session_start",
+	);
 
+	runner.destroy();
+});
+
+void test("Pi context handlers chain and run through the runtime hook", async () => {
+	const runner = new ExtensionRunner({ sessionId: "context-test", cwd: "/tmp" });
+	await runner.load([
+		{
+			name: "pi-context",
+			source: "path",
+			path: piExtensionFile(`
+				// Type.String marks this fixture as a Pi-style extension.
+				export default function(api) {
+					api.on("context", event => ({
+						messages: [...event.messages, { role: "user", content: "first" }]
+					}));
+					api.on("context", event => ({
+						messages: [...event.messages, { role: "user", content: "second" }]
+					}));
+				}
+			`),
+		} as ExtensionDefinition,
+	]);
+
+	const hook = runner.getHooks()?.transformContext;
+	assert.ok(hook);
+	const result = await hook({ messages: [], iteration: 1 });
+	assert.deepEqual(
+		result?.messages?.map(message =>
+			typeof (message as { content?: unknown } | undefined)?.content === "string"
+				? (message as { content: string }).content
+				: "",
+		),
+		["first", "second"],
+	);
+	runner.destroy();
+});
+
+void test("Pi tool_call handlers can mutate arguments and block execution", async () => {
+	const runner = new ExtensionRunner({ sessionId: "tool-gate-test", cwd: "/tmp" });
+	await runner.load([
+		{
+			name: "pi-tool-gate",
+			source: "path",
+			path: piExtensionFile(`
+				// Type.String marks this fixture as a Pi-style extension.
+				export default function(api) {
+					api.on("tool_call", event => {
+						event.input.checked = true;
+						if (event.input.dangerous) return { block: true, reason: "unsafe" };
+					});
+				}
+			`),
+		} as ExtensionDefinition,
+	]);
+
+	const hook = runner.getHooks()?.beforeToolCall;
+	assert.ok(hook);
+	const changed = await hook({
+		toolCall: { id: "call-1", name: "bash", arguments: "{}" },
+		args: {},
+		iteration: 1,
+	});
+	assert.deepEqual(changed?.args, { checked: true });
+
+	const blocked = await hook({
+		toolCall: { id: "call-2", name: "bash", arguments: "{}" },
+		args: { dangerous: true },
+		iteration: 1,
+	});
+	assert.equal(blocked?.content, "unsafe");
+	assert.equal(blocked?.isError, true);
 	runner.destroy();
 });
 

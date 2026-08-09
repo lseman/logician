@@ -16,11 +16,11 @@ void test("context updates preserve unavailable provider telemetry", () => {
 		{
 			type: "context_update",
 			tokens: 1_000,
-			max_tokens: 32_768,
+			maxTokens: 32_768,
 			compacted: undefined,
-			cached_tokens: null,
-			prompt_tokens: null,
-			completion_tokens: null,
+			cachedTokens: null,
+			promptTokens: null,
+			completionTokens: null,
 		},
 	);
 });
@@ -42,6 +42,52 @@ void test("steering cancellation maps to one informational notice", () => {
 	);
 });
 
+void test("tool preparation and execution remain distinct lifecycle phases", () => {
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "tool_call_start",
+			toolName: "read_file",
+			toolCallId: "call-1",
+			args: '{"path":"a.ts"}',
+		}),
+		{
+			type: "tool_call_start",
+			toolName: "read_file",
+			toolCallId: "call-1",
+			args: { path: "a.ts" },
+		},
+	);
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "tool_call_delta",
+			toolCallId: "call-1",
+			delta: '"}',
+		}),
+		{ type: "tool_call_update", toolCallId: "call-1", delta: '"}' },
+	);
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "tool_call_id_update",
+			previousToolCallId: "tool_0",
+			toolCallId: "call-1",
+		}),
+		{
+			type: "tool_call_id_update",
+			previousToolCallId: "tool_0",
+			toolCallId: "call-1",
+		},
+	);
+	assert.equal(
+		mapAgentEvent({
+			type: "tool_call_end",
+			toolName: "read_file",
+			toolCallId: "call-1",
+			result: "ok",
+		}),
+		null,
+	);
+});
+
 void test("subagent tool_execution_start/end map into subagent_chunk activity", () => {
 	assert.deepEqual(
 		mapAgentEvent({
@@ -60,7 +106,7 @@ void test("subagent tool_execution_start/end map into subagent_chunk activity", 
 			type: "subagent_chunk",
 			agentId: "agent_1",
 			seq: 3,
-			kind: "tool_start",
+			kind: "tool_execution_start",
 			toolCallId: "tc1",
 			toolName: "bash",
 			args: JSON.stringify({ command: "ls" }),
@@ -84,7 +130,7 @@ void test("subagent tool_execution_start/end map into subagent_chunk activity", 
 			type: "subagent_chunk",
 			agentId: "agent_1",
 			seq: 4,
-			kind: "tool_end",
+			kind: "tool_execution_end",
 			toolCallId: "tc1",
 			toolName: "bash",
 			result: "ok",

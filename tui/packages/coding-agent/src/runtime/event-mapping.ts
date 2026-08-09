@@ -4,89 +4,84 @@ import {
 	type AgentEvent,
 	STEERING_INTERRUPT_SUMMARY,
 } from "@logician/agent-core";
-import type { ParsedBridgeEvent } from "./events.ts";
+import type { RuntimeEvent } from "./events.ts";
 
-// Translates core AgentEvent variants to their ParsedBridgeEvent equivalent.
-// Not the sole producer of ParsedBridgeEvent: AgentCoreBridge also emits
-// UI-only synthesized types directly (e.g. "todos", "steered", "save_point",
+// Translates core AgentEvent variants to their RuntimeEvent equivalent.
+// Not the sole producer of RuntimeEvent: AgentCoreBridge also emits
+// UI-only synthesized types directly (e.g. "todos", "steered",
 // "notice", "memory_update") for signals that have no core AgentEvent
 // counterpart. A core event with no case below returns null and is dropped —
 // verify it isn't relied on downstream before adding a new AgentEvent variant.
-export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
+export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 	switch (event.type) {
 		case "message_start":
-			return {
-				type: "message_start",
-				turnId: event.turnId,
-				role: event.role,
-			} as ParsedBridgeEvent;
 		case "text_start":
-			return { type: "text_start", turnId: event.turnId };
+		case "text_end":
+		case "message_end":
+		case "agent_settled":
+		case "session_delete":
+			return null;
 		case "text_delta":
 			return { type: "token", token: event.delta };
-		case "text_end":
-			return { type: "text_end", turnId: event.turnId };
 		case "message_update":
 			return {
 				type: "message_update",
 				turnId: event.turnId,
 				message: event.message,
-			} as ParsedBridgeEvent;
+			};
 		case "thinking_delta":
 			return { type: "thinking_token", token: event.delta };
 		case "tool_call_start":
 			return {
-				type: "tool_execution_start",
-				tool_name: event.toolName,
-				tool_args: parseToolArgs(event.args),
-				tool_call_id: event.toolCallId,
-			} as ParsedBridgeEvent;
+				type: "tool_call_start",
+				toolName: event.toolName,
+				args: parseToolArgs(event.args) ?? {},
+				toolCallId: event.toolCallId,
+			};
 		case "tool_call_end":
-			return {
-				type: "tool_execution_end",
-				tool_name: event.toolName,
-				result: event.result,
-				is_error: event.isError,
-				tool_call_id: event.toolCallId,
-				details: event.details,
-			} as ParsedBridgeEvent;
+			// Execution completion is emitted separately. Keeping the provider call
+			// completion would create a second terminal lifecycle event for one tool.
+			return null;
 		case "tool_call_delta":
 			return {
-				type: "tool_execution_update",
-				tool_name: "",
-				partial_result: event.delta,
-				update_kind: "arguments",
-				tool_call_id: event.toolCallId,
-			} as ParsedBridgeEvent;
+				type: "tool_call_update",
+				delta: event.delta,
+				toolCallId: event.toolCallId,
+			};
+		case "tool_call_id_update":
+			return {
+				type: "tool_call_id_update",
+				previousToolCallId: event.previousToolCallId,
+				toolCallId: event.toolCallId,
+			};
 		case "tool_execution_start":
 			return {
 				type: "tool_execution_start",
-				tool_name: event.toolName,
-				tool_args: event.args,
-				tool_call_id: event.toolCallId,
-			} as ParsedBridgeEvent;
+				toolName: event.toolName,
+				args: event.args,
+				toolCallId: event.toolCallId,
+			};
 		case "tool_execution_end":
 			return {
 				type: "tool_execution_end",
-				tool_name: event.toolName,
+				toolName: event.toolName,
 				result: event.result,
-				is_error: event.isError,
-				tool_call_id: event.toolCallId,
-			} as ParsedBridgeEvent;
+				isError: event.isError,
+				toolCallId: event.toolCallId,
+			};
 		case "tool_execution_update":
 			return {
 				type: "tool_execution_update",
-				tool_name: event.toolName,
-				partial_result: event.partialResult,
-				update_kind: "output",
-				tool_call_id: event.toolCallId,
-			} as ParsedBridgeEvent;
+				toolName: event.toolName,
+				partialResult: event.partialResult,
+				toolCallId: event.toolCallId,
+			};
 		case "repair_nudge":
 			return {
 				type: "repair_nudge",
-				turn_id: event.turnId,
-				repair_stage: event.repairStage,
-				tool_name: event.toolName,
+				turnId: event.turnId,
+				repairStage: event.repairStage,
+				toolName: event.toolName,
 				message: event.message,
 			};
 		case "turn_start":
@@ -122,24 +117,24 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 			return {
 				type: "context_update",
 				tokens: event.tokens,
-				max_tokens: event.maxTokens,
+				maxTokens: event.maxTokens,
 				compacted: event.compacted,
 				...(event.cachedTokens !== undefined && {
-					cached_tokens: event.cachedTokens,
+					cachedTokens: event.cachedTokens,
 				}),
 				...(event.promptTokens !== undefined && {
-					prompt_tokens: event.promptTokens,
+					promptTokens: event.promptTokens,
 				}),
 				...(event.completionTokens !== undefined && {
-					completion_tokens: event.completionTokens,
+					completionTokens: event.completionTokens,
 				}),
 			};
 		case "compaction":
 			return {
 				type: "compaction",
 				reason: event.reason,
-				tokens_before: event.tokensBefore,
-				tokens_after: event.tokensAfter,
+				tokensBefore: event.tokensBefore,
+				tokensAfter: event.tokensAfter,
 			};
 		case "error":
 			return {
@@ -156,27 +151,21 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 				delayMs: event.delayMs,
 				error: event.error,
 				reason: event.reason,
-			} as ParsedBridgeEvent;
+			};
 		case "agent_retry_end":
 			return {
 				type: "agent_retry_end",
 				attempt: event.attempt,
 				success: event.success,
 				reason: event.reason,
-			} as ParsedBridgeEvent;
+			};
 		case "agent_error":
 			return {
 				type: "agent_error",
 				message: event.message,
 				phase: event.phase,
 				recoverable: event.recoverable,
-			} as ParsedBridgeEvent;
-		case "session_delete":
-			return {
-				type: "session_delete",
-				sessionFile: event.sessionFile,
-				sessionId: event.sessionId,
-			} as ParsedBridgeEvent;
+			};
 		case "run_outcome":
 			if (event.status === "completed" && event.source === "heuristic") {
 				return null;
@@ -205,22 +194,9 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 			};
 		case "model_select":
 			return {
-				type: "notice",
-				level: "info",
-				label: "Model",
-				text: event.model,
+				type: "model_select",
+				model: event.model,
 			};
-		case "message_end":
-			return {
-				type: "message_end",
-				turnId: event.turnId,
-				message: event.message,
-			} as ParsedBridgeEvent;
-		case "agent_settled":
-			return {
-				type: "agent_settled",
-				nextTurnCount: event.nextTurnCount,
-			} as ParsedBridgeEvent;
 		case "subagent_start":
 			return {
 				type: "subagent_lifecycle",
@@ -257,7 +233,7 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					type: "subagent_chunk",
 					agentId: event.agentId,
 					seq,
-					kind: "tool_start",
+					kind: "tool_execution_start",
 					toolCallId: child.toolCallId,
 					toolName: child.toolName,
 					args: child.args,
@@ -269,10 +245,21 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					type: "subagent_chunk",
 					agentId: event.agentId,
 					seq,
-					kind: "tool_start",
+					kind: "tool_execution_start",
 					toolCallId: child.toolCallId,
 					toolName: child.toolName,
 					args: JSON.stringify(child.args ?? {}),
+					taskIndex: event.taskIndex,
+				};
+			}
+			if (child.type === "tool_call_id_update") {
+				return {
+					type: "subagent_chunk",
+					agentId: event.agentId,
+					seq,
+					kind: "tool_call_id_update",
+					previousToolCallId: child.previousToolCallId,
+					toolCallId: child.toolCallId,
 					taskIndex: event.taskIndex,
 				};
 			}
@@ -284,7 +271,7 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 					type: "subagent_chunk",
 					agentId: event.agentId,
 					seq,
-					kind: "tool_end",
+					kind: "tool_execution_end",
 					toolCallId: child.toolCallId,
 					toolName: child.toolName,
 					result: child.result,
@@ -386,7 +373,12 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "acceptance_complete":
 			return {
 				type: "notice",
-				level: event.status === "passed" ? "success" : event.status === "failed" ? "error" : "warn",
+				level:
+					event.status === "passed"
+						? "success"
+						: event.status === "failed"
+							? "error"
+							: "warn",
 				label: "Acceptance",
 				text: `Status: ${event.status}`,
 			};

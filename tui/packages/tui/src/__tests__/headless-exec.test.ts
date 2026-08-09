@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
+import type { RuntimeEvent } from "@logician/coding-agent/runtime";
 import {
 	EXEC_STREAM_SCHEMA,
 	type ExecBridge,
@@ -17,10 +17,10 @@ class MemoryWriter {
 }
 
 class FakeBridge implements ExecBridge {
-	private callback: ((event: ParsedBridgeEvent) => void) | undefined;
+	private callback: ((event: RuntimeEvent) => void) | undefined;
 	stopped = false;
-	constructor(private readonly events: ParsedBridgeEvent[]) {}
-	on(callback: (event: ParsedBridgeEvent) => void): () => void {
+	constructor(private readonly events: RuntimeEvent[]) {}
+	on(callback: (event: RuntimeEvent) => void): () => void {
 		this.callback = callback;
 		return () => {
 			this.callback = undefined;
@@ -74,7 +74,7 @@ void test("jsonl output is terminal-clean and ends with metadata then done", asy
 		{
 			type: "context_update",
 			tokens: 42,
-			max_tokens: 1000,
+			maxTokens: 1000,
 		},
 	]);
 
@@ -113,8 +113,8 @@ void test("interactive permission fails closed and still emits one done", async 
 	const bridge = new FakeBridge([
 		{
 			type: "permission_request",
-			tool_name: "shell",
-			tool_call_id: "tool-1",
+			toolName: "shell",
+			toolCallId: "tool-1",
 			args: {},
 		},
 	]);

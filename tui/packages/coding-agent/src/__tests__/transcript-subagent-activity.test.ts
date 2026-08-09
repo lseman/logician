@@ -18,12 +18,12 @@ void test("transcript instances do not share turn state", () => {
 void test("subagent tool notices become one integrated lifecycle entry", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("Delegate this task");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
-		tool_args: { agent: "explorer", task: "Inspect the workspace" },
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
+		args: { agent: "explorer", task: "Inspect the workspace" },
 	});
 	transcript.handleEvent({
 		type: "notice",
@@ -64,12 +64,12 @@ void test("subagent tool notices become one integrated lifecycle entry", () => {
 void test("concurrent same-name child tool calls resolve to the correct call by id", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("Delegate this task");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
-		tool_args: { agent: "explorer", task: "Inspect the workspace" },
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
+		args: { agent: "explorer", task: "Inspect the workspace" },
 	});
 	// Two concurrent calls to the same tool name, interleaved arrival: start A,
 	// start B, end B, end A — a name-only match would wrongly resolve "end B"
@@ -115,12 +115,12 @@ void test("concurrent same-name child tool calls resolve to the correct call by 
 void test("multi-line child tool results do not break marker/id/name parsing", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("Delegate this task");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
-		tool_args: { agent: "explorer", task: "Inspect the workspace" },
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
+		args: { agent: "explorer", task: "Inspect the workspace" },
 	});
 	transcript.handleEvent({
 		type: "notice",
@@ -154,12 +154,12 @@ void test("multi-line child tool results do not break marker/id/name parsing", (
 void test("subagent lifecycle notices update the parent card without duplication", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("Delegate this task");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "parent-tool",
-		tool_args: { agent: "explorer", task: "Inspect the workspace" },
+		toolName: "spawn_agent",
+		toolCallId: "parent-tool",
+		args: { agent: "explorer", task: "Inspect the workspace" },
 	});
 	transcript.handleEvent({
 		type: "subagent_lifecycle",
@@ -194,12 +194,12 @@ void test("subagent lifecycle notices update the parent card without duplication
 void test("final batch details preserve collected child tool activity", () => {
 	const transcript = new Transcript();
 	transcript.addTurn("Delegate both tasks");
-	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
+	transcript.handleEvent({ type: "turn_start", turnId: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agents",
-		tool_call_id: "batch",
-		tool_args: {
+		toolName: "spawn_agents",
+		toolCallId: "batch",
+		args: {
 			tasks: [
 				{ agent: "explorer", task: "Inspect files" },
 				{ agent: "reviewer", task: "Review tests" },
@@ -214,8 +214,8 @@ void test("final batch details preserve collected child tool activity", () => {
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agents",
-		tool_call_id: "batch",
+		toolName: "spawn_agents",
+		toolCallId: "batch",
 		result: "",
 		details: { total: 2, completed: 2, failed: 0, results: [] },
 	});
@@ -234,21 +234,20 @@ void test("completed subagents retain their live transcript", () => {
 	transcript.addTurn("Delegate");
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "agent",
-		tool_args: { agent: "general", task: "Implement it" },
+		toolName: "spawn_agent",
+		toolCallId: "agent",
+		args: { agent: "general", task: "Implement it" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool_name: "spawn_agent",
-		tool_call_id: "agent",
-		update_kind: "output",
-		partial_result: "Inspecting...\n```ts\nconst answer = 42;\n```\n",
+		toolName: "spawn_agent",
+		toolCallId: "agent",
+		partialResult: "Inspecting...\n```ts\nconst answer = 42;\n```\n",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "spawn_agent",
-		tool_call_id: "agent",
+		toolName: "spawn_agent",
+		toolCallId: "agent",
 		result: "Implemented successfully.",
 	});
 
@@ -263,9 +262,9 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 	transcript.addTurn("Delegate");
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "spawn_agent",
-		tool_call_id: "agent",
-		tool_args: { agent: "explorer", task: "Inspect it" },
+		toolName: "spawn_agent",
+		toolCallId: "agent",
+		args: { agent: "explorer", task: "Inspect it" },
 	});
 	transcript.handleEvent({
 		type: "subagent_chunk",
@@ -285,7 +284,7 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		type: "subagent_chunk",
 		agentId: "explorer-1",
 		seq: 3,
-		kind: "tool_start",
+		kind: "tool_execution_start",
 		toolCallId: "read-1",
 		toolName: "read_file",
 		args: '{"path":"src/index.ts"}',
@@ -294,7 +293,7 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 		type: "subagent_chunk",
 		agentId: "explorer-1",
 		seq: 4,
-		kind: "tool_end",
+		kind: "tool_execution_end",
 		toolCallId: "read-1",
 		toolName: "read_file",
 		result: "file contents",

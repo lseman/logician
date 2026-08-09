@@ -283,4 +283,37 @@ describe("PiAdapter", () => {
 		expect(tools[0].name).toBe("tool1");
 		expect(tools[1].name).toBe("tool2");
 	});
+
+	it("should delegate runtime controls through the Pi compatibility port", async () => {
+		const api = createMockLogicianApi();
+		const ctx = createMockLogicianContext();
+		const sent: string[] = [];
+		let selectedModel: unknown;
+		let thinkingLevel: unknown = "medium";
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+			runtime: {
+				sendUserMessage: content => sent.push(content),
+				getActiveTools: () => ["read", "bash"],
+				setModel: async model => {
+					selectedModel = model;
+					return true;
+				},
+				getThinkingLevel: () => thinkingLevel,
+				setThinkingLevel: level => {
+					thinkingLevel = level;
+				},
+			},
+		});
+		const piApi = adapter.getApi();
+
+		piApi.sendUserMessage("continue");
+		expect(sent).toEqual(["continue"]);
+		expect(piApi.getActiveTools()).toEqual(["read", "bash"]);
+		expect(await piApi.setModel({ id: "next-model" })).toBe(true);
+		expect(selectedModel).toEqual({ id: "next-model" });
+		piApi.setThinkingLevel("high");
+		expect(piApi.getThinkingLevel()).toBe("high");
+	});
 });

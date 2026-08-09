@@ -229,6 +229,7 @@ export interface GenerateCallbacks {
 	// "running" state while the model is still emitting the call's arguments.
 	onToolCallStart?: (toolCallId: string, name: string, args: string) => void;
 	onToolCallDelta?: (toolCallId: string, delta: string) => void;
+	onToolCallIdUpdate?: (previousToolCallId: string, toolCallId: string) => void;
 }
 
 /** Options for a generate() call. */
@@ -350,6 +351,7 @@ export class OpenAIBackend implements LLMBackend {
 			onTextEnd,
 			onToolCallStart,
 			onToolCallDelta,
+			onToolCallIdUpdate,
 		} = callbacks;
 
 		const body: Record<string, unknown> = {
@@ -505,7 +507,13 @@ export class OpenAIBackend implements LLMBackend {
 									arguments: "",
 								};
 							}
-							if (tc.id) toolCalls[tc.index].id = tc.id;
+							if (tc.id) {
+								const previousId = toolCalls[tc.index].id;
+								if (!previousId && startedToolIndexes.has(tc.index)) {
+									onToolCallIdUpdate?.(`tool_${tc.index}`, tc.id);
+								}
+								toolCalls[tc.index].id = tc.id;
+							}
 							if (tc.function?.name)
 								toolCalls[tc.index].name = tc.function.name;
 							if (tc.function?.arguments) {

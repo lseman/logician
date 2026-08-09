@@ -234,6 +234,7 @@ export class SessionBrowserOverlay implements Component {
 	}
 
 	private _applyFilter(): void {
+		this.filter = this.renameInput;
 		const query = this.renameInput.toLowerCase();
 		if (!query) {
 			this.sessions = this.store

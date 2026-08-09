@@ -4,8 +4,10 @@
 
 import type {
 	MessageUpdateEvent,
-	ParsedBridgeEvent,
 	SubagentChunkEvent,
+	TranscriptEvent,
+	ToolCallStartEvent,
+	ToolCallUpdateEvent,
 	ToolEndEvent,
 	ToolStartEvent,
 	ToolUpdateEvent,
@@ -151,19 +153,22 @@ export class Transcript {
 
 	// ── Event handling ─────────────────────────────────────────────────────
 
-	handleEvent(event: ParsedBridgeEvent): void {
+	handleEvent(event: TranscriptEvent): void {
+		const revisionBefore = this._contentRevision;
+		const turnCountBefore = this.state.turns.length;
+		const currentTurnBefore = this.state.currentTurnId;
 		switch (event.type) {
 			case "turn_start":
-				this.handleTurnStart(event as TurnEndEvent & { type: "turn_start" });
+				this.handleTurnStart(event);
 				break;
 			case "token":
 				this.handleToken(String(event.token || ""));
 				break;
 			case "message_update":
-				this.handleMessageUpdate(event as MessageUpdateEvent);
+				this.handleMessageUpdate(event);
 				break;
 			case "notice":
-				this.handleNotice(event as ParsedBridgeEvent & { type: "notice" });
+				this.handleNotice(event);
 				break;
 			case "subagent_chunk":
 				this.handleSubagentChunk(event);
@@ -174,28 +179,40 @@ export class Transcript {
 			case "thinking_token":
 				this.handleThinkingToken(String(event.token || ""));
 				break;
-			case "tool_start":
+			case "tool_call_start":
+				this.handleToolStart(event);
+				break;
+			case "tool_call_update":
+				this.handleToolCallUpdate(event);
+				break;
+			case "tool_call_id_update":
+				this.handleToolCallIdUpdate(event);
+				break;
 			case "tool_execution_start":
-				this.handleToolStart(event as ToolStartEvent);
+				this.handleToolStart(event);
 				break;
 			case "tool_execution_update":
-				this.handleToolUpdate(event as ToolUpdateEvent);
+				this.handleToolUpdate(event);
 				break;
-			case "tool_end":
 			case "tool_execution_end": {
-				const toolEvent = event as ToolEndEvent;
-				this.handleToolEnd(toolEvent);
+				this.handleToolEnd(event);
 				break;
 			}
 			case "turn_end":
-				this.handleTurnEnd(event as TurnEndEvent);
+				this.handleTurnEnd(event);
 				break;
 		}
-		this.notify();
+		if (
+			this._contentRevision !== revisionBefore ||
+			this.state.turns.length !== turnCountBefore ||
+			this.state.currentTurnId !== currentTurnBefore
+		) {
+			this.notify();
+		}
 	}
 
-	private handleTurnStart(event: { turn_id: string }): void {
-		if (!event.turn_id) return;
+	private handleTurnStart(event: { turnId: string }): void {
+		if (!event.turnId) return;
 		// An incomplete turn is always at or near the tail (new turns are only
 		// ever appended, and streaming completes roughly in order), so scan
 		// backward in place rather than copying + reversing the whole,
@@ -210,16 +227,16 @@ export class Transcript {
 		if (pending) {
 			// Reuse the open turn (e.g. slash /spawn after addTurn, or a
 			// user message already registered by the TUI).
-			pending.id = event.turn_id;
+			pending.id = event.turnId;
 			pending.contentRevision = this._contentRevision;
-			this.state.currentTurnId = event.turn_id;
+			this.state.currentTurnId = event.turnId;
 			return;
 		}
 		// No open turn: open a fresh one. Never rebind currentTurnId onto a
 		// completed prior turn — that split tool_start from lifecycle/stream
 		// events and left /spawn cards without their agent output.
 		const turn: Turn = {
-			id: event.turn_id,
+			id: event.turnId,
 			userMessage: null,
 			assistantMessage: {
 				type: "assistant",
@@ -230,7 +247,7 @@ export class Transcript {
 			contentRevision: this._contentRevision,
 		};
 		this.state.turns.push(turn);
-		this.state.currentTurnId = event.turn_id;
+		this.state.currentTurnId = event.turnId;
 	}
 
 	/** Marks a turn's content as changed: advances the global counter and
@@ -258,33 +275,22 @@ export class Transcript {
 	}
 
 	/**
-	 * Find an incomplete tool chunk that a repeated `tool_start` should reuse.
-	 * Matches by tool_call_id when both ids are real; falls back to the last
-	 * incomplete tool chunk of the same name (covers placeholder ids emitted
-	 * during streaming, e.g. `tool_0`).
+	 * Find the tool card created while its call arguments were streaming.
+	 * Stable call IDs make name-based reconciliation unnecessary and keep
+	 * parallel calls to the same tool independent.
 	 */
 	private findReusableToolChunk(
 		chunks: AssistantChunk[],
-		event: ToolStartEvent,
+		event: ToolCallStartEvent | ToolStartEvent,
 	): AssistantChunk | undefined {
-		const sameName: AssistantChunk[] = [];
 		for (let i = chunks.length - 1; i >= 0; i--) {
 			const c = chunks[i];
 			if (c.type !== "tool" || c.isComplete || !c.tool) continue;
-			if (event.tool_call_id && c.tool.tool_call_id === event.tool_call_id) {
+			if (c.tool.tool_call_id === event.toolCallId) {
 				return c;
 			}
-			if (c.tool.tool_name === event.tool_name) sameName.push(c);
 		}
-		// A name-only match is safe only when it is unambiguous. Parallel calls
-		// to the same tool must remain separate and are reconciled by id.
-		if (sameName.length !== 1) return undefined;
-		const candidateId = sameName[0].tool?.tool_call_id;
-		const candidateIsPlaceholder =
-			typeof candidateId === "string" && /^tool_\d+$/.test(candidateId);
-		return !event.tool_call_id || !candidateId || candidateIsPlaceholder
-			? sameName[0]
-			: undefined;
+		return undefined;
 	}
 
 	private findToolChunk(
@@ -708,7 +714,24 @@ export class Transcript {
 			return;
 		}
 
-		if (event.kind === "tool_start") {
+		if (event.kind === "tool_call_id_update") {
+			const existing = childChunks
+				.slice()
+				.reverse()
+				.find(
+					chunk =>
+						chunk.type === "tool" &&
+						chunk.tool?.toolCallId === event.previousToolCallId,
+				);
+			if (existing?.tool) {
+				existing.tool.toolCallId = event.toolCallId;
+				existing.seq = Math.max(existing.seq, event.seq);
+				if (turn) this.bumpTurnRevision(turn);
+			}
+			return;
+		}
+
+		if (event.kind === "tool_execution_start") {
 			// Providers emit both tool_call_start and tool_execution_start for
 			// the same call. Reuse by toolCallId so each child tool renders once.
 			const existingStart = event.toolCallId
@@ -751,7 +774,7 @@ export class Transcript {
 			if (turn) this.bumpTurnRevision(turn);
 			return;
 		}
-		if (event.kind !== "tool_end") return;
+		if (event.kind !== "tool_execution_end") return;
 
 		// tool_end — also dedupe: tool_call_end and tool_execution_end both fire.
 		const existingEnd = event.toolCallId
@@ -817,7 +840,7 @@ export class Transcript {
 		this.bumpTurnRevision(turn);
 	}
 
-	private handleToolStart(event: ToolStartEvent): void {
+	private handleToolStart(event: ToolCallStartEvent | ToolStartEvent): void {
 		const turn = this.getCurrentTurn();
 		if (!turn) return;
 
@@ -826,19 +849,14 @@ export class Transcript {
 		this.closeStreamingOfType("thinking", msg.chunks);
 		this.closeStreamingOfType("content", msg.chunks);
 
-		// A tool can emit `start` twice: once while the model streams the call
-		// (placeholder id like `tool_0`) and again at execution time (real id).
-		// Reuse the existing streaming chunk instead of pushing a duplicate,
-		// otherwise the first chunk is left stuck on "streaming" while a second
-		// chunk shows "done".
+		// Execution start enriches the card created by call start. These are
+		// separate lifecycle phases joined by one stable toolCallId.
 		const existing = this.findReusableToolChunk(msg.chunks, event);
 		if (existing?.tool) {
-			existing.tool.tool_name = event.tool_name;
-			existing.tool.tool_call_id = event.tool_call_id;
-			if (event.tool_args !== undefined) {
-				existing.tool.args = event.tool_args as
-					| Record<string, unknown>
-					| undefined;
+			existing.tool.tool_name = event.toolName;
+			existing.tool.tool_call_id = event.toolCallId;
+			if (event.args !== undefined) {
+				existing.tool.args = event.args as Record<string, unknown> | undefined;
 			}
 			this.bumpTurnRevision(turn);
 			return;
@@ -848,9 +866,9 @@ export class Transcript {
 			seq: msg.chunks.length,
 			type: "tool",
 			tool: {
-				tool_name: event.tool_name,
-				tool_call_id: event.tool_call_id,
-				args: event.tool_args as Record<string, unknown> | undefined,
+				tool_name: event.toolName,
+				tool_call_id: event.toolCallId,
+				args: event.args as Record<string, unknown> | undefined,
 				result: undefined,
 				partialResult: undefined,
 				isError: false,
@@ -862,29 +880,48 @@ export class Transcript {
 		this.bumpTurnRevision(turn);
 	}
 
+	private handleToolCallUpdate(event: ToolCallUpdateEvent): void {
+		const turn = this.getCurrentTurn();
+		if (!turn?.assistantMessage) return;
+		const toolChunk = this.findToolChunk(
+			turn.assistantMessage.chunks,
+			event.toolCallId,
+		);
+		if (!toolChunk?.tool) return;
+		toolChunk.tool.partialResult =
+			(toolChunk.tool.partialResult || "") + event.delta;
+		this.bumpTurnRevision(turn);
+	}
+
+	private handleToolCallIdUpdate(event: {
+		previousToolCallId: string;
+		toolCallId: string;
+	}): void {
+		const turn = this.getCurrentTurn();
+		if (!turn?.assistantMessage) return;
+		const toolChunk = this.findToolChunk(
+			turn.assistantMessage.chunks,
+			event.previousToolCallId,
+		);
+		if (!toolChunk?.tool) return;
+		toolChunk.tool.tool_call_id = event.toolCallId;
+		this.bumpTurnRevision(turn);
+	}
+
 	private handleToolUpdate(event: ToolUpdateEvent): void {
 		const turn = this.getCurrentTurn();
 		if (!turn?.assistantMessage) return;
 
 		const toolChunk = this.findToolChunk(
 			turn.assistantMessage.chunks,
-			event.tool_call_id,
-			event.tool_name,
+			event.toolCallId,
+			event.toolName,
 		);
 		if (!toolChunk?.tool) return;
 
-		if (event.partial_result !== undefined) {
-			if (event.update_kind === "output") {
-				toolChunk.tool.streamOutput =
-					(toolChunk.tool.streamOutput || "") + String(event.partial_result);
-			} else {
-				// Argument fragments are kept separately from human-readable progress.
-				toolChunk.tool.partialResult =
-					(toolChunk.tool.partialResult || "") + String(event.partial_result);
-			}
-		}
+		toolChunk.tool.streamOutput =
+			(toolChunk.tool.streamOutput || "") + event.partialResult;
 		this.bumpTurnRevision(turn);
-		this.notify();
 	}
 
 	private handleToolEnd(event: ToolEndEvent): void {
@@ -895,14 +932,14 @@ export class Transcript {
 
 		let toolChunk = this.findToolChunk(
 			assistant.chunks,
-			event.tool_call_id,
-			event.tool_name,
+			event.toolCallId,
+			event.toolName,
 		);
 		// Direct-mode /spawn: tool_start was never emitted, or lifecycle:end
 		// already closed a placeholder under a synthetic id. Reuse the most
 		// recent spawn chunk before creating another card.
 		const isDirectSpawnName = ["spawn_agent", "spawn_agents"].includes(
-			event.tool_name,
+			event.toolName,
 		);
 		if (!toolChunk && isDirectSpawnName) {
 			toolChunk = [...assistant.chunks]
@@ -912,18 +949,18 @@ export class Transcript {
 						c.type === "tool" &&
 						["spawn_agent", "spawn_agents"].includes(c.tool?.tool_name ?? ""),
 				);
-			if (toolChunk?.tool && event.tool_call_id) {
-				toolChunk.tool.tool_call_id = event.tool_call_id;
+			if (toolChunk?.tool && event.toolCallId) {
+				toolChunk.tool.tool_call_id = event.toolCallId;
 			}
 		}
 		if (!toolChunk && isDirectSpawnName) {
-			const toolName = event.tool_name;
+			const toolName = event.toolName;
 			assistant.chunks.push({
 				seq: assistant.chunks.length,
 				type: "tool",
 				tool: {
 					tool_name: toolName,
-					tool_call_id: event.tool_call_id,
+					tool_call_id: event.toolCallId,
 					args: undefined,
 					result: undefined,
 					partialResult: undefined,
@@ -970,9 +1007,8 @@ export class Transcript {
 		}
 		tool.partialResult = undefined;
 		tool.streamOutput = undefined;
-		const isError = (event as unknown as Record<string, unknown>).is_error;
-		if (isError !== undefined) {
-			tool.isError = Boolean(isError);
+		if (event.isError !== undefined) {
+			tool.isError = event.isError;
 		}
 		tool.isComplete = true;
 		this.bumpTurnRevision(turn);
@@ -993,14 +1029,14 @@ export class Transcript {
 	}
 
 	private handleTurnEnd(event: TurnEndEvent): void {
-		if (event.final_message?.role === "assistant") {
+		if (event.finalMessage?.role === "assistant") {
 			this.handleMessageUpdate({
 				type: "message_update",
-				turnId: event.turn_id,
-				message: event.final_message,
+				turnId: event.turnId,
+				message: event.finalMessage,
 			});
 		}
-		const turn = this.getTurnById(event.turn_id);
+		const turn = this.getTurnById(event.turnId);
 		if (turn) {
 			if (turn.assistantMessage) {
 				for (const chunk of turn.assistantMessage.chunks) {

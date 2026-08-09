@@ -10,7 +10,7 @@ import {
 	type EohProgressEvent,
 } from "@logician/agent-capabilities/eoh/engine.ts";
 import { populationStats } from "@logician/agent-capabilities/eoh/population.ts";
-import type { ParsedBridgeEvent } from "../../runtime/events.ts";
+import type { RuntimeEvent } from "../../runtime/events.ts";
 import {
 	applyEohCandidate,
 	type EohFileTarget,
@@ -20,7 +20,7 @@ import {
 
 export interface EohControllerDeps {
 	cwd: string;
-	emit: (event: ParsedBridgeEvent) => void;
+	emit: (event: RuntimeEvent) => void;
 	getBaseUrl: () => string;
 	getCurrentModel: () => string;
 }
@@ -87,7 +87,7 @@ export class EohController {
 				}
 				this.deps.emit({
 					...event,
-				} as unknown as ParsedBridgeEvent);
+				} as unknown as RuntimeEvent);
 			};
 		}
 		this.engine.setProgressHandler(this.progressHandler);

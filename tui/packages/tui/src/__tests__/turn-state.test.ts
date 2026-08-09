@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
+import type { RuntimeEvent } from "@logician/coding-agent/runtime";
 import { INITIAL_TURN_STATE, reduceTurnState } from "../state/turn-state.ts";
 
-const event = (value: Record<string, unknown>): ParsedBridgeEvent =>
-	value as unknown as ParsedBridgeEvent;
+const event = (value: Record<string, unknown>): RuntimeEvent =>
+	value as unknown as RuntimeEvent;
 
 void test("turn state follows a complete tool lifecycle", () => {
 	let state = reduceTurnState(
 		INITIAL_TURN_STATE,
 		event({
 			type: "turn_start",
-			turn_id: "turn-1",
+			turnId: "turn-1",
 		}),
 		1,
 	);
@@ -23,8 +23,8 @@ void test("turn state follows a complete tool lifecycle", () => {
 		event({
 			type: "tool_execution_start",
 			tool: "bash",
-			tool_name: "bash",
-			tool_args: { command: "npm test" },
+			toolName: "bash",
+			args: { command: "npm test" },
 		}),
 		3,
 	);
@@ -34,8 +34,8 @@ void test("turn state follows a complete tool lifecycle", () => {
 		event({
 			type: "tool_execution_end",
 			tool: "bash",
-			tool_name: "bash",
-			is_error: false,
+			toolName: "bash",
+			isError: false,
 		}),
 		4,
 	);
@@ -50,7 +50,7 @@ void test("approval and failures are explicit states", () => {
 		INITIAL_TURN_STATE,
 		event({
 			type: "turn_start",
-			turn_id: "turn-1",
+			turnId: "turn-1",
 		}),
 	);
 	assert.equal(
@@ -58,8 +58,8 @@ void test("approval and failures are explicit states", () => {
 			started,
 			event({
 				type: "permission_request",
-				tool_name: "bash",
-				tool_call_id: "1",
+				toolName: "bash",
+				toolCallId: "1",
 				args: {},
 			}),
 		).phase,
@@ -77,19 +77,31 @@ void test("approval and failures are explicit states", () => {
 		).phase,
 		"failed",
 	);
+	assert.equal(
+		reduceTurnState(
+			started,
+			event({
+				type: "agent_error",
+				message: "provider failed",
+				phase: "model",
+				recoverable: false,
+			}),
+		).phase,
+		"failed",
+	);
 });
 
 void test("duplicate provider and execution starts count one running tool", () => {
 	const started = reduceTurnState(
 		INITIAL_TURN_STATE,
-		event({ type: "turn_start", turn_id: "turn-1" }),
+		event({ type: "turn_start", turnId: "turn-1" }),
 	);
 	const toolStart = event({
 		type: "tool_execution_start",
 		tool: "read_file",
-		tool_name: "read_file",
-		tool_call_id: "call-1",
-		tool_args: { path: "file.ts" },
+		toolName: "read_file",
+		toolCallId: "call-1",
+		args: { path: "file.ts" },
 	});
 	const first = reduceTurnState(started, toolStart);
 	const duplicate = reduceTurnState(first, toolStart);
@@ -101,8 +113,8 @@ void test("duplicate provider and execution starts count one running tool", () =
 		event({
 			type: "tool_execution_end",
 			tool: "read_file",
-			tool_name: "read_file",
-			tool_call_id: "call-1",
+			toolName: "read_file",
+			toolCallId: "call-1",
 			result: "done",
 		}),
 	);

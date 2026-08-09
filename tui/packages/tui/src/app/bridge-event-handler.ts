@@ -10,8 +10,10 @@ import type {
 	GoalManager,
 	GoalState,
 } from "@logician/coding-agent/application";
-import type { SlashCommandDef } from "@logician/coding-agent/commands";
-import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
+import {
+	isTranscriptEvent,
+	type RuntimeEvent,
+} from "@logician/coding-agent/runtime";
 import type { Transcript } from "@logician/coding-agent/sessions";
 import type { ChoicePopup } from "../overlays/choice-popup.ts";
 import type { PermissionPopup } from "../overlays/permission-popup.ts";
@@ -30,6 +32,7 @@ import type { WorkSurface } from "../status/work-surface.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
 import { getGitVersion } from "./git-status.ts";
+import { registerRuntimeCommandContributions } from "./runtime/command-contributions.ts";
 import { formatStartupMessage } from "./startup/message.ts";
 
 export interface BridgeEventHandlerCtx {
@@ -56,7 +59,7 @@ export interface BridgeEventHandlerCtx {
 }
 
 export function setupBridge(ctx: BridgeEventHandlerCtx): void {
-	const eventHandler = (event: ParsedBridgeEvent): void => {
+	const eventHandler = (event: RuntimeEvent): void => {
 		handleEvent(ctx, event);
 	};
 
@@ -78,6 +81,7 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 				sandboxMode: ctx.bridge.getSandboxMode(),
 				memoryEnabled: ctx.bridge.getSettingsData().memoryEnabled,
 			});
+			registerRuntimeCommandContributions(ctx);
 			// Don't add startup message when restoring a session — user history
 			// is already visible; prepending startup text just causes rendering
 			// overlap.
@@ -94,48 +98,6 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 					ctx.tui.requestRender();
 				}
 			}
-			// Surface discovered skills as /<skill-name> commands in the popup.
-			const skills = ctx.bridge.getSkills();
-			if (skills.length) {
-				const existing = ctx.slashPopup.getCommands() as SlashCommandDef[];
-				const taken = new Set(existing.map(c => c.command));
-				const skillCmds: SlashCommandDef[] = skills
-					.map(s => ({
-						command: `/${s.slashName}`,
-						usage: `/${s.slashName}${s.argumentHint ? ` ${s.argumentHint}` : ""}`,
-						description: `Skill: ${s.description.slice(0, 80)}`,
-						dispatch: "local" as const,
-						acceptsArgs: true,
-						bridgeHandler: (args: string) => {
-							ctx.bridge.invokeSkill(s.name, args);
-						},
-					}))
-					.filter(c => !taken.has(c.command));
-				if (skillCmds.length) {
-					ctx.slashPopup.setCommands([...existing, ...skillCmds]);
-				}
-			}
-			// Surface discovered prompts as /<prompt-name> commands in the popup.
-			const prompts = ctx.bridge.getPrompts();
-			if (prompts.length) {
-				const existing = ctx.slashPopup.getCommands() as SlashCommandDef[];
-				const taken = new Set(existing.map(c => c.command));
-				const promptCmds: SlashCommandDef[] = prompts
-					.map(p => ({
-						command: `/${p.slashName}`,
-						usage: `/${p.slashName}${p.argumentHint ? ` ${p.argumentHint}` : ""}`,
-						description: `Prompt: ${p.description.slice(0, 80)}`,
-						dispatch: "local" as const,
-						acceptsArgs: true,
-						bridgeHandler: (args: string) => {
-							ctx.bridge.invokePrompt(p.name, args);
-						},
-					}))
-					.filter(c => !taken.has(c.command));
-				if (promptCmds.length) {
-					ctx.slashPopup.setCommands([...existing, ...promptCmds]);
-				}
-			}
 		})
 		.catch(err => {
 			// Display init/connection errors in transcript so the user knows
@@ -148,10 +110,10 @@ export function setupBridge(ctx: BridgeEventHandlerCtx): void {
 
 export function handleEvent(
 	ctx: BridgeEventHandlerCtx,
-	event: ParsedBridgeEvent,
+	event: RuntimeEvent,
 ): void {
 	// Update transcript state
-	ctx.transcript.handleEvent(event);
+	if (isTranscriptEvent(event)) ctx.transcript.handleEvent(event);
 	ctx.turnState = reduceTurnState(ctx.turnState, event);
 	ctx.workSurface.setPhase(ctx.turnState.phase);
 	ctx.statusPanel.update({ phase: turnPhaseLabel(ctx.turnState.phase) });
@@ -166,19 +128,17 @@ export function handleEvent(
 	switch (event.type) {
 		case "todos":
 			ctx.todoBar.setTodos(event.todos);
-			ctx.tui.requestRender();
 			break;
 		case "queue_update":
 			ctx.steerQueue.setItems(event.steering || [], event.followUp || []);
-			ctx.tui.requestRender();
 			break;
 		case "permission_request": {
 			ctx.pendingPermission = {
-				toolCallId: event.tool_call_id,
-				toolName: event.tool_name,
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
 			};
 			const preview = JSON.stringify(event.args ?? {}).slice(0, 500);
-			ctx.permissionPopup.setToolInfo(event.tool_name, preview);
+			ctx.permissionPopup.setToolInfo(event.toolName, preview);
 			ctx.permissionPopup.setChoices([
 				{
 					value: "allow",
@@ -188,7 +148,7 @@ export function handleEvent(
 				{
 					value: "always",
 					label: "Always allow",
-					description: `Allow ${event.tool_name} without asking`,
+					description: `Allow ${event.toolName} without asking`,
 				},
 				{ value: "deny", label: "Deny", description: "Block this tool call" },
 			]);
@@ -202,12 +162,11 @@ export function handleEvent(
 			ctx.statusPanel.update({ phase: "permission" });
 			ctx.statusPanel.stopAnimation();
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			ctx.tui.requestRender();
 			break;
 		}
 		case "question_request": {
 			ctx.choicePopupPreview = false;
-			ctx.choicePopup.setQuestionId(event.question_id);
+			ctx.choicePopup.setQuestionId(event.questionId);
 			ctx.choicePopup.setQuestions(event.questions);
 			ctx.choicePopup.show();
 			const overlay = ctx.tui.showOverlay(ctx.choicePopup, {
@@ -216,26 +175,40 @@ export function handleEvent(
 				maxHeight: 24,
 			});
 			overlay.focus();
-			ctx.tui.requestRender();
 			break;
 		}
 		case "token":
+		case "thinking_token":
+		case "message_update":
+		case "tool_call_start":
+		case "tool_call_update":
+		case "tool_call_id_update":
+		case "tool_execution_update":
+		case "subagent_chunk":
+		case "subagent_lifecycle":
+		case "agent_retry_end":
 			break;
-		case "tool_start":
-		case "tool_execution_start":
-			ctx.workSurface.recordToolStart(
-				event.tool_call_id,
-				event.tool_name,
-				event.tool_args,
+		case "agent_retry_start":
+			ctx.statusPanel.update({ phase: "retrying" });
+			break;
+		case "agent_error":
+			ctx.transcript.addSystemMessage(
+				`Agent error (${event.phase}): ${event.message}`,
 			);
 			break;
-		case "tool_end":
+		case "tool_execution_start":
+			ctx.workSurface.recordToolStart(
+				event.toolCallId,
+				event.toolName,
+				event.args,
+			);
+			break;
 		case "tool_execution_end":
 			ctx.workSurface.recordToolEnd(
-				event.tool_call_id,
-				event.tool_name,
+				event.toolCallId,
+				event.toolName,
 				event.result,
-				event.is_error,
+				event.isError,
 			);
 			break;
 		case "turn_end":
@@ -269,25 +242,25 @@ export function handleEvent(
 		case "context_update":
 			ctx.workSurface.setContext(
 				Number(event.tokens || 0),
-				Number(event.max_tokens || 0) || undefined,
+				Number(event.maxTokens || 0) || undefined,
 			);
 			ctx.statusPanel.update({
 				contextTokens: Number(event.tokens || 0),
-				contextMaxTokens: Number(event.max_tokens || 0) || undefined,
+				contextMaxTokens: Number(event.maxTokens || 0) || undefined,
 				contextCompacted: event.compacted === true,
-				...(typeof event.cached_tokens === "number" && {
-					cacheReadTokens: event.cached_tokens,
+				...(typeof event.cachedTokens === "number" && {
+					cacheReadTokens: event.cachedTokens,
 				}),
-				...("prompt_tokens" in event && {
+				...(event.promptTokens !== undefined && {
 					promptTokens:
-						typeof event.prompt_tokens === "number"
-							? event.prompt_tokens
+						typeof event.promptTokens === "number"
+							? event.promptTokens
 							: undefined,
 				}),
-				...("completion_tokens" in event && {
+				...(event.completionTokens !== undefined && {
 					completionTokens:
-						typeof event.completion_tokens === "number"
-							? event.completion_tokens
+						typeof event.completionTokens === "number"
+							? event.completionTokens
 							: undefined,
 				}),
 			});
@@ -295,13 +268,13 @@ export function handleEvent(
 		case "compaction":
 			ctx.transcript.addSystemMessage(
 				`Context compacted (${formatContextSize(
-					Number(event.tokens_before || 0),
-				)} -> ${formatContextSize(Number(event.tokens_after || 0))}).`,
+					Number(event.tokensBefore || 0),
+				)} -> ${formatContextSize(Number(event.tokensAfter || 0))}).`,
 			);
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.statusPanel.update({
 				phase: "compacted",
-				contextTokens: Number(event.tokens_after || 0),
+				contextTokens: Number(event.tokensAfter || 0),
 				contextCompacted: true,
 			});
 			break;
@@ -315,6 +288,7 @@ export function handleEvent(
 						mcpServerCount: Number(state.mcp_servers || 0),
 						mcpLoading: false,
 					});
+					ctx.tui.requestRender();
 				});
 			} else if (event.label === "Memory") {
 				ctx.statusPanel.update({
@@ -363,7 +337,15 @@ export function handleEvent(
 			);
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			break;
+		default:
+			assertNever(event);
 	}
 
 	ctx.tui.requestRender();
+}
+
+function assertNever(value: never): never {
+	throw new Error(
+		`Unhandled runtime event: ${String((value as { type?: unknown }).type)}`,
+	);
 }

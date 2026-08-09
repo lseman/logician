@@ -1,4 +1,4 @@
-import type { ParsedBridgeEvent } from "@logician/coding-agent/runtime";
+import type { RuntimeEvent } from "@logician/coding-agent/runtime";
 
 export type TurnPhase =
 	| "idle"
@@ -26,41 +26,39 @@ export const INITIAL_TURN_STATE: TurnState = {
 	runningToolIds: [],
 };
 
-function toolCallId(event: ParsedBridgeEvent): string | undefined {
+function toolCallId(event: RuntimeEvent): string | undefined {
 	if (
-		event.type !== "tool_start" &&
 		event.type !== "tool_execution_start" &&
-		event.type !== "tool_end" &&
 		event.type !== "tool_execution_end"
 	) {
 		return undefined;
 	}
-	return event.tool_call_id || undefined;
+	return event.toolCallId || undefined;
 }
 
 const VERIFY_PATTERN =
 	/\b(test|check|lint|typecheck|pytest|cargo test|go test|ctest|make check)\b/i;
 
-function isVerificationTool(event: ParsedBridgeEvent): boolean {
-	if (event.type !== "tool_start" && event.type !== "tool_execution_start") {
+function isVerificationTool(event: RuntimeEvent): boolean {
+	if (event.type !== "tool_execution_start") {
 		return false;
 	}
-	if (event.tool_name !== "bash") return false;
-	const command = String(event.tool_args?.command ?? "");
+	if (event.toolName !== "bash") return false;
+	const command = String(event.args?.command ?? "");
 	return VERIFY_PATTERN.test(command);
 }
 
 /** Canonical lifecycle reducer. Renderers consume this state; they do not infer it. */
 export function reduceTurnState(
 	state: TurnState,
-	event: ParsedBridgeEvent,
+	event: RuntimeEvent,
 	now = Date.now(),
 ): TurnState {
 	switch (event.type) {
 		case "turn_start":
 			return {
 				phase: "thinking",
-				turnId: event.turn_id,
+				turnId: event.turnId,
 				runningTools: 0,
 				runningToolIds: [],
 				startedAt: now,
@@ -68,12 +66,13 @@ export function reduceTurnState(
 		case "thinking_token":
 			return { ...state, phase: "thinking" };
 		case "token":
-		case "text_start":
 		case "message_update":
+		case "tool_call_start":
+		case "tool_call_update":
+		case "tool_call_id_update":
 			return state.phase === "idle" || state.phase === "complete"
 				? state
 				: { ...state, phase: "streaming" };
-		case "tool_start":
 		case "tool_execution_start": {
 			const id = toolCallId(event);
 			const duplicate = id !== undefined && state.runningToolIds.includes(id);
@@ -87,7 +86,6 @@ export function reduceTurnState(
 						: [...state.runningToolIds, id],
 			};
 		}
-		case "tool_end":
 		case "tool_execution_end": {
 			const id = toolCallId(event);
 			const knownId = id !== undefined && state.runningToolIds.includes(id);
@@ -100,7 +98,7 @@ export function reduceTurnState(
 				: state.runningToolIds;
 			return {
 				...state,
-				phase: event.is_error
+				phase: event.isError
 					? "failed"
 					: runningTools > 0
 						? state.phase
@@ -131,6 +129,14 @@ export function reduceTurnState(
 						settledAt: now,
 					}
 				: state;
+		case "agent_error":
+			return {
+				...state,
+				phase: event.recoverable ? state.phase : "failed",
+				...(event.recoverable
+					? {}
+					: { runningTools: 0, runningToolIds: [], settledAt: now }),
+			};
 		case "phase":
 			if (event.state === "ready") {
 				return state.startedAt

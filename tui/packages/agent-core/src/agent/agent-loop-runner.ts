@@ -550,9 +550,7 @@ async function runAgentLoopInTaskScope(
 					// When the mode asks for provider defaults, omit all sampling
 					// params so the provider uses its own built-in defaults.
 					const useProviderDefaults = modeDef?.useProviderDefaults ?? false;
-					const modeParams = useProviderDefaults
-						? undefined
-						: modeDef?.params;
+					const modeParams = useProviderDefaults ? undefined : modeDef?.params;
 					const effectiveTemp =
 						modeParams?.temperature ?? config.temperature ?? 0.5;
 					response = await config.backend.generate(chatMessages, {
@@ -590,6 +588,12 @@ async function runAgentLoopInTaskScope(
 									type: "tool_call_delta",
 									toolCallId,
 									delta,
+								}),
+							onToolCallIdUpdate: (previousToolCallId, toolCallId) =>
+								queueProviderEvent({
+									type: "tool_call_id_update",
+									previousToolCallId,
+									toolCallId,
 								}),
 						},
 						headers: requestHeaders,

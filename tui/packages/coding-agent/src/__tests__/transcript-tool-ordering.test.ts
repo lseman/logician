@@ -5,9 +5,9 @@ import { Transcript } from "../sessions/transcript.ts";
 function start(transcript: Transcript, id: string, path: string): void {
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool_name: "read_file",
-		tool_call_id: id,
-		tool_args: { path },
+		toolName: "read_file",
+		toolCallId: id,
+		args: { path },
 	});
 }
 
@@ -19,28 +19,26 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool_name: "read_file",
-		tool_call_id: "call-a",
-		update_kind: "output",
-		partial_result: "A progress",
+		toolName: "read_file",
+		toolCallId: "call-a",
+		partialResult: "A progress",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool_name: "read_file",
-		tool_call_id: "call-b",
-		update_kind: "output",
-		partial_result: "B progress",
+		toolName: "read_file",
+		toolCallId: "call-b",
+		partialResult: "B progress",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "read_file",
-		tool_call_id: "call-b",
+		toolName: "read_file",
+		toolCallId: "call-b",
 		result: "B result",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool_name: "read_file",
-		tool_call_id: "call-a",
+		toolName: "read_file",
+		toolCallId: "call-a",
 		result: "A result",
 	});
 
@@ -69,19 +67,30 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 	);
 });
 
-void test("ambiguous id-less updates never overwrite a parallel tool", () => {
+void test("execution start enriches the card created during call preparation", () => {
 	const transcript = new Transcript();
-	transcript.addTurn("Read both files");
-	start(transcript, "call-a", "a.ts");
-	start(transcript, "call-b", "b.ts");
+	transcript.addTurn("Read the file");
+	transcript.handleEvent({
+		type: "tool_call_start",
+		toolName: "read_file",
+		toolCallId: "call-a",
+		args: {},
+	});
 
 	transcript.handleEvent({
-		type: "tool_execution_update",
-		tool_name: "read_file",
-		partial_result: "ambiguous",
-		update_kind: "output",
+		type: "tool_call_update",
+		toolCallId: "call-a",
+		delta: '{"path":"a.ts"}',
+	});
+	transcript.handleEvent({
+		type: "tool_execution_start",
+		toolName: "read_file",
+		toolCallId: "call-a",
+		args: { path: "a.ts" },
 	});
 
 	const tools = transcript.getAssistantTools(transcript.getTurns()[0]);
-	assert.ok(tools.every(tool => tool.streamOutput === undefined));
+	assert.equal(tools.length, 1);
+	assert.equal(tools[0].tool_call_id, "call-a");
+	assert.deepEqual(tools[0].args, { path: "a.ts" });
 });
