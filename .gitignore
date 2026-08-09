@@ -88,3 +88,6 @@ Untitled-*
 .playwright-mcp/
 /plugins/
 /notes/
+
+# Build artifacts
+tui/release/
