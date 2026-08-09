@@ -102,8 +102,17 @@ export class BM25Scorer {
 	private idfCache = new Map<string, number>();
 
 	addChunk(rowId: number, terms: string[]): void {
+		const existing = this.state.docTerms.get(rowId);
+		if (existing) {
+			for (const term of new Set(existing)) {
+				const rows = this.state.docFreq.get(term);
+				rows?.delete(rowId);
+				if (rows?.size === 0) this.state.docFreq.delete(term);
+			}
+		}
 		this.state.docTerms.set(rowId, terms);
-		this.state.nDocs = Math.max(this.state.nDocs, rowId + 1);
+		this.state.nDocs = this.state.docTerms.size;
+		this.idfCache.clear();
 		for (const term of terms) {
 			let s = this.state.docFreq.get(term);
 			if (!s) {
@@ -167,7 +176,9 @@ export class BM25Scorer {
 	/** Top-K rows by BM25 score for a query. */
 	topK(queryTerms: string[], k: number): Array<{ id: number; score: number }> {
 		const scores = new Map<number, number>();
-		for (const [term, rowIds] of this.state.docFreq.entries()) {
+		for (const term of new Set(queryTerms)) {
+			const rowIds = this.state.docFreq.get(term);
+			if (!rowIds) continue;
 			const idf = this.idf(term);
 			const k1 = 1.5;
 			const b = 0.75;
@@ -356,12 +367,14 @@ export class HybridVectorStore {
 	}
 
 	private saveBM25ToDB(rows: Array<{ rowId: number; termCounts: Map<string, number> }>): void {
-		this.statements.deleteAllBM25.run();
 		for (const { rowId, termCounts } of rows) {
+			this.statements.deleteByRowId.run(rowId);
 			for (const [term, count] of termCounts) {
 				this.statements.insertBM25Term.run(rowId, term, count);
 			}
 		}
+		this.bm25 = new BM25Scorer();
+		this.loadBM25FromDB();
 	}
 
 	// ── Chunk operations ────────────────────────────────────────────────────────
@@ -606,16 +619,22 @@ export class HybridVectorStore {
 			filter,
 		} = { ...options };
 
-		// Step 1: Dense retrieval
+		// Generate dense and sparse candidates independently. A sparse exact match
+		// must remain recoverable even when it falls outside the ANN neighborhood.
 		const kDense = Math.min(topK * 8, size);
 		const denseMatches = this.index.search(Float32Array.from(queryVector), kDense, 0);
 		const denseRowIds = Array.from(denseMatches.keys, (k) => Number(k));
+		const queryTerms = tokenize(queryText);
+		const sparseMatches = queryTerms.length
+			? this.bm25.topK(queryTerms, Math.min(topK * 8, size))
+			: [];
+		const candidateRowIds = [
+			...new Set([...denseRowIds, ...sparseMatches.map(match => match.id)]),
+		];
+		if (!candidateRowIds.length) return [];
 
-		if (!denseRowIds.length) return [];
-
-		// Step 2: Get candidate chunks
 		const rows = this.statements.getByRowIds.all(
-			JSON.stringify(denseRowIds),
+			JSON.stringify(candidateRowIds),
 		) as ChunkRow[];
 
 		let candidates = rows.map((r) => ({
@@ -641,18 +660,16 @@ export class HybridVectorStore {
 			});
 		}
 
-		// Step 3: BM25 scoring
-		const queryTerms = tokenize(queryText);
-		const bm25Top = queryTerms.length > 0
-			? this.bm25.topK(queryTerms, candidates.length)
-			: [];
+		const allowedRowIds = new Set(candidates.map(candidate => candidate.rowId));
+		const denseRank = denseRowIds.filter(rowId => allowedRowIds.has(rowId));
+		const bm25Top = sparseMatches.filter(match => allowedRowIds.has(match.id));
 
 		// Step 4: RRF fusion
 		const rankScores = new Map<number, number>();
 
 		// Dense ranks
-		for (let rank = 0; rank < denseRowIds.length; rank++) {
-			const rowId = denseRowIds[rank];
+		for (let rank = 0; rank < denseRank.length; rank++) {
+			const rowId = denseRank[rank];
 			rankScores.set(rowId, (rankScores.get(rowId) ?? 0) + denseWeight / (60 + rank));
 		}
 
@@ -727,6 +744,8 @@ export class HybridVectorStore {
 		}
 		if (rows.length) {
 			this.saveIndex();
+			this.bm25 = new BM25Scorer();
+			this.loadBM25FromDB();
 		}
 	}
 
@@ -769,6 +788,8 @@ export class HybridVectorStore {
 		for (const [term, count] of Object.entries(tf)) {
 			this.statements.insertBM25Term.run(rowId.rowid, term, count);
 		}
+		this.bm25 = new BM25Scorer();
+		this.loadBM25FromDB();
 	}
 
 	close(): void {
