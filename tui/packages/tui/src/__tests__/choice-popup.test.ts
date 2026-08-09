@@ -133,8 +133,16 @@ void test("settings and selectors share the same dialog frame and focus style", 
 
 	const themes = new ThemeSelectorOverlay();
 	themes.setThemes([
-		{ name: "Dark", description: "Low-light terminal palette" },
-		{ name: "Light", description: "Bright terminal palette" },
+		{
+			name: "Dark",
+			description: "Low-light terminal palette",
+			active: true,
+		},
+		{
+			name: "Light",
+			description: "Bright terminal palette",
+			active: false,
+		},
 	]);
 	themes.show();
 
@@ -153,4 +161,8 @@ void test("settings and selectors share the same dialog frame and focus style", 
 	const detail = plain(settings.render(64).join("\n"));
 	assert.match(detail, /❯ High ✓/);
 	assert.doesNotMatch(detail, /●/);
+
+	const themeList = plain(themes.render(64).join("\n"));
+	assert.match(themeList, /❯ Dark ✓/);
+	assert.doesNotMatch(themeList, /Light ✓/);
 });

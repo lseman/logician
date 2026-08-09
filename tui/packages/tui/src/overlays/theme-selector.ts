@@ -6,6 +6,7 @@ import { type ListItem, ListSelectorOverlay } from "./popup-utils.ts";
 export interface ThemeInfo {
 	name: string;
 	description: string;
+	active: boolean;
 }
 
 export type ThemeSelectorAction =
@@ -22,12 +23,17 @@ export class ThemeSelectorOverlay extends ListSelectorOverlay<ThemeInfo> {
 				label: t.name,
 				metadata: t.description,
 				selected: i === selectedIndex,
+				current: t.active,
 			}),
 		});
 	}
 
 	setThemes(themes: ThemeInfo[]): void {
-		this.setItems(themes);
+		const activeIndex = themes.findIndex(theme => theme.active);
+		this.setItems(
+			themes,
+			activeIndex >= 0 ? activeIndex : this.selection.index,
+		);
 	}
 
 	handleInput(data: string): ThemeSelectorAction | null {

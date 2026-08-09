@@ -3,7 +3,10 @@
 import { getReasonerMeta } from "@logician/agent-capabilities/reasoning";
 import { formatContextSize } from "@logician/coding-agent";
 import { saveConfigField } from "@logician/coding-agent/configuration";
-import { getAvailableThemes } from "../../terminal/theme.ts";
+import {
+	getCurrentThemeName,
+	getAvailableThemes,
+} from "../../terminal/theme.ts";
 import { getGitVersion } from "../git-status.ts";
 import type { SlashCommandsCtx } from "./context.ts";
 
@@ -149,7 +152,16 @@ export async function handleTheme(
 	try {
 		const normalized = args.trim().toLowerCase();
 		if (!normalized || normalized === "list") {
+			// Show the current theme before opening the selector
+			const current = getCurrentThemeName();
+			ctx.transcript.addSystemMessage(
+				current !== "unknown"
+					? `Current theme: ${current}. Select a different theme:`
+					: "No active theme. Select a theme:",
+			);
 			await ctx.openThemeSelector();
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			ctx.tui.requestRender();
 			return;
 		}
 		// Direct set: /theme dark, /theme light, etc.

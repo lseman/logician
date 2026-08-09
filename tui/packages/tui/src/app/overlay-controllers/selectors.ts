@@ -23,7 +23,11 @@ import type {
 	ThemeInfo,
 	ThemeSelectorAction,
 } from "../../overlays/theme-selector.ts";
-import { getAvailableThemes, setTheme } from "../../terminal/theme.ts";
+import {
+	getAvailableThemes,
+	getCurrentThemeName,
+	setTheme,
+} from "../../terminal/theme.ts";
 import type { InferenceMode } from "../inference-settings.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 
@@ -158,9 +162,11 @@ export async function openThemeSelector(
 	ctx: OverlayHandlersCtx,
 ): Promise<void> {
 	const available = getAvailableThemes();
+	const current = getCurrentThemeName();
 	const themes: ThemeInfo[] = available.map(name => ({
 		name,
 		description: `${name.charAt(0).toUpperCase() + name.slice(1)} theme`,
+		active: name === current,
 	}));
 	ctx.themeSelector.setThemes(themes);
 	ctx.themeSelector.setMessage("Enter selects a color theme.");

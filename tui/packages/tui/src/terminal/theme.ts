@@ -516,6 +516,11 @@ export function initTheme(name?: string): void {
 	}
 }
 
+export function getCurrentThemeName(): string {
+	const t = getGlobalTheme();
+	return t?.name ?? "unknown";
+}
+
 export function setTheme(name: string): boolean {
 	try {
 		const t = loadTheme(name);
