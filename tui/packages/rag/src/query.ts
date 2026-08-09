@@ -77,12 +77,10 @@ export function expandQuery(query: string): string[] {
 		}
 		// Combined expansion (top 3 synonyms + original key terms)
 		const keyTerms = terms.filter(
-			(t) => !SYNONYM_MAP[t] || SYNONYM_MAP[t].length === 0,
+			t => !SYNONYM_MAP[t] || SYNONYM_MAP[t].length === 0,
 		);
 		if (keyTerms.length > 0 && expansions.length > 0) {
-			expanded.push(
-				[...keyTerms, expansions.slice(0, 2)].join(" "),
-			);
+			expanded.push([...keyTerms, expansions.slice(0, 2)].join(" "));
 		}
 	}
 
@@ -140,7 +138,10 @@ export async function rewriteQuery(
  */
 export async function multiQuerySearch(
 	query: string,
-	searchFn: (q: string, k: number) => Promise<Array<{ chunk: { id: string }; score: number }>>,
+	searchFn: (
+		q: string,
+		k: number,
+	) => Promise<Array<{ chunk: { id: string }; score: number }>>,
 	options?: {
 		nSubQueries?: number;
 		perQueryK?: number;
@@ -218,7 +219,7 @@ Output:`;
 		"Content-Type": "application/json",
 	};
 	if (apiKey) {
-		headers["Authorization"] = `Bearer ${apiKey}`;
+		headers.Authorization = `Bearer ${apiKey}`;
 	}
 
 	const response = await fetch(endpoint, {

@@ -58,9 +58,15 @@ export class SettingsSelectorOverlay implements Component {
 	private cachedWidth = -1;
 
 	/** @internal Exposed for tests. */
-	get selectedIndex(): number { return this._selectedIndex; }
-	get selectedOptionIndex(): number { return this._selectedOptionIndex; }
-	get inDetailView(): boolean { return this._inDetailView; }
+	get selectedIndex(): number {
+		return this._selectedIndex;
+	}
+	get selectedOptionIndex(): number {
+		return this._selectedOptionIndex;
+	}
+	get inDetailView(): boolean {
+		return this._inDetailView;
+	}
 
 	setSettings(settings: SettingDef[]): void {
 		this.settings = settings;

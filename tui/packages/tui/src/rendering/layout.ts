@@ -33,8 +33,14 @@ export interface LayoutBox {
 
 function allocateBox(
 	component: Component,
-	x: number, y: number, width: number, height: number,
-	clipX: number, clipY: number, clipWidth: number, clipHeight: number,
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+	clipX: number,
+	clipY: number,
+	clipWidth: number,
+	clipHeight: number,
 	layer: number,
 	lines?: readonly string[],
 	lineOffset?: number,
@@ -121,10 +127,7 @@ function renderCached(
 /** Cached visibleWidth — avoids re-parsing ANSI escape sequences on every line.
  * Uses a string key "line|width" for the cache, but since width is constant
  * within a layout frame, we just key by the line text itself. */
-function visibleWidthCached(
-	context: LayoutContext,
-	line: string,
-): number {
+function visibleWidthCached(context: LayoutContext, line: string): number {
 	let cached = context.widthCache.get(line);
 	if (cached === undefined) {
 		cached = visibleWidth(line);
@@ -234,16 +237,35 @@ function layoutComponent(
 			if (cursorLine >= allocatedHeight)
 				lineOffset = cursorLine - allocatedHeight + 1;
 		}
-		const clipRect = intersect(clip, { x, y, width: safeWidth, height: allocatedHeight });
+		const clipRect = intersect(clip, {
+			x,
+			y,
+			width: safeWidth,
+			height: allocatedHeight,
+		});
 		const box = allocateBox(
 			component,
-			x, y, safeWidth, allocatedHeight,
-			clipRect.x, clipRect.y, clipRect.width, clipRect.height,
+			x,
+			y,
+			safeWidth,
+			allocatedHeight,
+			clipRect.x,
+			clipRect.y,
+			clipRect.width,
+			clipRect.height,
 			0,
 			lines,
 			lineOffset,
 		);
-		leafCache.set(component, { x, y, width: safeWidth, height, clip, lines, box });
+		leafCache.set(component, {
+			x,
+			y,
+			width: safeWidth,
+			height,
+			clip,
+			lines,
+			box,
+		});
 		return box;
 	}
 
@@ -275,13 +297,23 @@ function layoutComponent(
 		const childClip = intersect(clip, rect);
 		const box = allocateBox(
 			component,
-			x, y, safeWidth, viewportHeight,
-			childClip.x, childClip.y, childClip.width, childClip.height,
+			x,
+			y,
+			safeWidth,
+			viewportHeight,
+			childClip.x,
+			childClip.y,
+			childClip.width,
+			childClip.height,
 			0,
 		);
 		box.children.push(childBox);
 		box.scrollView = scrollView;
-		box.scrollContentLines = renderCached(context, node.component, contentWidth);
+		box.scrollContentLines = renderCached(
+			context,
+			node.component,
+			contentWidth,
+		);
 		childBox.parent = box;
 		updateClips(childBox, childClip);
 		return box;
@@ -308,8 +340,14 @@ function layoutComponent(
 		const clipRect = intersect(clip, rect);
 		const box = allocateBox(
 			component,
-			x, y, safeWidth, allocatedHeight,
-			clipRect.x, clipRect.y, clipRect.width, clipRect.height,
+			x,
+			y,
+			safeWidth,
+			allocatedHeight,
+			clipRect.x,
+			clipRect.y,
+			clipRect.width,
+			clipRect.height,
 			0,
 		);
 		let childY = y;
@@ -358,8 +396,14 @@ function layoutComponent(
 	const clipRect = intersect(clip, rect);
 	const box = allocateBox(
 		component,
-		x, y, safeWidth, allocatedHeight,
-		clipRect.x, clipRect.y, clipRect.width, clipRect.height,
+		x,
+		y,
+		safeWidth,
+		allocatedHeight,
+		clipRect.x,
+		clipRect.y,
+		clipRect.width,
+		clipRect.height,
 		0,
 	);
 	let childX = x;
@@ -375,12 +419,20 @@ function layoutComponent(
 		else if (node.align === "end") childY += allocatedHeight - childHeight;
 		const childWidth = widths[index]!;
 		if (childWidth === 0) {
-			box.children.push(allocateBox(
-				entries[index]?.component,
-				childX, childY, 0, childHeight,
-				childX, childY, 0, 0,
-				0,
-			));
+			box.children.push(
+				allocateBox(
+					entries[index]?.component,
+					childX,
+					childY,
+					0,
+					childHeight,
+					childX,
+					childY,
+					0,
+					0,
+					0,
+				),
+			);
 		} else {
 			box.children.push(
 				withParent(

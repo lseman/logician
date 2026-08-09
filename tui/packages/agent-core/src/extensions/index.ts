@@ -37,9 +37,13 @@ export type {
 	TurnStartEvent,
 } from "../hooks/extensions/events.ts";
 export * from "./loader.ts";
+export type { PiAdapterOptions, PiExtensionAPI } from "./pi-adapter.ts";
+// Pi adapter and type guard helpers (for Pi extensions running on Logician)
+export {
+	isBashToolResult,
+	isToolCallEventType,
+	PiAdapter,
+} from "./pi-adapter.ts";
 export * from "./runner.ts";
 export * from "./state.ts";
 export * from "./types.ts";
-// Pi adapter and type guard helpers (for Pi extensions running on Logician)
-export { PiAdapter, isToolCallEventType, isBashToolResult } from "./pi-adapter.ts";
-export type { PiAdapterOptions, PiExtensionAPI } from "./pi-adapter.ts";

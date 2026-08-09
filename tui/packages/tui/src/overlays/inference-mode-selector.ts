@@ -66,10 +66,7 @@ export class InferenceModeSelector extends ListSelectorOverlay<InferenceModeInfo
 	setModes(modes: InferenceModeInfo[], activeId: string): void {
 		this._activeId = activeId;
 		const activeIndex = modes.findIndex(m => m.id === activeId);
-		this.setItems(
-			modes,
-			activeIndex >= 0 ? activeIndex : this.selection.index,
-		);
+		this.setItems(modes, activeIndex >= 0 ? activeIndex : this.selection.index);
 	}
 
 	handleInput(data: string): InferenceModeSelectorAction | null {
@@ -83,7 +80,7 @@ export class InferenceModeSelector extends ListSelectorOverlay<InferenceModeInfo
 
 /** Return modes sorted by the canonical order, with unknown ones appended. */
 export function sortInferenceModesByIds(ids: string[]): string[] {
-	const known = new Set(MODE_ORDER);
+	const _known = new Set(MODE_ORDER);
 	const sorted = [...ids].sort((a, b) => {
 		const ai = MODE_ORDER.indexOf(a as (typeof MODE_ORDER)[number]);
 		const bi = MODE_ORDER.indexOf(b as (typeof MODE_ORDER)[number]);

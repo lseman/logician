@@ -3,7 +3,7 @@
 // scored jointly). Much more accurate than re-ranking with independent encoders.
 // Uses @huggingface/transformers in-process.
 
-import type { IReranker, RAGChunk, RerankerConfig } from "./types.ts";
+import type { IReranker, RAGChunk } from "./types.ts";
 
 type TextPairClassificationPipeline = (
 	pairs: [string, string][],
@@ -34,14 +34,16 @@ export class CrossEncoderReranker implements IReranker {
 	private async getPipeline(): Promise<TextPairClassificationPipeline> {
 		if (this.pipeline) return this.pipeline;
 		if (!this.loading) {
-			this.loading = import("@huggingface/transformers").then(async ({ pipeline }) => {
-				const p = (await pipeline(
-					"text-classification",
-					this.modelId,
-				)) as unknown as TextPairClassificationPipeline;
-				this.pipeline = p;
-				return p;
-			});
+			this.loading = import("@huggingface/transformers").then(
+				async ({ pipeline }) => {
+					const p = (await pipeline(
+						"text-classification",
+						this.modelId,
+					)) as unknown as TextPairClassificationPipeline;
+					this.pipeline = p;
+					return p;
+				},
+			);
 		}
 		return this.loading;
 	}
@@ -62,14 +64,21 @@ export class CrossEncoderReranker implements IReranker {
 		const pipeline = await this.getPipeline();
 
 		// Build pairs for cross-encoder
-		const pairTexts: Array<[string, string]> = pairs.map((p) => [query, p.chunk.text]);
+		const pairTexts: Array<[string, string]> = pairs.map(p => [
+			query,
+			p.chunk.text,
+		]);
 
 		// Batch process
-		const results: Array<{ chunk: RAGChunk; score: number; rerankScore: number }> = [];
+		const results: Array<{
+			chunk: RAGChunk;
+			score: number;
+			rerankScore: number;
+		}> = [];
 
 		for (let i = 0; i < pairTexts.length; i += this.batchSize) {
 			const batch = pairTexts.slice(i, i + this.batchSize);
-		 const output = await pipeline(batch, { batch_size: batch.length });
+			const output = await pipeline(batch, { batch_size: batch.length });
 
 			const scores =
 				output.data instanceof Float32Array
@@ -102,7 +111,6 @@ export class CrossEncoderReranker implements IReranker {
  */
 export class BM25Reranker implements IReranker {
 	readonly name = "bm25";
-	private batchSize = 1000;
 
 	async rerank(
 		query: string,
@@ -113,10 +121,10 @@ export class BM25Reranker implements IReranker {
 		const queryTerms = tokenize(query);
 		if (!queryTerms.length) {
 			// No query terms — return original ranking
-			return pairs.map((p) => ({ ...p, rerankScore: p.score }));
+			return pairs.map(p => ({ ...p, rerankScore: p.score }));
 		}
 
-		const scored = pairs.map((p) => {
+		const scored = pairs.map(p => {
 			const docTerms = tokenize(p.chunk.text);
 			const bm25Score = scoreBM25(queryTerms, docTerms);
 			return {
@@ -134,13 +142,72 @@ export class BM25Reranker implements IReranker {
 // ── Inline helpers ───────────────────────────────────────────────────────────
 
 const STOP_WORDS = new Set([
-	"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-	"of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-	"have", "has", "had", "do", "does", "did", "will", "would", "could",
-	"should", "may", "might", "shall", "can", "this", "that", "these",
-	"those", "it", "its", "i", "me", "my", "we", "our", "you", "your",
-	"he", "she", "they", "them", "their", "what", "which", "who", "how",
-	"when", "where", "why", "not", "no", "yes", "so", "if", "as",
+	"a",
+	"an",
+	"the",
+	"and",
+	"or",
+	"but",
+	"in",
+	"on",
+	"at",
+	"to",
+	"for",
+	"of",
+	"with",
+	"by",
+	"from",
+	"is",
+	"are",
+	"was",
+	"were",
+	"be",
+	"been",
+	"have",
+	"has",
+	"had",
+	"do",
+	"does",
+	"did",
+	"will",
+	"would",
+	"could",
+	"should",
+	"may",
+	"might",
+	"shall",
+	"can",
+	"this",
+	"that",
+	"these",
+	"those",
+	"it",
+	"its",
+	"i",
+	"me",
+	"my",
+	"we",
+	"our",
+	"you",
+	"your",
+	"he",
+	"she",
+	"they",
+	"them",
+	"their",
+	"what",
+	"which",
+	"who",
+	"how",
+	"when",
+	"where",
+	"why",
+	"not",
+	"no",
+	"yes",
+	"so",
+	"if",
+	"as",
 ]);
 
 function tokenize(text: string): string[] {
@@ -148,7 +215,7 @@ function tokenize(text: string): string[] {
 		.toLowerCase()
 		.replace(/[^a-z0-9\s]/g, " ")
 		.split(/\s+/)
-		.filter((t) => t.length > 1 && !STOP_WORDS.has(t));
+		.filter(t => t.length > 1 && !STOP_WORDS.has(t));
 }
 
 function scoreBM25(queryTerms: string[], docTerms: string[]): number {
@@ -167,9 +234,9 @@ function scoreBM25(queryTerms: string[], docTerms: string[]): number {
 	for (const qTerm of queryTerms) {
 		const tf = (termCounts.get(qTerm) ?? 0) / dl;
 		const idf = Math.log(200 / (termCounts.get(qTerm) ?? 1) + 1); // approximate IDF
-		const denom = tf + k1 * (1 - b + b * dl / avgLen);
+		const denom = tf + k1 * (1 - b + (b * dl) / avgLen);
 		if (denom > 0) {
-			score += idf * (tf * (k1 + 1)) / denom;
+			score += (idf * (tf * (k1 + 1))) / denom;
 		}
 	}
 

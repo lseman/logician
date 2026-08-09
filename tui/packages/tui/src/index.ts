@@ -173,7 +173,11 @@ async function main(): Promise<void> {
 	// ── Resolve trust ─────────────────────────────────────────────────────
 	// Create a minimal bridge first to get the extension runner for Pi extensions.
 	// This happens before the trust decision so Pi extensions can participate.
-	const minimalBridge = new AgentCoreBridge({ baseUrl: "http://localhost:8080", model: "test", cwd });
+	const minimalBridge = new AgentCoreBridge({
+		baseUrl: "http://localhost:8080",
+		model: "test",
+		cwd,
+	});
 
 	let loadProjectConfig = false;
 

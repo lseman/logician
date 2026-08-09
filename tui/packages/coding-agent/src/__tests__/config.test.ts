@@ -630,12 +630,12 @@ void test("loadLogicianConfig parses .logician.json with multi-line (/* */) comm
 		path.join(root, ".logician.json"),
 		[
 			"{",
-			'  /* top-level comment */',
+			"  /* top-level comment */",
 			'  "model": "gpt-4",',
 			"  /*",
-			'   * multi-line',
-			'   * comment block',
-			'   */',
+			"   * multi-line",
+			"   * comment block",
+			"   */",
 			'  "temperature": 0.7',
 			"}",
 		].join("\n"),
@@ -683,10 +683,7 @@ void test("loadLogicianConfig preserves /* */ comments inside string values", ()
 	);
 	try {
 		const result = loadLogicianConfig(root);
-		assert.equal(
-			result.config.systemPrompt,
-			"Hello /* world */ friend",
-		);
+		assert.equal(result.config.systemPrompt, "Hello /* world */ friend");
 		assert.deepEqual(result.warnings, []);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

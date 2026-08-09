@@ -36,7 +36,9 @@ export class McpManagerOverlay implements Component {
 	private cachedWidth = -1;
 
 	/** @internal Exposed for tests. */
-	get selection(): SelectorController { return this._selection; }
+	get selection(): SelectorController {
+		return this._selection;
+	}
 
 	setSnapshot(snapshot: {
 		configPath?: string;

@@ -1268,7 +1268,10 @@ describe("hook adapter functions", () => {
 		const hotIndex = text.indexOf("hot entry");
 		const coldIndex = text.indexOf("cold entry");
 		assert.ok(hotIndex >= 0 && coldIndex >= 0);
-		assert.ok(hotIndex < coldIndex, "hot entry should be ordered before cold entry");
+		assert.ok(
+			hotIndex < coldIndex,
+			"hot entry should be ordered before cold entry",
+		);
 
 		store.close();
 	});

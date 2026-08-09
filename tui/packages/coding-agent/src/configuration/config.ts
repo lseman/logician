@@ -911,9 +911,7 @@ export function loadGlobalLogicianConfig(
 
 function loadLogicianConfigFile(configPath: string): ResolvedLogicianConfig {
 	try {
-		const raw = JSON.parse(
-			stripJsonComments(readFileSync(configPath, "utf8")),
-		);
+		const raw = JSON.parse(stripJsonComments(readFileSync(configPath, "utf8")));
 		const warnings: string[] = [];
 		if (raw && typeof raw === "object") {
 			return {

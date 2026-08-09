@@ -6,14 +6,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Index, MetricKind } from "usearch";
-import type {
-	MetadataFilter,
-	RAGChunk,
-	SearchHit,
-} from "../types.ts";
+import type { RAGChunk, SearchHit } from "../types.ts";
 
 // ── SQLite helpers ─────────────────────────────────────────────────────────────
 
@@ -36,7 +31,9 @@ type SqliteDatabaseConstructor = new (path: string) => SqliteDatabase;
 function resolveSqliteDatabase(): SqliteDatabaseConstructor {
 	const runtimeRequire = createRequire(import.meta.url);
 	const isBun = "Bun" in globalThis;
-	const mod = isBun ? runtimeRequire("bun:sqlite") : runtimeRequire("node:sqlite");
+	const mod = isBun
+		? runtimeRequire("bun:sqlite")
+		: runtimeRequire("node:sqlite");
 	return (isBun ? mod.Database : mod.DatabaseSync) as SqliteDatabaseConstructor;
 }
 
@@ -62,13 +59,72 @@ function resolveStoragePaths(
 // ── Tokenizer ──────────────────────────────────────────────────────────────────
 
 const STOP_WORDS = new Set([
-	"a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-	"of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-	"have", "has", "had", "do", "does", "did", "will", "would", "could",
-	"should", "may", "might", "shall", "can", "this", "that", "these",
-	"those", "it", "its", "i", "me", "my", "we", "our", "you", "your",
-	"he", "she", "they", "them", "their", "what", "which", "who", "how",
-	"when", "where", "why", "not", "no", "yes", "so", "if", "as",
+	"a",
+	"an",
+	"the",
+	"and",
+	"or",
+	"but",
+	"in",
+	"on",
+	"at",
+	"to",
+	"for",
+	"of",
+	"with",
+	"by",
+	"from",
+	"is",
+	"are",
+	"was",
+	"were",
+	"be",
+	"been",
+	"have",
+	"has",
+	"had",
+	"do",
+	"does",
+	"did",
+	"will",
+	"would",
+	"could",
+	"should",
+	"may",
+	"might",
+	"shall",
+	"can",
+	"this",
+	"that",
+	"these",
+	"those",
+	"it",
+	"its",
+	"i",
+	"me",
+	"my",
+	"we",
+	"our",
+	"you",
+	"your",
+	"he",
+	"she",
+	"they",
+	"them",
+	"their",
+	"what",
+	"which",
+	"who",
+	"how",
+	"when",
+	"where",
+	"why",
+	"not",
+	"no",
+	"yes",
+	"so",
+	"if",
+	"as",
 ]);
 
 export function tokenize(text: string): string[] {
@@ -76,7 +132,7 @@ export function tokenize(text: string): string[] {
 		.toLowerCase()
 		.replace(/[^a-z0-9\s]/g, " ")
 		.split(/\s+/)
-		.filter((t) => t.length > 1 && !STOP_WORDS.has(t));
+		.filter(t => t.length > 1 && !STOP_WORDS.has(t));
 }
 
 // ── BM25 Scorer (in-process) ──────────────────────────────────────────────────
@@ -135,7 +191,8 @@ export class BM25Scorer {
 	}
 
 	private idf(term: string): number {
-		if (this.idfCache.has(term)) return this.idfCache.get(term)!;
+		const cached = this.idfCache.get(term);
+		if (cached !== undefined) return cached;
 		const df = this.state.docFreq.get(term)?.size ?? 0;
 		const n = this.state.nDocs;
 		const score = Math.log((n - df + 0.5) / (df + 0.5) + 1);
@@ -143,7 +200,10 @@ export class BM25Scorer {
 		return score;
 	}
 
-	scoreQuery(queryTerms: string[], targetRowIds: Set<number>): Map<number, number> {
+	scoreQuery(
+		queryTerms: string[],
+		targetRowIds: Set<number>,
+	): Map<number, number> {
 		const k1 = 1.5;
 		const b = 0.75;
 		const avgLen = this.state.avgDocLen;
@@ -151,17 +211,17 @@ export class BM25Scorer {
 
 		for (const rowId of targetRowIds) {
 			const terms = this.state.docTerms.get(rowId);
-			if (!terms || !terms.length) continue;
+			if (!terms?.length) continue;
 
 			const dl = terms.length;
 			let score = 0;
 
 			for (const qTerm of queryTerms) {
-				const tf = terms.filter((t) => t === qTerm).length / dl;
+				const tf = terms.filter(t => t === qTerm).length / dl;
 				const idf = this.idf(qTerm);
-				const denom = tf + k1 * (1 - b + b * dl / avgLen);
+				const denom = tf + k1 * (1 - b + (b * dl) / avgLen);
 				if (denom > 0) {
-					score += idf * (tf * (k1 + 1)) / denom;
+					score += (idf * (tf * (k1 + 1))) / denom;
 				}
 			}
 
@@ -188,17 +248,16 @@ export class BM25Scorer {
 				const terms = this.state.docTerms.get(rowId);
 				if (!terms) continue;
 				const dl = terms.length;
-				const tf = terms.filter((t) => t === term).length / dl;
-				const denom = tf + k1 * (1 - b + b * dl / avgLen);
+				const tf = terms.filter(t => t === term).length / dl;
+				const denom = tf + k1 * (1 - b + (b * dl) / avgLen);
 				if (denom > 0) {
-					const contrib = idf * (tf * (k1 + 1)) / denom;
+					const contrib = (idf * (tf * (k1 + 1))) / denom;
 					scores.set(rowId, (scores.get(rowId) ?? 0) + contrib);
 				}
 			}
 		}
 
-		const entries = Array.from(scores.entries())
-			.sort((a, b) => b[1] - a[1]);
+		const entries = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
 		return entries.slice(0, k).map(([id, score]) => ({ id, score }));
 	}
 }
@@ -223,7 +282,6 @@ export class HybridVectorStore {
 	private index: Index;
 	private bm25 = new BM25Scorer();
 	private readonly indexPath: string;
-	private readonly bm25Path: string;
 	private dimension: number;
 
 	constructor(
@@ -231,12 +289,11 @@ export class HybridVectorStore {
 		options?: { dbName?: string; dimension?: number },
 	) {
 		this.dimension = options?.dimension ?? 384;
-		const { dbPath, indexPath, bm25Path } = resolveStoragePaths(
+		const { dbPath, indexPath } = resolveStoragePaths(
 			projectDir,
 			options?.dbName || "chunks",
 		);
 		this.indexPath = indexPath;
-		this.bm25Path = bm25Path;
 
 		const dir = dirname(dbPath);
 		if (!existsSync(dir)) {
@@ -303,10 +360,14 @@ export class HybridVectorStore {
 				VALUES (?, ?, ?, ?, ?, ?)`),
 			getRowId: this.db.prepare("SELECT rowid FROM chunks WHERE id = ?"),
 			deleteById: this.db.prepare("DELETE FROM chunks WHERE id = ?"),
-			selectByDocId: this.db.prepare("SELECT rowid, id FROM chunks WHERE document_id = ?"),
+			selectByDocId: this.db.prepare(
+				"SELECT rowid, id FROM chunks WHERE document_id = ?",
+			),
 			clearAll: this.db.prepare("DELETE FROM chunks"),
 			countChunks: this.db.prepare("SELECT COUNT(*) AS cnt FROM chunks"),
-			getAllDocs: this.db.prepare("SELECT DISTINCT document_id FROM chunks ORDER BY created_at DESC"),
+			getAllDocs: this.db.prepare(
+				"SELECT DISTINCT document_id FROM chunks ORDER BY created_at DESC",
+			),
 			getChunkById: this.db.prepare("SELECT * FROM chunks WHERE id = ?"),
 			getByRowIds: this.db.prepare(
 				"SELECT * FROM chunks WHERE rowid IN (SELECT value FROM json_each(?))",
@@ -314,8 +375,12 @@ export class HybridVectorStore {
 			listChunksByDoc: this.db.prepare(
 				"SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC",
 			),
-			deleteByRowId: this.db.prepare("DELETE FROM bm25_terms WHERE chunk_rowid = ?"),
-			getBM25Terms: this.db.prepare("SELECT term, count FROM bm25_terms WHERE chunk_rowid = ?"),
+			deleteByRowId: this.db.prepare(
+				"DELETE FROM bm25_terms WHERE chunk_rowid = ?",
+			),
+			getBM25Terms: this.db.prepare(
+				"SELECT term, count FROM bm25_terms WHERE chunk_rowid = ?",
+			),
 			deleteAllBM25: this.db.prepare("DELETE FROM bm25_terms"),
 			insertBM25Term: this.db.prepare(
 				"INSERT OR REPLACE INTO bm25_terms (chunk_rowid, term, count) VALUES (?, ?, ?)",
@@ -337,9 +402,9 @@ export class HybridVectorStore {
 	// ── BM25 persistence ────────────────────────────────────────────────────────
 
 	private loadBM25FromDB(): void {
-		const rows = this.db.prepare(
-			"SELECT chunk_rowid, term, count FROM bm25_terms",
-		).all() as Array<{ chunk_rowid: number; term: string; count: number }>;
+		const rows = this.db
+			.prepare("SELECT chunk_rowid, term, count FROM bm25_terms")
+			.all() as Array<{ chunk_rowid: number; term: string; count: number }>;
 
 		// Group by rowid
 		const byRowId = new Map<number, Array<{ term: string; count: number }>>();
@@ -355,7 +420,7 @@ export class HybridVectorStore {
 		const bulk: Array<{ rowId: number; terms: string[] }> = [];
 		let totalTokens = 0;
 		for (const [rowId, terms] of byRowId) {
-			const expanded = terms.flatMap((t) => Array(t.count).fill(t.term));
+			const expanded = terms.flatMap(t => Array(t.count).fill(t.term));
 			bulk.push({ rowId, terms: expanded });
 			totalTokens += expanded.length;
 		}
@@ -366,7 +431,9 @@ export class HybridVectorStore {
 		}
 	}
 
-	private saveBM25ToDB(rows: Array<{ rowId: number; termCounts: Map<string, number> }>): void {
+	private saveBM25ToDB(
+		rows: Array<{ rowId: number; termCounts: Map<string, number> }>,
+	): void {
 		for (const { rowId, termCounts } of rows) {
 			this.statements.deleteByRowId.run(rowId);
 			for (const [term, count] of termCounts) {
@@ -382,17 +449,23 @@ export class HybridVectorStore {
 	async add(chunks: RAGChunk[]): Promise<void> {
 		if (!chunks.length) return;
 
-		const insertBM25Term = this.statements.insertBM25Term;
 		const getRowId = this.statements.getRowId;
 		const insertChunk = this.statements.insertChunk;
 
 		// BM25 data per chunk
-		const bm25Data: Array<{ rowId: number; termCounts: Map<string, number> }> = [];
+		const bm25Data: Array<{ rowId: number; termCounts: Map<string, number> }> =
+			[];
 
 		for (let i = 0; i < chunks.length; i++) {
 			const c = chunks[i];
 			if (!c.vector)
 				throw new Error(`Chunk ${c.id} has no vector; embed before storing.`);
+			const existing = getRowId.get(c.id) as { rowid: number } | undefined;
+			if (existing) {
+				const existingKey = BigInt(existing.rowid);
+				if (this.index.contains(existingKey)) this.index.remove(existingKey);
+				this.statements.deleteByRowId.run(existing.rowid);
+			}
 
 			insertChunk.run(
 				c.id,
@@ -451,17 +524,17 @@ export class HybridVectorStore {
 		const size = this.index.size();
 		if (size === 0) return [];
 
-		const {
-			denseWeight = 0.6,
-			sparseWeight = 0.4,
-			filter,
-		} = { ...options };
+		const { denseWeight = 0.6, sparseWeight = 0.4, filter } = { ...options };
 
 		const kDense = Math.min(topK * 8, size);
 
 		// Step 1: Dense retrieval
-		const denseMatches = this.index.search(Float32Array.from(vector), kDense, 0);
-		const denseRowIds = Array.from(denseMatches.keys, (k) => Number(k));
+		const denseMatches = this.index.search(
+			Float32Array.from(vector),
+			kDense,
+			0,
+		);
+		const denseRowIds = Array.from(denseMatches.keys, k => Number(k));
 
 		if (!denseRowIds.length) return [];
 
@@ -470,7 +543,7 @@ export class HybridVectorStore {
 			JSON.stringify(denseRowIds),
 		) as ChunkRow[];
 
-		let candidates = rows.map((r) => ({
+		let candidates = rows.map(r => ({
 			rowId: r.rowid,
 			text: r.text,
 			metadata: JSON.parse(r.metadata_json),
@@ -478,7 +551,7 @@ export class HybridVectorStore {
 
 		// Apply metadata filters
 		if (filter) {
-			candidates = candidates.filter((c) => {
+			candidates = candidates.filter(c => {
 				for (const [key, value] of Object.entries(filter)) {
 					const metaVal = c.metadata[key];
 					if (typeof value === "string") {
@@ -494,20 +567,9 @@ export class HybridVectorStore {
 		}
 
 		// Step 3: BM25 scoring
-		const queryTerms = tokenize(
-			this._vectorToQueryText(vector),
-		);
-		const bm25Scores = new Map<number, number>();
-		if (queryTerms.length > 0) {
-			const bm25Top = this.bm25.topK(queryTerms, candidates.length);
-			for (const { id, score } of bm25Top) {
-				bm25Scores.set(id, score);
-			}
-		}
-
+		const queryTerms = tokenize(this._vectorToQueryText(vector));
 		// Step 4: Reciprocal Rank Fusion
 		return this._rrfFusion(
-			denseRowIds,
 			denseMatches,
 			candidates,
 			queryTerms,
@@ -524,9 +586,12 @@ export class HybridVectorStore {
 	 * This is robust to score distribution differences between modalities.
 	 */
 	private _rrfFusion(
-		denseRowIds: number[],
 		denseMatches: { keys: BigUint64Array; distances: Float32Array },
-		candidates: Array<{ rowId: number; text: string; metadata: Record<string, unknown> }>,
+		candidates: Array<{
+			rowId: number;
+			text: string;
+			metadata: Record<string, unknown>;
+		}>,
 		queryTerms: string[],
 		topK: number,
 		denseWeight: number,
@@ -542,19 +607,24 @@ export class HybridVectorStore {
 			distance: denseMatches.distances[i],
 		}));
 		for (const { rowId, rank } of denseSorted) {
-			rankScores.set(rowId, (rankScores.get(rowId) ?? 0) + denseWeight / (rrfK + rank));
+			rankScores.set(
+				rowId,
+				(rankScores.get(rowId) ?? 0) + denseWeight / (rrfK + rank),
+			);
 		}
 
 		// BM25 ranks
 		const bm25Sorted = this.bm25.topK(queryTerms, candidates.length);
 		for (let rank = 0; rank < bm25Sorted.length; rank++) {
 			const rowId = bm25Sorted[rank].id;
-			rankScores.set(rowId, (rankScores.get(rowId) ?? 0) + sparseWeight / (rrfK + rank));
+			rankScores.set(
+				rowId,
+				(rankScores.get(rowId) ?? 0) + sparseWeight / (rrfK + rank),
+			);
 		}
 
 		// Sort by fused score
-		const fused = Array.from(rankScores.entries())
-			.sort((a, b) => b[1] - a[1]);
+		const fused = Array.from(rankScores.entries()).sort((a, b) => b[1] - a[1]);
 
 		// Fetch top-K rows
 		const topRowIds = fused.slice(0, topK).map(([id]) => id);
@@ -562,16 +632,17 @@ export class HybridVectorStore {
 			JSON.stringify(topRowIds),
 		) as ChunkRow[];
 
-		const byRowId = new Map(rows.map((r) => [r.rowid, r]));
+		const byRowId = new Map(rows.map(r => [r.rowid, r]));
 		const hits: SearchHit[] = [];
 
 		for (const [rowId, rrfScore] of fused.slice(0, topK)) {
 			const row = byRowId.get(rowId);
 			if (!row) continue;
 
-			const denseIdx = denseSorted.findIndex((d) => d.rowId === rowId);
+			const denseIdx = denseSorted.findIndex(d => d.rowId === rowId);
 			const denseSim = denseIdx >= 0 ? 1 - denseMatches.distances[denseIdx] : 0;
-			const bm25Score = this.bm25.scoreQuery(queryTerms, new Set([rowId])).get(rowId) ?? 0;
+			const bm25Score =
+				this.bm25.scoreQuery(queryTerms, new Set([rowId])).get(rowId) ?? 0;
 			const maxBm25 = bm25Sorted[0]?.score ?? 1;
 			const bm25Norm = maxBm25 > 0 ? bm25Score / maxBm25 : 0;
 
@@ -613,17 +684,17 @@ export class HybridVectorStore {
 		const size = this.index.size();
 		if (size === 0) return [];
 
-		const {
-			denseWeight = 0.6,
-			sparseWeight = 0.4,
-			filter,
-		} = { ...options };
+		const { denseWeight = 0.6, sparseWeight = 0.4, filter } = { ...options };
 
 		// Generate dense and sparse candidates independently. A sparse exact match
 		// must remain recoverable even when it falls outside the ANN neighborhood.
 		const kDense = Math.min(topK * 8, size);
-		const denseMatches = this.index.search(Float32Array.from(queryVector), kDense, 0);
-		const denseRowIds = Array.from(denseMatches.keys, (k) => Number(k));
+		const denseMatches = this.index.search(
+			Float32Array.from(queryVector),
+			kDense,
+			0,
+		);
+		const denseRowIds = Array.from(denseMatches.keys, k => Number(k));
 		const queryTerms = tokenize(queryText);
 		const sparseMatches = queryTerms.length
 			? this.bm25.topK(queryTerms, Math.min(topK * 8, size))
@@ -637,7 +708,7 @@ export class HybridVectorStore {
 			JSON.stringify(candidateRowIds),
 		) as ChunkRow[];
 
-		let candidates = rows.map((r) => ({
+		let candidates = rows.map(r => ({
 			rowId: r.rowid,
 			text: r.text,
 			metadata: JSON.parse(r.metadata_json),
@@ -645,7 +716,7 @@ export class HybridVectorStore {
 
 		// Apply metadata filters
 		if (filter) {
-			candidates = candidates.filter((c) => {
+			candidates = candidates.filter(c => {
 				for (const [key, value] of Object.entries(filter)) {
 					const metaVal = c.metadata[key];
 					if (typeof value === "string") {
@@ -670,26 +741,33 @@ export class HybridVectorStore {
 		// Dense ranks
 		for (let rank = 0; rank < denseRank.length; rank++) {
 			const rowId = denseRank[rank];
-			rankScores.set(rowId, (rankScores.get(rowId) ?? 0) + denseWeight / (60 + rank));
+			rankScores.set(
+				rowId,
+				(rankScores.get(rowId) ?? 0) + denseWeight / (60 + rank),
+			);
 		}
 
 		// BM25 ranks
 		for (let rank = 0; rank < bm25Top.length; rank++) {
 			const rowId = bm25Top[rank].id;
-			rankScores.set(rowId, (rankScores.get(rowId) ?? 0) + sparseWeight / (60 + rank));
+			rankScores.set(
+				rowId,
+				(rankScores.get(rowId) ?? 0) + sparseWeight / (60 + rank),
+			);
 		}
 
 		// Sort by fused score
-		const fused = Array.from(rankScores.entries())
-			.sort((a, b) => b[1] - a[1]);
+		const fused = Array.from(rankScores.entries()).sort((a, b) => b[1] - a[1]);
 
 		const topRowIds = fused.slice(0, topK).map(([id]) => id);
 		const topRows = this.statements.getByRowIds.all(
 			JSON.stringify(topRowIds),
 		) as ChunkRow[];
 
-		const byRowId = new Map(topRows.map((r) => [r.rowid, r]));
-		const denseByIdx = new Map(denseRowIds.map((k, i) => [k, 1 - denseMatches.distances[i]]));
+		const byRowId = new Map(topRows.map(r => [r.rowid, r]));
+		const denseByIdx = new Map(
+			denseRowIds.map((k, i) => [k, 1 - denseMatches.distances[i]]),
+		);
 
 		const hits: SearchHit[] = [];
 		for (const [rowId, rrfScore] of fused.slice(0, topK)) {
@@ -697,7 +775,7 @@ export class HybridVectorStore {
 			if (!row) continue;
 
 			const denseSim = denseByIdx.get(rowId) ?? 0;
-			const bm25Score = bm25Top.find((b) => b.id === rowId)?.score ?? 0;
+			const bm25Score = bm25Top.find(b => b.id === rowId)?.score ?? 0;
 			const maxBm25 = bm25Top[0]?.score ?? 1;
 			const bm25Norm = maxBm25 > 0 ? bm25Score / maxBm25 : 0;
 
@@ -714,7 +792,7 @@ export class HybridVectorStore {
 
 	// ── Legacy methods ──────────────────────────────────────────────────────────
 
-	async search(query: string, _topK = 5): Promise<SearchHit[]> {
+	async search(_query: string, _topK = 5): Promise<SearchHit[]> {
 		throw new Error(
 			"Use searchByVector() with pre-computed embeddings. For text search use the RAGPipeline.",
 		);
@@ -726,16 +804,18 @@ export class HybridVectorStore {
 	}
 
 	async documentIds(): Promise<string[]> {
-		const rows = this.db.prepare(
-			"SELECT DISTINCT document_id FROM chunks ORDER BY created_at DESC",
-		).all() as Array<{ document_id: string }>;
-		return rows.map((r) => r.document_id);
+		const rows = this.db
+			.prepare(
+				"SELECT DISTINCT document_id FROM chunks ORDER BY created_at DESC",
+			)
+			.all() as Array<{ document_id: string }>;
+		return rows.map(r => r.document_id);
 	}
 
 	async deleteDocument(docId: string): Promise<void> {
-		const rows = this.db.prepare(
-			"SELECT rowid, id FROM chunks WHERE document_id = ?",
-		).all(docId) as Array<{ rowid: number; id: string }>;
+		const rows = this.db
+			.prepare("SELECT rowid, id FROM chunks WHERE document_id = ?")
+			.all(docId) as Array<{ rowid: number; id: string }>;
 		for (const row of rows) {
 			const key = BigInt(row.rowid);
 			if (this.index.contains(key)) this.index.remove(key);
@@ -750,25 +830,29 @@ export class HybridVectorStore {
 	}
 
 	getChunksByDocument(docId: string): RAGChunk[] {
-		const rows = this.db.prepare(
-			"SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC",
-		).all(docId) as ChunkRow[];
+		const rows = this.db
+			.prepare(
+				"SELECT * FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC",
+			)
+			.all(docId) as ChunkRow[];
 		return rows.map(toRAGChunk);
 	}
 
 	getChunkById(chunkId: string): RAGChunk | null {
-		const row = this.db.prepare(
-			"SELECT * FROM chunks WHERE id = ?",
-		).get(chunkId) as ChunkRow | undefined;
+		const row = this.db
+			.prepare("SELECT * FROM chunks WHERE id = ?")
+			.get(chunkId) as ChunkRow | undefined;
 		return row ? toRAGChunk(row) : null;
 	}
 
 	getTermFrequencies(docId: string): Record<string, number> | null {
-		const rows = this.db.prepare(
-			"SELECT t.term, t.count FROM bm25_terms t " +
-			"JOIN chunks c ON t.chunk_rowid = c.rowid " +
-			"WHERE c.document_id = ?",
-		).all(docId) as Array<{ term: string; count: number }>;
+		const rows = this.db
+			.prepare(
+				"SELECT t.term, t.count FROM bm25_terms t " +
+					"JOIN chunks c ON t.chunk_rowid = c.rowid " +
+					"WHERE c.document_id = ?",
+			)
+			.all(docId) as Array<{ term: string; count: number }>;
 		if (!rows.length) return null;
 		const tf: Record<string, number> = {};
 		for (const r of rows) {
@@ -781,9 +865,9 @@ export class HybridVectorStore {
 		docId: string,
 		tf: Record<string, number>,
 	): Promise<void> {
-		const rowId = this.db.prepare(
-			"SELECT rowid FROM chunks WHERE document_id = ? LIMIT 1",
-		).get(docId) as { rowid: number } | undefined;
+		const rowId = this.db
+			.prepare("SELECT rowid FROM chunks WHERE document_id = ? LIMIT 1")
+			.get(docId) as { rowid: number } | undefined;
 		if (!rowId) return;
 		for (const [term, count] of Object.entries(tf)) {
 			this.statements.insertBM25Term.run(rowId.rowid, term, count);

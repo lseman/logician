@@ -26,8 +26,8 @@ import {
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { FileMentionPopup } from "../overlays/file-mention-popup.ts";
 import {
-	type InferenceModeSelectorAction,
 	InferenceModeSelector,
+	type InferenceModeSelectorAction,
 } from "../overlays/inference-mode-selector.ts";
 import {
 	type McpManagerAction,

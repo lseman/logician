@@ -5,12 +5,12 @@
 import type {
 	MessageUpdateEvent,
 	SubagentChunkEvent,
-	TranscriptEvent,
 	ToolCallStartEvent,
 	ToolCallUpdateEvent,
 	ToolEndEvent,
 	ToolStartEvent,
 	ToolUpdateEvent,
+	TranscriptEvent,
 	TurnEndEvent,
 } from "../runtime/events.ts";
 
@@ -605,7 +605,7 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
-		const turn = this.getCurrentTurn();
+		const _turn = this.getCurrentTurn();
 		const childToolCalls =
 			(details.childToolCalls as ChildToolCall[]) ??
 			(details.childToolCalls = []);

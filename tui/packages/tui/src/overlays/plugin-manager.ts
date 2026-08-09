@@ -37,7 +37,9 @@ export class PluginManagerOverlay implements Component {
 	private cachedWidth = -1;
 
 	/** @internal Exposed for tests. */
-	get selection(): SelectorController { return this._selection; }
+	get selection(): SelectorController {
+		return this._selection;
+	}
 
 	setSnapshot(snapshot: {
 		pluginsDir?: string;

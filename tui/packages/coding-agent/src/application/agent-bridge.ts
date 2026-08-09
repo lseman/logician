@@ -24,16 +24,16 @@ import {
 	type TruncationConfig,
 	type WebSearchConfig,
 } from "@logician/agent-core";
-import {
-	ExtensionRunner,
-	loadExtensions,
-} from "@logician/agent-core/extensions/index.ts";
 import { OpenAIBackend } from "@logician/agent-core/agent/backend.ts";
 import {
 	estimateChatPayloadTokens,
 	estimateTokens,
 } from "@logician/agent-core/agent/messages.ts";
 import { onTodosChanged } from "@logician/agent-core/agent/tasks/todo-state.ts";
+import {
+	ExtensionRunner,
+	loadExtensions,
+} from "@logician/agent-core/extensions/index.ts";
 import type {
 	PermissionMode,
 	PermissionRules,
@@ -294,7 +294,7 @@ export class AgentCoreBridge {
 				? false
 				: opts.postEditDiagnostics !== false;
 		// LSP config from settings.json.
-		let lspEnabled = true;
+		let _lspEnabled = true;
 		let lspTimeoutMs = 2_000;
 		const serverOverrides: Record<
 			string,
@@ -305,7 +305,7 @@ export class AgentCoreBridge {
 				const resolved = loadLogicianConfig(this.cwd);
 				const lspCfg = resolved.config.lsp;
 				if (lspCfg !== undefined) {
-					if (lspCfg.enabled === false) lspEnabled = false;
+					if (lspCfg.enabled === false) _lspEnabled = false;
 					if (lspCfg.timeoutMs !== undefined && lspCfg.timeoutMs > 0)
 						lspTimeoutMs = lspCfg.timeoutMs;
 					if (lspCfg.serverOverrides) {

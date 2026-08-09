@@ -1,17 +1,15 @@
 import { describe, expect, it, mock } from "bun:test";
+import type { EventBus } from "../extensions/event-bus.ts";
 import { PiAdapter } from "../extensions/pi-adapter.ts";
 import type {
 	ExtensionAPI as LApi,
+	RegisteredCommand as LCommand,
 	ExtensionContext as LContext,
 	ExtensionEvent as LEvent,
 	ExtensionEventType as LEventType,
 	ExtensionEventHandler as LHandler,
-	ExtensionToolResult,
-	ToolExecutionContext,
 	RegisteredTool as LTool,
-	RegisteredCommand as LCommand,
 } from "../extensions/types.ts";
-import type { EventBus } from "../extensions/event-bus.ts";
 
 // Create mock logician API
 function createMockLogicianApi(): LApi {
@@ -67,17 +65,20 @@ describe("PiAdapter - input event", () => {
 	it("should emit input event to registered handlers", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
-		let receivedText = "";
-		let receivedSource = "";
+		let _receivedText = "";
+		let _receivedSource = "";
 
 		// Handler that only intercepts specific input
-		piApi.onInput(async (text, images, source, hasUI, ui) => {
-			receivedText = text;
-			receivedSource = source;
+		piApi.onInput(async (text, _images, source, _hasUI, _ui) => {
+			_receivedText = text;
+			_receivedSource = source;
 			if (text.includes("block")) {
 				return { action: "handled" };
 			}
@@ -85,11 +86,19 @@ describe("PiAdapter - input event", () => {
 		});
 
 		// Test handled case
-		const handledResult = await adapter.emitInputEvent("block this", [], "interactive");
+		const handledResult = await adapter.emitInputEvent(
+			"block this",
+			[],
+			"interactive",
+		);
 		expect(handledResult?.action).toBe("handled");
 
 		// Test transform case
-		const transformResult = await adapter.emitInputEvent("hello", [], "interactive");
+		const transformResult = await adapter.emitInputEvent(
+			"hello",
+			[],
+			"interactive",
+		);
 		expect(transformResult?.action).toBe("transform");
 		expect(transformResult?.text).toBe("transformed: hello");
 	});
@@ -99,27 +108,38 @@ describe("PiAdapter - user_bash event", () => {
 	it("should emit user_bash event to registered handlers", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
-		piApi.onUserBash(async (command, excludeFromContext, cwd, hasUI, ui) => {
-			if (command.includes("blocked")) {
-				return {
-					action: "replace",
-					result: { output: "intercepted", exitCode: 0, cancelled: false },
-				};
-			}
-			return null; // continue
-		});
+		piApi.onUserBash(
+			async (command, _excludeFromContext, _cwd, _hasUI, _ui) => {
+				if (command.includes("blocked")) {
+					return {
+						action: "replace",
+						result: { output: "intercepted", exitCode: 0, cancelled: false },
+					};
+				}
+				return null; // continue
+			},
+		);
 
 		// Test replace case
-		const replaceResult = await adapter.emitUserBashEvent("blocked command", false);
+		const replaceResult = await adapter.emitUserBashEvent(
+			"blocked command",
+			false,
+		);
 		expect(replaceResult?.action).toBe("replace");
 		expect(replaceResult?.result?.output).toBe("intercepted");
 
 		// Test continue case
-		const continueResult = await adapter.emitUserBashEvent("normal command", true);
+		const continueResult = await adapter.emitUserBashEvent(
+			"normal command",
+			true,
+		);
 		expect(continueResult).toBeNull();
 	});
 });
@@ -128,11 +148,14 @@ describe("PiAdapter - project_trust event", () => {
 	it("should emit project_trust event to registered handlers", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
-		piApi.onProjectTrust(async (cwd, hasUI, ui) => {
+		piApi.onProjectTrust(async (cwd, _hasUI, _ui) => {
 			if (cwd.includes("trusted")) {
 				return { trusted: "yes", remember: true };
 			}
@@ -161,7 +184,10 @@ describe("PiAdapter - handler chaining", () => {
 	it("should chain multiple handlers and use first non-null result", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -169,13 +195,13 @@ describe("PiAdapter - handler chaining", () => {
 		let secondCalled = false;
 
 		// First handler returns null (continue)
-		piApi.onInput(async (text) => {
+		piApi.onInput(async _text => {
 			firstCalled = true;
 			return null; // continue to next handler
 		});
 
 		// Second handler returns transform
-		piApi.onInput(async (text) => {
+		piApi.onInput(async text => {
 			secondCalled = true;
 			return { action: "transform", text: `processed: ${text}` };
 		});
@@ -190,7 +216,10 @@ describe("PiAdapter - handler chaining", () => {
 	it("should stop at first handler that returns non-null", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -220,7 +249,10 @@ describe("PiAdapter - error handling", () => {
 	it("should swallow handler errors and continue to next handler", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 

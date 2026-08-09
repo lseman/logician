@@ -61,8 +61,7 @@ export const INFERENCE_MODES: ReadonlyMap<InferenceMode, InferenceModeDef> =
 			"none",
 			{
 				label: "Provider",
-				description:
-					"Pass nothing — let the provider use its own defaults.",
+				description: "Pass nothing — let the provider use its own defaults.",
 				thinking: false,
 				useProviderDefaults: true,
 				params: {

@@ -8,11 +8,16 @@
 // - Maintain parent context for small chunks
 // - Respect token budget
 
-import type { ContextWindowConfig, ParentContext, RAGChunk, SearchHit } from "./types.ts";
+import type {
+	ContextWindowConfig,
+	ParentContext,
+	RAGChunk,
+	SearchHit,
+} from "./types.ts";
 
 const DEFAULT_CONTEXT: ContextWindowConfig = {
 	maxTokens: 128_000,
-	estimateTokens: (text) => Math.ceil(text.length / 4),
+	estimateTokens: text => Math.ceil(text.length / 4),
 };
 
 /**
@@ -112,7 +117,7 @@ export function compressContext(
 	for (const hit of sorted) {
 		const text = hit.chunk.text;
 		// Extract key sentence (first sentence or highest-scoring sentence)
-		const sentences = text.split(/[.!?]+\s+/).filter((s) => s.trim().length > 20);
+		const sentences = text.split(/[.!?]+\s+/).filter(s => s.trim().length > 20);
 		const keySentence = sentences[0] ?? text.slice(0, 200);
 
 		const summaryTokens = estimateTokens(keySentence);
@@ -124,7 +129,7 @@ export function compressContext(
 
 	return {
 		compressed: summaries.join("\n"),
-		originalTokens: estimateTokens(hits.map((h) => h.chunk.text).join("\n")),
+		originalTokens: estimateTokens(hits.map(h => h.chunk.text).join("\n")),
 		compressedTokens: totalTokens,
 	};
 }
@@ -143,7 +148,8 @@ export function buildContextSummary(
 	const { maxTokens, estimateTokens } = { ...DEFAULT_CONTEXT, ...config };
 
 	const sorted = [...hits].sort((a, b) => b.score - a.score);
-	const sources: Array<{ source: string; docId: string; relevance: number }> = [];
+	const sources: Array<{ source: string; docId: string; relevance: number }> =
+		[];
 	const contextParts: string[] = [];
 	let totalTokens = 0;
 

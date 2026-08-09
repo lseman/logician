@@ -3,8 +3,8 @@
 // Returns undefined if memory is disabled.
 
 import type { AgentHooks, ExplicitTaskState } from "@logician/agent-core";
-import type { TurnToolEvidence } from "../episodes/episode-synthesizer.js";
 import type { MemoryEmbedder } from "../embeddings/local-embedder.js";
+import type { TurnToolEvidence } from "../episodes/episode-synthesizer.js";
 import {
 	extractSemanticEpisode,
 	type SemanticExtractor,

@@ -1,4 +1,5 @@
 <svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Logician Logo</title>
   <!-- Logo symbol (left side) -->
   <g transform="translate(80, 0)">
     <!-- Logic circuit paths (scaled down) -->

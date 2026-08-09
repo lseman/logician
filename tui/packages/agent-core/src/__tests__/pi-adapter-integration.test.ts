@@ -83,11 +83,13 @@ void test("Pi adapter handles missing registerTool gracefully", async () => {
 	// in adapter-local bookkeeping.
 	assert.equal(runner.getTools().length, 1);
 	assert.equal(runner.getTools()[0].name, "greet");
-	const result = await runner.getTools()[0].execute(
-		"call-1",
-		{},
-		{ cwd: "/tmp", sessionId: "pi-test2", toolCall: {} as never },
-	);
+	const result = await runner
+		.getTools()[0]
+		.execute(
+			"call-1",
+			{},
+			{ cwd: "/tmp", sessionId: "pi-test2", toolCall: {} as never },
+		);
 	assert.equal(result.content, "hello");
 	runner.destroy();
 });
@@ -146,9 +148,11 @@ void test("Pi adapter emits session_start to Pi handlers", async () => {
 	});
 	assert.equal(runner.getPiExtensionCount(), 1);
 	assert.equal(
-		(globalThis as typeof globalThis & {
-			_piReceivedSession?: () => { type?: string } | null;
-		})._piReceivedSession?.()?.type,
+		(
+			globalThis as typeof globalThis & {
+				_piReceivedSession?: () => { type?: string } | null;
+			}
+		)._piReceivedSession?.()?.type,
 		"session_start",
 	);
 
@@ -156,7 +160,10 @@ void test("Pi adapter emits session_start to Pi handlers", async () => {
 });
 
 void test("Pi context handlers chain and run through the runtime hook", async () => {
-	const runner = new ExtensionRunner({ sessionId: "context-test", cwd: "/tmp" });
+	const runner = new ExtensionRunner({
+		sessionId: "context-test",
+		cwd: "/tmp",
+	});
 	await runner.load([
 		{
 			name: "pi-context",
@@ -180,7 +187,8 @@ void test("Pi context handlers chain and run through the runtime hook", async ()
 	const result = await hook({ messages: [], iteration: 1 });
 	assert.deepEqual(
 		result?.messages?.map(message =>
-			typeof (message as { content?: unknown } | undefined)?.content === "string"
+			typeof (message as { content?: unknown } | undefined)?.content ===
+			"string"
 				? (message as { content: string }).content
 				: "",
 		),
@@ -190,7 +198,10 @@ void test("Pi context handlers chain and run through the runtime hook", async ()
 });
 
 void test("Pi tool_call handlers can mutate arguments and block execution", async () => {
-	const runner = new ExtensionRunner({ sessionId: "tool-gate-test", cwd: "/tmp" });
+	const runner = new ExtensionRunner({
+		sessionId: "tool-gate-test",
+		cwd: "/tmp",
+	});
 	await runner.load([
 		{
 			name: "pi-tool-gate",

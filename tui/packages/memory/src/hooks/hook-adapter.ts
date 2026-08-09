@@ -191,7 +191,10 @@ export function recallWithTier(
 
 	// Over-fetch once, then sort by real tier — avoids the N-tier-queries
 	// bug of re-running the same search per tier with no actual filter.
-	const results = store.list({ search: query, limit: Math.max(limit * 3, limit) });
+	const results = store.list({
+		search: query,
+		limit: Math.max(limit * 3, limit),
+	});
 	const ranked = results
 		.map(m => ({ memory: m, tier: store.getWorkingMemoryTier(m.id) }))
 		.sort((a, b) => tierRank[a.tier] - tierRank[b.tier]);

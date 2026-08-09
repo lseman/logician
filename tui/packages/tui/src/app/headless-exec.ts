@@ -72,8 +72,7 @@ export async function runHeadlessExec(
 				else options.stdout.write(event.token);
 				break;
 			case "tool_execution_start": {
-				const id =
-					event.toolCallId ?? `${event.toolName}:${toolStarts.size}`;
+				const id = event.toolCallId ?? `${event.toolName}:${toolStarts.size}`;
 				toolStarts.set(id, now());
 				emit({
 					type: "tool_use",

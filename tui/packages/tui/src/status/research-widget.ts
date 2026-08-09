@@ -67,7 +67,9 @@ export class ResearchWidget implements Component {
 		}
 
 		if (summary.confidence !== null) {
-			parts.push(`${theme.fg("muted", "conf")} ${confidenceLabel(summary.confidence)}`);
+			parts.push(
+				`${theme.fg("muted", "conf")} ${confidenceLabel(summary.confidence)}`,
+			);
 		}
 
 		if (summary.running) {

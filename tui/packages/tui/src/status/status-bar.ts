@@ -79,7 +79,9 @@ export class StatusBar implements Component {
 	private onInvalidate: (() => void) | null = null;
 
 	/** @internal Exposed for tests. */
-	get timer(): ReturnType<typeof setInterval> | null { return this._timer; }
+	get timer(): ReturnType<typeof setInterval> | null {
+		return this._timer;
+	}
 	/** Non-phase parts that fit at cachedWidth, from the last full layout pass.
 	 * A tick-only update reuses this instead of rerunning the fit probing. */
 	private cachedParts: string[] = [];

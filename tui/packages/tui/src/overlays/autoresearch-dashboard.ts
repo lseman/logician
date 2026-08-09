@@ -21,7 +21,10 @@ import {
 
 export type AutoresearchDashboardAction = { type: "close" };
 
-const STATUS_DOT: Record<AutoresearchDashboardRow["status"], ListItem["statusDot"]> = {
+const STATUS_DOT: Record<
+	AutoresearchDashboardRow["status"],
+	ListItem["statusDot"]
+> = {
 	keep: "green",
 	discard: "gray",
 	crash: "red",
@@ -105,7 +108,9 @@ export class AutoresearchDashboardOverlay implements Component {
 			label,
 			metadata,
 			statusDot: STATUS_DOT[row.status],
-			badge: row.isBest ? { text: "best", color: theme.fgRaw("success") } : undefined,
+			badge: row.isBest
+				? { text: "best", color: theme.fgRaw("success") }
+				: undefined,
 		};
 	}
 

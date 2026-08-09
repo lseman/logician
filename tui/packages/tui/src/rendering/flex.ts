@@ -296,9 +296,15 @@ export function allocateFlexSizes(
 
 // Legacy aliases — VStack = Flex("column"), HStack = Flex("row").
 // Kept for test compatibility with code that imports them by name.
-export function VStack(children: FlexChild[] = [], options: FlexOptions = {}): Flex {
+export function VStack(
+	children: FlexChild[] = [],
+	options: FlexOptions = {},
+): Flex {
 	return new Flex(children, { ...options, direction: "column" });
 }
-export function HStack(children: FlexChild[] = [], options: FlexOptions = {}): Flex {
+export function HStack(
+	children: FlexChild[] = [],
+	options: FlexOptions = {},
+): Flex {
 	return new Flex(children, { ...options, direction: "row" });
 }

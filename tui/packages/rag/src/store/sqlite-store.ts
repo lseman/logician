@@ -289,7 +289,10 @@ export class SQLiteVectorStore implements IVectorStore {
 		return null;
 	}
 
-	async setTermFrequencies(_docId: string, _tf: Record<string, number>): Promise<void> {
+	async setTermFrequencies(
+		_docId: string,
+		_tf: Record<string, number>,
+	): Promise<void> {
 		// SQLite store doesn't support BM25
 	}
 

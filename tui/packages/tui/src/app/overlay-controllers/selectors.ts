@@ -7,7 +7,10 @@ import {
 } from "@logician/agent-capabilities/reasoning";
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import { listProjectFiles } from "@logician/coding-agent/context";
-import type { InferenceMode } from "../inference-settings.ts";
+import type {
+	InferenceModeInfo,
+	InferenceModeSelectorAction,
+} from "../../overlays/inference-mode-selector.ts";
 import type {
 	ModelInfo,
 	ModelSelectorAction,
@@ -21,10 +24,7 @@ import type {
 	ThemeSelectorAction,
 } from "../../overlays/theme-selector.ts";
 import { getAvailableThemes, setTheme } from "../../terminal/theme.ts";
-import type {
-	InferenceModeInfo,
-	InferenceModeSelectorAction,
-} from "../../overlays/inference-mode-selector.ts";
+import type { InferenceMode } from "../inference-settings.ts";
 import type { OverlayHandlersCtx } from "./context.ts";
 
 // ── Reasoner selector ───────────────────────────────────────────────────
@@ -207,24 +207,164 @@ export function setThemeByName(name: string): boolean {
 
 // ── Inference mode selector ──────────────────────────────────────────
 
-export function openInferenceModeSelector(
-	ctx: OverlayHandlersCtx,
-): void {
+export function openInferenceModeSelector(ctx: OverlayHandlersCtx): void {
 	const inferenceModes: InferenceModeInfo[] = [
-		{ id: "auto", label: "Auto", description: "Auto-select from task phase", thinking: true, useProviderDefaults: false, params: { temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0.0, presence_penalty: 1.0, repetition_penalty: 1.0 } },
-		{ id: "none", label: "Provider", description: "Let the provider use its own defaults", thinking: false, useProviderDefaults: true, params: { temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repetition_penalty: 1.0 } },
-		{ id: "thinking-general", label: "Think Gen", description: "General thinking — high creativity", thinking: true, useProviderDefaults: false, params: { temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 1.5, repetition_penalty: 1.0 } },
-		{ id: "thinking-coding", label: "Think Code", description: "Precise coding — lower temp", thinking: true, useProviderDefaults: false, params: { temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repetition_penalty: 1.0 } },
-		{ id: "instruct-general", label: "Instruct", description: "Non-thinking — balanced", thinking: false, useProviderDefaults: false, params: { temperature: 0.7, top_p: 0.8, top_k: 20, min_p: 0.0, presence_penalty: 1.5, repetition_penalty: 1.0 } },
-		{ id: "instruct-reasoning", label: "Reason", description: "Non-thinking — high temp", thinking: false, useProviderDefaults: false, params: { temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 1.5, repetition_penalty: 1.0 } },
-		{ id: "instruct-coding", label: "Code", description: "Non-thinking — precise output", thinking: false, useProviderDefaults: false, params: { temperature: 0.3, top_p: 0.9, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repetition_penalty: 1.0 } },
-		{ id: "deterministic", label: "Exact", description: "Near-zero temp — reproducible", thinking: false, useProviderDefaults: false, params: { temperature: 0.0, top_p: 0.0, top_k: 1, min_p: 0.0, presence_penalty: 0.0, repetition_penalty: 1.0 } },
-		{ id: "creative", label: "Creative", description: "Ultra-high temp — brainstorm", thinking: false, useProviderDefaults: false, params: { temperature: 1.3, top_p: 0.99, top_k: 40, min_p: 0.0, presence_penalty: 2.0, repetition_penalty: 0.9 } },
-		{ id: "analytical", label: "Analyze", description: "Low temp — code review", thinking: false, useProviderDefaults: false, params: { temperature: 0.2, top_p: 0.7, top_k: 20, min_p: 0.0, presence_penalty: 0.5, repetition_penalty: 1.1 } },
+		{
+			id: "auto",
+			label: "Auto",
+			description: "Auto-select from task phase",
+			thinking: true,
+			useProviderDefaults: false,
+			params: {
+				temperature: 0.7,
+				top_p: 0.8,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 1.0,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "none",
+			label: "Provider",
+			description: "Let the provider use its own defaults",
+			thinking: false,
+			useProviderDefaults: true,
+			params: {
+				temperature: 0.7,
+				top_p: 0.8,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 0.0,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "thinking-general",
+			label: "Think Gen",
+			description: "General thinking — high creativity",
+			thinking: true,
+			useProviderDefaults: false,
+			params: {
+				temperature: 1.0,
+				top_p: 0.95,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 1.5,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "thinking-coding",
+			label: "Think Code",
+			description: "Precise coding — lower temp",
+			thinking: true,
+			useProviderDefaults: false,
+			params: {
+				temperature: 0.6,
+				top_p: 0.95,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 0.0,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "instruct-general",
+			label: "Instruct",
+			description: "Non-thinking — balanced",
+			thinking: false,
+			useProviderDefaults: false,
+			params: {
+				temperature: 0.7,
+				top_p: 0.8,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 1.5,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "instruct-reasoning",
+			label: "Reason",
+			description: "Non-thinking — high temp",
+			thinking: false,
+			useProviderDefaults: false,
+			params: {
+				temperature: 1.0,
+				top_p: 0.95,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 1.5,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "instruct-coding",
+			label: "Code",
+			description: "Non-thinking — precise output",
+			thinking: false,
+			useProviderDefaults: false,
+			params: {
+				temperature: 0.3,
+				top_p: 0.9,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 0.0,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "deterministic",
+			label: "Exact",
+			description: "Near-zero temp — reproducible",
+			thinking: false,
+			useProviderDefaults: false,
+			params: {
+				temperature: 0.0,
+				top_p: 0.0,
+				top_k: 1,
+				min_p: 0.0,
+				presence_penalty: 0.0,
+				repetition_penalty: 1.0,
+			},
+		},
+		{
+			id: "creative",
+			label: "Creative",
+			description: "Ultra-high temp — brainstorm",
+			thinking: false,
+			useProviderDefaults: false,
+			params: {
+				temperature: 1.3,
+				top_p: 0.99,
+				top_k: 40,
+				min_p: 0.0,
+				presence_penalty: 2.0,
+				repetition_penalty: 0.9,
+			},
+		},
+		{
+			id: "analytical",
+			label: "Analyze",
+			description: "Low temp — code review",
+			thinking: false,
+			useProviderDefaults: false,
+			params: {
+				temperature: 0.2,
+				top_p: 0.7,
+				top_k: 20,
+				min_p: 0.0,
+				presence_penalty: 0.5,
+				repetition_penalty: 1.1,
+			},
+		},
 	];
 
 	ctx.inferenceModeSelector.setModes(inferenceModes, ctx.inferenceMode);
-	ctx.inferenceModeSelector.setMessage("Enter selects inference mode for this session.");
+	ctx.inferenceModeSelector.setMessage(
+		"Enter selects inference mode for this session.",
+	);
 	ctx.inferenceModeSelector.show();
 	const overlay = ctx.tui.showOverlay(ctx.inferenceModeSelector, {
 		anchor: "aboveInput",

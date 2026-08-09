@@ -133,7 +133,8 @@ export class TranscriptDisplay implements Component, RenderCtx {
 		// hard cap (e.g. to bound memory on very long-running sessions) can
 		// still pass maxTurns/maxRenderedLines explicitly.
 		this.maxTurns = options.maxTurns ?? Number.POSITIVE_INFINITY;
-		this.maxRenderedLines = options.maxRenderedLines ?? Number.POSITIVE_INFINITY;
+		this.maxRenderedLines =
+			options.maxRenderedLines ?? Number.POSITIVE_INFINITY;
 	}
 
 	private static readonly SPINNER_FRAMES = [
@@ -403,8 +404,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					// Content is the same — only style might have changed.
 					// Extract the stored style revision from the full revision
 					// string (format: "contentRevision::styleRevision").
-					const storedFullRev =
-						this.assembledTurnRevisions[firstDirty];
+					const storedFullRev = this.assembledTurnRevisions[firstDirty];
 					const storedStyleRev = storedFullRev.slice(
 						storedFullRev.indexOf("::") + 2,
 					);
@@ -447,7 +447,10 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			: firstDirty > 0
 				? this.assembledLines.slice(0, this.assembledTurnStarts[firstDirty])
 				: [];
-		const turnStartLines: number[] = this.assembledTurnStarts.slice(0, firstDirty);
+		const turnStartLines: number[] = this.assembledTurnStarts.slice(
+			0,
+			firstDirty,
+		);
 		const pendingToolRegions: Array<{
 			start: number;
 			end: number;
@@ -486,7 +489,8 @@ export class TranscriptDisplay implements Component, RenderCtx {
 			if (needsSeparator) renderedLines.push(padToWidth(emptyLine));
 			const turnStart = renderedLines.length;
 			turnStartLines.push(turnStart);
-			turnRevisions[ti] = `${this.turnRevisionFor(turn)}::${this.turnStyleRevision(turn)}`;
+			turnRevisions[ti] =
+				`${this.turnRevisionFor(turn)}::${this.turnStyleRevision(turn)}`;
 
 			// Per-turn cache: a turn's own lines/hitRegions are only rebuilt when
 			// its own content, width, or narrow style slice actually changes —
@@ -877,7 +881,7 @@ export class TranscriptDisplay implements Component, RenderCtx {
 					// Split body at first newline (if any) so reason-only first line
 					// gets accent+body coloring while continuation lines stay muted.
 					const bodyLines = n.text.split("\n");
-					let firstLineBody = bodyLines[0] ?? "";
+					const firstLineBody = bodyLines[0] ?? "";
 					const continuationLines = bodyLines.slice(1);
 
 					// Apply markdown rendering to the body with muted base color.
@@ -886,7 +890,9 @@ export class TranscriptDisplay implements Component, RenderCtx {
 
 					if (reasonMatch) {
 						const reason = reasonMatch[1];
-						const bodyAfterReason = firstLineBody.slice(reasonMatch[0].length).trimStart();
+						const bodyAfterReason = firstLineBody
+							.slice(reasonMatch[0].length)
+							.trimStart();
 						renderedFirst = `${theme.fg("accent", reason)} ${renderMarkdownLine(bodyAfterReason, bodyColor)}`;
 					}
 
@@ -898,10 +904,15 @@ export class TranscriptDisplay implements Component, RenderCtx {
 
 					// Collect all body lines (first line body + continuations) and
 					// wrap them individually so each line gets proper markdown + color.
-					const maxBodyWidth = Math.max(1, contentWidth - visibleWidth(bodyIndent));
+					const maxBodyWidth = Math.max(
+						1,
+						contentWidth - visibleWidth(bodyIndent),
+					);
 					const allBodyRendered: string[] = [renderedFirst];
 					for (let ci = 0; ci < continuationLines.length; ci++) {
-						allBodyRendered.push(renderMarkdownLine(continuationLines[ci], bodyColor));
+						allBodyRendered.push(
+							renderMarkdownLine(continuationLines[ci], bodyColor),
+						);
 					}
 					for (const rendered of allBodyRendered) {
 						const wrapped = wrapText(rendered, maxBodyWidth);

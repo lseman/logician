@@ -7,12 +7,8 @@
 // - Persist state across turns
 
 import type { ToolCall } from "../agent/types.ts";
+import type { ExtensionEventName } from "../hooks/extensions/events.ts";
 import type { EventBus } from "./event-bus.ts";
-import type {
-	ExtensionEventName,
-	ExtensionEventResult,
-	ExtensionEventHandler as TypedEventHandler,
-} from "../hooks/extensions/events.ts";
 
 // ============================================================================
 // Event System (typed, from hooks/extensions/events.ts)
@@ -20,9 +16,9 @@ import type {
 
 // Re-export the typed event types so extensions can use them directly
 export type {
+	ExtensionEventHandler as ExtensionEventHandlerTyped,
 	ExtensionEventName,
 	ExtensionEventResult,
-	ExtensionEventHandler as ExtensionEventHandlerTyped,
 } from "../hooks/extensions/events.ts";
 
 // Legacy-compatible event type union (maps to typed event names)

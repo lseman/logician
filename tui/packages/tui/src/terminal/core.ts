@@ -130,10 +130,6 @@ export class TUI extends Container {
 	private focusedComponent: Component | null = null;
 	private overlayStack: OverlayStackEntry[] = [];
 	private focusOrderCounter = 0;
-	/** Tracks overlay focus restore state for proper focus transfer when overlays
-	 * are hidden. Handles the case where a modal overlay (e.g., trust prompt)
-	 * temporarily blocks focus from returning to a list picker (e.g., theme selector). */
-	private overlayFocusRestore: OverlayFocusRestoreState = { status: "inactive" };
 	private inputListeners: Set<
 		(data: string) => { consume?: boolean; data?: string } | undefined
 	> = new Set();
@@ -196,10 +192,7 @@ export class TUI extends Container {
 		}
 	}
 
-	showOverlay(
-		component: Component,
-		options?: OverlayOptions,
-	): OverlayHandle {
+	showOverlay(component: Component, options?: OverlayOptions): OverlayHandle {
 		const entry: OverlayStackEntry = {
 			component,
 			options,
@@ -245,7 +238,8 @@ export class TUI extends Container {
 			isHidden: () => entry.hidden,
 			isFocused: () => this.focusedComponent === component,
 			focus: () => {
-				if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry)) return;
+				if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry))
+					return;
 				entry.focusOrder = ++this.focusOrderCounter;
 				this.setFocus(component);
 				this.requestRender();
@@ -253,7 +247,7 @@ export class TUI extends Container {
 			unfocus: (target?: Component | null) => {
 				if (this.focusedComponent !== component) return;
 				const topVisible = this.getTopmostVisibleOverlay();
-				this.setFocus(target ?? (topVisible?.component ?? entry.preFocus));
+				this.setFocus(target ?? topVisible?.component ?? entry.preFocus);
 				this.requestRender();
 			},
 		};
@@ -328,71 +322,13 @@ export class TUI extends Container {
 	private getTopmostVisibleOverlay(): OverlayStackEntry | undefined {
 		let topmost: OverlayStackEntry | undefined;
 		for (const overlay of this.overlayStack) {
-			if (overlay.options?.nonCapturing || !this.isOverlayVisible(overlay)) continue;
+			if (overlay.options?.nonCapturing || !this.isOverlayVisible(overlay))
+				continue;
 			if (!topmost || overlay.focusOrder > topmost.focusOrder) {
 				topmost = overlay;
 			}
 		}
 		return topmost;
-	}
-
-	/** Clear the overlay focus restore state for a given overlay */
-	private clearOverlayFocusRestoreFor(overlay: OverlayStackEntry): void {
-		if (
-			this.overlayFocusRestore.status !== "inactive" &&
-			this.overlayFocusRestore.overlay === overlay
-		) {
-			this.overlayFocusRestore = { status: "inactive" };
-		}
-	}
-
-	/** Get the current focus restore state, deactivating if overlay is no longer on stack */
-	private getVisibleOverlayFocusRestore(): OverlayFocusRestoreState {
-		const state = this.overlayFocusRestore;
-		if (state.status === "inactive") return state;
-		if (
-			!this.overlayStack.includes(state.overlay!) ||
-			!this.isOverlayVisible(state.overlay!)
-		) {
-			return { status: "inactive" };
-		}
-		return state;
-	}
-
-	/** Resolve a blocked focus restore state to the correct target component */
-	private resolveBlockedOverlayFocusRestore(
-		state: {
-			status: "blocked";
-			overlay: OverlayStackEntry;
-			blockedBy: Component;
-			resume: { status: "restore-overlay" } | { status: "focus-target"; target: Component | null };
-		},
-	): Component | null {
-		if (state.resume.status === "restore-overlay") return state.overlay.component;
-		this.overlayFocusRestore = { status: "inactive" };
-		return state.resume.status === "focus-target" ? state.resume.target : null;
-	}
-
-	/** Check if a component is an ancestor in the overlay pre-focus chain of an entry */
-	private isOverlayFocusAncestor(entry: OverlayStackEntry, component: Component): boolean {
-		const visited = new Set<Component>();
-		let current = entry.preFocus;
-		while (current && !visited.has(current)) {
-			visited.add(current);
-			if (current === component) return true;
-			const nextEntry = this.overlayStack.find(o => o.component === current);
-			current = nextEntry?.preFocus ?? null;
-		}
-		return false;
-	}
-
-	/** Retarget preFocus for all overlays when one is removed */
-	private retargetOverlayPreFocus(removed: OverlayStackEntry): void {
-		for (const overlay of this.overlayStack) {
-			if (overlay !== removed && overlay.preFocus === removed.component) {
-				overlay.preFocus = removed.preFocus;
-			}
-		}
 	}
 
 	addInputListener(
@@ -528,9 +464,7 @@ export class TUI extends Container {
 		// expensive streaming frames schedule their successor immediately, creating
 		// bursts of layout work and terminal writes that could starve input handling.
 		const elapsed = performance.now() - this.lastRenderFinishedAt;
-		const delay = this.renderImmediateRequested
-			? 0
-			: Math.max(0, 16 - elapsed);
+		const delay = this.renderImmediateRequested ? 0 : Math.max(0, 16 - elapsed);
 		this.renderTimer = setTimeout(() => {
 			this.renderTimer = null;
 			if (this.stopped || !this.renderRequested) return;
@@ -1103,7 +1037,7 @@ export class TUI extends Container {
 		lines: string[],
 		termWidth: number,
 		termHeight: number,
-		transcriptHeight: number,
+		_transcriptHeight: number,
 	): string[] {
 		const result = [...lines];
 		this.paintedOverlayClickRects = [];
@@ -1131,7 +1065,12 @@ export class TUI extends Container {
 			// ── Resolve margin ─────────────────────────────────────────────
 			const margin =
 				typeof opt.margin === "number"
-					? { top: opt.margin, right: opt.margin, bottom: opt.margin, left: opt.margin }
+					? {
+							top: opt.margin,
+							right: opt.margin,
+							bottom: opt.margin,
+							left: opt.margin,
+						}
 					: (opt.margin ?? {});
 			const marginLeft = Math.max(0, margin.left ?? 0);
 			const marginRight = Math.max(0, margin.right ?? 0);
@@ -1140,7 +1079,7 @@ export class TUI extends Container {
 			// ── Resolve width ──────────────────────────────────────────────
 			let width = leftAligned
 				? availWidth
-				: parseSizeValue(opt.width, termWidth) ?? Math.min(80, availWidth);
+				: (parseSizeValue(opt.width, termWidth) ?? Math.min(80, availWidth));
 			if (opt.minWidth) width = Math.max(width, opt.minWidth);
 			if (!leftAligned) {
 				width = Math.max(40, Math.min(width, availWidth));
@@ -1150,10 +1089,11 @@ export class TUI extends Container {
 			const overlayLines = entry.component.render(Math.max(1, width));
 
 			// ── Resolve maxHeight ──────────────────────────────────────────
-			let maxHeight = parseSizeValue(opt.maxHeight, termHeight);
-			const overlayHeight = maxHeight !== undefined
-				? Math.min(overlayLines.length, maxHeight)
-				: overlayLines.length;
+			const maxHeight = parseSizeValue(opt.maxHeight, termHeight);
+			const overlayHeight =
+				maxHeight !== undefined
+					? Math.min(overlayLines.length, maxHeight)
+					: overlayLines.length;
 
 			// ── Resolve position ───────────────────────────────────────────
 			let row: number;
@@ -1164,7 +1104,7 @@ export class TUI extends Container {
 				row = absRow !== undefined ? Math.max(0, absRow) : 0;
 			} else {
 				const anchor = (opt.anchor ?? "center") as OverlayAnchor;
-				const availHeight = Math.max(1, termHeight);
+				const _availHeight = Math.max(1, termHeight);
 				switch (anchor) {
 					case "top":
 					case "top-left":
@@ -1185,7 +1125,7 @@ export class TUI extends Container {
 						break;
 					default:
 						row = 0;
-					}
+				}
 				row += (margin.top ?? 0) + (opt.offsetY ?? 0);
 			}
 
@@ -1267,7 +1207,8 @@ export class TUI extends Container {
 		);
 		const width = Math.max(1, termWidth - 1);
 		const rendered = entry.component.render(width);
-		const maxHeight = parseSizeValue(entry.options?.maxHeight, 200) ?? rendered.length;
+		const maxHeight =
+			parseSizeValue(entry.options?.maxHeight, 200) ?? rendered.length;
 		return rendered.slice(0, maxHeight).map(line => {
 			const clamped = clampLineToWidth(line, width);
 			return (
@@ -1465,7 +1406,10 @@ function isImageLine(line: string): boolean {
 export type SizeValue = number | `${number}%`;
 
 /** Parse a SizeValue into absolute value given a reference size */
-export function parseSizeValue(value: SizeValue | undefined, referenceSize: number): number | undefined {
+export function parseSizeValue(
+	value: SizeValue | undefined,
+	referenceSize: number,
+): number | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value === "number") return value;
 	const match = value.match(/^(\d+(?:\.\d+)?)%$/);
@@ -1581,7 +1525,9 @@ type OverlayFocusRestoreState = {
 	status: "inactive" | "eligible" | "blocked";
 	overlay?: OverlayStackEntry;
 	blockedBy?: Component;
-	resume?: { status: "restore-overlay" } | { status: "focus-target"; target: Component | null };
+	resume?:
+		| { status: "restore-overlay" }
+		| { status: "focus-target"; target: Component | null };
 };
 
 // ── Shared renderer surface ──────────────────────────────────────────────────

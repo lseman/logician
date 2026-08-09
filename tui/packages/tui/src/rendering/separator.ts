@@ -11,7 +11,9 @@ export class Separator implements Component {
 			return this.cachedLines;
 		}
 		this.cachedWidth = width;
-		this.cachedLines = [`\x1b[38;5;236m${"─".repeat(Math.max(0, width))}\x1b[0m`];
+		this.cachedLines = [
+			`\x1b[38;5;236m${"─".repeat(Math.max(0, width))}\x1b[0m`,
+		];
 		return this.cachedLines;
 	}
 }

@@ -2,7 +2,7 @@
 // Metrics: Precision@K, Recall, MRR, NDCG@K, faithfulness.
 // Evaluates retrieval quality against ground-truth relevance judgments.
 
-import type { EvalResult, EvalSummary, RAGChunk, SearchHit } from "./types.ts";
+import type { EvalResult, EvalSummary, SearchHit } from "./types.ts";
 
 // ── Retrieval Metrics ────────────────────────────────────────────────────────
 
@@ -16,29 +16,23 @@ export function precisionAtK(
 ): number {
 	const kItems = retrieved.slice(0, k);
 	const relevantSet = new Set(relevant);
-	const hits = kItems.filter((id) => relevantSet.has(id)).length;
+	const hits = kItems.filter(id => relevantSet.has(id)).length;
 	return kItems.length > 0 ? hits / kItems.length : 0;
 }
 
 /**
  * Recall: fraction of all relevant items that were retrieved.
  */
-export function recall(
-	retrieved: string[],
-	relevant: string[],
-): number {
+export function recall(retrieved: string[], relevant: string[]): number {
 	const relevantSet = new Set(relevant);
-	const hits = retrieved.filter((id) => relevantSet.has(id)).length;
+	const hits = retrieved.filter(id => relevantSet.has(id)).length;
 	return relevant.length > 0 ? hits / relevant.length : 0;
 }
 
 /**
  * Mean Reciprocal Rank (MRR): 1/rank of first relevant item.
  */
-export function mrr(
-	retrieved: string[],
-	relevant: string[],
-): number {
+export function mrr(retrieved: string[], relevant: string[]): number {
 	const relevantSet = new Set(relevant);
 	for (let i = 0; i < retrieved.length; i++) {
 		if (relevantSet.has(retrieved[i])) {
@@ -65,9 +59,13 @@ export function ndcgAtK(
 
 	// Ideal DCG: all relevant items at top positions
 	const idealHits = Math.min(relevant.length, k);
-	const idcg = idealHits > 0
-		? Array.from({ length: idealHits }, (_, i) => 1 / Math.log2(i + 2)).reduce((a, b) => a + b, 0)
-		: 1;
+	const idcg =
+		idealHits > 0
+			? Array.from(
+					{ length: idealHits },
+					(_, i) => 1 / Math.log2(i + 2),
+				).reduce((a, b) => a + b, 0)
+			: 1;
 
 	return dcg / idcg;
 }
@@ -100,7 +98,7 @@ export async function evaluateRetrieval(
 	let totalRecall = 0;
 	let totalMRR = 0;
 	let totalNDCG = 0;
-	let rewriteMs = 0;
+	const _rewriteMs = 0;
 	let retrievalMs = 0;
 
 	for (const test of testQueries) {
@@ -110,7 +108,7 @@ export async function evaluateRetrieval(
 		const hits = await searchFn(test.query, candidates);
 		retrievalMs += performance.now() - start;
 
-		const retrievedIds = hits.map((h) => h.chunk.id);
+		const retrievedIds = hits.map(h => h.chunk.id);
 
 		// Compute metrics
 		const p = precisionAtK(retrievedIds, test.expectedIds, topK);
@@ -153,10 +151,7 @@ export async function evaluateRetrieval(
  * Compare two retrieval configurations on the same test set.
  * Returns a diff showing which is better per metric.
  */
-export function compareEvaluations(
-	a: EvalSummary,
-	b: EvalSummary,
-): string {
+export function compareEvaluations(a: EvalSummary, b: EvalSummary): string {
 	const metrics = [
 		{ key: "avgPrecision", label: "Precision@K" },
 		{ key: "avgRecall", label: "Recall" },
@@ -182,8 +177,10 @@ export function compareEvaluations(
 	for (let i = 0; i < a.results.length; i++) {
 		const aScore = a.results[i].mrr;
 		const bScore = b.results[i]?.mrr ?? 0;
-		if (bScore > aScore) betterQueries.push(`"${a.results[i].query.slice(0, 50)}..."`);
-		else if (aScore > bScore) worseQueries.push(`"${a.results[i].query.slice(0, 50)}..."`);
+		if (bScore > aScore)
+			betterQueries.push(`"${a.results[i].query.slice(0, 50)}..."`);
+		else if (aScore > bScore)
+			worseQueries.push(`"${a.results[i].query.slice(0, 50)}..."`);
 	}
 
 	if (betterQueries.length) {
@@ -220,16 +217,16 @@ export function createSyntheticTests(
 			const chunk = doc.chunks[0];
 			if (!chunk) continue;
 
-			const sentences = chunk.text.split(/[.!?]+\s+/).filter((s) => s.trim().length > 10);
-			const query = sentences
-				.slice(0, 2)
-				.join(". ")
-				.replace(/\. $/, "")
-				|| chunk.text.slice(0, 100);
+			const sentences = chunk.text
+				.split(/[.!?]+\s+/)
+				.filter(s => s.trim().length > 10);
+			const query =
+				sentences.slice(0, 2).join(". ").replace(/\. $/, "") ||
+				chunk.text.slice(0, 100);
 
 			tests.push({
 				query: query.toLowerCase(),
-				expectedIds: doc.chunks.map((c) => c.id).slice(0, 5),
+				expectedIds: doc.chunks.map(c => c.id).slice(0, 5),
 			});
 		}
 	}
@@ -257,7 +254,7 @@ export function summaryReport(summary: EvalSummary): string {
 |---|---|---|---|---|`;
 
 	for (const r of summary.results) {
-		const q = r.query.length > 40 ? r.query.slice(0, 40) + "..." : r.query;
+		const q = r.query.length > 40 ? `${r.query.slice(0, 40)}...` : r.query;
 		report += `\n| ${q} | ${r.precision.toFixed(3)} | ${r.recall.toFixed(3)} | ${r.mrr.toFixed(3)} | ${r.nDCG.toFixed(3)} |`;
 	}
 

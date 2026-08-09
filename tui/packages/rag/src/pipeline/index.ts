@@ -11,36 +11,28 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { recursiveChunk, smartChunk } from "../chunking.ts";
+import {
+	DEFAULT_CHUNKING_CONFIG,
+	DEFAULT_CONTEXT_WINDOW,
+	DEFAULT_RAG_CONFIG,
+	type RerankingModel,
+} from "../config.ts";
+import { assembleContext, compressContext } from "../context.ts";
 import type { IEmbedder } from "../embedder.ts";
+import { llmRewriteQuery, rewriteQuery } from "../query.ts";
+import { CrossEncoderReranker } from "../reranker.ts";
 import type {
 	ChunkingConfig,
 	ContextWindowConfig,
 	ExtractedDocument,
 	IReranker,
 	MetadataFilter,
-	ParentContext,
 	RAGChunk,
 	RewrittenQuery,
 	SearchHit,
 	VectorStoreConfig,
 } from "../types.ts";
-
-import {
-	DEFAULT_HYBRID_CONFIG,
-	DEFAULT_RAG_CONFIG,
-	DEFAULT_CHUNKING_CONFIG,
-	DEFAULT_CONTEXT_WINDOW,
-	type RerankingModel,
-} from "../config.ts";
-import {
-	recursiveChunk,
-	parentChildChunk,
-	smartChunk,
-} from "../chunking.ts";
-import { tokenize, HybridVectorStore, type BM25Scorer } from "../store/hybrid-store.ts";
-import { CrossEncoderReranker, BM25Reranker } from "../reranker.ts";
-import { rewriteQuery, multiQuerySearch, llmRewriteQuery } from "../query.ts";
-import { assembleContext, compressContext, buildContextSummary } from "../context.ts";
 
 // tui/packages/rag/src/pipeline/index.ts -> repo root
 const REPO_ROOT = path.resolve(
@@ -119,7 +111,8 @@ export class RAGPipeline {
 		this.embedder = config.embedder;
 		this.vectorStore = config.vectorStore;
 		this.chunkingConfig = config.chunkingConfig ?? DEFAULT_CHUNKING_CONFIG;
-		this.enableReranking = config.enableReranking ?? DEFAULT_RAG_CONFIG.enableReranking;
+		this.enableReranking =
+			config.enableReranking ?? DEFAULT_RAG_CONFIG.enableReranking;
 		this.contextWindow = config.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 
 		// Determine if using hybrid store
@@ -128,7 +121,9 @@ export class RAGPipeline {
 		// Initialize reranker if enabled
 		if (this.enableReranking) {
 			const modelId = config.rerankerModel
-				? (config.rerankerModel === "BAAI/bge-reranker-v2-m3" ? "BAAI/bge-reranker-v2-m3" : "BAAI/bge-reranker-base")
+				? config.rerankerModel === "BAAI/bge-reranker-v2-m3"
+					? "BAAI/bge-reranker-v2-m3"
+					: "BAAI/bge-reranker-base"
 				: "BAAI/bge-reranker-base";
 			this.reranker = new CrossEncoderReranker({ modelId });
 		} else {
@@ -198,14 +193,10 @@ export class RAGPipeline {
 		json: ExtractedDocumentJSON,
 	): Promise<ExtractedDocument> {
 		// Smart chunking
-		const chunks = await this._smartChunkText(
-			json.content,
-			json.id,
-			json.meta,
-		);
+		const chunks = await this._smartChunkText(json.content, json.id, json.meta);
 
 		// Embed all chunks
-		const chunkTexts = chunks.map((c) => c.text);
+		const chunkTexts = chunks.map(c => c.text);
 		const vectors = await this.embedder.embedBatch(chunkTexts);
 
 		for (let i = 0; i < chunks.length; i++) {
@@ -233,13 +224,13 @@ export class RAGPipeline {
 		const strategy = this.chunkingConfig.strategy;
 
 		if (strategy === "semantic") {
-			const chunks = await smartChunk(
-				text,
-				this.chunkingConfig,
-				(t) => this.embedder.embed(t).then((v) => v),
+			const chunks = await smartChunk(text, this.chunkingConfig, t =>
+				this.embedder.embed(t).then(v => v),
 			);
-			return chunks.map((c) => ({
+			return chunks.map(c => ({
 				...c,
+				id: `${docId}:${c.id}`,
+				parentId: c.parentId ? `${docId}:${c.parentId}` : undefined,
 				metadata: { ...c.metadata, source: meta?.title || docId },
 				documentId: docId,
 			}));
@@ -265,7 +256,7 @@ export class RAGPipeline {
 				const chunkText = text.slice(start, breakPoint).trim();
 				if (chunkText.length > (this.chunkingConfig.minChunkSize ?? 64)) {
 					chunks.push({
-						id: `chunk_${idx++}`,
+						id: `${docId}:chunk_${idx++}`,
 						text: chunkText,
 						metadata: { source: meta?.title || docId },
 						documentId: docId,
@@ -280,8 +271,10 @@ export class RAGPipeline {
 
 		// Default: recursive chunking
 		const chunks = recursiveChunk(text, this.chunkingConfig) as RAGChunk[];
-		return chunks.map((c) => ({
+		return chunks.map(c => ({
 			...c,
+			id: `${docId}:${c.id}`,
+			parentId: c.parentId ? `${docId}:${c.parentId}` : undefined,
 			metadata: { ...c.metadata, source: meta?.title || docId },
 			documentId: docId,
 		}));
@@ -371,7 +364,7 @@ export class RAGPipeline {
 			const rr = reranker ?? this.reranker;
 			if (rr && hits.length > 0) {
 				const reranked = await rr.rerank(query, hits);
-				hits = reranked.map((r) => ({
+				hits = reranked.map(r => ({
 					chunk: r.chunk,
 					score: r.rerankScore,
 					denseScore: r.score,
@@ -463,5 +456,3 @@ export class RAGPipeline {
 		}
 	}
 }
-
-

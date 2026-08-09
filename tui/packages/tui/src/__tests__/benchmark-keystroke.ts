@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+
 // ── Keystroke Latency vs. Transcript Size Benchmark ────────────────────────
 // Reproduces the reported symptom: once a lot of text has accumulated in the
 // TUI transcript, typing in the input bar starts to feel laggy. This
@@ -29,8 +30,8 @@
 // Run:  npx tsx packages/tui/src/__tests__/benchmark-keystroke.ts [--json]
 // Output: table (or JSON) of p50/p95/p99 keystroke latency per transcript size.
 
-import { performance } from "node:perf_hooks";
 import { cpus } from "node:os";
+import { performance } from "node:perf_hooks";
 
 import type {
 	AssistantChunk,
@@ -39,15 +40,14 @@ import type {
 	Turn,
 	UserMessage,
 } from "@logician/coding-agent/sessions";
-
-import { initTheme } from "../terminal/theme.ts";
-import { Container } from "../terminal/core.ts";
-import { TranscriptDisplay } from "../rendering/transcript/display.ts";
-import { ScrollView } from "../rendering/scroll-view.ts";
-import { Flex } from "../rendering/flex.ts";
-import { renderLayoutFrame, type LayoutFrame } from "../rendering/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
+import { Flex } from "../rendering/flex.ts";
+import { type LayoutFrame, renderLayoutFrame } from "../rendering/layout.ts";
+import { ScrollView } from "../rendering/scroll-view.ts";
+import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { StatusBar } from "../status/status-bar.ts";
+import { Container } from "../terminal/core.ts";
+import { initTheme } from "../terminal/theme.ts";
 
 initTheme("dark");
 
@@ -80,20 +80,46 @@ const SIZES: Array<{ label: string; turns: number; chunkSize: number }> = [
 // ── Synthetic transcript generation (same shape as benchmark.ts) ──────────
 
 function genRandomText(length: number, seed: number): string {
-	const words = ["the", "function", "variable", "component", "render", "update",
-		"handle", "process", "compute", "validate", "transform", "generate",
-		"parse", "format", "display", "stream", "buffer", "cache", "state"];
+	const words = [
+		"the",
+		"function",
+		"variable",
+		"component",
+		"render",
+		"update",
+		"handle",
+		"process",
+		"compute",
+		"validate",
+		"transform",
+		"generate",
+		"parse",
+		"format",
+		"display",
+		"stream",
+		"buffer",
+		"cache",
+		"state",
+	];
 	let text = "";
 	let n = seed;
 	while (text.length < length) {
 		n = (n * 1103515245 + 12345) & 0x7fffffff;
-		text += words[n % words.length] + " ";
+		text += `${words[n % words.length]} `;
 	}
 	return text.slice(0, length);
 }
 
 function genToolResult(resultSize: number, turnIdx: number): ToolExecution {
-	const toolNames = ["read_file", "write_file", "edit_file", "grep", "bash", "find", "git"];
+	const toolNames = [
+		"read_file",
+		"write_file",
+		"edit_file",
+		"grep",
+		"bash",
+		"find",
+		"git",
+	];
 	const tool = toolNames[turnIdx % toolNames.length];
 	return {
 		tool_name: tool,
@@ -109,7 +135,8 @@ function genChunks(turnIdx: number, chunkSize: number): AssistantChunk[] {
 	const chunks: AssistantChunk[] = [];
 	const numChunks = 3 + (turnIdx % 4);
 	for (let ci = 0; ci < numChunks; ci++) {
-		const type = ci === 0 ? "thinking" : ci < numChunks - 1 ? "content" : "tool";
+		const type =
+			ci === 0 ? "thinking" : ci < numChunks - 1 ? "content" : "tool";
 		if (type === "thinking" || type === "content") {
 			chunks.push({
 				seq: ci,
@@ -118,16 +145,33 @@ function genChunks(turnIdx: number, chunkSize: number): AssistantChunk[] {
 				isComplete: true,
 			});
 		} else {
-			chunks.push({ seq: ci, type: "tool", tool: genToolResult(chunkSize, turnIdx), isComplete: true });
+			chunks.push({
+				seq: ci,
+				type: "tool",
+				tool: genToolResult(chunkSize, turnIdx),
+				isComplete: true,
+			});
 		}
 	}
 	return chunks;
 }
 
 function genTurn(turnIdx: number, chunkSize: number): Turn {
-	const userMsg: UserMessage = { type: "user", content: `Task ${turnIdx}: do the thing.` };
-	const assistantMsg: AssistantMessage = { type: "assistant", chunks: genChunks(turnIdx, chunkSize), isComplete: true };
-	return { id: `turn-${turnIdx}`, userMessage: userMsg, assistantMessage: assistantMsg, isComplete: true };
+	const userMsg: UserMessage = {
+		type: "user",
+		content: `Task ${turnIdx}: do the thing.`,
+	};
+	const assistantMsg: AssistantMessage = {
+		type: "assistant",
+		chunks: genChunks(turnIdx, chunkSize),
+		isComplete: true,
+	};
+	return {
+		id: `turn-${turnIdx}`,
+		userMessage: userMsg,
+		assistantMessage: assistantMsg,
+		isComplete: true,
+	};
 }
 
 function genTranscript(numTurns: number, chunkSize: number): Turn[] {
@@ -189,12 +233,18 @@ function buildFrame(numTurns: number, chunkSize: number) {
 // written to the terminal. This is real cost, not a stand-in — a keystroke
 // that only changes the input bar still pays for diffing every row because
 // the diff loop walks the full frame to find which rows changed.
-function commitFrameDiffCost(prevLines: string[], newLines: string[], termWidth: number, termHeight: number): string {
+function commitFrameDiffCost(
+	prevLines: string[],
+	newLines: string[],
+	termWidth: number,
+	termHeight: number,
+): string {
 	const renderWidth = Math.max(1, termWidth - 1);
 	let changes = "";
 	for (let row = 0; row < termHeight; row++) {
 		const prevLine = prevLines[row];
-		const newLine = row < newLines.length ? newLines[row] : " ".repeat(termWidth);
+		const newLine =
+			row < newLines.length ? newLines[row] : " ".repeat(termWidth);
 		if (prevLine === newLine) continue;
 		changes += `\x1b[${row + 1};1H\x1b[0m\x1b[2K${newLine.slice(0, renderWidth)}`;
 	}
@@ -216,7 +266,12 @@ function simulateKeystroke(
 
 	// 2. requestRender -> layout + render (real layout engine, same call as
 	//    core.ts's _doRenderInnerLayoutEngine)
-	const frame: LayoutFrame = renderLayoutFrame(root, width - 1, termHeight, () => {});
+	const frame: LayoutFrame = renderLayoutFrame(
+		root,
+		width - 1,
+		termHeight,
+		() => {},
+	);
 
 	// 3. _commitFrame's diff against the previous frame
 	commitFrameDiffCost(prevLines, frame.lines, width, termHeight);
@@ -254,7 +309,12 @@ function runBenchmark(): SizeResult[] {
 		// A few throwaway keystrokes to let any JIT warmup happen before we
 		// measure, so we're capturing steady-state cost, not compile cost.
 		for (let i = 0; i < 10; i++) {
-			simulateKeystroke(inputBar, root, prevLines, KEY_SEQUENCE[i % KEY_SEQUENCE.length]);
+			simulateKeystroke(
+				inputBar,
+				root,
+				prevLines,
+				KEY_SEQUENCE[i % KEY_SEQUENCE.length],
+			);
 		}
 		inputBar.handleInput("\x15"); // Ctrl-U: clear line, reset for real measurement
 
@@ -269,7 +329,10 @@ function runBenchmark(): SizeResult[] {
 	return results;
 }
 
-function summarize(size: { label: string; turns: number; chunkSize: number }, times: number[]): SizeResult {
+function summarize(
+	size: { label: string; turns: number; chunkSize: number },
+	times: number[],
+): SizeResult {
 	const approxChars = size.turns * size.chunkSize * 6; // ~6 chunks/turn average
 	return {
 		label: size.label,
@@ -290,7 +353,7 @@ function reportResults(results: SizeResult[]): void {
 	console.log(`  ${"-".repeat(header.length - 2)}`);
 	for (const r of results) {
 		console.log(
-			`  ${r.label.padEnd(22)} ${(r.p50Ms.toFixed(3) + "ms").padStart(8)} ${(r.p95Ms.toFixed(3) + "ms").padStart(8)} ${(r.p99Ms.toFixed(3) + "ms").padStart(8)} ${(r.maxMs.toFixed(3) + "ms").padStart(8)}`,
+			`  ${r.label.padEnd(22)} ${(`${r.p50Ms.toFixed(3)}ms`).padStart(8)} ${(`${r.p95Ms.toFixed(3)}ms`).padStart(8)} ${(`${r.p99Ms.toFixed(3)}ms`).padStart(8)} ${(`${r.maxMs.toFixed(3)}ms`).padStart(8)}`,
 		);
 	}
 
@@ -303,14 +366,24 @@ function reportResults(results: SizeResult[]): void {
 
 	const worst = results[results.length - 1];
 	console.log(`\n  Verdict:`);
-	console.log(`    Empty:   p50 ${baseline.p50Ms.toFixed(3)}ms, p99 ${baseline.p99Ms.toFixed(3)}ms`);
-	console.log(`    Largest: p50 ${worst.p50Ms.toFixed(3)}ms, p99 ${worst.p99Ms.toFixed(3)}ms`);
+	console.log(
+		`    Empty:   p50 ${baseline.p50Ms.toFixed(3)}ms, p99 ${baseline.p99Ms.toFixed(3)}ms`,
+	);
+	console.log(
+		`    Largest: p50 ${worst.p50Ms.toFixed(3)}ms, p99 ${worst.p99Ms.toFixed(3)}ms`,
+	);
 	if (worst.p50Ms > 16) {
-		console.log(`    ⚠ Largest transcript size exceeds the 16ms frame budget — user-perceptible typing lag.`);
+		console.log(
+			`    ⚠ Largest transcript size exceeds the 16ms frame budget — user-perceptible typing lag.`,
+		);
 	}
 	if (worst.p50Ms / Math.max(baseline.p50Ms, 0.001) > 3) {
-		console.log(`    ⚠ Latency scales with transcript size — indicates re-walking/re-diffing backlog content`);
-		console.log(`      on every keystroke instead of reusing cached, viewport-bounded output.`);
+		console.log(
+			`    ⚠ Latency scales with transcript size — indicates re-walking/re-diffing backlog content`,
+		);
+		console.log(
+			`      on every keystroke instead of reusing cached, viewport-bounded output.`,
+		);
 	} else {
 		console.log(`    ✓ Latency stays roughly flat as transcript size grows.`);
 	}
@@ -321,13 +394,21 @@ async function main() {
 		console.log(`\n=== Keystroke Latency vs. Transcript Size ===`);
 		console.log(`Terminal: ${width}x${termHeight}`);
 		console.log(`Keystrokes sampled per size: ${KEYSTROKES_PER_SIZE}`);
-		console.log(`Node: ${process.version}, Platform: ${process.platform}, Cores: ${cpus().length}`);
+		console.log(
+			`Node: ${process.version}, Platform: ${process.platform}, Cores: ${cpus().length}`,
+		);
 	}
 
 	const results = runBenchmark();
 
 	if (jsonMode) {
-		console.log(JSON.stringify({ width, termHeight, keystrokesPerSize: KEYSTROKES_PER_SIZE, results }, null, 2));
+		console.log(
+			JSON.stringify(
+				{ width, termHeight, keystrokesPerSize: KEYSTROKES_PER_SIZE, results },
+				null,
+				2,
+			),
+		);
 		return;
 	}
 

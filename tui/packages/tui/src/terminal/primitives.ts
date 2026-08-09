@@ -302,7 +302,13 @@ export function compositeTuiLine(
 	// Single-pass ASCII composite: tries the fast path once.  If the base
 	// line contains non-ASCII characters the function returns null and we
 	// fall through to the generic wide-character path below.
-	const fast = compositeTuiLineAsciiSingle(baseLine, overlayLine, startCol, overlayWidth, totalWidth);
+	const fast = compositeTuiLineAsciiSingle(
+		baseLine,
+		overlayLine,
+		startCol,
+		overlayWidth,
+		totalWidth,
+	);
 	if (fast !== null) return fast;
 	const before = clampLineToWidth(baseLine, startCol);
 	const beforeWidth = visibleWidth(before);

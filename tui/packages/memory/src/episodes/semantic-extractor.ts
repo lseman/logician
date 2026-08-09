@@ -1,12 +1,12 @@
-import {
-	synthesizeTurnEpisode,
-	type TurnEvidence,
-} from "./episode-synthesizer.js";
 import type {
 	CompressedObservation,
 	ObservationType,
 	RawObservation,
 } from "../types.js";
+import {
+	synthesizeTurnEpisode,
+	type TurnEvidence,
+} from "./episode-synthesizer.js";
 
 export interface SemanticExtractionRequest {
 	systemPrompt: string;

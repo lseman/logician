@@ -127,7 +127,6 @@ export class AgentHarness {
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
 	private onSavePoint?: () => void;
-	private onShutdown?: () => void;
 	private onCompaction?: (
 		reason: "auto" | "manual",
 		tokensBefore: number,
@@ -684,9 +683,13 @@ export class AgentHarness {
 			// Native extensions return { messages, systemPrompt } directly
 			if (result && typeof result === "object") {
 				const value = result as { messages?: Message[]; systemPrompt?: string };
-				nativeMessages = Array.isArray(value.messages) ? value.messages : undefined;
+				nativeMessages = Array.isArray(value.messages)
+					? value.messages
+					: undefined;
 				nativeSystemPrompt =
-					typeof value.systemPrompt === "string" ? value.systemPrompt : undefined;
+					typeof value.systemPrompt === "string"
+						? value.systemPrompt
+						: undefined;
 			}
 		}
 
@@ -869,7 +872,7 @@ export class AgentHarness {
 			case "agent_settled":
 			case "session_delete":
 			case "model_select":
-					await runner.emitToAll({ type: event.type, context });
+				await runner.emitToAll({ type: event.type, context });
 				break;
 		}
 	}

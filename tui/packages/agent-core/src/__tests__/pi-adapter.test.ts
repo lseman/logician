@@ -1,17 +1,16 @@
 import { describe, expect, it, mock } from "bun:test";
+import type { EventBus } from "../extensions/event-bus.ts";
 import { PiAdapter } from "../extensions/pi-adapter.ts";
 import type {
+	ExtensionToolResult,
 	ExtensionAPI as LApi,
+	RegisteredCommand as LCommand,
 	ExtensionContext as LContext,
 	ExtensionEvent as LEvent,
 	ExtensionEventType as LEventType,
 	ExtensionEventHandler as LHandler,
-	ExtensionToolResult,
-	ToolExecutionContext,
 	RegisteredTool as LTool,
-	RegisteredCommand as LCommand,
 } from "../extensions/types.ts";
-import type { EventBus } from "../extensions/event-bus.ts";
 
 // Create mock logician API
 function createMockLogicianApi(): LApi {
@@ -67,13 +66,20 @@ describe("PiAdapter", () => {
 	it("should convert TypeBox String schema to JSON Schema", () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const _adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		api.registerTool({
 			name: "test_tool",
 			description: "test",
-			parameters: { type: "object", properties: { name: { type: "string" } } } as any,
-			execute: async () => ({ content: "ok" }) as unknown as ExtensionToolResult,
+			parameters: {
+				type: "object",
+				properties: { name: { type: "string" } },
+			} as any,
+			execute: async () =>
+				({ content: "ok" }) as unknown as ExtensionToolResult,
 		});
 
 		// Verify tool was registered with Logician
@@ -83,7 +89,10 @@ describe("PiAdapter", () => {
 	it("should create Pi-compatible UI wrapper", () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -96,10 +105,13 @@ describe("PiAdapter", () => {
 	it("should forward Pi tool registration to Logician", () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
-		let capturedTool: any = null;
+		let _capturedTool: any = null;
 
 		piApi.registerTool({
 			name: "greet",
@@ -107,7 +119,7 @@ describe("PiAdapter", () => {
 			description: "Greet someone",
 			parameters: { type: "object", properties: { name: { type: "string" } } },
 			execute: async (toolCallId, params) => {
-				capturedTool = { toolCallId, params };
+				_capturedTool = { toolCallId, params };
 				return { content: [{ type: "text", text: `Hello, ${params.name}!` }] };
 			},
 		});
@@ -121,7 +133,10 @@ describe("PiAdapter", () => {
 	it("should forward Pi command registration to Logician", () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -136,7 +151,10 @@ describe("PiAdapter", () => {
 	it("should translate session_start event to Pi format", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -158,7 +176,10 @@ describe("PiAdapter", () => {
 	it("should translate agent_start event to Pi format", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -179,14 +200,20 @@ describe("PiAdapter", () => {
 	it("should translate tool_call event for blocking", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
 		let receivedEvent: any = null;
 		piApi.on("tool_execution_start", async (event, _ctx) => {
 			receivedEvent = event;
-			if (event.toolName === "bash" && (event.input as any).command?.includes("rm -rf")) {
+			if (
+				event.toolName === "bash" &&
+				(event.input as any).command?.includes("rm -rf")
+			) {
 				return { block: true, reason: "Dangerous command" };
 			}
 		});
@@ -210,7 +237,10 @@ describe("PiAdapter", () => {
 	it("should translate turn events with indices", async () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -242,7 +272,10 @@ describe("PiAdapter", () => {
 	it("should handle getFlag returning registered defaults", () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 
@@ -259,7 +292,10 @@ describe("PiAdapter", () => {
 	it("should return registered tools in getAllTools", () => {
 		const api = createMockLogicianApi();
 		const ctx = createMockLogicianContext();
-		const adapter = new PiAdapter(api, ctx, { sessionId: "test", cwd: "/test" });
+		const adapter = new PiAdapter(api, ctx, {
+			sessionId: "test",
+			cwd: "/test",
+		});
 
 		const piApi = adapter.getApi();
 

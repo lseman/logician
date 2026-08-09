@@ -42,7 +42,9 @@ function hashString(s: string): number {
 }
 
 function cachedHighlight(content: string, lang: string | null): string {
-	const key = lang ? `${lang}|${hashString(content)}` : `auto|${hashString(content)}`;
+	const key = lang
+		? `${lang}|${hashString(content)}`
+		: `auto|${hashString(content)}`;
 	const hit = highlightCache.get(key);
 	if (hit !== undefined) return hit;
 
@@ -194,7 +196,7 @@ export function renderMarkdownLines(
 
 	if (inCodeBlock && codeContent) {
 		// Streaming code block — also cached so repeated renders of the
-			// same partial content skip re-highlighting.
+		// same partial content skip re-highlighting.
 		const renderedCode = cachedHighlight(codeContent, codeBlockLang);
 		for (const cl of renderedCode.split("\n")) {
 			lines.push(`${bg}  ${cl}${bgReset}`);

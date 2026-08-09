@@ -17,7 +17,10 @@ test("discovers Pi-compatible global and project extension locations", () => {
 
 	const result = loadExtensions({ piUserDir: globalDir, projectDir });
 	assert.deepEqual(
-		result.extensions.map(extension => [extension.name, extension.compatibility]),
+		result.extensions.map(extension => [
+			extension.name,
+			extension.compatibility,
+		]),
 		[
 			["global", "pi"],
 			["project", "pi"],

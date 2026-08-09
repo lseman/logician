@@ -20,26 +20,13 @@ export function recursiveChunk(
 		overlap = 128,
 		minChunkSize = 64,
 		maxDepth = 3,
-		separators = [
-			"\n# ",
-			"\n## ",
-			"\n### ",
-			"\n#### ",
-			"\n\n",
-			"\n",
-			" ",
-			"",
-		],
+		separators = ["\n# ", "\n## ", "\n### ", "\n#### ", "\n\n", "\n", " ", ""],
 	} = { ...config };
 
-	const chunks: RAGChunk[] = [];
+	const _chunks: RAGChunk[] = [];
 	let chunkIndex = 0;
 
-	function split(
-		content: string,
-		depth: number,
-		baseId: string,
-	): RAGChunk[] {
+	function split(content: string, depth: number, baseId: string): RAGChunk[] {
 		if (depth >= maxDepth || content.length <= chunkSize) {
 			// Base case: emit the content as one or more chunks with overlap
 			return emitChunks(content, baseId);
@@ -68,8 +55,8 @@ export function recursiveChunk(
 				} else {
 					// Emit accumulated content as chunks
 					const joined = accumulated.join(sep);
-					const chunkStartIdx = accumulated.reduce(
-						(sum, p, idx) => sum + p.length + sep.length,
+					const _chunkStartIdx = accumulated.reduce(
+						(sum, p, _idx) => sum + p.length + sep.length,
 						0,
 					);
 					// Emit this accumulated block
@@ -185,7 +172,11 @@ export async function semanticChunk(
 	const windows: Array<{ startWord: number; endWord: number; text: string }> =
 		[];
 
-	for (let i = 0; i <= words.length - windowWordCount; i += Math.floor(windowWordCount / 2)) {
+	for (
+		let i = 0;
+		i <= words.length - windowWordCount;
+		i += Math.floor(windowWordCount / 2)
+	) {
 		const end = Math.min(i + windowWordCount, words.length);
 		const windowText = words.slice(i, end).join(" ");
 		windows.push({ startWord: i, endWord: end, text: windowText });
@@ -305,19 +296,26 @@ export function parentChildChunk(
 
 	// Step 2: Create parent contexts by grouping children
 	const parents: ParentContext[] = [];
-	const charsPerChild = childSize + childOverlap;
+	const _charsPerChild = childSize + childOverlap;
 
-	for (let i = 0; i < children.length; i += Math.floor(parentSize / childSize)) {
-		const groupEnd = Math.min(i + Math.floor(parentSize / childSize), children.length);
+	for (
+		let i = 0;
+		i < children.length;
+		i += Math.floor(parentSize / childSize)
+	) {
+		const groupEnd = Math.min(
+			i + Math.floor(parentSize / childSize),
+			children.length,
+		);
 		const groupChildren = children.slice(i, groupEnd);
-		const parentText = groupChildren.map((c) => c.text).join("\n\n");
+		const parentText = groupChildren.map(c => c.text).join("\n\n");
 
 		if (parentText.length > 0) {
 			const parentId = `parent_${i}`;
 			parents.push({
 				id: parentId,
 				text: parentText,
-				childIds: groupChildren.map((c) => c.id),
+				childIds: groupChildren.map(c => c.id),
 			});
 		}
 	}

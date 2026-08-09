@@ -4,7 +4,10 @@
 // ── Pi-style extension that runs via the adapter ──────────────────────────────
 
 interface ExtensionAPI {
-	on(event: string, handler: (event: any, ctx: any) => Promise<any> | any): void;
+	on(
+		event: string,
+		handler: (event: any, ctx: any) => Promise<any> | any,
+	): void;
 	registerTool(tool: {
 		name: string;
 		label?: string;
@@ -12,10 +15,13 @@ interface ExtensionAPI {
 		parameters: any;
 		execute: (toolCallId: string, params: any) => Promise<any>;
 	}): void;
-	registerCommand(name: string, options: {
-		description?: string;
-		handler: (args: string, ctx: any) => Promise<void>;
-	}): void;
+	registerCommand(
+		name: string,
+		options: {
+			description?: string;
+			handler: (args: string, ctx: any) => Promise<void>;
+		},
+	): void;
 }
 
 interface ExtensionContext {
@@ -41,7 +47,8 @@ export default async function (api: ExtensionAPI) {
 					"Dangerous Command",
 					`Block "rm -rf" command? ${cmd}`,
 				);
-				if (!ok) return { block: true, reason: "User denied dangerous command" };
+				if (!ok)
+					return { block: true, reason: "User denied dangerous command" };
 				return { block: true, reason: "Blocked by extension" };
 			}
 		}
@@ -58,9 +65,14 @@ export default async function (api: ExtensionAPI) {
 				name: { type: "string", description: "Name to greet" },
 			},
 		},
-		execute: async (toolCallId, params) => {
+		execute: async (_toolCallId, params) => {
 			return {
-				content: [{ type: "text", text: `Hello, ${params.name || "world"}! This is a Pi extension running on Logician.` }],
+				content: [
+					{
+						type: "text",
+						text: `Hello, ${params.name || "world"}! This is a Pi extension running on Logician.`,
+					},
+				],
 			};
 		},
 	});

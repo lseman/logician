@@ -167,7 +167,7 @@ export interface ContextWindowConfig {
 /** Default: ~4 chars per token, 128K max. */
 export const DEFAULT_CONTEXT_WINDOW: ContextWindowConfig = {
 	maxTokens: 128_000,
-	estimateTokens: (text) => Math.ceil(text.length / 4),
+	estimateTokens: text => Math.ceil(text.length / 4),
 };
 
 // ── Metadata Filtering ───────────────────────────────────────────────────────

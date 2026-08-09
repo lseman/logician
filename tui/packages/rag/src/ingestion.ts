@@ -3,16 +3,11 @@
 // store in HybridVectorStore.
 
 import path from "node:path";
+import type { EmbeddingModel, RAGConfig } from "./config.ts";
 import type { IEmbedder } from "./embedder.ts";
 import { RAGPipeline } from "./pipeline/index.ts";
 import { HybridVectorStore } from "./store/hybrid-store.ts";
-import type {
-	ExtractedDocument,
-	RAGChunk,
-	SearchHit,
-	VectorStoreConfig,
-} from "./types.ts";
-import { DEFAULT_RAG_CONFIG, EmbeddingModel, type RAGConfig, type RerankingModel } from "./config.ts";
+import type { ExtractedDocument, RAGChunk, SearchHit } from "./types.ts";
 
 export interface IngestionConfig {
 	/** Embedding model to use. */
@@ -39,14 +34,13 @@ export class IngestionPipeline {
 	private store: HybridVectorStore;
 	private pipeline: RAGPipeline;
 
-	constructor(
-		projectDir: string,
-		config: IngestionConfig,
-	) {
+	constructor(projectDir: string, config: IngestionConfig) {
 		// Determine embedder
 		const embedder = config.embedder;
 		if (!embedder) {
-			throw new Error('embedder is required; provide IEmbedder instance or use IngestionPipeline with embedder option');
+			throw new Error(
+				"embedder is required; provide IEmbedder instance or use IngestionPipeline with embedder option",
+			);
 		}
 
 		const dimension = embedder.dimension;
@@ -151,5 +145,3 @@ export class IngestionPipeline {
 		this.store.close();
 	}
 }
-
-

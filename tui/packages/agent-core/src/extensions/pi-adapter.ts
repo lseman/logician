@@ -137,15 +137,11 @@
 
 import type { EventBus } from "./event-bus.ts";
 import type {
+	ExtensionToolResult,
 	ExtensionAPI as LApi,
 	ExtensionContext as LContext,
 	ExtensionEvent as LEvent,
 	ExtensionEventType as LEventType,
-	ExtensionEventHandler as LHandler,
-	RegisteredTool as LTool,
-	RegisteredCommand as LCommand,
-	ToolExecutionContext,
-	ExtensionToolResult,
 } from "./types.ts";
 
 // ── TypeBox Schema → JSON Schema ─────────────────────────────────────────────
@@ -155,18 +151,23 @@ function isTypeBoxSchema(obj: unknown): obj is Record<string, unknown> {
 	return (
 		typeof obj === "object" &&
 		obj !== null &&
-		("__type" in obj || "$__type" in obj || typeof (obj as Record<string, unknown>).type === "string")
+		("__type" in obj ||
+			"$__type" in obj ||
+			typeof (obj as Record<string, unknown>).type === "string")
 	);
 }
 
 /** Convert a TypeBox schema to Logician's flat parameter schema. */
-function convertSchema(schema: unknown, required: string[] = []): Record<string, unknown> {
+function convertSchema(
+	schema: unknown,
+	required: string[] = [],
+): Record<string, unknown> {
 	if (!isTypeBoxSchema(schema)) {
 		return { type: "object", properties: {}, required: [] };
 	}
 
 	const s = schema as Record<string, unknown>;
-	const typeBoxType = s.__type ?? s["$__type"] ?? undefined;
+	const typeBoxType = s.__type ?? s.$__type ?? undefined;
 	const typeName = typeof typeBoxType === "string" ? typeBoxType : undefined;
 
 	const result: Record<string, unknown> = {};
@@ -174,7 +175,8 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 	switch (typeName) {
 		case "String":
 			result.type = "string";
-			result.description = s.description ?? s.__metaDescription ?? s.description;
+			result.description =
+				s.description ?? s.__metaDescription ?? s.description;
 			break;
 		case "Number":
 			result.type = "number";
@@ -193,7 +195,7 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 			result.description = s.description ?? s.__metaDescription;
 			result.items = s.items !== undefined ? convertSchema(s.items, []) : {};
 			break;
-		case "Object":
+		case "Object": {
 			result.type = "object";
 			result.description = s.description ?? s.__metaDescription;
 			result.properties = {};
@@ -201,7 +203,10 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 			if (props && typeof props === "object") {
 				const req = (s.required as string[]) ?? [];
 				for (const [key, val] of Object.entries(props)) {
-					(result.properties as Record<string, unknown>)[key] = convertSchema(val, required);
+					(result.properties as Record<string, unknown>)[key] = convertSchema(
+						val,
+						required,
+					);
 					if (req.includes(key)) {
 						if (!result.required) result.required = [];
 						(result.required as string[]).push(key);
@@ -209,6 +214,7 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 				}
 			}
 			break;
+		}
 		case "Union": {
 			const options = (s.anyOf ?? s.union) as unknown[] | undefined;
 			if (options && Array.isArray(options) && options.length > 0) {
@@ -222,13 +228,15 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 			}
 			break;
 		}
-		case "Literal":
+		case "Literal": {
 			const val = s.const;
-			result.type = val === null ? "null" : typeof val === "number" ? "number" : "string";
+			result.type =
+				val === null ? "null" : typeof val === "number" ? "number" : "string";
 			result.enum = [val];
 			result.description = s.description ?? s.__metaDescription;
 			break;
-		case "Enum":
+		}
+		case "Enum": {
 			const enumValues = s.enum as unknown[];
 			if (enumValues && Array.isArray(enumValues)) {
 				result.type = typeof enumValues[0] === "number" ? "number" : "string";
@@ -238,6 +246,7 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 			}
 			result.description = s.description ?? s.__metaDescription;
 			break;
+		}
 		case "Partial":
 			// Partial removes all required fields
 			if (s.type === "Object") {
@@ -246,7 +255,10 @@ function convertSchema(schema: unknown, required: string[] = []): Record<string,
 				const props = s.properties as Record<string, unknown> | undefined;
 				if (props && typeof props === "object") {
 					for (const [key, val] of Object.entries(props)) {
-						(result.properties as Record<string, unknown>)[key] = convertSchema(val, []);
+						(result.properties as Record<string, unknown>)[key] = convertSchema(
+							val,
+							[],
+						);
 					}
 				}
 			}
@@ -325,7 +337,7 @@ type PiEventType =
  * Note: Some Pi events (agent_retry_*, agent_error)
  * are handled specially — they map from Logician events that don't exist in Pi's event set.
  */
-function mapToLogician(type: PiEventType): LEventType | null {
+function _mapToLogician(type: PiEventType): LEventType | null {
 	const mapping: Record<PiEventType, LEventType | null> = {
 		project_trust: null,
 		resources_discover: null,
@@ -371,16 +383,35 @@ function mapToLogician(type: PiEventType): LEventType | null {
 // ── Pi-compatible UI Context ─────────────────────────────────────────────────
 
 interface PiUI {
-	select(title: string, options: string[], opts?: { timeout?: number }): Promise<string | undefined>;
-	confirm(title: string, message: string, opts?: { timeout?: number }): Promise<boolean>;
-	input(title: string, placeholder?: string, opts?: { timeout?: number }): Promise<string | undefined>;
+	select(
+		title: string,
+		options: string[],
+		opts?: { timeout?: number },
+	): Promise<string | undefined>;
+	confirm(
+		title: string,
+		message: string,
+		opts?: { timeout?: number },
+	): Promise<boolean>;
+	input(
+		title: string,
+		placeholder?: string,
+		opts?: { timeout?: number },
+	): Promise<string | undefined>;
 	notify(message: string, type?: "info" | "warning" | "error"): void;
 	setStatus(key: string, text: string | undefined): void;
 	setWorkingMessage(message?: string): void;
 	setWorkingVisible(visible: boolean): void;
-	setWorkingIndicator(options?: { frames?: string[]; intervalMs?: number }): void;
+	setWorkingIndicator(options?: {
+		frames?: string[];
+		intervalMs?: number;
+	}): void;
 	setHiddenThinkingLabel(label?: string): void;
-	setWidget(key: string, content: string[] | undefined, options?: { placement?: "aboveEditor" | "belowEditor" }): void;
+	setWidget(
+		key: string,
+		content: string[] | undefined,
+		options?: { placement?: "aboveEditor" | "belowEditor" },
+	): void;
 	setFooter(factory: unknown): void;
 	setHeader(factory: unknown): void;
 	setTitle(title: string): void;
@@ -403,13 +434,25 @@ interface PiUI {
 /** Wrap Logician's ExtensionUI with Pi-compatible surface. */
 function createPiUI(logicianUI: {
 	notify: (message: string, type?: "info" | "warning" | "error") => void;
-	confirm: (title: string, message: string, opts?: { timeoutMs?: number }) => Promise<boolean>;
-	input: (title: string, placeholder?: string, opts?: { timeoutMs?: number }) => Promise<string | undefined>;
-	select: (title: string, options: Array<{ label: string; description?: string }>, opts?: { timeoutMs?: number }) => Promise<string | undefined>;
+	confirm: (
+		title: string,
+		message: string,
+		opts?: { timeoutMs?: number },
+	) => Promise<boolean>;
+	input: (
+		title: string,
+		placeholder?: string,
+		opts?: { timeoutMs?: number },
+	) => Promise<string | undefined>;
+	select: (
+		title: string,
+		options: Array<{ label: string; description?: string }>,
+		opts?: { timeoutMs?: number },
+	) => Promise<string | undefined>;
 }): PiUI {
 	return {
 		select: async (title, options, _opts) => {
-			const labels = options.map((o, i) => {
+			const labels = options.map((o, _i) => {
 				if (typeof o === "string") return { label: o };
 				return o;
 			});
@@ -548,8 +591,14 @@ interface PiCommandContext extends PiExtensionContext {
 	waitForIdle(): Promise<void>;
 	newSession(options?: unknown): Promise<{ cancelled: boolean }>;
 	fork(entryId: string, options?: unknown): Promise<{ cancelled: boolean }>;
-	navigateTree(targetId: string, options?: unknown): Promise<{ cancelled: boolean }>;
-	switchSession(sessionPath: string, options?: unknown): Promise<{ cancelled: boolean }>;
+	navigateTree(
+		targetId: string,
+		options?: unknown,
+	): Promise<{ cancelled: boolean }>;
+	switchSession(
+		sessionPath: string,
+		options?: unknown,
+	): Promise<{ cancelled: boolean }>;
 	reload(): Promise<void>;
 }
 
@@ -609,7 +658,11 @@ interface PiToolDefinition {
 		signal: AbortSignal | undefined,
 		onUpdate: unknown,
 		ctx: PiExtensionContext,
-	) => Promise<{ content: Array<{ type: string; text: string }>; details?: Record<string, unknown>; isError?: boolean }>;
+	) => Promise<{
+		content: Array<{ type: string; text: string }>;
+		details?: Record<string, unknown>;
+		isError?: boolean;
+	}>;
 }
 
 // ── Pi-compatible Command ────────────────────────────────────────────────────
@@ -625,23 +678,52 @@ interface PiCommand {
 export interface PiExtensionAPI {
 	on(
 		event: PiEventType,
-		handler: (event: Record<string, unknown>, ctx: PiExtensionContext) => Promise<unknown> | unknown,
+		handler: (
+			event: Record<string, unknown>,
+			ctx: PiExtensionContext,
+		) => Promise<unknown> | unknown,
 	): void;
 	registerTool(tool: PiToolDefinition): void;
-	registerCommand(name: string, options: { description?: string; handler: (args: string, ctx: PiCommandContext) => Promise<void> }): void;
-	registerShortcut(shortcut: string, options: { description?: string; handler: (ctx: PiExtensionContext) => Promise<void> | void }): void;
-	registerFlag(name: string, options: { description?: string; type: "boolean" | "string"; default?: boolean | string }): void;
+	registerCommand(
+		name: string,
+		options: {
+			description?: string;
+			handler: (args: string, ctx: PiCommandContext) => Promise<void>;
+		},
+	): void;
+	registerShortcut(
+		shortcut: string,
+		options: {
+			description?: string;
+			handler: (ctx: PiExtensionContext) => Promise<void> | void;
+		},
+	): void;
+	registerFlag(
+		name: string,
+		options: {
+			description?: string;
+			type: "boolean" | "string";
+			default?: boolean | string;
+		},
+	): void;
 	getFlag(name: string): boolean | string | undefined;
 	registerMessageRenderer(customType: string, renderer: unknown): void;
 	registerMarkdownTransformer(transformer: unknown): void;
 	registerEntryRenderer(customType: string, renderer: unknown): void;
-	sendMessage(message: Record<string, unknown>, options?: Record<string, unknown>): void;
+	sendMessage(
+		message: Record<string, unknown>,
+		options?: Record<string, unknown>,
+	): void;
 	sendUserMessage(content: string, options?: Record<string, unknown>): void;
 	appendEntry(customType: string, data?: unknown): void;
 	setSessionName(name: string): void;
 	getSessionName(): string | undefined;
 	setLabel(entryId: string, label: string | undefined): void;
-	exec(command: string, args: string[], options?: Record<string, unknown>): Promise<unknown>;
+	exec(
+		command: string,
+		args: string[],
+		options?: Record<string, unknown>,
+	): Promise<unknown>;
 	getActiveTools(): string[];
 	getAllTools(): unknown[];
 	setActiveTools(toolNames: string[]): void;
@@ -688,15 +770,15 @@ export interface PiRuntimePort {
 export class PiAdapter {
 	private logicianApi: LApi;
 	private logicianCtx: LContext;
-	private piContext: PiExtensionContext;
-	private piCommandCtx: PiCommandContext;
 	private registeredTools: PiToolDefinition[] = [];
 	private registeredCommands: PiCommand[] = [];
-	private registeredShortcuts: Array<{ shortcut: string; handler: (ctx: PiExtensionContext) => Promise<void> | void }> = [];
 	private registeredFlags: Record<string, boolean | string | undefined> = {};
 	private piHandlers: Array<{
 		event: PiEventType;
-		handler: (event: Record<string, unknown>, ctx: PiExtensionContext) => Promise<unknown> | unknown;
+		handler: (
+			event: Record<string, unknown>,
+			ctx: PiExtensionContext,
+		) => Promise<unknown> | unknown;
 	}> = [];
 	// Handlers for the three new events (registered via callbacks, not via pi.on)
 	private inputHandlers: InputEventHandler[] = [];
@@ -732,7 +814,8 @@ export class PiAdapter {
 			input: { ...event.input },
 		};
 		const ctx = createPiContext(this.logicianCtx, this.runtime);
-		let decision: { block?: boolean; reason?: string; terminate?: boolean } = {};
+		let decision: { block?: boolean; reason?: string; terminate?: boolean } =
+			{};
 		for (const entry of this.piHandlers) {
 			if (entry.event !== "tool_call") continue;
 			try {
@@ -764,7 +847,8 @@ export class PiAdapter {
 			if (entry.event !== "tool_result") continue;
 			try {
 				const result = await entry.handler(piEvent, ctx);
-				if (result && typeof result === "object") Object.assign(piEvent, result);
+				if (result && typeof result === "object")
+					Object.assign(piEvent, result);
 			} catch (error) {
 				console.error("[pi-adapter] handler error for tool_result:", error);
 			}
@@ -772,7 +856,9 @@ export class PiAdapter {
 		return {
 			...event,
 			content: (piEvent.content as typeof event.content) ?? event.content,
-			details: (piEvent.details as Record<string, unknown> | undefined) ?? event.details,
+			details:
+				(piEvent.details as Record<string, unknown> | undefined) ??
+				event.details,
 			isError: (piEvent.isError as boolean | undefined) ?? event.isError,
 		};
 	}
@@ -786,7 +872,7 @@ export class PiAdapter {
 			on: (event, handler) => {
 				this.piHandlers.push({ event, handler });
 			},
-			registerTool: (tool) => {
+			registerTool: tool => {
 				this.registeredTools.push(tool);
 				this.forwardTool(tool);
 			},
@@ -798,36 +884,44 @@ export class PiAdapter {
 			registerFlag: (name, options) => {
 				this.registeredFlags[name] = options.default;
 			},
-			getFlag: (name) => this.registeredFlags[name],
+			getFlag: name => this.registeredFlags[name],
 			registerMessageRenderer: () => {}, // no-op
 			registerMarkdownTransformer: () => {}, // no-op
 			registerEntryRenderer: () => {}, // no-op
-			onInput: (handler) => {
+			onInput: handler => {
 				this.inputHandlers.push(handler);
 			},
-			onUserBash: (handler) => {
+			onUserBash: handler => {
 				this.userBashHandlers.push(handler);
 			},
-			onProjectTrust: (handler) => {
+			onProjectTrust: handler => {
 				this.projectTrustHandlers.push(handler);
 			},
 			sendMessage: () => {}, // no-op
-			sendUserMessage: (content) => this.runtime?.sendUserMessage?.(content),
+			sendUserMessage: content => this.runtime?.sendUserMessage?.(content),
 			appendEntry: () => {}, // no-op
 			setSessionName: () => {}, // no-op
 			getSessionName: () => this.logicianCtx.sessionId,
 			setLabel: () => {}, // no-op
-			exec: async (command, args) => {
+			exec: async (_command, _args) => {
 				// Forward to bash tool
 				return { output: "", exitCode: 0 };
 			},
 			getActiveTools: () => this.runtime?.getActiveTools?.() ?? [],
 			getAllTools: () =>
 				this.runtime?.getAllTools?.() ??
-				this.registeredTools.map(t => ({ name: t.name, description: t.description })),
+				this.registeredTools.map(t => ({
+					name: t.name,
+					description: t.description,
+				})),
 			setActiveTools: names => this.runtime?.setActiveTools?.(names),
-			getCommands: () => this.registeredCommands.map(c => ({ name: c.name, description: c.description })),
-			setModel: model => this.runtime?.setModel?.(model) ?? Promise.resolve(false),
+			getCommands: () =>
+				this.registeredCommands.map(c => ({
+					name: c.name,
+					description: c.description,
+				})),
+			setModel: model =>
+				this.runtime?.setModel?.(model) ?? Promise.resolve(false),
 			getThinkingLevel: () => this.runtime?.getThinkingLevel?.(),
 			setThinkingLevel: level => this.runtime?.setThinkingLevel?.(level),
 			registerProvider: () => {}, // no-op
@@ -849,13 +943,22 @@ export class PiAdapter {
 				description: piTool.description,
 				parameters: jsonSchema as any,
 				execute: async (toolCallId, params, lctx) => {
-					const ctx = createPiContext({
-						ui: this.logicianCtx.ui,
-						state: this.logicianCtx.state,
-						cwd: lctx.cwd,
-						sessionId: lctx.sessionId,
-					}, this.runtime);
-					const result = await piTool.execute(toolCallId, params, undefined, undefined, ctx);
+					const ctx = createPiContext(
+						{
+							ui: this.logicianCtx.ui,
+							state: this.logicianCtx.state,
+							cwd: lctx.cwd,
+							sessionId: lctx.sessionId,
+						},
+						this.runtime,
+					);
+					const result = await piTool.execute(
+						toolCallId,
+						params,
+						undefined,
+						undefined,
+						ctx,
+					);
 					return {
 						content: result.content.map(c => c.text).join("\n"),
 						isError: result.isError,
@@ -869,11 +972,17 @@ export class PiAdapter {
 	/**
 	 * Forward a Pi command to Logician's command registry.
 	 */
-	private forwardCommand(name: string, options: { description?: string; handler: (args: string, ctx: PiCommandContext) => Promise<void> }): void {
+	private forwardCommand(
+		name: string,
+		options: {
+			description?: string;
+			handler: (args: string, ctx: PiCommandContext) => Promise<void>;
+		},
+	): void {
 		this.logicianApi.registerCommand({
 			name,
 			description: options.description ?? "",
-			handler: async (args) => {
+			handler: async args => {
 				const ctx = createPiCommandContext(this.logicianCtx, this.runtime);
 				await options.handler(args, ctx);
 				return "";
@@ -894,12 +1003,15 @@ export class PiAdapter {
 		const piEvent = this.translateLogicianToPi(logicianEvent);
 		if (!piEvent) return {};
 
-		const ctx = createPiContext({
-			ui: this.logicianCtx.ui,
-			state: this.logicianCtx.state,
-			cwd: this.logicianCtx.cwd,
-			sessionId: this.logicianCtx.sessionId,
-		}, this.runtime);
+		const ctx = createPiContext(
+			{
+				ui: this.logicianCtx.ui,
+				state: this.logicianCtx.state,
+				cwd: this.logicianCtx.cwd,
+				sessionId: this.logicianCtx.sessionId,
+			},
+			this.runtime,
+		);
 
 		let collectedMessages: unknown[] | undefined;
 		let collectedSystemPrompt: string | undefined;
@@ -910,16 +1022,24 @@ export class PiAdapter {
 					const result = await handler(piEvent as Record<string, unknown>, ctx);
 
 					// tool_call: blocking + terminate
-					if (piEvent.type === "tool_call" && result && typeof result === "object") {
-						const hookResult = result as { block?: boolean; reason?: string; terminate?: boolean };
+					if (
+						piEvent.type === "tool_call" &&
+						result &&
+						typeof result === "object"
+					) {
+						const hookResult = result as {
+							block?: boolean;
+							reason?: string;
+							terminate?: boolean;
+						};
 						if (hookResult.block) {
 							await this.logicianApi.emit({
 								type: "tool_execution_start" as LEventType,
 								context: {
-										sessionId: this.logicianCtx.sessionId,
-										cwd: this.logicianCtx.cwd,
-										tool_name: piEvent.toolName,
-										tool_input: piEvent.input,
+									sessionId: this.logicianCtx.sessionId,
+									cwd: this.logicianCtx.cwd,
+									tool_name: piEvent.toolName,
+									tool_input: piEvent.input,
 								},
 								block: true,
 								reason: hookResult.reason ?? "Blocked by extension",
@@ -929,10 +1049,22 @@ export class PiAdapter {
 					}
 
 					// tool_result: result modification (content, details, isError, usage)
-					if (piEvent.type === "tool_result" && result && typeof result === "object") {
-						const mod = result as { content?: Array<{ text?: string }>; details?: unknown; isError?: boolean; usage?: unknown };
-						const piContent = (piEvent as any).content as Array<{ text?: string }> | undefined;
-						const toolResultText = mod.content?.[0]?.text ?? piContent?.[0]?.text ?? "";
+					if (
+						piEvent.type === "tool_result" &&
+						result &&
+						typeof result === "object"
+					) {
+						const mod = result as {
+							content?: Array<{ text?: string }>;
+							details?: unknown;
+							isError?: boolean;
+							usage?: unknown;
+						};
+						const piContent = (piEvent as any).content as
+							| Array<{ text?: string }>
+							| undefined;
+						const toolResultText =
+							mod.content?.[0]?.text ?? piContent?.[0]?.text ?? "";
 						await this.logicianApi.emit({
 							type: "tool_execution_end" as LEventType,
 							context: {
@@ -949,9 +1081,17 @@ export class PiAdapter {
 					}
 
 					// before_agent_start: collect systemPrompt (don't re-emit — caller handles it)
-					if (piEvent.type === "before_agent_start" && result && typeof result === "object") {
+					if (
+						piEvent.type === "before_agent_start" &&
+						result &&
+						typeof result === "object"
+					) {
 						const agentStartResult = result as {
-							message?: { customType: string; content: string; display: boolean };
+							message?: {
+								customType: string;
+								content: string;
+								display: boolean;
+							};
 							systemPrompt?: string;
 						};
 						if (agentStartResult.systemPrompt) {
@@ -961,7 +1101,11 @@ export class PiAdapter {
 					}
 
 					// context: collect modified messages
-					if (piEvent.type === "context" && result && typeof result === "object") {
+					if (
+						piEvent.type === "context" &&
+						result &&
+						typeof result === "object"
+					) {
 						const contextResult = result as { messages?: unknown[] };
 						if (contextResult.messages) {
 							collectedMessages = contextResult.messages;
@@ -969,7 +1113,10 @@ export class PiAdapter {
 						}
 					}
 				} catch (err) {
-					console.error(`[pi-adapter] handler error for ${piEvent.type}:`, err instanceof Error ? err.message : String(err));
+					console.error(
+						`[pi-adapter] handler error for ${piEvent.type}:`,
+						err instanceof Error ? err.message : String(err),
+					);
 				}
 			}
 		}
@@ -1111,13 +1258,12 @@ export class PiAdapter {
 			}
 			case "message_end":
 				return { type: "message_end", message: event.context.message };
-			case "tool_execution_start":
-				{
-					const args =
-						event.context.tool_input ??
-						event.context.toolInput ??
-						event.context.args ??
-						{};
+			case "tool_execution_start": {
+				const args =
+					event.context.tool_input ??
+					event.context.toolInput ??
+					event.context.args ??
+					{};
 				return {
 					type: "tool_execution_start",
 					toolCallId: (event.context as any).toolCallId,
@@ -1126,7 +1272,7 @@ export class PiAdapter {
 					// Compatibility alias used by early Logician Pi adapters.
 					input: args,
 				};
-				}
+			}
 			case "tool_execution_end":
 				return {
 					type: "tool_execution_end",
@@ -1245,19 +1391,25 @@ export class PiAdapter {
 		text?: string;
 		images?: unknown[];
 	} | null> {
-		const ctx = createPiContext({
-			ui: this.logicianCtx.ui,
-			state: this.logicianCtx.state,
-			cwd: this.logicianCtx.cwd,
-			sessionId: this.logicianCtx.sessionId,
-		}, this.runtime);
+		const ctx = createPiContext(
+			{
+				ui: this.logicianCtx.ui,
+				state: this.logicianCtx.state,
+				cwd: this.logicianCtx.cwd,
+				sessionId: this.logicianCtx.sessionId,
+			},
+			this.runtime,
+		);
 
 		for (const handler of this.inputHandlers) {
 			try {
 				const result = await handler(text, images, source, ctx.hasUI, ctx.ui);
 				if (result) return result;
 			} catch (err) {
-				console.error("[pi-adapter] input handler error:", err instanceof Error ? err.message : String(err));
+				console.error(
+					"[pi-adapter] input handler error:",
+					err instanceof Error ? err.message : String(err),
+				);
 			}
 		}
 		return null; // default: continue
@@ -1276,19 +1428,31 @@ export class PiAdapter {
 		result?: { output: string; exitCode: number; cancelled: boolean };
 		operations?: unknown;
 	} | null> {
-		const ctx = createPiContext({
-			ui: this.logicianCtx.ui,
-			state: this.logicianCtx.state,
-			cwd: this.logicianCtx.cwd,
-			sessionId: this.logicianCtx.sessionId,
-		}, this.runtime);
+		const ctx = createPiContext(
+			{
+				ui: this.logicianCtx.ui,
+				state: this.logicianCtx.state,
+				cwd: this.logicianCtx.cwd,
+				sessionId: this.logicianCtx.sessionId,
+			},
+			this.runtime,
+		);
 
 		for (const handler of this.userBashHandlers) {
 			try {
-				const result = await handler(command, excludeFromContext, this.logicianCtx.cwd, ctx.hasUI, ctx.ui);
+				const result = await handler(
+					command,
+					excludeFromContext,
+					this.logicianCtx.cwd,
+					ctx.hasUI,
+					ctx.ui,
+				);
 				if (result) return result;
 			} catch (err) {
-				console.error("[pi-adapter] user_bash handler error:", err instanceof Error ? err.message : String(err));
+				console.error(
+					"[pi-adapter] user_bash handler error:",
+					err instanceof Error ? err.message : String(err),
+				);
 			}
 		}
 		return null; // default: continue
@@ -1303,19 +1467,25 @@ export class PiAdapter {
 		trusted: "yes" | "no" | "undecided";
 		remember?: boolean;
 	} | null> {
-		const ctx = createPiContext({
-			ui: this.logicianCtx.ui,
-			state: this.logicianCtx.state,
-			cwd: cwd,
-			sessionId: this.logicianCtx.sessionId,
-		}, this.runtime);
+		const ctx = createPiContext(
+			{
+				ui: this.logicianCtx.ui,
+				state: this.logicianCtx.state,
+				cwd: cwd,
+				sessionId: this.logicianCtx.sessionId,
+			},
+			this.runtime,
+		);
 
 		for (const handler of this.projectTrustHandlers) {
 			try {
 				const result = await handler(cwd, ctx.hasUI, ctx.ui);
 				if (result) return result;
 			} catch (err) {
-				console.error("[pi-adapter] project_trust handler error:", err instanceof Error ? err.message : String(err));
+				console.error(
+					"[pi-adapter] project_trust handler error:",
+					err instanceof Error ? err.message : String(err),
+				);
 			}
 		}
 		return null; // default: continue (let Logician handle it)
@@ -1335,10 +1505,7 @@ export function isToolCallEventType(
 	toolName: string,
 	event: Record<string, unknown>,
 ): boolean {
-	return (
-		event.type === "tool_call" &&
-		event.toolName === toolName
-	);
+	return event.type === "tool_call" && event.toolName === toolName;
 }
 
 /**
@@ -1348,8 +1515,5 @@ export function isToolCallEventType(
  * @returns true if the event is a tool_result for a bash tool.
  */
 export function isBashToolResult(event: Record<string, unknown>): boolean {
-	return (
-		event.type === "tool_result" &&
-		event.toolName === "bash"
-	);
+	return event.type === "tool_result" && event.toolName === "bash";
 }

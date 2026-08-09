@@ -1,65 +1,74 @@
 /* Logician docs custom theme — matches site/index.html palette */
 
 :root {
-  /* Landing-page palette (site/style.css) */
-  --cyan: #06b6d4;
-  --cyan-bright: #22d3ee;
-  --violet: #8b5cf6;
-  --bg: #0b0e11;
-  --bg-soft: #111619;
-  --bg-hi: #161d22;
-  --border: rgba(255, 255, 255, 0.04);
-  --border-hi: rgba(255, 255, 255, 0.08);
-  --text: #e4e8ec;
-  --muted: #8a959e;
-  --muted-2: #5c6570;
-  --code-bg: #111619;
-  --radius: 14px;
-  --radius-sm: 10px;
+	/* Landing-page palette (site/style.css) */
+	--cyan: #06b6d4;
+	--cyan-bright: #22d3ee;
+	--violet: #8b5cf6;
+	--bg: #0b0e11;
+	--bg-soft: #111619;
+	--bg-hi: #161d22;
+	--border: rgba(255, 255, 255, 0.04);
+	--border-hi: rgba(255, 255, 255, 0.08);
+	--text: #e4e8ec;
+	--muted: #8a959e;
+	--muted-2: #5c6570;
+	--code-bg: #111619;
+	--radius: 14px;
+	--radius-sm: 10px;
 }
 
 /* Gradient text utility — matches .grad on landing page */
 .grad-text {
-  background: linear-gradient(125deg, #22d3ee 0%, #06b6d4 40%, #8b5cf6 80%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+	background: linear-gradient(125deg, #22d3ee 0%, #06b6d4 40%, #8b5cf6 80%);
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	background-clip: text;
 }
 
 /* Base */
 body {
-  background: var(--bg) !important;
+	background: var(--bg);
 }
 
-.Layout, .VPContent, .VPDoc, .VPDoc.has-aside .content-container,
-.VPDocAside, .VPSidebar {
-  background: transparent !important;
+.Layout,
+.VPContent,
+.VPDoc,
+.VPDoc.has-aside .content-container,
+.VPDocAside,
+.VPSidebar {
+	background: transparent;
 }
 
 /* Typography — matches landing page */
 :root {
-  --vp-font-family-base: 'DM Sans', system-ui, sans-serif;
-  --vp-font-family-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+	--vp-font-family-base: "DM Sans", system-ui, sans-serif;
+	--vp-font-family-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
 /* Plus Jakarta Sans for headings */
-.vp-doc h1, .vp-doc h2, .vp-doc h3, .vp-doc h4, .vp-doc h5, .vp-doc h6 {
-  font-family: 'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif;
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4,
+.vp-doc h5,
+.vp-doc h6 {
+	font-family: "Plus Jakarta Sans", "DM Sans", system-ui, sans-serif;
 }
 
 /* Nav — one dark surface, neutral controls, one interaction accent */
 .VPNavBar {
-  --vp-nav-logo-height: 28px;
-  --vp-nav-bg-color: #0b0e11;
-  background: var(--vp-nav-bg-color) !important;
-  backdrop-filter: blur(24px) saturate(1.3);
-  -webkit-backdrop-filter: blur(24px) saturate(1.3);
-  border-bottom: 1px solid var(--border);
+	--vp-nav-logo-height: 28px;
+	--vp-nav-bg-color: #0b0e11;
+	background: var(--vp-nav-bg-color);
+	backdrop-filter: blur(24px) saturate(1.3);
+	-webkit-backdrop-filter: blur(24px) saturate(1.3);
+	border-bottom: 1px solid var(--border);
 }
 
 .VPNavBar.has-sidebar > .wrapper > .container > .title,
 .VPNavBar:not(.home.top) .content-body {
-  background: var(--vp-nav-bg-color) !important;
+	background: var(--vp-nav-bg-color);
 }
 
 .VPNavBar .title,
@@ -67,321 +76,323 @@ body {
 .VPNavBar .button,
 .VPNavBar .VPSocialLink,
 .VPNavBar .vpi-more-horizontal {
-  color: var(--muted) !important;
+	color: var(--muted);
 }
 
 .VPNavBarTitle .title {
-  color: var(--text) !important;
+	color: var(--text);
 }
 
 .VPNavBar .button,
 .VPNavBar .VPSocialLink {
-  background: transparent !important;
-  border-color: transparent !important;
+	background: transparent;
+	border-color: transparent;
 }
 
 .VPNavBar .button:hover,
 .VPNavBar .button:focus-visible,
 .VPNavBar .VPSocialLink:hover,
 .VPNavBar .VPSocialLink:focus-visible {
-  color: var(--text) !important;
-  background: rgba(255, 255, 255, 0.05) !important;
+	color: var(--text);
+	background: rgba(255, 255, 255, 0.05);
 }
 
 .VPNavBar button:focus-visible,
 .VPNavBar a:focus-visible {
-  outline: 2px solid var(--cyan);
-  outline-offset: 2px;
+	outline: 2px solid var(--cyan);
+	outline-offset: 2px;
 }
 
 /* Sidebar */
 .VPSidebar {
-  border-right: 1px solid var(--border);
-  background: var(--bg) !important;
+	border-right: 1px solid var(--border);
+	background: var(--bg);
 }
 
 .VPSidebar .curtain {
-  background: var(--bg) !important;
+	background: var(--bg);
 }
 
 /* Nav dropdown button */
 .VPNavBarMenuGroup .button {
-  font-size: 0.84rem;
-  padding: 0.3rem 0.6rem;
-  border-radius: 8px;
+	font-size: 0.84rem;
+	padding: 0.3rem 0.6rem;
+	border-radius: 8px;
 }
 
 /* Search button follows the same neutral header controls. */
 .VPNavBarSearch .DocSearch-Button {
-  background: rgba(255, 255, 255, 0.03) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--muted) !important;
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid var(--border);
+	color: var(--muted);
 }
 
 .VPNavBarSearch .DocSearch-Button:hover,
 .VPNavBarSearch .DocSearch-Button:focus-visible {
-  background: rgba(255, 255, 255, 0.05) !important;
-  border-color: var(--border-hi) !important;
-  color: var(--text) !important;
+	background: rgba(255, 255, 255, 0.05);
+	border-color: var(--border-hi);
+	color: var(--text);
 }
 
 .VPNavBarSearch .DocSearch-Button-Key {
-  background: transparent !important;
-  border-color: var(--border-hi) !important;
-  color: var(--muted-2) !important;
+	background: transparent;
+	border-color: var(--border-hi);
+	color: var(--muted-2);
 }
 
 /* Content — matches landing page container */
 .vp-doc {
-  max-width: 72rem;
-  margin-inline: auto;
-  padding-inline: 2rem;
+	max-width: 72rem;
+	margin-inline: auto;
+	padding-inline: 2rem;
 }
 
 .vp-doc h1 {
-  font-size: clamp(2rem, 3vw, 2.8rem);
-  font-weight: 800;
-  color: var(--text);
-  letter-spacing: -0.03em;
-  line-height: 1.05;
-  margin-bottom: 1rem;
+	font-size: clamp(2rem, 3vw, 2.8rem);
+	font-weight: 800;
+	color: var(--text);
+	letter-spacing: -0.03em;
+	line-height: 1.05;
+	margin-bottom: 1rem;
 }
 
 .vp-doc h2 {
-  font-size: clamp(1.5rem, 2.5vw, 2rem);
-  font-weight: 800;
-  color: var(--text);
-  letter-spacing: -0.03em;
-  line-height: 1.05;
-  margin-top: 3rem;
-  margin-bottom: 1rem;
+	font-size: clamp(1.5rem, 2.5vw, 2rem);
+	font-weight: 800;
+	color: var(--text);
+	letter-spacing: -0.03em;
+	line-height: 1.05;
+	margin-top: 3rem;
+	margin-bottom: 1rem;
 }
 
 .vp-doc h3 {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--text);
-  margin-top: 2rem;
+	font-size: 1.2rem;
+	font-weight: 700;
+	color: var(--text);
+	margin-top: 2rem;
 }
 
 /* Links — cyan accent matching landing page */
 .vp-doc a:not(.vp-doc .headerlink) {
-  color: var(--cyan-bright);
-  text-decoration: none;
-  border-bottom: 1px solid rgba(34, 211, 238, 0.2);
-  transition: border-color 0.2s;
+	color: var(--cyan-bright);
+	text-decoration: none;
+	border-bottom: 1px solid rgba(34, 211, 238, 0.2);
+	transition: border-color 0.2s;
 }
 
 .vp-doc a:hover {
-  border-bottom-color: var(--cyan-bright);
+	border-bottom-color: var(--cyan-bright);
 }
 
 /* Code — matches landing page code style */
 .vp-doc :not(pre) > code {
-  background: rgba(6, 182, 212, 0.1);
-  color: var(--cyan-bright);
-  border: 1px solid var(--border-hi);
-  border-radius: var(--radius-sm);
-  padding: 0.08em 0.4em;
-  font-size: 0.85em;
+	background: rgba(6, 182, 212, 0.1);
+	color: var(--cyan-bright);
+	border: 1px solid var(--border-hi);
+	border-radius: var(--radius-sm);
+	padding: 0.08em 0.4em;
+	font-size: 0.85em;
 }
 
 .vp-doc pre {
-  background: var(--code-bg) !important;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.2rem 1.4rem;
-  overflow-x: auto;
+	background: var(--code-bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 1.2rem 1.4rem;
+	overflow-x: auto;
 }
 
 .vp-doc pre code {
-  font-size: 0.82rem;
-  line-height: 1.7;
-  color: var(--text);
+	font-size: 0.82rem;
+	line-height: 1.7;
+	color: var(--text);
 }
 
 /* Buttons — matches landing page .btn styles */
 .vp-doc .md-button {
-  border-radius: 999px;
-  padding: 0.5rem 1rem;
-  font-size: 0.84rem;
-  font-weight: 500;
-  font-family: 'DM Sans', sans-serif;
-  border: 1px solid var(--border-hi);
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
-  transition: all 0.2s;
-  cursor: pointer;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+	border-radius: 999px;
+	padding: 0.5rem 1rem;
+	font-size: 0.84rem;
+	font-weight: 500;
+	font-family: "DM Sans", sans-serif;
+	border: 1px solid var(--border-hi);
+	color: var(--text);
+	background: rgba(255, 255, 255, 0.06);
+	transition: all 0.2s;
+	cursor: pointer;
+	text-decoration: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
 }
 
 .vp-doc .md-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.15);
-  color: var(--cyan-bright);
+	background: rgba(255, 255, 255, 0.1);
+	border-color: rgba(255, 255, 255, 0.15);
+	color: var(--cyan-bright);
 }
 
 .vp-doc a.md-button.md-button--primary,
 .vp-doc a.md-button.md-button--primary:visited {
-  background: #0e7490;
-  border-color: transparent;
-  color: #fff !important;
-  font-weight: 600;
-  box-shadow: 0 2px 10px rgba(14, 116, 144, 0.3);
+	background: #0e7490;
+	border-color: transparent;
+	color: #fff;
+	font-weight: 600;
+	box-shadow: 0 2px 10px rgba(14, 116, 144, 0.3);
 }
 
 .vp-doc a.md-button.md-button--primary:hover,
 .vp-doc a.md-button.md-button--primary:focus-visible {
-  background: #0891b2;
-  color: #fff !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25);
+	background: #0891b2;
+	color: #fff;
+	transform: translateY(-1px);
+	box-shadow: 0 4px 14px rgba(6, 182, 212, 0.25);
 }
 
 .vp-doc a.md-button:focus-visible {
-  outline: 3px solid var(--cyan-bright);
-  outline-offset: 3px;
+	outline: 3px solid var(--cyan-bright);
+	outline-offset: 3px;
 }
 
 /* Hero actions */
 .hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin: 1.5rem 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	margin: 1.5rem 0;
 }
 
 .hero-actions .md-button {
-  margin: 0;
+	margin: 0;
 }
 
 /* Tables — matches landing page feature grid */
 .vp-doc table {
-  border-radius: var(--radius);
-  overflow: hidden;
-  border: 1px solid var(--border);
-  font-size: 0.86rem;
-  width: 100%;
+	border-radius: var(--radius);
+	overflow: hidden;
+	border: 1px solid var(--border);
+	font-size: 0.86rem;
+	width: 100%;
 }
 
 .vp-doc table th {
-  background: var(--bg-hi);
-  color: var(--cyan-bright);
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 0.72rem;
-  letter-spacing: 0.05em;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
+	background: var(--bg-hi);
+	color: var(--cyan-bright);
+	font-weight: 700;
+	text-transform: uppercase;
+	font-size: 0.72rem;
+	letter-spacing: 0.05em;
+	padding: 0.75rem 1rem;
+	border-bottom: 1px solid var(--border);
 }
 
 .vp-doc table td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
+	padding: 0.75rem 1rem;
+	border-bottom: 1px solid var(--border);
+	color: var(--text);
 }
 
 .vp-doc table tr:last-child td {
-  border-bottom: none;
+	border-bottom: none;
 }
 
 .vp-doc table tr:hover {
-  background: rgba(6, 182, 212, 0.03);
+	background: rgba(6, 182, 212, 0.03);
 }
 
 /* Admonitions — cyan/violet tinted, matching landing page */
-.vp-doc .tip, .vp-doc .note, .vp-doc .warning {
-  border-radius: var(--radius);
-  border-width: 1px;
+.vp-doc .tip,
+.vp-doc .note,
+.vp-doc .warning {
+	border-radius: var(--radius);
+	border-width: 1px;
 }
 
 .vp-doc .tip {
-  border-color: rgba(34, 211, 238, 0.2);
-  background: rgba(34, 211, 238, 0.04);
+	border-color: rgba(34, 211, 238, 0.2);
+	background: rgba(34, 211, 238, 0.04);
 }
 
 .vp-doc .tip > .title {
-  background: rgba(34, 211, 238, 0.08);
-  color: var(--cyan-bright);
+	background: rgba(34, 211, 238, 0.08);
+	color: var(--cyan-bright);
 }
 
 .vp-doc .warning {
-  border-color: rgba(251, 191, 36, 0.2);
-  background: rgba(251, 191, 36, 0.04);
+	border-color: rgba(251, 191, 36, 0.2);
+	background: rgba(251, 191, 36, 0.04);
 }
 
 .vp-doc .warning > .title {
-  background: rgba(251, 191, 36, 0.08);
-  color: #fbbf24;
+	background: rgba(251, 191, 36, 0.08);
+	color: #fbbf24;
 }
 
 .vp-doc .note {
-  border-color: rgba(139, 92, 246, 0.2);
-  background: rgba(139, 92, 246, 0.04);
+	border-color: rgba(139, 92, 246, 0.2);
+	background: rgba(139, 92, 246, 0.04);
 }
 
 .vp-doc .note > .title {
-  background: rgba(139, 92, 246, 0.08);
-  color: var(--violet);
+	background: rgba(139, 92, 246, 0.08);
+	color: var(--violet);
 }
 
 /* Mermaid — matches landing page code-block style */
 .mermaid {
-  background: var(--bg-soft);
-  padding: 1.2rem 1.4rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  text-align: center;
-  margin: 2rem 0;
+	background: var(--bg-soft);
+	padding: 1.2rem 1.4rem;
+	border-radius: var(--radius);
+	border: 1px solid var(--border);
+	text-align: center;
+	margin: 2rem 0;
 }
 
 .mermaid svg {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  height: auto;
-  margin-inline: auto;
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	height: auto;
+	margin-inline: auto;
 }
 
 /* Footer — matches landing page */
 .VPFooter {
-  border-top: 1px solid var(--border);
-  background: rgba(11, 14, 17, 0.72);
+	border-top: 1px solid var(--border);
+	background: rgba(11, 14, 17, 0.72);
 }
 
 /* Search — matches landing page input style */
 .VPNavBarSearch {
-  .search-input {
-    background: rgba(255, 255, 255, 0.03) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 999px !important;
-    color: var(--text) !important;
-    font-family: 'DM Sans', sans-serif !important;
-  }
-  .search-input:focus {
-    border-color: var(--cyan) !important;
-    box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15) !important;
-  }
+	.search-input {
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		color: var(--text);
+		font-family: "DM Sans", sans-serif;
+	}
+	.search-input:focus {
+		border-color: var(--cyan);
+		box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15);
+	}
 }
 
 /* Responsive — matches landing page breakpoints */
 @media (max-width: 1024px) {
-  .vp-doc {
-    max-width: 100%;
-  }
+	.vp-doc {
+		max-width: 100%;
+	}
 }
 
 @media (max-width: 768px) {
-  .vp-doc {
-    padding-inline: 1.25rem;
-  }
-  .hero-actions {
-    flex-direction: column;
-  }
-  .hero-actions .md-button {
-    text-align: center;
-  }
+	.vp-doc {
+		padding-inline: 1.25rem;
+	}
+	.hero-actions {
+		flex-direction: column;
+	}
+	.hero-actions .md-button {
+		text-align: center;
+	}
 }

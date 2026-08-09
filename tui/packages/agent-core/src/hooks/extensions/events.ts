@@ -420,48 +420,58 @@ export type ExtensionEventResult<T extends ExtensionEventName> =
 							: T extends "agent_retry_end"
 								? AgentRetryEndResult | undefined
 								: T extends "turn_start"
-											? TurnStartResult | undefined
-											: T extends "turn_end"
-												? TurnEndResult | undefined
-												: T extends "message_start"
-													? MessageStartResult | undefined
-													: T extends "message_update"
-														? MessageUpdateResult | undefined
-														: T extends "message_end"
-															? MessageEndResult | undefined
-															: T extends "tool_execution_start"
-																? ToolExecutionStartResult | undefined
-																: T extends "tool_execution_update"
-																	? ToolExecutionUpdateResult | undefined
-																	: T extends "tool_execution_end"
-																		? ToolExecutionEndResult | undefined
-																		: T extends "context_update"
-																			? ContextUpdateResult | undefined
-																			: T extends "session_before_switch"
-																				? SessionBeforeSwitchResult | undefined
-																				: T extends "session_before_fork"
-																					? SessionBeforeForkResult | undefined
-																					: T extends "session_before_compact"
-																						? SessionBeforeCompactResult | undefined
-																						: T extends "session_compact"
-																							? SessionCompactResult | undefined
-																							: T extends "session_shutdown"
-																								? SessionShutdownResult | undefined
-																								: T extends "queue_update"
-																									? QueueUpdateResult | undefined
-																									: T extends "session_start"
-																									? SessionStartResult | undefined
-																									: T extends "session_delete"
-																										? SessionDeleteResult | undefined
-																										: T extends "model_select"
-																											? ModelSelectResult | undefined
-																											: T extends "thinking_level_changed"
-																												? ThinkingLevelChangedResult | undefined
-																												: T extends "before_provider_request"
-																													? BeforeProviderRequestResult | undefined
-																													: T extends "after_provider_response"
-																														? AfterProviderResponseResult | undefined
-																															: undefined;
+									? TurnStartResult | undefined
+									: T extends "turn_end"
+										? TurnEndResult | undefined
+										: T extends "message_start"
+											? MessageStartResult | undefined
+											: T extends "message_update"
+												? MessageUpdateResult | undefined
+												: T extends "message_end"
+													? MessageEndResult | undefined
+													: T extends "tool_execution_start"
+														? ToolExecutionStartResult | undefined
+														: T extends "tool_execution_update"
+															? ToolExecutionUpdateResult | undefined
+															: T extends "tool_execution_end"
+																? ToolExecutionEndResult | undefined
+																: T extends "context_update"
+																	? ContextUpdateResult | undefined
+																	: T extends "session_before_switch"
+																		? SessionBeforeSwitchResult | undefined
+																		: T extends "session_before_fork"
+																			? SessionBeforeForkResult | undefined
+																			: T extends "session_before_compact"
+																				? SessionBeforeCompactResult | undefined
+																				: T extends "session_compact"
+																					? SessionCompactResult | undefined
+																					: T extends "session_shutdown"
+																						? SessionShutdownResult | undefined
+																						: T extends "queue_update"
+																							? QueueUpdateResult | undefined
+																							: T extends "session_start"
+																								? SessionStartResult | undefined
+																								: T extends "session_delete"
+																									?
+																											| SessionDeleteResult
+																											| undefined
+																									: T extends "model_select"
+																										?
+																												| ModelSelectResult
+																												| undefined
+																										: T extends "thinking_level_changed"
+																											?
+																													| ThinkingLevelChangedResult
+																													| undefined
+																											: T extends "before_provider_request"
+																												?
+																														| BeforeProviderRequestResult
+																														| undefined
+																												: T extends "after_provider_response"
+																													?
+																															| AfterProviderResponseResult
+																															| undefined
+																													: undefined;
 
 export type ExtensionEventHandler<T extends ExtensionEventName> = (
 	event: Extract<ExtensionEvent, { type: T }>,

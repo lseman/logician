@@ -93,7 +93,9 @@ function discoverFiles(
 		}
 
 		if (isDir) {
-			results.push(...discoverFiles(fullPath, rootDir, matcher, source, compatibility));
+			results.push(
+				...discoverFiles(fullPath, rootDir, matcher, source, compatibility),
+			);
 		} else if (isFile && /\.(ts|js|mjs)$/.test(entry.name)) {
 			results.push({ path: fullPath, source, compatibility });
 		}

@@ -939,19 +939,21 @@ export class AutoresearchSession {
 			state.currentSegment,
 			state.bestDirection,
 		);
-		const rows: AutoresearchDashboardRow[] = segmentResults.map((result, i) => ({
-			run: i + 1,
-			commit: result.commit,
-			status: result.status,
-			metric: result.metric,
-			metricFormatted: formatNum(result.metric, state.metricUnit),
-			description: result.description,
-			timestamp: result.timestamp,
-			isBest:
-				result.status === "keep" &&
-				bestMetric !== null &&
-				result.metric === bestMetric,
-		}));
+		const rows: AutoresearchDashboardRow[] = segmentResults.map(
+			(result, i) => ({
+				run: i + 1,
+				commit: result.commit,
+				status: result.status,
+				metric: result.metric,
+				metricFormatted: formatNum(result.metric, state.metricUnit),
+				description: result.description,
+				timestamp: result.timestamp,
+				isBest:
+					result.status === "keep" &&
+					bestMetric !== null &&
+					result.metric === bestMetric,
+			}),
+		);
 		return { summary: this.getWidgetSummary(), rows };
 	}
 
@@ -1208,10 +1210,7 @@ export class AutoresearchSession {
 				let checksOutput = "";
 				let checksDuration = 0;
 
-				if (
-					benchmarkPassed &&
-					fs.existsSync(autoresearchChecksPath(workDir))
-				) {
+				if (benchmarkPassed && fs.existsSync(autoresearchChecksPath(workDir))) {
 					const _checksTimeout =
 						((params.checks_timeout_seconds as number) ?? 300) * 1000;
 					const ct0 = Date.now();
@@ -1255,9 +1254,7 @@ export class AutoresearchSession {
 				// Parse METRIC lines
 				const parsedMetricMap = parseMetricLines(output);
 				const parsedMetrics =
-					parsedMetricMap.size > 0
-						? Object.fromEntries(parsedMetricMap)
-						: null;
+					parsedMetricMap.size > 0 ? Object.fromEntries(parsedMetricMap) : null;
 				const parsedPrimary = parsedMetricMap.get(state.metricName) ?? null;
 
 				let text = "";
@@ -1290,9 +1287,7 @@ export class AutoresearchSession {
 						const unit = sm?.unit ?? "";
 						text += ` ${name}=${formatNum(value, unit)}`;
 					}
-					const secArgs = secondary
-						.map(([k, v]) => `"${k}": ${v}`)
-						.join(", ");
+					const secArgs = secondary.map(([k, v]) => `"${k}": ${v}`).join(", ");
 					text += `\nUse these values: metric: ${parsedPrimary ?? "?"}, metrics: {${secArgs}}\n`;
 				}
 
@@ -1386,10 +1381,7 @@ export class AutoresearchSession {
 			}
 		}
 
-		state.bestMetric = findBaselineMetric(
-			state.results,
-			state.currentSegment,
-		);
+		state.bestMetric = findBaselineMetric(state.results, state.currentSegment);
 		state.confidence = computeConfidence(
 			state.results,
 			state.currentSegment,

@@ -6,7 +6,7 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**", "!**/dist/**", "!**/node_modules/**"]
+		"includes": ["**", "!**/dist", "!**/node_modules"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -16,9 +16,8 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true,
 			"complexity": {
-				"noForEach": "warn",
+				"noForEach": "off",
 				"useOptionalChain": "warn",
 				"noBannedTypes": "warn"
 			},
@@ -36,7 +35,8 @@
 				"noNonNullAssertion": "warn",
 				"noUselessElse": "off",
 				"useConst": "warn",
-				"noParameterAssign": "off"
+				"noParameterAssign": "off",
+				"noDescendingSpecificity": "warn"
 			},
 			"correctness": {
 				"noUnusedVariables": "warn",
@@ -47,7 +47,9 @@
 				"noVoidTypeReturn": "warn"
 			},
 			"a11y": {
-				"useButtonType": "off"
+				"useButtonType": "off",
+				"noSvgWithoutTitle": "warn",
+				"useValidAnchor": "warn"
 			},
 			"performance": {
 				"noDelete": "error"
