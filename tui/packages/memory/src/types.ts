@@ -538,8 +538,11 @@ export interface MemoryStore {
 	exportData(): ExportData;
 	/** Import data from a snapshot. */
 	importData(data: ImportData): ImportResult;
-	/** Auto-tier all memories: hot (<1h), warm (<24h), cold (>24h). */
-	autoTierMemories(): Record<string, WorkingMemoryTier>;
+	/** Auto-tier all memories by retention score (exponential decay + access
+	 *  reinforcement, weighted by type salience) — see computeRetentionScore. */
+	autoTierMemories(
+		config?: DecayConfigInput,
+	): Record<string, WorkingMemoryTier>;
 
 	// ── Auto-Forget ─────────────────────────────────────────────────────
 	/** Delete old, low-importance observations. */

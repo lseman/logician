@@ -1493,25 +1493,23 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		);
 	}
 
-	function autoTierMemories(): Record<string, WorkingMemoryTier> {
+	function autoTierMemories(
+		config: DecayConfigInput = {},
+	): Record<string, WorkingMemoryTier> {
 		const tiered: Record<string, WorkingMemoryTier> = {};
-		const nowMs = Date.now();
-		const oneHour = 60 * 60 * 1000;
-		const oneDay = 24 * oneHour;
 
 		const rows = db
 			.prepare(
-				"SELECT id, last_accessed FROM memories WHERE is_latest = 1 AND last_accessed IS NOT NULL AND workspace = ?",
+				"SELECT id FROM memories WHERE is_latest = 1 AND last_accessed IS NOT NULL AND workspace = ?",
 			)
-			.all(currentWorkspace) as { id: string; last_accessed: string }[];
+			.all(currentWorkspace) as { id: string }[];
 
 		for (const row of rows) {
-			const accessMs = new Date(row.last_accessed).getTime();
-			const age = nowMs - accessMs;
-			let tier: WorkingMemoryTier;
-			if (age < oneHour) tier = "hot";
-			else if (age < oneDay) tier = "warm";
-			else tier = "cold";
+			// Retention scoring (exponential decay + access reinforcement,
+			// weighted by memory-type salience) replaces naive last-accessed
+			// bucketing so tiers reflect actual relevance, not just recency.
+			const retention = computeRetentionScore(row.id, config);
+			const tier: WorkingMemoryTier = retention?.tier ?? "cold";
 
 			db.prepare("UPDATE memories SET working_tier = ? WHERE id = ?").run(
 				tier,
@@ -2035,6 +2033,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					.get(currentWorkspace, title) as any;
 
 				let newId: string;
+				let wasNewTopic = !existingRow;
 				try {
 					newId = writeMemory(existingRow);
 				} catch (error) {
@@ -2048,14 +2047,20 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 							"SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND title = ? LIMIT 1",
 						)
 						.get(currentWorkspace, title) as any;
+					wasNewTopic = !retryRow;
 					newId = writeMemory(retryRow);
 				}
-				memories.push(
-					rowToMemory(
-						db.prepare("SELECT * FROM memories WHERE id = ?").get(newId),
-					),
+				const newMemory = rowToMemory(
+					db.prepare("SELECT * FROM memories WHERE id = ?").get(newId),
 				);
+				memories.push(newMemory);
 				usedObservationIds.push(...sourceIds);
+
+				// Same-title collisions already went through the supersession path
+				// above (an intentional update to the same subject). Only check a
+				// genuinely new topic against the rest of the workspace's memory —
+				// that is the case a title-keyed lookup can't catch.
+				if (wasNewTopic) detectContradictions(newMemory);
 			}
 
 			if (usedObservationIds.length) {
@@ -2146,6 +2151,18 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			if (phase === "blocked" && /error|decision/.test(type)) return 1;
 			return 0;
 		};
+		// Retention-scored working tier as a small ranking nudge — hot/warm
+		// memories (recently relevant, reinforced by access) rank slightly
+		// above cold ones, and archived (never-accessed) memories are gently
+		// deprioritized rather than excluded outright.
+		const tierWeight: Record<WorkingMemoryTier, number> = {
+			hot: 1,
+			warm: 0.5,
+			cold: 0,
+			archived: -0.5,
+		};
+		const tierScore = (memoryId: string): number =>
+			tierWeight[getWorkingMemoryTier(memoryId)];
 
 		const session = getSession(sessionId);
 		if (session?.summary) {
@@ -2326,6 +2343,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					phaseScore(mem.type) * 3 +
 					(mem.strength / 10) * 6 +
 					recencyScore(mem.updatedAt) +
+					tierScore(mem.id) +
 					rrfBoost(lexicalMemoryRank.get(mem.id), 14) +
 					rrfBoost(semanticMemoryRank.get(mem.id), 12),
 				sourceKey: mem.sessionIds[0] || `memory:${mem.type}`,
@@ -2616,6 +2634,53 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		return Math.max(0, Math.min(1, score));
 	}
 
+	// Negation/polarity terms used by detectContradictions below. A candidate
+	// pair is flagged only when they share a subject (file or concept) AND
+	// disagree in polarity — this is a cheap synchronous heuristic (no LLM
+	// round-trip), so it stays conservative: same-title collisions already go
+	// through consolidate()'s supersession path, this only catches
+	// cross-title memories about the same file/concept that assert opposite
+	// things (e.g. "auth uses JWT" vs "auth does not use JWT").
+	const NEGATION_TERMS =
+		/\b(not|never|no longer|isn't|doesn't|don't|can't|cannot|fails?|failing|failed|broken|deprecated|removed|disabled|incorrect|wrong|instead of)\b/i;
+
+	function hasNegation(text: string): boolean {
+		return NEGATION_TERMS.test(text);
+	}
+
+	/**
+	 * Find existing memories that share a file/concept subject with the given
+	 * candidate but disagree in polarity, and record a `contradicts` relation
+	 * for each. Returns the memory IDs flagged. Synchronous, transaction-safe
+	 * — intended to run inside consolidate()'s transaction right after a new
+	 * (non-superseding) memory is written.
+	 */
+	function detectContradictions(candidate: Memory): string[] {
+		const subjects = [...candidate.concepts, ...candidate.files];
+		if (!subjects.length) return [];
+		const candidatePolarity = hasNegation(candidate.content);
+
+		const rows = db
+			.prepare(
+				`SELECT * FROM memories WHERE workspace = ? AND is_latest = 1 AND id != ? LIMIT 200`,
+			)
+			.all(currentWorkspace, candidate.id) as any[];
+
+		const flagged: string[] = [];
+		for (const row of rows) {
+			const other = rowToMemory(row);
+			const sharesSubject =
+				other.concepts.some(c => subjects.includes(c)) ||
+				other.files.some(f => subjects.includes(f));
+			if (!sharesSubject) continue;
+			if (hasNegation(other.content) === candidatePolarity) continue;
+
+			relate(candidate.id, other.id, "contradicts");
+			flagged.push(other.id);
+		}
+		return flagged;
+	}
+
 	function getRelations(memoryId: string): MemoryRelation[] {
 		const rows = db
 			.prepare(
@@ -2802,17 +2867,18 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			(now - new Date(memory.createdAt).getTime()) / (1000 * 60 * 60 * 24);
 		const temporalDecay = Math.exp(-resolved.lambda * deltaT);
 
-		// Reinforcement from access count
+		// Reinforcement from access recency: peaks at sigma right when accessed
+		// and decays smoothly, rather than 1/x (which is undefined at 0 and
+		// blows up for any access within the same second).
 		const accessStats = getAccessStats(id);
 		let reinforcementBoost = 0;
-		if (accessStats) {
-			// Each access contributes: sigma / daysSinceAccess
-			const daysSinceAccess =
+		if (accessStats?.lastAccessed) {
+			const daysSinceAccess = Math.max(
+				0,
 				(now - new Date(accessStats.lastAccessed).getTime()) /
-				(1000 * 60 * 60 * 24);
-			if (daysSinceAccess > 0) {
-				reinforcementBoost = resolved.sigma / daysSinceAccess;
-			}
+					(1000 * 60 * 60 * 24),
+			);
+			reinforcementBoost = resolved.sigma * Math.exp(-daysSinceAccess);
 		}
 
 		// Salience from memory type and access count

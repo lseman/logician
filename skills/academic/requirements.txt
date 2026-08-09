@@ -1,0 +1,10 @@
+# Academic skills — minimal dependencies
+httpx>=0.27.0
+
+# Optional (installed for full feature set):
+# arxiv          — arXiv API (used by arxiv.py as fallback)
+# habanero       — Crossref API client (used by crossref.py as primary)
+# pandas         — DataFrame export in systematic.py
+# matplotlib     — PRISMA/year/source/venue/citation plots in systematic.py
+# rapidfuzz      — Fuzzy dedup in systematic.py
+# networkx       — Citation graph building (if added later)

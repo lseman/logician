@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AgentModelConfig, TruncationConfig } from "@logician/agent-core";
+import { stripJsonComments } from "@logician/agent-core";
 
 /** Validated configuration with warnings collected during load. */
 export interface ResolvedLogicianConfig {
@@ -910,7 +911,9 @@ export function loadGlobalLogicianConfig(
 
 function loadLogicianConfigFile(configPath: string): ResolvedLogicianConfig {
 	try {
-		const raw = JSON.parse(readFileSync(configPath, "utf8"));
+		const raw = JSON.parse(
+			stripJsonComments(readFileSync(configPath, "utf8")),
+		);
 		const warnings: string[] = [];
 		if (raw && typeof raw === "object") {
 			return {

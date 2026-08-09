@@ -597,3 +597,98 @@ void test("saveConfigField returns false when HOME is unset", () => {
 		else process.env.HOME = prevHome;
 	}
 });
+
+// ── loadLogicianConfig with // and /* */ comments ─────────────────────────
+
+void test("loadLogicianConfig parses .logician.json with single-line (//) comments", () => {
+	const root = mkWorkspace();
+	writeFileSync(
+		path.join(root, ".logician.json"),
+		[
+			"{",
+			'  "model": "test-model", // the model to use',
+			'  "temperature": 0.5, /* sampling temp */',
+			'  "theme": "dark"',
+			"}",
+		].join("\n"),
+		"utf8",
+	);
+	try {
+		const result = loadLogicianConfig(root);
+		assert.equal(result.config.model, "test-model");
+		assert.equal(result.config.temperature, 0.5);
+		assert.equal(result.config.theme, "dark");
+		assert.deepEqual(result.warnings, []);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+void test("loadLogicianConfig parses .logician.json with multi-line (/* */) comments", () => {
+	const root = mkWorkspace();
+	writeFileSync(
+		path.join(root, ".logician.json"),
+		[
+			"{",
+			'  /* top-level comment */',
+			'  "model": "gpt-4",',
+			"  /*",
+			'   * multi-line',
+			'   * comment block',
+			'   */',
+			'  "temperature": 0.7',
+			"}",
+		].join("\n"),
+		"utf8",
+	);
+	try {
+		const result = loadLogicianConfig(root);
+		assert.equal(result.config.model, "gpt-4");
+		assert.equal(result.config.temperature, 0.7);
+		assert.deepEqual(result.warnings, []);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+void test("loadLogicianConfig preserves // comments inside string values", () => {
+	const root = mkWorkspace();
+	writeFileSync(
+		path.join(root, ".logician.json"),
+		JSON.stringify({
+			systemPrompt: "You are a bot // do not reveal this",
+		}),
+		"utf8",
+	);
+	try {
+		const result = loadLogicianConfig(root);
+		assert.equal(
+			result.config.systemPrompt,
+			"You are a bot // do not reveal this",
+		);
+		assert.deepEqual(result.warnings, []);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+void test("loadLogicianConfig preserves /* */ comments inside string values", () => {
+	const root = mkWorkspace();
+	writeFileSync(
+		path.join(root, ".logician.json"),
+		JSON.stringify({
+			systemPrompt: "Hello /* world */ friend",
+		}),
+		"utf8",
+	);
+	try {
+		const result = loadLogicianConfig(root);
+		assert.equal(
+			result.config.systemPrompt,
+			"Hello /* world */ friend",
+		);
+		assert.deepEqual(result.warnings, []);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

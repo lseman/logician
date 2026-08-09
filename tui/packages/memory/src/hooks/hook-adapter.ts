@@ -173,7 +173,8 @@ export function autoTierMemories(
 
 /**
  * Recall with working memory tier filtering.
- * Prioritizes hot memories, then warm, then cold.
+ * Prioritizes hot memories, then warm, then cold, using each memory's real
+ * (retention-scored) working_tier rather than raw search order.
  */
 export function recallWithTier(
 	store: MemoryStore,
@@ -181,19 +182,23 @@ export function recallWithTier(
 	limit: number = 10,
 	_format?: "text" | "system-prompt" | "markdown",
 ): string {
-	// Get hot memories first, then warm, then cold
-	const tiers: WorkingMemoryTier[] = ["hot", "warm", "cold"];
-	const perTier = Math.ceil(limit / tiers.length);
-	let allResults: string[] = [];
+	const tierRank: Record<WorkingMemoryTier, number> = {
+		hot: 0,
+		warm: 1,
+		cold: 2,
+		archived: 3,
+	};
 
-	for (const _tier of tiers) {
-		const results = store.list({ search: query, limit: perTier });
-		// Filter by tier (simple in-memory since SQL doesn't expose it in Memory interface)
-		const tiered = results.filter(() => true); // tier filtering is internal
-		allResults = allResults.concat(tiered.map(m => m.content));
-		if (allResults.length >= limit) break;
-	}
+	// Over-fetch once, then sort by real tier — avoids the N-tier-queries
+	// bug of re-running the same search per tier with no actual filter.
+	const results = store.list({ search: query, limit: Math.max(limit * 3, limit) });
+	const ranked = results
+		.map(m => ({ memory: m, tier: store.getWorkingMemoryTier(m.id) }))
+		.sort((a, b) => tierRank[a.tier] - tierRank[b.tier]);
 
-	const text = allResults.slice(0, limit).join("\n\n");
+	const text = ranked
+		.slice(0, limit)
+		.map(r => r.memory.content)
+		.join("\n\n");
 	return text || `No memories found matching "${query}"`;
 }

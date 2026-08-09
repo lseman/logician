@@ -1,5 +1,5 @@
 // ── Autoresearch fullscreen dashboard overlay ───────────────────────────────
-// Ctrl+Shift+F opens a scrollable results table for the active autoresearch
+// Ctrl+A opens a scrollable results table for the active autoresearch
 // session — every logged run, most recent last, with status/metric/commit.
 // Built on the shared ListSelectorOverlay base (same shape as the theme/
 // model/reasoner selectors): scroll with ↑↓/j-k/PageUp-PageDown, close with

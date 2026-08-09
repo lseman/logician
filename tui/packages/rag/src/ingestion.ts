@@ -1,39 +1,80 @@
-// ── Ingestion Pipeline ────────────────────────────────────────────────────────
-// End-to-end: ingest document → extract via Python Docling → store in SQLite.
+// ── Ingestion Pipeline ───────────────────────────────────────────────────────
+// End-to-end: ingest document → extract via Python Docling → smart chunking →
+// store in HybridVectorStore.
 
 import path from "node:path";
 import type { IEmbedder } from "./embedder.ts";
 import { RAGPipeline } from "./pipeline/index.ts";
-import { SQLiteVectorStore } from "./store/sqlite-store.ts";
-import type { ExtractedDocument, RAGChunk, SearchHit } from "./types.ts";
+import { HybridVectorStore } from "./store/hybrid-store.ts";
+import type {
+	ExtractedDocument,
+	RAGChunk,
+	SearchHit,
+	VectorStoreConfig,
+} from "./types.ts";
+import { DEFAULT_RAG_CONFIG, EmbeddingModel, type RAGConfig, type RerankingModel } from "./config.ts";
 
 export interface IngestionConfig {
-	embedder: IEmbedder;
+	/** Embedding model to use. */
+	embeddingModel?: EmbeddingModel;
+	/** Embedder instance (if already initialized). */
+	embedder?: IEmbedder;
+	/** RAG configuration (overrides defaults). */
+	config?: Partial<RAGConfig>;
 	dbName?: string;
 	pythonPath?: string;
 	scriptPath?: string;
+	/** Project directory for storage paths. */
+	projectDir?: string;
 }
 
 /**
- * Full ingestion pipeline that persists to SQLite and supports re-ingestion.
+ * Full ingestion pipeline:
+ * - Hybrid search (dense + BM25)
+ * - Smart chunking (recursive, semantic, parent-child)
+ * - Cross-encoder reranking (optional)
+ * - Query rewriting
  */
 export class IngestionPipeline {
-	private db: SQLiteVectorStore;
+	private store: HybridVectorStore;
 	private pipeline: RAGPipeline;
 
-	constructor(projectDir: string, config: IngestionConfig) {
-		this.db = new SQLiteVectorStore(projectDir, {
+	constructor(
+		projectDir: string,
+		config: IngestionConfig,
+	) {
+		// Determine embedder
+		const embedder = config.embedder;
+		if (!embedder) {
+			throw new Error('embedder is required; provide IEmbedder instance or use IngestionPipeline with embedder option');
+		}
+
+		const dimension = embedder.dimension;
+
+		// Create hybrid vector store
+		// HybridVectorStore implements IVectorStore
+		this.store = new HybridVectorStore(projectDir, {
 			dbName: config.dbName,
-			dimension: config.embedder.dimension,
+			dimension,
 		});
 
+		// Create pipeline
 		this.pipeline = new RAGPipeline(
-			{ embedder: config.embedder, vectorStore: this.db },
+			{
+				embedder,
+				vectorStore: this.store as any,
+				chunkingConfig: config.config?.chunking,
+				enableReranking: config.config?.enableReranking,
+				rerankerModel: config.config?.rerankerModel,
+				contextWindow: config.config?.contextWindow,
+				pythonPath: config.pythonPath,
+				scriptPath: config.scriptPath,
+			},
 			{ pythonPath: config.pythonPath, scriptPath: config.scriptPath },
 		);
 	}
 
-	/** Ingest a file (PDF, DOCX, etc.) via Docling → SQLite. */
+	/** Ingest a file (PDF, DOCX, etc.) via Docling → smart chunking → hybrid store. */
 	async ingestFile(
 		filePath: string,
 		docId?: string,
@@ -42,7 +83,7 @@ export class IngestionPipeline {
 		return this.pipeline.indexFile(abs, docId);
 	}
 
-	/** Ingest raw text with a source identifier. */
+	/** Ingest raw text with smart chunking. */
 	async ingestText(
 		text: string,
 		source: string,
@@ -51,33 +92,64 @@ export class IngestionPipeline {
 		return this.pipeline.indexText(text, source, docId);
 	}
 
-	/** Search across all indexed documents. */
-	async search(query: string, topK = 5): Promise<SearchHit[]> {
-		return this.pipeline.search(query, topK);
+	/**
+	 * Search: query rewrite → hybrid retrieval → rerank → context.
+	 */
+	async search(
+		query: string,
+		topK = 5,
+		options?: {
+			expand?: boolean;
+			rewriteEndpoint?: string;
+			denseWeight?: number;
+			sparseWeight?: number;
+		},
+	): Promise<SearchHit[]> {
+		return this.pipeline.search(query, topK, options as any);
 	}
 
-	/** List all document IDs in the store. */
+	/** Search with context assembly for LLM prompts. */
+	async searchWithContext(
+		query: string,
+		topK = 5,
+		options?: {
+			expand?: boolean;
+			assembleContext?: boolean;
+			compress?: boolean;
+		},
+	): Promise<{ hits: SearchHit[]; context: string }> {
+		return this.pipeline.searchWithContext(query, topK, options as any);
+	}
+
+	/** List all document IDs. */
 	async listDocuments(): Promise<string[]> {
-		return this.db.documentIds();
+		return this.store.documentIds();
 	}
 
 	/** Count total chunks. */
 	async countChunks(): Promise<number> {
-		return this.db.count();
+		return this.store.count();
 	}
 
-	/** Get raw chunk by ID (for debugging). */
+	/** Get raw chunk by ID. */
 	getChunkById(chunkId: string): RAGChunk | null {
-		return this.db.getChunkById(chunkId);
+		return this.store.getChunkById(chunkId);
 	}
 
-	/** Remove a single document by ID. */
+	/** Remove a document. */
 	async deleteDocument(docId: string): Promise<void> {
-		await this.db.deleteDocument(docId);
+		await this.store.deleteDocument(docId);
 	}
 
-	/** Close the database connection. */
+	/** Clear all data. */
+	async clear(): Promise<void> {
+		await this.store.clear();
+	}
+
+	/** Close database connections. */
 	close(): void {
-		this.db.close();
+		this.store.close();
 	}
 }
+
+

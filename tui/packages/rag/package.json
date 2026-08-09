@@ -1,14 +1,20 @@
 {
 	"name": "@logician/rag",
-	"version": "0.1.0",
-	"description": "Retrieval-Augmented Generation — Python Docling extraction via subprocess",
+	"version": "0.2.0",
+	"description": "SOTA RAG — Hybrid search (dense + BM25), smart chunking, cross-encoder reranking, query rewriting, context management",
 	"type": "module",
 	"main": "src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
 		"./pipeline": "./src/pipeline/index.ts",
-		"./store": "./src/store/sqlite-store.ts",
-		"./ingestion": "./src/ingestion.ts"
+		"./store": "./src/store/hybrid-store.ts",
+		"./ingestion": "./src/ingestion.ts",
+		"./chunking": "./src/chunking.ts",
+		"./reranker": "./src/reranker.ts",
+		"./query": "./src/query.ts",
+		"./context": "./src/context.ts",
+		"./eval": "./src/eval.ts",
+		"./config": "./src/config.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit"

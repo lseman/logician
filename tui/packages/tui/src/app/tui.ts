@@ -520,8 +520,8 @@ export class LogicianTUI {
 			maxHeight: 18,
 		});
 		// Center-anchored and large, unlike the aboveInput popups above — this
-		// is meant to read as a fullscreen dashboard (README: "Ctrl+Shift+F
-		// opens a scrollable full-terminal dashboard"), not a compact picker.
+		// is meant to read as a fullscreen dashboard (README: "Ctrl+A opens a
+		// scrollable full-terminal dashboard"), not a compact picker.
 		this.tui.showOverlay(this.autoresearchDashboard, {
 			anchor: "center",
 			width: "90%",

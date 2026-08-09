@@ -1,239 +1,114 @@
 ---
-name: Academic Research Workflows
-description: Structured workflows for deep research, comparative analysis, paper-code audits, replication planning, and peer review.
+name: References
+description: Use for building and maintaining a reference list from academic search results. Deduplicates papers, normalizes identifiers, and exports structured citations in multiple formats.
 aliases:
-  - academic research workflow
-  - deep research
-  - paper-code audit
-  - replication planning
-  - peer review workflow
-  - provenance tracking
+  - reference manager
+  - citation list
+  - paper deduplication
+  - reference export
+  - bibliography builder
 triggers:
-  - deep research
-  - comparative analysis
-  - paper-code audit
-  - replication planning
-  - peer review
-  - systematic review
-  - provenance sidecar
-  - research plan
+  - build a reference list
+  - deduplicate papers
+  - export citations
+  - normalize reference list
+  - build bibliography
 preferred_tools:
-  - arxiv_search
-  - arxiv_get
-  - s2_search
-  - openalex_search
-  - ieee_search
-  - unpaywall_resolve
+  - run_systematic_review
 example_queries:
-  - conduct deep research on transformer time series
-  - compare these papers on time series forecasting
-  - audit the code vs claims for this paper
-  - plan a replication of this experiment
-  - peer review this draft
+  - build a deduplicated reference list from these search results
+  - export these papers as a BibTeX bibliography
+  - normalize this reference list by DOI
+  - deduplicate papers from multiple sources
 when_not_to_use:
-  - the task is a quick factual lookup (use direct search instead)
-  - the user needs a single paper's abstract or PDF
+  - the task is literature discovery (use semantic scholar or openalex)
+  - the task is a systematic review (use academic/systematic directly)
 next_skills:
+  - academic/systematic
   - academic/semantic_scholar
   - academic/openalex
-  - academic/ieee
   - academic/arxiv
-  - academic/systematic
+---
 
-## Usage
+## References Skill
 
-These workflows guide durable research tasks that produce auditable artifacts. Use them when the user asks for deep research, comparative analysis, paper-code audit, replication planning, peer review, or any literature task needing structured outputs.
+Use this skill when you need to organize, deduplicate, and export a list of academic references.
 
-## Durable Research Pattern
+## Workflow
 
-For substantial research tasks, create a working plan before gathering evidence. Keep it lightweight but auditable.
+1. **Collect** papers from one or more sources using `academic/systematic` or individual provider skills.
+2. **Deduplicate** by DOI, arXiv ID, then fuzzy title matching.
+3. **Normalize** identifiers (DOIs, arXiv IDs, URLs) using `scripts/common.py` utilities.
+4. **Export** in your preferred format:
+   - JSON (machine-readable)
+   - BibTeX (LaTeX)
+   - APA/MLA-style plain text (human-readable)
 
-### Plan Template
+## Citation Format Templates
 
-```markdown
-# Research Plan: <topic>
+### BibTeX
 
-## Questions
-- <primary question>
-- <secondary questions>
-
-## Scope
-- Sources:
-- Date range:
-- Inclusion criteria:
-- Exclusion criteria:
-
-## Strategy
-- Search strings:
-- Databases:
-- Known seed papers:
-
-## Acceptance Criteria
-- <what counts as sufficient evidence>
-
-## Task Ledger
-- [ ] Search databases
-- [ ] Retrieve full text for key papers
-- [ ] Extract claims, methods, datasets, and metrics
-- [ ] Compare evidence
-- [ ] Verify critical claims
-
-## Verification Log
-| Claim | Source | Evidence | Status | Notes |
-|---|---|---|---|---|
-
-## Decision Log
-| Decision | Rationale |
-|---|---|
+```bibtex
+@article{key,
+  title     = {Paper Title},
+  author    = {Last, F. and First, A.},
+  journal   = {Journal Name},
+  volume    = {1},
+  number    = {2},
+  pages     = {100--120},
+  year      = {2024},
+  doi       = {10.xxxx/xxxxx},
+  url       = {https://doi.org/10.xxxx/xxxxx},
+  note      = {Accessed: 2024-01-01}
+}
 ```
 
-Save the plan under `outputs/.plans/<slug>.md`, `research/<slug>/plan.md`, or the project-local equivalent.
+### APA
 
-## Deep Research
-
-Use for broad surveys, state-of-the-art briefs, research roadmaps, or technical backgrounders.
-
-1. Define the exact research questions and acceptable source types.
-2. Search broadly across Semantic Scholar, OpenAlex, IEEE, arXiv, publisher pages, and citation graphs as appropriate.
-3. Build a shortlist before reading deeply. Deduplicate by DOI, arXiv ID, title, and first author/year.
-4. Extract for each key paper: problem, method, assumptions, dataset, metric, headline result, limitations, and follow-up citations.
-5. Synthesize by theme, not by paper order.
-6. Run a claim sweep before finalizing: every important number, ranking, causal statement, and "best/SOTA" claim must map to evidence in the verification log.
-7. Label inferences. Do not present extrapolations as source claims.
-
-### Final Output Shape
-
-```markdown
-# <Topic>
-
-## Bottom Line
-
-## Scope and Method
-
-## Findings
-
-## Comparison or Taxonomy
-
-## Gaps and Open Questions
-
-## Confidence
-
-## Sources
+```
+Author, A. A., & Author, B. B. (Year). Title of the article. *Journal Name, Volume*(Issue), pages. https://doi.org/xxxxx
 ```
 
-## Comparative Research
+### MLA
 
-Use for comparing papers, methods, datasets, tools, models, benchmarks, or claims.
-
-### Comparison Matrix
-
-```markdown
-| Item | Core Claim | Evidence Type | Strengths | Caveats | Confidence |
-|---|---|---|---|---|---|
-| <source or method> | <claim> | Direct / proxy / negative | <why it matters> | <limits> | High / Medium / Low |
+```
+Author, First A., and Second B. Author. "Title of Article." *Journal Name*, vol. Volume, no. Issue, Year, pp. pages. DOI.
 ```
 
-Always separate:
-- **Agreements:** claims supported by multiple independent sources.
-- **Disagreements:** places where findings conflict.
-- **Uncertainty:** missing details, incomparable metrics, weak evaluation, or unclear provenance.
-- **Applicability:** when a result holds only for certain datasets, domains, scales, hardware, or assumptions.
+## Deduplication Priority
 
-## Paper-Code Audit
+1. **DOI** — exact match (after normalizing `doi.org/` prefixes)
+2. **arXiv ID** — exact match (after stripping `arXiv:` prefix and version suffix)
+3. **Normalized title** — case-insensitive, punctuation-stripped, whitespace-normalized
+4. **Fuzzy title** — token-set ratio ≥ 93% (requires `rapidfuzz`)
 
-Use when the user wants to compare a paper against its repository or reproduce a method from code.
+## Implementation
 
-### Audit Checklist
+The core logic is in `skills/academic/systematic/scripts/systematic.py`:
 
-- **Paper identity:** title, authors, venue/preprint version, DOI/arXiv ID.
-- **Code identity:** repository URL, commit/ref if known, license, release date.
-- **Claimed method vs. implementation:** architecture, loss, preprocessing, training schedule, decoding/inference, default hyperparameters.
-- **Claimed datasets vs. code:** dataset names, splits, filtering, augmentation, leakage risks.
-- **Claimed metrics vs. code:** metric definitions, averaging, confidence intervals, seeds, statistical tests.
-- **Reproducibility:** environment, dependencies, scripts, checkpoints, configs, hardware assumptions, missing artifacts.
-- **Mismatches:** explicit paper/code discrepancies, ambiguous defaults, undocumented steps, or code paths that do not match reported experiments.
+```python
+from systematic import SystematicReview, SearchPlan, ScreeningPlan
 
-Use code tools such as file search, LSP, Python, Rust, or Bash only after identifying the paper claims to verify.
+sr = SystematicReview()
+plan = SearchPlan(
+    query="time series forecasting",
+    per_source_limit=20,
+    screening=ScreeningPlan(),
+)
+result = sr.run(plan)
 
-## Replication Planning
+# Access deduplicated papers
+papers = sr.papers  # Already deduplicated
 
-Use when the task is to plan or run a replication.
-
-Before running experiments or installing dependencies, confirm the execution environment and budget with the user. Then record:
-- Target result and exact metric.
-- Dataset and split.
-- Code ref or implementation source.
-- Hardware/software environment.
-- Commands to run.
-- Expected runtime and storage.
-- Seeds and variance handling.
-- What outcome would count as replicated, partially replicated, or failed.
-
-### Replication Report
-
-```markdown
-# Replication Report: <paper/result>
-
-## Target
-## Environment
-## Procedure
-## Results
-## Deviations
-## Failure Modes
-## Confidence
-## Sources
+# Export
+sr.save_jsonl("references.jsonl", papers)
+sr.save_csv("references.csv", papers)
 ```
 
-## Peer Review
+## Related Skills
 
-Use for reviewing papers, drafts, experiments, or research artifacts.
-
-### Review Criteria
-
-- **Novelty:** what is genuinely new relative to prior work.
-- **Significance:** whether the result changes practice or understanding.
-- **Rigor:** sound methodology, controls, ablations, uncertainty, statistical validity.
-- **Baselines:** fair, current, and correctly tuned comparisons.
-- **Claims:** claims match evidence and do not overgeneralize.
-- **Reproducibility:** enough detail, code/data availability, environment, seeds.
-- **Ethics and limitations:** harms, failure cases, data provenance, deployment risks.
-
-### Severity Labels
-
-- **Fatal:** invalidates a main result or makes the artifact unreproducible.
-- **Major:** materially weakens the claim but can likely be fixed.
-- **Minor:** clarity, presentation, or local technical issue.
-
-## Provenance Sidecar
-
-For durable research outputs, add a provenance section or sidecar file:
-
-```markdown
-# Provenance: <topic>
-
-## Search Log
-| Date | Query | Source | Results | Notes |
-|---|---|---|---|---|
-
-## Included Sources
-| Source | Identifier | Why Included | Verification Level |
-|---|---|---|---|
-
-## Excluded Sources
-| Source | Reason |
-|---|---|
-
-## Claim Verification
-| Claim | Evidence | Status | Notes |
-|---|---|---|---|
-
-## Open Questions
-- <question>
-```
-
-### Verification Levels
-
-- **Full text checked.**
-- **Abstract and metadata checked.**
-- **Citation/context checked only.**
-- **Unverified, included for discovery only.**
+- `academic/systematic` — Multi-source search and screening
+- `academic/semantic_scholar` — Citation-aware discovery
+- `academic/openalex` — Metadata and funding context
+- `academic/arxiv` — Preprint search
+- `academic/unpaywall` — Open-access PDF resolution

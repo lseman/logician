@@ -284,6 +284,15 @@ export class SQLiteVectorStore implements IVectorStore {
 		return row ? toRAGChunk(row) : null;
 	}
 
+	getTermFrequencies(_docId: string): Record<string, number> | null {
+		// SQLite store doesn't support BM25 — returns null
+		return null;
+	}
+
+	async setTermFrequencies(_docId: string, _tf: Record<string, number>): Promise<void> {
+		// SQLite store doesn't support BM25
+	}
+
 	close(): void {
 		this.db.close();
 	}

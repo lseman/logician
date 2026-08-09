@@ -113,19 +113,17 @@ export function renderThinkingCodeBlock(
 	if (!code) return;
 
 	let highlightedCode = code;
-	let detectedLanguage = language;
 	try {
 		const highlighted = language
 			? highlight(code, language)
 			: highlightAuto(code);
 		highlightedCode = highlighted.value;
-		detectedLanguage = highlighted.language || language;
 	} catch {
 		// Unknown or incomplete languages remain readable as plain code.
 	}
 
 	const codeLines = highlightedCode.split("\n");
-	const label = detectedLanguage || "code";
+	const label = language || "code";
 	const meta = `${label} · ${codeLines.length} line${codeLines.length === 1 ? "" : "s"}${streaming ? " · streaming" : ""}`;
 	const border = theme.fgRaw("separator");
 	lines.push(`${border}  ┌─${RESET} ${theme.fg("mdCode", meta)}${RESET}`);

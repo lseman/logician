@@ -1,20 +1,22 @@
 # systematic_review.py
 # -*- coding: utf-8 -*-
 """
-Systematic review helper (CS/ML friendly):
+Systematic review engine (CS/ML friendly):
 - Multi-source search: Semantic Scholar, OpenAlex, arXiv, Crossref, IEEE Xplore
-- NEW: DBLP (CS bib), Hugging Face Papers (ML discovery)
+- DBLP (CS bib), Hugging Face Papers (ML discovery)
 - Stronger dedupe: DOI/arXiv/url + fuzzy title fallback
 - PRISMA-style flow accounting
 - Review-style plots
 
 Optional enrichers:
-- Unpaywall (OA + PDF links by DOI)  -> requires UNPAYWALL_EMAIL (or plan.unpaywall_email)
+- Unpaywall (OA + PDF links by DOI)  -> requires UNPAYWALL_EMAIL
 - OpenCitations (citation_count by DOI)
 
-Notes:
-- OpenAlex abstracts: reconstructed from inverted index.
-- Minimal deps: httpx; optional: arxiv, habanero, pandas, matplotlib, networkx, rapidfuzz.
+Minimal deps: httpx; optional: arxiv, habanero, pandas, matplotlib, rapidfuzz.
+
+Usage:
+    python -m scripts.systematic review "transformer attention" --limit 20
+    python -m scripts.systematic sources "LLM safety"
 """
 
 from __future__ import annotations
@@ -36,13 +38,15 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 import httpx
 
+# ── Provider imports ───────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# arXiv needs special handling (exec from file to avoid __file__ issues)
 _arxiv_spec = importlib.util.spec_from_file_location(
     "arxiv_scripts_arxiv",
-    Path(__file__).resolve().parents[2] / "arxiv" / "scripts" / "arxiv.py",
+    ROOT / "arxiv" / "scripts" / "arxiv.py",
 )
 _arxiv_mod = importlib.util.module_from_spec(_arxiv_spec)
 _arxiv_spec.loader.exec_module(_arxiv_mod)
@@ -1997,4 +2001,129 @@ def run_systematic_review(
         )
 
 
-__tools__ = [run_systematic_review]
+__tools__ = ["run_systematic_review"]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI entry point
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _main(argv: Optional[list[str]] = None) -> int:
+    """CLI for the systematic review engine.
+
+    Usage:
+      python systematic.py review "deep reinforcement learning" --limit 20
+      python systematic.py review "LLM safety" --from-year 2023 --open-access
+      python systematic.py metrics
+      python systematic.py sources "transformer attention"
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Systematic academic review engine",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # review
+    p_review = sub.add_parser("review", help="Run multi-source search")
+    p_review.add_argument("query", help="Search query")
+    p_review.add_argument("--limit", type=int, default=20, help="Max results per source")
+    p_review.add_argument("--from-year", type=int, default=None, help="Filter by year")
+    p_review.add_argument("--to-year", type=int, default=None, help="Filter by year")
+    p_review.add_argument("--open-access", action="store_true", help="Only open-access papers")
+    p_review.add_argument("--enrich-unpaywall", action="store_true", help="Enrich with Unpaywall (needs UNPAYWALL_EMAIL)")
+    p_review.add_argument("--enrich-citations", action="store_true", help="Enrich citation counts via OpenCitations")
+    p_review.add_argument("--sort", choices=["year", "citations", "title"], default="citations", help="Sort output")
+
+    # metrics
+    p_metrics = sub.add_parser("metrics", help="Show metrics for saved JSONL")
+    p_metrics.add_argument("path", help="Path to JSONL output file")
+
+    # sources
+    p_sources = sub.add_parser("sources", help="List which sources are active")
+    p_sources.add_argument("query", help="Test query to probe sources")
+
+    args = parser.parse_args(argv)
+
+    if args.command == "review":
+        try:
+            sr = SystematicReview()
+            plan = SearchPlan(
+                query=args.query,
+                per_source_limit=args.limit,
+                from_year=args.from_year,
+                to_year=args.to_year,
+                open_access_only=args.open_access,
+                screening=ScreeningPlan(require_year=False, require_abstract=False),
+            )
+            if args.enrich_unpaywall:
+                plan.enrich_unpaywall = True
+            if args.enrich_citations:
+                plan.enrich_opencitations = True
+
+            res = sr.run(plan)
+            metrics = sr.metrics(res.papers)
+            top = sr.sort(res.papers, by=args.sort)[:15]
+            top_list = []
+            for p in top:
+                top_list.append({
+                    "title": p.title,
+                    "authors": p.authors[:5],
+                    "year": p.year,
+                    "venue": p.venue,
+                    "citations": p.citation_count,
+                    "url": p.url or p.pdf_url,
+                    "source": p.source,
+                })
+
+            print(json.dumps({
+                "status": "ok",
+                "query": args.query,
+                "added_new": res.added_new,
+                "total": len(res.papers),
+                "by_source": res.by_source,
+                "prisma": res.prisma.to_dict(),
+                "metrics": {
+                    k: v for k, v in metrics.items()
+                    if k not in ("top_keywords", "top_authors", "by_year")
+                },
+                "top_papers": top_list,
+            }, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            import traceback
+            print(json.dumps({
+                "status": "error",
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }, ensure_ascii=False, indent=2))
+            return 1
+
+    elif args.command == "metrics":
+        try:
+            import pandas as pd
+            df = pd.read_json(args.path, lines=True)
+            papers = [Paper(**row) for row in df.to_dict(orient="records")]
+            sr2 = SystematicReview()
+            sr2._papers = papers
+            m = sr2.metrics(papers)
+            print(json.dumps(m, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+
+    elif args.command == "sources":
+        sr = SystematicReview()
+        src_names = [getattr(s, "name", "unknown") for s in sr.sources]
+        print(json.dumps({"active_sources": src_names}, ensure_ascii=False, indent=2))
+
+    else:
+        parser.print_help()
+        return 0
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

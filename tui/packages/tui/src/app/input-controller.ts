@@ -384,10 +384,8 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 			return { consume: true };
 		}
 
-		// Ctrl+Shift+F — open the autoresearch fullscreen dashboard. Codepoint
-		// 102 = 'f'; modifier 6 = Shift+Ctrl (matches Ctrl+M/Ctrl+I's pattern —
-		// case alone doesn't disambiguate Shift, the modifier bit does).
-		if (data === "\x1b[102;6u") {
+		// Ctrl+A — open the autoresearch fullscreen dashboard.
+		if (data === "\x1b[97;4u" || data === "\x01") {
 			ctx.openAutoresearchDashboard();
 			return { consume: true };
 		}

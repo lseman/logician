@@ -26,7 +26,7 @@
 	},
 	"dependencies": {
 		"@logician/agent-core": "0.2.0",
-		"@logician/rag": "0.1.0"
+		"@logician/rag": "0.2.0"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

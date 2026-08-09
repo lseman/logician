@@ -185,7 +185,7 @@ export function handleMcpManagerAction(
 
 // ── Autoresearch dashboard ──────────────────────────────────────────────
 
-/** Opens the fullscreen dashboard (Ctrl+Shift+F). All data is local/sync
+/** Opens the fullscreen dashboard (Ctrl+A). All data is local/sync
  * (AutoresearchSession.getDashboardData() just reads in-memory state), so
  * unlike plugin/MCP managers there's no loading round-trip to show first. */
 export function openAutoresearchDashboard(ctx: OverlayHandlersCtx): void {

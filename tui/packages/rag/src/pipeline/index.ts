@@ -1,14 +1,48 @@
 // ── RAG Pipeline ─────────────────────────────────────────────────────────────
-// Orchestrates: extract (via Python Docling) → chunk → embed → store operations.
+// Orchestrates: extract (Docling) → smart chunking → embed → store →
+// hybrid search → rerank → context assembly.
+// - Hybrid search (dense + BM25 via RRF)
+// - Smart chunking (recursive, semantic, parent-child)
+// - Cross-encoder reranking
+// - Query rewriting/expansion
+// - Context window management
 
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { IEmbedder } from "../embedder.ts";
-import type { ExtractedDocument, IVectorStore, RAGChunk } from "../types.ts";
+import type {
+	ChunkingConfig,
+	ContextWindowConfig,
+	ExtractedDocument,
+	IReranker,
+	MetadataFilter,
+	ParentContext,
+	RAGChunk,
+	RewrittenQuery,
+	SearchHit,
+	VectorStoreConfig,
+} from "../types.ts";
 
-// tui/packages/rag/src/pipeline/index.ts -> repo root (5 levels up)
+import {
+	DEFAULT_HYBRID_CONFIG,
+	DEFAULT_RAG_CONFIG,
+	DEFAULT_CHUNKING_CONFIG,
+	DEFAULT_CONTEXT_WINDOW,
+	type RerankingModel,
+} from "../config.ts";
+import {
+	recursiveChunk,
+	parentChildChunk,
+	smartChunk,
+} from "../chunking.ts";
+import { tokenize, HybridVectorStore, type BM25Scorer } from "../store/hybrid-store.ts";
+import { CrossEncoderReranker, BM25Reranker } from "../reranker.ts";
+import { rewriteQuery, multiQuerySearch, llmRewriteQuery } from "../query.ts";
+import { assembleContext, compressContext, buildContextSummary } from "../context.ts";
+
+// tui/packages/rag/src/pipeline/index.ts -> repo root
 const REPO_ROOT = path.resolve(
 	fileURLToPath(new URL(".", import.meta.url)),
 	"../../../../..",
@@ -23,12 +57,6 @@ const DEFAULT_SCRIPT_PATH = path.join(
 );
 
 const execFileAsync = promisify(execFile);
-
-/** Pipeline configuration. */
-export interface RAGPipelineConfig {
-	embedder: IEmbedder;
-	vectorStore: IVectorStore;
-}
 
 /** Parsed extraction result from Python Docling subprocess. */
 interface ExtractedDocumentJSON {
@@ -45,13 +73,42 @@ interface ExtractedDocumentJSON {
 	extracted_at: number;
 }
 
+/** Pipeline configuration. */
+export interface RAGPipelineConfig {
+	/** Embedding model. */
+	embedder: IEmbedder;
+	/** Vector store (HybridVectorStore for BM25, SQLiteVectorStore for basic). */
+	vectorStore: VectorStoreConfig;
+	/** Chunking configuration. */
+	chunkingConfig?: ChunkingConfig;
+	/** Reranking model (if enabled). */
+	rerankerModel?: RerankingModel;
+	/** Enable reranking. */
+	enableReranking?: boolean;
+	/** Context window configuration. */
+	contextWindow?: ContextWindowConfig;
+	/** Python path for extraction. */
+	pythonPath?: string;
+	/** Python extraction script path. */
+	scriptPath?: string;
+}
+
 /**
- * The main RAG pipeline. Extraction uses Python subprocess (Docling);
- * embedding + storage are in-process.
+ * RAG pipeline.
+ *
+ * Workflow:
+ * 1. Index: Docling extraction → smart chunking → embed → hybrid store
+ * 2. Search: query rewrite → hybrid retrieval → rerank → context assembly
  */
 export class RAGPipeline {
 	private embedder: IEmbedder;
-	private store: IVectorStore;
+	private vectorStore: any; // HybridVectorStore or SQLiteVectorStore
+	private chunkingConfig: ChunkingConfig;
+	private enableReranking: boolean;
+	private reranker: IReranker | null;
+	private contextWindow: ContextWindowConfig;
+	private hybridStore: boolean;
+
 	readonly pythonPath: string;
 	readonly scriptPath: string;
 
@@ -60,12 +117,31 @@ export class RAGPipeline {
 		options?: { pythonPath?: string; scriptPath?: string },
 	) {
 		this.embedder = config.embedder;
-		this.store = config.vectorStore;
+		this.vectorStore = config.vectorStore;
+		this.chunkingConfig = config.chunkingConfig ?? DEFAULT_CHUNKING_CONFIG;
+		this.enableReranking = config.enableReranking ?? DEFAULT_RAG_CONFIG.enableReranking;
+		this.contextWindow = config.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+
+		// Determine if using hybrid store
+		this.hybridStore = "searchHybrid" in this.vectorStore;
+
+		// Initialize reranker if enabled
+		if (this.enableReranking) {
+			const modelId = config.rerankerModel
+				? (config.rerankerModel === "BAAI/bge-reranker-v2-m3" ? "BAAI/bge-reranker-v2-m3" : "BAAI/bge-reranker-base")
+				: "BAAI/bge-reranker-base";
+			this.reranker = new CrossEncoderReranker({ modelId });
+		} else {
+			this.reranker = null;
+		}
+
 		this.pythonPath = options?.pythonPath || DEFAULT_PYTHON_PATH;
 		this.scriptPath = options?.scriptPath || DEFAULT_SCRIPT_PATH;
 	}
 
-	/** Add a document file via Docling (PDF, DOCX, PPTX, etc.). */
+	// ── Indexing ──────────────────────────────────────────────────────────────
+
+	/** Index a document file via Docling → smart chunking → store. */
 	async indexFile(
 		filePath: string,
 		docId?: string,
@@ -78,7 +154,7 @@ export class RAGPipeline {
 		return this.processAndStore(json);
 	}
 
-	/** Add raw text as a single chunk. */
+	/** Index raw text with smart chunking. */
 	async indexText(
 		text: string,
 		source?: string,
@@ -93,25 +169,6 @@ export class RAGPipeline {
 			},
 		);
 		return this.processAndStore(json);
-	}
-
-	/** Search the indexed documents. */
-	async search(
-		text: string,
-		topK = 5,
-	): Promise<Array<{ chunk: RAGChunk; score: number }>> {
-		const vectors = await this.embedder.embedBatch([text]);
-		return this.store.searchByVector(vectors[0], topK);
-	}
-
-	/** List all indexed document IDs. */
-	async listDocuments(): Promise<string[]> {
-		return this.store.documentIds();
-	}
-
-	/** Count total chunks in the store. */
-	async countChunks(): Promise<number> {
-		return this.store.count();
 	}
 
 	private async _extractViaPython(
@@ -140,24 +197,23 @@ export class RAGPipeline {
 	private async processAndStore(
 		json: ExtractedDocumentJSON,
 	): Promise<ExtractedDocument> {
-		// Normalize chunk keys (Python uses snake_case, TS interface uses camelCase)
-		const chunks: RAGChunk[] = json.chunks.map(c => ({
-			id: c.id,
-			text: c.text,
-			metadata: c.metadata || {},
-			documentId: c.document_id || json.id,
-		}));
+		// Smart chunking
+		const chunks = await this._smartChunkText(
+			json.content,
+			json.id,
+			json.meta,
+		);
 
-		// Embed all chunks in batch
-		const chunkTexts = chunks.map(c => c.text);
+		// Embed all chunks
+		const chunkTexts = chunks.map((c) => c.text);
 		const vectors = await this.embedder.embedBatch(chunkTexts);
 
 		for (let i = 0; i < chunks.length; i++) {
 			chunks[i].vector = vectors[i];
 		}
 
-		// Store them
-		await this.store.add(chunks);
+		// Store in hybrid or vector store
+		await this.vectorStore.add(chunks);
 
 		return {
 			id: json.id,
@@ -168,4 +224,244 @@ export class RAGPipeline {
 			extractedAt: new Date(json.extracted_at).getTime(),
 		};
 	}
+
+	private async _smartChunkText(
+		text: string,
+		docId: string,
+		meta: Record<string, unknown>,
+	): Promise<RAGChunk[]> {
+		const strategy = this.chunkingConfig.strategy;
+
+		if (strategy === "semantic") {
+			const chunks = await smartChunk(
+				text,
+				this.chunkingConfig,
+				(t) => this.embedder.embed(t).then((v) => v),
+			);
+			return chunks.map((c) => ({
+				...c,
+				metadata: { ...c.metadata, source: meta?.title || docId },
+				documentId: docId,
+			}));
+		}
+
+		if (strategy === "fixed") {
+			// Fixed-size with overlap
+			const chunks: RAGChunk[] = [];
+			const size = this.chunkingConfig.chunkSize ?? 512;
+			const overlap = this.chunkingConfig.overlap ?? 128;
+			let start = 0;
+			let idx = 0;
+
+			while (start < text.length) {
+				const end = Math.min(start + size, text.length);
+				let breakPoint = end;
+				if (end < text.length) {
+					const lookBack = Math.min(overlap + 50, end - start);
+					const seg = text.slice(end - lookBack, end);
+					const spaceIdx = seg.lastIndexOf(" ");
+					if (spaceIdx > 0) breakPoint = end - lookBack + spaceIdx;
+				}
+				const chunkText = text.slice(start, breakPoint).trim();
+				if (chunkText.length > (this.chunkingConfig.minChunkSize ?? 64)) {
+					chunks.push({
+						id: `chunk_${idx++}`,
+						text: chunkText,
+						metadata: { source: meta?.title || docId },
+						documentId: docId,
+						approxTokens: Math.ceil(chunkText.length / 4),
+					});
+				}
+				start = breakPoint - overlap;
+				if (start <= 0) start = end;
+			}
+			return chunks;
+		}
+
+		// Default: recursive chunking
+		const chunks = recursiveChunk(text, this.chunkingConfig) as RAGChunk[];
+		return chunks.map((c) => ({
+			...c,
+			metadata: { ...c.metadata, source: meta?.title || docId },
+			documentId: docId,
+		}));
+	}
+
+	// ── Search ──────────────────────────────────────────────────────────────────
+
+	/**
+	 * Search: query rewrite → hybrid retrieval → rerank → context.
+	 */
+	async search(
+		query: string,
+		topK = 5,
+		options?: {
+			/** Expand query into sub-queries. */
+			expand?: boolean;
+			/** LLM endpoint for query rewriting. */
+			rewriteEndpoint?: string;
+			/** Reranker to use (overrides config). */
+			reranker?: IReranker;
+			/** Metadata filters. */
+			filter?: MetadataFilter[];
+			/** Number of candidates before reranking. */
+			candidatesBeforeRerank?: number;
+			/** Dense/sparse weight for hybrid search. */
+			denseWeight?: number;
+			sparseWeight?: number;
+		},
+	): Promise<SearchHit[]> {
+		const {
+			expand = true,
+			rewriteEndpoint,
+			reranker,
+			filter,
+			candidatesBeforeRerank = 50,
+			denseWeight = 0.6,
+			sparseWeight = 0.4,
+		} = options ?? {};
+
+		// Step 1: Query rewriting/expansion
+		let effectiveQuery = query;
+		let rewritten: RewrittenQuery | undefined;
+
+		if (expand) {
+			if (rewriteEndpoint) {
+				rewritten = await llmRewriteQuery(query, {
+					endpoint: rewriteEndpoint,
+					nExpansions: 3,
+				});
+				effectiveQuery = rewritten.combined;
+			} else {
+				rewritten = await rewriteQuery(query, { nExpansions: 3 });
+				effectiveQuery = rewritten.combined;
+			}
+		}
+
+		// Step 2: Embed the (expanded) query
+		const queryVectors = await this.embedder.embedBatch([effectiveQuery]);
+		const queryVector = queryVectors[0];
+
+		// Step 3: Hybrid retrieval
+		let hits: SearchHit[];
+
+		if (this.hybridStore) {
+			hits = await (this.vectorStore as any).searchHybrid(
+				effectiveQuery,
+				queryVector,
+				candidatesBeforeRerank,
+				{
+					denseWeight,
+					sparseWeight,
+					filter: this._filterToMap(filter),
+				},
+			);
+		} else {
+			hits = await this.vectorStore.searchByVector(
+				queryVector,
+				candidatesBeforeRerank,
+				{
+					filter: this._filterToMap(filter),
+				},
+			);
+		}
+
+		// Step 4: Reranking
+		if (this.enableReranking) {
+			const rr = reranker ?? this.reranker;
+			if (rr && hits.length > 0) {
+				const reranked = await rr.rerank(query, hits);
+				hits = reranked.map((r) => ({
+					chunk: r.chunk,
+					score: r.rerankScore,
+					denseScore: r.score,
+					rerankScore: r.rerankScore,
+				}));
+			}
+		}
+
+		// Step 5: Return top-K
+		return hits.slice(0, topK);
+	}
+
+	/**
+	 * Search with context assembly.
+	 * Returns formatted context string suitable for LLM prompts.
+	 */
+	async searchWithContext(
+		query: string,
+		topK = 5,
+		options?: Parameters<typeof this.search>[1] extends number
+			? Omit<Parameters<typeof this.search>[2], "expand"> & {
+					assembleContext?: boolean;
+					includeParents?: boolean;
+					compress?: boolean;
+				}
+			: never,
+	): Promise<{ hits: SearchHit[]; context: string }> {
+		const searchOptions = options as any;
+		const hits = await this.search(query, topK, {
+			...searchOptions,
+			expand: searchOptions?.expand ?? true,
+		});
+
+		let context: string;
+
+		if (searchOptions?.compress) {
+			context = compressContext(hits, this.contextWindow).compressed;
+		} else {
+			context = assembleContext(hits, this.contextWindow);
+		}
+
+		return { hits, context };
+	}
+
+	// ── Document management ───────────────────────────────────────────────────
+
+	/** List all indexed document IDs. */
+	async listDocuments(): Promise<string[]> {
+		return this.vectorStore.documentIds();
+	}
+
+	/** Count total chunks. */
+	async countChunks(): Promise<number> {
+		return this.vectorStore.count();
+	}
+
+	/** Remove a document. */
+	async deleteDocument(docId: string): Promise<void> {
+		await this.vectorStore.deleteDocument(docId);
+	}
+
+	/** Get chunks for a document (debugging). */
+	getChunksByDocument(docId: string): RAGChunk[] {
+		return this.vectorStore.getChunksByDocument(docId);
+	}
+
+	/** Clear all data. */
+	async clear(): Promise<void> {
+		await this.vectorStore.clear();
+	}
+
+	// ── Helpers ─────────────────────────────────────────────────────────────────
+
+	private _filterToMap(
+		filters?: MetadataFilter[],
+	): Record<string, string | number | boolean> | undefined {
+		if (!filters) return undefined;
+		const result: Record<string, string | number | boolean> = {};
+		for (const f of filters) {
+			result[f.field] = Array.isArray(f.value) ? f.value[0] : f.value;
+		}
+		return result;
+	}
+
+	/** Close resources. */
+	close(): void {
+		if ("close" in this.vectorStore) {
+			(this.vectorStore as any).close();
+		}
+	}
 }
+
+

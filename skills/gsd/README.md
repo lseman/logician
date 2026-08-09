@@ -15,12 +15,12 @@ new-project → discuss-phase → plan-phase → execute-phase → verify-work �
 | Component | Source | Logician Status |
 |-----------|--------|-----------------|
 | **Skills** | 71 SKILL.md files | ✅ Installed in `skills/gsd/` |
-| **Commands** | ~40 slash commands | ✅ Registered via `gsd-bridge.ts` |
+| **Commands** | ~40 slash commands | ✅ Registered via `bridge.ts` |
 | **Workflows** | Markdown workflows | ✅ Available via GSDBRIDGE protocol |
 | **Hooks** | Node.js Claude Code hooks | ⚠️ Not needed (Logician uses typed events) |
 | **Capabilities** | 44 runtime adapters | ⚠️ Not ported (Logician has its own runtime) |
-| **STATE.md** | Project memory | ✅ Implemented in `src/gsd-state.ts` |
-| **Phase Mgmt** | Phase lifecycle | ✅ Implemented in `src/gsd-phase.ts` |
+| **STATE.md** | Project memory | ✅ Implemented in `src/state.ts` |
+| **Phase Mgmt** | Phase lifecycle | ✅ Implemented in `src/phase.ts` |
 
 ## Available Commands
 
@@ -78,16 +78,16 @@ GSD workflows are adapted for Logician via the **GSDBRIDGE protocol**:
 4. The agent executes the workflow using Logician's native tools:
    - `ask_user_question` replaces `AskUserQuestion`
    - `subagent` replaces `Agent` tool
-   - `gsd-state.ts` provides STATE.md operations
-   - `gsd-phase.ts` provides phase lifecycle operations
+   - `state.ts` provides STATE.md operations
+   - `phase.ts` provides phase lifecycle operations
 
 ## Workflow Adaptation
 
 The GSD workflow markdown files use bash blocks with `gsd_run` commands.
 In Logician, these are handled by:
 
-1. **STATE.md operations** → `gsd-state.ts` functions
-2. **Phase directory operations** → `gsd-phase.ts` functions
+1. **STATE.md operations** → `state.ts` functions
+2. **Phase directory operations** → `phase.ts` functions
 3. **Interactive questioning** → `ask_user_question` tool
 4. **Subagent spawning** → `subagent` tool
 5. **Git operations** → `Bash` tool
@@ -97,11 +97,11 @@ In Logician, these are handled by:
 ```
 skills/gsd/
 ├── README.md                  # This file
-├── gsd-bridge.ts              # Extension registration (commands)
-├── gsd-*.md                   # 71 GSD skill files (adapted)
+├── bridge.ts                  # Extension registration (commands)
+├── *.md                       # 71 GSD skill files (adapted)
 └── src/
-    ├── gsd-state.ts           # STATE.md management
-    └── gsd-phase.ts           # Phase lifecycle management
+    ├── state.ts               # STATE.md management
+    └── phase.ts               # Phase lifecycle management
 ```
 
 ## Source

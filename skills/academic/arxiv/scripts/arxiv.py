@@ -25,7 +25,6 @@ from typing import Any, Optional
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
 _common = importlib.import_module("scripts.common")
 BaseHTTPSource = _common.BaseHTTPSource
 Paper = _common.Paper

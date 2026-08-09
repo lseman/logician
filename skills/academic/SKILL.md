@@ -1,38 +1,49 @@
 ---
 name: Academic
-description: Use for academic literature discovery and provider selection, then connect provider-specific results into a systematic review workflow.
+description: Use for academic literature discovery, provider selection, and connecting results into systematic review or reference-list workflows.
 aliases:
   - academic search
   - literature discovery
   - research search
   - paper discovery
+  - academic provider
 triggers:
   - find academic papers
   - literature review
   - academic search workflow
   - search papers across databases
+  - build a reference list
 preferred_tools:
   - s2_search
   - openalex_search
   - ieee_search
   - unpaywall_resolve
+  - arxiv_search
+  - crossref_search
 example_queries:
   - find papers on explainable AI for smart grids
   - locate recent papers on transformer time series forecasting
   - identify open-access PDFs for these citations
+  - build a deduplicated reference list
+  - search arXiv and IEEE for power systems papers
 when_not_to_use:
   - the task is general web search rather than academic literature
   - the answer should be based on code or software documentation instead of papers
 next_skills:
   - academic/systematic
+  - academic/references
   - academic/semantic_scholar
   - academic/openalex
   - academic/ieee
+  - academic/arxiv
+  - academic/crossref
   - academic/unpaywall
 preferred_sequence:
   - academic/semantic_scholar
   - academic/openalex
+  - academic/arxiv
   - academic/ieee
+  - academic/crossref
   - academic/unpaywall
 entry_criteria:
   - the user needs papers, citations, or scholarly evidence
@@ -43,6 +54,7 @@ decision_rules:
       * Semantic Scholar for citation-aware literature exploration
       * OpenAlex for broad metadata, affiliations, and funding information
       * IEEE Xplore for applied engineering and electronics
+      * Crossref for DOI metadata and publisher-level bibliography
       * Unpaywall for DOI-to-PDF resolution
   - avoid over-relying on a single database when completeness matters
 failure_recovery:
@@ -55,6 +67,7 @@ anti_patterns:
   - searching only one source without cross-checking other providers
   - citing a paper without checking whether it actually addresses the query
   - assuming citation count equals relevance
+  - not deduplicating before screening
 ---
 
 ## Academic Provider Directory
@@ -62,12 +75,14 @@ anti_patterns:
 Use provider-specific skills for the best fit:
 
 - `academic/arxiv` — preprints and open-access papers on arXiv
+- `academic/crossref` — DOI metadata and publisher-level bibliography
 - `academic/semantic_scholar` — citation-aware discovery and abstracts
 - `academic/openalex` — broad metadata, institutions, and funding context
 - `academic/ieee` — IEEE Xplore coverage for applied engineering and electronics
 - `academic/unpaywall` — legal open-access PDFs for known DOIs
 
 For structured literature synthesis, use `academic/systematic`.
+For reference list building and export, use `academic/references`.
 
 ## When to use this skill
 
@@ -78,27 +93,42 @@ For structured literature synthesis, use `academic/systematic`.
 ## Typical workflow
 
 1. Identify the research need.
-2. Choose the first provider that matches the need:
+2. Choose providers that match the need:
    - start with `academic/semantic_scholar` for broad search and citation context,
-   - use `academic/arxiv` for preprints and open versions,
    - use `academic/openalex` for author/institution/funding metadata,
+   - use `academic/arxiv` for preprints and open versions,
+   - use `academic/crossref` for DOI metadata, publisher, and bibliography details,
    - use `academic/ieee` for IEEE-focused applied research,
    - use `academic/unpaywall` to resolve PDFs by DOI.
 3. Collect candidate papers.
 4. Deduplicate and screen by title/abstract.
-5. Use `academic/systematic` to formalize inclusion and synthesis.
+5. Use `academic/systematic` to formalize inclusion and synthesis, or `academic/references` to build an exportable reference list.
+
+## CLI Quick Reference
+
+The systematic review engine can be run from the command line:
+
+```bash
+# From the project root:
+.venv/bin/python skills/academic/systematic/scripts/systematic.py review "transformer attention" --limit 20 --from-year 2022
+.venv/bin/python skills/academic/systematic/scripts/systematic.py sources "LLM alignment"
+.venv/bin/python skills/academic/systematic/scripts/systematic.py metrics results.jsonl
+```
 
 ## Example questions
 
 - "Find the most relevant open-access arXiv and IEEE papers on demand forecasting."
 - "Search for citations and abstracts for papers on distribution network optimization."
 - "Resolve the open-access PDF for DOI 10.1145/xxxxxxx."
+- "Build a deduplicated reference list from these search results."
 
 ## Related skills
 
-- `academic/systematic`
-- `academic/arxiv`
-- `academic/semantic_scholar`
-- `academic/openalex`
-- `academic/ieee`
-- `academic/unpaywall`
+- `academic/systematic` — Multi-source search and PRISMA screening
+- `academic/references` — Reference list building and export
+- `academic/arxiv` — Preprint search
+- `academic/crossref` — DOI metadata
+- `academic/semantic_scholar` — Citation-aware discovery
+- `academic/openalex` — Broad scholarly metadata
+- `academic/ieee` — IEEE Xplore search
+- `academic/unpaywall` — Open-access PDF resolution

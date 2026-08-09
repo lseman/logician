@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from html import unescape
 from typing import Any, Dict, List, Optional, Protocol
@@ -175,6 +176,12 @@ class Paper:
 
 
 class Source(Protocol):
+    """Interface for academic data sources.
+
+    Defined here for internal consistency but not exported from __init__.py
+    — systematic.py redefines its own copy.
+    """
+
     name: str
 
     def search(self, query: str, *, limit: int = 50, **kwargs) -> List[Paper]: ...
@@ -184,21 +191,35 @@ class BaseHTTPSource:
     name = "base"
 
     def __init__(self, *, timeout: float = 25.0):
-        headers = {"User-Agent": "SystematicReviewLib/0.3"}
-        self._client = httpx.Client(timeout=timeout, headers=headers)
+        headers = {"User-Agent": "SystematicReviewLib/0.4"}
+        self._client = httpx.Client(timeout=timeout, headers=headers, follow_redirects=True)
+
+    def close(self) -> None:
+        """Close the underlying httpx client to free resources."""
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     def _get_json(
         self,
         url: str,
+        *,
         params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
         max_retries: int = 2,
-        base_backoff_s: float = 1.0,
+        base_backoff_s: float = 0.8,
     ) -> Dict[str, Any]:
+        """GET JSON with retry and exponential backoff.
+
+        Retries on 429/5xx with backoff:  base_backoff_s * 2^attempt.
+        """
         retry_statuses = {429, 500, 502, 503, 504}
         last_exc: Optional[Exception] = None
+
         for attempt in range(max(0, int(max_retries)) + 1):
             try:
-                r = self._client.get(url, params=params)
+                r = self._client.get(url, params=params, headers=headers)
                 if r.status_code in retry_statuses and attempt < max_retries:
                     time.sleep(base_backoff_s * (2**attempt))
                     continue
@@ -210,6 +231,9 @@ class BaseHTTPSource:
                 if attempt >= max_retries:
                     break
                 time.sleep(base_backoff_s * (2**attempt))
+
         if last_exc:
             raise last_exc
         return {}
+
+

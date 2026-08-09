@@ -9,6 +9,7 @@ import {
 	getContext,
 	listMemories,
 	recall,
+	recallWithTier,
 	remember,
 	searchObservations,
 } from "../hooks/hook-adapter.js";
@@ -685,6 +686,78 @@ describe("consolidate", () => {
 
 		store.close();
 	});
+
+	test("flags a contradicts relation between memories on the same subject with opposing polarity", () => {
+		const store = createMemoryStore(dbPath());
+		store.createSession("sess-1", { project: "test" });
+		store.createSession("sess-2", { project: "test" });
+
+		// First session's observations consolidate into a new memory asserting
+		// the auth concept works a certain way.
+		store.observe({
+			id: "s1-obs-1",
+			sessionId: "sess-1",
+			timestamp: new Date().toISOString(),
+			hookType: "post_tool_use",
+			toolName: "write",
+			raw: {
+				tool_name: "write",
+				tool_output: "auth uses JWT tokens for session validation",
+			},
+		});
+		store.observe({
+			id: "s1-obs-2",
+			sessionId: "sess-1",
+			timestamp: new Date(Date.now() + 1).toISOString(),
+			hookType: "post_tool_use",
+			toolName: "write",
+			raw: {
+				tool_name: "write",
+				tool_output: "auth relies on JWT tokens throughout the API",
+			},
+		});
+		const firstBatch = store.consolidate("sess-1");
+		assert.ok(firstBatch.length >= 1);
+
+		// Second session's observations, about the same concept, but negated —
+		// should be flagged as contradicting the first, not silently merged
+		// (different dominant type ⇒ different title, so it doesn't hit the
+		// same-title supersession path and must go through detectContradictions).
+		store.observe({
+			id: "s2-obs-1",
+			sessionId: "sess-2",
+			timestamp: new Date(Date.now() + 2).toISOString(),
+			hookType: "post_tool_use",
+			toolName: "edit",
+			raw: {
+				tool_name: "edit",
+				tool_output: "auth no longer uses JWT tokens, switched to sessions",
+			},
+		});
+		store.observe({
+			id: "s2-obs-2",
+			sessionId: "sess-2",
+			timestamp: new Date(Date.now() + 3).toISOString(),
+			hookType: "post_tool_use",
+			toolName: "edit",
+			raw: {
+				tool_name: "edit",
+				tool_output: "auth no longer uses JWT, sessions are cookie-based now",
+			},
+		});
+		const secondBatch = store.consolidate("sess-2");
+		assert.ok(secondBatch.length >= 1);
+
+		const flagged = secondBatch.some(m =>
+			store.getRelations(m.id).some(r => r.type === "contradicts"),
+		);
+		assert.ok(
+			flagged,
+			"expected a contradicts relation between opposing auth memories",
+		);
+
+		store.close();
+	});
 });
 
 // ── Context Injection ──────────────────────────────────────────────────────
@@ -1175,6 +1248,27 @@ describe("hook adapter functions", () => {
 		const tiered = autoTierMemories(store);
 		assert.ok(typeof tiered[mem.id] === "string");
 		assert.ok(["hot", "warm", "cold", "archived"].includes(tiered[mem.id]!));
+
+		store.close();
+	});
+
+	test("recallWithTier orders results by real working tier, not raw search order", () => {
+		const store = createMemoryStore(dbPath());
+		// Cold: never accessed after creation.
+		const cold = store.create("shared-topic cold entry", { type: "fact" });
+		// Hot: created, then accessed just now — highest retention score.
+		const hot = store.create("shared-topic hot entry", { type: "fact" });
+		store.trackAccess(hot.id);
+
+		autoTierMemories(store);
+		assert.equal(store.getWorkingMemoryTier(hot.id), "hot");
+		assert.equal(store.getWorkingMemoryTier(cold.id), "archived");
+
+		const text = recallWithTier(store, "shared-topic", 10);
+		const hotIndex = text.indexOf("hot entry");
+		const coldIndex = text.indexOf("cold entry");
+		assert.ok(hotIndex >= 0 && coldIndex >= 0);
+		assert.ok(hotIndex < coldIndex, "hot entry should be ordered before cold entry");
 
 		store.close();
 	});
