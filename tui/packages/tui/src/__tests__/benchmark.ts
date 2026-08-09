@@ -316,11 +316,12 @@ function benchHotRender(transcript: TranscriptDisplay, width: number): number {
 
 function benchStreaming(
 	transcript: TranscriptDisplay,
+	turns: Turn[],
 	width: number,
 	_chunkSize: number,
 ): number {
 	// Add a small content chunk to simulate streaming
-	const latestTurn = transcript.turns as Turn[];
+	const latestTurn = turns;
 	if (latestTurn.length > 0) {
 		const lastMsg = latestTurn[latestTurn.length - 1].assistantMessage;
 		if (lastMsg) {
@@ -391,7 +392,7 @@ function benchScrollDiff(
 	return ms;
 }
 
-// ── Scenario 6: Layout engine (VStack with ScrollView + overlay) ──────────────
+// ── Scenario 6: Layout engine (Flex with ScrollView + overlay) ────────────────
 
 function benchLayoutEngine(
 	transcript: TranscriptDisplay,
@@ -484,6 +485,7 @@ function benchFullFrame(
 
 function benchFrameConsistency(
 	transcript: TranscriptDisplay,
+	turns: Turn[],
 	width: number,
 	termHeight: number,
 	frames: number,
@@ -495,7 +497,7 @@ function benchFrameConsistency(
 		// Alternate between hot (no change) and streaming (1 line change)
 		if (f % 5 === 4) {
 			// Simulate streaming: add a character
-			const latestTurn = transcript.turns as Turn[];
+			const latestTurn = turns;
 			if (latestTurn.length > 0) {
 				const lastMsg = latestTurn[latestTurn.length - 1].assistantMessage;
 				if (lastMsg) {
@@ -623,7 +625,7 @@ async function main() {
 
 		const times: number[] = [];
 		for (let i = 0; i < iterations; i++) {
-			times.push(benchStreaming(transcript, width, chunkSize));
+			times.push(benchStreaming(transcript, turns, width, chunkSize));
 		}
 		results.push({
 			scenario: "streaming",
@@ -767,7 +769,7 @@ async function main() {
 		for (let i = 0; i < iterations; i++) {
 			// Add a character every 5th frame to simulate live activity
 			if (i % 5 === 4) {
-				const latestTurn = transcript.turns as Turn[];
+				const latestTurn = turns;
 				if (latestTurn.length > 0) {
 					const lastMsg = latestTurn[latestTurn.length - 1].assistantMessage;
 					if (lastMsg && lastMsg.chunks.length > 0) {
@@ -818,6 +820,7 @@ async function main() {
 
 		const frameTimes = benchFrameConsistency(
 			transcript,
+			turns,
 			width,
 			termHeight,
 			100,

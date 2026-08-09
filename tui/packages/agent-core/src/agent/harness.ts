@@ -240,10 +240,6 @@ export class AgentHarness {
 		this.onSavePoint = cb;
 	}
 
-	setOnShutdown(cb: () => void): void {
-		this.onShutdown = cb;
-	}
-
 	subscribe(handler: EventHandler): () => void {
 		this._subscribers.add(handler);
 		return () => this._subscribers.delete(handler);

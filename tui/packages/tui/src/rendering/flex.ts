@@ -1,7 +1,7 @@
-// ── Flex — single flexbox-style stack, replaces Stack/VStack/HStack ────────
-// One component covers both directions: `direction: "column"` stacks children
-// top-to-bottom (VStack's old algorithm), `"row"` composes them left-to-right
-// on shared rows (HStack's). Only "column" has a live caller today, but the
+// ── Flex — single flexbox-style stack ──────────────────────────────────────
+// One implementation covers both directions: `direction: "column"` stacks
+// children top-to-bottom, while `"row"` composes them left-to-right on shared
+// rows. Only "column" has a live caller today, but the
 // layout engine (rendering/layout.ts) already models both as one node type
 // (`StackLayoutNode.type: "vstack" | "hstack"`), so keeping "row" here costs
 // nothing and avoids re-deriving the algorithm if a row layout is needed.
@@ -292,19 +292,4 @@ export function allocateFlexSizes(
 	else if (total > contentSize)
 		distribute(sizes, entries, total - contentSize, "shrink");
 	return sizes;
-}
-
-// Legacy aliases — VStack = Flex("column"), HStack = Flex("row").
-// Kept for test compatibility with code that imports them by name.
-export function VStack(
-	children: FlexChild[] = [],
-	options: FlexOptions = {},
-): Flex {
-	return new Flex(children, { ...options, direction: "column" });
-}
-export function HStack(
-	children: FlexChild[] = [],
-	options: FlexOptions = {},
-): Flex {
-	return new Flex(children, { ...options, direction: "row" });
 }

@@ -1,5 +1,3 @@
-import { formatStartupMemory } from "./memory.ts";
-
 export interface StartupMessageOptions {
 	configPath?: string;
 	project: string;
@@ -76,7 +74,6 @@ export function formatStartupMessage(
 	if (mcpErrors.length) {
 		lines.push("", "## MCP errors", ...mcpErrors.map(error => `- ${error}`));
 	}
-	lines.push(...formatStartupMemory(state));
 	lines.push(
 		"",
 		"## Loaded resources",

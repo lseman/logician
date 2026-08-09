@@ -27,51 +27,6 @@ export const getGraphemeSegmenter = (): Intl.Segmenter => {
 	}
 };
 
-// ── Word navigation ───────────────────────────────────────────────────────────
-
-export function findWordBackward(text: string, cursor: number): number {
-	if (cursor === 0) return 0;
-	const segmenter = getGraphemeSegmenter();
-	const segments = [...segmenter.segment(text)].map(s => s.segment);
-
-	// Skip non-word chars going backward
-	let i = cursor;
-	while (i > 0 && !isWordChar(segments[i - 1])) i--;
-	const _start = i;
-
-	// Skip word chars going backward
-	while (i > 0 && isWordChar(segments[i - 1])) i--;
-	return i;
-}
-
-export function findWordForward(text: string, cursor: number): number {
-	if (cursor >= text.length) return text.length;
-	const segmenter = getGraphemeSegmenter();
-	const segments = [...segmenter.segment(text)].map(s => s.segment);
-
-	// Skip non-word chars going forward
-	let i = cursor;
-	while (i < segments.length && !isWordChar(segments[i])) i++;
-	const _start = i;
-
-	// Skip word chars going forward
-	while (i < segments.length && isWordChar(segments[i])) i++;
-	return i;
-}
-
-function isWordChar(seg: string): boolean {
-	const ch = seg.trim();
-	if (!ch) return false;
-	const c = ch.charCodeAt(0);
-	return (
-		(c >= 0x30 && c <= 0x39) || // 0-9
-		(c >= 0x41 && c <= 0x5a) || // A-Z
-		(c >= 0x61 && c <= 0x7a) || // a-z
-		c === 0x5f || // _
-		c >= 0x0100
-	); // Unicode letter/digit
-}
-
 export function isWhitespaceChar(ch: string): boolean {
 	return ch.trim().length === 0;
 }

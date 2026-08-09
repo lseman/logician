@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, type Mock, mock } from "bun:test";
 import type { EventBus } from "../extensions/event-bus.ts";
 import { PiAdapter } from "../extensions/pi-adapter.ts";
 import type {
@@ -12,8 +12,13 @@ import type {
 	RegisteredTool as LTool,
 } from "../extensions/types.ts";
 
+type MockLogicianApi = LApi & {
+	registerTool: Mock<(tool: LTool) => void>;
+	registerCommand: Mock<(command: LCommand) => void>;
+};
+
 // Create mock logician API
-function createMockLogicianApi(): LApi {
+function createMockLogicianApi(): MockLogicianApi {
 	const registeredTools: LTool[] = [];
 	const registeredCommands: LCommand[] = [];
 	const eventBus = { clear: mock(() => {}) } as unknown as EventBus;
@@ -40,7 +45,7 @@ function createMockLogicianApi(): LApi {
 		}),
 		events: eventBus,
 		info: { name: "mock", path: "/mock" },
-	} as unknown as LApi;
+	} as unknown as MockLogicianApi;
 }
 
 function createMockLogicianContext(): LContext {
@@ -316,8 +321,8 @@ describe("PiAdapter", () => {
 
 		const tools = piApi.getAllTools();
 		expect(tools.length).toBe(2);
-		expect(tools[0].name).toBe("tool1");
-		expect(tools[1].name).toBe("tool2");
+		expect((tools[0] as { name: string }).name).toBe("tool1");
+		expect((tools[1] as { name: string }).name).toBe("tool2");
 	});
 
 	it("should delegate runtime controls through the Pi compatibility port", async () => {

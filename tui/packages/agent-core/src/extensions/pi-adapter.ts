@@ -790,8 +790,6 @@ export class PiAdapter {
 		this.logicianApi = api;
 		this.logicianCtx = ctx;
 		this.runtime = options.runtime;
-		this.piContext = createPiContext(ctx, this.runtime);
-		this.piCommandCtx = createPiCommandContext(ctx, this.runtime);
 	}
 
 	hasHandlers(event: string): boolean {
