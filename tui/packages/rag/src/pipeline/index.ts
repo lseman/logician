@@ -29,9 +29,9 @@ import type {
 	IReranker,
 	MetadataFilter,
 	RAGChunk,
+	RAGStore,
 	RewrittenQuery,
 	SearchHit,
-	VectorStoreConfig,
 } from "../types.ts";
 
 // tui/packages/rag/src/pipeline/index.ts -> repo root
@@ -70,7 +70,7 @@ export interface RAGPipelineConfig {
 	/** Embedding model. */
 	embedder: IEmbedder;
 	/** Vector store (HybridVectorStore for BM25, SQLiteVectorStore for basic). */
-	vectorStore: VectorStoreConfig;
+	vectorStore: RAGStore;
 	/** Chunking configuration. */
 	chunkingConfig?: ChunkingConfig;
 	/** Reranking model (if enabled). */
@@ -85,6 +85,28 @@ export interface RAGPipelineConfig {
 	scriptPath?: string;
 }
 
+export interface RAGSearchOptions {
+	/** Expand query into sub-queries. */
+	expand?: boolean;
+	/** LLM endpoint for query rewriting. */
+	rewriteEndpoint?: string;
+	/** Reranker to use (overrides config). */
+	reranker?: IReranker;
+	/** Metadata filters. */
+	filter?: MetadataFilter[];
+	/** Number of candidates before reranking. */
+	candidatesBeforeRerank?: number;
+	/** Dense/sparse weights for hybrid search. */
+	denseWeight?: number;
+	sparseWeight?: number;
+}
+
+export interface RAGContextSearchOptions extends RAGSearchOptions {
+	assembleContext?: boolean;
+	includeParents?: boolean;
+	compress?: boolean;
+}
+
 /**
  * RAG pipeline.
  *
@@ -94,12 +116,11 @@ export interface RAGPipelineConfig {
  */
 export class RAGPipeline {
 	private embedder: IEmbedder;
-	private vectorStore: any; // HybridVectorStore or SQLiteVectorStore
+	private vectorStore: RAGStore;
 	private chunkingConfig: ChunkingConfig;
 	private enableReranking: boolean;
 	private reranker: IReranker | null;
 	private contextWindow: ContextWindowConfig;
-	private hybridStore: boolean;
 
 	readonly pythonPath: string;
 	readonly scriptPath: string;
@@ -114,9 +135,6 @@ export class RAGPipeline {
 		this.enableReranking =
 			config.enableReranking ?? DEFAULT_RAG_CONFIG.enableReranking;
 		this.contextWindow = config.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-
-		// Determine if using hybrid store
-		this.hybridStore = "searchHybrid" in this.vectorStore;
 
 		// Initialize reranker if enabled
 		if (this.enableReranking) {
@@ -288,21 +306,7 @@ export class RAGPipeline {
 	async search(
 		query: string,
 		topK = 5,
-		options?: {
-			/** Expand query into sub-queries. */
-			expand?: boolean;
-			/** LLM endpoint for query rewriting. */
-			rewriteEndpoint?: string;
-			/** Reranker to use (overrides config). */
-			reranker?: IReranker;
-			/** Metadata filters. */
-			filter?: MetadataFilter[];
-			/** Number of candidates before reranking. */
-			candidatesBeforeRerank?: number;
-			/** Dense/sparse weight for hybrid search. */
-			denseWeight?: number;
-			sparseWeight?: number;
-		},
+		options?: RAGSearchOptions,
 	): Promise<SearchHit[]> {
 		const {
 			expand = true,
@@ -338,8 +342,8 @@ export class RAGPipeline {
 		// Step 3: Hybrid retrieval
 		let hits: SearchHit[];
 
-		if (this.hybridStore) {
-			hits = await (this.vectorStore as any).searchHybrid(
+		if (this.vectorStore.searchHybrid) {
+			hits = await this.vectorStore.searchHybrid(
 				effectiveQuery,
 				queryVector,
 				candidatesBeforeRerank,
@@ -384,15 +388,9 @@ export class RAGPipeline {
 	async searchWithContext(
 		query: string,
 		topK = 5,
-		options?: Parameters<typeof this.search>[1] extends number
-			? Omit<Parameters<typeof this.search>[2], "expand"> & {
-					assembleContext?: boolean;
-					includeParents?: boolean;
-					compress?: boolean;
-				}
-			: never,
+		options?: RAGContextSearchOptions,
 	): Promise<{ hits: SearchHit[]; context: string }> {
-		const searchOptions = options as any;
+		const searchOptions = options;
 		const hits = await this.search(query, topK, {
 			...searchOptions,
 			expand: searchOptions?.expand ?? true,
@@ -451,8 +449,6 @@ export class RAGPipeline {
 
 	/** Close resources. */
 	close(): void {
-		if ("close" in this.vectorStore) {
-			(this.vectorStore as any).close();
-		}
+		this.vectorStore.close?.();
 	}
 }

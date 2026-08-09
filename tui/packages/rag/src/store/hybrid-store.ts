@@ -40,7 +40,7 @@ function resolveSqliteDatabase(): SqliteDatabaseConstructor {
 function resolveStoragePaths(
 	projectDir: string,
 	dbName = "rag",
-): { dbPath: string; indexPath: string; bm25Path: string } {
+): { dbPath: string; indexPath: string } {
 	const base = "tui/rag-storage";
 	const storageRoot = process.env.XDG_DATA_HOME
 		? join(process.env.XDG_DATA_HOME, base)
@@ -52,7 +52,6 @@ function resolveStoragePaths(
 	return {
 		dbPath: join(storageRoot, `${key}.db`),
 		indexPath: join(storageRoot, `${key}.usearch`),
-		bm25Path: join(storageRoot, `${key}.bm25`),
 	};
 }
 

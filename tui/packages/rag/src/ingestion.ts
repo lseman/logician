@@ -56,7 +56,7 @@ export class IngestionPipeline {
 		this.pipeline = new RAGPipeline(
 			{
 				embedder,
-				vectorStore: this.store as any,
+				vectorStore: this.store,
 				chunkingConfig: config.config?.chunking,
 				enableReranking: config.config?.enableReranking,
 				rerankerModel: config.config?.rerankerModel,
@@ -99,7 +99,7 @@ export class IngestionPipeline {
 			sparseWeight?: number;
 		},
 	): Promise<SearchHit[]> {
-		return this.pipeline.search(query, topK, options as any);
+		return this.pipeline.search(query, topK, options);
 	}
 
 	/** Search with context assembly for LLM prompts. */
@@ -112,7 +112,7 @@ export class IngestionPipeline {
 			compress?: boolean;
 		},
 	): Promise<{ hits: SearchHit[]; context: string }> {
-		return this.pipeline.searchWithContext(query, topK, options as any);
+		return this.pipeline.searchWithContext(query, topK, options);
 	}
 
 	/** List all document IDs. */

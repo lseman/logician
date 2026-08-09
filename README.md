@@ -1,29 +1,53 @@
-# Logician
-
-[![Node.js](https://img.shields.io/badge/node-%3E%3D22.19.0-brightgreen)](https://nodejs.org)
-[![Bun](https://img.shields.io/badge/bun-%3E%3D1.3.14-f9f1e1)](https://bun.sh)
-[![TypeScript](https://img.shields.io/badge/typescript-6.x-blue)](https://typescriptlang.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+<div align="center">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="logo/logician-banner.svg">
   <img src="logo/logician-banner-light.svg" alt="Logician" width="800">
 </picture>
 
+### A local-first coding agent built for the terminal
 
-A local-first coding agent with a streaming terminal UI. SSH-ready, thinking-visible, and built for real code editing workflows.
+Streaming, extensible, SSH-ready, and designed to turn instructions into verified code changes.
 
-Logician turns natural-language instructions into verified code changes — with full reasoning trace, session persistence, and skill-based extensibility. No cloud dependency, no black-box prompts.
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.19-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Bun](https://img.shields.io/badge/Bun-%E2%89%A51.3.14-14151a?logo=bun&logoColor=white)](https://bun.sh)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6?logo=typescript&logoColor=white)](https://typescriptlang.org)
+![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)
+
+[Install](#install) · [Quick start](#quick-start) · [Features](#why-logician) · [Documentation](docs/index.md) · [Architecture](#architecture)
+
+</div>
+
+---
+
+Logician is an agentic coding environment for OpenAI-compatible model backends. It combines a responsive terminal interface with code-aware tools, persistent sessions, memory, RAG, plugins, skills, MCP servers, and observable agent execution.
+
+It works equally well at a local workstation, inside `tmux`, or over SSH—and it also exposes a structured JSONL mode for automation.
+
+## Why Logician
+
+| | Capability | What it gives you |
+|---|---|---|
+| ⚡ | **Streaming-first TUI** | Live responses, thinking modes, tool cards, overlays, and steering without leaving the terminal |
+| 🛠️ | **Code-aware execution** | Precise edits, fast search, shell execution, Git workflows, syntax diagnostics, and verification |
+| 🧠 | **Persistent memory** | Workspace-scoped observations and durable lessons with lexical + semantic retrieval |
+| 📚 | **Hybrid RAG** | Dense and BM25 retrieval, structural chunking, reranking, source attribution, and context budgeting |
+| 🔌 | **Extensibility** | `SKILL.md` capabilities, plugins, lifecycle hooks, custom events, and MCP tools |
+| 🌿 | **Parallel agents** | Delegate bounded work to child agents with isolated context and worktree support |
+| 🛡️ | **Controlled autonomy** | Permission modes, sandbox profiles, workspace trust, loop guards, and cancellation |
+| 💾 | **Durable sessions** | JSONL transcripts, search, bookmarks, branching, rewind, export, and compaction |
+| 🧪 | **Autoresearch** | Run measured experiment loops and keep improvements that beat the baseline |
+| 🤖 | **Headless operation** | Versioned JSONL events for scripts, CI, editors, and other agent systems |
 
 ## Install
 
-### Binary (recommended)
+### Prebuilt binary
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash
 ```
 
-Supports macOS and Linux on `x86_64` and `arm64`. Pin a version:
+The installer supports Linux and macOS on `x86_64` and `arm64`. To install a specific release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- 0.3.0
@@ -32,345 +56,182 @@ curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh
 ### From source
 
 ```bash
-cd tui
+git clone https://github.com/lseman/logician.git
+cd logician
 bun install
 bun start
 ```
 
 ### Requirements
 
-| Requirement | Details                           |
-| ----------- | --------------------------------- |
-| Node.js     | `>=22.19.0` (or Bun `>=1.3.14`)  |
-| LLM backend | OpenAI-compatible API             |
-| `rg`, `fd`  | Optional — speeds up search tools |
-| SearXNG     | Optional — powers `web_search`    |
-| MCP servers | Optional — extend tool surface    |
+| Requirement | Details |
+|---|---|
+| Runtime | Bun `>=1.3.14` or Node.js `>=22.19.0` |
+| Model | An OpenAI-compatible API endpoint |
+| Search | `rg` and `fd` are optional but recommended |
+| Web search | An optional SearXNG instance |
+| Integrations | Optional stdio or streamable HTTP MCP servers |
 
-## Quick Start
+## Quick start
 
-Run the TUI. It connects to an OpenAI-compatible backend at `http://127.0.0.1:8080` by default. Configure in `.logician.json` or via `LOGICIAN_LLM_URL`.
-
-```
-/ Enter commands  ·  Ctrl+Enter steer  ·  Ctrl+O tools
-```
-
-### Keyboard shortcuts
-
-Shortcuts below change runtime settings immediately — no restart, no config edit.
-
-| Shortcut | Effect |
-| --- | --- |
-| `Ctrl+L` | Open model selector |
-| `Ctrl+G` | Jump to a file from the current working set |
-| `Ctrl+O` | Expand/collapse tool execution details |
-| `Alt+J` / `Alt+K` | Move focus between tool cards |
-| `Alt+Enter` | Toggle the focused tool card |
-| `Ctrl+Shift+T` | Cycle thinking display mode (collapsed → summary → expanded) |
-| `Ctrl+S` | Open session manager |
-| `Ctrl+K` | Cycle sandbox mode (off → code → full) |
-| `Ctrl+P` | Toggle plan mode (plan ↔ act) |
-| `Ctrl+Enter` | Submit as immediate steering, or flush the steering queue |
-| `Ctrl+M` / `Alt+M` | Cycle inference mode |
-| `Ctrl+I` | Cycle execution profile (autonomous ↔ minimal) |
-
-### Development
-
-```bash
-cd tui
-bun run dev        # start dev server
-bun run typecheck  # TypeScript check
-bun run test       # run tests
-bun start -- doctor --json  # read-only readiness report
-bun start -- exec --jsonl "fix the failing test"  # headless JSONL stream
-```
-
-`doctor` inspects configuration, local dependencies, MCP declarations, skills,
-permissions, and sandbox capability without contacting the configured model or
-starting MCP servers. Omit `--json` for a compact human-readable report.
-
-`exec --jsonl` keeps stdout machine-readable with versioned content, tool,
-error, terminal metadata, and `done` records. Diagnostics go to stderr, and
-reasoning tokens are not included in the stream.
-
-## Features
-
-- **Terminal-native** — works over SSH, in tmux, in any VT100-compatible terminal
-- **Streaming responses** — see reasoning, tool progress, and results as they happen
-- **Safe edits** — strict text matching, CRLF/BOM preservation, path normalization
-- **Skills & plugins** — `SKILL.md`-driven capabilities, Claude-style lifecycle hooks
-- **Subagents** — delegate to child agents with isolated worktrees
-- **Structured reasoning** — SSR, Tree of Thoughts, Reflexion, and more
-- **Session management** — persistence, bookmarks, branching, rewind checkpoints, compaction
-- **Cross-session memory** — persistent observations, lessons, and action tracking
-- **MCP support** — stdio and streamable HTTP MCP servers
-- **Permission modes** — `acceptAll`, `acceptEdits`, `ask`, `plan`
-
-## Architecture
-
-Logician is a TypeScript monorepo with four packages under `tui/packages/`. The TUI sits on top, connecting the user to the agent engine through an orchestration layer.
-
-```mermaid
-flowchart TB
-    subgraph tui["TUI Layer"]
-        tuiDesc["tui/packages/tui/<br/>terminal rendering, input, overlays"]
-    end
-    subgraph orch["Orchestration"]
-        orchDesc["tui/packages/coding-agent/<br/>sessions, config, MCP, skills, prompts, trust, tools"]
-    end
-    subgraph core["Agent Core"]
-        coreDesc["tui/packages/agent-core/<br/>loop, harness, hooks, types"]
-        capDesc["tui/packages/agent-capabilities/<br/>tasks, delegation, reasoning, interaction"]
-    end
-    subgraph ext["External"]
-        extDesc["LLM backend (OpenAI-compatible) · MCP servers · SearXNG"]
-    end
-
-    tui --> orch --> core --> ext
-```
-
-### Data flow
-
-```mermaid
-flowchart TD
-    A["User input (TUI)"] --> B["AgentCoreBridge"]
-    B --> C["AgentHarness"]
-    C --> D["runAgentLoop()"]
-    D --> E["LLM backend"]
-    E --> F["response messages"]
-    F --> G["parse & execute"]
-    C --> H["hooks"]
-    H --> I["guardrails"]
-    D --> J["ToolRegistry"]
-    J --> K["bash / edit / git"]
-    K --> L["Tool results"]
-    I --> M["OutputGuard"]
-    M --> N["compaction / stop"]
-    L --> D
-    G --> D
-    N --> D
-```
-
-1. **TUI** collects input, renders the transcript, and manages overlays (permissions, session browser, settings).
-2. **AgentCoreBridge** (in `coding-agent`) wires the bridge between the TUI and `agent-core`. It resolves configuration, loads MCP servers, registers tools, and translates agent events to TUI display formats.
-3. **AgentHarness** runs the main loop: receive user input → call backend → parse response → execute tools → repeat. Each iteration is a "turn" with granular lifecycle events (`turn_start`, `message_start`, `text_delta`, `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `message_update`, `turn_end`, `agent_settled`).
-4. **Hooks** intercept every event via a `HookBus` with per-event reducer semantics. Built-in hooks include duplicate-call guard, failure-loop guard, thinking-loop detector, budget tracker, proactive compaction, and file checkpointing. Skills and plugins register custom hooks.
-5. **ToolRegistry** dispatches tool calls to implementations (`bash`, `edit_file`, `git`, etc.). Permission checks gate execution based on the configured mode.
-
-### Packages
-
-| Package | Role | Key modules |
-|---------|------|-------------|
-| `@logician/agent-core` | Agent engine | `agent/` — loop runner, harness, session, guards; `hooks/` — HookBus, builtin hooks; `tools/` — tool registry, shared utilities; `compaction/` — context summarization; `queue/` — steering and follow-up queues |
-| `@logician/agent-capabilities` | Agent capabilities | `delegation/` — subagent spawning and isolation; `reasoning/` — CoT, ToT, SSR, Reflexion, Best-of-N; `interaction/` — ask-user prompts; `tasks/` — todo tracking; `eoh/` — evolution-of-thought evaluator |
-| `@logician/coding-agent` | Orchestration | `application/` — AgentCoreBridge, LoopManager, GoalManager; `configuration/` — config loading and validation; `context/` — system prompt assembly, file loading; `commands/` — slash commands; `mcp/` — MCP client and manager; `sessions/` — JSONL transcript, bookmarks; `tools/` — all tool implementations; `skills/` — SKILL.md loader and activation; `trust/` — workspace trust; `developer-tools/` — doctor, LSP, post-edit diagnostics |
-| `@logician/tui` | Terminal UI | `app/` — main TUI, headless exec; `input/` — input bar, undo stack, word navigation; `overlays/` — all popup UIs; `rendering/` — transcript display, terminal sanitization; `state/` — turn state; `status/` — status bar, todo bar, notifications; `terminal/` — core terminal, themes |
-
-### Key subsystems
-
-#### Agent loop
-The harness loop: receive input → call backend → parse response → execute tools → repeat. `AgentHarness` orchestrates via `runAgentLoop()`, managing budget, compaction triggers, and guardrails.
-
-#### Hook system
-Hooks are lifecycle callbacks registered per event type on a `HookBus`. Multi-handler with per-event reducer semantics:
-
-| Event | Reducer | Behavior |
-|-------|---------|----------|
-| `beforeToolCall` | early-block | First `{content}` short-circuits; `{args}` rewrites thread |
-| `afterToolCall` | patch-accumulate | Each handler sees prior patch; later non-undefined fields win |
-| `prepareNextTurn` | transform | Messages thread through all handlers |
-| `shouldStopAfterTurn` | first-true | Any handler returning `true` stops the loop |
-
-Handlers have `priority` (higher first), `timeoutMs`, and `source` metadata.
-
-#### Session lifecycle
-Sessions persist as JSONL transcript files. Support:
-- **Bookmarks** — named checkpoints at any turn
-- **Branching** — fork a session; branches merge via summarization
-- **Rewind** — restore to a bookmark
-- **Compaction** — summarize old turns at `proactiveCompactionFraction` (default 0.8) of the context window
-- **Cross-session memory** — structured observations indexed in a BM25 knowledge base
-
-#### Trust model
-At startup, the TUI scans the working directory for trust-requiring resources. A prompt overlay offers five choices: trust this folder, trust parent, session-only trust, deny, or exit. Skills with `allowed-tools` lists are gated by trust.
-
-#### Subagent isolation
-Child agents run in isolated Bun worktrees with their own `node_modules` and file system scope. They receive a subset of the parent's tools, a truncated context window, and their own session.
-
-#### Response guardrails
-The `response-patterns` module detects degenerate model behavior:
-- **Non-committal** — hedging language
-- **Completion** — premature task-complete declarations
-- **Meta-reasoning** — reasoning about reasoning without action
-- **Circling** — retry intent without progress
-
-#### MCP integration
-Logician supports MCP (Model Context Protocol) servers via stdio and streamable HTTP. MCP tools are discovered at startup, registered in the `ToolRegistry`, and surfaced as native tools. Load failures are injected into the system prompt for transparency.
-
-## Tools
-
-**File operations**
-| Tool         | Purpose                                       |
-| ------------ | --------------------------------------------- |
-| `read_file`  | Read files with path normalization            |
-| `write_file` | Create/replace files (auto-creates dirs)      |
-| `edit_file`  | Strict text edits with unique-match guarantee |
-| `file_diff`  | Show file diffs                               |
-| `list_files` | Safe directory listing                        |
-
-**Search**
-| Tool   | Purpose                    |
-| ------ | -------------------------- |
-| `grep` | Content search via ripgrep |
-| `find` | File location via fd/find  |
-
-**System**
-| Tool      | Purpose                                         |
-| --------- | ----------------------------------------------- |
-| `bash`    | Run shell commands with timeout/abort           |
-| `git`     | Git status/diff/log                             |
-| `sandbox` | Execute commands in Bubblewrap-isolated sandbox |
-
-**Agent primitives**
-| Tool           | Purpose                               |
-| -------------- | ------------------------------------- |
-| `todo`         | Task tracking with status transitions |
-| `task_status`  | Structured completion/delegation      |
-| `ask_user`     | User input prompts                    |
-| `spawn_agent`  | Child agent runner (isolated context) |
-| `spawn_agents` | Parallel child agent runners          |
-
-**Web & docs**
-| Tool         | Purpose                 |
-| ------------ | ----------------------- |
-| `web_search` | Search via SearXNG      |
-| `web_fetch`  | Fetch web content       |
-| `read_skill` | Load skill instructions |
-
-**MCP tools**
-| Tool    | Purpose                                                    |
-| ------- | ---------------------------------------------------------- |
-| `mcp_*` | External MCP server tools (configured in `.logician.json`) |
-
-## Configuration
-
-Config is read in order: `LOGICIAN_CONFIG` → `.logician.json` → `~/.logician/settings.json` → env vars.
+Logician defaults to an OpenAI-compatible endpoint at `http://127.0.0.1:8080`. Create `.logician.json` in your project when you need to override it:
 
 ```json
 {
   "baseUrl": "http://127.0.0.1:8080",
-  "model": "local-model",
-  "theme": "dark",
-  "executionProfile": "minimal",
-  "webSearch": { "baseUrl": "http://127.0.0.1:8090", "maxResults": 10 },
+  "model": "your-model",
   "permissionMode": "acceptEdits",
-  "compaction": { "enabled": true, "reserveTokens": 16384 },
-  "mcpServers": {
-    "context7": { "type": "streamable-http", "url": "https://mcp.context7.com/mcp" }
-  }
+  "executionProfile": "autonomous",
+  "memory": true,
+  "memoryEmbeddings": true
 }
 ```
 
-### Execution profiles
+Then start Logician from the repository you want to work on:
 
-`executionProfile` controls who owns continuation and termination policy. It
-does not change tool permissions or sandboxing; those remain controlled by
-`permissionMode` and the sandbox profile.
-
-| Capability                                              | `autonomous` (default) | `minimal` |
-| ------------------------------------------------------- | ---------------------- | --------- |
-| Provider calls and streaming                            | Enabled                | Enabled   |
-| Tool execution and result delivery                      | Enabled                | Enabled   |
-| Steering and follow-up queues                           | Enabled                | Enabled   |
-| Retries, cancellation, checkpoints, and compaction      | Enabled                | Enabled   |
-| Caller hooks and SDK `stopPolicies`                     | Enabled                | Enabled   |
-| Built-in continuation and todo nudges                   | Enabled                | Disabled  |
-| Acceptance contracts and reflection                     | Enabled                | Disabled  |
-| Duplicate/failure, budget, and thinking-loop guards     | Enabled                | Disabled  |
-| Heuristic completion, question, and non-committal stops | Enabled                | Disabled  |
-| Built-in `task_status` termination                      | Enabled                | Disabled  |
-
-Use `autonomous` for the interactive coding agent: Logician can notice
-unfinished work, inject corrective turns, validate acceptance criteria, and
-produce a structured conclusion.
-
-Use `minimal` when embedding the loop as a mechanism inside another agent or
-SDK. The loop still calls the provider, executes tools, drains queues, retries,
-compacts context, and honors cancellation, but it becomes idle after the
-provider has no pending work. The caller can then use `stopPolicies` to inject
-another turn or return a structured `completed`, `needs_input`, `blocked`,
-`failed`, or `cancelled` outcome.
-
-In the TUI, press **Ctrl+I** to toggle `autonomous ↔ minimal`. The status bar
-shows `exec: auto` or `exec: minimal`; the selected profile is persisted and
-takes effect on the next turn. It can also be changed through the settings
-overlay or `/settings execution-policy <autonomous|minimal>`.
-
-`web_search` uses SearXNG's JSON endpoint. Override the default local endpoint
-with `webSearch.baseUrl` or `LOGICIAN_SEARXNG_URL`; use
-`LOGICIAN_SEARXNG_MAX_RESULTS` to change the default result count.
-
-Successful JavaScript, TypeScript, and JSON edits receive a fast syntax check
-before the next model turn. Set `LOGICIAN_POST_EDIT_DIAGNOSTICS=0` to disable
-this advisory check.
-
-### Permission modes
-
-| Mode          | Behavior                             |
-| ------------- | ------------------------------------ |
-| `acceptAll`   | Execute everything without asking    |
-| `acceptEdits` | Auto-accept reads; ask before writes |
-| `ask`         | Ask before every tool call           |
-| `plan`        | Plan only, no execution              |
-
-### Slash commands
-
-| Area        | Commands                                                                 |
-| ----------- | ------------------------------------------------------------------------ |
-| Sessions    | `/new`, `/sessions`, `/save`, `/rename`, `/bookmark`, `/load`, `/export` |
-| Agent       | `/status`, `/agents`, `/agent`, `/pipeline`, `/reload`                   |
-| Context     | `/context`, `/compact`, `/fork`, `/reset`, `/changes`                    |
-| RAG/docs    | `/mount`, `/upload`, `/docs`, `/rag`                                     |
-| Tools       | `/skills-health`, `/plugins`, `/mcp`, `/theme`, `/reasoner`, `/settings` |
-| Permissions | `/permissions`, `/plan`, `/rewind`                                       |
-
-Run `/help` in the TUI for the full live list.
-
-## Skills
-
-Skills are `SKILL.md` files with YAML frontmatter. They define capabilities the agent can activate on demand.
-
-```md
----
-name: code-review
-description: Review code changes for correctness, risks, and missing tests.
-allowed-tools: [read_file, grep, git]
-argument-hint: <diff-or-topic>
----
-
-Inspect the change as a reviewer. Prioritize bugs and regressions before style.
+```bash
+logician
 ```
 
-## Themes
+Give it an outcome, not a sequence of keystrokes:
 
-Built-in themes live in `tui/packages/tui/src/terminal`. Custom themes go in `~/.logician/themes/`.
-
-```json
-{
-  "name": "my-theme",
-  "mode": "truecolor",
-  "colors": {
-    "accent": "#58a6ff",
-    "text": "#c9d1d9",
-    "bg": "#0d1117",
-    "success": "#56d364",
-    "error": "#f85149",
-    "warning": "#d29922"
-  }
-}
+```text
+Fix the failing authentication tests, preserve the public interface, and verify the result.
 ```
 
-Switch with `/theme dark` or `/theme light`.
+Inside the composer:
+
+```text
+/ Enter commands  ·  Ctrl+Enter steer now  ·  Ctrl+O tools
+```
+
+## Everyday workflows
+
+### Interactive coding
+
+Ask Logician to inspect, implement, test, and explain changes in one continuous session. Tool calls remain visible and interruptible, and you can steer the active turn with `Ctrl+Enter`.
+
+### Headless automation
+
+```bash
+bun start -- exec --jsonl "fix the failing test"
+```
+
+Standard output contains versioned content, tool, error, terminal-metadata, and completion records. Diagnostics are written to standard error so the JSONL stream remains machine-readable.
+
+### Environment diagnostics
+
+```bash
+bun start -- doctor
+bun start -- doctor --json
+```
+
+`doctor` checks configuration, local dependencies, MCP declarations, skills, permissions, and sandbox readiness without contacting the model or starting MCP servers.
+
+### Extend the agent
+
+- Add focused instructions and workflows with [`SKILL.md`](docs/guides/skills.md) files.
+- Package skills, hooks, commands, and integrations as [plugins](docs/guides/plugins.md).
+- Connect external tools through [MCP](docs/guides/mcp.md).
+- Use Pi-compatible extension events and lifecycle hooks to customize runtime behavior.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+L` | Open the model selector |
+| `Ctrl+G` | Jump to a file in the current working set |
+| `Ctrl+O` | Expand or collapse tool execution details |
+| `Alt+J` / `Alt+K` | Move between tool cards |
+| `Alt+Enter` | Toggle the focused tool card |
+| `Ctrl+Shift+T` | Cycle thinking display mode |
+| `Ctrl+S` | Open the session manager |
+| `Ctrl+K` | Cycle sandbox mode |
+| `Ctrl+P` | Toggle plan and act modes |
+| `Ctrl+Enter` | Send immediate steering or flush queued steering |
+| `Ctrl+M` / `Alt+M` | Open the inference-mode selector |
+| `Ctrl+I` | Toggle autonomous and minimal execution |
+| `Ctrl+A` | Open the autoresearch dashboard |
+
+Type `/help` for the live command list. Common entry points include `/sessions`, `/context`, `/compact`, `/agents`, `/plugins`, `/mcp`, `/permissions`, `/settings`, and `/rag`.
+
+## Architecture
+
+Logician is a TypeScript monorepo organized as a layered agent runtime:
+
+```mermaid
+flowchart LR
+    User([User or automation]) --> TUI[Terminal UI / JSONL]
+    TUI --> Coding[Coding orchestration]
+    Coding --> Core[Agent core]
+    Core --> Model[OpenAI-compatible model]
+    Core --> Tools[Built-in and MCP tools]
+    Coding --> Memory[Memory and RAG]
+    Core --> Capabilities[Capabilities and subagents]
+    Capabilities --> Research[Autoresearch]
+```
+
+| Package | Responsibility |
+|---|---|
+| `@logician/tui` | Terminal rendering, input, overlays, transcript display, and headless execution |
+| `@logician/coding-agent` | Configuration, sessions, commands, skills, plugins, MCP, trust, and tool orchestration |
+| `@logician/agent-core` | Provider loop, harness, event lifecycle, hooks, queues, guards, and compaction |
+| `@logician/agent-capabilities` | Delegation, reasoning strategies, tasks, user interaction, and agent primitives |
+| `@logician/memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
+| `@logician/rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
+| `@logician/autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
+
+The core flow is deliberately simple:
+
+```text
+input → provider → streamed events → tool calls → results → next turn → settled
+```
+
+Hooks, plugins, memory, guardrails, and UI projections observe or transform that lifecycle through explicit event seams rather than owning separate agent loops.
+
+Read the [architecture overview](docs/architecture/overview.md), [agent loop](docs/architecture/agent-loop.md), [hook system](docs/architecture/hooks.md), and [session model](docs/architecture/sessions.md) for the deeper design.
+
+## Safety and control
+
+Logician separates execution policy from permissions:
+
+- **Execution profile** decides whether the built-in agent policy actively continues unfinished work (`autonomous`) or yields control to its caller (`minimal`).
+- **Permission mode** decides which operations require confirmation (`acceptAll`, `acceptEdits`, `ask`, or `plan`).
+- **Sandbox mode** controls process isolation independently of both.
+- **Workspace trust** gates project-provided skills, plugins, and other executable configuration.
+
+This separation lets you use an autonomous agent with strict permissions or embed a minimal loop with broader tool access.
+
+## Development
+
+```bash
+bun install
+bun run dev         # launch from source
+bun run typecheck   # check all workspaces
+bun run lint        # run Biome
+bun run test        # run the main test suites
+bun run ci          # typecheck + lint + formatting + tests
+```
+
+Documentation lives in [`docs/`](docs/index.md). Run its local site with:
+
+```bash
+cd docs
+npm install
+npm run dev
+```
+
+## Documentation
+
+- [Getting started](docs/getting-started.md)
+- [Configuration](docs/guides/configuration.md)
+- [Terminal UI](docs/guides/terminal-ui.md)
+- [Sessions and compaction](docs/guides/sessions.md)
+- [Skills](docs/guides/skills.md)
+- [Plugins](docs/guides/plugins.md)
+- [MCP](docs/guides/mcp.md)
+- [Subagents](docs/guides/subagents.md)
+- [Troubleshooting](docs/guides/troubleshooting.md)
 
 ## License
 

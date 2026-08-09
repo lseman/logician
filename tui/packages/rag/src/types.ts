@@ -78,6 +78,23 @@ export interface IVectorStore {
 	setTermFrequencies(docId: string, tf: Record<string, number>): Promise<void>;
 }
 
+/** Store capabilities required by the end-to-end RAG pipeline. */
+export interface RAGStore extends IVectorStore {
+	searchHybrid?(
+		queryText: string,
+		queryVector: number[],
+		topK?: number,
+		options?: {
+			filter?: Record<string, string | number | boolean>;
+			denseWeight?: number;
+			sparseWeight?: number;
+		},
+	): Promise<SearchHit[]>;
+	deleteDocument(documentId: string): Promise<void>;
+	getChunksByDocument(documentId: string): RAGChunk[];
+	close?(): void;
+}
+
 /** Pipeline step interface. */
 export interface PipelineStep<TIn, TOut> {
 	name: string;
