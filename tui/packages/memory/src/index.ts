@@ -11,7 +11,6 @@ export {
 	listMemories,
 	recall,
 	recallWithTier,
-	registerMemoryHooks,
 	remember,
 	searchObservations,
 	setSessionId,

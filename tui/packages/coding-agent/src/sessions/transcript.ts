@@ -17,7 +17,6 @@ export type ThinkingDisplayStyle = "collapsed" | "summary" | "expanded";
 // ── Tool execution (used by tool chunks) ──────────────────────────────────────
 
 export interface ToolExecution {
-	tool: string;
 	tool_name: string;
 	tool_call_id?: string;
 	args?: Record<string, unknown>;
@@ -505,7 +504,6 @@ export class Transcript {
 				seq: assistant.chunks.length,
 				type: "tool",
 				tool: {
-					tool: "spawn_agent",
 					tool_name: "spawn_agent",
 					tool_call_id: `lifecycle_${Date.now()}`,
 					args: event.task
@@ -835,7 +833,6 @@ export class Transcript {
 		// chunk shows "done".
 		const existing = this.findReusableToolChunk(msg.chunks, event);
 		if (existing?.tool) {
-			existing.tool.tool = event.tool;
 			existing.tool.tool_name = event.tool_name;
 			existing.tool.tool_call_id = event.tool_call_id;
 			if (event.tool_args !== undefined) {
@@ -851,7 +848,6 @@ export class Transcript {
 			seq: msg.chunks.length,
 			type: "tool",
 			tool: {
-				tool: event.tool,
 				tool_name: event.tool_name,
 				tool_call_id: event.tool_call_id,
 				args: event.tool_args as Record<string, unknown> | undefined,
@@ -873,7 +869,7 @@ export class Transcript {
 		const toolChunk = this.findToolChunk(
 			turn.assistantMessage.chunks,
 			event.tool_call_id,
-			event.tool_name || event.tool,
+			event.tool_name,
 		);
 		if (!toolChunk?.tool) return;
 
@@ -900,13 +896,13 @@ export class Transcript {
 		let toolChunk = this.findToolChunk(
 			assistant.chunks,
 			event.tool_call_id,
-			event.tool_name || event.tool,
+			event.tool_name,
 		);
 		// Direct-mode /spawn: tool_start was never emitted, or lifecycle:end
 		// already closed a placeholder under a synthetic id. Reuse the most
 		// recent spawn chunk before creating another card.
 		const isDirectSpawnName = ["spawn_agent", "spawn_agents"].includes(
-			event.tool_name || event.tool,
+			event.tool_name,
 		);
 		if (!toolChunk && isDirectSpawnName) {
 			toolChunk = [...assistant.chunks]
@@ -921,12 +917,11 @@ export class Transcript {
 			}
 		}
 		if (!toolChunk && isDirectSpawnName) {
-			const toolName = event.tool_name || event.tool;
+			const toolName = event.tool_name;
 			assistant.chunks.push({
 				seq: assistant.chunks.length,
 				type: "tool",
 				tool: {
-					tool: toolName,
 					tool_name: toolName,
 					tool_call_id: event.tool_call_id,
 					args: undefined,

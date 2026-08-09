@@ -120,7 +120,6 @@ export interface TurnEndEvent {
 
 export interface ToolStartEvent {
 	type: "tool_start" | "tool_execution_start";
-	tool: string;
 	tool_name: string;
 	tool_args?: Record<string, unknown>;
 	turn_id?: string;
@@ -129,7 +128,6 @@ export interface ToolStartEvent {
 
 export interface ToolEndEvent {
 	type: "tool_end" | "tool_execution_end";
-	tool: string;
 	tool_name: string;
 	result?: string;
 	is_error?: boolean;
@@ -141,7 +139,6 @@ export interface ToolEndEvent {
 
 export interface ToolUpdateEvent {
 	type: "tool_execution_update";
-	tool: string;
 	tool_name: string;
 	partial_result?: string;
 	update_kind?: "arguments" | "output";

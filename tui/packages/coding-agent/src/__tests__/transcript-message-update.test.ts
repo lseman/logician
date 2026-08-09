@@ -85,14 +85,12 @@ void test("empty structured-tool snapshot preserves streamed assistant prose", (
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call_1",
 		tool_args: { path: "implementation.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call_1",
 		result: "contents",
@@ -183,14 +181,12 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 	transcript.handleEvent({ type: "token", token: "I will inspect the file." });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call_1",
 		tool_args: { path: "file.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call_1",
 		result: "file contents",
@@ -216,14 +212,12 @@ void test("promoted tool calls preserve text and tool chronology across iteratio
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call_2",
 		tool_args: { path: "other.ts" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call_2",
 		result: "other contents",

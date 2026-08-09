@@ -15,7 +15,6 @@ void test("a length-truncated tool call closes its spinner instead of hanging", 
 	// Streaming placeholder: model already sent the real id (typical case).
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "call_abc123",
 		tool_args: {},
@@ -25,7 +24,6 @@ void test("a length-truncated tool call closes its spinner instead of hanging", 
 	// tool_call_end (mapped to "tool_execution_end") with the same id.
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "call_abc123",
 		result:
@@ -47,7 +45,6 @@ void test("a length-truncated tool call closes even with a placeholder streaming
 	// falls back to `tool_${index}` — here "tool_0").
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "tool_0",
 		tool_args: {},
@@ -57,7 +54,6 @@ void test("a length-truncated tool call closes even with a placeholder streaming
 	// and the real id is known — it no longer matches the placeholder.
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "call_real_id_9",
 		result: "not executed, truncated",
@@ -81,14 +77,12 @@ void test("two parallel same-name calls truncated together both close correctly"
 	// (provider hasn't assigned real ids yet for either).
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "tool_0",
 		tool_args: {},
 	});
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "tool_1",
 		tool_args: {},
@@ -97,7 +91,6 @@ void test("two parallel same-name calls truncated together both close correctly"
 	// Both truncate together; the length branch emits real ids for each.
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "call_real_a",
 		result: "not executed, truncated",
@@ -105,7 +98,6 @@ void test("two parallel same-name calls truncated together both close correctly"
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "write_file",
 		tool_name: "write_file",
 		tool_call_id: "call_real_b",
 		result: "not executed, truncated",

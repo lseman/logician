@@ -142,7 +142,6 @@ export class SubagentCoordinator {
 		// before the tool fires subagent_start/subagent_event.
 		this.deps.emit({
 			type: "tool_execution_start",
-			tool: "spawn_agent",
 			tool_name: "spawn_agent",
 			tool_args: { task, agent },
 			tool_call_id: toolCallId,
@@ -156,7 +155,6 @@ export class SubagentCoordinator {
 				// deps.emit(subagent_event) → mapAgentEvent.
 				this.deps.emit({
 					type: "tool_execution_update",
-					tool: "spawn_agent",
 					tool_name: "spawn_agent",
 					partial_result: delta,
 					update_kind: "output" as const,
@@ -176,7 +174,6 @@ export class SubagentCoordinator {
 				// emitted by the tool via deps.emit during execute().
 				this.deps.emit({
 					type: "tool_execution_end",
-					tool: "spawn_agent",
 					tool_name: "spawn_agent",
 					result: content,
 					is_error: isError,
@@ -195,7 +192,6 @@ export class SubagentCoordinator {
 				const error = err as Error;
 				this.deps.emit({
 					type: "tool_execution_end",
-					tool: "spawn_agent",
 					tool_name: "spawn_agent",
 					result: error.message,
 					is_error: true,

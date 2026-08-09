@@ -11,7 +11,6 @@ void test("direct-mode /spawn: lifecycle summary written after tool_end closes c
 	// Tool execution completes before any lifecycle events
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		result: "Agent done in 2 turns",
@@ -61,7 +60,6 @@ void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", (
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn-direct" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "spawn_1",
 		tool_args: { task: "list files", agent: "general" },
@@ -92,7 +90,6 @@ void test("direct-mode /spawn: lifecycle end marks tool done before tool_end", (
 	// tool_end should reuse the same card and prefer metrics duration
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "spawn_1",
 		result: "file a, file b",
@@ -129,7 +126,6 @@ void test("direct-mode /spawn-test: batch lifecycle captured after tool_end", ()
 	// Tool ends first
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agents",
 		tool_name: "spawn_agents",
 		tool_call_id: "batch",
 		result: "",
@@ -188,7 +184,6 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	transcript.handleEvent({ type: "turn_start", turn_id: "spawn_turn" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "spawn_1",
 		tool_args: { task: "list files", agent: "general" },
@@ -202,7 +197,6 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "spawn_1",
 		partial_result: "Listing files…\n",
@@ -245,7 +239,6 @@ void test("direct-mode /spawn: stream and result stay on the user command turn",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "spawn_1",
 		result: "Two markdown files.",
@@ -284,7 +277,6 @@ void test("child tool_call and tool_execution events dedupe by toolCallId", () =
 	transcript.handleEvent({ type: "turn_start", turn_id: "t1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "spawn_1",
 		tool_args: { task: "list", agent: "general" },
@@ -365,7 +357,6 @@ void test("normal flow: lifecycle before tool_end still captures summary", () =>
 	// Tool start creates the chunk first (as agent-loop does)
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		tool_args: { agent: "explorer", task: "Inspect files" },
@@ -392,7 +383,6 @@ void test("normal flow: lifecycle before tool_end still captures summary", () =>
 	// Tool ends after
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		result: "done",

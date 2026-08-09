@@ -45,7 +45,7 @@ function isVerificationTool(event: ParsedBridgeEvent): boolean {
 	if (event.type !== "tool_start" && event.type !== "tool_execution_start") {
 		return false;
 	}
-	if (event.tool_name !== "bash" && event.tool !== "bash") return false;
+	if (event.tool_name !== "bash") return false;
 	const command = String(event.tool_args?.command ?? "");
 	return VERIFY_PATTERN.test(command);
 }

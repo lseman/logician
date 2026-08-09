@@ -96,7 +96,6 @@ function genToolResult(resultSize: number, turnIdx: number): ToolExecution {
 	const toolNames = ["read_file", "write_file", "edit_file", "grep", "bash", "find", "git"];
 	const tool = toolNames[turnIdx % toolNames.length];
 	return {
-		tool,
 		tool_name: tool,
 		args: { path: `/src/file${turnIdx}.ts`, command: `echo "hello"` },
 		result: genRandomText(resultSize, turnIdx),

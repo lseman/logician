@@ -78,7 +78,6 @@ export function childToolExecution(call: ChildToolCall): ToolExecution {
 				: {};
 	const status = call.status ?? (call.isError ? "failed" : "completed");
 	return {
-		tool: call.toolName,
 		tool_name: call.toolName,
 		tool_call_id: call.toolCallId,
 		args,

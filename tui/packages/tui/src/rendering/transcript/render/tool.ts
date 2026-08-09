@@ -333,7 +333,6 @@ export function sanitizeToolForDisplay(
 	}
 	return {
 		...tool,
-		tool: sanitizeTerminalText(tool.tool),
 		tool_name: sanitizeTerminalText(tool.tool_name),
 		tool_call_id: tool.tool_call_id
 			? sanitizeTerminalText(tool.tool_call_id)

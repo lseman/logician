@@ -21,7 +21,6 @@ void test("subagent tool notices become one integrated lifecycle entry", () => {
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		tool_args: { agent: "explorer", task: "Inspect the workspace" },
@@ -68,7 +67,6 @@ void test("concurrent same-name child tool calls resolve to the correct call by 
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		tool_args: { agent: "explorer", task: "Inspect the workspace" },
@@ -120,7 +118,6 @@ void test("multi-line child tool results do not break marker/id/name parsing", (
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		tool_args: { agent: "explorer", task: "Inspect the workspace" },
@@ -160,7 +157,6 @@ void test("subagent lifecycle notices update the parent card without duplication
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "parent-tool",
 		tool_args: { agent: "explorer", task: "Inspect the workspace" },
@@ -201,7 +197,6 @@ void test("final batch details preserve collected child tool activity", () => {
 	transcript.handleEvent({ type: "turn_start", turn_id: "turn-1" });
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agents",
 		tool_name: "spawn_agents",
 		tool_call_id: "batch",
 		tool_args: {
@@ -219,7 +214,6 @@ void test("final batch details preserve collected child tool activity", () => {
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agents",
 		tool_name: "spawn_agents",
 		tool_call_id: "batch",
 		result: "",
@@ -240,14 +234,12 @@ void test("completed subagents retain their live transcript", () => {
 	transcript.addTurn("Delegate");
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "agent",
 		tool_args: { agent: "general", task: "Implement it" },
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "agent",
 		update_kind: "output",
@@ -255,7 +247,6 @@ void test("completed subagents retain their live transcript", () => {
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "agent",
 		result: "Implemented successfully.",
@@ -272,7 +263,6 @@ void test("subagent chunks retain thinking, tool calls, and responses in order",
 	transcript.addTurn("Delegate");
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "spawn_agent",
 		tool_name: "spawn_agent",
 		tool_call_id: "agent",
 		tool_args: { agent: "explorer", task: "Inspect it" },

@@ -42,36 +42,47 @@ stateDiagram-v2
 | `getSteeringMessages` | Building steering | `{ messages, iteration }` |
 | `getFollowUpMessages` | Building follow-up | `{ messages, iteration, assistantText }` |
 
-## Writing a plugin
+## Writing an extension
 
-Create a JavaScript/TypeScript module:
+An extension is a `.ts`/`.js` module with a default export: a function that
+receives an `ExtensionAPI` and wires up event subscriptions, tools, or slash
+commands:
 
 ```typescript
-// my-plugin.ts
-export default {
-  name: 'my-plugin',
-  hooks: {
-    beforeToolCall({ toolName, args }) {
-      console.log(`[my-plugin] About to call ${toolName}`)
-    },
-    afterToolCall({ toolName, result, error }) {
-      if (error) {
-        console.error(`[my-plugin] ${toolName} failed:`, error.message)
-      }
-    },
-  },
+// my-extension.ts
+import type { ExtensionAPI } from '@logician/agent-core/extensions'
+
+export default (api: ExtensionAPI) => {
+  api.on('tool_execution_start', ({ toolName, args }) => {
+    console.log(`[my-extension] About to call ${toolName}`)
+  })
+
+  api.on('tool_execution_end', ({ toolName, result, isError }) => {
+    if (isError) console.error(`[my-extension] ${toolName} failed:`, result)
+  })
 }
 ```
 
-## Configuration
+`api.on()` subscribes to the typed extension event vocabulary (see
+[API Reference](/reference/api) for the full event list) and returns an
+unsubscribe function. Some events — like `tool_execution_start` — let a
+handler short-circuit behavior by returning a result (e.g. `{ content }`
+skips execution and uses that content instead).
 
-Plugins are loaded from the `plugins/` directory or specified in config:
+This is a different, narrower surface than the in-process `AgentHooks` /
+`HookBus` API described in the [Hook API](/reference/hooks) reference: hooks
+compose deterministically and can rewrite arguments, thread transformed
+messages, etc.; extension events are primarily for observing lifecycle and
+building tools/commands.
 
-```json
-{
-  "plugins": [
-    "./plugins/my-plugin.ts",
-    "./plugins/analytics.ts"
-  ]
-}
-```
+## Loading extensions
+
+Extensions are discovered from `.ts`/`.js`/`.mjs` files in these
+directories, in order:
+
+- `~/.local/share/logician/extensions/` (or `$XDG_DATA_HOME/logician/extensions/`) — user-level
+- `.logician/extensions/` in the project root — project-level
+
+Each file's default export is loaded and invoked once with the shared
+`ExtensionAPI`. `.gitignore`/`.ignore` rules inside the extensions directory
+are respected when discovering files.

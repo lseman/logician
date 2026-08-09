@@ -191,7 +191,6 @@ function toPreview(text: string | null, maxLen = 80): string {
 /** Serialize tool executions to JSON string. */
 function serializeTools(
 	toolExecs: Array<{
-		tool: string;
 		tool_name: string;
 		args?: Record<string, unknown>;
 		isError: boolean;
@@ -200,7 +199,6 @@ function serializeTools(
 ): string {
 	return JSON.stringify(
 		toolExecs.map(t => ({
-			tool: t.tool,
 			tool_name: t.tool_name,
 			isError: t.isError,
 			isComplete: t.isComplete,
@@ -612,7 +610,6 @@ export class SessionStore {
 		let thinkingContent: string | null = null;
 		let assistantContent: string | null = null;
 		const toolExecs: Array<{
-			tool: string;
 			tool_name: string;
 			args?: Record<string, unknown>;
 			isError: boolean;

@@ -6,6 +6,12 @@ import {
 } from "@logician/agent-core";
 import type { ParsedBridgeEvent } from "./events.ts";
 
+// Translates core AgentEvent variants to their ParsedBridgeEvent equivalent.
+// Not the sole producer of ParsedBridgeEvent: AgentCoreBridge also emits
+// UI-only synthesized types directly (e.g. "todos", "steered", "save_point",
+// "notice", "memory_update") for signals that have no core AgentEvent
+// counterpart. A core event with no case below returns null and is dropped —
+// verify it isn't relied on downstream before adding a new AgentEvent variant.
 export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 	switch (event.type) {
 		case "message_start":
@@ -31,7 +37,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "tool_call_start":
 			return {
 				type: "tool_execution_start",
-				tool: event.toolName,
 				tool_name: event.toolName,
 				tool_args: parseToolArgs(event.args),
 				tool_call_id: event.toolCallId,
@@ -39,7 +44,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "tool_call_end":
 			return {
 				type: "tool_execution_end",
-				tool: event.toolName,
 				tool_name: event.toolName,
 				result: event.result,
 				is_error: event.isError,
@@ -49,7 +53,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "tool_call_delta":
 			return {
 				type: "tool_execution_update",
-				tool: "",
 				tool_name: "",
 				partial_result: event.delta,
 				update_kind: "arguments",
@@ -58,7 +61,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "tool_execution_start":
 			return {
 				type: "tool_execution_start",
-				tool: event.toolName,
 				tool_name: event.toolName,
 				tool_args: event.args,
 				tool_call_id: event.toolCallId,
@@ -66,7 +68,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "tool_execution_end":
 			return {
 				type: "tool_execution_end",
-				tool: event.toolName,
 				tool_name: event.toolName,
 				result: event.result,
 				is_error: event.isError,
@@ -75,7 +76,6 @@ export function mapAgentEvent(event: AgentEvent): ParsedBridgeEvent | null {
 		case "tool_execution_update":
 			return {
 				type: "tool_execution_update",
-				tool: event.toolName,
 				tool_name: event.toolName,
 				partial_result: event.partialResult,
 				update_kind: "output",

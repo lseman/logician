@@ -1,110 +1,97 @@
 ---
 title: Hook API
-description: Programmatic API for registering and managing hooks.
+description: Programmatic API for registering and composing hooks on the HookBus.
 ---
 
 # Hook API
 
-Programmatic access to the hook system.
+Programmatic access to the hook system. For what each hook does and when it
+fires, see [Hook System](/architecture/hooks). This page covers the
+`HookBus` registration API itself.
 
-## Hook interface
+## AgentHooks
+
+Each hook point is an optional handler on the `AgentHooks` interface,
+imported from `@logician/agent-core`:
 
 ```typescript
-interface HookPlugin {
-  name: string
-  hooks: {
-    beforeLLMRequest?: (ctx: BeforeLLMRequestCtx) => void | Promise<void>
-    afterLLMResponse?: (ctx: AfterLLMResponseCtx) => void | Promise<void>
-    beforeToolCall?: (ctx: BeforeToolCallCtx) => void | Promise<void>
-    afterToolCall?: (ctx: AfterToolCallCtx) => void | Promise<void>
-    beforeSessionSave?: (ctx: BeforeSessionSaveCtx) => void | Promise<void>
-    afterSessionSave?: (ctx: AfterSessionSaveCtx) => void | Promise<void>
-    onError?: (ctx: ErrorCtx) => void | Promise<void>
-  }
+import type { AgentHooks } from '@logician/agent-core'
+
+const hooks: AgentHooks = {
+  beforeToolCall(ctx, signal) {
+    console.log(`Calling ${ctx.toolCall.name}`)
+  },
+  afterToolCall(ctx, signal) {
+    if (ctx.isError) console.error(`${ctx.toolCall.name} failed: ${ctx.result}`)
+  },
 }
 ```
 
-## Hook contexts
-
-### BeforeLLMRequestCtx
-
-```typescript
-interface BeforeLLMRequestCtx {
-  messages: Message[]
-  tools: Tool[]
-  config: Config
-}
-```
-
-### AfterLLMResponseCtx
-
-```typescript
-interface AfterLLMResponseCtx {
-  response: LLMResponse
-  toolCalls: ToolCall[]
-}
-```
-
-### BeforeToolCallCtx
-
-```typescript
-interface BeforeToolCallCtx {
-  toolName: string
-  args: Record<string, unknown>
-}
-```
-
-### AfterToolCallCtx
-
-```typescript
-interface AfterToolCallCtx {
-  toolName: string
-  result: unknown
-  error?: Error
-}
-```
-
-### BeforeSessionSaveCtx
-
-```typescript
-interface BeforeSessionSaveCtx {
-  sessionId: string
-  messages: Message[]
-}
-```
-
-### AfterSessionSaveCtx
-
-```typescript
-interface AfterSessionSaveCtx {
-  sessionId: string
-}
-```
-
-### ErrorCtx
-
-```typescript
-interface ErrorCtx {
-  error: Error
-  context: Record<string, unknown>
-}
-```
+Handlers may be synchronous or return a `Promise`, and receive an optional
+`AbortSignal` as the second argument. See [Hook System](/architecture/hooks)
+for the full list of hook points and their context/result shapes.
 
 ## Registering hooks
 
-```typescript
-import { registerHook } from '@logician/agent-core/hooks'
+Hooks are registered on a `HookBus` instance, not via a global function.
+`HookBus.register()` takes a whole `AgentHooks` object and wires up every
+handler it defines in one call, returning a single unsubscribe function:
 
-registerHook({
-  name: 'my-plugin',
-  hooks: {
-    beforeToolCall({ toolName, args }) {
-      console.log(`Calling ${toolName}`)
-    },
-  },
+```typescript
+import { HookBus } from '@logician/agent-core/hooks/native'
+
+const bus = new HookBus({ errorMode: 'continue' })
+
+const unregister = bus.register(hooks, {
+  id: 'my-plugin',       // stable identity for diagnostics/dedup
+  source: 'my-plugin',   // used to attribute errors to a source
+  priority: 0,            // higher runs first; ties keep registration order
+  timeoutMs: 5000,        // per-handler timeout override
 })
+
+// Later, to remove all handlers registered above:
+unregister()
 ```
 
-## Hook execution order
+Individual hook points can also be registered one at a time with `bus.on()`:
 
-Hooks execute in registration order. No priority system.
+```typescript
+bus.on('beforeToolCall', hooks.beforeToolCall!, { priority: 10 })
+```
+
+## Composition semantics
+
+Multiple registrants can hook the same event. Each event type composes
+handlers deterministically rather than just "last one wins":
+
+- `beforeToolCall` — early-block: the first handler to return `{ content }`
+  short-circuits tool execution; a returned `{ args }` rewrites arguments
+  for later handlers.
+- `afterToolCall` — patch-accumulate: each handler sees the prior patch;
+  later non-`undefined` fields win.
+- `prepareNextTurn` — transform: messages thread through every handler in
+  order.
+- `shouldStopAfterTurn` — first `true` wins.
+
+## Priority and error isolation
+
+- **Priority**: handlers with a higher `priority` run first; equal
+  priorities preserve registration order.
+- **Timeouts**: `HookBusOptions.defaultTimeoutMs` sets a default per-handler
+  timeout (0 disables it); a per-registration `timeoutMs` overrides it. A
+  timed-out handler is treated like a thrown error — skipped and reported.
+- **Error mode**: `HookBusOptions.errorMode` controls whether a thrown
+  handler aborts the rest of the chain (`"throw"`) or is skipped and
+  reported via `onError` (`"continue"`, the default).
+
+## Observing without hooking
+
+`bus.observe(observer)` subscribes a read-only firehose over every event —
+useful for logging or metrics without participating in the hook chain's
+return-value semantics:
+
+```typescript
+bus.observe((event, ctx) => {
+  console.log(`[hook] ${event} fired`)
+})
+```

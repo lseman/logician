@@ -59,7 +59,6 @@ void test("transcript renders clear speaker hierarchy and compact tool activity"
 					seq: 2,
 					type: "tool",
 					tool: {
-						tool: "read_file",
 						tool_name: "read_file",
 						args: { path: "application/agent-bridge.ts" },
 						result: "ok",
@@ -103,7 +102,6 @@ void test("collapsed running tools show live output without expanding details", 
 						seq: 0,
 						type: "tool",
 						tool: {
-							tool: "bash",
 							tool_name: "bash",
 							tool_call_id: "build-1",
 							args: { command: "npm test" },
@@ -139,7 +137,6 @@ void test("tool output cannot inject terminal control sequences", () => {
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool: "bash",
 							tool_name: "bash",
 							args: { command: "printf untrusted" },
 							result: "safe\x1b[2J text\x1b]0;owned title\x07 visible",
@@ -172,7 +169,6 @@ void test("growing tool streams sanitize only the appended suffix", () => {
 					seq: 1,
 					type: "tool",
 					tool: {
-						tool: "bash",
 						tool_name: "bash",
 						args: { command: "compile" },
 						streamOutput: "x".repeat(100_000),
@@ -213,7 +209,6 @@ void test("streaming updates reuse the rendered completed-turn prefix", () => {
 					seq: 0,
 					type: "tool",
 					tool: {
-						tool: "bash",
 						tool_name: "bash",
 						args: { command: "build" },
 						result: "completed output",
@@ -268,7 +263,6 @@ void test("clicking a tool card toggles only that tool's details", () => {
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool: "bash",
 							tool_name: "bash",
 							tool_call_id: "first-tool",
 							args: { command: "echo first" },
@@ -282,7 +276,6 @@ void test("clicking a tool card toggles only that tool's details", () => {
 						seq: 2,
 						type: "tool",
 						tool: {
-							tool: "bash",
 							tool_name: "bash",
 							tool_call_id: "second-tool",
 							args: { command: "echo second" },
@@ -330,7 +323,6 @@ void test("keyboard navigation focuses and toggles individual tool cards", () =>
 					seq: index + 1,
 					type: "tool" as const,
 					tool: {
-						tool: "bash",
 						tool_name: "bash",
 						tool_call_id: name,
 						args: { command: `echo ${name}` },
@@ -380,7 +372,6 @@ void test("clicking a tool card in a non-first turn expands the right card", () 
 					seq: 1,
 					type: "tool" as const,
 					tool: {
-						tool: "bash",
 						tool_name: "bash",
 						tool_call_id: name,
 						args: { command: `echo ${name}` },
@@ -496,7 +487,6 @@ void test("write_file streams live line counts and expanded content", () => {
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool: "write_file",
 							tool_name: "write_file",
 							tool_call_id: "live-write",
 							args: {},
@@ -545,7 +535,6 @@ void test("click-expanded write_file shows every line without a Ctrl+O hint", ()
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool: "write_file",
 							tool_name: "write_file",
 							tool_call_id: "large-write",
 							args: { path: "fixture.txt", content },
@@ -588,7 +577,6 @@ void test("write_file_append streams live line counts and expanded content", () 
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool: "write_file_append",
 							tool_name: "write_file_append",
 							tool_call_id: "live-append",
 							args: {},
@@ -637,7 +625,6 @@ void test("click-expanded write_file_append shows every appended line", () => {
 						seq: 1,
 						type: "tool",
 						tool: {
-							tool: "write_file_append",
 							tool_name: "write_file_append",
 							tool_call_id: "large-append",
 							args: { path: "fixture.txt", content },
@@ -1034,7 +1021,6 @@ void test("expanded agent tools separate task arguments from live output", () =>
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: {
 								task: "Inspect architecture and tests",
@@ -1076,7 +1062,6 @@ void test("expanded subagent streams render fenced code with syntax highlighting
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect code", agent: "explorer" },
 							streamOutput:
@@ -1114,7 +1099,6 @@ void test("expanded agent progress is never character-truncated", () => {
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Audit everything", agent: "explorer" },
 							streamOutput: longProgress,
@@ -1153,7 +1137,6 @@ void test("collapsed agent card shows only the header while running", () => {
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Audit everything", agent: "explorer" },
 							streamOutput: longProgress,
@@ -1199,7 +1182,6 @@ void test("expanded completed subagent keeps its streaming transcript", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Audit everything", agent: "explorer" },
 							result: "Audit complete.",
@@ -1241,7 +1223,6 @@ void test("expanded completed subagent does not repeat its final report", () => 
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Review it", agent: "reviewer" },
 							result: "**Final report:** all checks passed.",
@@ -1280,7 +1261,6 @@ void test("collapsed completed subagent formats its final report as markdown", (
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Review it", agent: "reviewer" },
 							result:
@@ -1330,7 +1310,6 @@ void test("post-edit diagnostics render as a dedicated formatted block", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "edit_file",
 							tool_name: "edit_file",
 							args: { path: "src/runtime-config.ts", edits: [] },
 							result: [
@@ -1376,7 +1355,6 @@ void test("post-edit diagnostics render clangd source and symbolic codes", () =>
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "edit_file",
 							tool_name: "edit_file",
 							args: { path: "/data/dev/solvers/python/qp_ext.cpp", edits: [] },
 							result: [
@@ -1450,7 +1428,6 @@ void test("Ctrl+O expansion keeps a bottom-anchored viewport on newest content",
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "bash",
 							tool_name: "bash",
 							args: { command: "build" },
 							result: Array.from(
@@ -1696,7 +1673,6 @@ void test("expanded subagent details show child tool calls", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect files", agent: "explorer" },
 							result: "Done inspecting.",
@@ -1759,7 +1735,6 @@ void test("expanded subagent renders thinking, tools, and responses in call orde
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect files", agent: "explorer" },
 							result: "Summary: implementation verified successfully.",
@@ -1848,7 +1823,6 @@ void test("collapsed completed subagent shows its final summary", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect files", agent: "explorer" },
 							result: "Summary: the implementation is correct.",
@@ -1911,7 +1885,6 @@ void test("collapsed subagent shows ordered flow with child tools collapsed", ()
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect files", agent: "explorer" },
 							result: "Inspection complete.",
@@ -2002,7 +1975,6 @@ void test("collapsed subagent card shows a compact recent tool timeline", () => 
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect files", agent: "explorer" },
 							result: "Done inspecting.",
@@ -2059,7 +2031,6 @@ void test("completed subagent card has one parent success indicator", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agent",
 							tool_name: "spawn_agent",
 							args: { task: "Inspect files", agent: "explorer" },
 							result: "Inspection complete.",
@@ -2114,7 +2085,6 @@ void test("spawn_agents renders ordered live task status", () => {
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							args: {
 								tasks: [
@@ -2184,7 +2154,6 @@ void test("clicking a spawn_agents task row expands that exact task, not a neigh
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							tool_call_id: "batch-1",
 							args: {
@@ -2296,7 +2265,6 @@ void test("spawn_agents never renders a positive count over zero while arguments
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							partialResult: '{"tasks":[{"agent":"explorer"',
 							details: {
@@ -2340,7 +2308,6 @@ void test("spawn_agents repairs an inconsistent structured total", () => {
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							details: {
 								total: 0,
@@ -2385,7 +2352,6 @@ void test("expanded spawn_agents keeps concurrent text streams attributed", () =
 						type: "tool",
 						isComplete: false,
 						tool: {
-							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							args: {
 								tasks: [
@@ -2462,7 +2428,6 @@ void test("spawn_agents shows partial failures and expanded reports", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "spawn_agents",
 							tool_name: "spawn_agents",
 							args: {
 								tasks: [
@@ -2525,7 +2490,6 @@ void test("edited TypeScript previews are syntax highlighted", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "edit_file",
 							tool_name: "edit_file",
 							args: {
 								path: "src/example.ts",
@@ -2563,7 +2527,6 @@ void test("edit_file result highlights code inside the diff", () => {
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "edit_file",
 							tool_name: "edit_file",
 							args: { path: "src/example.ts" },
 							result: [
@@ -2609,7 +2572,6 @@ void test("internal post-tool hook guidance stays out of the transcript", () => 
 						type: "tool",
 						isComplete: true,
 						tool: {
-							tool: "bash",
 							tool_name: "bash",
 							args: { command: "printf visible" },
 							result:

@@ -225,7 +225,7 @@ export function handleEvent(
 		case "tool_execution_start":
 			ctx.workSurface.recordToolStart(
 				event.tool_call_id,
-				event.tool_name || event.tool,
+				event.tool_name,
 				event.tool_args,
 			);
 			break;
@@ -233,7 +233,7 @@ export function handleEvent(
 		case "tool_execution_end":
 			ctx.workSurface.recordToolEnd(
 				event.tool_call_id,
-				event.tool_name || event.tool,
+				event.tool_name,
 				event.result,
 				event.is_error,
 			);

@@ -5,7 +5,6 @@ import { Transcript } from "../sessions/transcript.ts";
 function start(transcript: Transcript, id: string, path: string): void {
 	transcript.handleEvent({
 		type: "tool_execution_start",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: id,
 		tool_args: { path },
@@ -20,7 +19,6 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call-a",
 		update_kind: "output",
@@ -28,7 +26,6 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 	});
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call-b",
 		update_kind: "output",
@@ -36,14 +33,12 @@ void test("parallel same-name tool output stays attached to its call id", () => 
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call-b",
 		result: "B result",
 	});
 	transcript.handleEvent({
 		type: "tool_execution_end",
-		tool: "read_file",
 		tool_name: "read_file",
 		tool_call_id: "call-a",
 		result: "A result",
@@ -82,7 +77,6 @@ void test("ambiguous id-less updates never overwrite a parallel tool", () => {
 
 	transcript.handleEvent({
 		type: "tool_execution_update",
-		tool: "read_file",
 		tool_name: "read_file",
 		partial_result: "ambiguous",
 		update_kind: "output",
