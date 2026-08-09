@@ -190,6 +190,11 @@ export function handleMcpManagerAction(
  * unlike plugin/MCP managers there's no loading round-trip to show first. */
 export function openAutoresearchDashboard(ctx: OverlayHandlersCtx): void {
 	ctx.autoresearchDashboard.show();
+	// This overlay is pre-registered once at startup and never re-pushed, so
+	// its stack position is frozen below overlays registered after it (e.g.
+	// plugin/MCP managers). Bring it to front on every open or it can render
+	// hidden underneath whichever of those is currently visible.
+	ctx.tui.bringToFront(ctx.autoresearchDashboard);
 	ctx.tui.requestRender();
 }
 

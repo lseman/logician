@@ -87,10 +87,10 @@ export function startViewerServer(opts: ViewerOptions): {
 		const url = new URL(req.url);
 		const path = url.pathname;
 
-		// Favicon
+		// Favicon — Logician L-monogram icon
 		if (path === "/favicon.svg") {
 			return new Response(
-				`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#67e8f9"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs><circle cx="50" cy="50" r="42" fill="#0e1420" stroke="url(#g)" stroke-width="5"/><text x="50" y="63" text-anchor="middle" fill="url(#g)" font-size="40" font-family="monospace" font-weight="bold">M</text></svg>`,
+				`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#22d3ee"/><stop offset="40%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs><rect width="140" height="140" rx="32" fill="url(#g)"/><path d="M46 32h20v56h30l12 12-12 12H46z" fill="#0b0e11"/><circle cx="66" cy="88" r="7" fill="#0b0e11"/><circle cx="66" cy="88" r="4" fill="#22d3ee"/></svg>`,
 				{ headers: { "Content-Type": "image/svg+xml" } },
 			);
 		}

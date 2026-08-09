@@ -93,6 +93,7 @@ import {
 	type Component,
 	normalizeKeyboardInput,
 	TUI,
+	visibleWidth,
 } from "../terminal/core.ts";
 import { runInPty, screenFromPtyResult } from "../testing/pty-harness.ts";
 
@@ -249,6 +250,47 @@ void test("Escape reaches the dialog owner before the core overlay fallback", ()
 
 	assert.equal(dismissed, true);
 	assert.equal(dialog.visible, false);
+});
+
+void test("bringToFront moves an existing overlay above later registrations", () => {
+	const tui = new TUI({} as NodeJS.WriteStream);
+	const dashboard: Component = { render: () => ["dashboard"] };
+	const currentRenderer: Component = { render: () => ["current"] };
+
+	tui.showOverlay(dashboard);
+	tui.showOverlay(currentRenderer);
+	tui.bringToFront(dashboard);
+
+	const stack = (
+		tui as unknown as {
+			overlayStack: Array<{ component: Component }>;
+		}
+	).overlayStack;
+	assert.deepEqual(
+		stack.map(entry => entry.component),
+		[currentRenderer, dashboard],
+	);
+});
+
+void test("overlays replace the occupied screen cells instead of rendering past them", () => {
+	const tui = new TUI({} as NodeJS.WriteStream);
+	const dashboard: Component = { render: () => ["dashboard"] };
+	tui.showOverlay(dashboard, { row: 0, col: 0, width: 9 });
+
+	const lines = (
+		tui as unknown as {
+			composeOverlays(
+				lines: string[],
+				termWidth: number,
+				termHeight: number,
+				transcriptHeight: number,
+			): string[];
+		}
+	).composeOverlays(["background content".padEnd(80)], 80, 1, 1);
+
+	assert.equal(visibleWidth(lines[0]), 80);
+	assert.ok(lines[0].includes("dashboard"));
+	assert.ok(!lines[0].includes("background content"));
 });
 
 void test("TUI expands tools from a Kitty Ctrl+O sequence", async () => {

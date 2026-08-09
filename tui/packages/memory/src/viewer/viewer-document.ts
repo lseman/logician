@@ -9,6 +9,29 @@ const HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Logician Memory</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script nonce="__NONCE__">
+  // Inline favicon SVG for the Logician icon (avoids extra request)
+  (function() {
+   var svg = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140">' +
+    '<defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">' +
+    '<stop offset="0%" stop-color="#22d3ee"/>' +
+    '<stop offset="40%" stop-color="#06b6d4"/>' +
+    '<stop offset="100%" stop-color="#8b5cf6"/>' +
+    '</linearGradient></defs>' +
+    '<rect width="140" height="140" rx="32" fill="url(#g)"/>' +
+    '<path d="M46 32h20v56h30l12 12-12 12H46z" fill="#0b0e11"/>' +
+    '<circle cx="66" cy="88" r="7" fill="#0b0e11"/>' +
+    '<circle cx="66" cy="88" r="4" fill="#22d3ee"/>' +
+    '</svg>'
+   );
+   var _fav = document.createElement('link');
+   _fav.rel = 'icon';
+   _fav.type = 'image/svg+xml';
+   _fav.href = svg;
+   document.head.appendChild(_fav);
+  })();
+  </script>
   <style>
     :root {
       color-scheme: dark;
@@ -114,14 +137,11 @@ const HTML = `<!DOCTYPE html>
     }
     .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; cursor: pointer; }
     .brand .mark {
-      width: 28px; height: 28px; border-radius: 8px; flex: 0 0 auto;
-      background: radial-gradient(circle at 30% 30%, var(--accent), var(--accent-dim));
+      width: 28px; height: 28px; flex: 0 0 auto;
       box-shadow: var(--shadow-glow); position: relative;
     }
-    .brand .mark::after {
-      content: ''; position: absolute; inset: 0; border-radius: 8px;
-      background: radial-gradient(circle at 65% 70%, rgba(255,255,255,0.35), transparent 55%);
-    }
+    .brand .mark rect { transition: opacity 0.3s; }
+    .brand:hover .mark rect:first-of-type { opacity: 0.88; }
     .brand-text h1 { font-family: var(--font-display); font-size: 14.5px; font-weight: 650; color: var(--text); letter-spacing: -0.01em; }
     .brand-text .tag { font-size: 10px; color: var(--text-faint); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
     .pulse-strip {
@@ -324,7 +344,24 @@ const HTML = `<!DOCTYPE html>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand" onclick="switchTab('dashboard')">
-        <div class="mark"></div>
+        <svg class="mark" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#22d3ee"/>
+              <stop offset="40%" stop-color="#06b6d4"/>
+              <stop offset="100%" stop-color="#8b5cf6"/>
+            </linearGradient>
+            <linearGradient id="badgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+              <stop offset="35%" stop-color="#ffffff" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="140" height="140" rx="32" fill="url(#badgeGrad)"/>
+          <rect x="0" y="0" width="140" height="140" rx="32" fill="url(#badgeSheen)"/>
+          <path d="M 46 32 L 66 32 L 66 88 L 96 88 L 108 100 L 96 112 L 46 112 Z" fill="#0b0e11"/>
+          <circle cx="66" cy="88" r="7" fill="#0b0e11"/>
+          <circle cx="66" cy="88" r="4" fill="#22d3ee"/>
+        </svg>
         <div class="brand-text">
           <h1>logician</h1>
           <div class="tag">memory</div>
@@ -837,7 +874,7 @@ const HTML = `<!DOCTYPE html>
       loadWorkingMemory();
     } catch (e) { console.error('[auto-tier] error:', e); }
   });
-  function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); };
+  function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); }; }
   loadDashboard();
   state.refreshInterval = setInterval(() => {
     if (state.activeTab === 'observations') loadObservations();

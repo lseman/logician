@@ -39,6 +39,7 @@ import {
 	Container,
 	CURSOR_MARKER,
 	clampLineToWidth,
+	compositeTuiLine,
 	type Focusable,
 	isFocusable,
 	type Scrollable,
@@ -266,6 +267,17 @@ export class TUI extends Container {
 			const topVisible = this.getTopmostVisibleOverlay();
 			this.setFocus(topVisible?.component ?? overlay.preFocus);
 		}
+		this.requestRender();
+	}
+
+	/** Move a pre-registered overlay's stack entry to the top so it paints
+	 * over other overlays instead of staying pinned at its construction-time
+	 * stack position. No-op if the component isn't on the stack. */
+	bringToFront(component: Component): void {
+		const idx = this.overlayStack.findIndex(e => e.component === component);
+		if (idx < 0 || idx === this.overlayStack.length - 1) return;
+		const [entry] = this.overlayStack.splice(idx, 1);
+		this.overlayStack.push(entry);
 		this.requestRender();
 	}
 
@@ -1206,12 +1218,13 @@ export class TUI extends Container {
 			for (let i = 0; i < overlayHeight; i++) {
 				const idx = row + i;
 				if (idx >= 0 && idx < result.length) {
-					const srcLine = overlayLines[i] || "";
-					const clipped = clampLineToWidth(srcLine, width);
-					const vis = visibleWidth(clipped);
-					const padRight = " ".repeat(Math.max(0, width - vis));
-					const padLeft = " ".repeat(Math.max(0, col - visibleWidth(result[idx] ?? "")));
-					result[idx] = (result[idx] ?? "") + padLeft + clipped + padRight;
+					result[idx] = compositeTuiLine(
+						result[idx] ?? "",
+						overlayLines[i] || "",
+						col,
+						width,
+						termWidth,
+					);
 				}
 			}
 
@@ -1574,8 +1587,9 @@ type OverlayFocusRestoreState = {
 // ── Shared renderer surface ──────────────────────────────────────────────────
 // The narrow slice of TUI that app/*.ts "Ctx" interfaces actually call
 // (verified by grep: requestRender, renderNow, addInputListener, showOverlay,
-// removeOverlay). TUI implements this structurally, so app/*.ts code depends
-// on this narrow surface instead of importing TUI's full API.
+// removeOverlay, bringToFront). TUI implements this structurally, so
+// app/*.ts code depends on this narrow surface instead of importing TUI's
+// full API.
 export interface TuiHandle {
 	requestRender(force?: boolean, immediate?: boolean): void;
 	renderNow(): void;
@@ -1593,4 +1607,5 @@ export interface TuiHandle {
 		focus: () => void;
 	};
 	removeOverlay(component: Component): void;
+	bringToFront(component: Component): void;
 }
