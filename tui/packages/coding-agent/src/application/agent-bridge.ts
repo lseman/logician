@@ -457,7 +457,7 @@ export class AgentCoreBridge {
 				try {
 					this.memoryViewerServer = startViewerServer({
 						port: this.memoryViewerPort,
-						host: "0.0.0.0",
+						host: "127.0.0.1",
 						store: this.memoryStore,
 					});
 					const bound = getBoundViewerPort();
@@ -817,7 +817,25 @@ export class AgentCoreBridge {
 					...meta.defaultConfig,
 					...this.reasonerConfig,
 				});
-				const trace = await reasoner.solve(message);
+				const reasonerStartedAt = Date.now();
+				let trace: Awaited<ReturnType<typeof reasoner.solve>>;
+				try {
+					trace = await reasoner.solve(message);
+				} catch (error) {
+					this.emit({
+						type: "notice",
+						level: "error",
+						label: "Reasoner",
+						text: `${meta.name} failed after ${Date.now() - reasonerStartedAt}ms: ${error instanceof Error ? error.message : String(error)}`,
+					});
+					throw error;
+				}
+				this.emit({
+					type: "notice",
+					level: "success",
+					label: "Reasoner",
+					text: `${meta.name} completed in ${Date.now() - reasonerStartedAt}ms.`,
+				});
 				const advisory = [trace.reasoning, trace.answer]
 					.map(part => part?.trim())
 					.filter(Boolean)
@@ -872,6 +890,12 @@ export class AgentCoreBridge {
 			if (this.pendingAutoContinue) {
 				this.pendingAutoContinue = false;
 				this.skillActivation.continueWith(turnActivations);
+				this.emit({
+					type: "notice",
+					level: "info",
+					label: "Continuation",
+					text: "Starting the queued next-turn continuation.",
+				});
 				void this.sendMessage("continue");
 			}
 		}
@@ -898,7 +922,15 @@ export class AgentCoreBridge {
 			// continues without requiring user input. The nextTurn items are
 			// injected before the trigger message by the transformContext hook.
 			this.harness.setOnSettled(nextTurnCount => {
-				if (nextTurnCount > 0) this.pendingAutoContinue = true;
+				if (nextTurnCount > 0) {
+					this.pendingAutoContinue = true;
+					this.emit({
+						type: "notice",
+						level: "info",
+						label: "Continuation",
+						text: `${nextTurnCount} next-turn message(s) queued; continuation will start after settlement.`,
+					});
+				}
 			});
 			// Apply compaction settings from user settings (~/.logician/settings.json).
 			const userSettings = loadUserSettings();

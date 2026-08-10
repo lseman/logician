@@ -6,6 +6,7 @@ import type {
 	TaskPhase,
 } from "../tasks/task-state-controller.ts";
 import type { Message, MessageRole, StopReason } from "./types-messages.ts";
+import type { HarnessIntervention } from "../intervention-controller.ts";
 
 /**
  * Envelope metadata stamped onto every event at the emit boundary: a
@@ -18,6 +19,7 @@ export interface AgentEventEnvelope {
 
 export type AgentEventBody =
 	| { type: "agent_start" }
+	| ({ type: "harness_intervention" } & HarnessIntervention)
 	| { type: "agent_end"; messages?: Message[] }
 	| { type: "agent_settled"; nextTurnCount?: number }
 	| {
@@ -211,7 +213,11 @@ export type AgentEventBody =
 				| "continuation_nudge"
 				| "acceptance_retry"
 				| "reflection_retry"
-				| "loop_detected";
+				| "loop_detected"
+				| "budget_stop"
+				| "follow_up"
+				| "policy_continue"
+				| "continuation_exhausted";
 			message: string;
 			toolName?: string;
 			iteration: number;

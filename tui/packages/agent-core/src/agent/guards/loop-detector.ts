@@ -67,12 +67,12 @@ const DEFAULT_DUPLICATE_THRESHOLD = 3;
 const DEFAULT_FAILURE_THRESHOLD = 3;
 const MAX_CATEGORY_LEN = 120;
 
-// Normalize a single string leaf so cosmetic noise (timestamps, incrementing
-// counters, whitespace) doesn't defeat duplicate detection. A model retrying
-// the "same" call with `timeout: 10` -> `timeout: 11` or a fresh timestamp
-// comment is still a duplicate in spirit — the guard should see through that.
+// Normalize a single string leaf so timestamps and whitespace don't defeat
+// duplicate detection. Ordinary numbers remain significant: line ranges,
+// ports, IDs, offsets, and retry parameters can represent genuinely different
+// work and must not be collapsed into one call signature.
 function normalizeLeaf(value: unknown): unknown {
-	if (typeof value === "number") return "#num";
+	if (typeof value === "number") return value;
 	if (typeof value !== "string") return value;
 	return value
 		.replace(
@@ -80,7 +80,6 @@ function normalizeLeaf(value: unknown): unknown {
 			"#ts",
 		)
 		.replace(/\b\d{10,13}\b/g, "#ts") // unix ms/sec timestamps
-		.replace(/\b\d+\b/g, "#num") // any other bare integer (counters, retries)
 		.replace(/\s+/g, " ")
 		.trim();
 }
@@ -162,6 +161,7 @@ export class LoopDetector {
 	private readonly duplicateThreshold: number;
 	private readonly failureThreshold: number;
 	private readonly seenShapes = new Set<string>();
+	private consecutiveStagnantTurns = 0;
 
 	constructor(options: LoopDetectorOptions = {}) {
 		this.maxHistory = options.maxHistory ?? 10;
@@ -243,6 +243,20 @@ export class LoopDetector {
 		inc(this.failCategoryCounts, cat);
 	}
 
+	/** Successful work is evidence that a previously failing route recovered.
+	 * Decay matching failure state so old incidents do not poison the tool or
+	 * path for the remainder of a long-running harness session. */
+	recordSuccess(name: string, args: string): void {
+		this.failSignatureCounts.delete(callSignature(name, args));
+		const path = callPath(args);
+		if (path) this.failPathCounts.delete(path);
+		for (const category of this.failCategoryCounts.keys()) {
+			if (category.startsWith(`${name} `)) {
+				this.failCategoryCounts.delete(category);
+			}
+		}
+	}
+
 	private tripFailure(toolName: string, target: string): GuardDecision {
 		return {
 			block: true,
@@ -266,6 +280,14 @@ export class LoopDetector {
 
 		// Build fingerprint and add to history.
 		const fingerprint = this.buildFingerprint(assistantContent, toolCalls);
+		const hasNewShape = fingerprint.fingerprints.some(
+			fp => !shapesBefore.has(`${fp.name}:${fp.resultPrefix}`),
+		);
+		if (fingerprint.fingerprints.length === 0 || hasNewShape) {
+			this.consecutiveStagnantTurns = 0;
+		} else {
+			this.consecutiveStagnantTurns++;
+		}
 		const entry = {
 			signature: fingerprint.signature,
 			toolFingerprints: fingerprint.fingerprints,
@@ -280,7 +302,7 @@ export class LoopDetector {
 		// Accumulate shapes for future stagnation checks.
 		this.updateSeenShapes(fingerprint.fingerprints);
 
-		return this.isLoopingWithShapesBefore(shapesBefore);
+		return this.isLooping();
 	}
 
 	// ── Fingerprint builder ───────────────────────────────────────────────
@@ -354,11 +376,11 @@ export class LoopDetector {
 		}
 	}
 
-	private isLoopingWithShapesBefore(shapesBefore: Set<string>): boolean {
+	private isLooping(): boolean {
 		return (
 			this.isExactRepeat() ||
 			this.isDegenerateLoop() ||
-			this.isStagnatingWith(shapesBefore)
+			this.isStagnating()
 		);
 	}
 
@@ -391,34 +413,6 @@ export class LoopDetector {
 		return true;
 	}
 
-	private isStagnatingWith(shapesBefore: Set<string>): boolean {
-		if (this.history.length < this.stagnationWindow) return false;
-		const window = this.history.slice(-this.stagnationWindow);
-
-		const hasTools = window.some(h => h.toolNames.length > 0);
-		if (!hasTools) return false;
-
-		let anyNew = false;
-		for (const entry of window) {
-			for (const fp of entry.toolFingerprints) {
-				const shapeKey = `${fp.name}:${fp.resultPrefix}`;
-				if (!shapesBefore.has(shapeKey)) {
-					anyNew = true;
-					break;
-				}
-			}
-			if (anyNew) break;
-		}
-
-		for (const entry of window) {
-			for (const fp of entry.toolFingerprints) {
-				this.seenShapes.add(`${fp.name}:${fp.resultPrefix}`);
-			}
-		}
-
-		return !anyNew;
-	}
-
 	private updateSeenShapes(fingerprints: ToolFingerprint[]): void {
 		for (const fp of fingerprints) {
 			this.seenShapes.add(`${fp.name}:${fp.resultPrefix}`);
@@ -437,6 +431,7 @@ export class LoopDetector {
 		this.seenShapes.clear();
 		this.lastCallSignature = null;
 		this.consecutiveCallCount = 0;
+		this.consecutiveStagnantTurns = 0;
 		this.failSignatureCounts.clear();
 		this.failCategoryCounts.clear();
 		this.failPathCounts.clear();
@@ -489,6 +484,6 @@ export class LoopDetector {
 	}
 
 	private isStagnating(): boolean {
-		return this.isStagnatingWith(new Set(this.seenShapes));
+		return this.consecutiveStagnantTurns >= this.stagnationWindow;
 	}
 }

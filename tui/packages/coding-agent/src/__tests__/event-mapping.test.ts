@@ -25,6 +25,30 @@ void test("context updates preserve unavailable provider telemetry", () => {
 	);
 });
 
+void test("harness interventions map to one evidence-rich notice", () => {
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "harness_intervention",
+			id: "intervention-1",
+			kind: "loop",
+			cause: "stagnation",
+			action: "change_strategy",
+			severity: "warning",
+			detector: "output_guard",
+			attempt: 2,
+			evidence: { summary: "No verified progress" },
+			nextAction: "Try another approach.",
+			iteration: 4,
+		}),
+		{
+			type: "notice",
+			level: "warn",
+			label: "loop: change_strategy",
+			text: "No verified progress (attempt 2, incident intervention-1) Next: Try another approach.",
+		},
+	);
+});
+
 void test("steering cancellation maps to one informational notice", () => {
 	assert.deepEqual(
 		mapAgentEvent({

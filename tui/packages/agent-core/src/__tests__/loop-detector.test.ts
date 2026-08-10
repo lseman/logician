@@ -144,6 +144,17 @@ void test("guard does not block on single failure", () => {
 	);
 });
 
+void test("successful work clears stale failure state", () => {
+	const d = new LoopDetector({ failureThreshold: 3 });
+	const args = '{"path":"a.txt"}';
+	for (let i = 0; i < 2; i++) {
+		d.recordFailure("read_file", args, "Error: not found");
+	}
+	d.recordSuccess("read_file", args);
+	d.recordFailure("read_file", args, "Error: not found");
+	assert.equal(d.checkToolCall("read_file", args).block, false);
+});
+
 // ── Guard: disabled ───────────────────────────────────────────────────
 
 void test("guard disabled when thresholds are 0", () => {
@@ -308,8 +319,30 @@ void test("detects stagnation (zero new result prefixes)", () => {
 			content: "reading once more",
 			toolCalls: [tool("read_file", '{"path":"c"}', "Error: file not found")],
 		},
+		{
+			content: "reading yet again",
+			toolCalls: [tool("read_file", '{"path":"d"}', "Error: file not found")],
+		},
 	];
 	assert.equal(record(d, turns), true, "should detect stagnation");
+});
+
+void test("recent progress resets the stagnation window", () => {
+	const d = new LoopDetector({
+		exactRepeatWindow: 10,
+		degenerateWindow: 10,
+		stagnationWindow: 3,
+		maxHistory: 10,
+	});
+	d.recordAndDetect("first", [tool("read_file", '{"path":"a"}', "known")]);
+	d.recordAndDetect("repeat", [tool("read_file", '{"path":"b"}', "known")]);
+	d.recordAndDetect("progress", [tool("read_file", '{"path":"c"}', "new result")]);
+	assert.equal(
+		d.recordAndDetect("one repeat after progress", [
+			tool("read_file", '{"path":"d"}', "new result"),
+		]),
+		false,
+	);
 });
 
 void test("does not flag when result prefixes vary", () => {
@@ -479,6 +512,10 @@ void test("getLoopDiagnostic returns message for stagnation", () => {
 		{
 			content: "read",
 			toolCalls: [tool("read_file", '{"p":"c"}', "Error: not found")],
+		},
+		{
+			content: "read",
+			toolCalls: [tool("read_file", '{"p":"d"}', "Error: not found")],
 		},
 	];
 	record(d, turns);

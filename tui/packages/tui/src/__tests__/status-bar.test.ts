@@ -2,7 +2,8 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { StatusBar } from "../status/status-bar.ts";
+import { StatusBar } from "../footer/layout.ts";
+import { createDefaultConfig, DEFAULT_WIDGET_LAYOUTS } from "../footer/types.ts";
 import { visibleWidth } from "../terminal/core.ts";
 import { initTheme } from "../terminal/theme.ts";
 
@@ -363,5 +364,93 @@ void describe("StatusBar", () => {
 		const plain = lines[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(!plain.includes("↑"));
 		assert.ok(!plain.includes("↓"));
+	});
+
+	it("preserves legacy phase markers", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({ phase: "approval" });
+		assert.ok(bar.render(80)[0].includes("◆ APPROVAL"));
+		bar.update({ phase: "error" });
+		assert.ok(bar.render(80)[0].includes("× ERROR"));
+		bar.update({ phase: "verifying" });
+		assert.ok(bar.render(80)[0].includes("⠋ VERIFYING"));
+	});
+
+	it("keeps configured rows separate when returning a cached render", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		const config = createDefaultConfig();
+		config.rows = 2;
+		config.widgets.memory = {
+			enabled: true,
+			row: 1,
+			position: 0,
+			align: "left",
+			fill: "none",
+		};
+		bar.setConfig(config);
+		bar.update({ memoryEnabled: true });
+		assert.strictEqual(bar.render(160).length, 2);
+		assert.strictEqual(bar.render(160).length, 2);
+	});
+});
+
+void describe("configurable footer widgets", () => {
+	const emptyConfig = () => {
+		const config = createDefaultConfig();
+		for (const id of Object.keys(DEFAULT_WIDGET_LAYOUTS)) {
+			config.widgets[id] = { ...DEFAULT_WIDGET_LAYOUTS[id as keyof typeof DEFAULT_WIDGET_LAYOUTS], enabled: false };
+		}
+		return config;
+	};
+
+	it("positions contributed widgets in left, middle, and right groups", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.setConfig(emptyConfig());
+		bar.upsertWidget({ id: "test.left", text: "LEFT", layout: { row: 0, align: "left" } });
+		bar.upsertWidget({ id: "test.middle", text: "MIDDLE", layout: { row: 0, align: "middle" } });
+		bar.upsertWidget({ id: "test.right", text: "RIGHT", layout: { row: 0, align: "right" } });
+		const line = bar.render(50)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.ok(line.startsWith("LEFT"));
+		assert.ok(line.indexOf("MIDDLE") >= 20 && line.indexOf("MIDDLE") <= 24);
+		assert.ok(line.endsWith("RIGHT"));
+	});
+
+	it("applies icons, style overrides, minimum width, and grow fill", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.setConfig(emptyConfig());
+		bar.upsertWidget({
+			id: "test.grow",
+			text: "build",
+			icon: "!",
+			layout: { row: 0, align: "left", fill: "grow", minWidth: 12 },
+			style: { iconColor: "warning", textColor: "error" },
+		});
+		bar.upsertWidget({ id: "test.edge", text: "END", layout: { row: 0, align: "right" } });
+		const line = bar.render(40)[0];
+		const plain = line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.ok(plain.startsWith("! build"));
+		assert.ok(plain.endsWith("END"));
+		assert.strictEqual(visibleWidth(line), 40);
+		assert.ok(line.includes("\x1b["));
+	});
+
+	it("sanitizes and removes contributed widget snapshots", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.setConfig(emptyConfig());
+		bar.upsertWidget({
+			id: "test.safe",
+			text: "safe\x1b[2J\ntext",
+			layout: { row: 0 },
+		});
+		const rendered = bar.render(80)[0];
+		assert.ok(rendered.includes("safe text"));
+		assert.ok(!rendered.includes("\x1b[2J"));
+		assert.strictEqual(bar.removeWidget("test.safe"), true);
+		assert.ok(!bar.render(80)[0].includes("safe text"));
 	});
 });

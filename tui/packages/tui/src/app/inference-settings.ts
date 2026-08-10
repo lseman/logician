@@ -4,7 +4,7 @@
 
 import type { AgentCoreBridge } from "@logician/coding-agent/application";
 import { saveConfigField } from "@logician/coding-agent/configuration";
-import type { StatusBar } from "../status/status-bar.ts";
+import type { StatusBar } from "../footer/layout.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 
 export type InferenceMode =

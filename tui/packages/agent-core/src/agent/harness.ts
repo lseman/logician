@@ -726,16 +726,15 @@ export class AgentHarness {
 			contextWindowTokens: () => config.contextWindowTokens,
 			toolDefs: () => tools as unknown as Record<string, unknown>[],
 			loopDetector: this.loopDetector,
-			eventBus: this._extensionBus
-				? {
-						// Builtin hooks emit ad-hoc diagnostic shapes (e.g. thinking_loop_detected)
-						// that aren't part of the typed ExtensionEvent contract, so this bridges
-						// through the legacy untyped emit rather than the strict typed bus.
-						emit: (event: { type: string; [key: string]: unknown }) => {
-							void this._extensionBus?.emitLegacy(event);
-						},
-					}
-				: undefined,
+			eventBus: {
+				// Builtin interventions must use the same subscriber path as loop-runner
+				// events or the application/TUI never sees them. Mirror them to legacy
+				// extension listeners as a secondary projection.
+				emit: (event: { type: string; [key: string]: unknown }) => {
+					this.emitToSubscribers(event as AgentEvent);
+					void this._extensionBus?.emitLegacy(event);
+				},
+			},
 		});
 
 		const layers: HookLayer[] = [

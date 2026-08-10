@@ -9,6 +9,7 @@ export * from "./agent/execution-policy.ts";
 export * from "./agent/file-checkpoints.ts";
 export * from "./agent/guards/loop-detector.ts";
 export * from "./agent/harness.ts";
+export * from "./agent/intervention-controller.ts";
 export * from "./agent/messages.ts";
 export * from "./agent/runtime-state.ts";
 export * from "./agent/session.ts";
