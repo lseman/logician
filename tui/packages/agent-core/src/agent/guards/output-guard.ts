@@ -440,13 +440,9 @@ export class OutputGuard {
 		);
 		if (!isLooping) return null;
 		const diag = this.loopDetector.getLoopDiagnostic();
-		if (diag) {
-			this.emitEvent({
-				type: "loop_detected",
-				message: diag,
-				attempt: this.retryCount,
-			});
-		}
+		// The runner emits one guard_triggered intervention when it schedules the
+		// recovery nudge. Emitting loop_detected here as well produced duplicate
+		// user-visible notices for the same incident.
 		return diag;
 	}
 

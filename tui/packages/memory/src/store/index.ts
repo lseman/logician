@@ -1638,11 +1638,20 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function deleteEntry(id: string): boolean {
 		// Only delete if still latest (prevent double-delete)
-		const result = db
-			.prepare(
-				"UPDATE memories SET is_latest = 0 WHERE id = ? AND is_latest = 1",
-			)
-			.run(id);
+		const remove = db.transaction(() => {
+			const result = db
+				.prepare(
+					"UPDATE memories SET is_latest = 0 WHERE id = ? AND workspace = ? AND is_latest = 1",
+				)
+				.run(id, currentWorkspace);
+			if (result.changes > 0) {
+				db.prepare(
+					"DELETE FROM memory_embeddings WHERE entity_id = ? AND workspace = ?",
+				).run(id, currentWorkspace);
+			}
+			return result;
+		});
+		const result = remove();
 		return result.changes > 0;
 	}
 
@@ -1655,6 +1664,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			"DELETE FROM relations WHERE source_id = ? OR target_id = ?",
 		);
 		for (const { id } of ids) removeRelations.run(id, id);
+		db.prepare(
+			"DELETE FROM memory_embeddings WHERE workspace = ? AND entity_kind = 'memory'",
+		).run(currentWorkspace);
 		db.prepare("DELETE FROM memories WHERE workspace = ?").run(
 			currentWorkspace,
 		);
@@ -1691,11 +1703,28 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 		sets.push("updated_at = ?");
 		params.push(now());
-		params.push(id);
+		params.push(id, currentWorkspace);
 
-		db.prepare(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`).run(
-			...params,
-		);
+		const updateMemory = db.transaction(() => {
+			const result = db
+				.prepare(
+					`UPDATE memories SET ${sets.join(", ")} WHERE id = ? AND workspace = ?`,
+				)
+				.run(...params);
+			// Content-derived vectors cannot remain valid after semantic fields change.
+			if (
+				result.changes > 0 &&
+				(updates.content !== undefined ||
+					updates.title !== undefined ||
+					updates.concepts !== undefined)
+			) {
+				db.prepare(
+					"DELETE FROM memory_embeddings WHERE entity_id = ? AND workspace = ?",
+				).run(id, currentWorkspace);
+			}
+			return result;
+		});
+		updateMemory();
 		return get(id);
 	}
 
@@ -2984,15 +3013,21 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	function exportData(): ExportData {
 		const sessions = listSessions();
 		const memories = db
-			.prepare(`SELECT * FROM memories WHERE is_latest = 1`)
-			.all()
+			.prepare(`SELECT * FROM memories WHERE workspace = ? AND is_latest = 1`)
+			.all(currentWorkspace)
 			.map(rowToMemory);
 		const observations = db
-			.prepare(`SELECT * FROM observations ORDER BY timestamp DESC`)
-			.all() as any[];
+			.prepare(
+				`SELECT * FROM observations WHERE workspace = ? ORDER BY timestamp DESC`,
+			)
+			.all(currentWorkspace) as any[];
 		const relations = db
-			.prepare(`SELECT * FROM relations ORDER BY created_at DESC`)
-			.all() as any[];
+			.prepare(`SELECT r.* FROM relations r
+          JOIN memories source ON source.id = r.source_id
+          JOIN memories target ON target.id = r.target_id
+          WHERE source.workspace = ? AND target.workspace = ?
+          ORDER BY r.created_at DESC`)
+			.all(currentWorkspace, currentWorkspace) as any[];
 
 		return {
 			version: 1,
@@ -3011,6 +3046,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				files: safeParseJsonArray(r.files),
 				importance: r.importance ?? 5,
 				consolidated: r.consolidated === 1 || r.consolidated === true,
+				workspace: r.workspace || currentWorkspace,
 			})),
 			memories,
 			relations: relations.map(r => ({

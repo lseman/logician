@@ -67,7 +67,7 @@ import {
 	type NotificationLevel,
 } from "../status/notification-center.ts";
 import { ResearchWidget } from "../status/research-widget.ts";
-import { StatusBar } from "../status/status-bar.ts";
+import { StatusBar } from "../footer/layout.ts";
 import { SteerQueue } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { WorkSurface } from "../status/work-surface.ts";

@@ -1148,6 +1148,7 @@ void test("external stop policy can continue the minimal mechanism", async () =>
 		},
 	]);
 	let policyCalls = 0;
+	const events: AgentEvent[] = [];
 	const messages = await runAgentLoop(
 		{ systemPrompt: "test", messages: [], tools: [noop] },
 		[user("prompt")],
@@ -1166,12 +1167,52 @@ void test("external stop policy can continue the minimal mechanism", async () =>
 				},
 			],
 		},
-		() => {},
+		event => {
+			events.push(event);
+		},
 	);
 
 	assert.equal(backend.calls, 2);
 	assert.equal(policyCalls, 2);
 	assert.equal(messages.at(-1)?.content, "second answer");
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "harness_intervention" &&
+				event.cause === "stop_policy" &&
+				event.action === "continue",
+		),
+	);
+});
+
+void test("continuation exhaustion is visible and ends blocked", async () => {
+	const backend = new FakeBackend(
+		Array.from({ length: 4 }, () => () =>
+			textResponse("I still need to check the test output."),
+		),
+	);
+	const events: AgentEvent[] = [];
+	await runAgentLoop(
+		{ systemPrompt: "test", messages: [], tools: [noop] },
+		[user("finish this")],
+		{ ...makeConfig({ continuationEnabled: true }), backend },
+		event => {
+			events.push(event);
+		},
+	);
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "harness_intervention" &&
+				event.cause === "continuation_exhausted" &&
+				event.action === "pause",
+		),
+	);
+	assert.ok(
+		events.some(
+			event => event.type === "run_outcome" && event.status === "blocked",
+		),
+	);
 });
 
 void test("external stop policy can return a structured minimal outcome", async () => {

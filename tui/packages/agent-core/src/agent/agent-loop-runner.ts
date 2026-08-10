@@ -19,6 +19,10 @@ import {
 import type { LLMBackend } from "./backend.ts";
 import { getInferenceMode } from "./configuration/inference-modes.ts";
 import {
+	HarnessInterventionController,
+	type InterventionInput,
+} from "./intervention-controller.ts";
+import {
 	evaluateStopPolicies,
 	resolveExecutionPolicy,
 } from "./execution-policy.ts";
@@ -177,6 +181,12 @@ async function runAgentLoopInTaskScope(
 	};
 	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
+	const interventionController = new HarnessInterventionController();
+	const intervene = (input: InterventionInput): Promise<void> | void =>
+		emit({
+			type: "harness_intervention",
+			...interventionController.record(input),
+		});
 	// ── P0-1: Shared tool result cache ─────────────────────────────────
 	const cache = new ToolResultCache(
 		config.cacheSize ?? 2000,
@@ -888,22 +898,33 @@ async function runAgentLoopInTaskScope(
 					turnToolCalls,
 				);
 				if (diagnostic) {
-					// checkLoopDetection already emitted a "loop_detected" event with
-					// this diagnostic — inject it as a nudge and keep going. The
+					// Turn the diagnostic into one durable intervention and inject it
+					// as a recovery nudge. The
 					// role:"user" message_start/message_end pair below is never
 					// rendered (Transcript.handleMessageUpdate ignores non-assistant
-					// roles), so guard_triggered is what actually makes this visible.
+					// roles), so the intervention is what makes this visible.
 					const nudgeContent = `[continuation-nudge:loop-detected] ${diagnostic} Stop and try a different approach, or explain why you're stuck.`;
 					const nudge = createUserMessage(nudgeContent);
 					messages.push(nudge);
 					newMessages.push(nudge);
 					await emitMessagePair(emit, turnId, nudge);
-					await emit({
-						type: "guard_triggered",
-						guard: "loop_detected",
+					const loopIntervention = interventionController.record({
+						kind: "loop",
+						cause: "stagnation",
+						detector: "output_guard",
 						message: nudgeContent,
 						iteration,
+						signals: ["repeated_turn_pattern"],
+						nextAction: "Try a materially different tool or approach.",
 					});
+					await emit({ type: "harness_intervention", ...loopIntervention });
+					if (loopIntervention.action === "pause") {
+						return finish({
+							status: "blocked",
+							summary: "Repeated loop detection persisted after recovery attempts.",
+							source: "runtime",
+						});
+					}
 				}
 			}
 
@@ -1030,6 +1051,20 @@ async function runAgentLoopInTaskScope(
 						}),
 				]);
 				if (followUpsOnTerminate.length > 0) {
+					if (
+						!followUpsOnTerminate.some(message =>
+							String(message.content).startsWith("[continuation-nudge:"),
+						)
+					) {
+						await intervene({
+							kind: "continuation",
+							cause: "follow_up_after_termination",
+							detector: "follow_up_queue",
+							message: `Harness scheduled ${followUpsOnTerminate.length} follow-up message(s) after tool termination.`,
+							iteration,
+							action: "continue",
+						});
+					}
 					pendingMessages = followUpsOnTerminate;
 					hasMoreToolCalls = false;
 					// Re-enter inner loop with follow-up messages
@@ -1073,7 +1108,15 @@ async function runAgentLoopInTaskScope(
 				acceptanceStop = checkStopRules(resolved);
 			}
 			if (stop || acceptanceStop) {
-				return finish({ status: "completed", source: "heuristic" });
+				const declared = getTaskStatus();
+				return finish({
+					status:
+						declared?.status === "done"
+							? "completed"
+							: (declared?.status ?? "completed"),
+					summary: declared?.summary,
+					source: declared ? "structured" : "heuristic",
+				});
 			}
 
 			pendingMessages = await firstMessages([
@@ -1108,6 +1151,21 @@ async function runAgentLoopInTaskScope(
 					stopReason: "stop",
 				}),
 		]);
+		if (
+			followUps.length > 0 &&
+			!followUps.some(message =>
+				String(message.content).startsWith("[continuation-nudge:"),
+			)
+		) {
+			await intervene({
+				kind: "continuation",
+				cause: "follow_up",
+				detector: "follow_up_queue",
+				message: `Harness scheduled ${followUps.length} follow-up message(s).`,
+				iteration,
+				action: "continue",
+			});
+		}
 
 		// Runner-level continuation nudge: fires when no follow-ups from hooks
 		// and the model didn't signal completion. This is the FINAL safety net
@@ -1115,6 +1173,7 @@ async function runAgentLoopInTaskScope(
 		// explicit completion signal AND no structured stop was issued.
 		// Capped to MAX_CONSECUTIVE_RUNNER_NUDGES to prevent infinite loops.
 		const MAX_CONSECUTIVE_RUNNER_NUDGES = 3;
+		let continuationExhausted = false;
 		if (
 			executionPolicy.embeddedPoliciesEnabled &&
 			config.continuationEnabled === true &&
@@ -1138,12 +1197,14 @@ async function runAgentLoopInTaskScope(
 				consecutiveRunnerNudges = 0;
 			}
 
-			if (
+			const eligibleForNudge =
 				!hadTools &&
 				!waitingForUser &&
 				!hasAcceptanceReport &&
 				(looksNonCommittal(text) || requiresStructuredConclusion) &&
-				!hasStructuredStop &&
+				!hasStructuredStop;
+			if (
+				eligibleForNudge &&
 				consecutiveRunnerNudges < MAX_CONSECUTIVE_RUNNER_NUDGES
 			) {
 				const nudgeTag = requiresStructuredConclusion
@@ -1156,14 +1217,35 @@ async function runAgentLoopInTaskScope(
 					: `${nudgeTag} Continue with the next step. If the task is fully complete, ` +
 						"say so explicitly. Otherwise keep working — do not stop prematurely.";
 				followUps.push({ role: "user" as const, content: nudgeContent });
-				await emit({
-					type: "guard_triggered",
-					guard: "continuation_nudge",
+				await intervene({
+					kind: "continuation",
+					cause: requiresStructuredConclusion
+						? "missing_structured_conclusion"
+						: "non_committal_response",
+					detector: "runner_continuation",
 					message: nudgeContent,
 					iteration,
+					counters: { consecutiveRunnerNudges },
+					limits: { maxConsecutiveNudges: MAX_CONSECUTIVE_RUNNER_NUDGES },
 				});
 				consecutiveRunnerNudges++;
 				lastRunnerNudgeIteration = iteration;
+			} else if (
+				eligibleForNudge &&
+				consecutiveRunnerNudges >= MAX_CONSECUTIVE_RUNNER_NUDGES
+			) {
+				continuationExhausted = true;
+				await intervene({
+					kind: "continuation",
+					cause: "continuation_exhausted",
+					detector: "runner_continuation",
+					message: `Continuation stopped after ${MAX_CONSECUTIVE_RUNNER_NUDGES} consecutive nudges without observable tool progress.`,
+					iteration,
+					action: "pause",
+					counters: { consecutiveRunnerNudges },
+					limits: { maxConsecutiveNudges: MAX_CONSECUTIVE_RUNNER_NUDGES },
+					nextAction: "Resume from the current checkpoint with user guidance.",
+				});
 			} else {
 				// Model signaled completion, has structured stop, or cap reached — reset.
 				consecutiveRunnerNudges = 0;
@@ -1173,6 +1255,13 @@ async function runAgentLoopInTaskScope(
 		if (followUps.length > 0) {
 			pendingMessages = followUps;
 			continue;
+		}
+		if (continuationExhausted) {
+			return finish({
+				status: "blocked",
+				summary: `Continuation exhausted after ${MAX_CONSECUTIVE_RUNNER_NUDGES} nudges without tool progress.`,
+				source: "runtime",
+			});
 		}
 
 		// A final question hands control back to the user. It must beat
@@ -1196,6 +1285,14 @@ async function runAgentLoopInTaskScope(
 			signal: config.signal,
 		});
 		if (policyDecision?.action === "continue") {
+			await intervene({
+				kind: "continuation",
+				cause: "stop_policy",
+				detector: "custom_stop_policy",
+				message: `A stop policy continued the run with ${policyDecision.messages.length} follow-up message(s).`,
+				iteration,
+				action: "continue",
+			});
 			if (policyDecision.messages.length > 0) {
 				pendingMessages = policyDecision.messages;
 				continue;
@@ -1242,11 +1339,16 @@ async function runAgentLoopInTaskScope(
 					`[continuation-nudge:acceptance-retry] Acceptance validation failed (attempt ${acceptanceFinalizationTurns}/${resolved.maxFinalizationTurns ?? 3}). ` +
 					"Review the acceptance contract, fix any unmet criteria or verification failures, and finish with a valid acceptance-report block.";
 				pendingMessages = [{ role: "user", content: acceptanceRetryContent }];
-				await emit({
-					type: "guard_triggered",
-					guard: "acceptance_retry",
+				await intervene({
+					kind: "verification",
+					cause: "acceptance_failed",
+					detector: "acceptance_contract",
 					message: acceptanceRetryContent,
 					iteration,
+					counters: { acceptanceFinalizationTurns },
+					limits: {
+						maxFinalizationTurns: resolved.maxFinalizationTurns ?? 3,
+					},
 				});
 				continue;
 			} else {
@@ -1293,11 +1395,14 @@ async function runAgentLoopInTaskScope(
 						? `[continuation-nudge:reflection-retry] Reflection found issues: ${reflection.result.issues.join(", ")}. Address them and continue working.`
 						: `[continuation-nudge:reflection-retry] Reflection found the task incomplete. ${suggested ? `Suggested next steps: ${suggested}. ` : ""}Continue working.`;
 				pendingMessages = [{ role: "user", content: reflectionRetryContent }];
-				await emit({
-					type: "guard_triggered",
-					guard: "reflection_retry",
+				await intervene({
+					kind: "verification",
+					cause: "reflection_incomplete",
+					detector: "reflection",
 					message: reflectionRetryContent,
 					iteration,
+					counters: { reflectionCount },
+					limits: { maxReflections },
 				});
 				continue;
 			}
@@ -1308,13 +1413,6 @@ async function runAgentLoopInTaskScope(
 	const finalMessagesForConclusion = newMessages;
 
 	if (iteration >= maxIterations) {
-		const lastText = lastAssistantContent(newMessages);
-		await emit({
-			type: "task_failed",
-			reason: `Agent reached the ${maxIterations}-turn safety limit without finishing`,
-			iteration,
-			lastContent: lastText,
-		});
 		await emit({
 			type: "max_iterations",
 			iterations: iteration,
@@ -1323,7 +1421,7 @@ async function runAgentLoopInTaskScope(
 	}
 
 	// Emit conclusion / task_failed before agent_end
-	if (executionPolicy.embeddedPoliciesEnabled) {
+	if (executionPolicy.embeddedPoliciesEnabled && iteration < maxIterations) {
 		const hadFollowUps = iteration < maxIterations;
 		await emitConclusion(
 			emit,

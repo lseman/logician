@@ -5,6 +5,7 @@
 
 import { spawnSync } from "node:child_process";
 import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
+import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
@@ -21,7 +22,10 @@ import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
 } from "../../agent/messages.ts";
-import { getTaskStatus } from "../../agent/tasks/task-status-state.ts";
+import {
+	getTaskStatus,
+	recordTaskStatus,
+} from "../../agent/tasks/task-status-state.ts";
 import { getTasks } from "../../agent/tasks/todo-state.ts";
 import type {
 	AgentConfig,
@@ -77,6 +81,14 @@ export interface BuiltinHookDeps {
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const { config, loopDetector } = deps;
+	const interventions = new HarnessInterventionController();
+	const emitIntervention = (
+		input: Parameters<HarnessInterventionController["record"]>[0],
+	) => {
+		const intervention = interventions.record(input);
+		deps.eventBus?.emit({ type: "harness_intervention", ...intervention });
+		return intervention;
+	};
 	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	// Tool guards (duplicate + failure-loop, merged from GuardEngine).
 	// Duplicate-call detection defaults ON: blocking exact same-args repeats
@@ -172,13 +184,22 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				JSON.stringify(args),
 			);
 			if (decision.block) {
-				deps.eventBus?.emit({
-					type: "guard_triggered",
-					guard: decision.guard ?? "duplicate",
+				const intervention = emitIntervention({
+					kind: "loop",
+					cause: decision.guard ?? "duplicate",
+					detector: "tool_call_guard",
 					message: decision.message ?? "",
-					toolName: toolCall.name,
 					iteration,
+					signals: [decision.guard ?? "duplicate"],
+					nextAction: "Change the tool arguments or choose another approach.",
 				});
+				if (intervention.action === "pause") {
+					recordTaskStatus({
+						status: "blocked",
+						summary: intervention.evidence.summary,
+						ts: Date.now(),
+					});
+				}
 				return { content: decision.message, isError: true };
 			}
 		}
@@ -195,6 +216,9 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		}
 		if (guardThresholds && isError) {
 			loopDetector.recordFailure(toolCall.name, toolCall.arguments, result);
+		} else if (guardThresholds) {
+			loopDetector.recordSuccess(toolCall.name, toolCall.arguments);
+			interventions.recordProgress();
 		}
 		if (
 			executionPolicy.embeddedPoliciesEnabled &&
@@ -222,6 +246,14 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				},
 			});
 			lastCompactionTurn = iteration;
+			if (result.changed) {
+				deps.eventBus?.emit({
+					type: "compaction",
+					reason: "threshold",
+					tokensBefore: estimateChatPayloadTokens(messages, deps.toolDefs()),
+					tokensAfter: result.tokensAfter,
+				});
+			}
 			return result.changed
 				? { messages: result.messages as Message[] }
 				: undefined;
@@ -229,9 +261,23 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	}
 
 	if (budget) {
-		hooks.shouldStopAfterTurn = ({ messages }) => {
+		hooks.shouldStopAfterTurn = ({ messages, iteration }) => {
 			const tokens = estimateChatPayloadTokens(messages, deps.toolDefs());
-			return budget.shouldStop(tokens);
+			const stopped = budget.shouldStop(tokens);
+			if (stopped) {
+				const message =
+					"Continuation stopped because token growth stayed below the progress threshold for two turns.";
+				recordTaskStatus({ status: "blocked", summary: message, ts: Date.now() });
+				emitIntervention({
+					kind: "budget",
+					cause: "low_progress",
+					detector: "token_budget",
+					message,
+					iteration,
+					action: "stop",
+				});
+			}
+			return stopped;
 		};
 	}
 
@@ -267,13 +313,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				} else if (diagnostic.includes("budget")) {
 					strategy = "budget_exhausted";
 				}
-				const event = {
-					type: "thinking_loop_detected" as const,
+				emitIntervention({
+					kind: "loop",
+					cause: strategy,
+					detector: "thinking_loop",
 					message: diagnostic,
-					strategy,
 					iteration,
-				};
-				deps.eventBus?.emit(event);
+					signals: [strategy],
+					action: "stop",
+					nextAction: "Use tools, test a concrete hypothesis, or report the blocker.",
+				});
 			}
 		};
 
@@ -286,7 +335,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				hadToolCalls: false,
 			});
 			if (budgetResult === true) return true;
-			return thinkingLoopDetector?.getDiagnostic() !== null;
+			const diagnostic = thinkingLoopDetector?.getDiagnostic() ?? null;
+			if (diagnostic) {
+				recordTaskStatus({
+					status: "blocked",
+					summary: diagnostic,
+					ts: Date.now(),
+				});
+				return true;
+			}
+			return false;
 		};
 	}
 
@@ -316,11 +374,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				const message =
 					"[continuation-nudge:length] Your previous response was cut off because it reached the output limit. " +
 					"Please continue exactly where you left off — do not repeat what you already wrote.";
-				deps.eventBus?.emit({
-					type: "guard_triggered",
-					guard: "continuation_nudge",
+				emitIntervention({
+					kind: "continuation",
+					cause: "length_truncation",
+					detector: "builtin_continuation",
 					message,
 					iteration,
+					action: "continue",
 				});
 				return [{ role: "user", content: message }];
 			}
@@ -368,11 +428,13 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					"If you are truly blocked or done, say so explicitly and stop.";
 			}
 
-			deps.eventBus?.emit({
-				type: "guard_triggered",
-				guard: "continuation_nudge",
+			emitIntervention({
+				kind: isCircling ? "loop" : "continuation",
+				cause: isCircling ? "circling" : "unfinished_todos",
+				detector: "builtin_continuation",
 				message: content,
 				iteration,
+				action: isCircling ? "change_strategy" : "continue",
 			});
 			return [{ role: "user", content }];
 		};

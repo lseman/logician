@@ -58,6 +58,12 @@ export type {
 	EventHandler,
 } from "./types/types-events.ts";
 export type {
+	HarnessIntervention,
+	HarnessInterventionAction,
+	HarnessInterventionEvidence,
+	HarnessInterventionKind,
+} from "./intervention-controller.ts";
+export type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,
 	AfterToolCallResult,

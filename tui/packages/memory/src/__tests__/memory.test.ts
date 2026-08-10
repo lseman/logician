@@ -463,6 +463,56 @@ describe("createMemoryStore — observations", () => {
 		store.close();
 	});
 
+	test("prevents cross-workspace memory mutation and export leakage", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/work/project-a");
+		store.createSession("session-a", {
+			cwd: "/work/project-a",
+			workspace: "/work/project-a",
+		});
+		const projectA = store.create("Project A private architecture");
+		store.upsertEmbedding(projectA.id, "memory", [1, 0]);
+
+		store.setCurrentWorkspace("/work/project-b");
+		store.createSession("session-b", {
+			cwd: "/work/project-b",
+			workspace: "/work/project-b",
+		});
+		const projectB = store.create("Project B public architecture");
+
+		assert.equal(store.update(projectA.id, { content: "tampered" }), null);
+		assert.equal(store.remove(projectA.id), false);
+		const exported = store.exportData();
+		assert.deepEqual(
+			exported.sessions.map(session => session.id),
+			["session-b"],
+		);
+		assert.deepEqual(
+			exported.memories.map(memory => memory.id),
+			[projectB.id],
+		);
+
+		store.setCurrentWorkspace("/work/project-a");
+		assert.equal(
+			store.get(projectA.id)?.content,
+			"Project A private architecture",
+		);
+		assert.equal(store.hasEmbedding(projectA.id), true);
+		store.close();
+	});
+
+	test("invalidates stale embeddings when semantic memory fields change", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/work/project-a");
+		const memory = store.create("Original semantic content");
+		store.upsertEmbedding(memory.id, "memory", [1, 0]);
+		assert.equal(store.hasEmbedding(memory.id), true);
+
+		store.update(memory.id, { content: "Updated semantic content" });
+		assert.equal(store.hasEmbedding(memory.id), false);
+		store.close();
+	});
+
 	test("lists recent observations without requiring session metadata", () => {
 		const store = createMemoryStore(dbPath());
 		store.setCurrentWorkspace("/workspace");

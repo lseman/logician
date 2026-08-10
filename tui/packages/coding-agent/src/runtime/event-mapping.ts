@@ -348,6 +348,18 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				label: `Guard: ${event.guard}`,
 				text: event.message,
 			};
+		case "harness_intervention":
+			return {
+				type: "notice",
+				level:
+					event.severity === "error"
+						? "error"
+						: event.severity === "warning"
+							? "warn"
+							: "info",
+				label: `${event.kind}: ${event.action}`,
+				text: `${event.evidence.summary} (attempt ${event.attempt}, incident ${event.id})${event.nextAction ? ` Next: ${event.nextAction}` : ""}`,
+			};
 		// ── Acceptance / reflection observability ────────────────────────
 		case "acceptance_start":
 			return {

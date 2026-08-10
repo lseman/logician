@@ -186,10 +186,25 @@ export function handleEvent(
 		case "tool_execution_update":
 		case "subagent_chunk":
 		case "subagent_lifecycle":
-		case "agent_retry_end":
 			break;
 		case "agent_retry_start":
 			ctx.statusPanel.update({ phase: "retrying" });
+			ctx.transcript.handleEvent({
+				type: "notice",
+				level: "warn",
+				label: "Retry",
+				text: `Attempt ${event.attempt}/${event.maxRetries} in ${event.delayMs}ms${event.reason ? ` (${event.reason})` : ""}: ${event.error}`,
+			});
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			break;
+		case "agent_retry_end":
+			ctx.transcript.handleEvent({
+				type: "notice",
+				level: event.success ? "success" : "error",
+				label: "Retry",
+				text: `Attempt ${event.attempt} ${event.success ? "recovered" : "failed"}${event.reason ? ` (${event.reason})` : ""}.`,
+			});
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			break;
 		case "agent_error":
 			ctx.transcript.addSystemMessage(
@@ -264,6 +279,15 @@ export function handleEvent(
 							: undefined,
 				}),
 			});
+			if (event.compacted === true) {
+				ctx.transcript.handleEvent({
+					type: "notice",
+					level: "info",
+					label: "Context recovery",
+					text: `Context was compacted and the run will continue at ${formatContextSize(Number(event.tokens || 0))}.`,
+				});
+				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			}
 			break;
 		case "compaction":
 			ctx.transcript.addSystemMessage(
