@@ -58,6 +58,8 @@ const KNOWN_KEYS = new Set([
 	"allowedPaths",
 	"allowAllPaths",
 	"rtkProxyEnabled",
+	"ariadneEnabled",
+	"fffgrepEnabled",
 	"maxParallelAgents",
 	"cwd",
 	"truncation",
@@ -339,6 +341,8 @@ export function validateConfig(
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
 	cfg.rtkProxyEnabled = configBool(obj.rtkProxyEnabled);
+	cfg.ariadneEnabled = configBool(obj.ariadneEnabled, true);
+	cfg.fffgrepEnabled = configBool(obj.fffgrepEnabled, true);
 	if (obj.memory !== undefined) {
 		cfg.memory = configBool(obj.memory);
 	}
@@ -810,6 +814,10 @@ export interface LogicianTuiConfig {
 	autoRetryEnabled?: boolean;
 	// RTK CLI proxy — compresses bash/rg/grep output 60–90%.
 	rtkProxyEnabled?: boolean;
+	/** Expose the Ariadne code-graph tool (ON by default). */
+	ariadneEnabled?: boolean;
+	/** Prefer the fff MCP indexed grep tool when available (ON by default). */
+	fffgrepEnabled?: boolean;
 	// Self-evaluation step run before the agent's final conclusion (OFF by default).
 	reflectionConfig?: {
 		enabled?: boolean;

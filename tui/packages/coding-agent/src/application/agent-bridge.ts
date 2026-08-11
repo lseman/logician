@@ -163,6 +163,8 @@ export interface AgentBridgeOptions {
 	reflectionConfig?: AgentConfig["reflectionConfig"];
 	postEditDiagnostics?: boolean;
 	rtkProxyEnabled?: boolean;
+	ariadneEnabled?: boolean;
+	fffgrepEnabled?: boolean;
 	autoRetryEnabled?: boolean;
 	maxRetries?: number;
 	retryBaseDelayMs?: number;
@@ -349,6 +351,8 @@ export class AgentCoreBridge {
 				...(opts.extraTools ?? []),
 			],
 			webSearch: opts.webSearch,
+			ariadneEnabled: opts.ariadneEnabled,
+			fffgrepEnabled: opts.fffgrepEnabled,
 			emit: event => this.emit(event),
 			onToolAdded: () => this.addDefaultTool(),
 			onContextChanged: () => this.rebuildBaseSystemPrompt(),
@@ -419,7 +423,7 @@ export class AgentCoreBridge {
 				this.extensionLoadPromise = this.extensionRunner
 					.load(extResult.extensions)
 					.catch(err => console.error("[logician] extension load error:", err));
-		this.extensionDirs = opts.extensionDirs;
+				this.extensionDirs = opts.extensionDirs;
 			}
 		} catch (err) {
 			console.error("[logician] extension load error:", err);
@@ -522,6 +526,8 @@ export class AgentCoreBridge {
 			continuationEnabled: opts.continuationEnabled,
 			reflectionConfig: opts.reflectionConfig,
 			rtkProxyEnabled: opts.rtkProxyEnabled,
+			ariadneEnabled: opts.ariadneEnabled ?? true,
+			fffgrepEnabled: opts.fffgrepEnabled ?? true,
 			autoRetryEnabled: opts.autoRetryEnabled,
 			maxRetries: opts.maxRetries,
 			retryBaseDelayMs: opts.retryBaseDelayMs,
@@ -1079,11 +1085,19 @@ export class AgentCoreBridge {
 	}
 
 	/** Return config snapshot for external LLM calls (goal evaluator, etc.). */
-	getConfig(): { baseUrl: string; model: string; rtkProxyEnabled?: boolean } {
+	getConfig(): {
+		baseUrl: string;
+		model: string;
+		rtkProxyEnabled?: boolean;
+		ariadneEnabled?: boolean;
+		fffgrepEnabled?: boolean;
+	} {
 		return {
 			baseUrl: this.config.baseUrl,
 			model: this.config.model,
 			rtkProxyEnabled: this.config.rtkProxyEnabled,
+			ariadneEnabled: this.config.ariadneEnabled,
+			fffgrepEnabled: this.config.fffgrepEnabled,
 		};
 	}
 
@@ -1697,6 +1711,8 @@ export class AgentCoreBridge {
 			| "proactiveCompactionEnabled"
 			| "postEditDiagnostics"
 			| "rtkProxyEnabled"
+			| "ariadneEnabled"
+			| "fffgrepEnabled"
 			| "memoryEnabled",
 		enabled: boolean,
 	): void {
@@ -1747,6 +1763,21 @@ export class AgentCoreBridge {
 			this.postEditDiagnosticsEnabled = enabled;
 			return;
 		}
+		if (key === "ariadneEnabled") {
+			this.config.ariadneEnabled = enabled;
+			this.toolRouter.setAriadneEnabled(enabled);
+			this.addDefaultTool();
+			return;
+		}
+		if (key === "fffgrepEnabled") {
+			this.config.fffgrepEnabled = enabled;
+			this.toolRouter.setFffgrepEnabled(enabled);
+			this.addDefaultTool();
+			void this.setMcpServerEnabled("fff", enabled).catch(error =>
+				this.reportError(error),
+			);
+			return;
+		}
 		this.config[key] = enabled;
 		if (key === "proactiveCompactionEnabled") {
 			this.harness?.enableAutoCompaction(enabled);
@@ -1786,6 +1817,8 @@ export class AgentCoreBridge {
 		proactiveCompactionEnabled: boolean;
 		postEditDiagnostics: boolean;
 		rtkProxyEnabled: boolean;
+		ariadneEnabled: boolean;
+		fffgrepEnabled: boolean;
 		memoryEnabled: boolean;
 	} {
 		return {
@@ -1802,6 +1835,8 @@ export class AgentCoreBridge {
 				this.config.proactiveCompactionEnabled ?? false,
 			postEditDiagnostics: this.postEditDiagnosticsEnabled,
 			rtkProxyEnabled: this.config.rtkProxyEnabled ?? false,
+			ariadneEnabled: this.config.ariadneEnabled ?? true,
+			fffgrepEnabled: this.config.fffgrepEnabled ?? true,
 			memoryEnabled: this.memoryStore !== null,
 		};
 	}

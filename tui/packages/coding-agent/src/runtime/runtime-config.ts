@@ -93,6 +93,8 @@ export function resolveRuntimeConfig(
 			reflectionConfig: config.reflectionConfig,
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),
 			rtkProxyEnabled: configBool(config.rtkProxyEnabled),
+			ariadneEnabled: configBool(config.ariadneEnabled, true),
+			fffgrepEnabled: configBool(config.fffgrepEnabled, true),
 			autoRetryEnabled: configBool(config.autoRetryEnabled, true),
 			maxRetries: configNumber(config.maxRetries),
 			retryBaseDelayMs: configNumber(config.retryBaseDelayMs),

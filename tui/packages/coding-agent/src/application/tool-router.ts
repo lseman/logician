@@ -25,6 +25,7 @@ import { loadPrompts, type Prompt } from "../prompts/index.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 import { formatSkillCatalog, loadSkills, type Skill } from "../skills/index.ts";
 import { createDefaultTools } from "../tools/default-tools.ts";
+import { ariadne } from "../tools/ariadne.ts";
 import { createReadSkillTool } from "../tools/read-skill.ts";
 import {
 	getDefaultSandboxProfile,
@@ -43,6 +44,8 @@ export interface ToolRouterDeps {
 	tools?: Tool[];
 	extraTools?: Tool[];
 	webSearch?: Partial<{ baseUrl: string; maxResults: number }>;
+	ariadneEnabled?: boolean;
+	fffgrepEnabled?: boolean;
 	emit: (event: RuntimeEvent) => void;
 	/** Add a tool to the live default set (propagates into config.tools / harness.setTools). */
 	onToolAdded: (tool: Tool) => void;
@@ -90,6 +93,8 @@ export class ToolRouter {
 	private mcpServerCount = 0;
 	private mcpErrors: string[] = [];
 	private mcpToolNames = new Set<string>();
+	private disabledFffTools: Tool[] = [];
+	private fffgrepEnabled: boolean;
 	private mcpSystemContext = "";
 
 	private skillsInjected = false;
@@ -112,6 +117,7 @@ export class ToolRouter {
 		this.emit = deps.emit;
 		this.onToolAdded = deps.onToolAdded;
 		this.onContextChanged = deps.onContextChanged;
+		this.fffgrepEnabled = deps.fffgrepEnabled !== false;
 		const defaultWebSearch = resolveWebSearchConfig();
 		const webSearch = {
 			baseUrl: deps.webSearch?.baseUrl || defaultWebSearch.baseUrl,
@@ -119,7 +125,7 @@ export class ToolRouter {
 		};
 		this.defaultTools = deps.tools?.length
 			? deps.tools
-			: createDefaultTools({ webSearch });
+			: createDefaultTools({ webSearch, ariadneEnabled: deps.ariadneEnabled });
 		if (deps.extraTools?.length) {
 			this.defaultTools = [
 				...this.defaultTools,
@@ -144,9 +150,43 @@ export class ToolRouter {
 		return this.defaultTools;
 	}
 
+	setAriadneEnabled(enabled: boolean): void {
+		const hasAriadne = this.defaultTools.some(
+			tool => tool.name === ariadne.name,
+		);
+		if (enabled === hasAriadne) return;
+		this.defaultTools = enabled
+			? [ariadne, ...this.defaultTools]
+			: this.defaultTools.filter(tool => tool.name !== ariadne.name);
+		this.onContextChanged();
+	}
+
+	setFffgrepEnabled(enabled: boolean): void {
+		this.fffgrepEnabled = enabled;
+		if (enabled) {
+			if (!this.disabledFffTools.length) return;
+			this.defaultTools = [...this.defaultTools, ...this.disabledFffTools];
+			this.disabledFffTools = [];
+		} else {
+			const fffTools = this.defaultTools.filter(tool =>
+				/^fff(?:__|_)grep$/i.test(tool.name),
+			);
+			if (!fffTools.length) return;
+			this.disabledFffTools = fffTools;
+			this.defaultTools = this.defaultTools.filter(
+				tool => !fffTools.some(fff => fff.name === tool.name),
+			);
+		}
+		this.onContextChanged();
+	}
+
 	/** Append a tool to the router's own set and notify the bridge to propagate it into config/harness/system prompt. */
 	private addTool(tool: Tool): void {
 		if (this.defaultTools.some(t => t.name === tool.name)) return;
+		if (!this.fffgrepEnabled && /^fff(?:__|_)grep$/i.test(tool.name)) {
+			this.disabledFffTools = [...this.disabledFffTools, tool];
+			return;
+		}
 		this.defaultTools = [...this.defaultTools, tool];
 		this.onToolAdded(tool);
 	}

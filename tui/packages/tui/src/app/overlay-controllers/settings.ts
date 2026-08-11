@@ -209,6 +209,45 @@ export async function openSettingsSelector(
 				],
 			},
 			{
+				name: "Ariadne",
+				currentValue: data.ariadneEnabled ? "on" : "off",
+				description:
+					"Expose the Ariadne code-graph tool for semantic repository analysis",
+				options: [
+					{
+						label: "on",
+						value: "true",
+						current: data.ariadneEnabled,
+						toggleOn: true,
+					},
+					{
+						label: "off",
+						value: "false",
+						current: !data.ariadneEnabled,
+						toggleOn: false,
+					},
+				],
+			},
+			{
+				name: "fffgrep",
+				currentValue: data.fffgrepEnabled ? "on" : "off",
+				description: "Prefer the fff indexed MCP grep tool over local grep",
+				options: [
+					{
+						label: "on",
+						value: "true",
+						current: data.fffgrepEnabled,
+						toggleOn: true,
+					},
+					{
+						label: "off",
+						value: "false",
+						current: !data.fffgrepEnabled,
+						toggleOn: false,
+					},
+				],
+			},
+			{
 				name: "Execution policy",
 				currentValue: data.executionProfile,
 				description:
@@ -338,6 +377,22 @@ export function handleSettingsSelectorAction(
 			saveConfigField("rtkProxyEnabled", on);
 			ctx.statusPanel.update({ rtkProxyEnabled: on });
 			ctx.notify(`RTK proxy: ${on ? "on" : "off"}`, "success");
+			break;
+		}
+		case "ariadne": {
+			const on = value === "true";
+			ctx.bridge.setRuntimeToggle("ariadneEnabled", on);
+			saveConfigField("ariadneEnabled", on);
+			ctx.statusPanel.update({ ariadneEnabled: on });
+			ctx.notify(`Ariadne: ${on ? "on" : "off"}`, "success");
+			break;
+		}
+		case "fffgrep": {
+			const on = value === "true";
+			ctx.bridge.setRuntimeToggle("fffgrepEnabled", on);
+			saveConfigField("fffgrepEnabled", on);
+			ctx.statusPanel.update({ fffgrepEnabled: on });
+			ctx.notify(`fffgrep: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		case "inference mode": {
