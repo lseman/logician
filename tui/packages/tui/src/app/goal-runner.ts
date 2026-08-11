@@ -45,9 +45,12 @@ export async function evaluateGoal(
 		snapshot,
 	);
 
-	ctx.transcript.addSystemMessage(
-		`◎ Goal evaluation #${goalState.turnCount}: "${goalState.condition}"`,
-	);
+	ctx.transcript.handleEvent({
+		type: "notice",
+		level: "info",
+		label: "Goal evaluation",
+		text: `Evaluation #${goalState.turnCount}: "${goalState.condition}"`,
+	});
 	ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 	ctx.tui.requestRender();
 
@@ -92,9 +95,12 @@ export async function evaluateGoal(
 		const err = e instanceof Error ? e.message : String(e);
 		ctx.goalManager.handleAction({ type: "clear" });
 		ctx.goalActive = false;
-		ctx.transcript.addSystemMessage(
-			`Goal evaluation failed: ${err}. Goal cancelled.`,
-		);
+		ctx.transcript.handleEvent({
+			type: "notice",
+			level: "error",
+			label: "Goal stopped",
+			text: `Evaluation failed: ${err}. Goal cancelled.`,
+		});
 		ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 		ctx.tui.requestRender();
 		ctx.goalEvaluationPending = false;
@@ -106,18 +112,24 @@ export async function evaluateGoal(
 	if (met) {
 		ctx.goalManager.recordEvaluation(true, reason);
 		ctx.goalActive = false;
-		ctx.transcript.addSystemMessage(
-			`✓ Goal achieved: "${goalState.condition}" — ${reason}`,
-		);
+		ctx.transcript.handleEvent({
+			type: "notice",
+			level: "success",
+			label: "Goal achieved",
+			text: `"${goalState.condition}" — ${reason}`,
+		});
 	} else {
 		ctx.goalManager.recordEvaluation(false, reason);
 		const stillActive = ctx.goalManager.isActive();
 		ctx.goalActive = stillActive;
-		ctx.transcript.addSystemMessage(
-			stillActive
-				? `◎ Goal not yet met: ${reason} — continuing...`
-				: `Goal stopped: ${ctx.goalManager.getState()?.lastReason || reason}`,
-		);
+		ctx.transcript.handleEvent({
+			type: "notice",
+			level: stillActive ? "warn" : "error",
+			label: stillActive ? "Goal continuing" : "Goal stopped",
+			text: stillActive
+				? `${reason} — continuing...`
+				: ctx.goalManager.getState()?.lastReason || reason,
+		});
 		if (stillActive) {
 			const reminder = `Goal reminder: "${goalState.condition}". ${reason}. Continue working toward the goal.`;
 			void ctx.bridge.sendMessage(reminder).catch((error: unknown) => {

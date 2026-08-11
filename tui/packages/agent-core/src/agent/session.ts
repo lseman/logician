@@ -127,7 +127,9 @@ export type OperationJournalEventType =
 	| "turn_start"
 	| "turn_end"
 	| "tool_start"
-	| "tool_end";
+	| "tool_end"
+	| "checkpoint"
+	| "intervention";
 
 export interface OperationJournalEvent {
 	version: 1;
@@ -139,6 +141,10 @@ export interface OperationJournalEvent {
 	toolCallId?: string;
 	toolName?: string;
 	status?: string;
+	interventionId?: string;
+	cause?: string;
+	action?: string;
+	iteration?: number;
 }
 
 export type SessionEntry =
