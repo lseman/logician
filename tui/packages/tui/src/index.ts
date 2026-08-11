@@ -42,6 +42,7 @@ import {
 	formatDoctorReport,
 } from "@logician/coding-agent/developer-tools";
 import { resolveRuntimeConfig } from "@logician/coding-agent/runtime";
+import { activateProjectVirtualEnv } from "@logician/coding-agent/tools";
 import {
 	applyTrustChoice,
 	resolveTrust,
@@ -119,6 +120,7 @@ function defaultProjectTrust(): "ask" | "always" | "never" {
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	const cwd = process.cwd();
+	activateProjectVirtualEnv(cwd);
 
 	// ── Parse --session <id> flag ────────────────────────────────────────
 	let resumeSessionId: string | undefined;

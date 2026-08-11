@@ -5,11 +5,22 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
+import { sanitizeTerminalText } from "../rendering/terminal-sanitize.ts";
 import { type Component, DIM, RESET, visibleWidth } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import { sanitizeTerminalText } from "../rendering/terminal-sanitize.ts";
-import { type ContributedWidget, type FooterConfig, type WidgetLayout, createDefaultConfig, DEFAULT_WIDGET_LAYOUTS } from "./types.ts";
-import { type WidgetData, type WidgetId, produceWidgets, type WidgetFactoryStatus } from "./widget-factory.ts";
+import {
+	type ContributedWidget,
+	createDefaultConfig,
+	DEFAULT_WIDGET_LAYOUTS,
+	type FooterConfig,
+	type WidgetLayout,
+} from "./types.ts";
+import {
+	produceWidgets,
+	type WidgetData,
+	type WidgetFactoryStatus,
+	type WidgetId,
+} from "./widget-factory.ts";
 
 /* ════════════════════════════════════════════════════════════════════════════
  *  Config loading — reads ~/.logician/footer-config.json if present
@@ -52,7 +63,10 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 	if (typeof obj.rows === "number" && (obj.rows === 1 || obj.rows === 2)) {
 		base.rows = obj.rows;
 	}
-	if (typeof obj.animationIntervalMs === "number" && obj.animationIntervalMs > 0) {
+	if (
+		typeof obj.animationIntervalMs === "number" &&
+		obj.animationIntervalMs > 0
+	) {
 		base.animationIntervalMs = obj.animationIntervalMs;
 	}
 	if (typeof obj.defaultTextColor === "string") {
@@ -64,13 +78,16 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 
 	// Merge per-widget layouts
 	if (obj.widgets && typeof obj.widgets === "object") {
-		for (const [key, val] of Object.entries(obj.widgets as Record<string, unknown>)) {
-				if (!isValidWidgetId(key)) continue;
+		for (const [key, val] of Object.entries(
+			obj.widgets as Record<string, unknown>,
+		)) {
+			if (!isValidWidgetId(key)) continue;
 			if (val && typeof val === "object") {
 				const w = val as Record<string, unknown>;
 				const layout: Partial<WidgetLayout> = {};
 				if (typeof w.enabled === "boolean") layout.enabled = w.enabled;
-				if (typeof w.row === "number" && (w.row === 0 || w.row === 1)) layout.row = w.row;
+				if (typeof w.row === "number" && (w.row === 0 || w.row === 1))
+					layout.row = w.row;
 				if (typeof w.position === "number") layout.position = w.position;
 				if (w.align === "left" || w.align === "middle" || w.align === "right") {
 					layout.align = w.align as any;
@@ -82,8 +99,15 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 					layout.minWidth = w.minWidth;
 				}
 				base.widgets[key as WidgetId] = {
-					...(DEFAULT_WIDGET_LAYOUTS[key as keyof typeof DEFAULT_WIDGET_LAYOUTS]
-						?? { enabled: true, row: 1, position: 0, align: "left", fill: "none" }),
+					...(DEFAULT_WIDGET_LAYOUTS[
+						key as keyof typeof DEFAULT_WIDGET_LAYOUTS
+					] ?? {
+						enabled: true,
+						row: 1,
+						position: 0,
+						align: "left",
+						fill: "none",
+					}),
 					...layout,
 				};
 			}
@@ -92,7 +116,9 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 
 	// Merge per-widget styles
 	if (obj.widgetStyles && typeof obj.widgetStyles === "object") {
-		for (const [key, val] of Object.entries(obj.widgetStyles as Record<string, unknown>)) {
+		for (const [key, val] of Object.entries(
+			obj.widgetStyles as Record<string, unknown>,
+		)) {
 			if (!isValidWidgetId(key)) continue;
 			if (val && typeof val === "object") {
 				const s = val as Record<string, unknown>;
@@ -103,7 +129,8 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 				if (s.textColor && isValidThemeColor(s.textColor)) {
 					style.textColor = s.textColor as string;
 				}
-				base.widgetStyles[key as WidgetId] = style as FooterConfig["widgetStyles"][WidgetId];
+				base.widgetStyles[key as WidgetId] =
+					style as FooterConfig["widgetStyles"][WidgetId];
 			}
 		}
 	}
@@ -112,12 +139,20 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 }
 
 function isValidWidgetId(id: string): boolean {
-	return id in DEFAULT_WIDGET_LAYOUTS || /^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(id);
+	return (
+		id in DEFAULT_WIDGET_LAYOUTS || /^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(id)
+	);
 }
 
 function isValidThemeColor(c: unknown): boolean {
 	const colors = [
-		"text", "accent", "muted", "dim", "success", "error", "warning",
+		"text",
+		"accent",
+		"muted",
+		"dim",
+		"success",
+		"error",
+		"warning",
 	];
 	return typeof c === "string" && colors.includes(c);
 }
@@ -137,18 +172,24 @@ interface GroupedWidget {
 /** Sort widgets into rows and alignment groups, ordered by position within
  * each group. Returns an array of row-groups, each containing left/middle/right
  * sections. */
-function layoutWidgets(widgets: WidgetData[], config: FooterConfig): GroupedWidget[][] {
+function layoutWidgets(
+	widgets: WidgetData[],
+	config: FooterConfig,
+): GroupedWidget[][] {
 	const byRow = new Map<number, Map<string, GroupedWidget[]>>();
 
 	// Sort widgets by config ordering (row → align order → position)
 	const sortedIds = [
 		...Object.keys(DEFAULT_WIDGET_LAYOUTS),
-		...Object.keys(config.widgets).filter(id => !(id in DEFAULT_WIDGET_LAYOUTS)),
+		...Object.keys(config.widgets).filter(
+			id => !(id in DEFAULT_WIDGET_LAYOUTS),
+		),
 	] as WidgetId[];
 
 	for (const widgetId of sortedIds) {
-		const layout = config.widgets[widgetId]
-			?? DEFAULT_WIDGET_LAYOUTS[widgetId as keyof typeof DEFAULT_WIDGET_LAYOUTS];
+		const layout =
+			config.widgets[widgetId] ??
+			DEFAULT_WIDGET_LAYOUTS[widgetId as keyof typeof DEFAULT_WIDGET_LAYOUTS];
 		if (!layout) continue;
 		if (!layout.enabled) continue;
 
@@ -157,11 +198,21 @@ function layoutWidgets(widgets: WidgetData[], config: FooterConfig): GroupedWidg
 		if (!data || data.empty) continue;
 
 		const alignKey = layout.align;
-		const rowWidgets = byRow.get(layout.row) ?? new Map<string, GroupedWidget[]>();
+		const rowWidgets =
+			byRow.get(layout.row) ?? new Map<string, GroupedWidget[]>();
 		const group = rowWidgets.get(alignKey) ?? [];
-		group.push({ id: widgetId, align: alignKey, position: layout.position, data, layout });
+		group.push({
+			id: widgetId,
+			align: alignKey,
+			position: layout.position,
+			data,
+			layout,
+		});
 
-		rowWidgets.set(alignKey, group.sort((a, b) => a.position - b.position));
+		rowWidgets.set(
+			alignKey,
+			group.sort((a, b) => a.position - b.position),
+		);
 		byRow.set(layout.row, rowWidgets);
 	}
 
@@ -177,7 +228,7 @@ function layoutWidgets(widgets: WidgetData[], config: FooterConfig): GroupedWidg
 			}
 		}
 		if (sections.length > 0) {
-			result.push(sections.map(s => s.widgets).flat());
+			result.push(sections.flatMap(s => s.widgets));
 		}
 	}
 
@@ -200,8 +251,9 @@ function renderWidget(
 	const style = config.widgetStyles[widget.data.id];
 	const iconColor = style?.iconColor ?? config.defaultIconColor ?? "dim";
 	let text = widget.data.text;
-	const textColor = style?.textColor
-		?? (!text.includes("\x1b[") ? config.defaultTextColor : undefined);
+	const textColor =
+		style?.textColor ??
+		(!text.includes("\x1b[") ? config.defaultTextColor : undefined);
 	if (textColor) {
 		text = theme.fg(textColor, text.replace(ANSI_RE, ""));
 	}
@@ -223,7 +275,11 @@ function joinWidgets(
 		.join(SEP);
 }
 
-function renderGroupedRow(group: GroupedWidget[], width: number, config: FooterConfig): string {
+function renderGroupedRow(
+	group: GroupedWidget[],
+	width: number,
+	config: FooterConfig,
+): string {
 	const visibleWidgets = [...group];
 	let parts = visibleWidgets.map(widget => renderWidget(widget, config));
 	let line = parts.join(SEP);
@@ -265,15 +321,20 @@ function renderGroupedRow(group: GroupedWidget[], width: number, config: FooterC
 		line = parts.join(SEP);
 	}
 	if (visibleWidth(line) > width) {
-		const phase = group.find(widget => widget.id === "phase")?.data.text ?? parts[0] ?? "";
-		const context = group.find(widget => widget.id === "context-bar")?.data.text ?? "";
+		const phase =
+			group.find(widget => widget.id === "phase")?.data.text ?? parts[0] ?? "";
+		const context =
+			group.find(widget => widget.id === "context-bar")?.data.text ?? "";
 		const compact = [phase, context].filter(Boolean).join(SEP);
-		line = visibleWidth(compact) <= width ? compact : truncateVisible(phase, width);
+		line =
+			visibleWidth(compact) <= width ? compact : truncateVisible(phase, width);
 		return line + RESET;
 	}
 
 	const allocations = new Map<string, number>();
-	const growWidgets = visibleWidgets.filter(widget => widget.layout.fill === "grow");
+	const growWidgets = visibleWidgets.filter(
+		widget => widget.layout.fill === "grow",
+	);
 	const unused = Math.max(0, width - visibleWidth(line));
 	if (growWidgets.length > 0 && unused > 0) {
 		const each = Math.floor(unused / growWidgets.length);
@@ -284,14 +345,27 @@ function renderGroupedRow(group: GroupedWidget[], width: number, config: FooterC
 		}
 	}
 
-	const left = joinWidgets(visibleWidgets.filter(widget => widget.align === "left"), config, allocations);
-	const middle = joinWidgets(visibleWidgets.filter(widget => widget.align === "middle"), config, allocations);
-	const right = joinWidgets(visibleWidgets.filter(widget => widget.align === "right"), config, allocations);
+	const left = joinWidgets(
+		visibleWidgets.filter(widget => widget.align === "left"),
+		config,
+		allocations,
+	);
+	const middle = joinWidgets(
+		visibleWidgets.filter(widget => widget.align === "middle"),
+		config,
+		allocations,
+	);
+	const right = joinWidgets(
+		visibleWidgets.filter(widget => widget.align === "right"),
+		config,
+		allocations,
+	);
 	const leftWidth = visibleWidth(left);
 	const middleWidth = visibleWidth(middle);
 	const rightWidth = visibleWidth(right);
 
-	if (!left && !middle) return `${" ".repeat(Math.max(0, width - rightWidth))}${right}${RESET}`;
+	if (!left && !middle)
+		return `${" ".repeat(Math.max(0, width - rightWidth))}${right}${RESET}`;
 	if (!left && !right) {
 		const before = Math.max(0, Math.floor((width - middleWidth) / 2));
 		return `${" ".repeat(before)}${middle}${RESET}`;
@@ -301,15 +375,24 @@ function renderGroupedRow(group: GroupedWidget[], width: number, config: FooterC
 		return `${left}${" ".repeat(Math.max(SEP_WIDTH, width - leftWidth - rightWidth))}${right}${RESET}`;
 	}
 	if (!left) {
-		const before = Math.max(0, Math.min(
-			Math.floor((width - middleWidth) / 2),
-			width - rightWidth - SEP_WIDTH - middleWidth,
-		));
-		const after = Math.max(SEP_WIDTH, width - before - middleWidth - rightWidth);
+		const before = Math.max(
+			0,
+			Math.min(
+				Math.floor((width - middleWidth) / 2),
+				width - rightWidth - SEP_WIDTH - middleWidth,
+			),
+		);
+		const after = Math.max(
+			SEP_WIDTH,
+			width - before - middleWidth - rightWidth,
+		);
 		return `${" ".repeat(before)}${middle}${" ".repeat(after)}${right}${RESET}`;
 	}
 	if (!right) {
-		const before = Math.max(SEP_WIDTH, Math.floor((width - middleWidth) / 2) - leftWidth);
+		const before = Math.max(
+			SEP_WIDTH,
+			Math.floor((width - middleWidth) / 2) - leftWidth,
+		);
 		return `${left}${" ".repeat(before)}${middle}${RESET}`;
 	}
 
@@ -369,6 +452,8 @@ const DEFAULT_INFO: WidgetFactoryStatus = {
 	phase: "ready",
 	model: "local",
 	cwd: process.cwd(),
+	virtualEnv: undefined,
+	virtualEnvPythonVersion: undefined,
 	branch: "",
 	gitModified: 0,
 	gitStaged: 0,
@@ -401,8 +486,14 @@ export class StatusBar implements Component {
 	private configMtime = 0;
 	private lastConfigCheck = 0;
 	private readonly contributedWidgets = new Map<string, WidgetData>();
-	private readonly contributedLayouts = new Map<string, Partial<WidgetLayout>>();
-	private readonly contributedStyles = new Map<string, NonNullable<ContributedWidget["style"]>>();
+	private readonly contributedLayouts = new Map<
+		string,
+		Partial<WidgetLayout>
+	>();
+	private readonly contributedStyles = new Map<
+		string,
+		NonNullable<ContributedWidget["style"]>
+	>();
 
 	/** Widgets produced by the factory, refreshed each render cycle */
 	private widgets: WidgetData[] = [];
@@ -480,7 +571,7 @@ export class StatusBar implements Component {
 			};
 		} else if (widget.layout) {
 			this.config.widgets[widget.id] = {
-				...this.config.widgets[widget.id] as WidgetLayout,
+				...(this.config.widgets[widget.id] as WidgetLayout),
 				...widget.layout,
 			};
 		}

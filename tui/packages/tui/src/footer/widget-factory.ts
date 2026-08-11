@@ -2,10 +2,12 @@
 // Maps the existing StatusBar StatusInfo fields → typed WidgetData for each
 // WidgetId. The layout/renderer layer then positions widgets per config.
 
-import { type BuiltinWidgetId, type WidgetData, type WidgetId } from "./types.ts";
+import type { BuiltinWidgetId, WidgetData, WidgetId } from "./types.ts";
+
 export type { WidgetData, WidgetId };
-import { theme } from "../terminal/theme.ts";
+
 import { DIM, RESET } from "../terminal/core.ts";
+import { theme } from "../terminal/theme.ts";
 
 /* ════════════════════════════════════════════════════════════════════════════
  *  StatusInfo — subset of StatusBar StatusInfo needed by the factory
@@ -20,6 +22,8 @@ export interface WidgetFactoryStatus {
 	phase: string;
 	model: string;
 	cwd: string;
+	virtualEnv?: string;
+	virtualEnvPythonVersion?: string;
 	branch: string;
 	gitModified?: number;
 	gitStaged?: number;
@@ -41,7 +45,7 @@ export interface WidgetFactoryStatus {
 	completionTokens?: number;
 	rtkProxyEnabled?: boolean;
 	memoryEnabled?: boolean;
-	tick?: number;               // 0-7 for spinner animation
+	tick?: number; // 0-7 for spinner animation
 }
 
 // ── Widget data helpers ──────────────────────────────────────────────────────
@@ -54,7 +58,12 @@ function withIcon(id: WidgetId, icon: string, text: string): WidgetData {
 	return { id, icon, text };
 }
 
-function styled(id: WidgetId, color: string, label: string, value: string): WidgetData {
+function styled(
+	id: WidgetId,
+	color: string,
+	label: string,
+	value: string,
+): WidgetData {
 	// Returns {label prefix + colored value} as text; no separate icon
 	const labelText = label ? `${DIM}${label}${RESET}` : "";
 	return { id, text: `${labelText} ${color}${value}${RESET}` };
@@ -78,34 +87,42 @@ function tokenStr(tokens: number): string {
 const PHASE_SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 
 const PHASE_LABELS: Record<string, { label: string; color: string }> = {
-	ready:       { label: "READY",   color: "success" },
-	thinking:    { label: "THINKING", color: "phaseThinking" },
-	tool:        { label: "TOOL",    color: "phaseTool" },
-	verifying:   { label: "VERIFYING", color: "phaseThinking" },
-	streaming:   { label: "STREAMING", color: "phaseStreaming" },
-	waiting:     { label: "WAITING", color: "accent" },
-	approval:    { label: "APPROVAL", color: "warning" },
-	failed:      { label: "FAILED",  color: "error" },
-	compacting:  { label: "COMPACTING", color: "phaseCompacting" },
-	branching:   { label: "BRANCHING", color: "phaseBranching" },
-	cancelling:  { label: "CANCELLING", color: "muted" },
-	error:       { label: "ERROR",   color: "error" },
+	ready: { label: "READY", color: "success" },
+	thinking: { label: "THINKING", color: "phaseThinking" },
+	tool: { label: "TOOL", color: "phaseTool" },
+	verifying: { label: "VERIFYING", color: "phaseThinking" },
+	streaming: { label: "STREAMING", color: "phaseStreaming" },
+	waiting: { label: "WAITING", color: "accent" },
+	approval: { label: "APPROVAL", color: "warning" },
+	failed: { label: "FAILED", color: "error" },
+	compacting: { label: "COMPACTING", color: "phaseCompacting" },
+	branching: { label: "BRANCHING", color: "phaseBranching" },
+	cancelling: { label: "CANCELLING", color: "muted" },
+	error: { label: "ERROR", color: "error" },
 };
 
 function phaseWidget(status: WidgetFactoryStatus): WidgetData {
 	const tick = status.tick ?? 0;
 	const spinner = PHASE_SPINNERS[tick % 8];
 	const raw = status.phase || "ready";
-	const info = PHASE_LABELS[raw] ?? { label: raw.toUpperCase(), color: "muted" };
-	const withSpinner = raw === "thinking" || raw === "tool" || raw === "verifying"
-		|| raw === "streaming" || raw === "compacting" || raw === "branching"
-		|| raw === "cancelling"
-		? `${spinner} ${info.label}`
-		: raw === "waiting" || raw === "approval"
-			? `◆ ${info.label}`
-			: raw === "failed" || raw === "error"
-				? `× ${info.label}`
-				: `● ${info.label}`;
+	const info = PHASE_LABELS[raw] ?? {
+		label: raw.toUpperCase(),
+		color: "muted",
+	};
+	const withSpinner =
+		raw === "thinking" ||
+		raw === "tool" ||
+		raw === "verifying" ||
+		raw === "streaming" ||
+		raw === "compacting" ||
+		raw === "branching" ||
+		raw === "cancelling"
+			? `${spinner} ${info.label}`
+			: raw === "waiting" || raw === "approval"
+				? `◆ ${info.label}`
+				: raw === "failed" || raw === "error"
+					? `× ${info.label}`
+					: `● ${info.label}`;
 	const color = theme.fg(info.color as any, "");
 	return withIcon("phase", "", `${color}${withSpinner}${RESET}`);
 }
@@ -122,10 +139,10 @@ function thinkingWidget(status: WidgetFactoryStatus): WidgetData {
 		return styled("thinking", theme.fg("levelOff" as any, ""), "think:", "off");
 	}
 	const levelColors: Record<string, string> = {
-		low:    theme.fg("levelLow" as any, ""),
+		low: theme.fg("levelLow" as any, ""),
 		medium: theme.fg("levelMedium" as any, ""),
-		high:   theme.fg("levelHigh" as any, ""),
-		xhigh:  theme.fg("levelXhigh" as any, ""),
+		high: theme.fg("levelHigh" as any, ""),
+		xhigh: theme.fg("levelXhigh" as any, ""),
 	};
 	const color = levelColors[lvl] ?? theme.fg("accent" as any, "");
 	return styled("thinking", color, "think:", lvl.toUpperCase());
@@ -139,41 +156,51 @@ function contextBarWidget(status: WidgetFactoryStatus): WidgetData {
 	const ratio = Math.min(1, tokens / maxTokens);
 	const pct = (ratio * 100).toFixed(1);
 
-	const color = ratio >= 0.9
-		? theme.fg("contextCritical" as any, "")
-		: ratio >= 0.75
-			? theme.fg("contextWarning" as any, "")
-			: theme.fg("contextGood" as any, "");
+	const color =
+		ratio >= 0.9
+			? theme.fg("contextCritical" as any, "")
+			: ratio >= 0.75
+				? theme.fg("contextWarning" as any, "")
+				: theme.fg("contextGood" as any, "");
 
 	const maxStr = tokenStr(maxTokens);
 	const cells = 5;
 	const filled = Math.min(cells, Math.max(0, Math.round(ratio * cells)));
 	const meter = filled > 0 ? "▰".repeat(filled) : "";
 
-	return styled("context-bar", color, "ctx", `${meter} ${pct}%${RESET}${DIM}/${maxStr}${RESET}`);
+	return styled(
+		"context-bar",
+		color,
+		"ctx",
+		`${meter} ${pct}%${RESET}${DIM}/${maxStr}${RESET}`,
+	);
 }
 
 function contextCapacityWidget(status: WidgetFactoryStatus): WidgetData {
-	if (!status.contextMaxTokens || status.contextMaxTokens === 0) return empty("context-capacity");
+	if (!status.contextMaxTokens || status.contextMaxTokens === 0)
+		return empty("context-capacity");
 	const str = tokenStr(status.contextMaxTokens);
 	return styled("context-capacity", theme.fg("dim" as any, ""), "cap:", str);
 }
 
 function tokenFlowWidget(status: WidgetFactoryStatus): WidgetData {
-	const hasIn  = status.promptTokens !== undefined;
+	const hasIn = status.promptTokens !== undefined;
 	const hasOut = status.completionTokens !== undefined;
 	if (!hasIn && !hasOut) return empty("token-flow");
 
-	const inStr  = hasIn ? tokenStr(status.promptTokens!) : "–";
+	const inStr = hasIn ? tokenStr(status.promptTokens!) : "–";
 	const outStr = hasOut ? tokenStr(status.completionTokens!) : "–";
 	const color = theme.fg("accent" as any, "");
-	return { id: "token-flow", text: `${DIM}↑${RESET} ${color}${inStr}${RESET}${DIM} │ ${RESET}${DIM}↓${RESET} ${color}${outStr}${RESET}` };
+	return {
+		id: "token-flow",
+		text: `${DIM}↑${RESET} ${color}${inStr}${RESET}${DIM} │ ${RESET}${DIM}↓${RESET} ${color}${outStr}${RESET}`,
+	};
 }
 
 function cacheReadWidget(status: WidgetFactoryStatus): WidgetData {
 	const unknown = status.cacheReadTokens === undefined;
 	const val = unknown ? "unknown" : tokenStr(status.cacheReadTokens!);
-	const color = theme.fg(unknown ? "dim" as any : "accent" as any, "");
+	const color = theme.fg(unknown ? ("dim" as any) : ("accent" as any), "");
 	return styled("cache-read", color, "cache read:", val);
 }
 
@@ -199,12 +226,30 @@ function locationWidget(status: WidgetFactoryStatus): WidgetData {
 	return withIcon("location", "", theme.fg("text" as any, name));
 }
 
+function virtualEnvWidget(status: WidgetFactoryStatus): WidgetData {
+	if (!status.virtualEnv) return empty("virtual-env");
+	const normalized = status.virtualEnv.replace(/[\\/]+$/, "");
+	const name = normalized.split(/[\\/]/).pop() || normalized;
+	const version = status.virtualEnvPythonVersion
+		? ` · py${status.virtualEnvPythonVersion}`
+		: "";
+	return styled(
+		"virtual-env",
+		theme.fg("success" as any, ""),
+		"venv:",
+		`${name}${version}`,
+	);
+}
+
 function branchWidget(status: WidgetFactoryStatus): WidgetData {
 	if (!status.branch) return empty("branch");
 	let text = `⎇ ${theme.fg("success" as any, status.branch)}`;
-	if (status.gitModified) text += ` ${theme.fg("warning" as any, `*${status.gitModified}`)}`;
-	if (status.gitStaged) text += ` ${theme.fg("success" as any, `+${status.gitStaged}`)}`;
-	if (status.gitUntracked) text += ` ${theme.fg("error" as any, `?${status.gitUntracked}`)}`;
+	if (status.gitModified)
+		text += ` ${theme.fg("warning" as any, `*${status.gitModified}`)}`;
+	if (status.gitStaged)
+		text += ` ${theme.fg("success" as any, `+${status.gitStaged}`)}`;
+	if (status.gitUntracked)
+		text += ` ${theme.fg("error" as any, `?${status.gitUntracked}`)}`;
 	return withIcon("branch", "", text);
 }
 
@@ -244,7 +289,12 @@ function pullRequestCiStatusWidget(): WidgetData {
 
 function reasonerWidget(status: WidgetFactoryStatus): WidgetData {
 	if (status.reasoner === "none") return empty("reasoner");
-	return styled("reasoner", theme.fg("muted" as any, ""), "reasoner:", status.reasoner);
+	return styled(
+		"reasoner",
+		theme.fg("muted" as any, ""),
+		"reasoner:",
+		status.reasoner,
+	);
 }
 
 function inferenceModeWidget(status: WidgetFactoryStatus): WidgetData {
@@ -258,13 +308,23 @@ function inferenceModeWidget(status: WidgetFactoryStatus): WidgetData {
 		none: "PROVIDER",
 	};
 	const label = labels[mode] ?? mode.toUpperCase();
-	return styled("inference-mode", theme.fg("accent" as any, ""), "mode:", label);
+	return styled(
+		"inference-mode",
+		theme.fg("accent" as any, ""),
+		"mode:",
+		label,
+	);
 }
 
 function sandboxWidget(status: WidgetFactoryStatus): WidgetData {
 	const mode = status.sandboxMode ?? "code";
 	if (mode === "none") {
-		return styled("sandbox", theme.fg("levelOff" as any, ""), "sandbox:", "off");
+		return styled(
+			"sandbox",
+			theme.fg("levelOff" as any, ""),
+			"sandbox:",
+			"off",
+		);
 	}
 	return styled("sandbox", theme.fg("accent" as any, ""), "sandbox:", mode);
 }
@@ -312,48 +372,67 @@ function goalWidget(status: WidgetFactoryStatus): WidgetData {
 	// Truncate long conditions
 	const maxLen = 24;
 	const truncated = cond.length > maxLen ? `${cond.slice(0, maxLen)}…` : cond;
-	return styled("goal", theme.fg("accent" as any, ""), "◎", `${truncated} (${turns} turns, ${timeStr})`);
+	return styled(
+		"goal",
+		theme.fg("accent" as any, ""),
+		"◎",
+		`${truncated} (${turns} turns, ${timeStr})`,
+	);
 }
 
 function executionProfileWidget(status: WidgetFactoryStatus): WidgetData {
 	const profile = status.executionProfile ?? "autonomous";
 	if (profile === "minimal") {
-		return styled("execution-profile", theme.fg("warning" as any, ""), "exec:", "minimal");
+		return styled(
+			"execution-profile",
+			theme.fg("warning" as any, ""),
+			"exec:",
+			"minimal",
+		);
 	}
-	return styled("execution-profile", theme.fg("success" as any, ""), "exec:", "auto");
+	return styled(
+		"execution-profile",
+		theme.fg("success" as any, ""),
+		"exec:",
+		"auto",
+	);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
  *  Provider registry — maps WidgetId → provider function
  * ════════════════════════════════════════════════════════════════════════════ */
 
-const PROVIDERS: Record<BuiltinWidgetId, (status: WidgetFactoryStatus) => WidgetData> = {
-	"model": modelWidget,
-	"thinking": thinkingWidget,
-	"phase": phaseWidget,
+const PROVIDERS: Record<
+	BuiltinWidgetId,
+	(status: WidgetFactoryStatus) => WidgetData
+> = {
+	model: modelWidget,
+	thinking: thinkingWidget,
+	phase: phaseWidget,
 	"context-bar": contextBarWidget,
 	"context-capacity": contextCapacityWidget,
 	"token-flow": tokenFlowWidget,
 	"cache-read": cacheReadWidget,
 	"cache-write": cacheWriteWidget,
 	"cache-hit-rate": cacheHitRateWidget,
-	"location": locationWidget,
-	"branch": branchWidget,
-	"commit": commitWidget,
+	location: locationWidget,
+	"virtual-env": virtualEnvWidget,
+	branch: branchWidget,
+	commit: commitWidget,
 	"git-diff-added": gitDiffAddedWidget,
 	"git-diff-removed": gitDiffRemovedWidget,
 	"git-status": gitStatusWidget,
 	"pull-request": pullRequestWidget,
 	"pull-request-review-threads": pullRequestReviewThreadsWidget,
 	"pull-request-ci-status": pullRequestCiStatusWidget,
-	"reasoner": reasonerWidget,
+	reasoner: reasonerWidget,
 	"inference-mode": inferenceModeWidget,
-	"sandbox": sandboxWidget,
-	"permission": permissionWidget,
-	"mcp": mcpWidget,
-	"rtk": rtkWidget,
-	"memory": memoryWidget,
-	"goal": goalWidget,
+	sandbox: sandboxWidget,
+	permission: permissionWidget,
+	mcp: mcpWidget,
+	rtk: rtkWidget,
+	memory: memoryWidget,
+	goal: goalWidget,
 	"execution-profile": executionProfileWidget,
 	"total-cost": totalCostWidget,
 };

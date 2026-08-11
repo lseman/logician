@@ -3,7 +3,7 @@
 // Ported from Pi (packages/coding-agent/src/utils/shell.ts).
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 export interface ShellConfig {
@@ -85,18 +85,70 @@ export function getShellConfig(customShellPath?: string): ShellConfig {
 	return { shell: "sh", args: ["-c"] };
 }
 
+/** Resolve the conventional project-local virtual environment, if present. */
+export function getProjectVirtualEnv(cwd?: string): string | undefined {
+	if (!cwd) return undefined;
+	const virtualEnv = path.join(cwd, ".venv");
+	const executables = path.join(
+		virtualEnv,
+		process.platform === "win32" ? "Scripts" : "bin",
+	);
+	return existsSync(executables) ? virtualEnv : undefined;
+}
+
+/** Read the Python version recorded by a virtual environment. */
+export function getVirtualEnvPythonVersion(
+	virtualEnv?: string,
+): string | undefined {
+	if (!virtualEnv) return undefined;
+	try {
+		const config = readFileSync(path.join(virtualEnv, "pyvenv.cfg"), "utf8");
+		const match = config.match(/^version\s*=\s*(\S+)\s*$/im);
+		return match?.[1];
+	} catch {
+		return undefined;
+	}
+}
+
 /**
- * Get shell environment with bin dir added to PATH.
+ * Get a shell environment with a project-local .venv activated when present.
  */
-export function getShellEnv(): NodeJS.ProcessEnv {
+export function getShellEnv(cwd?: string): NodeJS.ProcessEnv {
 	const pathKey =
 		Object.keys(process.env).find(key => key.toLowerCase() === "path") ??
 		"PATH";
-	const currentPath = process.env[pathKey] ?? "";
+	let currentPath = process.env[pathKey] ?? "";
+	const virtualEnv = getProjectVirtualEnv(cwd);
+
+	if (virtualEnv) {
+		const executables = path.join(
+			virtualEnv,
+			process.platform === "win32" ? "Scripts" : "bin",
+		);
+		const remainingEntries = currentPath
+			.split(path.delimiter)
+			.filter(entry => entry !== executables);
+		currentPath = [executables, ...remainingEntries].join(path.delimiter);
+	}
+
 	return {
 		...process.env,
 		[pathKey]: currentPath,
+		...(virtualEnv ? { VIRTUAL_ENV: virtualEnv } : {}),
 	};
+}
+
+/** Activate a project-local .venv for the Logician process and its children. */
+export function activateProjectVirtualEnv(cwd?: string): string | undefined {
+	const virtualEnv = getProjectVirtualEnv(cwd);
+	if (!virtualEnv) return undefined;
+	const env = getShellEnv(cwd);
+	const pathKey =
+		Object.keys(process.env).find(key => key.toLowerCase() === "path") ??
+		"PATH";
+	process.env[pathKey] = env[pathKey];
+	process.env.VIRTUAL_ENV = virtualEnv;
+	return virtualEnv;
 }
 
 /**

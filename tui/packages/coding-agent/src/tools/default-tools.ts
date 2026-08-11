@@ -3,6 +3,7 @@ import type {
 	Tool,
 	WebSearchConfig,
 } from "@logician/agent-core/agent/types.ts";
+import { ariadne } from "./ariadne.ts";
 import { bash } from "./bash.ts";
 import { edit_file } from "./edit-file.ts";
 import { file_diff } from "./file-diff.ts";
@@ -30,6 +31,7 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 	const tools: Tool[] = [
 		list_files,
 		find,
+		ariadne, // Ariadne code graph — prefer for semantic analysis
 		read_file,
 		grep,
 		edit_file,

@@ -54,6 +54,7 @@ export type BuiltinWidgetId =
 	| "cache-hit-rate"          // latest turn's cache hit rate
 	// Git / repo
 	| "location"                // current directory (abbreviated)
+	| "virtual-env"             // active Python virtual environment
 	| "branch"                  // git branch name
 	| "commit"                  // short commit SHA (opt-in)
 	| "git-diff-added"          // +N modified lines
@@ -140,8 +141,9 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 		"model":          { enabled: true, row: 0, position: 1, align: "left",    fill: "none" },
 		"context-bar":    { enabled: true, row: 0, position: 2, align: "left",    fill: "none" },
 		"location":       { enabled: true, row: 0, position: 3, align: "left",    fill: "none" },
-		"branch":         { enabled: true, row: 0, position: 4, align: "left",    fill: "none" },
-		"context-capacity":{ enabled: false, row: 0, position: 5, align: "left",  fill: "none" },
+		"virtual-env":    { enabled: true, row: 0, position: 4, align: "left",    fill: "none" },
+		"branch":         { enabled: true, row: 0, position: 5, align: "left",    fill: "none" },
+		"context-capacity":{ enabled: false, row: 0, position: 6, align: "left",  fill: "none" },
 
 		// Row 0 — middle group (optional details)
 		"thinking":        { enabled: true, row: 0, position: 0, align: "middle", fill: "none" },
