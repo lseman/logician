@@ -1,4 +1,5 @@
 export { ask_user } from "@logician/agent-capabilities/interaction/ask-user/index.ts";
+export { ariadne } from "./ariadne.ts";
 export { createAutoresearchTools } from "./autoresearch.ts";
 export { type BashDetails, bash } from "./bash.ts";
 export {
@@ -27,6 +28,12 @@ export {
 	setDefaultSandboxProfile,
 } from "./sandbox.ts";
 export { grep, type SearchDetails } from "./search.ts";
+export {
+	activateProjectVirtualEnv,
+	getProjectVirtualEnv,
+	getShellEnv,
+	getVirtualEnvPythonVersion,
+} from "./shell.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,

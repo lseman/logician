@@ -261,7 +261,7 @@ async function executeSingleCommand(
 		};
 	}
 
-	const shellEnv = getShellEnv();
+	const shellEnv = getShellEnv(cwd);
 	const output = new OutputAccumulator({ tempFilePrefix: "logician-bash" });
 	const timeoutSeconds = timeout;
 	const throttledUpdate = makeUpdateThrottler();

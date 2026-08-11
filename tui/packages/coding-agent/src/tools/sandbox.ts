@@ -212,7 +212,7 @@ async function executeSandboxed(
 			const child = spawn(bwrap.path!, bwrapArgs, {
 				cwd,
 				stdio: ["ignore", "pipe", "pipe"],
-				env: getShellEnv(),
+				env: getShellEnv(cwd),
 				timeout: timeoutSeconds ? timeoutSeconds * 1000 : undefined,
 			});
 
@@ -344,7 +344,7 @@ async function executeFallback(
 	status: SandboxRunResult["status"];
 }> {
 	const { shell, args: shellArgs } = getShellConfig();
-	const shellEnv = getShellEnv();
+	const shellEnv = getShellEnv(cwd);
 	const output = new OutputAccumulator({
 		tempFilePrefix: "logician-sandbox-fallback",
 	});

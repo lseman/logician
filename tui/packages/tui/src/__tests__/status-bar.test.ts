@@ -3,7 +3,10 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { StatusBar } from "../footer/layout.ts";
-import { createDefaultConfig, DEFAULT_WIDGET_LAYOUTS } from "../footer/types.ts";
+import {
+	createDefaultConfig,
+	DEFAULT_WIDGET_LAYOUTS,
+} from "../footer/types.ts";
 import { visibleWidth } from "../terminal/core.ts";
 import { initTheme } from "../terminal/theme.ts";
 
@@ -44,6 +47,20 @@ void describe("StatusBar", () => {
 		const lines = bar.render(120);
 		assert.ok(lines[0].includes("mcp"));
 		assert.ok(lines[0].includes("3"));
+	});
+
+	it("shows the active Python virtual environment", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		bar.update({
+			virtualEnv: "/workspace/logician/.venv",
+			virtualEnvPythonVersion: "3.12.4",
+		});
+		const plain = bar.render(160)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.ok(plain.includes("venv: .venv · py3.12.4"));
+
+		bar.update({ virtualEnv: undefined });
+		assert.ok(!bar.render(160)[0].includes("venv:"));
 	});
 
 	it("omits MCP section when count is zero or undefined", () => {
@@ -400,7 +417,10 @@ void describe("configurable footer widgets", () => {
 	const emptyConfig = () => {
 		const config = createDefaultConfig();
 		for (const id of Object.keys(DEFAULT_WIDGET_LAYOUTS)) {
-			config.widgets[id] = { ...DEFAULT_WIDGET_LAYOUTS[id as keyof typeof DEFAULT_WIDGET_LAYOUTS], enabled: false };
+			config.widgets[id] = {
+				...DEFAULT_WIDGET_LAYOUTS[id as keyof typeof DEFAULT_WIDGET_LAYOUTS],
+				enabled: false,
+			};
 		}
 		return config;
 	};
@@ -409,9 +429,21 @@ void describe("configurable footer widgets", () => {
 		setupTheme();
 		const bar = new StatusBar();
 		bar.setConfig(emptyConfig());
-		bar.upsertWidget({ id: "test.left", text: "LEFT", layout: { row: 0, align: "left" } });
-		bar.upsertWidget({ id: "test.middle", text: "MIDDLE", layout: { row: 0, align: "middle" } });
-		bar.upsertWidget({ id: "test.right", text: "RIGHT", layout: { row: 0, align: "right" } });
+		bar.upsertWidget({
+			id: "test.left",
+			text: "LEFT",
+			layout: { row: 0, align: "left" },
+		});
+		bar.upsertWidget({
+			id: "test.middle",
+			text: "MIDDLE",
+			layout: { row: 0, align: "middle" },
+		});
+		bar.upsertWidget({
+			id: "test.right",
+			text: "RIGHT",
+			layout: { row: 0, align: "right" },
+		});
 		const line = bar.render(50)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(line.startsWith("LEFT"));
 		assert.ok(line.indexOf("MIDDLE") >= 20 && line.indexOf("MIDDLE") <= 24);
@@ -429,7 +461,11 @@ void describe("configurable footer widgets", () => {
 			layout: { row: 0, align: "left", fill: "grow", minWidth: 12 },
 			style: { iconColor: "warning", textColor: "error" },
 		});
-		bar.upsertWidget({ id: "test.edge", text: "END", layout: { row: 0, align: "right" } });
+		bar.upsertWidget({
+			id: "test.edge",
+			text: "END",
+			layout: { row: 0, align: "right" },
+		});
 		const line = bar.render(40)[0];
 		const plain = line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 		assert.ok(plain.startsWith("! build"));

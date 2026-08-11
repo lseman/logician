@@ -15,7 +15,11 @@ import {
 	Transcript,
 	type Turn,
 } from "@logician/coding-agent/sessions";
-import { createAutoresearchTools } from "@logician/coding-agent/tools";
+import {
+	createAutoresearchTools,
+	getVirtualEnvPythonVersion,
+} from "@logician/coding-agent/tools";
+import { StatusBar } from "../footer/layout.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { KillRing } from "../input/kill-ring.ts";
 import { UndoStack } from "../input/undo-stack.ts";
@@ -67,7 +71,6 @@ import {
 	type NotificationLevel,
 } from "../status/notification-center.ts";
 import { ResearchWidget } from "../status/research-widget.ts";
-import { StatusBar } from "../footer/layout.ts";
 import { SteerQueue } from "../status/steer-queue.ts";
 import { TodoBar } from "../status/todo-bar.ts";
 import { WorkSurface } from "../status/work-surface.ts";
@@ -395,6 +398,10 @@ export class LogicianTUI {
 			phase: "ready",
 			model: runtimeConfig.bridge.model || "local",
 			cwd: process.cwd(),
+			virtualEnv: process.env.VIRTUAL_ENV,
+			virtualEnvPythonVersion: getVirtualEnvPythonVersion(
+				process.env.VIRTUAL_ENV,
+			),
 			branch: gitStatus.branch,
 			gitModified: gitStatus.modified,
 			gitStaged: gitStatus.staged,
