@@ -195,6 +195,8 @@ const HTML = `<!DOCTYPE html>
     }
     .view { display: none; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 24px 28px 40px; }
     .view.active { display: block; }
+		.view.active > * { animation: view-in 0.24s cubic-bezier(0.16,1,0.3,1); }
+		@keyframes view-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
     /* ── Primitives ────────────────────────────────────────────────────── */
     .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -326,6 +328,37 @@ const HTML = `<!DOCTYPE html>
     .placeholder .placeholder-icon { font-size: 40px; opacity: 0.4; margin-bottom: 18px; }
     .placeholder h3 { font-size: 16px; color: var(--text-dim); margin-bottom: 8px; font-family: var(--font-display); font-weight: 650; }
     .muted { color: var(--text-faint); font-size: 11.5px; }
+		.result-count { margin-left: auto; color: var(--text-faint); font: 10.5px var(--font-mono); }
+		.loading-state { display: grid; gap: 10px; }
+		.loading-line { height: 72px; border-radius: var(--radius); border: 1px solid var(--border-soft); background: linear-gradient(100deg, var(--surface) 20%, var(--surface-hover) 45%, var(--surface) 70%); background-size: 240% 100%; animation: shimmer 1.25s linear infinite; }
+		@keyframes shimmer { to { background-position: -240% 0; } }
+
+		.claim-card { position: relative; overflow: hidden; padding: 18px 20px 18px 24px; }
+		.claim-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--slate); }
+		.claim-card.op-SUPERSEDE::before { background: var(--violet); }
+		.claim-card.op-INVALIDATE::before { background: var(--coral); }
+		.claim-card.op-NOOP::before { background: var(--text-faint); }
+		.claim-text { color: var(--text); font-size: 14px; line-height: 1.55; margin: 12px 0; max-width: 920px; }
+		.claim-lineage { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: var(--text-faint); font: 10.5px var(--font-mono); }
+		.claim-lineage .arrow { color: var(--violet); font-size: 14px; }
+		.claim-evidence { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border-soft); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+		.confidence { min-width: 42px; font-variant-numeric: tabular-nums; }
+
+		@media (max-width: 760px) {
+			.sidebar { width: 72px; padding: 14px 8px; }
+			.brand { justify-content: center; padding-inline: 0; }
+			.brand-text, .nav-group-label, .nav button:not(.active) .soon, .pulse-label, .sidebar-foot .dateline { display: none; }
+			.pulse-strip { justify-content: center; padding: 9px; }
+			.nav button { justify-content: center; padding: 10px; }
+			.nav button .ic { font-size: 16px; }
+			.nav button { font-size: 0; }
+			.topbar { padding: 0 16px; }
+			.topbar .sub { display: none; }
+			.workspace-chip { max-width: 42vw; }
+			.view { padding: 18px 14px 32px; }
+			.stats-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+			.toolbar { position: sticky; top: -18px; z-index: 5; padding: 10px 0; background: color-mix(in srgb, var(--ink) 92%, transparent); backdrop-filter: blur(12px); }
+		}
 
     .activity-item { display: flex; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--border-soft); }
     .activity-item:last-child { border-bottom: none; }
@@ -377,6 +410,7 @@ const HTML = `<!DOCTYPE html>
         <button data-tab="activity"><span class="ic">&#9679;</span>Live Activity</button>
         <div class="nav-group-label">Recall</div>
         <button data-tab="memories"><span class="ic">&#9670;</span>Memories</button>
+				<button data-tab="claims"><span class="ic">&#10022;</span>Claims</button>
         <button data-tab="observations"><span class="ic">&#9633;</span>Observations</button>
         <button data-tab="timeline"><span class="ic">&#9702;</span>Timeline</button>
         <div class="nav-group-label">Sessions</div>
@@ -408,6 +442,8 @@ const HTML = `<!DOCTYPE html>
           <div class="stat-card accent"><div class="label">Memories</div><div class="value" id="stat-memories">—</div></div>
           <div class="stat-card"><div class="label">Observations</div><div class="value" id="stat-observations">—</div></div>
           <div class="stat-card"><div class="label">Today</div><div class="value" id="stat-observations-today">—</div></div>
+          <div class="stat-card"><div class="label">Grounded claims</div><div class="value" id="stat-claims">—</div><div class="sub" id="stat-claims-sub">—</div></div>
+          <div class="stat-card"><div class="label">Structured coverage</div><div class="value" id="stat-coverage">—</div><div class="sub" id="stat-coverage-sub">—</div></div>
         </div>
         <div class="two-col">
           <div>
@@ -440,6 +476,17 @@ const HTML = `<!DOCTYPE html>
         </div>
         <div id="memories-list"></div>
       </div>
+
+			<div id="view-claims" class="view">
+				<div class="toolbar">
+					<input id="claim-search" type="text" placeholder="Filter claim text or evidence…">
+					<select id="claim-status"><option value="">All statuses</option><option value="verified">Verified</option><option value="tentative">Tentative</option><option value="invalidated">Invalidated</option></select>
+					<select id="claim-history"><option value="current">Current truth</option><option value="all">Full history</option></select>
+					<button class="btn" id="btn-refresh-claims">Refresh</button>
+					<span class="result-count" id="claim-count">—</span>
+				</div>
+				<div id="claims-list"></div>
+			</div>
 
       <div id="view-timeline" class="view">
         <div class="toolbar">
@@ -496,6 +543,7 @@ const HTML = `<!DOCTYPE html>
     dashboard: ['Dashboard', 'Live overview of agent memory'],
     activity: ['Live Activity', 'Streaming feed of everything the agent observes'],
     memories: ['Memories', 'Distilled, long-term knowledge'],
+		claims: ['Truth Ledger', 'Current claims, evidence, and revision history'],
     observations: ['Observations', 'Raw captured events for this folder'],
     timeline: ['Timeline', 'Chronological view across sessions'],
     sessions: ['Sessions', 'Every agent run in this workspace'],
@@ -526,6 +574,7 @@ const HTML = `<!DOCTYPE html>
     if (tabId === 'dashboard') loadDashboard();
     else if (tabId === 'observations') loadObservations();
     else if (tabId === 'memories') loadMemories();
+		else if (tabId === 'claims') loadClaims();
     else if (tabId === 'timeline') loadTimeline();
     else if (tabId === 'sessions') loadSessions();
     else if (tabId === 'audit') loadAudit();
@@ -573,6 +622,11 @@ const HTML = `<!DOCTYPE html>
       document.getElementById('stat-memories').textContent = s.memories || 0;
       document.getElementById('stat-observations').textContent = s.observations || 0;
       document.getElementById('stat-observations-today').textContent = s.observationsToday || 0;
+      document.getElementById('stat-claims').textContent = s.claims || 0;
+      document.getElementById('stat-claims-sub').textContent = (s.verifiedClaims || 0) + ' verified';
+      const coverage = s.observations ? Math.round((s.structuredObservations || 0) / s.observations * 100) : 0;
+      document.getElementById('stat-coverage').textContent = coverage + '%';
+      document.getElementById('stat-coverage-sub').textContent = (s.modelExtractedObservations || 0) + ' model · ' + (s.extractionFallbacks || 0) + ' fallback';
       const chip = document.getElementById('workspace-chip');
       if (chip) chip.textContent = s.workspace || 'Unknown workspace';
       const rssMB = (h.rss / 1024 / 1024).toFixed(0);
@@ -623,23 +677,81 @@ const HTML = `<!DOCTYPE html>
         ? '<div class="empty-state"><div class="empty-icon">&#9633;</div><p>No observations in this folder</p></div>'
         : observations.map((o, index) => {
           const narrative = String(o.narrative || '');
-          const expandable = narrative.length > 500;
+          const claims = Array.isArray(o.claims) ? o.claims : [];
+          const provenance = o.provenance || {};
+          const expandable = narrative.length > 500 || claims.length > 0 || (o.files?.length || 0) > 0;
           const key = 'observation:' + String(o.id || index);
+          const claimsHtml = claims.length ? '<div class="entry-body entry-full"><strong>Grounded claims</strong>' + claims.map(c =>
+            '<div style="margin-top:8px;padding-left:10px;border-left:2px solid var(--'+(c.status === 'verified' ? 'sage' : c.status === 'invalidated' ? 'coral' : 'amber')+')">' +
+            '<span class="badge badge-'+(c.status === 'verified' ? 'sage' : c.status === 'invalidated' ? 'coral' : 'amber')+'">'+esc(c.status)+'</span> ' +
+            '<span class="badge badge-muted">'+Math.round(Number(c.confidence || 0) * 100)+'%</span>' +
+            '<div style="margin-top:5px;color:var(--text)">'+esc(c.text)+'</div>' +
+            '<div class="entry-meta">evidence: '+esc((c.evidenceEventIds || []).join(', '))+'</div></div>'
+          ).join('') + '</div>' : '';
           return '<div class="entry-card ' + impClass(o.importance) + expandableAttrs(key, expandable) + '">' +
           '<div class="entry-head">' +
           '<span class="badge badge-muted">#' + (index + 1) + '</span>' +
           '<span class="badge badge-' + (TYPE_COLORS[o.type] || 'slate') + '">' + esc(o.type) + '</span>' +
           '<span class="badge badge-' + impBadge(o.importance) + '">' + o.importance + '/10</span>' +
+          '<span class="badge badge-' + (provenance.source === 'model' ? 'violet' : 'muted') + '">' + esc(provenance.source || 'legacy') + '</span>' +
+          '<span class="badge badge-' + (provenance.trust === 'trusted_local' ? 'sage' : 'coral') + '">' + esc(provenance.trust || 'unknown trust') + '</span>' +
           '<span class="entry-meta" style="margin-left:auto;">' + esc(o.timestamp?.slice(0,19)) + '</span></div>' +
           '<div class="entry-title">' + esc(o.title) + '</div>' +
           '<div class="entry-meta">' + esc(o.id) + '</div>' +
           (narrative ? '<div class="entry-body entry-preview">' + esc(narrative.slice(0,500)) + (expandable ? '…' : '') + '</div>' : '') +
-          (expandable ? '<div class="entry-body entry-full">' + esc(narrative) + '</div>' + expandHint('observation') : '') +
+          (expandable ? '<div class="entry-body entry-full">' + esc(narrative) + '</div>' + claimsHtml +
+            (o.files?.length ? '<div class="entry-body entry-full"><strong>Files</strong><div>'+o.files.map(f => '<span class="tag">'+esc(f)+'</span>').join('')+'</div></div>' : '') +
+            (provenance.rejectionReason ? '<div class="entry-body entry-full" style="color:var(--amber)">Extractor fallback: '+esc(provenance.rejectionReason)+'</div>' : '') +
+            expandHint('observation') : '') +
           '</div>';
         }).join('');
       document.getElementById('observations-list').innerHTML = html;
     } catch (e) { console.error('[observations] error:', e); }
   }
+	async function loadClaims() {
+		const list = document.getElementById('claims-list');
+		const query = document.getElementById('claim-search').value.trim().toLowerCase();
+		const status = document.getElementById('claim-status').value;
+		const includeHistory = document.getElementById('claim-history').value === 'all';
+		list.innerHTML = '<div class="loading-state"><div class="loading-line"></div><div class="loading-line"></div><div class="loading-line"></div></div>';
+		const params = new URLSearchParams({ limit: '500' });
+		if (status) params.set('status', status);
+		if (includeHistory) params.set('includeSuperseded', 'true');
+		try {
+			const res = await api('/claims?' + params.toString());
+			if (!res.ok) throw new Error('Claim request failed: ' + res.status);
+			let claims = await res.json();
+			if (query) claims = claims.filter(c =>
+				String(c.text || '').toLowerCase().includes(query) ||
+				String(c.id || '').toLowerCase().includes(query) ||
+				(c.evidenceEventIds || []).some(id => String(id).toLowerCase().includes(query))
+			);
+			document.getElementById('claim-count').textContent = claims.length + (claims.length === 1 ? ' claim' : ' claims');
+			const statusColor = { verified: 'sage', tentative: 'amber', invalidated: 'coral' };
+			const operationColor = { ADD: 'teal', SUPERSEDE: 'violet', INVALIDATE: 'coral', NOOP: 'muted' };
+			list.innerHTML = claims.length ? claims.map(c => {
+				const evidence = (c.evidenceEventIds || []).map(id => '<span class="tag">'+esc(id)+'</span>').join('');
+				const lineage = (c.supersedesClaimId ? '<span>'+esc(c.supersedesClaimId)+'</span><span class="arrow">→</span>' : '') +
+					'<span>'+esc(c.id)+'</span>' +
+					(c.supersededByClaimId ? '<span class="arrow">→</span><span>'+esc(c.supersededByClaimId)+'</span>' : '');
+				const validUntil = c.validTo ? ' until ' + esc(c.validTo.slice(0, 19)) : ' · active';
+				return '<article class="entry-card claim-card op-'+esc(c.operation)+'">' +
+					'<div class="entry-head"><span class="badge badge-'+(operationColor[c.operation] || 'muted')+'">'+esc(c.operation)+'</span>' +
+					'<span class="badge badge-'+(statusColor[c.status] || 'muted')+'">'+esc(c.status)+'</span>' +
+					'<span class="badge badge-muted confidence">'+Math.round(Number(c.confidence || 0) * 100)+'%</span>' +
+					'<span class="badge badge-'+(c.trust === 'trusted_local' ? 'sage' : c.trust === 'untrusted' ? 'coral' : 'amber')+'">'+esc(c.trust)+'</span>' +
+					'<span class="entry-meta" style="margin-left:auto">'+esc(c.transactionTime?.slice(0, 19))+'</span></div>' +
+					'<div class="claim-text">'+esc(c.text)+'</div>' +
+					'<div class="claim-lineage">'+lineage+'</div>' +
+					'<div class="entry-meta">valid from '+esc(c.validFrom?.slice(0, 19))+validUntil+' · '+esc(c.source)+' · '+esc(c.extractorVersion)+'</div>' +
+					'<div class="claim-evidence"><span class="muted">Evidence</span>'+(evidence || '<span class="muted">No evidence IDs</span>')+'</div>' +
+					'</article>';
+			}).join('') : '<div class="empty-state"><div class="empty-icon">&#10022;</div><p>No claims match these filters</p></div>';
+		} catch (e) {
+			console.error('[claims] error:', e);
+			list.innerHTML = '<div class="empty-state"><div class="empty-icon">!</div><p>Could not load the truth ledger</p></div>';
+		}
+	}
   async function loadMemories() {
     const search = document.getElementById('memory-search').value;
     const type = document.getElementById('memory-type').value;
@@ -832,6 +944,7 @@ const HTML = `<!DOCTYPE html>
         const msg = JSON.parse(evt.data);
         if (msg.type === 'observation' && state.activeTab === 'dashboard') loadDashboard();
         if (msg.type === 'observation' && state.activeTab === 'observations') loadObservations();
+				if (msg.type === 'observation' && state.activeTab === 'claims') loadClaims();
         if (msg.type === 'observation' && state.activeTab === 'activity') loadActivity();
       } catch {}
     };
@@ -840,6 +953,10 @@ const HTML = `<!DOCTYPE html>
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
   document.getElementById('memory-search').addEventListener('input', debounce(loadMemories, 300));
+	document.getElementById('claim-search').addEventListener('input', debounce(loadClaims, 180));
+	document.getElementById('claim-status').addEventListener('change', loadClaims);
+	document.getElementById('claim-history').addEventListener('change', loadClaims);
+	document.getElementById('btn-refresh-claims').addEventListener('click', loadClaims);
   document.getElementById('observation-search').addEventListener('input', debounce(loadObservations, 300));
   document.getElementById('observation-type').addEventListener('change', loadObservations);
   document.getElementById('observation-min-importance').addEventListener('change', loadObservations);

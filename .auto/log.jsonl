@@ -1,2 +1,0 @@
-{"type":"config","name":"Full-Screen TUI Keystroke Latency","metricName":"keystroke_full_p50_ms","metricUnit":"ms","bestDirection":"lower"}
-{"type":"experiment","timestamp":"2026-08-11T13:22:00Z","status":"baseline","metrics":{"keystroke_full_p50_ms":0.377,"keystroke_full_p95_ms":0.529,"keystroke_full_p99_ms":7.906,"keystroke_empty_p50_ms":0.183,"keystroke_marathon_p50_ms":0.243,"keystroke_backlog_scaling_x":1.314},"evidence":"Three fresh 120x40 processes, 300 keystrokes per transcript-size bucket","decision":"keep as initial benchmark baseline"}

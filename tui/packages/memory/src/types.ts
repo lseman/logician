@@ -90,15 +90,23 @@ export interface ExportData {
 	version: number;
 	exportedAt: string;
 	sessions: Session[];
-	observations: CompressedObservation[];
+	observations: ExportedObservation[];
+	claims: MemoryClaim[];
 	memories: Memory[];
 	relations: MemoryRelation[];
+}
+
+/** Complete persisted observation shape used by lossless backup/restore. */
+export interface ExportedObservation extends CompressedObservation {
+	hookType: HookPhase | "import";
+	rawData?: unknown;
 }
 
 export interface ImportData {
 	version: number;
 	sessions: Session[];
-	observations: CompressedObservation[];
+	observations: Array<CompressedObservation | ExportedObservation>;
+	claims?: MemoryClaim[];
 	memories: Memory[];
 	relations?: MemoryRelation[];
 	onConflict?: "skip" | "update";
@@ -200,6 +208,55 @@ export interface RawObservation {
 	raw: unknown;
 }
 
+export type ClaimStatus = "tentative" | "verified" | "invalidated";
+export type ObservationTrust = "trusted_local" | "external" | "untrusted";
+
+/** An atomic claim derived from immutable turn evidence. */
+export interface ObservationClaim {
+	text: string;
+	confidence: number;
+	status: ClaimStatus;
+	evidenceEventIds: string[];
+}
+
+/** Extraction lineage kept alongside an observation for later auditing. */
+export interface ObservationProvenance {
+	source: "model" | "deterministic";
+	trust: ObservationTrust;
+	extractorVersion: string;
+	schemaVersion: number;
+	rejectionReason?: string;
+}
+
+export type ClaimRevisionOperation =
+	| "ADD"
+	| "SUPERSEDE"
+	| "INVALIDATE"
+	| "NOOP";
+
+/** Append-only durable claim derived from one or more evidence events. */
+export interface MemoryClaim {
+	id: string;
+	workspace: string;
+	observationId: string;
+	sessionId: string;
+	text: string;
+	status: ClaimStatus;
+	confidence: number;
+	operation: ClaimRevisionOperation;
+	validFrom: string;
+	validTo?: string;
+	transactionTime: string;
+	source: ObservationProvenance["source"];
+	trust: ObservationTrust;
+	extractorVersion: string;
+	schemaVersion: number;
+	supersedesClaimId?: string;
+	supersededByClaimId?: string;
+	tombstonedAt?: string;
+	evidenceEventIds: string[];
+}
+
 /** Synthetic compression: zero-LLM summary derived from raw observation. */
 export interface CompressedObservation {
 	id: string;
@@ -215,6 +272,8 @@ export interface CompressedObservation {
 	importance: number;
 	consolidated: boolean;
 	workspace?: string;
+	claims?: ObservationClaim[];
+	provenance?: ObservationProvenance;
 }
 
 export type ObservationType =
@@ -262,6 +321,9 @@ export interface Memory {
 	isLatest: boolean;
 	project?: string;
 	workspace?: string; // Workspace scope (derived from session)
+	accessCount?: number;
+	lastAccessed?: string;
+	workingTier?: WorkingMemoryTier;
 }
 
 // ── Retrieval ────────────────────────────────────────────────────────────────
@@ -311,7 +373,7 @@ export interface MemoryQuery {
 }
 
 export interface ContextBlock {
-	type: "summary" | "observation" | "memory";
+	type: "summary" | "observation" | "memory" | "claim";
 	content: string;
 	tokens: number;
 	recency: number;
@@ -407,6 +469,13 @@ export interface MemoryStore {
 		limit?: number,
 		type?: ObservationType,
 	): CompressedObservation[];
+	/** List append-only derived claims, newest transaction first. */
+	listClaims(options?: {
+		observationId?: string;
+		status?: ClaimStatus;
+		includeSuperseded?: boolean;
+		limit?: number;
+	}): MemoryClaim[];
 	searchObservations(query: string, limit?: number): SearchResult[];
 	expandEntries(ids: string[]): ExpandedMemoryEntry[];
 	/** Permanently remove observations in the current workspace. */

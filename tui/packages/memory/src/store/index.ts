@@ -20,11 +20,14 @@ import type {
 	ImportData,
 	ImportResult,
 	Memory,
+	MemoryClaim,
 	MemoryQuery,
 	MemoryRelation,
 	MemoryRelationType,
 	MemoryStore,
 	MemoryType,
+	ObservationClaim,
+	ObservationProvenance,
 	ObservationType,
 	RawObservation,
 	RecallOptions,
@@ -387,6 +390,12 @@ function buildSyntheticCompression(raw: RawObservation): CompressedObservation {
 		files: uniqueFiles,
 		importance: Math.max(1, Math.min(10, importance)),
 		consolidated: false,
+		provenance: {
+			source: "deterministic",
+			trust: "trusted_local",
+			extractorVersion: "synthetic-compression/2",
+			schemaVersion: 1,
+		},
 	};
 }
 
@@ -417,6 +426,62 @@ function safeParseJson(val: string): unknown {
 	}
 }
 
+function parseObservationClaims(value: unknown): ObservationClaim[] {
+	const parsed = typeof value === "string" ? safeParseJson(value) : value;
+	if (!Array.isArray(parsed)) return [];
+	return parsed.flatMap(item => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+		const claim = item as Record<string, unknown>;
+		if (
+			typeof claim.text !== "string" ||
+			typeof claim.confidence !== "number" ||
+			!(["tentative", "verified", "invalidated"] as unknown[]).includes(
+				claim.status,
+			) ||
+			!Array.isArray(claim.evidenceEventIds)
+		)
+			return [];
+		return [
+			{
+				text: claim.text,
+				confidence: Math.max(0, Math.min(1, claim.confidence)),
+				status: claim.status as ObservationClaim["status"],
+				evidenceEventIds: claim.evidenceEventIds
+					.filter((id): id is string => typeof id === "string")
+					.slice(0, 12),
+			},
+		];
+	});
+}
+
+function parseObservationProvenance(
+	value: unknown,
+): ObservationProvenance | undefined {
+	const parsed = typeof value === "string" ? safeParseJson(value) : value;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+		return undefined;
+	const item = parsed as Record<string, unknown>;
+	if (
+		(item.source !== "model" && item.source !== "deterministic") ||
+		!(["trusted_local", "external", "untrusted"] as unknown[]).includes(
+			item.trust,
+		) ||
+		typeof item.extractorVersion !== "string" ||
+		typeof item.schemaVersion !== "number"
+	)
+		return undefined;
+	return {
+		source: item.source,
+		trust: item.trust as ObservationProvenance["trust"],
+		extractorVersion: item.extractorVersion,
+		schemaVersion: item.schemaVersion,
+		rejectionReason:
+			typeof item.rejectionReason === "string"
+				? item.rejectionReason
+				: undefined,
+	};
+}
+
 // ── Store Factory ────────────────────────────────────────────────────────────
 
 export function createMemoryStore(dbPath: string): MemoryStore {
@@ -425,6 +490,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		.replace(/^~/, process.env.HOME || "");
 	mkdirSync(dirname(resolved), { recursive: true });
 	const db = new Database(resolved);
+	db.exec(
+		"PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
+	);
 	let currentWorkspace = normalizeWorkspacePath(process.cwd());
 
 	db.exec(`
@@ -462,6 +530,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       importance INTEGER NOT NULL DEFAULT 5,
       workspace TEXT NOT NULL DEFAULT '',
       consolidated INTEGER NOT NULL DEFAULT 0,
+      claims TEXT NOT NULL DEFAULT '[]',
+      provenance TEXT,
       raw_data TEXT,
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
@@ -544,6 +614,45 @@ export function createMemoryStore(dbPath: string): MemoryStore {
     CREATE INDEX IF NOT EXISTS idx_extraction_jobs_ready
       ON extraction_jobs(workspace, status, next_attempt_at, created_at);
 
+    -- Append-only truth layer derived from immutable observations. Claim rows
+    -- are never updated in place except to close validity or link a successor.
+    CREATE TABLE IF NOT EXISTS claims (
+      id TEXT PRIMARY KEY,
+      workspace TEXT NOT NULL,
+      observation_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('tentative', 'verified', 'invalidated')),
+      confidence REAL NOT NULL,
+      operation TEXT NOT NULL CHECK(operation IN ('ADD', 'SUPERSEDE', 'INVALIDATE', 'NOOP')),
+      valid_from TEXT NOT NULL,
+      valid_to TEXT,
+      transaction_time TEXT NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('model', 'deterministic')),
+      trust TEXT NOT NULL CHECK(trust IN ('trusted_local', 'external', 'untrusted')),
+      extractor_version TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      supersedes_claim_id TEXT,
+      superseded_by_claim_id TEXT,
+      tombstoned_at TEXT,
+      FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE,
+      FOREIGN KEY (supersedes_claim_id) REFERENCES claims(id),
+      FOREIGN KEY (superseded_by_claim_id) REFERENCES claims(id)
+    );
+    CREATE TABLE IF NOT EXISTS claim_evidence (
+      claim_id TEXT NOT NULL,
+      observation_id TEXT NOT NULL,
+      evidence_event_id TEXT NOT NULL,
+      PRIMARY KEY (claim_id, evidence_event_id),
+      FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE,
+      FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_claims_workspace_status
+      ON claims(workspace, status, transaction_time DESC);
+    CREATE INDEX IF NOT EXISTS idx_claims_observation ON claims(observation_id);
+    CREATE INDEX IF NOT EXISTS idx_claim_evidence_observation
+      ON claim_evidence(observation_id);
+
     CREATE TABLE IF NOT EXISTS memory_embeddings (
       entity_id TEXT PRIMARY KEY,
       entity_kind TEXT NOT NULL CHECK(entity_kind IN ('observation', 'memory')),
@@ -603,6 +712,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			db.exec(
 				`ALTER TABLE observations ADD COLUMN consolidated INTEGER NOT NULL DEFAULT 0`,
 			);
+		}
+		if (!obsCols.find(c => c.name === "claims")) {
+			db.exec(
+				"ALTER TABLE observations ADD COLUMN claims TEXT NOT NULL DEFAULT '[]'",
+			);
+		}
+		if (!obsCols.find(c => c.name === "provenance")) {
+			db.exec("ALTER TABLE observations ADD COLUMN provenance TEXT");
 		}
 	} catch {}
 	// Create consolidated index
@@ -977,6 +1094,157 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	}
 
 	// ── Observations ───────────────────────────────────────────────────────
+	const CLAIM_NEGATION =
+		/\b(?:not|never|no longer|isn't|doesn't|don't|can't|cannot|without|disabled|removed|deprecated|incorrect|wrong)\b/gi;
+	const claimTerms = (text: string, ignorePolarity = false): Set<string> => {
+		const normalized = ignorePolarity
+			? text.replace(CLAIM_NEGATION, " ").replace(/\b(?:do|does|did)\b/gi, " ")
+			: text;
+		const stop = new Set([
+			"a",
+			"an",
+			"and",
+			"are",
+			"as",
+			"at",
+			"be",
+			"by",
+			"for",
+			"from",
+			"in",
+			"is",
+			"it",
+			"of",
+			"on",
+			"or",
+			"the",
+			"this",
+			"to",
+			"with",
+		]);
+		return new Set(
+			(
+				normalized
+					.normalize("NFKC")
+					.toLowerCase()
+					.match(/[\p{L}\p{N}_-]{2,}/gu) || []
+			)
+				.map(token =>
+					token === "uses"
+						? "use"
+						: token.endsWith("ies") && token.length > 4
+							? `${token.slice(0, -3)}y`
+							: token.endsWith("s") && token.length > 4
+								? token.slice(0, -1)
+								: token,
+				)
+				.filter(token => !stop.has(token)),
+		);
+	};
+	const claimSimilarity = (left: string, right: string): number => {
+		const a = claimTerms(left, true);
+		const b = claimTerms(right, true);
+		if (!a.size || !b.size) return 0;
+		let overlap = 0;
+		for (const token of a) if (b.has(token)) overlap++;
+		return overlap / (a.size + b.size - overlap);
+	};
+	const claimHasNegation = (text: string): boolean => {
+		CLAIM_NEGATION.lastIndex = 0;
+		return CLAIM_NEGATION.test(text);
+	};
+	function persistObservationClaims(
+		observation: CompressedObservation,
+		workspace: string,
+		transactionTime: string,
+	): void {
+		const provenance = observation.provenance || {
+			source: "deterministic" as const,
+			trust: "trusted_local" as const,
+			extractorVersion: "legacy-observation/1",
+			schemaVersion: 1,
+		};
+		const insertClaim = db.prepare(`INSERT OR IGNORE INTO claims
+      (id, workspace, observation_id, session_id, text, status, confidence,
+       operation, valid_from, transaction_time, source, trust,
+	       extractor_version, schema_version, supersedes_claim_id, tombstoned_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+		const insertEvidence = db.prepare(`INSERT OR IGNORE INTO claim_evidence
+      (claim_id, observation_id, evidence_event_id) VALUES (?, ?, ?)`);
+		const activeRows = db.prepare(`SELECT id, text, status, confidence, trust
+	      FROM claims
+	      WHERE workspace = ? AND valid_to IS NULL
+	        AND superseded_by_claim_id IS NULL AND tombstoned_at IS NULL
+	      ORDER BY transaction_time DESC LIMIT 500`);
+		const closeClaim = db.prepare(`UPDATE claims
+	      SET valid_to = ?, superseded_by_claim_id = ?
+	      WHERE id = ? AND valid_to IS NULL AND superseded_by_claim_id IS NULL`);
+		for (const [index, claim] of (observation.claims || []).entries()) {
+			const claimId = `${observation.id}:claim:${index}`;
+			const active = activeRows.all(workspace) as Array<{
+				id: string;
+				text: string;
+				status: MemoryClaim["status"];
+				confidence: number;
+				trust: MemoryClaim["trust"];
+			}>;
+			const exact = active.find(candidate => {
+				const left = [...claimTerms(candidate.text)].sort().join(" ");
+				const right = [...claimTerms(claim.text)].sort().join(" ");
+				return left.length > 0 && left === right;
+			});
+			const contradiction = active.find(
+				candidate =>
+					claimSimilarity(candidate.text, claim.text) >= 0.8 &&
+					claimHasNegation(candidate.text) !== claimHasNegation(claim.text),
+			);
+			let operation: MemoryClaim["operation"] = "ADD";
+			let supersedesClaimId: string | undefined;
+			let tombstonedAt: string | undefined;
+			let claimToClose: string | undefined;
+
+			if (exact) {
+				operation = claim.status === "invalidated" ? "INVALIDATE" : "NOOP";
+				supersedesClaimId = exact.id;
+				if (operation === "INVALIDATE") claimToClose = exact.id;
+				else tombstonedAt = transactionTime;
+			} else if (contradiction) {
+				const trustedRevision =
+					provenance.trust !== "untrusted" &&
+					claim.status === "verified" &&
+					claim.confidence >= contradiction.confidence;
+				if (claim.status === "invalidated" || trustedRevision) {
+					operation =
+						claim.status === "invalidated" ? "INVALIDATE" : "SUPERSEDE";
+					supersedesClaimId = contradiction.id;
+					claimToClose = contradiction.id;
+				}
+			}
+			insertClaim.run(
+				claimId,
+				workspace,
+				observation.id,
+				observation.sessionId,
+				claim.text,
+				claim.status,
+				claim.confidence,
+				operation,
+				observation.timestamp,
+				transactionTime,
+				provenance.source,
+				provenance.trust,
+				provenance.extractorVersion,
+				provenance.schemaVersion,
+				supersedesClaimId || null,
+				tombstonedAt || null,
+			);
+			if (claimToClose)
+				closeClaim.run(observation.timestamp, claimId, claimToClose);
+			for (const evidenceId of claim.evidenceEventIds) {
+				insertEvidence.run(claimId, observation.id, evidenceId);
+			}
+		}
+	}
 
 	function observe(
 		raw: RawObservation,
@@ -1001,37 +1269,59 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			facts: generated.facts.map(sanitizeString).slice(0, 20),
 			concepts: generated.concepts.map(sanitizeString).slice(0, 20),
 			files: generated.files.map(sanitizeString).slice(0, 20),
+			claims: parseObservationClaims(generated.claims).map(claim => ({
+				...claim,
+				text: sanitizeString(claim.text).slice(0, 1000),
+				evidenceEventIds: claim.evidenceEventIds
+					.map(sanitizeString)
+					.slice(0, 12),
+			})),
+			provenance: parseObservationProvenance(generated.provenance),
 		};
 		// Derive workspace from observation data or current workspace
 		const obsWorkspace = normalizeWorkspacePath(
 			raw.workspace || currentWorkspace,
 		);
+		// Direct callers may capture evidence before explicitly registering the
+		// session. Materialize the owning session so foreign-key enforcement does
+		// not turn robust capture into a startup-order dependency.
+		if (!getSession(raw.sessionId)) {
+			createSession(raw.sessionId, {
+				cwd: obsWorkspace,
+				workspace: obsWorkspace,
+			});
+		}
 
-		db.prepare(`
+		const persistObservation = db.transaction(() => {
+			db.prepare(`
       INSERT INTO observations (id, session_id, timestamp, hook_type, type, title, subtitle,
-                                narrative, facts, concepts, files, importance, workspace, raw_data)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                narrative, facts, concepts, files, importance, workspace, claims,
+                                provenance, raw_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-			comp.id,
-			raw.sessionId,
-			raw.timestamp || ts,
-			raw.hookType,
-			comp.type,
-			comp.title,
-			comp.subtitle || null,
-			comp.narrative,
-			JSON.stringify(comp.facts),
-			JSON.stringify(comp.concepts),
-			JSON.stringify(comp.files),
-			comp.importance,
-			obsWorkspace,
-			JSON.stringify(safeRaw.raw).slice(0, 32_000),
-		);
-
-		// Update session observation count
-		db.prepare(`
+				comp.id,
+				raw.sessionId,
+				raw.timestamp || ts,
+				raw.hookType,
+				comp.type,
+				comp.title,
+				comp.subtitle || null,
+				comp.narrative,
+				JSON.stringify(comp.facts),
+				JSON.stringify(comp.concepts),
+				JSON.stringify(comp.files),
+				comp.importance,
+				obsWorkspace,
+				JSON.stringify(comp.claims || []),
+				comp.provenance ? JSON.stringify(comp.provenance) : null,
+				JSON.stringify(safeRaw.raw).slice(0, 32_000),
+			);
+			persistObservationClaims(comp, obsWorkspace, ts);
+			db.prepare(`
       UPDATE sessions SET observation_count = observation_count + 1 WHERE id = ?
-    `).run(raw.sessionId);
+			`).run(raw.sessionId);
+		});
+		persistObservation();
 
 		// Apply sliding window cap (enforce max observations per session)
 		slidingWindowCap(raw.sessionId, 200);
@@ -1061,6 +1351,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			importance: row.importance ?? 5,
 			consolidated: row.consolidated === 1 || row.consolidated === true,
 			workspace: row.workspace || "",
+			claims: parseObservationClaims(row.claims),
+			provenance: parseObservationProvenance(row.provenance),
 		};
 	}
 
@@ -1079,6 +1371,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			importance: row.importance ?? 5,
 			consolidated: row.consolidated === 1 || row.consolidated === true,
 			workspace: row.workspace || "",
+			claims: parseObservationClaims(row.claims),
+			provenance: parseObservationProvenance(row.provenance),
 		};
 	}
 
@@ -1114,6 +1408,67 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			)
 			.all(...params) as any[];
 		return rows.map(rowToObservation);
+	}
+
+	function listClaims(
+		options: {
+			observationId?: string;
+			status?: MemoryClaim["status"];
+			includeSuperseded?: boolean;
+			limit?: number;
+		} = {},
+	): MemoryClaim[] {
+		const conditions = ["workspace = ?"];
+		const params: Array<string | number> = [currentWorkspace];
+		if (options.observationId) {
+			conditions.push("observation_id = ?");
+			params.push(options.observationId);
+		}
+		if (options.status) {
+			conditions.push("status = ?");
+			params.push(options.status);
+		}
+		if (!options.includeSuperseded) {
+			conditions.push("superseded_by_claim_id IS NULL");
+			conditions.push("tombstoned_at IS NULL");
+		}
+		params.push(Math.max(1, Math.min(options.limit || 100, 1000)));
+		const rows = db
+			.prepare(
+				`SELECT * FROM claims WHERE ${conditions.join(" AND ")}
+         ORDER BY transaction_time DESC, id DESC LIMIT ?`,
+			)
+			.all(...params) as any[];
+		return rows.map(rowToClaim);
+	}
+
+	const claimEvidence = db.prepare(
+		"SELECT evidence_event_id FROM claim_evidence WHERE claim_id = ? ORDER BY evidence_event_id",
+	);
+	function rowToClaim(row: any): MemoryClaim {
+		return {
+			id: row.id,
+			workspace: row.workspace,
+			observationId: row.observation_id,
+			sessionId: row.session_id,
+			text: row.text,
+			status: row.status,
+			confidence: row.confidence,
+			operation: row.operation,
+			validFrom: row.valid_from,
+			validTo: row.valid_to || undefined,
+			transactionTime: row.transaction_time,
+			source: row.source,
+			trust: row.trust,
+			extractorVersion: row.extractor_version,
+			schemaVersion: row.schema_version,
+			supersedesClaimId: row.supersedes_claim_id || undefined,
+			supersededByClaimId: row.superseded_by_claim_id || undefined,
+			tombstonedAt: row.tombstoned_at || undefined,
+			evidenceEventIds: (
+				claimEvidence.all(row.id) as Array<{ evidence_event_id: string }>
+			).map(item => item.evidence_event_id),
+		};
 	}
 
 	function searchObservations(
@@ -1152,6 +1507,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				importance: r.importance ?? 5,
 				consolidated: r.consolidated === 1 || r.consolidated === true,
 				workspace: r.workspace || "",
+				claims: parseObservationClaims(r.claims),
+				provenance: parseObservationProvenance(r.provenance),
 			},
 			score: Number(
 				(Math.max(0, -Number(r.lexical_rank || 0)) + r.importance / 10).toFixed(
@@ -1290,6 +1647,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			isLatest: true,
 			project: options.project,
 			workspace: memoryWorkspace,
+			accessCount: 0,
+			workingTier: "cold",
 		};
 	}
 
@@ -1319,6 +1678,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			isLatest: true,
 			project: row.project,
 			workspace: row.workspace || "",
+			accessCount: row.access_count ?? 0,
+			lastAccessed: row.last_accessed || undefined,
+			workingTier: (row.working_tier || "cold") as WorkingMemoryTier,
 		};
 	}
 
@@ -1346,6 +1708,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			isLatest: row.is_latest === 1,
 			project: row.project,
 			workspace: row.workspace || "",
+			accessCount: row.access_count ?? 0,
+			lastAccessed: row.last_accessed || undefined,
+			workingTier: (row.working_tier || "cold") as WorkingMemoryTier,
 		};
 	}
 
@@ -1369,6 +1734,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			isLatest: row.is_latest === 1 || row.is_latest === true,
 			project: row.project,
 			workspace: row.workspace || "",
+			accessCount: row.access_count ?? 0,
+			lastAccessed: row.last_accessed || undefined,
+			workingTier: (row.working_tier || "cold") as WorkingMemoryTier,
 		};
 	}
 
@@ -1892,6 +2260,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			importance: r.importance ?? 5,
 			consolidated: r.consolidated === 1,
 			workspace: r.workspace || currentWorkspace,
+			claims: parseObservationClaims(r.claims),
+			provenance: parseObservationProvenance(r.provenance),
 		}));
 
 		// Group by the most concrete topic available. A file or concept is much
@@ -1927,11 +2297,31 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					)[0];
 				const allFacts = [
 					...new Set(
-						group
-							.flatMap(o => (o.facts.length ? o.facts : [o.narrative]))
-							.filter(Boolean),
+						group.flatMap(observation => {
+							// Structured claims are the durable semantic unit. Never promote
+							// invalidated/untrusted claims, and do not mix transient user intent
+							// back in through the legacy facts fallback.
+							if (observation.claims.length > 0) {
+								if (observation.provenance?.trust === "untrusted") return [];
+								return observation.claims
+									.filter(claim => claim.status !== "invalidated")
+									.sort((a, b) => {
+										const status =
+											(b.status === "verified" ? 1 : 0) -
+											(a.status === "verified" ? 1 : 0);
+										return status || b.confidence - a.confidence;
+									})
+									.map(claim => claim.text);
+							}
+							return (
+								observation.facts.length
+									? observation.facts
+									: [observation.narrative]
+							).filter(fact => !/^user intent\s*:/i.test(fact.trim()));
+						}),
 					),
 				].slice(0, 8);
+				if (allFacts.length === 0) continue;
 				const allConcepts = [...new Set(group.flatMap(o => o.concepts))].slice(
 					0,
 					10,
@@ -2136,6 +2526,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		};
 		const candidates: Candidate[] = [];
 		const episodicFallbackCandidates: Candidate[] = [];
+		let claimCandidateCount = 0;
 		const briefDescription = (
 			value: string,
 			maxLength: number = 220,
@@ -2208,6 +2599,45 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				sourceKey: sessionId,
 				similarityText: session.summary,
 			});
+		}
+
+		// Claims are quoted evidence-bearing data, never instructions. Only active,
+		// trusted claims enter automatic context; invalidated, superseded and NOOP
+		// audit rows remain available through listClaims()/the viewer.
+		const retrievableClaims = listClaims({ limit: 500 }).filter(
+			claim =>
+				claim.status !== "invalidated" &&
+				claim.trust !== "untrusted" &&
+				claim.operation !== "NOOP",
+		);
+		const claimTextsByObservation = new Map<string, string[]>();
+		for (const claim of retrievableClaims) {
+			const texts = claimTextsByObservation.get(claim.observationId) || [];
+			texts.push(claim.text);
+			claimTextsByObservation.set(claim.observationId, texts);
+			if (claim.sessionId === sessionId) continue;
+			const relevance = overlapScore(claim.text);
+			if (queryTokens.size && relevance === 0) continue;
+			const evidence = claim.evidenceEventIds.slice(0, 3).join(", ");
+			const validity = claim.validTo
+				? `${claim.validFrom}–${claim.validTo}`
+				: `since ${claim.validFrom}`;
+			const content = `- [${claim.id}] Claim (quoted data) · ${claim.status} · confidence ${claim.confidence.toFixed(2)} · ${validity} — ${briefDescription(claim.text)}${evidence ? ` · evidence: ${evidence}` : ""}`;
+			candidates.push({
+				id: `claim:${claim.id}`,
+				type: "claim",
+				content,
+				tokens: estimateTokens(content),
+				recency: Date.parse(claim.transactionTime),
+				score:
+					relevance * 22 +
+					(claim.status === "verified" ? 8 : 3) +
+					claim.confidence * 5 +
+					recencyScore(claim.transactionTime),
+				sourceKey: claim.observationId,
+				similarityText: claim.text,
+			});
+			claimCandidateCount++;
 		}
 
 		// Generate candidates in SQLite so relevant older knowledge is not hidden
@@ -2290,7 +2720,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			// Completed semantic episodes supersede the low-level telemetry that
 			// produced them. Newer, not-yet-synthesized events remain available.
 			if (coveredByEpisode) continue;
-			const body = `${obs.title} ${obs.narrative} ${(obs.facts || []).join(" ")} ${(obs.concepts || []).join(" ")}`;
+			const currentClaimTexts = claimTextsByObservation.get(obs.id);
+			if ((obs.claims?.length || 0) > 0 && !currentClaimTexts?.length) continue;
+			const semanticBody = currentClaimTexts?.length
+				? currentClaimTexts.join(" ")
+				: `${obs.narrative} ${(obs.facts || []).join(" ")}`;
+			const body = `${obs.title} ${semanticBody} ${(obs.concepts || []).join(" ")}`;
 			const relevance = overlapScore(body);
 			const files = fileScore(obs.files, body);
 			const score =
@@ -2315,9 +2750,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			const fileLabel = obs.files.length
 				? ` · ${obs.files.slice(0, 3).join(", ")}`
 				: "";
-			const description = briefDescription(
-				[obs.narrative, ...(obs.facts || [])].filter(Boolean).join(" "),
-			);
+			const description = briefDescription(semanticBody);
 			const content = `- [${obs.id}] ${label} · ${obs.type} · ${obs.title}${description ? ` — ${description}` : ""}${fileLabel}`;
 			episodicFallbackCandidates.push({
 				id: `observation:${obs.id}`,
@@ -2389,7 +2822,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		// Prefer consolidated semantic memory. Only when retrieval finds no
 		// relevant durable memory do we surface a small amount of prior episodic
 		// evidence, which the agent can expand by stable ID if needed.
-		if (memoryCandidateCount === 0) {
+		if (memoryCandidateCount === 0 && claimCandidateCount === 0) {
 			episodicFallbackCandidates
 				.sort((a, b) => b.score - a.score || b.recency - a.recency)
 				.slice(0, 3)
@@ -2412,9 +2845,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const includesEpisodicFallback = blocks.some(
 			block => block.type === "observation",
 		);
+		const includesClaims = blocks.some(block => block.type === "claim");
 		const retrievalMode = includesEpisodicFallback
 			? "episodic fallback"
-			: "semantic memory";
+			: includesClaims
+				? "truth-aware claims and semantic memory"
+				: "semantic memory";
 		const retrievalNote = objective
 			? `_Task-aware retrieval: ${phase}; ${retrievalMode} compact index; ${blocks.length} items; ~${tokenCount}/${budget} tokens._`
 			: `_Semantic memory compact index: ${blocks.length} items; ~${tokenCount}/${budget} tokens._`;
@@ -2788,45 +3224,48 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			isLatest: true,
 		};
 
-		// Insert new version FIRST (so we can still reference it)
-		db.prepare(`
+		// Retire the previous latest row and insert its replacement atomically.
+		// The partial unique index permits only one latest row per title, so the
+		// old row must be retired before inserting a same-title revision.
+		const applyEvolution = db.transaction(() => {
+			db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(
+				memoryId,
+			);
+			db.prepare(`
       INSERT INTO memories (id, created_at, updated_at, type, title, content,
                             concepts, files, session_ids, strength, version,
                             parent_id, related_ids, source_observation_ids, is_latest, project,
                             workspace, access_count, last_accessed, working_tier, supersedes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1, ?, ?, 0, NULL, 'cold', ?)
     `).run(
-			evolved.id,
-			ts,
-			ts,
-			existing.type,
-			evolved.title,
-			newContent,
-			JSON.stringify(existing.concepts),
-			JSON.stringify(existing.files),
-			JSON.stringify(existing.sessionIds),
-			existing.strength,
-			evolved.version,
-			memoryId,
-			existing.project || null,
-			existing.workspace || currentWorkspace,
-			JSON.stringify([existing.id]),
-		);
+				evolved.id,
+				ts,
+				ts,
+				existing.type,
+				evolved.title,
+				newContent,
+				JSON.stringify(existing.concepts),
+				JSON.stringify(existing.files),
+				JSON.stringify(existing.sessionIds),
+				existing.strength,
+				evolved.version,
+				memoryId,
+				existing.project || null,
+				existing.workspace || currentWorkspace,
+				JSON.stringify([existing.id]),
+			);
 
-		// Mark old as non-latest
-		db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(memoryId);
-
-		// Create supersedes relation
-		const relationId = generateId();
-		db.prepare(`
+			const relationId = generateId();
+			db.prepare(`
       INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
       VALUES (?, 'supersedes', ?, ?, 1.0, ?)
     `).run(relationId, evolved.id, memoryId, ts);
 
-		// Update related_ids on new memory
-		db.prepare(
-			`UPDATE memories SET related_ids = json_insert(related_ids, '$', ?) WHERE id = ?`,
-		).run(memoryId, evolved.id);
+			db.prepare(
+				`UPDATE memories SET related_ids = json_insert(related_ids, '$', ?) WHERE id = ?`,
+			).run(memoryId, evolved.id);
+		});
+		applyEvolution();
 
 		return { memory: evolved, previousId: memoryId };
 	}
@@ -3013,7 +3452,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	function exportData(): ExportData {
 		const sessions = listSessions();
 		const memories = db
-			.prepare(`SELECT * FROM memories WHERE workspace = ? AND is_latest = 1`)
+			.prepare(
+				`SELECT * FROM memories WHERE workspace = ? ORDER BY created_at, version, id`,
+			)
 			.all(currentWorkspace)
 			.map(rowToMemory);
 		const observations = db
@@ -3021,6 +3462,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				`SELECT * FROM observations WHERE workspace = ? ORDER BY timestamp DESC`,
 			)
 			.all(currentWorkspace) as any[];
+		const claims = (
+			db
+				.prepare(
+					"SELECT * FROM claims WHERE workspace = ? ORDER BY transaction_time, id",
+				)
+				.all(currentWorkspace) as any[]
+		).map(rowToClaim);
 		const relations = db
 			.prepare(`SELECT r.* FROM relations r
           JOIN memories source ON source.id = r.source_id
@@ -3030,7 +3478,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			.all(currentWorkspace, currentWorkspace) as any[];
 
 		return {
-			version: 1,
+			version: 3,
 			exportedAt: now(),
 			sessions,
 			observations: observations.map(r => ({
@@ -3047,7 +3495,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				importance: r.importance ?? 5,
 				consolidated: r.consolidated === 1 || r.consolidated === true,
 				workspace: r.workspace || currentWorkspace,
+				claims: parseObservationClaims(r.claims),
+				provenance: parseObservationProvenance(r.provenance),
+				hookType: r.hook_type || "import",
+				rawData: safeParseJson(r.raw_data || "null"),
 			})),
+			claims,
 			memories,
 			relations: relations.map(r => ({
 				id: r.id,
@@ -3063,20 +3516,66 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	function importData(data: ImportData): ImportResult {
 		const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 		const mode = data.onConflict || "skip";
+		if (data.version !== 1 && data.version !== 2 && data.version !== 3) {
+			return {
+				imported: 0,
+				skipped: 0,
+				errors: [`Unsupported memory export version: ${data.version}`],
+			};
+		}
+		const normalizedScope = (workspace?: string): string =>
+			normalizeWorkspacePath(workspace || currentWorkspace);
+		const collisionIsOutsideScope = (
+			table: "sessions" | "observations" | "memories",
+			id: string,
+			workspace: string,
+		): boolean => {
+			const row = db
+				.prepare(`SELECT workspace FROM ${table} WHERE id = ?`)
+				.get(id) as { workspace: string } | undefined;
+			return Boolean(row && normalizedScope(row.workspace) !== workspace);
+		};
 
 		// Import sessions
 		for (const session of data.sessions) {
 			try {
-				const existing = getSession(session.id);
+				const workspace = normalizedScope(session.workspace || session.cwd);
+				if (collisionIsOutsideScope("sessions", session.id, workspace)) {
+					throw new Error("ID belongs to a different workspace");
+				}
+				const existing = db
+					.prepare("SELECT id FROM sessions WHERE id = ?")
+					.get(session.id);
 				if (existing && mode === "skip") {
 					result.skipped++;
 					continue;
 				}
-				if (existing && mode === "update") {
-					updateSession(session.id, session);
-				} else {
-					createSession(session.id, session);
-				}
+				db.prepare(`INSERT INTO sessions
+            (id, name, project, cwd, workspace, started_at, ended_at, status,
+             observation_count, model, tags, first_prompt, summary, commit_shas)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              name=excluded.name, project=excluded.project, cwd=excluded.cwd,
+              workspace=excluded.workspace, started_at=excluded.started_at,
+              ended_at=excluded.ended_at, status=excluded.status,
+              observation_count=excluded.observation_count, model=excluded.model,
+              tags=excluded.tags, first_prompt=excluded.first_prompt,
+              summary=excluded.summary, commit_shas=excluded.commit_shas`).run(
+					session.id,
+					session.name || null,
+					session.project || "",
+					session.cwd || workspace,
+					workspace,
+					session.startedAt,
+					session.endedAt || null,
+					session.status,
+					session.observationCount,
+					session.model || null,
+					JSON.stringify(session.tags || []),
+					session.firstPrompt || null,
+					session.summary || null,
+					JSON.stringify(session.commitShas || []),
+				);
 				result.imported++;
 			} catch (e) {
 				result.errors.push(`Session ${session.id}: ${(e as Error).message}`);
@@ -3086,6 +3585,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		// Import observations
 		for (const obs of data.observations) {
 			try {
+				const workspace = normalizedScope(obs.workspace);
+				if (collisionIsOutsideScope("observations", obs.id, workspace)) {
+					throw new Error("ID belongs to a different workspace");
+				}
 				const existing = db
 					.prepare("SELECT id FROM observations WHERE id = ?")
 					.get(obs.id) as { id: string } | undefined;
@@ -3093,34 +3596,54 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					result.skipped++;
 					continue;
 				}
-				if (existing && mode === "update") {
-					db.prepare(`
-            UPDATE observations SET session_id=?, timestamp=?, type=?, title=?,
-              subtitle=?, narrative=?, facts=?, concepts=?, files=?, importance=?
-            WHERE id=?
-          `).run(
-						obs.sessionId,
-						obs.timestamp,
-						obs.type,
-						obs.title,
-						obs.subtitle || null,
-						obs.narrative,
-						JSON.stringify(obs.facts),
-						JSON.stringify(obs.concepts),
-						JSON.stringify(obs.files),
-						obs.importance,
-						obs.id,
-					);
-				} else {
-					observe(
+				if (existing) {
+					db.prepare("DELETE FROM claims WHERE observation_id = ?").run(obs.id);
+				}
+				const exported = obs as typeof obs & {
+					hookType?: string;
+					rawData?: unknown;
+				};
+				db.prepare(`INSERT INTO observations
+            (id, session_id, timestamp, hook_type, type, title, subtitle,
+             narrative, facts, concepts, files, importance, workspace,
+             consolidated, claims, provenance, raw_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              session_id=excluded.session_id, timestamp=excluded.timestamp,
+              hook_type=excluded.hook_type, type=excluded.type, title=excluded.title,
+              subtitle=excluded.subtitle, narrative=excluded.narrative,
+              facts=excluded.facts, concepts=excluded.concepts, files=excluded.files,
+              importance=excluded.importance, workspace=excluded.workspace,
+              consolidated=excluded.consolidated, claims=excluded.claims,
+              provenance=excluded.provenance, raw_data=excluded.raw_data`).run(
+					obs.id,
+					obs.sessionId,
+					obs.timestamp,
+					exported.hookType || "import",
+					obs.type,
+					obs.title,
+					obs.subtitle || null,
+					obs.narrative,
+					JSON.stringify(obs.facts),
+					JSON.stringify(obs.concepts),
+					JSON.stringify(obs.files),
+					obs.importance,
+					workspace,
+					obs.consolidated ? 1 : 0,
+					JSON.stringify(obs.claims || []),
+					obs.provenance ? JSON.stringify(obs.provenance) : null,
+					JSON.stringify(exported.rawData ?? null),
+				);
+				if (!data.claims) {
+					persistObservationClaims(
 						{
-							id: obs.id,
-							sessionId: obs.sessionId,
-							timestamp: obs.timestamp,
-							hookType: "import" as any,
-							raw: {},
+							...obs,
+							workspace,
+							claims: parseObservationClaims(obs.claims),
+							provenance: parseObservationProvenance(obs.provenance),
 						},
-						obs,
+						workspace,
+						obs.timestamp,
 					);
 				}
 				result.imported++;
@@ -3129,9 +3652,82 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			}
 		}
 
+		// Version 3 carries the temporal truth layer explicitly. Import it in two
+		// passes so forward superseded-by links never depend on array ordering.
+		if (data.claims) {
+			for (const claim of data.claims) {
+				try {
+					const workspace = normalizedScope(claim.workspace);
+					if (workspace !== currentWorkspace)
+						throw new Error("claim belongs to a different workspace");
+					db.prepare(`INSERT INTO claims
+					  (id, workspace, observation_id, session_id, text, status, confidence,
+					   operation, valid_from, valid_to, transaction_time, source, trust,
+					   extractor_version, schema_version, supersedes_claim_id,
+					   superseded_by_claim_id, tombstoned_at)
+					  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+					  ON CONFLICT(id) DO UPDATE SET text=excluded.text, status=excluded.status,
+					    confidence=excluded.confidence, operation=excluded.operation,
+					    valid_from=excluded.valid_from, valid_to=excluded.valid_to,
+					    transaction_time=excluded.transaction_time, source=excluded.source,
+					    trust=excluded.trust, extractor_version=excluded.extractor_version,
+					    schema_version=excluded.schema_version,
+					    supersedes_claim_id=NULL,
+					    superseded_by_claim_id=NULL, tombstoned_at=excluded.tombstoned_at`).run(
+						claim.id,
+						workspace,
+						claim.observationId,
+						claim.sessionId,
+						claim.text,
+						claim.status,
+						claim.confidence,
+						claim.operation,
+						claim.validFrom,
+						claim.validTo || null,
+						claim.transactionTime,
+						claim.source,
+						claim.trust,
+						claim.extractorVersion,
+						claim.schemaVersion,
+						claim.tombstonedAt || null,
+					);
+					db.prepare("DELETE FROM claim_evidence WHERE claim_id = ?").run(
+						claim.id,
+					);
+					for (const evidenceId of claim.evidenceEventIds)
+						db.prepare(`INSERT INTO claim_evidence
+						  (claim_id, observation_id, evidence_event_id) VALUES (?, ?, ?)`).run(
+							claim.id,
+							claim.observationId,
+							evidenceId,
+						);
+					result.imported++;
+				} catch (e) {
+					result.errors.push(`Claim ${claim.id}: ${(e as Error).message}`);
+				}
+			}
+			for (const claim of data.claims) {
+				if (!claim.supersededByClaimId && !claim.supersedesClaimId) continue;
+				try {
+					db.prepare(`UPDATE claims
+					  SET supersedes_claim_id = ?, superseded_by_claim_id = ? WHERE id = ?`).run(
+						claim.supersedesClaimId || null,
+						claim.supersededByClaimId || null,
+						claim.id,
+					);
+				} catch (e) {
+					result.errors.push(`Claim link ${claim.id}: ${(e as Error).message}`);
+				}
+			}
+		}
+
 		// Import memories
 		for (const mem of data.memories) {
 			try {
+				const workspace = normalizedScope(mem.workspace);
+				if (collisionIsOutsideScope("memories", mem.id, workspace)) {
+					throw new Error("ID belongs to a different workspace");
+				}
 				const existing = db
 					.prepare("SELECT id FROM memories WHERE id = ?")
 					.get(mem.id) as { id: string } | undefined;
@@ -3139,19 +3735,47 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					result.skipped++;
 					continue;
 				}
-				if (existing && mode === "update") {
-					update(mem.id, { content: mem.content, title: mem.title });
-				} else {
-					create(mem.content, {
-						type: mem.type,
-						concepts: mem.concepts,
-						files: mem.files,
-						strength: mem.strength,
-						sessionIds: mem.sessionIds,
-						parentId: mem.parentId,
-						project: mem.project,
-					});
-				}
+				db.prepare(`INSERT INTO memories
+            (id, created_at, updated_at, type, title, content, concepts, files,
+             session_ids, strength, version, parent_id, related_ids,
+             source_observation_ids, is_latest, project, workspace,
+             access_count, last_accessed, working_tier, supersedes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              created_at=excluded.created_at, updated_at=excluded.updated_at,
+              type=excluded.type, title=excluded.title, content=excluded.content,
+              concepts=excluded.concepts, files=excluded.files,
+              session_ids=excluded.session_ids, strength=excluded.strength,
+              version=excluded.version, parent_id=excluded.parent_id,
+              related_ids=excluded.related_ids,
+              source_observation_ids=excluded.source_observation_ids,
+              is_latest=excluded.is_latest, project=excluded.project,
+              workspace=excluded.workspace, access_count=excluded.access_count,
+              last_accessed=excluded.last_accessed,
+              working_tier=excluded.working_tier,
+              supersedes=excluded.supersedes`).run(
+					mem.id,
+					mem.createdAt,
+					mem.updatedAt,
+					mem.type,
+					mem.title,
+					mem.content,
+					JSON.stringify(mem.concepts),
+					JSON.stringify(mem.files),
+					JSON.stringify(mem.sessionIds),
+					mem.strength,
+					mem.version,
+					mem.parentId || null,
+					JSON.stringify(mem.relatedIds || []),
+					JSON.stringify(mem.sourceObservationIds || []),
+					mem.isLatest ? 1 : 0,
+					mem.project || null,
+					workspace,
+					mem.accessCount || 0,
+					mem.lastAccessed || null,
+					mem.workingTier || "cold",
+					JSON.stringify(mem.supersedes || []),
+				);
 				result.imported++;
 			} catch (e) {
 				result.errors.push(`Memory ${mem.id}: ${(e as Error).message}`);
@@ -3162,6 +3786,23 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		if (data.relations) {
 			for (const rel of data.relations) {
 				try {
+					const endpoints = db
+						.prepare(`SELECT source.workspace AS source_workspace,
+                           target.workspace AS target_workspace
+                    FROM memories source JOIN memories target
+                    WHERE source.id = ? AND target.id = ?`)
+						.get(rel.sourceId, rel.targetId) as
+						| { source_workspace: string; target_workspace: string }
+						| undefined;
+					if (
+						!endpoints ||
+						normalizedScope(endpoints.source_workspace) !==
+							normalizedScope(endpoints.target_workspace)
+					) {
+						throw new Error(
+							"relation endpoints are missing or cross-workspace",
+						);
+					}
 					const existing = db
 						.prepare("SELECT id FROM relations WHERE id = ?")
 						.get(rel.id) as { id: string } | undefined;
@@ -3170,8 +3811,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 						continue;
 					}
 					db.prepare(`
-            INSERT OR IGNORE INTO relations (id, type, source_id, target_id, confidence, created_at)
+            INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET type=excluded.type,
+              source_id=excluded.source_id, target_id=excluded.target_id,
+              confidence=excluded.confidence, created_at=excluded.created_at
           `).run(
 						rel.id,
 						rel.type,
@@ -3361,6 +4005,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		getObservation,
 		listObservations,
 		listRecentObservations,
+		listClaims,
 		searchObservations,
 		expandEntries,
 		clearObservations,
