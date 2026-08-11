@@ -726,6 +726,72 @@ describe("createMemoryStore — observations", () => {
 		store.close();
 	});
 
+	test("rejects embeddings whose model, content hash, or creation version drifted", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		const memory = store.create("Versioned embedding content");
+		const metadata = {
+			model: "test/minilm",
+			contentHash: "sha256:original",
+			creationVersion: memory.version,
+		};
+		store.upsertEmbedding(memory.id, "memory", [1, 0], undefined, metadata);
+		assert.equal(store.hasEmbedding(memory.id, metadata), true);
+		assert.equal(
+			store.hasEmbedding(memory.id, { ...metadata, model: "test/new-model" }),
+			false,
+		);
+		assert.equal(
+			store.hasEmbedding(memory.id, {
+				...metadata,
+				contentHash: "sha256:changed",
+			}),
+			false,
+		);
+		assert.equal(
+			store.hasEmbedding(memory.id, { ...metadata, creationVersion: 2 }),
+			false,
+		);
+		store.close();
+	});
+
+	test("content-addressed semantic search retains old matching vectors beyond 4000 rows", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		store.upsertEmbedding("old-target", "memory", [1, 1, 1, 1]);
+		for (let index = 0; index < 4_100; index++) {
+			store.upsertEmbedding(`new-${index}`, "memory", [-1, -1, -1, -1]);
+		}
+		const results = store.searchEmbeddings([1, 1, 1, 1], 5);
+		assert.equal(results[0]?.id, "old-target");
+		store.close();
+	});
+
+	test("scopes access, tiers, and relations to the active workspace", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace-a");
+		const a1 = store.create("Workspace A one");
+		const a2 = store.create("Workspace A two");
+		const relation = store.relate(a1.id, a2.id, "supports");
+		assert.ok(relation);
+		if (!relation) throw new Error("expected relation");
+
+		store.setCurrentWorkspace("/workspace-b");
+		store.trackAccess(a1.id);
+		store.setWorkingMemoryTier(a1.id, "hot");
+		assert.equal(store.getAccessStats(a1.id), null);
+		assert.equal(store.getWorkingMemoryTier(a1.id), "cold");
+		assert.deepEqual(store.getRelations(a1.id), []);
+		assert.deepEqual(store.getRelatedMemories(a1.id), []);
+		assert.equal(store.removeRelation(relation.id), false);
+
+		store.setCurrentWorkspace("/workspace-a");
+		assert.equal(store.getAccessStats(a1.id)?.accessCount, 0);
+		assert.equal(store.getWorkingMemoryTier(a1.id), "cold");
+		assert.equal(store.getRelations(a1.id).length, 1);
+		store.close();
+	});
+
 	test("lists recent observations without requiring session metadata", () => {
 		const store = createMemoryStore(dbPath());
 		store.setCurrentWorkspace("/workspace");
@@ -1026,6 +1092,33 @@ describe("consolidate", () => {
 // ── Context Injection ──────────────────────────────────────────────────────
 
 describe("getContext", () => {
+	test("records explainable retrieval selections and abstentions", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		store.create("The parser uses a bounded token cursor", {
+			type: "architecture",
+			strength: 9,
+		});
+		const context = store.getContext("current", 1200, {
+			objective: "parser token cursor",
+			phase: "investigate",
+		});
+		assert.match(context, /bounded token cursor/);
+		let traces = store.listRetrievalTraces();
+		assert.equal(traces.length, 1);
+		assert.equal(traces[0]?.abstained, false);
+		assert.ok(traces[0]?.selected.some(item => item.reasons.includes("fts")));
+		assert.ok((traces[0]?.latencyMs || -1) >= 0);
+
+		assert.equal(
+			store.getContext("current", 1200, "completely absent quux marker"),
+			"",
+		);
+		traces = store.listRetrievalTraces();
+		assert.equal(traces[0]?.abstained, true);
+		assert.equal(traces[0]?.reason, "no-relevant-trusted-candidates");
+		store.close();
+	});
 	test("fuses optional semantic candidates when lexical terms do not overlap", () => {
 		const store = createMemoryStore(dbPath());
 		store.setCurrentWorkspace("/workspace");

@@ -217,6 +217,16 @@ export function startViewerServer(opts: ViewerOptions): {
 				);
 			}
 
+			if (segments[0] === "retrieval-traces" && segments.length === 1) {
+				const limit = Math.min(
+					Math.max(parseInt(url.searchParams.get("limit") || "100", 10), 1),
+					1000,
+				);
+				return new Response(JSON.stringify(store.listRetrievalTraces(limit)), {
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+
 			if (segments[0] === "memories" && segments.length === 1) {
 				const search = url.searchParams.get("search") || undefined;
 				const type = url.searchParams.get("type") || undefined;

@@ -12,6 +12,7 @@ import type {
 	CreateMemoryOptions,
 	DecayConfig,
 	DecayConfigInput,
+	EmbeddingMetadata,
 	ExpandedMemoryEntry,
 	ExportData,
 	ExtractionJob,
@@ -32,6 +33,7 @@ import type {
 	RawObservation,
 	RecallOptions,
 	RetentionScore,
+	RetrievalTrace,
 	SearchResult,
 	SemanticSearchResult,
 	Session,
@@ -659,6 +661,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       session_id TEXT,
       workspace TEXT NOT NULL DEFAULT '',
       dimensions INTEGER NOT NULL,
+	  model TEXT NOT NULL DEFAULT 'unknown',
+	  content_hash TEXT NOT NULL DEFAULT '',
+	  creation_version INTEGER NOT NULL DEFAULT 1,
+	  vector_bucket TEXT NOT NULL DEFAULT '',
       vector TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -666,6 +672,24 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       ON memory_embeddings(workspace, dimensions, entity_kind);
     CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recency
       ON memory_embeddings(workspace, dimensions, updated_at DESC);
+
+	CREATE TABLE IF NOT EXISTS retrieval_traces (
+	  id TEXT PRIMARY KEY,
+	  workspace TEXT NOT NULL,
+	  session_id TEXT NOT NULL,
+	  objective TEXT NOT NULL,
+	  phase TEXT NOT NULL,
+	  created_at TEXT NOT NULL,
+	  latency_ms REAL NOT NULL,
+	  budget INTEGER NOT NULL,
+	  tokens INTEGER NOT NULL,
+	  abstained INTEGER NOT NULL,
+	  reason TEXT,
+	  candidate_counts TEXT NOT NULL,
+	  selected TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_retrieval_traces_workspace
+	  ON retrieval_traces(workspace, created_at DESC);
   `);
 
 	// A process may exit after claiming but before acknowledging a job. Requeue
@@ -695,6 +719,22 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			} catch {}
 		} catch {}
 	}
+	for (const [column, definition] of [
+		["model", "TEXT NOT NULL DEFAULT 'unknown'"],
+		["content_hash", "TEXT NOT NULL DEFAULT ''"],
+		["creation_version", "INTEGER NOT NULL DEFAULT 1"],
+		["vector_bucket", "TEXT NOT NULL DEFAULT ''"],
+	] as const) {
+		const columns = db
+			.prepare("PRAGMA table_info(memory_embeddings)")
+			.all() as Array<{ name: string }>;
+		if (!columns.some(item => item.name === column))
+			db.exec(
+				`ALTER TABLE memory_embeddings ADD COLUMN ${column} ${definition}`,
+			);
+	}
+	db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_embeddings_bucket
+	  ON memory_embeddings(workspace, dimensions, vector_bucket)`);
 	try {
 		const sessionCols = db
 			.prepare("PRAGMA table_info(sessions)")
@@ -1804,6 +1844,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	// ── Sliding Window ─────────────────────────────────────────────────────
 
 	function slidingWindowCap(sessionId: string, cap: number = 200): number {
+		const session = getSession(sessionId);
+		if (
+			!session ||
+			normalizeWorkspacePath(session.workspace) !== currentWorkspace
+		)
+			return 0;
 		const excess = db
 			.prepare(
 				"SELECT COUNT(*) as cnt FROM observations WHERE session_id = ? AND id NOT IN (SELECT id FROM observations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?)",
@@ -1824,16 +1870,18 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function trackAccess(entityId: string): void {
 		db.prepare(`
-      UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?
-    `).run(now(), entityId);
+	      UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ? AND workspace = ?
+	    `).run(now(), entityId, currentWorkspace);
 	}
 
 	function getAccessStats(
 		entityId: string,
 	): { lastAccessed: string; accessCount: number } | null {
 		const row = db
-			.prepare("SELECT last_accessed, access_count FROM memories WHERE id = ?")
-			.get(entityId) as
+			.prepare(
+				"SELECT last_accessed, access_count FROM memories WHERE id = ? AND workspace = ?",
+			)
+			.get(entityId, currentWorkspace) as
 			| { last_accessed: string; access_count: number }
 			| undefined;
 		if (!row) return null;
@@ -1847,8 +1895,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function getWorkingMemoryTier(entityId: string): WorkingMemoryTier {
 		const row = db
-			.prepare("SELECT working_tier FROM memories WHERE id = ?")
-			.get(entityId) as { working_tier: string } | undefined;
+			.prepare(
+				"SELECT working_tier FROM memories WHERE id = ? AND workspace = ?",
+			)
+			.get(entityId, currentWorkspace) as { working_tier: string } | undefined;
 		return (row?.working_tier as WorkingMemoryTier) || "cold";
 	}
 
@@ -1856,10 +1906,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		entityId: string,
 		tier: WorkingMemoryTier,
 	): void {
-		db.prepare("UPDATE memories SET working_tier = ? WHERE id = ?").run(
-			tier,
-			entityId,
-		);
+		db.prepare(
+			"UPDATE memories SET working_tier = ? WHERE id = ? AND workspace = ?",
+		).run(tier, entityId, currentWorkspace);
 	}
 
 	function autoTierMemories(
@@ -2134,16 +2183,27 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		kind: "observation" | "memory",
 		vector: number[],
 		sessionId?: string,
+		metadata: EmbeddingMetadata = {
+			model: "unknown",
+			contentHash: "",
+			creationVersion: 1,
+		},
 	): void {
 		if (!vector.length || vector.some(value => !Number.isFinite(value))) return;
+		const vectorBucket = embeddingBucket(vector);
 		db.prepare(`INSERT INTO memory_embeddings
-      (entity_id, entity_kind, session_id, workspace, dimensions, vector, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+	      (entity_id, entity_kind, session_id, workspace, dimensions, model,
+	       content_hash, creation_version, vector_bucket, vector, updated_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(entity_id) DO UPDATE SET
         entity_kind = excluded.entity_kind,
         session_id = excluded.session_id,
         workspace = excluded.workspace,
-        dimensions = excluded.dimensions,
+	        dimensions = excluded.dimensions,
+	        model = excluded.model,
+	        content_hash = excluded.content_hash,
+	        creation_version = excluded.creation_version,
+	        vector_bucket = excluded.vector_bucket,
         vector = excluded.vector,
         updated_at = excluded.updated_at`).run(
 			id,
@@ -2151,21 +2211,32 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			sessionId || null,
 			currentWorkspace,
 			vector.length,
+			metadata.model,
+			metadata.contentHash,
+			metadata.creationVersion,
+			vectorBucket,
 			JSON.stringify(vector),
 			now(),
 		);
 	}
 
-	// Brute-force cosine similarity has no index to lean on, so it's bounded to
-	// the most recently embedded rows rather than the whole workspace history.
-	// This runs synchronously on every turn's context injection (once the
-	// embedder is warm), so an unbounded scan would make per-turn latency grow
-	// linearly with total memory size. Recency is a reasonable proxy here: the
-	// context-ranking pass in getContext() already privileges recent and
-	// lexically/file-matched candidates over exhaustive semantic recall, so
-	// capping the semantic candidate pool trades a small amount of recall on
-	// very old entries for bounded per-turn cost.
-	const SEMANTIC_SEARCH_SCAN_CAP = 4_000;
+	const EMBEDDING_BUCKET_BITS = 12;
+	function embeddingBucket(vector: number[]): string {
+		return vector
+			.slice(0, Math.min(EMBEDDING_BUCKET_BITS, vector.length))
+			.map(value => (value >= 0 ? "1" : "0"))
+			.join("");
+	}
+	function embeddingProbeBuckets(vector: number[]): string[] {
+		const primary = embeddingBucket(vector);
+		const probes = [primary];
+		for (let index = 0; index < primary.length; index++) {
+			probes.push(
+				`${primary.slice(0, index)}${primary[index] === "1" ? "0" : "1"}${primary.slice(index + 1)}`,
+			);
+		}
+		return probes;
+	}
 
 	function searchEmbeddings(
 		vector: number[],
@@ -2173,16 +2244,30 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	): SemanticSearchResult[] {
 		if (!vector.length || vector.some(value => !Number.isFinite(value)))
 			return [];
-		const rows = db
+		const buckets = embeddingProbeBuckets(vector);
+		const placeholders = buckets.map(() => "?").join(", ");
+		let rows = db
 			.prepare(`SELECT entity_id, entity_kind, session_id, vector
-      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
-      ORDER BY updated_at DESC LIMIT ?`)
-			.all(currentWorkspace, vector.length, SEMANTIC_SEARCH_SCAN_CAP) as Array<{
+	      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
+	        AND vector_bucket IN (${placeholders})
+	      ORDER BY updated_at DESC LIMIT 8000`)
+			.all(currentWorkspace, vector.length, ...buckets) as Array<{
 			entity_id: string;
 			entity_kind: "observation" | "memory";
 			session_id: string | null;
 			vector: string;
 		}>;
+		// Legacy rows are backfilled lazily. A bounded fallback keeps semantic
+		// retrieval available during migration without reinstating a recency-only
+		// cliff for indexed rows.
+		if (rows.length < Math.min(limit, 20)) {
+			const legacyRows = db
+				.prepare(`SELECT entity_id, entity_kind, session_id, vector
+				  FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
+				    AND vector_bucket = '' ORDER BY updated_at DESC LIMIT 1000`)
+				.all(currentWorkspace, vector.length) as typeof rows;
+			rows.push(...legacyRows);
+		}
 		let queryNorm = 0;
 		for (const value of vector) queryNorm += value * value;
 		queryNorm = Math.sqrt(queryNorm);
@@ -2217,13 +2302,30 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			.slice(0, Math.max(1, Math.min(limit, 200)));
 	}
 
-	function hasEmbedding(id: string): boolean {
+	function hasEmbedding(
+		id: string,
+		metadata: Partial<EmbeddingMetadata> = {},
+	): boolean {
+		const conditions = ["entity_id = ?", "workspace = ?"];
+		const params: Array<string | number> = [id, currentWorkspace];
+		if (metadata.model !== undefined) {
+			conditions.push("model = ?");
+			params.push(metadata.model);
+		}
+		if (metadata.contentHash !== undefined) {
+			conditions.push("content_hash = ?");
+			params.push(metadata.contentHash);
+		}
+		if (metadata.creationVersion !== undefined) {
+			conditions.push("creation_version = ?");
+			params.push(metadata.creationVersion);
+		}
 		return Boolean(
 			db
 				.prepare(
-					"SELECT 1 AS found FROM memory_embeddings WHERE entity_id = ? AND workspace = ?",
+					`SELECT 1 AS found FROM memory_embeddings WHERE ${conditions.join(" AND ")}`,
 				)
-				.get(id, currentWorkspace),
+				.get(...params),
 		);
 	}
 
@@ -2502,6 +2604,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		budget: number = 4000,
 		query: string | ContextRetrievalQuery = "",
 	): string {
+		const retrievalStarted = performance.now();
 		const retrieval = typeof query === "string" ? { objective: query } : query;
 		const objective = retrieval.objective?.trim() || "";
 		const phase = retrieval.phase || "orient";
@@ -2523,6 +2626,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			sourceKey: string;
 			similarityText: string;
 			memoryId?: string;
+			reasons: string[];
 		};
 		const candidates: Candidate[] = [];
 		const episodicFallbackCandidates: Candidate[] = [];
@@ -2598,6 +2702,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				score: 8 + overlapScore(session.summary) * 12,
 				sourceKey: sessionId,
 				similarityText: session.summary,
+				reasons: ["session-summary"],
 			});
 		}
 
@@ -2636,6 +2741,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					recencyScore(claim.transactionTime),
 				sourceKey: claim.observationId,
 				similarityText: claim.text,
+				reasons: [
+					claim.status,
+					`confidence:${claim.confidence.toFixed(2)}`,
+					"lexical-overlap",
+				],
 			});
 			claimCandidateCount++;
 		}
@@ -2761,6 +2871,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				score,
 				sourceKey: obs.sessionId,
 				similarityText: body,
+				reasons: [
+					...(lexicalObservationRank.has(obs.id) ? ["fts"] : []),
+					...(semanticObservationRank.has(obs.id) ? ["dense"] : []),
+					...(files > 0 ? ["file-match"] : []),
+					...(isEpisode ? ["semantic-episode"] : []),
+				],
 			});
 		}
 
@@ -2815,6 +2931,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				sourceKey: mem.sessionIds[0] || `memory:${mem.type}`,
 				similarityText: body,
 				memoryId: mem.id,
+				reasons: [
+					...(lexicalMemoryRank.has(mem.id) ? ["fts"] : []),
+					...(semanticMemoryRank.has(mem.id) ? ["dense"] : []),
+					...(files > 0 ? ["file-match"] : []),
+					`strength:${mem.strength}`,
+				],
 			});
 			memoryCandidateCount++;
 		}
@@ -2829,12 +2951,89 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				.forEach(candidate => candidates.push(candidate));
 		}
 
-		const blocks = selectContextCandidates(candidates, {
-			budget,
-			maxItems: 40,
-			preferredItemsPerSource: 2,
-		});
+		const defaultQuotas: Record<ContextBlock["type"], number> = {
+			summary: 0.1,
+			claim: 0.3,
+			memory: 0.45,
+			observation: 0.15,
+		};
+		const quotas = { ...defaultQuotas, ...(retrieval.typedQuotas || {}) };
+		const selectedByQuota: Candidate[] = [];
+		for (const type of ["summary", "claim", "memory", "observation"] as const) {
+			selectedByQuota.push(
+				...selectContextCandidates(
+					candidates.filter(candidate => candidate.type === type),
+					{
+						budget: Math.floor(budget * Math.max(0, quotas[type])),
+						maxItems: type === "observation" ? 6 : 20,
+						preferredItemsPerSource: 2,
+					},
+				),
+			);
+		}
+		const quotaIds = new Set(selectedByQuota.map(candidate => candidate.id));
+		const quotaTokens = selectedByQuota.reduce(
+			(sum, candidate) => sum + candidate.tokens,
+			0,
+		);
+		const blocks = [
+			...selectedByQuota,
+			...selectContextCandidates(
+				candidates.filter(candidate => !quotaIds.has(candidate.id)),
+				{
+					budget: Math.max(0, budget - quotaTokens),
+					maxItems: Math.max(0, 40 - selectedByQuota.length),
+					preferredItemsPerSource: 2,
+				},
+			),
+		];
 		const tokenCount = blocks.reduce((sum, block) => sum + block.tokens, 0);
+		const candidateCounts = candidates.reduce<Record<string, number>>(
+			(counts, candidate) => {
+				counts[candidate.type] = (counts[candidate.type] || 0) + 1;
+				return counts;
+			},
+			{},
+		);
+		const trace: RetrievalTrace = {
+			id: generateId(),
+			workspace: currentWorkspace,
+			sessionId,
+			objective: sanitizeString(objective).slice(0, 1000),
+			phase,
+			createdAt: now(),
+			latencyMs: Number((performance.now() - retrievalStarted).toFixed(3)),
+			budget,
+			tokens: tokenCount,
+			abstained: blocks.length === 0,
+			reason:
+				blocks.length === 0 ? "no-relevant-trusted-candidates" : undefined,
+			candidateCounts,
+			selected: blocks.map(block => ({
+				id: block.id,
+				type: block.type,
+				score: Number(block.score.toFixed(4)),
+				reasons: block.reasons,
+			})),
+		};
+		db.prepare(`INSERT INTO retrieval_traces
+		  (id, workspace, session_id, objective, phase, created_at, latency_ms,
+		   budget, tokens, abstained, reason, candidate_counts, selected)
+		  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+			trace.id,
+			trace.workspace,
+			trace.sessionId,
+			trace.objective,
+			trace.phase || "orient",
+			trace.createdAt,
+			trace.latencyMs,
+			trace.budget,
+			trace.tokens,
+			trace.abstained ? 1 : 0,
+			trace.reason || null,
+			JSON.stringify(trace.candidateCounts),
+			JSON.stringify(trace.selected),
+		);
 		if (!blocks.length) return "";
 		for (const memoryId of new Set(
 			blocks.flatMap(block => (block.memoryId ? [block.memoryId] : [])),
@@ -2892,6 +3091,32 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				.map(token => token.replace(/(?:ing|ed|es|s)$/i, ""))
 				.filter(token => token.length > 1 && !stop.has(token)),
 		);
+	}
+
+	function listRetrievalTraces(limit: number = 100): RetrievalTrace[] {
+		const rows = db
+			.prepare(`SELECT * FROM retrieval_traces
+			  WHERE workspace = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+			.all(currentWorkspace, Math.max(1, Math.min(limit, 1000))) as any[];
+		return rows.map(row => ({
+			id: row.id,
+			workspace: row.workspace,
+			sessionId: row.session_id,
+			objective: row.objective,
+			phase: row.phase,
+			createdAt: row.created_at,
+			latencyMs: row.latency_ms,
+			budget: row.budget,
+			tokens: row.tokens,
+			abstained: row.abstained === 1,
+			reason: row.reason || undefined,
+			candidateCounts: (safeParseJson(row.candidate_counts) || {}) as Record<
+				string,
+				number
+			>,
+			selected: (safeParseJson(row.selected) ||
+				[]) as RetrievalTrace["selected"],
+		}));
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────────────
@@ -3131,9 +3356,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	function getRelations(memoryId: string): MemoryRelation[] {
 		const rows = db
 			.prepare(
-				`SELECT * FROM relations WHERE source_id = ? OR target_id = ? ORDER BY created_at DESC`,
+				`SELECT r.* FROM relations r
+				 JOIN memories source ON source.id = r.source_id
+				 JOIN memories target ON target.id = r.target_id
+				 WHERE (r.source_id = ? OR r.target_id = ?)
+				   AND source.workspace = ? AND target.workspace = ?
+				 ORDER BY r.created_at DESC`,
 			)
-			.all(memoryId, memoryId) as any[];
+			.all(memoryId, memoryId, currentWorkspace, currentWorkspace) as any[];
 
 		return rows.map(r => ({
 			id: r.id,
@@ -3150,7 +3380,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		maxHops: number = 2,
 		minConfidence: number = 0,
 	): Array<{ memory: Memory; hop: number; confidence: number }> {
-		const allRelations = db.prepare(`SELECT * FROM relations`).all() as any[];
+		if (!get(memoryId)) return [];
+		const allRelations = db
+			.prepare(`SELECT r.* FROM relations r
+			  JOIN memories source ON source.id = r.source_id
+			  JOIN memories target ON target.id = r.target_id
+			  WHERE source.workspace = ? AND target.workspace = ?`)
+			.all(currentWorkspace, currentWorkspace) as any[];
 
 		const visited = new Set<string>([memoryId]);
 		const result: Array<{ memory: Memory; hop: number; confidence: number }> =
@@ -3272,8 +3508,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function removeRelation(relationId: string): boolean {
 		const result = db
-			.prepare("DELETE FROM relations WHERE id = ?")
-			.run(relationId);
+			.prepare(`DELETE FROM relations WHERE id = ? AND EXISTS (
+			  SELECT 1 FROM memories source JOIN memories target
+			  WHERE source.id = relations.source_id AND target.id = relations.target_id
+			    AND source.workspace = ? AND target.workspace = ?
+			)`)
+			.run(relationId, currentWorkspace, currentWorkspace);
 		return result.changes > 0;
 	}
 
@@ -4024,6 +4264,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		failExtractionJob,
 		listExtractionJobs,
 		getContext,
+		listRetrievalTraces,
 		upsertEmbedding,
 		hasEmbedding,
 		searchEmbeddings,

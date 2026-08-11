@@ -343,6 +343,10 @@ const HTML = `<!DOCTYPE html>
 		.claim-lineage .arrow { color: var(--violet); font-size: 14px; }
 		.claim-evidence { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border-soft); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 		.confidence { min-width: 42px; font-variant-numeric: tabular-nums; }
+		.trace-metrics { display: grid; grid-template-columns: repeat(4, minmax(80px, 1fr)); gap: 8px; margin-top: 12px; }
+		.trace-metric { padding: 9px 10px; background: var(--surface-raised); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+		.trace-metric b { display: block; color: var(--text); font: 650 14px var(--font-display); }
+		.trace-metric span { color: var(--text-faint); font: 9.5px var(--font-mono); text-transform: uppercase; }
 
 		@media (max-width: 760px) {
 			.sidebar { width: 72px; padding: 14px 8px; }
@@ -419,6 +423,7 @@ const HTML = `<!DOCTYPE html>
         <div class="nav-group-label">System</div>
         <button data-tab="working-memory"><span class="ic">&#9642;</span>Working Set</button>
         <button data-tab="audit"><span class="ic">&#9776;</span>Audit Log</button>
+				<button data-tab="retrieval"><span class="ic">&#8644;</span>Retrieval</button>
         <button data-tab="graph" disabled><span class="ic">&#8982;</span>Graph<span class="soon">soon</span></button>
         <button data-tab="replay" disabled><span class="ic">&#9654;</span>Replay<span class="soon">soon</span></button>
       </nav>
@@ -511,6 +516,15 @@ const HTML = `<!DOCTYPE html>
         </div>
       </div>
 
+			<div id="view-retrieval" class="view">
+				<div class="toolbar">
+					<select id="retrieval-filter"><option value="">All outcomes</option><option value="selected">Selected context</option><option value="abstained">Abstained</option></select>
+					<button class="btn" id="btn-refresh-retrieval">Refresh</button>
+					<span class="result-count" id="retrieval-count">—</span>
+				</div>
+				<div id="retrieval-list"></div>
+			</div>
+
       <div id="view-activity" class="view">
         <div class="toolbar"><button class="btn" id="btn-refresh-activity">Refresh</button></div>
         <div class="card"><div id="activity-feed"></div></div>
@@ -550,6 +564,7 @@ const HTML = `<!DOCTYPE html>
     profile: ['Profile', 'Aggregate stats per project'],
     'working-memory': ['Working Set', 'Recency-tiered memory (hot / warm / cold / archived)'],
     audit: ['Audit Log', 'Every memory write, in order'],
+		retrieval: ['Retrieval Waterfall', 'Why context was selected, rejected, or withheld'],
     graph: ['Graph', 'Knowledge graph'],
     replay: ['Replay', 'Session replay'],
   };
@@ -578,6 +593,7 @@ const HTML = `<!DOCTYPE html>
     else if (tabId === 'timeline') loadTimeline();
     else if (tabId === 'sessions') loadSessions();
     else if (tabId === 'audit') loadAudit();
+		else if (tabId === 'retrieval') loadRetrieval();
     else if (tabId === 'activity') loadActivity();
     else if (tabId === 'profile') loadProfile();
     else if (tabId === 'working-memory') loadWorkingMemory();
@@ -868,6 +884,39 @@ const HTML = `<!DOCTYPE html>
       document.getElementById('audit-body').innerHTML = html;
     } catch (e) { console.error('[audit] error:', e); }
   }
+	async function loadRetrieval() {
+		const list = document.getElementById('retrieval-list');
+		list.innerHTML = '<div class="loading-state"><div class="loading-line"></div><div class="loading-line"></div></div>';
+		try {
+			const res = await api('/retrieval-traces?limit=200');
+			if (!res.ok) throw new Error('Retrieval trace request failed: ' + res.status);
+			const mode = document.getElementById('retrieval-filter').value;
+			let traces = await res.json();
+			if (mode === 'abstained') traces = traces.filter(trace => trace.abstained);
+			if (mode === 'selected') traces = traces.filter(trace => !trace.abstained);
+			document.getElementById('retrieval-count').textContent = traces.length + (traces.length === 1 ? ' trace' : ' traces');
+			list.innerHTML = traces.length ? traces.map(trace => {
+				const selected = (trace.selected || []).map(item =>
+					'<div class="claim-evidence"><span class="badge badge-'+(item.type === 'claim' ? 'teal' : item.type === 'memory' ? 'violet' : 'slate')+'">'+esc(item.type)+'</span>' +
+					'<span class="entry-meta">'+esc(item.id)+' · score '+Number(item.score || 0).toFixed(2)+' · '+esc((item.reasons || []).join(', '))+'</span></div>'
+				).join('');
+				const counts = Object.entries(trace.candidateCounts || {}).map(([kind, count]) => esc(kind)+': '+count).join(' · ');
+				return '<article class="entry-card">' +
+					'<div class="entry-head"><span class="badge badge-'+(trace.abstained ? 'amber' : 'sage')+'">'+(trace.abstained ? 'ABSTAINED' : 'SELECTED')+'</span>' +
+					'<span class="badge badge-muted">'+esc(trace.phase || 'orient')+'</span><span class="entry-meta" style="margin-left:auto">'+esc(trace.createdAt?.slice(0,19))+'</span></div>' +
+					'<div class="entry-title">'+esc(trace.objective || 'Context refresh')+'</div>' +
+					(trace.reason ? '<div class="entry-body" style="color:var(--amber)">'+esc(trace.reason)+'</div>' : '') +
+					'<div class="trace-metrics"><div class="trace-metric"><b>'+Number(trace.latencyMs || 0).toFixed(2)+'</b><span>latency ms</span></div>' +
+					'<div class="trace-metric"><b>'+Number(trace.tokens || 0)+'</b><span>tokens</span></div>' +
+					'<div class="trace-metric"><b>'+Number(trace.budget || 0)+'</b><span>budget</span></div>' +
+					'<div class="trace-metric"><b>'+Number((trace.selected || []).length)+'</b><span>selected</span></div></div>' +
+					'<div class="entry-meta" style="margin-top:10px">Candidates · '+esc(counts || 'none')+'</div>'+selected+'</article>';
+			}).join('') : '<div class="empty-state"><div class="empty-icon">&#8644;</div><p>No retrieval traces yet</p></div>';
+		} catch (e) {
+			console.error('[retrieval] error:', e);
+			list.innerHTML = '<div class="empty-state"><div class="empty-icon">!</div><p>Could not load retrieval traces</p></div>';
+		}
+	}
   async function loadActivity() {
     try {
       const res = await api('/activity?limit=50');
@@ -982,6 +1031,8 @@ const HTML = `<!DOCTYPE html>
   document.getElementById('timeline-min-importance').addEventListener('change', loadTimeline);
   document.getElementById('btn-refresh-timeline').addEventListener('click', loadTimeline);
   document.getElementById('btn-refresh-audit').addEventListener('click', loadAudit);
+	document.getElementById('btn-refresh-retrieval').addEventListener('click', loadRetrieval);
+	document.getElementById('retrieval-filter').addEventListener('change', loadRetrieval);
   document.getElementById('btn-refresh-activity').addEventListener('click', loadActivity);
   document.getElementById('btn-refresh-wm').addEventListener('click', loadWorkingMemory);
   document.getElementById('wm-tier-filter').addEventListener('change', loadWorkingMemory);

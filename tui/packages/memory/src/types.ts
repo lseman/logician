@@ -144,6 +144,8 @@ export interface ContextRetrievalQuery {
 	toolFailures?: number;
 	/** Internal optional query embedding used by hybrid retrieval. */
 	semanticVector?: number[];
+	/** Optional per-kind fractions; unspecified kinds use safe defaults. */
+	typedQuotas?: Partial<Record<ContextBlock["type"], number>>;
 }
 
 // ── Dedup Config ─────────────────────────────────────────────────────────────
@@ -353,6 +355,12 @@ export interface SemanticSearchResult {
 	score: number;
 }
 
+export interface EmbeddingMetadata {
+	model: string;
+	contentHash: string;
+	creationVersion: number;
+}
+
 export interface MemoryQuery {
 	/** Full-text search across memory content and titles */
 	search?: string;
@@ -377,6 +385,27 @@ export interface ContextBlock {
 	content: string;
 	tokens: number;
 	recency: number;
+}
+
+export interface RetrievalTrace {
+	id: string;
+	workspace: string;
+	sessionId: string;
+	objective: string;
+	phase: ContextRetrievalQuery["phase"];
+	createdAt: string;
+	latencyMs: number;
+	budget: number;
+	tokens: number;
+	abstained: boolean;
+	reason?: string;
+	candidateCounts: Record<string, number>;
+	selected: Array<{
+		id: string;
+		type: ContextBlock["type"];
+		score: number;
+		reasons: string[];
+	}>;
 }
 
 export type ExtractionJobStatus =
@@ -516,13 +545,15 @@ export interface MemoryStore {
 		budget?: number,
 		query?: string | ContextRetrievalQuery,
 	): string;
+	listRetrievalTraces(limit?: number): RetrievalTrace[];
 	upsertEmbedding(
 		id: string,
 		kind: "observation" | "memory",
 		vector: number[],
 		sessionId?: string,
+		metadata?: EmbeddingMetadata,
 	): void;
-	hasEmbedding(id: string): boolean;
+	hasEmbedding(id: string, metadata?: Partial<EmbeddingMetadata>): boolean;
 	searchEmbeddings(vector: number[], limit?: number): SemanticSearchResult[];
 
 	// Session tracking
