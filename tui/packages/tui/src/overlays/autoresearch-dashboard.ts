@@ -6,12 +6,13 @@
 // Escape or q. There's nothing to "select" here (rows aren't actionable),
 // so handleInput only ever returns close/null — Enter is a no-op.
 
-import type {
-	AutoresearchDashboardRow,
-	AutoresearchSession,
+import {
+	type AutoresearchDashboardRow,
+	type AutoresearchSession,
+	formatNum,
 } from "@logician/autoresearch";
-import { formatNum } from "@logician/autoresearch";
 import type { Component } from "../terminal/core.ts";
+
 import { theme } from "../terminal/theme.ts";
 import {
 	type ListItem,
