@@ -62,7 +62,7 @@ export class HarnessInterventionController {
 	private sequence = 0;
 
 	record(input: InterventionInput): HarnessIntervention {
-		const key = `${input.kind}:${input.detector}:${input.cause}`;
+		const key = this.incidentKey(input.kind, input.detector, input.cause);
 		const previous = this.incidents.get(key);
 		const attempt = (previous?.attempt ?? 0) + 1;
 		const id = previous?.id ?? `intervention-${++this.sequence}`;
@@ -74,7 +74,12 @@ export class HarnessInterventionController {
 			kind: input.kind,
 			cause: input.cause,
 			action,
-			severity: action === "pause" || action === "stop" ? "error" : "warning",
+			severity:
+				action === "pause" || action === "stop"
+					? "error"
+					: action === "notice" || action === "continue"
+						? "info"
+						: "warning",
 			detector: input.detector,
 			attempt,
 			evidence: {
@@ -91,6 +96,32 @@ export class HarnessInterventionController {
 	/** Verified progress closes active incidents so later failures start fresh. */
 	recordProgress(): void {
 		this.incidents.clear();
+	}
+
+	/** Rebuild escalation state from a durable intervention trajectory. */
+	replay(events: readonly HarnessIntervention[]): void {
+		this.incidents.clear();
+		for (const event of events) {
+			const key = this.incidentKey(event.kind, event.detector, event.cause);
+			const previous = this.incidents.get(key);
+			if (!previous || event.attempt >= previous.attempt) {
+				this.incidents.set(key, {
+					id: event.id,
+					attempt: event.attempt,
+					lastIteration: event.iteration,
+				});
+			}
+			const numericId = Number(event.id.match(/(\d+)$/)?.[1] ?? 0);
+			this.sequence = Math.max(this.sequence, numericId);
+		}
+	}
+
+	private incidentKey(
+		kind: HarnessInterventionKind,
+		detector: string,
+		cause: string,
+	): string {
+		return `${kind}:${detector}:${cause}`;
 	}
 
 	private escalatedAction(attempt: number): HarnessInterventionAction {

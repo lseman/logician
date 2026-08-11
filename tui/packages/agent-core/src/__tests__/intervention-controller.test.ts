@@ -47,5 +47,17 @@ void test("callers can explicitly select lifecycle actions", () => {
 	});
 
 	assert.equal(event.action, "continue");
-	assert.equal(event.severity, "warning");
+	assert.equal(event.severity, "info");
+});
+
+void test("durable trajectories restore escalation state for resumed runs", () => {
+	const original = new HarnessInterventionController();
+	const trajectory = [original.record(input(1)), original.record(input(2))];
+	const resumed = new HarnessInterventionController();
+	resumed.replay(trajectory);
+
+	const next = resumed.record(input(5));
+	assert.equal(next.id, trajectory[0]?.id);
+	assert.equal(next.attempt, 3);
+	assert.equal(next.action, "pause");
 });

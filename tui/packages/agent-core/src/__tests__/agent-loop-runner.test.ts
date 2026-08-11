@@ -407,6 +407,13 @@ void test("provider retry stays within one iteration and ends only after success
 		retryEnds.map(event => event.success),
 		[true],
 	);
+	const retryInterventions = events.filter(
+		event => event.type === "harness_intervention" && event.kind === "retry",
+	);
+	assert.equal(retryInterventions.length, 1);
+	const retryIntervention = retryInterventions[0];
+	assert.ok(retryIntervention?.type === "harness_intervention");
+	assert.equal(retryIntervention.action, "recover");
 	assert.equal(events.filter(event => event.type === "error").length, 0);
 });
 
@@ -415,6 +422,7 @@ void test("context-full retry compacts and publishes the live transcript", async
 		user(`old message ${index} ${"x".repeat(2000)}`),
 	);
 	let compacted: Message[] | undefined;
+	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
 		() => {
 			throw new BackendError({ category: "context_full", message: "too long" });
@@ -435,7 +443,9 @@ void test("context-full retry compacts and publishes the live transcript", async
 				compacted = messages;
 			},
 		},
-		() => {},
+		event => {
+			events.push(event);
+		},
 	);
 	assert.ok(compacted);
 	assert.ok(
@@ -444,6 +454,14 @@ void test("context-full retry compacts and publishes the live transcript", async
 		),
 	);
 	assert.equal(compacted.at(-1)?.content, "recovered");
+	assert.equal(
+		events.filter(
+			event =>
+				event.type === "harness_intervention" &&
+				event.kind === "compaction",
+		).length,
+		1,
+	);
 });
 
 void test("aborting retry backoff prevents another provider request", async () => {

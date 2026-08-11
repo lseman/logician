@@ -447,6 +447,33 @@ void test("enabled sessions journal operation and turn boundaries", async () => 
 	assert.equal(session.loadJournalEvents().length, events.length);
 });
 
+void test("enabled sessions persist resumable checkpoints at tool boundaries", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "logician-checkpoint-"));
+	const harness = makeHarness(
+		new FakeBackend([
+			() => ({
+				content: "",
+				toolCalls: [{ id: "call_1", name: "noop", arguments: "{}" }],
+				stopReason: "stop",
+			}),
+			() => textResponse("done"),
+		]),
+	);
+	await harness.enableSession(dir);
+	await harness.prompt("run the tool");
+
+	const sessionInfo = harness.listSessions()[0];
+	const session = new Session(sessionInfo.id, { baseDir: dir, enabled: true });
+	const events = session.loadJournalEvents();
+	const toolEnd = events.find(event => event.type === "tool_end");
+	const checkpoint = events.find(event => event.type === "checkpoint");
+
+	assert.equal(toolEnd?.toolCallId, "call_1");
+	assert.equal(checkpoint?.toolCallId, "call_1");
+	assert.equal(checkpoint?.status, "tool_boundary");
+	assert.equal(checkpoint?.operationId, toolEnd?.operationId);
+});
+
 void test("session typed entries build deterministic context", () => {
 	const dir = mkdtempSync(join(tmpdir(), "logician-session-tree-"));
 	const session = new Session("tree", { baseDir: dir, enabled: true });

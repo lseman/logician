@@ -835,6 +835,23 @@ export class AgentHarness {
 				toolName: event.toolName,
 				status: event.isError ? "error" : "completed",
 			});
+			this._session.appendJournalEvent({
+				type: "checkpoint",
+				operationId,
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				status: event.isError ? "tool_error" : "tool_boundary",
+			});
+		} else if (event.type === "harness_intervention") {
+			this._session.appendJournalEvent({
+				type: "intervention",
+				operationId,
+				interventionId: event.id,
+				cause: event.cause,
+				action: event.action,
+				iteration: event.iteration,
+				status: event.severity,
+			});
 		}
 	}
 

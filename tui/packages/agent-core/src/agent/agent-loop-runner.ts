@@ -683,6 +683,20 @@ async function runAgentLoopInTaskScope(
 						delayMs: guardResult.retryDelayMs ?? 0,
 						error: guardResult.message ?? String(llmError),
 					});
+					await intervene({
+						kind: "retry",
+						cause: guardResult.action,
+						detector: "provider_error_guard",
+						message: guardResult.message ?? String(llmError),
+						iteration,
+						action: "recover",
+						counters: { attempt: activeRetryAttempt },
+						limits: { maxRetries: guardResult.maxRetries ?? 3 },
+						nextAction:
+							guardResult.action === "compact_then_retry"
+								? "Compact context, then retry the provider request."
+								: "Retry the provider request after backoff.",
+					});
 
 					if (guardResult.action === "compact_then_retry") {
 						const compacted = await compactToFit(
@@ -720,6 +734,18 @@ async function runAgentLoopInTaskScope(
 							tokens: compacted.tokensAfter,
 							maxTokens: config.contextWindowTokens,
 							compacted: true,
+						});
+						await intervene({
+							kind: "compaction",
+							cause: "context_full",
+							detector: "provider_retry",
+							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens before retrying.`,
+							iteration,
+							action: "continue",
+							counters: {
+								tokensBefore: compacted.tokensBefore,
+								tokensAfter: compacted.tokensAfter,
+							},
 						});
 					}
 
@@ -970,6 +996,18 @@ async function runAgentLoopInTaskScope(
 							tokens: compacted.tokensAfter,
 							maxTokens: config.contextWindowTokens,
 							compacted: true,
+						});
+						await intervene({
+							kind: "compaction",
+							cause: "budget_exhausted",
+							detector: "context_budget",
+							message: `Context compacted from ${compacted.tokensBefore} to ${compacted.tokensAfter} tokens.`,
+							iteration,
+							action: "continue",
+							counters: {
+								tokensBefore: compacted.tokensBefore,
+								tokensAfter: compacted.tokensAfter,
+							},
 						});
 					}
 				}

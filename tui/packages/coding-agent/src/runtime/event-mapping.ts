@@ -167,9 +167,6 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				recoverable: event.recoverable,
 			};
 		case "run_outcome":
-			if (event.status === "completed" && event.source === "heuristic") {
-				return null;
-			}
 			if (
 				event.status === "cancelled" &&
 				event.summary === STEERING_INTERRUPT_SUMMARY

@@ -189,27 +189,18 @@ export function handleEvent(
 			break;
 		case "agent_retry_start":
 			ctx.statusPanel.update({ phase: "retrying" });
-			ctx.transcript.handleEvent({
-				type: "notice",
-				level: "warn",
-				label: "Retry",
-				text: `Attempt ${event.attempt}/${event.maxRetries} in ${event.delayMs}ms${event.reason ? ` (${event.reason})` : ""}: ${event.error}`,
-			});
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			break;
 		case "agent_retry_end":
-			ctx.transcript.handleEvent({
-				type: "notice",
-				level: event.success ? "success" : "error",
-				label: "Retry",
-				text: `Attempt ${event.attempt} ${event.success ? "recovered" : "failed"}${event.reason ? ` (${event.reason})` : ""}.`,
-			});
-			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
+			ctx.statusPanel.update({ phase: event.success ? "thinking" : "error" });
 			break;
 		case "agent_error":
-			ctx.transcript.addSystemMessage(
-				`Agent error (${event.phase}): ${event.message}`,
-			);
+			ctx.transcript.handleEvent({
+				type: "notice",
+				level: event.recoverable ? "warn" : "error",
+				label: `Agent error: ${event.phase}`,
+				text: event.message,
+			});
+			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			break;
 		case "tool_execution_start":
 			ctx.workSurface.recordToolStart(
@@ -279,22 +270,16 @@ export function handleEvent(
 							: undefined,
 				}),
 			});
-			if (event.compacted === true) {
-				ctx.transcript.handleEvent({
-					type: "notice",
-					level: "info",
-					label: "Context recovery",
-					text: `Context was compacted and the run will continue at ${formatContextSize(Number(event.tokens || 0))}.`,
-				});
-				ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
-			}
 			break;
 		case "compaction":
-			ctx.transcript.addSystemMessage(
-				`Context compacted (${formatContextSize(
+			ctx.transcript.handleEvent({
+				type: "notice",
+				level: "info",
+				label: "Compaction",
+				text: `Context compacted (${formatContextSize(
 					Number(event.tokensBefore || 0),
 				)} -> ${formatContextSize(Number(event.tokensAfter || 0))}).`,
-			);
+			});
 			ctx.transcriptDisplay.setTurns(ctx.transcript.getTurns());
 			ctx.statusPanel.update({
 				phase: "compacted",
