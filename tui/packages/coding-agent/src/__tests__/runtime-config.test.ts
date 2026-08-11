@@ -18,6 +18,8 @@ function configuredWorkspace(): string {
 			mcpEager: true,
 			hooks: true,
 			rtkProxyEnabled: true,
+			ariadneEnabled: false,
+			fffgrepEnabled: false,
 			autoRetryEnabled: false,
 			maxRetries: 2,
 			retryBaseDelayMs: 25,
@@ -56,6 +58,8 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.permissionMode, "ask");
 	assert.equal(resolved.bridge.mcpEager, true);
 	assert.equal(resolved.bridge.rtkProxyEnabled, true);
+	assert.equal(resolved.bridge.ariadneEnabled, false);
+	assert.equal(resolved.bridge.fffgrepEnabled, false);
 	assert.equal(resolved.bridge.autoRetryEnabled, false);
 	assert.equal(resolved.bridge.maxRetries, 2);
 	assert.equal(resolved.bridge.retryBaseDelayMs, 25);

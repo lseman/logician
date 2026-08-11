@@ -24,6 +24,7 @@ export const DEFAULT_SEARXNG_URL = "http://localhost:8090";
 export interface DefaultToolsOptions {
 	// SearXNG config; defaults to DEFAULT_SEARXNG_URL when omitted.
 	webSearch?: WebSearchConfig;
+	ariadneEnabled?: boolean;
 }
 
 export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
@@ -31,7 +32,7 @@ export function createDefaultTools(opts: DefaultToolsOptions = {}): Tool[] {
 	const tools: Tool[] = [
 		list_files,
 		find,
-		ariadne, // Ariadne code graph — prefer for semantic analysis
+		...(opts.ariadneEnabled !== false ? [ariadne] : []),
 		read_file,
 		grep,
 		edit_file,

@@ -412,6 +412,8 @@ export class LogicianTUI {
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
 			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
+			ariadneEnabled: runtimeConfig.bridge.ariadneEnabled ?? true,
+			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
 			memoryEnabled: runtimeConfig.bridge.memoryEnabled ?? false,
 			// MCP discovery starts in the background the moment the bridge is
 			// constructed (ToolRouter's constructor), so it's typically already

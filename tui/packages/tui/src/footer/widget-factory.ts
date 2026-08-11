@@ -44,6 +44,8 @@ export interface WidgetFactoryStatus {
 	promptTokens?: number;
 	completionTokens?: number;
 	rtkProxyEnabled?: boolean;
+	ariadneEnabled?: boolean;
+	fffgrepEnabled?: boolean;
 	memoryEnabled?: boolean;
 	tick?: number; // 0-7 for spinner animation
 }
@@ -351,6 +353,27 @@ function rtkWidget(status: WidgetFactoryStatus): WidgetData {
 	return styled("rtk", theme.fg("accent" as any, ""), "rtk", "on");
 }
 
+function toggleWidget(
+	id: WidgetId,
+	label: string,
+	enabled: boolean,
+): WidgetData {
+	return styled(
+		id,
+		theme.fg((enabled ? "success" : "dim") as any, ""),
+		`${label}:`,
+		enabled ? "on" : "off",
+	);
+}
+
+function ariadneWidget(status: WidgetFactoryStatus): WidgetData {
+	return toggleWidget("ariadne", "ari", status.ariadneEnabled ?? true);
+}
+
+function fffgrepWidget(status: WidgetFactoryStatus): WidgetData {
+	return toggleWidget("fffgrep", "fff", status.fffgrepEnabled ?? true);
+}
+
 function memoryWidget(status: WidgetFactoryStatus): WidgetData {
 	if (!status.memoryEnabled) return empty("memory");
 	return styled("memory", theme.fg("accent" as any, ""), "memory", "on");
@@ -431,6 +454,8 @@ const PROVIDERS: Record<
 	permission: permissionWidget,
 	mcp: mcpWidget,
 	rtk: rtkWidget,
+	ariadne: ariadneWidget,
+	fffgrep: fffgrepWidget,
 	memory: memoryWidget,
 	goal: goalWidget,
 	"execution-profile": executionProfileWidget,

@@ -108,6 +108,8 @@ export interface AgentConfig {
 	budgetStopEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	proactiveCompactionFraction?: number;
+	ariadneEnabled?: boolean;
+	fffgrepEnabled?: boolean;
 	continuationEnabled?: boolean;
 	toolExecution?: "sequential" | "parallel";
 	steeringQueueMode?: QueueMode;
