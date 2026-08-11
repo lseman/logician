@@ -21,9 +21,7 @@ export function resolveCompletionGate(
 	if (input.declared) {
 		return {
 			status:
-				input.declared.status === "done"
-					? "completed"
-					: input.declared.status,
+				input.declared.status === "done" ? "completed" : input.declared.status,
 			summary: input.declared.summary,
 			source: "structured",
 		};

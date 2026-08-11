@@ -3,11 +3,11 @@
 import type { PermissionManager } from "../../tools/shared/permissions.ts";
 import type { AgentStopPolicy, ExecutionProfile } from "../execution-policy.ts";
 import type { AcceptanceConfig } from "../guards/acceptance-contract.ts";
+import type { RunBudgetLimits } from "../run-budget.ts";
 import type { EventHandler } from "./types-events.ts";
 import type { AgentHooks } from "./types-hooks.ts";
 import type { Tool } from "./types-tools.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
-import type { RunBudgetLimits } from "../run-budget.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
 

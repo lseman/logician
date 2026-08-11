@@ -31,7 +31,7 @@ import type { TodoBar } from "../status/todo-bar.ts";
 import type { WorkSurface } from "../status/work-surface.ts";
 import type { TuiHandle } from "../terminal/core.ts";
 import { theme } from "../terminal/theme.ts";
-import { getGitVersion } from "./git-status.ts";
+import { getGitStatus, getGitVersion } from "./git-status.ts";
 import { registerRuntimeCommandContributions } from "./runtime/command-contributions.ts";
 import { formatStartupMessage } from "./startup/message.ts";
 
@@ -216,10 +216,23 @@ export function handleEvent(
 				event.result,
 				event.isError,
 			);
+			if (
+				!event.isError &&
+				[
+					"edit_file",
+					"write_file",
+					"write_file_append",
+					"git",
+					"bash",
+				].includes(event.toolName)
+			) {
+				updateGitFooter(ctx);
+			}
 			break;
 		case "turn_end":
 			// Auto-save the completed turn
 			ctx._autoSaveTurn();
+			updateGitFooter(ctx);
 			ctx.statusPanel.update({
 				turnCount: ctx.transcript.getTurns().length,
 				messageCount: ctx.transcript.getMessageCount(),
@@ -354,6 +367,21 @@ export function handleEvent(
 	}
 
 	ctx.tui.requestRender();
+}
+
+function updateGitFooter(ctx: BridgeEventHandlerCtx): void {
+	const git = getGitStatus();
+	ctx.statusPanel.update({
+		branch: git.branch,
+		gitCommit: git.commit,
+		gitModified: git.modified,
+		gitStaged: git.staged,
+		gitUntracked: git.untracked,
+		gitAhead: git.ahead,
+		gitBehind: git.behind,
+		gitAddedLines: git.addedLines,
+		gitRemovedLines: git.removedLines,
+	});
 }
 
 function assertNever(value: never): never {

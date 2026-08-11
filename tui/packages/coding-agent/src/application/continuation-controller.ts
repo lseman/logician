@@ -151,7 +151,9 @@ export class ContinuationController {
 		const statePath = this.statePath();
 		if (!existsSync(statePath)) return;
 		try {
-			const parsed = JSON.parse(readFileSync(statePath, "utf8")) as ContinuationLease;
+			const parsed = JSON.parse(
+				readFileSync(statePath, "utf8"),
+			) as ContinuationLease;
 			if (parsed.version === 1 && parsed.sessionId === this.sessionId) {
 				this.lease = parsed;
 			}

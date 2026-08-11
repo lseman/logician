@@ -5,7 +5,6 @@
 
 import { spawnSync } from "node:child_process";
 import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
-import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
 import {
 	recordBashMutations,
 	recordFileBeforeWrite,
@@ -18,6 +17,7 @@ import {
 	detectsCircling,
 } from "../../agent/guards/response-patterns.ts";
 import { ThinkingLoopDetector } from "../../agent/guards/thinking-loop-detector.ts";
+import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
 	estimateChatPayloadTokens,
@@ -267,7 +267,11 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			if (stopped) {
 				const message =
 					"Continuation stopped because token growth stayed below the progress threshold for two turns.";
-				recordTaskStatus({ status: "blocked", summary: message, ts: Date.now() });
+				recordTaskStatus({
+					status: "blocked",
+					summary: message,
+					ts: Date.now(),
+				});
 				emitIntervention({
 					kind: "budget",
 					cause: "low_progress",
@@ -321,7 +325,8 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 					iteration,
 					signals: [strategy],
 					action: "stop",
-					nextAction: "Use tools, test a concrete hypothesis, or report the blocker.",
+					nextAction:
+						"Use tools, test a concrete hypothesis, or report the blocker.",
 				});
 			}
 		};

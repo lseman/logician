@@ -17,6 +17,12 @@ export type {
 } from "./execution-policy.ts";
 export type { AcceptanceConfig } from "./guards/acceptance-contract.ts";
 export type {
+	HarnessIntervention,
+	HarnessInterventionAction,
+	HarnessInterventionEvidence,
+	HarnessInterventionKind,
+} from "./intervention-controller.ts";
+export type {
 	AcceptanceCriterion,
 	AcceptanceReview,
 	AcceptanceVerification,
@@ -57,12 +63,6 @@ export type {
 	AgentEventEnvelope,
 	EventHandler,
 } from "./types/types-events.ts";
-export type {
-	HarnessIntervention,
-	HarnessInterventionAction,
-	HarnessInterventionEvidence,
-	HarnessInterventionKind,
-} from "./intervention-controller.ts";
 export type {
 	AfterProviderResponseContext,
 	AfterToolCallContext,

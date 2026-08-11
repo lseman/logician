@@ -378,9 +378,7 @@ export class LoopDetector {
 
 	private isLooping(): boolean {
 		return (
-			this.isExactRepeat() ||
-			this.isDegenerateLoop() ||
-			this.isStagnating()
+			this.isExactRepeat() || this.isDegenerateLoop() || this.isStagnating()
 		);
 	}
 

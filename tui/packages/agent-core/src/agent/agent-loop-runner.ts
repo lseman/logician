@@ -19,10 +19,6 @@ import {
 import type { LLMBackend } from "./backend.ts";
 import { getInferenceMode } from "./configuration/inference-modes.ts";
 import {
-	HarnessInterventionController,
-	type InterventionInput,
-} from "./intervention-controller.ts";
-import {
 	evaluateStopPolicies,
 	resolveExecutionPolicy,
 } from "./execution-policy.ts";
@@ -41,6 +37,10 @@ import {
 	looksComplete,
 	looksNonCommittal,
 } from "./guards/response-patterns.ts";
+import {
+	HarnessInterventionController,
+	type InterventionInput,
+} from "./intervention-controller.ts";
 import {
 	applyHeaderPatch,
 	assistantText,
@@ -64,8 +64,9 @@ import {
 	estimateChatPayloadTokens,
 	sanitizeToolCallArguments,
 } from "./messages.ts";
-import { runWithTaskState } from "./tasks/run-task-state.ts";
+import { RunBudgetController } from "./run-budget.ts";
 import { resolveCompletionGate } from "./tasks/completion-gate.ts";
+import { runWithTaskState } from "./tasks/run-task-state.ts";
 import {
 	hasMeaningfulTaskState,
 	TaskStateController,
@@ -73,7 +74,6 @@ import {
 } from "./tasks/task-state-controller.ts";
 import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
 import { ToolResultCache } from "./tool-cache.ts";
-import { RunBudgetController } from "./run-budget.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -1001,7 +1001,8 @@ async function runAgentLoopInTaskScope(
 					if (loopIntervention.action === "pause") {
 						return finish({
 							status: "blocked",
-							summary: "Repeated loop detection persisted after recovery attempts.",
+							summary:
+								"Repeated loop detection persisted after recovery attempts.",
 							source: "runtime",
 						});
 					}

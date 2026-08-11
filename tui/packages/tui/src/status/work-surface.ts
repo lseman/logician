@@ -183,9 +183,10 @@ export class WorkSurface implements Component {
 		}
 		if (this.evidence.tools > 0 || this.context) {
 			const label = this.active ? "Activity" : "Run summary";
-			const turnLabel = this.turnCount > 0
-				? `${this.turnCount} turn${this.turnCount === 1 ? "" : "s"}`
-				: "0 turns";
+			const turnLabel =
+				this.turnCount > 0
+					? `${this.turnCount} turn${this.turnCount === 1 ? "" : "s"}`
+					: "0 turns";
 			const state = this.active
 				? theme.fg("warning", "● running")
 				: theme.fg("success", "✓");

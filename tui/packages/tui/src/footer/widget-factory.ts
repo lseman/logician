@@ -28,6 +28,11 @@ export interface WidgetFactoryStatus {
 	gitModified?: number;
 	gitStaged?: number;
 	gitUntracked?: number;
+	gitCommit?: string;
+	gitAhead?: number;
+	gitBehind?: number;
+	gitAddedLines?: number;
+	gitRemovedLines?: number;
 	contextTokens: number;
 	contextMaxTokens?: number;
 	contextCompacted: boolean;
@@ -255,25 +260,57 @@ function branchWidget(status: WidgetFactoryStatus): WidgetData {
 	return withIcon("branch", "", text);
 }
 
-function commitWidget(_status: WidgetFactoryStatus): WidgetData {
-	// Not available in current status — would need commit SHA from bridge
-	return empty("commit");
+function commitWidget(status: WidgetFactoryStatus): WidgetData {
+	if (!status.gitCommit) return empty("commit");
+	return styled(
+		"commit",
+		theme.fg("muted" as any, ""),
+		"commit:",
+		status.gitCommit,
+	);
 }
 
 function gitDiffAddedWidget(status: WidgetFactoryStatus): WidgetData {
-	if (!status.gitModified) return empty("git-diff-added");
-	const val = `+${status.gitModified}`;
+	if (!status.gitAddedLines) return empty("git-diff-added");
+	const val = `+${status.gitAddedLines}`;
 	return withIcon("git-diff-added", "↗", theme.fg("success" as any, val));
 }
 
-function gitDiffRemovedWidget(_status: WidgetFactoryStatus): WidgetData {
-	// gitRemoved not in status — skip
-	return empty("git-diff-removed");
+function gitDiffRemovedWidget(status: WidgetFactoryStatus): WidgetData {
+	if (!status.gitRemovedLines) return empty("git-diff-removed");
+	return withIcon(
+		"git-diff-removed",
+		"↘",
+		theme.fg("error" as any, `-${status.gitRemovedLines}`),
+	);
 }
 
-function gitStatusWidget(): WidgetData {
-	// Ahead/behind info not yet exposed
-	return empty("git-status");
+function gitStatusWidget(status: WidgetFactoryStatus): WidgetData {
+	const hasRepository = Boolean(
+		status.branch ||
+			status.gitCommit ||
+			status.gitAhead ||
+			status.gitBehind ||
+			status.gitModified ||
+			status.gitStaged ||
+			status.gitUntracked,
+	);
+	if (!hasRepository) return empty("git-status");
+	const parts: string[] = [];
+	if (status.gitAhead) parts.push(`↑${status.gitAhead}`);
+	if (status.gitBehind) parts.push(`↓${status.gitBehind}`);
+	const dirty =
+		(status.gitModified ?? 0) +
+		(status.gitStaged ?? 0) +
+		(status.gitUntracked ?? 0);
+	if (dirty) parts.push(`${dirty} changed`);
+	else parts.push("clean");
+	return styled(
+		"git-status",
+		theme.fg(dirty ? ("warning" as any) : ("success" as any), ""),
+		"git:",
+		parts.join(" "),
+	);
 }
 
 function pullRequestWidget(_status: WidgetFactoryStatus): WidgetData {
