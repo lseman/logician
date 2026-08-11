@@ -2,6 +2,7 @@
 // Creates AgentHooks for the Logician agent — observation capture + context injection.
 // Returns undefined if memory is disabled.
 
+import { createHash } from "node:crypto";
 import type { AgentHooks, ExplicitTaskState } from "@logician/agent-core";
 import type { MemoryEmbedder } from "../embeddings/local-embedder.js";
 import type { TurnToolEvidence } from "../episodes/episode-synthesizer.js";
@@ -142,20 +143,33 @@ export function createMemoryHooks(
 			kind: "observation" | "memory";
 			text: string;
 			sessionId?: string;
+			creationVersion?: number;
 		}>,
 	) => {
-		if (!config.embedder || !entries.length) return;
-		const missing = entries.filter(entry => !store.hasEmbedding(entry.id));
+		const embedder = config.embedder;
+		if (!embedder || !entries.length) return;
+		const metadataFor = (entry: (typeof entries)[number]) => ({
+			model: embedder.model,
+			contentHash: createHash("sha256").update(entry.text).digest("hex"),
+			creationVersion: entry.creationVersion || 1,
+		});
+		const missing = entries.filter(
+			entry => !store.hasEmbedding(entry.id, metadataFor(entry)),
+		);
 		for (let offset = 0; offset < missing.length; offset += 16) {
 			if (config.shutdownSignal?.aborted) return;
 			const batch = missing.slice(offset, offset + 16);
-			const vectors = await config.embedder.embedBatch(
-				batch.map(entry => entry.text),
-			);
+			const vectors = await embedder.embedBatch(batch.map(entry => entry.text));
 			batch.forEach((entry, index) => {
 				const vector = vectors[index];
 				if (vector?.length)
-					store.upsertEmbedding(entry.id, entry.kind, vector, entry.sessionId);
+					store.upsertEmbedding(
+						entry.id,
+						entry.kind,
+						vector,
+						entry.sessionId,
+						metadataFor(entry),
+					);
 			});
 		}
 	};
@@ -232,6 +246,7 @@ export function createMemoryHooks(
 							kind: "memory" as const,
 							text: `${memory.title}\n${memory.content}`,
 							sessionId: memory.sessionIds[0],
+							creationVersion: memory.version,
 						})),
 					);
 				}
@@ -496,6 +511,7 @@ export function createMemoryHooks(
 						kind: "memory" as const,
 						text: `${memory.title}\n${memory.content}`,
 						sessionId: memory.sessionIds[0],
+						creationVersion: memory.version,
 					})),
 					...episodes.map(observation => ({
 						id: observation.id,

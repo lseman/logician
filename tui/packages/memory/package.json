@@ -8,6 +8,7 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
+		"eval": "bun run benchmarks/memory-eval.ts",
 		"test": "tsx --test $(find src -name '*.test.ts' -type f)",
 		"typecheck": "tsc --noEmit"
 	},
