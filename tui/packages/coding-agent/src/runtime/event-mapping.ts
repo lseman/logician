@@ -85,7 +85,10 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				message: event.message,
 			};
 		case "turn_start":
-			return null; // The bridge owns the user-visible turn lifecycle.
+			return {
+				type: "agent_iteration_start",
+				iteration: Number(event.turnId.replace(/^turn_/, "")) || 1,
+			};
 		case "turn_end":
 			// Core turn_end is per model/tool iteration, not per user-visible turn.
 			// Reconcile its final assistant snapshot without completing the UI card;

@@ -569,6 +569,21 @@ export class AgentHarness {
 		});
 	}
 
+	/**
+	 * Consume queued next-turn guidance and resume without fabricating a user
+	 * prompt whose content is merely "continue".
+	 */
+	async continueWithNextTurn(): Promise<Message[]> {
+		this.assertIdle("continue with next-turn guidance");
+		const guidance = this._nextTurnQueue.splice(0).map(createUserMessage);
+		if (guidance.length === 0) {
+			throw new Error("Cannot continue: no next-turn guidance queued");
+		}
+		this.history = [...this.history, ...guidance];
+		this.emitQueueChange();
+		return this.continue();
+	}
+
 	private async createContinueSnapshot(
 		signal: AbortSignal,
 	): Promise<HarnessTurnSnapshot> {
@@ -1466,7 +1481,11 @@ export class AgentHarness {
 				thinkingLevel: this.config.thinkingLevel,
 			});
 
-			if (!result.changed) {
+			if (
+				this.history !== messages ||
+				!result.changed ||
+				result.tokensAfter >= before
+			) {
 				await this.emitPostCompact();
 				this.emitToSubscribers({
 					type: "compaction",
@@ -1556,7 +1575,11 @@ export class AgentHarness {
 				thinkingLevel: this.config.thinkingLevel,
 			});
 
-			if (!result.changed) {
+			if (
+				this.history !== messages ||
+				!result.changed ||
+				result.tokensAfter >= before
+			) {
 				await this.emitPostCompact();
 				this.emitToSubscribers({
 					type: "compaction",

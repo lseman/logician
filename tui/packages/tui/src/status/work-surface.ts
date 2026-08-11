@@ -30,6 +30,8 @@ export class WorkSurface implements Component {
 	private evidence: Evidence = this.emptyEvidence();
 	private active = false;
 	private context = "";
+	private loopIteration = 0;
+	private turnCount = 0;
 	private onInvalidate: (() => void) | null = null;
 	private revision = 0;
 	private cachedWidth = -1;
@@ -40,10 +42,21 @@ export class WorkSurface implements Component {
 		this.onInvalidate = cb;
 	}
 
-	startTurn(): void {
+	/** Start a user-visible agent run and reset all per-run activity. */
+	startRun(): void {
 		this.active = true;
 		this.calls.clear();
 		this.evidence = this.emptyEvidence();
+		this.turnCount = 0;
+		this.revision++;
+		this.onInvalidate?.();
+	}
+
+	/** Record one provider/tool turn inside the active agent run. */
+	startTurn(): void {
+		this.active = true;
+		this.calls.clear();
+		this.turnCount++;
 		this.revision++;
 		this.onInvalidate?.();
 	}
@@ -72,6 +85,29 @@ export class WorkSurface implements Component {
 			: tokens > 0
 				? tokens.toLocaleString()
 				: "";
+		this.revision++;
+		this.onInvalidate?.();
+	}
+
+	setLoopIteration(iteration: number): void {
+		const changed = this.loopIteration !== iteration;
+		this.loopIteration = iteration;
+		if (changed) {
+			this.turnCount = 0;
+		}
+		this.revision++;
+		this.onInvalidate?.();
+	}
+
+	/** Reset all accumulated counters and state (called when a new session/run starts). */
+	reset(): void {
+		this.active = false;
+		this.workingSet = [];
+		this.calls.clear();
+		this.evidence = this.emptyEvidence();
+		this.context = "";
+		this.turnCount = 0;
+		this.loopIteration = 0;
 		this.revision++;
 		this.onInvalidate?.();
 	}
@@ -146,11 +182,16 @@ export class WorkSurface implements Component {
 			);
 		}
 		if (this.evidence.tools > 0 || this.context) {
-			const label = this.active ? "Activity" : "Turn summary";
+			const label = this.active ? "Activity" : "Run summary";
+			const turnLabel = this.turnCount > 0
+				? `${this.turnCount} turn${this.turnCount === 1 ? "" : "s"}`
+				: "0 turns";
 			const state = this.active
 				? theme.fg("warning", "● running")
 				: theme.fg("success", "✓");
 			const parts = [
+				turnLabel,
+				this.loopIteration > 0 ? `loop ${this.loopIteration}` : "",
 				`${this.evidence.tools} tools`,
 				this.evidence.changed.size
 					? `${this.evidence.changed.size} changed`

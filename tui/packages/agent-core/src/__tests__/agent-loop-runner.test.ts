@@ -112,18 +112,15 @@ void test("typed before_agent_start results augment provider context", async () 
 	);
 });
 
-void test("auto inference selects a preset and injects explicit task state", async () => {
+void test("auto inference selects a preset without injecting empty task state", async () => {
 	const events: AgentEvent[] = [];
 	const backend = new FakeBackend([
 		(messages, options) => {
 			assert.equal(options.temperature, 0.2);
 			assert.equal(options.topP, 0.7);
 			assert.ok(
-				messages.some(
-					message =>
-						message.role === "system" &&
-						String(message.content).includes("<task_state>") &&
-						String(message.content).includes("phase: orient"),
+				!messages.some(message =>
+					String(message.content).includes("<task_state>"),
 				),
 			);
 			return textResponse("Analysis complete.");

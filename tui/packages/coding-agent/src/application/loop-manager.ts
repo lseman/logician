@@ -14,6 +14,8 @@ export interface LoopState {
 	readonly lastStartedAt?: number;
 	readonly lastFinishedAt?: number;
 	readonly lastError?: string;
+	readonly consecutiveFailures: number;
+	readonly retryDelayMs?: number;
 }
 
 export type LoopAction =
@@ -30,6 +32,8 @@ export type LoopTickHandler = (
 export type LoopStateHandler = (state: Readonly<LoopState> | null) => void;
 
 const MIN_INTERVAL_MS = 100;
+const MAX_CONSECUTIVE_FAILURES = 3;
+const MAX_RETRY_DELAY_MS = 15 * 60_000;
 
 export class LoopManager {
 	private state: LoopState | null = null;
@@ -87,6 +91,7 @@ export class LoopManager {
 			iteration: 0,
 			status: "scheduled",
 			startedAt: now,
+			consecutiveFailures: 0,
 			nextRunAt: now + Math.round(intervalMs),
 		};
 		const generation = ++this.generation;
@@ -150,15 +155,37 @@ export class LoopManager {
 		if (generation !== this.generation || !this.state) return;
 		this.controller = null;
 		const now = Date.now();
+		const consecutiveFailures = lastError
+			? this.state.consecutiveFailures + 1
+			: 0;
+		if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+			this.state = {
+				...this.state,
+				status: "stopped",
+				lastFinishedAt: now,
+				lastError,
+				consecutiveFailures,
+			};
+			this.notify();
+			return;
+		}
+		const retryDelayMs = lastError
+			? Math.min(
+					MAX_RETRY_DELAY_MS,
+					this.state.intervalMs * 2 ** Math.max(0, consecutiveFailures - 1),
+				)
+			: this.state.intervalMs;
 		this.state = {
 			...this.state,
 			status: "scheduled",
 			lastFinishedAt: now,
 			lastError,
-			nextRunAt: now + this.state.intervalMs,
+			consecutiveFailures,
+			retryDelayMs: lastError ? retryDelayMs : undefined,
+			nextRunAt: now + retryDelayMs,
 		};
 		this.notify();
-		this.schedule(generation, this.state.intervalMs);
+		this.schedule(generation, retryDelayMs);
 	}
 
 	private notify(): void {

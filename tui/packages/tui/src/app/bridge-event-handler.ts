@@ -234,8 +234,11 @@ export function handleEvent(
 			ctx.researchManager.onAgentEnd();
 			break;
 		case "turn_start":
-			ctx.workSurface.startTurn();
+			ctx.workSurface.startRun();
 			ctx.researchManager.onAgentStart();
+			break;
+		case "agent_iteration_start":
+			ctx.workSurface.startTurn();
 			break;
 		case "phase":
 			if (event.state === "ready") {

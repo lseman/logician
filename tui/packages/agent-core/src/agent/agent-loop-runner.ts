@@ -65,12 +65,15 @@ import {
 	sanitizeToolCallArguments,
 } from "./messages.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
+import { resolveCompletionGate } from "./tasks/completion-gate.ts";
 import {
+	hasMeaningfulTaskState,
 	TaskStateController,
 	taskObjectiveFromMessages,
 } from "./tasks/task-state-controller.ts";
 import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
 import { ToolResultCache } from "./tool-cache.ts";
+import { RunBudgetController } from "./run-budget.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -221,6 +224,13 @@ async function runAgentLoopInTaskScope(
 	let reflectionCount = 0;
 	let reflectionFailed = false;
 	let lastAdaptiveSelection = "";
+	const runBudget = new RunBudgetController(
+		config.runBudget ?? {
+			maxProviderCalls: maxIterations,
+			maxToolCalls: maxIterations * 16,
+			maxElapsedMs: 30 * 60_000,
+		},
+	);
 
 	// ── Acceptance contract tracking ─────────────────────────────────────
 	let resolvedAcceptance: ResolvedAcceptance | null = null;
@@ -439,6 +449,27 @@ async function runAgentLoopInTaskScope(
 			(hasMoreToolCalls || pendingMessages.length > 0) &&
 			iteration < maxIterations
 		) {
+			const providerBudget = runBudget.requestProviderCall();
+			if (!providerBudget.allowed) {
+				await intervene({
+					kind: "budget",
+					cause: "run_budget",
+					detector: "run_budget",
+					message: providerBudget.reason ?? "Run budget exhausted.",
+					iteration,
+					action: "pause",
+					counters: {
+						providerCalls: providerBudget.snapshot.providerCalls,
+						toolCalls: providerBudget.snapshot.toolCalls,
+						elapsedMs: providerBudget.snapshot.elapsedMs,
+					},
+				});
+				return finish({
+					status: "blocked",
+					summary: providerBudget.reason,
+					source: "runtime",
+				});
+			}
 			iteration++;
 			const turnId = `turn_${iteration}`;
 			await emitTyped(config.extensionBus, {
@@ -490,7 +521,9 @@ async function runAgentLoopInTaskScope(
 					messages as AgentMessage[],
 				);
 				const chatMessages = convertToChatFormat(llmMessages);
-				chatMessages.push({ role: "system", content: taskState.toContext() });
+				if (hasMeaningfulTaskState(taskState.snapshot())) {
+					chatMessages.push({ role: "system", content: taskState.toContext() });
+				}
 
 				// Apply beforeProviderRequest hook
 				const providerRequestHooks = [
@@ -875,6 +908,27 @@ async function runAgentLoopInTaskScope(
 			}
 
 			hasMoreToolCalls = false;
+			const toolBudget = runBudget.requestToolBatch(toolCalls.length);
+			if (!toolBudget.allowed) {
+				await intervene({
+					kind: "budget",
+					cause: "run_budget",
+					detector: "run_budget",
+					message: toolBudget.reason ?? "Run budget exhausted.",
+					iteration,
+					action: "pause",
+					counters: {
+						providerCalls: toolBudget.snapshot.providerCalls,
+						toolCalls: toolBudget.snapshot.toolCalls,
+						elapsedMs: toolBudget.snapshot.elapsedMs,
+					},
+				});
+				return finish({
+					status: "blocked",
+					summary: toolBudget.reason,
+					source: "runtime",
+				});
+			}
 			const batch = await executeToolBatch({
 				registry,
 				toolCalls,
@@ -1108,15 +1162,13 @@ async function runAgentLoopInTaskScope(
 					// Re-enter inner loop with follow-up messages
 					continue;
 				}
-				const declared = getTaskStatus();
-				return finish({
-					status:
-						declared?.status === "done"
-							? "completed"
-							: (declared?.status ?? "completed"),
-					summary: declared?.summary,
-					source: declared ? "structured" : "heuristic",
-				});
+				return finish(
+					resolveCompletionGate({
+						declared: getTaskStatus(),
+						structuredOutcomeRequired:
+							performedToolWork && registry.has("task_status"),
+					}),
+				);
 			}
 
 			// Fix #5: only invoke shouldStopAfterTurn when no tool calls ran.
@@ -1146,15 +1198,13 @@ async function runAgentLoopInTaskScope(
 				acceptanceStop = checkStopRules(resolved);
 			}
 			if (stop || acceptanceStop) {
-				const declared = getTaskStatus();
-				return finish({
-					status:
-						declared?.status === "done"
-							? "completed"
-							: (declared?.status ?? "completed"),
-					summary: declared?.summary,
-					source: declared ? "structured" : "heuristic",
-				});
+				return finish(
+					resolveCompletionGate({
+						declared: getTaskStatus(),
+						structuredOutcomeRequired:
+							performedToolWork && registry.has("task_status"),
+					}),
+				);
 			}
 
 			pendingMessages = await firstMessages([
@@ -1598,12 +1648,14 @@ async function runAgentLoopInTaskScope(
 	const declared = executionPolicy.embeddedPoliciesEnabled
 		? getTaskStatus()
 		: null;
-	if (declared) {
-		return finish({
-			status: declared.status === "done" ? "completed" : declared.status,
-			summary: declared.summary,
-			source: "structured",
-		});
+	if (declared || (performedToolWork && registry.has("task_status"))) {
+		return finish(
+			resolveCompletionGate({
+				declared,
+				structuredOutcomeRequired:
+					performedToolWork && registry.has("task_status"),
+			}),
+		);
 	}
 	if (config.signal?.aborted) {
 		return finish({

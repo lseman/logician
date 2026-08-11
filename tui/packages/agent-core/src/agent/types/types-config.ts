@@ -7,6 +7,7 @@ import type { EventHandler } from "./types-events.ts";
 import type { AgentHooks } from "./types-hooks.ts";
 import type { Tool } from "./types-tools.ts";
 import type { TruncationConfig } from "./types-truncation.ts";
+import type { RunBudgetLimits } from "../run-budget.ts";
 
 export type QueueMode = "all" | "one-at-a-time";
 
@@ -129,6 +130,8 @@ export interface AgentConfig {
 		ctx: import("./types-tools.ts").AskUserContext,
 	) => Promise<string>;
 	maxTotalTokens?: number;
+	/** Hierarchical hard limits for one agent run. */
+	runBudget?: RunBudgetLimits;
 	// Per-turn stream options managed by the harness.
 	streamOptions?: AgentHarnessStreamOptions;
 	eventLogPath?: string;

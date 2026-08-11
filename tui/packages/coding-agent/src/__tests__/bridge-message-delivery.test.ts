@@ -385,6 +385,29 @@ void test("/context renders the latest explicit task state", () => {
 	);
 });
 
+void test("/context omits an empty orient task state", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.currentTaskState = {
+		objective: "hi",
+		phase: "orient",
+		hypotheses: [],
+		evidence: [],
+		changedFiles: [],
+		verification: [],
+		blockers: [],
+		toolCalls: 0,
+		toolFailures: 0,
+	};
+	internal.harness = { messages: [], getMemoryPrompt: () => "" };
+	assert.doesNotMatch(bridge.getContext(), /<task_state>/);
+});
+
 void test("/context renders request-time memory injection", () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
@@ -491,15 +514,18 @@ void test("automatic continuation retains the active skill", async () => {
 		},
 	];
 	let activePrompt = internal.config.systemPrompt;
-	const seen: Array<{ message: string; systemPrompt: string }> = [];
+	const seen: Array<{ kind: string; systemPrompt: string }> = [];
 	internal.harness = {
 		messages: [],
 		setSystemPrompt: (value: string) => {
 			activePrompt = value;
 		},
-		prompt: async (message: string) => {
-			seen.push({ message, systemPrompt: activePrompt });
+		prompt: async () => {
+			seen.push({ kind: "prompt", systemPrompt: activePrompt });
 			if (seen.length === 1) internal.pendingAutoContinue = true;
+		},
+		continueWithNextTurn: async () => {
+			seen.push({ kind: "continue", systemPrompt: activePrompt });
 		},
 	};
 
@@ -508,7 +534,7 @@ void test("automatic continuation retains the active skill", async () => {
 		await new Promise<void>(resolve => setImmediate(resolve));
 	}
 
-	assert.equal(seen[1]?.message, "continue");
+	assert.equal(seen[1]?.kind, "continue");
 	assert.match(seen[1]?.systemPrompt ?? "", /Keep debugging until/);
 });
 

@@ -62,3 +62,17 @@ void test("state snapshots cannot mutate manager state", () => {
 	assert.equal(manager.getState()?.iteration, 0);
 	manager.stop();
 });
+
+void test("repeated callback failures open the circuit breaker", async () => {
+	const manager = new LoopManager();
+	manager.setOnTick(() => {
+		throw new Error("still broken");
+	});
+	manager.start("work", 100);
+	await delay(750);
+	const state = manager.getState();
+	assert.equal(state?.status, "stopped");
+	assert.equal(state?.consecutiveFailures, 3);
+	assert.match(state?.lastError ?? "", /still broken/);
+	manager.stop();
+});
