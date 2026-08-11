@@ -179,6 +179,10 @@ async function main(): Promise<void> {
 		baseUrl: "http://localhost:8080",
 		model: "test",
 		cwd,
+		// This bridge exists only so Pi extensions can participate in the trust
+		// decision. It must not create a second memory session or viewer server.
+		memoryEnabled: false,
+		memoryViewerEnabled: false,
 	});
 
 	let loadProjectConfig = false;
@@ -240,6 +244,11 @@ async function main(): Promise<void> {
 			loadProjectConfig = trust.trusted;
 		}
 	}
+
+	// Release the trust-only extension runtime before the real bridge starts.
+	// In particular, do not leave its MCP clients or other lifecycle resources
+	// alive alongside the application bridge.
+	await minimalBridge.stop();
 
 	const runtimeConfig = resolveRuntimeConfig(cwd, process.env, {
 		loadProjectConfig,

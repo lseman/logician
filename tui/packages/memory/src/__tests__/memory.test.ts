@@ -365,6 +365,219 @@ describe("createMemoryStore — sessions", () => {
 // ── Observations ───────────────────────────────────────────────────────────
 
 describe("createMemoryStore — observations", () => {
+	test("persists structured claims and extraction provenance", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		store.createSession("claims", { cwd: "/workspace" });
+		store.observe(
+			{
+				id: "claim-observation",
+				sessionId: "claims",
+				timestamp: new Date().toISOString(),
+				hookType: "stop",
+				workspace: "/workspace",
+				raw: { evidence: "test" },
+			},
+			{
+				id: "claim-observation",
+				sessionId: "claims",
+				timestamp: new Date().toISOString(),
+				type: "bugfix",
+				title: "Bounded retry behavior",
+				facts: [],
+				narrative: "Retries stop after three attempts.",
+				concepts: ["retry"],
+				files: ["src/retry.ts"],
+				importance: 9,
+				consolidated: false,
+				claims: [
+					{
+						text: "Retries stop after three attempts.",
+						confidence: 0.97,
+						status: "verified",
+						evidenceEventIds: ["test-retry"],
+					},
+				],
+				provenance: {
+					source: "model",
+					trust: "trusted_local",
+					extractorVersion: "test/1",
+					schemaVersion: 1,
+				},
+			},
+		);
+
+		const observation = store.getObservation("claim-observation", "claims");
+		assert.equal(observation?.claims?.[0]?.status, "verified");
+		assert.equal(observation?.claims?.[0]?.confidence, 0.97);
+		assert.deepEqual(observation?.claims?.[0]?.evidenceEventIds, [
+			"test-retry",
+		]);
+		assert.equal(observation?.provenance?.extractorVersion, "test/1");
+		const claims = store.listClaims({ observationId: "claim-observation" });
+		assert.equal(claims.length, 1);
+		assert.equal(claims[0]?.operation, "ADD");
+		assert.equal(claims[0]?.text, "Retries stop after three attempts.");
+		assert.deepEqual(claims[0]?.evidenceEventIds, ["test-retry"]);
+		assert.equal(claims[0]?.extractorVersion, "test/1");
+		store.close();
+	});
+
+	test("consolidates grounded claims without promoting intent or invalidated claims", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		store.createSession("claim-consolidation", { cwd: "/workspace" });
+		store.observe(
+			{
+				id: "grounded-observation",
+				sessionId: "claim-consolidation",
+				timestamp: "2026-08-11T10:00:00.000Z",
+				hookType: "stop",
+				workspace: "/workspace",
+				raw: {},
+			},
+			{
+				id: "grounded-observation",
+				sessionId: "claim-consolidation",
+				timestamp: "2026-08-11T10:00:00.000Z",
+				type: "decision",
+				title: "Retry behavior",
+				facts: ["User intent: rewrite every networking module"],
+				narrative: "A bounded retry policy was verified.",
+				concepts: ["retry"],
+				files: ["src/retry.ts"],
+				importance: 9,
+				consolidated: false,
+				claims: [
+					{
+						text: "Retries stop after three attempts.",
+						confidence: 0.98,
+						status: "verified",
+						evidenceEventIds: ["retry-test"],
+					},
+					{
+						text: "Retries continue forever.",
+						confidence: 0.9,
+						status: "invalidated",
+						evidenceEventIds: ["retry-test"],
+					},
+				],
+				provenance: {
+					source: "model",
+					trust: "trusted_local",
+					extractorVersion: "test/1",
+					schemaVersion: 1,
+				},
+			},
+		);
+
+		const memories = store.consolidate("claim-consolidation");
+		assert.equal(memories.length, 1);
+		assert.match(memories[0]?.content || "", /three attempts/);
+		assert.doesNotMatch(memories[0]?.content || "", /User intent/i);
+		assert.doesNotMatch(memories[0]?.content || "", /forever/);
+		store.close();
+	});
+
+	test("records duplicate and contradictory claim revisions and retrieves only current truth", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		for (const id of ["old", "duplicate", "new", "current"])
+			store.createSession(id, { cwd: "/workspace" });
+		const addClaim = (
+			id: string,
+			text: string,
+			confidence: number,
+			timestamp: string,
+			status: "verified" | "invalidated" = "verified",
+		) =>
+			store.observe(
+				{
+					id: `observation-${id}`,
+					sessionId: id,
+					timestamp,
+					hookType: "stop",
+					workspace: "/workspace",
+					raw: {},
+				},
+				{
+					id: `observation-${id}`,
+					sessionId: id,
+					timestamp,
+					type: "decision",
+					title: "Authentication format",
+					facts: [],
+					narrative: text,
+					concepts: ["authentication"],
+					files: ["src/auth.ts"],
+					importance: 9,
+					consolidated: false,
+					claims: [
+						{
+							text,
+							confidence,
+							status,
+							evidenceEventIds: [`evidence-${id}`],
+						},
+					],
+					provenance: {
+						source: "model",
+						trust: "trusted_local",
+						extractorVersion: "test/1",
+						schemaVersion: 1,
+					},
+				},
+			);
+
+		addClaim(
+			"old",
+			"Authentication uses JWT.",
+			0.9,
+			"2026-08-11T10:00:00.000Z",
+		);
+		addClaim(
+			"duplicate",
+			"Authentication uses JWT.",
+			0.91,
+			"2026-08-11T10:01:00.000Z",
+		);
+		addClaim(
+			"new",
+			"Authentication does not use JWT.",
+			0.95,
+			"2026-08-11T10:02:00.000Z",
+		);
+
+		const history = store.listClaims({ includeSuperseded: true });
+		assert.deepEqual(history.map(claim => claim.operation).sort(), [
+			"ADD",
+			"NOOP",
+			"SUPERSEDE",
+		]);
+		const active = store.listClaims();
+		assert.equal(active.length, 1);
+		assert.equal(active[0]?.operation, "SUPERSEDE");
+		assert.equal(active[0]?.supersedesClaimId, "observation-old:claim:0");
+
+		const context = store.getContext("current", 1000, "authentication JWT");
+		assert.match(context, /Authentication does not use JWT/);
+		assert.doesNotMatch(context, /— Authentication uses JWT/);
+		assert.match(context, /evidence-new/);
+
+		addClaim(
+			"invalidated",
+			"Authentication does not use JWT.",
+			0.99,
+			"2026-08-11T10:03:00.000Z",
+			"invalidated",
+		);
+		const afterInvalidation = store.listClaims();
+		assert.equal(afterInvalidation.length, 1);
+		assert.equal(afterInvalidation[0]?.operation, "INVALIDATE");
+		assert.equal(store.getContext("current", 1000, "authentication JWT"), "");
+		store.close();
+	});
+
 	test("clears observations only in the current workspace", () => {
 		const store = createMemoryStore(dbPath());
 		for (const [sessionId, workspace] of [
@@ -1816,12 +2029,131 @@ test("exportData produces a valid ExportData", () => {
 	store.create("Memory one");
 	store.create("Memory two");
 	const data = store.exportData();
-	assert.equal(data.version, 1);
+	assert.equal(data.version, 3);
 	assert.ok(data.exportedAt);
 	assert.ok(data.sessions.length >= 1);
 	assert.ok(data.memories.length >= 2);
 	assert.ok(Array.isArray(data.observations));
+	assert.ok(Array.isArray(data.claims));
 	assert.ok(Array.isArray(data.relations));
+	store.close();
+});
+
+test("export/import round-trips IDs, revisions, provenance, and relations", () => {
+	const source = createMemoryStore(dbPath());
+	source.setCurrentWorkspace("/workspace");
+	source.createSession("roundtrip-session", {
+		name: "Round trip",
+		project: "memory",
+		cwd: "/workspace",
+		workspace: "/workspace",
+		startedAt: "2026-08-11T10:00:00.000Z",
+		status: "completed",
+		observationCount: 1,
+	});
+	source.observe(
+		{
+			id: "roundtrip-observation",
+			sessionId: "roundtrip-session",
+			timestamp: "2026-08-11T10:01:00.000Z",
+			hookType: "stop",
+			workspace: "/workspace",
+			raw: { immutable: "evidence" },
+		},
+		{
+			id: "roundtrip-observation",
+			sessionId: "roundtrip-session",
+			timestamp: "2026-08-11T10:01:00.000Z",
+			type: "decision",
+			title: "Use a bounded retry policy",
+			facts: ["Retries are bounded"],
+			narrative: "The retry policy was selected and verified.",
+			concepts: ["retry"],
+			files: ["src/retry.ts"],
+			importance: 9,
+			consolidated: true,
+			workspace: "/workspace",
+			claims: [
+				{
+					text: "Retries stop after three attempts.",
+					confidence: 0.98,
+					status: "verified",
+					evidenceEventIds: ["test-retry"],
+				},
+			],
+			provenance: {
+				source: "model",
+				trust: "trusted_local",
+				extractorVersion: "test/2",
+				schemaVersion: 1,
+			},
+		},
+	);
+	const original = source.create("Retry policy version one", {
+		type: "workflow",
+		sessionIds: ["roundtrip-session"],
+		workspace: "/workspace",
+	});
+	const evolved = source.evolve(
+		original.id,
+		"Retry policy version two",
+		original.title,
+	);
+	assert.ok(evolved);
+	const exported = source.exportData();
+	assert.equal(exported.memories.length, 2);
+	assert.equal(exported.relations.length, 1);
+	assert.equal(exported.observations[0]?.hookType, "stop");
+	// Raw data is implementation-owned, but the evidence payload must survive.
+	assert.match(JSON.stringify(exported.observations[0]?.rawData), /evidence/);
+
+	const destination = createMemoryStore(dbPath());
+	destination.setCurrentWorkspace("/workspace");
+	const imported = destination.importData({
+		...exported,
+		onConflict: "update",
+	});
+	assert.deepEqual(imported.errors, []);
+	const restored = destination.exportData();
+	assert.deepEqual(restored.sessions, exported.sessions);
+	assert.deepEqual(restored.observations, exported.observations);
+	assert.deepEqual(restored.claims, exported.claims);
+	assert.deepEqual(restored.memories, exported.memories);
+	assert.deepEqual(restored.relations, exported.relations);
+	const portableClaim = ({ transactionTime: _, ...claim }: any) => claim;
+	assert.deepEqual(
+		destination
+			.listClaims({
+				observationId: "roundtrip-observation",
+				includeSuperseded: true,
+			})
+			.map(portableClaim),
+		source
+			.listClaims({
+				observationId: "roundtrip-observation",
+				includeSuperseded: true,
+			})
+			.map(portableClaim),
+	);
+	source.close();
+	destination.close();
+});
+
+test("configures SQLite WAL mode and supports multiple store connections", () => {
+	const path = dbPath();
+	const store = createMemoryStore(path);
+	const secondStore = createMemoryStore(path);
+	store.createSession("writer-one", { cwd: process.cwd() });
+	secondStore.createSession("writer-two", { cwd: process.cwd() });
+	const db = new Database(path);
+	assert.equal(
+		(db.query("PRAGMA journal_mode").get() as { journal_mode: string })
+			.journal_mode,
+		"wal",
+	);
+	assert.equal(store.listSessions().length, 2);
+	db.close();
+	secondStore.close();
 	store.close();
 });
 
@@ -1862,6 +2194,7 @@ test("importData imports with update on conflict", () => {
 				id: "sess-1",
 				project: "updated-project",
 				cwd: "/updated/cwd",
+				workspace: process.cwd(),
 				startedAt: mem.createdAt,
 				status: "active" as const,
 				observationCount: 0,

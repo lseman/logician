@@ -1,0 +1,29 @@
+{
+  "rows": 1,
+  "animationIntervalMs": 150,
+  "defaultTextColor": "text",
+  "defaultIconColor": "dim",
+  "widgets": {
+    "phase": { "enabled": true, "row": 0, "position": 0, "align": "left", "fill": "none" },
+    "model": { "enabled": true, "row": 0, "position": 1, "align": "left", "fill": "none" },
+    "context-bar": { "enabled": true, "row": 0, "position": 2, "align": "left", "fill": "none" },
+    "location": { "enabled": true, "row": 0, "position": 3, "align": "left", "fill": "none" },
+    "virtual-env": { "enabled": true, "row": 0, "position": 4, "align": "left", "fill": "none" },
+    "branch": { "enabled": true, "row": 0, "position": 5, "align": "left", "fill": "none" },
+    "thinking": { "enabled": true, "row": 0, "position": 0, "align": "middle", "fill": "none" },
+    "reasoner": { "enabled": true, "row": 0, "position": 1, "align": "middle", "fill": "none" },
+    "inference-mode": { "enabled": true, "row": 0, "position": 2, "align": "middle", "fill": "none" },
+    "sandbox": { "enabled": true, "row": 0, "position": 3, "align": "middle", "fill": "none" },
+    "permission": { "enabled": true, "row": 0, "position": 4, "align": "middle", "fill": "none" },
+    "goal": { "enabled": true, "row": 0, "position": 5, "align": "middle", "fill": "grow" },
+    "execution-profile": { "enabled": true, "row": 0, "position": 6, "align": "middle", "fill": "none" },
+    "token-flow": { "enabled": true, "row": 0, "position": 0, "align": "right", "fill": "none" },
+    "cache-read": { "enabled": true, "row": 0, "position": 1, "align": "right", "fill": "none" },
+    "mcp": { "enabled": true, "row": 0, "position": 2, "align": "right", "fill": "none" },
+    "rtk": { "enabled": true, "row": 0, "position": 3, "align": "right", "fill": "none" },
+    "ariadne": { "enabled": true, "row": 0, "position": 4, "align": "right", "fill": "none" },
+    "fffgrep": { "enabled": true, "row": 0, "position": 5, "align": "right", "fill": "none" },
+    "memory": { "enabled": true, "row": 0, "position": 6, "align": "right", "fill": "none" }
+  },
+  "widgetStyles": {}
+}

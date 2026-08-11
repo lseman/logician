@@ -390,6 +390,16 @@ describe("createMemoryHooks observation capture", () => {
 			episode?.facts[0] || "",
 			/verified; confidence=0\.96; evidence=edit-grounded,test-grounded/,
 		);
+		assert.deepEqual(episode?.claims, [
+			{
+				text: "Authentication timeout retries are bounded by the policy implemented in auth.ts.",
+				confidence: 0.96,
+				status: "verified",
+				evidenceEventIds: ["edit-grounded", "test-grounded"],
+			},
+		]);
+		assert.equal(episode?.provenance?.source, "model");
+		assert.equal(episode?.provenance?.trust, "trusted_local");
 		store.close();
 	});
 
@@ -447,6 +457,11 @@ describe("createMemoryHooks observation capture", () => {
 			.find(item => item.id.startsWith("episode:"));
 		assert.match(episode?.title || "", /Authentication timeout is now bounded/);
 		assert.doesNotMatch(JSON.stringify(episode), /canaries|invented/);
+		assert.equal(episode?.provenance?.source, "deterministic");
+		assert.match(
+			episode?.provenance?.rejectionReason || "",
+			/ungrounded evidence ID/,
+		);
 		store.close();
 	});
 

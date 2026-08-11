@@ -1,5 +1,6 @@
 import type {
 	CompressedObservation,
+	ObservationClaim,
 	ObservationType,
 	RawObservation,
 } from "../types.js";
@@ -35,6 +36,8 @@ const KINDS = new Set<ObservationType>([
 const STATUSES = new Set(["tentative", "verified", "invalidated"]);
 const GENERIC =
 	/^(?:updated|fixed|implemented|completed|worked on|made changes|ran tests|investigated)(?:\s+(?:files?|code|issue|it|this))?[.!]?$/i;
+const EXTRACTOR_VERSION = "semantic-extractor/2";
+const CLAIM_SCHEMA_VERSION = 1;
 
 function parseJson(value: unknown): unknown {
 	if (typeof value !== "string") return value;
@@ -154,6 +157,7 @@ function validateModelEpisode(
 	}
 
 	const facts: string[] = [];
+	const claims: ObservationClaim[] = [];
 	for (const rawClaim of obj.claims) {
 		if (!rawClaim || typeof rawClaim !== "object" || Array.isArray(rawClaim))
 			return { reason: "invalid claim object" };
@@ -183,6 +187,12 @@ function validateModelEpisode(
 		facts.push(
 			`[${claim.status}; confidence=${claim.confidence.toFixed(2)}; evidence=${ids.join(",")}] ${claim.text.trim()}`,
 		);
+		claims.push({
+			text: claim.text.trim(),
+			confidence: claim.confidence,
+			status: claim.status as ObservationClaim["status"],
+			evidenceEventIds: ids,
+		});
 	}
 
 	const filesRead = strings(obj.filesRead ?? [], 20);
@@ -224,6 +234,7 @@ function validateModelEpisode(
 						: 7,
 			consolidated: false,
 			workspace: evidence.workspace,
+			claims,
 		},
 	};
 }
@@ -234,7 +245,21 @@ export async function extractSemanticEpisode(
 ): Promise<SemanticExtractionResult | null> {
 	const fallback = synthesizeTurnEpisode(evidence);
 	if (!extractor)
-		return fallback ? { ...fallback, source: "deterministic" } : null;
+		return fallback
+			? {
+					...fallback,
+					compressed: {
+						...fallback.compressed,
+						provenance: {
+							source: "deterministic",
+							trust: "trusted_local",
+							extractorVersion: EXTRACTOR_VERSION,
+							schemaVersion: CLAIM_SCHEMA_VERSION,
+						},
+					},
+					source: "deterministic",
+				}
+			: null;
 	try {
 		const output = await extractor(extractionPrompt(evidence));
 		const validated = validateModelEpisode(output, evidence);
@@ -243,6 +268,16 @@ export async function extractSemanticEpisode(
 			return fallback
 				? {
 						...fallback,
+						compressed: {
+							...fallback.compressed,
+							provenance: {
+								source: "deterministic",
+								trust: "trusted_local",
+								extractorVersion: EXTRACTOR_VERSION,
+								schemaVersion: CLAIM_SCHEMA_VERSION,
+								rejectionReason: validated.reason,
+							},
+						},
 						source: "deterministic",
 						rejectionReason: validated.reason,
 					}
@@ -257,13 +292,32 @@ export async function extractSemanticEpisode(
 				workspace: evidence.workspace,
 				raw: { kind: "semantic_episode", extraction_source: "model", evidence },
 			},
-			compressed: validated.episode,
+			compressed: {
+				...validated.episode,
+				provenance: {
+					source: "model",
+					trust: "trusted_local",
+					extractorVersion: EXTRACTOR_VERSION,
+					schemaVersion: CLAIM_SCHEMA_VERSION,
+				},
+			},
 			source: "model",
 		};
 	} catch (error) {
 		return fallback
 			? {
 					...fallback,
+					compressed: {
+						...fallback.compressed,
+						provenance: {
+							source: "deterministic",
+							trust: "trusted_local",
+							extractorVersion: EXTRACTOR_VERSION,
+							schemaVersion: CLAIM_SCHEMA_VERSION,
+							rejectionReason:
+								error instanceof Error ? error.message : String(error),
+						},
+					},
 					source: "deterministic",
 					rejectionReason:
 						error instanceof Error ? error.message : String(error),

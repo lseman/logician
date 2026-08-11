@@ -1,5 +1,6 @@
 import type {
 	CompressedObservation,
+	ObservationClaim,
 	ObservationType,
 	RawObservation,
 } from "../types.js";
@@ -152,6 +153,38 @@ export function synthesizeTurnEpisode(evidence: TurnEvidence): {
 			`Failed evidence: ${failedTools.map(tool => `${tool.name}: ${cleanLine(tool.result) || "failed"}`).join("; ")}`,
 		);
 
+	const evidenceIds = evidence.tools.map(tool => tool.id);
+	const successfulVerificationIds = verification
+		.filter(
+			tool =>
+				!tool.isError &&
+				!/\b[1-9]\d*\s+(?:fail(?:ed|ure)?|errors?)\b|\b(?:tests?|checks?)\s+failed\b/i.test(
+					tool.result,
+				),
+		)
+		.map(tool => tool.id);
+	const claims: ObservationClaim[] = [];
+	if (outcomeLine) {
+		claims.push({
+			text: outcomeLine,
+			confidence: successfulVerificationIds.length ? 0.85 : 0.65,
+			status: successfulVerificationIds.length ? "verified" : "tentative",
+			evidenceEventIds: successfulVerificationIds.length
+				? successfulVerificationIds
+				: evidenceIds.length
+					? evidenceIds.slice(0, 12)
+					: ["assistant-outcome"],
+		});
+	}
+	if (failedTools.length) {
+		claims.push({
+			text: `The turn encountered ${failedTools.length} failed tool operation${failedTools.length === 1 ? "" : "s"}.`,
+			confidence: 1,
+			status: "verified",
+			evidenceEventIds: failedTools.map(tool => tool.id).slice(0, 12),
+		});
+	}
+
 	const concepts = new Set<string>();
 	if (changedTools.length) concepts.add("what-changed");
 	if (type === "bugfix" || failedTools.length) concepts.add("problem-solution");
@@ -188,6 +221,7 @@ export function synthesizeTurnEpisode(evidence: TurnEvidence): {
 		importance,
 		consolidated: false,
 		workspace: evidence.workspace,
+		claims,
 	};
 	return {
 		raw: {

@@ -8,6 +8,11 @@ interface DashboardStats {
 	memories: number;
 	observations: number;
 	observationsToday: number;
+	structuredObservations: number;
+	claims: number;
+	verifiedClaims: number;
+	modelExtractedObservations: number;
+	extractionFallbacks: number;
 	memoriesByType: Record<string, number>;
 	sessionsByStatus: Record<string, number>;
 }
@@ -64,6 +69,7 @@ export function startViewerServer(opts: ViewerOptions): {
 		const sessionsByStatus: Record<string, number> = {};
 		for (const s of sessions)
 			sessionsByStatus[s.status] = (sessionsByStatus[s.status] || 0) + 1;
+		const claims = store.listClaims({ limit: 1000 });
 		return {
 			workspace: store.getCurrentWorkspace(),
 			sessions: sessions.length,
@@ -71,6 +77,18 @@ export function startViewerServer(opts: ViewerOptions): {
 			observations: observations.length,
 			observationsToday: observations.filter(observation =>
 				observation.timestamp.startsWith(today),
+			).length,
+			structuredObservations: observations.filter(
+				observation => (observation.claims?.length || 0) > 0,
+			).length,
+			claims: claims.length,
+			verifiedClaims: claims.filter(claim => claim.status === "verified")
+				.length,
+			modelExtractedObservations: observations.filter(
+				observation => observation.provenance?.source === "model",
+			).length,
+			extractionFallbacks: observations.filter(observation =>
+				Boolean(observation.provenance?.rejectionReason),
 			).length,
 			memoriesByType,
 			sessionsByStatus,
@@ -170,6 +188,33 @@ export function startViewerServer(opts: ViewerOptions): {
 				return new Response(JSON.stringify(filtered), {
 					headers: { "Content-Type": "application/json" },
 				});
+			}
+
+			if (segments[0] === "claims" && segments.length === 1) {
+				const limit = Math.min(
+					Math.max(parseInt(url.searchParams.get("limit") || "100", 10), 1),
+					1000,
+				);
+				const status = url.searchParams.get("status") || undefined;
+				const observationId =
+					url.searchParams.get("observationId") || undefined;
+				const includeSuperseded =
+					url.searchParams.get("includeSuperseded") === "true";
+				return new Response(
+					JSON.stringify(
+						store.listClaims({
+							limit,
+							status: status as
+								| "tentative"
+								| "verified"
+								| "invalidated"
+								| undefined,
+							observationId,
+							includeSuperseded,
+						}),
+					),
+					{ headers: { "Content-Type": "application/json" } },
+				);
 			}
 
 			if (segments[0] === "memories" && segments.length === 1) {
