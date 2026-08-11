@@ -1,12 +1,12 @@
 // ── Event types ───────────────────────────────────────────────────────────
 
 import type { InferenceMode } from "../configuration/inference-modes.ts";
+import type { HarnessIntervention } from "../intervention-controller.ts";
 import type {
 	ExplicitTaskState,
 	TaskPhase,
 } from "../tasks/task-state-controller.ts";
 import type { Message, MessageRole, StopReason } from "./types-messages.ts";
-import type { HarnessIntervention } from "../intervention-controller.ts";
 
 /**
  * Envelope metadata stamped onto every event at the emit boundary: a

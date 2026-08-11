@@ -24,8 +24,8 @@ import {
 import { loadPrompts, type Prompt } from "../prompts/index.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 import { formatSkillCatalog, loadSkills, type Skill } from "../skills/index.ts";
-import { createDefaultTools } from "../tools/default-tools.ts";
 import { ariadne } from "../tools/ariadne.ts";
+import { createDefaultTools } from "../tools/default-tools.ts";
 import { createReadSkillTool } from "../tools/read-skill.ts";
 import {
 	getDefaultSandboxProfile,

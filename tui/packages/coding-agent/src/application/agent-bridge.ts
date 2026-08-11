@@ -18,8 +18,8 @@ import {
 	type AgentModelConfig,
 	type ExplicitTaskState,
 	formatTaskStateContext,
-	hasMeaningfulTaskState,
 	type HarnessPhase,
+	hasMeaningfulTaskState,
 	type Message,
 	type Tool,
 	type TruncationConfig,
@@ -62,7 +62,6 @@ import {
 } from "../configuration/config.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";
-import { ContinuationController } from "./continuation-controller.ts";
 import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diagnostics.ts";
 import type { McpSnapshotResult, McpToggleResult } from "../mcp/index.ts";
 import { findPromptByName, type Prompt } from "../prompts/index.ts";
@@ -96,6 +95,7 @@ import {
 	applyCompactionSettings,
 	loadUserSettings,
 } from "./bridge-settings.ts";
+import { ContinuationController } from "./continuation-controller.ts";
 import { EohController } from "./eoh/controller.ts";
 import { InteractionCoordinator } from "./interaction-coordinator.ts";
 import { SubagentCoordinator } from "./subagent-coordinator.ts";
@@ -200,6 +200,8 @@ export interface AgentBridgeOptions {
 	memoryViewerEnabled?: boolean;
 	/** Port for the memory viewer dashboard. Default: 3200. */
 	memoryViewerPort?: number;
+	/** Host for the memory viewer dashboard. Default: "0.0.0.0". */
+	memoryViewerHost?: string;
 	/** Enable optional local MiniLM semantic retrieval. Default: false. */
 	memoryEmbeddingsEnabled?: boolean;
 	/** Hugging Face model ID used for local embeddings. */
@@ -470,7 +472,7 @@ export class AgentCoreBridge {
 				try {
 					this.memoryViewerServer = startViewerServer({
 						port: this.memoryViewerPort,
-						host: "127.0.0.1",
+						host: "0.0.0.0",
 						store: this.memoryStore,
 					});
 					const bound = getBoundViewerPort();
@@ -1734,7 +1736,7 @@ export class AgentCoreBridge {
 					try {
 						this.memoryViewerServer = startViewerServer({
 							port: this.memoryViewerPortConfig,
-							host: "127.0.0.1",
+							host: "0.0.0.0",
 							store: this.memoryStore,
 						});
 						const bound = getBoundViewerPort();

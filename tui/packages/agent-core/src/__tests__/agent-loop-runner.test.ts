@@ -454,8 +454,7 @@ void test("context-full retry compacts and publishes the live transcript", async
 	assert.equal(
 		events.filter(
 			event =>
-				event.type === "harness_intervention" &&
-				event.kind === "compaction",
+				event.type === "harness_intervention" && event.kind === "compaction",
 		).length,
 		1,
 	);
@@ -1202,8 +1201,9 @@ void test("external stop policy can continue the minimal mechanism", async () =>
 
 void test("continuation exhaustion is visible and ends blocked", async () => {
 	const backend = new FakeBackend(
-		Array.from({ length: 4 }, () => () =>
-			textResponse("I still need to check the test output."),
+		Array.from(
+			{ length: 4 },
+			() => () => textResponse("I still need to check the test output."),
 		),
 	);
 	const events: AgentEvent[] = [];

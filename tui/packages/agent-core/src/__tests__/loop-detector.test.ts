@@ -336,7 +336,9 @@ void test("recent progress resets the stagnation window", () => {
 	});
 	d.recordAndDetect("first", [tool("read_file", '{"path":"a"}', "known")]);
 	d.recordAndDetect("repeat", [tool("read_file", '{"path":"b"}', "known")]);
-	d.recordAndDetect("progress", [tool("read_file", '{"path":"c"}', "new result")]);
+	d.recordAndDetect("progress", [
+		tool("read_file", '{"path":"c"}', "new result"),
+	]);
 	assert.equal(
 		d.recordAndDetect("one repeat after progress", [
 			tool("read_file", '{"path":"d"}', "new result"),

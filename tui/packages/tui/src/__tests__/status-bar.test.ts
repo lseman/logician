@@ -411,6 +411,61 @@ void describe("StatusBar", () => {
 		assert.strictEqual(bar.render(160).length, 2);
 		assert.strictEqual(bar.render(160).length, 2);
 	});
+
+	it("supports widgets configured on a third footer row", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		const config = createDefaultConfig();
+		config.rows = 3;
+		config.widgets.commit = {
+			enabled: true,
+			row: 2,
+			position: 0,
+			align: "left",
+			fill: "none",
+		};
+		bar.setConfig(config);
+		bar.update({ gitCommit: "deadbeef" });
+		const lines = bar.render(160);
+		assert.strictEqual(lines.length, 3);
+		assert.ok(lines[2].includes("deadbeef"));
+	});
+
+	it("renders commit, ahead/behind, and line diff widgets", () => {
+		setupTheme();
+		const bar = new StatusBar();
+		const config = createDefaultConfig();
+		config.rows = 2;
+		for (const [position, id] of [
+			"git-diff-added",
+			"git-diff-removed",
+			"git-status",
+			"commit",
+		].entries()) {
+			config.widgets[id] = {
+				enabled: true,
+				row: 1,
+				position,
+				align: "left",
+				fill: "none",
+			};
+		}
+		bar.setConfig(config);
+		bar.update({
+			gitCommit: "cafebabe",
+			gitAhead: 2,
+			gitBehind: 1,
+			gitModified: 1,
+			gitAddedLines: 12,
+			gitRemovedLines: 4,
+		});
+		const second = bar.render(160)[1];
+		assert.ok(second.includes("cafebabe"));
+		assert.ok(second.includes("↑2"));
+		assert.ok(second.includes("↓1"));
+		assert.ok(second.includes("+12"));
+		assert.ok(second.includes("-4"));
+	});
 });
 
 void describe("configurable footer widgets", () => {

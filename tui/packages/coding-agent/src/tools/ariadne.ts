@@ -4,13 +4,24 @@
 // Falls back to "not available" when the CLI is missing or the graph is empty.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { constants } from "node:fs";
+import { access, stat } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Tool, ToolResult } from "@logician/agent-core/agent/types.ts";
 import { formatSize, truncateHead } from "./truncate.ts";
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_DB = "ariadne.db";
+const INDEX_REFRESH_INTERVAL_MS = 5_000;
+const MAX_PROCESS_OUTPUT = 2 * 1024 * 1024;
+const bundledAriadneRoot = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"../../../../../ariadne",
+);
+const indexRefreshes = new Map<string, Promise<string | null>>();
+const indexRefreshedAt = new Map<string, number>();
+const cliDialects = new Map<string, Promise<"direct" | "agent">>();
 
 // Map of operations that accept a "path" parameter (file-level targets)
 const PATH_OPERATIONS = new Set([
@@ -36,6 +47,130 @@ function resolveAriadneDb(cwd: string): string {
 	if (envDb) return envDb;
 	const localDb = path.join(cwd, DEFAULT_DB);
 	return localDb;
+}
+
+async function executable(pathname: string): Promise<boolean> {
+	try {
+		await access(pathname, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Resolve the submodule build first, then an explicitly configured/system CLI. */
+export async function resolveAriadneBinary(): Promise<string | null> {
+	const candidates = [
+		process.env.ARIADNE_BIN,
+		path.join(bundledAriadneRoot, "target/release/ariadne"),
+		path.join(bundledAriadneRoot, "target/debug/ariadne"),
+	].filter((candidate): candidate is string => Boolean(candidate));
+	for (const candidate of candidates) {
+		if (await executable(candidate)) return candidate;
+	}
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	try {
+		const { stdout } = await promisify(execFile)("which", ["ariadne"], {
+			timeout: 3_000,
+		});
+		return stdout.trim().split("\n")[0]?.trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+function runAriadne(
+	binary: string,
+	args: string[],
+	options: { cwd: string; signal?: AbortSignal; timeoutMs?: number },
+): Promise<{
+	code: number | null;
+	stdout: string;
+	stderr: string;
+	aborted: boolean;
+}> {
+	return new Promise(resolve => {
+		if (options.signal?.aborted) {
+			resolve({ code: null, stdout: "", stderr: "", aborted: true });
+			return;
+		}
+		const child = spawn(binary, args, {
+			cwd: options.cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		let aborted = false;
+		const append = (current: string, chunk: Buffer) =>
+			(current + chunk.toString()).slice(-MAX_PROCESS_OUTPUT);
+		child.stdout.on("data", chunk => (stdout = append(stdout, chunk)));
+		child.stderr.on("data", chunk => (stderr = append(stderr, chunk)));
+		const stop = () => {
+			aborted = true;
+			if (!child.killed) child.kill("SIGKILL");
+		};
+		options.signal?.addEventListener("abort", stop, { once: true });
+		const timer = setTimeout(stop, options.timeoutMs ?? 30_000);
+		child.on("error", error => {
+			stderr = error.message;
+		});
+		child.on("close", code => {
+			clearTimeout(timer);
+			options.signal?.removeEventListener("abort", stop);
+			resolve({ code, stdout, stderr, aborted });
+		});
+	});
+}
+
+async function detectCliDialect(
+	binary: string,
+	cwd: string,
+): Promise<"direct" | "agent"> {
+	let pending = cliDialects.get(binary);
+	if (!pending) {
+		pending = runAriadne(binary, ["tool", "--help"], {
+			cwd,
+			timeoutMs: 3_000,
+		}).then(result => (result.code === 0 ? "direct" : "agent"));
+		cliDialects.set(binary, pending);
+	}
+	return pending;
+}
+
+async function refreshIndex(
+	binary: string,
+	dbPath: string,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<string | null> {
+	const lastRefresh = indexRefreshedAt.get(dbPath) ?? 0;
+	if (Date.now() - lastRefresh < INDEX_REFRESH_INTERVAL_MS) return null;
+	const existing = indexRefreshes.get(dbPath);
+	if (existing) return existing;
+	const pending = (async () => {
+		let dbExists = false;
+		try {
+			await stat(dbPath);
+			dbExists = true;
+		} catch {}
+		const args = dbExists
+			? ["--db", dbPath, "build", "update", "."]
+			: ["--db", dbPath, "build", "."];
+		const result = await runAriadne(binary, args, {
+			cwd,
+			signal,
+			timeoutMs: dbExists ? 60_000 : 5 * 60_000,
+		});
+		if (result.aborted) return "Ariadne index refresh was aborted.";
+		if (result.code !== 0) {
+			return `Ariadne index refresh failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.code}`}`;
+		}
+		indexRefreshedAt.set(dbPath, Date.now());
+		return null;
+	})().finally(() => indexRefreshes.delete(dbPath));
+	indexRefreshes.set(dbPath, pending);
+	return pending;
 }
 
 /** Parse ariadne agent tool output, handling JSON wrapping */
@@ -72,7 +207,8 @@ export const ariadne: Tool = {
 		"change risk assessment, caller/callee relationships, and structural analysis. " +
 		"Returns structured, bounded context — ideal when you need to understand " +
 		"code relationships without reading entire files. " +
-		"Available operations: minimal_context, search, impact, callers_of, callees_of, " +
+		"The graph is built or incrementally refreshed automatically before queries. " +
+		"Available operations: status, minimal_context, search, impact, callers_of, callees_of, " +
 		"paths, traverse, detect_changes, risk, review_context, affected_flows, " +
 		"test_coverage, suggested_questions, architecture, communities, cycles, " +
 		"bridge_nodes, hub_nodes, god_nodes, gaps, knowledge_gaps, dead_code, " +
@@ -80,10 +216,12 @@ export const ariadne: Tool = {
 	promptSnippet:
 		"Query the Ariadne code graph for semantic analysis: minimal_context, search, impact, callers_of, callees_of, paths, traverse, detect_changes, risk, architecture, etc.",
 	promptGuidelines: [
+		"Use Ariadne early to orient in unfamiliar code; its workspace index refreshes automatically",
 		"Use ariadne for semantic code analysis (symbol context, impact, dependencies)",
 		"Prefer ariadne over find/grep when you need relationship analysis",
 		"Use minimal_context to resolve a symbol and get bounded neighborhood",
 		"Use impact to see what breaks if a symbol changes",
+		"Before editing shared symbols, call impact; after a change set, call detect_changes or risk",
 		"Use callers_of / callees_of for call graph traversal",
 		"Use detect_changes for diff-based risk analysis",
 		"Use search for hybrid FTS5 + topology search",
@@ -105,9 +243,12 @@ export const ariadne: Tool = {
 					"Target symbol, file path, or search query (operation-dependent)",
 			},
 			params: {
-				type: "string",
+				oneOf: [
+					{ type: "object", additionalProperties: true },
+					{ type: "string" },
+				],
 				description:
-					"Additional JSON parameters for the operation (optional, merged with other params)",
+					"Additional operation parameters as an object (or JSON string), merged with top-level convenience fields",
 			},
 			base: {
 				type: "string",
@@ -132,8 +273,7 @@ export const ariadne: Tool = {
 			},
 			direction: {
 				type: "string",
-				description:
-					"Traversal direction: 'forward', 'backward', or 'both'",
+				description: "Traversal direction: 'forward', 'backward', or 'both'",
 			},
 			algorithm: {
 				type: "string",
@@ -167,7 +307,10 @@ export const ariadne: Tool = {
 				} catch {
 					// Keep as string, ariadne CLI will parse it
 				}
-			} else if (typeof args.params === "object" && !Array.isArray(args.params)) {
+			} else if (
+				typeof args.params === "object" &&
+				!Array.isArray(args.params)
+			) {
 				Object.assign(params, args.params);
 			}
 		}
@@ -177,29 +320,15 @@ export const ariadne: Tool = {
 		const operation = String(args.operation);
 		if (!operation) return "Error: operation is required.";
 
-		// Check if ariadne CLI is available
-		const { execFile } = await import("node:child_process");
-		const { promisify } = await import("node:util");
-		const execFileAsync = promisify(execFile);
-		let ariadnePath: string | null = null;
-		try {
-			const { stdout } = await execFileAsync("which", ["ariadne"], {
-				timeout: 3000,
-			});
-			ariadnePath = stdout.trim().split("\n")[0].trim() || null;
-		} catch {
-			// not on PATH
-		}
+		const ariadnePath = await resolveAriadneBinary();
 		if (!ariadnePath) {
 			return [
-				"Ariadne CLI is not installed or not in PATH.",
+				"Ariadne CLI is unavailable.",
 				"",
-				"To install:",
-				"  cargo install --path crates/ariadne-graph",
+				"Build the bundled submodule:",
+				`  cargo build --release --manifest-path ${path.join(bundledAriadneRoot, "Cargo.toml")}`,
 				"",
-				"Or use the system package if available.",
-				"",
-				"Without Ariadne, use find/grep/read_file for code navigation.",
+				"You can also set ARIADNE_BIN or install ariadne on PATH.",
 			].join("\n");
 		}
 
@@ -227,117 +356,66 @@ export const ariadne: Tool = {
 					// If it's not valid JSON, pass as-is
 					cliParams._raw = args.params;
 				}
-			} else if (typeof args.params === "object" && !Array.isArray(args.params)) {
+			} else if (
+				typeof args.params === "object" &&
+				!Array.isArray(args.params)
+			) {
 				Object.assign(cliParams, args.params);
 			}
 		}
 
-		// Ensure the db exists
-		if (!existsSync(dbPath)) {
-			return [
-				`Ariadne database not found at ${dbPath}.`,
-				"",
-				"To build the graph:",
-				`  ariadne --db ${dbPath} build .`,
-				"",
-				"Or set ARIADNE_DB environment variable to point to your database.",
-			].join("\n");
-		}
+		// Build or incrementally refresh the workspace graph before querying. Calls
+		// within a short burst share one refresh and queries remain bounded.
+		const refreshWarning = await refreshIndex(
+			ariadnePath,
+			dbPath,
+			ctx.cwd || ".",
+			ctx.signal,
+		);
+		if (ctx.signal?.aborted) return "Error: Command aborted";
 
-		// Build the CLI command
+		const dialect = await detectCliDialect(ariadnePath, ctx.cwd || ".");
 		const paramsJson = JSON.stringify(cliParams);
 		const cliArgs = [
 			"--db",
 			dbPath,
-			"agent",
+			...(dialect === "agent" ? ["agent"] : []),
 			"tool",
 			operation,
 			"--params",
 			paramsJson,
 		];
-
-		return new Promise<string | ToolResult>(resolve => {
-			if (ctx.signal?.aborted) {
-				resolve("Error: Command aborted");
-				return;
-			}
-
-			const child = spawn(ariadnePath, cliArgs, {
-				stdio: ["ignore", "pipe", "pipe"],
-				timeout: 30000, // 30s timeout for graph queries
-			});
-
-			let stdout = "";
-			let stderr = "";
-			let killed = false;
-
-			const onAbort = () => {
-				killed = true;
-				if (!child.killed) child.kill("SIGKILL");
-			};
-			ctx.signal?.addEventListener("abort", onAbort, { once: true });
-
-			child.stdout?.on("data", (chunk: Buffer) => {
-				stdout += chunk.toString();
-			});
-
-			child.stderr?.on("data", (chunk: Buffer) => {
-				stderr += chunk.toString();
-			});
-
-			child.on("error", err => {
-				ctx.signal?.removeEventListener("abort", onAbort);
-				resolve(`Error: Failed to run ariadne: ${err.message}`);
-			});
-
-			child.on("close", code => {
-				ctx.signal?.removeEventListener("abort", onAbort);
-
-				if (killed || ctx.signal?.aborted) {
-					resolve("Error: Command aborted");
-					return;
-				}
-
-				if (code === 0) {
-					const parsed = parseOutput(stdout);
-					const truncated = truncateHead(parsed, {
-						maxBytes: 50 * 1024,
-					});
-					let result = truncated.content;
-					const notices: string[] = [];
-					if (truncated.truncated) {
-						notices.push(`${formatSize(truncated.maxBytes)} limit reached`);
-					}
-					if (notices.length) {
-						result += `\n\n[${notices.join(". ")}]`;
-					}
-					resolve({
-						content: result,
-						details: {
-							operation,
-							target,
-							db: dbPath,
-						},
-					});
-					return;
-				}
-
-				// Handle non-zero exit codes
-				const errorMsg = stderr.trim() || stdout.trim();
-				if (code === 1 && !errorMsg) {
-					resolve(`No results for operation '${operation}'.`);
-					return;
-				}
-				resolve(`Error (exit ${code}): ${errorMsg || "Unknown error"}`);
-			});
-
-			// Set timeout
-			setTimeout(() => {
-				if (!child.killed) {
-					killed = true;
-					child.kill("SIGKILL");
-				}
-			}, 30000);
+		const query = await runAriadne(ariadnePath, cliArgs, {
+			cwd: ctx.cwd || ".",
+			signal: ctx.signal,
+			timeoutMs: 30_000,
 		});
+		if (query.aborted) return "Error: Command aborted";
+		if (query.code !== 0) {
+			const error = query.stderr.trim() || query.stdout.trim();
+			if (query.code === 1 && !error)
+				return `No results for operation '${operation}'.`;
+			return `Error (exit ${query.code}): ${error || "Unknown error"}`;
+		}
+
+		const parsed = parseOutput(query.stdout);
+		const truncated = truncateHead(parsed, { maxBytes: 50 * 1024 });
+		let content = truncated.content;
+		const notices: string[] = [];
+		if (refreshWarning) notices.push(refreshWarning);
+		if (truncated.truncated)
+			notices.push(`${formatSize(truncated.maxBytes)} limit reached`);
+		if (notices.length) content += `\n\n[${notices.join(". ")}]`;
+		return {
+			content,
+			details: {
+				operation,
+				target,
+				db: dbPath,
+				binary: ariadnePath,
+				dialect,
+				indexFresh: !refreshWarning,
+			},
+		};
 	},
 };

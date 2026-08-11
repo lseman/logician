@@ -60,7 +60,12 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 	if (!raw || typeof raw !== "object") return base;
 	const obj = raw as Record<string, unknown>;
 
-	if (typeof obj.rows === "number" && (obj.rows === 1 || obj.rows === 2)) {
+	if (
+		typeof obj.rows === "number" &&
+		Number.isInteger(obj.rows) &&
+		obj.rows >= 1 &&
+		obj.rows <= 5
+	) {
 		base.rows = obj.rows;
 	}
 	if (
@@ -86,7 +91,12 @@ function mergeWithDefaults(raw: unknown): FooterConfig {
 				const w = val as Record<string, unknown>;
 				const layout: Partial<WidgetLayout> = {};
 				if (typeof w.enabled === "boolean") layout.enabled = w.enabled;
-				if (typeof w.row === "number" && (w.row === 0 || w.row === 1))
+				if (
+					typeof w.row === "number" &&
+					Number.isInteger(w.row) &&
+					w.row >= 0 &&
+					w.row < base.rows
+				)
 					layout.row = w.row;
 				if (typeof w.position === "number") layout.position = w.position;
 				if (w.align === "left" || w.align === "middle" || w.align === "right") {
@@ -218,8 +228,12 @@ function layoutWidgets(
 
 	// Convert to array of rows in order
 	const result: GroupedWidget[][] = [];
-	for (const rowNum of [0, 1].filter(r => r < config.rows && byRow.has(r))) {
-		const row = byRow.get(rowNum)!;
+	for (let rowNum = 0; rowNum < config.rows; rowNum++) {
+		const row = byRow.get(rowNum);
+		if (!row) {
+			result.push([]);
+			continue;
+		}
 		const sections: Array<{ align: string; widgets: GroupedWidget[] }> = [];
 		for (const alignKey of ["left", "middle", "right"]) {
 			const widgets = row.get(alignKey);
@@ -227,9 +241,7 @@ function layoutWidgets(
 				sections.push({ align: alignKey, widgets });
 			}
 		}
-		if (sections.length > 0) {
-			result.push(sections.flatMap(s => s.widgets));
-		}
+		result.push(sections.flatMap(s => s.widgets));
 	}
 
 	return result;
@@ -458,6 +470,11 @@ const DEFAULT_INFO: WidgetFactoryStatus = {
 	gitModified: 0,
 	gitStaged: 0,
 	gitUntracked: 0,
+	gitCommit: "",
+	gitAhead: 0,
+	gitBehind: 0,
+	gitAddedLines: 0,
+	gitRemovedLines: 0,
 	contextTokens: 0,
 	contextMaxTokens: undefined,
 	contextCompacted: false,

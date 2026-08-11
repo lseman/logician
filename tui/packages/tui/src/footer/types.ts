@@ -112,7 +112,7 @@ export interface ContributedWidget {
  * ════════════════════════════════════════════════════════════════════════════ */
 
 export interface FooterConfig {
-	// Layout: how many rows (1 or 2)
+	// Layout: how many rows (1-5). Widget row indices are zero-based.
 	rows: number;
 
 	// Per-widget layout overrides (keys = widgetId)

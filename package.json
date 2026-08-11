@@ -10,6 +10,8 @@
 	"scripts": {
 		"dev": "tsx tui/packages/tui/src/index.ts",
 		"start": "tsx tui/packages/tui/src/index.ts",
+		"ariadne:build": "cargo build --release --manifest-path ariadne/Cargo.toml --package ariadne-graph",
+		"ariadne:check": "cargo test --manifest-path ariadne/Cargo.toml --workspace",
 		"lint": "biome check tui/packages/",
 		"lint:fix": "biome check --fix tui/packages/",
 		"format": "biome format --write tui/packages/",

@@ -4,8 +4,8 @@ import { getReasonerMeta } from "@logician/agent-capabilities/reasoning";
 import { formatContextSize } from "@logician/coding-agent";
 import { saveConfigField } from "@logician/coding-agent/configuration";
 import {
-	getCurrentThemeName,
 	getAvailableThemes,
+	getCurrentThemeName,
 } from "../../terminal/theme.ts";
 import { getGitVersion } from "../git-status.ts";
 import type { SlashCommandsCtx } from "./context.ts";
