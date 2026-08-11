@@ -318,6 +318,7 @@ export class LogicianTUI {
 		});
 		this.loopManager.setOnStateChange(state => {
 			this.loopActive = state !== null;
+			this.workSurface.setLoopIteration(state?.iteration ?? 0);
 			if (state?.lastError) {
 				this.transcript.addSystemMessage(
 					`Loop iteration ${state.iteration} failed: ${state.lastError}`,

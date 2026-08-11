@@ -47,6 +47,12 @@ export interface TurnEndEvent {
 	finalMessage?: MessageUpdateEvent["message"];
 }
 
+/** One provider/tool iteration inside the current user-visible agent run. */
+export interface AgentIterationStartEvent {
+	type: "agent_iteration_start";
+	iteration: number;
+}
+
 export interface ToolCallStartEvent {
 	type: "tool_call_start";
 	toolName: string;
@@ -298,6 +304,7 @@ export type RuntimeEvent =
 	| MessageUpdateEvent
 	| TurnStartEvent
 	| TurnEndEvent
+	| AgentIterationStartEvent
 	| ToolCallStartEvent
 	| ToolCallUpdateEvent
 	| ToolCallIdUpdateEvent

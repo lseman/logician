@@ -18,6 +18,7 @@ import {
 	type AgentModelConfig,
 	type ExplicitTaskState,
 	formatTaskStateContext,
+	hasMeaningfulTaskState,
 	type HarnessPhase,
 	type Message,
 	type Tool,
@@ -61,6 +62,7 @@ import {
 } from "../configuration/config.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";
+import { ContinuationController } from "./continuation-controller.ts";
 import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diagnostics.ts";
 import type { McpSnapshotResult, McpToggleResult } from "../mcp/index.ts";
 import { findPromptByName, type Prompt } from "../prompts/index.ts";
@@ -217,11 +219,13 @@ export class AgentCoreBridge {
 	private running = false;
 	private sendTail: Promise<void> = Promise.resolve();
 	private pendingAutoContinue = false;
+	private continuationController: ContinuationController;
 	private skillActivation = new SkillActivationSession();
 	private cwd: string;
 	private toolRouter: ToolRouter;
 	private baseSystemPrompt: string;
 	private extensionRunner: ExtensionRunner | null = null;
+	private extensionDirs?: { user?: string; paths?: string[] };
 	private extensionLoadPromise: Promise<void> = Promise.resolve();
 	private additionalSystemPrompt?: string;
 	private pluginSystemContext = "";
@@ -278,6 +282,10 @@ export class AgentCoreBridge {
 		this.reasonerId = opts.reasoner?.trim().toLowerCase() || "none";
 		this.reasonerConfig = opts.reasonerConfig ?? {};
 		this.cwd = opts.cwd || process.cwd();
+		this.continuationController = new ContinuationController(
+			this.cwd,
+			this.sessionId,
+		);
 		this.eohController = new EohController({
 			cwd: this.cwd,
 			emit: event => this.emit(event),
@@ -411,6 +419,7 @@ export class AgentCoreBridge {
 				this.extensionLoadPromise = this.extensionRunner
 					.load(extResult.extensions)
 					.catch(err => console.error("[logician] extension load error:", err));
+		this.extensionDirs = opts.extensionDirs;
 			}
 		} catch (err) {
 			console.error("[logician] extension load error:", err);
@@ -786,6 +795,8 @@ export class AgentCoreBridge {
 		let persistentSystemPrompt: string | undefined;
 		let turnSystemPrompt = this.config.systemPrompt;
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
+		let turnSucceeded = false;
+		this.continuationController.start(message, this.progressFingerprint());
 		try {
 			await this.runStartupHooksOnce();
 			// MCP loads in the background from the moment the bridge is
@@ -866,6 +877,7 @@ export class AgentCoreBridge {
 
 			this.emit({ type: "turn_start", turnId: turnId });
 			await harness.prompt(message);
+			turnSucceeded = true;
 		} catch (err: unknown) {
 			const error = err as Error;
 			// Emit a visible error notice so the user sees connection/server
@@ -887,16 +899,91 @@ export class AgentCoreBridge {
 			this.emit({ type: "turn_end", turnId });
 			// Keep the harness alive to retain history across turns.
 			this.emit({ type: "phase", state: "ready" });
-			if (this.pendingAutoContinue) {
+			if (turnSucceeded && this.pendingAutoContinue) {
 				this.pendingAutoContinue = false;
-				this.skillActivation.continueWith(turnActivations);
-				this.emit({
-					type: "notice",
-					level: "info",
-					label: "Continuation",
-					text: "Starting the queued next-turn continuation.",
-				});
-				void this.sendMessage("continue");
+				this.scheduleAutoContinuation(turnActivations);
+			}
+		}
+	}
+
+	private progressFingerprint(): string {
+		const state = this.currentTaskState;
+		if (!state) return "";
+		const evidence = Array.from(
+			new Set(
+				state.evidence.map(
+					item => `${item.kind}:${item.tool ?? ""}:${item.summary}`,
+				),
+			),
+		).sort();
+		return JSON.stringify({
+			phase: state.phase,
+			changedFiles: [...state.changedFiles].sort(),
+			verification: state.verification
+				.map(item => `${item.passed}:${item.command}:${item.summary}`)
+				.sort(),
+			blockers: [...state.blockers].sort(),
+			evidence,
+		});
+	}
+
+	private scheduleAutoContinuation(
+		activations: ReturnType<typeof selectSkillsForPrompt>,
+	): void {
+		const decision = this.continuationController.request(
+			"next_turn_queue",
+			this.progressFingerprint(),
+		);
+		if (decision.action === "pause") {
+			this.emit({
+				type: "notice",
+				level: "warn",
+				label: "Continuation paused",
+				text: decision.reason,
+			});
+			return;
+		}
+		this.emit({
+			type: "notice",
+			level: "info",
+			label: "Continuation",
+			text: `Starting native continuation run ${decision.lease.runs}.`,
+		});
+		void this.runQueuedContinuation(activations).catch(error => {
+			this.pendingAutoContinue = false;
+			const message = error instanceof Error ? error.message : String(error);
+			this.continuationController.finish("failed", message);
+			this.reportError(error);
+		});
+	}
+
+	private async runQueuedContinuation(
+		activations: ReturnType<typeof selectSkillsForPrompt>,
+	): Promise<void> {
+		const harness = this.ensureHarness();
+		this.running = true;
+		const turnId = `turn_${Date.now()}`;
+		const originalPrompt = this.config.systemPrompt ?? this.baseSystemPrompt;
+		let turnSucceeded = false;
+		try {
+			this.skillActivation.continueWith(activations);
+			if (activations.length) {
+				harness.setSystemPrompt(
+					`${originalPrompt}\n\n${formatActivatedSkills(activations)}`,
+				);
+			}
+			this.emit({ type: "turn_start", turnId });
+			await harness.continueWithNextTurn();
+			turnSucceeded = true;
+		} finally {
+			if (activations.length) harness.setSystemPrompt(originalPrompt);
+			this.running = false;
+			this.publishContextUsage();
+			this.emit({ type: "turn_end", turnId });
+			this.emit({ type: "phase", state: "ready" });
+			if (turnSucceeded && this.pendingAutoContinue) {
+				this.pendingAutoContinue = false;
+				this.scheduleAutoContinuation(activations);
 			}
 		}
 	}
@@ -1188,6 +1275,33 @@ export class AgentCoreBridge {
 		this.startupHookResult = null;
 		this.pluginSystemContext = "";
 		this.skillActivation.reset();
+
+		// ── Re-read settings from disk ────────────────────────────────────
+		const userSettings = loadUserSettings();
+		if (this.harness) {
+			applyCompactionSettings(this.harness, userSettings);
+		}
+
+		// ── Re-discover skills and prompts ────────────────────────────────
+		await this.toolRouter.injectSkillsFromPlugins();
+		await this.toolRouter.injectPrompts();
+
+		// ── Re-load extensions ────────────────────────────────────────────
+		try {
+			const extResult = loadExtensions({
+				userDir: this.extensionDirs?.user,
+				projectDir: this.projectTrusted ? this.cwd : undefined,
+				explicitPaths: this.extensionDirs?.paths,
+			});
+			if (extResult.extensions.length > 0 && this.extensionRunner) {
+				await this.extensionRunner.load(extResult.extensions);
+			}
+		} catch (err) {
+			console.error("[logician] extension reload error:", err);
+		}
+
+		// ── Re-discover MCP servers ───────────────────────────────────────
+		await this.toolRouter.loadMcpToolsOnce();
 
 		// Send reload confirmation (not via sendMessage to avoid starting a turn)
 		this.emit({
@@ -1734,6 +1848,7 @@ export class AgentCoreBridge {
 			this.memoryStore.discardEmptySession(provisionalSessionId);
 		}
 		this.sessionId = sessionId;
+		this.continuationController.useSession(sessionId);
 		this.transcriptPath = createHookTranscriptPath(this.cwd, sessionId);
 		this.config.hookSessionId = sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
@@ -2041,7 +2156,10 @@ export class AgentCoreBridge {
 		// The loop appends task state as the final system message immediately before
 		// each provider request. Mirror that ordering here so /context reflects the
 		// actual provider payload instead of presenting task state as a side panel.
-		if (this.currentTaskState) {
+		if (
+			this.currentTaskState &&
+			hasMeaningfulTaskState(this.currentTaskState)
+		) {
 			lines.push("[SYSTEM]", formatTaskStateContext(this.currentTaskState), "");
 		}
 

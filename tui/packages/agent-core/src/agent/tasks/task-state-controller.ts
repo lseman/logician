@@ -33,6 +33,20 @@ export interface AdaptiveModeDecision {
 	reason: string;
 }
 
+/** Whether the ledger contains information beyond the original user prompt. */
+export function hasMeaningfulTaskState(state: ExplicitTaskState): boolean {
+	return (
+		state.phase !== "orient" ||
+		state.toolCalls > 0 ||
+		state.toolFailures > 0 ||
+		state.hypotheses.length > 0 ||
+		state.evidence.length > 0 ||
+		state.changedFiles.length > 0 ||
+		state.verification.length > 0 ||
+		state.blockers.length > 0
+	);
+}
+
 /** Serialize task state exactly as it is injected into provider context. */
 export function formatTaskStateContext(state: ExplicitTaskState): string {
 	const recent = state.evidence.slice(-6);
