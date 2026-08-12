@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { Transcript } from "../sessions/transcript.ts";
 
 // Reproduces the reported "stuck streaming spinner" bug end to end, using the

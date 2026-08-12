@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { RunBudgetController } from "../agent/run-budget.ts";
 
 void test("provider budget preserves finalization reserve", () => {

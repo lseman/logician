@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import type { Tool } from "../agent/types.ts";
 import { microCompactMessages } from "../compaction/compaction.ts";
 import { ToolRegistry } from "../tools/shared/registry.ts";

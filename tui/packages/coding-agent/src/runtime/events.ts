@@ -201,6 +201,18 @@ export interface AgentErrorEvent {
 	recoverable: boolean;
 }
 
+export interface RuntimeStatusEvent {
+	type: "runtime_status";
+	runPhase: string;
+	continuationsRemaining?: number;
+	noProgressRemaining?: number;
+	timeRemainingMs?: number;
+	retry?: string;
+	repair?: string;
+	compactionGeneration: number;
+	activeSubagents: number;
+}
+
 // A standalone status line (retry / error / model / stopped) rendered as its
 // own iconed, coloured chunk rather than folded into assistant prose.
 export interface NoticeEvent {
@@ -327,6 +339,7 @@ export type RuntimeEvent =
 	| MemoryUpdateEvent
 	| AgentRetryStartEvent
 	| AgentRetryEndEvent
+	| RuntimeStatusEvent
 	| AgentErrorEvent;
 
 /** Event names are derived from the canonical discriminated union so the two

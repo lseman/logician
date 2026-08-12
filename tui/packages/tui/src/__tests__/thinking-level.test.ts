@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { LogicianTUI } from "../app/tui.ts";
 
 void test("thinking-level transition synchronizes runtime, local state, and status", () => {

@@ -4,10 +4,15 @@
 // Usage: cd tui && npx --no-install tsx packages/tui/src/__tests__/profile-keystroke.ts
 
 import { performance } from "node:perf_hooks";
-import type { Turn, AssistantMessage, UserMessage, AssistantChunk } from "@logician/coding-agent/sessions";
+import type {
+	AssistantChunk,
+	AssistantMessage,
+	Turn,
+	UserMessage,
+} from "@logician/coding-agent/sessions";
 import { InputBar } from "../input/input-bar.ts";
 import { Flex } from "../rendering/flex.ts";
-import { renderLayoutFrame, type LayoutFrame } from "../rendering/layout.ts";
+import { renderLayoutFrame } from "../rendering/layout.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
 import { TranscriptDisplay } from "../rendering/transcript/display.ts";
 import { StatusBar } from "../status/status-bar.ts";
@@ -26,7 +31,16 @@ const SIZES = [
 ];
 
 function genRandomText(length: number, seed: number): string {
-	const words = ["the","function","variable","component","render","update","handle","process"];
+	const words = [
+		"the",
+		"function",
+		"variable",
+		"component",
+		"render",
+		"update",
+		"handle",
+		"process",
+	];
 	let text = "";
 	let n = seed;
 	while (text.length < length) {
@@ -47,24 +61,38 @@ function genTurn(turnIdx: number, chunkSize: number): Turn {
 		});
 	}
 	const toolResult = {
-		tool_name: ["read_file","bash","grep"][turnIdx % 3],
+		tool_name: ["read_file", "bash", "grep"][turnIdx % 3],
 		args: {},
 		result: genRandomText(chunkSize, turnIdx),
 		isError: false,
 		isComplete: true,
 		durationMs: 10,
 	};
-	chunks.push({ seq: chunks.length, type: "tool", tool: toolResult as any, isComplete: true });
+	chunks.push({
+		seq: chunks.length,
+		type: "tool",
+		tool: toolResult as any,
+		isComplete: true,
+	});
 	return {
 		id: `turn-${turnIdx}`,
-		userMessage: { type: "user", content: `Task ${turnIdx}: do the thing.` } as UserMessage,
-		assistantMessage: { type: "assistant", chunks, isComplete: true } as AssistantMessage,
+		userMessage: {
+			type: "user",
+			content: `Task ${turnIdx}: do the thing.`,
+		} as UserMessage,
+		assistantMessage: {
+			type: "assistant",
+			chunks,
+			isComplete: true,
+		} as AssistantMessage,
 		isComplete: true,
 	};
 }
 
 function buildFrame(numTurns: number, chunkSize: number) {
-	const transcriptDisplay = new TranscriptDisplay({ thinkingMode: "collapsed" });
+	const transcriptDisplay = new TranscriptDisplay({
+		thinkingMode: "collapsed",
+	});
 	const turns: Turn[] = [];
 	for (let i = 0; i < numTurns; i++) turns.push(genTurn(i, chunkSize));
 	transcriptDisplay.setTurns(turns);
@@ -73,7 +101,10 @@ function buildFrame(numTurns: number, chunkSize: number) {
 	const statusBar = new StatusBar();
 
 	const transcriptScroll = new ScrollView(transcriptDisplay, {
-		follow: "end", primary: true, overscroll: "chain", scrollbar: "always",
+		follow: "end",
+		primary: true,
+		overscroll: "chain",
+		scrollbar: "always",
 	});
 	transcriptDisplay.setScrollView(transcriptScroll);
 
@@ -110,11 +141,15 @@ function main() {
 		}
 		inputBar.handleInput("\x15"); // Ctrl-U clear
 
-		const phaseTimes = { handleInput: [] as number[], layout: [] as number[], diff: [] as number[] };
+		const phaseTimes = {
+			handleInput: [] as number[],
+			layout: [] as number[],
+			diff: [] as number[],
+		};
 
 		for (let i = 0; i < NUM_KEYSTROKES; i++) {
 			const key = KEY_SEQUENCE[i % KEY_SEQUENCE.length];
-			
+
 			// Phase 1: handleInput
 			const tStart = performance.now();
 			inputBar.handleInput(key);
@@ -129,7 +164,8 @@ function main() {
 			const tDiffStart = performance.now();
 			for (let row = 0; row < termHeight; row++) {
 				const prevLine = prevLines[row];
-				const newLine = row < frame.lines.length ? frame.lines[row] : " ".repeat(termHeight);
+				const newLine =
+					row < frame.lines.length ? frame.lines[row] : " ".repeat(termHeight);
 				if (prevLine === newLine) continue;
 			}
 			phaseTimes.diff.push(performance.now() - tDiffStart);
@@ -143,20 +179,33 @@ function main() {
 			const p50 = sorted[Math.floor(sorted.length * 0.5)];
 			const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
 			const avg = times.reduce((s, t) => s + t, 0) / times.length;
-			console.log(`  ${phase.padEnd(12)}: p50=${p50.toFixed(4)}ms p95=${p95.toFixed(4)}ms avg=${avg.toFixed(4)}ms`);
+			console.log(
+				`  ${phase.padEnd(12)}: p50=${p50.toFixed(4)}ms p95=${p95.toFixed(4)}ms avg=${avg.toFixed(4)}ms`,
+			);
 		}
 
-		const totalAvg = (
-			phaseTimes.handleInput.reduce((s, t) => s + t, 0) +
-			phaseTimes.layout.reduce((s, t) => s + t, 0) +
-			phaseTimes.diff.reduce((s, t) => s + t, 0)
-		) / NUM_KEYSTROKES;
+		const totalAvg =
+			(phaseTimes.handleInput.reduce((s, t) => s + t, 0) +
+				phaseTimes.layout.reduce((s, t) => s + t, 0) +
+				phaseTimes.diff.reduce((s, t) => s + t, 0)) /
+			NUM_KEYSTROKES;
 		console.log(`  ${"total".padEnd(12)}: avg=${totalAvg.toFixed(4)}ms`);
 
-		const layoutPct = (phaseTimes.layout.reduce((s, t) => s + t, 0) / totalAvg * 100).toFixed(1);
-		const diffPct = (phaseTimes.diff.reduce((s, t) => s + t, 0) / totalAvg * 100).toFixed(1);
-		const inputPct = (phaseTimes.handleInput.reduce((s, t) => s + t, 0) / totalAvg * 100).toFixed(1);
-		console.log(`  Distribution: handleInput=${inputPct}% layout=${layoutPct}% diff=${diffPct}%`);
+		const layoutPct = (
+			(phaseTimes.layout.reduce((s, t) => s + t, 0) / totalAvg) *
+			100
+		).toFixed(1);
+		const diffPct = (
+			(phaseTimes.diff.reduce((s, t) => s + t, 0) / totalAvg) *
+			100
+		).toFixed(1);
+		const inputPct = (
+			(phaseTimes.handleInput.reduce((s, t) => s + t, 0) / totalAvg) *
+			100
+		).toFixed(1);
+		console.log(
+			`  Distribution: handleInput=${inputPct}% layout=${layoutPct}% diff=${diffPct}%`,
+		);
 	}
 }
 

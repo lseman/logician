@@ -268,6 +268,10 @@ export async function runDelegatedAgent(params: {
 			},
 		);
 		messages = [...messages, ...produced];
+		// A validated acceptance report is the authoritative delegated outcome.
+		// The generic runner may classify a tool-bearing run without task_status as
+		// blocked, but delegation's explicit contract has already proved completion.
+		if (acceptance && acceptancePassed) status = "completed";
 		if (acceptancePassed || !acceptance || signal?.aborted) break;
 		if (attempt + 1 >= maxAttempts || turns >= params.maxIterations) break;
 		prompts = [

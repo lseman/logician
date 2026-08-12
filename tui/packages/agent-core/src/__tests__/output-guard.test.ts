@@ -1,5 +1,5 @@
+import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
 import { BackendError } from "../agent/backend.ts";
 import { OutputGuard } from "../agent/guards/output-guard.ts";
 

@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { type TaskItem, TodoBar } from "../status/todo-bar.ts";
 import { initTheme } from "../terminal/theme.ts";
 

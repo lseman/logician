@@ -9,7 +9,7 @@
 	},
 	"scripts": {
 		"eval": "bun run benchmarks/memory-eval.ts",
-		"test": "tsx --test $(find src -name '*.test.ts' -type f)",
+		"test": "bun test src",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

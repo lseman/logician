@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import type { SessionStore } from "@logician/coding-agent/sessions";
 import { SessionBrowserOverlay } from "../overlays/session-manager.ts";
 import { initTheme } from "../terminal/theme.ts";

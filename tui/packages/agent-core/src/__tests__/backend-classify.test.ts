@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { classifyHttpError, parseProviderUsage } from "../agent/backend.ts";
 
 void test("429 with numeric Retry-After carries retryAfterMs", () => {

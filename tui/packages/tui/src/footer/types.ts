@@ -44,6 +44,7 @@ export type BuiltinWidgetId =
 	| "model" // active model name
 	| "thinking" // thinking level (off/low/medium/high/xhigh)
 	| "phase" // READY, THINKING, STREAMING, etc. with spinner
+	| "runtime-status" // durable run phase, budgets, repair/retry, compaction, children
 	// Context & tokens
 	| "context-bar" // mini gauge of used context (can grow to full bar)
 	| "context-capacity" // total context window size (e.g. 150k)
@@ -140,6 +141,13 @@ function buildDefaultLayouts(): Record<BuiltinWidgetId, WidgetLayout> {
 	return {
 		// Row 0 — left group (always shown when relevant)
 		phase: { enabled: true, row: 0, position: 0, align: "left", fill: "none" },
+		"runtime-status": {
+			enabled: true,
+			row: 0,
+			position: 0,
+			align: "right",
+			fill: "none",
+		},
 		model: { enabled: true, row: 0, position: 1, align: "left", fill: "none" },
 		"context-bar": {
 			enabled: true,

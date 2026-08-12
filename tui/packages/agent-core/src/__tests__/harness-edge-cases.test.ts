@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { AgentHarness, HarnessBusyError } from "../agent/harness.ts";
 import type { AgentConfig } from "../agent/types.ts";
 import { FakeBackend, textResponse } from "./fake-backend.ts";

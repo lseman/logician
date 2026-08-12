@@ -22,6 +22,11 @@ import { assembleContext, compressContext } from "../context.ts";
 import type { IEmbedder } from "../embedder.ts";
 import { llmRewriteQuery, rewriteQuery } from "../query.ts";
 import { CrossEncoderReranker } from "../reranker.ts";
+import {
+	diagnoseRetrieval,
+	fuseRankedHits,
+	selectDiverseHits,
+} from "../retrieval.ts";
 import type {
 	ChunkingConfig,
 	ContextWindowConfig,
@@ -30,6 +35,7 @@ import type {
 	MetadataFilter,
 	RAGChunk,
 	RAGStore,
+	RetrievalDiagnostics,
 	RewrittenQuery,
 	SearchHit,
 } from "../types.ts";
@@ -99,6 +105,10 @@ export interface RAGSearchOptions {
 	/** Dense/sparse weights for hybrid search. */
 	denseWeight?: number;
 	sparseWeight?: number;
+	/** Retrieve rewritten variants independently, then fuse their rankings. */
+	multiQuery?: boolean;
+	/** Remove redundant evidence while preserving relevance. */
+	diversify?: boolean;
 }
 
 export interface RAGContextSearchOptions extends RAGSearchOptions {
@@ -316,6 +326,8 @@ export class RAGPipeline {
 			candidatesBeforeRerank = 50,
 			denseWeight = 0.6,
 			sparseWeight = 0.4,
+			multiQuery = true,
+			diversify = true,
 		} = options ?? {};
 
 		// Step 1: Query rewriting/expansion
@@ -335,50 +347,75 @@ export class RAGPipeline {
 			}
 		}
 
-		// Step 2: Embed the (expanded) query
-		const queryVectors = await this.embedder.embedBatch([effectiveQuery]);
-		const queryVector = queryVectors[0];
-
-		// Step 3: Hybrid retrieval
-		let hits: SearchHit[];
-
-		if (this.vectorStore.searchHybrid) {
-			hits = await this.vectorStore.searchHybrid(
-				effectiveQuery,
-				queryVector,
-				candidatesBeforeRerank,
-				{
-					denseWeight,
-					sparseWeight,
-					filter: this._filterToMap(filter),
-				},
-			);
-		} else {
-			hits = await this.vectorStore.searchByVector(
-				queryVector,
-				candidatesBeforeRerank,
-				{
-					filter: this._filterToMap(filter),
-				},
-			);
-		}
+		// Embed and retrieve variants independently. Embedding a synthetic "OR"
+		// string blurs intent; rank fusion preserves evidence from each route.
+		const queryVariants =
+			multiQuery && rewritten
+				? [...new Set([query, rewritten.rewritten, ...rewritten.expansions])]
+				: [effectiveQuery];
+		const queryVectors = await this.embedder.embedBatch(queryVariants);
+		const routes = await Promise.all(
+			queryVariants.map(async (variant, index) => {
+				const routeHits = this.vectorStore.searchHybrid
+					? await this.vectorStore.searchHybrid(
+							variant,
+							queryVectors[index],
+							candidatesBeforeRerank,
+							{
+								denseWeight,
+								sparseWeight,
+								filter: this._filterToMap(filter),
+							},
+						)
+					: await this.vectorStore.searchByVector(
+							queryVectors[index],
+							candidatesBeforeRerank,
+							{
+								filter: this._filterToMap(filter),
+							},
+						);
+				return { name: variant, hits: routeHits };
+			}),
+		);
+		let hits = fuseRankedHits(routes);
 
 		// Step 4: Reranking
 		if (this.enableReranking) {
 			const rr = reranker ?? this.reranker;
 			if (rr && hits.length > 0) {
+				const retrievalById = new Map(hits.map(hit => [hit.chunk.id, hit]));
 				const reranked = await rr.rerank(query, hits);
 				hits = reranked.map(r => ({
+					...retrievalById.get(r.chunk.id),
 					chunk: r.chunk,
 					score: r.rerankScore,
-					denseScore: r.score,
 					rerankScore: r.rerankScore,
 				}));
 			}
 		}
 
 		// Step 5: Return top-K
-		return hits.slice(0, topK);
+		return diversify ? selectDiverseHits(hits, topK) : hits.slice(0, topK);
+	}
+
+	/** Search plus calibrated, machine-readable evidence diagnostics. */
+	async searchWithDiagnostics(
+		query: string,
+		topK = 5,
+		options?: RAGSearchOptions,
+	): Promise<{ hits: SearchHit[]; diagnostics: RetrievalDiagnostics }> {
+		const hits = await this.search(query, topK, options);
+		const variants = [
+			...new Set(hits.flatMap(hit => hit.retrievalRoutes ?? [])),
+		];
+		return {
+			hits,
+			diagnostics: diagnoseRetrieval(
+				variants.length ? variants : [query],
+				hits,
+				hits,
+			),
+		};
 	}
 
 	/**

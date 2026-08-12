@@ -1,7 +1,7 @@
 // ── Branching enhancement tests ──────────────────────────────────────────────
 
+import { describe, it } from "bun:test";
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
 
 describe("BranchInfo type", () => {
 	it("has all required fields", () => {

@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import test from "node:test";
 import { clampLineToWidth, visibleWidth } from "../terminal/core.ts";
 import { renderTerminalScreen } from "../testing/terminal-screen.ts";
 

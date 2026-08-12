@@ -1,8 +1,8 @@
+import { afterEach, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, test } from "node:test";
 import type { RAGChunk } from "../types.ts";
 import { BM25Scorer, HybridVectorStore } from "./hybrid-store.ts";
 

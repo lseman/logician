@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { LoopDetector } from "../agent/guards/loop-detector.ts";
 
 // Helper to create a signature the way the loop does.

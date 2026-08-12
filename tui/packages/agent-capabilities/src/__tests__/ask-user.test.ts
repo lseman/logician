@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { ask_user } from "../interaction/ask-user/index.ts";
 
 void test("ask_user forwards a tabbed questionnaire and returns structured answers", async () => {

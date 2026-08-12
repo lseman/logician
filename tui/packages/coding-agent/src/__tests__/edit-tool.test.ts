@@ -1,3 +1,4 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
 	chmodSync,
@@ -12,7 +13,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
 import { edit_file } from "../tools/edit-file.ts";
 import { read_file } from "../tools/read-file.ts";
 import { isStaleSinceRead, recordRead } from "../tools/read-tracker.ts";

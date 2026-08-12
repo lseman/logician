@@ -1,8 +1,8 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "node:test";
 
 // Minimal dark theme that satisfies the TUI's initTheme() requirement.
 const DARK_THEME_JSON = JSON.stringify({
@@ -117,10 +117,7 @@ void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async
 			LOGICIAN_HOOKS: "0",
 			LOGICIAN_MODEL: "test-model",
 		},
-		actions: [
-			{ afterMs: 100, send: "s\n" },
-			{ afterMs: 500, send: "\x1b[109;5u" },
-		],
+		actions: [{ afterMs: 300, send: "\x1b[109;5u" }],
 		timeoutMs: 4_000,
 		columns: 120,
 		rows: 32,

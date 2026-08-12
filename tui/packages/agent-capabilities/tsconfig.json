@@ -18,7 +18,7 @@
 			"@logician/rag/*": ["../rag/src/*"]
 		},
 		"noEmit": true,
-		"types": ["node"]
+		"types": ["node", "bun-types"]
 	},
 	"include": ["src/**/*", "../agent-core/src/**/*", "../rag/src/**/*"],
 	"exclude": ["node_modules", "dist"]

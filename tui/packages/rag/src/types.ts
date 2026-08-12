@@ -48,6 +48,21 @@ export interface SearchHit {
 	sparseScore?: number;
 	/** Reranked cross-encoder score. */
 	rerankScore?: number;
+	/** Query variants/routes that independently retrieved this chunk. */
+	retrievalRoutes?: string[];
+}
+
+/** Observable retrieval quality signals for abstention and debugging. */
+export interface RetrievalDiagnostics {
+	queryVariants: string[];
+	candidateCount: number;
+	selectedCount: number;
+	/** Fraction of selected hits supported by more than one retrieval route. */
+	routeAgreement: number;
+	/** 0..1 heuristic confidence; intended for calibration, not truth claims. */
+	confidence: number;
+	insufficientEvidence: boolean;
+	reasons: string[];
 }
 
 /** Configuration for the vector store. */

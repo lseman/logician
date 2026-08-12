@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { MessageDeliveryManager } from "../queue/manager.ts";
 
 void test("one-at-a-time steering drains without dropping later messages", () => {

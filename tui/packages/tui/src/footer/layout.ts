@@ -303,6 +303,7 @@ function renderGroupedRow(
 		model: 1,
 		"context-bar": 2,
 		location: 3,
+		"virtual-env": 3,
 		branch: 3,
 		thinking: 4,
 		reasoner: 5,
@@ -517,9 +518,10 @@ export class StatusBar implements Component {
 	/** Widgets produced by the factory, refreshed each render cycle */
 	private widgets: WidgetData[] = [];
 
-	constructor() {
-		this.config = loadFooterConfig();
-		this.configMtime = configMtimeMs();
+	constructor(config?: FooterConfig) {
+		this.config = config ? structuredClone(config) : loadFooterConfig();
+		this.configMtime = config ? 0 : configMtimeMs();
+		this.lastConfigCheck = config ? Number.POSITIVE_INFINITY : 0;
 	}
 
 	setOnInvalidate(cb: () => void): void {

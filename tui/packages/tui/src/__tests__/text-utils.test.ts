@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { renderMarkdownLine } from "../rendering/transcript/text-utils.ts";
 import { initTheme, theme } from "../terminal/theme.ts";
 
