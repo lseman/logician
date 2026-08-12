@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { AgentConfig, Tool } from "@logician/agent-core";
+import type { AgentConfig, AgentEvent, Tool } from "@logician/agent-core";
+import { PermissionManager } from "@logician/agent-core";
 import type {
 	GenerateOptions,
 	LLMBackend,
@@ -400,6 +401,57 @@ void test("spawn_agent surfaces backend errors as an isError result instead of t
 	if (typeof result === "string") return;
 	assert.equal(result.isError, true);
 	assert.ok(events.some(e => e.type === "subagent_end"));
+});
+
+void test("subagents inherit the parent permission boundary", async () => {
+	let executed = false;
+	let calls = 0;
+	const events: AgentEvent[] = [];
+	const mutate: Tool = {
+		name: "mutate",
+		description: "mutate state",
+		parameters: { type: "object", properties: {} },
+		execute: async () => {
+			executed = true;
+			return "changed";
+		},
+	};
+	const tool = createSpawnAgentTool({
+		config: () => ({
+			...baseConfig,
+			tools: [mutate],
+			permissions: new PermissionManager({ mode: "plan" }),
+		}),
+		backend: {
+			model: "fake",
+			withModel() {
+				return this;
+			},
+			async generate() {
+				calls++;
+				return calls === 1
+					? {
+							content: null,
+							toolCalls: [
+								{ id: "child-call", name: "mutate", arguments: "{}" },
+							],
+							stopReason: "stop" as const,
+						}
+					: { content: "done", toolCalls: [], stopReason: "stop" as const };
+			},
+		},
+		agents: () => BUILTIN_AGENTS,
+		emit: event => events.push(event),
+	});
+	await tool.execute({ task: "change state", agent: "general" }, {});
+	assert.equal(executed, false);
+	assert.ok(
+		events.some(
+			event =>
+				event.type === "subagent_event" &&
+				event.event.type === "tool_permission_decision",
+		),
+	);
 });
 
 // ── spawn_agents: concurrency-limiter abort emits a synthetic subagent_end ──

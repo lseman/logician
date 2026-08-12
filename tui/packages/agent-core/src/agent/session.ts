@@ -8,12 +8,12 @@
 // Key operations:
 // - append(msg): persist one message to the current session file
 // - load(): return all messages from the session file
-// - checkpoint(): write a snapshot marker for undo/restore
 // - listSessions(): return all known session IDs
-// - clear(): remove the session file and all checkpoints
+// - checkout(entryId): select the active leaf in the conversation tree
+// - clear(): remove the session directory
 //
-// Design: minimal, file-based. No database. Each session is one JSONL file
-// plus optional checkpoint markers. Sessions are stored under
+// Design: minimal, file-based. No database. Each session is an append-only
+// JSONL conversation tree plus metadata naming its active leaf. Sessions live at
 // <cwd>/.logician/sessions/<sessionId>/
 
 import { randomUUID } from "node:crypto";
@@ -120,33 +120,6 @@ export interface LabelSessionEntry {
 	label?: string;
 }
 
-export type OperationJournalEventType =
-	| "operation_start"
-	| "operation_finish"
-	| "operation_interrupted"
-	| "turn_start"
-	| "turn_end"
-	| "tool_start"
-	| "tool_end"
-	| "checkpoint"
-	| "intervention";
-
-export interface OperationJournalEvent {
-	version: 1;
-	id: string;
-	type: OperationJournalEventType;
-	operationId: string;
-	timestamp: number;
-	turnId?: string;
-	toolCallId?: string;
-	toolName?: string;
-	status?: string;
-	interventionId?: string;
-	cause?: string;
-	action?: string;
-	iteration?: number;
-}
-
 export type SessionEntry =
 	| MessageSessionEntry
 	| ModelChangeSessionEntry
@@ -166,14 +139,6 @@ export interface SessionContext {
 	labels: Map<string, string>;
 }
 
-/** Checkpoint metadata written to a separate file. */
-export interface SessionCheckpoint {
-	timestamp: number;
-	messageCount: number;
-	/** File path for the checkpoint data (the full message array serialized). */
-	dataFile: string;
-}
-
 /** Session metadata (name, creation time, message count). */
 export interface SessionMeta {
 	id: string;
@@ -183,6 +148,8 @@ export interface SessionMeta {
 	name?: string;
 	/** UUID of the parent session (for forked sessions). */
 	parentId?: string;
+	/** Selected entry leaf for durable branch checkout. */
+	activeLeafId?: string;
 	/** Session format version (for migration). */
 	version?: number;
 }
@@ -195,8 +162,6 @@ export interface SessionConfig {
 	baseDir?: string;
 	/** Whether to enable session persistence (default: false). */
 	enabled?: boolean;
-	/** Maximum number of checkpoints to keep per session (default: 10). */
-	maxCheckpoints?: number;
 	/** UUID of parent session (for forked sessions). */
 	parentId?: string;
 	/** Session format version (auto-upgraded on load). */
@@ -204,14 +169,12 @@ export interface SessionConfig {
 }
 
 const DEFAULT_BASE_DIR = ".logician/sessions";
-const DEFAULT_MAX_CHECKPOINTS = 10;
 const SESSIONS_DIR = "sessions";
-const CHECKPOINT_DIR = "checkpoints";
 const META_FILE = "meta.json";
 
 // ── Session class ───────────────────────────────────────────────────────
-// Append-only JSONL crash-recovery journal for one harness run (messages,
-// checkpoints, operation log). Not the same concept as coding-agent's
+// Append-only JSONL conversation tree for one harness session. Execution state
+// belongs exclusively to the Run Kernel. This is distinct from coding-agent's
 // SessionStore (SQLite-backed session browser/rename/switch UI) or tui's
 // SessionManager component (the overlay for that browser) — this one is
 // internal to the agent loop and has no user-facing UI of its own.
@@ -220,14 +183,13 @@ export class Session {
 	private readonly dir: string;
 	private readonly filePath: string;
 	private readonly metaPath: string;
-	private readonly checkpointDir: string;
-	private maxCheckpoints: number;
 	private messageCount = 0;
 	private readonly createdAt: number;
 	private lastActivity: number;
 	private name?: string;
 	private parentId?: string;
-	private version = 2;
+	private activeLeafId?: string;
+	private version = 3;
 
 	constructor(
 		private readonly sessionId: string,
@@ -240,8 +202,6 @@ export class Session {
 		);
 		this.filePath = join(this.dir, "messages.jsonl");
 		this.metaPath = join(this.dir, META_FILE);
-		this.checkpointDir = join(this.dir, CHECKPOINT_DIR);
-		this.maxCheckpoints = config?.maxCheckpoints ?? DEFAULT_MAX_CHECKPOINTS;
 		this.parentId = config?.parentId;
 		this.createdAt = Date.now();
 		this.lastActivity = this.createdAt;
@@ -254,10 +214,11 @@ export class Session {
 			this.lastActivity = existingMeta.lastActivity ?? this.lastActivity;
 			this.name = existingMeta.name;
 			this.parentId = config?.parentId ?? existingMeta.parentId;
+			this.activeLeafId = existingMeta.activeLeafId;
 			this.version = (config?.version ?? existingMeta.version ?? 1) as number;
 			this.migrateVersion();
 		} else {
-			this.version = config?.version ?? 2;
+			this.version = config?.version ?? 3;
 		}
 
 		// Initialize session directory and meta
@@ -267,7 +228,6 @@ export class Session {
 	/** Create the session directory and meta file if they don't exist. */
 	private init(): void {
 		mkdirSync(this.dir, { recursive: true });
-		mkdirSync(this.checkpointDir, { recursive: true });
 		markPathIgnoredByCloudSync(this.dir);
 
 		if (!existsSync(this.metaPath)) {
@@ -285,41 +245,6 @@ export class Session {
 				"utf8",
 			);
 		}
-	}
-
-	appendJournalEvent(
-		event: Omit<OperationJournalEvent, "version" | "id" | "timestamp">,
-	): OperationJournalEvent {
-		const persisted: OperationJournalEvent = {
-			version: 1,
-			id: randomUUID(),
-			timestamp: Date.now(),
-			...event,
-		};
-		appendFileSync(
-			join(this.dir, "operations.jsonl"),
-			`${JSON.stringify(persisted)}\n`,
-			"utf8",
-		);
-		return persisted;
-	}
-
-	/** Load durable lifecycle records, ignoring only an incomplete final line. */
-	loadJournalEvents(): OperationJournalEvent[] {
-		const journalPath = join(this.dir, "operations.jsonl");
-		if (!existsSync(journalPath)) return [];
-		const lines = readFileSync(journalPath, "utf8").split("\n");
-		const events: OperationJournalEvent[] = [];
-		for (let index = 0; index < lines.length; index++) {
-			const line = lines[index].trim();
-			if (!line) continue;
-			try {
-				events.push(JSON.parse(line) as OperationJournalEvent);
-			} catch (error) {
-				if (index !== lines.length - 1) throw error;
-			}
-		}
-		return events;
 	}
 
 	// ── Core operations ─────────────────────────────────────────────────
@@ -421,13 +346,14 @@ export class Session {
 	appendEntry(entry: SessionEntry): void {
 		mkdirSync(dirname(this.filePath), { recursive: true });
 		if (!entry.parentId) {
-			entry.parentId = this.getLeafEntryId();
+			entry.parentId = this.activeLeafId;
 		}
 		if (entry.type === "message") {
 			entry.message.entryId = entry.id;
 			entry.message.parentId = entry.parentId;
 		}
 		appendFileSync(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
+		this.activeLeafId = entry.id;
 		this.messageCount++;
 		this.lastActivity = Date.now();
 		this.updateMeta();
@@ -435,7 +361,7 @@ export class Session {
 
 	/** Load all messages from the session file. */
 	load(): SessionMessage[] {
-		return this.loadEntries()
+		return this.getPathToRootEntries()
 			.filter((entry): entry is MessageSessionEntry => entry.type === "message")
 			.map(entry => entry.message);
 	}
@@ -515,57 +441,6 @@ export class Session {
 		return context;
 	}
 
-	/** Save a checkpoint of the current state. Returns the checkpoint path. */
-	saveCheckpoint(): string {
-		const messages = this.load();
-		const checkpoint: SessionCheckpoint = {
-			timestamp: Date.now(),
-			messageCount: messages.length,
-			dataFile: join(this.checkpointDir, `checkpoint_${messages.length}.json`),
-		};
-
-		// Serialize full state for restore
-		writeFileSync(checkpoint.dataFile, JSON.stringify(messages), "utf8");
-		this.lastActivity = Date.now();
-		this.updateMeta();
-
-		// Prune old checkpoints
-		this.pruneCheckpoints();
-
-		return checkpoint.dataFile;
-	}
-
-	/** List available checkpoints for this session. */
-	listCheckpoints(): Array<{
-		dataFile: string;
-		messageCount: number;
-		timestamp: number;
-	}> {
-		if (!existsSync(this.checkpointDir)) return [];
-		return readdirSync(this.checkpointDir)
-			.filter(f => f.startsWith("checkpoint_") && f.endsWith(".json"))
-			.map(f => {
-				const content = JSON.parse(
-					readFileSync(join(this.checkpointDir, f), "utf8"),
-				);
-				return {
-					dataFile: join(this.checkpointDir, f),
-					messageCount: content.length,
-					timestamp: statSync(join(this.checkpointDir, f)).mtimeMs,
-				};
-			})
-			.sort((a, b) => a.timestamp - b.timestamp);
-	}
-
-	/** Load a checkpoint by message count. Returns null if not found. */
-	loadCheckpoint(messageCount: number): SessionMessage[] | null {
-		const checkpoint = this.listCheckpoints().find(
-			c => c.messageCount === messageCount,
-		);
-		if (!checkpoint) return null;
-		return JSON.parse(readFileSync(checkpoint.dataFile, "utf8"));
-	}
-
 	// ── Metadata ────────────────────────────────────────────────────────
 
 	getMeta(): SessionMeta {
@@ -586,7 +461,7 @@ export class Session {
 
 	// ── Cleanup ─────────────────────────────────────────────────────────
 
-	/** Remove the session directory and all checkpoints. */
+	/** Remove the session directory and its conversation data. */
 	clear(): void {
 		if (existsSync(this.dir)) {
 			rmSync(this.dir, { recursive: true, force: true });
@@ -610,7 +485,8 @@ export class Session {
 		}
 
 		const path: SessionEntry[] = [];
-		let currentId: string | undefined = entries[entries.length - 1].id;
+		let currentId: string | undefined =
+			this.activeLeafId ?? entries[entries.length - 1].id;
 		const seen = new Set<string>();
 
 		while (currentId && !seen.has(currentId)) {
@@ -626,30 +502,42 @@ export class Session {
 
 	/** Get last entryId in the session. */
 	getLeafEntryId(): string | undefined {
-		const entries = this.loadEntries();
-		return entries.length > 0 ? entries[entries.length - 1].id : undefined;
+		return this.activeLeafId;
+	}
+
+	checkout(entryId?: string): void {
+		if (entryId && !this.loadEntries().some(entry => entry.id === entryId))
+			throw new Error(`Cannot checkout unknown session entry ${entryId}`);
+		this.activeLeafId = entryId;
+		this.lastActivity = Date.now();
+		this.updateMeta();
 	}
 
 	/** Truncate the session file (keep only recent messages). */
 	truncate(keepLast: number): void {
 		const messages = this.load();
 		const truncated = messages.slice(-keepLast);
+		const entries: MessageSessionEntry[] = [];
+		for (const message of truncated) {
+			const id = message.entryId ?? randomUUID();
+			const parentId = entries.at(-1)?.id;
+			entries.push({
+				type: "message",
+				id,
+				parentId,
+				timestamp: message.timestamp,
+				message: { ...message, entryId: id, parentId },
+			});
+		}
 		this.messageCount = truncated.length;
 		writeFileSync(
 			this.filePath,
-			`${truncated
-				.map(m =>
-					JSON.stringify({
-						type: "message",
-						id: m.entryId ?? randomUUID(),
-						parentId: m.parentId,
-						timestamp: m.timestamp,
-						message: m,
-					} satisfies MessageSessionEntry),
-				)
+			`${entries
+				.map(entry => JSON.stringify(entry satisfies MessageSessionEntry))
 				.join("\n")}\n`,
 			"utf8",
 		);
+		this.activeLeafId = entries.at(-1)?.id;
 		this.lastActivity = Date.now();
 		this.updateMeta();
 	}
@@ -666,6 +554,7 @@ export class Session {
 				lastActivity: this.lastActivity,
 				name: this.name,
 				parentId: this.parentId,
+				activeLeafId: this.activeLeafId,
 				version: this.version,
 			}),
 			"utf8",
@@ -692,24 +581,6 @@ export class Session {
 		};
 	}
 
-	private pruneCheckpoints(): void {
-		const checkpoints = this.listCheckpoints();
-		if (checkpoints.length <= this.maxCheckpoints) return;
-
-		// Remove oldest checkpoints beyond the limit
-		const toRemove = checkpoints.slice(
-			0,
-			checkpoints.length - this.maxCheckpoints,
-		);
-		for (const cp of toRemove) {
-			try {
-				rmSync(cp.dataFile, { force: true });
-			} catch (_e: unknown) {
-				// Best-effort cleanup
-			}
-		}
-	}
-
 	private getMetaSilent(): SessionMeta | null {
 		if (!existsSync(this.metaPath)) return null;
 		try {
@@ -728,6 +599,16 @@ export class Session {
 				writeFileSync(this.metaPath, JSON.stringify(meta, null, 2), "utf8");
 			}
 			this.version = 2;
+		}
+		if (this.version < 3) {
+			const meta = this.getMetaSilent();
+			this.activeLeafId = this.loadEntries().at(-1)?.id;
+			if (meta) {
+				meta.activeLeafId = this.activeLeafId;
+				meta.version = 3;
+				writeFileSync(this.metaPath, JSON.stringify(meta, null, 2), "utf8");
+			}
+			this.version = 3;
 		}
 	}
 }

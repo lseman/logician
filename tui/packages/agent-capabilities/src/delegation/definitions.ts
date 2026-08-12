@@ -9,6 +9,7 @@
 // body becomes the child's system prompt. Two built-in agents always exist:
 // "general" (all parent tools) and "explorer" (read-only tools).
 
+import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -181,8 +182,6 @@ export interface SpawnAgentDeps {
 	concurrencyLimiter?: SubagentConcurrencyLimiter;
 }
 
-let agentSeq = 0;
-
 // ── Session-local concurrency limiter ───────────────────────────────────────
 
 export interface SpawnCtx {
@@ -273,8 +272,9 @@ export function createSubagentConcurrencyLimiter(
 }
 
 function limiterFor(deps: SpawnAgentDeps): SubagentConcurrencyLimiter {
-	return (deps.concurrencyLimiter ??=
-		createSubagentConcurrencyLimiter(undefined));
+	if (!deps.concurrencyLimiter)
+		deps.concurrencyLimiter = createSubagentConcurrencyLimiter(undefined);
+	return deps.concurrencyLimiter;
 }
 
 async function _runSpawn(
@@ -294,7 +294,7 @@ async function _runSpawn(
 		return `Error: Unknown agent "${agentName}". Available: ${names}`;
 	}
 
-	const agentId = `agent_${++agentSeq}`;
+	const agentId = `agent_${randomUUID()}`;
 	const parent = deps.config();
 	deps.emit({
 		type: "subagent_start",
@@ -316,12 +316,20 @@ async function _runSpawn(
 		systemPrompt: def.prompt,
 		tools: resolveChildTools(def, parent.tools ?? []),
 		toolExecution: parent.toolExecution,
+		permissions: parent.permissions,
+		onPermissionRequest: parent.onPermissionRequest,
+		allowedPaths: parent.allowedPaths,
+		allowAllPaths: parent.allowAllPaths,
+		hooks: parent.hooks,
+		internalHooks: parent.internalHooks,
 		thinkingLevel: parent.thinkingLevel,
 		autoRetryEnabled: parent.autoRetryEnabled,
 		maxRetries: parent.maxRetries,
 		turnTimeoutMs: parent.turnTimeoutMs,
 		webSearch: parent.webSearch,
 		truncation: parent.truncation,
+		runBudget: parent.runBudget,
+		maxTotalTokens: parent.maxTotalTokens,
 		// External settings-hooks (PreToolUse shell hooks etc.) stay enabled
 		// so safety hooks also govern subagent tool use.
 		runtimeHooksEnabled: parent.runtimeHooksEnabled,
@@ -422,6 +430,7 @@ function resolveChildTools(def: AgentDefinition, parentTools: Tool[]): Tool[] {
 export function createSpawnAgentTool(deps: SpawnAgentDeps): Tool {
 	return {
 		name: "spawn_agent",
+		recoverySemantics: "at_most_once_unknown",
 		description:
 			"Delegate a self-contained task to a subagent with its own context " +
 			"window. The subagent works autonomously and returns only its final " +
@@ -488,6 +497,7 @@ function truncateResult(text: string, maxChars: number): string {
 export function createSpawnAgentsTool(deps: SpawnAgentDeps): Tool {
 	return {
 		name: "spawn_agents",
+		recoverySemantics: "at_most_once_unknown",
 		description:
 			"Spawn multiple subagents concurrently, bounded by maxParallelAgents. " +
 			"Returns results in the same order as the input tasks. " +

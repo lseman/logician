@@ -16,6 +16,13 @@ type OnPermissionRequest = (ctx: {
 	toolCallId: string;
 	args: Record<string, unknown>;
 }) => Promise<"allow" | "deny" | "always">;
+export interface PermissionDecisionRecord {
+	toolCallId: string;
+	toolName: string;
+	decision: "allow" | "deny";
+	source: "rule" | "mode" | "user" | "fail_closed";
+	scope?: "once" | "session";
+}
 
 export interface ToolBatchControllerOptions {
 	registry: ToolRegistry;
@@ -28,6 +35,29 @@ export interface ToolBatchControllerOptions {
 	hooks?: AgentHooks;
 	permissions?: PermissionManager;
 	onPermissionRequest?: OnPermissionRequest;
+	onPermissionDecision?: (
+		decision: PermissionDecisionRecord,
+	) => void | Promise<void>;
+	onToolIntent?: (input: {
+		toolCallId: string;
+		toolName: string;
+		args: Record<string, unknown>;
+		recovery:
+			| "pure"
+			| "idempotent"
+			| "receipt_recoverable"
+			| "at_most_once_unknown";
+	}) =>
+		| { operationId: string; idempotencyKey: string }
+		| undefined
+		| Promise<{ operationId: string; idempotencyKey: string } | undefined>;
+	onToolResult?: (input: {
+		toolCallId: string;
+		toolName: string;
+		result: string;
+		isError: boolean;
+		receipt?: string;
+	}) => void | Promise<void>;
 	emit: Emit;
 	emitExtension: EmitExtension;
 }
@@ -37,6 +67,7 @@ const PERMISSION_DENIED_PREFIX = "Tool call denied";
 export interface ToolBatchResult {
 	messages: Message[];
 	terminated: boolean;
+	executedToolCallIds: string[];
 }
 
 const CANCELLED_TOOL_RESULT =
@@ -56,28 +87,105 @@ async function evaluatePermission(
 	call: ToolCall,
 	args: Record<string, unknown>,
 	tool: ReturnType<ToolRegistry["get"]>,
+	onDecision: ToolBatchControllerOptions["onPermissionDecision"],
+	emit: Emit,
 ): Promise<string | undefined> {
 	const verdict = permissions.evaluate(call, args, tool);
-	if (verdict.decision === "allow") return undefined;
+	if (verdict.decision === "allow") {
+		await onDecision?.({
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "allow",
+			source: verdict.source,
+		});
+		await emit({
+			type: "tool_permission_decision",
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "allow",
+			source: verdict.source,
+		});
+		return undefined;
+	}
 	if (verdict.decision === "deny") {
+		await onDecision?.({
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "deny",
+			source: verdict.source,
+		});
+		await emit({
+			type: "tool_permission_decision",
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "deny",
+			source: verdict.source,
+		});
 		return `${PERMISSION_DENIED_PREFIX}: ${verdict.reason ?? `"${call.name}" is not permitted in the current mode.`}`;
 	}
 
 	// decision === "ask"
 	if (!onPermissionRequest) {
+		await onDecision?.({
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "deny",
+			source: "fail_closed",
+		});
+		await emit({
+			type: "tool_permission_decision",
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "deny",
+			source: "fail_closed",
+		});
 		return `${PERMISSION_DENIED_PREFIX}: "${call.name}" requires approval, but no interactive handler is available.`;
 	}
+	await emit({
+		type: "tool_permission_request",
+		toolCallId: call.id,
+		toolName: call.name,
+		args: JSON.stringify(args),
+	});
 	const answer = await onPermissionRequest({
 		toolName: call.name,
 		toolCallId: call.id,
 		args,
 	});
 	if (answer === "deny") {
+		await onDecision?.({
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "deny",
+			source: "user",
+			scope: "once",
+		});
+		await emit({
+			type: "tool_permission_decision",
+			toolCallId: call.id,
+			toolName: call.name,
+			decision: "deny",
+			source: "user",
+		});
 		return `${PERMISSION_DENIED_PREFIX}: the user denied "${call.name}".`;
 	}
 	if (answer === "always") {
 		permissions.addSessionAllow(call.name);
 	}
+	await onDecision?.({
+		toolCallId: call.id,
+		toolName: call.name,
+		decision: "allow",
+		source: "user",
+		scope: answer === "always" ? "session" : "once",
+	});
+	await emit({
+		type: "tool_permission_decision",
+		toolCallId: call.id,
+		toolName: call.name,
+		decision: answer,
+		source: "user",
+	});
 	return undefined;
 }
 
@@ -137,7 +245,7 @@ export async function executeToolBatch(
 			});
 			messages.push(createToolResultMessage(call.id, call.name, text, true));
 		}
-		return { messages, terminated: false };
+		return { messages, terminated: false, executedToolCallIds: [] };
 	}
 
 	type Plan = {
@@ -174,6 +282,8 @@ export async function executeToolBatch(
 				prepared.call,
 				prepared.args,
 				registry.get(prepared.call.name),
+				options.onPermissionDecision,
+				emit,
 			);
 		}
 
@@ -208,17 +318,36 @@ export async function executeToolBatch(
 
 	const execute = async (
 		plan: Plan,
-	): Promise<{ message: Message; terminate: boolean }> => {
+	): Promise<{
+		message: Message;
+		terminate: boolean;
+		executed: boolean;
+		toolCallId: string;
+	}> => {
 		const { prepared, args } = plan;
 		let resultText = plan.immediateContent;
 		let isError = plan.immediateError;
 		let terminate = false;
 		let accepting = true;
+		let executed = false;
 		if (resultText === undefined) {
+			const tool = registry.get(prepared.call.name);
+			const durableIntent = await options.onToolIntent?.({
+				toolCallId: prepared.call.id,
+				toolName: prepared.call.name,
+				args,
+				recovery:
+					tool?.recoverySemantics ??
+					(tool?.readOnly === true || tool?.cacheable === true
+						? "pure"
+						: "at_most_once_unknown"),
+			});
 			const result = await registry.execute(
 				prepared.call,
 				{
 					signal,
+					operationId: durableIntent?.operationId,
+					idempotencyKey: durableIntent?.idempotencyKey,
 					onUpdate: async partialResult => {
 						if (!accepting) return;
 						await emit({
@@ -236,6 +365,14 @@ export async function executeToolBatch(
 			resultText = result.content;
 			isError = result.isError === true;
 			terminate = result.terminate === true;
+			executed = true;
+			await options.onToolResult?.({
+				toolCallId: prepared.call.id,
+				toolName: prepared.call.name,
+				result: resultText,
+				isError,
+				receipt: result.recoveryReceipt,
+			});
 		}
 		accepting = false;
 		const context = {
@@ -280,10 +417,17 @@ export async function executeToolBatch(
 				isError,
 			),
 			terminate: after?.terminate ?? terminate,
+			executed,
+			toolCallId: prepared.call.id,
 		};
 	};
 
-	const outcomes: Array<{ message: Message; terminate: boolean }> = [];
+	const outcomes: Array<{
+		message: Message;
+		terminate: boolean;
+		executed: boolean;
+		toolCallId: string;
+	}> = [];
 	if (options.toolExecution !== "parallel") {
 		for (let index = 0; index < plans.length; index++) {
 			const plan = plans[index];
@@ -319,5 +463,8 @@ export async function executeToolBatch(
 		messages: outcomes.map(outcome => outcome.message),
 		terminated:
 			outcomes.length > 0 && outcomes.every(outcome => outcome.terminate),
+		executedToolCallIds: outcomes
+			.filter(outcome => outcome.executed)
+			.map(outcome => outcome.toolCallId),
 	};
 }

@@ -399,7 +399,7 @@ function sandboxWidget(status: WidgetFactoryStatus): WidgetData {
 }
 
 function permissionWidget(status: WidgetFactoryStatus): WidgetData {
-	const mode = status.permissionMode ?? "acceptAll";
+	const mode = status.permissionMode ?? "acceptEdits";
 	if (mode === "acceptAll") {
 		return withIcon("permission", "", theme.fg("success" as any, "act"));
 	}

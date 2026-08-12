@@ -1,65 +1,71 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import type { LLMBackend } from "../agent/backend.ts";
+import type {
+	GenerateOptions,
+	LLMBackend,
+	LLMResponse,
+} from "../agent/backend.ts";
 import { BackendError } from "../agent/backend.ts";
-import {
-	evaluateTrajectory,
-	FaultInjectingBackend,
-	TrajectoryRecorder,
-} from "../agent/trajectory.ts";
-import type { AgentConfig } from "../agent/types.ts";
+import { evaluateTrajectory } from "../agent/trajectory.ts";
 
-const config: AgentConfig = {
-	baseUrl: "http://localhost:8080",
-	model: "test-model",
-	maxIterations: 7,
-	tools: [],
-};
+type InjectedFault =
+	| "rate_limit"
+	| "timeout"
+	| "context_full"
+	| "malformed_response";
 
-void test("trajectory recorder persists correlated metadata and replays a torn journal", () => {
-	const cwd = mkdtempSync(path.join(tmpdir(), "logician-trajectory-"));
-	const recorder = new TrajectoryRecorder(cwd, "session-a");
-	recorder.start("run-a", "op-a", config, "prompt");
-	recorder.record("run-a", "op-a", {
-		type: "tool_execution_start",
-		toolCallId: "t1",
-		toolName: "read",
-		args: {},
-	});
-	recorder.record("run-a", "op-a", {
-		type: "tool_execution_end",
-		toolCallId: "t1",
-		toolName: "read",
-		result: "",
-		isError: true,
-	});
-	recorder.finish("run-a", "op-a", "failed");
-	const file = path.join(cwd, ".logician", "trajectories", "session-a.jsonl");
-	appendFileSync(file, '{"version":1');
-
-	const entries = new TrajectoryRecorder(cwd, "session-a").load();
-	assert.equal(entries.length, 4);
-	assert.ok(
-		entries.every(
-			entry => entry.runId === "run-a" && entry.operationId === "op-a",
-		),
-	);
-	const metadata = entries[0]?.payload.metadata as {
-		model?: string;
-		config?: { maxIterations?: number };
-	};
-	assert.equal(metadata.model, "test-model");
-	assert.equal(metadata.config?.maxIterations, 7);
-	assert.equal(evaluateTrajectory(entries).toolFailures, 1);
-	assert.equal(evaluateTrajectory(entries).replayComplete, true);
-	assert.match(readFileSync(file, "utf8"), /"kind":"run_finish"/);
-	const resumed = new TrajectoryRecorder(cwd, "session-a");
-	resumed.finish("run-a", "op-b", "resumed");
-	assert.equal(resumed.load().at(-1)?.sequence, 5);
-});
+class FaultInjectingBackend implements LLMBackend {
+	private cursor = 0;
+	readonly model: string;
+	constructor(
+		private readonly backend: LLMBackend,
+		private readonly faults: InjectedFault[],
+	) {
+		this.model = backend.model;
+	}
+	async generate(
+		messages: Record<string, unknown>[],
+		options?: GenerateOptions,
+	): Promise<LLMResponse> {
+		const fault = this.faults[this.cursor++];
+		if (fault === "rate_limit")
+			throw new BackendError({
+				category: "rate_limit",
+				message: "injected rate limit",
+				status: 429,
+			});
+		if (fault === "timeout")
+			throw new BackendError({
+				category: "transient",
+				message: "injected timeout",
+			});
+		if (fault === "context_full")
+			throw new BackendError({
+				category: "context_full",
+				message: "injected context overflow",
+			});
+		if (fault === "malformed_response")
+			return {
+				content: null,
+				toolCalls: [],
+				stopReason: "error",
+				errorMessage: "injected malformed response",
+			};
+		return this.backend.generate(messages, options);
+	}
+	withModel(model: string): LLMBackend {
+		return new FaultInjectingBackend(
+			this.backend.withModel(model),
+			this.faults.slice(this.cursor),
+		);
+	}
+	withEndpoint(model: string, baseUrl: string): LLMBackend {
+		const backend =
+			this.backend.withEndpoint?.(model, baseUrl) ??
+			this.backend.withModel(model);
+		return new FaultInjectingBackend(backend, this.faults.slice(this.cursor));
+	}
+}
 
 void test("trajectory evaluation flags unsupported completed outcomes", () => {
 	const base = {

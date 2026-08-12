@@ -1,6 +1,7 @@
 export interface RunBudgetLimits {
 	maxProviderCalls?: number;
 	maxToolCalls?: number;
+	maxTokens?: number;
 	maxElapsedMs?: number;
 	reserveFinalizationCalls?: number;
 }
@@ -8,9 +9,11 @@ export interface RunBudgetLimits {
 export interface RunBudgetSnapshot {
 	providerCalls: number;
 	toolCalls: number;
+	tokens: number;
 	elapsedMs: number;
 	remainingProviderCalls?: number;
 	remainingToolCalls?: number;
+	remainingTokens?: number;
 }
 
 export interface RunBudgetDecision {
@@ -19,17 +22,35 @@ export interface RunBudgetDecision {
 	snapshot: RunBudgetSnapshot;
 }
 
+export interface RunBudgetInitialState {
+	providerCalls?: number;
+	toolCalls?: number;
+	tokens?: number;
+	startedAt?: number;
+}
+
+export type RunBudgetConsumption =
+	| { resource: "provider_call"; amount: 1 }
+	| { resource: "tool_call"; amount: number }
+	| { resource: "token"; amount: number };
+
 /** Hierarchical run accounting behind one small decision interface. */
 export class RunBudgetController {
 	private providerCalls = 0;
 	private toolCalls = 0;
+	private tokens = 0;
 	private readonly startedAt: number;
 
 	constructor(
 		private readonly limits: RunBudgetLimits = {},
 		private readonly now: () => number = Date.now,
+		initial: RunBudgetInitialState = {},
+		private readonly onConsumed?: (consumption: RunBudgetConsumption) => void,
 	) {
-		this.startedAt = now();
+		this.providerCalls = initial.providerCalls ?? 0;
+		this.toolCalls = initial.toolCalls ?? 0;
+		this.tokens = initial.tokens ?? 0;
+		this.startedAt = initial.startedAt ?? now();
 	}
 
 	requestProviderCall(finalization = false): RunBudgetDecision {
@@ -43,6 +64,7 @@ export class RunBudgetController {
 			return this.denied("provider-call budget exhausted");
 		}
 		this.providerCalls++;
+		this.onConsumed?.({ resource: "provider_call", amount: 1 });
 		return { allowed: true, snapshot: this.snapshot() };
 	}
 
@@ -54,6 +76,19 @@ export class RunBudgetController {
 			return this.denied("tool-call budget exhausted");
 		}
 		this.toolCalls += count;
+		if (count > 0) this.onConsumed?.({ resource: "tool_call", amount: count });
+		return { allowed: true, snapshot: this.snapshot() };
+	}
+
+	recordTokens(count: number): RunBudgetDecision {
+		const amount = Math.max(0, Math.floor(count));
+		if (amount > 0) {
+			this.tokens += amount;
+			this.onConsumed?.({ resource: "token", amount });
+		}
+		const max = this.limits.maxTokens;
+		if (max !== undefined && this.tokens > max)
+			return this.denied("token budget exhausted");
 		return { allowed: true, snapshot: this.snapshot() };
 	}
 
@@ -61,6 +96,7 @@ export class RunBudgetController {
 		return {
 			providerCalls: this.providerCalls,
 			toolCalls: this.toolCalls,
+			tokens: this.tokens,
 			elapsedMs: Math.max(0, this.now() - this.startedAt),
 			remainingProviderCalls:
 				this.limits.maxProviderCalls === undefined
@@ -70,6 +106,10 @@ export class RunBudgetController {
 				this.limits.maxToolCalls === undefined
 					? undefined
 					: Math.max(0, this.limits.maxToolCalls - this.toolCalls),
+			remainingTokens:
+				this.limits.maxTokens === undefined
+					? undefined
+					: Math.max(0, this.limits.maxTokens - this.tokens),
 		};
 	}
 

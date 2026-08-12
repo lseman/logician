@@ -7,16 +7,16 @@ description: Persistence, bookmarks, branching, rewind, and compaction.
 
 Logician persists every session in SQLite, with support for bookmarks, branching, and compaction.
 
+Agent execution state is persisted separately in the workspace Run Kernel
+ledger. See [Run Kernel](/architecture/run-kernel) for replay and recovery
+commands.
+
 ## Session structure
 
-```
-sessions/
-├── default/
-│   ├── history.db          # SQLite session database
-│   ├── checkpoint-001.json # Rewind point
-│   ├── checkpoint-002.json
-│   └── bookmark-main.json  # Named bookmark
-```
+The application session catalog is stored in SQLite. Harness transcripts use
+an append-only, parent-linked entry tree with an explicit active leaf. Forking
+does not copy or truncate messages: discarding checks out the parent leaf and
+merging appends a branch-summary entry. The selected path survives restart.
 
 ## Key operations
 
@@ -49,7 +49,8 @@ Return to any checkpoint or bookmark:
 Ctrl+R → select checkpoint
 ```
 
-The session history is truncated to the selected point, and the agent continues from there.
+The active leaf moves to the selected point, and the agent continues on a new
+path. Abandoned entries remain recoverable in the append-only journal.
 
 ### Compaction
 

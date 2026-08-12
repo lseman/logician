@@ -157,7 +157,7 @@ export async function buildDoctorReport(
 			loaded: skillResult.skills.length,
 			warnings: skillResult.diagnostics.length,
 		},
-		permissions: { mode: config.permissionMode ?? "acceptAll" },
+		permissions: { mode: config.permissionMode ?? "acceptEdits" },
 		diagnostics: {
 			postEditEnabled: process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS !== "0",
 		},

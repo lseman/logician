@@ -176,7 +176,7 @@ export type AgentEventBody =
 			toolName: string;
 			toolCallId: string;
 			decision: "allow" | "deny" | "always";
-			source: "rule" | "mode" | "user" | "hook";
+			source: "rule" | "mode" | "user" | "hook" | "fail_closed";
 	  }
 	| { type: "budget_exhausted"; usedTokens: number; limitTokens: number }
 	| { type: "error"; message: string; error?: unknown }

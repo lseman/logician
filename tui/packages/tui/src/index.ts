@@ -50,6 +50,7 @@ import {
 	TrustStore,
 } from "@logician/coding-agent/trust";
 import { parseExecArgs, runHeadlessExec } from "./app/headless-exec.ts";
+import { runKernelCommand } from "./app/run-kernel-cli.ts";
 import { LogicianTUI } from "./app/tui.ts";
 import {
 	type TrustChoice,
@@ -129,6 +130,14 @@ async function main(): Promise<void> {
 			resumeSessionId = args[i + 1];
 			break;
 		}
+	}
+
+	if (args[0] === "run") {
+		process.exitCode = runKernelCommand(args.slice(1), cwd, {
+			stdout: text => process.stdout.write(text),
+			stderr: text => process.stderr.write(text),
+		});
+		return;
 	}
 
 	if (args[0] === "exec") {

@@ -461,7 +461,7 @@ export function createSlashCommands(
 					return `Permission mode: ${mode}`;
 				}
 				return `Valid modes: ${valid.join(", ")} (current: ${
-					localHandlers.getPermissionMode?.() ?? "acceptAll"
+					localHandlers.getPermissionMode?.() ?? "acceptEdits"
 				})`;
 			},
 		),
