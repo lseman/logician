@@ -15,6 +15,62 @@ export interface ResolvedRuntimeConfig {
 	bridge: AgentBridgeOptions;
 }
 
+function mergeObject<T extends Record<string, unknown>>(
+	base: T | undefined,
+	override: T | undefined,
+): T | undefined {
+	if (!base) return override;
+	if (!override) return base;
+	return { ...base, ...override };
+}
+
+/** Merge validated config layers without dropping sibling settings in sections. */
+export function mergeRuntimeConfigLayers(
+	global: LogicianTuiConfig,
+	project: LogicianTuiConfig,
+): LogicianTuiConfig {
+	const merged: LogicianTuiConfig = { ...global, ...project };
+	for (const key of [
+		"webSearch",
+		"permissions",
+		"compaction",
+		"memoryExtractor",
+		"reasonerConfig",
+		"mcp",
+		"mcpServers",
+		"plugins",
+	] as const) {
+		const value = mergeObject(
+			global[key] as Record<string, unknown> | undefined,
+			project[key] as Record<string, unknown> | undefined,
+		);
+		if (value) (merged as Record<string, unknown>)[key] = value;
+	}
+	if (global.lsp || project.lsp) {
+		const serverOverrides = mergeObject(
+			global.lsp?.serverOverrides,
+			project.lsp?.serverOverrides,
+		);
+		merged.lsp = {
+			...global.lsp,
+			...project.lsp,
+			...(serverOverrides ? { serverOverrides } : {}),
+		};
+	}
+	if (global.truncation || project.truncation) {
+		const microCompactMaxChars = mergeObject(
+			global.truncation?.microCompactMaxChars,
+			project.truncation?.microCompactMaxChars,
+		);
+		merged.truncation = {
+			...global.truncation,
+			...project.truncation,
+			...(microCompactMaxChars ? { microCompactMaxChars } : {}),
+		};
+	}
+	return merged;
+}
+
 export function resolveRuntimeConfig(
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
@@ -28,7 +84,7 @@ export function resolveRuntimeConfig(
 			? global
 			: {
 					path: project.path ?? global.path,
-					config: { ...global.config, ...project.config },
+					config: mergeRuntimeConfigLayers(global.config, project.config),
 					warnings: [...global.warnings, ...project.warnings],
 				};
 	const config = loaded.config;
@@ -38,6 +94,7 @@ export function resolveRuntimeConfig(
 		warnings: loaded.warnings,
 		source: config,
 		bridge: {
+			configPath: loaded.path,
 			baseUrl:
 				environment.LOGICIAN_LLM_URL ||
 				configString(config.baseUrl) ||
@@ -67,10 +124,6 @@ export function resolveRuntimeConfig(
 				environment.LOGICIAN_HOOKS !== undefined
 					? environment.LOGICIAN_HOOKS !== "0"
 					: configBool(config.hooks),
-			mcpEager:
-				environment.LOGICIAN_MCP_EAGER !== undefined
-					? environment.LOGICIAN_MCP_EAGER !== "0"
-					: configBool(config.mcpEager),
 			webSearch: config.webSearch
 				? {
 						baseUrl: configString(config.webSearch.baseUrl),
@@ -92,6 +145,9 @@ export function resolveRuntimeConfig(
 				true,
 			),
 			proactiveCompactionEnabled: configBool(config.compaction?.enabled),
+			compaction: config.compaction,
+			maxParallelAgents: configNumber(config.maxParallelAgents),
+			lsp: config.lsp,
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			reflectionConfig: config.reflectionConfig,
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),

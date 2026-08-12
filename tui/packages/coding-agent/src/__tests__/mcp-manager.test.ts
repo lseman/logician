@@ -166,9 +166,12 @@ void test("toggling a global MCP from a project workspace updates its defining f
 		const projectPath = path.join(workspace, ".mcp.json");
 		writeFileSync(
 			globalPath,
-			JSON.stringify({
-				mcpServers: { global: { command: "global-mcp" } },
-			}),
+			`{
+				// Explicit inference choices must survive an MCP toggle.
+				"inferenceMode": "thinking-coding",
+				"thinkingLevel": "xhigh",
+				"mcpServers": { "global": { "command": "global-mcp" } }
+			}`,
 		);
 		writeFileSync(
 			projectPath,
@@ -185,6 +188,8 @@ void test("toggling a global MCP from a project workspace updates its defining f
 		const global = JSON.parse(readFileSync(globalPath, "utf8"));
 		const project = JSON.parse(readFileSync(projectPath, "utf8"));
 		assert.equal(global.mcpServers.global.enabled, false);
+		assert.equal(global.inferenceMode, "thinking-coding");
+		assert.equal(global.thinkingLevel, "xhigh");
 		assert.equal(project.mcpServers.global, undefined);
 	});
 });

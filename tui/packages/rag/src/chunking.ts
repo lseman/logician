@@ -23,7 +23,6 @@ export function recursiveChunk(
 		separators = ["\n# ", "\n## ", "\n### ", "\n#### ", "\n\n", "\n", " ", ""],
 	} = { ...config };
 
-	const _chunks: RAGChunk[] = [];
 	let chunkIndex = 0;
 
 	function split(content: string, depth: number, baseId: string): RAGChunk[] {
@@ -55,10 +54,6 @@ export function recursiveChunk(
 				} else {
 					// Emit accumulated content as chunks
 					const joined = accumulated.join(sep);
-					const _chunkStartIdx = accumulated.reduce(
-						(sum, p, _idx) => sum + p.length + sep.length,
-						0,
-					);
 					// Emit this accumulated block
 					const emitted = emitChunks(joined, `${baseId}_${depth}`);
 					partChunks.push(...emitted);
@@ -296,17 +291,14 @@ export function parentChildChunk(
 
 	// Step 2: Create parent contexts by grouping children
 	const parents: ParentContext[] = [];
-	const _charsPerChild = childSize + childOverlap;
-
-	for (
-		let i = 0;
-		i < children.length;
-		i += Math.floor(parentSize / childSize)
-	) {
-		const groupEnd = Math.min(
-			i + Math.floor(parentSize / childSize),
-			children.length,
-		);
+	const childrenPerParent = Math.max(1, Math.floor(parentSize / childSize));
+	const overlappingChildren = Math.min(
+		childrenPerParent - 1,
+		Math.max(0, Math.floor(parentOverlap / childSize)),
+	);
+	const parentStep = Math.max(1, childrenPerParent - overlappingChildren);
+	for (let i = 0; i < children.length; i += parentStep) {
+		const groupEnd = Math.min(i + childrenPerParent, children.length);
 		const groupChildren = children.slice(i, groupEnd);
 		const parentText = groupChildren.map(c => c.text).join("\n\n");
 

@@ -16,9 +16,10 @@ function configuredWorkspace(): string {
 			thinkingLevel: "high",
 			inferenceMode: "none",
 			compaction: { enabled: true },
+			maxParallelAgents: 4,
+			lsp: { enabled: false, timeoutMs: 3210 },
 			permissionMode: "ask",
 			toolExecution: "sequential",
-			mcpEager: true,
 			hooks: true,
 			rtkProxyEnabled: true,
 			ariadneEnabled: false,
@@ -48,6 +49,7 @@ function configuredWorkspace(): string {
 
 void test("runtime resolver applies shared environment precedence", () => {
 	const resolved = resolveRuntimeConfig(configuredWorkspace(), {
+		HOME: mkdtempSync(path.join(tmpdir(), "logician-runtime-empty-home-")),
 		LOGICIAN_LLM_URL: "http://env.test:9000",
 		LOGICIAN_MODEL: "env-model",
 		LOGICIAN_HOOKS: "0",
@@ -59,10 +61,13 @@ void test("runtime resolver applies shared environment precedence", () => {
 	assert.equal(resolved.bridge.thinkingLevel, "high");
 	assert.equal(resolved.bridge.inferenceMode, "none");
 	assert.equal(resolved.bridge.proactiveCompactionEnabled, true);
+	assert.deepEqual(resolved.bridge.compaction, { enabled: true });
+	assert.equal(resolved.bridge.maxParallelAgents, 4);
+	assert.deepEqual(resolved.bridge.lsp, { enabled: false, timeoutMs: 3210 });
+	assert.equal(resolved.bridge.configPath, resolved.configPath);
 	assert.equal(resolved.bridge.runtimeHooksEnabled, false);
 	assert.equal(resolved.bridge.toolExecution, "sequential");
 	assert.equal(resolved.bridge.permissionMode, "ask");
-	assert.equal(resolved.bridge.mcpEager, true);
 	assert.equal(resolved.bridge.rtkProxyEnabled, true);
 	assert.equal(resolved.bridge.ariadneEnabled, false);
 	assert.equal(resolved.bridge.fffgrepEnabled, false);
@@ -102,6 +107,8 @@ void test("untrusted runtime resolution ignores project configuration", () => {
 			baseUrl: "http://global.test:7000",
 			model: "global-model",
 			permissionMode: "acceptEdits",
+			compaction: { reserveTokens: 8_000, keepRecentTokens: 12_000 },
+			lsp: { enabled: true, timeoutMs: 5_000 },
 		}),
 		"utf8",
 	);
@@ -129,12 +136,16 @@ void test("trusted runtime resolution overlays project config on global settings
 			baseUrl: "http://global.test:7000",
 			model: "global-model",
 			permissionMode: "acceptEdits",
+			compaction: { reserveTokens: 8_000, keepRecentTokens: 12_000 },
+			lsp: { enabled: true, timeoutMs: 5_000 },
 		}),
 		"utf8",
 	);
 	writeFileSync(
 		path.join(workspace, ".logician.json"),
 		JSON.stringify({
+			compaction: { enabled: true },
+			lsp: { timeoutMs: 1_000 },
 			mcpServers: {
 				project: { command: "project-mcp" },
 			},
@@ -156,4 +167,13 @@ void test("trusted runtime resolution overlays project config on global settings
 		project: { command: "project-mcp" },
 	});
 	assert.equal(resolved.bridge.projectTrusted, true);
+	assert.deepEqual(resolved.bridge.compaction, {
+		reserveTokens: 8_000,
+		keepRecentTokens: 12_000,
+		enabled: true,
+	});
+	assert.deepEqual(resolved.bridge.lsp, {
+		enabled: true,
+		timeoutMs: 1_000,
+	});
 });

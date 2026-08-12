@@ -1,11 +1,12 @@
 // ── MCP Manager ───────────────────────────────────────────────────────────
 // High-level MCP server management: load servers, create tools, manage config.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Tool } from "@logician/agent-core";
 import { parseJsonWithComments } from "@logician/agent-core/tools/shared/json-utils.ts";
 import { runPluginBackend } from "@logician/agent-core/tools/shared/plugins.ts";
+import { updateConfigFile } from "../configuration/config.ts";
 import {
 	allocateMcpToolName,
 	createMcpClient,
@@ -13,19 +14,6 @@ import {
 	type McpClient,
 	type McpServerConfig,
 } from "./client.ts";
-
-// Temporary, opt-in tracing for the "MCP loaded but /mcp shows nothing"
-// investigation. LOGICIAN_MCP_DEBUG=1 prints resolved cwd/config paths/server
-// counts to stderr at every resolveConfigs()/load()/getSnapshot() call so a
-// live repro can show exactly what each call actually saw. Remove once the
-// bug is found — this is not meant to stay.
-const MCP_DEBUG = process.env.LOGICIAN_MCP_DEBUG === "1";
-function mcpDebug(label: string, data: unknown): void {
-	if (!MCP_DEBUG) return;
-	process.stderr.write(
-		`[mcp-debug] ${new Date().toISOString()} ${label} ${JSON.stringify(data)}\n`,
-	);
-}
 
 export interface McpLoadResult {
 	tools: Tool[];
@@ -227,35 +215,18 @@ export class McpManager {
 			Object.keys(configs).map(name => [name, undefined]),
 		);
 		const paths = fileMcpConfigPaths(cwd);
-		mcpDebug("resolveConfigs:paths", {
-			cwd,
-			paths,
-			pluginServerNames: Object.keys(pluginConfigs),
-		});
 		for (const configPath of paths) {
 			let fromFile: Record<string, McpServerConfig> = {};
 			try {
 				fromFile = readMcpServerConfigs(configPath);
-			} catch (error) {
-				mcpDebug("resolveConfigs:readError", {
-					configPath,
-					error: error instanceof Error ? error.message : String(error),
-				});
+			} catch {
 				continue;
 			}
-			mcpDebug("resolveConfigs:fileRead", {
-				configPath,
-				serverNames: Object.keys(fromFile),
-			});
 			for (const [name, config] of Object.entries(fromFile)) {
 				configs[name] = config;
 				configPaths[name] = configPath;
 			}
 		}
-		mcpDebug("resolveConfigs:result", {
-			cwd,
-			allServerNames: Object.keys(configs),
-		});
 		return {
 			configs,
 			configPaths,
@@ -267,7 +238,6 @@ export class McpManager {
 		cwd: string,
 		reservedToolNames: Iterable<string> = [],
 	): Promise<McpLoadResult> {
-		mcpDebug("load:called", { cwd, alreadyLoaded: this.loaded });
 		if (this.loaded) {
 			return {
 				tools: this.tools,
@@ -280,7 +250,6 @@ export class McpManager {
 
 		// Project config wins over user and plugin-declared servers on name clash.
 		const { configs } = await this.resolveConfigs(cwd);
-		mcpDebug("load:configs", { cwd, names: Object.keys(configs) });
 		for (const [name, config] of Object.entries(configs)) {
 			if (config.enabled === false) continue;
 			let client: McpClient | null = null;
@@ -321,7 +290,6 @@ export class McpManager {
 	}
 
 	async getSnapshot(cwd: string): Promise<McpSnapshotResult> {
-		mcpDebug("getSnapshot:called", { cwd, clientCount: this.clients.length });
 		const { configs, configPaths, primaryConfigPath } =
 			await this.resolveConfigs(cwd);
 
@@ -354,12 +322,6 @@ export class McpManager {
 			},
 		);
 
-		mcpDebug("getSnapshot:result", {
-			cwd,
-			configPath: primaryConfigPath,
-			serverCount: servers.length,
-			loadedServerNames: Object.keys(loadedServers),
-		});
 		return {
 			configPath: primaryConfigPath,
 			servers,
@@ -384,19 +346,20 @@ export class McpManager {
 			throw new Error(`MCP server '${serverName}' not found in config.`);
 		}
 
-		const raw = parseJsonWithComments<Record<string, unknown>>(
-			readFileSync(configPath, "utf8"),
-		);
-		const configKey = raw.mcpServers ? "mcpServers" : "mcp";
-		const config = (raw[configKey] as Record<string, McpServerConfig>) || {};
-
-		if (!(serverName in config)) {
-			throw new Error(`MCP server '${serverName}' not found in config.`);
+		const updated = updateConfigFile(configPath, raw => {
+			const configKey = raw.mcpServers ? "mcpServers" : "mcp";
+			const config = (raw[configKey] as Record<string, McpServerConfig>) || {};
+			if (!(serverName in config)) {
+				throw new Error(`MCP server '${serverName}' not found in config.`);
+			}
+			raw[configKey] = {
+				...config,
+				[serverName]: { ...config[serverName], enabled },
+			};
+		});
+		if (!updated) {
+			throw new Error(`Failed to update MCP server '${serverName}' in config.`);
 		}
-
-		config[serverName] = { ...config[serverName], enabled };
-		raw[configKey] = config;
-		writeFileSync(configPath, JSON.stringify(raw, null, 2), "utf8");
 
 		const loadedServers: Record<string, { toolCount: number }> = {};
 		for (const client of this.clients) {

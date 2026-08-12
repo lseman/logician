@@ -10,7 +10,6 @@ import type {
 	ContextBlock,
 	ContextRetrievalQuery,
 	CreateMemoryOptions,
-	DecayConfig,
 	DecayConfigInput,
 	EmbeddingMetadata,
 	ExpandedMemoryEntry,
@@ -2246,7 +2245,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			return [];
 		const buckets = embeddingProbeBuckets(vector);
 		const placeholders = buckets.map(() => "?").join(", ");
-		let rows = db
+		const rows = db
 			.prepare(`SELECT entity_id, entity_kind, session_id, vector
 	      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
 	        AND vector_bucket IN (${placeholders})
@@ -3518,12 +3517,6 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	}
 
 	// ── Retention Scoring ────────────────────────────────────────────────
-
-	const _DEFAULT_DECAY: DecayConfig = {
-		lambda: 0.01,
-		sigma: 0.3,
-		tierThresholds: { hot: 0.7, warm: 0.4, cold: 0.15 },
-	};
 
 	function resolveDecayConfig(input?: DecayConfigInput): {
 		lambda: number;

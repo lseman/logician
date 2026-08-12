@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -605,6 +606,53 @@ void test("saveConfigField merges into an existing settings file instead of over
 		);
 		assert.equal(written.existing, "value");
 		assert.equal(written.theme, "light");
+	} finally {
+		if (prevHome === undefined) delete process.env.HOME;
+		else process.env.HOME = prevHome;
+		rmSync(fakeHome, { recursive: true, force: true });
+	}
+});
+
+void test("saveConfigField atomically updates supported commented JSON", () => {
+	const fakeHome = mkWorkspace();
+	const settingsDir = path.join(fakeHome, ".logician");
+	mkdirSync(settingsDir, { recursive: true });
+	const settingsPath = path.join(settingsDir, "settings.json");
+	writeFileSync(
+		settingsPath,
+		'{\n  // retained value\n  "existing": "value"\n}\n',
+		"utf8",
+	);
+	const prevHome = process.env.HOME;
+	process.env.HOME = fakeHome;
+	try {
+		assert.equal(saveConfigField("theme", "light"), true);
+		assert.deepEqual(JSON.parse(readFileSync(settingsPath, "utf8")), {
+			existing: "value",
+			theme: "light",
+		});
+		assert.deepEqual(
+			readdirSync(settingsDir).filter(name => name.endsWith(".tmp")),
+			[],
+		);
+	} finally {
+		if (prevHome === undefined) delete process.env.HOME;
+		else process.env.HOME = prevHome;
+		rmSync(fakeHome, { recursive: true, force: true });
+	}
+});
+
+void test("saveConfigField deletes undefined values instead of serializing stale defaults", () => {
+	const fakeHome = mkWorkspace();
+	const settingsDir = path.join(fakeHome, ".logician");
+	mkdirSync(settingsDir, { recursive: true });
+	const settingsPath = path.join(settingsDir, "settings.json");
+	writeFileSync(settingsPath, JSON.stringify({ guardsEnabled: true }), "utf8");
+	const prevHome = process.env.HOME;
+	process.env.HOME = fakeHome;
+	try {
+		assert.equal(saveConfigField("guardsEnabled", undefined), true);
+		assert.deepEqual(JSON.parse(readFileSync(settingsPath, "utf8")), {});
 	} finally {
 		if (prevHome === undefined) delete process.env.HOME;
 		else process.env.HOME = prevHome;

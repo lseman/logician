@@ -5,53 +5,63 @@ description: .logician.json, environment variables, and runtime settings.
 
 # Configuration
 
-Logician can be configured via `.logician.json`, environment variables, or runtime commands.
+Logician resolves configuration once at startup from user settings, trusted
+project settings, and environment overrides. The resolved snapshot is passed to
+the runtime; the harness and subagents do not reread files independently.
 
 ## Configuration file
 
-Create `.logician.json` in the project root:
+Put user-wide settings in `~/.logician/settings.json` and trusted project
+overrides in `.logician.json`:
 
 ```json
 {
-  "llm": {
-    "url": "http://127.0.0.1:8080",
-    "model": "gpt-4o",
-    "apiKey": "sk-...",
-    "maxTokens": 8192,
-    "temperature": 0.7
+  "baseUrl": "http://127.0.0.1:8080",
+  "model": "model-id",
+  "maxTokens": 8192,
+  "temperature": 0.7,
+  "permissionMode": "ask",
+  "permissions": {
+    "allow": ["read_file", "grep"],
+    "deny": []
   },
-  "permissions": "ask",
+  "inferenceMode": "thinking-coding",
   "thinkingLevel": "medium",
-  "reasoning": {
-    "mode": "auto_cot",
-    "maxIterations": 10
-  },
   "compaction": {
     "enabled": true,
-    "triggerFraction": 0.75
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
   },
-  "mcp": {
-    "servers": {}
+  "maxParallelAgents": 4,
+  "mcpServers": {
+    "docs": {
+      "command": "docs-mcp",
+      "args": []
+    }
   },
-  "plugins": [],
-  "tools": {
-    "allowed": [],
-    "denied": []
-  }
+  "plugins": {}
 }
 ```
+
+Object-valued sections are merged recursively across user and project layers,
+including `permissions`, `compaction`, `lsp.serverOverrides`, MCP servers, and
+truncation limits. A project override therefore does not erase unrelated user
+settings in the same section. Project configuration is ignored until the
+workspace is trusted.
+
+Writes made by selectors and `/settings` update only the selected field in the
+user file via an atomic replacement. Starting Logician, switching sessions, or
+applying a resolved setting never writes configuration.
 
 ## Environment variables
 
 | Variable | Description | Default |
 |---|---|---|
 | `LOGICIAN_LLM_URL` | LLM API endpoint | `http://127.0.0.1:8080` |
-| `LOGICIAN_LLM_MODEL` | Model name | `gpt-4o` |
-| `LOGICIAN_LLM_API_KEY` | API key | (none) |
-| `LOGICIAN_PERMISSIONS` | Permission mode | `ask` |
-| `LOGICIAN_THINKING` | Thinking level | `medium` |
-| `LOGICIAN_MAX_TOKENS` | Max tokens | `8192` |
-| `LOGICIAN_TEMPERATURE` | Temperature | `0.7` |
+| `LOGICIAN_MODEL` | Model name | configured model |
+| `LOGICIAN_SYSTEM_PROMPT` | System prompt override | configured prompt |
+| `LOGICIAN_CONTEXT_WINDOW` | Context-window token count | provider/config value |
+| `LOGICIAN_HOOKS` | Enable runtime hooks (`0` disables) | config value |
 | `LOGICIAN_MEMORY_EXTRACTOR_URL` | Dedicated semantic-memory model endpoint | Primary LLM endpoint |
 | `LOGICIAN_MEMORY_EXTRACTOR_MODEL` | Model used for semantic-memory extraction | Active model |
 | `LOGICIAN_MEMORY_EMBEDDINGS` | Enable local semantic memory retrieval | `false` |
@@ -121,6 +131,11 @@ View and modify settings during a session:
 
 Configuration is resolved in this order (highest priority first):
 1. Environment variables
-2. Runtime `/settings` commands
-3. `.logician.json`
-4. Built-in defaults
+2. Explicit runtime selections (which persist only when the user changes them)
+3. Trusted project `.logician.json`
+4. User `~/.logician/settings.json`
+5. Built-in defaults
+
+Run `logician doctor --json` to inspect the selected config path, validation
+warnings, and effective backend, permission, MCP, and diagnostics settings. The
+doctor is read-only and does not connect to the model or MCP servers.

@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AgentModelConfig, TruncationConfig } from "@logician/agent-core";
 import { stripJsonComments } from "@logician/agent-core";
@@ -303,7 +311,6 @@ export function validateConfig(
 
 	// Boolean fields.
 	cfg.hooks = configBool(obj.hooks);
-	cfg.mcpEager = configBool(obj.mcpEager);
 	cfg.steeringInterrupt = configBool(obj.steeringInterrupt);
 
 	// inferenceMode: pre-defined sampling parameter set (Alt+M in the TUI)
@@ -439,6 +446,7 @@ export function validateConfig(
 		["cacheTtlMs", 0, false],
 		["duplicateToolThreshold", 0, true],
 		["toolFailureLoopThreshold", 0, true],
+		["maxParallelAgents", 0, false],
 	] as const) {
 		if (obj[key] === undefined) continue;
 		const value = configNumber(obj[key]);
@@ -801,7 +809,6 @@ export interface LogicianTuiConfig {
 	mcp?: Record<string, unknown>;
 	mcpServers?: Record<string, unknown>;
 	plugins?: Record<string, unknown>;
-	mcpEager?: boolean;
 	webSearch?: {
 		baseUrl?: string;
 		maxResults?: number;
@@ -882,6 +889,8 @@ export interface LogicianTuiConfig {
 	truncation?: TruncationConfig;
 	// Whether to auto-resume the most recent session on startup (default: true).
 	autoResumeSession?: boolean;
+	/** Maximum delegated agents executing concurrently. */
+	maxParallelAgents?: number;
 	// Memory persistence settings.
 	memory?: boolean;
 	/** Path to the memory SQLite database. Default: <cwd>/.logician/memory.db */
@@ -1008,26 +1017,10 @@ export function configBool(
 
 /** Save a single config field to the global user config file (~/.logician/settings.json). */
 export function saveConfigField(key: string, value: unknown): boolean {
-	try {
-		const home = process.env.HOME || "";
-		if (!home) return false;
-		const configPath = join(home, ".logician", "settings.json");
-		const dir = dirname(configPath);
-		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
-		}
-		const raw = existsSync(configPath)
-			? (JSON.parse(readFileSync(configPath, "utf8")) as Record<
-					string,
-					unknown
-				>)
-			: {};
-		raw[key] = value;
-		writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`);
-		return true;
-	} catch (_e: unknown) {
-		return false;
-	}
+	return updateGlobalConfig(raw => {
+		if (value === undefined) delete raw[key];
+		else raw[key] = value;
+	});
 }
 
 /** Merge one key into an object-valued global setting without losing siblings. */
@@ -1036,27 +1029,65 @@ export function saveConfigNestedField(
 	key: string,
 	value: unknown,
 ): boolean {
-	try {
-		const home = process.env.HOME || "";
-		if (!home) return false;
-		const configPath = join(home, ".logician", "settings.json");
-		mkdirSync(dirname(configPath), { recursive: true });
-		const raw = existsSync(configPath)
-			? (JSON.parse(readFileSync(configPath, "utf8")) as Record<
-					string,
-					unknown
-				>)
-			: {};
+	return updateGlobalConfig(raw => {
 		const current =
 			raw[section] &&
 			typeof raw[section] === "object" &&
 			!Array.isArray(raw[section])
 				? (raw[section] as Record<string, unknown>)
 				: {};
-		raw[section] = { ...current, [key]: value };
-		writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`);
+		if (value === undefined) {
+			const next = { ...current };
+			delete next[key];
+			if (Object.keys(next).length) raw[section] = next;
+			else delete raw[section];
+		} else raw[section] = { ...current, [key]: value };
+	});
+}
+
+export function updateConfigFile(
+	configPath: string,
+	mutate: (raw: Record<string, unknown>) => void,
+): boolean {
+	let temporaryPath: string | undefined;
+	try {
+		const directory = dirname(configPath);
+		mkdirSync(directory, { recursive: true });
+		const raw = existsSync(configPath)
+			? (JSON.parse(
+					stripJsonComments(readFileSync(configPath, "utf8")),
+				) as Record<string, unknown>)
+			: {};
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+		mutate(raw);
+		temporaryPath = join(
+			directory,
+			`.${configPath.split(/[\\/]/).at(-1)}.${process.pid}.${Date.now()}.tmp`,
+		);
+		const mode = existsSync(configPath) ? statSync(configPath).mode : 0o600;
+		writeFileSync(temporaryPath, `${JSON.stringify(raw, null, 2)}\n`, {
+			encoding: "utf8",
+			mode,
+		});
+		renameSync(temporaryPath, configPath);
+		temporaryPath = undefined;
 		return true;
 	} catch {
+		if (temporaryPath) {
+			try {
+				rmSync(temporaryPath, { force: true });
+			} catch {
+				// Best-effort cleanup after a failed atomic replacement.
+			}
+		}
 		return false;
 	}
+}
+
+function updateGlobalConfig(
+	mutate: (raw: Record<string, unknown>) => void,
+): boolean {
+	const home = process.env.HOME || "";
+	if (!home) return false;
+	return updateConfigFile(join(home, ".logician", "settings.json"), mutate);
 }

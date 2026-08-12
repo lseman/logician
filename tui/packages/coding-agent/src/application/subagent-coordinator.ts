@@ -26,13 +26,13 @@ import {
 } from "@logician/agent-core";
 import type { LLMBackend } from "@logician/agent-core/agent/backend.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
-import { loadUserSettings } from "./bridge-settings.ts";
 
 export interface SubagentCoordinatorDeps {
 	config: () => AgentConfig;
 	backend: LLMBackend;
 	cwd: string;
 	projectTrusted: boolean;
+	maxParallelAgents?: number;
 	getEnabledPluginRoots: () => Array<{ name: string; installPath: string }>;
 	/** Add a tool to the bridge's default tool set (also wires config.tools / harness.setTools / system prompt). */
 	onToolAdded: (tool: Tool) => void;
@@ -74,19 +74,13 @@ export class SubagentCoordinator {
 				.map(p => path.join(p.installPath, "agents")),
 		]);
 
-		const userSettings = loadUserSettings();
-		const maxParallelAgents =
-			userSettings.subagents?.maxParallelAgents ??
-			(typeof userSettings.maxParallelAgents === "number"
-				? userSettings.maxParallelAgents
-				: undefined);
 		const subagentDeps: SubagentToolDeps = {
 			config: this.deps.config,
 			backend: this.deps.backend,
 			cwd,
 			agents: () => this.agentDefs,
 			emit: event => this.deps.config().onEvent?.(event),
-			maxParallelAgents,
+			maxParallelAgents: this.deps.maxParallelAgents,
 		};
 		const existing = new Set(this.deps.getDefaultTools().map(t => t.name));
 		for (const tool of getBuiltInSubagentTools(subagentDeps)) {

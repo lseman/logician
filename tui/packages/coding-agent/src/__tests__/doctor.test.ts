@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -10,6 +10,8 @@ import {
 
 void test("doctor reports configuration without modifying it", async () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-"));
+	const home = path.join(cwd, "home");
+	mkdirSync(home);
 	const configPath = path.join(cwd, ".logician.json");
 	const original = JSON.stringify({
 		baseUrl: "http://localhost:9000",
@@ -19,7 +21,7 @@ void test("doctor reports configuration without modifying it", async () => {
 	});
 	writeFileSync(configPath, original, "utf8");
 
-	const report = await buildDoctorReport(cwd);
+	const report = await buildDoctorReport(cwd, { HOME: home });
 
 	assert.equal(report.config.valid, true);
 	assert.equal(report.config.path, configPath);
@@ -34,9 +36,11 @@ void test("doctor reports configuration without modifying it", async () => {
 
 void test("doctor returns structured invalid-config evidence", async () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-invalid-"));
+	const home = path.join(cwd, "home");
+	mkdirSync(home);
 	writeFileSync(path.join(cwd, ".logician.json"), "{invalid", "utf8");
 
-	const report = await buildDoctorReport(cwd);
+	const report = await buildDoctorReport(cwd, { HOME: home });
 
 	assert.equal(report.config.valid, false);
 	assert.match(report.config.error ?? "", /Failed to read/);
@@ -45,7 +49,9 @@ void test("doctor returns structured invalid-config evidence", async () => {
 
 void test("doctor text states that backend and sandbox are not verified", async () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-text-"));
-	const text = formatDoctorReport(await buildDoctorReport(cwd));
+	const home = path.join(cwd, "home");
+	mkdirSync(home);
+	const text = formatDoctorReport(await buildDoctorReport(cwd, { HOME: home }));
 
 	assert.match(text, /not probed/);
 	// sandbox line shows either "none" or "bubblewrap" depending on platform

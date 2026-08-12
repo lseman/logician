@@ -461,10 +461,7 @@ export function createLocalHandlers(
 					return `Found ${items.length} observations:\n\n${items.join("\n\n---\n\n")}`;
 				}
 				case "stats": {
-					const _stats = ctx.bridge.getMemoryStats();
-					const _allMemories = store.list({ limit: 1000 });
 					const workspaceMemories = store.list({ limit: 1000 });
-					const _sessions = store.listSessions();
 					const workspaceSessions = store.listSessions();
 					const tierCounts = { hot: 0, warm: 0, cold: 0, archived: 0 };
 					const typeCounts: Record<string, number> = {};
