@@ -3,6 +3,35 @@ import assert from "node:assert/strict";
 import { AgentCoreBridge } from "../application/agent-bridge.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 
+void test("runtime settings update the live harness and preserve guard auto mode", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const patches: Array<Record<string, unknown>> = [];
+	(bridge as unknown as { harness: unknown }).harness = {
+		setRuntimeOptions: (patch: Record<string, unknown>) => patches.push(patch),
+	};
+
+	bridge.setGuardMode("off");
+	bridge.setRuntimeToggle("continuationEnabled", false);
+	bridge.setRuntimeToggle("reflectionEnabled", true);
+	bridge.setGuardMode("auto");
+
+	const settings = bridge.getSettingsData();
+	assert.equal(settings.guardMode, "auto");
+	assert.equal(settings.continuationEnabled, false);
+	assert.equal(settings.reflectionEnabled, true);
+	assert.deepEqual(patches, [
+		{ guardsEnabled: false },
+		{ continuationEnabled: false },
+		{ reflectionConfig: { enabled: true } },
+		{ guardsEnabled: undefined },
+	]);
+});
+
 void test("direct /spawn records task and result in harness history", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

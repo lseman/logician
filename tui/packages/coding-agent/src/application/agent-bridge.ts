@@ -128,6 +128,8 @@ export interface AgentBridgeOptions {
 	temperature?: number;
 	maxTokens?: number;
 	maxIterations?: number;
+	thinkingLevel?: AgentConfig["thinkingLevel"];
+	inferenceMode?: AgentConfig["inferenceMode"];
 	executionProfile?: AgentConfig["executionProfile"];
 	contextWindowTokens?: number;
 	toolExecution?: AgentConfig["toolExecution"];
@@ -159,6 +161,7 @@ export interface AgentBridgeOptions {
 	toolFailureLoopThreshold?: number;
 	budgetStopEnabled?: boolean;
 	thinkingLoopDetectionEnabled?: boolean;
+	proactiveCompactionEnabled?: boolean;
 	continuationEnabled?: boolean;
 	reflectionConfig?: AgentConfig["reflectionConfig"];
 	postEditDiagnostics?: boolean;
@@ -374,6 +377,9 @@ export class AgentCoreBridge {
 			model: opts.model,
 			chatTemplate: opts.chatTemplate,
 		});
+		if (opts.thinkingLevel) {
+			this.backend.setDefaultThinkingLevel(opts.thinkingLevel);
+		}
 
 		this.additionalSystemPrompt = opts.systemPrompt;
 		this.baseSystemPrompt = this.buildBaseSystemPrompt();
@@ -512,6 +518,8 @@ export class AgentCoreBridge {
 			executionProfile: opts.executionProfile,
 			temperature: opts.temperature,
 			maxTokens: opts.maxTokens,
+			thinkingLevel: opts.thinkingLevel,
+			inferenceMode: opts.inferenceMode,
 			// Parallel scheduling is transparent to the model. Tools that require
 			// exclusivity declare executionMode: "sequential" and become barriers.
 			toolExecution: opts.toolExecution ?? "parallel",
@@ -534,6 +542,7 @@ export class AgentCoreBridge {
 			toolFailureLoopThreshold: opts.toolFailureLoopThreshold,
 			budgetStopEnabled: opts.budgetStopEnabled,
 			thinkingLoopDetectionEnabled: opts.thinkingLoopDetectionEnabled,
+			proactiveCompactionEnabled: opts.proactiveCompactionEnabled,
 			continuationEnabled: opts.continuationEnabled,
 			reflectionConfig: opts.reflectionConfig,
 			rtkProxyEnabled: opts.rtkProxyEnabled,
@@ -1765,6 +1774,13 @@ export class AgentCoreBridge {
 	setRuntimeToggle(
 		key:
 			| "guardsEnabled"
+			| "duplicateGuardEnabled"
+			| "failureGuardEnabled"
+			| "budgetStopEnabled"
+			| "thinkingLoopDetectionEnabled"
+			| "continuationEnabled"
+			| "autoRetryEnabled"
+			| "reflectionEnabled"
 			| "proactiveCompactionEnabled"
 			| "postEditDiagnostics"
 			| "rtkProxyEnabled"
@@ -1820,6 +1836,16 @@ export class AgentCoreBridge {
 			this.postEditDiagnosticsEnabled = enabled;
 			return;
 		}
+		if (key === "reflectionEnabled") {
+			this.config.reflectionConfig = {
+				...this.config.reflectionConfig,
+				enabled,
+			};
+			this.harness?.setRuntimeOptions({
+				reflectionConfig: this.config.reflectionConfig,
+			});
+			return;
+		}
 		if (key === "ariadneEnabled") {
 			this.config.ariadneEnabled = enabled;
 			this.toolRouter.setAriadneEnabled(enabled);
@@ -1836,12 +1862,36 @@ export class AgentCoreBridge {
 			return;
 		}
 		this.config[key] = enabled;
+		if (
+			key === "guardsEnabled" ||
+			key === "duplicateGuardEnabled" ||
+			key === "failureGuardEnabled" ||
+			key === "budgetStopEnabled" ||
+			key === "thinkingLoopDetectionEnabled" ||
+			key === "continuationEnabled" ||
+			key === "autoRetryEnabled"
+		) {
+			this.harness?.setRuntimeOptions({ [key]: enabled });
+		}
 		if (key === "proactiveCompactionEnabled") {
 			this.harness?.enableAutoCompaction(enabled);
 		}
 	}
 
+	setGuardMode(mode: "auto" | "on" | "off"): void {
+		this.config.guardsEnabled = mode === "auto" ? undefined : mode === "on";
+		this.harness?.setRuntimeOptions({
+			guardsEnabled: this.config.guardsEnabled,
+		});
+	}
+
 	getSettingsText(): string {
+		const guardMode =
+			this.config.guardsEnabled === undefined
+				? "auto"
+				: this.config.guardsEnabled
+					? "on"
+					: "off";
 		return [
 			"Runtime settings",
 			`  Model: ${this.config.model}`,
@@ -1850,9 +1900,17 @@ export class AgentCoreBridge {
 			`  Max iterations: ${this.config.maxIterations ?? 30}`,
 			`  Context window: ${this.config.contextWindowTokens ?? "unset"}`,
 			`  Thinking: ${this.config.thinkingLevel ?? "off"}`,
+			`  Inference mode: ${this.config.inferenceMode ?? "instruct-general"}`,
 			`  Reasoner: ${this.reasonerId}`,
 			`  Permission mode: ${this.getPermissionMode()}`,
-			`  Guards: ${this.config.guardsEnabled ? "on" : "off"}`,
+			`  Guards: ${guardMode}`,
+			`  Duplicate-call guard: ${(this.config.duplicateGuardEnabled ?? true) ? "on" : "off"}`,
+			`  Failure-loop guard: ${(this.config.failureGuardEnabled ?? false) ? "on" : "off"}`,
+			`  Thinking-loop guard: ${(this.config.thinkingLoopDetectionEnabled ?? true) ? "on" : "off"}`,
+			`  Continuation: ${(this.config.continuationEnabled ?? true) ? "on" : "off"}`,
+			`  Automatic retries: ${(this.config.autoRetryEnabled ?? true) ? "on" : "off"}`,
+			`  Reflection: ${(this.config.reflectionConfig?.enabled ?? false) ? "on" : "off"}`,
+			`  Budget early-stop: ${(this.config.budgetStopEnabled ?? false) ? "on" : "off"}`,
 			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
 			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
 			`  Memory: ${this.memoryStore ? "on" : "off"}`,
@@ -1877,6 +1935,14 @@ export class AgentCoreBridge {
 		ariadneEnabled: boolean;
 		fffgrepEnabled: boolean;
 		memoryEnabled: boolean;
+		duplicateGuardEnabled: boolean;
+		failureGuardEnabled: boolean;
+		thinkingLoopDetectionEnabled: boolean;
+		continuationEnabled: boolean;
+		autoRetryEnabled: boolean;
+		reflectionEnabled: boolean;
+		budgetStopEnabled: boolean;
+		guardMode: "auto" | "on" | "off";
 	} {
 		return {
 			model: this.config.model,
@@ -1889,12 +1955,26 @@ export class AgentCoreBridge {
 			executionProfile: this.config.executionProfile ?? "autonomous",
 			guardsEnabled: this.config.guardsEnabled ?? false,
 			proactiveCompactionEnabled:
-				this.config.proactiveCompactionEnabled ?? false,
+				this.config.proactiveCompactionEnabled ?? true,
 			postEditDiagnostics: this.postEditDiagnosticsEnabled,
 			rtkProxyEnabled: this.config.rtkProxyEnabled ?? false,
 			ariadneEnabled: this.config.ariadneEnabled ?? true,
 			fffgrepEnabled: this.config.fffgrepEnabled ?? true,
 			memoryEnabled: this.memoryStore !== null,
+			duplicateGuardEnabled: this.config.duplicateGuardEnabled ?? true,
+			failureGuardEnabled: this.config.failureGuardEnabled ?? false,
+			thinkingLoopDetectionEnabled:
+				this.config.thinkingLoopDetectionEnabled ?? true,
+			continuationEnabled: this.config.continuationEnabled ?? true,
+			autoRetryEnabled: this.config.autoRetryEnabled ?? true,
+			reflectionEnabled: this.config.reflectionConfig?.enabled ?? false,
+			budgetStopEnabled: this.config.budgetStopEnabled ?? false,
+			guardMode:
+				this.config.guardsEnabled === undefined
+					? "auto"
+					: this.config.guardsEnabled
+						? "on"
+						: "off",
 		};
 	}
 

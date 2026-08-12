@@ -51,6 +51,8 @@ export function resolveRuntimeConfig(
 			temperature: configNumber(config.temperature),
 			maxTokens: configNumber(config.maxTokens),
 			maxIterations: configNumber(config.maxIterations),
+			thinkingLevel: config.thinkingLevel,
+			inferenceMode: config.inferenceMode,
 			executionProfile: config.executionProfile,
 			toolExecution:
 				configString(config.toolExecution) === "sequential"
@@ -89,6 +91,7 @@ export function resolveRuntimeConfig(
 				config.thinkingLoopDetectionEnabled,
 				true,
 			),
+			proactiveCompactionEnabled: configBool(config.compaction?.enabled),
 			continuationEnabled: configBool(config.continuationEnabled, true),
 			reflectionConfig: config.reflectionConfig,
 			postEditDiagnostics: configBool(config.postEditDiagnostics, true),

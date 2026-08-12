@@ -88,6 +88,7 @@ export function applyThinkingLevel(
 	ctx.thinkingLevel = level;
 	ctx.bridge.setThinkingLevel(level);
 	ctx.statusPanel.update({ thinkingLevel: level });
+	saveConfigField("thinkingLevel", level);
 }
 
 export function setExecutionProfile(

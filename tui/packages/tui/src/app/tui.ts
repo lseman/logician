@@ -243,6 +243,10 @@ export class LogicianTUI {
 		}),
 	) {
 		this.configPath = runtimeConfig.configPath;
+		this.thinkingLevel = runtimeConfig.bridge.thinkingLevel ?? "off";
+		this.inferenceMode =
+			(runtimeConfig.bridge.inferenceMode as InferenceMode | undefined) ??
+			"instruct-general";
 		this.researchManager = new AutoresearchSession(
 			runtimeConfig.bridge.cwd ?? process.cwd(),
 			(message, level) => this.notifications.show(message, level),
