@@ -408,6 +408,36 @@ void test("/context omits an empty orient task state", () => {
 	assert.doesNotMatch(bridge.getContext(), /<task_state>/);
 });
 
+void test("/context omits terminal handoff state", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const internal = bridge as unknown as Record<string, any>;
+	internal.currentTaskState = {
+		objective: "hi",
+		phase: "handoff",
+		hypotheses: [],
+		evidence: [
+			{
+				kind: "observation",
+				tool: "task_status",
+				summary: "Recorded: done — No active tasks — ready for work.",
+				iteration: 1,
+			},
+		],
+		changedFiles: [],
+		verification: [],
+		blockers: [],
+		toolCalls: 1,
+		toolFailures: 0,
+	};
+	internal.harness = { messages: [], getMemoryPrompt: () => "" };
+	assert.doesNotMatch(bridge.getContext(), /<task_state>/);
+});
+
 void test("/context renders request-time memory injection", () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",

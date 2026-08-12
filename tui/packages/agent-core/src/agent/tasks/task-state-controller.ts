@@ -47,27 +47,75 @@ export function hasMeaningfulTaskState(state: ExplicitTaskState): boolean {
 	);
 }
 
-/** Serialize task state exactly as it is injected into provider context. */
-export function formatTaskStateContext(state: ExplicitTaskState): string {
-	const recent = state.evidence.slice(-6);
+/** Whether durable task truth is useful to the next model decision. */
+export function shouldProjectTaskState(state: ExplicitTaskState): boolean {
+	if (state.phase === "handoff") return false;
+	if (state.phase === "blocked") return state.blockers.length > 0;
+	return (
+		state.phase === "investigate" ||
+		state.phase === "implement" ||
+		state.phase === "verify" ||
+		state.toolFailures > 0 ||
+		state.changedFiles.length > 0 ||
+		state.verification.length > 0 ||
+		state.blockers.length > 0
+	);
+}
+
+function boundedList(values: string[], limit: number): string[] {
 	return [
+		...new Set(values.map(value => compact(value, 160)).filter(Boolean)),
+	].slice(-limit);
+}
+
+/** Materialize a bounded active-task projection; durable state remains richer. */
+export function formatTaskStateContext(state: ExplicitTaskState): string {
+	if (!shouldProjectTaskState(state)) return "";
+	const recent = state.evidence
+		.filter(
+			item =>
+				item.kind !== "observation" ||
+				item.tool !== "task_status" ||
+				!/recorded:\s*(?:done|complete)/i.test(item.summary),
+		)
+		.slice(-3);
+	const changedFiles = boundedList(state.changedFiles, 12);
+	const blockers = boundedList(state.blockers, 4);
+	const verification = state.verification.slice(-3);
+	const lines = [
 		"<task_state>",
 		`objective: ${state.objective}`,
 		`phase: ${state.phase}`,
-		`progress: ${state.toolCalls} tool calls, ${state.toolFailures} failures`,
-		`changed_files: ${state.changedFiles.join(", ") || "none"}`,
-		`verification: ${state.verification.map(item => `${item.passed ? "pass" : "fail"} ${item.command}`).join("; ") || "none"}`,
-		`blockers: ${state.blockers.join("; ") || "none"}`,
-		"recent_evidence:",
-		...(recent.length
-			? recent.map(
+	];
+	if (changedFiles.length)
+		lines.push(`changed_files: ${changedFiles.join(", ")}`);
+	if (verification.length) {
+		lines.push(
+			`verification: ${verification
+				.map(
 					item =>
-						`- [${item.kind}] ${item.tool ? `${item.tool}: ` : ""}${item.summary}`,
+						`${item.passed ? "pass" : "fail"} ${compact(item.command, 120)}`,
 				)
-			: ["- none"]),
-		"Use this state as a concise ledger. Do not repeat it to the user. Advance the phase through evidence-backed work.",
+				.join("; ")}`,
+		);
+	}
+	if (blockers.length) lines.push(`blockers: ${blockers.join("; ")}`);
+	if (state.toolFailures > 0)
+		lines.push(`tool_failures: ${state.toolFailures}`);
+	if (recent.length) {
+		lines.push(
+			"recent_evidence:",
+			...recent.map(
+				item =>
+					`- [${item.kind}] ${item.tool ? `${item.tool}: ` : ""}${compact(item.summary, 180)}`,
+			),
+		);
+	}
+	lines.push(
+		"Treat this as runtime state, not user content. Use it for the next decision and do not repeat it.",
 		"</task_state>",
-	].join("\n");
+	);
+	return lines.join("\n");
 }
 
 const WRITE_TOOLS = new Set([
@@ -122,8 +170,8 @@ function stringArg(
 export class TaskStateController {
 	private readonly state: ExplicitTaskState;
 
-	constructor(objective: string) {
-		this.state = {
+	constructor(objective: string, restored?: ExplicitTaskState) {
+		const initial: ExplicitTaskState = {
 			objective: compact(objective, 1000),
 			phase: "orient",
 			hypotheses: [],
@@ -134,6 +182,12 @@ export class TaskStateController {
 			toolCalls: 0,
 			toolFailures: 0,
 		};
+		this.state = restored
+			? {
+					...structuredClone(restored),
+					objective: compact(restored.objective || objective, 1000),
+				}
+			: initial;
 	}
 
 	snapshot(): ExplicitTaskState {
