@@ -38,6 +38,7 @@ import {
 	looksNonCommittal,
 } from "./guards/response-patterns.ts";
 import {
+	type HarnessIntervention,
 	HarnessInterventionController,
 	type InterventionInput,
 } from "./intervention-controller.ts";
@@ -139,6 +140,30 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
 	/** Durable checkpoint restored only for a native continuation/resume. */
 	initialTaskState?: ExplicitTaskState;
+	/** Prior intervention incidents restored from the typed Run Kernel projection. */
+	initialInterventions?: HarnessIntervention[];
+	/** Task-spanning counters restored from the Run Kernel. */
+	durableBudgetState?: {
+		providerCalls: number;
+		toolCalls: number;
+		tokens: number;
+		startedAt?: number;
+	};
+	/** Persist accepted budget consumption before the corresponding work starts. */
+	onBudgetConsumed?: (
+		resource: "provider_call" | "tool_call" | "token",
+		amount: number,
+	) => void;
+	onToolIntent?: NonNullable<
+		import("../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolIntent"]
+	>;
+	onToolResult?: NonNullable<
+		import("../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onToolResult"]
+	>;
+	onPermissionDecision?: NonNullable<
+		import("../runtime/tool-batch-controller.ts").ToolBatchControllerOptions["onPermissionDecision"]
+	>;
+	onToolCommit?: (toolCallId: string) => void | Promise<void>;
 }
 
 const DEFAULT_MAX_ITERATIONS = 30;
@@ -189,6 +214,7 @@ async function runAgentLoopInTaskScope(
 	const maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 	const executionPolicy = resolveExecutionPolicy(config.executionProfile);
 	const interventionController = new HarnessInterventionController();
+	interventionController.replay(config.initialInterventions ?? []);
 	const intervene = (input: InterventionInput): Promise<void> | void =>
 		emit({
 			type: "harness_intervention",
@@ -229,11 +255,17 @@ async function runAgentLoopInTaskScope(
 	let reflectionFailed = false;
 	let lastAdaptiveSelection = "";
 	const runBudget = new RunBudgetController(
-		config.runBudget ?? {
+		{
 			maxProviderCalls: maxIterations,
 			maxToolCalls: maxIterations * 16,
 			maxElapsedMs: 30 * 60_000,
+			maxTokens: config.maxTotalTokens,
+			...config.runBudget,
 		},
+		Date.now,
+		config.durableBudgetState,
+		consumption =>
+			config.onBudgetConsumed?.(consumption.resource, consumption.amount),
 	);
 
 	// ── Acceptance contract tracking ─────────────────────────────────────
@@ -808,6 +840,29 @@ async function runAgentLoopInTaskScope(
 				}
 			}
 
+			const tokenBudget = runBudget.recordTokens(
+				response?.usage?.totalTokens ?? 0,
+			);
+			if (!tokenBudget.allowed) {
+				await intervene({
+					kind: "budget",
+					cause: "run_budget",
+					detector: "run_budget",
+					message: tokenBudget.reason ?? "Token budget exhausted.",
+					iteration,
+					action: "pause",
+					counters: {
+						providerCalls: tokenBudget.snapshot.providerCalls,
+						toolCalls: tokenBudget.snapshot.toolCalls,
+						elapsedMs: tokenBudget.snapshot.elapsedMs,
+					},
+				});
+				return finish({
+					status: "blocked",
+					summary: tokenBudget.reason,
+					source: "runtime",
+				});
+			}
 			let toolCalls = response?.toolCalls ?? [];
 			let assistantContent = response?.content ?? "";
 			// Fallback: when LLM emits tool calls as text instead of structured
@@ -944,6 +999,9 @@ async function runAgentLoopInTaskScope(
 				hooks: config.hooks,
 				permissions: config.permissions,
 				onPermissionRequest: config.onPermissionRequest,
+				onPermissionDecision: config.onPermissionDecision,
+				onToolIntent: config.onToolIntent,
+				onToolResult: config.onToolResult,
 				emit,
 				emitExtension: event => emitTyped(config.extensionBus, event),
 			});
@@ -959,6 +1017,8 @@ async function runAgentLoopInTaskScope(
 				taskState.recordToolBatch(toolCalls, toolResults, iteration);
 				await emit({ type: "task_state_update", state: taskState.snapshot() });
 			}
+			for (const toolCallId of batch.executedToolCallIds)
+				await config.onToolCommit?.(toolCallId);
 
 			// Turn-level loop detection: exact-repeat / degenerate / stagnation
 			// across turns (e.g. re-reading the same file over and over without

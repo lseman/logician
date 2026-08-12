@@ -12,7 +12,7 @@
 //
 // Evaluation order: deny rules → allow rules (config + session "always") →
 // mode policy. Modes:
-//   acceptAll   — allow everything (legacy behavior, the default)
+//   acceptAll   — explicitly allow everything
 //   acceptEdits — read-only + file-edit tools allowed; the rest ask
 //   ask         — read-only tools allowed; everything else asks
 //   plan        — read-only tools allowed; everything else denied
@@ -93,7 +93,7 @@ export class PermissionManager {
 	private sessionAllow: ParsedRule[] = [];
 
 	constructor(opts?: { mode?: PermissionMode; rules?: PermissionRules }) {
-		this.mode = opts?.mode ?? "acceptAll";
+		this.mode = opts?.mode ?? "acceptEdits";
 		this.allowRules = (opts?.rules?.allow ?? [])
 			.map(parseRule)
 			.filter((r): r is ParsedRule => r !== null);
@@ -114,6 +114,13 @@ export class PermissionManager {
 	addSessionAllow(toolName: string): void {
 		const rule = parseRule(toolName);
 		if (rule) this.sessionAllow.push(rule);
+	}
+
+	/** Replace ephemeral approvals when switching or restoring a session. */
+	restoreSessionAllow(toolNames: readonly string[]): void {
+		this.sessionAllow = toolNames
+			.map(parseRule)
+			.filter((rule): rule is ParsedRule => rule !== null);
 	}
 
 	evaluate(

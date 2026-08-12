@@ -310,12 +310,12 @@ export function createLocalHandlers(
 		getPermissionMode: () => ctx.bridge.getPermissionMode(),
 		togglePlanMode: () => {
 			const next =
-				ctx.bridge.getPermissionMode() === "plan" ? "acceptAll" : "plan";
+				ctx.bridge.getPermissionMode() === "plan" ? "acceptEdits" : "plan";
 			ctx.bridge.setPermissionMode(next);
 			ctx.statusPanel.update({ permissionMode: next });
 			return next === "plan"
 				? "Plan mode ON — only read-only tools; the agent should present a plan."
-				: "Plan mode OFF — permission mode back to acceptAll.";
+				: "Plan mode OFF — permission mode back to acceptEdits.";
 		},
 		rewind: () => {
 			const restored = ctx.bridge.rewind();

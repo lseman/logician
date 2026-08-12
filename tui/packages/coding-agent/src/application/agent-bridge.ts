@@ -448,7 +448,7 @@ export class AgentCoreBridge {
 
 		this.interaction = new InteractionCoordinator({
 			emit: event => this.emit(event),
-			permissionMode: opts.permissionMode ?? "acceptAll",
+			permissionMode: opts.permissionMode ?? "acceptEdits",
 			permissionRules: opts.permissionRules,
 		});
 

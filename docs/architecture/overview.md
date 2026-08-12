@@ -44,6 +44,10 @@ The foundation layer. Handles:
 - Hook system
 - Tool registry and execution
 
+Execution durability is owned by the [Run Kernel](/architecture/run-kernel), a
+versioned event ledger used for replay, task-spanning budgets, fencing, and tool
+effect recovery.
+
 ### coding-agent
 
 The orchestration layer. Handles:

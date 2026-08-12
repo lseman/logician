@@ -12,9 +12,16 @@ export interface ToolResult {
 	details?: Record<string, unknown>;
 	isError?: boolean;
 	terminate?: boolean;
+	/** Provider receipt used to reconcile a crash before commit. */
+	recoveryReceipt?: string;
 }
 
 export type ToolExecutionMode = "sequential" | "parallel";
+export type ToolRecoverySemantics =
+	| "pure"
+	| "idempotent"
+	| "receipt_recoverable"
+	| "at_most_once_unknown";
 
 export interface Tool {
 	name: string;
@@ -40,6 +47,8 @@ export interface Tool {
 	resolveTimeoutMs?: (args: Record<string, unknown>) => number | undefined;
 	hookAliases?: string[];
 	readOnly?: boolean;
+	/** Crash-recovery contract. Mutating tools default to at_most_once_unknown. */
+	recoverySemantics?: ToolRecoverySemantics;
 	execute: (
 		args: Record<string, unknown>,
 		ctx: ToolContext,
@@ -63,4 +72,8 @@ export interface ToolContext {
 	signal?: AbortSignal;
 	onUpdate?: (partialResult: string) => void;
 	onQuestionRequest?: (ctx: AskUserContext) => Promise<string>;
+	/** Stable across retries of the same logical operation. */
+	idempotencyKey?: string;
+	/** Run Kernel operation identity for receipts and correlation. */
+	operationId?: string;
 }

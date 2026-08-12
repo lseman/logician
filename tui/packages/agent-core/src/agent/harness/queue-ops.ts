@@ -10,7 +10,6 @@ import type {
 } from "../../queue/manager.ts";
 import { createSteeringInterruptReason } from "../agent-loop-runner.ts";
 import type { HarnessPhase } from "../runtime-state.ts";
-import type { Session } from "../session.ts";
 import type { QueueMode } from "../types.ts";
 import type { AbortResult, HarnessQueues } from "./contracts.ts";
 import { HarnessBusyError } from "./phase.ts";
@@ -18,8 +17,6 @@ import { HarnessBusyError } from "./phase.ts";
 export interface QueueOpsDeps {
 	msgManager: MessageDeliveryManager;
 	getPhase: () => HarnessPhase;
-	getNextTurnQueue: () => string[];
-	setNextTurnQueue: (queue: string[]) => void;
 	emitQueueChange: () => void;
 }
 
@@ -28,14 +25,13 @@ export function getQueues(deps: QueueOpsDeps): HarnessQueues {
 	return {
 		steering: q.getSteering().map(m => m.content),
 		followUp: q.getFollowUp().map(m => m.content),
-		nextTurn: [...deps.getNextTurnQueue()],
+		nextTurn: q.getNextTurn().map(message => message.content),
 	};
 }
 
 export function clearQueues(deps: QueueOpsDeps): HarnessQueues {
 	const cleared = getQueues(deps);
 	deps.msgManager.queue.clear();
-	deps.setNextTurnQueue([]);
 	deps.emitQueueChange();
 	return cleared;
 }
@@ -67,10 +63,7 @@ export function flushSteeringNow(
 	}
 	const queued = deps.msgManager.queue.dequeueSteering();
 	if (queued.length === 0) return 0;
-	deps.setNextTurnQueue([
-		...deps.getNextTurnQueue(),
-		...queued.map(message => message.content),
-	]);
+	for (const message of queued) deps.msgManager.queue.nextTurn(message.content);
 	deps.emitQueueChange();
 	abortController?.abort(createSteeringInterruptReason());
 	return queued.length;
@@ -95,7 +88,7 @@ export function followUp(deps: QueueOpsDeps, text: string): void {
 }
 
 export function nextTurn(deps: QueueOpsDeps, text: string): void {
-	deps.setNextTurnQueue([...deps.getNextTurnQueue(), text]);
+	deps.msgManager.queue.nextTurn(text);
 	deps.emitQueueChange();
 }
 
@@ -117,8 +110,6 @@ export function getFollowUpMode(deps: QueueOpsDeps): QueueMode {
 
 export interface AbortDeps extends QueueOpsDeps {
 	abortController: AbortController | null;
-	activeOperationId: string | undefined;
-	session: Session | undefined;
 	setAbortRequested: () => void;
 	waitForIdle: () => Promise<void>;
 	emitAbortEvent: (result: AbortResult) => void;
@@ -129,16 +120,9 @@ export async function abort(deps: AbortDeps): Promise<AbortResult> {
 	const q = deps.msgManager.queue;
 	const clearedSteering = q.getSteering().map(m => m.content);
 	const clearedFollowUp = q.getFollowUp().map(m => m.content);
-	if (deps.activeOperationId) {
-		deps.session?.appendJournalEvent({
-			type: "operation_interrupted",
-			operationId: deps.activeOperationId,
-			status: "aborted",
-		});
-	}
 	deps.setAbortRequested();
 	deps.abortController?.abort();
-	deps.msgManager.queue.clear();
+	deps.msgManager.queue.clearCurrentTurn();
 	deps.emitQueueChange();
 	await deps.waitForIdle();
 	const result: AbortResult = {

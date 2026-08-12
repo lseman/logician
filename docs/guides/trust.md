@@ -16,6 +16,9 @@ Logician provides granular control over what the agent can do, from read-only pl
 | `acceptEdits` | Edits automatically, asks for tools | ✅ | ⚠️ (confirm) |
 | `acceptAll` | Full autonomy | ✅ | ✅ |
 
+`acceptEdits` is the default. Full autonomy must be selected explicitly;
+non-interactive approval requests fail closed.
+
 ## Safe edits
 
 All file edits use strict exact-text matching:

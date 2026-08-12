@@ -18,6 +18,8 @@ export interface Branch {
 	parent: Message[];
 	forkedAt: number;
 	summary: BranchSummaryData | null;
+	/** Durable session entry selected at the fork point. */
+	sessionLeafId?: string;
 }
 
 /** Fork the current history into a new branch. Mutates `branches` in place, returns the new branch id. */
@@ -26,12 +28,14 @@ export function forkBranch(
 	branchSeq: number,
 	currentHistory: Message[],
 	customSummary?: BranchSummaryData,
+	sessionLeafId?: string,
 ): { branch: Branch; nextBranchSeq: number } {
 	const branch: Branch = {
 		id: `branch_${branchSeq + 1}`,
 		parent: currentHistory,
 		forkedAt: currentHistory.length,
 		summary: customSummary ?? null,
+		sessionLeafId,
 	};
 	return { branch, nextBranchSeq: branchSeq + 1 };
 }

@@ -335,7 +335,7 @@ export function setupInputHandler(ctx: LogicianTUI): void {
 		// Ctrl+P — toggle plan mode (plan ↔ act)
 		if (data === "\x10") {
 			const next =
-				ctx.bridge.getPermissionMode() === "plan" ? "acceptAll" : "plan";
+				ctx.bridge.getPermissionMode() === "plan" ? "acceptEdits" : "plan";
 			ctx.bridge.setPermissionMode(next);
 			ctx.statusPanel.update({ permissionMode: next });
 			ctx.tui.requestRender();

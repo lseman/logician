@@ -8,7 +8,7 @@
 //
 // Escape aborts and restores queued messages to the editor.
 
-export type MessageType = "steering" | "followUp";
+export type MessageType = "steering" | "followUp" | "nextTurn";
 
 export interface QueuedMessage {
 	id: string;
@@ -45,6 +45,18 @@ export class MessageQueue {
 		return msg;
 	}
 
+	/** Queue guidance for the next user-initiated turn. */
+	nextTurn(content: string): QueuedMessage {
+		const msg: QueuedMessage = {
+			id: `msg_${Date.now()}_${this.nextId++}`,
+			type: "nextTurn",
+			content,
+			timestamp: Date.now(),
+		};
+		this.queue.push(msg);
+		return msg;
+	}
+
 	/** Get all queued messages, ordered by submission time. */
 	getAll(): QueuedMessage[] {
 		return [...this.queue];
@@ -58,6 +70,10 @@ export class MessageQueue {
 	/** Get follow-up messages. */
 	getFollowUp(): QueuedMessage[] {
 		return this.queue.filter(m => m.type === "followUp");
+	}
+
+	getNextTurn(): QueuedMessage[] {
+		return this.queue.filter(message => message.type === "nextTurn");
 	}
 
 	/** Peek at the next steering message without removing it. */
@@ -93,6 +109,23 @@ export class MessageQueue {
 		return this.queue.splice(index, 1);
 	}
 
+	dequeueNextTurn(): QueuedMessage[] {
+		const messages = this.getNextTurn();
+		this.queue = this.queue.filter(message => message.type !== "nextTurn");
+		return messages;
+	}
+
+	restore(snapshot: {
+		steering: string[];
+		followUp: string[];
+		nextTurn: string[];
+	}): void {
+		this.queue = [];
+		for (const content of snapshot.steering) this.steering(content);
+		for (const content of snapshot.followUp) this.followUp(content);
+		for (const content of snapshot.nextTurn) this.nextTurn(content);
+	}
+
 	remove(id: string): QueuedMessage | undefined {
 		const index = this.queue.findIndex(message => message.id === id);
 		if (index < 0) return undefined;
@@ -104,6 +137,13 @@ export class MessageQueue {
 		const all = [...this.queue];
 		this.queue = [];
 		return all;
+	}
+
+	/** Clear steering/follow-up messages while preserving next-turn guidance. */
+	clearCurrentTurn(): QueuedMessage[] {
+		const cleared = this.queue.filter(message => message.type !== "nextTurn");
+		this.queue = this.queue.filter(message => message.type === "nextTurn");
+		return cleared;
 	}
 
 	/** Check if there are any queued messages. */

@@ -33,6 +33,9 @@ async function run(
 	onPermissionRequest?: Parameters<
 		typeof executeToolBatch
 	>[0]["onPermissionRequest"],
+	onPermissionDecision?: Parameters<
+		typeof executeToolBatch
+	>[0]["onPermissionDecision"],
 ) {
 	const events: AgentEvent[] = [];
 	return executeToolBatch({
@@ -42,6 +45,7 @@ async function run(
 		iteration: 1,
 		permissions,
 		onPermissionRequest,
+		onPermissionDecision,
 		emit: e => {
 			events.push(e);
 		},
@@ -151,4 +155,30 @@ void test("acceptAll mode never invokes the permission handler", async () => {
 	);
 	assert.equal(asked, false);
 	assert.equal(batch.messages[0].content, "ran: make build");
+});
+
+void test("permission decisions are attributed before execution", async () => {
+	const decisions: Array<{
+		decision: string;
+		source: string;
+		scope?: string;
+	}> = [];
+	await run(
+		registryWithBash(),
+		callFor("make build"),
+		new PermissionManager({ mode: "ask" }),
+		async () => "always",
+		decision => {
+			decisions.push(decision);
+		},
+	);
+	assert.deepEqual(decisions, [
+		{
+			toolCallId: "c1",
+			toolName: "bash",
+			decision: "allow",
+			source: "user",
+			scope: "session",
+		},
+	]);
 });

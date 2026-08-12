@@ -4,7 +4,7 @@
 // nextTurn queues drained at save points.
 //
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { CompactionSettings } from "../compaction/index.ts";
 import type { ExtensionRunner, RegisteredTool } from "../extensions/index.ts";
 import {
@@ -69,12 +69,14 @@ import {
 	listSessions as listSessionsHelper,
 	loadSessionMessages,
 } from "./harness/session-lifecycle.ts";
-import { createUserMessage, estimateChatPayloadTokens } from "./messages.ts";
 import {
-	type ContinuationDecision,
-	type DurableRunState,
-	RunStateController,
-} from "./run-state.ts";
+	createToolResultMessage,
+	createUserMessage,
+	estimateChatPayloadTokens,
+} from "./messages.ts";
+import { type ContinuationDecision, RunKernel } from "./run-kernel.ts";
+import type { RunKernelState } from "./run-kernel-events.ts";
+import { migrateLegacyRunData } from "./run-kernel-migration.ts";
 import {
 	type AgentRuntimeState,
 	createRuntimeState,
@@ -83,7 +85,7 @@ import {
 } from "./runtime-state.ts";
 import { Session } from "./session.ts";
 import type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
-import { TrajectoryRecorder, type TrajectoryReport } from "./trajectory.ts";
+import { evaluateTrajectory, type TrajectoryReport } from "./trajectory.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -103,6 +105,40 @@ export type {
 	HarnessQueues,
 } from "./harness/contracts.ts";
 export { HarnessBusyError } from "./harness/phase.ts";
+
+function stableSerialize(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+	if (value && typeof value === "object") {
+		return `{${Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`)
+			.join(",")}}`;
+	}
+	return JSON.stringify(value) ?? "null";
+}
+
+function digest(value: unknown): string {
+	return createHash("sha256").update(stableSerialize(value)).digest("hex");
+}
+
+function trajectoryEventPayload(event: AgentEvent): Record<string, unknown> {
+	const payload = structuredClone(event as unknown as Record<string, unknown>);
+	for (const field of ["delta", "content", "message", "messages", "result"]) {
+		const value = payload[field];
+		if (value !== undefined) {
+			payload[`${field}Digest`] = digest(value);
+			payload[`${field}Size`] =
+				typeof value === "string" ? value.length : JSON.stringify(value).length;
+			payload[field] = undefined;
+		}
+	}
+	if (event.type === "subagent_event") {
+		payload.eventType = event.event.type;
+		payload.event = undefined;
+	}
+	return payload;
+}
+
 export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
 export type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 
@@ -125,7 +161,6 @@ export class AgentHarness {
 	private branches: Branch[] = [];
 	private branchSeq = 0;
 	private checkpoints: Message[][] = [];
-	private _nextTurnQueue: string[] = [];
 	private msgManager: MessageDeliveryManager;
 	private loopDetector: LoopDetector;
 	private thinkingLoopDetector: ThinkingLoopDetector | null;
@@ -155,8 +190,9 @@ export class AgentHarness {
 	private _transcriptPath?: string;
 	private _hasStartedSession = false;
 	private _activeOperationId?: string;
-	private runState: RunStateController;
-	private trajectory: TrajectoryRecorder;
+	private runKernel: RunKernel;
+	private readonly runKernelOwnerId = randomUUID();
+	private activeToolOperations = new Map<string, string>();
 	private _runPromise?: Promise<void>;
 	private _runResolve?: () => void;
 	private _subscribers: Set<EventHandler> = new Set();
@@ -186,13 +222,11 @@ export class AgentHarness {
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
-		this.runState = new RunStateController(
+		const initialSessionId =
+			options.config.hookSessionId ?? `tui_${randomUUID()}`;
+		this.runKernel = new RunKernel(
 			options.cwd ?? process.cwd(),
-			options.config.hookSessionId ?? `tui_${randomUUID()}`,
-		);
-		this.trajectory = new TrajectoryRecorder(
-			options.cwd ?? process.cwd(),
-			options.config.hookSessionId ?? `tui_${randomUUID()}`,
+			initialSessionId,
 		);
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
@@ -242,27 +276,185 @@ export class AgentHarness {
 		};
 	}
 
-	get durableRunState(): DurableRunState | undefined {
-		return this.runState.snapshot();
+	get durableRunState(): RunKernelState | undefined {
+		const state = this.runKernel.snapshot().state;
+		return state.taskId ? state : undefined;
 	}
 
 	get durableRunBudget() {
-		return this.runState.budgetStatus();
+		return this.runKernel.budgetStatus();
 	}
 
 	get trajectoryReport(): TrajectoryReport {
-		return this.trajectory.evaluate();
+		const state = this.runKernel.snapshot().state;
+		return evaluateTrajectory(
+			state.trajectory.map(entry => ({
+				version: 1,
+				sequence: entry.sequence,
+				timestamp: entry.timestamp,
+				sessionId: state.sessionId ?? "",
+				runId: entry.runId,
+				operationId: entry.operationId,
+				kind: entry.kind,
+				payload: entry.payload,
+			})),
+		);
+	}
+
+	private recordTrajectoryStart(
+		runId: string,
+		operationId: string,
+		config: AgentConfig,
+		cause: "prompt" | "continue",
+	): void {
+		this.runKernel.recordTrajectory(
+			"run_start",
+			operationId,
+			{
+				cause,
+				metadata: {
+					harnessVersion: "0.3.0",
+					model: config.model,
+					baseUrl: config.baseUrl,
+					executionProfile: config.executionProfile,
+					inferenceMode: config.inferenceMode,
+					tools: (config.tools ?? []).map(tool => ({
+						name: tool.name,
+						description: tool.description,
+					})),
+				},
+			},
+			runId,
+		);
+	}
+
+	private renewRunKernelLease(): void {
+		const state = this.runKernel.snapshot().state;
+		if (!state.taskId || !state.runId || state.status === "idle") return;
+		this.runKernel.acquireLease(this.runKernelOwnerId, {
+			taskId: state.taskId,
+			runId: state.runId,
+			force: true,
+		});
+	}
+
+	private durableExecutionConfig(): Pick<
+		RunAgentLoopConfig,
+		| "durableBudgetState"
+		| "initialInterventions"
+		| "onBudgetConsumed"
+		| "onPermissionDecision"
+		| "onToolIntent"
+		| "onToolResult"
+		| "onToolCommit"
+	> {
+		this.renewRunKernelLease();
+		const state = this.runKernel.snapshot().state;
+		const appendOptions = (operationId?: string) => {
+			const current = this.runKernel.snapshot().state;
+			if (!current.taskId || !current.runId) return undefined;
+			return {
+				taskId: current.taskId,
+				runId: current.runId,
+				operationId,
+				leaseEpoch: current.leaseEpoch,
+			};
+		};
+		return {
+			initialInterventions: state.interventions,
+			durableBudgetState: {
+				providerCalls: state.budgets.provider_call,
+				toolCalls: state.budgets.tool_call,
+				tokens: state.budgets.token,
+				startedAt: state.createdAt,
+			},
+			onBudgetConsumed: (resource, amount) => {
+				const options = appendOptions();
+				if (!options) return;
+				this.runKernel.append(
+					{ type: "budget_consumed", resource, amount },
+					options,
+				);
+			},
+			onPermissionDecision: decision => {
+				const options = appendOptions();
+				if (!options) return;
+				this.runKernel.append(
+					{ type: "permission_decided", ...decision },
+					options,
+				);
+			},
+			onToolIntent: input => {
+				const current = this.runKernel.snapshot().state;
+				if (!current.taskId) return;
+				const argumentsDigest = digest(input.args);
+				const operationId = digest({
+					taskId: current.taskId,
+					toolCallId: input.toolCallId,
+					toolName: input.toolName,
+					argumentsDigest,
+				}).slice(0, 32);
+				const options = appendOptions(operationId);
+				if (!options) return;
+				this.runKernel.append(
+					{
+						type: "operation_intent_recorded",
+						operationId,
+						toolCallId: input.toolCallId,
+						toolName: input.toolName,
+						arguments: structuredClone(input.args),
+						argumentsDigest,
+						idempotencyKey: operationId,
+						recovery: input.recovery,
+					},
+					options,
+				);
+				this.activeToolOperations.set(input.toolCallId, operationId);
+				return { operationId, idempotencyKey: operationId };
+			},
+			onToolResult: input => {
+				const operationId = this.activeToolOperations.get(input.toolCallId);
+				if (!operationId)
+					throw new Error(`Missing durable intent for ${input.toolCallId}`);
+				const options = appendOptions(operationId);
+				if (!options) return;
+				this.runKernel.append(
+					{
+						type: "operation_result_recorded",
+						operationId,
+						resultDigest: digest(input.result),
+						result: input.result,
+						isError: input.isError,
+						receipt: input.receipt,
+					},
+					options,
+				);
+			},
+			onToolCommit: toolCallId => {
+				const operationId = this.activeToolOperations.get(toolCallId);
+				if (!operationId)
+					throw new Error(`Missing durable result for ${toolCallId}`);
+				const options = appendOptions(operationId);
+				if (!options) return;
+				this.runKernel.append(
+					{ type: "operation_committed", operationId },
+					options,
+				);
+				this.activeToolOperations.delete(toolCallId);
+			},
+		};
 	}
 
 	requestContinuation(
 		cause: string,
 		progressFingerprint: string,
 	): ContinuationDecision {
-		return this.runState.requestContinuation(cause, progressFingerprint);
+		this.renewRunKernelLease();
+		return this.runKernel.requestContinuation(cause, progressFingerprint);
 	}
 
 	failRun(reason?: string): void {
-		this.runState.fail(reason);
+		this.runKernel.finish("failed", reason, "runtime");
 	}
 
 	setOnPhaseChange(
@@ -372,21 +564,30 @@ export class AgentHarness {
 		assertIdlePhase(this._phase, op);
 	}
 
+	private settleTurn(): void {
+		this._activeOperationId = undefined;
+		this.abortController = null;
+		this.msgManager.queue.clearCurrentTurn();
+		this.emitQueueChange();
+		this._runResolve?.();
+		this._runPromise = undefined;
+		this._runResolve = undefined;
+		const nextTurnCount = this.msgManager.queue.getNextTurn().length;
+		this.onSettled?.(nextTurnCount);
+		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
+	}
+
 	// ── Structural operation: prompt ───────────────────────────────────────
 
 	async prompt(userMessage: string): Promise<Message[]> {
-		this._runPromise = new Promise<void>(resolve => {
-			this._runResolve = resolve;
-		});
-
+		this.assertIdle("prompt");
 		if (this.autoCompactionSettings.enabled) {
 			const compacted = await this.runAutoCompaction("auto");
 			if (compacted) {
 				return this.prompt(userMessage);
 			}
 		}
-		this.runState.start(userMessage);
-
+		this.recoverInterruptedOperations();
 		// Initialize output guard if not already done
 		if (!this.outputGuard && this.config.contextWindowTokens) {
 			this.setOutputGuardConfig({
@@ -401,12 +602,22 @@ export class AgentHarness {
 				autoCompactOnContextFull: this.config.autoRetryEnabled !== false,
 			});
 		}
+		this._runPromise = new Promise<void>(resolve => {
+			this._runResolve = resolve;
+		});
 
 		return this.runInPhase("turn", "prompt", async () => {
+			this.runKernel.startTask(userMessage);
+			this.renewRunKernelLease();
 			this.abortController = new AbortController();
 
 			if (!this._hasStartedSession) {
-				await this.emitSessionStart("startup");
+				try {
+					await this.emitSessionStart("startup");
+				} catch (error) {
+					this.settleTurn();
+					throw error;
+				}
 			}
 
 			this.checkpoints.push([...this.history]);
@@ -416,19 +627,20 @@ export class AgentHarness {
 			beginFileFrame();
 
 			const promptText = userMessage;
-			const snapshot = await this.createTurnSnapshot(
-				promptText,
-				this.abortController.signal,
-			);
+			let snapshot: HarnessTurnSnapshot;
+			try {
+				snapshot = await this.createTurnSnapshot(
+					promptText,
+					this.abortController.signal,
+				);
+			} catch (error) {
+				this.settleTurn();
+				throw error;
+			}
 			const operationId = randomUUID();
 			this._activeOperationId = operationId;
-			const runId = this.runState.snapshot()?.runId ?? operationId;
-			this.trajectory.start(runId, operationId, snapshot.config, "prompt");
-			this._session?.appendJournalEvent({
-				type: "operation_start",
-				operationId,
-				status: "prompt",
-			});
+			const runId = this.runKernel.snapshot().state.runId ?? operationId;
+			this.recordTrajectoryStart(runId, operationId, snapshot.config, "prompt");
 
 			try {
 				this.loopConfig = snapshot.config;
@@ -443,6 +655,7 @@ export class AgentHarness {
 					[createUserMessage(snapshot.promptText)],
 					{
 						...snapshot.config,
+						...this.durableExecutionConfig(),
 						backend: this.backend,
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
@@ -452,6 +665,10 @@ export class AgentHarness {
 							this.withExtensionRuntime(this.snapshotConfig()),
 						onContextCompacted: messages => {
 							compactedContext = messages;
+							this.persistCompactedContext(
+								messages,
+								this.estimatePayloadTokens(),
+							);
 						},
 					} satisfies RunAgentLoopConfig,
 					async event => {
@@ -472,26 +689,15 @@ export class AgentHarness {
 				this.history = result;
 				return result;
 			} finally {
-				this.trajectory.finish(
+				this.runKernel.recordTrajectory(
+					"run_finish",
+					operationId,
+					{
+						status: this.runtime.outcome?.status ?? "unknown",
+					},
 					runId,
-					operationId,
-					this.runtime.outcome?.status ?? "unknown",
 				);
-				this._session?.appendJournalEvent({
-					type: "operation_finish",
-					operationId,
-					status: this.runtime.outcome?.status ?? "unknown",
-				});
-				this._activeOperationId = undefined;
-				this.abortController = null;
-				this.msgManager.queue.clear();
-				this.emitQueueChange();
-				this._runResolve?.();
-				this._runPromise = undefined;
-				this._runResolve = undefined;
-				const nextTurnCount = this._nextTurnQueue.length;
-				this.onSettled?.(nextTurnCount);
-				this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
+				this.settleTurn();
 			}
 		});
 	}
@@ -503,6 +709,8 @@ export class AgentHarness {
 	 * the caller wants to re-enter the loop without fabricating a follow-up prompt.
 	 */
 	async continue(): Promise<Message[]> {
+		this.assertIdle("continue");
+		this.recoverInterruptedOperations();
 		const nonSystem = this.history.filter(
 			(m): m is Message => m != null && m.role !== "system",
 		);
@@ -536,7 +744,12 @@ export class AgentHarness {
 			this.abortController = new AbortController();
 
 			if (!this._hasStartedSession) {
-				await this.emitSessionStart("startup");
+				try {
+					await this.emitSessionStart("startup");
+				} catch (error) {
+					this.settleTurn();
+					throw error;
+				}
 			}
 
 			this.checkpoints.push([...this.history]);
@@ -545,18 +758,24 @@ export class AgentHarness {
 			}
 			beginFileFrame();
 
-			const snapshot = await this.createContinueSnapshot(
-				this.abortController.signal,
-			);
+			let snapshot: HarnessTurnSnapshot;
+			try {
+				snapshot = await this.createContinueSnapshot(
+					this.abortController.signal,
+				);
+			} catch (error) {
+				this.settleTurn();
+				throw error;
+			}
 			const operationId = randomUUID();
 			this._activeOperationId = operationId;
-			const runId = this.runState.snapshot()?.runId ?? operationId;
-			this.trajectory.start(runId, operationId, snapshot.config, "continue");
-			this._session?.appendJournalEvent({
-				type: "operation_start",
+			const runId = this.runKernel.snapshot().state.runId ?? operationId;
+			this.recordTrajectoryStart(
+				runId,
 				operationId,
-				status: "continue",
-			});
+				snapshot.config,
+				"continue",
+			);
 
 			try {
 				this.loopConfig = snapshot.config;
@@ -570,16 +789,21 @@ export class AgentHarness {
 					},
 					{
 						...snapshot.config,
+						...this.durableExecutionConfig(),
 						backend: this.backend,
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
 						outputGuard: this.outputGuard,
 						extensionBus: this._extensionBus,
-						initialTaskState: this.runState.snapshot()?.taskState,
+						initialTaskState: this.runKernel.snapshot().state.taskState,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
 						onContextCompacted: messages => {
 							compactedContext = messages;
+							this.persistCompactedContext(
+								messages,
+								this.estimatePayloadTokens(),
+							);
 						},
 					} satisfies RunAgentLoopConfig,
 					async event => {
@@ -600,26 +824,15 @@ export class AgentHarness {
 				this.history = result;
 				return result;
 			} finally {
-				this.trajectory.finish(
+				this.runKernel.recordTrajectory(
+					"run_finish",
+					operationId,
+					{
+						status: this.runtime.outcome?.status ?? "unknown",
+					},
 					runId,
-					operationId,
-					this.runtime.outcome?.status ?? "unknown",
 				);
-				this._session?.appendJournalEvent({
-					type: "operation_finish",
-					operationId,
-					status: this.runtime.outcome?.status ?? "unknown",
-				});
-				this._activeOperationId = undefined;
-				this.abortController = null;
-				this.msgManager.queue.clear();
-				this.emitQueueChange();
-				this._runResolve?.();
-				this._runPromise = undefined;
-				this._runResolve = undefined;
-				const nextTurnCount = this._nextTurnQueue.length;
-				this.onSettled?.(nextTurnCount);
-				this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
+				this.settleTurn();
 			}
 		});
 	}
@@ -630,7 +843,9 @@ export class AgentHarness {
 	 */
 	async continueWithNextTurn(): Promise<Message[]> {
 		this.assertIdle("continue with next-turn guidance");
-		const guidance = this._nextTurnQueue.splice(0).map(createUserMessage);
+		const guidance = this.msgManager.queue
+			.dequeueNextTurn()
+			.map(message => createUserMessage(message.content));
 		if (guidance.length === 0) {
 			throw new Error("Cannot continue: no next-turn guidance queued");
 		}
@@ -683,9 +898,9 @@ export class AgentHarness {
 
 		// nextTurn guidance belongs to the next user-initiated prompt. Consume it
 		// exactly once here, never from an iteration of the currently active run.
-		const nextTurnMessages = this._nextTurnQueue
-			.splice(0)
-			.map(createUserMessage);
+		const nextTurnMessages = this.msgManager.queue
+			.dequeueNextTurn()
+			.map(message => createUserMessage(message.content));
 		if (nextTurnMessages.length > 0) {
 			initialMessages = [...initialMessages, ...nextTurnMessages];
 			this.emitQueueChange();
@@ -869,19 +1084,69 @@ export class AgentHarness {
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
 		this.reduceRuntimeEvent(event);
-		const runId = this.runState.snapshot()?.runId;
+		const runId = this.runKernel.snapshot().state.runId;
 		if (runId && this._activeOperationId) {
-			this.trajectory.record(runId, this._activeOperationId, event);
+			this.runKernel.recordTrajectory(
+				"agent_event",
+				this._activeOperationId,
+				trajectoryEventPayload(event),
+				runId,
+			);
+		}
+		if (
+			event.type === "subagent_start" ||
+			event.type === "subagent_event" ||
+			event.type === "subagent_end"
+		) {
+			const state = this.runKernel.snapshot().state;
+			if (state.taskId && state.runId) {
+				const kernelEvent =
+					event.type === "subagent_start"
+						? {
+								type: "subagent_started" as const,
+								agentId: event.agentId,
+								agent: event.agent,
+								task: event.task,
+								taskIndex: event.taskIndex,
+							}
+						: event.type === "subagent_event"
+							? {
+									type: "subagent_progressed" as const,
+									agentId: event.agentId,
+									eventType: event.event.type,
+								}
+							: {
+									type: "subagent_finished" as const,
+									agentId: event.agentId,
+									agent: event.agent,
+									result: event.result,
+									isError: event.isError ?? false,
+									turns: event.turns,
+								};
+				this.runKernel.append(kernelEvent, {
+					taskId: state.taskId,
+					runId: state.runId,
+					leaseEpoch: state.leaseEpoch,
+				});
+			}
 		}
 		if (event.type === "task_state_update")
-			this.runState.applyTaskState(event.state);
-		if (event.type === "compaction") this.runState.recordCompaction();
+			this.runKernel.updateTaskState(event.state);
+		if (event.type === "harness_intervention") {
+			const state = this.runKernel.snapshot().state;
+			if (state.taskId && state.runId)
+				this.runKernel.append(
+					{ type: "intervention_recorded", intervention: event },
+					{
+						taskId: state.taskId,
+						runId: state.runId,
+						leaseEpoch: state.leaseEpoch,
+					},
+				);
+		}
+		if (event.type === "compaction") this.runKernel.recordCompaction();
 		if (event.type === "run_outcome") {
-			this.runState.applyOutcome({
-				status: event.status,
-				summary: event.summary,
-				source: event.source,
-			});
+			this.runKernel.finish(event.status, event.summary, event.source);
 		}
 		// The primary application event path is synchronous and latency-sensitive;
 		// extension delivery must not hold streaming deltas behind an await.
@@ -890,53 +1155,7 @@ export class AgentHarness {
 			this.loopConfig?.onEvent?.(event);
 			this.persistTurnMessages([event.message]);
 		}
-		this.persistJournalEvent(event);
 		await this.emitExtensionAgentEvent(event);
-	}
-
-	private persistJournalEvent(event: AgentEvent): void {
-		if (!this._session || !this._activeOperationId) return;
-		const operationId = this._activeOperationId;
-		if (event.type === "turn_start" || event.type === "turn_end") {
-			this._session.appendJournalEvent({
-				type: event.type,
-				operationId,
-				turnId: event.turnId,
-				status: event.type === "turn_end" ? event.stopReason : undefined,
-			});
-		} else if (event.type === "tool_execution_start") {
-			this._session.appendJournalEvent({
-				type: "tool_start",
-				operationId,
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-			});
-		} else if (event.type === "tool_execution_end") {
-			this._session.appendJournalEvent({
-				type: "tool_end",
-				operationId,
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				status: event.isError ? "error" : "completed",
-			});
-			this._session.appendJournalEvent({
-				type: "checkpoint",
-				operationId,
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				status: event.isError ? "tool_error" : "tool_boundary",
-			});
-		} else if (event.type === "harness_intervention") {
-			this._session.appendJournalEvent({
-				type: "intervention",
-				operationId,
-				interventionId: event.id,
-				cause: event.cause,
-				action: event.action,
-				iteration: event.iteration,
-				status: event.severity,
-			});
-		}
 	}
 
 	private reduceRuntimeEvent(event: AgentEvent): void {
@@ -1126,10 +1345,6 @@ export class AgentHarness {
 		return {
 			msgManager: this.msgManager,
 			getPhase: () => this._phase,
-			getNextTurnQueue: () => this._nextTurnQueue,
-			setNextTurnQueue: queue => {
-				this._nextTurnQueue = queue;
-			},
 			emitQueueChange: () => this.emitQueueChange(),
 		};
 	}
@@ -1164,8 +1379,6 @@ export class AgentHarness {
 		return queueOps.abort({
 			...this.queueOpsDeps,
 			abortController: this.abortController,
-			activeOperationId: this._activeOperationId,
-			session: this._session,
 			setAbortRequested: () => {
 				this.runtime = { ...this.runtime, abortRequested: true };
 			},
@@ -1192,6 +1405,17 @@ export class AgentHarness {
 
 	private emitQueueChange(): void {
 		const queues = queueOps.getQueues(this.queueOpsDeps);
+		const run = this.runKernel.snapshot().state;
+		if (run.taskId && run.runId) {
+			this.runKernel.append(
+				{ type: "queue_updated", ...queues },
+				{
+					taskId: run.taskId,
+					runId: run.runId,
+					leaseEpoch: run.leaseEpoch,
+				},
+			);
+		}
 		this.onQueueChange?.(queues);
 		this.emitToSubscribers({
 			type: "queue_update",
@@ -1235,8 +1459,139 @@ export class AgentHarness {
 	setSessionId(id: string): void {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
-		this.runState.useSession(id);
-		this.trajectory.useSession(id);
+		this.runKernel.useSession(id);
+		migrateLegacyRunData(this.runKernel, this.cwd ?? process.cwd(), id);
+		this.restoreKernelSessionState();
+	}
+
+	private restoreKernelSessionState(): void {
+		const state = this.runKernel.snapshot().state;
+		this.msgManager.queue.restore(state.queues);
+		this.config.permissions?.restoreSessionAllow(
+			state.permissionDecisions
+				.filter(
+					decision =>
+						decision.decision === "allow" &&
+						decision.source === "user" &&
+						decision.scope === "session",
+				)
+				.map(decision => decision.toolName),
+		);
+	}
+
+	/** Resolve crash frontiers into valid conversation history before re-entry. */
+	private recoverInterruptedOperations(): void {
+		const initial = this.runKernel.snapshot().state;
+		const recoverable = Object.values(initial.operations).filter(
+			operation =>
+				operation.status === "intent_recorded" ||
+				operation.status === "result_recorded" ||
+				(operation.status === "committed" && operation.result !== undefined) ||
+				operation.status === "quarantined",
+		);
+		if (!initial.taskId || !initial.runId) return;
+		const runningSubagents = Object.values(initial.subagents).filter(
+			child => child.status === "running",
+		);
+		if (recoverable.length === 0 && runningSubagents.length === 0) return;
+		if (
+			runningSubagents.length > 0 ||
+			recoverable.some(
+				operation =>
+					operation.status === "intent_recorded" ||
+					operation.status === "result_recorded",
+			)
+		)
+			this.renewRunKernelLease();
+		for (const operation of recoverable) {
+			const toolCallId = operation.toolCallId;
+			if (!toolCallId) continue;
+			const alreadyRecovered = this.history.some(
+				message =>
+					message.role === "tool" && message.tool_call_id === toolCallId,
+			);
+			let content: string;
+			let isError: boolean;
+			if (
+				operation.status === "result_recorded" ||
+				operation.status === "committed"
+			) {
+				content =
+					operation.result ?? "Tool completed without a textual result.";
+				isError = operation.isError ?? false;
+			} else if (operation.status === "quarantined") {
+				content =
+					operation.quarantineReason ??
+					"Tool execution was quarantined after an interrupted effect.";
+				isError = true;
+			} else {
+				const guidance =
+					operation.recovery === "pure" || operation.recovery === "idempotent"
+						? "The interrupted operation is safe to retry with the same arguments."
+						: operation.recovery === "receipt_recoverable"
+							? "Reconcile the external receipt before retrying this operation."
+							: "The external effect is indeterminate; do not retry without verification.";
+				content = `Tool execution was interrupted after its durable intent was recorded. ${guidance}`;
+				isError = true;
+			}
+			if (!alreadyRecovered) {
+				const message = createToolResultMessage(
+					toolCallId,
+					operation.toolName,
+					content,
+					isError,
+				);
+				this.history.push(message);
+				this.persistTurnMessages([message]);
+			}
+			if (
+				operation.status === "committed" ||
+				operation.status === "quarantined"
+			)
+				continue;
+			const current = this.runKernel.snapshot().state;
+			if (!current.taskId || !current.runId) continue;
+			const options = {
+				taskId: current.taskId,
+				runId: current.runId,
+				operationId: operation.operationId,
+				leaseEpoch: current.leaseEpoch,
+			};
+			if (operation.status === "result_recorded")
+				this.runKernel.append(
+					{ type: "operation_committed", operationId: operation.operationId },
+					options,
+				);
+			else
+				this.runKernel.append(
+					{
+						type: "operation_quarantined",
+						operationId: operation.operationId,
+						reason: content,
+					},
+					options,
+				);
+		}
+		for (const child of runningSubagents) {
+			const current = this.runKernel.snapshot().state;
+			if (!current.taskId || !current.runId) break;
+			this.runKernel.append(
+				{
+					type: "subagent_finished",
+					agentId: child.agentId,
+					agent: child.agent,
+					result:
+						"Subagent execution was interrupted by process termination; its result is unavailable.",
+					isError: true,
+					turns: child.turns,
+				},
+				{
+					taskId: current.taskId,
+					runId: current.runId,
+					leaseEpoch: current.leaseEpoch,
+				},
+			);
+		}
 	}
 
 	setTranscriptPath(path: string): void {
@@ -1315,8 +1670,9 @@ export class AgentHarness {
 		this._sessionBaseDir = baseDir;
 		this._session = new Session(sessionId, { baseDir, enabled: true });
 		this._sessionId = sessionId;
-		this.runState.useSession(sessionId);
-		this.trajectory.useSession(sessionId);
+		this.runKernel.useSession(sessionId);
+		migrateLegacyRunData(this.runKernel, this.cwd ?? process.cwd(), sessionId);
+		this.restoreKernelSessionState();
 		await this.emitSessionStart("startup");
 	}
 
@@ -1335,8 +1691,9 @@ export class AgentHarness {
 		this._sessionBaseDir = sessionBaseDir;
 		this._session = resumed.session;
 		this._sessionId = sessionId;
-		this.runState.useSession(sessionId);
-		this.trajectory.useSession(sessionId);
+		this.runKernel.useSession(sessionId);
+		migrateLegacyRunData(this.runKernel, this.cwd ?? process.cwd(), sessionId);
+		this.restoreKernelSessionState();
 		await this.emitSessionStart("resume");
 		return true;
 	}
@@ -1421,6 +1778,7 @@ export class AgentHarness {
 			this.branchSeq,
 			current,
 			customSummary,
+			this._session?.getLeafEntryId(),
 		);
 		this.branchSeq = nextBranchSeq;
 		this.branches.push(branch);
@@ -1446,6 +1804,7 @@ export class AgentHarness {
 		const diverged = current.slice(branch.forkedAt);
 		if (!diverged.length) {
 			this.branches.pop();
+			this._session?.checkout(branch.sessionLeafId);
 			this.setActiveHistory(branch.parent);
 			return null;
 		}
@@ -1463,6 +1822,12 @@ export class AgentHarness {
 				},
 			);
 			this.branches.pop();
+			this._session?.checkout(branch.sessionLeafId);
+			if (outcome.summaryText)
+				this._session?.appendBranchSummary(
+					outcome.summaryText,
+					branch.sessionLeafId,
+				);
 			this.setActiveHistory(outcome.history);
 			return outcome.summaryText;
 		});
@@ -1475,6 +1840,7 @@ export class AgentHarness {
 		this.assertIdle("discardBranch");
 		const branch = this.branches.pop();
 		if (!branch) return false;
+		this._session?.checkout(branch.sessionLeafId);
 		this.setActiveHistory(branch.parent);
 		return true;
 	}
@@ -1533,6 +1899,23 @@ export class AgentHarness {
 
 	private setActiveHistory(messages: Message[]): void {
 		this.history = messages;
+	}
+
+	private persistCompactedContext(
+		messages: Message[],
+		tokensBefore: number,
+	): void {
+		const summary = messages.find(
+			message => String(message.role) === "compactionSummary",
+		)?.content;
+		if (typeof summary !== "string" || !summary.trim()) return;
+		const firstKeptEntryId = messages
+			.map(message => message as Message & { entryId?: string })
+			.find(
+				message =>
+					String(message.role) !== "compactionSummary" && message.entryId,
+			)?.entryId;
+		this._session?.appendCompaction(summary, tokensBefore, firstKeptEntryId);
 	}
 
 	// ── Compaction ─────────────────────────────────────────────────────────
@@ -1594,6 +1977,8 @@ export class AgentHarness {
 			}
 			this.history = result.messages;
 			const after = result.tokensAfter;
+			this.persistCompactedContext(result.messages, before);
+			this.runKernel.recordCompaction();
 			this.onCompaction?.("manual", before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
@@ -1689,6 +2074,8 @@ export class AgentHarness {
 
 			this.history = result.messages;
 			const after = this.estimatePayloadTokens();
+			this.persistCompactedContext(result.messages, before);
+			this.runKernel.recordCompaction();
 			this.onCompaction?.(reason, before, after);
 			await this.emitPostCompact();
 			await this._extensionRunner?.emit({
