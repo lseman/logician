@@ -1081,7 +1081,7 @@ export class AgentCoreBridge {
 
 	private emitRuntimeStatus(): void {
 		if (!this.harness) return;
-		const run = this.harness.durableRunState;
+		const run = this.harness.durableRunStatus;
 		const budget = this.harness.durableRunBudget;
 		this.emit({
 			type: "runtime_status",
