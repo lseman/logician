@@ -317,6 +317,13 @@ export function mapAgentEvent(event: AgentEvent): RuntimeEvent | null {
 				text: `${event.toolName} awaiting approval`,
 			};
 		case "tool_permission_decision":
+			// Automatic policy matches are useful in the durable audit trail but are
+			// normal tool-routing noise, not transcript-worthy user interaction.
+			if (
+				event.decision === "allow" &&
+				(event.source === "mode" || event.source === "rule")
+			)
+				return null;
 			return {
 				type: "notice",
 				level: event.decision === "deny" ? "warn" : "info",

@@ -129,6 +129,46 @@ void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async
 	assert.doesNotMatch(result.output, /TypeError|TUI render error/);
 });
 
+void test("startup applies inference preferences without rewriting settings", async () => {
+	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-settings-"));
+	const settingsDir = path.join(home, ".logician");
+	const themeDir = path.join(settingsDir, "themes");
+	mkdirSync(themeDir, { recursive: true });
+	writeFileSync(path.join(themeDir, "dark.json"), DARK_THEME_JSON);
+	const settingsPath = path.join(settingsDir, "settings.json");
+	const original = `${JSON.stringify(
+		{
+			theme: "dark",
+			thinkingLevel: "high",
+			inferenceMode: "thinking-coding",
+			customPreference: { preserve: true },
+		},
+		null,
+		2,
+	)}\n`;
+	writeFileSync(settingsPath, original);
+
+	await runInPty({
+		command: bun,
+		args: ["run", entry],
+		cwd: tuiRoot,
+		env: {
+			HOME: home,
+			TERM: "xterm-256color",
+			LOGICIAN_TRUST: "always",
+			LOGICIAN_MCP: "0",
+			LOGICIAN_HOOKS: "0",
+			LOGICIAN_MODEL: "test-model",
+		},
+		actions: [],
+		timeoutMs: 1_000,
+		columns: 120,
+		rows: 32,
+	});
+
+	assert.equal(readFileSync(settingsPath, "utf8"), original);
+});
+
 void test("Kitty Ctrl+O and Ctrl+C reports reach legacy TUI keybindings", () => {
 	assert.equal(normalizeKeyboardInput("\x1b[27u"), "\x1b");
 	assert.equal(normalizeKeyboardInput("\x1b[27;1u"), "\x1b");
