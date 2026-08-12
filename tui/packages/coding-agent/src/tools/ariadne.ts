@@ -23,24 +23,6 @@ const indexRefreshes = new Map<string, Promise<string | null>>();
 const indexRefreshedAt = new Map<string, number>();
 const cliDialects = new Map<string, Promise<"direct" | "agent">>();
 
-// Map of operations that accept a "path" parameter (file-level targets)
-const PATH_OPERATIONS = new Set([
-	"minimal_context",
-	"context",
-	"impact",
-	"callers_of",
-	"callees_of",
-	"detect_changes",
-	"risk",
-	"review_context",
-	"affected_flows",
-	"test_coverage",
-	"suggested_questions",
-	"counterfactual",
-	"rename_preview",
-	"find_related",
-]);
-
 function resolveAriadneDb(cwd: string): string {
 	// Check for --db flag in environment or common locations
 	const envDb = process.env.ARIADNE_DB;

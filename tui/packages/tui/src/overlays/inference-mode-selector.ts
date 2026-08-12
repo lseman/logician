@@ -80,7 +80,6 @@ export class InferenceModeSelector extends ListSelectorOverlay<InferenceModeInfo
 
 /** Return modes sorted by the canonical order, with unknown ones appended. */
 export function sortInferenceModesByIds(ids: string[]): string[] {
-	const _known = new Set(MODE_ORDER);
 	const sorted = [...ids].sort((a, b) => {
 		const ai = MODE_ORDER.indexOf(a as (typeof MODE_ORDER)[number]);
 		const bi = MODE_ORDER.indexOf(b as (typeof MODE_ORDER)[number]);

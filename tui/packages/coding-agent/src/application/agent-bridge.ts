@@ -56,10 +56,6 @@ import {
 	setSessionId,
 	startViewerServer,
 } from "@logician/memory";
-import {
-	findLogicianConfig,
-	loadLogicianConfig,
-} from "../configuration/config.ts";
 import { buildDefaultSystemPrompt } from "../context/system-prompt.ts";
 import { LspManager } from "../developer-tools/lsp-manager.ts";
 import { createPostEditDiagnosticHooks } from "../developer-tools/post-edit-diagnostics.ts";
@@ -91,10 +87,6 @@ import {
 	eventLogPathFor,
 	resolveWebSearchConfig,
 } from "./bridge-environment.ts";
-import {
-	applyCompactionSettings,
-	loadUserSettings,
-} from "./bridge-settings.ts";
 import { EohController } from "./eoh/controller.ts";
 import { InteractionCoordinator } from "./interaction-coordinator.ts";
 import { RepositoryMap } from "./repository-map.ts";
@@ -121,6 +113,8 @@ export function findJbPrompt(cwd: string): string | null {
 // ── Bridge options ──────────────────────────────────────────────────────────────
 
 export interface AgentBridgeOptions {
+	/** Authoritative resolved config source; never recomputed inside the bridge. */
+	configPath?: string;
 	baseUrl: string;
 	model: string;
 	models?: AgentModelConfig[];
@@ -138,9 +132,7 @@ export interface AgentBridgeOptions {
 	permissionRules?: PermissionRules;
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
-	/** Whether a turn blocks waiting for MCP discovery to finish. Discovery
-	 * itself always starts in the background at construction regardless of
-	 * this — it only controls whether a turn's tool snapshot waits for it. */
+	/** @deprecated MCP discovery is always non-blocking. */
 	mcpEager?: boolean;
 	/** Test-only: suppress the construction-time MCP auto-start so unit tests
 	 * can stub McpManager/loadMcpToolsOnce before anything real fires.
@@ -162,6 +154,20 @@ export interface AgentBridgeOptions {
 	budgetStopEnabled?: boolean;
 	thinkingLoopDetectionEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
+	compaction?: {
+		enabled?: boolean;
+		reserveTokens?: number;
+		keepRecentTokens?: number;
+	};
+	maxParallelAgents?: number;
+	lsp?: {
+		enabled?: boolean;
+		timeoutMs?: number;
+		serverOverrides?: Record<
+			string,
+			{ command: string; args?: string[]; languageId: string }
+		>;
+	};
 	continuationEnabled?: boolean;
 	reflectionConfig?: AgentConfig["reflectionConfig"];
 	postEditDiagnostics?: boolean;
@@ -250,7 +256,6 @@ export class AgentCoreBridge {
 	private contextMaxTokens?: number;
 	private currentTaskState: ExplicitTaskState | null = null;
 	private configPath: string | null;
-	private mcpEager: boolean;
 	private postEditDiagnosticsEnabled: boolean;
 	private lspManager: LspManager;
 	private readonly projectTrusted: boolean;
@@ -279,6 +284,7 @@ export class AgentCoreBridge {
 	private runtimeRetry?: string;
 	private runtimeRepair?: string;
 	private readonly activeRuntimeSubagents = new Set<string>();
+	private readonly compactionSettings?: AgentBridgeOptions["compaction"];
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 	private eohController!: EohController;
@@ -296,6 +302,7 @@ export class AgentCoreBridge {
 	) {
 		this.reasonerId = opts.reasoner?.trim().toLowerCase() || "none";
 		this.reasonerConfig = opts.reasonerConfig ?? {};
+		this.compactionSettings = opts.compaction;
 		this.cwd = opts.cwd || process.cwd();
 		if (opts.repositoryMapEnabled !== false) {
 			this.repositoryMap = new RepositoryMap(this.cwd, {
@@ -309,41 +316,20 @@ export class AgentCoreBridge {
 			getCurrentModel: () => this.getCurrentModel(),
 		});
 		this.projectTrusted = opts.projectTrusted === true;
-		this.configPath = this.projectTrusted ? findLogicianConfig(this.cwd) : null;
+		this.configPath = opts.configPath ?? null;
 		configurePluginRuntimeEnv(buildPluginRuntimeEnv(opts));
-		this.mcpEager =
-			process.env.LOGICIAN_MCP === "0" ? false : opts.mcpEager !== false;
 		this.postEditDiagnosticsEnabled =
 			process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS === "0"
 				? false
 				: opts.postEditDiagnostics !== false;
-		// LSP config from settings.json.
-		let _lspEnabled = true;
-		let lspTimeoutMs = 2_000;
-		const serverOverrides: Record<
-			string,
-			{ command: string; args: string[]; languageId: string }
-		> = {};
-		if (this.projectTrusted) {
-			try {
-				const resolved = loadLogicianConfig(this.cwd);
-				const lspCfg = resolved.config.lsp;
-				if (lspCfg !== undefined) {
-					if (lspCfg.enabled === false) _lspEnabled = false;
-					if (lspCfg.timeoutMs !== undefined && lspCfg.timeoutMs > 0)
-						lspTimeoutMs = lspCfg.timeoutMs;
-					if (lspCfg.serverOverrides) {
-						Object.assign(serverOverrides, lspCfg.serverOverrides);
-					}
-				}
-			} catch {
-				// Config load failure is non-fatal; LSP stays on with defaults.
-			}
-		}
+		const lspTimeoutMs = opts.lsp?.timeoutMs ?? 2_000;
+		const serverOverrides = opts.lsp?.serverOverrides;
 		this.lspManager = new LspManager(this.cwd, {
 			timeoutMs: lspTimeoutMs,
 			servers:
-				Object.keys(serverOverrides).length > 0 ? serverOverrides : undefined,
+				serverOverrides && Object.keys(serverOverrides).length > 0
+					? serverOverrides
+					: undefined,
 		});
 		this.transcriptPath = createHookTranscriptPath(this.cwd, this.sessionId);
 		const defaultWebSearch = resolveWebSearchConfig();
@@ -563,7 +549,7 @@ export class AgentCoreBridge {
 				createPostEditDiagnosticHooks(
 					this.cwd,
 					() => this.postEditDiagnosticsEnabled,
-					this.lspManager,
+					opts.lsp?.enabled === false ? undefined : this.lspManager,
 					{
 						allowedPaths: opts.allowedPaths,
 						allowAllPaths: opts.allowAllPaths,
@@ -610,6 +596,7 @@ export class AgentCoreBridge {
 			backend: this.backend,
 			cwd: this.cwd,
 			projectTrusted: this.projectTrusted,
+			maxParallelAgents: opts.maxParallelAgents,
 			getEnabledPluginRoots: () => this.toolRouter.getEnabledPluginRoots(),
 			getDefaultTools: () => this.toolRouter.getDefaultTools(),
 			onToolAdded: () => this.addDefaultTool(),
@@ -1051,6 +1038,8 @@ export class AgentCoreBridge {
 				extensionRunner: this.extensionRunner || undefined,
 			});
 			this.harness.setSessionId(this.sessionId);
+			if (this.compactionSettings)
+				this.harness.setAutoCompactionSettings(this.compactionSettings);
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
 			// Surface harness phase transitions the loop can't see — compaction
@@ -1072,9 +1061,6 @@ export class AgentCoreBridge {
 					});
 				}
 			});
-			// Apply compaction settings from user settings (~/.logician/settings.json).
-			const userSettings = loadUserSettings();
-			applyCompactionSettings(this.harness, userSettings);
 		}
 		return this.harness;
 	}
@@ -1353,12 +1339,6 @@ export class AgentCoreBridge {
 		this.startupHookResult = null;
 		this.pluginSystemContext = "";
 		this.skillActivation.reset();
-
-		// ── Re-read settings from disk ────────────────────────────────────
-		const userSettings = loadUserSettings();
-		if (this.harness) {
-			applyCompactionSettings(this.harness, userSettings);
-		}
 
 		// ── Re-discover skills and prompts ────────────────────────────────
 		await this.toolRouter.injectSkillsFromPlugins();

@@ -331,55 +331,6 @@ type PiEventType =
 	// Session lifecycle
 	| "session_delete";
 
-/**
- * Map a Pi event type to a Logician event type.
- * Returns null if there's no equivalent.
- * Note: Some Pi events (agent_retry_*, agent_error)
- * are handled specially — they map from Logician events that don't exist in Pi's event set.
- */
-function _mapToLogician(type: PiEventType): LEventType | null {
-	const mapping: Record<PiEventType, LEventType | null> = {
-		project_trust: null,
-		resources_discover: null,
-		session_start: "session_start",
-		session_info_changed: null, // not emitted by Logician
-		session_before_switch: null,
-		session_before_fork: null,
-		session_before_compact: "session_before_compact",
-		session_compact: "session_compact",
-		session_shutdown: "session_shutdown",
-		session_before_tree: null,
-		session_tree: null, // not emitted by Logician
-		context: "context", // mapped via emitWithContext
-		before_provider_request: null, // not emitted by Logician
-		before_provider_headers: null, // not emitted by Logician
-		after_provider_response: null, // not emitted by Logician
-		before_agent_start: "before_agent_start",
-		agent_start: "agent_start",
-		agent_end: "agent_end",
-		agent_settled: "agent_settled",
-		turn_start: "turn_start",
-		turn_end: "turn_end",
-		message_start: "message_start",
-		message_update: "message_update",
-		message_end: "message_end",
-		tool_execution_start: "tool_execution_start",
-		tool_execution_update: "tool_execution_update",
-		tool_execution_end: "tool_execution_end",
-		tool_call: "tool_execution_start",
-		tool_result: "tool_execution_end",
-		model_select: "model_select",
-		thinking_level_changed: null, // not emitted by Logician
-		user_bash: null, // N/A (handler)
-		input: null, // N/A (handler)
-		agent_retry_start: "agent_retry_start",
-		agent_retry_end: "agent_retry_end",
-		agent_error: "agent_error",
-		session_delete: "session_delete",
-	};
-	return mapping[type];
-}
-
 // ── Pi-compatible UI Context ─────────────────────────────────────────────────
 
 interface PiUI {

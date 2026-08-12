@@ -1104,7 +1104,6 @@ export class TUI extends Container {
 				row = absRow !== undefined ? Math.max(0, absRow) : 0;
 			} else {
 				const anchor = (opt.anchor ?? "center") as OverlayAnchor;
-				const _availHeight = Math.max(1, termHeight);
 				switch (anchor) {
 					case "top":
 					case "top-left":
@@ -1519,15 +1518,6 @@ type OverlayStackEntry = {
 	preFocus: Component | null;
 	hidden: boolean;
 	focusOrder: number;
-};
-
-type OverlayFocusRestoreState = {
-	status: "inactive" | "eligible" | "blocked";
-	overlay?: OverlayStackEntry;
-	blockedBy?: Component;
-	resume?:
-		| { status: "restore-overlay" }
-		| { status: "focus-target"; target: Component | null };
 };
 
 // ── Shared renderer surface ──────────────────────────────────────────────────

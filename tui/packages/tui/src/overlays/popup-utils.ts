@@ -19,9 +19,6 @@ import { SelectorController } from "./selector-controller.ts";
 
 // ── ANSI codes ──────────────────────────────────────────────────────────────
 
-const _BG_HIGHLIGHT = "\x1b[48;2;";
-const _FG_OVERRIDE = "\x1b[38;2;";
-
 // ── Box-drawing characters ──────────────────────────────────────────────────
 
 export const BOX = {
@@ -51,69 +48,6 @@ const getWarning = (): string => theme.fgRaw("warning");
 
 /** Columns consumed by the popup border + 1-col padding on each side. */
 export const POPUP_FRAME_OVERHEAD = 4;
-
-// ── Popup design config ─────────────────────────────────────────────────────
-
-export interface PopupConfig {
-	/** Title shown in the header bar */
-	title: string;
-	/** Subtitle / count shown in the header bar */
-	subtitle?: string;
-	/** Keyboard hints shown in the header bar */
-	hints?: string;
-	/** Popup width in terminal columns (auto-calculated if not set) */
-	width?: number;
-	/** Padding inside the popup (default: 1) */
-	padding?: number;
-	/** Whether to show a bottom action bar */
-	showBottomBar?: boolean;
-	/** Bottom bar text */
-	bottomText?: string;
-}
-
-// ── Render a popup frame ────────────────────────────────────────────────────
-
-export function renderPopupFrame(
-	config: PopupConfig,
-	width: number,
-): {
-	topLine: string;
-	bottomLine: string;
-	innerWidth: number;
-} {
-	const popupWidth = config.width ?? Math.max(48, Math.min(width, 120));
-	const pad = config.padding ?? 1;
-	const innerWidth = Math.max(1, popupWidth - 2 - pad * 2);
-
-	// Header bar with colored background
-	const headerFg = getHeaderFg();
-	const titleText = config.title;
-	const subtitleText = config.subtitle
-		? ` ${DIM}${config.subtitle}${RESET}`
-		: "";
-	const hintsText = config.hints ? `  ${DIM}${config.hints}${RESET}` : "";
-	const headerContent = `${BOLD}${titleText}${RESET}${subtitleText}${hintsText}`;
-	const headerVisible = visibleWidth(headerContent);
-	const _headerPad = Math.max(0, innerWidth - headerVisible);
-
-	const topLine = `${headerFg}${BOX.horiz.repeat(popupWidth)}${RESET}`;
-
-	const _headerLine = `${headerFg}${" ".repeat(pad)}${headerContent}${" ".repeat(
-		innerWidth - headerVisible + pad,
-	)}${" ".repeat(pad)}${headerFg}${BOX.vert}${RESET}`;
-
-	// Bottom bar
-	const bottomFg = getMuted();
-	const bottomContent = config.showBottomBar ? (config.bottomText ?? "") : "";
-	const bottomVisible = visibleWidth(bottomContent);
-	const bottomPad = Math.max(0, innerWidth - bottomVisible);
-
-	const bottomLine = `${bottomFg}${" ".repeat(pad)}${bottomContent}${" ".repeat(
-		bottomPad,
-	)}${" ".repeat(pad)}${RESET}`;
-
-	return { topLine, bottomLine, innerWidth };
-}
 
 // ── Render a separator line ─────────────────────────────────────────────────
 

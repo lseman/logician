@@ -98,7 +98,6 @@ export async function evaluateRetrieval(
 	let totalRecall = 0;
 	let totalMRR = 0;
 	let totalNDCG = 0;
-	const _rewriteMs = 0;
 	let retrievalMs = 0;
 
 	for (const test of testQueries) {

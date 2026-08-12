@@ -243,32 +243,6 @@ function findBestMetric(
 	return direction === "lower" ? Math.min(...kept) : Math.max(...kept);
 }
 
-function _findBaselineSecondary(
-	results: ExperimentResult[],
-	segment: number,
-	knownMetrics?: MetricDef[],
-): Record<string, number> {
-	const cur = currentResults(results, segment);
-	const base: Record<string, number> =
-		cur.length > 0 ? { ...(cur[0].metrics ?? {}) } : {};
-
-	if (knownMetrics) {
-		for (const sm of knownMetrics) {
-			if (base[sm.name] === undefined) {
-				for (const r of cur) {
-					const val = r.metrics?.[sm.name];
-					if (val !== undefined) {
-						base[sm.name] = val;
-						break;
-					}
-				}
-			}
-		}
-	}
-
-	return base;
-}
-
 function cloneExperimentState(state: ExperimentState): ExperimentState {
 	return {
 		...state,
@@ -280,10 +254,6 @@ function cloneExperimentState(state: ExperimentState): ExperimentState {
 	};
 }
 
-function _clamp(value: number, min: number, max: number): number {
-	return Math.min(max, Math.max(min, value));
-}
-
 export function formatNum(value: number | null, unit: string): string {
 	if (value === null) return "—";
 	const u = unit || "";
@@ -293,24 +263,94 @@ export function formatNum(value: number | null, unit: string): string {
 	return value.toFixed(2) + u;
 }
 
-function _formatElapsed(ms: number): string {
-	const totalSec = Math.floor(ms / 1000);
-	const m = Math.floor(totalSec / 60);
-	const s = totalSec % 60;
-	if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
-	return `${s}s`;
-}
-
-function killTree(pid: number): void {
+function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
 	try {
-		process.kill(-pid, "SIGTERM");
+		process.kill(-pid, signal);
 	} catch {
 		try {
-			process.kill(pid, "SIGTERM");
+			process.kill(pid, signal);
 		} catch {
 			// Process may have already exited
 		}
 	}
+}
+
+interface ProcessResult {
+	code: number | null;
+	stdout: string;
+	stderr: string;
+	killed: boolean;
+}
+
+const PROCESS_OUTPUT_LIMIT_BYTES = 1024 * 1024;
+
+function appendOutputTail(chunks: Buffer[], chunk: Buffer): void {
+	chunks.push(chunk);
+	let total = chunks.reduce((sum, current) => sum + current.length, 0);
+	while (total > PROCESS_OUTPUT_LIMIT_BYTES && chunks.length > 1) {
+		total -= chunks.shift()?.length ?? 0;
+	}
+	if (total > PROCESS_OUTPUT_LIMIT_BYTES && chunks.length === 1) {
+		chunks[0] = chunks[0].subarray(-PROCESS_OUTPUT_LIMIT_BYTES);
+	}
+}
+
+function runScript(
+	scriptPath: string,
+	cwd: string,
+	timeoutMs: number,
+): Promise<ProcessResult> {
+	return new Promise((resolve, reject) => {
+		const child = spawn("bash", [scriptPath], {
+			cwd,
+			detached: true,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		const stdout: Buffer[] = [];
+		const stderr: Buffer[] = [];
+		child.stdout?.on("data", (chunk: Buffer) =>
+			appendOutputTail(stdout, chunk),
+		);
+		child.stderr?.on("data", (chunk: Buffer) =>
+			appendOutputTail(stderr, chunk),
+		);
+		let killed = false;
+		let settled = false;
+		let forceKillTimer: NodeJS.Timeout | undefined;
+		const timer =
+			timeoutMs > 0
+				? setTimeout(() => {
+						killed = true;
+						if (child.pid) {
+							const pid = child.pid;
+							killTree(pid);
+							forceKillTimer = setTimeout(
+								() => killTree(pid, "SIGKILL"),
+								1_000,
+							);
+						}
+					}, timeoutMs)
+				: undefined;
+		child.once("error", error => {
+			if (timer) clearTimeout(timer);
+			if (forceKillTimer) clearTimeout(forceKillTimer);
+			if (settled) return;
+			settled = true;
+			reject(error);
+		});
+		child.once("close", code => {
+			if (timer) clearTimeout(timer);
+			if (forceKillTimer) clearTimeout(forceKillTimer);
+			if (settled) return;
+			settled = true;
+			resolve({
+				code,
+				stdout: Buffer.concat(stdout).toString("utf8"),
+				stderr: Buffer.concat(stderr).toString("utf8"),
+				killed,
+			});
+		});
+	});
 }
 
 function truncateTail(
@@ -510,7 +550,6 @@ function logoDataUrl(): string {
 let dashboardServer: Server | null = null;
 let dashboardServerPort: number | null = null;
 let dashboardServerWorkDir: string | null = null;
-let _dashboardServerHtmlPath: string | null = null;
 const dashboardSSEClients = new Set<ServerResponse>();
 
 function stopDashboardServer(): void {
@@ -534,7 +573,6 @@ function stopDashboardServer(): void {
 	dashboardServer = null;
 	dashboardServerPort = null;
 	dashboardServerWorkDir = null;
-	_dashboardServerHtmlPath = null;
 }
 
 function escapeHtml(text: string): string {
@@ -589,13 +627,11 @@ async function startDashboardServer(
 			dashboardServerWorkDir === resolvedWorkDir &&
 			dashboardServerPort
 		) {
-			_dashboardServerHtmlPath = resolvedHtmlPath;
 			resolve(dashboardServerPort);
 			return;
 		}
 
 		stopDashboardServer();
-		_dashboardServerHtmlPath = resolvedHtmlPath;
 
 		const server = createServer((req, res) => {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -713,10 +749,6 @@ function autoresearchJsonlPath(dir: string): string {
 
 function autoresearchMdPath(dir: string): string {
 	return sessionFilePath(dir, "prompt");
-}
-
-function _autoresearchIdeasPath(dir: string): string {
-	return sessionFilePath(dir, "ideas");
 }
 
 function autoresearchChecksPath(dir: string): string {
@@ -1086,7 +1118,7 @@ export class AutoresearchSession {
 
 		this.setAutoresearchMode(true);
 
-		const _steer = await this.fireHook({
+		const steer = await this.fireHook({
 			event: "before",
 			cwd: workDir,
 			next_run: state.results.length + 1,
@@ -1105,7 +1137,7 @@ export class AutoresearchSession {
 			workDir !== this.cwd ? `\nWorking directory: ${workDir}` : "";
 
 		return {
-			content: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${workDirNote}\nConfig written to .auto/log.jsonl.`,
+			content: `✅ Experiment initialized: "${state.name}"${reinitNote}\nMetric: ${state.metricName} (${state.metricUnit || "unitless"}, ${state.bestDirection} is better)${limitNote}${workDirNote}\nConfig written to .auto/log.jsonl.${steer ? `\n\n${steer}` : ""}`,
 			details: { state: cloneExperimentState(state) },
 		};
 	}
@@ -1176,28 +1208,36 @@ export class AutoresearchSession {
 			});
 
 			const chunks: Buffer[] = [];
-			let _totalBytes = 0;
 
 			if (child.stdout)
 				child.stdout.on("data", (d: Buffer) => {
-					_totalBytes += d.length;
-					chunks.push(d);
+					appendOutputTail(chunks, d);
 				});
 			if (child.stderr)
 				child.stderr.on("data", (d: Buffer) => {
-					_totalBytes += d.length;
-					chunks.push(d);
+					appendOutputTail(chunks, d);
 				});
 
 			let timedOut = false;
-			if (timeout > 0) {
-				setTimeout(() => {
-					timedOut = true;
-					if (child.pid) killTree(child.pid);
-				}, timeout);
-			}
+			let forceKillTimer: NodeJS.Timeout | undefined;
+			const timeoutHandle =
+				timeout > 0
+					? setTimeout(() => {
+							timedOut = true;
+							if (child.pid) {
+								const pid = child.pid;
+								killTree(pid);
+								forceKillTimer = setTimeout(
+									() => killTree(pid, "SIGKILL"),
+									1_000,
+								);
+							}
+						}, timeout)
+					: undefined;
 
-			child.on("close", code => {
+			child.on("close", async code => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				if (forceKillTimer) clearTimeout(forceKillTimer);
 				const durationSeconds = (Date.now() - t0) / 1000;
 				this.runtime.lastRunDuration = durationSeconds;
 				this.runtime.runningExperiment = null;
@@ -1211,16 +1251,15 @@ export class AutoresearchSession {
 				let checksDuration = 0;
 
 				if (benchmarkPassed && fs.existsSync(autoresearchChecksPath(workDir))) {
-					const _checksTimeout =
+					const checksTimeout =
 						((params.checks_timeout_seconds as number) ?? 300) * 1000;
 					const ct0 = Date.now();
 					try {
-						const checksResult = {
-							code: 0,
-							stdout: "",
-							stderr: "",
-							killed: false,
-						};
+						const checksResult = await runScript(
+							autoresearchChecksPath(workDir),
+							workDir,
+							checksTimeout,
+						);
 						checksDuration = (Date.now() - ct0) / 1000;
 						checksPass = checksResult.code === 0 && !checksResult.killed;
 						checksOutput = (

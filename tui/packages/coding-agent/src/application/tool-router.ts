@@ -55,9 +55,7 @@ export interface ToolRouterDeps {
 	 * Start MCP discovery in the background the moment this router is
 	 * constructed, instead of waiting for the first caller that needs it.
 	 * Defaults to true for real sessions — this is a construction-time
-	 * side-effect switch only, unrelated to the user-facing `mcpEager` bridge
-	 * option (which controls whether a turn *blocks* on MCP, not whether
-	 * discovery starts). Set false to keep construction free of network/
+	 * side-effect switch only. Set false to keep construction free of network/
 	 * subprocess side effects — tests that stub `mcpManager` or
 	 * `loadMcpToolsOnce()` after construction need this, since otherwise the
 	 * real load can already be in flight (and win the memoized promise) by
@@ -137,9 +135,7 @@ export class ToolRouter {
 		}
 
 		// Fire-and-forget: start MCP connections as soon as Logician opens,
-		// regardless of the user-facing mcpEager setting — that setting only
-		// controls whether a turn blocks waiting for MCP, not whether
-		// discovery starts. Opt out (autoStartMcp: false) to keep construction
+		// without blocking the first turn. Opt out (autoStartMcp: false) to keep construction
 		// free of side effects — see ToolRouterDeps.
 		if (deps.autoStartMcp !== false) void this.loadMcpToolsOnce();
 	}

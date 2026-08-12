@@ -2,11 +2,13 @@
 // Cold-start latency benchmark for the TUI
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
-const srcDir = join(__dirname, "..");
+const benchmarkDir = dirname(__filename);
+const srcDir = join(benchmarkDir, "..");
+const tuiRoot = join(benchmarkDir, "..", "..", "..", "..");
 
 function countFiles(dir: string): {
 	files: number;
@@ -59,18 +61,27 @@ console.log(`\n--- Cold Start Benchmarks ---`);
 const results = [
 	{
 		label: "tsx parse index.ts only",
-		cmd: `cd /home/seman/logician/tui && timeout 30 npx tsx --eval 'import("./packages/tui/src/index.js").catch(()=>{})' 2>&1; echo $?`,
+		command: "npx",
+		args: [
+			"tsx",
+			"--eval",
+			'import("./packages/tui/src/index.js").catch(() => {})',
+		],
+		cwd: tuiRoot,
 	},
 ];
 
 for (const r of results) {
 	const start = Date.now();
-	const _result = spawnSync("bash", ["-c", r.cmd], {
+	const result = spawnSync(r.command, r.args, {
+		cwd: r.cwd,
 		timeout: 30000,
 		env: { ...process.env, FORCE_COLOR: "0" },
 	});
 	const elapsed = Date.now() - start;
-	console.log(`  ${r.label.padEnd(40)} ${elapsed} ms`);
+	console.log(
+		`  ${r.label.padEnd(40)} ${elapsed} ms${result.error ? ` (${result.error.message})` : ""}`,
+	);
 }
 
 // Run the compiled binary
@@ -79,18 +90,21 @@ console.log(`\n--- Binary Benchmarks ---`);
 const binResults = [
 	{
 		label: "Binary: --doctor",
-		cmd: `/home/seman/logician/tui/dist/logician --doctor 2>&1 || true`,
+		command: join(tuiRoot, "dist", "logician"),
+		args: ["--doctor"],
 	},
 ];
 
 for (const r of binResults) {
 	const start = Date.now();
-	const _result = spawnSync("bash", ["-c", r.cmd], {
+	const result = spawnSync(r.command, r.args, {
 		timeout: 30000,
 		env: { ...process.env, LOGICIAN_TRUST: "always" },
 	});
 	const elapsed = Date.now() - start;
-	console.log(`  ${r.label.padEnd(40)} ${elapsed} ms`);
+	console.log(
+		`  ${r.label.padEnd(40)} ${elapsed} ms${result.error ? ` (${result.error.message})` : ""}`,
+	);
 }
 
 console.log("\nDone.");

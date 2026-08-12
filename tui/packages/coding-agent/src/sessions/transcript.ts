@@ -605,7 +605,6 @@ export class Transcript {
 		if (!toolChunk?.tool) return;
 
 		const details = (toolChunk.tool.details ??= {});
-		const _turn = this.getCurrentTurn();
 		const childToolCalls =
 			(details.childToolCalls as ChildToolCall[]) ??
 			(details.childToolCalls = []);

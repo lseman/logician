@@ -165,9 +165,8 @@ void test("validateConfig warns on unknown permissions keys", () => {
 
 void test("validateConfig parses boolean fields from strings", () => {
 	const w: string[] = [];
-	const cfg = validateConfig({ hooks: "true", mcpEager: "0" }, w);
+	const cfg = validateConfig({ hooks: "true" }, w);
 	assert.equal(cfg.hooks, true);
-	assert.equal(cfg.mcpEager, false);
 });
 
 void test("validateConfig parses numeric strings", () => {

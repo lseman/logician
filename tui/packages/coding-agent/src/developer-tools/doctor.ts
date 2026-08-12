@@ -2,7 +2,7 @@ import { constants, existsSync } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { loadLogicianConfig } from "../configuration/config.ts";
+import { resolveRuntimeConfig } from "../runtime/runtime-config.ts";
 import { loadSkills } from "../skills/index.ts";
 import { getToolPath } from "../tools/shared/tools-manager.ts";
 
@@ -59,6 +59,7 @@ function skillRoots(cwd: string): string[] {
 
 export async function buildDoctorReport(
 	cwd = process.cwd(),
+	environment: NodeJS.ProcessEnv = process.env,
 ): Promise<DoctorReport> {
 	const workspacePath = path.resolve(cwd);
 	let present = false;
@@ -68,14 +69,16 @@ export async function buildDoctorReport(
 		present = false;
 	}
 
-	let loaded: ReturnType<typeof loadLogicianConfig> | undefined;
+	let loaded: ReturnType<typeof resolveRuntimeConfig> | undefined;
 	let configError: string | undefined;
 	try {
-		loaded = loadLogicianConfig(workspacePath);
+		loaded = resolveRuntimeConfig(workspacePath, environment, {
+			loadProjectConfig: true,
+		});
 	} catch (error: unknown) {
 		configError = error instanceof Error ? error.message : String(error);
 	}
-	const config = loaded?.config ?? {};
+	const config = loaded?.source ?? {};
 	const configuredMcp = {
 		...(config.mcp ?? {}),
 		...(config.mcpServers ?? {}),
@@ -129,18 +132,14 @@ export async function buildDoctorReport(
 		version: "0.2.0",
 		workspace: { path: workspacePath, present, readable, writable },
 		config: {
-			path: loaded?.path ?? null,
+			path: loaded?.configPath ?? null,
 			valid: configError === undefined,
 			warnings: loaded?.warnings ?? [],
 			...(configError ? { error: configError } : {}),
 		},
 		backend: {
-			baseUrl:
-				process.env.LOGICIAN_LLM_URL?.trim() ||
-				config.llmUrl ||
-				config.baseUrl ||
-				"http://127.0.0.1:8080",
-			model: process.env.LOGICIAN_MODEL?.trim() || config.model || null,
+			baseUrl: loaded?.bridge.baseUrl ?? "http://127.0.0.1:8080",
+			model: loaded?.bridge.model || null,
 			probed: false,
 		},
 		dependencies: {
@@ -157,9 +156,11 @@ export async function buildDoctorReport(
 			loaded: skillResult.skills.length,
 			warnings: skillResult.diagnostics.length,
 		},
-		permissions: { mode: config.permissionMode ?? "acceptEdits" },
+		permissions: {
+			mode: loaded?.bridge.permissionMode ?? "acceptEdits",
+		},
 		diagnostics: {
-			postEditEnabled: process.env.LOGICIAN_POST_EDIT_DIAGNOSTICS !== "0",
+			postEditEnabled: environment.LOGICIAN_POST_EDIT_DIAGNOSTICS !== "0",
 		},
 		sandbox: {
 			enforced: false,
