@@ -1,6 +1,9 @@
 // ── Settings selector controller ───────────────────────────────────────────
 
-import { saveConfigField } from "@logician/coding-agent/configuration";
+import {
+	saveConfigField,
+	saveConfigNestedField,
+} from "@logician/coding-agent/configuration";
 import type {
 	SettingDef,
 	SettingsSelectorAction,
@@ -81,24 +84,24 @@ export async function openSettingsSelector(
 			},
 			{
 				name: "Guards",
-				currentValue: data.guardsEnabled ? "on" : "off",
-				description: "Safety guards against harmful tool use",
+				currentValue: data.guardMode,
+				description: "Loop guards: auto uses safe defaults; off disables all",
 				options: [
 					{
 						label: "Auto",
 						value: "auto",
-						current: data.inferenceMode === "auto",
+						current: data.guardMode === "auto",
 					},
 					{
 						label: "on",
-						value: "true",
-						current: data.guardsEnabled,
+						value: "on",
+						current: data.guardMode === "on",
 						toggleOn: true,
 					},
 					{
 						label: "off",
-						value: "false",
-						current: !data.guardsEnabled,
+						value: "off",
+						current: data.guardMode === "off",
 						toggleOn: false,
 					},
 				],
@@ -127,6 +130,16 @@ export async function openSettingsSelector(
 				currentValue: data.inferenceMode,
 				description: "Pre-defined sampling parameter set (Alt+M to cycle)",
 				options: [
+					{
+						label: "Auto",
+						value: "auto",
+						current: data.inferenceMode === "auto",
+					},
+					{
+						label: "Provider defaults",
+						value: "none",
+						current: data.inferenceMode === "none",
+					},
 					{
 						label: "Think General",
 						value: "thinking-general",
@@ -265,6 +278,61 @@ export async function openSettingsSelector(
 					},
 				],
 			},
+			...[
+				[
+					"Duplicate-call guard",
+					data.duplicateGuardEnabled,
+					"Block repeated identical tool calls",
+				],
+				[
+					"Failure-loop guard",
+					data.failureGuardEnabled,
+					"Block repeated equivalent tool failures",
+				],
+				[
+					"Thinking-loop guard",
+					data.thinkingLoopDetectionEnabled,
+					"Detect reasoning loops without action",
+				],
+				[
+					"Continuation",
+					data.continuationEnabled,
+					"Continue bounded unfinished autonomous work",
+				],
+				[
+					"Automatic retries",
+					data.autoRetryEnabled,
+					"Retry transient provider failures",
+				],
+				[
+					"Reflection",
+					data.reflectionEnabled,
+					"Run bounded self-review before completion",
+				],
+				[
+					"Budget early-stop",
+					data.budgetStopEnabled,
+					"Stop when useful token growth flattens",
+				],
+				[
+					"Memory",
+					data.memoryEnabled,
+					"Persist and retrieve cross-session memories",
+				],
+			].map(([name, enabled, description]) => ({
+				name: String(name),
+				currentValue: enabled ? "on" : "off",
+				description: String(description),
+				options: [
+					{
+						label: "on",
+						value: "true",
+						current: Boolean(enabled),
+						toggleOn: true,
+					},
+					{ label: "off", value: "false", current: !enabled, toggleOn: false },
+				],
+			})),
 		];
 		ctx.settingsSelector.setSettings(settings);
 		ctx.settingsSelector.setMessage(
@@ -316,6 +384,7 @@ export function handleSettingsSelectorAction(
 			const num = Number(value);
 			if (Number.isFinite(num) && num >= 0 && num <= 2) {
 				ctx.bridge.setTemperature(num);
+				saveConfigField("temperature", num);
 				ctx.notify(`Temperature: ${num}`, "success");
 			} else {
 				ctx.notify("Temperature must be between 0 and 2.", "error");
@@ -326,6 +395,7 @@ export function handleSettingsSelectorAction(
 			const num = Number.parseInt(value, 10);
 			if (Number.isFinite(num) && num >= 1) {
 				ctx.bridge.setMaxTokens(num);
+				saveConfigField("maxTokens", num);
 				ctx.notify(`Max tokens: ${num}`, "success");
 			} else {
 				ctx.notify("Max tokens must be a positive integer.", "error");
@@ -336,6 +406,7 @@ export function handleSettingsSelectorAction(
 			const num = Number.parseInt(value, 10);
 			if (Number.isFinite(num) && num >= 1) {
 				ctx.bridge.setMaxIterations(num);
+				saveConfigField("maxIterations", num);
 				ctx.notify(`Max iterations: ${num}`, "success");
 			} else {
 				ctx.notify("Max iterations must be a positive integer.", "error");
@@ -350,17 +421,23 @@ export function handleSettingsSelectorAction(
 			ctx.bridge.setPermissionMode(
 				value as "acceptAll" | "acceptEdits" | "ask" | "plan",
 			);
+			saveConfigField("permissionMode", value);
 			ctx.notify(`Permission mode: ${value}`, "success");
 			break;
 		case "guards": {
-			const on = value === "true";
-			ctx.bridge.setRuntimeToggle("guardsEnabled", on);
-			ctx.notify(`Guards: ${on ? "on" : "off"}`, "success");
+			const mode = value as "auto" | "on" | "off";
+			ctx.bridge.setGuardMode(mode);
+			saveConfigField(
+				"guardsEnabled",
+				mode === "auto" ? undefined : mode === "on",
+			);
+			ctx.notify(`Guards: ${mode}`, "success");
 			break;
 		}
 		case "compaction": {
 			const on = value === "true";
 			ctx.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
+			saveConfigNestedField("compaction", "enabled", on);
 			ctx.notify(`Compaction: ${on ? "on" : "off"}`, "success");
 			break;
 		}
@@ -398,6 +475,7 @@ export function handleSettingsSelectorAction(
 		case "inference mode": {
 			const valid = [
 				"auto",
+				"none",
 				"thinking-general",
 				"thinking-coding",
 				"instruct-general",
@@ -428,6 +506,40 @@ export function handleSettingsSelectorAction(
 				setExecutionProfile(ctx, value as "autonomous" | "minimal");
 				ctx.notify(`Execution policy: ${value}`, "success");
 			}
+			break;
+		}
+		case "duplicate-call guard":
+		case "failure-loop guard":
+		case "thinking-loop guard":
+		case "continuation":
+		case "automatic retries":
+		case "reflection":
+		case "budget early-stop":
+		case "memory": {
+			const on = value === "true";
+			const keys = {
+				"duplicate-call guard": [
+					"duplicateGuardEnabled",
+					"duplicateGuardEnabled",
+				],
+				"failure-loop guard": ["failureGuardEnabled", "failureGuardEnabled"],
+				"thinking-loop guard": [
+					"thinkingLoopDetectionEnabled",
+					"thinkingLoopDetectionEnabled",
+				],
+				continuation: ["continuationEnabled", "continuationEnabled"],
+				"automatic retries": ["autoRetryEnabled", "autoRetryEnabled"],
+				reflection: ["reflectionEnabled", "reflectionConfig"],
+				"budget early-stop": ["budgetStopEnabled", "budgetStopEnabled"],
+				memory: ["memoryEnabled", "memory"],
+			} as const;
+			const [runtimeKey, configKey] =
+				keys[settingName.toLowerCase() as keyof typeof keys];
+			ctx.bridge.setRuntimeToggle(runtimeKey, on);
+			if (configKey === "reflectionConfig")
+				saveConfigNestedField("reflectionConfig", "enabled", on);
+			else saveConfigField(configKey, on);
+			ctx.notify(`${settingName}: ${on ? "on" : "off"}`, "success");
 			break;
 		}
 		default:

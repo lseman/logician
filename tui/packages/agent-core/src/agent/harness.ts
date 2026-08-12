@@ -1074,6 +1074,28 @@ export class AgentHarness {
 		this.config.executionProfile = profile;
 	}
 
+	setRuntimeOptions(
+		options: Partial<
+			Pick<
+				AgentConfig,
+				| "guardsEnabled"
+				| "duplicateGuardEnabled"
+				| "failureGuardEnabled"
+				| "budgetStopEnabled"
+				| "continuationEnabled"
+				| "thinkingLoopDetectionEnabled"
+				| "autoRetryEnabled"
+				| "reflectionConfig"
+			>
+		>,
+	): void {
+		Object.assign(this.config, options);
+		if (options.thinkingLoopDetectionEnabled !== undefined) {
+			this.setThinkingLoopDetectorEnabled(options.thinkingLoopDetectionEnabled);
+		}
+		if (options.autoRetryEnabled !== undefined) this.outputGuard = null;
+	}
+
 	setTools(tools: Tool[]): void {
 		this.config.tools = tools;
 		this.idleTools = this.createToolRegistry(tools);

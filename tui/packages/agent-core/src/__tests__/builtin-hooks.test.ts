@@ -121,6 +121,34 @@ void test("minimal profile keeps mechanism hooks and omits built-in policies", (
 	assert.equal(typeof hooks.afterToolCall, "function");
 });
 
+void test("explicitly disabling guards bypasses the default duplicate guard", () => {
+	const loopDetector = new LoopDetector();
+	let checks = 0;
+	loopDetector.checkToolCall = (...args) => {
+		checks += 1;
+		return LoopDetector.prototype.checkToolCall.apply(loopDetector, args);
+	};
+	const hooks = buildBuiltinHooks({
+		config: {
+			baseUrl: "http://fake",
+			model: "fake",
+			guardsEnabled: false,
+		},
+		contextWindowTokens: () => 4096,
+		toolDefs: () => [],
+		loopDetector,
+	});
+
+	for (let iteration = 1; iteration <= 4; iteration += 1) {
+		hooks.beforeToolCall?.({
+			toolCall: { id: String(iteration), name: "read_file", arguments: "{}" },
+			args: { path: "README.md" },
+			iteration,
+		});
+	}
+	assert.equal(checks, 0);
+});
+
 void test("RTK rewrite delegates supported and compound commands to RTK", () => {
 	withFakeRtk(() => {
 		assert.equal(rewriteCommandWithRtk("git status"), "rtk git status");

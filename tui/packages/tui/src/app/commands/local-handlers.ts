@@ -1,6 +1,9 @@
 // ── Local slash-command registry ───────────────────────────────────────────
 
-import { saveConfigField } from "@logician/coding-agent/configuration";
+import {
+	saveConfigField,
+	saveConfigNestedField,
+} from "@logician/coding-agent/configuration";
 import type { CompressedObservation, ObservationType } from "@logician/memory";
 import { theme } from "../../terminal/theme.ts";
 import type { SlashCommandsCtx } from "./context.ts";
@@ -140,6 +143,7 @@ export function createLocalHandlers(
 				case "model":
 					if (!value) return "Usage: /settings model <name>";
 					ctx.bridge.setModel(value);
+					saveConfigField("model", value);
 					return `Model: ${value}`;
 				case "model-cycle":
 				case "model_cycle":
@@ -149,6 +153,7 @@ export function createLocalHandlers(
 					if (!Number.isFinite(number) || number < 0 || number > 2)
 						return "Temperature must be between 0 and 2.";
 					ctx.bridge.setTemperature(number);
+					saveConfigField("temperature", number);
 					return `Temperature: ${number}`;
 				}
 				case "max-tokens":
@@ -157,6 +162,7 @@ export function createLocalHandlers(
 					if (!Number.isFinite(number) || number < 1)
 						return "Max tokens must be a positive integer.";
 					ctx.bridge.setMaxTokens(number);
+					saveConfigField("maxTokens", number);
 					return `Max tokens: ${number}`;
 				}
 				case "max-iterations":
@@ -165,6 +171,7 @@ export function createLocalHandlers(
 					if (!Number.isFinite(number) || number < 1)
 						return "Max iterations must be a positive integer.";
 					ctx.bridge.setMaxIterations(number);
+					saveConfigField("maxIterations", number);
 					return `Max iterations: ${number}`;
 				}
 				case "permissions":
@@ -172,12 +179,20 @@ export function createLocalHandlers(
 					ctx.bridge.setPermissionMode(
 						value as "acceptAll" | "acceptEdits" | "ask" | "plan",
 					);
+					saveConfigField("permissionMode", value);
 					return `Permission mode: ${value}`;
 				case "guards":
-					ctx.bridge.setRuntimeToggle("guardsEnabled", on);
-					return `Guards: ${on ? "on" : "off"}`;
+					if (!["on", "off", "auto"].includes(value.toLowerCase()))
+						return "Usage: /settings guards <auto|on|off>";
+					ctx.bridge.setGuardMode(value.toLowerCase() as "auto" | "on" | "off");
+					saveConfigField(
+						"guardsEnabled",
+						value.toLowerCase() === "auto" ? undefined : on,
+					);
+					return `Guards: ${value.toLowerCase()}`;
 				case "compaction":
 					ctx.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);
+					saveConfigNestedField("compaction", "enabled", on);
 					return `Compaction: ${on ? "on" : "off"}`;
 				case "diagnostics":
 				case "post-edit-diagnostics":
@@ -188,6 +203,7 @@ export function createLocalHandlers(
 				case "inference_mode": {
 					const modes = [
 						"auto",
+						"none",
 						"thinking-general",
 						"thinking-coding",
 						"instruct-general",

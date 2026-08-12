@@ -16,6 +16,7 @@ import {
 	findLogicianConfig,
 	loadLogicianConfig,
 	saveConfigField,
+	saveConfigNestedField,
 	validateConfig,
 } from "../configuration/config.ts";
 
@@ -159,6 +160,7 @@ void test("validateConfig rejects invalid inferenceMode", () => {
 void test("validateConfig accepts every inference preset", () => {
 	for (const inferenceMode of [
 		"auto",
+		"none",
 		"thinking-general",
 		"thinking-coding",
 		"instruct-general",
@@ -173,6 +175,30 @@ void test("validateConfig accepts every inference preset", () => {
 		assert.equal(cfg.inferenceMode, inferenceMode);
 		assert.deepEqual(warnings, []);
 	}
+});
+
+void test("validateConfig accepts persisted thinking levels", () => {
+	for (const thinkingLevel of [
+		"off",
+		"minimal",
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+	] as const) {
+		const warnings: string[] = [];
+		assert.equal(
+			validateConfig({ thinkingLevel }, warnings).thinkingLevel,
+			thinkingLevel,
+		);
+		assert.deepEqual(warnings, []);
+	}
+	const warnings: string[] = [];
+	assert.equal(
+		validateConfig({ thinkingLevel: "extreme" }, warnings).thinkingLevel,
+		undefined,
+	);
+	assert.ok(warnings.some(warning => warning.includes('"thinkingLevel"')));
 });
 
 void test("validateConfig accepts execution profiles and rejects unknown profiles", () => {
@@ -595,6 +621,33 @@ void test("saveConfigField returns false when HOME is unset", () => {
 	} finally {
 		if (prevHome === undefined) delete process.env.HOME;
 		else process.env.HOME = prevHome;
+	}
+});
+
+void test("saveConfigNestedField preserves sibling settings", () => {
+	const fakeHome = mkWorkspace();
+	const settingsDir = path.join(fakeHome, ".logician");
+	mkdirSync(settingsDir, { recursive: true });
+	writeFileSync(
+		path.join(settingsDir, "settings.json"),
+		JSON.stringify({ compaction: { enabled: false, reserveTokens: 8192 } }),
+		"utf8",
+	);
+	const prevHome = process.env.HOME;
+	process.env.HOME = fakeHome;
+	try {
+		assert.equal(saveConfigNestedField("compaction", "enabled", true), true);
+		const written = JSON.parse(
+			readFileSync(path.join(settingsDir, "settings.json"), "utf8"),
+		);
+		assert.deepEqual(written.compaction, {
+			enabled: true,
+			reserveTokens: 8192,
+		});
+	} finally {
+		if (prevHome === undefined) delete process.env.HOME;
+		else process.env.HOME = prevHome;
+		rmSync(fakeHome, { recursive: true, force: true });
 	}
 });
 

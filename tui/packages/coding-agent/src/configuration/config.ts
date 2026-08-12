@@ -22,6 +22,7 @@ const KNOWN_KEYS = new Set([
 	"temperature",
 	"maxTokens",
 	"maxIterations",
+	"thinkingLevel",
 	"executionProfile",
 	"autoRetryEnabled",
 	"maxRetries",
@@ -328,6 +329,16 @@ export function validateConfig(
 		} else if (im) {
 			cfg.inferenceMode = im as LogicianTuiConfig["inferenceMode"];
 		}
+	}
+	if (obj.thinkingLevel !== undefined) {
+		const level = configString(obj.thinkingLevel);
+		const validLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+		if (!level || !validLevels.includes(level)) {
+			warn(
+				warnings,
+				`"thinkingLevel" must be one of: ${validLevels.join(", ")}.`,
+			);
+		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
 	}
 	cfg.guardsEnabled = configBool(obj.guardsEnabled);
 	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
@@ -781,6 +792,7 @@ export interface LogicianTuiConfig {
 	temperature?: number;
 	maxTokens?: number;
 	maxIterations?: number;
+	thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	executionProfile?: "autonomous" | "minimal";
 	toolExecution?: "sequential" | "parallel";
 	contextWindow?: number;
@@ -1014,6 +1026,37 @@ export function saveConfigField(key: string, value: unknown): boolean {
 		writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`);
 		return true;
 	} catch (_e: unknown) {
+		return false;
+	}
+}
+
+/** Merge one key into an object-valued global setting without losing siblings. */
+export function saveConfigNestedField(
+	section: string,
+	key: string,
+	value: unknown,
+): boolean {
+	try {
+		const home = process.env.HOME || "";
+		if (!home) return false;
+		const configPath = join(home, ".logician", "settings.json");
+		mkdirSync(dirname(configPath), { recursive: true });
+		const raw = existsSync(configPath)
+			? (JSON.parse(readFileSync(configPath, "utf8")) as Record<
+					string,
+					unknown
+				>)
+			: {};
+		const current =
+			raw[section] &&
+			typeof raw[section] === "object" &&
+			!Array.isArray(raw[section])
+				? (raw[section] as Record<string, unknown>)
+				: {};
+		raw[section] = { ...current, [key]: value };
+		writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`);
+		return true;
+	} catch {
 		return false;
 	}
 }

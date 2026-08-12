@@ -98,9 +98,11 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	// trust-model approach. `guardsEnabled` is the umbrella toggle for both.
 	const duplicateGuardOn =
 		executionPolicy.embeddedPoliciesEnabled &&
+		config.guardsEnabled !== false &&
 		(config.guardsEnabled === true || config.duplicateGuardEnabled !== false);
 	const failureGuardOn =
 		executionPolicy.embeddedPoliciesEnabled &&
+		config.guardsEnabled !== false &&
 		(config.guardsEnabled === true || config.failureGuardEnabled === true);
 	const guardThresholds =
 		duplicateGuardOn || failureGuardOn
