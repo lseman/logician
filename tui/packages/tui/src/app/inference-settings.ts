@@ -48,13 +48,14 @@ export interface InferenceSettingsCtx {
 export function setInferenceMode(
 	ctx: InferenceSettingsCtx,
 	mode: string,
+	options: { persist?: boolean; notify?: boolean } = {},
 ): void {
 	if (!INFERENCE_MODE_ORDER.includes(mode as InferenceMode)) return;
 	const oldMode = ctx.inferenceMode;
 	ctx.inferenceMode = mode as InferenceMode;
 	ctx.bridge.setInferenceMode(mode);
 	ctx.statusPanel.update({ inferenceMode: mode });
-	if (oldMode !== mode) {
+	if (oldMode !== mode && options.notify !== false) {
 		const labels: Record<string, string> = {
 			auto: "Auto",
 			none: "Provider",
@@ -68,8 +69,9 @@ export function setInferenceMode(
 			analytical: "Analytical",
 		};
 		ctx.notify(`Inference mode: ${labels[mode] ?? mode}`, "success");
-		saveConfigField("inferenceMode", mode);
 	}
+	if (options.persist === true && oldMode !== mode)
+		saveConfigField("inferenceMode", mode);
 }
 
 export function cycleInferenceMode(ctx: InferenceSettingsCtx): void {
@@ -77,6 +79,7 @@ export function cycleInferenceMode(ctx: InferenceSettingsCtx): void {
 	setInferenceMode(
 		ctx,
 		INFERENCE_MODE_ORDER[(currentIndex + 1) % INFERENCE_MODE_ORDER.length],
+		{ persist: true },
 	);
 	ctx.tui.requestRender();
 }
@@ -84,11 +87,12 @@ export function cycleInferenceMode(ctx: InferenceSettingsCtx): void {
 export function applyThinkingLevel(
 	ctx: InferenceSettingsCtx,
 	level: string,
+	options: { persist?: boolean } = {},
 ): void {
 	ctx.thinkingLevel = level;
 	ctx.bridge.setThinkingLevel(level);
 	ctx.statusPanel.update({ thinkingLevel: level });
-	saveConfigField("thinkingLevel", level);
+	if (options.persist === true) saveConfigField("thinkingLevel", level);
 }
 
 export function setExecutionProfile(

@@ -414,7 +414,7 @@ export function handleSettingsSelectorAction(
 			break;
 		}
 		case "thinking level":
-			applyThinkingLevel(ctx, value);
+			applyThinkingLevel(ctx, value, { persist: true });
 			ctx.notify(`Thinking level: ${value}`, "success");
 			break;
 		case "permission mode":
@@ -491,7 +491,7 @@ export function handleSettingsSelectorAction(
 					"error",
 				);
 			} else {
-				setInferenceMode(ctx, value);
+				setInferenceMode(ctx, value, { persist: true });
 			}
 			break;
 		}

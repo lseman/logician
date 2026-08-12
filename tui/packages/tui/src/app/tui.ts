@@ -173,8 +173,8 @@ export class LogicianTUI {
 	pendingPermission: { toolCallId: string; toolName: string } | null = null;
 
 	// Inference mode helper — used by the keyboard shortcut and /settings.
-	setInferenceMode(mode: string): void {
-		setInferenceModeImpl(this, mode);
+	setInferenceMode(mode: string, persist = true): void {
+		setInferenceModeImpl(this, mode, { persist });
 	}
 
 	notify(message: string, level: NotificationLevel = "info"): void {
@@ -305,7 +305,7 @@ export class LogicianTUI {
 		this.transcriptDisplay.setOnAnimationTick(() => this.tui.requestRender());
 		// Apply inference mode only after its transcript/status dependencies exist.
 		if (runtimeConfig.source.inferenceMode) {
-			this.setInferenceMode(runtimeConfig.source.inferenceMode);
+			this.setInferenceMode(runtimeConfig.source.inferenceMode, false);
 		}
 		this.killRing = new KillRing();
 		this.undoStack = new UndoStack();
@@ -682,7 +682,7 @@ export class LogicianTUI {
 	}
 
 	applyThinkingLevel(level: string): void {
-		applyThinkingLevelImpl(this, level);
+		applyThinkingLevelImpl(this, level, { persist: true });
 	}
 
 	// ── Start ──────────────────────────────────────────────────────────────

@@ -83,6 +83,54 @@ void test("steering cancellation maps to one informational notice", () => {
 	);
 });
 
+void test("routine automatic permission allows stay out of the transcript", () => {
+	for (const source of ["mode", "rule"] as const) {
+		assert.equal(
+			mapAgentEvent({
+				type: "tool_permission_decision",
+				toolName: "task_status",
+				toolCallId: `call-${source}`,
+				decision: "allow",
+				source,
+			}),
+			null,
+		);
+	}
+});
+
+void test("permission denials and user-mediated approvals remain visible", () => {
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "tool_permission_decision",
+			toolName: "bash",
+			toolCallId: "call-denied",
+			decision: "deny",
+			source: "rule",
+		}),
+		{
+			type: "notice",
+			level: "warn",
+			label: "Permission",
+			text: "bash: deny (rule)",
+		},
+	);
+	assert.deepEqual(
+		mapAgentEvent({
+			type: "tool_permission_decision",
+			toolName: "write_file",
+			toolCallId: "call-user",
+			decision: "always",
+			source: "user",
+		}),
+		{
+			type: "notice",
+			level: "info",
+			label: "Permission",
+			text: "write_file: always (user)",
+		},
+	);
+});
+
 void test("tool preparation and execution remain distinct lifecycle phases", () => {
 	assert.deepEqual(
 		mapAgentEvent({
