@@ -11,6 +11,7 @@ export * from "./agent/guards/loop-detector.ts";
 export * from "./agent/harness.ts";
 export * from "./agent/intervention-controller.ts";
 export * from "./agent/messages.ts";
+export * from "./agent/run-state.ts";
 export * from "./agent/runtime-state.ts";
 export * from "./agent/session.ts";
 export * from "./agent/tasks/task-state-controller.ts";
@@ -25,6 +26,7 @@ export {
 export type { Task, TaskStatus } from "./agent/tasks/todo-state.ts";
 export { getTasks, onTodosChanged } from "./agent/tasks/todo-state.ts";
 export * from "./agent/tool-cache.ts";
+export * from "./agent/trajectory.ts";
 export * from "./agent/types.ts";
 // Compaction: single engine shared by harness compact, the loop's
 // context-full retry, and the builtin proactive hook.

@@ -1,8 +1,8 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
 import { BackendError } from "../agent/backend.ts";
 import { AgentHarness, HarnessBusyError } from "../agent/harness.ts";
 import { Session } from "../agent/session.ts";

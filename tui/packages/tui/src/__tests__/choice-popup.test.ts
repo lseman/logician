@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { ChoicePopup } from "../overlays/choice-popup.ts";
 import { SettingsSelectorOverlay } from "../overlays/settings-overlay.ts";
 import { ThemeSelectorOverlay } from "../overlays/theme-selector.ts";

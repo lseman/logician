@@ -193,6 +193,18 @@ export function handleEvent(
 		case "agent_retry_end":
 			ctx.statusPanel.update({ phase: event.success ? "thinking" : "error" });
 			break;
+		case "runtime_status":
+			ctx.statusPanel.update({
+				runPhase: event.runPhase,
+				continuationsRemaining: event.continuationsRemaining,
+				noProgressRemaining: event.noProgressRemaining,
+				runTimeRemainingMs: event.timeRemainingMs,
+				runtimeRetry: event.retry,
+				runtimeRepair: event.repair,
+				compactionGeneration: event.compactionGeneration,
+				activeSubagents: event.activeSubagents,
+			});
+			break;
 		case "agent_error":
 			ctx.transcript.handleEvent({
 				type: "notice",

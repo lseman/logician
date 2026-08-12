@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import type { AgentEvent, Tool, ToolCall } from "../agent/types.ts";
 import type { ExtensionEvent } from "../hooks/extensions/events.ts";
 import { executeToolBatch } from "../runtime/tool-batch-controller.ts";

@@ -95,9 +95,9 @@ import {
 	applyCompactionSettings,
 	loadUserSettings,
 } from "./bridge-settings.ts";
-import { ContinuationController } from "./continuation-controller.ts";
 import { EohController } from "./eoh/controller.ts";
 import { InteractionCoordinator } from "./interaction-coordinator.ts";
+import { RepositoryMap } from "./repository-map.ts";
 import { SubagentCoordinator } from "./subagent-coordinator.ts";
 import { ToolRouter } from "./tool-router.ts";
 export type EventCallback = (event: RuntimeEvent) => void;
@@ -210,6 +210,10 @@ export interface AgentBridgeOptions {
 	reasoner?: string;
 	/** Overrides merged over the selected reasoner's defaults. */
 	reasonerConfig?: ReasonerConfig;
+	/** Inject a change-refreshed symbol/import map into each user turn. Default: true. */
+	repositoryMapEnabled?: boolean;
+	/** Maximum approximate tokens for repository-map context. Default: 2000. */
+	repositoryMapMaxTokens?: number;
 }
 
 // ── AgentCoreBridge ─────────────────────────────────────────────────────────────
@@ -223,7 +227,6 @@ export class AgentCoreBridge {
 	private running = false;
 	private sendTail: Promise<void> = Promise.resolve();
 	private pendingAutoContinue = false;
-	private continuationController: ContinuationController;
 	private skillActivation = new SkillActivationSession();
 	private cwd: string;
 	private toolRouter: ToolRouter;
@@ -268,6 +271,10 @@ export class AgentCoreBridge {
 	private reasonerConfig: ReasonerConfig;
 	private memoryViewerPortConfig: number = 3200;
 	private subagents: SubagentCoordinator;
+	private repositoryMap?: RepositoryMap;
+	private runtimeRetry?: string;
+	private runtimeRepair?: string;
+	private readonly activeRuntimeSubagents = new Set<string>();
 
 	// ── EoH (Evolution of Heuristics) ─────────────────────────────────
 	private eohController!: EohController;
@@ -286,10 +293,11 @@ export class AgentCoreBridge {
 		this.reasonerId = opts.reasoner?.trim().toLowerCase() || "none";
 		this.reasonerConfig = opts.reasonerConfig ?? {};
 		this.cwd = opts.cwd || process.cwd();
-		this.continuationController = new ContinuationController(
-			this.cwd,
-			this.sessionId,
-		);
+		if (opts.repositoryMapEnabled !== false) {
+			this.repositoryMap = new RepositoryMap(this.cwd, {
+				maxTokens: opts.repositoryMapMaxTokens,
+			});
+		}
 		this.eohController = new EohController({
 			cwd: this.cwd,
 			emit: event => this.emit(event),
@@ -563,10 +571,23 @@ export class AgentCoreBridge {
 				if (event.type === "task_state_update") {
 					this.currentTaskState = event.state;
 				}
+				if (event.type === "agent_retry_start") {
+					this.runtimeRetry = `${event.attempt}/${event.maxRetries}`;
+				} else if (event.type === "agent_retry_end")
+					this.runtimeRetry = undefined;
+				if (event.type === "repair_nudge")
+					this.runtimeRepair = event.repairStage;
+				if (event.type === "turn_start") this.runtimeRepair = undefined;
+				if (event.type === "subagent_start") {
+					this.activeRuntimeSubagents.add(event.agentId);
+				} else if (event.type === "subagent_end") {
+					this.activeRuntimeSubagents.delete(event.agentId);
+				}
 				const mapped = mapAgentEvent(event);
 				if (mapped) {
 					this.emit(mapped);
 				}
+				this.emitRuntimeStatus();
 			},
 		};
 
@@ -804,7 +825,6 @@ export class AgentCoreBridge {
 		let turnSystemPrompt = this.config.systemPrompt;
 		let turnActivations: ReturnType<typeof selectSkillsForPrompt> = [];
 		let turnSucceeded = false;
-		this.continuationController.start(message, this.progressFingerprint());
 		try {
 			await this.runStartupHooksOnce();
 			// MCP loads in the background from the moment the bridge is
@@ -821,6 +841,12 @@ export class AgentCoreBridge {
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
 			const harness = this.ensureHarness();
+			const repositoryContext = this.repositoryMap?.render(message);
+			if (repositoryContext && typeof harness.setSystemPrompt === "function") {
+				persistentSystemPrompt = this.config.systemPrompt;
+				turnSystemPrompt = `${persistentSystemPrompt}\n\n${repositoryContext}`;
+				harness.setSystemPrompt(turnSystemPrompt);
+			}
 			if (this.reasonerId !== "none") {
 				const meta = getReasonerMeta(this.reasonerId);
 				if (!meta) {
@@ -938,7 +964,7 @@ export class AgentCoreBridge {
 	private scheduleAutoContinuation(
 		activations: ReturnType<typeof selectSkillsForPrompt>,
 	): void {
-		const decision = this.continuationController.request(
+		const decision = this.ensureHarness().requestContinuation(
 			"next_turn_queue",
 			this.progressFingerprint(),
 		);
@@ -955,12 +981,12 @@ export class AgentCoreBridge {
 			type: "notice",
 			level: "info",
 			label: "Continuation",
-			text: `Starting native continuation run ${decision.lease.runs}.`,
+			text: `Starting native continuation run ${decision.state.continuationRuns}.`,
 		});
 		void this.runQueuedContinuation(activations).catch(error => {
 			this.pendingAutoContinue = false;
 			const message = error instanceof Error ? error.message : String(error);
-			this.continuationController.finish("failed", message);
+			this.ensureHarness().failRun(message);
 			this.reportError(error);
 		});
 	}
@@ -1006,6 +1032,7 @@ export class AgentCoreBridge {
 				maxIterations: this.config.maxIterations,
 				extensionRunner: this.extensionRunner || undefined,
 			});
+			this.harness.setSessionId(this.sessionId);
 			// Harness owns the queue state; mirror every change to the UI.
 			this.harness.setOnQueueChange(() => this._emitQueueUpdate());
 			// Surface harness phase transitions the loop can't see — compaction
@@ -1032,6 +1059,23 @@ export class AgentCoreBridge {
 			applyCompactionSettings(this.harness, userSettings);
 		}
 		return this.harness;
+	}
+
+	private emitRuntimeStatus(): void {
+		if (!this.harness) return;
+		const run = this.harness.durableRunState;
+		const budget = this.harness.durableRunBudget;
+		this.emit({
+			type: "runtime_status",
+			runPhase: run?.taskState?.phase ?? run?.status ?? "idle",
+			continuationsRemaining: budget?.continuationsRemaining,
+			noProgressRemaining: budget?.noProgressRemaining,
+			timeRemainingMs: budget?.timeRemainingMs,
+			retry: this.runtimeRetry,
+			repair: this.runtimeRepair,
+			compactionGeneration: run?.compactionGeneration ?? 0,
+			activeSubagents: this.activeRuntimeSubagents.size,
+		});
 	}
 
 	/**
@@ -1581,6 +1625,8 @@ export class AgentCoreBridge {
 				pendingToolCalls: [],
 				abortRequested: false,
 			},
+			durable_run_state: this.harness?.durableRunState,
+			trajectory_report: this.harness?.trajectoryReport,
 			config_path: this.configPath || "",
 			connected: true,
 			reasoner: this.reasonerId,
@@ -1885,7 +1931,7 @@ export class AgentCoreBridge {
 			this.memoryStore.discardEmptySession(provisionalSessionId);
 		}
 		this.sessionId = sessionId;
-		this.continuationController.useSession(sessionId);
+		this.harness?.setSessionId(sessionId);
 		this.transcriptPath = createHookTranscriptPath(this.cwd, sessionId);
 		this.config.hookSessionId = sessionId;
 		this.config.hookTranscriptPath = this.transcriptPath;
@@ -2058,6 +2104,8 @@ export class AgentCoreBridge {
 				pendingToolCalls: [],
 				abortRequested: false,
 			},
+			durable_run_state: this.harness?.durableRunState,
+			trajectory_report: this.harness?.trajectoryReport,
 			config_path: this.configPath || "",
 			hooks_enabled: this.config.runtimeHooksEnabled !== false,
 			hook_transcript_path: this.config.hookTranscriptPath || "",

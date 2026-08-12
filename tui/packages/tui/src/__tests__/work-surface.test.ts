@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { beforeEach, test } from "node:test";
 import { WorkSurface } from "../status/work-surface.ts";
 import { initTheme } from "../terminal/theme.ts";
 

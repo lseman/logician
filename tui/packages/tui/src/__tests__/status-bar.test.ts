@@ -1,7 +1,7 @@
 // ── StatusBar tests ──────────────────────────────────────────────────────────
 
+import { describe, it } from "bun:test";
 import { strict as assert } from "node:assert";
-import { describe, it } from "node:test";
 import { StatusBar } from "../footer/layout.ts";
 import {
 	createDefaultConfig,
@@ -21,7 +21,7 @@ const setupTheme = (): void => {
 void describe("StatusBar", () => {
 	it("renders minimal line with phase, model, context", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "claude-sonnet-4",
@@ -36,7 +36,7 @@ void describe("StatusBar", () => {
 
 	it("shows MCP server count when set", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -49,9 +49,30 @@ void describe("StatusBar", () => {
 		assert.ok(lines[0].includes("3"));
 	});
 
+	it("shows durable runtime phase, budgets, recovery, compaction, and children", () => {
+		setupTheme();
+		const bar = new StatusBar(createDefaultConfig());
+		bar.update({
+			runPhase: "verify",
+			continuationsRemaining: 5,
+			noProgressRemaining: 2,
+			runTimeRemainingMs: 9 * 60_000,
+			runtimeRepair: "acceptance",
+			compactionGeneration: 3,
+			activeSubagents: 2,
+		});
+		const line = bar.render(220)[0].replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+		assert.match(line, /verify/);
+		assert.match(line, /↻5/);
+		assert.match(line, /Δ2/);
+		assert.match(line, /repair acceptance/);
+		assert.match(line, /cmp#3/);
+		assert.match(line, /agents 2/);
+	});
+
 	it("shows the active Python virtual environment", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			virtualEnv: "/workspace/logician/.venv",
 			virtualEnvPythonVersion: "3.12.4",
@@ -65,7 +86,7 @@ void describe("StatusBar", () => {
 
 	it("omits MCP section when count is zero or undefined", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -79,7 +100,7 @@ void describe("StatusBar", () => {
 
 	it("omits MCP section when mcpServerCount is not set", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -92,7 +113,7 @@ void describe("StatusBar", () => {
 
 	it("shows the resolved execution profile", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -106,7 +127,7 @@ void describe("StatusBar", () => {
 
 	it("drops optional sections on narrow terminals", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "claude-sonnet-4",
@@ -124,7 +145,7 @@ void describe("StatusBar", () => {
 
 	it("shows git indicators when present", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -144,7 +165,7 @@ void describe("StatusBar", () => {
 
 	it("shows thinking level", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -159,7 +180,7 @@ void describe("StatusBar", () => {
 
 	it("shows thinking off", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -174,7 +195,7 @@ void describe("StatusBar", () => {
 
 	it("shows inference mode", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -189,7 +210,7 @@ void describe("StatusBar", () => {
 
 	it("shows reasoner when not none", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -204,7 +225,7 @@ void describe("StatusBar", () => {
 
 	it("omits reasoner when none", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -218,7 +239,7 @@ void describe("StatusBar", () => {
 
 	it("shows cache read tokens", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -233,7 +254,7 @@ void describe("StatusBar", () => {
 
 	it("shows goal when present", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -251,7 +272,7 @@ void describe("StatusBar", () => {
 
 	it("updates on tick animation", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "streaming",
 			model: "test",
@@ -266,7 +287,7 @@ void describe("StatusBar", () => {
 
 	it("invalidates cache on update", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -286,7 +307,7 @@ void describe("StatusBar", () => {
 
 	it("starts and stops animation timer", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "streaming",
 			model: "test",
@@ -301,14 +322,14 @@ void describe("StatusBar", () => {
 
 	it("renders empty line when not visible", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		const lines = bar.render(80);
 		assert.strictEqual(lines.length, 1);
 	});
 
 	it("renders context meter bar", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -322,7 +343,7 @@ void describe("StatusBar", () => {
 
 	it("colors context meter red at high usage", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -335,7 +356,7 @@ void describe("StatusBar", () => {
 
 	it("shows token flow with prompt and completion tokens", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -354,7 +375,7 @@ void describe("StatusBar", () => {
 
 	it("shows partial token flow when only prompt tokens present", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -370,7 +391,7 @@ void describe("StatusBar", () => {
 
 	it("omits token flow when neither token count is set", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({
 			phase: "ready",
 			model: "test",
@@ -385,7 +406,7 @@ void describe("StatusBar", () => {
 
 	it("preserves legacy phase markers", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.update({ phase: "approval" });
 		assert.ok(bar.render(80)[0].includes("◆ APPROVAL"));
 		bar.update({ phase: "error" });
@@ -396,7 +417,7 @@ void describe("StatusBar", () => {
 
 	it("keeps configured rows separate when returning a cached render", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		const config = createDefaultConfig();
 		config.rows = 2;
 		config.widgets.memory = {
@@ -414,7 +435,7 @@ void describe("StatusBar", () => {
 
 	it("supports widgets configured on a third footer row", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		const config = createDefaultConfig();
 		config.rows = 3;
 		config.widgets.commit = {
@@ -433,7 +454,7 @@ void describe("StatusBar", () => {
 
 	it("renders commit, ahead/behind, and line diff widgets", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		const config = createDefaultConfig();
 		config.rows = 2;
 		for (const [position, id] of [
@@ -482,7 +503,7 @@ void describe("configurable footer widgets", () => {
 
 	it("positions contributed widgets in left, middle, and right groups", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.setConfig(emptyConfig());
 		bar.upsertWidget({
 			id: "test.left",
@@ -507,7 +528,7 @@ void describe("configurable footer widgets", () => {
 
 	it("applies icons, style overrides, minimum width, and grow fill", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.setConfig(emptyConfig());
 		bar.upsertWidget({
 			id: "test.grow",
@@ -531,7 +552,7 @@ void describe("configurable footer widgets", () => {
 
 	it("sanitizes and removes contributed widget snapshots", () => {
 		setupTheme();
-		const bar = new StatusBar();
+		const bar = new StatusBar(createDefaultConfig());
 		bar.setConfig(emptyConfig());
 		bar.upsertWidget({
 			id: "test.safe",

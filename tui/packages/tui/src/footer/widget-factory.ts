@@ -52,6 +52,14 @@ export interface WidgetFactoryStatus {
 	ariadneEnabled?: boolean;
 	fffgrepEnabled?: boolean;
 	memoryEnabled?: boolean;
+	runPhase?: string;
+	continuationsRemaining?: number;
+	noProgressRemaining?: number;
+	runTimeRemainingMs?: number;
+	runtimeRetry?: string;
+	runtimeRepair?: string;
+	compactionGeneration?: number;
+	activeSubagents?: number;
 	tick?: number; // 0-7 for spinner animation
 }
 
@@ -132,6 +140,28 @@ function phaseWidget(status: WidgetFactoryStatus): WidgetData {
 					: `● ${info.label}`;
 	const color = theme.fg(info.color as any, "");
 	return withIcon("phase", "", `${color}${withSpinner}${RESET}`);
+}
+
+function runtimeStatusWidget(status: WidgetFactoryStatus): WidgetData {
+	if (!status.runPhase || status.runPhase === "idle")
+		return empty("runtime-status");
+	const parts = [status.runPhase];
+	if (status.continuationsRemaining !== undefined)
+		parts.push(`↻${status.continuationsRemaining}`);
+	if (status.noProgressRemaining !== undefined)
+		parts.push(`Δ${status.noProgressRemaining}`);
+	if (status.runTimeRemainingMs !== undefined)
+		parts.push(`${Math.ceil(status.runTimeRemainingMs / 60_000)}m`);
+	if (status.runtimeRetry) parts.push(`retry ${status.runtimeRetry}`);
+	if (status.runtimeRepair) parts.push(`repair ${status.runtimeRepair}`);
+	if (status.compactionGeneration)
+		parts.push(`cmp#${status.compactionGeneration}`);
+	if (status.activeSubagents) parts.push(`agents ${status.activeSubagents}`);
+	return withIcon(
+		"runtime-status",
+		"◈",
+		theme.fg("accent" as any, parts.join(" ")),
+	);
 }
 
 function modelWidget(status: WidgetFactoryStatus): WidgetData {
@@ -469,6 +499,7 @@ const PROVIDERS: Record<
 	model: modelWidget,
 	thinking: thinkingWidget,
 	phase: phaseWidget,
+	"runtime-status": runtimeStatusWidget,
 	"context-bar": contextBarWidget,
 	"context-capacity": contextCapacityWidget,
 	"token-flow": tokenFlowWidget,

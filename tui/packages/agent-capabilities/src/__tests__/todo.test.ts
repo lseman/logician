@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { getTasks, onTodosChanged, todo_tool } from "../tasks/todo.ts";
 
 void test("todo store rejects invisible subjects and publishes immutable snapshots", async () => {

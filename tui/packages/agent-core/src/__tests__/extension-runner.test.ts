@@ -1,8 +1,8 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { AgentHarness } from "../agent/harness.ts";
 import type { AgentConfig } from "../agent/types.ts";

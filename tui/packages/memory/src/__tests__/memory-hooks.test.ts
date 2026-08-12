@@ -1,6 +1,6 @@
+import { afterEach, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import { unlinkSync } from "node:fs";
-import { afterEach, describe, test } from "node:test";
 import type { MemoryHooksConfig } from "../hooks/memory-hooks.js";
 import { createMemoryHooks as createHooks } from "../hooks/memory-hooks.js";
 import { createMemoryStore } from "../store/index.js";

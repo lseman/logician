@@ -16,7 +16,7 @@
 		"lint:fix": "biome check --fix tui/packages/",
 		"format": "biome format --write tui/packages/",
 		"format:check": "biome check --linter-enabled=false tui/packages/",
-		"test": "bun test tui/packages/agent-core/src/__tests__/*.test.ts tui/packages/agent-capabilities/src/__tests__/*.test.ts tui/packages/coding-agent/src/__tests__/*.test.ts tui/packages/tui/src/__tests__/*.test.ts tui/packages/tui/__tests__/*.test.ts",
+		"test": "bun run --workspaces --if-present test",
 		"typecheck": "bun run --workspaces --if-present typecheck",
 		"ci": "bun run typecheck && bun run lint && bun run format:check && bun run test"
 	},

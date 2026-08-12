@@ -1,6 +1,7 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import type { Turn } from "@logician/coding-agent/sessions";
+import { createDefaultConfig } from "../footer/types.ts";
 import { InputBar } from "../input/input-bar.ts";
 import { renderLayoutFrame } from "../rendering/layout.ts";
 import { ScrollView } from "../rendering/scroll-view.ts";
@@ -868,7 +869,7 @@ void test("notifications are transient, bounded, and width-safe", () => {
 });
 
 void test("status bar drops optional sections instead of clipping ANSI text", () => {
-	const status = new StatusBar();
+	const status = new StatusBar(createDefaultConfig());
 	status.update({
 		phase: "ready",
 		model: "a-very-long-model-name",
@@ -892,7 +893,7 @@ void test("status bar drops optional sections instead of clipping ANSI text", ()
 });
 
 void test("status bar renders cached tokens and unknown telemetry", () => {
-	const status = new StatusBar();
+	const status = new StatusBar(createDefaultConfig());
 	status.update({
 		contextTokens: 20_000,
 		contextMaxTokens: 32_768,
@@ -908,7 +909,7 @@ void test("status bar renders cached tokens and unknown telemetry", () => {
 });
 
 void test("status bar renders RTK when restored as enabled", () => {
-	const status = new StatusBar();
+	const status = new StatusBar(createDefaultConfig());
 	assert.doesNotMatch(plain(status.render(200)[0]), /\brtk on\b/);
 
 	status.update({ rtkProxyEnabled: true });

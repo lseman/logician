@@ -71,6 +71,11 @@ import {
 } from "./harness/session-lifecycle.ts";
 import { createUserMessage, estimateChatPayloadTokens } from "./messages.ts";
 import {
+	type ContinuationDecision,
+	type DurableRunState,
+	RunStateController,
+} from "./run-state.ts";
+import {
 	type AgentRuntimeState,
 	createRuntimeState,
 	type HarnessPhase,
@@ -78,6 +83,7 @@ import {
 } from "./runtime-state.ts";
 import { Session } from "./session.ts";
 import type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
+import { TrajectoryRecorder, type TrajectoryReport } from "./trajectory.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
@@ -149,6 +155,8 @@ export class AgentHarness {
 	private _transcriptPath?: string;
 	private _hasStartedSession = false;
 	private _activeOperationId?: string;
+	private runState: RunStateController;
+	private trajectory: TrajectoryRecorder;
 	private _runPromise?: Promise<void>;
 	private _runResolve?: () => void;
 	private _subscribers: Set<EventHandler> = new Set();
@@ -178,6 +186,14 @@ export class AgentHarness {
 		this._hooksEnabled = options.config.runtimeHooksEnabled ?? true;
 		this.backend = options.backend;
 		this.cwd = options.cwd;
+		this.runState = new RunStateController(
+			options.cwd ?? process.cwd(),
+			options.config.hookSessionId ?? `tui_${randomUUID()}`,
+		);
+		this.trajectory = new TrajectoryRecorder(
+			options.cwd ?? process.cwd(),
+			options.config.hookSessionId ?? `tui_${randomUUID()}`,
+		);
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
 		this.loopDetector = new LoopDetector({
@@ -224,6 +240,29 @@ export class AgentHarness {
 			retry: this.runtime.retry ? { ...this.runtime.retry } : undefined,
 			outcome: this.runtime.outcome ? { ...this.runtime.outcome } : undefined,
 		};
+	}
+
+	get durableRunState(): DurableRunState | undefined {
+		return this.runState.snapshot();
+	}
+
+	get durableRunBudget() {
+		return this.runState.budgetStatus();
+	}
+
+	get trajectoryReport(): TrajectoryReport {
+		return this.trajectory.evaluate();
+	}
+
+	requestContinuation(
+		cause: string,
+		progressFingerprint: string,
+	): ContinuationDecision {
+		return this.runState.requestContinuation(cause, progressFingerprint);
+	}
+
+	failRun(reason?: string): void {
+		this.runState.fail(reason);
 	}
 
 	setOnPhaseChange(
@@ -346,6 +385,7 @@ export class AgentHarness {
 				return this.prompt(userMessage);
 			}
 		}
+		this.runState.start(userMessage);
 
 		// Initialize output guard if not already done
 		if (!this.outputGuard && this.config.contextWindowTokens) {
@@ -382,6 +422,8 @@ export class AgentHarness {
 			);
 			const operationId = randomUUID();
 			this._activeOperationId = operationId;
+			const runId = this.runState.snapshot()?.runId ?? operationId;
+			this.trajectory.start(runId, operationId, snapshot.config, "prompt");
 			this._session?.appendJournalEvent({
 				type: "operation_start",
 				operationId,
@@ -430,6 +472,11 @@ export class AgentHarness {
 				this.history = result;
 				return result;
 			} finally {
+				this.trajectory.finish(
+					runId,
+					operationId,
+					this.runtime.outcome?.status ?? "unknown",
+				);
 				this._session?.appendJournalEvent({
 					type: "operation_finish",
 					operationId,
@@ -503,6 +550,8 @@ export class AgentHarness {
 			);
 			const operationId = randomUUID();
 			this._activeOperationId = operationId;
+			const runId = this.runState.snapshot()?.runId ?? operationId;
+			this.trajectory.start(runId, operationId, snapshot.config, "continue");
 			this._session?.appendJournalEvent({
 				type: "operation_start",
 				operationId,
@@ -550,6 +599,11 @@ export class AgentHarness {
 				this.history = result;
 				return result;
 			} finally {
+				this.trajectory.finish(
+					runId,
+					operationId,
+					this.runtime.outcome?.status ?? "unknown",
+				);
 				this._session?.appendJournalEvent({
 					type: "operation_finish",
 					operationId,
@@ -814,6 +868,20 @@ export class AgentHarness {
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
 		this.reduceRuntimeEvent(event);
+		const runId = this.runState.snapshot()?.runId;
+		if (runId && this._activeOperationId) {
+			this.trajectory.record(runId, this._activeOperationId, event);
+		}
+		if (event.type === "task_state_update")
+			this.runState.applyTaskState(event.state);
+		if (event.type === "compaction") this.runState.recordCompaction();
+		if (event.type === "run_outcome") {
+			this.runState.applyOutcome({
+				status: event.status,
+				summary: event.summary,
+				source: event.source,
+			});
+		}
 		// The primary application event path is synchronous and latency-sensitive;
 		// extension delivery must not hold streaming deltas behind an await.
 		this.loopConfig?.onEvent?.(event);
@@ -1144,6 +1212,8 @@ export class AgentHarness {
 	setSessionId(id: string): void {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
+		this.runState.useSession(id);
+		this.trajectory.useSession(id);
 	}
 
 	setTranscriptPath(path: string): void {
@@ -1222,6 +1292,8 @@ export class AgentHarness {
 		this._sessionBaseDir = baseDir;
 		this._session = new Session(sessionId, { baseDir, enabled: true });
 		this._sessionId = sessionId;
+		this.runState.useSession(sessionId);
+		this.trajectory.useSession(sessionId);
 		await this.emitSessionStart("startup");
 	}
 
@@ -1240,6 +1312,8 @@ export class AgentHarness {
 		this._sessionBaseDir = sessionBaseDir;
 		this._session = resumed.session;
 		this._sessionId = sessionId;
+		this.runState.useSession(sessionId);
+		this.trajectory.useSession(sessionId);
 		await this.emitSessionStart("resume");
 		return true;
 	}

@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { AgentCoreBridge } from "../application/agent-bridge.ts";
 import type { RuntimeEvent } from "../runtime/events.ts";
 
@@ -527,6 +527,11 @@ void test("automatic continuation retains the active skill", async () => {
 		continueWithNextTurn: async () => {
 			seen.push({ kind: "continue", systemPrompt: activePrompt });
 		},
+		requestContinuation: () => ({
+			action: "continue",
+			state: { continuationRuns: 1 },
+		}),
+		failRun: () => {},
 	};
 
 	await bridge.sendMessage("Diagnose this TypeScript error.");

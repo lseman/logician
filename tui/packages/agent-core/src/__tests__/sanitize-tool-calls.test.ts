@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { sanitizeToolCallArguments } from "../agent/messages.ts";
 
 void test("sanitizeToolCallArguments leaves valid JSON untouched", () => {

@@ -1,8 +1,8 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { ExtensionRunner } from "../extensions/runner.ts";
 import type { ExtensionDefinition } from "../extensions/types.ts";

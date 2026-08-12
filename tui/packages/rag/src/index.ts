@@ -11,5 +11,6 @@ export * from "./ingestion.ts";
 export * from "./pipeline/index.ts";
 export * from "./query.ts";
 export * from "./reranker.ts";
+export * from "./retrieval.ts";
 export * from "./store/index.ts";
 export * from "./types.ts";

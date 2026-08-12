@@ -21,7 +21,7 @@
 		"./eoh/*": "./src/eoh/*"
 	},
 	"scripts": {
-		"test": "tsx --test $(find src -name '*.test.ts' -type f -print)",
+		"test": "bun test src",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

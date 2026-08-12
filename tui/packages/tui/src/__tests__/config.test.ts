@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { validateConfig } from "@logician/coding-agent/configuration";
 
 void test("validateConfig rejects non-object input", () => {
@@ -213,9 +213,11 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 	const w: string[] = [];
 	const cfg = validateConfig({}, w);
 	assert.deepEqual(cfg, {
+		ariadneEnabled: true,
 		autoRetryEnabled: true,
 		continuationEnabled: true,
 		duplicateGuardEnabled: true,
+		fffgrepEnabled: true,
 		postEditDiagnostics: true,
 		thinkingLoopDetectionEnabled: true,
 	});

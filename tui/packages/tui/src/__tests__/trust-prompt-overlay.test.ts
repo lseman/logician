@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { TrustPromptOverlay } from "../overlays/trust-prompt-overlay.ts";
 import { visibleWidth } from "../terminal/core.ts";
 import { initTheme } from "../terminal/theme.ts";

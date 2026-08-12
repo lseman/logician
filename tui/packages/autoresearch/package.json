@@ -16,7 +16,8 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "node --test tests/*.test.mjs"
+		"test": "node --test tests/compaction.test.mjs tests/jsonl-helpers.test.mjs tests/paths.test.mjs tests/shortcuts.test.mjs",
+		"test:legacy-extension": "node --test tests/activation.test.mjs tests/auto-resume-guards.test.mjs tests/log-params-schema.test.mjs"
 	},
 	"dependencies": {
 		"@logician/agent-core": "0.2.0"

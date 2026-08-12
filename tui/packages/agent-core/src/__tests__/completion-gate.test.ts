@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { resolveCompletionGate } from "../agent/tasks/completion-gate.ts";
 
 void test("structured done is authoritative", () => {

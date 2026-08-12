@@ -1,5 +1,5 @@
+import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import type { AgentConfig, Tool } from "@logician/agent-core";
 import type {
 	GenerateOptions,
