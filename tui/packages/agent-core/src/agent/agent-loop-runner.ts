@@ -68,7 +68,8 @@ import { RunBudgetController } from "./run-budget.ts";
 import { resolveCompletionGate } from "./tasks/completion-gate.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
 import {
-	hasMeaningfulTaskState,
+	type ExplicitTaskState,
+	shouldProjectTaskState,
 	TaskStateController,
 	taskObjectiveFromMessages,
 } from "./tasks/task-state-controller.ts";
@@ -136,6 +137,8 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	extensionBus?: ExtensionEventBus;
 	/** Resolve the acceptance config at call time (allows harness to update it). */
 	getAcceptanceConfig?: () => AcceptanceConfig | undefined;
+	/** Durable checkpoint restored only for a native continuation/resume. */
+	initialTaskState?: ExplicitTaskState;
 }
 
 const DEFAULT_MAX_ITERATIONS = 30;
@@ -161,6 +164,7 @@ async function runAgentLoopInTaskScope(
 	const newMessages: Message[] = [...prompts];
 	const taskState = new TaskStateController(
 		taskObjectiveFromMessages([...context.messages, ...prompts]),
+		config.initialTaskState,
 	);
 	resetTaskStatus();
 	const finish = async (outcome: {
@@ -521,7 +525,7 @@ async function runAgentLoopInTaskScope(
 					messages as AgentMessage[],
 				);
 				const chatMessages = convertToChatFormat(llmMessages);
-				if (hasMeaningfulTaskState(taskState.snapshot())) {
+				if (shouldProjectTaskState(taskState.snapshot())) {
 					chatMessages.push({ role: "system", content: taskState.toContext() });
 				}
 

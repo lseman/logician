@@ -43,6 +43,26 @@ const SYMBOL_PATTERNS = [
 
 const IMPORT_PATTERN =
 	/(?:from\s+|import\s*(?:\([^)]*\)\s*from\s*)?|require\s*\()\s*["']([^"']+)["']/g;
+const REPOSITORY_INTENT =
+	/\b(?:bug|build|class|code|compile|debug|dependency|edit|function|implement|import|lint|module|package|refactor|repo(?:sitory)?|source|symbol|test|typecheck)\b|(?:^|\s)[\w./-]+\.(?:[cm]?[jt]sx?|py|rb|rs|go|java|kt|php|swift)\b/i;
+const QUERY_STOP_WORDS = new Set([
+	"add",
+	"build",
+	"change",
+	"code",
+	"debug",
+	"file",
+	"fix",
+	"implement",
+	"please",
+	"refactor",
+	"repository",
+	"review",
+	"source",
+	"test",
+	"this",
+	"with",
+]);
 
 /** Change-refreshed, query-ranked repository context with a hard token budget. */
 export class RepositoryMap {
@@ -59,25 +79,29 @@ export class RepositoryMap {
 	}
 
 	render(query = ""): string {
+		const terms = this.queryTerms(query);
+		if (terms.length === 0) return "";
 		const files = this.listFiles();
 		const live = new Set(files);
 		for (const cached of this.cache.keys()) {
 			if (!live.has(cached)) this.cache.delete(cached);
 		}
-		const entries = files
+		const ranked = files
 			.map(file => this.entryFor(file))
 			.filter((entry): entry is RepositoryMapEntry => entry !== undefined)
+			.map(entry => ({ entry, score: this.score(entry, terms) }))
+			.filter(item => item.score > 0)
 			.sort(
-				(a, b) =>
-					this.score(b, query) - this.score(a, query) ||
-					a.file.localeCompare(b.file),
+				(a, b) => b.score - a.score || a.entry.file.localeCompare(b.entry.file),
 			);
+		if (!REPOSITORY_INTENT.test(query) && ranked[0]?.score !== terms.length)
+			return "";
 
 		const maxChars = this.maxTokens * 4;
 		const header = "<repository-map>\n";
 		const footer = "</repository-map>";
 		let output = header;
-		for (const entry of entries) {
+		for (const { entry } of ranked) {
 			const details = [
 				entry.symbols.length ? `symbols: ${entry.symbols.join(", ")}` : "",
 				entry.imports.length ? `imports: ${entry.imports.join(", ")}` : "",
@@ -149,8 +173,17 @@ export class RepositoryMap {
 		}
 	}
 
-	private score(entry: RepositoryMapEntry, query: string): number {
-		const terms = query.toLowerCase().match(/[a-z_$][\w$-]{2,}/g) ?? [];
+	private queryTerms(query: string): string[] {
+		return [
+			...new Set(
+				(query.toLowerCase().match(/[a-z_$][\w$-]{2,}/g) ?? []).filter(
+					term => !QUERY_STOP_WORDS.has(term),
+				),
+			),
+		];
+	}
+
+	private score(entry: RepositoryMapEntry, terms: string[]): number {
 		const haystack =
 			`${entry.file} ${entry.symbols.join(" ")} ${entry.imports.join(" ")}`.toLowerCase();
 		return terms.reduce(

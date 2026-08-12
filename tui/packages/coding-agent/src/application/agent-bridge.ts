@@ -19,8 +19,8 @@ import {
 	type ExplicitTaskState,
 	formatTaskStateContext,
 	type HarnessPhase,
-	hasMeaningfulTaskState,
 	type Message,
+	shouldProjectTaskState,
 	type Tool,
 	type TruncationConfig,
 	type WebSearchConfig,
@@ -272,6 +272,7 @@ export class AgentCoreBridge {
 	private memoryViewerPortConfig: number = 3200;
 	private subagents: SubagentCoordinator;
 	private repositoryMap?: RepositoryMap;
+	private activeRepositoryQuery?: string;
 	private runtimeRetry?: string;
 	private runtimeRepair?: string;
 	private readonly activeRuntimeSubagents = new Set<string>();
@@ -841,9 +842,11 @@ export class AgentCoreBridge {
 			// Reuse one harness across messages so conversation history (and thus
 			// "continue" / "go on" follow-ups) persists. Created lazily once.
 			const harness = this.ensureHarness();
+			this.activeRepositoryQuery = undefined;
 			const repositoryContext = this.repositoryMap?.render(message);
 			if (repositoryContext && typeof harness.setSystemPrompt === "function") {
 				persistentSystemPrompt = this.config.systemPrompt;
+				this.activeRepositoryQuery = message;
 				turnSystemPrompt = `${persistentSystemPrompt}\n\n${repositoryContext}`;
 				harness.setSystemPrompt(turnSystemPrompt);
 			}
@@ -886,8 +889,8 @@ export class AgentCoreBridge {
 					.filter(Boolean)
 					.join("\n\nProposed answer:\n");
 				if (advisory) {
-					persistentSystemPrompt = this.config.systemPrompt;
-					turnSystemPrompt = `${persistentSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
+					persistentSystemPrompt ??= this.config.systemPrompt;
+					turnSystemPrompt = `${turnSystemPrompt}\n\nA structured reasoner produced the following advisory analysis for this turn. Verify it, use tools as needed, and do not mention this internal advisory unless useful:\n\n${advisory}`;
 					harness.setSystemPrompt(turnSystemPrompt);
 				}
 			}
@@ -1001,16 +1004,22 @@ export class AgentCoreBridge {
 		let turnSucceeded = false;
 		try {
 			this.skillActivation.continueWith(activations);
-			if (activations.length) {
+			const dynamicContext = [
+				this.activeRepositoryQuery
+					? this.repositoryMap?.render(this.activeRepositoryQuery)
+					: undefined,
+				activations.length ? formatActivatedSkills(activations) : undefined,
+			].filter((value): value is string => Boolean(value));
+			if (dynamicContext.length)
 				harness.setSystemPrompt(
-					`${originalPrompt}\n\n${formatActivatedSkills(activations)}`,
+					`${originalPrompt}\n\n${dynamicContext.join("\n\n")}`,
 				);
-			}
 			this.emit({ type: "turn_start", turnId });
 			await harness.continueWithNextTurn();
 			turnSucceeded = true;
 		} finally {
-			if (activations.length) harness.setSystemPrompt(originalPrompt);
+			if (activations.length || this.activeRepositoryQuery)
+				harness.setSystemPrompt(originalPrompt);
 			this.running = false;
 			this.publishContextUsage();
 			this.emit({ type: "turn_end", turnId });
@@ -2243,7 +2252,7 @@ export class AgentCoreBridge {
 		// actual provider payload instead of presenting task state as a side panel.
 		if (
 			this.currentTaskState &&
-			hasMeaningfulTaskState(this.currentTaskState)
+			shouldProjectTaskState(this.currentTaskState)
 		) {
 			lines.push("[SYSTEM]", formatTaskStateContext(this.currentTaskState), "");
 		}

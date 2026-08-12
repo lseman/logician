@@ -575,6 +575,7 @@ export class AgentHarness {
 						maxIterations: this.maxIterations,
 						outputGuard: this.outputGuard,
 						extensionBus: this._extensionBus,
+						initialTaskState: this.runState.snapshot()?.taskState,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
 						onContextCompacted: messages => {

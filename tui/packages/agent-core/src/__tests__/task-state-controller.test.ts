@@ -1,6 +1,8 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
+	formatTaskStateContext,
+	shouldProjectTaskState,
 	TaskStateController,
 	taskObjectiveFromMessages,
 } from "../agent/tasks/task-state-controller.ts";
@@ -13,6 +15,57 @@ function call(name: string, args: Record<string, unknown>): ToolCall {
 function result(content: string): Message {
 	return { role: "tool", content };
 }
+
+void test("provider projection omits trivial and terminal durable state", () => {
+	const controller = new TaskStateController("hi");
+	assert.equal(shouldProjectTaskState(controller.snapshot()), false);
+	assert.equal(formatTaskStateContext(controller.snapshot()), "");
+
+	controller.recordToolBatch(
+		[call("task_status", { status: "done" })],
+		[result("Recorded: done — No active tasks — ready for work.")],
+		1,
+	);
+	controller.markHandoff();
+	assert.equal(shouldProjectTaskState(controller.snapshot()), false);
+	assert.equal(formatTaskStateContext(controller.snapshot()), "");
+});
+
+void test("provider projection is bounded and includes only decision-relevant state", () => {
+	const controller = new TaskStateController("Fix authentication retries");
+	controller.recordToolBatch(
+		[call("edit_file", { path: "src/auth.ts" })],
+		[result("Updated retry cap")],
+		1,
+	);
+	controller.recordToolBatch(
+		[call("bash", { command: "bun test auth.test.ts" })],
+		[result("4 pass")],
+		2,
+	);
+	const context = formatTaskStateContext(controller.snapshot());
+	assert.match(context, /phase: verify/);
+	assert.match(context, /changed_files: src\/auth\.ts/);
+	assert.match(context, /verification: pass bun test auth\.test\.ts/);
+	assert.doesNotMatch(context, /progress:/);
+	assert.doesNotMatch(context, /blockers: none/);
+	assert.doesNotMatch(context, /recent_evidence:\n- none/);
+});
+
+void test("restored controller resumes a durable active checkpoint", () => {
+	const original = new TaskStateController("Fix retries");
+	original.recordToolBatch(
+		[call("edit_file", { path: "src/retry.ts" })],
+		[result("Updated retry policy")],
+		1,
+	);
+	const checkpoint = original.snapshot();
+	const restored = new TaskStateController("ignored continuation", checkpoint);
+	checkpoint.changedFiles.push("mutated-outside.ts");
+	assert.equal(restored.snapshot().phase, "implement");
+	assert.deepEqual(restored.snapshot().changedFiles, ["src/retry.ts"]);
+	assert.match(restored.toContext(), /objective: Fix retries/);
+});
 
 void test("task state advances through investigation, implementation, and verification", () => {
 	const controller = new TaskStateController(
