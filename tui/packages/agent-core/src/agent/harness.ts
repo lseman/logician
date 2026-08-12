@@ -139,6 +139,24 @@ function trajectoryEventPayload(event: AgentEvent): Record<string, unknown> {
 	return payload;
 }
 
+// Streaming events are presentation updates, not durable state transitions.
+// Persisting each token/partial tool result makes the append-only projection grow
+// quadratically (snapshot cloning) and, more importantly, fsyncs on the UI thread.
+// Boundary events retain everything needed for replay, diagnostics, and evals.
+const EPHEMERAL_AGENT_EVENTS = new Set<AgentEvent["type"]>([
+	"text_delta",
+	"thinking_delta",
+	"tool_call_delta",
+	"tool_execution_update",
+	"message_update",
+	"context_update",
+	"phase",
+]);
+
+function isDurableAgentEvent(event: AgentEvent): boolean {
+	return !EPHEMERAL_AGENT_EVENTS.has(event.type);
+}
+
 export type { AgentRuntimeState, HarnessPhase } from "./runtime-state.ts";
 export type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 
@@ -279,6 +297,11 @@ export class AgentHarness {
 	get durableRunState(): RunKernelState | undefined {
 		const state = this.runKernel.snapshot().state;
 		return state.taskId ? state : undefined;
+	}
+
+	get durableRunStatus() {
+		const status = this.runKernel.status();
+		return status.taskId ? status : undefined;
 	}
 
 	get durableRunBudget() {
@@ -1084,18 +1107,20 @@ export class AgentHarness {
 
 	private async handleAgentEvent(event: AgentEvent): Promise<void> {
 		this.reduceRuntimeEvent(event);
-		const runId = this.runKernel.snapshot().state.runId;
-		if (runId && this._activeOperationId) {
-			this.runKernel.recordTrajectory(
-				"agent_event",
-				this._activeOperationId,
-				trajectoryEventPayload(event),
-				runId,
-			);
+		if (this._activeOperationId && isDurableAgentEvent(event)) {
+			const runId = this.runKernel.snapshot().state.runId;
+			if (runId) {
+				this.runKernel.recordTrajectory(
+					"agent_event",
+					this._activeOperationId,
+					trajectoryEventPayload(event),
+					runId,
+				);
+			}
 		}
 		if (
 			event.type === "subagent_start" ||
-			event.type === "subagent_event" ||
+			(event.type === "subagent_event" && isDurableAgentEvent(event.event)) ||
 			event.type === "subagent_end"
 		) {
 			const state = this.runKernel.snapshot().state;

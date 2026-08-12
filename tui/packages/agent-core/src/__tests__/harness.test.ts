@@ -496,6 +496,40 @@ void test("harness records run state and trajectory in the unified kernel ledger
 	);
 });
 
+void test("streaming deltas stay live without entering the durable ledger", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-stream-"));
+	const sessionId = "stream-session";
+	const chunks = 250;
+	const backend = new FakeBackend([
+		(_messages, options) => {
+			options.callbacks?.onTextStart?.();
+			for (let index = 0; index < chunks; index++)
+				options.callbacks?.onDelta?.("x");
+			options.callbacks?.onTextEnd?.();
+			return textResponse("x".repeat(chunks));
+		},
+	]);
+	const harness = makeHarness(backend, cwd);
+	harness.setSessionId(sessionId);
+	let observedDeltas = 0;
+	harness.subscribe(event => {
+		if (event.type === "text_delta") observedDeltas++;
+	});
+
+	await harness.prompt("stream");
+
+	assert.equal(observedDeltas, chunks);
+	const trajectory = new RunKernel(cwd, sessionId).snapshot().state.trajectory;
+	assert.equal(
+		trajectory.filter(
+			entry =>
+				entry.kind === "agent_event" && entry.payload.type === "text_delta",
+		).length,
+		0,
+	);
+	assert.ok(trajectory.length < 30, "stream telemetry must remain bounded");
+});
+
 void test("provider budget remains exhausted across native continuation runs", async () => {
 	const cwd = mkdtempSync(join(tmpdir(), "logician-kernel-budget-"));
 	let backendCalls = 0;

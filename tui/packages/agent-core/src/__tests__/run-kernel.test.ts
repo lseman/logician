@@ -26,6 +26,28 @@ void test("kernel journal persists and deterministically restores its projection
 	assert.deepEqual(restored.violations, []);
 });
 
+void test("latency-sensitive status reads exclude trajectory payloads", () => {
+	const cwd = mkdtempSync(path.join(tmpdir(), "logician-kernel-status-"));
+	const kernel = new RunKernel(cwd, "session-status");
+	const ids = { taskId: "task-status", runId: "run-status", leaseEpoch: 1 };
+	kernel.append(
+		{ type: "task_started", rootPrompt: "stream", createdAt: 10 },
+		ids,
+	);
+	kernel.recordTrajectory(
+		"agent_event",
+		"operation-status",
+		{ type: "turn_start", large: "x".repeat(10_000) },
+		ids.runId,
+	);
+
+	const status = kernel.status();
+	assert.equal(status.taskId, ids.taskId);
+	assert.equal(status.status, "active");
+	assert.equal("trajectory" in status, false);
+	assert.ok(kernel.budgetStatus());
+});
+
 void test("doctor reports a torn tail and recovery semantics for orphaned effects", () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-doctor-"));
 	const kernel = new RunKernel(cwd, "session-b");

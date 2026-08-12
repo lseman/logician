@@ -36,6 +36,13 @@ export interface RunBudgetStatus {
 	timeRemainingMs: number;
 }
 
+export interface RunKernelStatus {
+	taskId?: string;
+	status: RunKernelReduction["state"]["status"];
+	taskState?: ExplicitTaskState;
+	compactionGeneration: number;
+}
+
 export type ContinuationDecision =
 	| { action: "continue"; state: RunKernelReduction["state"] }
 	| { action: "pause"; reason: string; state: RunKernelReduction["state"] };
@@ -137,6 +144,18 @@ export class RunKernel {
 		return structuredClone(this.reduction);
 	}
 
+	/** Lightweight projection for latency-sensitive UI updates. */
+	status(): RunKernelStatus {
+		this.refreshIfChanged();
+		const state = this.reduction.state;
+		return {
+			taskId: state.taskId,
+			status: state.status,
+			taskState: state.taskState ? structuredClone(state.taskState) : undefined,
+			compactionGeneration: state.compactionGeneration,
+		};
+	}
+
 	loadEvents(): RunEventEnvelope[] {
 		return this.read().events;
 	}
@@ -227,7 +246,8 @@ export class RunKernel {
 	}
 
 	budgetStatus(now = Date.now()): RunBudgetStatus | undefined {
-		const state = this.snapshot().state;
+		this.refreshIfChanged();
+		const state = this.reduction.state;
 		if (!state.taskId || state.createdAt === undefined) return undefined;
 		const elapsedMs = Math.max(0, now - state.createdAt);
 		return {
