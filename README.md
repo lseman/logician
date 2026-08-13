@@ -180,6 +180,7 @@ flowchart LR
 | `@logician/memory` | SQLite-backed observations, semantic episodes, consolidation, and task-aware recall |
 | `@logician/rag` | Document ingestion, chunking, hybrid retrieval, reranking, and context assembly |
 | `@logician/autoresearch` | Bounded experiment loops with measurement and keep-or-discard decisions |
+| `@logician/agent-eval` | Versioned coding-task corpora, independent graders, trials, and quality reports |
 
 The core flow is deliberately simple:
 

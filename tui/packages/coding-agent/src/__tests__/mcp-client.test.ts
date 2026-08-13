@@ -2,11 +2,30 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import {
 	allocateMcpToolName,
+	buildMcpProcessEnv,
 	createMcpTool,
 	encodeMcpMessage,
 	formatMcpToolResult,
 	tryDecodeMcpMessage,
 } from "../mcp/client.ts";
+
+void test("stdio MCP environment exposes credentials only when configured", () => {
+	const parent = {
+		PATH: "/bin",
+		HOME: "/home/test",
+		AWS_SECRET_ACCESS_KEY: "secret",
+		EXPLICIT_TOKEN: "token",
+	};
+	const minimal = buildMcpProcessEnv({}, parent);
+	assert.equal(minimal.PATH, "/bin");
+	assert.equal(minimal.HOME, "/home/test");
+	assert.equal(minimal.AWS_SECRET_ACCESS_KEY, undefined);
+	const configured = buildMcpProcessEnv(
+		{ MCP_TOKEN: "$" + "{EXPLICIT_TOKEN}" },
+		parent,
+	);
+	assert.equal(configured.MCP_TOKEN, "token");
+});
 
 void test("MCP tools expose concise names and retain qualified hook aliases", () => {
 	const client = {

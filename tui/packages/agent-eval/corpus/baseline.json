@@ -1,0 +1,111 @@
+{
+	"schemaVersion": 1,
+	"name": "logician-baseline-v1",
+	"tasks": [
+		{
+			"schemaVersion": 1,
+			"id": "calculator-quantity-bug",
+			"title": "Fix quantity-aware totals",
+			"kind": "bugfix",
+			"prompt": "Fix the failing calculator behavior. Preserve the public API, make the smallest appropriate change, and run the tests before finishing.",
+			"fixture": {
+				"repository": "tui/packages/agent-eval/fixtures/calculator-bug",
+				"revision": "sha256:7dcb234a1498a367d1ec8658ec86c49fdd13a6e430efe11efaa52d206af1c40b"
+			},
+			"agent": {
+				"command": "bun",
+				"args": ["run", "{logicianEntry}", "exec", "--jsonl"],
+				"timeoutMs": 180000
+			},
+			"graders": [
+				{
+					"id": "tests",
+					"type": "command",
+					"command": "bun",
+					"args": ["test"],
+					"timeoutMs": 30000
+				},
+				{
+					"id": "scope",
+					"type": "diff_scope",
+					"baseRef": "HEAD",
+					"allowedPaths": ["src/calculator.ts"],
+					"maxChangedFiles": 1
+				}
+			],
+			"tags": ["baseline", "bugfix", "short"]
+		},
+		{
+			"schemaVersion": 1,
+			"id": "slug-feature",
+			"title": "Implement robust slug generation",
+			"kind": "feature",
+			"prompt": "Implement slugify to satisfy the supplied contract and tests. Keep the existing public types, avoid dependencies, and verify the result.",
+			"fixture": {
+				"repository": "tui/packages/agent-eval/fixtures/slug-feature",
+				"revision": "sha256:8e62e0dee60555859f4754eaf5acc2b9d2cd42ad08ed9e6fbffb1af896cce4e3"
+			},
+			"agent": {
+				"command": "bun",
+				"args": ["run", "{logicianEntry}", "exec", "--jsonl"],
+				"timeoutMs": 180000
+			},
+			"graders": [
+				{
+					"id": "tests",
+					"type": "command",
+					"command": "bun",
+					"args": ["test"],
+					"timeoutMs": 30000
+				},
+				{
+					"id": "scope",
+					"type": "diff_scope",
+					"baseRef": "HEAD",
+					"allowedPaths": ["src/slug.ts"],
+					"maxChangedFiles": 1
+				}
+			],
+			"tags": ["baseline", "feature", "short"]
+		},
+		{
+			"schemaVersion": 1,
+			"id": "config-parser-refactor",
+			"title": "Unify duplicated configuration parsing",
+			"kind": "refactor",
+			"prompt": "Refactor the duplicated configuration readers into one shared parsing path while preserving both exported functions. Fix the inconsistent validation exposed by the tests and verify the result.",
+			"fixture": {
+				"repository": "tui/packages/agent-eval/fixtures/config-refactor",
+				"revision": "sha256:2252f1dad4a3208c68478fd1ad09e299355377ac297ab720ac74a5ea37fe6502"
+			},
+			"agent": {
+				"command": "bun",
+				"args": ["run", "{logicianEntry}", "exec", "--jsonl"],
+				"timeoutMs": 180000
+			},
+			"graders": [
+				{
+					"id": "tests",
+					"type": "command",
+					"command": "bun",
+					"args": ["test"],
+					"timeoutMs": 30000
+				},
+				{
+					"id": "shared-parser",
+					"type": "file_contains",
+					"path": "src/config.ts",
+					"pattern": "function parse"
+				},
+				{
+					"id": "scope",
+					"type": "diff_scope",
+					"baseRef": "HEAD",
+					"allowedPaths": ["src/config.ts"],
+					"maxChangedFiles": 1
+				}
+			],
+			"tags": ["baseline", "refactor", "short"]
+		}
+	]
+}

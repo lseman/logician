@@ -35,10 +35,9 @@ void test("sandbox tool requires a command parameter", () => {
 	assert.ok(required.includes("command"));
 });
 
-void test("sandbox tool exposes the full profile enum", () => {
+void test("sandbox profile is not model-controlled", () => {
 	const props = sandbox.parameters.properties as Record<string, unknown>;
-	const profileProp = props.profile as { enum: string[] };
-	assert.deepEqual(profileProp.enum, ["none", "code", "full"]);
+	assert.equal(props.profile, undefined);
 });
 
 void test("sandbox tool has a timeout parameter", () => {

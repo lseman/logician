@@ -1,0 +1,369 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-13T11:59:17.264Z",
+  "trials": [
+    {
+      "schemaVersion": 1,
+      "taskId": "calculator-quantity-bug",
+      "trialId": "fa582e57-1c1c-40b2-8898-03fcdcf8e386",
+      "startedAt": "2026-08-13T11:56:14.459Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/calculator-quantity-bug-1",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 8,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\ncalculator.test.ts:\n(pass) totals quantities and applies a percentage discount [0.18ms]\n(pass) does not mutate input [0.04ms]\n\n 2 pass\n 0 fail\n 2 expect() calls\nRan 2 tests across 1 file. [6.00ms]"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/calculator.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 8374,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 9,
+        "contextTokens": 63151,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/calculator-quantity-bug-fa582e57-1c1c-40b2-8898-03fcdcf8e386.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "calculator-quantity-bug",
+      "trialId": "be5d7630-dbee-45b1-bae9-8095fab7a653",
+      "startedAt": "2026-08-13T11:56:22.838Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/calculator-quantity-bug-2",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 8,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\ncalculator.test.ts:\n(pass) totals quantities and applies a percentage discount [0.15ms]\n(pass) does not mutate input [0.03ms]\n\n 2 pass\n 0 fail\n 2 expect() calls\nRan 2 tests across 1 file. [6.00ms]"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/calculator.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 40367,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 13,
+        "contextTokens": 63353,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/calculator-quantity-bug-be5d7630-dbee-45b1-bae9-8095fab7a653.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "calculator-quantity-bug",
+      "trialId": "2d6d7a4c-c9dc-4dea-9338-ec5d878875c8",
+      "startedAt": "2026-08-13T11:57:03.209Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/calculator-quantity-bug-3",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 9,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\ncalculator.test.ts:\n(pass) totals quantities and applies a percentage discount [0.18ms]\n(pass) does not mutate input [0.04ms]\n\n 2 pass\n 0 fail\n 2 expect() calls\nRan 2 tests across 1 file. [7.00ms]"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/calculator.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 16926,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 9,
+        "contextTokens": 63236,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/calculator-quantity-bug-2d6d7a4c-c9dc-4dea-9338-ec5d878875c8.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "slug-feature",
+      "trialId": "0ae269c7-5286-45bc-b81d-89b7503eba5a",
+      "startedAt": "2026-08-13T11:57:20.144Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/slug-feature-1",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 10,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\nslug.test.ts:\n(pass) normalizes words and punctuation [0.17ms]\n(pass) folds diacritics and collapses separators [0.08ms]\n(pass) truncates at a word boundary without a trailing dash [0.03ms]\n(pass) returns an empty slug for punctuation-only input [0.01ms]\n\n 4 pass\n 0 fail\n 4 expect() calls\nRan 4 tests across 1 file. [7.00ms]"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/slug.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 27072,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 14,
+        "contextTokens": 56827,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/slug-feature-0ae269c7-5286-45bc-b81d-89b7503eba5a.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "slug-feature",
+      "trialId": "d934c972-7bc0-4d58-9593-46b115970139",
+      "startedAt": "2026-08-13T11:57:47.227Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/slug-feature-2",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 9,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\nslug.test.ts:\n(pass) normalizes words and punctuation [0.19ms]\n(pass) folds diacritics and collapses separators [0.04ms]\n(pass) truncates at a word boundary without a trailing dash [0.02ms]\n(pass) returns an empty slug for punctuation-only input\n\n 4 pass\n 0 fail\n 4 expect() calls\nRan 4 tests across 1 file. [7.00ms]"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/slug.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 17595,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 11,
+        "contextTokens": 55744,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/slug-feature-d934c972-7bc0-4d58-9593-46b115970139.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "slug-feature",
+      "trialId": "71739db0-87dc-45fe-9fb8-48fe87210ca4",
+      "startedAt": "2026-08-13T11:58:04.831Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/slug-feature-3",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 9,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\nslug.test.ts:\n(pass) normalizes words and punctuation [0.16ms]\n(pass) folds diacritics and collapses separators [0.03ms]\n(pass) truncates at a word boundary without a trailing dash [0.02ms]\n(pass) returns an empty slug for punctuation-only input\n\n 4 pass\n 0 fail\n 4 expect() calls\nRan 4 tests across 1 file. [7.00ms]"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/slug.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 16537,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 10,
+        "contextTokens": 53823,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/slug-feature-71739db0-87dc-45fe-9fb8-48fe87210ca4.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "config-parser-refactor",
+      "trialId": "61f9517e-9c0b-4215-af53-b2da2fc3e477",
+      "startedAt": "2026-08-13T11:58:21.374Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/config-parser-refactor-1",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 10,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\nconfig.test.ts:\n(pass) readConfig supplies defaults [0.12ms]\n(pass) readConfig trims and parses values [0.02ms]\n(pass) readConfig rejects invalid booleans [0.04ms]\n(pass) readWorkerConfig supplies defaults\n(pass) readWorkerConfig trims and parses values\n(pass) readWorkerConfig rejects invalid booleans\n\n 6 pass\n 0 fail\n 6 expect() calls\nRan 6 tests across 1 file. [7.00ms]"
+        },
+        {
+          "id": "shared-parser",
+          "type": "file_contains",
+          "passed": true,
+          "durationMs": 0,
+          "summary": "pattern found",
+          "evidence": "src/config.ts"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/config.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 17511,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 11,
+        "contextTokens": 55147,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/config-parser-refactor-61f9517e-9c0b-4215-af53-b2da2fc3e477.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "config-parser-refactor",
+      "trialId": "a2bebbe3-45bb-4932-9dbc-c5f439f76843",
+      "startedAt": "2026-08-13T11:58:38.896Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/config-parser-refactor-2",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 8,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\nconfig.test.ts:\n(pass) readConfig supplies defaults [0.09ms]\n(pass) readConfig trims and parses values [0.02ms]\n(pass) readConfig rejects invalid booleans [0.03ms]\n(pass) readWorkerConfig supplies defaults\n(pass) readWorkerConfig trims and parses values\n(pass) readWorkerConfig rejects invalid booleans\n\n 6 pass\n 0 fail\n 6 expect() calls\nRan 6 tests across 1 file. [6.00ms]"
+        },
+        {
+          "id": "shared-parser",
+          "type": "file_contains",
+          "passed": true,
+          "durationMs": 0,
+          "summary": "pattern found",
+          "evidence": "src/config.ts"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/config.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 17980,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 12,
+        "contextTokens": 55057,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/config-parser-refactor-a2bebbe3-45bb-4932-9dbc-c5f439f76843.jsonl"
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "config-parser-refactor",
+      "trialId": "3b6e15a3-f802-4317-a541-d33f6e5d3ca4",
+      "startedAt": "2026-08-13T11:58:56.881Z",
+      "workspace": "/home/seman/logician/outputs/agent-eval-workspaces/config-parser-refactor-3",
+      "agentDeclaredComplete": true,
+      "environmentGradedPass": true,
+      "graders": [
+        {
+          "id": "tests",
+          "type": "command",
+          "passed": true,
+          "durationMs": 10,
+          "summary": "exit 0",
+          "evidence": "bun test v1.3.14-canary.1 (0d9b296a)\n\nconfig.test.ts:\n(pass) readConfig supplies defaults [0.15ms]\n(pass) readConfig trims and parses values [0.02ms]\n(pass) readConfig rejects invalid booleans [0.04ms]\n(pass) readWorkerConfig supplies defaults [0.01ms]\n(pass) readWorkerConfig trims and parses values\n(pass) readWorkerConfig rejects invalid booleans\n\n 6 pass\n 0 fail\n 6 expect() calls\nRan 6 tests across 1 file. [7.00ms]"
+        },
+        {
+          "id": "shared-parser",
+          "type": "file_contains",
+          "passed": true,
+          "durationMs": 0,
+          "summary": "pattern found",
+          "evidence": "src/config.ts"
+        },
+        {
+          "id": "scope",
+          "type": "diff_scope",
+          "passed": true,
+          "durationMs": 1,
+          "summary": "1 changed file(s) in scope",
+          "evidence": "src/config.ts"
+        }
+      ],
+      "metrics": {
+        "durationMs": 20381,
+        "exitCode": 0,
+        "timedOut": false,
+        "changedFiles": 1,
+        "toolCalls": 11,
+        "contextTokens": 57162,
+        "model": "default-model"
+      },
+      "trajectoryPath": "/home/seman/logician/outputs/agent-eval-baseline-2026-08-13.artifacts/config-parser-refactor-3b6e15a3-f802-4317-a541-d33f6e5d3ca4.jsonl"
+    }
+  ],
+  "summary": {
+    "passed": 9,
+    "failed": 0,
+    "passRate": 1,
+    "medianDurationMs": 17595
+  }
+}

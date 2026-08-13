@@ -1,0 +1,24 @@
+{
+	"name": "@logician/agent-eval",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Outcome-grounded evaluation runner and reports for Logician agent trials",
+	"type": "module",
+	"main": "src/index.ts",
+	"bin": {
+		"logician-eval": "src/cli.ts"
+	},
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"eval:smoke": "bun run src/cli.ts validate corpus/smoke.json",
+		"test": "bun test src",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.14",
+		"@types/node": "^22.0.0",
+		"typescript": "^6.0.3"
+	}
+}

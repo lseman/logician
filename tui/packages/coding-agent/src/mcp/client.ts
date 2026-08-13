@@ -31,6 +31,31 @@ export interface McpServerConfig {
 	timeout?: number;
 }
 
+const MCP_BASE_ENV_KEYS = [
+	"PATH",
+	"HOME",
+	"USERPROFILE",
+	"TMPDIR",
+	"TMP",
+	"TEMP",
+	"LANG",
+	"LC_ALL",
+	"SYSTEMROOT",
+	"COMSPEC",
+] as const;
+
+/** Build a minimal child environment; credentials require explicit config. */
+export function buildMcpProcessEnv(
+	configured: Record<string, string> = {},
+	parent: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const key of MCP_BASE_ENV_KEYS) {
+		if (parent[key] !== undefined) env[key] = parent[key];
+	}
+	return { ...env, ...expandEnvMap(configured, parent) };
+}
+
 export interface McpToolDefinition {
 	name: string;
 	title?: string;
@@ -74,7 +99,7 @@ class StdioMcpClient implements McpClient {
 		}
 		this.proc = spawn(this.config.command, this.config.args || [], {
 			cwd: this.config.cwd ? resolve(this.cwd, this.config.cwd) : this.cwd,
-			env: { ...process.env, ...expandEnvMap(this.config.env || {}) },
+			env: buildMcpProcessEnv(this.config.env || {}),
 			stdio: "pipe",
 		});
 		this.proc.stdout.on("data", chunk => this.handleStdout(chunk));
@@ -500,12 +525,15 @@ function unwrapEnvelope(
 		: {};
 }
 
-function expandEnvMap(values: Record<string, string>): Record<string, string> {
+function expandEnvMap(
+	values: Record<string, string>,
+	parent: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
 	const expanded: Record<string, string> = {};
 	for (const [key, value] of Object.entries(values)) {
 		expanded[key] = value.replace(
 			/\$\{([A-Z0-9_]+)\}/gi,
-			(_, name: string) => process.env[name] || "",
+			(_, name: string) => parent[name] || "",
 		);
 	}
 	return expanded;

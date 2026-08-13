@@ -1,7 +1,11 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { sandbox } from "../tools/sandbox.ts";
+import {
+	getDefaultSandboxProfile,
+	sandbox,
+	setDefaultSandboxProfile,
+} from "../tools/sandbox.ts";
 
 const bwrapAvailable =
 	process.platform === "linux" &&
@@ -28,3 +32,21 @@ void bwrapTest(
 		}
 	},
 );
+
+void test("model arguments cannot weaken the user-controlled sandbox profile", async () => {
+	const previous = getDefaultSandboxProfile();
+	setDefaultSandboxProfile("code");
+	try {
+		const result = await sandbox.execute(
+			{ command: "printf should-not-run-unsandboxed", profile: "none" },
+			{ cwd: process.cwd() },
+		);
+		assert.equal(typeof result, "object");
+		if (typeof result === "object") {
+			assert.equal(result.details?.profile, "code");
+			if (!bwrapAvailable) assert.equal(result.isError, true);
+		}
+	} finally {
+		setDefaultSandboxProfile(previous);
+	}
+});

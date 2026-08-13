@@ -5,7 +5,7 @@ description: High-level architecture of the Logician system.
 
 # System Overview
 
-Logician is built on four core packages that form a layered architecture.
+Logician is built as seven focused packages that form a layered architecture.
 
 ## Package layers
 
@@ -23,10 +23,14 @@ graph LR
   subgraph "Capabilities"
     D[Agent Capabilities Package]
   end
+	F[Memory and RAG]
+	G[Autoresearch and Agent Eval]
 
   A --> B
   B --> C
   B --> D
+	B --> F
+	D --> G
   C --> E[LLM Backend]
   D --> E
 ```
@@ -78,6 +82,17 @@ The presentation layer. Handles:
 - Streaming output
 - State management
 - Layout and theming
+
+### memory and rag
+
+Workspace-scoped durable memory and document/repository retrieval, with hybrid
+ranking, provenance, context budgets, and component evaluation.
+
+### autoresearch and agent-eval
+
+Measured experiment loops and independently graded coding-task trials. Agent
+evaluation treats repository state and executable checks as authoritative; an
+agent's own completion claim is retained only as diagnostic evidence.
 
 ## Data flow
 
