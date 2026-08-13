@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"name": "logician-eval-smoke",
+	"tasks": [
+		{
+			"schemaVersion": 1,
+			"id": "docs-architecture-consistency",
+			"title": "Keep architecture documentation consistent",
+			"kind": "docs",
+			"prompt": "Inspect the architecture documentation and correct package-layer drift without changing runtime code.",
+			"fixture": { "repository": "logician", "revision": "HEAD" },
+			"agent": { "command": "true", "args": [] },
+			"graders": [
+				{
+					"id": "readme-names-run-kernel",
+					"type": "file_contains",
+					"path": "README.md",
+					"pattern": "Run Kernel"
+				},
+				{
+					"id": "docs-name-memory",
+					"type": "file_contains",
+					"path": "docs/architecture/overview.md",
+					"pattern": "memory"
+				}
+			],
+			"tags": ["smoke", "docs"]
+		}
+	]
+}

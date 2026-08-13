@@ -1,6 +1,6 @@
 // ── sandbox tool ────────────────────────────────────────────────────────────────
 // Execute commands inside a Bubblewrap-isolated sandbox (Linux only).
-// Falls back to regular bash execution on non-Linux or when bwrap is unavailable.
+// Fails closed when isolation is requested but Bubblewrap is unavailable.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -30,8 +30,8 @@ export interface SandboxDetails {
 export type SandboxProfile = "none" | "code" | "full";
 
 // ── Session default profile ─────────────────────────────────────────────────
-// Applied when a tool call omits `profile`. Cycled by the UI (Ctrl+K); a
-// model-supplied `profile` argument always overrides this.
+// Cycled by the UI (Ctrl+K). Tool arguments cannot weaken this user-controlled
+// policy.
 let _defaultProfile: SandboxProfile = "code";
 
 export function getDefaultSandboxProfile(): SandboxProfile {
@@ -115,6 +115,8 @@ function buildBwrapCommand(
 	if (profile === "full") {
 		cmd.push("--unshare-all");
 		cmd.push("--die-with-parent");
+	} else if (profile === "code") {
+		cmd.push("--unshare-net");
 	}
 
 	// Session + no new privileges
@@ -168,15 +170,19 @@ async function executeSandboxed(
 ): Promise<SandboxRunResult> {
 	const bwrap = detectBwrap();
 
-	if (!bwrap.available) {
-		// Fallback: execute normally without sandbox
+	if (!bwrap.available || !bwrap.path) {
+		if (profile === "none") {
+			return {
+				...(await executeFallback(command, cwd, timeout, ctx)),
+				details: { bwrapAvailable: false, bwrapPath: bwrap.path, profile },
+			};
+		}
 		return {
-			...((await executeFallback(
-				command,
-				cwd,
-				timeout,
-				ctx,
-			)) as unknown as Omit<SandboxRunResult, "details">),
+			content:
+				"Sandbox isolation is unavailable. Install Bubblewrap on Linux or explicitly select the user-controlled 'none' profile to run on the host.",
+			exitCode: null,
+			signal: null,
+			status: "failed",
 			details: {
 				bwrapAvailable: false,
 				bwrapPath: bwrap.path,
@@ -184,6 +190,7 @@ async function executeSandboxed(
 			},
 		};
 	}
+	const bwrapPath = bwrap.path;
 
 	const sandboxTmpdir = path.join(tmpdir(), `logician_sandbox_${Date.now()}`);
 	try {
@@ -209,7 +216,7 @@ async function executeSandboxed(
 		};
 
 		const result = await new Promise<SandboxRunResult>(resolve => {
-			const child = spawn(bwrap.path!, bwrapArgs, {
+			const child = spawn(bwrapPath, bwrapArgs, {
 				cwd,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: getShellEnv(cwd),
@@ -473,13 +480,6 @@ const sandboxSchema = {
 			type: "string",
 			description: "Shell command to execute inside the sandbox",
 		},
-		profile: {
-			type: "string",
-			enum: ["none", "code", "full"],
-			description:
-				"Sandbox isolation profile. 'code' = read-only host fs, writable /tmp, no network, no devices. 'full' = adds user namespace + mount namespace.",
-			default: "code",
-		},
 		timeout: {
 			type: "number",
 			description: "Timeout in seconds (default: 60)",
@@ -490,7 +490,6 @@ const sandboxSchema = {
 
 type SandboxArgs = {
 	command: string;
-	profile?: SandboxProfile;
 	timeout?: number;
 };
 
@@ -501,7 +500,7 @@ export const sandbox: Tool = {
 	executionMode: "sequential",
 	label: "Sandbox",
 	description:
-		"Execute a command inside a Bubblewrap-isolated sandbox. Linux-only; falls back to regular bash when bwrap is unavailable. " +
+		"Execute a command under the session's user-controlled sandbox policy. Isolation fails closed when Bubblewrap is unavailable. " +
 		"Profiles: none (no isolation), code (read-only host fs, writable /tmp, no network), full (code + namespaces). " +
 		`Output truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
 	promptSnippet:
@@ -530,8 +529,7 @@ export const sandbox: Tool = {
 			return "Error: command is required.";
 		}
 
-		const profile = (args.profile ??
-			getDefaultSandboxProfile()) as string as SandboxProfile;
+		const profile = getDefaultSandboxProfile();
 		const cwd = ctx.cwd || process.cwd();
 
 		// Validate cwd exists
@@ -568,6 +566,7 @@ export const sandbox: Tool = {
 
 		return {
 			content,
+			isError: result.status !== "completed",
 			details: result.details as unknown as Record<string, unknown>,
 		};
 	},

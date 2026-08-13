@@ -18,6 +18,7 @@
 		"format:check": "biome check --linter-enabled=false tui/packages/",
 		"bench:keystroke": "tsx tui/packages/tui/src/__tests__/benchmark-keystroke.ts",
 		"bench:latency": "tsx tui/packages/tui/src/__tests__/benchmark-latency.ts",
+		"eval:smoke": "bun run --filter @logician/agent-eval eval:smoke",
 		"test": "bun run --workspaces --if-present test",
 		"typecheck": "bun run --workspaces --if-present typecheck",
 		"ci": "bun run typecheck && bun run lint && bun run format:check && bun run test"

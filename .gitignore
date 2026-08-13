@@ -91,3 +91,6 @@ Untitled-*
 
 # Build artifacts
 tui/release/
+outputs/agent-eval-workspaces/
+outputs/agent-eval-*-pilot.json
+outputs/agent-eval-*-pilot.md
