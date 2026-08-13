@@ -212,6 +212,26 @@ export interface RawObservation {
 
 export type ClaimStatus = "tentative" | "verified" | "invalidated";
 export type ObservationTrust = "trusted_local" | "external" | "untrusted";
+export type ClaimLifecycle =
+	| "probationary"
+	| "durable"
+	| "contested"
+	| "stale"
+	| "superseded"
+	| "quarantined";
+
+/** Deterministic environment assertion that can invalidate only its owning claim. */
+export type ClaimValidityPredicate =
+	| { type: "file_hash"; path: string; sha256: string }
+	| { type: "git_revision"; revision: string }
+	| { type: "config_value"; path: string; key: string; sha256: string };
+
+export interface ClaimEvidenceCertificate {
+	extractorVersion: string;
+	schemaVersion: number;
+	evidenceEventIds: string[];
+	issuedAt: string;
+}
 
 /** An atomic claim derived from immutable turn evidence. */
 export interface ObservationClaim {
@@ -219,6 +239,7 @@ export interface ObservationClaim {
 	confidence: number;
 	status: ClaimStatus;
 	evidenceEventIds: string[];
+	validityPredicates?: ClaimValidityPredicate[];
 }
 
 /** Extraction lineage kept alongside an observation for later auditing. */
@@ -257,6 +278,9 @@ export interface MemoryClaim {
 	supersededByClaimId?: string;
 	tombstonedAt?: string;
 	evidenceEventIds: string[];
+	lifecycle: ClaimLifecycle;
+	validityPredicates: ClaimValidityPredicate[];
+	evidenceCertificate: ClaimEvidenceCertificate;
 }
 
 /** Synthetic compression: zero-LLM summary derived from raw observation. */
@@ -405,7 +429,41 @@ export interface RetrievalTrace {
 		type: ContextBlock["type"];
 		score: number;
 		reasons: string[];
+		tokens?: number;
+		shadow?: {
+			action: "inject" | "withhold";
+			score: number;
+			policyVersion: number;
+		};
 	}>;
+}
+
+export interface MemoryOutcomeReceipt {
+	id: string;
+	workspace: string;
+	retrievalTraceId: string;
+	taskId: string;
+	trialId?: string;
+	createdAt: string;
+	selectedIds: string[];
+	policyVersion: number;
+	outcome: {
+		environmentPassed: boolean;
+		corrected?: boolean;
+		reverted?: boolean;
+		unauthorizedSideEffect?: boolean;
+		tokens?: number;
+		durationMs?: number;
+	};
+	reward: number;
+}
+
+export interface ShadowMemoryPolicy {
+	version: number;
+	mode: "deterministic" | "shadow";
+	weights: number[];
+	samples: number;
+	updatedAt: string;
 }
 
 export type ExtractionJobStatus =
@@ -546,6 +604,18 @@ export interface MemoryStore {
 		query?: string | ContextRetrievalQuery,
 	): string;
 	listRetrievalTraces(limit?: number): RetrievalTrace[];
+	recordOutcomeReceipt(input: {
+		retrievalTraceId: string;
+		taskId: string;
+		trialId?: string;
+		outcome: MemoryOutcomeReceipt["outcome"];
+	}): MemoryOutcomeReceipt;
+	listOutcomeReceipts(limit?: number): MemoryOutcomeReceipt[];
+	promoteClaim(
+		claimId: string,
+		evidenceEventIds?: string[],
+	): MemoryClaim | null;
+	getShadowPolicy(): ShadowMemoryPolicy;
 	upsertEmbedding(
 		id: string,
 		kind: "observation" | "memory",

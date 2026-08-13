@@ -97,9 +97,9 @@ import {
 } from "../terminal/core.ts";
 import { runInPty, screenFromPtyResult } from "../testing/pty-harness.ts";
 
-const tuiRoot = path.resolve(import.meta.dirname, "../../../..");
+const repoRoot = path.resolve(import.meta.dirname, "../../../..");
 const bun = process.execPath;
-const entry = path.join(tuiRoot, "packages", "tui", "src", "index.ts");
+const entry = path.join(repoRoot, "apps", "tui", "src", "index.ts");
 void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async () => {
 	const home = mkdtempSync(path.join(tmpdir(), "logician-pty-home-"));
 	const themeDir = path.join(home, ".logician", "themes");
@@ -108,7 +108,7 @@ void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async
 	const result = await runInPty({
 		command: bun,
 		args: ["run", entry],
-		cwd: tuiRoot,
+		cwd: repoRoot,
 		env: {
 			HOME: home,
 			TERM: "xterm-256color",
@@ -151,7 +151,7 @@ void test("startup applies inference preferences without rewriting settings", as
 	await runInPty({
 		command: bun,
 		args: ["run", entry],
-		cwd: tuiRoot,
+		cwd: repoRoot,
 		env: {
 			HOME: home,
 			TERM: "xterm-256color",
@@ -205,7 +205,7 @@ void test("Ctrl+I changes and persists the execution profile", async () => {
 	const result = await runInPty({
 		command: bun,
 		args: ["run", entry],
-		cwd: tuiRoot,
+		cwd: repoRoot,
 		env: {
 			HOME: home,
 			TERM: "xterm-256color",
@@ -339,7 +339,7 @@ void test("TUI handles a Kitty Ctrl+O sequence without corrupting the render", a
 	const result = await runInPty({
 		command: bun,
 		args: ["run", entry],
-		cwd: tuiRoot,
+		cwd: repoRoot,
 		env: {
 			HOME: home,
 			TERM: "xterm-256color",

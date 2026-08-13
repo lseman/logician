@@ -9,8 +9,8 @@ initTheme("dark");
 void test("file mention popup fuzzy-matches by basename and renders count", () => {
 	const popup = new FileMentionPopup();
 	popup.setFiles([
-		"packages/tui/src/app/tui.ts",
-		"packages/tui/src/input/input-bar.ts",
+		"apps/tui/src/app/tui.ts",
+		"apps/tui/src/input/input-bar.ts",
 		"packages/agent-core/src/agent/agent-loop-runner.ts",
 		"README.md",
 	]);
@@ -18,7 +18,7 @@ void test("file mention popup fuzzy-matches by basename and renders count", () =
 	popup.show();
 	const rendered = popup.render(120).join("\n");
 	assert.match(rendered, /files.*\(1\)/);
-	assert.equal(popup.currentFile(), "packages/tui/src/app/tui.ts");
+	assert.equal(popup.currentFile(), "apps/tui/src/app/tui.ts");
 });
 
 void test("file mention popup windows long match lists with more-above/below", () => {
@@ -63,6 +63,6 @@ void test("input bar detects the active @-mention token at the cursor", () => {
 void test("input bar splices the accepted mention path into the active token", () => {
 	const bar = new InputBar();
 	bar.valueText = "check @tui";
-	bar.insertMention("packages/tui/src/app/tui.ts");
-	assert.equal(bar.valueText, "check @packages/tui/src/app/tui.ts ");
+	bar.insertMention("apps/tui/src/app/tui.ts");
+	assert.equal(bar.valueText, "check @apps/tui/src/app/tui.ts ");
 });

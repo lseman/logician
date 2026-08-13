@@ -4,6 +4,13 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, normalize, resolve } from "node:path";
+import {
+	initialShadowPolicy,
+	learnShadowPolicy,
+	policyFeatures,
+	shadowDecision,
+} from "../evolution/shadow-policy.js";
+import { predicatesAreValid } from "../evolution/validity.js";
 import { selectContextCandidates } from "../retrieval/context-selector.js";
 import type {
 	CompressedObservation,
@@ -21,6 +28,7 @@ import type {
 	ImportResult,
 	Memory,
 	MemoryClaim,
+	MemoryOutcomeReceipt,
 	MemoryQuery,
 	MemoryRelation,
 	MemoryRelationType,
@@ -36,6 +44,7 @@ import type {
 	SearchResult,
 	SemanticSearchResult,
 	Session,
+	ShadowMemoryPolicy,
 	WorkingMemoryTier,
 } from "../types.js";
 
@@ -450,6 +459,24 @@ function parseObservationClaims(value: unknown): ObservationClaim[] {
 				evidenceEventIds: claim.evidenceEventIds
 					.filter((id): id is string => typeof id === "string")
 					.slice(0, 12),
+				...(Array.isArray(claim.validityPredicates)
+					? {
+							validityPredicates: claim.validityPredicates
+								.filter(
+									(
+										item,
+									): item is NonNullable<
+										ObservationClaim["validityPredicates"]
+									>[number] =>
+										!!item &&
+										typeof item === "object" &&
+										["file_hash", "git_revision", "config_value"].includes(
+											(item as { type?: string }).type || "",
+										),
+								)
+								.slice(0, 8),
+						}
+					: {}),
 			},
 		];
 	});
@@ -636,6 +663,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       supersedes_claim_id TEXT,
       superseded_by_claim_id TEXT,
       tombstoned_at TEXT,
+	  lifecycle TEXT NOT NULL DEFAULT 'probationary',
+	  validity_predicates TEXT NOT NULL DEFAULT '[]',
+	  evidence_certificate TEXT NOT NULL DEFAULT '{}',
       FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE,
       FOREIGN KEY (supersedes_claim_id) REFERENCES claims(id),
       FOREIGN KEY (superseded_by_claim_id) REFERENCES claims(id)
@@ -689,6 +719,30 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	);
 	CREATE INDEX IF NOT EXISTS idx_retrieval_traces_workspace
 	  ON retrieval_traces(workspace, created_at DESC);
+
+	CREATE TABLE IF NOT EXISTS memory_outcome_receipts (
+	  id TEXT PRIMARY KEY,
+	  workspace TEXT NOT NULL,
+	  retrieval_trace_id TEXT NOT NULL,
+	  task_id TEXT NOT NULL,
+	  trial_id TEXT,
+	  created_at TEXT NOT NULL,
+	  selected_ids TEXT NOT NULL,
+	  policy_version INTEGER NOT NULL,
+	  outcome TEXT NOT NULL,
+	  reward REAL NOT NULL,
+	  FOREIGN KEY (retrieval_trace_id) REFERENCES retrieval_traces(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_memory_receipts_workspace
+	  ON memory_outcome_receipts(workspace, created_at DESC);
+	CREATE TABLE IF NOT EXISTS memory_policy_state (
+	  workspace TEXT PRIMARY KEY,
+	  version INTEGER NOT NULL,
+	  mode TEXT NOT NULL CHECK(mode IN ('deterministic', 'shadow')),
+	  weights TEXT NOT NULL,
+	  samples INTEGER NOT NULL,
+	  updated_at TEXT NOT NULL
+	);
   `);
 
 	// A process may exit after claiming but before acknowledging a job. Requeue
@@ -699,6 +753,17 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	).run();
 
 	// ── Schema migrations ──────────────────────────────────────────────────
+	for (const [column, definition] of [
+		["lifecycle", "TEXT NOT NULL DEFAULT 'probationary'"],
+		["validity_predicates", "TEXT NOT NULL DEFAULT '[]'"],
+		["evidence_certificate", "TEXT NOT NULL DEFAULT '{}'"],
+	] as const) {
+		const columns = db.prepare("PRAGMA table_info(claims)").all() as Array<{
+			name: string;
+		}>;
+		if (!columns.some(item => item.name === column))
+			db.exec(`ALTER TABLE claims ADD COLUMN ${column} ${definition}`);
+	}
 	// Add workspace columns to existing databases that were created before
 	// the workspace scoping feature.
 	for (const table of ["sessions", "observations", "memories"]) {
@@ -1206,8 +1271,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const insertClaim = db.prepare(`INSERT OR IGNORE INTO claims
       (id, workspace, observation_id, session_id, text, status, confidence,
        operation, valid_from, transaction_time, source, trust,
-	       extractor_version, schema_version, supersedes_claim_id, tombstoned_at)
-	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+	       extractor_version, schema_version, supersedes_claim_id, tombstoned_at,
+	       lifecycle, validity_predicates, evidence_certificate)
+	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 		const insertEvidence = db.prepare(`INSERT OR IGNORE INTO claim_evidence
       (claim_id, observation_id, evidence_event_id) VALUES (?, ?, ?)`);
 		const activeRows = db.prepare(`SELECT id, text, status, confidence, trust
@@ -1216,8 +1282,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	        AND superseded_by_claim_id IS NULL AND tombstoned_at IS NULL
 	      ORDER BY transaction_time DESC LIMIT 500`);
 		const closeClaim = db.prepare(`UPDATE claims
-	      SET valid_to = ?, superseded_by_claim_id = ?
+	      SET valid_to = ?, superseded_by_claim_id = ?, lifecycle = 'superseded'
 	      WHERE id = ? AND valid_to IS NULL AND superseded_by_claim_id IS NULL`);
+		const contestClaim = db.prepare(
+			"UPDATE claims SET lifecycle = 'contested' WHERE id = ? AND lifecycle != 'superseded'",
+		);
 		for (const [index, claim] of (observation.claims || []).entries()) {
 			const claimId = `${observation.id}:claim:${index}`;
 			const active = activeRows.all(workspace) as Array<{
@@ -1257,8 +1326,25 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 						claim.status === "invalidated" ? "INVALIDATE" : "SUPERSEDE";
 					supersedesClaimId = contradiction.id;
 					claimToClose = contradiction.id;
-				}
+				} else contestClaim.run(contradiction.id);
 			}
+			const lifecycle: MemoryClaim["lifecycle"] =
+				provenance.trust === "untrusted"
+					? "quarantined"
+					: claim.status === "invalidated"
+						? "stale"
+						: provenance.source === "deterministic" &&
+								claim.status === "verified"
+							? "durable"
+							: contradiction && !claimToClose
+								? "contested"
+								: "probationary";
+			const certificate = {
+				extractorVersion: provenance.extractorVersion,
+				schemaVersion: provenance.schemaVersion,
+				evidenceEventIds: claim.evidenceEventIds,
+				issuedAt: transactionTime,
+			};
 			insertClaim.run(
 				claimId,
 				workspace,
@@ -1276,6 +1362,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				provenance.schemaVersion,
 				supersedesClaimId || null,
 				tombstonedAt || null,
+				lifecycle,
+				JSON.stringify(claim.validityPredicates || []),
+				JSON.stringify(certificate),
 			);
 			if (claimToClose)
 				closeClaim.run(observation.timestamp, claimId, claimToClose);
@@ -1485,6 +1574,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		"SELECT evidence_event_id FROM claim_evidence WHERE claim_id = ? ORDER BY evidence_event_id",
 	);
 	function rowToClaim(row: any): MemoryClaim {
+		const evidenceEventIds = (
+			claimEvidence.all(row.id) as Array<{ evidence_event_id: string }>
+		).map(item => item.evidence_event_id);
+		const certificate = safeParseJson(
+			row.evidence_certificate || "{}",
+		) as Partial<MemoryClaim["evidenceCertificate"]> | null;
 		return {
 			id: row.id,
 			workspace: row.workspace,
@@ -1504,10 +1599,62 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			supersedesClaimId: row.supersedes_claim_id || undefined,
 			supersededByClaimId: row.superseded_by_claim_id || undefined,
 			tombstonedAt: row.tombstoned_at || undefined,
-			evidenceEventIds: (
-				claimEvidence.all(row.id) as Array<{ evidence_event_id: string }>
-			).map(item => item.evidence_event_id),
+			evidenceEventIds,
+			lifecycle: (row.lifecycle as MemoryClaim["lifecycle"]) || "probationary",
+			validityPredicates: (safeParseJson(row.validity_predicates || "[]") ||
+				[]) as MemoryClaim["validityPredicates"],
+			evidenceCertificate: {
+				extractorVersion:
+					certificate?.extractorVersion || row.extractor_version,
+				schemaVersion: certificate?.schemaVersion || row.schema_version,
+				evidenceEventIds: certificate?.evidenceEventIds || evidenceEventIds,
+				issuedAt: certificate?.issuedAt || row.transaction_time,
+			},
 		};
+	}
+
+	function promoteClaim(
+		claimId: string,
+		evidenceEventIds: string[] = [],
+	): MemoryClaim | null {
+		const claim = listClaims({ includeSuperseded: true, limit: 1_000 }).find(
+			candidate => candidate.id === claimId,
+		);
+		if (!claim || claim.lifecycle !== "probationary") return null;
+		const corroborated = new Set([
+			...claim.evidenceEventIds,
+			...evidenceEventIds.map(sanitizeString),
+		]);
+		// Promotion requires verified status, trusted provenance, and at least two
+		// independent evidence identifiers. Model confidence alone is insufficient.
+		if (
+			claim.status !== "verified" ||
+			claim.trust === "untrusted" ||
+			corroborated.size < 2
+		)
+			return null;
+		const issuedAt = now();
+		db.transaction(() => {
+			const insertEvidence = db.prepare(`INSERT OR IGNORE INTO claim_evidence
+			  (claim_id, observation_id, evidence_event_id) VALUES (?, ?, ?)`);
+			for (const eventId of evidenceEventIds)
+				insertEvidence.run(
+					claim.id,
+					claim.observationId,
+					sanitizeString(eventId),
+				);
+			db.prepare(`UPDATE claims SET lifecycle = 'durable', evidence_certificate = ?
+			  WHERE id = ? AND lifecycle = 'probationary'`).run(
+				JSON.stringify({
+					...claim.evidenceCertificate,
+					evidenceEventIds: [...corroborated],
+					issuedAt,
+				}),
+				claim.id,
+			);
+		})();
+		const row = db.prepare("SELECT * FROM claims WHERE id = ?").get(claim.id);
+		return row ? rowToClaim(row) : null;
 	}
 
 	function searchObservations(
@@ -2597,6 +2744,31 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	}
 
 	// ── Context Injection ──────────────────────────────────────────────────
+	function getShadowPolicy(): ShadowMemoryPolicy {
+		const row = db
+			.prepare("SELECT * FROM memory_policy_state WHERE workspace = ?")
+			.get(currentWorkspace) as any;
+		if (row)
+			return {
+				version: row.version,
+				mode: row.mode,
+				weights: safeParseJsonArray(row.weights).map(Number),
+				samples: row.samples,
+				updatedAt: row.updated_at,
+			};
+		const policy = initialShadowPolicy();
+		db.prepare(`INSERT INTO memory_policy_state
+		  (workspace, version, mode, weights, samples, updated_at)
+		  VALUES (?, ?, ?, ?, ?, ?)`).run(
+			currentWorkspace,
+			policy.version,
+			policy.mode,
+			JSON.stringify(policy.weights),
+			policy.samples,
+			policy.updatedAt,
+		);
+		return policy;
+	}
 
 	function getContext(
 		sessionId: string,
@@ -2708,11 +2880,25 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		// Claims are quoted evidence-bearing data, never instructions. Only active,
 		// trusted claims enter automatic context; invalidated, superseded and NOOP
 		// audit rows remain available through listClaims()/the viewer.
-		const retrievableClaims = listClaims({ limit: 500 }).filter(
+		const claimsForValidation = listClaims({ limit: 500 });
+		for (const claim of claimsForValidation) {
+			if (
+				claim.lifecycle === "durable" &&
+				claim.validityPredicates.length > 0 &&
+				!predicatesAreValid(claim.workspace, claim.validityPredicates)
+			) {
+				db.prepare(
+					"UPDATE claims SET lifecycle = 'stale' WHERE id = ? AND lifecycle = 'durable'",
+				).run(claim.id);
+				claim.lifecycle = "stale";
+			}
+		}
+		const retrievableClaims = claimsForValidation.filter(
 			claim =>
 				claim.status !== "invalidated" &&
 				claim.trust !== "untrusted" &&
-				claim.operation !== "NOOP",
+				claim.operation !== "NOOP" &&
+				claim.lifecycle === "durable",
 		);
 		const claimTextsByObservation = new Map<string, string[]>();
 		for (const claim of retrievableClaims) {
@@ -2987,6 +3173,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			),
 		];
 		const tokenCount = blocks.reduce((sum, block) => sum + block.tokens, 0);
+		const shadowPolicy = getShadowPolicy();
 		const candidateCounts = candidates.reduce<Record<string, number>>(
 			(counts, candidate) => {
 				counts[candidate.type] = (counts[candidate.type] || 0) + 1;
@@ -3013,6 +3200,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				type: block.type,
 				score: Number(block.score.toFixed(4)),
 				reasons: block.reasons,
+				tokens: block.tokens,
+				shadow: shadowDecision(shadowPolicy, policyFeatures(block)),
 			})),
 		};
 		db.prepare(`INSERT INTO retrieval_traces
@@ -3115,6 +3304,100 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			>,
 			selected: (safeParseJson(row.selected) ||
 				[]) as RetrievalTrace["selected"],
+		}));
+	}
+
+	function recordOutcomeReceipt(input: {
+		retrievalTraceId: string;
+		taskId: string;
+		trialId?: string;
+		outcome: MemoryOutcomeReceipt["outcome"];
+	}): MemoryOutcomeReceipt {
+		const trace = listRetrievalTraces(1_000).find(
+			candidate => candidate.id === input.retrievalTraceId,
+		);
+		if (!trace)
+			throw new Error(
+				"Retrieval trace does not exist in the current workspace",
+			);
+		const policy = getShadowPolicy();
+		const reward = Math.max(
+			-2,
+			Math.min(
+				1,
+				(input.outcome.environmentPassed ? 1 : -1) -
+					(input.outcome.corrected ? 0.5 : 0) -
+					(input.outcome.reverted ? 0.75 : 0) -
+					(input.outcome.unauthorizedSideEffect ? 2 : 0),
+			),
+		);
+		const receipt: MemoryOutcomeReceipt = {
+			id: generateId(),
+			workspace: currentWorkspace,
+			retrievalTraceId: trace.id,
+			taskId: sanitizeString(input.taskId).slice(0, 500),
+			trialId: input.trialId
+				? sanitizeString(input.trialId).slice(0, 500)
+				: undefined,
+			createdAt: now(),
+			selectedIds: trace.selected.map(item => item.id),
+			policyVersion: policy.version,
+			outcome: input.outcome,
+			reward,
+		};
+		const featureRows = trace.selected.map(item =>
+			policyFeatures({
+				type: item.type,
+				score: item.score,
+				tokens: item.tokens || 0,
+				reasons: item.reasons,
+			}),
+		);
+		const evolved = learnShadowPolicy(policy, featureRows, reward);
+		db.transaction(() => {
+			db.prepare(`INSERT INTO memory_outcome_receipts
+			  (id, workspace, retrieval_trace_id, task_id, trial_id, created_at,
+			   selected_ids, policy_version, outcome, reward)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+				receipt.id,
+				receipt.workspace,
+				receipt.retrievalTraceId,
+				receipt.taskId,
+				receipt.trialId || null,
+				receipt.createdAt,
+				JSON.stringify(receipt.selectedIds),
+				receipt.policyVersion,
+				JSON.stringify(receipt.outcome),
+				receipt.reward,
+			);
+			db.prepare(`UPDATE memory_policy_state SET version = ?, mode = 'shadow',
+			  weights = ?, samples = ?, updated_at = ? WHERE workspace = ?`).run(
+				evolved.version,
+				JSON.stringify(evolved.weights),
+				evolved.samples,
+				evolved.updatedAt,
+				currentWorkspace,
+			);
+		})();
+		return receipt;
+	}
+
+	function listOutcomeReceipts(limit: number = 100): MemoryOutcomeReceipt[] {
+		const rows = db
+			.prepare(`SELECT * FROM memory_outcome_receipts WHERE workspace = ?
+			  ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+			.all(currentWorkspace, Math.max(1, Math.min(limit, 1_000))) as any[];
+		return rows.map(row => ({
+			id: row.id,
+			workspace: row.workspace,
+			retrievalTraceId: row.retrieval_trace_id,
+			taskId: row.task_id,
+			trialId: row.trial_id || undefined,
+			createdAt: row.created_at,
+			selectedIds: safeParseJsonArray(row.selected_ids),
+			policyVersion: row.policy_version,
+			outcome: safeParseJson(row.outcome) as MemoryOutcomeReceipt["outcome"],
+			reward: row.reward,
 		}));
 	}
 
@@ -3711,7 +3994,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			.all(currentWorkspace, currentWorkspace) as any[];
 
 		return {
-			version: 3,
+			version: 4,
 			exportedAt: now(),
 			sessions,
 			observations: observations.map(r => ({
@@ -3749,7 +4032,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	function importData(data: ImportData): ImportResult {
 		const result: ImportResult = { imported: 0, skipped: 0, errors: [] };
 		const mode = data.onConflict || "skip";
-		if (data.version !== 1 && data.version !== 2 && data.version !== 3) {
+		if (![1, 2, 3, 4].includes(data.version)) {
 			return {
 				imported: 0,
 				skipped: 0,
@@ -3885,7 +4168,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			}
 		}
 
-		// Version 3 carries the temporal truth layer explicitly. Import it in two
+		// Version 3+ carries the temporal truth layer explicitly. Import it in two
 		// passes so forward superseded-by links never depend on array ordering.
 		if (data.claims) {
 			for (const claim of data.claims) {
@@ -3897,14 +4180,18 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					  (id, workspace, observation_id, session_id, text, status, confidence,
 					   operation, valid_from, valid_to, transaction_time, source, trust,
 					   extractor_version, schema_version, supersedes_claim_id,
-					   superseded_by_claim_id, tombstoned_at)
-					  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+					   superseded_by_claim_id, tombstoned_at, lifecycle,
+					   validity_predicates, evidence_certificate)
+					  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
 					  ON CONFLICT(id) DO UPDATE SET text=excluded.text, status=excluded.status,
 					    confidence=excluded.confidence, operation=excluded.operation,
 					    valid_from=excluded.valid_from, valid_to=excluded.valid_to,
 					    transaction_time=excluded.transaction_time, source=excluded.source,
 					    trust=excluded.trust, extractor_version=excluded.extractor_version,
 					    schema_version=excluded.schema_version,
+					    lifecycle=excluded.lifecycle,
+					    validity_predicates=excluded.validity_predicates,
+					    evidence_certificate=excluded.evidence_certificate,
 					    supersedes_claim_id=NULL,
 					    superseded_by_claim_id=NULL, tombstoned_at=excluded.tombstoned_at`).run(
 						claim.id,
@@ -3923,6 +4210,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 						claim.extractorVersion,
 						claim.schemaVersion,
 						claim.tombstonedAt || null,
+						claim.lifecycle || "probationary",
+						JSON.stringify(claim.validityPredicates || []),
+						JSON.stringify(claim.evidenceCertificate || {}),
 					);
 					db.prepare("DELETE FROM claim_evidence WHERE claim_id = ?").run(
 						claim.id,
@@ -4239,6 +4529,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		listObservations,
 		listRecentObservations,
 		listClaims,
+		promoteClaim,
 		searchObservations,
 		expandEntries,
 		clearObservations,
@@ -4258,6 +4549,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		listExtractionJobs,
 		getContext,
 		listRetrievalTraces,
+		recordOutcomeReceipt,
+		listOutcomeReceipts,
+		getShadowPolicy,
 		upsertEmbedding,
 		hasEmbedding,
 		searchEmbeddings,

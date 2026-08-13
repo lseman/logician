@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, test } from "bun:test";
 import assert from "node:assert/strict";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { sha256 } from "../evolution/validity.js";
 import {
 	autoForget,
 	autoTierMemories,
@@ -558,6 +560,11 @@ describe("createMemoryStore — observations", () => {
 		assert.equal(active.length, 1);
 		assert.equal(active[0]?.operation, "SUPERSEDE");
 		assert.equal(active[0]?.supersedesClaimId, "observation-old:claim:0");
+		assert.equal(
+			store.promoteClaim(active[0]?.id || "", ["independent-auth-test"])
+				?.lifecycle,
+			"durable",
+		);
 
 		const context = store.getContext("current", 1000, "authentication JWT");
 		assert.match(context, /Authentication does not use JWT/);
@@ -1092,6 +1099,106 @@ describe("consolidate", () => {
 // ── Context Injection ──────────────────────────────────────────────────────
 
 describe("getContext", () => {
+	test("keeps learned policy shadow-only and links retrieval to independent outcomes", () => {
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace("/workspace");
+		store.create("The parser uses a bounded token cursor", { strength: 9 });
+		store.getContext("current", 1200, "parser token cursor");
+		const trace = store.listRetrievalTraces(1)[0];
+		assert.ok(trace);
+		assert.equal(trace.selected[0]?.shadow?.policyVersion, 1);
+		const before = store.getShadowPolicy();
+		const receipt = store.recordOutcomeReceipt({
+			retrievalTraceId: trace.id,
+			taskId: "memory-eval/parser",
+			trialId: "seed-1",
+			outcome: { environmentPassed: true, tokens: 800, durationMs: 25 },
+		});
+		assert.equal(receipt.reward, 1);
+		assert.deepEqual(
+			receipt.selectedIds,
+			trace.selected.map(item => item.id),
+		);
+		assert.equal(store.listOutcomeReceipts()[0]?.taskId, "memory-eval/parser");
+		const after = store.getShadowPolicy();
+		assert.equal(after.mode, "shadow");
+		assert.equal(after.samples, before.samples + 1);
+		// Learning is observational: the deterministic candidate still appears.
+		assert.match(
+			store.getContext("next", 1200, "parser token cursor"),
+			/bounded/,
+		);
+		store.close();
+	});
+
+	test("promotes corroborated claims and invalidates only stale predicates", () => {
+		const workspace = `/tmp/logician-validity-${process.pid}-${++counter}`;
+		mkdirSync(workspace, { recursive: false });
+		const configPath = `${workspace}/config.json`;
+		writeFileSync(configPath, JSON.stringify({ retries: 3 }));
+		const store = createMemoryStore(dbPath());
+		store.setCurrentWorkspace(workspace);
+		store.createSession("history", { cwd: workspace, workspace });
+		store.observe(
+			{
+				id: "predicate-claim",
+				sessionId: "history",
+				timestamp: new Date().toISOString(),
+				hookType: "stop",
+				workspace,
+				raw: {},
+			},
+			{
+				id: "predicate-claim",
+				sessionId: "history",
+				timestamp: new Date().toISOString(),
+				type: "decision",
+				title: "Retry config",
+				facts: [],
+				narrative: "Retries are limited to three.",
+				concepts: ["retry"],
+				files: ["config.json"],
+				importance: 9,
+				consolidated: false,
+				claims: [
+					{
+						text: "Retries are limited to three.",
+						confidence: 0.99,
+						status: "verified",
+						evidenceEventIds: ["config-read"],
+						validityPredicates: [
+							{
+								type: "file_hash",
+								path: "config.json",
+								sha256: sha256(JSON.stringify({ retries: 3 })),
+							},
+						],
+					},
+				],
+				provenance: {
+					source: "model",
+					trust: "trusted_local",
+					extractorVersion: "test/2",
+					schemaVersion: 2,
+				},
+			},
+		);
+		const claim = store.listClaims()[0];
+		assert.ok(claim);
+		assert.equal(claim.lifecycle, "probationary");
+		assert.doesNotMatch(store.getContext("new", 1200, "retry three"), /Claim/);
+		assert.equal(store.promoteClaim(claim.id), null);
+		assert.equal(
+			store.promoteClaim(claim.id, ["test-pass"])?.lifecycle,
+			"durable",
+		);
+		assert.match(store.getContext("new", 1200, "retry three"), /Claim/);
+		writeFileSync(configPath, JSON.stringify({ retries: 5 }));
+		assert.doesNotMatch(store.getContext("new", 1200, "retry three"), /Claim/);
+		assert.equal(store.listClaims()[0]?.lifecycle, "stale");
+		store.close();
+		rmSync(workspace, { recursive: true });
+	});
 	test("records explainable retrieval selections and abstentions", () => {
 		const store = createMemoryStore(dbPath());
 		store.setCurrentWorkspace("/workspace");
@@ -2122,7 +2229,7 @@ test("exportData produces a valid ExportData", () => {
 	store.create("Memory one");
 	store.create("Memory two");
 	const data = store.exportData();
-	assert.equal(data.version, 3);
+	assert.equal(data.version, 4);
 	assert.ok(data.exportedAt);
 	assert.ok(data.sessions.length >= 1);
 	assert.ok(data.memories.length >= 2);

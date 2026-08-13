@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const benchmarkDir = dirname(__filename);
 const srcDir = join(benchmarkDir, "..");
-const tuiRoot = join(benchmarkDir, "..", "..", "..", "..");
+const appRoot = join(benchmarkDir, "..", "..");
+const repoRoot = join(appRoot, "..", "..");
 
 function countFiles(dir: string): {
 	files: number;
@@ -65,9 +66,9 @@ const results = [
 		args: [
 			"tsx",
 			"--eval",
-			'import("./packages/tui/src/index.js").catch(() => {})',
+			'import("./apps/tui/src/index.js").catch(() => {})',
 		],
-		cwd: tuiRoot,
+		cwd: repoRoot,
 	},
 ];
 
@@ -90,7 +91,7 @@ console.log(`\n--- Binary Benchmarks ---`);
 const binResults = [
 	{
 		label: "Binary: --doctor",
-		command: join(tuiRoot, "dist", "logician"),
+		command: join(appRoot, "dist", "logician"),
 		args: ["--doctor"],
 	},
 ];

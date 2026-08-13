@@ -11,7 +11,7 @@
 //   • Frame timing consistency (p50/p95/p99)
 //   • Layout engine (Flex + ScrollView composition)
 //
-// Run:  npx tsx packages/tui/src/__tests__/benchmark.ts [--json] [--size small|medium|large|xlarge]
+// Run:  npx tsx apps/tui/src/__tests__/benchmark.ts [--json] [--size small|medium|large|xlarge]
 // Output: JSON with per-scenario metrics, or human-readable table.
 
 import { cpus } from "node:os";

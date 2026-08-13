@@ -18,7 +18,7 @@ const NODES = {
 		color: "#8b5cf6",
 		type: "grid",
 		summary:
-			"Everything the user sees and types. Rendering, input handling, theming, and modal overlays — the terminal-native front end (packages/tui).",
+			"Everything the user sees and types. Rendering, input handling, theming, and modal overlays — the terminal-native front end (apps/tui).",
 		children: ["tui-rendering", "tui-input", "tui-themes", "tui-overlays"],
 	},
 	"tui-rendering": {

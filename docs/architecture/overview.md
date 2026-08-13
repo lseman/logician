@@ -87,6 +87,8 @@ The presentation layer. Handles:
 
 Workspace-scoped durable memory and document/repository retrieval, with hybrid
 ranking, provenance, context budgets, and component evaluation.
+Memory claims also use gated lifecycles, executable validity predicates, and
+outcome-linked shadow learning; see [Evolving memory](./evolving-memory.md).
 
 ### autoresearch and agent-eval
 

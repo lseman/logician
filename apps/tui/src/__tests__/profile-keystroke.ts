@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 // Profiler — breaks down keystroke latency by phase.
-// Usage: cd tui && npx --no-install tsx packages/tui/src/__tests__/profile-keystroke.ts
+// Usage: cd apps/tui && npx --no-install tsx src/__tests__/profile-keystroke.ts
 
 import { performance } from "node:perf_hooks";
 import type {

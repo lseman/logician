@@ -3,7 +3,6 @@
 // Returns undefined if memory is disabled.
 
 import { createHash } from "node:crypto";
-import type { AgentHooks, ExplicitTaskState } from "@logician/agent-core";
 import type { MemoryEmbedder } from "../embeddings/local-embedder.js";
 import type { TurnToolEvidence } from "../episodes/episode-synthesizer.js";
 import {
@@ -17,6 +16,55 @@ import type {
 	MemoryStore,
 	RawObservation,
 } from "../types.js";
+
+/**
+ * Minimal host-neutral task state understood by memory retrieval. Agent
+ * runtimes may pass richer state; only these fields are read.
+ */
+export interface MemoryTaskState {
+	objective?: string;
+	phase?: ContextRetrievalQuery["phase"];
+	changedFiles?: string[];
+	evidence: Array<{ summary: string }>;
+	toolFailures?: number;
+	[key: string]: unknown;
+}
+
+export interface MemoryAgentMessage {
+	role: string;
+	content: unknown;
+	[key: string]: unknown;
+}
+
+/**
+ * Structural hook interface implemented by the memory adapter. Hosts can map
+ * these lifecycle hooks directly or wrap them in their own hook system.
+ */
+export interface MemoryAgentHooks {
+	beforeAgentStart?: (
+		ctx: { prompt: string } & Record<string, unknown>,
+	) => unknown;
+	beforeToolCall?: (ctx: Record<string, unknown>) => unknown;
+	afterToolCall?: (
+		ctx: {
+			toolCall: { name: string; id?: string; arguments?: string };
+			args: Record<string, unknown>;
+			result: string;
+			isError: boolean;
+		} & Record<string, unknown>,
+	) => unknown;
+	transformContext?: (
+		ctx: {
+			messages: MemoryAgentMessage[];
+			taskState?: MemoryTaskState;
+		} & Record<string, unknown>,
+	) => Promise<{ messages: MemoryAgentMessage[] } | undefined>;
+	afterProviderResponse?: (
+		ctx: { content?: string } & Record<string, unknown>,
+	) => void;
+	shouldStopAfterTurn?: (ctx?: Record<string, unknown>) => undefined;
+	beforeCompact?: (ctx?: Record<string, unknown>) => undefined;
+}
 
 export interface MemoryHooksConfig {
 	/** Whether to capture tool observations. Default: true */
@@ -109,7 +157,7 @@ function saveObservation(
 export function createMemoryHooks(
 	store: MemoryStore,
 	config: MemoryHooksConfig = {},
-): AgentHooks {
+): MemoryAgentHooks {
 	const captureTools = config.captureTools ?? true;
 	const capturePrompts = config.capturePrompts ?? true;
 	const injectContext = config.injectContext ?? true;
@@ -375,7 +423,10 @@ export function createMemoryHooks(
 	// ── transformContext: inject session context into messages ──────────
 
 	const transformContext = injectContext
-		? async (ctx: { messages: any[]; taskState?: ExplicitTaskState }) => {
+		? async (ctx: {
+				messages: MemoryAgentMessage[];
+				taskState?: MemoryTaskState;
+			}) => {
 				const sessionId = store.getCurrentSessionId();
 				if (!sessionId) return undefined;
 				const retrieval: ContextRetrievalQuery = ctx.taskState
@@ -424,7 +475,7 @@ export function createMemoryHooks(
 
 	// ── Hook composition ───────────────────────────────────────────────
 
-	const hooks: AgentHooks = {};
+	const hooks: MemoryAgentHooks = {};
 
 	if (beforeAgentStart) hooks.beforeAgentStart = beforeAgentStart;
 	if (afterToolCall) hooks.afterToolCall = afterToolCall;

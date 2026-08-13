@@ -3,7 +3,7 @@
 // around @logician/autoresearch's AutoresearchSession, which owns all the
 // actual logic (state, .auto/ file I/O, git commit/revert, confidence
 // scoring). One AutoresearchSession is shared across all three tools per
-// session — see packages/tui/src/app/research-manager.ts for how the TUI
+// session — see apps/tui/src/app/research-manager.ts for how the TUI
 // constructs and threads it through.
 //
 // Not gated readOnly (same as bash/write_file): run_experiment executes

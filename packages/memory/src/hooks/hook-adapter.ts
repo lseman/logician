@@ -1,7 +1,7 @@
 // ── @logician/memory — Hook Adapter ──────────────────────────────────────────
 // Manual remember/recall/forget functions for tool-driven memory access.
-// Automatic capture/injection into the agent loop is wired via the real
-// AgentHooks-typed createMemoryHooks() in ./memory-hooks.ts.
+// Automatic capture/injection into an agent loop is exposed through the
+// host-neutral structural hooks returned by createMemoryHooks().
 
 import type {
 	AutoForgetConfig,

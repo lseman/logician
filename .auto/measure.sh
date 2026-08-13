@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
-tui_dir="$repo_dir/tui"
-benchmark="packages/tui/src/__tests__/benchmark-keystroke.ts"
+tui_dir="$repo_dir/apps/tui"
+benchmark="src/__tests__/benchmark-keystroke.ts"
 runs="${AUTORESEARCH_RUNS:-3}"
 
 if ! [[ "$runs" =~ ^[1-9][0-9]*$ ]]; then

@@ -10,7 +10,7 @@
  * logExperiment/handleCommand) with no dependency on any particular tool-
  * registration or extension-API shape. Callers wire these into real tools
  * and slash commands (see packages/coding-agent/src/tools/autoresearch.ts
- * and packages/tui/src/app/research-manager.ts).
+ * and apps/tui/src/app/research-manager.ts).
  */
 
 import { execFile as execFileCb } from "node:child_process";

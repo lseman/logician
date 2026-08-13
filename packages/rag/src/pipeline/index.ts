@@ -40,10 +40,10 @@ import type {
 	SearchHit,
 } from "../types.ts";
 
-// tui/packages/rag/src/pipeline/index.ts -> repo root
+// packages/rag/src/pipeline/index.ts -> repo root
 const REPO_ROOT = path.resolve(
 	fileURLToPath(new URL(".", import.meta.url)),
-	"../../../../..",
+	"../../../..",
 );
 const DEFAULT_PYTHON_PATH = path.join(REPO_ROOT, ".venv", "bin", "python");
 const DEFAULT_SCRIPT_PATH = path.join(

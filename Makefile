@@ -1,7 +1,7 @@
-# Root Makefile — delegates to the tui/ project (the actual app lives there).
-# Every target runs inside tui/ so `make build` works from the repo root.
+# Root Makefile — delegates executable targets to the terminal application.
+# Reusable modules remain independently addressable through the root workspace.
 
-TUI := tui
+TUI := apps/tui
 
 .PHONY: build binary install dev start check lint lint-fix format clean
 

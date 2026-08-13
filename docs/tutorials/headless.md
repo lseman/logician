@@ -59,10 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v1
-      - run: cd tui && bun install
+      - run: bun install
       - run: |
-          cd tui
-          npm start -- exec --jsonl "fix lint errors" \
+          bun start -- exec --jsonl "fix lint errors" \
             > output.jsonl
       - uses: actions/upload-artifact@v4
         with:

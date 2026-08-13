@@ -25,11 +25,17 @@ export {
 } from "./hooks/hook-adapter.js";
 export {
 	createMemoryHooks,
+	type MemoryAgentHooks,
+	type MemoryAgentMessage,
 	type MemoryHooksConfig,
+	type MemoryTaskState,
 } from "./hooks/memory-hooks.js";
 export { createMemoryStore } from "./store/index.js";
 export type {
 	AutoForgetConfig,
+	ClaimEvidenceCertificate,
+	ClaimLifecycle,
+	ClaimValidityPredicate,
 	CompressedObservation,
 	ContextBlock,
 	// Options
@@ -50,6 +56,8 @@ export type {
 	ImportResult,
 	// Memories
 	Memory,
+	MemoryClaim,
+	MemoryOutcomeReceipt,
 	// Retrieval
 	MemoryQuery,
 	// Memory Relations
@@ -68,6 +76,7 @@ export type {
 	SemanticSearchResult,
 	// Sessions
 	Session,
+	ShadowMemoryPolicy,
 	// Working Memory
 	WorkingMemoryTier,
 } from "./types.js";

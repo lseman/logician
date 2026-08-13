@@ -8,7 +8,7 @@
 // latency scales with backlog size.
 //
 // "End to end" here means the same path a real keypress takes
-// (packages/tui/src/terminal/core.ts):
+// (apps/tui/src/terminal/core.ts):
 //   stdin data -> handleInput() -> InputBar.handleInput() (mutates state)
 //   -> requestRender() -> doRender() -> renderLayoutFrame() (Flex + ScrollView
 //      + TranscriptDisplay layout/render) -> _commitFrame() (cell-level diff
@@ -27,7 +27,7 @@
 // would indicate re-walking/re-diffing a bigger tree, not more work that's
 // intrinsically necessary.
 //
-// Run:  npx tsx packages/tui/src/__tests__/benchmark-keystroke.ts [--json]
+// Run:  npx tsx apps/tui/src/__tests__/benchmark-keystroke.ts [--json]
 // Output: table (or JSON) of p50/p95/p99 keystroke latency per transcript size.
 
 import { cpus } from "node:os";

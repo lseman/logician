@@ -17,7 +17,7 @@ point. Launch it as a script; it reads its config from `.logician.json`
 (see [Config Schema](/reference/config)):
 
 ```sh
-tsx packages/tui/src/index.ts
+tsx apps/tui/src/index.ts
 ```
 
 ### Headless (programmatic)
