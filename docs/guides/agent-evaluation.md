@@ -18,8 +18,8 @@ Run the three-task baseline three times each in automatically provisioned,
 disposable workspaces:
 
 ```sh
-bun run tui/packages/agent-eval/src/cli.ts run \
-  tui/packages/agent-eval/corpus/baseline.json \
+bun run packages/agent-eval/src/cli.ts run \
+  packages/agent-eval/corpus/baseline.json \
   --trials 3 \
   --work-root outputs/agent-eval-workspaces \
   --output outputs/agent-eval-baseline.json

@@ -97,7 +97,7 @@ export interface HighlightResult {
 }
 
 // A TUI turn re-renders its whole transcript on every streamed chunk (see
-// TranscriptDisplay's per-turn cache in packages/tui), which re-runs this
+// TranscriptDisplay's per-turn cache in apps/tui), which re-runs this
 // highlighter over every code fence in that turn every time — including
 // fences that finished streaming turns ago and whose content hasn't changed
 // since. Highlighting is a pure function of (code, language), so a small

@@ -1,10 +1,10 @@
 #!/bin/sh
 # Logician installer — binary TUI for the Logician coding agent
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- 0.2.0
-#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- --dry-run
-#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- -v 0.2.0
+#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash -s -- 0.2.0
+#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash -s -- --dry-run
+#   curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash -s -- -v 0.2.0
 
 # ── Colors & symbols ─────────────────────────────────────────────────────────
 if [ -t 2 ] && [ -n "${TERM:-}" ]; then

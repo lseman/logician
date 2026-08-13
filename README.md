@@ -44,13 +44,13 @@ It works equally well at a local workstation, inside `tmux`, or over SSH—and i
 ### Prebuilt binary
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash
 ```
 
 The installer supports Linux and macOS on `x86_64` and `arm64`. To install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/tui/install.sh | bash -s -- 0.3.0
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash -s -- 0.3.0
 ```
 
 ### From source
@@ -204,6 +204,10 @@ Logician separates execution policy from permissions:
 This separation lets you use an autonomous agent with strict permissions or embed a minimal loop with broader tool access.
 
 ## Development
+
+Reusable TypeScript modules live under `packages/`; executable front ends live
+under `apps/`. The terminal application is in `apps/tui` and consumes the same
+agent and memory modules available to other hosts.
 
 ```bash
 bun install

@@ -82,6 +82,23 @@ function runCase(testCase: Case) {
 		text => !context.includes(text),
 	);
 	const abstentionCorrect = Boolean(trace?.abstained) === testCase.abstain;
+	const environmentPassed =
+		recall === 1 && obsoleteRejected && abstentionCorrect;
+	if (trace) {
+		store.recordOutcomeReceipt({
+			retrievalTraceId: trace.id,
+			taskId: `memory-eval/${testCase.id}`,
+			trialId: "deterministic-seed-1",
+			outcome: { environmentPassed },
+		});
+	}
+	// A learned recommendation may evolve, but shadow mode must not alter the
+	// deterministic production selection until a repeated external gate wins.
+	store.getContext("query", 1200, testCase.query);
+	const selectedAfterLearning =
+		store.listRetrievalTraces(1)[0]?.selected.map(item => item.id) || [];
+	const shadowNonInterference =
+		JSON.stringify(selectedAfterLearning) === JSON.stringify(selected);
 	store.close();
 	for (const suffix of ["", "-wal", "-shm"])
 		try {
@@ -93,8 +110,9 @@ function runCase(testCase: Case) {
 		ndcgAt5: ndcg,
 		obsoleteRejected,
 		abstentionCorrect,
+		shadowNonInterference,
 		latencyMs: trace?.latencyMs || 0,
-		passed: recall === 1 && obsoleteRejected && abstentionCorrect,
+		passed: environmentPassed && shadowNonInterference,
 	};
 }
 
@@ -111,6 +129,9 @@ const summary = {
 		results.filter(result => result.obsoleteRejected).length / results.length,
 	abstentionAccuracy:
 		results.filter(result => result.abstentionCorrect).length / results.length,
+	shadowNonInterference:
+		results.filter(result => result.shadowNonInterference).length /
+		results.length,
 	latencyP50Ms: percentile(latencies, 0.5),
 	latencyP95Ms: percentile(latencies, 0.95),
 };

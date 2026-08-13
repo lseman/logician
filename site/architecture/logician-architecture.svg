@@ -74,7 +74,7 @@
   <g id="package-tui" filter="url(#shadow)">
     <rect x="150" y="230" width="1100" height="105" rx="16" fill="#171c26" stroke="#a78bfa" stroke-width="2"/>
     <rect x="150" y="230" width="7" height="105" rx="3.5" fill="#a78bfa"/>
-    <text x="184" y="258" class="package" fill="#a78bfa">packages/tui</text>
+    <text x="184" y="258" class="package" fill="#a78bfa">apps/tui</text>
     <text x="184" y="288" class="card-title">Terminal UI</text>
     <text x="184" y="310" class="body">Streaming presentation and runtime controls</text>
     <g transform="translate(620 253)">

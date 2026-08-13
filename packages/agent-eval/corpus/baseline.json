@@ -9,7 +9,7 @@
 			"kind": "bugfix",
 			"prompt": "Fix the failing calculator behavior. Preserve the public API, make the smallest appropriate change, and run the tests before finishing.",
 			"fixture": {
-				"repository": "tui/packages/agent-eval/fixtures/calculator-bug",
+				"repository": "packages/agent-eval/fixtures/calculator-bug",
 				"revision": "sha256:7dcb234a1498a367d1ec8658ec86c49fdd13a6e430efe11efaa52d206af1c40b"
 			},
 			"agent": {
@@ -42,7 +42,7 @@
 			"kind": "feature",
 			"prompt": "Implement slugify to satisfy the supplied contract and tests. Keep the existing public types, avoid dependencies, and verify the result.",
 			"fixture": {
-				"repository": "tui/packages/agent-eval/fixtures/slug-feature",
+				"repository": "packages/agent-eval/fixtures/slug-feature",
 				"revision": "sha256:8e62e0dee60555859f4754eaf5acc2b9d2cd42ad08ed9e6fbffb1af896cce4e3"
 			},
 			"agent": {
@@ -75,7 +75,7 @@
 			"kind": "refactor",
 			"prompt": "Refactor the duplicated configuration readers into one shared parsing path while preserving both exported functions. Fix the inconsistent validation exposed by the tests and verify the result.",
 			"fixture": {
-				"repository": "tui/packages/agent-eval/fixtures/config-refactor",
+				"repository": "packages/agent-eval/fixtures/config-refactor",
 				"revision": "sha256:2252f1dad4a3208c68478fd1ad09e299355377ac297ab720ac74a5ea37fe6502"
 			},
 			"agent": {

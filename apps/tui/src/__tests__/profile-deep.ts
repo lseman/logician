@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 // Deep profiler — breaks down keystroke latency into finer buckets.
-// Usage: cd tui && npx --no-install tsx packages/tui/src/__tests__/profile-deep.ts
+// Usage: cd apps/tui && npx --no-install tsx src/__tests__/profile-deep.ts
 
 import { performance } from "node:perf_hooks";
 import type {

@@ -31,9 +31,10 @@ Logician turns natural-language instructions into verified code changes — with
 ## Quick Start
 
 ```bash
-cd tui
-npm install
-npm start
+git clone https://github.com/lseman/logician.git
+cd logician
+bun install
+bun start
 ```
 
 The TUI connects to an OpenAI-compatible backend at `http://127.0.0.1:8080` by default. Configure it in `.logician.json` or via `LOGICIAN_LLM_URL`.

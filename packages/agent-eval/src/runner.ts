@@ -163,13 +163,13 @@ export async function runTrial(
 	await verifyFixture(task, workspace);
 	const startedAt = new Date().toISOString();
 	const started = performance.now();
-	const logicianRoot = path.resolve(import.meta.dirname, "../../../../");
+	const logicianRoot = path.resolve(import.meta.dirname, "../../../");
 	const expand = (value: string) =>
 		value
 			.replaceAll("{logicianRoot}", logicianRoot)
 			.replaceAll(
 				"{logicianEntry}",
-				path.join(logicianRoot, "tui/packages/tui/src/index.ts"),
+				path.join(logicianRoot, "apps/tui/src/index.ts"),
 			);
 	const agent = await runProcess(
 		expand(task.agent.command),

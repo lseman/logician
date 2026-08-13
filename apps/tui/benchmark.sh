@@ -6,7 +6,7 @@ echo "=== TUI Latency Benchmark ==="
 echo ""
 
 # Source stats
-SRC_DIR="packages/tui/src"
+SRC_DIR="src"
 TS_FILES=$(find "$SRC_DIR" -name '*.ts' ! -path '*/__tests__/*' | wc -l)
 TOTAL_LINES=0
 LARGEST_FILE=""
@@ -24,7 +24,7 @@ echo ""
 echo "--- Module Load ---"
 for run in 1 2 3; do
   start=$(date +%s%N)
-  node --experimental-strip-types --no-warnings -e "import('./packages/tui/src/index.ts').catch(()=>{})" > /dev/null 2>&1 || true
+  node --experimental-strip-types --no-warnings -e "import('./src/index.ts').catch(()=>{})" > /dev/null 2>&1 || true
   end=$(date +%s%N)
   elapsed=$(( (end - start) / 1000000 ))
   echo "Run $run: ${elapsed} ms"
@@ -144,7 +144,7 @@ echo ""
 echo "--- tsx Load ---"
 for run in 1 2 3; do
   start=$(date +%s%N)
-  npx --yes tsx --eval "import('./packages/tui/src/index.ts').catch(()=>{})" > /dev/null 2>&1 || true
+  npx --yes tsx --eval "import('./src/index.ts').catch(()=>{})" > /dev/null 2>&1 || true
   end=$(date +%s%N)
   elapsed=$(( (end - start) / 1000000 ))
   echo "Run $run: ${elapsed} ms"

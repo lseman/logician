@@ -117,6 +117,13 @@ Retrieved context injects compact summaries of relevant durable memories. The ag
 
 Memory retrieval searches both durable memories and the episodic observation store, using reciprocal-rank fusion with task, file, phase, recency, and semantic signals. Durable memories are injected by default. Current-session observations are never reinjected because they already exist in the active transcript; up to three strongly relevant prior observations are used only when no durable memory answers the retrieval query. Every injected entry is a compact stable-ID card that can be expanded with `memory_get`.
 
+Model-extracted claims are probationary until corroborated by independent
+evidence. Retrieval outcome feedback updates a versioned contextual policy in
+shadow mode only, so learned recommendations cannot change prompts without a
+separate repeated evaluation gate. See
+[Evolving memory](../architecture/evolving-memory.md) for lifecycle, validity,
+security, and rollout details.
+
 ## Runtime settings
 
 View and modify settings during a session:

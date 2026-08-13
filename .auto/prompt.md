@@ -15,18 +15,18 @@ Treat improvements smaller than 5% as noise unless they reproduce over more runs
 `./.auto/measure.sh` — runs three fresh benchmark processes and outputs only `METRIC name=value` lines. Set `AUTORESEARCH_RUNS=5` for confirmation runs.
 
 For a human-readable diagnostic sweep, run:
-`cd tui && COLUMNS=120 LINES=40 npx --no-install tsx packages/tui/src/__tests__/benchmark-keystroke.ts`
+`cd apps/tui && COLUMNS=120 LINES=40 npx --no-install tsx src/__tests__/benchmark-keystroke.ts`
 
 ## Files in Scope
-- **`tui/packages/tui/src/terminal/core.ts`** — TUI rendering engine, frame pacing, diff+write pipeline (1557 lines). The hot path: `doRender()` → `_doRenderInner()` → `_commitFrame()`. Every frame allocates line arrays and calls `visibleWidth()` on every cell.
-- **`tui/packages/tui/src/rendering/layout.ts`** — Flexbox constrained layout engine called every frame (675 lines). Key functions: `renderLayoutFrame()`, `paintBox()`.
-- **`tui/packages/tui/src/rendering/transcript/display.ts`** — Transcript rendering with per-turn cache. The render loop iterates all turns, checks revisions, rebuilds dirty turns via markdown parsing and text wrapping (4116 lines total for the display module). Key hot path: `render()`, `turnRevisionFor()`, `buildTurnLines()`.
-- **`tui/packages/tui/src/terminal/primitives.ts`** — TUI line primitives including `clampLineToWidth()`, `compositeTuiLine()`, `CURSOR_MARKER`, etc. (425 lines).
-- **`tui/packages/tui/src/terminal/theme.ts`** — Theme system, called on every render for color lookups. (532 lines)
-- **`tui/packages/tui/src/rendering/flex.ts`** — Flex layout component used by the TUI root (295 lines).
-- **`tui/packages/tui/src/rendering/scroll-view.ts`** — ScrollView component (236 lines).
-- **`tui/packages/tui/src/input/input-bar.ts`** — keystroke handling and input rendering.
-- **`tui/packages/tui/src/__tests__/benchmark-keystroke.ts`** — benchmark harness; changes here must improve fidelity, not scores.
+- **`apps/tui/src/terminal/core.ts`** — TUI rendering engine, frame pacing, diff+write pipeline (1557 lines). The hot path: `doRender()` → `_doRenderInner()` → `_commitFrame()`. Every frame allocates line arrays and calls `visibleWidth()` on every cell.
+- **`apps/tui/src/rendering/layout.ts`** — Flexbox constrained layout engine called every frame (675 lines). Key functions: `renderLayoutFrame()`, `paintBox()`.
+- **`apps/tui/src/rendering/transcript/display.ts`** — Transcript rendering with per-turn cache. The render loop iterates all turns, checks revisions, rebuilds dirty turns via markdown parsing and text wrapping (4116 lines total for the display module). Key hot path: `render()`, `turnRevisionFor()`, `buildTurnLines()`.
+- **`apps/tui/src/terminal/primitives.ts`** — TUI line primitives including `clampLineToWidth()`, `compositeTuiLine()`, `CURSOR_MARKER`, etc. (425 lines).
+- **`apps/tui/src/terminal/theme.ts`** — Theme system, called on every render for color lookups. (532 lines)
+- **`apps/tui/src/rendering/flex.ts`** — Flex layout component used by the TUI root (295 lines).
+- **`apps/tui/src/rendering/scroll-view.ts`** — ScrollView component (236 lines).
+- **`apps/tui/src/input/input-bar.ts`** — keystroke handling and input rendering.
+- **`apps/tui/src/__tests__/benchmark-keystroke.ts`** — benchmark harness; changes here must improve fidelity, not scores.
 - **`tui/package.json`**, **`package.json`** — Dependencies and scripts.
 
 ## Off Limits
@@ -39,7 +39,7 @@ For a human-readable diagnostic sweep, run:
 ## Constraints
 - Must pass typecheck: `bun run typecheck` in tui/
 - Must pass lint: `bun run lint` in root
-- Must pass existing tests in `tui/packages/*/src/__tests__/`
+- Must pass existing tests in `packages/*/src/__tests__/`
 - All changes must be strictly performance-oriented — no refactors without measurable benefit.
 - Preserve keystroke behavior and byte-for-byte rendered frame semantics.
 - The benchmark measures CPU-side handling through escape-sequence generation; it does not claim to measure OS terminal emulator paint time or physical keyboard input latency.

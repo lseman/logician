@@ -4,7 +4,7 @@
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"jsx": "react-jsx",
-		"rootDir": "..",
+		"rootDir": "../..",
 		"outDir": "dist",
 		"strict": true,
 		"esModuleInterop": true,
@@ -16,19 +16,22 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"paths": {
-			"@logician/coding-agent": ["../coding-agent/src/index.ts"],
-			"@logician/coding-agent/*": ["../coding-agent/src/*"],
-			"@logician/agent-capabilities": ["../agent-capabilities/src/index.ts"],
-			"@logician/agent-capabilities/*": ["../agent-capabilities/src/*"],
-			"@logician/memory": ["../memory/src/index.ts"]
+			"@logician/coding-agent": ["../../packages/coding-agent/src/index.ts"],
+			"@logician/coding-agent/*": ["../../packages/coding-agent/src/*"],
+			"@logician/agent-capabilities": [
+				"../../packages/agent-capabilities/src/index.ts"
+			],
+			"@logician/agent-capabilities/*": [
+				"../../packages/agent-capabilities/src/*"
+			]
 		},
 		"types": ["node", "bun-types"]
 	},
 	"include": [
 		"src/**/*",
-		"../agent-core/src/**/*",
-		"../coding-agent/src/**/*",
-		"../agent-capabilities/src/**/*"
+		"../../packages/agent-core/src/**/*",
+		"../../packages/coding-agent/src/**/*",
+		"../../packages/agent-capabilities/src/**/*"
 	],
 	"exclude": ["node_modules", "dist"]
 }
