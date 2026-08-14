@@ -1,74 +1,49 @@
 ---
-title: Streaming Mode
-description: How streaming works in Logician — token-by-token output, real-time visibility, and tool progress.
+title: Streaming
+description: Understand interactive runtime events and the headless JSONL contract.
 ---
 
-# Streaming Mode
+# Streaming
 
-Logician streams everything — reasoning, tool calls, and results — in real time. You see the agent think before it acts.
-
-## How it works
+Logician renders provider text and tool progress as events arrive. Thinking output appears only when the selected provider and thinking settings supply it.
 
 ```mermaid
 sequenceDiagram
-  participant User
-  participant TUI
-  participant Agent
-  participant LLM
-  participant Tools
-
-  User->>Agent: Submit instruction
-  Agent->>LLM: Stream request
-  LLM-->>Agent: Stream tokens
-  Agent->>TUI: Render reasoning
-  Note over TUI: "💭 Thinking..."
-  Agent->>Tools: Execute tool call
-  Tools-->>Agent: Return result
-  Agent->>TUI: Show result
-  Agent->>LLM: Continue stream
-  LLM-->>Agent: More tokens
-  Agent->>TUI: Render next step
+    participant User
+    participant TUI
+    participant Agent
+    participant Provider
+    participant Tool
+    User->>TUI: Submit or steer
+    TUI->>Agent: Queue input
+    Agent->>Provider: Streaming request
+    Provider-->>Agent: Text, thinking, or tool call deltas
+    Agent-->>TUI: Runtime events
+    Agent->>Tool: Execute completed tool call
+    Tool-->>Agent: Result
+    Agent-->>TUI: Tool progress and result
+    Agent->>Provider: Continue with tool result
+    Agent-->>TUI: Settled
 ```
 
-## Stream stages
+## Interactive event families
 
-| Stage | Events | Description |
-|---|---|---|
-| Turn start | `turn_start`, `message_start` | New turn begins |
-| Thinking | `thinking_token` | Agent's internal thought process |
-| Response | `token`, `message_update` | Streaming text output |
-| Tool execution | `tool_execution_start`, `tool_execution_update`, `tool_execution_end` | Tool invocation with progress |
-| Turn end | `turn_end`, `agent_settled` | Turn completes, agent settles |
+The bridge exposes turn, message, token, tool-execution, context, queue, permission, retry, compaction, and subagent lifecycle events. The TUI projects those events into transcript text, tool cards, status widgets, and overlays.
 
-## Configuration
+Text streaming and thinking display are not an audit log of hidden model reasoning. They are the content the provider exposes through its API.
 
-Streaming is enabled by default. Control it via config:
+## Control the display
 
-```json
-{
-  "streaming": {
-    "enabled": true,
-    "showThinking": true,
-    "showToolCalls": true,
-    "showToolResults": true
-  }
-}
-```
+- `Ctrl+O` expands or collapses tool details.
+- `Alt+J`/`Alt+K` moves between tool cards.
+- `Alt+Enter` toggles the focused card.
+- `Ctrl+Shift+T` cycles thinking display mode.
+- `Ctrl+Enter` sends or flushes steering during an active turn.
 
-## Headless streaming
-
-In headless mode, streaming outputs as JSONL:
+## Headless stream
 
 ```bash
-npm start -- exec --jsonl "analyze src/auth.ts"
+logician exec --jsonl "analyze src/auth.ts"
 ```
 
-Each line is a typed JSON event:
-```json
-{"type":"turn_start","turn_id":"turn_1"}
-{"type":"thinking_token","token":"Analyzing auth flow..."}
-{"type":"tool_execution_start","tool":"read_file","tool_name":"read_file","tool_call_id":"tc_1","tool_args":{"path":"src/auth.ts"}}
-{"type":"tool_execution_end","tool":"read_file","tool_name":"read_file","tool_call_id":"tc_1","result":"...","is_error":false}
-{"type":"message_update","turnId":"turn_1","message":{"role":"assistant","content":"Found 3 auth middleware functions..."}}
-{"type":"turn_end","turn_id":"turn_1","message":""}
-```
+Headless records use the versioned `logician.exec-stream` schema. This is intentionally smaller than the internal bridge event union. See the [Headless tutorial](/tutorials/headless) for records, exit status, and CI guidance.

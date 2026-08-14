@@ -1,62 +1,45 @@
 ---
-title: Reasoning Modes
-description: Tree of Thoughts, SSR, Reflexion, Auto-CoT, and other reasoning strategies.
+title: Reasoning and Inference
+description: Provider defaults, thinking levels, inference presets, and structured reasoners.
 ---
 
-# Reasoning Modes
+# Reasoning and Inference
 
-Logician supports multiple structured reasoning strategies. Choose the mode that fits your task complexity.
+Logician exposes three separate controls. Keeping them distinct makes configuration predictable.
 
-## Available reasoners
-
-| Reasoner | Best for | Description |
+| Control | Purpose | Default |
 |---|---|---|
-| `cot` | Simple tasks | Standard chain-of-thought |
-| `auto_cot` | Moderate tasks | Automatic reasoning depth selection |
-| `reflexion` | Complex debugging | Self-reflection and revision |
-| `tot` | Architecture decisions | Tree of Thoughts exploration |
-| `ssr` | Code generation | Self-subjective reasoning |
-| `got` | Multi-step problems | Graph of Thoughts |
-| `best_of_n` | Quality-critical tasks | Multiple attempts, best result |
-| `in_context_cot` | Few-shot learning | Demonstrations in context |
-| `self_consistency` | Ambiguous tasks | Majority vote across attempts |
+| Inference mode | Sampling parameters sent to the provider | `none` (**Provider**) |
+| Thinking level | Provider-specific reasoning effort | `off` |
+| Structured reasoner | Optional advisory pre-reasoning strategy | `none` |
 
-## Configuration
+## Inference modes
+
+`none` leaves provider sampling parameters untouched. Other presets include `auto`, `thinking-general`, `thinking-coding`, `instruct-general`, `instruct-reasoning`, `instruct-coding`, `deterministic`, `creative`, and `analytical`.
+
+Open the selector with `/mode` or `Ctrl+M`/`Alt+M`. `/inference-mode-cycle` advances through presets.
+
+## Thinking level
+
+Supported values are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`. Availability depends on the selected model; Logician clamps unsupported levels when models change.
+
+Use `/thinking <level>` or the settings overlay. Thinking level is independent of whether reasoning text is collapsed, summarized, or expanded in the transcript.
+
+## Structured reasoners
+
+Reasoners run before the ordinary tool-capable agent loop and provide advisory analysis. Available IDs are `ssr`, `tot`, `got`, `reflexion`, `self_consistency`, `best_of_n`, `auto_cot`, `in_context_cot`, and `cover`.
 
 ```json
 {
-  "reasoning": {
-    "mode": "reflexion",
-    "maxIterations": 10,
-    "temperature": 0.7
+  "reasoner": "reflexion",
+  "reasonerConfig": {
+    "maxTrials": 2
   }
 }
 ```
 
-## Reasoning depth
+Use `/reasoner <mode>` to select and persist a reasoner, or `/reasoner none` to disable it. Reasoners do not replace verification: the main loop still owns tools, edits, and completion.
 
-The `thinkingLevel` setting controls how deeply the agent reasons:
+## A practical starting point
 
-| Level | Description |
-|---|---|
-| `low` | Quick responses, minimal reasoning |
-| `medium` | Balanced reasoning and speed |
-| `high` | Deep analysis, more iterations |
-| `full` | Maximum reasoning depth |
-
-## Switching at runtime
-
-Change reasoning mode during a session:
-
-```
-/reasoning mode tot
-/reasoning depth high
-```
-
-## When to use each
-
-- **Simple fixes** → `cot` or `auto_cot`
-- **Bug investigation** → `reflexion`
-- **Architecture changes** → `tot` or `got`
-- **Critical code** → `best_of_n`
-- **Ambiguous requirements** → `self_consistency`
+Keep Provider mode, thinking off, and no structured reasoner until a task benefits from tighter sampling or additional deliberation. For an ambiguous design decision, try `tot`; for revision after a failed attempt, try `reflexion`; for output diversity with selection, try `best_of_n`.

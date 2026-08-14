@@ -166,7 +166,7 @@ export class LogicianTUI {
 	private cancellationPending = false;
 	configPath?: string;
 	thinkingLevel = "off";
-	inferenceMode: InferenceMode = "instruct-general";
+	inferenceMode: InferenceMode = "none";
 	thinkingDisplayMode: "collapsed" | "summary" | "expanded" = "expanded";
 	currentSessionId: string | null = null;
 	// Tool call awaiting an interactive allow/deny answer in the input bar.
@@ -246,7 +246,7 @@ export class LogicianTUI {
 		this.thinkingLevel = runtimeConfig.bridge.thinkingLevel ?? "off";
 		this.inferenceMode =
 			(runtimeConfig.bridge.inferenceMode as InferenceMode | undefined) ??
-			"instruct-general";
+			"none";
 		this.researchManager = new AutoresearchSession(
 			runtimeConfig.bridge.cwd ?? process.cwd(),
 			(message, level) => this.notifications.show(message, level),

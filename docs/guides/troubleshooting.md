@@ -1,83 +1,67 @@
 ---
 title: Troubleshooting
-description: Common issues and fixes.
+description: Diagnose model, configuration, skill, MCP, and terminal problems.
 ---
 
 # Troubleshooting
 
-Common issues and how to resolve them.
-
-## Connection refused
-
-```
-Error: ECONNREFUSED 127.0.0.1:8080
-```
-
-**Fix:** Start your LLM backend. The TUI expects an OpenAI-compatible server at the configured URL.
+Start with the read-only doctor report:
 
 ```bash
-# Verify the backend is running
+logician doctor
+logician doctor --json
+```
+
+It validates configuration, workspace detection, dependencies, declared MCP servers, skill diagnostics, permissions, and sandbox readiness without contacting the model or starting MCP servers.
+
+## Model connection fails
+
+Confirm `baseUrl` includes the provider's expected API root and that the model ID is valid. For a local endpoint:
+
+```bash
 curl http://127.0.0.1:8080/v1/models
 ```
 
-## Context window full
+Check `LOGICIAN_LLM_URL`, `LOGICIAN_MODEL`, user settings, and trusted project settings in that priority order.
 
-```
-Error: context_full
-```
+## Project settings do not apply
 
-**Fix:** Enable compaction or reduce context:
+Project configuration, skills, and extensions load only for trusted workspaces. Restart in the project root and review the trust prompt. Use `LOGICIAN_TRUST=always` only in controlled environments.
+
+## Context is full
+
+Run `/context`, then `/compact`. For proactive compaction, configure token reserves rather than a percentage:
 
 ```json
 {
   "compaction": {
     "enabled": true,
-    "triggerFraction": 0.75
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
   }
 }
 ```
 
-## Edit fails — text not found
+## An edit cannot find its target
 
-```
-Error: Edit failed — text not found in file
-```
+The file changed or the expected text was not exact. Re-read the file and retry with current content. Do not weaken exact-match editing merely to force an ambiguous replacement.
 
-**Fix:** The file content changed between read and edit. Re-read the file and retry.
+## A skill does not load
 
-## Skill not loading
+Verify that the file is named `SKILL.md`, has YAML frontmatter with a non-empty `description`, and lives below `~/.agents/skills/`, an enabled plugin's `skills/`, or a trusted project's `skills/`/`.agents/skills/`. Run `logician doctor --json` for parse, metadata, ignore, and collision diagnostics.
 
-```
-[WARN] Skill not found: my-skill
-```
+## An MCP server does not start
 
-**Fix:** Check that `SKILL.md` is in the correct location and has valid frontmatter:
+Run a stdio server's configured command directly. For HTTP, verify the URL, `POST` support, authentication header, and response content type. Secrets referenced as `${NAME}` should be in `~/.logician/.env` or the parent environment. Use `/mcp list` to inspect runtime state.
 
-```
-skills/my-skill/SKILL.md
-```
+## The binary does not reflect source changes
 
-## MCP server not starting
-
-```
-Error: MCP server filesystem failed to start
-```
-
-**Fix:** Verify the command and args are correct:
+Source builds live at `apps/tui/dist/logician`. Run:
 
 ```bash
-npx -y @modelcontextprotocol/server-filesystem /workspace
+make install
+command -v logician
+readlink -f "$(command -v logician)"
 ```
 
-## Diagnostic commands
-
-```bash
-# Full system check
-npm start -- doctor --json
-
-# Check MCP connectivity
-npm start -- doctor --mcp
-
-# Check skills
-npm start -- doctor --skills
-```
+The default install link should resolve to the current checkout's `apps/tui/dist/logician`. Restart running processes after rebuilding.

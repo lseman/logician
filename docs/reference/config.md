@@ -25,11 +25,15 @@ The current flat runtime keys include:
   "memoryViewer": true,
   "memoryViewerPort": 3200,
   "reasoner": "none",
-  "reasonerConfig": {}
+  "reasonerConfig": {},
+  "thinkingLevel": "off",
+  "inferenceMode": "none"
 }
 ```
 
 `reasoner` defaults to `none`. A selected reasoner runs before the ordinary tool-capable agent loop and its `reasonerConfig` values override that reasoner's registry defaults.
+
+`thinkingLevel` defaults to `off`. `inferenceMode` defaults to `none`, labeled **Provider** in the UI, which omits Logician's sampling presets and lets the provider use its defaults.
 
 `memoryEmbeddings` defaults to `false`. When enabled, Logician lazily loads the configured local embedding model and fuses its semantic results with SQLite FTS memory retrieval. Lexical retrieval remains available while the model warms.
 
@@ -75,3 +79,5 @@ Environment overrides exist for selected deployment-sensitive settings:
 | `systemPrompt` | `LOGICIAN_SYSTEM_PROMPT` |
 | `contextWindowTokens` | `LOGICIAN_CONTEXT_WINDOW` |
 | `hooks` | `LOGICIAN_HOOKS` |
+
+Logician reads `~/.logician/.env` before resolving MCP servers. It is intended for secrets referenced as `${VARIABLE}` in MCP `headers` or `env` maps.

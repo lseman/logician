@@ -1,77 +1,66 @@
 ---
 title: Skills
-description: SKILL.md-driven capabilities, loading, triggers, and writing custom skills.
+description: Create, discover, and invoke SKILL.md capabilities.
 ---
 
 # Skills
 
-Skills are `SKILL.md` files that inject specialized instructions into the agent's system prompt when triggered by task keywords.
+A skill is a directory containing `SKILL.md`. Its frontmatter describes when it applies; its Markdown body contains the instructions loaded when the skill activates or the user invokes its slash command.
 
-## Structure
+## Where skills load from
 
-Each skill lives in a directory with a `SKILL.md` file:
+Logician recursively discovers skills from:
 
+1. enabled plugins' `skills/` directories;
+2. `~/.agents/skills/` for user-wide skills;
+3. `skills/` and `.agents/skills/` in trusted project ancestors.
+
+Real paths are deduplicated. When stable IDs collide, the first loaded skill wins and Logician reports a diagnostic.
+
+## Directory and command names
+
+The stable ID retains the path below its skill root, but the slash command uses only the skill directory's final segment:
+
+```text
+~/.agents/skills/cpp/cpp-router/SKILL.md
+stable ID: cpp/cpp-router
+command:   /cpp-router
 ```
-skills/
-├── coding/
-│   └── file_ops/
-│       └── SKILL.md
-└── testing/
-    └── write_tests/
-        └── SKILL.md
-```
+
+Use a prefixed leaf directory when the command itself needs a namespace, such as `gsd/gsd-plan-phase/SKILL.md` → `/gsd-plan-phase`.
 
 ## SKILL.md format
 
 ```markdown
-<!-- name: coding/file_ops -->
-<!-- displayName: File Operations -->
-<!-- description: Safe file reading, writing, and editing -->
-<!-- triggers: read write edit file -->
-
-# File Operations
-
-When working with files, always:
-
-1. Read before editing
-2. Use exact text matching for edits
-3. Preserve CRLF line endings
-4. Handle BOM correctly
-```
-
-## Loading order
-
-Skills are loaded from these locations (priority order):
-
-1. **Project skills** — `skills/` in the project root
-2. **User skills** — `~/.logician/skills/`
-3. **Global skills** — installed via package manager
-
-## Triggers
-
-Skills activate automatically when the user prompt matches trigger keywords:
-
-```yaml
-# In SKILL.md frontmatter
+---
+name: file-operations
+description: Safely inspect and modify local files.
 triggers:
-  - read
-  - write
-  - edit
-  - file
+  - edit this file
+  - update the implementation
+allowed-tools:
+  - read_file
+  - edit_file
+argument-hint: "[path]"
+---
+
+# File operations
+
+Read a file before editing it. Preserve its existing line endings and encoding.
 ```
 
-## Writing custom skills
+`description` is required. `name` is a human-facing display name; the stable ID and slash command come from the directory path. Useful optional fields include `aliases`, `triggers`, `example_queries`, `when_not_to_use`, `next_skills`, `preferred_tools`, `model`, and `disable-model-invocation`.
 
-1. Create a directory: `mkdir -p skills/my-skill`
-2. Create `SKILL.md` with frontmatter and instructions
-3. Restart the agent — the skill loads automatically
+## Activation
 
-## Skill diagnostics
+Logician scores the current request against names, aliases, descriptions, triggers, and examples. A bounded set of relevant skills is injected for that turn. Skills with `disable-model-invocation: true` remain available as slash commands but are excluded from automatic activation.
 
-The agent reports skill loading status:
+You can invoke a skill directly with `/<directory-name> [arguments]`. Restart or use `/reload` after adding a skill.
 
-```
-[SKILL] Loaded: coding/file_ops (triggers: read, write, edit, file)
-[SKILL] Loaded: testing/write_tests (triggers: test, spec)
-[WARN] Skill collision: my-skill overrides project/my-skill
-```
+## Resources
+
+Put supporting material in `references/` and executable helpers in `scripts/` below the skill directory. Relative paths in `SKILL.md` resolve against that directory. Keep the main file focused and route to supporting files only when needed.
+
+## Diagnose loading
+
+Run `logician doctor --json` to inspect skill roots and diagnostics. Common failures are a missing description, invalid directory characters, malformed YAML, ignored files, or an untrusted project.

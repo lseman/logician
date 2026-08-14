@@ -1,91 +1,56 @@
 ---
 title: Headless Mode
-description: JSONL streaming for CI/CD and automation.
+description: Run one agent task with machine-readable JSONL output.
 ---
 
 # Headless Mode
 
-Run Logician without the TUI — outputs structured JSONL for CI/CD pipelines and automation.
+`logician exec` runs one prompt without the interactive TUI. Use `--jsonl` when another program will consume the output.
 
-## Basic usage
+## Run a task
 
 ```bash
-npm start -- exec --jsonl "fix the failing test in src/utils.ts"
+logician exec --jsonl "fix the failing test in src/utils.ts"
 ```
 
-## JSONL output
+Place `--` before a prompt fragment that begins with a hyphen:
 
-Each line is a JSON object with typed events:
-
-```json
-{"type":"turn_start","turn_id":"turn_1"}
-{"type":"message_start","turnId":"turn_1","role":"assistant"}
-{"type":"thinking_token","token":"Analyzing test failures..."}
-{"type":"token","token":"I'll fix the test."}
-{"type":"tool_execution_start","tool":"grep","tool_name":"grep","tool_call_id":"tc_1","tool_args":{"pattern":"fail","path":"src/utils.ts"}}
-{"type":"tool_execution_update","tool":"grep","tool_name":"grep","tool_call_id":"tc_1","partial_result":"{\"matches\":3}","update_kind":"arguments"}
-{"type":"tool_execution_end","tool":"grep","tool_name":"grep","tool_call_id":"tc_1","result":"3 matches found","is_error":false}
-{"type":"tool_execution_start","tool":"edit_file","tool_name":"edit_file","tool_call_id":"tc_2","tool_args":{"path":"src/utils.ts","changes":1}}
-{"type":"tool_execution_end","tool":"edit_file","tool_name":"edit_file","tool_call_id":"tc_2","result":"1 change applied","is_error":false}
-{"type":"tool_execution_start","tool":"bash","tool_name":"bash","tool_call_id":"tc_3","tool_args":{"command":"npm test"}}
-{"type":"tool_execution_end","tool":"bash","tool_name":"bash","tool_call_id":"tc_3","result":"12/12 tests passed","is_error":false}
-{"type":"message_update","turnId":"turn_1","message":{"role":"assistant","content":"Fixed the failing test. All 12 tests now pass."}}
-{"type":"turn_end","turn_id":"turn_1","message":""}
-{"type":"agent_settled","nextTurnCount":0}
+```bash
+logician exec --jsonl -- "- inspect why this command fails"
 ```
 
-### Event categories
+## Output contract
 
-| Category | Events |
-|---|---|
-| **Turn lifecycle** | `turn_start`, `message_start`, `message_update`, `message_end`, `turn_end`, `agent_settled` |
-| **Streaming** | `token`, `thinking_token`, `text_start`, `text_end` |
-| **Tool execution** | `tool_execution_start`, `tool_execution_update`, `tool_execution_end`, `tool_start`, `tool_end` |
-| **Context & state** | `context_update`, `compaction`, `phase`, `queue_update`, `todos`, `steered`, `model_select` |
-| **Observability** | `notice`, `agent_retry_start`, `agent_retry_end`, `agent_error`, `guardrail_nudge`, `repair_nudge` |
-| **Interaction** | `permission_request`, `question_request` |
-| **Session** | `session_delete`, `save_point`, `memory_update` |
-| **Subagents** | `subagent_chunk`, `subagent_lifecycle` |
+Standard output contains newline-delimited records. The stream includes content deltas, thinking deltas when supplied by the provider, tool lifecycle records, errors, terminal metadata, and a final `done` record. Diagnostics and configuration warnings go to standard error so stdout remains parseable.
 
-## CI/CD integration
+Consumers should branch on each record's `type` and ignore unknown fields and future record types. Do not parse the human-readable TUI event vocabulary as if it were the headless wire contract.
+
+Example shape:
+
+```jsonl
+{"type":"content","content":"I found the failing assertion."}
+{"type":"tool_use","id":"call_1","name":"read_file","input":{"path":"src/utils.ts"}}
+{"type":"tool_result","id":"call_1","name":"read_file","status":"success","output":"..."}
+{"type":"metadata","meta":{"receipt_kind":"terminal","status":"completed"}}
+{"type":"done"}
+```
+
+## Exit status
+
+The command returns `0` after a successful run, `1` when agent execution reports an error, and `2` for invalid CLI usage or setup errors handled before the run begins.
+
+## CI example
 
 ```yaml
-# .github/workflows/logician.yml
-name: Logician
-on: [pull_request]
-jobs:
-  fix:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
-      - run: bun install
-      - run: |
-          bun start -- exec --jsonl "fix lint errors" \
-            > output.jsonl
-      - uses: actions/upload-artifact@v4
-        with:
-          name: logician-output
-          path: output.jsonl
+steps:
+  - uses: actions/checkout@v4
+  - uses: oven-sh/setup-bun@v2
+  - run: bun install --frozen-lockfile
+  - run: bun start -- exec --jsonl "inspect the failing checks and propose a fix" > logician.jsonl
+  - uses: actions/upload-artifact@v4
+    with:
+      name: logician-output
+      path: logician.jsonl
 ```
 
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| 0 | Success |
-| 1 | Error |
-| 2 | Cancelled |
-| 3 | Timeout |
-
-## Configuration
-
-```json
-{
-  "headless": {
-    "timeout": 300,
-    "maxIterations": 20,
-    "streamOutput": true
-  }
-}
-```
+CI must provide the model endpoint, credentials, and an explicit trust policy appropriate for that environment.

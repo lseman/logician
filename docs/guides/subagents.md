@@ -1,59 +1,43 @@
 ---
 title: Subagents
-description: Delegate tasks to child agents with isolated worktrees.
+description: Delegate bounded tasks to child agents and collect their results.
 ---
 
 # Subagents
 
-Subagents let the main agent delegate self-contained tasks to child agents, each with its own isolated worktree.
-
-## How it works
+Subagents run self-contained tasks with isolated conversation context. They share the configured workspace unless a workflow explicitly creates a Git worktree, so delegation is not automatically file-isolated.
 
 ```mermaid
-graph LR
-  A[Main Agent] --> B[Subagent 1]
-  A --> C[Subagent 2]
-  A --> D[Subagent 3]
-  B --> E[worktree/sub1]
-  C --> F[worktree/sub2]
-  D --> G[worktree/sub3]
-  B --> H[Result → Main]
-  C --> I[Result → Main]
-  D --> J[Result → Main]
+flowchart LR
+    Parent[Parent agent] -->|spawn task| ChildA[Child agent A]
+    Parent -->|spawn task| ChildB[Child agent B]
+    ChildA -->|events and final result| Parent
+    ChildB -->|events and final result| Parent
+    Parent --> Workspace[(Shared workspace by default)]
+    ChildA --> Workspace
+    ChildB --> Workspace
 ```
 
-## Delegation
+## Good delegation boundaries
 
-The main agent creates subagents for:
-- Independent file changes
-- Parallel research tasks
-- Testing and verification
-- Documentation updates
+Delegate work that is concrete, independently verifiable, and unlikely to overlap another writer: a focused investigation, one test suite, a bounded component, or a source review. Keep tightly coupled edits in one agent.
 
 ## Configuration
 
+Use the flat bridge settings rather than a nested `subagents` object:
+
 ```json
 {
-  "subagents": {
-    "maxConcurrent": 4,
-    "isolation": "worktree",
-    "timeout": 300
-  }
+  "maxParallelAgents": 4
 }
 ```
 
-## Results
+The parent controls concurrency. Individual agent definitions can set their own model and turn limits. Child results and lifecycle events flow back to the parent, which remains responsible for integration and final verification.
 
-Subagent results are merged back into the main session:
-- File changes are committed
-- Outputs are captured in the conversation
-- Errors are reported to the main agent
+## Commands and tools
 
-## Commands
+- `/spawn <task>` starts a child task from the TUI.
+- `/agents` (when contributed by the active capability set) shows child state.
+- Programmatic agents use the registered delegation tools to spawn, message, interrupt, or wait for children.
 
-| Command | Action |
-|---|---|
-| `/subagent create <task>` | Create a new subagent |
-| `/subagent list` | List active subagents |
-| `/subagent status <id>` | Check subagent status |
-| `/subagent cancel <id>` | Cancel a subagent |
+Do not assume a child committed changes or used a worktree unless the task explicitly required and verified that workflow.

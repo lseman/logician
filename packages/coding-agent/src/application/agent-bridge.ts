@@ -504,8 +504,8 @@ export class AgentCoreBridge {
 			executionProfile: opts.executionProfile,
 			temperature: opts.temperature,
 			maxTokens: opts.maxTokens,
-			thinkingLevel: opts.thinkingLevel,
-			inferenceMode: opts.inferenceMode,
+			thinkingLevel: opts.thinkingLevel ?? "off",
+			inferenceMode: opts.inferenceMode ?? "none",
 			// Parallel scheduling is transparent to the model. Tools that require
 			// exclusivity declare executionMode: "sequential" and become barriers.
 			toolExecution: opts.toolExecution ?? "parallel",
@@ -1880,7 +1880,7 @@ export class AgentCoreBridge {
 			`  Max iterations: ${this.config.maxIterations ?? 30}`,
 			`  Context window: ${this.config.contextWindowTokens ?? "unset"}`,
 			`  Thinking: ${this.config.thinkingLevel ?? "off"}`,
-			`  Inference mode: ${this.config.inferenceMode ?? "instruct-general"}`,
+			`  Inference mode: ${this.config.inferenceMode ?? "none"}`,
 			`  Reasoner: ${this.reasonerId}`,
 			`  Permission mode: ${this.getPermissionMode()}`,
 			`  Guards: ${guardMode}`,
@@ -1930,7 +1930,7 @@ export class AgentCoreBridge {
 			maxTokens: this.config.maxTokens ?? 4096,
 			maxIterations: this.config.maxIterations ?? 30,
 			thinkingLevel: this.config.thinkingLevel ?? "off",
-			inferenceMode: this.config.inferenceMode ?? "instruct-general",
+			inferenceMode: this.config.inferenceMode ?? "none",
 			permissionMode: this.getPermissionMode(),
 			executionProfile: this.config.executionProfile ?? "autonomous",
 			guardsEnabled: this.config.guardsEnabled ?? false,

@@ -52,40 +52,34 @@ Other notable `AgentCoreBridge` methods: `steer()`, `followUp()`,
 ## Event stream
 
 ```typescript
-type EventCallback = (event: ParsedBridgeEvent) => void
+type EventCallback = (event: RuntimeEvent) => void
 type ErrorCallback = (err: Error) => void
 ```
 
-`ParsedBridgeEvent` is a discriminated union keyed on `type`, exported from
-`@logician/coding-agent` (re-exported from `./runtime/events.ts`). The real
-`type` values are:
+`RuntimeEvent` is a discriminated union keyed on `type`, exported from
+`@logician/coding-agent/runtime`. Its event families are:
 
 ```typescript
-type BridgeEventType =
-  | 'agent_start' | 'agent_end' | 'agent_settled'
-  | 'agent_retry_start' | 'agent_retry_end' | 'agent_error'
+type RuntimeEventType =
   | 'turn_start' | 'turn_end'
   | 'token' | 'thinking_token'
-  | 'text_start' | 'text_end'
-  | 'message_start' | 'message_update' | 'message_end'
-  | 'queue_update'
-  | 'tool_start' | 'tool_end'
+  | 'message_update' | 'agent_iteration_start'
+  | 'tool_call_start' | 'tool_call_update' | 'tool_call_id_update'
   | 'tool_execution_start' | 'tool_execution_update' | 'tool_execution_end'
-  | 'repair_nudge'
-  | 'phase' | 'context_update' | 'compaction' | 'memory_update'
+  | 'phase' | 'runtime_status' | 'context_update' | 'compaction'
+  | 'queue_update' | 'repair_nudge'
   | 'question_request' | 'permission_request'
-  | 'session_delete'
-  | 'model_select'
-  | 'todos' | 'steered' | 'save_point' | 'notice'
+  | 'agent_retry_start' | 'agent_retry_end' | 'agent_error'
+  | 'model_select' | 'todos' | 'steered' | 'notice' | 'memory_update'
   | 'subagent_chunk' | 'subagent_lifecycle'
 ```
 
 Each variant has its own payload shape (see
 `packages/coding-agent/src/runtime/events.ts` for the full interfaces).
-Most mirror the core agent-loop's internal `AgentEventBody` union 1:1 via
-`mapAgentEvent()`; a handful (`todos`, `steered`, `save_point`, `notice`,
-`memory_update`) are synthesized directly by `AgentCoreBridge` for UI-only
-signals that don't exist as core agent events.
+Most core events pass through `mapAgentEvent()`; bridge-owned features also
+emit UI-facing events such as `todos`, `steered`, `notice`, and
+`memory_update`. The [headless JSONL stream](/tutorials/headless) is a separate,
+smaller versioned contract.
 
 ## Configuration
 

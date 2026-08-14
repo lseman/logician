@@ -1,93 +1,47 @@
 ---
 title: Session Persistence
-description: How sessions are stored, managed, and recovered.
+description: How the TUI catalog and append-only agent journal work together.
 ---
 
 # Session Persistence
 
-Logician stores all session data in SQLite, providing fast queries and reliable recovery.
-
-## Database schema
+Session persistence has two layers because browsing history and recovering an in-flight agent have different requirements.
 
 ```mermaid
-erDiagram
-    SESSIONS {
-        string id PK
-        string title
-        datetime created_at
-        datetime updated_at
-        int message_count
-        string status
-    }
-    MESSAGES {
-        int id PK
-        string session_id FK
-        string role
-        string content
-        datetime timestamp
-        string tool_name
-        boolean is_compacted
-    }
-    BOOKMARKS {
-        int id PK
-        string session_id FK
-        string name
-        int message_id
-        datetime created_at
-    }
-    CHECKPOINTS {
-        int id PK
-        string session_id FK
-        int message_id
-        string label
-        datetime created_at
-    }
-
-    SESSIONS ||--o{ MESSAGES : contains
-    SESSIONS ||--o{ BOOKMARKS : has
-    SESSIONS ||--o{ CHECKPOINTS : has
+flowchart LR
+    Turn[Completed or interrupted turn] --> Catalog[(TUI SQLite catalog)]
+    Turn --> Journal[Append-only agent journal]
+    Catalog --> Browser[Session browser and labels]
+    Journal --> ActivePath[Parent-linked active path]
+    ActivePath --> Resume[Resume, fork, discard, compact]
 ```
 
-## Recovery
+## TUI catalog
 
-Sessions survive crashes and restarts:
+Each workspace stores `history.db` under `.logician/tui/sessions/`. The schema tracks sessions, completed turns, labels, and settings changes. SQLite WAL mode makes incremental saves crash-resistant and supports fast session-browser queries.
 
-1. **Auto-save** — messages are saved after each LLM response
-2. **Checkpoint** — manual save points for rewind
-3. **Bookmark** — named save points with labels
-4. **Compaction** — automatic when context nears limit
+## Agent journal
 
-## Compaction
+The core session journal is append-only. Entries can point to parents, allowing an active path to diverge without truncating or copying earlier history. Branch operations change the selected leaf or append summaries; they do not rewrite the journal.
 
-When the context window approaches its limit:
-
-```json
-{
-  "compaction": {
-    "enabled": true,
-    "triggerFraction": 0.75,
-    "strategy": "summarize",
-    "keepToolResults": true,
-    "keepFinalAnswers": true
-  }
-}
-```
-
-Compaction preserves:
-- Tool results and their outcomes
-- Final answers to user questions
-- Critical decisions and conclusions
-- Error messages and their context
-
-## Session lifecycle
+## Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Active
-    Active --> Saving: After each response
-    Saving --> Active
-    Active --> Compacting: Context > 75%
-    Compacting --> Active: Compacted
-    Active --> Archived: User closes
-    Archived --> [*]
+    [*] --> Active: start or resume
+    Active --> Saved: turn completes
+    Saved --> Active: next input
+    Active --> Branched: fork
+    Branched --> Active: merge summary or discard
+    Active --> Compacted: context pressure or /compact
+    Compacted --> Active: summary becomes provider context
+    Active --> [*]: close
 ```
+
+## Compaction and durability
+
+Compaction changes the context sent to the model, not the historical record shown to the user. Summaries, usage metadata, and the active journal path are persisted so later recovery uses the same logical conversation state.
+
+## File recovery
+
+Conversation branches are distinct from file checkpoints. When checkpointing is enabled, Logician records recoverable file state around edits so rewind can restore both conversational position and affected files without destructive Git operations.
