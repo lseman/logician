@@ -14,11 +14,15 @@
 		"forceConsistentCasingInFileNames": true,
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
-		"types": ["node", "bun-types"]
+		"types": ["node", "bun-types"],
+		"paths": {
+			"@logician/eoh/*": ["../eoh/src/*"]
+		}
 	},
 	"include": [
 		"src/**/*",
 		"../agent-core/src/**/*",
-		"../agent-capabilities/src/**/*"
+		"../agent-capabilities/src/**/*",
+		"../eoh/src/**/*"
 	]
 }
