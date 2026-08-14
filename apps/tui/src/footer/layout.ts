@@ -529,8 +529,18 @@ export class StatusBar implements Component {
 	}
 
 	update(info: Partial<WidgetFactoryStatus>): void {
-		Object.assign(this.info, info);
-		this._invalidate();
+		let changed = false;
+		for (const [key, value] of Object.entries(info) as Array<
+			[
+				keyof WidgetFactoryStatus,
+				WidgetFactoryStatus[keyof WidgetFactoryStatus],
+			]
+		>) {
+			if (Object.is(this.info[key], value)) continue;
+			Object.assign(this.info, { [key]: value });
+			changed = true;
+		}
+		if (changed) this._invalidate();
 	}
 
 	setTick(tick: number): void {

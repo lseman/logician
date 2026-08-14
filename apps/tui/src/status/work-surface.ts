@@ -68,13 +68,15 @@ export class WorkSurface implements Component {
 	}
 
 	setPhase(phase: TurnPhase): void {
-		this.active = ![
+		const active = ![
 			"idle",
 			"complete",
 			"failed",
 			"waiting",
 			"approval",
 		].includes(phase);
+		if (this.active === active) return;
+		this.active = active;
 		this.revision++;
 		this.onInvalidate?.();
 	}

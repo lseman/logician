@@ -305,6 +305,16 @@ void describe("StatusBar", () => {
 		assert.ok(lines1[0] !== lines2[0]);
 	});
 
+	it("keeps its render cache when an update does not change any value", () => {
+		const bar = new StatusBar(createDefaultConfig());
+		bar.update({ phase: "streaming" });
+		const first = bar.render(100);
+
+		bar.update({ phase: "streaming" });
+
+		assert.equal(bar.render(100), first);
+	});
+
 	it("starts and stops animation timer", () => {
 		setupTheme();
 		const bar = new StatusBar(createDefaultConfig());

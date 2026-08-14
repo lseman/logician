@@ -252,6 +252,38 @@ void test("streaming updates reuse the rendered completed-turn prefix", () => {
 	);
 });
 
+void test("spinner ticks keep text-only streaming turns cached", () => {
+	const display = new TranscriptDisplay();
+	display.setTurns([
+		{
+			id: "text-only-stream",
+			userMessage: undefined,
+			assistantMessage: {
+				type: "assistant",
+				isComplete: false,
+				chunks: [
+					{
+						seq: 0,
+						type: "content",
+						contentText: "Streaming",
+						isComplete: false,
+					},
+				],
+			},
+			isComplete: false,
+		},
+	]);
+	const internals = display as unknown as {
+		spinnerTick: number;
+		turnStyleRevision: (turn: Turn) => string;
+		turns: Turn[];
+	};
+	const firstRevision = internals.turnStyleRevision(internals.turns[0]);
+	internals.spinnerTick = 1;
+
+	assert.equal(internals.turnStyleRevision(internals.turns[0]), firstRevision);
+});
+
 void test("clicking a tool card toggles only that tool's details", () => {
 	const display = new TranscriptDisplay();
 	display.setTurns([
