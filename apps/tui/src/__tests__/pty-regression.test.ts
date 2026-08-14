@@ -125,7 +125,7 @@ void test("TUI starts in a real terminal and Ctrl+M opens mode selection", async
 	const screen = screenFromPtyResult(result, 120, 32).text();
 	assert.match(screen, /Enter commands/);
 	assert.match(screen, /Inference Mode \(10\)/);
-	assert.match(screen, /Instruct ✓/);
+	assert.match(screen, /Provider ✓/);
 	assert.doesNotMatch(result.output, /TypeError|TUI render error/);
 });
 

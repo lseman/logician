@@ -5,10 +5,7 @@
 // it only supplies cwd/model/emit through EohControllerDeps.
 
 import path from "node:path";
-import {
-	EohEngine,
-	type EohProgressEvent,
-} from "@logician/eoh/engine";
+import { EohEngine, type EohProgressEvent } from "@logician/eoh/engine";
 import { populationStats } from "@logician/eoh/population";
 import type { RuntimeEvent } from "../../runtime/events.ts";
 import {

@@ -1,18 +1,30 @@
-import { test } from "node:test";
 import assert from "node:assert";
+import { test } from "node:test";
 import {
-	rankPopulation,
-	selectParents,
-	selectNextGeneration,
 	populationStats,
+	rankPopulation,
+	selectNextGeneration,
+	selectParents,
 } from "../src/population.ts";
 
 function makeHeuristic(id, fitness) {
-	return { id, thought: `thought ${id}`, code: `code ${id}`, fitness, generation: 0, createdBy: "init", parentIds: [] };
+	return {
+		id,
+		thought: `thought ${id}`,
+		code: `code ${id}`,
+		fitness,
+		generation: 0,
+		createdBy: "init",
+		parentIds: [],
+	};
 }
 
 test("rankPopulation sorts by descending fitness", () => {
-	const pop = [makeHeuristic(1, 0.3), makeHeuristic(2, 0.9), makeHeuristic(3, 0.5)];
+	const pop = [
+		makeHeuristic(1, 0.3),
+		makeHeuristic(2, 0.9),
+		makeHeuristic(3, 0.5),
+	];
 	const ranked = rankPopulation(pop);
 	assert.equal(ranked[0].fitness, 0.9);
 	assert.equal(ranked[1].fitness, 0.5);
@@ -57,7 +69,11 @@ test("selectNextGeneration deduplicates by fingerprint", () => {
 });
 
 test("populationStats returns correct stats", () => {
-	const pop = [makeHeuristic(1, 0.3), makeHeuristic(2, 0.7), makeHeuristic(3, 0.5)];
+	const pop = [
+		makeHeuristic(1, 0.3),
+		makeHeuristic(2, 0.7),
+		makeHeuristic(3, 0.5),
+	];
 	const stats = populationStats(pop);
 	assert.equal(stats.best, 0.7);
 	assert.equal(stats.worst, 0.3);

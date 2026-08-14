@@ -11,6 +11,7 @@
 
 import type {
 	EohConfigEntry,
+	EohOperator,
 	EohRunEntry,
 	ReconstructedEohState,
 } from "./types.ts";
@@ -37,9 +38,20 @@ function statusFrom(value: unknown): EohRunEntry["status"] {
 	return "keep";
 }
 
-function directionFrom(
-	value: unknown,
-): ReconstructedEohState["bestDirection"] {
+function operatorFrom(value: unknown): EohOperator {
+	switch (value) {
+		case "e1_diversity":
+		case "e2_convergence":
+		case "m1_improve":
+		case "m2_tune":
+		case "m3_simplify":
+			return value;
+		default:
+			return "init";
+	}
+}
+
+function directionFrom(value: unknown): ReconstructedEohState["bestDirection"] {
 	return value === "higher" ? "higher" : DEFAULT_DIRECTION;
 }
 
@@ -73,27 +85,19 @@ function nextSegment(state: ReconstructedEohState, segment: number): number {
 	return segment + 1;
 }
 
-function runFrom(
-	entry: JsonlEntry,
-	segment: number,
-): EohRunEntry {
+function runFrom(entry: JsonlEntry, segment: number): EohRunEntry {
 	return {
 		run: typeof entry.run === "number" ? entry.run : 0,
 		thought: typeof entry.thought === "string" ? entry.thought : "",
 		code: typeof entry.code === "string" ? entry.code : "",
 		fitness: typeof entry.fitness === "number" ? entry.fitness : 0,
-		generation:
-			typeof entry.generation === "number" ? entry.generation : 0,
-		createdBy:
-			typeof entry.createdBy === "string"
-				? entry.createdBy
-				: "init",
+		generation: typeof entry.generation === "number" ? entry.generation : 0,
+		createdBy: operatorFrom(entry.createdBy),
 		parentIds: Array.isArray(entry.parentIds)
 			? (entry.parentIds as string[])
 			: [],
 		status: statusFrom(entry.status),
-		description:
-			typeof entry.description === "string" ? entry.description : "",
+		description: typeof entry.description === "string" ? entry.description : "",
 		timestamp: typeof entry.timestamp === "number" ? entry.timestamp : 0,
 		segment,
 	};
@@ -108,9 +112,7 @@ export function parseJsonlEntry(line: string): JsonlEntry | null {
 	}
 }
 
-export function isEohConfigEntry(
-	entry: unknown,
-): entry is EohConfigEntry {
+export function isEohConfigEntry(entry: unknown): entry is EohConfigEntry {
 	return isObjectRecord(entry) && entry.type === "eoh_config";
 }
 
@@ -118,9 +120,7 @@ export function isEohRunEntry(entry: unknown): entry is EohRunEntry {
 	return isObjectRecord(entry) && typeof entry.run === "number";
 }
 
-function firstConfigEntry(
-	jsonlContent: string,
-): EohConfigEntry | null {
+function firstConfigEntry(jsonlContent: string): EohConfigEntry | null {
 	for (const line of nonEmptyLines(jsonlContent)) {
 		const entry = parseJsonlEntry(line);
 		if (isEohConfigEntry(entry)) return entry;

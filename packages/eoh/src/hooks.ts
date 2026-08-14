@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 
 import { hasEohConfigHeader } from "./jsonl.ts";
-import { sessionFilePath, ensureParentDir } from "./paths.ts";
+import { ensureParentDir, sessionFilePath } from "./paths.ts";
 
 const TIMEOUT_MS = 30_000;
 const STDOUT_MAX_BYTES = 8 * 1024;
