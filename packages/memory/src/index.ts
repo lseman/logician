@@ -63,6 +63,7 @@ export type {
 	// Memory Relations
 	MemoryRelation,
 	MemoryRelationType,
+	MemoryRetrievalResult,
 	// Store
 	MemoryStore,
 	MemoryType,

@@ -6,6 +6,7 @@
 		{ "path": "packages/coding-agent" },
 		{ "path": "apps/tui" },
 		{ "path": "packages/rag" },
-		{ "path": "packages/memory" }
+		{ "path": "packages/memory" },
+		{ "path": "apps/memory-mcp" }
 	]
 }

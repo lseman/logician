@@ -14,6 +14,22 @@
         "typescript": "5.7.2",
       },
     },
+    "apps/memory-mcp": {
+      "name": "@logician/memory-mcp",
+      "version": "0.1.0",
+      "bin": {
+        "logician-memory-mcp": "src/index.ts",
+      },
+      "dependencies": {
+        "@logician/memory": "0.1.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^22.0.0",
+        "bun-types": "^1.3.14",
+        "typescript": "^6.0.3",
+      },
+    },
     "apps/tui": {
       "name": "@logician/tui",
       "version": "0.2.0",
@@ -291,6 +307,8 @@
     "@logician/coding-agent": ["@logician/coding-agent@workspace:packages/coding-agent"],
 
     "@logician/memory": ["@logician/memory@workspace:packages/memory"],
+
+    "@logician/memory-mcp": ["@logician/memory-mcp@workspace:apps/memory-mcp"],
 
     "@logician/rag": ["@logician/rag@workspace:packages/rag"],
 
@@ -589,6 +607,8 @@
     "@logician/memory/@types/node": ["@types/node@26.1.2", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg=="],
 
     "@logician/memory/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "@logician/memory-mcp/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "@logician/tui/typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 

@@ -146,6 +146,13 @@ export interface ContextRetrievalQuery {
 	semanticVector?: number[];
 	/** Optional per-kind fractions; unspecified kinds use safe defaults. */
 	typedQuotas?: Partial<Record<ContextBlock["type"], number>>;
+	/** Global cap on selected context items after ranking and quotas. */
+	maxItems?: number;
+}
+
+export interface MemoryRetrievalResult {
+	context: string;
+	trace: RetrievalTrace;
 }
 
 // ── Dedup Config ─────────────────────────────────────────────────────────────
@@ -483,11 +490,16 @@ export interface ExtractionJob {
 	updatedAt: string;
 	nextAttemptAt: string;
 	lastError?: string;
+	ownerId?: string;
+	leaseUntil?: string;
+	fencingToken: number;
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────
 
 export interface CreateMemoryOptions {
+	/** Stable caller-supplied ID for idempotent external writes. */
+	id?: string;
 	/** Memory type, default: "fact" */
 	type?: MemoryType;
 	/** Explicit concepts (overrides auto-extraction) */
@@ -592,7 +604,8 @@ export interface MemoryStore {
 		workspace: string,
 		payload: string,
 	): ExtractionJob;
-	claimExtractionJob(): ExtractionJob | null;
+	claimExtractionJob(leaseMs?: number): ExtractionJob | null;
+	renewExtractionJob(id: string, leaseMs?: number): boolean;
 	completeExtractionJob(id: string): void;
 	failExtractionJob(id: string, error: string, retryDelayMs?: number): void;
 	listExtractionJobs(status?: ExtractionJobStatus): ExtractionJob[];
@@ -603,6 +616,12 @@ export interface MemoryStore {
 		budget?: number,
 		query?: string | ContextRetrievalQuery,
 	): string;
+	/** Canonical retrieval entry point used by every adapter. */
+	retrieve(
+		sessionId: string,
+		budget?: number,
+		query?: string | ContextRetrievalQuery,
+	): MemoryRetrievalResult;
 	listRetrievalTraces(limit?: number): RetrievalTrace[];
 	recordOutcomeReceipt(input: {
 		retrievalTraceId: string;

@@ -272,9 +272,11 @@ describe("createMemoryStore — sessions", () => {
 		store.createSession("current", { cwd: "/workspace" });
 		const legacyDb = new Database(path);
 		legacyDb
-			.prepare(`INSERT INTO sessions
+			.prepare(
+				`INSERT INTO sessions
       (id, project, cwd, workspace, started_at, status, observation_count)
-      VALUES ('legacy', '', '', '', ?, 'completed', 0)`)
+      VALUES ('legacy', '', '', '', ?, 'completed', 0)`,
+			)
 			.run(new Date().toISOString());
 		legacyDb.close();
 		const result = store.clearSessions("current");
@@ -1504,7 +1506,7 @@ describe("memory expansion", () => {
 });
 
 describe("durable extraction queue", () => {
-	test("requeues a claimed job when the database is reopened", () => {
+	test("does not steal a healthy lease and reclaims an expired lease", () => {
 		const path = dbPath();
 		const first = createMemoryStore(path);
 		first.setCurrentWorkspace("/workspace");
@@ -1513,15 +1515,31 @@ describe("durable extraction queue", () => {
 			"/workspace",
 			JSON.stringify({ intent: "recover" }),
 		);
-		assert.equal(first.claimExtractionJob()?.id, queued.id);
+		assert.equal(first.claimExtractionJob(60_000)?.id, queued.id);
+
+		const concurrent = createMemoryStore(path);
+		concurrent.setCurrentWorkspace("/workspace");
+		assert.equal(concurrent.claimExtractionJob(), null);
+		concurrent.close();
 		first.close();
 
 		const recovered = createMemoryStore(path);
 		recovered.setCurrentWorkspace("/workspace");
-		assert.equal(recovered.listExtractionJobs("pending")[0]?.id, queued.id);
-		recovered.completeExtractionJob(queued.id);
-		assert.equal(recovered.listExtractionJobs("completed").length, 1);
+		assert.equal(recovered.claimExtractionJob(), null);
 		recovered.close();
+
+		const raw = new Database(path);
+		raw
+			.prepare("UPDATE extraction_jobs SET lease_until = ? WHERE id = ?")
+			.run(new Date(0).toISOString(), queued.id);
+		raw.close();
+
+		const reclaimed = createMemoryStore(path);
+		reclaimed.setCurrentWorkspace("/workspace");
+		assert.equal(reclaimed.claimExtractionJob()?.id, queued.id);
+		reclaimed.completeExtractionJob(queued.id);
+		assert.equal(reclaimed.listExtractionJobs("completed").length, 1);
+		reclaimed.close();
 	});
 
 	test("moves repeatedly failing jobs to a terminal state", () => {

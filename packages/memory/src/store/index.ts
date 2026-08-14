@@ -637,7 +637,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       next_attempt_at TEXT NOT NULL,
-      last_error TEXT
+      last_error TEXT,
+      owner_id TEXT,
+      lease_until TEXT,
+      fencing_token INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_extraction_jobs_ready
       ON extraction_jobs(workspace, status, next_attempt_at, created_at);
@@ -745,14 +748,18 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	);
   `);
 
-	// A process may exit after claiming but before acknowledging a job. Requeue
-	// those leases on startup; writes are idempotent because observation IDs are
-	// derived from the job ID by the hook worker.
-	db.prepare(
-		"UPDATE extraction_jobs SET status = 'pending' WHERE status = 'running'",
-	).run();
-
 	// ── Schema migrations ──────────────────────────────────────────────────
+	for (const [column, definition] of [
+		["owner_id", "TEXT"],
+		["lease_until", "TEXT"],
+		["fencing_token", "INTEGER NOT NULL DEFAULT 0"],
+	] as const) {
+		const columns = db
+			.prepare("PRAGMA table_info(extraction_jobs)")
+			.all() as Array<{ name: string }>;
+		if (!columns.some(item => item.name === column))
+			db.exec(`ALTER TABLE extraction_jobs ADD COLUMN ${column} ${definition}`);
+	}
 	for (const [column, definition] of [
 		["lifecycle", "TEXT NOT NULL DEFAULT 'probationary'"],
 		["validity_predicates", "TEXT NOT NULL DEFAULT '[]'"],
@@ -970,11 +977,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const sessionWorkspace = normalizeWorkspacePath(
 			data.workspace || sessionCwd,
 		);
-		db.prepare(`
+		db.prepare(
+			`
       INSERT OR IGNORE INTO sessions (id, name, project, cwd, workspace, started_at, status, observation_count,
                                       model, tags, first_prompt, summary, commit_shas)
       VALUES (?, ?, COALESCE(?, ''), COALESCE(?, ''), COALESCE(?, ''), ?, 'active', 0, ?, ?, ?, ?, ?)
-    `).run(
+    `,
+		).run(
 			id,
 			data.name || null,
 			data.project || "",
@@ -1138,11 +1147,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		// shown or attributed safely. Treat them as legacy garbage when the user
 		// explicitly asks to clean sessions.
 		const rows = db
-			.prepare(`
+			.prepare(
+				`
       SELECT id FROM sessions
       WHERE (workspace = ? OR (workspace = '' AND cwd = ''))
         AND (? IS NULL OR id != ?)
-    `)
+    `,
+			)
 			.all(
 				currentWorkspace,
 				keepSessionId || null,
@@ -1183,7 +1194,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function discardEmptySession(id: string): boolean {
 		const session = db
-			.prepare(`
+			.prepare(
+				`
       SELECT id FROM sessions
       WHERE id = ? AND observation_count = 0
         AND NOT EXISTS (SELECT 1 FROM observations WHERE session_id = sessions.id)
@@ -1191,7 +1203,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
           SELECT 1 FROM memories m, json_each(m.session_ids) je
           WHERE json_valid(m.session_ids) AND je.value = sessions.id
         )
-    `)
+    `,
+			)
 			.get(id) as { id: string } | undefined;
 		if (!session) return false;
 		return db.prepare("DELETE FROM sessions WHERE id = ?").run(id).changes > 0;
@@ -1421,12 +1434,14 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		}
 
 		const persistObservation = db.transaction(() => {
-			db.prepare(`
+			db.prepare(
+				`
       INSERT INTO observations (id, session_id, timestamp, hook_type, type, title, subtitle,
                                 narrative, facts, concepts, files, importance, workspace, claims,
                                 provenance, raw_data)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    `,
+			).run(
 				comp.id,
 				raw.sessionId,
 				raw.timestamp || ts,
@@ -1445,9 +1460,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				JSON.stringify(safeRaw.raw).slice(0, 32_000),
 			);
 			persistObservationClaims(comp, obsWorkspace, ts);
-			db.prepare(`
+			db.prepare(
+				`
       UPDATE sessions SET observation_count = observation_count + 1 WHERE id = ?
-			`).run(raw.sessionId);
+			`,
+			).run(raw.sessionId);
 		});
 		persistObservation();
 
@@ -1643,8 +1660,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					claim.observationId,
 					sanitizeString(eventId),
 				);
-			db.prepare(`UPDATE claims SET lifecycle = 'durable', evidence_certificate = ?
-			  WHERE id = ? AND lifecycle = 'probationary'`).run(
+			db.prepare(
+				`UPDATE claims SET lifecycle = 'durable', evidence_certificate = ?
+			  WHERE id = ? AND lifecycle = 'probationary'`,
+			).run(
 				JSON.stringify({
 					...claim.evidenceCertificate,
 					evidenceEventIds: [...corroborated],
@@ -1664,14 +1683,16 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const ftsQuery = toFtsQuery(query);
 		if (!ftsQuery) return [];
 		const rows = db
-			.prepare(`
+			.prepare(
+				`
       SELECT o.*, bm25(observations_fts, 0, 8, 4, 2, 3, 3) AS lexical_rank
       FROM observations_fts
       JOIN observations o ON o.id = observations_fts.id
       WHERE observations_fts MATCH ? AND o.workspace = ?
       ORDER BY lexical_rank ASC, o.importance DESC, o.timestamp DESC
       LIMIT ?
-    `)
+    `,
+			)
 			.all(
 				ftsQuery,
 				currentWorkspace,
@@ -1765,21 +1786,32 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		db.prepare("DELETE FROM observations WHERE workspace = ?").run(
 			currentWorkspace,
 		);
-		db.prepare(`
+		db.prepare(
+			`
       UPDATE sessions
       SET observation_count = (
         SELECT COUNT(*) FROM observations WHERE observations.session_id = sessions.id
       )
       WHERE workspace = ?
-    `).run(currentWorkspace);
+    `,
+		).run(currentWorkspace);
 		return count;
 	}
 
 	// ── Memories ───────────────────────────────────────────────────────────
 
 	function create(content: string, options: CreateMemoryOptions = {}): Memory {
-		const id = generateId();
+		const id = options.id?.trim() || generateId();
 		const ts = now();
+		const memoryWorkspace = normalizeWorkspacePath(
+			options.workspace || currentWorkspace,
+		);
+		const existingRow = db
+			.prepare(
+				"SELECT * FROM memories WHERE id = ? AND is_latest = 1 AND workspace = ?",
+			)
+			.get(id, memoryWorkspace) as any;
+		if (existingRow) return rowToMemory(existingRow);
 
 		// Auto-extract concepts from content
 		const concepts = options.concepts || extractConcepts(content);
@@ -1789,17 +1821,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const strength = options.strength ?? assignStrength(content);
 
 		// Derive workspace from options or current workspace
-		const memoryWorkspace = normalizeWorkspacePath(
-			options.workspace || currentWorkspace,
-		);
-
-		db.prepare(`
+		db.prepare(
+			`
       INSERT INTO memories (id, created_at, updated_at, type, title, content,
                             concepts, files, session_ids, strength, version,
                             parent_id, related_ids, source_observation_ids, is_latest, project, workspace,
                             access_count, last_accessed, working_tier)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, '[]', '[]', 1, ?, ?, 0, NULL, 'cold')
-    `).run(
+    `,
+		).run(
 			id,
 			ts,
 			ts,
@@ -1977,10 +2007,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		toolInput: unknown,
 	): void {
 		const hash = computeDedupHash(sessionId, toolName, toolInput);
-		db.prepare(`
+		db.prepare(
+			`
       INSERT INTO dedup (hash, created_at) VALUES (?, ?)
       ON CONFLICT(hash) DO UPDATE SET created_at = excluded.created_at
-    `).run(hash, now());
+    `,
+		).run(hash, now());
 		// Clean up old entries
 		db.prepare("DELETE FROM dedup WHERE created_at < ?").run(
 			new Date(Date.now() - dedupWindowMs * 2).toISOString(),
@@ -2003,11 +2035,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			.get(sessionId, sessionId, cap) as { cnt: number };
 		if (!excess || excess.cnt <= 0) return 0;
 
-		db.prepare(`
+		db.prepare(
+			`
       DELETE FROM observations WHERE session_id = ? AND id NOT IN (
         SELECT id FROM observations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?
       )
-    `).run(sessionId, sessionId, cap);
+    `,
+		).run(sessionId, sessionId, cap);
 
 		return excess.cnt;
 	}
@@ -2015,9 +2049,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	// ── Access Tracker ─────────────────────────────────────────────────────
 
 	function trackAccess(entityId: string): void {
-		db.prepare(`
+		db.prepare(
+			`
 	      UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ? AND workspace = ?
-	    `).run(now(), entityId, currentWorkspace);
+	    `,
+		).run(now(), entityId, currentWorkspace);
 	}
 
 	function getAccessStats(
@@ -2337,7 +2373,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	): void {
 		if (!vector.length || vector.some(value => !Number.isFinite(value))) return;
 		const vectorBucket = embeddingBucket(vector);
-		db.prepare(`INSERT INTO memory_embeddings
+		db.prepare(
+			`INSERT INTO memory_embeddings
 	      (entity_id, entity_kind, session_id, workspace, dimensions, model,
 	       content_hash, creation_version, vector_bucket, vector, updated_at)
 	      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2351,7 +2388,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	        creation_version = excluded.creation_version,
 	        vector_bucket = excluded.vector_bucket,
         vector = excluded.vector,
-        updated_at = excluded.updated_at`).run(
+        updated_at = excluded.updated_at`,
+		).run(
 			id,
 			kind,
 			sessionId || null,
@@ -2393,10 +2431,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const buckets = embeddingProbeBuckets(vector);
 		const placeholders = buckets.map(() => "?").join(", ");
 		const rows = db
-			.prepare(`SELECT entity_id, entity_kind, session_id, vector
+			.prepare(
+				`SELECT entity_id, entity_kind, session_id, vector
 	      FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
 	        AND vector_bucket IN (${placeholders})
-	      ORDER BY updated_at DESC LIMIT 8000`)
+	      ORDER BY updated_at DESC LIMIT 8000`,
+			)
 			.all(currentWorkspace, vector.length, ...buckets) as Array<{
 			entity_id: string;
 			entity_kind: "observation" | "memory";
@@ -2408,9 +2448,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		// cliff for indexed rows.
 		if (rows.length < Math.min(limit, 20)) {
 			const legacyRows = db
-				.prepare(`SELECT entity_id, entity_kind, session_id, vector
+				.prepare(
+					`SELECT entity_id, entity_kind, session_id, vector
 				  FROM memory_embeddings WHERE workspace = ? AND dimensions = ?
-				    AND vector_bucket = '' ORDER BY updated_at DESC LIMIT 1000`)
+				    AND vector_bucket = '' ORDER BY updated_at DESC LIMIT 1000`,
+				)
 				.all(currentWorkspace, vector.length) as typeof rows;
 			rows.push(...legacyRows);
 		}
@@ -2641,11 +2683,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 						db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(
 							existing.id,
 						);
-						db.prepare(`INSERT INTO memories
+						db.prepare(
+							`INSERT INTO memories
                 (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
                  strength, version, parent_id, related_ids, source_observation_ids, is_latest,
                  project, workspace, supersedes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`).run(
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+						).run(
 							id,
 							existing.createdAt,
 							ts,
@@ -2664,20 +2708,19 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 							currentWorkspace,
 							JSON.stringify([existing.id]),
 						);
-						db.prepare(`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
-              VALUES (?, 'supersedes', ?, ?, 1, ?)`).run(
-							generateId(),
-							id,
-							existing.id,
-							ts,
-						);
+						db.prepare(
+							`INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
+              VALUES (?, 'supersedes', ?, ?, 1, ?)`,
+						).run(generateId(), id, existing.id, ts);
 						return id;
 					}
 					const id = generateId();
-					db.prepare(`INSERT INTO memories
+					db.prepare(
+						`INSERT INTO memories
             (id, created_at, updated_at, type, title, content, concepts, files, session_ids,
              strength, version, parent_id, related_ids, source_observation_ids, is_latest, project, workspace)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, NULL, ?)`).run(
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, '[]', ?, 1, NULL, ?)`,
+					).run(
 						id,
 						ts,
 						ts,
@@ -2757,9 +2800,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				updatedAt: row.updated_at,
 			};
 		const policy = initialShadowPolicy();
-		db.prepare(`INSERT INTO memory_policy_state
+		db.prepare(
+			`INSERT INTO memory_policy_state
 		  (workspace, version, mode, weights, samples, updated_at)
-		  VALUES (?, ?, ?, ?, ?, ?)`).run(
+		  VALUES (?, ?, ?, ?, ?, ?)`,
+		).run(
 			currentWorkspace,
 			policy.version,
 			policy.mode,
@@ -2945,10 +2990,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const semanticMemoryRank = new Map<string, number>();
 		const lexicalObservations = ftsQuery
 			? (db
-					.prepare(`SELECT o.*, bm25(observations_fts, 0, 8, 4, 2, 3, 4) AS rank
+					.prepare(
+						`SELECT o.*, bm25(observations_fts, 0, 8, 4, 2, 3, 4) AS rank
           FROM observations_fts JOIN observations o ON o.id = observations_fts.id
           WHERE observations_fts MATCH ? AND o.workspace = ?
-          ORDER BY rank ASC LIMIT 80`)
+          ORDER BY rank ASC LIMIT 80`,
+					)
 					.all(ftsQuery, currentWorkspace) as any[])
 			: [];
 		lexicalObservations.forEach((row, index) =>
@@ -2956,10 +3003,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		);
 		const lexicalMemories = ftsQuery
 			? (db
-					.prepare(`SELECT m.*, bm25(memories_fts, 0, 8, 4, 3, 4) AS rank
+					.prepare(
+						`SELECT m.*, bm25(memories_fts, 0, 8, 4, 3, 4) AS rank
           FROM memories_fts JOIN memories m ON m.id = memories_fts.id
           WHERE memories_fts MATCH ? AND m.workspace = ? AND m.is_latest = 1
-          ORDER BY rank ASC LIMIT 80`)
+          ORDER BY rank ASC LIMIT 80`,
+					)
 					.all(ftsQuery, currentWorkspace) as any[])
 			: [];
 		lexicalMemories.forEach((row, index) =>
@@ -3171,7 +3220,7 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					preferredItemsPerSource: 2,
 				},
 			),
-		];
+		].slice(0, Math.max(1, Math.min(retrieval.maxItems ?? 40, 100)));
 		const tokenCount = blocks.reduce((sum, block) => sum + block.tokens, 0);
 		const shadowPolicy = getShadowPolicy();
 		const candidateCounts = candidates.reduce<Record<string, number>>(
@@ -3204,10 +3253,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				shadow: shadowDecision(shadowPolicy, policyFeatures(block)),
 			})),
 		};
-		db.prepare(`INSERT INTO retrieval_traces
+		db.prepare(
+			`INSERT INTO retrieval_traces
 		  (id, workspace, session_id, objective, phase, created_at, latency_ms,
 		   budget, tokens, abstained, reason, candidate_counts, selected)
-		  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+		  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		).run(
 			trace.id,
 			trace.workspace,
 			trace.sessionId,
@@ -3244,6 +3295,17 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const expansionNote =
 			"Each bracketed value is a stable ID. These entries are summaries, not complete records. Call `memory_get` once with the relevant IDs when full rationale, evidence, or details are needed.";
 		return `# Agent Context\n\n${retrievalNote}\n\n${expansionNote}\n\n${blocks.map(block => block.content).join("\n")}\n`;
+	}
+
+	function retrieve(
+		sessionId: string,
+		budget: number = 4000,
+		query: string | ContextRetrievalQuery = "",
+	) {
+		const context = getContext(sessionId, budget, query);
+		const trace = listRetrievalTraces(1)[0];
+		if (!trace) throw new Error("Retrieval did not produce a trace");
+		return { context, trace };
 	}
 
 	function contextTokens(value: string): Set<string> {
@@ -3283,8 +3345,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function listRetrievalTraces(limit: number = 100): RetrievalTrace[] {
 		const rows = db
-			.prepare(`SELECT * FROM retrieval_traces
-			  WHERE workspace = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+			.prepare(
+				`SELECT * FROM retrieval_traces
+			  WHERE workspace = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+			)
 			.all(currentWorkspace, Math.max(1, Math.min(limit, 1000))) as any[];
 		return rows.map(row => ({
 			id: row.id,
@@ -3355,10 +3419,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		);
 		const evolved = learnShadowPolicy(policy, featureRows, reward);
 		db.transaction(() => {
-			db.prepare(`INSERT INTO memory_outcome_receipts
+			db.prepare(
+				`INSERT INTO memory_outcome_receipts
 			  (id, workspace, retrieval_trace_id, task_id, trial_id, created_at,
 			   selected_ids, policy_version, outcome, reward)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			).run(
 				receipt.id,
 				receipt.workspace,
 				receipt.retrievalTraceId,
@@ -3370,8 +3436,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				JSON.stringify(receipt.outcome),
 				receipt.reward,
 			);
-			db.prepare(`UPDATE memory_policy_state SET version = ?, mode = 'shadow',
-			  weights = ?, samples = ?, updated_at = ? WHERE workspace = ?`).run(
+			db.prepare(
+				`UPDATE memory_policy_state SET version = ?, mode = 'shadow',
+			  weights = ?, samples = ?, updated_at = ? WHERE workspace = ?`,
+			).run(
 				evolved.version,
 				JSON.stringify(evolved.weights),
 				evolved.samples,
@@ -3384,8 +3452,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function listOutcomeReceipts(limit: number = 100): MemoryOutcomeReceipt[] {
 		const rows = db
-			.prepare(`SELECT * FROM memory_outcome_receipts WHERE workspace = ?
-			  ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+			.prepare(
+				`SELECT * FROM memory_outcome_receipts WHERE workspace = ?
+			  ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+			)
 			.all(currentWorkspace, Math.max(1, Math.min(limit, 1_000))) as any[];
 		return rows.map(row => ({
 			id: row.id,
@@ -3535,10 +3605,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			),
 		);
 
-		db.prepare(`
+		db.prepare(
+			`
       INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(relationId, type, sourceId, targetId, clampedConf, ts);
+    `,
+		).run(relationId, type, sourceId, targetId, clampedConf, ts);
 
 		// Update related_ids on both memories
 		db.prepare(
@@ -3664,10 +3736,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 	): Array<{ memory: Memory; hop: number; confidence: number }> {
 		if (!get(memoryId)) return [];
 		const allRelations = db
-			.prepare(`SELECT r.* FROM relations r
+			.prepare(
+				`SELECT r.* FROM relations r
 			  JOIN memories source ON source.id = r.source_id
 			  JOIN memories target ON target.id = r.target_id
-			  WHERE source.workspace = ? AND target.workspace = ?`)
+			  WHERE source.workspace = ? AND target.workspace = ?`,
+			)
 			.all(currentWorkspace, currentWorkspace) as any[];
 
 		const visited = new Set<string>([memoryId]);
@@ -3749,13 +3823,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			db.prepare("UPDATE memories SET is_latest = 0 WHERE id = ?").run(
 				memoryId,
 			);
-			db.prepare(`
+			db.prepare(
+				`
       INSERT INTO memories (id, created_at, updated_at, type, title, content,
                             concepts, files, session_ids, strength, version,
                             parent_id, related_ids, source_observation_ids, is_latest, project,
                             workspace, access_count, last_accessed, working_tier, supersedes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 1, ?, ?, 0, NULL, 'cold', ?)
-    `).run(
+    `,
+			).run(
 				evolved.id,
 				ts,
 				ts,
@@ -3774,10 +3850,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			);
 
 			const relationId = generateId();
-			db.prepare(`
+			db.prepare(
+				`
       INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
       VALUES (?, 'supersedes', ?, ?, 1.0, ?)
-    `).run(relationId, evolved.id, memoryId, ts);
+    `,
+			).run(relationId, evolved.id, memoryId, ts);
 
 			db.prepare(
 				`UPDATE memories SET related_ids = json_insert(related_ids, '$', ?) WHERE id = ?`,
@@ -3790,11 +3868,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 
 	function removeRelation(relationId: string): boolean {
 		const result = db
-			.prepare(`DELETE FROM relations WHERE id = ? AND EXISTS (
+			.prepare(
+				`DELETE FROM relations WHERE id = ? AND EXISTS (
 			  SELECT 1 FROM memories source JOIN memories target
 			  WHERE source.id = relations.source_id AND target.id = relations.target_id
 			    AND source.workspace = ? AND target.workspace = ?
-			)`)
+			)`,
+			)
 			.run(relationId, currentWorkspace, currentWorkspace);
 		return result.changes > 0;
 	}
@@ -3911,20 +3991,24 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		const pattern = `%${file}%`;
 		const rows = sessionId
 			? (db
-					.prepare(`
+					.prepare(
+						`
           SELECT id, session_id, type, title, narrative, importance, timestamp
           FROM observations
           WHERE workspace = ? AND (title LIKE ? OR narrative LIKE ? OR files LIKE ?) AND session_id = ?
           ORDER BY timestamp DESC
-        `)
+        `,
+					)
 					.all(currentWorkspace, pattern, pattern, pattern, sessionId) as any[])
 			: (db
-					.prepare(`
+					.prepare(
+						`
           SELECT id, session_id, type, title, narrative, importance, timestamp
           FROM observations
           WHERE workspace = ? AND (title LIKE ? OR narrative LIKE ? OR files LIKE ?)
           ORDER BY timestamp DESC
-        `)
+        `,
+					)
 					.all(currentWorkspace, pattern, pattern, pattern) as any[]);
 
 		if (rows.length === 0) return null;
@@ -3986,11 +4070,13 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				.all(currentWorkspace) as any[]
 		).map(rowToClaim);
 		const relations = db
-			.prepare(`SELECT r.* FROM relations r
+			.prepare(
+				`SELECT r.* FROM relations r
           JOIN memories source ON source.id = r.source_id
           JOIN memories target ON target.id = r.target_id
           WHERE source.workspace = ? AND target.workspace = ?
-          ORDER BY r.created_at DESC`)
+          ORDER BY r.created_at DESC`,
+			)
 			.all(currentWorkspace, currentWorkspace) as any[];
 
 		return {
@@ -4066,7 +4152,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					result.skipped++;
 					continue;
 				}
-				db.prepare(`INSERT INTO sessions
+				db.prepare(
+					`INSERT INTO sessions
             (id, name, project, cwd, workspace, started_at, ended_at, status,
              observation_count, model, tags, first_prompt, summary, commit_shas)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4076,7 +4163,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
               ended_at=excluded.ended_at, status=excluded.status,
               observation_count=excluded.observation_count, model=excluded.model,
               tags=excluded.tags, first_prompt=excluded.first_prompt,
-              summary=excluded.summary, commit_shas=excluded.commit_shas`).run(
+              summary=excluded.summary, commit_shas=excluded.commit_shas`,
+				).run(
 					session.id,
 					session.name || null,
 					session.project || "",
@@ -4119,7 +4207,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					hookType?: string;
 					rawData?: unknown;
 				};
-				db.prepare(`INSERT INTO observations
+				db.prepare(
+					`INSERT INTO observations
             (id, session_id, timestamp, hook_type, type, title, subtitle,
              narrative, facts, concepts, files, importance, workspace,
              consolidated, claims, provenance, raw_data)
@@ -4131,7 +4220,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
               facts=excluded.facts, concepts=excluded.concepts, files=excluded.files,
               importance=excluded.importance, workspace=excluded.workspace,
               consolidated=excluded.consolidated, claims=excluded.claims,
-              provenance=excluded.provenance, raw_data=excluded.raw_data`).run(
+              provenance=excluded.provenance, raw_data=excluded.raw_data`,
+				).run(
 					obs.id,
 					obs.sessionId,
 					obs.timestamp,
@@ -4176,7 +4266,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					const workspace = normalizedScope(claim.workspace);
 					if (workspace !== currentWorkspace)
 						throw new Error("claim belongs to a different workspace");
-					db.prepare(`INSERT INTO claims
+					db.prepare(
+						`INSERT INTO claims
 					  (id, workspace, observation_id, session_id, text, status, confidence,
 					   operation, valid_from, valid_to, transaction_time, source, trust,
 					   extractor_version, schema_version, supersedes_claim_id,
@@ -4193,7 +4284,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					    validity_predicates=excluded.validity_predicates,
 					    evidence_certificate=excluded.evidence_certificate,
 					    supersedes_claim_id=NULL,
-					    superseded_by_claim_id=NULL, tombstoned_at=excluded.tombstoned_at`).run(
+					    superseded_by_claim_id=NULL, tombstoned_at=excluded.tombstoned_at`,
+					).run(
 						claim.id,
 						workspace,
 						claim.observationId,
@@ -4218,12 +4310,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 						claim.id,
 					);
 					for (const evidenceId of claim.evidenceEventIds)
-						db.prepare(`INSERT INTO claim_evidence
-						  (claim_id, observation_id, evidence_event_id) VALUES (?, ?, ?)`).run(
-							claim.id,
-							claim.observationId,
-							evidenceId,
-						);
+						db.prepare(
+							`INSERT INTO claim_evidence
+						  (claim_id, observation_id, evidence_event_id) VALUES (?, ?, ?)`,
+						).run(claim.id, claim.observationId, evidenceId);
 					result.imported++;
 				} catch (e) {
 					result.errors.push(`Claim ${claim.id}: ${(e as Error).message}`);
@@ -4232,8 +4322,10 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			for (const claim of data.claims) {
 				if (!claim.supersededByClaimId && !claim.supersedesClaimId) continue;
 				try {
-					db.prepare(`UPDATE claims
-					  SET supersedes_claim_id = ?, superseded_by_claim_id = ? WHERE id = ?`).run(
+					db.prepare(
+						`UPDATE claims
+					  SET supersedes_claim_id = ?, superseded_by_claim_id = ? WHERE id = ?`,
+					).run(
 						claim.supersedesClaimId || null,
 						claim.supersededByClaimId || null,
 						claim.id,
@@ -4258,7 +4350,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 					result.skipped++;
 					continue;
 				}
-				db.prepare(`INSERT INTO memories
+				db.prepare(
+					`INSERT INTO memories
             (id, created_at, updated_at, type, title, content, concepts, files,
              session_ids, strength, version, parent_id, related_ids,
              source_observation_ids, is_latest, project, workspace,
@@ -4276,7 +4369,8 @@ export function createMemoryStore(dbPath: string): MemoryStore {
               workspace=excluded.workspace, access_count=excluded.access_count,
               last_accessed=excluded.last_accessed,
               working_tier=excluded.working_tier,
-              supersedes=excluded.supersedes`).run(
+              supersedes=excluded.supersedes`,
+				).run(
 					mem.id,
 					mem.createdAt,
 					mem.updatedAt,
@@ -4310,10 +4404,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 			for (const rel of data.relations) {
 				try {
 					const endpoints = db
-						.prepare(`SELECT source.workspace AS source_workspace,
+						.prepare(
+							`SELECT source.workspace AS source_workspace,
                            target.workspace AS target_workspace
                     FROM memories source JOIN memories target
-                    WHERE source.id = ? AND target.id = ?`)
+                    WHERE source.id = ? AND target.id = ?`,
+						)
 						.get(rel.sourceId, rel.targetId) as
 						| { source_workspace: string; target_workspace: string }
 						| undefined;
@@ -4333,13 +4429,15 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 						result.skipped++;
 						continue;
 					}
-					db.prepare(`
+					db.prepare(
+						`
             INSERT INTO relations (id, type, source_id, target_id, confidence, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET type=excluded.type,
               source_id=excluded.source_id, target_id=excluded.target_id,
               confidence=excluded.confidence, created_at=excluded.created_at
-          `).run(
+          `,
+					).run(
 						rel.id,
 						rel.type,
 						rel.sourceId,
@@ -4398,6 +4496,9 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		updated_at: string;
 		next_attempt_at: string;
 		last_error: string | null;
+		owner_id: string | null;
+		lease_until: string | null;
+		fencing_token: number;
 	};
 	const rowToExtractionJob = (row: ExtractionJobRow): ExtractionJob => ({
 		id: row.id,
@@ -4410,7 +4511,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		updatedAt: row.updated_at,
 		nextAttemptAt: row.next_attempt_at,
 		lastError: row.last_error || undefined,
+		ownerId: row.owner_id || undefined,
+		leaseUntil: row.lease_until || undefined,
+		fencingToken: row.fencing_token || 0,
 	});
+	const extractionWorkerId = crypto.randomUUID();
+	const defaultExtractionLeaseMs = 30_000;
 
 	function enqueueExtractionJob(
 		sessionId: string,
@@ -4426,9 +4532,11 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 				return JSON.stringify({ invalidPayload: sanitizeString(payload) });
 			}
 		})();
-		db.prepare(`INSERT INTO extraction_jobs
+		db.prepare(
+			`INSERT INTO extraction_jobs
       (id, session_id, workspace, payload, status, attempts, created_at, updated_at, next_attempt_at)
-      VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)`).run(
+      VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+		).run(
 			id,
 			sessionId,
 			normalizeWorkspacePath(workspace),
@@ -4447,33 +4555,60 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		);
 	}
 
-	function claimExtractionJob(): ExtractionJob | null {
+	function claimExtractionJob(
+		leaseMs: number = defaultExtractionLeaseMs,
+	): ExtractionJob | null {
 		const timestamp = now();
+		const leaseUntil = new Date(
+			Date.now() + Math.max(0, leaseMs),
+		).toISOString();
 		const row = db
-			.prepare(`SELECT * FROM extraction_jobs
-      WHERE workspace = ? AND status = 'pending' AND next_attempt_at <= ?
-      ORDER BY created_at ASC LIMIT 1`)
-			.get(currentWorkspace, timestamp) as ExtractionJobRow | undefined;
-		if (!row) return null;
-		const updated = db
-			.prepare(`UPDATE extraction_jobs
-      SET status = 'running', attempts = attempts + 1, updated_at = ?
-      WHERE id = ? AND status = 'pending'`)
-			.run(timestamp, row.id);
-		if (updated.changes !== 1) return null;
-		return rowToExtractionJob({
-			...row,
-			status: "running",
-			attempts: row.attempts + 1,
-			updated_at: timestamp,
-		});
+			.prepare(
+				`UPDATE extraction_jobs
+		  SET status = 'running', attempts = attempts + 1, updated_at = ?,
+		      owner_id = ?, lease_until = ?, fencing_token = fencing_token + 1
+		  WHERE id = (
+		    SELECT id FROM extraction_jobs
+		    WHERE workspace = ? AND next_attempt_at <= ?
+		      AND (status = 'pending' OR (status = 'running' AND lease_until <= ?))
+		    ORDER BY created_at ASC LIMIT 1
+		  )
+		  RETURNING *`,
+			)
+			.get(
+				timestamp,
+				extractionWorkerId,
+				leaseUntil,
+				currentWorkspace,
+				timestamp,
+				timestamp,
+			) as ExtractionJobRow | undefined;
+		return row ? rowToExtractionJob(row) : null;
 	}
 
 	function completeExtractionJob(id: string): void {
 		const timestamp = now();
 		db.prepare(
-			"UPDATE extraction_jobs SET status = 'completed', updated_at = ?, last_error = NULL WHERE id = ?",
-		).run(timestamp, id);
+			"UPDATE extraction_jobs SET status = 'completed', updated_at = ?, last_error = NULL, lease_until = NULL WHERE id = ? AND status = 'running' AND owner_id = ?",
+		).run(timestamp, id, extractionWorkerId);
+	}
+
+	function renewExtractionJob(
+		id: string,
+		leaseMs: number = defaultExtractionLeaseMs,
+	): boolean {
+		const timestamp = now();
+		const leaseUntil = new Date(
+			Date.now() + Math.max(1, leaseMs),
+		).toISOString();
+		const updated = db
+			.prepare(
+				`UPDATE extraction_jobs
+		  SET updated_at = ?, lease_until = ?
+		  WHERE id = ? AND status = 'running' AND owner_id = ?`,
+			)
+			.run(timestamp, leaseUntil, id, extractionWorkerId);
+		return updated.changes === 1;
 	}
 
 	function failExtractionJob(
@@ -4482,21 +4617,26 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		retryDelayMs: number = 1_000,
 	): void {
 		const row = db
-			.prepare("SELECT attempts FROM extraction_jobs WHERE id = ?")
-			.get(id) as { attempts: number } | undefined;
+			.prepare(
+				"SELECT attempts FROM extraction_jobs WHERE id = ? AND status = 'running' AND owner_id = ?",
+			)
+			.get(id, extractionWorkerId) as { attempts: number } | undefined;
 		if (!row) return;
 		const terminal = row.attempts >= 3;
 		const timestamp = now();
 		const nextAttempt = new Date(
 			Date.now() + Math.max(0, retryDelayMs),
 		).toISOString();
-		db.prepare(`UPDATE extraction_jobs SET status = ?, updated_at = ?, next_attempt_at = ?, last_error = ?
-      WHERE id = ?`).run(
+		db.prepare(
+			`UPDATE extraction_jobs SET status = ?, updated_at = ?, next_attempt_at = ?, last_error = ?, lease_until = NULL
+		  WHERE id = ? AND status = 'running' AND owner_id = ?`,
+		).run(
 			terminal ? "failed" : "pending",
 			timestamp,
 			nextAttempt,
 			error.slice(0, 1000),
 			id,
+			extractionWorkerId,
 		);
 	}
 
@@ -4544,10 +4684,12 @@ export function createMemoryStore(dbPath: string): MemoryStore {
 		consolidate,
 		enqueueExtractionJob,
 		claimExtractionJob,
+		renewExtractionJob,
 		completeExtractionJob,
 		failExtractionJob,
 		listExtractionJobs,
 		getContext,
+		retrieve,
 		listRetrievalTraces,
 		recordOutcomeReceipt,
 		listOutcomeReceipts,

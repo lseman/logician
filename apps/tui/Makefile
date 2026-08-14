@@ -1,6 +1,7 @@
 BIN := dist/logician
 ENTRY := src/index.ts
 BUN ?= $(shell command -v bun 2>/dev/null || printf '%s/.bun/bin/bun' "$$HOME")
+INSTALL_BIN ?= $(HOME)/.local/bin/logician
 
 .PHONY: build binary install dev start check lint lint-fix format clean
 
@@ -14,8 +15,10 @@ binary:
 	@chmod +x $(BIN)
 	@echo "Built $(BIN)"
 
-install:
-	$(BUN) install
+install: binary
+	@mkdir -p $(dir $(INSTALL_BIN))
+	@ln -sfn $(abspath $(BIN)) $(INSTALL_BIN)
+	@echo "Installed $(INSTALL_BIN) -> $(abspath $(BIN))"
 
 dev:
 	$(BUN) run dev
