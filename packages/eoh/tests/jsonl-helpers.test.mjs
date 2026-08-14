@@ -1,12 +1,12 @@
-import { test } from "node:test";
 import assert from "node:assert";
+import { test } from "node:test";
 import {
-	parseJsonlEntry,
-	isEohConfigEntry,
-	isEohRunEntry,
-	reconstructEohState,
 	extractEohSessionName,
 	hasEohConfigHeader,
+	isEohConfigEntry,
+	isEohRunEntry,
+	parseJsonlEntry,
+	reconstructEohState,
 } from "../src/jsonl.ts";
 
 test("parseJsonlEntry parses valid JSON", () => {
@@ -83,4 +83,10 @@ test("reconstructEohState handles empty JSONL", () => {
 	assert.equal(state.name, null);
 	assert.equal(state.results.length, 0);
 	assert.equal(state.currentSegment, 0);
+});
+
+test("reconstructEohState normalizes unknown operators", () => {
+	const state = reconstructEohState('{"run":1,"createdBy":"unknown-operator"}');
+
+	assert.equal(state.results[0].createdBy, "init");
 });

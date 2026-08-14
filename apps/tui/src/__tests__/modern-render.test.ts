@@ -257,7 +257,7 @@ void test("spinner ticks keep text-only streaming turns cached", () => {
 	display.setTurns([
 		{
 			id: "text-only-stream",
-			userMessage: undefined,
+			userMessage: null,
 			assistantMessage: {
 				type: "assistant",
 				isComplete: false,

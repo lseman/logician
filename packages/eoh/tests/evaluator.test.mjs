@@ -1,9 +1,9 @@
-import { test } from "node:test";
 import assert from "node:assert";
+import { test } from "node:test";
 import {
+	extractFunctionName,
 	parseHeuristicOutput,
 	validateCode,
-	extractFunctionName,
 } from "../src/evaluator.ts";
 
 test("parseHeuristicOutput parses XML tags", () => {

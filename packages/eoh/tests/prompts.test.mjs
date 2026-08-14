@@ -1,12 +1,12 @@
-import { test } from "node:test";
 import assert from "node:assert";
+import { test } from "node:test";
 import {
 	promptE1Diversity,
 	promptE2Convergence,
+	promptInit,
 	promptM1Improve,
 	promptM2Tune,
 	promptM3Simplify,
-	promptInit,
 } from "../src/prompts.ts";
 
 const PROBLEM = {
@@ -18,7 +18,15 @@ const PROBLEM = {
 };
 
 function makeHeuristic(id, thought = `thought ${id}`, code = `code ${id}`) {
-	return { id, thought, code, fitness: 0.5, generation: 0, createdBy: "init", parentIds: [] };
+	return {
+		id,
+		thought,
+		code,
+		fitness: 0.5,
+		generation: 0,
+		createdBy: "init",
+		parentIds: [],
+	};
 }
 
 test("promptInit returns system + user messages", () => {

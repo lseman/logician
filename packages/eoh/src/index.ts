@@ -17,8 +17,8 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { EohEngine, type EohProgressEvent } from "./engine.ts";
+import { buildEohCompactionSummary, eohSummaryPathsFor } from "./compaction.ts";
+import { EohEngine } from "./engine.ts";
 import {
 	appendHookLogEntryIfConfigured,
 	type HookPayload,
@@ -26,26 +26,9 @@ import {
 	type SessionSnapshot,
 	steerMessageFor,
 } from "./hooks.ts";
-import {
-	extractEohSessionName,
-	hasEohConfigHeader,
-	reconstructEohState,
-	type ReconstructedEohState,
-} from "./jsonl.ts";
-import {
-	EOH_DIR,
-	ensureParentDir,
-	sessionFilePath,
-} from "./paths.ts";
+import { extractEohSessionName, reconstructEohState } from "./jsonl.ts";
+import { ensureParentDir, sessionFilePath } from "./paths.ts";
 import { populationStats } from "./population.ts";
-import { buildEohCompactionSummary, eohSummaryPathsFor } from "./compaction.ts";
-import type { EohConfig, EohProblem, Heuristic } from "./types.ts";
-
-// ---------------------------------------------------------------------------
-// Session output limits (sent to LLM — keep small to save context)
-// ---------------------------------------------------------------------------
-const GENERATION_MAX_LINES = 10;
-const GENERATION_MAX_BYTES = 4 * 1024; // 4KB
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,14 +53,6 @@ interface EohRunResult {
 	timestamp: number;
 	segment: number;
 	asi?: ASI;
-}
-
-interface EohConfigEntry {
-	type: "eoh_config";
-	name?: string;
-	populationSize?: number;
-	maxGenerations?: number;
-	bestDirection?: "lower" | "higher";
 }
 
 interface EohState {
@@ -349,10 +324,6 @@ function eohJsonlPath(dir: string): string {
 	return sessionFilePath(dir, "log");
 }
 
-function eohProblemPath(dir: string): string {
-	return sessionFilePath(dir, "problem");
-}
-
 function eohPromptPath(dir: string): string {
 	return sessionFilePath(dir, "prompt");
 }
@@ -374,7 +345,6 @@ function reconstructState(cwd: string): EohState {
 			state.currentSegment = reconstructed.currentSegment;
 			state.results = reconstructed.results.map(r => ({
 				...r,
-				
 			}));
 		}
 	} catch {
@@ -382,64 +352,6 @@ function reconstructState(cwd: string): EohState {
 	}
 
 	return state;
-}
-
-// ---------------------------------------------------------------------------
-// Config helpers
-// ---------------------------------------------------------------------------
-
-interface EohConfigFile {
-	maxGenerations?: number;
-}
-
-function readEohConfig(cwd: string): EohConfigFile {
-	try {
-		const configPath = sessionFilePath(cwd, "config");
-		if (!fs.existsSync(configPath)) return {};
-		return JSON.parse(fs.readFileSync(configPath, "utf-8"));
-	} catch {
-		return {};
-	}
-}
-
-function readMaxGenerations(cwd: string): number | null {
-	const config = readEohConfig(cwd);
-	return typeof config.maxGenerations === "number" && config.maxGenerations > 0
-		? Math.floor(config.maxGenerations)
-		: null;
-}
-
-function truncateTail(
-	output: string,
-	maxLines: number,
-	maxBytes: number,
-): {
-	content: string;
-	truncated: boolean;
-	outputLines: number;
-	totalLines: number;
-} {
-	const lines = output.split("\n");
-	const totalLines = lines.length;
-	let truncated = false;
-
-	if (lines.length > maxLines) {
-		lines.splice(0, lines.length - maxLines);
-		truncated = true;
-	}
-
-	const content = lines.join("\n");
-	if (Buffer.byteLength(content) > maxBytes) {
-		const limited = output.slice(-maxBytes);
-		return {
-			content: limited,
-			truncated: true,
-			outputLines: Math.min(maxLines, output.split("\n").length),
-			totalLines,
-		};
-	}
-
-	return { content, truncated, outputLines: lines.length, totalLines };
 }
 
 function formatNum(value: number, decimals = 4): string {
@@ -538,7 +450,9 @@ export class EohSession {
 		}
 		const engine = this.engine;
 		const engineState = engine?.getState();
-		const stats = engineState ? populationStats(engineState.population) : { best: 0, worst: 0, mean: 0, size: 0 };
+		const stats = engineState
+			? populationStats(engineState.population)
+			: { best: 0, worst: 0, mean: 0, size: 0 };
 
 		return {
 			active: this.runtime.eohMode,
@@ -564,7 +478,9 @@ export class EohSession {
 		const state = this.runtime.state;
 		const engine = this.engine;
 		const engineState = engine?.getState();
-		const bestFitness = engineState ? populationStats(engineState.population).best : null;
+		const bestFitness = engineState
+			? populationStats(engineState.population).best
+			: null;
 
 		const rows: EohDashboardRow[] = state.results.map((result, i) => ({
 			run: i + 1,
@@ -626,11 +542,16 @@ export class EohSession {
 		return fs.readFileSync(jsonlPath, "utf-8").split("\n").filter(Boolean);
 	}
 
-	private readLastRun(workDir: string): Record<string, unknown> | null {
+	private readLastRun(workDir: string): { generation: number } | null {
 		const lines = this.readJsonlLines(workDir);
 		for (let i = lines.length - 1; i >= 0; i--) {
 			const entry = JSON.parse(lines[i]) as Record<string, unknown>;
-			if (typeof entry.run === "number") return entry;
+			if (typeof entry.run === "number") {
+				return {
+					generation:
+						typeof entry.generation === "number" ? entry.generation : 0,
+				};
+			}
 		}
 		return null;
 	}
@@ -639,7 +560,9 @@ export class EohSession {
 		const state = this.runtime.state;
 		const engine = this.engine;
 		const engineState = engine?.getState();
-		const stats = engineState ? populationStats(engineState.population) : { best: 0, worst: 0, mean: 0, size: 0 };
+		const stats = engineState
+			? populationStats(engineState.population)
+			: { best: 0, worst: 0, mean: 0, size: 0 };
 
 		return {
 			goal: state.name ?? "",
@@ -666,17 +589,21 @@ export class EohSession {
 
 	/** Initialize the evolution session: name, problem definition, config.
 	 * Writes the config header to .eoh/log.jsonl. */
-	async initEvolution(
-		params: Record<string, unknown>,
-	): Promise<EohResult> {
+	async initEvolution(params: Record<string, unknown>): Promise<EohResult> {
 		const state = this.runtime.state;
 		const isReinit = state.results.length > 0;
 
 		state.name = params.name as string;
-		if (typeof params.populationSize === "number" && params.populationSize > 0) {
+		if (
+			typeof params.populationSize === "number" &&
+			params.populationSize > 0
+		) {
 			state.populationSize = params.populationSize as number;
 		}
-		if (typeof params.maxGenerations === "number" && params.maxGenerations >= 0) {
+		if (
+			typeof params.maxGenerations === "number" &&
+			params.maxGenerations >= 0
+		) {
 			state.maxGenerations = params.maxGenerations as number;
 		}
 		if (params.direction === "lower" || params.direction === "higher") {
@@ -733,7 +660,9 @@ export class EohSession {
 
 		return {
 			content: `✅ Evolution initialized: "${state.name}"${reinitNote}\nPopulation: ${state.populationSize}${limitNote}${workDirNote}\nConfig written to .eoh/log.jsonl.${steer ? `\n\n${steer}` : ""}`,
-			details: { state: { ...state, results: state.results.map(r => ({ ...r })) } },
+			details: {
+				state: { ...state, results: state.results.map(r => ({ ...r })) },
+			},
 		};
 	}
 
@@ -749,7 +678,9 @@ export class EohSession {
 		const state = this.runtime.state;
 
 		if (state.maxGenerations !== null && state.maxGenerations > 0) {
-			const segCount = state.results.filter(r => r.segment === state.currentSegment).length;
+			const segCount = state.results.filter(
+				r => r.segment === state.currentSegment,
+			).length;
 			if (segCount >= state.maxGenerations) {
 				return {
 					content: `🛑 Maximum generations reached (${state.maxGenerations}).`,
@@ -763,24 +694,19 @@ export class EohSession {
 
 		if (!engineState.problem) {
 			return {
-				content: "❌ No problem set. Call initEvolution with a problem definition first.",
+				content:
+					"❌ No problem set. Call initEvolution with a problem definition first.",
 				details: {},
 			};
 		}
 
 		if (engineState.population.length === 0) {
 			return {
-				content: "❌ Population empty. Call initEvolution to initialize the population first.",
+				content:
+					"❌ Population empty. Call initEvolution to initialize the population first.",
 				details: {},
 			};
 		}
-
-		const baseUrl = (params.baseUrl as string) ||
-			process.env.ANTHROPIC_BASE_URL ||
-			"https://api.anthropic.com/v1";
-		const model = (params.model as string) ||
-			process.env.EOH_MODEL ||
-			"claude-haiku-4-5-20251001";
 
 		this.runtime.runningGeneration = {
 			startedAt: Date.now(),
@@ -833,8 +759,10 @@ export class EohSession {
 			});
 
 			const limitReached =
-				state.maxGenerations !== null && state.maxGenerations > 0 &&
-				state.results.filter(r => r.segment === state.currentSegment).length >= state.maxGenerations;
+				state.maxGenerations !== null &&
+				state.maxGenerations > 0 &&
+				state.results.filter(r => r.segment === state.currentSegment).length >=
+					state.maxGenerations;
 
 			let text = `🧬 Generation ${engineState.generation} complete\n`;
 			text += `Population: ${stats.size}\n`;
@@ -999,13 +927,12 @@ ${best.code}
 		}
 
 		if (command === "clear") {
-			return this.clear();
+			return { message: this.clear().content, injectAsTurn: false };
 		}
 
 		if (this.runtime.eohMode) {
 			return {
-				message:
-					"EoH already active — use '/eoh off' to stop first",
+				message: "EoH already active — use '/eoh off' to stop first",
 				injectAsTurn: false,
 			};
 		}

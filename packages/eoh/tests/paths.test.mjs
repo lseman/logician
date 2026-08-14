@@ -1,17 +1,29 @@
-import { test } from "node:test";
 import assert from "node:assert";
-import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync as existsSyncSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { sessionFilePath, ensureParentDir, EOH_DIR } from "../src/paths.ts";
+import { test } from "node:test";
+import { EOH_DIR, ensureParentDir, sessionFilePath } from "../src/paths.ts";
 
 test("sessionFilePath returns correct path for log", () => {
 	const dir = "/tmp/test-eoh";
-	assert.equal(sessionFilePath(dir, "log"), path.join(dir, EOH_DIR, "log.jsonl"));
-	assert.equal(sessionFilePath(dir, "problem"), path.join(dir, EOH_DIR, "problem.json"));
-	assert.equal(sessionFilePath(dir, "config"), path.join(dir, EOH_DIR, "config.json"));
-	assert.equal(sessionFilePath(dir, "prompt"), path.join(dir, EOH_DIR, "prompt.md"));
+	assert.equal(
+		sessionFilePath(dir, "log"),
+		path.join(dir, EOH_DIR, "log.jsonl"),
+	);
+	assert.equal(
+		sessionFilePath(dir, "problem"),
+		path.join(dir, EOH_DIR, "problem.json"),
+	);
+	assert.equal(
+		sessionFilePath(dir, "config"),
+		path.join(dir, EOH_DIR, "config.json"),
+	);
+	assert.equal(
+		sessionFilePath(dir, "prompt"),
+		path.join(dir, EOH_DIR, "prompt.md"),
+	);
 });
 
 test("ensureParentDir creates directory", async () => {

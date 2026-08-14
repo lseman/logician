@@ -9,10 +9,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-
-import type { ReconstructedEohState, EohRunEntry } from "./types.ts";
-import { sessionFilePath } from "./paths.ts";
 import { reconstructEohState } from "./jsonl.ts";
+import { sessionFilePath } from "./paths.ts";
+import type { EohRunEntry, ReconstructedEohState } from "./types.ts";
 
 const RECENT_RUN_LIMIT = 50;
 
@@ -128,9 +127,7 @@ function bestRun(runs: EohRunEntry[]): EohRunEntry | null {
 		run => run.status === "keep" && Number.isFinite(run.fitness),
 	);
 	if (kept.length === 0) return null;
-	return kept.reduce((best, run) =>
-		run.fitness > best.fitness ? run : best,
-	);
+	return kept.reduce((best, run) => (run.fitness > best.fitness ? run : best));
 }
 
 function formatMetric(value: number): string {
@@ -200,11 +197,7 @@ function nextStepSection(): string {
 
 function formatRunLine(run: EohRunEntry): string {
 	const head = `#${run.run} ${padStatus(run.status)} ${formatMetric(run.fitness)}`;
-	const parts = [
-		head,
-		formatDescription(run),
-		`operator: ${run.createdBy}`,
-	];
+	const parts = [head, formatDescription(run), `operator: ${run.createdBy}`];
 	return parts.filter(Boolean).join(" | ");
 }
 
