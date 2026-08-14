@@ -93,3 +93,16 @@ void test("a new agent run resets its internal turn count and evidence", () => {
 	assert.match(nextRun, /1 turn( |$)/);
 	assert.match(nextRun, /1 tools/);
 });
+
+void test("active phase changes keep the work surface render cached", () => {
+	initTheme("dark");
+	const surface = new WorkSurface();
+	surface.startRun();
+	surface.recordToolStart("1", "read_file", { path: "src/main.ts" });
+	surface.setPhase("thinking");
+	const first = surface.render(100);
+
+	surface.setPhase("streaming");
+
+	assert.equal(surface.render(100), first);
+});
