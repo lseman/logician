@@ -1,7 +1,6 @@
 // ── Agent Capabilities Entry Point ───────────────────────────────────────────
 // Agent capabilities: todo tracking, ask-user, subagents, reasoners.
-// eoh is a demo extension, not re-exported here — import it directly from
-// "@logician/agent-capabilities/eoh/index.ts" if needed.
+// eoh has been extracted to its own package (@logician/eoh).
 
 export * from "./delegation/index.ts";
 export * from "./interaction/index.ts";

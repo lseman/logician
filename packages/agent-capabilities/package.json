@@ -17,8 +17,7 @@
 		"./reasoning": "./src/reasoning/index.ts",
 		"./reasoning/registry": "./src/reasoning/registry.ts",
 		"./reasoning/*": "./src/reasoning/*",
-		"./rag": "./src/rag/index.ts",
-		"./eoh/*": "./src/eoh/*"
+		"./rag": "./src/rag/index.ts"
 	},
 	"scripts": {
 		"test": "bun test src",

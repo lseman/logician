@@ -8,8 +8,8 @@ import path from "node:path";
 import {
 	EohEngine,
 	type EohProgressEvent,
-} from "@logician/agent-capabilities/eoh/engine.ts";
-import { populationStats } from "@logician/agent-capabilities/eoh/population.ts";
+} from "@logician/eoh/engine";
+import { populationStats } from "@logician/eoh/population";
 import type { RuntimeEvent } from "../../runtime/events.ts";
 import {
 	applyEohCandidate,
