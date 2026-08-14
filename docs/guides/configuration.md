@@ -25,8 +25,8 @@ overrides in `.logician.json`:
     "allow": ["read_file", "grep"],
     "deny": []
   },
-  "inferenceMode": "thinking-coding",
-  "thinkingLevel": "medium",
+  "inferenceMode": "none",
+  "thinkingLevel": "off",
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,
@@ -54,6 +54,8 @@ user file via an atomic replacement. Starting Logician, switching sessions, or
 applying a resolved setting never writes configuration.
 
 ## Environment variables
+
+Logician also loads `~/.logician/.env` at startup. Use it for secrets referenced by MCP header or process-environment placeholders; do not commit secrets to project configuration.
 
 | Variable | Description | Default |
 |---|---|---|
@@ -128,10 +130,12 @@ security, and rollout details.
 
 View and modify settings during a session:
 
-```
-/settings list
-/settings set permissions acceptEdits
-/settings set reasoning.mode tot
+```text
+/settings
+/permissions acceptEdits
+/thinking off
+/mode
+/reasoner reflexion
 ```
 
 ## Priority

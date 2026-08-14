@@ -21,6 +21,8 @@ void test("runtime settings update the live harness and preserve guard auto mode
 	bridge.setGuardMode("auto");
 
 	const settings = bridge.getSettingsData();
+	assert.equal(settings.thinkingLevel, "off");
+	assert.equal(settings.inferenceMode, "none");
 	assert.equal(settings.guardMode, "auto");
 	assert.equal(settings.continuationEnabled, false);
 	assert.equal(settings.reflectionEnabled, true);

@@ -17,8 +17,8 @@ Guides cover each subsystem in depth. Pick a topic below.
 
 - [Skills](/guides/skills) — `SKILL.md`-driven capabilities, loading, triggers, and writing custom skills
 - [Plugins & Hooks](/guides/plugins) — lifecycle hooks, plugin architecture, and extensibility
-- [Reasoning Modes](/guides/reasoning) — Tree of Thoughts, SSR, Reflexion, Auto-CoT, and other reasoning strategies
-- [Subagents](/guides/subagents) — delegating tasks to child agents with isolated worktrees
+- [Reasoning & Inference](/guides/reasoning) — provider defaults, thinking effort, and optional structured reasoners
+- [Subagents](/guides/subagents) — delegating bounded tasks to child agents
 
 ## Infrastructure
 

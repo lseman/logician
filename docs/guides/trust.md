@@ -9,12 +9,12 @@ Logician provides granular control over what the agent can do, from read-only pl
 
 ## Permission modes
 
-| Mode | Description | File edits | Tool execution |
+| Mode | Read-only tools | File edits | Other tools |
 |---|---|---|---|
-| `plan` | Read-only, suggests changes | ❌ | ❌ |
-| `ask` | Asks before each action | ✅ (confirm) | ✅ (confirm) |
-| `acceptEdits` | Edits automatically, asks for tools | ✅ | ⚠️ (confirm) |
-| `acceptAll` | Full autonomy | ✅ | ✅ |
+| `plan` | Allowed | Denied | Denied |
+| `ask` | Allowed | Ask | Ask |
+| `acceptEdits` | Allowed | Allowed | Ask |
+| `acceptAll` | Allowed | Allowed | Allowed |
 
 `acceptEdits` is the default. Full autonomy must be selected explicitly;
 non-interactive approval requests fail closed.
@@ -41,12 +41,14 @@ Control which tools the agent can use:
 
 ```json
 {
-  "tools": {
-    "allowed": ["read_file", "grep", "find"],
-    "denied": ["bash", "edit_file"]
+  "permissions": {
+    "allow": ["read_file", "grep", "find"],
+    "deny": ["bash(git push *)", "edit_file(secrets/*)"]
   }
 }
 ```
+
+Rules can match a tool name or a tool plus a glob over its primary argument. Deny rules take precedence, followed by explicit allow rules and then the active mode.
 
 ## File access control
 
@@ -54,12 +56,12 @@ Restrict which directories the agent can access:
 
 ```json
 {
-  "access": {
-    "allowedPaths": ["src/", "tests/"],
-    "deniedPaths": ["node_modules/", ".git/"]
-  }
+  "allowedPaths": ["/absolute/shared/source"],
+  "allowAllPaths": false
 }
 ```
+
+The workspace is always in scope. `allowedPaths` adds absolute roots outside it; `allowAllPaths` disables this boundary and should be used sparingly. Use permission deny rules for tool/argument restrictions inside allowed roots.
 
 ## Audit trail
 

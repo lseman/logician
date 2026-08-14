@@ -1,76 +1,59 @@
 ---
 title: MCP Servers
-description: stdio and streamable HTTP MCP server integration, tool extension.
+description: Configure stdio and streamable HTTP MCP servers.
 ---
 
 # MCP Servers
 
-Logician integrates with Model Context Protocol (MCP) servers to extend its tool surface. Both stdio and HTTP transports are supported.
+Model Context Protocol (MCP) servers add external tools to Logician. Server declarations can live in `~/.logician/settings.json`, `~/.logician/mcp.json`, or a trusted project's `.logician.json` or `.mcp.json`.
 
-## Configuration
+## Configure servers
 
-Add MCP servers to your config:
+Use the top-level `mcpServers` map:
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "filesystem": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
-        "transport": "stdio"
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "enabled": true,
+      "timeout": 30
+    },
+    "remote-docs": {
+      "type": "streamable-http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_MCP_TOKEN}"
       },
-      "github": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-github"],
-        "env": {
-          "GITHUB_TOKEN": "your-token"
-        },
-        "transport": "stdio"
-      },
-      "custom": {
-        "url": "http://localhost:3000/mcp",
-        "transport": "http"
-      }
+      "enabled": true,
+      "timeout": 30
     }
   }
 }
 ```
 
-## Available tools
+Put `DOCS_MCP_TOKEN=...` in `~/.logician/.env`; Logician expands `${NAME}` placeholders in MCP headers and process environments.
 
-MCP servers expose tools that appear alongside built-in tools:
+## Transports
 
-```
-Built-in tools:
-  read_file, write_file, edit_file, grep, bash, find, git, ...
+| Type | Required fields | Use case |
+|---|---|---|
+| `stdio` | `command`, optional `args` and `env` | Local processes and CLI bridges |
+| `streamable-http` | `url`, optional `headers` | Remote MCP endpoints using POST and SSE responses |
+| `http` | `url`, optional `headers` | Alias accepted for HTTP MCP servers |
 
-MCP tools:
-  github_list_issues, github_create_issue, ...
-  filesystem_read_dir, filesystem_write_file, ...
-```
+## Loading behavior
 
-## Transport types
+MCP discovery normally runs in the background, so a slow server does not block the first user turn. Tools appear as servers finish connecting. Set `mcpEager` when startup must wait for discovery.
 
-| Transport | Use case |
-|---|---|
-| `stdio` | Local servers, CLI tools wrapped as MCP |
-| `http` | Remote MCP servers, containerized services |
+Use `/mcp` to inspect or manage declared servers. `logician doctor --json` validates declarations without connecting to them.
 
-## Server lifecycle
+## Troubleshooting
 
-The agent manages MCP server lifecycle automatically:
-- Servers start when the agent initializes
-- Tools are discovered and registered
-- Connections are maintained across the session
-- Servers restart on connection failure
-
-## Debugging
-
-```bash
-# List all available MCP tools
-npm start -- doctor --mcp
-
-# Test a specific server
-npm start -- mcp test filesystem
-```
+1. Run the configured stdio command directly and check its exit status.
+2. Confirm remote endpoints accept `POST` and return JSON or `text/event-stream`.
+3. Verify referenced environment variables are available in `~/.logician/.env` or the parent process.
+4. Increase the server's `timeout` if initialization is legitimately slow.
+5. Restart Logician after editing startup configuration.

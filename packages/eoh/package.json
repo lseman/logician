@@ -1,0 +1,35 @@
+{
+	"name": "@logician/eoh",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Evolution of Heuristics (EoH) — arxiv 2401.02051. Session logic, persistence, and dashboard.",
+	"type": "module",
+	"main": "src/index.ts",
+	"exports": {
+		".": "./src/index.ts",
+		"./paths": "./src/paths.ts",
+		"./jsonl": "./src/jsonl.ts",
+		"./compaction": "./src/compaction.ts",
+		"./hooks": "./src/hooks.ts",
+		"./engine": "./src/engine.ts",
+		"./evaluator": "./src/evaluator.ts",
+		"./llm": "./src/llm.ts",
+		"./population": "./src/population.ts",
+		"./prompts": "./src/prompts.ts",
+		"./types": "./src/types.ts",
+		"./assets": "./assets/"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "node --test tests/*.test.mjs"
+	},
+	"dependencies": {
+		"@logician/agent-core": "0.2.0"
+	},
+	"devDependencies": {
+		"@sinclair/typebox": "^0.34.41",
+		"@types/node": "^22.0.0",
+		"tsx": "^4.23.1",
+		"typescript": "^6.0.3"
+	}
+}

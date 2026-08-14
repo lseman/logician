@@ -1,74 +1,92 @@
 ---
 title: Getting Started
-description: Install Logician and run your first agent session.
+description: Install Logician, configure a model, and run your first session.
 ---
 
 # Getting Started
 
-This guide gets you from zero to your first agent session in under 5 minutes.
+This guide takes you from installation to a verified first turn. Logician needs an OpenAI-compatible model endpoint; everything else is optional.
 
 ## Prerequisites
 
 | Requirement | Details |
 |---|---|
-| Node.js | `>=22.19.0` |
-| LLM backend | OpenAI-compatible API (any provider) |
-| `rg` (ripgrep) | Optional — speeds up search tools |
-| `fd` | Optional — faster file finding |
-| SearXNG | Optional — powers `web_search` |
+| Runtime | Bun `>=1.3.14` for source builds; prebuilt binaries include the runtime |
+| Model endpoint | An OpenAI-compatible chat-completions API |
+| Search helpers | `rg` and `fd` are optional but recommended |
 
-## Installation
+## Install
+
+Use the prebuilt binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lseman/logician/main/apps/tui/install.sh | bash
+```
+
+Or run from source:
 
 ```bash
 git clone https://github.com/lseman/logician.git
-cd logician/tui
-npm install
+cd logician
+bun install
+bun start
 ```
 
-## Configuration
+`make install` builds the executable and links it at `~/.local/bin/logician`.
 
-Create `.logician.json` in the project root:
+## Configure a model
+
+User-wide settings live in `~/.logician/settings.json`. A trusted workspace can override them with `.logician.json`:
 
 ```json
 {
-  "llm": {
-    "url": "http://127.0.0.1:8080",
-    "model": "your-model-name",
-    "apiKey": "your-api-key"
-  },
-  "permissions": "ask",
-  "thinkingLevel": "medium"
+  "baseUrl": "http://127.0.0.1:8080",
+  "model": "your-model-name",
+  "permissionMode": "ask",
+  "thinkingLevel": "off",
+  "inferenceMode": "none"
 }
 ```
 
-Or use environment variables:
+`inferenceMode: "none"` is shown as **Provider** in the UI: Logician leaves sampling parameters to the provider. Keep secrets out of JSON. Logician loads `~/.logician/.env`, so an MCP or provider header can reference `${VARIABLE_NAME}` without storing its value in settings.
+
+Selected environment overrides are also supported:
 
 ```bash
 export LOGICIAN_LLM_URL=http://127.0.0.1:8080
-export LOGICIAN_LLM_MODEL=your-model-name
-export LOGICIAN_LLM_API_KEY=your-api-key
+export LOGICIAN_MODEL=your-model-name
 ```
 
-## Running the TUI
+Run a read-only diagnostic before starting:
 
 ```bash
-npm start
+logician doctor
 ```
 
-The TUI starts in interactive mode. Type your instruction and press Enter. The agent will stream its reasoning, tool calls, and results in real time.
+## Start the TUI
+
+Run `logician` from the repository you want to work on. On first use in a workspace, review the trust prompt before project configuration, skills, and extensions are loaded.
+
+Type an outcome and press Enter:
+
+```text
+Find the cause of the failing authentication test, fix it without changing the public API, and run the focused tests.
+```
+
+Use `/help` for the live command list. The TUI streams text and tool progress, and asks before actions that require approval under the selected permission mode.
 
 ## Headless mode
 
-For CI/CD pipelines or scripted workflows:
+For scripts and CI:
 
 ```bash
-npm start -- exec --jsonl "fix the failing test in src/utils.ts"
+logician exec --jsonl "fix the failing test in src/utils.ts"
 ```
 
-This outputs JSONL (one JSON object per line) with the full reasoning trace, tool calls, and final result.
+Standard output is machine-readable JSONL; diagnostics go to standard error.
 
 ## Next steps
 
-- Read the [Guides](/guides/overview) for in-depth topics
-- Try the [First Session tutorial](/tutorials/first-session)
-- Explore the [API reference](/reference/api)
+- Follow the [First Session tutorial](/tutorials/first-session).
+- Learn the [configuration layers](/guides/configuration).
+- Add capabilities with [skills](/guides/skills), [plugins](/guides/plugins), or [MCP servers](/guides/mcp).

@@ -1,82 +1,54 @@
 ---
 title: Session Management
-description: Persistence, bookmarks, branching, rewind, and compaction.
+description: Persistence, labels, branches, rewind, and compaction.
 ---
 
 # Session Management
 
-Logician persists every session in SQLite, with support for bookmarks, branching, and compaction.
+Logician maintains two complementary records:
 
-Agent execution state is persisted separately in the workspace Run Kernel
-ledger. See [Run Kernel](/architecture/run-kernel) for replay and recovery
-commands.
+- the TUI session catalog in `<workspace>/.logician/tui/sessions/history.db`, used for browsing, names, labels, and completed turns;
+- an append-only agent journal used for crash recovery, branches, settings changes, and compaction state.
 
-## Session structure
+## Everyday operations
 
-The application session catalog is stored in SQLite. Harness transcripts use
-an append-only, parent-linked entry tree with an explicit active leaf. Forking
-does not copy or truncate messages: discarding checks out the parent leaf and
-merging appends a branch-summary entry. The selected path survives restart.
+| Command | Action |
+|---|---|
+| `/new` | Start a new session |
+| `/session` | Open the session manager |
+| `/sessions [clean]` | List sessions or clean stale entries |
+| `/name <name>` | Set a short session name |
+| `/rename <name>` | Rename the current session |
+| `/bookmark <label> [note]` | Label the current position |
+| `/bookmarks` | List labels in the current session |
+| `/compact` | Summarize older context |
+| `/fork` | Create a branch from the active journal leaf |
+| `/discard-branch` | Return to the parent branch |
+| `/branch-summary` | Summarize the current branch |
+| `/rewind` | Open rewind/checkpoint selection |
 
-## Key operations
+Sessions are saved automatically. `/save` requests an explicit save but is not required after each turn.
 
-### Bookmarking
+## Branches and rewind
 
-Create a named bookmark at any point:
+The agent journal is parent-linked and append-only. Forking creates a new active path without copying history. Discarding a branch selects its parent; merging records a branch summary rather than rewriting old entries. File checkpoints are separate from conversation branches and let the UI restore edited files when available.
 
-```
-Ctrl+B → "add checkpoint" → "review auth flow"
-```
+## Compaction
 
-Bookmark the current state for later return.
-
-### Branching
-
-Start a new branch from any point:
-
-```
-/bookmark create review-auth
-/branch from-review-auth
-```
-
-The branch inherits the conversation up to the bookmark, then diverges.
-
-### Rewinding
-
-Return to any checkpoint or bookmark:
-
-```
-Ctrl+R → select checkpoint
-```
-
-The active leaf moves to the selected point, and the agent continues on a new
-path. Abandoned entries remain recoverable in the append-only journal.
-
-### Compaction
-
-When context grows large, the agent can compact the session:
+Compaction replaces older provider context with a summary while retaining the durable transcript. Configure its token reserve and recent-context window:
 
 ```json
 {
   "compaction": {
     "enabled": true,
-    "triggerFraction": 0.75,
-    "strategy": "summarize"
+    "reserveTokens": 16384,
+    "keepRecentTokens": 20000
   }
 }
 ```
 
-Compaction summarizes older messages while preserving tool results and final answers.
+Use `/context` to inspect current context state and `/compact` when you want to compact before the automatic threshold.
 
-## Session commands
+## Recovery
 
-| Command | Action |
-|---|---|
-| `/session list` | List all sessions |
-| `/session switch <id>` | Switch to a session |
-| `/session new` | Start a new session |
-| `/session bookmark <name>` | Create a bookmark |
-| `/session rewind <id>` | Rewind to a checkpoint |
-| `/session branch <name>` | Branch from current point |
-| `/session compact` | Compact current session |
-| `/session export` | Export session as JSON |
+The SQLite catalog uses WAL mode and saves completed turns. The agent journal records incremental execution state. After an interruption, Logician can restore the selected session path and recover queued/session metadata without treating the displayed transcript as the only source of truth.

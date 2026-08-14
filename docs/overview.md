@@ -9,8 +9,8 @@ Logician is a local-first coding agent built on a modular architecture. This pag
 
 ## Design philosophy
 
-- **No cloud dependency** — everything runs locally. The LLM is called via an OpenAI-compatible API, but all reasoning, sessions, and tool execution happen on your machine.
-- **Streaming-first** — every token, tool call, and reasoning step is visible in real time. No black-box prompts.
+- **Local-first runtime** — sessions and tool execution stay local; the model endpoint can be local or hosted.
+- **Streaming-first** — provider text and tool progress are visible as they arrive.
 - **Safe by default** — edits use strict exact-text matching with CRLF/BOM preservation. Permission modes control how aggressively the agent acts.
 - **Extensible** — skills (`SKILL.md` files), plugins, and MCP servers extend capabilities without code changes.
 
@@ -71,10 +71,10 @@ graph TB
 
 ## Why local-first?
 
-Cloud-dependent agents have a single point of failure and leak your code to third parties. Logician runs entirely on your machine — the LLM call is the only external network request, and even that goes to an endpoint you configure.
+Logician keeps orchestration, tools, and session storage on your machine. Network exposure depends on the model endpoint, MCP servers, web tools, and plugins you configure.
 
 This means:
-- Your code never leaves your machine
-- No API key stored in a cloud service
-- Works offline (except for LLM calls)
+- Local model endpoints can keep model traffic on your machine
+- Secrets can remain in `~/.logician/.env` rather than project files
+- Core editing and session workflows do not require a hosted Logician service
 - Full control over data retention and session history

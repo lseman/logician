@@ -458,7 +458,7 @@ function truncateVisible(text: string, width: number): string {
 
 const DEFAULT_INFO: WidgetFactoryStatus = {
 	thinkingLevel: "off",
-	inferenceMode: "instruct-general",
+	inferenceMode: "none",
 	cacheReadTokens: undefined,
 	turnCount: 0,
 	messageCount: 0,

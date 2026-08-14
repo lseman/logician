@@ -37,7 +37,7 @@ The Logician TUI is designed for real terminal environments — SSH sessions, tm
 | `Ctrl+K` | Cycle sandbox mode |
 | `Ctrl+P` | Toggle plan/act permission mode |
 | `Ctrl+I` | Toggle autonomous/minimal execution policy (enhanced keyboard protocol) |
-| `Ctrl+M` / `Alt+M` | Cycle inference mode |
+| `Ctrl+M` / `Alt+M` | Open the inference-mode selector |
 | `/` | Open command palette |
 | `/help` | Show the live command reference |
 
@@ -57,7 +57,7 @@ Works with any VT100-compatible terminal:
 
 ## Streaming output
 
-All output streams in real time:
-- Reasoning steps appear as they're generated
+Provider output and tool progress stream in real time:
+- Thinking content appears when the provider exposes it and thinking is enabled
 - Tool calls show before execution
 - Results display immediately after completion

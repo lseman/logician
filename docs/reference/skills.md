@@ -1,23 +1,23 @@
 ---
 title: Skills API
-description: Programmatic API for loading and managing skills.
+description: Skill data structures, loading, diagnostics, and frontmatter.
 ---
 
 # Skills API
 
-Programmatic access to the skills system.
+Import the loader from `@logician/coding-agent/skills`.
 
-## Skill interface
+## Skill shape
 
 ```typescript
 interface Skill {
-  name: string                    // Stable id: coding/file_ops
-  displayName: string             // Human name: "File Operations"
+  name: string                  // stable path ID, e.g. coding/file_ops
+  displayName: string           // frontmatter name or directory name
   description: string
-  content: string                 // SKILL.md content
-  filePath: string                // Path to SKILL.md
-  baseDir: string                 // Directory containing SKILL.md
-  slashName: string               // Slash-safe: coding-file_ops
+  content: string
+  filePath: string
+  baseDir: string
+  slashName: string             // final path segment, e.g. file_ops
   disableModelInvocation: boolean
   allowedTools?: string[]
   aliases?: string[]
@@ -37,33 +37,28 @@ interface Skill {
 }
 ```
 
-## Loading skills
+## Load skills
+
+`loadSkills` accepts one directory or a list of directories/source descriptors and returns both skills and diagnostics:
 
 ```typescript
-import { loadSkills, findSkills } from '@logician/coding-agent/skills'
+import { loadSkills } from '@logician/coding-agent/skills'
 
-// Load all skills from default locations
-const skills = await loadSkills()
-
-// Find skills matching triggers
-const matching = findSkills(skills, ['read', 'write', 'edit'])
-
-// Load from specific path
-const custom = await loadSkills({ paths: ['./my-skills'] })
+const { skills, diagnostics } = await loadSkills([
+  { dir: '/home/me/.agents/skills', source: 'user' },
+  { dir: '/workspace/project/skills', source: 'project' },
+])
 ```
+
+Missing roots are skipped. Discovery is recursive, honors `.gitignore`, `.ignore`, and `.fdignore`, and deduplicates resolved file paths.
+
+## Find and format skills
+
+Use `findSkillByName(skills, query)` for exact IDs, display names, slash names, and aliases. `formatSkillCatalog` produces bounded system-prompt metadata; `formatSkillInvocation` renders one skill's full instructions and discovered resources.
 
 ## Diagnostics
 
 ```typescript
-interface SkillDiagnostic {
-  type: 'warning' | 'collision'
-  code: SkillDiagnosticCode
-  message: string
-  path: string
-  winnerPath?: string
-  loserPath?: string
-}
-
 type SkillDiagnosticCode =
   | 'file_info_failed'
   | 'list_failed'
@@ -73,18 +68,10 @@ type SkillDiagnosticCode =
   | 'collision'
 ```
 
-## SKILL.md frontmatter
+Diagnostics include `type`, `code`, `message`, and `path`; collisions also include winner and loser paths.
 
-```yaml
-name: my-skill
-displayName: My Skill
-description: What this skill does
-triggers:
-  - trigger1
-  - trigger2
-allowedTools:
-  - read_file
-  - grep
-whenNotToUse:
-  - when this skill is not appropriate
-```
+## Frontmatter keys
+
+The required `description` and optional `name` use standard YAML frontmatter. List fields accept YAML arrays or comma-separated strings. Supported aliases include `allowed-tools`/`allowed_tools`, `argument-hint`/`argument_hint`, and `preferred_tools`.
+
+See the [Skills guide](/guides/skills) for a complete example and naming behavior.

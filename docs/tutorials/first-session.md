@@ -1,82 +1,58 @@
 ---
 title: First Session
-description: Walk through your first agent session end to end.
+description: Complete a small, safe change and verify it in the TUI.
 ---
 
 # First Session
 
-This tutorial walks through your first agent session — from starting the TUI to getting a code change.
+This tutorial uses a real repository and keeps the first task deliberately small.
 
-## Step 1: Start the TUI
+## 1. Start in your workspace
 
 ```bash
-cd logician/tui
-npm start
+cd /path/to/your-project
+logician
 ```
 
-You should see:
+Review the trust prompt. Trust enables project-local `.logician.json`, skills, and extensions; decline if you have not inspected them.
 
-```
-┌─────────────────────────────────────────────────┐
-│ Logician v0.2.0                    [ask] mode  │
-├─────────────────────────────────────────────────┤
-│ >                              _     _          │
-└─────────────────────────────────────────────────┘
-```
+## 2. Begin with inspection
 
-## Step 2: Submit a simple task
+Ask:
 
-Type:
-
-```
-Show me the contents of README.md
+```text
+Explain how this project runs its tests. Do not change files.
 ```
 
-Press Enter. The agent will:
+This confirms the model connection, search tools, and repository context without authorizing edits. Tool cards show what Logician inspected; `Ctrl+O` expands or collapses their details.
 
-1. Think: `💭 Reading README.md...`
-2. Call tool: `🔧 read_file README.md`
-3. Show result: `✅ README.md: 45 lines`
+## 3. Request a bounded change
 
-## Step 3: Make a code change
+Choose a small task with an explicit verification condition:
 
-Type:
-
-```
-Add a comment to the main function in src/index.ts explaining what it does
+```text
+Add a regression test for the empty-input case, make the smallest implementation change needed, and run the focused test file.
 ```
 
-If in `ask` mode, you'll see:
+Under `ask` permissions, approve or deny each gated operation. You can send corrective steering during the turn with `Ctrl+Enter`.
 
-```
-🔧 edit_file: src/index.ts
-   Change 1: Add doc comment to main()
-   Apply? [Y/n]
-```
+## 4. Review the outcome
 
-Press `Y` to confirm.
+Check the final response for changed files, behavior, and verification evidence. Inspect the worktree yourself when the change matters:
 
-## Step 4: Verify
-
-The agent runs verification:
-
-```
-🔧 bash: npm run typecheck
-✅ Type check passed
-🔧 bash: npm test
-✅ Tests passed (12/12)
+```bash
+git diff --check
+git diff
 ```
 
-## Step 5: Save the session
+If verification was incomplete, ask Logician to run the missing check rather than assuming success.
 
-Your session is automatically persisted. Find it later with:
+## 5. Find the session later
 
-```
-/session list
-```
+Sessions save automatically. Use `/session` for the interactive browser, `/sessions` for a list, and `/name first-regression-test` to give the current session a memorable name.
 
 ## Next steps
 
-- Learn about [Skills](/guides/skills) to extend capabilities
-- Explore [Reasoning Modes](/guides/reasoning) for complex tasks
-- Try [Headless Mode](/tutorials/headless) for automation
+- Learn [permission, sandbox, and trust boundaries](/guides/trust).
+- Add reusable instructions with [skills](/guides/skills).
+- Use [headless mode](/tutorials/headless) for machine-readable automation.

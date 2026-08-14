@@ -1,66 +1,70 @@
 ---
 title: Custom Skills
-description: Write your own SKILL.md-driven capabilities.
+description: Create and test a project-local SKILL.md capability.
 ---
 
 # Custom Skills
 
-Create custom skills to give the agent specialized instructions for your codebase.
+This tutorial creates a project skill with a direct slash command and automatic activation hints.
 
-## Step 1: Create the skill directory
+## 1. Create the directory
 
 ```bash
-mkdir -p skills/code-review
+mkdir -p skills/project-code-review
 ```
 
-## Step 2: Write SKILL.md
+The final directory segment becomes the command: `/project-code-review`.
+
+## 2. Write SKILL.md
 
 ```markdown
-<!-- name: code-review -->
-<!-- displayName: Code Review -->
-<!-- description: Review code for quality, security, and best practices -->
-<!-- triggers: review review- code-review audit -->
+---
+name: Project Code Review
+description: Review this project's code for correctness, security, and maintainability.
+triggers:
+  - review this change
+  - audit this code
+example_queries:
+  - Review the authentication changes before I commit them.
+allowed-tools:
+  - read_file
+  - grep
+  - bash
+argument-hint: "[path]"
+---
 
-# Code Review
+# Project code review
 
-When reviewing code, check for:
-
-1. **Security** — SQL injection, XSS, auth bypass
-2. **Performance** — N+1 queries, unnecessary allocations
-3. **Style** — Consistent formatting, naming conventions
-4. **Edge cases** — Null handling, error paths, bounds
-
-Provide specific line references and suggested fixes.
+Read the relevant implementation and tests. Report findings in severity order
+with file and line evidence. Do not edit files unless the user asks for fixes.
 ```
 
-## Step 3: Activate
+Keep `description` specific: it is required and participates in automatic activation. The `name` is for display; directory naming controls stable IDs and slash commands.
 
-The skill activates automatically when your prompt contains "review" or "audit".
+## 3. Trust and reload
 
-```
-> Review src/auth.ts for security issues
-```
-
-The agent responds with:
-
-```
-[SKILL] Activated: code-review
-💭 Reviewing auth.ts for security issues...
-🔧 read_file src/auth.ts
-✅ Found 2 security issues:
-   - Line 23: SQL injection risk
-   - Line 45: Missing null check
-```
-
-## Step 4: Test
+Project skills load only in trusted workspaces. Restart Logician or run `/reload`, then inspect diagnostics with:
 
 ```bash
-npm start -- exec "review src/auth.ts" --jsonl
+logician doctor --json
 ```
 
-## Tips
+## 4. Test both paths
 
-- Use specific trigger words relevant to your codebase
-- Keep instructions concise and actionable
-- Include examples of good and bad patterns
-- Test with `doctor --skills` to verify loading
+Invoke it directly:
+
+```text
+/project-code-review src/auth.ts
+```
+
+Then test automatic matching with a natural request:
+
+```text
+Review the authentication changes before I commit them. Do not edit files.
+```
+
+If it activates too often, narrow its description and triggers. If it rarely activates, add realistic `example_queries` rather than a long list of generic keywords.
+
+## 5. Add supporting resources
+
+Put detailed policy in `references/` and reusable helpers in `scripts/`. Link them from `SKILL.md` with relative paths so the main instructions stay short.

@@ -5,32 +5,31 @@ description: High-level architecture of the Logician system.
 
 # System Overview
 
-Logician is built as seven focused packages that form a layered architecture.
+Logician is a TypeScript monorepo whose packages form a layered runtime.
 
 ## Package layers
 
 ```mermaid
 graph LR
-  subgraph "Presentation"
-    A[TUI Package]
+  subgraph Presentation
+    A["@logician/tui"]
   end
-  subgraph "Agent"
-    B[Coding Agent Package]
+  subgraph Orchestration
+    B["@logician/coding-agent"]
   end
-  subgraph "Core"
-    C[Agent Core Package]
+  subgraph Runtime
+    C["@logician/agent-core"]
+    D["@logician/agent-capabilities"]
   end
-  subgraph "Capabilities"
-    D[Agent Capabilities Package]
+  subgraph DataAndEvaluation["Data and evaluation"]
+    F["memory + rag"]
+    G["autoresearch + agent-eval"]
   end
-	F[Memory and RAG]
-	G[Autoresearch and Agent Eval]
-
   A --> B
   B --> C
   B --> D
-	B --> F
-	D --> G
+  B --> F
+  D --> G
   C --> E[LLM Backend]
   D --> E
 ```
@@ -42,8 +41,8 @@ graph LR
 The foundation layer. Handles:
 - LLM backend (OpenAI-compatible HTTP client)
 - Agent loop execution
-- Configuration management
-- Session persistence (SQLite)
+- Provider-facing runtime configuration
+- Append-only agent session journal
 - Compaction (context window management)
 - Hook system
 - Tool registry and execution
@@ -98,8 +97,11 @@ agent's own completion claim is retained only as diagnostic evidence.
 
 ## Data flow
 
-```
-User Input → TUI → Coding Agent → Agent Core → LLM Backend
-                                                                ↓
-User Display ← TUI ← Coding Agent ← Agent Core ← LLM Response ←
+```mermaid
+flowchart LR
+    User --> TUI --> Coding["Coding agent"] --> Core["Agent core"] --> Provider
+    Provider --> Core
+    Core --> Tools
+    Tools --> Core
+    Core --> Coding --> TUI --> User
 ```
