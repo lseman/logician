@@ -67,17 +67,20 @@ function runCase(testCase: Case) {
 	}
 	const context = store.getContext("query", 1200, testCase.query);
 	const trace = store.listRetrievalTraces(1)[0];
-	const selected = trace?.selected.map(item => item.id) || [];
+	const selected = (trace?.selected.map(item => item.id) || []).slice(0, 5);
 	const hits = testCase.expected.filter(id => selected.includes(id)).length;
 	const recall = testCase.expected.length ? hits / testCase.expected.length : 1;
-	const firstRelevant = selected.findIndex(id =>
-		testCase.expected.includes(id),
+	const dcg = selected.reduce(
+		(sum, id, rank) =>
+			sum + (testCase.expected.includes(id) ? 1 / Math.log2(rank + 2) : 0),
+		0,
 	);
-	const ndcg = testCase.expected.length
-		? firstRelevant >= 0
-			? 1 / Math.log2(firstRelevant + 2)
-			: 0
-		: 1;
+	const idealHits = Math.min(5, testCase.expected.length);
+	const idcg = Array.from(
+		{ length: idealHits },
+		(_, rank) => 1 / Math.log2(rank + 2),
+	).reduce((sum, gain) => sum + gain, 0);
+	const ndcg = testCase.expected.length ? dcg / idcg : 1;
 	const obsoleteRejected = testCase.forbidden.every(
 		text => !context.includes(text),
 	);

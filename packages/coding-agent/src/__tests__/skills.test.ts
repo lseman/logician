@@ -102,6 +102,7 @@ void test("openclaude-style nested skills keep path ids and display names", asyn
 	const childSkill = findSkillByName(skills, "academic/semantic_scholar");
 	assert.ok(childSkill);
 	assert.equal(childSkill.displayName, "Semantic Scholar");
+	assert.equal(childSkill.slashName, "semantic_scholar");
 });
 
 void test("skill catalog and invocation render openclaude metadata and resources", async () => {
@@ -140,7 +141,7 @@ void test("skill catalog and invocation render openclaude metadata and resources
 	const skill = findSkillByName(skills, "File Ops");
 	assert.ok(skill);
 	assert.equal(skill.name, "coding/file_ops");
-	assert.equal(skill.slashName, "coding-file_ops");
+	assert.equal(skill.slashName, "file_ops");
 
 	const catalog = formatSkillCatalog(skills);
 	assert.match(catalog, /name="coding\/file_ops"/);

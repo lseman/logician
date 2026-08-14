@@ -253,6 +253,10 @@ export function createMemoryHooks(
 				scheduleRetryWakeup();
 				return;
 			}
+			const heartbeat = setInterval(() => {
+				store.renewExtractionJob(job.id);
+			}, 10_000);
+			(heartbeat as unknown as { unref?: () => void }).unref?.();
 			try {
 				const evidence = JSON.parse(job.payload) as Parameters<
 					typeof extractSemanticEpisode
@@ -316,6 +320,8 @@ export function createMemoryHooks(
 					error instanceof Error ? error.message : String(error),
 					delay,
 				);
+			} finally {
+				clearInterval(heartbeat);
 			}
 		}
 	};

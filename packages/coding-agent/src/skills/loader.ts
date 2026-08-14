@@ -19,7 +19,7 @@ export interface Skill {
 	content: string;
 	filePath: string;
 	baseDir: string;
-	/** Slash command-safe form derived from `name`, e.g. coding-file_ops. */
+	/** Slash command-safe form derived from the skill's own name, e.g. file_ops. */
 	slashName: string;
 	disableModelInvocation: boolean;
 	/** Tool-name allowlist suggested while this skill is active. */
@@ -588,7 +588,7 @@ function skillIdFromPath(
 }
 
 function slashNameForSkill(name: string): string {
-	return name.replace(/\//g, "-");
+	return name.split("/").at(-1) ?? name;
 }
 
 function parseStringList(value: unknown): string[] {
