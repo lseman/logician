@@ -5,10 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { LoopDetector } from "../agent/guards/loop-detector.ts";
 import { createGuardEngine } from "../agent/guards/guard-engine.ts";
-import {
-	awaitsUserInput,
-	detectsCircling,
-} from "../agent/guards/response-patterns.ts";
+import { awaitsUserInput } from "../agent/guards/response-patterns.ts";
 import {
 	buildBuiltinHooks,
 	rewriteCommandWithRtk,
@@ -45,33 +42,7 @@ esac
 	}
 }
 
-// ── detectsCircling ───────────────────────────────────────────────────────
-
-void test("detectsCircling: catches retry patterns", () => {
-	assert.ok(detectsCircling("I'll try again with a different approach."));
-	assert.ok(detectsCircling("Let me try again."));
-	assert.ok(detectsCircling("I will attempt the same thing again."));
-	assert.ok(detectsCircling("Cannot fix it but I'll try."));
-});
-
-void test("detectsCircling: catches attempt patterns", () => {
-	assert.ok(
-		detectsCircling("I tried it but however it failed, let me try again."),
-	);
-	assert.ok(detectsCircling("I've tried again and attempted another way."));
-});
-
-void test("detectsCircling: does not flag non-circling text", () => {
-	assert.ok(!detectsCircling("I read the file and made the changes."));
-	assert.ok(!detectsCircling("The task is complete."));
-	assert.ok(!detectsCircling("Here is the solution to your problem."));
-	assert.ok(!detectsCircling(""));
-});
-
-void test("detectsCircling: requires minimum length", () => {
-	assert.ok(!detectsCircling("ok"));
-	assert.ok(!detectsCircling("done"));
-});
+// ── awaitsUserInput: detects final questions and direct input requests ──────
 
 void test("awaitsUserInput: detects final questions and direct input requests", () => {
 	assert.ok(
@@ -165,25 +136,6 @@ void test("RTK rewrite leaves unsupported commands unchanged", () => {
 	withFakeRtk(() => {
 		assert.equal(rewriteCommandWithRtk("echo hello"), "echo hello");
 	});
-});
-
-// ── GuardEngine: loop detection ──────────────────────────────────────────
-
-void test("recordTurn detects exact-repeat loops", () => {
-	const guardEngine = createGuardEngine({
-		guardsEnabled: true,
-		duplicateGuardEnabled: true,
-		loopExactRepeatWindow: 3,
-	});
-
-	for (let i = 1; i <= 3; i++) {
-		const detected = guardEngine.recordTurn("I will try reading the file again.", [
-			{ name: "read_file", args: JSON.stringify({ path: "src/missing.ts" }), result: "Error: not found" },
-		]);
-		if (i >= 3) {
-			assert.ok(detected, `loop should be detected on turn ${i}`);
-		}
-	}
 });
 
 // ── GuardEngine: tool-call guards ────────────────────────────────────────

@@ -36,7 +36,6 @@ import type { OutputGuard } from "./guards/output-guard.ts";
 import {
 	awaitsUserInput,
 	looksComplete,
-	looksNonCommittal,
 } from "./guards/response-patterns.ts";
 import {
 	type HarnessIntervention,
@@ -1066,47 +1065,7 @@ async function runAgentLoopInTaskScope(
 					result: String(toolResults[index]?.content ?? ""),
 				}));
 
-				let loopDetected = false;
-				let diagnostic: string | null = null;
 
-				if (guardEngine) {
-					loopDetected = guardEngine.recordTurn(assistantContent || "", turnToolCalls);
-					diagnostic = guardEngine.getLoopDiagnostic();
-				} else {
-					diagnostic = outputGuard?.checkLoopDetection(assistantContent || "", turnToolCalls) ?? null;
-					loopDetected = diagnostic !== null;
-				}
-
-				if (loopDetected && diagnostic) {
-					// Inject a recovery nudge. The role:"user"
-					// message_start/message_end pair below is never rendered
-					// (Transcript.handleMessageUpdate ignores non-assistant roles),
-					// so the intervention is what makes this visible.
-					const nudgeContent = `[continuation-nudge:loop-detected] ${diagnostic} Stop and try a different approach, or explain why you're stuck.`;
-					const nudge = createUserMessage(nudgeContent);
-					messages.push(nudge);
-					newMessages.push(nudge);
-					await emitMessagePair(emit, turnId, nudge);
-
-					const loopIntervention = interventionController.record({
-						kind: "loop",
-						cause: "stagnation",
-						detector: guardEngine ? "guard_engine" : "output_guard",
-						message: nudgeContent,
-						iteration,
-						signals: ["repeated_turn_pattern"],
-						nextAction: "Try a materially different tool or approach.",
-					});
-					await emit({ type: "harness_intervention", ...loopIntervention });
-					if (loopIntervention.action === "pause") {
-						return finish({
-							status: "blocked",
-							summary:
-								"Repeated loop detection persisted after recovery attempts.",
-							source: "runtime",
-						});
-					}
-				}
 			}
 
 			// The final usage-only SSE chunk is optional and many local providers
@@ -1390,27 +1349,20 @@ async function runAgentLoopInTaskScope(
 				!hadTools &&
 				!waitingForUser &&
 				!hasAcceptanceReport &&
-				(looksNonCommittal(text) || requiresStructuredConclusion) &&
+				requiresStructuredConclusion &&
 				!hasStructuredStop;
 			if (
 				eligibleForNudge &&
 				consecutiveRunnerNudges < MAX_CONSECUTIVE_RUNNER_NUDGES
 			) {
-				const nudgeTag = requiresStructuredConclusion
-					? "[continuation-nudge:structured-conclusion]"
-					: "[continuation-nudge:non-committal]";
-				const nudgeContent = requiresStructuredConclusion
-					? `${nudgeTag} Do not stop yet without a structured conclusion. Verify that every requested step is complete. ` +
-						"If work remains, continue with the next step. If the task is complete, blocked, failed, or needs user input, " +
-						"call task_status with the accurate status as your final action."
-					: `${nudgeTag} Continue with the next step. If the task is fully complete, ` +
-						"say so explicitly. Otherwise keep working — do not stop prematurely.";
+				const nudgeTag = "[continuation-nudge:structured-conclusion]";
+				const nudgeContent = `${nudgeTag} Do not stop yet without a structured conclusion. Verify that every requested step is complete. ` +
+					"If work remains, continue with the next step. If the task is complete, blocked, failed, or needs user input, " +
+					"call task_status with the accurate status as your final action.";
 				followUps.push({ role: "user" as const, content: nudgeContent });
 				await intervene({
 					kind: "continuation",
-					cause: requiresStructuredConclusion
-						? "missing_structured_conclusion"
-						: "non_committal_response",
+					cause: "missing_structured_conclusion",
 					detector: "runner_continuation",
 					message: nudgeContent,
 					iteration,
@@ -1776,7 +1728,7 @@ async function runAgentLoopInTaskScope(
 		status:
 			iteration >= maxIterations ||
 			reflectionFailed ||
-			(executionPolicy.embeddedPoliciesEnabled && looksNonCommittal(finalText))
+			false
 				? "failed"
 				: "completed",
 		summary: finalText || undefined,

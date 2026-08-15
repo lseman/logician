@@ -1,7 +1,6 @@
 import {
 	awaitsUserInput,
 	looksComplete,
-	looksNonCommittal,
 } from "../agent/guards/response-patterns.ts";
 import type { AgentEvent, Message } from "../agent/types.ts";
 
@@ -31,19 +30,10 @@ export async function emitConclusion(
 	const text = lastAssistantContent(messages);
 	const hadTools = lastHadToolCalls(messages);
 	if (hadTools || looksComplete(text) || awaitsUserInput(text)) return;
-	if (looksNonCommittal(text) && !hadFollowUps) {
-		await emit({
-			type: "task_failed",
-			reason: `Model stopped with non-committal text after ${iteration} iteration(s). It did not complete the task or produce actionable output.`,
-			iteration,
-			lastContent: text.slice(0, 300),
-		});
-		return;
-	}
 	if (iteration >= maxIterations) {
 		await emit({
 			type: "task_failed",
-			reason: `Reached ${maxIterations} iteration limit without completing the task. ${looksNonCommittal(text) ? "Last response was non-committal." : "Last response did not signal task completion."}`,
+			reason: `Reached ${maxIterations} iteration limit without completing the task. Last response did not signal task completion.`,
 			iteration,
 			lastContent: text.slice(0, 300),
 		});

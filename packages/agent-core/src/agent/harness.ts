@@ -252,10 +252,6 @@ export class AgentHarness {
 		this.maxIterations = options.maxIterations;
 		this._extensionRunner = options.extensionRunner;
 		this.loopDetector = new LoopDetector({
-			maxHistory: options.config.loopDetectionWindow,
-			exactRepeatWindow: options.config.loopDetectionWindow,
-			degenerateWindow: options.config.degenerateLoopThreshold,
-			stagnationWindow: options.config.stagnationThreshold,
 			duplicateThreshold: options.config.duplicateToolThreshold,
 			failureThreshold: options.config.toolFailureLoopThreshold,
 		});

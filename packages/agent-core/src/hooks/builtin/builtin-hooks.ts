@@ -17,10 +17,7 @@ import {
 } from "../../agent/file-checkpoints.ts";
 import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
 import type { GuardEngine } from "../../agent/guards/guard-engine.ts";
-import {
-	awaitsUserInput,
-	detectsCircling,
-} from "../../agent/guards/response-patterns.ts";
+import { awaitsUserInput } from "../../agent/guards/response-patterns.ts";
 import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
@@ -343,48 +340,25 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// tasks (model used the todo tool correctly) or task_status (checked above).
 			if (!remaining.length) return undefined;
 
-			// Detect whether the assistant is circling — repeating the same
-			// approach without progress. When detected, the nudge changes tone
-			// to force a strategy shift rather than blind continuation.
-			const isCircling = detectsCircling(assistantText);
-
-			// Build adaptive nudge text based on circling detection. This hook
-			// only decides content — the loop continues until shouldStopAfterTurn
-			// returns true.
+			// Build nudge text. Circling detection (regex-based) has been
+			// removed — trust the model's reasoning instead.
 			const next =
 				remaining.find(t => t.status === "in_progress") ?? remaining[0];
 
-			let content: string;
-			if (isCircling) {
-				// Circling detected — force a strategy shift. This is the most
-				// important case: the model has admitted (explicitly or implicitly)
-				// that it's retrying the same thing. The nudge must break the
-				// pattern, not reinforce it.
-				content =
-					"[continuation-nudge:circling] You appear to be circling — retrying the same approach without progress. " +
-					"Stop and assess: what have you actually tried so far? " +
-					"What specifically failed or didn't work? " +
-					"You need to try a different approach, not just repeat. " +
-					`Remaining items: ${remaining.map(t => `#${t.id} ${t.subject}`).join(", ")}. ` +
-					"If you're truly stuck, explain why and stop.";
-			} else {
-				// Standard nudge — context-rich. Include the next task and
-				// remind the model it can use any tool.
-				content =
-					`[continuation-nudge:todo] You still have ${remaining.length} unfinished task(s). ` +
-					`Continue working — next: #${next.id} ${next.subject}. ` +
-					"Use the todo tool to track progress: create tasks, mark them in_progress before working, and completed when done. " +
-					"Do not skip calling the todo tool — the system only knows you finished via that tool call. " +
-					"If you are truly blocked or done, say so explicitly and stop.";
-			}
+			const content =
+				`[continuation-nudge:todo] You still have ${remaining.length} unfinished task(s). ` +
+				`Continue working — next: #${next.id} ${next.subject}. ` +
+				"Use the todo tool to track progress: create tasks, mark them in_progress before working, and completed when done. " +
+				"Do not skip calling the todo tool — the system only knows you finished via that tool call. " +
+				"If you are truly blocked or done, say so explicitly and stop.";
 
 			emitIntervention({
-				kind: isCircling ? "loop" : "continuation",
-				cause: isCircling ? "circling" : "unfinished_todos",
+				kind: "continuation",
+				cause: "unfinished_todos",
 				detector: "builtin_continuation",
 				message: content,
 				iteration,
-				action: isCircling ? "change_strategy" : "continue",
+				action: "continue",
 			});
 			return [{ role: "user", content }];
 		};
