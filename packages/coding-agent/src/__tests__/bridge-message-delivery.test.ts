@@ -408,9 +408,9 @@ void test("/context renders the latest explicit task state", () => {
 	assert.match(context, /\[change\] edit_file: Updated retry cap/);
 	assert.match(context, /<\/task_state>/);
 	assert.doesNotMatch(context, /## Task state/);
-	assert.match(context, /## Conversation[\s\S]*\[SYSTEM\]\n<task_state>/);
+	assert.match(context, /## Conversation[\s\S]*\[USER\]\n<task_state>/);
 	assert.ok(
-		context.indexOf("[SYSTEM]\n<task_state>") >
+		context.indexOf("[USER]\n<task_state>") >
 			context.indexOf("## Conversation"),
 		"task state should appear in the final provider-message position",
 	);
@@ -499,7 +499,7 @@ void test("/context renders request-time memory injection", () => {
 		context,
 		/Retrieved memory: ~\d+ tokens — request-time compact index/,
 	);
-	assert.match(context, /\[SYSTEM\]\n# Agent Context/);
+	assert.match(context, /\[USER\]\n# Agent Context/);
 	assert.match(context, new RegExp(memory.id));
 	assert.match(context, /Authentication retry policy/);
 	assert.match(context, /Call `memory_get` once/);

@@ -218,6 +218,31 @@ export function parseProviderUsage(
 	};
 }
 
+/**
+ * Re-role any system message that is not at the start of the array to `user`.
+ *
+ * The loop appends request-time context (memory index, task state) as trailing
+ * system messages so the leading system prompt — the cacheable prefix — stays
+ * stable. Chat templates behind many OpenAI-compatible servers (SGLang, vLLM,
+ * llama.cpp) only accept a system/developer message at position 0 and raise
+ * "System message must be at the beginning" for any later occurrence. `user`
+ * is accepted by every chat template, so trailing system context is re-roled
+ * here at the transport boundary instead of changing the loop's logical
+ * message model or the prompt-cache prefix.
+ */
+export function normalizeProviderMessages(
+	messages: Record<string, unknown>[],
+): Record<string, unknown>[] {
+	let sawNonSystem = false;
+	return messages.map(message => {
+		if (message.role === "system" && sawNonSystem) {
+			return { ...message, role: "user" };
+		}
+		if (message.role !== "system") sawNonSystem = true;
+		return message;
+	});
+}
+
 /** Streaming callbacks for a generate() call. All optional. */
 export interface GenerateCallbacks {
 	onDelta?: (delta: string) => void;
@@ -354,9 +379,11 @@ export class OpenAIBackend implements LLMBackend {
 			onToolCallIdUpdate,
 		} = callbacks;
 
+		const providerMessages = normalizeProviderMessages(messages);
+
 		const body: Record<string, unknown> = {
 			model: this.model,
-			messages,
+			messages: providerMessages,
 			temperature,
 			max_tokens: maxTokens,
 			stream: true,
