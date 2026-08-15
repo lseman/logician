@@ -146,7 +146,6 @@ export interface AgentConfig {
 	thinkingLoopMinThinkingLength?: number;
 	thinkingLoopThinkingOnlyThreshold?: number;
 	thinkingLoopEscalationRatio?: number;
-	thinkingLoopMaxTotalThinkingTokens?: number;
 	thinkingLoopMetaReasoningThreshold?: number;
 	// Inference mode (Ctrl+M)
 	inferenceMode?: InferenceMode;

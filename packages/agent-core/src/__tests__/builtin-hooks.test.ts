@@ -102,14 +102,11 @@ void test("minimal profile keeps mechanism hooks and omits built-in policies", (
 			executionProfile: "minimal",
 			continuationEnabled: true,
 			budgetStopEnabled: true,
-			thinkingLoopDetectionEnabled: true,
 			proactiveCompactionEnabled: true,
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
-		guardEngine: createGuardEngine({
-			thinkingLoopDetectionEnabled: true,
-		}),
+		guardEngine: createGuardEngine(),
 		loopDetector: new LoopDetector(),
 	});
 
@@ -170,16 +167,79 @@ void test("RTK rewrite leaves unsupported commands unchanged", () => {
 	});
 });
 
-// ── GuardEngine wiring: recovery-memory read side ────────────────────────
+// ── GuardEngine: loop detection ──────────────────────────────────────────
+
+void test("recordTurn detects exact-repeat loops", () => {
+	const guardEngine = createGuardEngine({
+		guardsEnabled: true,
+		duplicateGuardEnabled: true,
+		loopExactRepeatWindow: 3,
+	});
+
+	for (let i = 1; i <= 3; i++) {
+		const detected = guardEngine.recordTurn("I will try reading the file again.", [
+			{ name: "read_file", args: JSON.stringify({ path: "src/missing.ts" }), result: "Error: not found" },
+		]);
+		if (i >= 3) {
+			assert.ok(detected, `loop should be detected on turn ${i}`);
+		}
+	}
+});
+
+// ── GuardEngine: tool-call guards ────────────────────────────────────────
+
+void test("checkToolCall blocks duplicate calls", () => {
+	const guardEngine = createGuardEngine({
+		guardsEnabled: true,
+		duplicateGuardEnabled: true,
+		loopDuplicateThreshold: 3,
+	});
+
+	// First two calls pass
+	assert.equal(guardEngine.checkToolCall("read_file", '{"path":"a.ts"}').block, false);
+	assert.equal(guardEngine.checkToolCall("read_file", '{"path":"a.ts"}').block, false);
+
+	// Third call blocks
+	assert.equal(guardEngine.checkToolCall("read_file", '{"path":"a.ts"}').block, true);
+});
+
+void test("explicitly disabling guards bypasses the duplicate guard", () => {
+	const guardEngine = createGuardEngine({
+		guardsEnabled: false,
+		duplicateGuardEnabled: true,
+	});
+
+	// Even with duplicateGuardEnabled, guardsEnabled=false should skip all checks
+	for (let i = 1; i <= 5; i++) {
+		const result = guardEngine.checkToolCall("read_file", '{"path":"a.ts"}');
+		assert.equal(result.block, false, `should not block on call ${i}`);
+	}
+});
+
+// ── GuardEngine: recovery memory ─────────────────────────────────────────
+
+void test("checkAndRecordFailure returns warnings on repeated failures", () => {
+	const guardEngine = createGuardEngine({ guardsEnabled: false });
+
+	const first = guardEngine.checkAndRecordFailure(
+		"bash", '{"command":"npm test"}', "Error: timeout exceeded",
+	);
+	assert.equal(first.warnings.length, 0);
+
+	const second = guardEngine.checkAndRecordFailure(
+		"bash", '{"command":"npm test"}', "Error: timeout exceeded",
+	);
+	assert.ok(second.warnings.length > 0, "should warn on second failure");
+});
 
 void test("afterToolCall appends a recovery-memory warning on a repeated failure", async () => {
-	const guardEngine = createGuardEngine({ guardsEnabled: false, recoveryMemoryEnabled: true });
+	const guardEngine = createGuardEngine({ guardsEnabled: false });
 	const hooks = buildBuiltinHooks({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
 			guardsEnabled: false,
-			recoveryMemoryEnabled: true,
+			executionProfile: "autonomous",
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
@@ -204,13 +264,13 @@ void test("afterToolCall appends a recovery-memory warning on a repeated failure
 });
 
 void test("afterToolCall does not warn on the first occurrence of a failure", async () => {
-	const guardEngine = createGuardEngine({ guardsEnabled: false, recoveryMemoryEnabled: true });
+	const guardEngine = createGuardEngine({ guardsEnabled: false });
 	const hooks = buildBuiltinHooks({
 		config: {
 			baseUrl: "http://fake",
 			model: "fake",
 			guardsEnabled: false,
-			recoveryMemoryEnabled: true,
+			executionProfile: "autonomous",
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
@@ -228,16 +288,11 @@ void test("afterToolCall does not warn on the first occurrence of a failure", as
 });
 
 void test("recovery memory records and warns even with duplicate/failure tool-call guards off", async () => {
-	// Regression: recordFailure/checkAndRecordFailure used to be gated behind
-	// the tool-call guard's own `guardThresholds`, so recovery memory silently
-	// never populated when duplicate/failure guards were both off — a
-	// plausible config for anyone who wants recovery memory without the
-	// blocking guards.
+	// Recovery memory works independently of the tool-call guard.
 	const guardEngine = createGuardEngine({
 		guardsEnabled: false,
 		duplicateGuardEnabled: false,
 		failureGuardEnabled: false,
-		recoveryMemoryEnabled: true,
 	});
 	const hooks = buildBuiltinHooks({
 		config: {
@@ -246,7 +301,7 @@ void test("recovery memory records and warns even with duplicate/failure tool-ca
 			guardsEnabled: false,
 			duplicateGuardEnabled: false,
 			failureGuardEnabled: false,
-			recoveryMemoryEnabled: true,
+			executionProfile: "autonomous",
 		},
 		contextWindowTokens: () => 4096,
 		toolDefs: () => [],
@@ -265,122 +320,4 @@ void test("recovery memory records and warns even with duplicate/failure tool-ca
 	await call(1);
 	const second = await call(2);
 	assert.ok(second?.content?.includes("recovery-memory"));
-});
-
-// ── GuardEngine wiring: composite evaluate()/graduated intervention ──────
-
-void test("evaluate() escalates to restrict severity once progress signal and repeated failures compound", () => {
-	const guardEngine = createGuardEngine({
-		guardsEnabled: false,
-		recoveryMemoryEnabled: true,
-		progressSignalEnabled: true,
-		fusionEnabled: true,
-		graduatedIntervention: true,
-		progressSignalMinScore: 30,
-		progressSignalMinLowScoreTurns: 2,
-	});
-
-	// Drive progress down: repeated no-op turns in "orient" phase score low.
-	for (let i = 1; i <= 3; i++) {
-		guardEngine.recordProgress([], [], i, "orient");
-	}
-	// Compound with a repeated failure pattern (recovery memory signal).
-	for (let i = 0; i < 4; i++) {
-		guardEngine.recordFailure("bash", '{"command":"npm test"}', "Error: timeout");
-	}
-
-	const decision = guardEngine.evaluate();
-	assert.ok(decision.compositeScore > 0);
-	assert.ok(["nudge", "restrict", "pause", "abort"].includes(decision.severity));
-	assert.ok(decision.evidence.length > 0);
-});
-
-void test("evaluate() caps heuristic-only signals at nudge, never restrict/pause/abort", () => {
-	// Regression: progress_signal, recovery_memory, and hypothesis_tracker are
-	// all scored from heuristics (keyword matches, string similarity) that
-	// produce identical scores for a stuck agent and for perfectly healthy
-	// work whose tool results just don't happen to contain the expected
-	// keywords (e.g. reading a JSON config or test fixture). Composite
-	// severity must stay capped at "nudge" unless a reliable, pattern-based
-	// detector (loop_detection/thinking_loop/output_errors) is also present —
-	// otherwise a healthy long-running agent gets its flow force-interrupted
-	// by a false positive.
-	const guardEngine = createGuardEngine({
-		guardsEnabled: false, // no LoopDetector-backed tool-call guard
-		fusionEnabled: true,
-		graduatedIntervention: true,
-		progressSignalEnabled: true,
-		recoveryMemoryEnabled: true,
-		progressSignalMinScore: 30,
-		progressSignalMinLowScoreTurns: 1,
-	});
-
-	// Drive progress_signal as low as possible: no meaningful file changes,
-	// no verification, stuck in "orient".
-	for (let i = 1; i <= 10; i++) {
-		guardEngine.recordProgress(
-			[{ name: "read_file", args: JSON.stringify({ path: `f${i}.json` }) }],
-			[{ content: '{"unrelated": "content"}', file: `f${i}.json` }],
-			i,
-			"orient",
-		);
-	}
-	// Compound with repeated recovery-memory failures on the same approach.
-	for (let i = 0; i < 6; i++) {
-		guardEngine.recordFailure("bash", '{"command":"npm test"}', "Error: timeout exceeded");
-	}
-
-	const decision = guardEngine.evaluate();
-	assert.ok(
-		decision.severity === "info" || decision.severity === "nudge",
-		`expected info or nudge, got ${decision.severity} (score ${decision.compositeScore})`,
-	);
-});
-
-void test("evaluate() still escalates to restrict/pause when loop_detection is among the evidence", () => {
-	// Counterpart to the cap above: a reliable, pattern-based signal (an
-	// actual repeated tool call + repeated assistant text) must still be able
-	// to escalate past nudge — the cap only applies to heuristic-only signals.
-	const guardEngine = createGuardEngine({
-		guardsEnabled: true,
-		duplicateGuardEnabled: true,
-		fusionEnabled: true,
-		graduatedIntervention: true,
-	});
-
-	let lastSeverity = "info";
-	for (let i = 1; i <= 6; i++) {
-		guardEngine.recordTurn("I will try reading the file again.", [
-			{ name: "read_file", args: JSON.stringify({ path: "src/missing.ts" }), result: "Error: not found" },
-		]);
-		lastSeverity = guardEngine.evaluate().severity;
-	}
-	assert.ok(
-		lastSeverity === "restrict" || lastSeverity === "pause" || lastSeverity === "abort",
-		`expected an escalated severity from a genuine repeated loop, got ${lastSeverity}`,
-	);
-});
-
-void test("evaluate() stays at info severity with no signals", () => {
-	const guardEngine = createGuardEngine({
-		guardsEnabled: false,
-		fusionEnabled: true,
-		graduatedIntervention: true,
-	});
-	const decision = guardEngine.evaluate();
-	assert.equal(decision.severity, "info");
-	assert.equal(decision.shouldIntervene, false);
-});
-
-// ── GuardEngine wiring: hypothesis prompt round-trip ─────────────────────
-
-void test("buildHypothesisPrompt + parseHypothesesFromText round-trips into stored hypotheses", () => {
-	const guardEngine = createGuardEngine({ guardsEnabled: false, hypothesisTrackingEnabled: true });
-	const prompt = guardEngine.buildHypothesisPrompt(["progress is low"]);
-	assert.match(prompt, /progress is low/);
-
-	const modelReply = "1. The path changed because the repo was restructured\n   test: grep for the old path";
-	const count = guardEngine.parseHypothesesFromText(modelReply);
-	assert.equal(count, 1);
-	assert.equal(guardEngine.getActiveHypotheses().length, 1);
 });

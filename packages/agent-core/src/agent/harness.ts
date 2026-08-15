@@ -37,9 +37,11 @@ import {
 	restoreFileFrame,
 } from "./file-checkpoints.ts";
 import { LoopDetector } from "./guards/loop-detector.ts";
-import { createGuardEngine, type GuardEngine } from "./guards/guard-engine.ts";
+import {
+	createGuardCallbacks,
+	type GuardCallbacks,
+} from "./guards/guard-callbacks.ts";
 import { OutputGuard } from "./guards/output-guard.ts";
-import { ThinkingLoopDetector } from "./guards/thinking-loop-detector.ts";
 import {
 	type Branch,
 	forkBranch,
@@ -181,11 +183,8 @@ export class AgentHarness {
 	private branchSeq = 0;
 	private checkpoints: Message[][] = [];
 	private msgManager: MessageDeliveryManager;
-	private guardEngine: GuardEngine;
+	private guardCallbacks: GuardCallbacks;
 	private loopDetector: LoopDetector;
-	private thinkingLoopDetector: ThinkingLoopDetector | null;
-	/** @deprecated Use guardEngine.outputGuard instead. */
-	private _outputGuardLegacy: OutputGuard | null = null;
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
@@ -260,73 +259,26 @@ export class AgentHarness {
 			duplicateThreshold: options.config.duplicateToolThreshold,
 			failureThreshold: options.config.toolFailureLoopThreshold,
 		});
-		this.thinkingLoopDetector =
-			options.config.thinkingLoopDetectionEnabled !== false
-				? new ThinkingLoopDetector({
-					minThinkingLength: options.config.thinkingLoopMinThinkingLength,
-					thinkingOnlyThreshold:
-						options.config.thinkingLoopThinkingOnlyThreshold,
-					escalationRatio: options.config.thinkingLoopEscalationRatio,
-					maxTotalThinkingTokens:
-						options.config.thinkingLoopMaxTotalThinkingTokens,
-					metaReasoningThreshold:
-						options.config.thinkingLoopMetaReasoningThreshold,
-				})
-				: null;
-		// Create the central GuardEngine that unifies all guard rails.
-		this.guardEngine = createGuardEngine({
-			// Loop detection
-			loopMaxHistory: options.config.loopDetectionWindow ?? 10,
-			loopExactRepeatWindow: options.config.loopDetectionWindow ?? 3,
-			loopDegenerateWindow: options.config.degenerateLoopThreshold ?? 4,
-			loopStagnationWindow: options.config.stagnationThreshold ?? 5,
-			loopDuplicateThreshold: options.config.duplicateToolThreshold ?? 3,
-			loopFailureThreshold: options.config.toolFailureLoopThreshold ?? 3,
-			// Tool guards
-			guardsEnabled: options.config.guardsEnabled,
-			duplicateGuardEnabled: options.config.duplicateGuardEnabled,
-			failureGuardEnabled: options.config.failureGuardEnabled,
-			// Thinking loop detection
-			thinkingLoopDetectionEnabled: options.config.thinkingLoopDetectionEnabled,
-			thinkingLoopMinThinkingLength: options.config.thinkingLoopMinThinkingLength,
-			thinkingLoopThinkingOnlyThreshold: options.config.thinkingLoopThinkingOnlyThreshold,
-			thinkingLoopEscalationRatio: options.config.thinkingLoopEscalationRatio,
-			thinkingLoopMaxTotalThinkingTokens: options.config.thinkingLoopMaxTotalThinkingTokens,
-			thinkingLoopMetaReasoningThreshold: options.config.thinkingLoopMetaReasoningThreshold,
-			// Output guard
-			outputMaxRetries: options.config.streamOptions?.maxRetries ?? options.config.maxRetries ?? 3,
-			outputRetryBaseDelayMs: options.config.retryBaseDelayMs ?? 500,
-			outputMaxRetryDelayMs: options.config.streamOptions?.maxRetryDelayMs ?? 15_000,
-			outputAutoCompactOnContextFull: options.config.autoRetryEnabled !== false,
-			outputMaxEmptyResponses: 3,
-			outputMaxNonCommittalResponses: 3,
-			outputBudgetThreshold: 0.95,
-			outputMaxConsecutiveCompactions: 3,
-			// Progress signal
-			progressSignalEnabled: options.config.progressSignalEnabled,
-			progressSignalMinScore: options.config.progressSignalMinScore ?? 30,
-			progressSignalMinLowScoreTurns: options.config.progressSignalMinLowScoreTurns ?? 5,
-			// Goal decomposition
-			goalDecompositionEnabled: options.config.goalDecompositionEnabled,
-			goalDecomposerMaxSubgoals: options.config.goalDecomposerMaxSubgoals ?? 10,
-			// Recovery memory
-			recoveryMemoryEnabled: options.config.recoveryMemoryEnabled,
-			recoveryMemoryMaxEntries: options.config.recoveryMemoryMaxEntries ?? 50,
-			// Hypothesis tracking
-			hypothesisTrackingEnabled: options.config.hypothesisTrackingEnabled,
-			hypothesisTrackerMaxHypotheses: options.config.hypothesisTrackerMaxHypotheses ?? 10,
-			// Fusion / graduated intervention
-			fusionEnabled: options.config.guardFusionEnabled,
-			fusionWeights: options.config.guardFusionWeights,
-			graduatedIntervention: options.config.guardGraduatedIntervention,
-			// Events
-			onEvent: event => {
-				this.emitToSubscribers(event);
-			},
-			onCompact: async () => {
-				const result = await this.compact();
-				return result ?? null;
-			},
+		// Create the central GuardCallbacks (callback-based guardrail system).
+		this.guardCallbacks = createGuardCallbacks({
+			loopDetector: this.loopDetector,
+			outputGuard: new OutputGuard({
+				maxRetries: options.config.streamOptions?.maxRetries ?? options.config.maxRetries ?? 3,
+				retryBaseDelayMs: options.config.retryBaseDelayMs ?? 500,
+				maxRetryDelayMs: options.config.streamOptions?.maxRetryDelayMs ?? 15_000,
+				autoCompactOnContextFull: options.config.autoRetryEnabled !== false,
+				maxEmptyResponses: 3,
+				maxNonCommittalResponses: 3,
+				budgetThreshold: 0.95,
+				maxConsecutiveCompactions: 3,
+				onEvent: event => {
+					this.emitToSubscribers(event);
+				},
+				onCompact: async () => {
+					const result = await this.compact();
+					return result ?? null;
+				},
+			}),
 		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
 		this.msgManager = new MessageDeliveryManager({
@@ -728,9 +680,7 @@ export class AgentHarness {
 						backend: this.backend,
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
-						// Use GuardEngine's internal OutputGuard.
-						outputGuard: this.guardEngine.outputGuard,
-						guardEngine: this.guardEngine,
+						outputGuard: this.guardCallbacks.outputGuard,
 						extensionBus: this._extensionBus,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
@@ -853,8 +803,7 @@ export class AgentHarness {
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
 						// Use GuardEngine's internal OutputGuard.
-						outputGuard: this.guardEngine.outputGuard,
-						guardEngine: this.guardEngine,
+						outputGuard: this.guardCallbacks.outputGuard,
 						extensionBus: this._extensionBus,
 						initialTaskState: this.runKernel.snapshot().state.taskState,
 						refreshNextTurnConfig: () =>
@@ -1071,7 +1020,6 @@ export class AgentHarness {
 			config,
 			contextWindowTokens: () => config.contextWindowTokens,
 			toolDefs: () => tools as unknown as Record<string, unknown>[],
-			guardEngine: this.guardEngine,
 			loopDetector: this.loopDetector,
 			eventBus: {
 				// Builtin interventions must use the same subscriber path as loop-runner
@@ -1271,29 +1219,11 @@ export class AgentHarness {
 	}
 
 	getOutputGuard(): OutputGuard | null {
-		return this.guardEngine.outputGuard;
+		return this.guardCallbacks.outputGuard;
 	}
 
 	getLoopDetector(): LoopDetector {
 		return this.loopDetector;
-	}
-
-	getThinkingLoopDetector(): ThinkingLoopDetector | null {
-		return this.thinkingLoopDetector;
-	}
-
-	setThinkingLoopDetectorEnabled(enabled: boolean): void {
-		if (enabled && !this.thinkingLoopDetector) {
-			this.thinkingLoopDetector = new ThinkingLoopDetector({
-				minThinkingLength: this.config.thinkingLoopMinThinkingLength,
-				thinkingOnlyThreshold: this.config.thinkingLoopThinkingOnlyThreshold,
-				escalationRatio: this.config.thinkingLoopEscalationRatio,
-				maxTotalThinkingTokens: this.config.thinkingLoopMaxTotalThinkingTokens,
-				metaReasoningThreshold: this.config.thinkingLoopMetaReasoningThreshold,
-			});
-		} else if (!enabled) {
-			this.thinkingLoopDetector = null;
-		}
 	}
 
 	// ── Runtime config setters ─────────────────────────────────────────────
@@ -1357,9 +1287,6 @@ export class AgentHarness {
 		>,
 	): void {
 		Object.assign(this.config, options);
-		if (options.thinkingLoopDetectionEnabled !== undefined) {
-			this.setThinkingLoopDetectorEnabled(options.thinkingLoopDetectionEnabled);
-		}
 		// autoRetryEnabled changes are handled by GuardEngine.
 	}
 
