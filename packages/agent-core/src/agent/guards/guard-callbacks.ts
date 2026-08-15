@@ -36,12 +36,10 @@ export interface ToolResultDecision {
 	terminate?: boolean;
 }
 
-/** Decision returned from `onTurnComplete`. Return true to signal a loop. */
+/** Decision returned from `onTurnComplete`. No longer used for loop detection. */
 export interface TurnDecision {
-	/** True if a loop was detected. */
-	isLooping: boolean;
-	/** Diagnostic message to inject as a recovery nudge. */
-	diagnostic?: string;
+	/** Reserved for future use. */
+	_?: never;
 }
 
 /** Decision returned from `onError` for backend/provider errors. */
@@ -128,7 +126,7 @@ export interface GuardCallbacks {
 	onToolCall?: OnToolCall;
 	/** Called after each tool call. */
 	onToolResult?: OnToolResult;
-	/** Called after each turn (loop detection). */
+	/** Called after each turn. No longer used for loop detection. */
 	onTurnComplete?: OnTurnComplete;
 	/** Called when a backend error occurs. */
 	onError?: OnError;
@@ -177,16 +175,8 @@ export function createGuardCallbacks(config: GuardCallbacksConfig = {}): GuardCa
 				}
 			: undefined,
 
-		onTurnComplete: loopDetector
-				? (context) => {
-						const isLooping = loopDetector.recordAndDetect(
-							context.assistantContent,
-							context.toolCalls,
-						);
-						const diagnostic = isLooping ? loopDetector.getLoopDiagnostic() ?? undefined : undefined;
-						return isLooping ? { isLooping: true, diagnostic } : undefined;
-					}
-				: undefined,
+		// onTurnComplete kept as a hook point; no longer performs detection.
+		onTurnComplete: undefined,
 
 		onError: outputGuard ? (error) => outputGuard.handleError(error) : undefined,
 

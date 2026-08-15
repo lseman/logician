@@ -1,14 +1,14 @@
 // ── GuardEngine ──────────────────────────────────────────────────────────
-// Minimal guard engine: wraps loop detection + output guard only.
+// Minimal guard engine: wraps tool-call guards + output guard only.
 //
 // Two orthogonal concerns:
-//   1. Loop detection (tool-call level) — detects exact repeats, degeneracy,
-//      stagnation, duplicates, and failure loops. Returns true on detection.
+//   1. Tool-call guards (pre-execution) — blocks duplicate tool calls and
+//      repeated failures.
 //   2. Output guard (response level) — handles backend errors (retry/abort),
-//      empty/non-committal responses, and token budget exhaustion.
+//      empty responses, and token budget exhaustion.
 //
 // No multi-signal fusion, no graduated intervention, no composite scoring.
-// Callers check loop detection and output guard results directly.
+// Callers check tool-call guards and output guard results directly.
 
 import type { LoopDetector } from "./loop-detector.ts";
 import type { OutputGuard } from "./output-guard.ts";
@@ -17,18 +17,12 @@ import type { EventHandler } from "../types.ts";
 // ── Config ────────────────────────────────────────────────────────────────
 
 export interface GuardEngineConfig {
-	// ── Loop detection ─────────────────────────────────────────────────────
-	loopMaxHistory?: number;
-	loopExactRepeatWindow?: number;
-	loopDegenerateWindow?: number;
-	loopStagnationWindow?: number;
-	loopDuplicateThreshold?: number;
-	loopFailureThreshold?: number;
-
 	// ── Tool guards ────────────────────────────────────────────────────────
 	guardsEnabled?: boolean;
 	duplicateGuardEnabled?: boolean;
 	failureGuardEnabled?: boolean;
+	loopDuplicateThreshold?: number;
+	loopFailureThreshold?: number;
 
 	// ── Output guard ───────────────────────────────────────────────────────
 	outputMaxRetries?: number;
@@ -61,15 +55,7 @@ export interface GuardEngine {
 	/** Record a successful tool call (decays failure state). */
 	recordSuccess(name: string, args: string): void;
 
-	// ── Loop detection (post-execution) ────────────────────────────────────
-	/** Record a turn and check for loops. Returns true if a loop is detected. */
-	recordTurn(assistantContent: string, toolCalls: Array<{ name: string; args: string; result: string }>): boolean;
 
-	/** Get loop diagnostic message if a loop is detected. */
-	getLoopDiagnostic(): string | null;
-
-	/** Check for loop patterns in a turn (fallback when guardEngine not present). */
-	checkLoopDetection(assistantContent: string, toolCalls: Array<{ name: string; args: string; result: string }>): string | null;
 
 	// ── Output guard ───────────────────────────────────────────────────────
 	/** Process a backend error. Returns guard decision. */
@@ -119,17 +105,12 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 	const {
 		onEvent,
 		onCompact,
-		// Loop detection defaults
-		loopMaxHistory = 10,
-		loopExactRepeatWindow = 3,
-		loopDegenerateWindow = 4,
-		loopStagnationWindow = 5,
-		loopDuplicateThreshold = 3,
-		loopFailureThreshold = 3,
 		// Tool guard defaults
 		guardsEnabled = true,
 		duplicateGuardEnabled = true,
 		failureGuardEnabled = false,
+		loopDuplicateThreshold = 3,
+		loopFailureThreshold = 3,
 		// Output guard defaults
 		outputMaxRetries = 3,
 		outputRetryBaseDelayMs = 500,
@@ -149,10 +130,6 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		if (!_loopDetector) {
 			const { LoopDetector: LD } = require("./loop-detector.ts");
 			_loopDetector = new LD({
-				maxHistory: loopMaxHistory,
-				exactRepeatWindow: loopExactRepeatWindow,
-				degenerateWindow: loopDegenerateWindow,
-				stagnationWindow: loopStagnationWindow,
 				duplicateThreshold: loopDuplicateThreshold,
 				failureThreshold: loopFailureThreshold,
 			});
@@ -233,17 +210,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 			}
 		},
 
-		recordTurn(assistantContent, toolCalls) {
-			return getLoopDetector().recordAndDetect(assistantContent, toolCalls);
-		},
 
-		getLoopDiagnostic() {
-			return getLoopDetector().getLoopDiagnostic();
-		},
-
-		checkLoopDetection(assistantContent, toolCalls) {
-			return getLoopDetector().getLoopDiagnostic() ?? null;
-		},
 
 		handleError(error) {
 			return getOutputGuard().handleError(error);
@@ -310,10 +277,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		},
 
 		getStats() {
-			const loop = getLoopDetector();
-			const loopHistory = (loop as unknown as Record<string, unknown>)?.history as unknown[] | undefined;
 			return {
-				loopHistoryLength: loopHistory?.length ?? 0,
 				outputRetryCount: getOutputGuard().getRetryCount(),
 				failureHistoryCount: failureHistory.length,
 			};
