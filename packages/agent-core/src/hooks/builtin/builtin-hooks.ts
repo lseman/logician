@@ -5,14 +5,7 @@
 //
 // All guard rail logic is delegated to the central GuardEngine, which owns:
 //   - Tool-call guards (duplicate + failure-loop) via LoopDetector
-//   - Thinking loop detection via ThinkingLoopDetector
-//   - Progress signal tracking
-//   - Recovery memory
-//   - Hypothesis tracking
-//   - Goal decomposition
-//
-// This eliminates the duplicate ThinkingLoopDetector that was previously
-// created in both harness.ts and this file.
+//   - Output guard (error handling, retries, budget) via OutputGuard.
 
 import { spawnSync } from "node:child_process";
 import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
@@ -80,8 +73,8 @@ export interface BuiltinHookDeps {
 	contextWindowTokens: () => number | undefined;
 	// Tool definitions for accurate payload token estimates.
 	toolDefs: () => Record<string, unknown>[];
-	// Central GuardEngine that owns all guard rails.
-	guardEngine: GuardEngine;
+	// Central GuardEngine that owns all guard rails (optional when using GuardCallbacks).
+	guardEngine?: GuardEngine;
 	// Legacy LoopDetector reference (for backward compatibility).
 	loopDetector?: LoopDetector;
 	// Typed event emitter for structured events (optional).
@@ -139,11 +132,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const budgetEnabled =
 		executionPolicy.embeddedPoliciesEnabled &&
 		config.budgetStopEnabled === true;
-	// Thinking loop detection: detects meta-reasoning spirals where the model
-	// keeps thinking without taking action. Default ON.
-	const thinkingLoopEnabled =
-		executionPolicy.embeddedPoliciesEnabled &&
-		(config.thinkingLoopDetectionEnabled ?? true);
 	// Proactive compaction: default ON but aggressive (80% window). Can lose
 	// context mid-task. Consider disabling for long-running tasks.
 	const compactionEnabled = config.proactiveCompactionEnabled !== false;
@@ -193,7 +181,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			// GuardEngine is the canonical source; loopDetector is legacy fallback.
 			const decision = loopDetector
 				? loopDetector.checkToolCall(toolCall.name, JSON.stringify(args))
-				: guardEngine.checkToolCall(toolCall.name, JSON.stringify(args));
+				: guardEngine?.checkToolCall(toolCall.name, JSON.stringify(args)) ?? { block: false };
 			if (decision.block) {
 				const intervention = emitIntervention({
 					kind: "loop",
@@ -233,16 +221,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		// guards off.
 		let content: string | undefined;
 		if (isError && (guardThresholds || recoveryMemoryOn)) {
-			const { warnings } = guardEngine.checkAndRecordFailure(
+			const { warnings } = guardEngine?.checkAndRecordFailure(
 				toolCall.name,
 				toolCall.arguments,
 				result,
-			);
+			) ?? { warnings: [] };
 			if (warnings.length > 0) {
 				content = `${result}\n\n${warnings.join("\n")}`;
 			}
 		} else if (!isError && guardThresholds) {
-			guardEngine.recordSuccess(toolCall.name, toolCall.arguments);
+			guardEngine?.recordSuccess(toolCall.name, toolCall.arguments);
 			interventions.recordProgress();
 		}
 		if (
@@ -307,74 +295,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				});
 			}
 			return stopped;
-		};
-	}
-
-	// Thinking loop detection: delegate to GuardEngine.
-	// GuardEngine owns the ThinkingLoopDetector, so we just call its API.
-	if (thinkingLoopEnabled) {
-		hooks.afterProviderResponse = ({
-			content,
-			toolCallCount,
-			iteration,
-			usageTokens,
-		}) => {
-			const diagnostic = guardEngine.recordThinkingTurn(
-				content ?? "",
-				toolCallCount,
-				iteration,
-				usageTokens,
-			);
-			if (diagnostic) {
-				// Extract strategy from diagnostic for the event
-				let strategy:
-					| "thinking_only"
-					| "escalation"
-					| "meta_reasoning"
-					| "budget_exhausted" = "thinking_only";
-				if (
-					diagnostic.includes("escalation") ||
-					diagnostic.includes("spiral")
-				) {
-					strategy = "escalation";
-				} else if (diagnostic.includes("meta-reasoning")) {
-					strategy = "meta_reasoning";
-				} else if (diagnostic.includes("budget")) {
-					strategy = "budget_exhausted";
-				}
-				emitIntervention({
-					kind: "loop",
-					cause: strategy,
-					detector: "thinking_loop",
-					message: diagnostic,
-					iteration,
-					signals: [strategy],
-					action: "stop",
-					nextAction:
-						"Use tools, test a concrete hypothesis, or report the blocker.",
-				});
-			}
-		};
-
-		// Merge into shouldStopAfterTurn alongside budget check.
-		const prevShouldStop = hooks.shouldStopAfterTurn;
-		hooks.shouldStopAfterTurn = ({ messages, iteration }) => {
-			const budgetResult = prevShouldStop?.({
-				messages,
-				iteration,
-				hadToolCalls: false,
-			});
-			if (budgetResult === true) return true;
-			const diagnostic = guardEngine.getThinkingDiagnostic();
-			if (diagnostic) {
-				recordTaskStatus({
-					status: "blocked",
-					summary: diagnostic,
-					ts: Date.now(),
-				});
-				return true;
-			}
-			return false;
 		};
 	}
 
