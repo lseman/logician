@@ -2300,21 +2300,24 @@ export class AgentCoreBridge {
 			lines.push("");
 		}
 
-		// Memory retrieval is a request-time system message, not persistent
+		// Memory retrieval is a request-time context block, not persistent
 		// conversation history. Include the same synthetic block here so /context
 		// displays the effective provider payload instead of only the harness log.
+		// The backend re-roles these trailing system messages to `user` for chat
+		// templates that require a system message at position 0.
 		if (memoryContext) {
-			lines.push("[SYSTEM]", memoryContext, "");
+			lines.push("[USER]", memoryContext, "");
 		}
 
-		// The loop appends task state as the final system message immediately before
-		// each provider request. Mirror that ordering here so /context reflects the
-		// actual provider payload instead of presenting task state as a side panel.
+		// The loop appends task state as the final request-time context block
+		// immediately before each provider request (re-roled to `user` by the
+		// backend). Mirror that ordering here so /context reflects the actual
+		// provider payload instead of presenting task state as a side panel.
 		if (
 			this.currentTaskState &&
 			shouldProjectTaskState(this.currentTaskState)
 		) {
-			lines.push("[SYSTEM]", formatTaskStateContext(this.currentTaskState), "");
+			lines.push("[USER]", formatTaskStateContext(this.currentTaskState), "");
 		}
 
 		return `## Context (${msgs.length} messages, ~${contextTokens} tokens)\n\n${lines.join("\n")}`;

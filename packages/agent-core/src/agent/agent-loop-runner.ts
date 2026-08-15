@@ -557,6 +557,8 @@ async function runAgentLoopInTaskScope(
 					messages as AgentMessage[],
 				);
 				const chatMessages = convertToChatFormat(llmMessages);
+				// Trailing system context: OpenAIBackend re-roles it to `user`
+				// for chat templates that require a system message at position 0.
 				if (shouldProjectTaskState(taskState.snapshot())) {
 					chatMessages.push({ role: "system", content: taskState.toContext() });
 				}
