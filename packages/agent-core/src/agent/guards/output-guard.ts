@@ -18,7 +18,6 @@
 import { BackendError, type BackendErrorCategory } from "../backend.ts";
 import type { EventHandler } from "../types.ts";
 import type { LoopDetector } from "./loop-detector.ts";
-import { NON_COMMITTAL_PATTERNS } from "./response-patterns.ts";
 
 export interface OutputGuardConfig {
 	/** Max retry attempts for transient/provider errors (default 3). */
@@ -79,7 +78,7 @@ export class OutputGuard {
 		Omit<OutputGuardConfig, "onCompact" | "onEvent" | "loopDetector">
 	>;
 	private readonly onEvent: OutputGuardConfig["onEvent"];
-	private readonly loopDetector: OutputGuardConfig["loopDetector"];
+	// loopDetector field kept for type compatibility but no longer used for turn detection.
 	private retryCount = 0;
 	private consecutiveEmptyResponses = 0;
 	private consecutiveNonCommittalResponses = 0;
@@ -94,7 +93,7 @@ export class OutputGuard {
 	constructor(config: OutputGuardConfig = {}) {
 		this.config = { ...DEFAULT_CONFIG, ...config };
 		this.onEvent = config.onEvent;
-		this.loopDetector = config.loopDetector;
+
 	}
 
 	/**
@@ -314,8 +313,8 @@ export class OutputGuard {
 	}
 
 	/**
-	 * Process a successful model response. Checks for empty/degenerate patterns.
-	 * Returns "abort" if the model keeps returning nothing or is stuck in non-committal mode.
+	 * Process a successful model response. Checks for empty responses.
+	 * Returns "abort" if the model keeps returning nothing.
 	 */
 	checkResponse(
 		content: string | null | undefined,
@@ -342,29 +341,7 @@ export class OutputGuard {
 			this.consecutiveEmptyResponses = 0;
 		}
 
-		// Track non-committal responses (has content but no tool calls, matches vague patterns)
-		if (content && content.trim().length > 0 && hasNoTools) {
-			const isNonCommittal = NON_COMMITTAL_PATTERNS.some(p => p.test(content));
-			if (isNonCommittal) {
-				this.consecutiveNonCommittalResponses++;
-				if (
-					this.consecutiveNonCommittalResponses >=
-					this.config.maxNonCommittalResponses
-				) {
-					this.emitEvent({
-						type: "error",
-						message: `Model returned ${this.config.maxNonCommittalResponses} consecutive non-committal responses without tool calls. Aborting turn.`,
-					});
-					return {
-						action: "abort",
-						message: `Model stuck in non-committal mode. No tool calls after ${this.config.maxNonCommittalResponses} responses.`,
-						isRetryable: false,
-					};
-				}
-			} else {
-				this.consecutiveNonCommittalResponses = 0;
-			}
-		}
+
 
 		this.consecutiveCompactions = 0;
 		return { action: "proceed" };
@@ -416,29 +393,6 @@ export class OutputGuard {
 	 */
 	getRetryCount(): number {
 		return this.retryCount;
-	}
-
-	/**
-	 * Check if loop detector found a loop in the current turn.
-	 * Returns the diagnostic message if a loop is detected (and emits an
-	 * event), or null otherwise. Callers should nudge the model with the
-	 * diagnostic rather than abort — a false positive shouldn't kill the run.
-	 */
-	checkLoopDetection(
-		assistantContent: string,
-		toolCalls: Array<{ name: string; args: string; result: string }>,
-	): string | null {
-		if (!this.loopDetector) return null;
-		const isLooping = this.loopDetector.recordAndDetect(
-			assistantContent,
-			toolCalls,
-		);
-		if (!isLooping) return null;
-		const diag = this.loopDetector.getLoopDiagnostic();
-		// The runner emits one guard_triggered intervention when it schedules the
-		// recovery nudge. Emitting loop_detected here as well produced duplicate
-		// user-visible notices for the same incident.
-		return diag;
 	}
 
 	// ── Internals ──────────────────────────────────────────────────────────
