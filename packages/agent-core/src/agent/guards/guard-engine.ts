@@ -1,16 +1,18 @@
-// ── GuardEngine v2 — SOTA Guard Rails ──────────────────────────────────────
+// ── GuardEngine ──────────────────────────────────────────────────────────
 // Central orchestrator for all agent guard rails, loop detection, and recovery.
 //
-// v2 upgrades (SOTA features):
+// Two upgrades over a flat per-detector API:
 //   1. Multi-signal fusion — composite scoring from all detectors
 //   2. Graduated intervention ladder — severity-based escalation
-//   3. Adaptive thresholds — dynamic thresholding from session behavior
-//   4. Temporal decay — exponential weighting of recent observations
-//   5. Meta-cognitive self-assessment — periodic risk evaluation
-//   6. Predictive detection — early warning signals from trend analysis
+//
+// Only loop_detection, thinking_loop, and output_errors are pattern-based on
+// unambiguous repetition — they may escalate the ladder up to abort.
+// Everything else (progress_signal, recovery_memory, hypothesis_tracker,
+// goal_decomposition) scores from heuristics that can't reliably distinguish
+// a stuck agent from healthy work, so they're capped at "nudge": informative,
+// never an interrupt. See RELIABLE_ESCALATION_DETECTORS.
 //
 // Backward compatible: existing API methods work unchanged.
-// SOTA features are opt-in via config flags.
 
 import type { LoopDetector } from "./loop-detector.ts";
 import type { OutputGuard } from "./output-guard.ts";
@@ -21,9 +23,9 @@ import type { RecoveryMemory } from "./recovery-memory.ts";
 import type { GoalDecomposer } from "./goal-decomposer.ts";
 import type { EventHandler } from "../types.ts";
 
-// ── SOTA Types ──────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────
 
-/** Graduated intervention severity — SOTA escalation ladder. */
+/** Graduated intervention severity — escalation ladder. */
 export type InterventionSeverity =
 	| "info"      // Just logging, no intervention
 	| "nudge"     // Soft nudge, agent continues
@@ -70,58 +72,8 @@ export interface GuardDecision {
 	shouldIntervene: boolean;
 }
 
-/** Risk level for meta-cognitive assessment. */
+/** Risk level for the composite risk assessment. */
 export type RiskLevel = "green" | "yellow" | "orange" | "red";
-
-/** Meta-cognitive self-assessment of the agent's state. */
-export interface MetaAssessment {
-	/** Risk level based on all guard signals. */
-	riskLevel: RiskLevel;
-	/** Progress assessment. */
-	progressAssessment: "ahead" | "on-track" | "behind" | "stuck";
-	/** Strategy assessment. */
-	strategyAssessment: "effective" | "neutral" | "counterproductive";
-	/** Composite risk score (0-100). */
-	riskScore: number;
-	/** Confidence in the assessment (0-100). */
-	confidence: number;
-	/** Key risk factors. */
-	riskFactors: string[];
-	/** Key positive factors. */
-	positiveFactors: string[];
-	/** Recommendations for the agent. */
-	recommendations: string[];
-}
-
-/** Early warning prediction. */
-export interface PredictiveWarning {
-	/** Warning type. */
-	type: "loop_formation" | "progress_decline" | "thinking_spiral" | "stagnation_approaching";
-	/** How many turns ahead this warning applies. */
-	horizon: number;
-	/** Confidence (0-100). */
-	confidence: number;
-	/** Description of the predicted pattern. */
-	description: string;
-	/** Recommended preemptive action. */
-	recommendation: string;
-}
-
-/** Adaptive thresholds that adjust based on session behavior. */
-export interface AdaptiveThresholds {
-	/** Thinking loop threshold (consecutive thinking-only turns). */
-	thinkingLoopThreshold: number;
-	/** Progress signal threshold (score below which to nudge). */
-	progressThreshold: number;
-	/** Loop detection window (consecutive turns before flagging). */
-	loopWindow: number;
-	/** Stagnation window (turns with zero progress before flagging). */
-	stagnationWindow: number;
-	/** Whether thresholds have been adapted. */
-	adapted: boolean;
-	/** Original (config) thresholds for reference. */
-	original: Record<string, number>;
-}
 
 // ── Fusion Config ───────────────────────────────────────────────────────────
 
@@ -146,17 +98,20 @@ const SEVERITY_THRESHOLDS = {
 	abort: 90,      // Below this: pause; above this: abort
 };
 
-// ── Temporal Decay ──────────────────────────────────────────────────────────
-
-/** Calculate exponential decay weight based on age and half-life. */
-function decayWeight(
-	ageInTurns: number,
-	halfLifeInTurns: number = 10,
-): number {
-	if (ageInTurns <= 0) return 1.0;
-	// Exponential decay: w = (1/2)^(age/halfLife)
-	return Math.pow(0.5, ageInTurns / halfLifeInTurns);
-}
+/** Detectors whose signal is pattern-based on unambiguous repetition (the
+ *  same tool call, the same turn shape, thinking without acting) — these are
+ *  trusted to escalate all the way to pause/abort on their own.
+ *
+ *  Every other detector (progress_signal, recovery_memory, hypothesis_tracker,
+ *  goal_decomposition) scores from heuristics — keyword matches, string
+ *  similarity, phase labels — against content that varies enormously in
+ *  legitimate work (a read_file on a JSON config scores identically to a
+ *  stuck agent re-reading the same file, because neither result contains the
+ *  "meaningful change" keywords). A single such signal must never be able to
+ *  interrupt a healthy run, so composite severity is capped at "nudge"
+ *  unless a reliable detector is present in the evidence.
+ */
+const RELIABLE_ESCALATION_DETECTORS = new Set(["loop_detection", "thinking_loop", "output_errors"]);
 
 // ── Unified Config ──────────────────────────────────────────────────────────
 
@@ -242,29 +197,14 @@ export interface GuardEngineConfig {
 	/** Max hypotheses (default 10). */
 	hypothesisTrackerMaxHypotheses?: number;
 
-	// ── SOTA Features (opt-in) ─────────────────────────────────────────────
-	/** Whether to enable multi-signal fusion (default false for backward compat). */
+	// ── Fusion / graduated intervention ─────────────────────────────────────
+	/** Whether to enable multi-signal fusion (default true). */
 	fusionEnabled?: boolean;
 	/** Custom detector weights for fusion (overrides defaults). */
 	fusionWeights?: Record<string, number>;
-	/** Whether to use graduated intervention ladder (default false for backward compat). */
+	/** Whether to use the graduated intervention ladder (default true). Heuristic
+	 *  detectors are capped at "nudge" regardless — see RELIABLE_ESCALATION_DETECTORS. */
 	graduatedIntervention?: boolean;
-	/** Whether to adapt thresholds based on session behavior (default false). */
-	adaptiveThresholds?: boolean;
-	/** Number of turns to collect data for adaptation (default 15). */
-	adaptationWindowSize?: number;
-	/** Whether to use temporal decay on observations (default false). */
-	temporalDecayEnabled?: boolean;
-	/** Half-life for temporal decay in turns (default 10). */
-	decayHalfLife?: number;
-	/** Whether to enable meta-cognitive self-assessment (default false). */
-	metaCognitionEnabled?: boolean;
-	/** How often to assess in turns (default 5). */
-	assessmentInterval?: number;
-	/** Whether to enable predictive detection (default false). */
-	predictiveEnabled?: boolean;
-	/** Prediction horizon in turns (default 3). */
-	predictionHorizon?: number;
 
 	// ── Events ─────────────────────────────────────────────────────────────
 	/** Emit events to the UI/event bus. */
@@ -342,6 +282,10 @@ export interface GuardEngine {
 	/** Get warnings for a new approach. */
 	getFailureWarnings(approach: string, failureType: string): string[];
 
+	/** Look up recovery warnings for this failure and record it, atomically —
+	 *  so the warning lookup and the recorded entry share one derivation. */
+	checkAndRecordFailure(name: string, args: string, result: string): { warnings: string[] };
+
 	/** Add a new hypothesis. */
 	addHypothesis(statement: string, test: string, confidence?: number): { id: string };
 
@@ -357,6 +301,16 @@ export interface GuardEngine {
 	/** Build a prompt asking the model to generate hypotheses. */
 	buildHypothesisPrompt(stuckReasons: string[]): string;
 
+	/** Parse hypotheses from model output and store them. Returns count parsed. */
+	parseHypothesesFromText(text: string): number;
+
+	/** Check active hypotheses against new evidence; falsifies any that are contradicted.
+	 *  Returns the IDs of hypotheses falsified by this evidence. */
+	checkHypothesesAgainstEvidence(evidence: Array<{ content: string; type?: string }>): string[];
+
+	/** Build a steering message asking the model to decompose the objective. */
+	buildDecompositionPrompt(objective: string): string;
+
 	/** Parse and set a breakdown from model output. */
 	parseGoalBreakdown(text: string, objective: string): boolean;
 
@@ -366,21 +320,11 @@ export interface GuardEngine {
 	/** Get a status summary for the model. */
 	getGoalStatusSummary(): string | null;
 
-	// ── SOTA API ─────────────────────────────────────────────────────────
 	/** Evaluate all guard signals and return a composite decision. */
 	evaluate(): GuardDecision;
 
 	/** Get the current composite risk assessment. */
 	getCompositeRisk(): { score: number; level: RiskLevel; signals: GuardSignal[] };
-
-	/** Get meta-cognitive self-assessment of the agent's state. */
-	getMetaAssessment(): MetaAssessment;
-
-	/** Get predictive early warning signals. */
-	getPredictiveWarnings(): PredictiveWarning[];
-
-	/** Get current adaptive thresholds. */
-	getAdaptiveThresholds(): AdaptiveThresholds;
 
 	// ── Lifecycle ──────────────────────────────────────────────────────────
 	/** Reset all guard state. */
@@ -436,18 +380,10 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		// Hypothesis tracking defaults
 		hypothesisTrackingEnabled = true,
 		hypothesisTrackerMaxHypotheses = 10,
-		// SOTA feature flags (enabled by default — these are the state-of-the-art features)
+		// Fusion / graduated intervention (on by default)
 		fusionEnabled = true,
 		fusionWeights = {},
 		graduatedIntervention = true,
-		adaptiveThresholds = true,
-		adaptationWindowSize = 15,
-		temporalDecayEnabled = true,
-		decayHalfLife = 10,
-		metaCognitionEnabled = true,
-		assessmentInterval = 5,
-		predictiveEnabled = true,
-		predictionHorizon = 3,
 	} = config;
 
 	// ── Merge fusion weights ─────────────────────────────────────────────
@@ -477,8 +413,8 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		return _loopDetector!;
 	};
 
-	const getThinkingLoopDetector = (): ThinkingLoopDetector => {
-		if (!thinkingLoopDetectionEnabled) return null as unknown as ThinkingLoopDetector;
+	const getThinkingLoopDetector = (): ThinkingLoopDetector | null => {
+		if (!thinkingLoopDetectionEnabled) return null;
 		if (!_thinkingLoopDetector) {
 			const { ThinkingLoopDetector: TLD } = require("./thinking-loop-detector.ts");
 			_thinkingLoopDetector = new TLD({
@@ -547,14 +483,11 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		return _goalDecomposer!;
 	};
 
-	// ── SOTA State ───────────────────────────────────────────────────────
-	let lastIteration = 0;
-	let lastProgressScore = 100;
-	let progressHistory: number[] = []; // For trend analysis
-	let thinkingTurnHistory: { length: number; iteration: number }[] = [];
-	let toolCallVelocityHistory: { count: number; iteration: number }[] = [];
+	// Turn counter for recordTurn's emitted intervention events — it doesn't
+	// receive an iteration number, unlike the other record* methods.
+	let turnCounter = 0;
 
-	// ── Map SOTA intervention to event format ────────────────────────────
+	// ── Map intervention severity to event format ─────────────────────────
 	const mapSeverity = (s: InterventionSeverity): string => {
 		switch (s) {
 			case "info": return "info";
@@ -594,7 +527,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 	const failureGuardOn = guardsEnabled && failureGuardEnabled;
 	const guardThresholds = duplicateGuardOn || failureGuardOn;
 
-	// ── SOTA: Composite signal collection ────────────────────────────────
+	// ── Composite signal collection ─────────────────────────────────────────
 	const collectSignals = (): GuardSignal[] => {
 		const signals: GuardSignal[] = [];
 
@@ -689,7 +622,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		return signals;
 	};
 
-	// ── SOTA: Multi-signal fusion ────────────────────────────────────────
+	// ── Multi-signal fusion ────────────────────────────────────────────────
 	const computeCompositeScore = (signals: GuardSignal[]): number => {
 		if (signals.length === 0) return 0;
 
@@ -701,16 +634,10 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 			weightSum += signal.weight;
 		}
 
-		// Apply temporal decay if enabled
-		if (temporalDecayEnabled && lastIteration > 0) {
-			const decay = decayWeight(lastIteration, decayHalfLife);
-			return Math.round(weightedSum / weightSum * decay);
-		}
-
 		return Math.round(weightedSum / weightSum);
 	};
 
-	// ── SOTA: Graduated intervention ─────────────────────────────────────
+	// ── Graduated intervention ─────────────────────────────────────────────
 	const severityFromScore = (score: number): InterventionSeverity => {
 		if (score >= SEVERITY_THRESHOLDS.abort) return "abort";
 		if (score >= SEVERITY_THRESHOLDS.pause) return "pause";
@@ -746,174 +673,25 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		}
 	};
 
-	// ── SOTA: Adaptive thresholds ────────────────────────────────────────
-	const getAdaptiveThresholds = (): AdaptiveThresholds => {
-		const adapted = adaptiveThresholds && progressHistory.length >= adaptationWindowSize;
-
-		return {
-			thinkingLoopThreshold: adapted
-				? Math.max(5, Math.round(thinkingLoopThinkingOnlyThreshold * (1 + (progressHistory.filter((s) => s < 50).length / progressHistory.length) * 0.5)))
-				: thinkingLoopThinkingOnlyThreshold,
-			progressThreshold: adapted
-				? Math.max(20, progressSignalMinScore - (progressHistory.filter((s) => s < progressSignalMinScore).length * 2))
-				: progressSignalMinScore,
-			loopWindow: adapted
-				? Math.max(2, loopExactRepeatWindow - Math.floor(progressHistory.length / adaptationWindowSize))
-				: loopExactRepeatWindow,
-			stagnationWindow: adapted
-				? Math.max(3, loopStagnationWindow - 1)
-				: loopStagnationWindow,
-			adapted,
-			original: {
-				thinkingLoopThreshold: thinkingLoopThinkingOnlyThreshold,
-				progressThreshold: progressSignalMinScore,
-				loopWindow: loopExactRepeatWindow,
-				stagnationWindow: loopStagnationWindow,
-			},
-		};
-	};
-
-	// ── SOTA: Predictive detection ───────────────────────────────────────
-	const getPredictiveWarnings = (): PredictiveWarning[] => {
-		if (!predictiveEnabled || progressHistory.length < 3) return [];
-
-		const warnings: PredictiveWarning[] = [];
-
-		// Trend analysis: is progress declining?
-		const recent = progressHistory.slice(-predictionHorizon);
-		if (recent.length >= 2 && recent[recent.length - 1] < recent[0]) {
-			const declineRate = (recent[0] - recent[recent.length - 1]) / recent.length;
-			if (declineRate > 5) {
-				warnings.push({
-					type: "progress_decline",
-					horizon: predictionHorizon,
-					confidence: Math.min(90, Math.round(declineRate * 10)),
-					description: `Progress score declining at ${declineRate.toFixed(1)} points/turn`,
-					recommendation: "Consider stepping back and reassessing your approach.",
-				});
-			}
-		}
-
-		// Thinking spiral prediction
-		if (thinkingLoopDetectionEnabled && thinkingTurnHistory.length >= 2) {
-			const recentThinking = thinkingTurnHistory.slice(-predictionHorizon);
-			if (recentThinking.length >= 2) {
-				const avgLength = recentThinking.reduce((s, t) => s + t.length, 0) / recentThinking.length;
-				if (avgLength > thinkingLoopMinThinkingLength * 1.5) {
-					warnings.push({
-						type: "thinking_spiral",
-						horizon: predictionHorizon,
-						confidence: 70,
-						description: `Average thinking length is ${avgLength.toFixed(0)} tokens (threshold: ${thinkingLoopMinThinkingLength})`,
-						recommendation: "Reduce thinking length and focus on concrete actions.",
-					});
-				}
-			}
-		}
-
-		// Stagnation approaching
-		if (progressHistory.length >= predictionHorizon) {
-			const recentProgress = progressHistory.slice(-predictionHorizon);
-			const variance = recentProgress.reduce((s, v) => s + Math.pow(v - recentProgress.reduce((a, b) => a + b, 0) / recentProgress.length, 2), 0) / recentProgress.length;
-			if (variance < 10 && recentProgress.every((v) => v < progressSignalMinScore)) {
-				warnings.push({
-					type: "stagnation_approaching",
-					horizon: predictionHorizon,
-					confidence: 75,
-					description: "Progress has been consistently low with low variance",
-					recommendation: "Change strategy — the current approach is not working.",
-				});
-			}
-		}
-
-		return warnings;
-	};
-
-	// ── SOTA: Meta-cognitive assessment ──────────────────────────────────
-	const getMetaAssessment = (): MetaAssessment => {
-		const signals = collectSignals();
-		const compositeScore = computeCompositeScore(signals);
-		const riskLevel: RiskLevel = compositeScore < 30 ? "green" :
-			compositeScore < 55 ? "yellow" :
-				compositeScore < 75 ? "orange" : "red";
-
-		const progress = getProgressSignal();
-		const lastScore = progress["lastScore"] ?? 100;
-		const progressAssessment: MetaAssessment["progressAssessment"] =
-			lastScore >= 70 ? "on-track" :
-				lastScore >= 40 ? "behind" : "stuck";
-
-		// Strategy assessment based on thinking loop + recovery memory
-		const hasThinkingLoop = thinkingLoopDetectionEnabled && getThinkingLoopDetector()?.getDiagnostic();
-		const recoveryEntries = recoveryMemoryEnabled ? getRecoveryMemory().getEntries().filter((e) => e.repeatCount >= 2).length : 0;
-
-		const strategyAssessment: MetaAssessment["strategyAssessment"] =
-			!hasThinkingLoop && recoveryEntries === 0 ? "effective" :
-				hasThinkingLoop && recoveryEntries > 2 ? "counterproductive" : "neutral";
-
-		// Risk factors
-		const riskFactors: string[] = [];
-		const positiveFactors: string[] = [];
-
-		if (hasThinkingLoop) {
-			riskFactors.push("Thinking loop detected");
-		}
-		if (recoveryEntries > 0) {
-			riskFactors.push(`${recoveryEntries} repeated failure patterns`);
-		}
-		if (lastScore < progressSignalMinScore) {
-			riskFactors.push(`Low progress (${lastScore}/100)`);
-		}
-		if (signals.some((s) => s.score > 70)) {
-			riskFactors.push("High-severity guard signals");
-		}
-
-		if (lastScore >= 60) {
-			positiveFactors.push(`Progress is ${lastScore}/100`);
-		}
-		if (!hasThinkingLoop) {
-			positiveFactors.push("No thinking loops detected");
-		}
-		if (progressAssessment === "on-track") {
-			positiveFactors.push("Agent is making progress");
-		}
-
-		// Recommendations
-		const recommendations: string[] = [];
-		if (riskLevel === "red") {
-			recommendations.push("Immediately reassess strategy — current approach is not working");
-		}
-		if (riskLevel === "orange") {
-			recommendations.push("Consider changing approach or seeking clarification");
-		}
-		if (strategyAssessment === "counterproductive") {
-			recommendations.push("Previous attempts have consistently failed — try a fundamentally different approach");
-		}
-		if (progressAssessment === "stuck") {
-			recommendations.push("Generate hypotheses about why progress has stalled");
-		}
-
-		return {
-			riskLevel,
-			progressAssessment,
-			strategyAssessment,
-			riskScore: compositeScore,
-			confidence: Math.min(95, Math.round(50 + signals.length * 10)),
-			riskFactors,
-			positiveFactors,
-			recommendations,
-		};
-	};
-
-	// ── SOTA: Composite decision ─────────────────────────────────────────
+	// ── Composite decision ──────────────────────────────────────────────────
 	const evaluate = (): GuardDecision => {
 		const signals = collectSignals();
 		const compositeScore = computeCompositeScore(signals);
-		const severity = graduatedIntervention ? severityFromScore(compositeScore) : (compositeScore > 50 ? "nudge" : "info");
+		let severity = graduatedIntervention ? severityFromScore(compositeScore) : (compositeScore > 50 ? "nudge" : "info");
+
+		// Cap at "nudge" unless a reliable (pattern-based) detector is among the
+		// evidence — heuristic-only signals (progress/recovery/hypothesis/goal)
+		// must never interrupt a healthy run on their own. See
+		// RELIABLE_ESCALATION_DETECTORS for why.
+		const hasReliableSignal = signals.some((s) => RELIABLE_ESCALATION_DETECTORS.has(s.detector));
+		if (!hasReliableSignal && (severity === "restrict" || severity === "pause" || severity === "abort")) {
+			severity = "nudge";
+		}
+
 		const action = actionFromSeverity(severity);
 
 		return {
-			severity: graduatedIntervention ? severity : (compositeScore > 50 ? "nudge" : "info"),
+			severity,
 			action,
 			message: messageFromDecision({ severity, action, evidence: signals, compositeScore, shouldIntervene: action !== "proceed" }),
 			evidence: signals,
@@ -922,7 +700,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		};
 	};
 
-	// ── SOTA: Composite risk ─────────────────────────────────────────────
+	// ── Composite risk ───────────────────────────────────────────────────
 	const getCompositeRisk = () => {
 		const signals = collectSignals();
 		const score = computeCompositeScore(signals);
@@ -931,6 +709,21 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 				score < 75 ? "orange" : "red";
 		return { score, level, signals };
 	};
+
+	// ── Shared failure-context derivation ────────────────────────────────
+	// Used by both recordFailure and checkAndRecordFailure so the warning
+	// lookup and the entry that gets recorded always agree on the same
+	// failureType/approach derivation.
+	const deriveFailureContext = (
+		name: string,
+		args: string,
+		result: string,
+	): { failureType: string; approach: string } => ({
+		failureType: result.includes("Error:")
+			? result.slice(0, 100).replace(/^Error:\s*/i, "").slice(0, 60)
+			: "unknown",
+		approach: `${name} ${args.slice(0, 200)}`,
+	});
 
 	// ── Legacy: Unified intervention emitter ─────────────────────────────
 	const emitInterventionLegacy = (
@@ -973,12 +766,10 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 				getLoopDetector().recordFailure(name, args, result);
 			}
 			if (recoveryMemoryEnabled) {
-				const failureType = result.includes("Error:")
-					? result.slice(0, 100).replace(/^Error:\s*/i, "").slice(0, 60)
-					: "unknown";
+				const { failureType, approach } = deriveFailureContext(name, args, result);
 				const { similarEntries } = getRecoveryMemory().recordFailure(
 					failureType,
-					`${name} ${args.slice(0, 200)}`,
+					approach,
 					result.slice(0, 300),
 				);
 				if (similarEntries.length > 0 && similarEntries[0].repeatCount >= 3) {
@@ -989,6 +780,34 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 					);
 				}
 			}
+		},
+
+		checkAndRecordFailure(name: string, args: string, result: string) {
+			if (!recoveryMemoryEnabled) {
+				if (guardThresholds) getLoopDetector().recordFailure(name, args, result);
+				return { warnings: [] };
+			}
+			const { failureType, approach } = deriveFailureContext(name, args, result);
+			if (guardThresholds) {
+				getLoopDetector().recordFailure(name, args, result);
+			}
+			// Record first, then look up warnings — getWarnings' repeatCount > 1
+			// check needs this failure's own occurrence already counted, or a
+			// second-time failure would never cross the threshold.
+			const { similarEntries } = getRecoveryMemory().recordFailure(
+				failureType,
+				approach,
+				result.slice(0, 300),
+			);
+			const warnings = getRecoveryMemory().getWarnings(approach, failureType);
+			if (similarEntries.length > 0 && similarEntries[0].repeatCount >= 3) {
+				emitInterventionLegacy(
+					"loop", "repeated_failure", "recovery_memory",
+					`Repeated failure: this approach has failed ${similarEntries[0].repeatCount} times. Last: ${similarEntries[0].outcome.slice(0, 150)}`,
+					0, "change_strategy",
+				);
+			}
+			return { warnings };
 		},
 
 		recordSuccess(name: string, args: string) {
@@ -1002,10 +821,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 
 		recordTurn(assistantContent: string, toolCalls: Array<{ name: string; args: string; result: string }>) {
 			const detected = getLoopDetector().recordAndDetect(assistantContent, toolCalls);
-
-			// SOTA: Track for predictive detection
-			lastIteration++;
-			toolCallVelocityHistory.push({ count: toolCalls.length, iteration: lastIteration });
+			turnCounter++;
 
 			if (graduatedIntervention) {
 				const decision = evaluate();
@@ -1015,7 +831,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 						"multi_signal_fusion",
 						"guard_engine",
 						decision.message ?? "",
-						lastIteration,
+						turnCounter,
 						decision.action,
 						decision.severity,
 					);
@@ -1035,15 +851,6 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 
 			const diagnostic = detector.recordTurn(content, toolCallCount, iteration, thinkingTokens);
 
-			// SOTA: Track thinking length for predictive detection
-			if (thinkingLoopDetectionEnabled) {
-				thinkingTurnHistory.push({
-					length: content?.length ?? 0,
-					iteration,
-				});
-			}
-
-			// SOTA: Emit via graduated intervention
 			if (diagnostic && graduatedIntervention) {
 				const decision = evaluate();
 				if (decision.shouldIntervene) {
@@ -1078,19 +885,13 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 		recordProgress(calls, results, iteration, currentPhase) {
 			const signal = getProgressSignal().record(calls, results, iteration, currentPhase);
 
-			// SOTA: Track for predictive detection and adaptive thresholds
-			lastIteration = Math.max(lastIteration, iteration);
-			progressHistory.push(signal.score);
-			lastProgressScore = signal.score;
-
-			// Keep bounded history
-			if (progressHistory.length > 100) progressHistory = progressHistory.slice(-100);
-
 			if (signal.shouldNudge && signal.nudgeMessage) {
-				const severity = signal.score < 15 ? "restrict" : "nudge";
+				// progress_signal is heuristic-only (see RELIABLE_ESCALATION_DETECTORS)
+				// — always emitted as a "nudge", never a higher severity, even when
+				// the raw score is very low.
 				emitIntervention(
 					"progress", "low_progress", "progress_signal",
-					signal.nudgeMessage, iteration, "nudge", severity,
+					signal.nudgeMessage, iteration, "nudge", "nudge",
 				);
 			}
 
@@ -1146,6 +947,18 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 			return getHypothesisTracker().buildHypothesisPrompt(stuckReasons);
 		},
 
+		parseHypothesesFromText(text: string) {
+			return getHypothesisTracker().parseFromText(text).length;
+		},
+
+		checkHypothesesAgainstEvidence(evidence) {
+			return getHypothesisTracker().checkAgainstEvidence(evidence);
+		},
+
+		buildDecompositionPrompt(objective) {
+			return getGoalDecomposer().buildDecompositionPrompt(objective);
+		},
+
 		parseGoalBreakdown(text, objective) {
 			return getGoalDecomposer().parseFromText(text, objective);
 		},
@@ -1164,12 +977,8 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 			return getGoalDecomposer().getStatusSummary();
 		},
 
-		// ── SOTA API ─────────────────────────────────────────────────────
 		evaluate,
 		getCompositeRisk,
-		getMetaAssessment,
-		getPredictiveWarnings,
-		getAdaptiveThresholds,
 
 		// Lifecycle
 		reset() {
@@ -1180,11 +989,7 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 			getRecoveryMemory().clear();
 			getHypothesisTracker().reset();
 			getGoalDecomposer().reset();
-			lastIteration = 0;
-			lastProgressScore = 100;
-			progressHistory = [];
-			thinkingTurnHistory = [];
-			toolCallVelocityHistory = [];
+			turnCounter = 0;
 		},
 
 		getStats() {
@@ -1217,22 +1022,15 @@ export function createGuardEngine(config: GuardEngineConfig = {}): GuardEngine {
 				stats.goalTotal = gb.totalCount;
 			}
 
-			// SOTA stats
 			const signals = collectSignals();
-			stats.sota = {
+			stats.guardEngine = {
 				fusionEnabled,
 				graduatedIntervention,
-				adaptiveThresholds,
-				temporalDecayEnabled,
-				metaCognitionEnabled,
-				predictiveEnabled,
 				compositeScore: computeCompositeScore(signals),
 				riskLevel: computeCompositeScore(signals) < 30 ? "green" :
 					computeCompositeScore(signals) < 55 ? "yellow" :
 						computeCompositeScore(signals) < 75 ? "orange" : "red",
 				signalCount: signals.length,
-				progressHistoryLength: progressHistory.length,
-				adaptiveThresholdsState: getAdaptiveThresholds(),
 			};
 			return stats;
 		},

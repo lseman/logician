@@ -58,7 +58,7 @@ function globToRegExp(glob: string): RegExp {
 		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
 		.replace(/\*/g, ".*")
 		.replace(/\?/g, ".");
-	return new RegExp(`^${escaped}`, "s");
+	return new RegExp(`^${escaped}$`, "s");
 }
 
 function primaryArgStrings(args: Record<string, unknown>): string[] {
@@ -110,10 +110,16 @@ export class PermissionManager {
 		this.mode = mode;
 	}
 
-	/** Persist an interactive "always allow" for the rest of the session. */
-	addSessionAllow(toolName: string): void {
-		const rule = parseRule(toolName);
-		if (rule) this.sessionAllow.push(rule);
+	/** Persist an interactive "always allow" for this exact call shape. */
+	addSessionAllow(
+		toolName: string,
+		args: Record<string, unknown>,
+	): string | undefined {
+		const raw = `${toolName}(${primaryArgString(args)})`;
+		const rule = parseRule(raw);
+		if (!rule) return undefined;
+		this.sessionAllow.push(rule);
+		return raw;
 	}
 
 	/** Replace ephemeral approvals when switching or restoring a session. */
@@ -161,12 +167,12 @@ export class PermissionManager {
 				return readOnly
 					? { decision: "allow", source: "mode" }
 					: {
-							decision: "deny",
-							source: "mode",
-							reason:
-								"Plan mode is active: present a plan instead of executing. " +
-								"Only read-only tools are available.",
-						};
+						decision: "deny",
+						source: "mode",
+						reason:
+							"Plan mode is active: present a plan instead of executing. " +
+							"Only read-only tools are available.",
+					};
 		}
 	}
 

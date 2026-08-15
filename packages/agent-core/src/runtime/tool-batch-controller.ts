@@ -22,6 +22,7 @@ export interface PermissionDecisionRecord {
 	decision: "allow" | "deny";
 	source: "rule" | "mode" | "user" | "fail_closed";
 	scope?: "once" | "session";
+	approvalRule?: string;
 }
 
 export interface ToolBatchControllerOptions {
@@ -43,10 +44,10 @@ export interface ToolBatchControllerOptions {
 		toolName: string;
 		args: Record<string, unknown>;
 		recovery:
-			| "pure"
-			| "idempotent"
-			| "receipt_recoverable"
-			| "at_most_once_unknown";
+		| "pure"
+		| "idempotent"
+		| "receipt_recoverable"
+		| "at_most_once_unknown";
 	}) =>
 		| { operationId: string; idempotencyKey: string }
 		| undefined
@@ -169,15 +170,15 @@ async function evaluatePermission(
 		});
 		return `${PERMISSION_DENIED_PREFIX}: the user denied "${call.name}".`;
 	}
-	if (answer === "always") {
-		permissions.addSessionAllow(call.name);
-	}
+	const approvalRule =
+		answer === "always" ? permissions.addSessionAllow(call.name, args) : undefined;
 	await onDecision?.({
 		toolCallId: call.id,
 		toolName: call.name,
 		decision: "allow",
 		source: "user",
 		scope: answer === "always" ? "session" : "once",
+		...(approvalRule ? { approvalRule } : {}),
 	});
 	await emit({
 		type: "tool_permission_decision",
@@ -220,7 +221,7 @@ export async function executeToolBatch(
 			const text =
 				call.name === "write_file"
 					? `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. ` +
-						"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
+					"The content is too large for a single call. Split it into smaller chunks and use write_file_append repeatedly (same path, in order) instead of retrying write_file with the full content."
 					: `Tool call "${call.name}" was not executed because the assistant response hit the output token limit; its arguments may be truncated. Re-issue the tool call with complete arguments.`;
 			await emit({
 				type: "tool_call_end",

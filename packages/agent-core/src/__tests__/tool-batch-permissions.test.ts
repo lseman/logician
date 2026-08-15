@@ -49,7 +49,7 @@ async function run(
 		emit: e => {
 			events.push(e);
 		},
-		emitExtension: async (_e: ExtensionEvent) => {},
+		emitExtension: async (_e: ExtensionEvent) => { },
 	});
 }
 
@@ -128,8 +128,7 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 	assert.equal(first.messages[0].content, "ran: make build");
 	assert.equal(asked, 1);
 
-	// Second call with the same tool name should now be auto-allowed without
-	// asking again, via the session-allow rule persisted by "always".
+	// The same call should be auto-allowed by the scoped session rule.
 	const second = await run(
 		registry,
 		callFor("make build"),
@@ -138,6 +137,15 @@ void test("ask verdict resolved 'always' persists a session allow for later call
 	);
 	assert.equal(second.messages[0].content, "ran: make build");
 	assert.equal(asked, 1);
+
+	const different = await run(
+		registry,
+		callFor("make clean"),
+		permissions,
+		onPermissionRequest,
+	);
+	assert.equal(different.messages[0].content, "ran: make clean");
+	assert.equal(asked, 2);
 });
 
 void test("acceptAll mode never invokes the permission handler", async () => {
@@ -179,6 +187,7 @@ void test("permission decisions are attributed before execution", async () => {
 			decision: "allow",
 			source: "user",
 			scope: "session",
+			approvalRule: "bash(make build)",
 		},
 	]);
 });

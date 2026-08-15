@@ -158,6 +158,33 @@ export interface AgentConfig {
 	truncation?: TruncationConfig;
 	/** When true, prefix all bash commands with `rtk` for token savings. */
 	rtkProxyEnabled?: boolean;
+	// ── Advanced guard config ──────────────────────────────────────────────
+	/** Whether to enable progress signal tracking (default true). */
+	progressSignalEnabled?: boolean;
+	/** Progress signal: min score before nudging (default 30). */
+	progressSignalMinScore?: number;
+	/** Progress signal: min low-score turns before nudging (default 5). */
+	progressSignalMinLowScoreTurns?: number;
+	/** Whether to enable goal decomposition (default true). */
+	goalDecompositionEnabled?: boolean;
+	/** Goal decomposer: max subgoals (default 10). */
+	goalDecomposerMaxSubgoals?: number;
+	/** Whether to enable recovery memory (default true). */
+	recoveryMemoryEnabled?: boolean;
+	/** Recovery memory: max entries (default 50). */
+	recoveryMemoryMaxEntries?: number;
+	/** Whether to enable hypothesis tracking (default true). */
+	hypothesisTrackingEnabled?: boolean;
+	/** Hypothesis tracker: max hypotheses (default 10). */
+	hypothesisTrackerMaxHypotheses?: number;
+	// ── Guard engine fusion / graduated intervention (opt-in; default on) ──
+	/** Whether to enable multi-signal fusion across detectors (default true). */
+	guardFusionEnabled?: boolean;
+	/** Custom detector weights for fusion (overrides defaults). */
+	guardFusionWeights?: Record<string, number>;
+	/** Whether to use the graduated intervention ladder (default true). Heuristic
+	 *  detectors are capped at "nudge" regardless of this setting. */
+	guardGraduatedIntervention?: boolean;
 }
 
 export interface WebSearchConfig {

@@ -37,6 +37,7 @@ import {
 	restoreFileFrame,
 } from "./file-checkpoints.ts";
 import { LoopDetector } from "./guards/loop-detector.ts";
+import { createGuardEngine, type GuardEngine } from "./guards/guard-engine.ts";
 import { OutputGuard } from "./guards/output-guard.ts";
 import { ThinkingLoopDetector } from "./guards/thinking-loop-detector.ts";
 import {
@@ -180,8 +181,11 @@ export class AgentHarness {
 	private branchSeq = 0;
 	private checkpoints: Message[][] = [];
 	private msgManager: MessageDeliveryManager;
+	private guardEngine: GuardEngine;
 	private loopDetector: LoopDetector;
 	private thinkingLoopDetector: ThinkingLoopDetector | null;
+	/** @deprecated Use guardEngine.outputGuard instead. */
+	private _outputGuardLegacy: OutputGuard | null = null;
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
 	private onSettled?: (nextTurnCount: number) => void;
@@ -232,7 +236,7 @@ export class AgentHarness {
 		this._streamOptions = {
 			...options.config.streamOptions,
 			...(options.config.streamOptions?.timeoutMs === undefined &&
-			options.config.turnTimeoutMs !== undefined
+				options.config.turnTimeoutMs !== undefined
 				? { timeoutMs: options.config.turnTimeoutMs }
 				: {}),
 		};
@@ -259,16 +263,71 @@ export class AgentHarness {
 		this.thinkingLoopDetector =
 			options.config.thinkingLoopDetectionEnabled !== false
 				? new ThinkingLoopDetector({
-						minThinkingLength: options.config.thinkingLoopMinThinkingLength,
-						thinkingOnlyThreshold:
-							options.config.thinkingLoopThinkingOnlyThreshold,
-						escalationRatio: options.config.thinkingLoopEscalationRatio,
-						maxTotalThinkingTokens:
-							options.config.thinkingLoopMaxTotalThinkingTokens,
-						metaReasoningThreshold:
-							options.config.thinkingLoopMetaReasoningThreshold,
-					})
+					minThinkingLength: options.config.thinkingLoopMinThinkingLength,
+					thinkingOnlyThreshold:
+						options.config.thinkingLoopThinkingOnlyThreshold,
+					escalationRatio: options.config.thinkingLoopEscalationRatio,
+					maxTotalThinkingTokens:
+						options.config.thinkingLoopMaxTotalThinkingTokens,
+					metaReasoningThreshold:
+						options.config.thinkingLoopMetaReasoningThreshold,
+				})
 				: null;
+		// Create the central GuardEngine that unifies all guard rails.
+		this.guardEngine = createGuardEngine({
+			// Loop detection
+			loopMaxHistory: options.config.loopDetectionWindow ?? 10,
+			loopExactRepeatWindow: options.config.loopDetectionWindow ?? 3,
+			loopDegenerateWindow: options.config.degenerateLoopThreshold ?? 4,
+			loopStagnationWindow: options.config.stagnationThreshold ?? 5,
+			loopDuplicateThreshold: options.config.duplicateToolThreshold ?? 3,
+			loopFailureThreshold: options.config.toolFailureLoopThreshold ?? 3,
+			// Tool guards
+			guardsEnabled: options.config.guardsEnabled,
+			duplicateGuardEnabled: options.config.duplicateGuardEnabled,
+			failureGuardEnabled: options.config.failureGuardEnabled,
+			// Thinking loop detection
+			thinkingLoopDetectionEnabled: options.config.thinkingLoopDetectionEnabled,
+			thinkingLoopMinThinkingLength: options.config.thinkingLoopMinThinkingLength,
+			thinkingLoopThinkingOnlyThreshold: options.config.thinkingLoopThinkingOnlyThreshold,
+			thinkingLoopEscalationRatio: options.config.thinkingLoopEscalationRatio,
+			thinkingLoopMaxTotalThinkingTokens: options.config.thinkingLoopMaxTotalThinkingTokens,
+			thinkingLoopMetaReasoningThreshold: options.config.thinkingLoopMetaReasoningThreshold,
+			// Output guard
+			outputMaxRetries: options.config.streamOptions?.maxRetries ?? options.config.maxRetries ?? 3,
+			outputRetryBaseDelayMs: options.config.retryBaseDelayMs ?? 500,
+			outputMaxRetryDelayMs: options.config.streamOptions?.maxRetryDelayMs ?? 15_000,
+			outputAutoCompactOnContextFull: options.config.autoRetryEnabled !== false,
+			outputMaxEmptyResponses: 3,
+			outputMaxNonCommittalResponses: 3,
+			outputBudgetThreshold: 0.95,
+			outputMaxConsecutiveCompactions: 3,
+			// Progress signal
+			progressSignalEnabled: options.config.progressSignalEnabled,
+			progressSignalMinScore: options.config.progressSignalMinScore ?? 30,
+			progressSignalMinLowScoreTurns: options.config.progressSignalMinLowScoreTurns ?? 5,
+			// Goal decomposition
+			goalDecompositionEnabled: options.config.goalDecompositionEnabled,
+			goalDecomposerMaxSubgoals: options.config.goalDecomposerMaxSubgoals ?? 10,
+			// Recovery memory
+			recoveryMemoryEnabled: options.config.recoveryMemoryEnabled,
+			recoveryMemoryMaxEntries: options.config.recoveryMemoryMaxEntries ?? 50,
+			// Hypothesis tracking
+			hypothesisTrackingEnabled: options.config.hypothesisTrackingEnabled,
+			hypothesisTrackerMaxHypotheses: options.config.hypothesisTrackerMaxHypotheses ?? 10,
+			// Fusion / graduated intervention
+			fusionEnabled: options.config.guardFusionEnabled,
+			fusionWeights: options.config.guardFusionWeights,
+			graduatedIntervention: options.config.guardGraduatedIntervention,
+			// Events
+			onEvent: event => {
+				this.emitToSubscribers(event);
+			},
+			onCompact: async () => {
+				const result = await this.compact();
+				return result ?? null;
+			},
+		});
 		this.idleTools = this.createToolRegistry(this.config.tools ?? []);
 		this.msgManager = new MessageDeliveryManager({
 			steeringMode: (options.config.steeringQueueMode ??
@@ -611,20 +670,7 @@ export class AgentHarness {
 			}
 		}
 		this.recoverInterruptedOperations();
-		// Initialize output guard if not already done
-		if (!this.outputGuard && this.config.contextWindowTokens) {
-			this.setOutputGuardConfig({
-				maxRetries:
-					this.config.autoRetryEnabled === false
-						? 0
-						: (this.config.streamOptions?.maxRetries ??
-							this.config.maxRetries ??
-							3),
-				retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
-				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
-				autoCompactOnContextFull: this.config.autoRetryEnabled !== false,
-			});
-		}
+		// Output guard is pre-configured via GuardEngine in the constructor.
 		this._runPromise = new Promise<void>(resolve => {
 			this._runResolve = resolve;
 		});
@@ -682,7 +728,9 @@ export class AgentHarness {
 						backend: this.backend,
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
-						outputGuard: this.outputGuard,
+						// Use GuardEngine's internal OutputGuard.
+						outputGuard: this.guardEngine.outputGuard,
+						guardEngine: this.guardEngine,
 						extensionBus: this._extensionBus,
 						refreshNextTurnConfig: () =>
 							this.withExtensionRuntime(this.snapshotConfig()),
@@ -749,19 +797,7 @@ export class AgentHarness {
 			this._runResolve = resolve;
 		});
 
-		if (!this.outputGuard && this.config.contextWindowTokens) {
-			this.setOutputGuardConfig({
-				maxRetries:
-					this.config.autoRetryEnabled === false
-						? 0
-						: (this.config.streamOptions?.maxRetries ??
-							this.config.maxRetries ??
-							3),
-				retryBaseDelayMs: this.config.retryBaseDelayMs ?? 500,
-				maxRetryDelayMs: this.config.streamOptions?.maxRetryDelayMs ?? 15000,
-				autoCompactOnContextFull: this.config.autoRetryEnabled !== false,
-			});
-		}
+		// Output guard is pre-configured via GuardEngine in the constructor.
 
 		return this.runInPhase("turn", "continue", async () => {
 			this.abortController = new AbortController();
@@ -816,7 +852,9 @@ export class AgentHarness {
 						backend: this.backend,
 						signal: snapshot.signal,
 						maxIterations: this.maxIterations,
-						outputGuard: this.outputGuard,
+						// Use GuardEngine's internal OutputGuard.
+						outputGuard: this.guardEngine.outputGuard,
+						guardEngine: this.guardEngine,
 						extensionBus: this._extensionBus,
 						initialTaskState: this.runKernel.snapshot().state.taskState,
 						refreshNextTurnConfig: () =>
@@ -1033,12 +1071,13 @@ export class AgentHarness {
 			config,
 			contextWindowTokens: () => config.contextWindowTokens,
 			toolDefs: () => tools as unknown as Record<string, unknown>[],
+			guardEngine: this.guardEngine,
 			loopDetector: this.loopDetector,
 			eventBus: {
 				// Builtin interventions must use the same subscriber path as loop-runner
 				// events or the application/TUI never sees them. Mirror them to legacy
 				// extension listeners as a secondary projection.
-				emit: (event: { type: string; [key: string]: unknown }) => {
+				emit: (event: { type: string;[key: string]: unknown }) => {
 					this.emitToSubscribers(event as AgentEvent);
 					void this._extensionBus?.emitLegacy(event);
 				},
@@ -1128,26 +1167,26 @@ export class AgentHarness {
 				const kernelEvent =
 					event.type === "subagent_start"
 						? {
-								type: "subagent_started" as const,
-								agentId: event.agentId,
-								agent: event.agent,
-								task: event.task,
-								taskIndex: event.taskIndex,
-							}
+							type: "subagent_started" as const,
+							agentId: event.agentId,
+							agent: event.agent,
+							task: event.task,
+							taskIndex: event.taskIndex,
+						}
 						: event.type === "subagent_event"
 							? {
-									type: "subagent_progressed" as const,
-									agentId: event.agentId,
-									eventType: event.event.type,
-								}
+								type: "subagent_progressed" as const,
+								agentId: event.agentId,
+								eventType: event.event.type,
+							}
 							: {
-									type: "subagent_finished" as const,
-									agentId: event.agentId,
-									agent: event.agent,
-									result: event.result,
-									isError: event.isError ?? false,
-									turns: event.turns,
-								};
+								type: "subagent_finished" as const,
+								agentId: event.agentId,
+								agent: event.agent,
+								result: event.result,
+								isError: event.isError ?? false,
+								turns: event.turns,
+							};
 				this.runKernel.append(kernelEvent, {
 					taskId: state.taskId,
 					runId: state.runId,
@@ -1218,37 +1257,21 @@ export class AgentHarness {
 	}
 
 	// ── Output guard setup ───────────────────────────────────────────────
+	// GuardEngine owns the OutputGuard; this method is a no-op for
+	// backward compatibility. Use guardEngine.outputGuard directly.
 
-	setOutputGuardConfig(config: {
+	setOutputGuardConfig(_config: {
 		maxRetries?: number;
 		retryBaseDelayMs?: number;
 		maxRetryDelayMs?: number;
 		autoCompactOnContextFull?: boolean;
 		maxEmptyResponses?: number;
 	}): void {
-		this.outputGuard = new OutputGuard({
-			...config,
-			loopDetector: this.loopDetector,
-			onCompact: async () => {
-				const result = await this.compact();
-				return result ?? null;
-			},
-			onEvent: event => {
-				if (
-					event.type === "agent_retry_start" ||
-					event.type === "agent_retry_end" ||
-					event.type === "error" ||
-					event.type === "context_update"
-				) {
-					return;
-				}
-				this.emitToSubscribers(event);
-			},
-		});
+		// No-op — GuardEngine is configured in the constructor.
 	}
 
 	getOutputGuard(): OutputGuard | null {
-		return this.outputGuard;
+		return this.guardEngine.outputGuard;
 	}
 
 	getLoopDetector(): LoopDetector {
@@ -1337,7 +1360,7 @@ export class AgentHarness {
 		if (options.thinkingLoopDetectionEnabled !== undefined) {
 			this.setThinkingLoopDetectorEnabled(options.thinkingLoopDetectionEnabled);
 		}
-		if (options.autoRetryEnabled !== undefined) this.outputGuard = null;
+		// autoRetryEnabled changes are handled by GuardEngine.
 	}
 
 	setTools(tools: Tool[]): void {
@@ -1500,7 +1523,8 @@ export class AgentHarness {
 						decision.source === "user" &&
 						decision.scope === "session",
 				)
-				.map(decision => decision.toolName),
+				.map(decision => decision.approvalRule)
+				.filter((rule): rule is string => typeof rule === "string"),
 		);
 	}
 
@@ -1740,25 +1764,25 @@ export class AgentHarness {
 	}
 
 	clearHistory(): void {
-		this.emitSessionEnd("reset").catch(() => {});
+		this.emitSessionEnd("reset").catch(() => { });
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
 		this.setActiveHistory([]);
-		this.emitSessionStart("clear").catch(() => {});
+		this.emitSessionStart("clear").catch(() => { });
 		this._hasStartedSession = false;
 	}
 
 	setHistory(messages: Message[]): void {
 		this.assertIdle("setHistory");
-		this.emitSessionEnd("switch").catch(() => {});
+		this.emitSessionEnd("switch").catch(() => { });
 		this.branches = [];
 		this.checkpoints = [];
 		clearFileFrames();
 		this.setActiveHistory(
 			messages.filter((m): m is Message => m != null && m.role !== "system"),
 		);
-		this.emitSessionStart("resume").catch(() => {});
+		this.emitSessionStart("resume").catch(() => { });
 		this._hasStartedSession = false;
 	}
 

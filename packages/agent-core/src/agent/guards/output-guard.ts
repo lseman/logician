@@ -258,16 +258,11 @@ export class OutputGuard {
 		}
 
 		// Retryable errors (rate_limit, transient): backoff retry
+		// Note: agent_retry_start is emitted by the loop runner after handleError returns,
+		// to avoid duplicate events. The OutputGuard only emits agent_retry_end for exhausted retries.
 		if (backendErr?.retryable && this.retryCount < this.config.maxRetries) {
 			this.retryCount++;
 			const delay = this.computeRetryDelay(backendErr);
-			this.emitEvent({
-				type: "agent_retry_start",
-				attempt: this.retryCount,
-				maxRetries: this.config.maxRetries,
-				delayMs: delay,
-				error: error instanceof Error ? error.message : String(error),
-			});
 			return {
 				action: "retry",
 				retryDelayMs: delay,

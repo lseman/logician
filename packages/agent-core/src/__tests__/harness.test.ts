@@ -770,6 +770,7 @@ void test("kernel audits and restores session-scoped permission decisions", asyn
 		decision: "allow",
 		source: "user",
 		scope: "session",
+		approvalRule: "mutate({})",
 		sequence: undefined,
 	});
 
