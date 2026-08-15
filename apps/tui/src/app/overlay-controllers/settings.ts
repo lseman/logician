@@ -518,19 +518,13 @@ export function handleSettingsSelectorAction(
 		case "memory": {
 			const on = value === "true";
 			const keys = {
-				"duplicate-call guard": [
-					"duplicateGuardEnabled",
-					"duplicateGuardEnabled",
-				],
-				"failure-loop guard": ["failureGuardEnabled", "failureGuardEnabled"],
-				"thinking-loop guard": [
-					"thinkingLoopDetectionEnabled",
-					"thinkingLoopDetectionEnabled",
-				],
+				"duplicate-call guard": ["duplicateGuardEnabled", "guardrails"],
+				"failure-loop guard": ["failureGuardEnabled", "guardrails"],
+				"thinking-loop guard": ["thinkingLoopDetectionEnabled", "guardrails"],
 				continuation: ["continuationEnabled", "continuationEnabled"],
 				"automatic retries": ["autoRetryEnabled", "autoRetryEnabled"],
 				reflection: ["reflectionEnabled", "reflectionConfig"],
-				"budget early-stop": ["budgetStopEnabled", "budgetStopEnabled"],
+				"budget early-stop": ["budgetStopEnabled", "guardrails"],
 				memory: ["memoryEnabled", "memory"],
 			} as const;
 			const [runtimeKey, configKey] =
@@ -538,6 +532,8 @@ export function handleSettingsSelectorAction(
 			ctx.bridge.setRuntimeToggle(runtimeKey, on);
 			if (configKey === "reflectionConfig")
 				saveConfigNestedField("reflectionConfig", "enabled", on);
+			else if (configKey === "guardrails")
+				saveConfigNestedField("guardrails", runtimeKey, on);
 			else saveConfigField(configKey, on);
 			ctx.notify(`${settingName}: ${on ? "on" : "off"}`, "success");
 			break;

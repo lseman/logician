@@ -31,6 +31,7 @@ import {
 	resolveEffectiveAcceptance,
 	shouldRunAcceptanceFinalization,
 } from "./guards/acceptance-contract.ts";
+import type { GuardDecision, GuardEngine } from "./guards/guard-engine.ts";
 import type { OutputGuard } from "./guards/output-guard.ts";
 import {
 	awaitsUserInput,
@@ -39,6 +40,7 @@ import {
 } from "./guards/response-patterns.ts";
 import {
 	type HarnessIntervention,
+	type HarnessInterventionAction,
 	HarnessInterventionController,
 	type InterventionInput,
 } from "./intervention-controller.ts";
@@ -107,6 +109,19 @@ function isSteeringInterrupt(signal: AbortSignal | undefined): boolean {
 	);
 }
 
+// Cheap heuristic for "this objective probably needs a subgoal breakdown" —
+// long objectives, or ones with multiple imperative clauses, benefit most
+// from decomposition; short single-action asks ("fix the typo") do not.
+const MULTI_STEP_WORD_THRESHOLD = 25;
+const MULTI_STEP_CONJUNCTION_PATTERN = /\b(?:and then|,\s*then|;\s*|\band\b.*\band\b)/i;
+
+function looksMultiStep(objective: string): boolean {
+	if (!objective) return false;
+	const wordCount = objective.trim().split(/\s+/).filter(Boolean).length;
+	if (wordCount >= MULTI_STEP_WORD_THRESHOLD) return true;
+	return MULTI_STEP_CONJUNCTION_PATTERN.test(objective);
+}
+
 /** Emit a typed extension event if the bus is available. */
 async function emitTyped(
 	emitter: ExtensionEventBus | undefined,
@@ -134,6 +149,11 @@ export interface RunAgentLoopConfig extends AgentConfig, LoopCallbacks {
 	// Output guard config (optional). When provided, the loop uses OutputGuard
 	// to handle context_full, retryable errors, and empty responses.
 	outputGuard?: OutputGuard | null;
+	/** Central guard engine (optional). When provided, the loop uses it for
+	 *  composite turn-level loop detection, progress tracking, and graduated
+	 *  intervention (nudge/restrict/pause/abort) instead of the narrower
+	 *  outputGuard-only loop check. */
+	guardEngine?: GuardEngine | null;
 	/** Typed extension event bus for structured extension subscriptions. */
 	extensionBus?: ExtensionEventBus;
 	/** Resolve the acceptance config at call time (allows harness to update it). */
@@ -241,7 +261,16 @@ async function runAgentLoopInTaskScope(
 	let registry = createRegistry(context.tools ?? config.tools ?? []);
 
 	const outputGuard = config.outputGuard;
+	const guardEngine = config.guardEngine;
 	let iteration = 0;
+	// Armed when a restrict-severity guard decision injects a hypothesis
+	// prompt; consumed after the next provider response to parse the model's
+	// reply into stored hypotheses.
+	let awaitingHypothesisParse = false;
+	// Armed when the initial goal-decomposition prompt is injected at agent
+	// start; consumed after the next provider response to parse the model's
+	// reply into a subgoal breakdown.
+	let awaitingGoalBreakdownParse = false;
 	let consecutiveRunnerNudges = 0;
 	let lastRunnerNudgeIteration = -1;
 	let lastToolWorkIteration = -1;
@@ -439,6 +468,26 @@ async function runAgentLoopInTaskScope(
 	}
 	if (beforeAgentStartResult?.systemPrompt) {
 		context.systemPrompt = beforeAgentStartResult.systemPrompt;
+	}
+
+	// ── Goal decomposition: for objectives that look multi-step, ask the
+	// model up front to break the objective into subgoals, then parse its
+	// very next reply into a tracked breakdown (see awaitingGoalBreakdownParse
+	// consumption after afterProviderResponse below). ──────────────────────
+	if (
+		executionPolicy.embeddedPoliciesEnabled &&
+		guardEngine &&
+		config.goalDecompositionEnabled !== false &&
+		looksMultiStep(taskState.snapshot().objective)
+	) {
+		const decompositionPrompt = guardEngine.buildDecompositionPrompt(
+			taskState.snapshot().objective,
+		);
+		const decompositionMessage = createUserMessage(decompositionPrompt);
+		messages.push(decompositionMessage);
+		newMessages.push(decompositionMessage);
+		await emitMessagePair(emit, promptTurnId, decompositionMessage);
+		awaitingGoalBreakdownParse = true;
 	}
 
 	// ── Inject acceptance contract into system prompt ──────────────────
@@ -747,6 +796,8 @@ async function runAgentLoopInTaskScope(
 					}
 
 					activeRetryAttempt = guardResult.attempt ?? activeRetryAttempt + 1;
+					// Emit retry start event (OutputGuard handles error classification,
+					// loop runner emits the event to avoid duplicates).
 					await emit({
 						type: "agent_retry_start",
 						attempt: activeRetryAttempt,
@@ -902,6 +953,19 @@ async function runAgentLoopInTaskScope(
 				});
 			}
 
+			// Consume a pending hypothesis-generation prompt: whatever the model
+			// just said is parsed for hypotheses, win or lose — cleared
+			// unconditionally so a run can never get stuck waiting for a parse
+			// that never comes (e.g. the model ignored the prompt).
+			if (awaitingHypothesisParse && guardEngine) {
+				guardEngine.parseHypothesesFromText(assistantContent || "");
+				awaitingHypothesisParse = false;
+			}
+			if (awaitingGoalBreakdownParse && guardEngine) {
+				guardEngine.parseGoalBreakdown(assistantContent || "", taskState.snapshot().objective);
+				awaitingGoalBreakdownParse = false;
+			}
+
 			// Output guard: check for empty/degenerate responses
 			if (outputGuard) {
 				const guardCheck = outputGuard.checkResponse(
@@ -1022,16 +1086,18 @@ async function runAgentLoopInTaskScope(
 			for (const toolCallId of batch.executedToolCallIds)
 				await config.onToolCommit?.(toolCallId);
 
-			// Turn-level loop detection: exact-repeat / degenerate / stagnation
-			// across turns (e.g. re-reading the same file over and over without
-			// progress). Runs after every turn regardless of the duplicate-call
+			// Turn-level composite guard check: loop detection plus progress,
+			// recovery-memory, and hypothesis signals fused into one graduated
+			// decision. Runs after every turn regardless of the duplicate-call
 			// guard, which only catches identical calls within a single turn.
-			// A detection is a nudge, not a hard stop — false positives here
-			// must not kill an otherwise-healthy run; the model gets a chance
-			// to course-correct on its own.
+			// guardEngine.recordTurn subsumes the narrower outputGuard-only loop
+			// check below — when both are wired (the harness always wires both),
+			// guardEngine is authoritative and outputGuard.checkLoopDetection is
+			// skipped entirely to avoid double-firing on the same underlying
+			// LoopDetector state.
 			if (
 				executionPolicy.embeddedPoliciesEnabled &&
-				outputGuard &&
+				(guardEngine || outputGuard) &&
 				toolCalls.length > 0
 			) {
 				const turnToolCalls = toolCalls.map((call, index) => ({
@@ -1039,31 +1105,85 @@ async function runAgentLoopInTaskScope(
 					args: call.arguments,
 					result: String(toolResults[index]?.content ?? ""),
 				}));
-				const diagnostic = outputGuard.checkLoopDetection(
-					assistantContent || "",
-					turnToolCalls,
+
+				const reshapedCalls = toolCalls.map(call => ({
+					name: call.name,
+					args: call.arguments,
+				}));
+				const reshapedResults = toolResults.map(result => ({
+					content: String(result.content ?? ""),
+				}));
+				const progress = guardEngine?.recordProgress(
+					reshapedCalls,
+					reshapedResults,
+					iteration,
+					taskState.snapshot().phase,
 				);
-				if (diagnostic) {
-					// Turn the diagnostic into one durable intervention and inject it
-					// as a recovery nudge. The
-					// role:"user" message_start/message_end pair below is never
-					// rendered (Transcript.handleMessageUpdate ignores non-assistant
-					// roles), so the intervention is what makes this visible.
-					const nudgeContent = `[continuation-nudge:loop-detected] ${diagnostic} Stop and try a different approach, or explain why you're stuck.`;
+				if (progress && guardEngine) {
+					const activeHypotheses = guardEngine.getActiveHypotheses();
+					if (activeHypotheses.length > 0) {
+						taskState.setHypotheses(activeHypotheses.map(h => h.statement));
+					}
+				}
+
+				let decision: GuardDecision | null = null;
+				if (guardEngine) {
+					guardEngine.recordTurn(assistantContent || "", turnToolCalls);
+					decision = guardEngine.evaluate();
+				}
+				const diagnostic = decision
+					? null
+					: (outputGuard?.checkLoopDetection(assistantContent || "", turnToolCalls) ?? null);
+
+				if ((decision && decision.severity !== "info") || diagnostic) {
+					// Turn the diagnostic/decision into one durable intervention and
+					// inject it as a recovery nudge. The role:"user"
+					// message_start/message_end pair below is never rendered
+					// (Transcript.handleMessageUpdate ignores non-assistant roles),
+					// so the intervention is what makes this visible.
+					const isRestrict = decision?.severity === "restrict";
+					const progressDominant = decision?.evidence.some(
+						s => s.detector === "progress_signal",
+					);
+					const nudgeContent = isRestrict
+						? progressDominant
+							? guardEngine!.buildHypothesisPrompt(progress?.stuckReasons ?? [])
+							: `[continuation-nudge:reflect] ${decision!.message} Stop, explain your current understanding of the problem, and pick a materially different next step.`
+						: `[continuation-nudge:loop-detected] ${decision?.message ?? diagnostic} Stop and try a different approach, or explain why you're stuck.`;
 					const nudge = createUserMessage(nudgeContent);
 					messages.push(nudge);
 					newMessages.push(nudge);
 					await emitMessagePair(emit, turnId, nudge);
+					if (isRestrict) awaitingHypothesisParse = true;
+
+					const mappedAction: HarnessInterventionAction | undefined =
+						decision?.severity === "pause"
+							? "pause"
+							: decision?.severity === "abort"
+								? "stop"
+								: decision?.severity === "restrict"
+									? "change_strategy"
+									: undefined;
 					const loopIntervention = interventionController.record({
 						kind: "loop",
-						cause: "stagnation",
-						detector: "output_guard",
+						cause: decision ? (decision.evidence[0]?.signal ?? "stagnation") : "stagnation",
+						detector: decision ? "guard_engine" : "output_guard",
 						message: nudgeContent,
 						iteration,
-						signals: ["repeated_turn_pattern"],
+						signals: decision
+							? decision.evidence.map(s => s.signal)
+							: ["repeated_turn_pattern"],
 						nextAction: "Try a materially different tool or approach.",
+						action: mappedAction,
 					});
 					await emit({ type: "harness_intervention", ...loopIntervention });
+					if (decision?.severity === "abort") {
+						return finish({
+							status: "failed",
+							summary: decision.message ?? "Guard engine aborted the run.",
+							source: "runtime",
+						});
+					}
 					if (loopIntervention.action === "pause") {
 						return finish({
 							status: "blocked",

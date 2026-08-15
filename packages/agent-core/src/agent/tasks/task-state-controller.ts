@@ -102,6 +102,9 @@ export function formatTaskStateContext(state: ExplicitTaskState): string {
 	if (blockers.length) lines.push(`blockers: ${blockers.join("; ")}`);
 	if (state.toolFailures > 0)
 		lines.push(`tool_failures: ${state.toolFailures}`);
+	const hypotheses = boundedList(state.hypotheses, 5);
+	if (hypotheses.length)
+		lines.push(`active_hypotheses: ${hypotheses.join("; ")}`);
 	if (recent.length) {
 		lines.push(
 			"recent_evidence:",
@@ -258,6 +261,13 @@ export class TaskStateController {
 
 	markHandoff(): void {
 		this.state.phase = "handoff";
+	}
+
+	/** Replace the projected hypothesis list — the guard engine's
+	 *  HypothesisTracker is the source of truth; this only mirrors its active
+	 *  statements into the context projection. */
+	setHypotheses(statements: string[]): void {
+		this.state.hypotheses = [...statements];
 	}
 
 	selectAdaptiveMode(): AdaptiveModeDecision {

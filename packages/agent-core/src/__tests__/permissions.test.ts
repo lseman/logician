@@ -74,10 +74,14 @@ void test("session allow persists after an 'always' decision", () => {
 		pm.evaluate(call("write_file", { path: "a" }), { path: "a" }).decision,
 		"ask",
 	);
-	pm.addSessionAllow("write_file");
+	pm.addSessionAllow("write_file", { path: "a" });
 	assert.equal(
 		pm.evaluate(call("write_file", { path: "a" }), { path: "a" }).decision,
 		"allow",
+	);
+	assert.equal(
+		pm.evaluate(call("write_file", { path: "b" }), { path: "b" }).decision,
+		"ask",
 	);
 });
 

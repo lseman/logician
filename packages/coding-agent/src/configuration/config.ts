@@ -57,6 +57,7 @@ const KNOWN_KEYS = new Set([
 	"toolFailureLoopThreshold",
 	"budgetStopEnabled",
 	"thinkingLoopDetectionEnabled",
+	"guardrails",
 	"continuationEnabled",
 	"reflectionConfig",
 	"postEditDiagnostics",
@@ -90,6 +91,15 @@ const COMPACTION_KEYS = new Set([
 	"enabled",
 	"reserveTokens",
 	"keepRecentTokens",
+]);
+const GUARDRAILS_KEYS = new Set([
+	"guardsEnabled",
+	"duplicateGuardEnabled",
+	"duplicateToolThreshold",
+	"failureGuardEnabled",
+	"toolFailureLoopThreshold",
+	"thinkingLoopDetectionEnabled",
+	"budgetStopEnabled",
 ]);
 const TRUNCATION_KEYS = new Set([
 	"toolResultMaxChars",
@@ -183,10 +193,11 @@ export function validateConfig(
 		}
 	}
 
-	// models: array of model objects for cycling (Ctrl+L model selector)
+	// models: array of model objects for cycling (Ctrl+L model selector).
+	// Also accepts an object with named keys: { "default": { baseUrl, model }, ... }
 	if (obj.models !== undefined) {
+		const parsed: AgentModelConfig[] = [];
 		if (Array.isArray(obj.models)) {
-			const parsed: AgentModelConfig[] = [];
 			for (const item of obj.models) {
 				if (typeof item === "string" && item.trim()) {
 					// Legacy string entry: convert to object
@@ -214,11 +225,44 @@ export function validateConfig(
 					);
 				}
 			}
-			if (parsed.length > 0) {
-				cfg.models = parsed as LogicianTuiConfig["models"];
+		} else if (
+			typeof obj.models === "object" &&
+			obj.models !== null &&
+			!Array.isArray(obj.models)
+		) {
+			// Named-object format: { "myModel": { baseUrl, model }, ... }
+			const modelsObj = obj.models as Record<string, unknown>;
+			for (const [name, value] of Object.entries(modelsObj)) {
+				if (
+					typeof value === "object" &&
+					value !== null &&
+					"model" in value &&
+					typeof (value as Record<string, unknown>).model === "string"
+				) {
+					const m = value as Record<string, unknown>;
+					const modelName = (m.model as string).trim();
+					if (modelName) {
+						parsed.push({
+							name: name.trim(),
+							model: modelName,
+							url:
+								typeof m.baseUrl === "string"
+									? m.baseUrl.trim()
+									: undefined,
+						});
+					}
+				} else {
+					warn(
+						warnings,
+						`"models" entry for "${name}" invalid, got: ${JSON.stringify(value)}.`,
+					);
+				}
 			}
 		} else {
-			warn(warnings, '"models" must be an array.');
+			warn(warnings, '"models" must be an array or object.');
+		}
+		if (parsed.length > 0) {
+			cfg.models = parsed as LogicianTuiConfig["models"];
 		}
 	}
 	cfg.theme = configString(obj.theme);
@@ -347,12 +391,32 @@ export function validateConfig(
 			);
 		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
 	}
-	cfg.guardsEnabled = configBool(obj.guardsEnabled);
-	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
-	cfg.failureGuardEnabled = configBool(obj.failureGuardEnabled);
-	cfg.budgetStopEnabled = configBool(obj.budgetStopEnabled);
+
+	// guardrails: nested object preferred; flat top-level keys still accepted
+	// for backward compatibility (nested values win when both are present).
+	let guardrailsSource = obj;
+	if (obj.guardrails !== undefined) {
+		if (typeof obj.guardrails !== "object" || obj.guardrails === null) {
+			warn(warnings, '"guardrails" must be an object.');
+		} else {
+			const g = obj.guardrails as Record<string, unknown>;
+			for (const key of Object.keys(g)) {
+				if (!GUARDRAILS_KEYS.has(key)) {
+					warn(warnings, `Unknown guardrails key: "${key}".`);
+				}
+			}
+			guardrailsSource = { ...obj, ...g };
+		}
+	}
+	cfg.guardsEnabled = configBool(guardrailsSource.guardsEnabled);
+	cfg.duplicateGuardEnabled = configBool(
+		guardrailsSource.duplicateGuardEnabled,
+		true,
+	);
+	cfg.failureGuardEnabled = configBool(guardrailsSource.failureGuardEnabled);
+	cfg.budgetStopEnabled = configBool(guardrailsSource.budgetStopEnabled);
 	cfg.thinkingLoopDetectionEnabled = configBool(
-		obj.thinkingLoopDetectionEnabled,
+		guardrailsSource.thinkingLoopDetectionEnabled,
 		true,
 	);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
@@ -448,8 +512,14 @@ export function validateConfig(
 		["toolFailureLoopThreshold", 0, true],
 		["maxParallelAgents", 0, false],
 	] as const) {
-		if (obj[key] === undefined) continue;
-		const value = configNumber(obj[key]);
+		// duplicateToolThreshold / toolFailureLoopThreshold may come from the
+		// nested "guardrails" object (which wins over the flat legacy key).
+		const source =
+			key === "duplicateToolThreshold" || key === "toolFailureLoopThreshold"
+				? guardrailsSource
+				: obj;
+		if (source[key] === undefined) continue;
+		const value = configNumber(source[key]);
 		const valid =
 			value !== undefined && (inclusive ? value >= minimum : value > minimum);
 		if (!valid) {

@@ -82,9 +82,9 @@ describe("ThinkingLoopDetector", () => {
 			metaReasoningThreshold: 2,
 		});
 		const metaText1 =
-			"I need to think about how to approach this problem and figure out the best strategy and plan forward.";
+			"I am not sure about this approach, let me think about it some more before proceeding.";
 		const metaText2 =
-			"Let me think about how to handle this differently and reconsider my approach and what to do next.";
+			"Upon further reflection on this problem, let me reconsider the whole approach here.";
 		assert.strictEqual(detector.recordTurn(metaText1, 0, 1), null);
 		const result = detector.recordTurn(metaText2, 0, 2);
 		assert.ok(result !== null, "should detect meta-reasoning loop");

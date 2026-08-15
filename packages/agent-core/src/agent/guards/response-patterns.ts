@@ -33,6 +33,11 @@ export const NON_COMMITTAL_PATTERNS: ReadonlyArray<RegExp> = [
 	/\blet\s+me\s+(reconsider|rethink|step\s+back\s+and\s+think)\b/i,
 	// "At this point I'm not sure" — giving up without direction
 	/\b(at\s+this\s+point)\s+(i\s+(am|'m)\s+(not\s+sure|unsure|confused)|we\s+(need|should)\s+(to\s+)?(?:think|consider))\b/i,
+	// "I still need to check X" / "I have not finished yet" / "more work to do" —
+	// bare unfinished-work statements with no concrete action taken this turn.
+	// Distinct from the hedging patterns above: no "let me think" clause needed,
+	// this is the plain "work remains" signal the continuation nudge relies on.
+	/\b(i\s+(?:still\s+)?(?:need|have)\s+(?:to|not)\b.*?\b(?:check|verify|finish|complete|fix|test|review|investigate|update|implement)\b|(?:not|isn.?t)\s+(?:yet\s+)?(?:done|finished|complete)\b|more\s+work\s+(?:to\s+do|remains|left))\b/i,
 ];
 
 // ── Completion patterns ─────────────────────────────────────────────────────

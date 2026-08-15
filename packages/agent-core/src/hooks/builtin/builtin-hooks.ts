@@ -2,6 +2,17 @@
 // Constructs the default safeguard hooks (guards, budget stop, proactive
 // compaction) as a single AgentHooks object, and composes them with any
 // user-supplied hooks via the typed HookBus so both run.
+//
+// All guard rail logic is delegated to the central GuardEngine, which owns:
+//   - Tool-call guards (duplicate + failure-loop) via LoopDetector
+//   - Thinking loop detection via ThinkingLoopDetector
+//   - Progress signal tracking
+//   - Recovery memory
+//   - Hypothesis tracking
+//   - Goal decomposition
+//
+// This eliminates the duplicate ThinkingLoopDetector that was previously
+// created in both harness.ts and this file.
 
 import { spawnSync } from "node:child_process";
 import { resolveExecutionPolicy } from "../../agent/execution-policy.ts";
@@ -12,11 +23,11 @@ import {
 	type WorkspaceSnapshot,
 } from "../../agent/file-checkpoints.ts";
 import type { LoopDetector } from "../../agent/guards/loop-detector.ts";
+import type { GuardEngine } from "../../agent/guards/guard-engine.ts";
 import {
 	awaitsUserInput,
 	detectsCircling,
 } from "../../agent/guards/response-patterns.ts";
-import { ThinkingLoopDetector } from "../../agent/guards/thinking-loop-detector.ts";
 import { HarnessInterventionController } from "../../agent/intervention-controller.ts";
 import {
 	COMPACTION_TARGET_FRACTION,
@@ -69,8 +80,10 @@ export interface BuiltinHookDeps {
 	contextWindowTokens: () => number | undefined;
 	// Tool definitions for accurate payload token estimates.
 	toolDefs: () => Record<string, unknown>[];
-	// Loop detector instance for guard integration (merged from GuardEngine).
-	loopDetector: LoopDetector;
+	// Central GuardEngine that owns all guard rails.
+	guardEngine: GuardEngine;
+	// Legacy LoopDetector reference (for backward compatibility).
+	loopDetector?: LoopDetector;
 	// Typed event emitter for structured events (optional).
 	eventBus?: {
 		emit: (event: { type: string; [key: string]: unknown }) => void;
@@ -80,7 +93,7 @@ export interface BuiltinHookDeps {
 // Build the default safeguard hooks. Returns undefined per-event when a
 // safeguard is disabled so composition can skip it cleanly.
 export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
-	const { config, loopDetector } = deps;
+	const { config, guardEngine, loopDetector } = deps;
 	const interventions = new HarnessInterventionController();
 	const emitIntervention = (
 		input: Parameters<HarnessInterventionController["record"]>[0],
@@ -115,6 +128,12 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 						: 0,
 				}
 			: undefined;
+	// Recovery memory is independent of the duplicate/failure tool-call
+	// guards above — it should record and warn on failures whenever it's
+	// enabled, not only when one of those thresholds happens to be armed.
+	const recoveryMemoryOn =
+		executionPolicy.embeddedPoliciesEnabled &&
+		config.recoveryMemoryEnabled !== false;
 	// Budget-based early stop is opt-in: it can cut off a legitimate multi-step
 	// run (e.g. one following a todo list) when per-turn token growth is small.
 	const budgetEnabled =
@@ -134,16 +153,6 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 	const fraction =
 		config.proactiveCompactionFraction ?? DEFAULT_COMPACTION_FRACTION;
 	let lastCompactionTurn = -COMPACTION_COOLDOWN_TURNS;
-
-	const thinkingLoopDetector = thinkingLoopEnabled
-		? new ThinkingLoopDetector({
-				minThinkingLength: config.thinkingLoopMinThinkingLength,
-				thinkingOnlyThreshold: config.thinkingLoopThinkingOnlyThreshold,
-				escalationRatio: config.thinkingLoopEscalationRatio,
-				maxTotalThinkingTokens: config.thinkingLoopMaxTotalThinkingTokens,
-				metaReasoningThreshold: config.thinkingLoopMetaReasoningThreshold,
-			})
-		: null;
 
 	const hooks: AgentHooks = {};
 
@@ -181,10 +190,10 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			}
 		}
 		if (guardThresholds) {
-			const decision = loopDetector.checkToolCall(
-				toolCall.name,
-				JSON.stringify(args),
-			);
+			// GuardEngine is the canonical source; loopDetector is legacy fallback.
+			const decision = loopDetector
+				? loopDetector.checkToolCall(toolCall.name, JSON.stringify(args))
+				: guardEngine.checkToolCall(toolCall.name, JSON.stringify(args));
 			if (decision.block) {
 				const intervention = emitIntervention({
 					kind: "loop",
@@ -216,10 +225,24 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			recordBashMutations(bashSnapshots.get(toolCall.id) ?? null);
 			bashSnapshots.delete(toolCall.id);
 		}
-		if (guardThresholds && isError) {
-			loopDetector.recordFailure(toolCall.name, toolCall.arguments, result);
-		} else if (guardThresholds) {
-			loopDetector.recordSuccess(toolCall.name, toolCall.arguments);
+		// Delegate failure/success recording to GuardEngine. The duplicate/
+		// failure-loop guard's LoopDetector recording stays gated on
+		// guardThresholds (those are the blocking thresholds); recovery-memory
+		// recording/warnings are independent of that and gated on
+		// recoveryMemoryOn instead, so memory works even with both tool-call
+		// guards off.
+		let content: string | undefined;
+		if (isError && (guardThresholds || recoveryMemoryOn)) {
+			const { warnings } = guardEngine.checkAndRecordFailure(
+				toolCall.name,
+				toolCall.arguments,
+				result,
+			);
+			if (warnings.length > 0) {
+				content = `${result}\n\n${warnings.join("\n")}`;
+			}
+		} else if (!isError && guardThresholds) {
+			guardEngine.recordSuccess(toolCall.name, toolCall.arguments);
 			interventions.recordProgress();
 		}
 		if (
@@ -229,7 +252,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		) {
 			return { terminate: true };
 		}
-		return undefined;
+		return content ? { content } : undefined;
 	};
 
 	if (compactionEnabled) {
@@ -287,16 +310,16 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 		};
 	}
 
-	// Thinking loop detection: record each LLM response via afterProviderResponse,
-	// then check for thinking loops on shouldStopAfterTurn.
-	if (thinkingLoopDetector) {
+	// Thinking loop detection: delegate to GuardEngine.
+	// GuardEngine owns the ThinkingLoopDetector, so we just call its API.
+	if (thinkingLoopEnabled) {
 		hooks.afterProviderResponse = ({
 			content,
 			toolCallCount,
 			iteration,
 			usageTokens,
 		}) => {
-			const diagnostic = thinkingLoopDetector.recordTurn(
+			const diagnostic = guardEngine.recordThinkingTurn(
 				content ?? "",
 				toolCallCount,
 				iteration,
@@ -333,7 +356,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 			}
 		};
 
-		// Merge into shouldStopAfterTurn alongside budget check
+		// Merge into shouldStopAfterTurn alongside budget check.
 		const prevShouldStop = hooks.shouldStopAfterTurn;
 		hooks.shouldStopAfterTurn = ({ messages, iteration }) => {
 			const budgetResult = prevShouldStop?.({
@@ -342,7 +365,7 @@ export function buildBuiltinHooks(deps: BuiltinHookDeps): AgentHooks {
 				hadToolCalls: false,
 			});
 			if (budgetResult === true) return true;
-			const diagnostic = thinkingLoopDetector?.getDiagnostic() ?? null;
+			const diagnostic = guardEngine.getThinkingDiagnostic();
 			if (diagnostic) {
 				recordTaskStatus({
 					status: "blocked",

@@ -85,6 +85,27 @@ void test("validateConfig parses legacy string entries and object entries in mod
 	assert.ok(warnings.some(w => w.includes('"models" entry invalid')));
 });
 
+void test("validateConfig parses named-object models format", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig(
+		{
+			models: {
+				default: { baseUrl: "http://127.0.0.1:8080", model: "default-model" },
+				headroom: { baseUrl: "http://127.0.0.1:8787", model: "headroom" },
+				broken: { badKey: "value" },
+			},
+		},
+		warnings,
+	);
+	assert.deepEqual(cfg.models, [
+		{ name: "default", model: "default-model", url: "http://127.0.0.1:8080" },
+		{ name: "headroom", model: "headroom", url: "http://127.0.0.1:8787" },
+	]);
+	assert.ok(
+		warnings.some(w => w.includes('"models" entry for "broken" invalid')),
+	);
+});
+
 void test("validateConfig clamps out-of-range temperature and warns", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig({ temperature: 5 }, warnings);
@@ -228,6 +249,50 @@ void test("validateConfig applies default booleans (continuationEnabled, postEdi
 	assert.equal(cfg.postEditDiagnostics, true);
 	assert.equal(cfg.autoRetryEnabled, true);
 	assert.equal(cfg.guardsEnabled, undefined);
+});
+
+void test("validateConfig parses guard settings from the nested guardrails object", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig(
+		{
+			guardrails: {
+				guardsEnabled: true,
+				duplicateGuardEnabled: false,
+				duplicateToolThreshold: 5,
+				failureGuardEnabled: true,
+				toolFailureLoopThreshold: 7,
+				thinkingLoopDetectionEnabled: false,
+				budgetStopEnabled: true,
+			},
+		},
+		warnings,
+	);
+	assert.equal(cfg.guardsEnabled, true);
+	assert.equal(cfg.duplicateGuardEnabled, false);
+	assert.equal(cfg.duplicateToolThreshold, 5);
+	assert.equal(cfg.failureGuardEnabled, true);
+	assert.equal(cfg.toolFailureLoopThreshold, 7);
+	assert.equal(cfg.thinkingLoopDetectionEnabled, false);
+	assert.equal(cfg.budgetStopEnabled, true);
+	assert.deepEqual(warnings, []);
+});
+
+void test("validateConfig warns on unknown guardrails subkeys", () => {
+	const warnings: string[] = [];
+	validateConfig({ guardrails: { bogus: true } }, warnings);
+	assert.ok(warnings.some(w => w.includes('Unknown guardrails key: "bogus"')));
+});
+
+void test("validateConfig still accepts legacy flat guard keys, nested guardrails wins", () => {
+	const warnings: string[] = [];
+	const cfg = validateConfig(
+		{
+			guardsEnabled: false,
+			guardrails: { guardsEnabled: true },
+		},
+		warnings,
+	);
+	assert.equal(cfg.guardsEnabled, true);
 });
 
 void test("validateConfig enforces bounds for maxRetries/retryBaseDelayMs/turnTimeoutMs/cacheSize/cacheTtlMs", () => {

@@ -41,7 +41,7 @@ interface ToolFingerprint {
 	resultPrefix: string;
 }
 
-export interface GuardDecision {
+export interface LoopGuardDecision {
 	block: boolean;
 	message?: string;
 	/** Which guard tripped — lets callers report/emit without parsing message text. */
@@ -183,7 +183,7 @@ export class LoopDetector {
 	 * Check a tool call before execution. Returns block=true with a message
 	 * the loop records instead of executing the tool.
 	 */
-	checkToolCall(name: string, args: string): GuardDecision {
+	checkToolCall(name: string, args: string): LoopGuardDecision {
 		const sig = callSignature(name, args);
 
 		// Duplicate guard: only count consecutive identical calls.
@@ -257,7 +257,7 @@ export class LoopDetector {
 		}
 	}
 
-	private tripFailure(toolName: string, target: string): GuardDecision {
+	private tripFailure(toolName: string, target: string): LoopGuardDecision {
 		return {
 			block: true,
 			guard: "failure",
