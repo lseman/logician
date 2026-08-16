@@ -229,6 +229,11 @@ export class AgentCoreBridge {
 	private running = false;
 	private sendTail: Promise<void> = Promise.resolve();
 	private pendingAutoContinue = false;
+	// Set when the harness settled because a steering interrupt cancelled the
+	// in-flight turn — the queued nextTurn message is the steering text, not
+	// the model's own follow-up work, so it resumes as a plain continuation,
+	// bypassing requestContinuation's autonomous-run budget/pause policy.
+	private pendingSteeringContinue = false;
 	private skillActivation = new SkillActivationSession();
 	private cwd: string;
 	private toolRouter: ToolRouter;
@@ -946,16 +951,35 @@ export class AgentCoreBridge {
 			this.emit({ type: "turn_end", turnId });
 			// Keep the harness alive to retain history across turns.
 			this.emit({ type: "phase", state: "ready" });
-			if (turnSucceeded && this.pendingAutoContinue) {
-				this.pendingAutoContinue = false;
-				this.scheduleAutoContinuation(turnActivations);
-			}
+			if (turnSucceeded) this.checkPendingContinuation(turnActivations);
 		}
 	}
 
 	private progressFingerprint(): string {
 		// Simplified — task state was removed; rely on text progress.
 		return "";
+	}
+
+	/** After a turn settles, resume with whichever continuation was queued —
+	 *  a steering redirect resumes as a plain turn; the model's own queued
+	 *  follow-up work goes through the autonomous-continuation budget policy. */
+	private checkPendingContinuation(
+		activations: ReturnType<typeof selectSkillsForPrompt>,
+	): void {
+		if (this.pendingSteeringContinue) {
+			this.pendingSteeringContinue = false;
+			void this.runQueuedContinuation(activations).catch(error => {
+				this.pendingSteeringContinue = false;
+				const message = error instanceof Error ? error.message : String(error);
+				this.ensureHarness().failRun(message);
+				this.reportError(error);
+			});
+			return;
+		}
+		if (this.pendingAutoContinue) {
+			this.pendingAutoContinue = false;
+			this.scheduleAutoContinuation(activations);
+		}
 	}
 
 	private scheduleAutoContinuation(
@@ -1018,10 +1042,7 @@ export class AgentCoreBridge {
 			this.publishContextUsage();
 			this.emit({ type: "turn_end", turnId });
 			this.emit({ type: "phase", state: "ready" });
-			if (turnSucceeded && this.pendingAutoContinue) {
-				this.pendingAutoContinue = false;
-				this.scheduleAutoContinuation(activations);
-			}
+			if (turnSucceeded) this.checkPendingContinuation(activations);
 		}
 	}
 
@@ -1048,16 +1069,22 @@ export class AgentCoreBridge {
 			// nextTurn messages, auto-trigger the next prompt so the agent
 			// continues without requiring user input. The nextTurn items are
 			// injected before the trigger message by the transformContext hook.
-			this.harness.setOnSettled(nextTurnCount => {
-				if (nextTurnCount > 0) {
-					this.pendingAutoContinue = true;
-					this.emit({
-						type: "notice",
-						level: "info",
-						label: "Continuation",
-						text: `${nextTurnCount} next-turn message(s) queued; continuation will start after settlement.`,
-					});
+			// A steering interrupt is a different case: the queued message is
+			// the user's redirect, not the model's own follow-up work, so it
+			// resumes as a plain turn instead of an autonomous continuation run.
+			this.harness.setOnSettled((nextTurnCount, reason) => {
+				if (nextTurnCount === 0) return;
+				if (reason === "steering_interrupt") {
+					this.pendingSteeringContinue = true;
+					return;
 				}
+				this.pendingAutoContinue = true;
+				this.emit({
+					type: "notice",
+					level: "info",
+					label: "Continuation",
+					text: `${nextTurnCount} next-turn message(s) queued; continuation will start after settlement.`,
+				});
 			});
 		}
 		return this.harness;

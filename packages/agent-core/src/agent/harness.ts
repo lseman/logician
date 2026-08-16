@@ -89,7 +89,10 @@ import {
 	reduceRuntimeState,
 	RunKernel,
 } from "./run-kernel.ts";
-import type { RunKernelState } from "./run-kernel-events.ts";
+import {
+	STEERING_INTERRUPT_SUMMARY,
+	type RunKernelState,
+} from "./run-kernel-events.ts";
 import { Session } from "./session.ts";
 import type { BranchInfo, BranchSummaryData } from "./summaries/types.ts";
 import { evaluateTrajectory, type TrajectoryReport } from "./trajectory.ts";
@@ -139,7 +142,10 @@ export class AgentHarness {
 	private loopDetector: LoopDetector;
 	private onQueueChange?: (queues: HarnessQueues) => void;
 	private onPhaseChange?: (phase: HarnessPhase, prev: HarnessPhase) => void;
-	private onSettled?: (nextTurnCount: number) => void;
+	private onSettled?: (
+		nextTurnCount: number,
+		reason: "steering_interrupt" | "normal",
+	) => void;
 	private onSavePoint?: () => void;
 	private onCompaction?: (
 		reason: "auto" | "manual",
@@ -447,7 +453,12 @@ export class AgentHarness {
 		this.onPhaseChange = cb;
 	}
 
-	setOnSettled(cb: (nextTurnCount: number) => void): void {
+	setOnSettled(
+		cb: (
+			nextTurnCount: number,
+			reason: "steering_interrupt" | "normal",
+		) => void,
+	): void {
 		this.onSettled = cb;
 	}
 
@@ -561,7 +572,15 @@ export class AgentHarness {
 		this._runPromise = undefined;
 		this._runResolve = undefined;
 		const nextTurnCount = this.msgManager.queue.getNextTurn().length;
-		this.onSettled?.(nextTurnCount);
+		// A steering interrupt should resume as a plain next turn, not go through
+		// the autonomous continuation budget/task-restart policy meant for the
+		// model queueing its own follow-up work.
+		const reason: "steering_interrupt" | "normal" =
+			this.runtime.outcome?.status === "cancelled" &&
+			this.runtime.outcome.summary === STEERING_INTERRUPT_SUMMARY
+				? "steering_interrupt"
+				: "normal";
+		this.onSettled?.(nextTurnCount, reason);
 		this.emitToSubscribers({ type: "agent_settled", nextTurnCount });
 	}
 
