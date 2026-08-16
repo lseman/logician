@@ -18,6 +18,7 @@ import {
 	type AgentModelConfig,
 	type HarnessPhase,
 	type Message,
+	resolveAgentSettings,
 	type Tool,
 	type TruncationConfig,
 	type WebSearchConfig,
@@ -1914,15 +1915,16 @@ export class AgentCoreBridge {
 		budgetStopEnabled: boolean;
 		guardMode: "auto" | "on" | "off";
 	} {
+		const settings = resolveAgentSettings(this.config);
 		return {
 			model: this.config.model,
 			temperature: this.config.temperature ?? 0.5,
 			maxTokens: this.config.maxTokens ?? 4096,
-			maxIterations: this.config.maxIterations ?? 30,
-			thinkingLevel: this.config.thinkingLevel ?? "off",
-			inferenceMode: this.config.inferenceMode ?? "none",
+			maxIterations: settings.maxIterations,
+			thinkingLevel: settings.thinkingLevel,
+			inferenceMode: settings.inferenceMode,
 			permissionMode: this.getPermissionMode(),
-			executionProfile: this.config.executionProfile ?? "minimal",
+			executionProfile: settings.executionProfile,
 			guardsEnabled: this.config.guardsEnabled ?? false,
 			proactiveCompactionEnabled:
 				this.config.proactiveCompactionEnabled ?? true,
