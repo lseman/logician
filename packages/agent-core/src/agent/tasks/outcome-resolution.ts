@@ -14,6 +14,19 @@ export interface OutcomeDecision {
     source: "structured" | "heuristic" | "runtime";
 }
 
+// ── Completion gate aliases (backward compat) ────────────────────────────────
+// These are re-exported from completion-gate.ts for callers that import the
+// gate names instead of the core outcome-resolution names.
+
+export type CompletionGateDecision = OutcomeDecision;
+export type CompletionGateInput = OutcomeResolutionInput;
+
+export function resolveCompletionGate(
+    input: CompletionGateInput,
+): CompletionGateDecision {
+    return resolveOutcome(input);
+}
+
 /** Resolve every normal loop completion through one small terminal contract. */
 export function resolveOutcome(
     input: OutcomeResolutionInput,

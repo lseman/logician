@@ -2,12 +2,18 @@
 // Emits ExtensionEvent to registered handlers per event type. Supports
 // per-handler timeouts, error isolation, and structured result merging.
 //
-// Usage:
+// Can be used standalone OR wired to a HookBus as an observer layer:
+//   const hookBus = new HookBus();
+//   const extBus = ExtensionEventBus.fromHookBus(hookBus);
+//   // extBus now auto-emits typed events from every HookBus event.
+//
+// Standalone usage:
 //   const bus = new ExtensionEventBus({ onError, defaultTimeoutMs: 5000 });
 //   const off = bus.on("turn_start", (event) => { /* handle */ });
 //   await bus.emit({ type: "turn_start", turnIndex: 5 });
 //   off(); // unsubscribe
 
+import type { HookBus, HookEventName } from "../native/hook-bus.ts";
 import type {
 	ExtensionErrorHandler,
 	ExtensionEvent,
@@ -32,10 +38,46 @@ export class ExtensionEventBus {
 	private handlers: Map<ExtensionEventName, Registration[]> = new Map();
 	private onError: ExtensionErrorHandler;
 	private defaultTimeoutMs: number;
+	private _hookBusObserver: (() => void) | null = null;
 
 	constructor(options: ExtensionEventBusOptions = {}) {
 		this.onError = options.onError ?? this.defaultOnError;
 		this.defaultTimeoutMs = options.defaultTimeoutMs ?? 0;
+	}
+
+	/**
+	 * Factory: creates an ExtensionEventBus that emits typed events from a
+	 * HookBus's observer firehose. The bus still accepts direct .on() registrations
+	 * in addition to the auto-emitted typed events.
+	 *
+	 * The returned bus owns the HookBus subscription; call dispose() to clean up.
+	 */
+	static fromHookBus(
+		hookBus: HookBus,
+		options: ExtensionEventBusOptions = {},
+	): ExtensionEventBus {
+		const bus = new ExtensionEventBus(options);
+		bus._hookBusObserver = hookBus.observe((event, ctx) => {
+			const typed = hookToExtensionEvent(event, ctx);
+			if (typed) bus.emit(typed as any); // type-safe by construction
+		});
+		return bus;
+	}
+
+	/**
+	 * Manually emit a legacy event that isn't typed in the ExtensionEvent contract.
+	 * Used by builtin hooks for internal diagnostics (e.g. thinking_loop_detected).
+	 */
+	async emitLegacy(event: { type: string; [key: string]: unknown }): Promise<void> {
+		const registrations =
+			this.handlers.get(event.type as ExtensionEventName) ?? [];
+		for (const { handler, timeoutMs } of registrations) {
+			await this.guardHandler(
+				handler,
+				event as unknown as Extract<ExtensionEvent, { type: ExtensionEventName }>,
+				timeoutMs,
+			);
+		}
 	}
 
 	/** Register a handler for a specific event type. Returns unsubscribe function. */
@@ -95,28 +137,7 @@ export class ExtensionEventBus {
 		) as ExtensionEventResult<T>;
 	}
 
-	/**
-	 * Emit an ad-hoc diagnostic event that isn't part of the typed ExtensionEvent
-	 * contract (e.g. builtin-hook internals like thinking_loop_detected). Delivered
-	 * only to handlers registered for that exact type string; skipped if none.
-	 */
-	async emitLegacy(event: {
-		type: string;
-		[key: string]: unknown;
-	}): Promise<void> {
-		const registrations =
-			this.handlers.get(event.type as ExtensionEventName) ?? [];
-		for (const { handler, timeoutMs } of registrations) {
-			await this.guardHandler(
-				handler,
-				event as unknown as Extract<
-					ExtensionEvent,
-					{ type: ExtensionEventName }
-				>,
-				timeoutMs,
-			);
-		}
-	}
+
 
 	/** Get all registered event types. */
 	getRegisteredEvents(): ExtensionEventName[] {
@@ -131,6 +152,21 @@ export class ExtensionEventBus {
 	/** Clear all handlers. */
 	clear(): void {
 		this.handlers.clear();
+	}
+
+	// ── Lifecycle ───────────────────────────────────────────────────────
+
+	/**
+	 * Clean up resources. When wired to a HookBus, unsubscribes the observer.
+	 * When used standalone, clears all handlers.
+	 */
+	async dispose(): Promise<void> {
+		if (this._hookBusObserver) {
+			this._hookBusObserver();
+			this._hookBusObserver = null;
+		} else {
+			this.clear();
+		}
 	}
 
 	// ── Internals ───────────────────────────────────────────────────────
@@ -178,5 +214,115 @@ export class ExtensionEventBus {
 				},
 			);
 		});
+	}
+}
+
+// ── Mapping: HookBus event → ExtensionEvent payload ─────────────────────
+// Maps the 12 HookBus event types to typed ExtensionEvent payloads.
+// Returns undefined when the HookBus event has no extension counterpart.
+
+import type { Message, StopReason } from "../../agent/types.ts";
+
+function hookToExtensionEvent(
+	event: HookEventName,
+	ctx: unknown,
+): ExtensionEvent | undefined {
+	switch (event) {
+		case "beforeAgentStart": {
+			const c = ctx as {
+				prompt: string;
+				systemPrompt: string;
+				messages: Message[];
+			};
+			return { type: "before_agent_start", prompt: c.prompt, systemPrompt: c.systemPrompt };
+		}
+		case "beforeToolCall": {
+			const c = ctx as {
+				toolCall: { id: string; name: string; arguments: string };
+				args: Record<string, unknown>;
+				iteration: number;
+			};
+			return {
+				type: "tool_execution_start",
+				toolCallId: c.toolCall.id,
+				toolName: c.toolCall.name,
+				args: c.args,
+			};
+		}
+		case "afterToolCall": {
+			const c = ctx as {
+				toolCall: { id: string; name: string };
+				result: string;
+				isError: boolean;
+				iteration: number;
+			};
+			return {
+				type: "tool_execution_end",
+				toolCallId: c.toolCall.id,
+				toolName: c.toolCall.name,
+				result: c.result,
+				isError: c.isError,
+			};
+		}
+		case "prepareNextTurn":
+		case "transformContext":
+			// No direct extension counterpart — these transform messages in-place.
+			return undefined;
+		case "beforeProviderRequest": {
+			const c = ctx as {
+				model: string;
+				sessionId: string;
+				iteration: number;
+				streamOptions: Record<string, unknown>;
+			};
+			return {
+				type: "before_provider_request",
+				model: c.model,
+				sessionId: c.sessionId,
+				iteration: c.iteration,
+				streamOptions: { stream: true, ...c.streamOptions },
+			};
+		}
+		case "beforeProviderPayload":
+			// Internal only — no extension counterpart.
+			return undefined;
+		case "afterProviderResponse": {
+			const c = ctx as {
+				model: string;
+				content: string;
+				toolCallCount: number;
+				stopReason: StopReason;
+				usageTokens?: number;
+				iteration: number;
+			};
+			return {
+				type: "after_provider_response",
+				model: c.model,
+				content: c.content,
+				toolCallCount: c.toolCallCount,
+				stopReason: c.stopReason,
+				usageTokens: c.usageTokens,
+				iteration: c.iteration,
+			};
+		}
+		case "shouldStopAfterTurn":
+			// No extension counterpart — decision hook.
+			return undefined;
+		case "getSteeringMessages":
+		case "getFollowUpMessages":
+			return { type: "queue_update", steering: [], followUp: [] };
+		case "beforeCompact": {
+			const c = ctx as {
+				tokensBefore: number;
+				reason: "manual" | "auto";
+			};
+			return {
+				type: "session_before_compact",
+				tokensBefore: c.tokensBefore,
+				reason: c.reason === "auto" ? "auto" : "manual",
+			};
+		}
+		default:
+			return undefined;
 	}
 }

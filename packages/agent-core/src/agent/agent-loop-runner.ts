@@ -70,6 +70,7 @@ import {
 	sanitizeToolCallArguments,
 } from "./messages.ts";
 import { type RunBudgetDecision, RunBudgetController } from "./run-budget.ts";
+import { checkBudget } from "./exit-path.ts";
 import {
 	isToolFailureResult,
 	selectAdaptiveMode,
@@ -463,7 +464,7 @@ async function runAgentLoopInTaskScope(
 			(hasMoreToolCalls || pendingMessages.length > 0) &&
 			iteration < maxIterations
 		) {
-			const providerBudget = runBudget.requestProviderCall();
+			const providerBudget = checkBudget(runBudget, "provider_call");
 			if (!providerBudget.allowed) {
 				return finishForBudgetExhaustion(providerBudget);
 			}
@@ -728,9 +729,7 @@ async function runAgentLoopInTaskScope(
 				}
 			}
 
-			const tokenBudget = runBudget.recordTokens(
-				response?.usage?.totalTokens ?? 0,
-			);
+			const tokenBudget = checkBudget(runBudget, "tokens", response?.usage?.totalTokens ?? 0);
 			if (!tokenBudget.allowed) {
 				return finishForBudgetExhaustion(tokenBudget);
 			}
@@ -770,7 +769,7 @@ async function runAgentLoopInTaskScope(
 			const stopReason = stopReasonFor(rawStopReason, toolCalls);
 
 			hasMoreToolCalls = false;
-			const toolBudget = runBudget.requestToolBatch(toolCalls.length);
+			const toolBudget = checkBudget(runBudget, "tool_batch", toolCalls.length);
 			if (!toolBudget.allowed) {
 				return finishForBudgetExhaustion(toolBudget);
 			}

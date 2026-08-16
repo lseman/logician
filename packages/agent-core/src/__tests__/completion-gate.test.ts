@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { resolveCompletionGate } from "../agent/tasks/completion-gate.ts";
+import { resolveCompletionGate } from "../agent/tasks/outcome-resolution.ts";
 
 void test("structured done is authoritative", () => {
 	assert.deepEqual(

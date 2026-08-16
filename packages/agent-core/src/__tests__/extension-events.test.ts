@@ -248,3 +248,105 @@ describe("ExtensionContext", () => {
 		assert.strictEqual(ctx.inToolLoop, true);
 	});
 });
+
+// ── HookBus → ExtensionEventBus wiring tests ────────────────────────────
+import { HookBus } from "../hooks/native/hook-bus.ts";
+
+describe("ExtensionEventBus.fromHookBus", () => {
+	it("emits typed events from HookBus firehose", async () => {
+		const hookBus = new HookBus();
+		const extBus = ExtensionEventBus.fromHookBus(hookBus);
+		const received: Array<{ type: string; prompt: string }> = [];
+
+		extBus.on("before_agent_start", (event: any) => {
+			received.push({ type: event.type, prompt: event.prompt });
+			return undefined;
+		});
+
+		// Call the hook through the AgentHooks produced by toHooks()
+		const hooks = hookBus.toHooks();
+		await hooks.beforeAgentStart?.({
+			prompt: "hello world",
+			systemPrompt: "system prompt",
+			messages: [],
+		});
+
+		assert.strictEqual(received.length, 1);
+		assert.strictEqual(received[0].prompt, "hello world");
+	});
+
+	it("emits tool_execution_start from beforeToolCall", async () => {
+		const hookBus = new HookBus();
+		const extBus = ExtensionEventBus.fromHookBus(hookBus);
+		const received: Array<{ type: string; toolName: string }> = [];
+
+		extBus.on("tool_execution_start", (event: any) => {
+			received.push({ type: event.type, toolName: event.toolName });
+			return undefined;
+		});
+
+		const hooks = hookBus.toHooks();
+		await hooks.beforeToolCall?.({
+			toolCall: { id: "call_1", name: "bash", arguments: '{}' },
+			args: { cmd: "ls" },
+			iteration: 5,
+		});
+
+		assert.strictEqual(received.length, 1);
+		assert.strictEqual(received[0].toolName, "bash");
+	});
+
+	it("dispose() cleans up HookBus subscription", async () => {
+		const hookBus = new HookBus();
+		const extBus = ExtensionEventBus.fromHookBus(hookBus);
+		let triggered = false;
+
+		extBus.on("before_agent_start", () => {
+			triggered = true;
+			return undefined;
+		});
+
+		const hooks = hookBus.toHooks();
+
+		// Should trigger
+		await hooks.beforeAgentStart?.({
+			prompt: "test",
+			systemPrompt: "system",
+			messages: [],
+		});
+		assert.strictEqual(triggered, true);
+
+		// Dispose
+		await extBus.dispose();
+
+		// Should NOT trigger after dispose
+		triggered = false;
+		await hooks.beforeAgentStart?.({
+			prompt: "after dispose",
+			systemPrompt: "system",
+			messages: [],
+		});
+		assert.strictEqual(triggered, false);
+	});
+
+	it("emitLegacy() dispatches to handlers for custom event types", async () => {
+		const extBus = new ExtensionEventBus();
+		const received: Array<{ type: string; iteration: number }> = [];
+
+		// Register on a real ExtensionEventName but intercept legacy dispatch
+		extBus.on("agent_start", (event: any) => {
+			received.push({ type: event.type ?? "agent_start", iteration: event.iteration });
+			return undefined;
+		});
+
+		// emitLegacy dispatches to handlers registered for that exact type;
+		// since "thinking_loop_detected" != "agent_start", no handler fires.
+		await (extBus as any).emitLegacy({
+			type: "thinking_loop_detected",
+			iteration: 42,
+		});
+
+		// No handler matched because the type string doesn't match
+		assert.strictEqual(received.length, 0);
+	});
+});

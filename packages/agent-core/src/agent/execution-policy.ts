@@ -1,7 +1,5 @@
 import type { Message } from "./types/types-messages.ts";
 
-export type ExecutionProfile = "autonomous" | "minimal";
-
 export type RunOutcomeStatus =
 	| "completed"
 	| "needs_input"
@@ -37,6 +35,8 @@ export type AgentStopPolicy = (
 	context: StopPolicyContext,
 ) => Promise<StopPolicyDecision | undefined> | StopPolicyDecision | undefined;
 
+export type ExecutionProfile = "autonomous" | "minimal";
+
 export interface ResolvedExecutionPolicy {
 	profile: ExecutionProfile;
 	embeddedPoliciesEnabled: boolean;
@@ -45,7 +45,7 @@ export interface ResolvedExecutionPolicy {
 export function resolveExecutionPolicy(
 	profile: ExecutionProfile | undefined,
 ): ResolvedExecutionPolicy {
-	const resolvedProfile = profile ?? "minimal";
+	const resolvedProfile = profile ?? "autonomous";
 	return {
 		profile: resolvedProfile,
 		embeddedPoliciesEnabled: resolvedProfile === "autonomous",
