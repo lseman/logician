@@ -1,9 +1,16 @@
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { AgentHooks } from "@logician/agent-core";
 import { ensureInsideCwd } from "@logician/agent-core/tools/shared/path-utils.ts";
-import ts from "typescript";
 import type { LspManager } from "./lsp-manager.ts";
+
+const execFileAsync = promisify(execFile);
+const runtimeRequire = createRequire(import.meta.url);
 
 const MAX_SOURCE_BYTES = 1_000_000;
 const MAX_DIAGNOSTICS = 10;
@@ -36,72 +43,109 @@ function successfulMutation(toolName: string, result: string): boolean {
 	return false;
 }
 
-function scriptKindFor(extension: string): ts.ScriptKind {
-	switch (extension) {
-		case ".js":
-		case ".mjs":
-		case ".cjs":
-			return ts.ScriptKind.JS;
-		case ".jsx":
-			return ts.ScriptKind.JSX;
-		case ".tsx":
-			return ts.ScriptKind.TSX;
-		default:
-			return ts.ScriptKind.TS;
+let cachedTscBin: string | null = null;
+
+/** Resolve the tsc CLI shipped with the installed typescript package.
+ *  "typescript/bin/tsc" isn't in the package's exports map, so resolve the
+ *  package root via its (exported) package.json and join the bin path on
+ *  disk rather than through module resolution. */
+function tscBin(): string {
+	if (cachedTscBin) return cachedTscBin;
+	const packageJsonPath = runtimeRequire.resolve("typescript/package.json");
+	cachedTscBin = path.join(path.dirname(packageJsonPath), "bin", "tsc");
+	return cachedTscBin;
+}
+
+// Matches non-pretty `tsc` diagnostic lines, e.g.:
+//   broken.ts(1,15): error TS1109: Expression expected.
+const TSC_DIAGNOSTIC_LINE =
+	/^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/;
+
+function parseTscOutput(
+	output: string,
+	fileBaseName: string,
+): PostEditDiagnostic[] {
+	const diagnostics: PostEditDiagnostic[] = [];
+	for (const line of output.split("\n")) {
+		const match = TSC_DIAGNOSTIC_LINE.exec(line.trim());
+		if (!match) continue;
+		const [, reportedFile, lineStr, columnStr, code, message] = match;
+		if (path.basename(reportedFile) !== fileBaseName) continue;
+		diagnostics.push({
+			line: Number(lineStr),
+			column: Number(columnStr),
+			message,
+			code: Number(code.slice(2)),
+		});
+		if (diagnostics.length >= MAX_DIAGNOSTICS) break;
+	}
+	return diagnostics;
+}
+
+async function runTsc(args: string[], cwd: string): Promise<string> {
+	try {
+		const result = await execFileAsync(
+			process.execPath,
+			[tscBin(), ...args, "--pretty", "false"],
+			{ cwd, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 },
+		);
+		return result.stdout ?? "";
+	} catch (error) {
+		// tsc exits non-zero when it reports diagnostics — that's the
+		// normal, expected outcome here, not a failure to run it.
+		const withOutput = error as { stdout?: string };
+		return withOutput.stdout ?? "";
 	}
 }
 
-function flattenMessage(message: string | ts.DiagnosticMessageChain): string {
-	return ts.flattenDiagnosticMessageText(message, "\n");
-}
-
-function collectTypeScriptDiagnostics(
+async function collectTypeScriptDiagnostics(
 	filePath: string,
 	source: string,
-	extension: string,
-): PostEditDiagnostic[] {
-	const output = ts.transpileModule(source, {
-		fileName: filePath,
-		reportDiagnostics: true,
-		compilerOptions: {
-			allowJs: true,
-			checkJs: false,
-			noEmit: true,
-			target: ts.ScriptTarget.Latest,
-			module: ts.ModuleKind.ESNext,
-			jsx: ts.JsxEmit.Preserve,
-		},
-	});
-	const sourceFile = ts.createSourceFile(
-		filePath,
-		source,
-		ts.ScriptTarget.Latest,
-		true,
-		scriptKindFor(extension),
-	);
-	return (output.diagnostics ?? [])
-		.slice(0, MAX_DIAGNOSTICS)
-		.map(diagnostic => {
-			const position = sourceFile.getLineAndCharacterOfPosition(
-				diagnostic.start ?? 0,
-			);
-			return {
-				line: position.line + 1,
-				column: position.character + 1,
-				message: flattenMessage(diagnostic.messageText),
-				code: diagnostic.code,
-			};
-		});
+): Promise<PostEditDiagnostic[]> {
+	const tmpDir = mkdtempSync(path.join(tmpdir(), "logician-tsc-"));
+	const fileBaseName = path.basename(filePath);
+	const tmpFile = path.join(tmpDir, fileBaseName);
+	try {
+		await writeFile(tmpFile, source, "utf8");
+		const output = await runTsc(
+			[
+				"--noEmit",
+				"--target",
+				"ESNext",
+				"--module",
+				"ESNext",
+				"--jsx",
+				"preserve",
+				"--allowJs",
+				"--checkJs",
+				"false",
+				fileBaseName,
+			],
+			tmpDir,
+		);
+		return parseTscOutput(output, fileBaseName);
+	} finally {
+		rmSync(tmpDir, { recursive: true, force: true });
+	}
 }
 
-function collectProjectDiagnostics(
+/** Walk upward from `startDir` looking for the nearest tsconfig.json. */
+function findConfigFile(startDir: string): string | undefined {
+	let dir = startDir;
+	while (true) {
+		const candidate = path.join(dir, "tsconfig.json");
+		if (existsSync(candidate)) return candidate;
+		const parent = path.dirname(dir);
+		if (parent === dir) return undefined;
+		dir = parent;
+	}
+}
+
+async function collectProjectDiagnostics(
 	cwd: string,
 	filePath: string,
-): PostEditDiagnostic[] {
-	const configPath = ts.findConfigFile(
-		path.dirname(filePath),
-		ts.sys.fileExists,
-	);
+): Promise<PostEditDiagnostic[]> {
+	const configPath = findConfigFile(path.dirname(filePath));
 	if (!configPath) return [];
 	const relativeConfig = path.relative(
 		path.resolve(cwd),
@@ -110,35 +154,11 @@ function collectProjectDiagnostics(
 	if (relativeConfig.startsWith("..") || path.isAbsolute(relativeConfig))
 		return [];
 
-	const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
-	if (loaded.error) return [];
-	const parsed = ts.parseJsonConfigFileContent(
-		loaded.config,
-		ts.sys,
+	const output = await runTsc(
+		["--noEmit", "-p", configPath],
 		path.dirname(configPath),
-		{ noEmit: true },
-		configPath,
 	);
-	const program = ts.createProgram(parsed.fileNames, parsed.options);
-	const sourceFile = program.getSourceFile(filePath);
-	if (!sourceFile) return [];
-
-	return [
-		...program.getSyntacticDiagnostics(sourceFile),
-		...program.getSemanticDiagnostics(sourceFile),
-	]
-		.slice(0, MAX_DIAGNOSTICS)
-		.map(diagnostic => {
-			const position = sourceFile.getLineAndCharacterOfPosition(
-				diagnostic.start ?? 0,
-			);
-			return {
-				line: position.line + 1,
-				column: position.character + 1,
-				message: flattenMessage(diagnostic.messageText),
-				code: diagnostic.code,
-			};
-		});
+	return parseTscOutput(output, path.basename(filePath));
 }
 
 function collectJsonDiagnostics(source: string): PostEditDiagnostic[] {
@@ -175,10 +195,10 @@ export async function diagnoseEditedFile(
 	const source = await readFile(resolved, "utf8");
 	if (Buffer.byteLength(source, "utf8") > MAX_SOURCE_BYTES) return [];
 	if (extension === ".json") return collectJsonDiagnostics(source);
-	const projectDiagnostics = collectProjectDiagnostics(cwd, resolved);
+	const projectDiagnostics = await collectProjectDiagnostics(cwd, resolved);
 	return projectDiagnostics.length > 0
 		? projectDiagnostics
-		: collectTypeScriptDiagnostics(resolved, source, extension);
+		: collectTypeScriptDiagnostics(resolved, source);
 }
 
 function formatDiagnostics(
