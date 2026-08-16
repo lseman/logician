@@ -471,7 +471,7 @@ function goalWidget(status: WidgetFactoryStatus): WidgetData {
 }
 
 function executionProfileWidget(status: WidgetFactoryStatus): WidgetData {
-	const profile = status.executionProfile ?? "autonomous";
+	const profile = status.executionProfile ?? "minimal";
 	if (profile === "minimal") {
 		return styled(
 			"execution-profile",

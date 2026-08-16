@@ -419,7 +419,7 @@ export class LogicianTUI {
 			contextTokens: 0,
 			reasoner: this.bridge.getReasonerStatus(),
 			contextMaxTokens: runtimeConfig.bridge.contextWindowTokens,
-			executionProfile: runtimeConfig.bridge.executionProfile ?? "autonomous",
+			executionProfile: runtimeConfig.bridge.executionProfile ?? "minimal",
 			rtkProxyEnabled: runtimeConfig.bridge.rtkProxyEnabled ?? false,
 			ariadneEnabled: runtimeConfig.bridge.ariadneEnabled ?? true,
 			fffgrepEnabled: runtimeConfig.bridge.fffgrepEnabled ?? true,
