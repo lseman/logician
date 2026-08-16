@@ -1893,39 +1893,6 @@ export class AgentCoreBridge {
 		});
 	}
 
-	getSettingsText(): string {
-		const guardMode =
-			this.config.guardsEnabled === undefined
-				? "auto"
-				: this.config.guardsEnabled
-					? "on"
-					: "off";
-		return [
-			"Runtime settings",
-			`  Model: ${this.config.model}`,
-			`  Temperature: ${this.config.temperature ?? 0.5}`,
-			`  Max tokens: ${this.config.maxTokens ?? 4096}`,
-			`  Max iterations: ${this.config.maxIterations ?? 30}`,
-			`  Context window: ${this.config.contextWindowTokens ?? "unset"}`,
-			`  Thinking: ${this.config.thinkingLevel ?? "off"}`,
-			`  Inference mode: ${this.config.inferenceMode ?? "none"}`,
-			`  Reasoner: ${this.reasonerId}`,
-			`  Permission mode: ${this.getPermissionMode()}`,
-			`  Guards: ${guardMode}`,
-			`  Duplicate-call guard: ${(this.config.duplicateGuardEnabled ?? true) ? "on" : "off"}`,
-			`  Failure-loop guard: ${(this.config.failureGuardEnabled ?? false) ? "on" : "off"}`,
-			`  Thinking-loop guard: ${(this.config.thinkingLoopDetectionEnabled ?? true) ? "on" : "off"}`,
-			`  Continuation: ${(this.config.continuationEnabled ?? true) ? "on" : "off"}`,
-			`  Automatic retries: ${(this.config.autoRetryEnabled ?? true) ? "on" : "off"}`,
-			`  Reflection: ${(this.config.reflectionConfig?.enabled ?? false) ? "on" : "off"}`,
-			`  Budget early-stop: ${(this.config.budgetStopEnabled ?? false) ? "on" : "off"}`,
-			`  Compaction: ${this.config.proactiveCompactionEnabled ? "on" : "off"}`,
-			`  Post-edit diagnostics: ${this.postEditDiagnosticsEnabled ? "on" : "off"}`,
-			`  Memory: ${this.memoryStore ? "on" : "off"}`,
-			`  RTK proxy: ${this.config.rtkProxyEnabled ? "on" : "off"}`,
-		].join("\n");
-	}
-
 	/** Return structured settings data for the overlay UI. */
 	getSettingsData(): {
 		model: string;
