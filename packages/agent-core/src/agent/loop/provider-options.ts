@@ -55,11 +55,11 @@ export function buildProviderRequestOptions(
 
 	const useProviderDefaults = modeDef?.useProviderDefaults ?? false;
 	const modeParams = useProviderDefaults ? undefined : modeDef?.params;
-	const effectiveTemp = modeParams?.temperature ?? config.temperature ?? 0.5;
+	const effectiveTemp = modeParams?.temperature ?? config.temperature;
 
 	const options: GenerateOptions = {
 		tools: toolDefinitions,
-		...(!useProviderDefaults && { temperature: effectiveTemp }),
+		...(effectiveTemp !== undefined && { temperature: effectiveTemp }),
 		maxTokens: config.maxTokens ?? 4096,
 		...(modeParams?.top_p !== undefined && { topP: modeParams.top_p }),
 		...(modeParams?.top_k !== undefined && { topK: modeParams.top_k }),
