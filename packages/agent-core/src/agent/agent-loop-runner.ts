@@ -65,7 +65,7 @@ import {
 	estimateChatPayloadTokens,
 	sanitizeToolCallArguments,
 } from "./messages.ts";
-import { RunBudgetController } from "./run-budget.ts";
+import { type RunBudgetDecision, RunBudgetController } from "./run-budget.ts";
 import {
 	isToolFailureResult,
 	selectAdaptiveMode,
@@ -289,6 +289,28 @@ async function runAgentLoopInTaskScope(
 			config.onBudgetConsumed?.(consumption.resource, consumption.amount),
 	);
 
+	async function finishForBudgetExhaustion(
+		decision: RunBudgetDecision,
+	): Promise<Message[]> {
+		await intervene({
+			kind: "budget",
+			cause: "run_budget",
+			detector: "run_budget",
+			message: decision.reason ?? "Run budget exhausted.",
+			iteration,
+			counters: {
+				providerCalls: decision.snapshot.providerCalls,
+				toolCalls: decision.snapshot.toolCalls,
+				elapsedMs: decision.snapshot.elapsedMs,
+			},
+		});
+		return finish({
+			status: "blocked",
+			summary: decision.reason,
+			source: "runtime",
+		});
+	}
+
 	// ── Acceptance contract tracking ─────────────────────────────────────
 	let resolvedAcceptance: ResolvedAcceptance | null = null;
 	let acceptanceReported = false;
@@ -507,23 +529,7 @@ async function runAgentLoopInTaskScope(
 		) {
 			const providerBudget = runBudget.requestProviderCall();
 			if (!providerBudget.allowed) {
-				await intervene({
-					kind: "budget",
-					cause: "run_budget",
-					detector: "run_budget",
-					message: providerBudget.reason ?? "Run budget exhausted.",
-					iteration,
-					counters: {
-						providerCalls: providerBudget.snapshot.providerCalls,
-						toolCalls: providerBudget.snapshot.toolCalls,
-						elapsedMs: providerBudget.snapshot.elapsedMs,
-					},
-				});
-				return finish({
-					status: "blocked",
-					summary: providerBudget.reason,
-					source: "runtime",
-				});
+				return finishForBudgetExhaustion(providerBudget);
 			}
 			iteration++;
 			const turnId = `turn_${iteration}`;
@@ -836,23 +842,7 @@ async function runAgentLoopInTaskScope(
 				response?.usage?.totalTokens ?? 0,
 			);
 			if (!tokenBudget.allowed) {
-				await intervene({
-					kind: "budget",
-					cause: "run_budget",
-					detector: "run_budget",
-					message: tokenBudget.reason ?? "Token budget exhausted.",
-					iteration,
-					counters: {
-						providerCalls: tokenBudget.snapshot.providerCalls,
-						toolCalls: tokenBudget.snapshot.toolCalls,
-						elapsedMs: tokenBudget.snapshot.elapsedMs,
-					},
-				});
-				return finish({
-					status: "blocked",
-					summary: tokenBudget.reason,
-					source: "runtime",
-				});
+				return finishForBudgetExhaustion(tokenBudget);
 			}
 			let toolCalls = response?.toolCalls ?? [];
 			let assistantContent = response?.content ?? "";
@@ -960,23 +950,7 @@ async function runAgentLoopInTaskScope(
 			hasMoreToolCalls = false;
 			const toolBudget = runBudget.requestToolBatch(toolCalls.length);
 			if (!toolBudget.allowed) {
-				await intervene({
-					kind: "budget",
-					cause: "run_budget",
-					detector: "run_budget",
-					message: toolBudget.reason ?? "Run budget exhausted.",
-					iteration,
-					counters: {
-						providerCalls: toolBudget.snapshot.providerCalls,
-						toolCalls: toolBudget.snapshot.toolCalls,
-						elapsedMs: toolBudget.snapshot.elapsedMs,
-					},
-				});
-				return finish({
-					status: "blocked",
-					summary: toolBudget.reason,
-					source: "runtime",
-				});
+				return finishForBudgetExhaustion(toolBudget);
 			}
 			const batch = await executeToolBatch({
 				registry,
