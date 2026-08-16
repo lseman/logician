@@ -300,9 +300,9 @@ export async function openSettingsSelector(
 					"Continue bounded unfinished autonomous work",
 				],
 				[
-					"Automatic retries",
+					"Auto-compact on full context",
 					data.autoRetryEnabled,
-					"Retry transient provider failures",
+					"Compact and retry automatically when context fills up",
 				],
 				[
 					"Reflection",
@@ -512,7 +512,7 @@ export function handleSettingsSelectorAction(
 		case "failure-loop guard":
 		case "thinking-loop guard":
 		case "continuation":
-		case "automatic retries":
+		case "auto-compact on full context":
 		case "reflection":
 		case "budget early-stop":
 		case "memory": {
@@ -522,7 +522,7 @@ export function handleSettingsSelectorAction(
 				"failure-loop guard": ["failureGuardEnabled", "guardrails"],
 				"thinking-loop guard": ["thinkingLoopDetectionEnabled", "guardrails"],
 				continuation: ["continuationEnabled", "continuationEnabled"],
-				"automatic retries": ["autoRetryEnabled", "autoRetryEnabled"],
+				"auto-compact on full context": ["autoRetryEnabled", "autoRetryEnabled"],
 				reflection: ["reflectionEnabled", "reflectionConfig"],
 				"budget early-stop": ["budgetStopEnabled", "guardrails"],
 				memory: ["memoryEnabled", "memory"],
