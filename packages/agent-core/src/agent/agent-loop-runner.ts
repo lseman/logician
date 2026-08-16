@@ -66,6 +66,11 @@ import {
 	sanitizeToolCallArguments,
 } from "./messages.ts";
 import { RunBudgetController } from "./run-budget.ts";
+import {
+	isToolFailureResult,
+	selectAdaptiveMode,
+	taskObjectiveFromMessages,
+} from "./tasks/adaptive-mode.ts";
 import { resolveCompletionGate } from "./tasks/completion-gate.ts";
 import { runWithTaskState } from "./tasks/run-task-state.ts";
 import { getTaskStatus, resetTaskStatus } from "./tasks/task-status-state.ts";
@@ -257,6 +262,11 @@ async function runAgentLoopInTaskScope(
 	let lastRunnerNudgeIteration = -1;
 	let lastToolWorkIteration = -1;
 	let performedToolWork = false;
+	let toolFailures = 0;
+	const adaptiveObjective = taskObjectiveFromMessages([
+		...context.messages,
+		...prompts,
+	]);
 	let contextWasCompacted = false;
 	const reflectionEnabled =
 		executionPolicy.embeddedPoliciesEnabled &&
@@ -606,7 +616,27 @@ async function runAgentLoopInTaskScope(
 
 				try {
 					// Resolve inference mode params — they override individual config values.
-					const effectiveMode = config.inferenceMode;
+					const adaptiveDecision =
+						config.inferenceMode === "auto"
+							? selectAdaptiveMode({
+									objective: adaptiveObjective,
+									performedToolWork,
+									toolFailures,
+								})
+							: undefined;
+					const effectiveMode = adaptiveDecision?.mode ?? config.inferenceMode;
+					if (adaptiveDecision) {
+						const selectionKey = `${adaptiveDecision.mode}:${adaptiveDecision.reason}`;
+						if (selectionKey !== lastAdaptiveSelection) {
+							lastAdaptiveSelection = selectionKey;
+							await emit({
+								type: "inference_mode_selected",
+								configuredMode: "auto",
+								effectiveMode: adaptiveDecision.mode,
+								reason: adaptiveDecision.reason,
+							});
+						}
+					}
 					const modeDef = effectiveMode
 						? getInferenceMode(effectiveMode)
 						: undefined;
@@ -968,6 +998,9 @@ async function runAgentLoopInTaskScope(
 			const toolResults = batch.messages;
 			const toolTerminated = batch.terminated;
 			for (const toolResult of toolResults) {
+				if (isToolFailureResult(String(toolResult.content ?? ""))) {
+					toolFailures++;
+				}
 				messages.push(toolResult);
 				newMessages.push(toolResult);
 				await emitMessagePair(emit, turnId, toolResult);
