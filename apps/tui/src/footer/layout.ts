@@ -485,7 +485,7 @@ const DEFAULT_INFO: WidgetFactoryStatus = {
 	mcpLoading: false,
 	sandboxMode: "code",
 	permissionMode: "acceptAll",
-	executionProfile: "autonomous",
+	executionProfile: "minimal",
 	promptTokens: undefined,
 	completionTokens: undefined,
 	rtkProxyEnabled: false,
