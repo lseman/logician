@@ -14,7 +14,6 @@ function bridgeWithPathPolicy(
 		model: "test",
 		cwd,
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 		autoStartMcp: false,
 		...options,
 	});

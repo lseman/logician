@@ -185,11 +185,7 @@ export function createLocalHandlers(
 					if (!["on", "off", "auto"].includes(value.toLowerCase()))
 						return "Usage: /settings guards <auto|on|off>";
 					ctx.bridge.setGuardMode(value.toLowerCase() as "auto" | "on" | "off");
-					saveConfigNestedField(
-						"guardrails",
-						"guardsEnabled",
-						value.toLowerCase() === "auto" ? undefined : on,
-					);
+					saveConfigField("guardsEnabled", value.toLowerCase() === "auto" ? undefined : on);
 					return `Guards: ${value.toLowerCase()}`;
 				case "compaction":
 					ctx.bridge.setRuntimeToggle("proactiveCompactionEnabled", on);

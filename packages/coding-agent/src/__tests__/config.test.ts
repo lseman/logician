@@ -251,18 +251,16 @@ void test("validateConfig applies default booleans (continuationEnabled, postEdi
 	assert.equal(cfg.guardsEnabled, undefined);
 });
 
-void test("validateConfig parses guard settings from the nested guardrails object", () => {
+void test("validateConfig parses flat guard settings", () => {
 	const warnings: string[] = [];
 	const cfg = validateConfig(
 		{
-			guardrails: {
-				guardsEnabled: true,
-				duplicateGuardEnabled: false,
-				duplicateToolThreshold: 5,
-				failureGuardEnabled: true,
-				toolFailureLoopThreshold: 7,
-				budgetStopEnabled: true,
-			},
+			guardsEnabled: true,
+			duplicateGuardEnabled: false,
+			duplicateToolThreshold: 5,
+			failureGuardEnabled: true,
+			toolFailureLoopThreshold: 7,
+			budgetStopEnabled: true,
 		},
 		warnings,
 	);
@@ -272,25 +270,7 @@ void test("validateConfig parses guard settings from the nested guardrails objec
 	assert.equal(cfg.failureGuardEnabled, true);
 	assert.equal(cfg.toolFailureLoopThreshold, 7);
 	assert.equal(cfg.budgetStopEnabled, true);
-		assert.deepEqual(warnings, ['Unknown config key: "guardrails".', '"guardrails" is deprecated \u2014 use flat keys instead.']);
-});
-
-void test("validateConfig warns on unknown guardrails subkeys", () => {
-	const warnings: string[] = [];
-	validateConfig({ guardrails: { bogus: true } }, warnings);
-	assert.ok(warnings.some(w => w.includes('Unknown guardrails key: "bogus"')));
-});
-
-void test("validateConfig still accepts legacy flat guard keys, nested guardrails wins", () => {
-	const warnings: string[] = [];
-	const cfg = validateConfig(
-		{
-			guardsEnabled: false,
-			guardrails: { guardsEnabled: true },
-		},
-		warnings,
-	);
-	assert.equal(cfg.guardsEnabled, true);
+	assert.deepEqual(warnings, []);
 });
 
 void test("validateConfig enforces bounds for maxRetries/retryBaseDelayMs/turnTimeoutMs/cacheSize/cacheTtlMs", () => {
