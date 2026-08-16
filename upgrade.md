@@ -311,8 +311,8 @@ These are NOT part of Pi but are valuable for Logician. Keep them, but make them
 | `guards/output-guard.ts` | ~465 | Replace with simple check | **Keep** — wired as an optional loop-level guard (config.outputGuard) in agent-loop-runner.ts |
 | `guards/guard-engine.ts` | ~286 | Merge into main loop | **Keep** — builtin-hooks.ts explicitly documents it as "the canonical source" for tool guard rails (duplicate + failure-loop detection) |
 | `tasks/completion-gate.ts` | ~35 | Flatten into outcome-resolution | **Done** — flattened into outcome-resolution.ts as part of the 2026-08-16 exit-path work |
-| `harness/phase.ts` | ~35 | Simplify phase hierarchy | Still imported by harness.ts — **not yet audited for content**, do a proper read before deciding |
-| `harness/contracts.ts` | ~35 | Merge into harness.ts | Still imported by harness.ts — **not yet audited for content**, do a proper read before deciding |
+| `harness/phase.ts` | ~35 | Simplify phase hierarchy | **Keep** — small state-machine validator (`assertPhaseTransition`/`assertIdlePhase`), `HarnessBusyError` it defines is used by harness.ts, harness/queue-ops.ts, and surfaces through coding-agent's bridge. Merging into harness.ts would un-split an already well-factored file for no reduction in real complexity — works against the goal of shrinking harness.ts. |
+| `harness/contracts.ts` | ~35 | Merge into harness.ts | **Keep** — pure type definitions (`AgentHarnessOptions`, `HarnessTurnSnapshot`, `HarnessQueues`, `AbortResult`); `AgentHarnessOptions` is consumed directly by coding-agent/agent-bridge.ts. Same reasoning as phase.ts. |
 | `loop/provider-request.ts` | ~336 | Already deleted (Phase 1) | Confirmed gone |
 | `configuration/inference-modes.ts` | ~254 | Already deleted (Phase 3) | Confirmed gone |
 | `agent/runtime-state.ts` | ~140 | Already deleted (Phase 5) | Confirmed gone |
