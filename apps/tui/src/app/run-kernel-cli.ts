@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { migrateLegacyRunData, RunKernel } from "@logician/agent-core";
+import { RunKernel } from "@logician/agent-core";
 
 export interface RunKernelCommandIO {
 	stdout: (text: string) => void;
@@ -11,7 +11,6 @@ function usage(): string {
 		"Usage:",
 		"  logician run replay <session-id> [--json]",
 		"  logician run doctor <session-id> [--json]",
-		"  logician run migrate <session-id> [--json]",
 	].join("\n");
 }
 
@@ -24,28 +23,11 @@ export function runKernelCommand(
 	const action = args[0];
 	const sessionId = args[1];
 	const json = args.includes("--json");
-	if (
-		(action !== "replay" && action !== "doctor" && action !== "migrate") ||
-		!sessionId
-	) {
+	if ((action !== "replay" && action !== "doctor") || !sessionId) {
 		io.stderr(`${usage()}\n`);
 		return 2;
 	}
 	const kernel = new RunKernel(cwd, sessionId);
-	if (action === "migrate") {
-		const migrated = migrateLegacyRunData(kernel, cwd, sessionId);
-		if (json)
-			io.stdout(
-				`${JSON.stringify({ sessionId, migrated, file: kernel.filePath })}\n`,
-			);
-		else
-			io.stdout(
-				migrated
-					? `Migrated legacy execution data for ${sessionId} to ${kernel.filePath}\n`
-					: `No legacy execution data migrated for ${sessionId}.\n`,
-			);
-		return migrated ? 0 : 1;
-	}
 	if (!existsSync(kernel.filePath)) {
 		io.stderr(
 			`Run Kernel ledger not found for session ${sessionId}: ${kernel.filePath}\n`,

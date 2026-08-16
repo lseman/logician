@@ -15,11 +15,7 @@ Ledgers live under the workspace:
 .logician/run-kernel/<session-id>.jsonl
 ```
 
-Conversation messages remain in the session transcript. Legacy
-`.logician/runtime` and `.logician/trajectories` journals are imported when a
-session has no kernel ledger, then moved to
-`.logician/migrations/v1-archive/`. Integrated sessions never write the old
-formats.
+Conversation messages remain in the session transcript.
 
 ## Guarantees
 
@@ -55,10 +51,8 @@ logician run replay <session-id>
 logician run replay <session-id> --json
 logician run doctor <session-id>
 logician run doctor <session-id> --json
-logician run migrate <session-id>
 ```
 
 `replay` materializes the current projection. `doctor` reports parse errors,
 invariant violations, torn final records, incomplete operations, and the safe
-recovery action for each operation. `migrate` explicitly imports and archives
-pre-kernel execution journals; `replay` and `doctor` never mutate them.
+recovery action for each operation. Neither command mutates the ledger.

@@ -1,10 +1,9 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { RunKernel } from "../agent/run-kernel.ts";
-import { migrateLegacyRunData } from "../agent/run-kernel-migration.ts";
 
 void test("kernel journal persists and deterministically restores its projection", () => {
 	const cwd = mkdtempSync(path.join(tmpdir(), "logician-kernel-"));
@@ -220,106 +219,5 @@ void test("a stale kernel instance observes an external takeover before append",
 				},
 			),
 		/older than/,
-	);
-});
-
-void test("existing v1 run-state and trajectory journals import into the kernel", () => {
-	const cwd = mkdtempSync(path.join(tmpdir(), "logician-kernel-import-"));
-	const sessionId = "legacy-session";
-	const runId = "legacy-run";
-	const runtimeDir = path.join(cwd, ".logician", "runtime");
-	const trajectoryDir = path.join(cwd, ".logician", "trajectories");
-	mkdirSync(runtimeDir, { recursive: true });
-	mkdirSync(trajectoryDir, { recursive: true });
-	const initial = {
-		version: 1,
-		sessionId,
-		runId,
-		rootPrompt: "legacy objective",
-		createdAt: 10,
-		updatedAt: 10,
-		status: "active",
-		continuationRuns: 0,
-		noProgressRuns: 0,
-		lastProgressFingerprint: "initial",
-		lastCause: "user_prompt",
-		compactionGeneration: 0,
-	};
-	const journal = [
-		{
-			version: 1,
-			sequence: 1,
-			timestamp: 10,
-			sessionId,
-			runId,
-			event: { type: "run_started", state: initial },
-		},
-		{
-			version: 1,
-			sequence: 2,
-			timestamp: 20,
-			sessionId,
-			runId,
-			event: {
-				type: "continuation_requested",
-				cause: "legacy_continue",
-				progressFingerprint: "progress",
-			},
-		},
-		{
-			version: 1,
-			sequence: 3,
-			timestamp: 30,
-			sessionId,
-			runId,
-			event: {
-				type: "run_outcome",
-				outcome: { status: "completed", source: "structured" },
-			},
-		},
-	];
-	appendFileSync(
-		path.join(runtimeDir, `${sessionId}.jsonl`),
-		`${journal.map(item => JSON.stringify(item)).join("\n")}\n`,
-	);
-	const trajectory = ["run_start", "run_finish"].map((kind, index) => ({
-		version: 1,
-		sequence: index + 1,
-		timestamp: 21 + index,
-		sessionId,
-		runId,
-		operationId: "legacy-operation",
-		kind,
-		payload: { status: "completed" },
-	}));
-	appendFileSync(
-		path.join(trajectoryDir, `${sessionId}.jsonl`),
-		`${trajectory.map(item => JSON.stringify(item)).join("\n")}\n`,
-	);
-	const kernel = new RunKernel(cwd, sessionId);
-	assert.equal(kernel.snapshot().state.lastSequence, 0);
-	assert.equal(migrateLegacyRunData(kernel, cwd, sessionId), true);
-	const imported = kernel.snapshot();
-	assert.deepEqual(imported.violations, []);
-	assert.equal(imported.state.rootPrompt, "legacy objective");
-	assert.equal(imported.state.continuationRuns, 1);
-	assert.equal(imported.state.status, "completed");
-	assert.deepEqual(
-		imported.state.trajectory.map(entry => entry.kind),
-		["run_start", "run_finish"],
-	);
-	assert.equal(existsSync(path.join(runtimeDir, `${sessionId}.jsonl`)), false);
-	assert.equal(
-		existsSync(
-			path.join(
-				cwd,
-				".logician",
-				"migrations",
-				"v1-archive",
-				"runtime",
-				`${sessionId}.jsonl`,
-			),
-		),
-		true,
 	);
 });

@@ -79,7 +79,6 @@ import {
 } from "./messages.ts";
 import { type ContinuationDecision, RunKernel } from "./run-kernel.ts";
 import type { RunKernelState } from "./run-kernel-events.ts";
-import { migrateLegacyRunData } from "./run-kernel-migration.ts";
 import {
 	type AgentRuntimeState,
 	createRuntimeState,
@@ -1428,7 +1427,6 @@ export class AgentHarness {
 		this._sessionId = id;
 		this.config.hookSessionId = id;
 		this.runKernel.useSession(id);
-		migrateLegacyRunData(this.runKernel, this.cwd ?? process.cwd(), id);
 		this.restoreKernelSessionState();
 	}
 
@@ -1640,7 +1638,6 @@ export class AgentHarness {
 		this._session = new Session(sessionId, { baseDir, enabled: true });
 		this._sessionId = sessionId;
 		this.runKernel.useSession(sessionId);
-		migrateLegacyRunData(this.runKernel, this.cwd ?? process.cwd(), sessionId);
 		this.restoreKernelSessionState();
 		await this.emitSessionStart("startup");
 	}
@@ -1661,7 +1658,6 @@ export class AgentHarness {
 		this._session = resumed.session;
 		this._sessionId = sessionId;
 		this.runKernel.useSession(sessionId);
-		migrateLegacyRunData(this.runKernel, this.cwd ?? process.cwd(), sessionId);
 		this.restoreKernelSessionState();
 		await this.emitSessionStart("resume");
 		return true;

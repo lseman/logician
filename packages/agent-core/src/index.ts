@@ -14,7 +14,6 @@ export * from "./agent/intervention-controller.ts";
 export * from "./agent/messages.ts";
 export * from "./agent/run-kernel.ts";
 export * from "./agent/run-kernel-events.ts";
-export * from "./agent/run-kernel-migration.ts";
 export * from "./agent/runtime-state.ts";
 export * from "./agent/session.ts";
 export type { TaskStatusRecord } from "./agent/tasks/task-status-state.ts";
