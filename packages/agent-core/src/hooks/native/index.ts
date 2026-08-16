@@ -2,4 +2,3 @@
 
 export type { AgentHooks } from "../../agent/types.ts";
 export * from "./hook-bus.ts";
-export * from "./hook-metrics.ts";
