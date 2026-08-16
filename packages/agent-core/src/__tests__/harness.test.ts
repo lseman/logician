@@ -275,6 +275,55 @@ void test("steer outside a turn throws HarnessBusyError", () => {
 	assert.throws(() => harness.steer("now"), HarnessBusyError);
 });
 
+void test("steering with steeringInterrupt survives the abort and reaches the next turn", async () => {
+	const backend = new FakeBackend([
+		() => {
+			harness.steer("urgent correction");
+			throw new DOMException("Operation aborted", "AbortError");
+		},
+		messages => {
+			assert.ok(
+				messages.some(
+					m => m.role === "user" && m.content === "urgent correction",
+				),
+			);
+			return textResponse("done");
+		},
+	]);
+	const config: AgentConfig = {
+		baseUrl: "http://fake",
+		model: "fake",
+		systemPrompt: "test",
+		runtimeHooksEnabled: false,
+		proactiveCompactionEnabled: false,
+		continuationEnabled: false,
+		steeringInterrupt: true,
+		tools: [
+			{
+				name: "noop",
+				description: "does nothing",
+				parameters: { type: "object", properties: {} },
+				execute: async () => "ok",
+			},
+		],
+	};
+	const harness = new AgentHarness({ config, backend, maxIterations: 5 });
+	let settledNextTurnCount = 0;
+	harness.setOnSettled(count => {
+		settledNextTurnCount = count;
+	});
+
+	await harness.prompt("initial question");
+	assert.equal(settledNextTurnCount, 1);
+
+	await harness.continueWithNextTurn();
+	assert.ok(
+		harness.messages.some(
+			m => m.role === "user" && m.content === "urgent correction",
+		),
+	);
+});
+
 void test("rewind restores the pre-prompt conversation, then returns null", async () => {
 	const harness = makeHarness(
 		new FakeBackend([() => textResponse("a1"), () => textResponse("a2")]),
