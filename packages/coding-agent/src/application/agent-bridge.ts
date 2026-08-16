@@ -1729,6 +1729,7 @@ export class AgentCoreBridge {
 			| "medium"
 			| "high"
 			| "xhigh";
+		this.harness?.setThinkingLevel(level);
 		// Also update the backend's default so future turns pick it up.
 		(this.backend as OpenAIBackend).setDefaultThinkingLevel(
 			level as "off" | "minimal" | "low" | "medium" | "high" | "xhigh",

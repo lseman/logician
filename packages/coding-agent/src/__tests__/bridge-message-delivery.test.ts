@@ -34,6 +34,23 @@ void test("runtime settings update the live harness and preserve guard auto mode
 	]);
 });
 
+void test("setThinkingLevel propagates to the live harness", () => {
+	const bridge = new AgentCoreBridge({
+		baseUrl: "http://127.0.0.1:1",
+		model: "test",
+		runtimeHooksEnabled: false,
+		mcpEager: false,
+	});
+	const harnessLevels: string[] = [];
+	(bridge as unknown as { harness: unknown }).harness = {
+		setThinkingLevel: (level: string) => harnessLevels.push(level),
+	};
+
+	bridge.setThinkingLevel("high");
+
+	assert.deepEqual(harnessLevels, ["high"]);
+});
+
 void test("direct /spawn records task and result in harness history", async () => {
 	const bridge = new AgentCoreBridge({
 		baseUrl: "http://127.0.0.1:1",
