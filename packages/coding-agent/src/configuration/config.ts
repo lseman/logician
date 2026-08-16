@@ -96,14 +96,6 @@ const COMPACTION_KEYS = new Set([
 	"reserveTokens",
 	"keepRecentTokens",
 ]);
-const GUARDRAILS_KEYS = new Set([
-	"guardsEnabled",
-	"duplicateGuardEnabled",
-	"duplicateToolThreshold",
-	"failureGuardEnabled",
-	"toolFailureLoopThreshold",
-	"budgetStopEnabled",
-]);
 const TRUNCATION_KEYS = new Set([
 	"toolResultMaxChars",
 	"maxLines",
@@ -382,30 +374,10 @@ export function validateConfig(
 		} else cfg.thinkingLevel = level as LogicianTuiConfig["thinkingLevel"];
 	}
 
-	// guardrails: nested object preferred; flat top-level keys still accepted
-	// for backward compatibility (nested values win when both are present).
-	let guardrailsSource = obj;
-	if (obj.guardrails !== undefined) {
-		warn(warnings, '"guardrails" is deprecated — use flat keys instead.');
-		if (typeof obj.guardrails !== "object" || obj.guardrails === null) {
-			warn(warnings, '"guardrails" must be an object.');
-		} else {
-			const g = obj.guardrails as Record<string, unknown>;
-			for (const key of Object.keys(g)) {
-				if (!GUARDRAILS_KEYS.has(key)) {
-					warn(warnings, `Unknown guardrails key: "${key}".`);
-				}
-			}
-			guardrailsSource = { ...obj, ...g };
-		}
-	}
-	cfg.guardsEnabled = configBool(guardrailsSource.guardsEnabled);
-	cfg.duplicateGuardEnabled = configBool(
-		guardrailsSource.duplicateGuardEnabled,
-		true,
-	);
-	cfg.failureGuardEnabled = configBool(guardrailsSource.failureGuardEnabled);
-	cfg.budgetStopEnabled = configBool(guardrailsSource.budgetStopEnabled);
+	cfg.guardsEnabled = configBool(obj.guardsEnabled);
+	cfg.duplicateGuardEnabled = configBool(obj.duplicateGuardEnabled, true);
+	cfg.failureGuardEnabled = configBool(obj.failureGuardEnabled);
+	cfg.budgetStopEnabled = configBool(obj.budgetStopEnabled);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
@@ -499,12 +471,7 @@ export function validateConfig(
 		["toolFailureLoopThreshold", 0, true],
 		["maxParallelAgents", 0, false],
 	] as const) {
-		// duplicateToolThreshold / toolFailureLoopThreshold may come from the
-		// nested "guardrails" object (which wins over the flat legacy key).
-		const source =
-			key === "duplicateToolThreshold" || key === "toolFailureLoopThreshold"
-				? guardrailsSource
-				: obj;
+		const source = obj;
 		if (source[key] === undefined) continue;
 		const value = configNumber(source[key]);
 		const valid =

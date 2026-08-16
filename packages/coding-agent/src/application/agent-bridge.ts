@@ -128,8 +128,6 @@ export interface AgentBridgeOptions {
 	permissionRules?: PermissionRules;
 	steeringInterrupt?: boolean;
 	maxTotalTokens?: number;
-	/** @deprecated MCP discovery is always non-blocking. */
-	mcpEager?: boolean;
 	/** Test-only: suppress the construction-time MCP auto-start so unit tests
 	 * can stub McpManager/loadMcpToolsOnce before anything real fires.
 	 * Real app startup never sets this — MCP always auto-starts on open. */

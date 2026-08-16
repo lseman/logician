@@ -511,22 +511,20 @@ export function handleSettingsSelectorAction(
 		case "budget early-stop":
 		case "memory": {
 			const on = value === "true";
-			const keys = {
-				"duplicate-call guard": ["duplicateGuardEnabled", "guardrails"],
-				"failure-loop guard": ["failureGuardEnabled", "guardrails"],
-				continuation: ["continuationEnabled", "continuationEnabled"],
-				"auto-compact on full context": ["autoRetryEnabled", "autoRetryEnabled"],
-				reflection: ["reflectionEnabled", "reflectionConfig"],
-				"budget early-stop": ["budgetStopEnabled", "guardrails"],
-				memory: ["memoryEnabled", "memory"],
+			const runtimeKeys = {
+				"duplicate-call guard": "duplicateGuardEnabled",
+				"failure-loop guard": "failureGuardEnabled",
+				continuation: "continuationEnabled",
+				"auto-compact on full context": "autoRetryEnabled",
+				reflection: "reflectionEnabled",
+				"budget early-stop": "budgetStopEnabled",
+				memory: "memoryEnabled",
 			} as const;
-			const [runtimeKey, configKey] =
-				keys[settingName.toLowerCase() as keyof typeof keys];
-			ctx.bridge.setRuntimeToggle(runtimeKey, on);
-			if (configKey === "reflectionConfig")
+			const configKey =
+				runtimeKeys[settingName.toLowerCase() as keyof typeof runtimeKeys];
+			ctx.bridge.setRuntimeToggle(configKey, on);
+			if (configKey === "reflectionEnabled")
 				saveConfigNestedField("reflectionConfig", "enabled", on);
-			else if (configKey === "guardrails")
-				saveConfigNestedField("guardrails", runtimeKey, on);
 			else saveConfigField(configKey, on);
 			ctx.notify(`${settingName}: ${on ? "on" : "off"}`, "success");
 			break;

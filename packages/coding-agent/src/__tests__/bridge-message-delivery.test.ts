@@ -8,7 +8,6 @@ void test("runtime settings update the live harness and preserve guard auto mode
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const patches: Array<Record<string, unknown>> = [];
 	(bridge as unknown as { harness: unknown }).harness = {
@@ -39,7 +38,6 @@ void test("setThinkingLevel propagates to the live harness", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const harnessLevels: string[] = [];
 	(bridge as unknown as { harness: unknown }).harness = {
@@ -56,7 +54,6 @@ void test("setSteeringInterrupt propagates to the live harness", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const harnessValues: boolean[] = [];
 	(bridge as unknown as { harness: unknown }).harness = {
@@ -73,7 +70,6 @@ void test("direct /spawn records task and result in harness history", async () =
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as {
 		toolRouter: {
@@ -155,7 +151,6 @@ void test("startup state reports the registered web_search capability", async ()
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 		webSearch: { baseUrl: "http://search.test:8090" },
 	});
 	const internal = bridge as unknown as Record<string, unknown>;
@@ -177,7 +172,6 @@ void test("sandbox mode cycles off -> code -> full -> off and updates the tool d
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	try {
 		setDefaultSandboxProfile("code");
@@ -199,7 +193,6 @@ void test("an in-flight MCP connection never blocks delivery of a user message",
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
@@ -229,7 +222,6 @@ void test("MCP discovery never blocks the first turn — it loads in the backgro
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: true,
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
@@ -262,7 +254,6 @@ void test("MCP load failures are injected into the system prompt", async () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
@@ -292,7 +283,6 @@ void test("plugin hook updates preserve MCP and skills system context", async ()
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 		autoStartMcp: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
@@ -351,7 +341,6 @@ void test("malformed startup hook messages do not prevent initialization", () =>
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 
@@ -377,7 +366,6 @@ void test("/context preserves complete long messages and tool results", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	const longUserMessage = `user-start\n${"u".repeat(2500)}\nuser-end`;
@@ -407,7 +395,6 @@ void test("/context omits an empty orient task state", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.currentTaskState = {
@@ -430,7 +417,6 @@ void test("/context omits terminal handoff state", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.currentTaskState = {
@@ -460,7 +446,6 @@ void test("/context renders request-time memory injection", () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 		memoryDbPath: `/tmp/logician-context-memory-${process.pid}-${Date.now()}.db`,
 		memoryViewerEnabled: false,
 	});
@@ -497,7 +482,6 @@ void test("matching skills are injected only for the selected turn", async () =>
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
@@ -541,7 +525,6 @@ void test("automatic continuation retains the active skill", async () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
@@ -595,7 +578,6 @@ void test("sendMessage rejects when the turn fails", async () => {
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
@@ -614,7 +596,6 @@ void test("cancel resolves only after abort settlement and returns recoverable q
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	let settled = false;
@@ -645,7 +626,6 @@ void test("core iterations reconcile output without completing the UI turn early
 		baseUrl: "http://127.0.0.1:1",
 		model: "test",
 		runtimeHooksEnabled: false,
-		mcpEager: false,
 	});
 	const internal = bridge as unknown as Record<string, any>;
 	internal.startupHooksRan = true;
