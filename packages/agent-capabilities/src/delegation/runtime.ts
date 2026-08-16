@@ -14,7 +14,7 @@ import {
 import type {
 	AfterToolCallContext,
 	AfterToolCallResult,
-} from "@logician/agent-core/agent/types/types-hooks.ts";
+} from "@logician/agent-core/agent/types/types-messages.ts";
 
 export interface DelegationContract {
 	expectedOutput?: string;
