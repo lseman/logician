@@ -68,6 +68,7 @@ export type {
 	AgentEventBody,
 	AgentEventEnvelope,
 	EventHandler,
+	AgentEventSink,
 } from "./types/types-events.ts";
 export type {
 	AfterProviderResponseContext,

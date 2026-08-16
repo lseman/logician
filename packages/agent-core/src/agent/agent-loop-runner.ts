@@ -17,11 +17,15 @@ import {
 	stripTextToolCalls,
 } from "../tools/shared/text-to-tool-calls.ts";
 import type { LLMBackend } from "./backend.ts";
+import { buildProviderRequestOptions } from "./loop/provider-options.ts";
+import { buildStreamingCallbacks } from "./loop/provider-streaming.ts";
+import { processProviderResponse } from "./loop/provider-response.ts";
 import { resolveAgentSettings } from "./agent-settings.ts";
 import { getInferenceMode } from "./types/types-config.ts";
 import {
 	evaluateStopPolicies,
 	resolveExecutionPolicy,
+	type RunOutcomeStatus,
 } from "./execution-policy.ts";
 import {
 	type AcceptanceConfig,
@@ -78,15 +82,16 @@ import { ToolResultCache } from "./tool-cache.ts";
 import type {
 	AgentConfig,
 	AgentEvent,
+	AgentEventSink,
 	AgentMessage,
 	CompactableMessage,
 	Message,
 	Tool,
+	ToolCall,
 } from "./types.ts";
 
 export type { ReflectionConfig } from "./loop/reflection.ts";
 
-export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
 export const STEERING_INTERRUPT_NAME = "SteeringInterruptError";
 export const STEERING_INTERRUPT_SUMMARY =
@@ -190,7 +195,7 @@ async function runAgentLoopInTaskScope(
 	const newMessages: Message[] = [...prompts];
 	resetTaskStatus();
 	const finish = async (outcome: {
-		status: "completed" | "needs_input" | "blocked" | "failed" | "cancelled";
+		status: RunOutcomeStatus;
 		summary?: string;
 		source: "structured" | "heuristic" | "runtime";
 	}): Promise<Message[]> => {
@@ -577,72 +582,28 @@ async function runAgentLoopInTaskScope(
 					const modeDef = effectiveMode
 						? getInferenceMode(effectiveMode)
 						: undefined;
-					// When the mode asks for provider defaults, omit all sampling
-					// params so the provider uses its own built-in defaults.
-					const useProviderDefaults = modeDef?.useProviderDefaults ?? false;
-					const modeParams = useProviderDefaults ? undefined : modeDef?.params;
-					const effectiveTemp =
-						modeParams?.temperature ?? config.temperature ?? 0.5;
-					response = await config.backend.generate(chatMessages, {
-						tools: registry.toToolDefinitions(),
-						...(!useProviderDefaults && { temperature: effectiveTemp }),
-						maxTokens: config.maxTokens ?? 4096,
-						...(modeParams?.top_p !== undefined && { topP: modeParams.top_p }),
-						...(modeParams?.top_k !== undefined && { topK: modeParams.top_k }),
-						...(modeParams?.min_p !== undefined && { minP: modeParams.min_p }),
-						...(modeParams?.presence_penalty !== undefined && {
-							presencePenalty: modeParams.presence_penalty,
-						}),
-						...(modeParams?.repetition_penalty !== undefined && {
-							repetitionPenalty: modeParams.repetition_penalty,
-						}),
+					const requestOptions = buildProviderRequestOptions({
+						chatMessages,
+						toolDefinitions: registry.toToolDefinitions(),
+						settings,
+						config,
+						requestHeaders: requestHeaders as Record<string, string>,
+						requestTimeoutMs: requestTimeoutMs as number,
+						requestMaxRetries: requestMaxRetries as number,
+						requestCacheRetention,
+						requestMetadata,
+						modeDef,
 						signal: config.signal,
-						thinkingLevel: settings.thinkingLevel,
-						callbacks: {
-							onDelta: delta =>
-								queueProviderEvent({ type: "text_delta", turnId, delta }),
-							onThinking: delta =>
-								queueProviderEvent({ type: "thinking_delta", turnId, delta }),
-							onTextStart: () =>
-								queueProviderEvent({ type: "text_start", turnId }),
-							onTextEnd: () => queueProviderEvent({ type: "text_end", turnId }),
-							onToolCallStart: (toolCallId, toolName, args) =>
-								queueProviderEvent({
-									type: "tool_call_start",
-									toolCallId,
-									toolName,
-									args,
-								}),
-							onToolCallDelta: (toolCallId, delta) =>
-								queueProviderEvent({
-									type: "tool_call_delta",
-									toolCallId,
-									delta,
-								}),
-							onToolCallIdUpdate: (previousToolCallId, toolCallId) =>
-								queueProviderEvent({
-									type: "tool_call_id_update",
-									previousToolCallId,
-									toolCallId,
-								}),
-						},
-						headers: requestHeaders,
-						timeoutMs: requestTimeoutMs,
-						maxRetries: requestMaxRetries,
-						cacheRetention: requestCacheRetention,
-						metadata: requestMetadata,
-						transformPayload: async basePayload => {
-							let payload = basePayload;
-							for (const hook of payloadHooks) {
-								const result = await hook?.({
-									model: config.model ?? "",
-									payload,
-								});
-								if (result?.payload) payload = result.payload;
-							}
-							return payload;
-						},
+						payloadHooks,
 					});
+					requestOptions.callbacks = buildStreamingCallbacks(
+						turnId,
+						queueProviderEvent,
+					);
+					response = await config.backend.generate(
+						chatMessages,
+						requestOptions,
+					);
 					await Promise.all(providerEvents);
 					if (activeRetryAttempt > 0) {
 						await emit({
@@ -764,8 +725,6 @@ async function runAgentLoopInTaskScope(
 							},
 						});
 					}
-
-
 				}
 			}
 
@@ -775,108 +734,40 @@ async function runAgentLoopInTaskScope(
 			if (!tokenBudget.allowed) {
 				return finishForBudgetExhaustion(tokenBudget);
 			}
-			let toolCalls = response?.toolCalls ?? [];
-			let assistantContent = response?.content ?? "";
-			// Fallback: when LLM emits tool calls as text instead of structured
-			// tool_calls array, extract them from the response content.
-			if (toolCalls.length === 0 && response?.content) {
-				const textCalls = parseTextToolCalls(response.content, name =>
-					registry.has(name),
-				);
-				if (textCalls.length > 0) {
-					toolCalls = textCalls;
-					assistantContent = stripTextToolCalls(response.content);
+			const processResult = processProviderResponse({
+				response,
+				registry,
+				outputGuard: outputGuard ?? null,
+				messages,
+				newMessages,
+				turnId,
+				iteration,
+				emit,
+				config,
+				extensionBus: config.extensionBus,
+			});
+
+			let toolCalls: ToolCall[];
+			let assistant: Message;
+			let assistantContent: string;
+			if (processResult.success) {
+				toolCalls = processResult.toolCalls;
+				assistantContent = processResult.assistantContent;
+				assistant = processResult.assistant;
+				if (toolCalls.some(call => call.name !== "task_status")) {
+					performedToolWork = true;
+					lastToolWorkIteration = iteration;
 				}
-			}
-			if (toolCalls.some(call => call.name !== "task_status")) {
-				performedToolWork = true;
-				lastToolWorkIteration = iteration;
+			} else {
+				return finish({
+					status: "failed",
+					summary: processResult.errorMessage ?? "Model returned empty response.",
+					source: "runtime",
+				});
 			}
 			const rawStopReason =
 				(response?.stopReason as "stop" | "length" | "error") ?? "stop";
 			const stopReason = stopReasonFor(rawStopReason, toolCalls);
-
-			// Apply afterProviderResponse hook
-			const responseHooks = [
-				config.internalHooks?.afterProviderResponse,
-				config.hooks?.afterProviderResponse,
-			];
-			for (const hook of responseHooks) {
-				await hook?.({
-					model: config.model ?? "",
-					content: assistantContent,
-					toolCallCount: toolCalls.length,
-					stopReason,
-					usageTokens: response?.usage?.totalTokens,
-					iteration,
-				});
-			}
-
-			// Output guard: check for empty/degenerate responses
-			if (outputGuard) {
-				const guardCheck = outputGuard.checkResponse(
-					assistantContent || null,
-					toolCalls.length,
-				);
-				if (guardCheck.action === "abort") {
-					await emit({
-						type: "error",
-						message: guardCheck.message ?? "Model returned empty response.",
-					});
-					return finish({
-						status: "failed",
-						summary: guardCheck.message ?? "Model returned empty response.",
-						source: "runtime",
-					});
-				}
-			}
-
-			// Persist sanitized arguments (invalid JSON replaced with "{}") so a
-			// call truncated by the output token limit never poisons history with
-			// a tool_call the backend can never re-parse on a later turn. The
-			// *execution* path below still uses the original `toolCalls`, whose
-			// ids the executor's own truncation handling (tool-batch-controller's
-			// "length" branch) depends on for tool_call/tool_result pairing.
-			const assistant = createAssistantMessage(
-				assistantContent,
-				sanitizeToolCallArguments(toolCalls),
-			);
-			messages.push(assistant);
-			newMessages.push(assistant);
-			await emitTyped(config.extensionBus, {
-				type: "message_start",
-				message: assistant,
-			});
-			await emit({ type: "message_start", turnId, role: "assistant" });
-			await emit({ type: "message_update", turnId, message: assistant });
-			await emitTyped(config.extensionBus, {
-				type: "message_update",
-				message: assistant,
-			});
-			await emit({ type: "message_end", turnId, message: assistant });
-			await emitTyped(config.extensionBus, {
-				type: "message_end",
-				message: assistant,
-			});
-
-			if (stopReason === "error") {
-				await emit({
-					type: "error",
-					message: response.errorMessage ?? "Model request failed",
-				});
-				await emit({
-					type: "turn_end",
-					turnId,
-					stopReason,
-					message: assistant,
-					toolResults: [],
-				});
-				return finish({
-					status: "failed",
-					summary: response.errorMessage ?? "Model request failed",
-					source: "runtime",
-				});
-			}
 
 			hasMoreToolCalls = false;
 			const toolBudget = runBudget.requestToolBatch(toolCalls.length);

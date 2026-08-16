@@ -1,13 +1,10 @@
+import type { RunOutcomeStatus } from "./execution-policy.ts";
 import type { HarnessIntervention } from "./intervention-controller.ts";
 
 export const RUN_KERNEL_SCHEMA_VERSION = 1 as const;
 
-export type RunTerminalStatus =
-	| "completed"
-	| "needs_input"
-	| "blocked"
-	| "failed"
-	| "cancelled";
+/** @deprecated Use `RunOutcomeStatus` from execution-policy.ts directly. */
+export type RunTerminalStatus = RunOutcomeStatus;
 
 export type RunOperationRecovery =
 	| "pure"
