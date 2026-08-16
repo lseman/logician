@@ -19,6 +19,21 @@ export {
 	loadLogicianConfig,
 	saveConfigField,
 } from "./configuration/config.ts";
+export type {
+	CompactionSettings,
+	GuardSettings,
+	InferenceModeValue,
+	LspSettings,
+	MemorySettings,
+	ModelSettings,
+	ReasonerSettings,
+	ReflectionSettings,
+	RuntimeSettings,
+	ThinkingLevelValue,
+	ToolSettings,
+	TranscriptSettings,
+	WebSearchSettings,
+} from "./configuration/config-types.ts";
 export * from "./context/index.ts";
 export * from "./mcp/index.ts";
 export * from "./prompts/index.ts";

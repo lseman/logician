@@ -1,7 +1,8 @@
 // ── Core types (barrel) ──────────────────────────────────────────────────
 // Re-exports from consolidated sub-modules:
 //   types-config.ts  : Config, Error, Truncation types
-//   types-messages.ts: Message, Tool, Event, Hook types
+//   types-messages.ts: Message, Tool, Event types
+//   types-hooks.ts   : Hook context/result types (extracted from types-messages)
 //   types-truncation.ts: Truncation defaults (kept separate — used by non-type code)
 
 export type {
@@ -39,21 +40,45 @@ export {
 	INFERENCE_MODE_ORDER,
 	INFERENCE_MODES,
 	isValidInferenceMode,
+	QUEUE_MODES,
+	THINKING_LEVELS,
+	VALID_TOOL_EXECUTION,
 	AgentError,
 	AgentErrorType,
 	wrapError,
 } from "./types/types-config.ts";
-// ── Message, Tool, Event, Hook ────────────────────────────────────────────
+// ── Message, Tool, Event ──────────────────────────────────────────────────
 export type {
 	AgentEvent,
 	AgentEventBody,
 	AgentEventEnvelope,
 	EventHandler,
 	AgentEventSink,
+	AgentMessage,
+	AskUserContext,
+	BashExecutionMessage,
+	BranchSummaryMessage,
+	CompactableMessage,
+	CompactionSummaryMessage,
+	CustomAgentMessageMap,
+	CustomAgentMessages,
+	CustomMessage,
+	LlmRole,
+	Message,
+	MessageRole,
+	StopReason,
+	Tool,
+	ToolCall,
+	ToolContext,
+	ToolExecutionMode,
+	ToolResult,
+} from "./types/types-messages.ts";
+// ── Hook context/result types (extracted to types-hooks.ts) ───────────────
+export type {
+	AgentHooks,
 	AfterProviderResponseContext,
 	AfterToolCallContext,
 	AfterToolCallResult,
-	AgentHooks,
 	BeforeAgentStartContext,
 	BeforeAgentStartResult,
 	BeforeCompactContext,
@@ -71,25 +96,7 @@ export type {
 	ShouldStopAfterTurnContext,
 	TransformContext,
 	TransformContextResult,
-	AgentMessage,
-	BashExecutionMessage,
-	BranchSummaryMessage,
-	CompactableMessage,
-	CompactionSummaryMessage,
-	CustomAgentMessageMap,
-	CustomAgentMessages,
-	CustomMessage,
-	LlmRole,
-	Message,
-	MessageRole,
-	StopReason,
-	AskUserContext,
-	Tool,
-	ToolCall,
-	ToolContext,
-	ToolExecutionMode,
-	ToolResult,
-} from "./types/types-messages.ts";
+} from "./types/types-hooks.ts";
 export type { TruncationConfig } from "./types/types-truncation.ts";
 export {
 	DEFAULT_TRUNCATION,

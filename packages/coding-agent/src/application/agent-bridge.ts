@@ -23,6 +23,7 @@ import {
 	type TruncationConfig,
 	type WebSearchConfig,
 } from "@logician/agent-core";
+import type { QueueMode } from "@logician/agent-core";
 import { OpenAIBackend } from "@logician/agent-core/agent/backend.ts";
 import {
 	estimateChatPayloadTokens,
@@ -1119,7 +1120,7 @@ export class AgentCoreBridge {
 	}
 
 	/** Controls how queued steering messages are drained. */
-	setSteeringMode(mode: "all" | "one-at-a-time"): void {
+	setSteeringMode(mode: QueueMode): void {
 		this.config.steeringQueueMode = mode;
 		this.harness?.setSteeringMode(mode);
 	}
@@ -1152,7 +1153,7 @@ export class AgentCoreBridge {
 	}
 
 	/** Controls how queued follow-up messages are drained. */
-	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
+	setFollowUpMode(mode: QueueMode): void {
 		this.config.followUpQueueMode = mode;
 		this.harness?.setFollowUpMode(mode);
 	}
