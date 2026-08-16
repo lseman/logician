@@ -663,25 +663,6 @@ export class SessionManager {
 	}
 
 	/**
-	 * Fork an existing session, creating a child session that shares the
-	 * parent's message tree but diverges from this point.
-	 * The child inherits the parent's entryId as its parentId.
-	 */
-	forkSession(parentId: string, name?: string): Session | null {
-		const parent = this.getSession(parentId);
-		if (!parent) return null;
-
-		const childId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-		const child = new Session(childId, {
-			baseDir: join(this.baseDir, ".."),
-			parentId,
-			version: 2,
-		});
-		if (name) child.setName(name);
-		return child;
-	}
-
-	/**
 	 * Get the full session tree rooted at a given session ID.
 	 * Returns an array of session IDs from root to leaf.
 	 */
