@@ -290,11 +290,6 @@ export async function openSettingsSelector(
 					"Block repeated equivalent tool failures",
 				],
 				[
-					"Thinking-loop guard",
-					data.thinkingLoopDetectionEnabled,
-					"Detect reasoning loops without action",
-				],
-				[
 					"Continuation",
 					data.continuationEnabled,
 					"Continue bounded unfinished autonomous work",
@@ -510,7 +505,6 @@ export function handleSettingsSelectorAction(
 		}
 		case "duplicate-call guard":
 		case "failure-loop guard":
-		case "thinking-loop guard":
 		case "continuation":
 		case "auto-compact on full context":
 		case "reflection":
@@ -520,7 +514,6 @@ export function handleSettingsSelectorAction(
 			const keys = {
 				"duplicate-call guard": ["duplicateGuardEnabled", "guardrails"],
 				"failure-loop guard": ["failureGuardEnabled", "guardrails"],
-				"thinking-loop guard": ["thinkingLoopDetectionEnabled", "guardrails"],
 				continuation: ["continuationEnabled", "continuationEnabled"],
 				"auto-compact on full context": ["autoRetryEnabled", "autoRetryEnabled"],
 				reflection: ["reflectionEnabled", "reflectionConfig"],

@@ -140,10 +140,6 @@ export function resolveRuntimeConfig(
 			duplicateToolThreshold: configNumber(config.duplicateToolThreshold),
 			toolFailureLoopThreshold: configNumber(config.toolFailureLoopThreshold),
 			budgetStopEnabled: configBool(config.budgetStopEnabled),
-			thinkingLoopDetectionEnabled: configBool(
-				config.thinkingLoopDetectionEnabled,
-				true,
-			),
 			proactiveCompactionEnabled: configBool(config.compaction?.enabled),
 			compaction: config.compaction,
 			maxParallelAgents: configNumber(config.maxParallelAgents),

@@ -61,7 +61,6 @@ const KNOWN_KEYS = new Set([
 	"duplicateToolThreshold",
 	"toolFailureLoopThreshold",
 	"budgetStopEnabled",
-	"thinkingLoopDetectionEnabled",
 	"guardrails",
 	"continuationEnabled",
 	"reflectionConfig",
@@ -103,7 +102,6 @@ const GUARDRAILS_KEYS = new Set([
 	"duplicateToolThreshold",
 	"failureGuardEnabled",
 	"toolFailureLoopThreshold",
-	"thinkingLoopDetectionEnabled",
 	"budgetStopEnabled",
 ]);
 const TRUNCATION_KEYS = new Set([
@@ -408,10 +406,6 @@ export function validateConfig(
 	);
 	cfg.failureGuardEnabled = configBool(guardrailsSource.failureGuardEnabled);
 	cfg.budgetStopEnabled = configBool(guardrailsSource.budgetStopEnabled);
-	cfg.thinkingLoopDetectionEnabled = configBool(
-		guardrailsSource.thinkingLoopDetectionEnabled,
-		true,
-	);
 	cfg.continuationEnabled = configBool(obj.continuationEnabled, true);
 	cfg.postEditDiagnostics = configBool(obj.postEditDiagnostics, true);
 	cfg.autoRetryEnabled = configBool(obj.autoRetryEnabled, true);
@@ -890,7 +884,6 @@ export interface LogicianTuiConfig {
 	duplicateToolThreshold?: number; // consecutive identical calls before the duplicate guard blocks (default 3)
 	toolFailureLoopThreshold?: number; // repeated failures (same call/path/category) before the failure guard blocks (default 3)
 	budgetStopEnabled?: boolean; // OFF by default — stops the run early once per-turn token growth flattens
-	thinkingLoopDetectionEnabled?: boolean; // ON by default — detects meta-reasoning spirals (thinking without acting)
 	continuationEnabled?: boolean; // ON by default — prevents premature stopping when the model says "done" mid-task
 	postEditDiagnostics?: boolean; // ON by default — syntax and project-aware diagnostics after edits
 	autoRetryEnabled?: boolean;

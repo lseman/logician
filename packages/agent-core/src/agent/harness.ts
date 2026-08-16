@@ -1240,7 +1240,6 @@ export class AgentHarness {
 				| "failureGuardEnabled"
 				| "budgetStopEnabled"
 				| "continuationEnabled"
-				| "thinkingLoopDetectionEnabled"
 				| "autoRetryEnabled"
 				| "reflectionConfig"
 			>
