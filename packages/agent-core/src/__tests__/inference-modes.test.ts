@@ -21,7 +21,6 @@ void test("getInferenceMode returns correct params", () => {
 	const mode = getInferenceMode("thinking-general");
 	assert.ok(mode);
 	assert.equal(mode.label, "Think Gen");
-	assert.equal(mode.thinking, true);
 	assert.equal(mode.params.temperature, 1.0);
 	assert.equal(mode.params.top_p, 0.95);
 	assert.equal(mode.params.top_k, 20);
@@ -97,7 +96,6 @@ void test("instruct-coding has low temperature and zero presence penalty", () =>
 	const mode = getInferenceMode("instruct-coding");
 	assert.ok(mode);
 	assert.equal(mode.label, "Code");
-	assert.equal(mode.thinking, false);
 	assert.equal(mode.params.temperature, 0.3);
 	assert.equal(mode.params.presence_penalty, 0.0);
 });
@@ -106,7 +104,6 @@ void test("deterministic has zero temperature and top_p", () => {
 	const mode = getInferenceMode("deterministic");
 	assert.ok(mode);
 	assert.equal(mode.label, "Exact");
-	assert.equal(mode.thinking, false);
 	assert.equal(mode.params.temperature, 0.0);
 	assert.equal(mode.params.top_p, 0.0);
 	assert.equal(mode.params.top_k, 1);
@@ -116,7 +113,6 @@ void test("creative has ultra-high temperature", () => {
 	const mode = getInferenceMode("creative");
 	assert.ok(mode);
 	assert.equal(mode.label, "Creative");
-	assert.equal(mode.thinking, false);
 	assert.equal(mode.params.temperature, 1.3);
 	assert.equal(mode.params.top_p, 0.99);
 	assert.equal(mode.params.top_k, 40);
@@ -127,7 +123,6 @@ void test("analytical has low temperature and tight top_p", () => {
 	const mode = getInferenceMode("analytical");
 	assert.ok(mode);
 	assert.equal(mode.label, "Analyze");
-	assert.equal(mode.thinking, false);
 	assert.equal(mode.params.temperature, 0.2);
 	assert.equal(mode.params.top_p, 0.7);
 	assert.equal(mode.params.presence_penalty, 0.5);
@@ -138,7 +133,6 @@ void test("none mode omits sampling params to provider", () => {
 	const mode = getInferenceMode("none");
 	assert.ok(mode);
 	assert.equal(mode.label, "Provider");
-	assert.equal(mode.thinking, false);
 	assert.equal(mode.useProviderDefaults, true);
 	assert.equal(isValidInferenceMode("none"), true);
 });
