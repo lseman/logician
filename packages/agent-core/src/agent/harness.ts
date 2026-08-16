@@ -1196,6 +1196,10 @@ export class AgentHarness {
 		this.config.temperature = temperature;
 	}
 
+	setSteeringInterrupt(enabled: boolean): void {
+		this.config.steeringInterrupt = enabled;
+	}
+
 	setInferenceMode(mode: string): void {
 		// Validate mode name before accepting it.
 		const valid = [
