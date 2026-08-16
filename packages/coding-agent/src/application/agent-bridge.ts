@@ -146,7 +146,6 @@ export interface AgentBridgeOptions {
 	duplicateToolThreshold?: number;
 	toolFailureLoopThreshold?: number;
 	budgetStopEnabled?: boolean;
-	thinkingLoopDetectionEnabled?: boolean;
 	proactiveCompactionEnabled?: boolean;
 	compaction?: {
 		enabled?: boolean;
@@ -522,7 +521,6 @@ export class AgentCoreBridge {
 			duplicateToolThreshold: opts.duplicateToolThreshold,
 			toolFailureLoopThreshold: opts.toolFailureLoopThreshold,
 			budgetStopEnabled: opts.budgetStopEnabled,
-			thinkingLoopDetectionEnabled: opts.thinkingLoopDetectionEnabled,
 			proactiveCompactionEnabled: opts.proactiveCompactionEnabled,
 			continuationEnabled: opts.continuationEnabled,
 			reflectionConfig: opts.reflectionConfig,
@@ -1785,7 +1783,6 @@ export class AgentCoreBridge {
 			| "duplicateGuardEnabled"
 			| "failureGuardEnabled"
 			| "budgetStopEnabled"
-			| "thinkingLoopDetectionEnabled"
 			| "continuationEnabled"
 			| "autoRetryEnabled"
 			| "reflectionEnabled"
@@ -1875,7 +1872,6 @@ export class AgentCoreBridge {
 			key === "duplicateGuardEnabled" ||
 			key === "failureGuardEnabled" ||
 			key === "budgetStopEnabled" ||
-			key === "thinkingLoopDetectionEnabled" ||
 			key === "continuationEnabled" ||
 			key === "autoRetryEnabled"
 		) {
@@ -1912,7 +1908,6 @@ export class AgentCoreBridge {
 		memoryEnabled: boolean;
 		duplicateGuardEnabled: boolean;
 		failureGuardEnabled: boolean;
-		thinkingLoopDetectionEnabled: boolean;
 		continuationEnabled: boolean;
 		autoRetryEnabled: boolean;
 		reflectionEnabled: boolean;
@@ -1938,8 +1933,6 @@ export class AgentCoreBridge {
 			memoryEnabled: this.memoryStore !== null,
 			duplicateGuardEnabled: this.config.duplicateGuardEnabled ?? true,
 			failureGuardEnabled: this.config.failureGuardEnabled ?? false,
-			thinkingLoopDetectionEnabled:
-				this.config.thinkingLoopDetectionEnabled ?? true,
 			continuationEnabled: this.config.continuationEnabled ?? true,
 			autoRetryEnabled: this.config.autoRetryEnabled ?? true,
 			reflectionEnabled: this.config.reflectionConfig?.enabled ?? false,

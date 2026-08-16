@@ -218,7 +218,6 @@ void test("validateConfig empty config applies defaults with no warnings", () =>
 		duplicateGuardEnabled: true,
 		fffgrepEnabled: true,
 		postEditDiagnostics: true,
-		thinkingLoopDetectionEnabled: true,
 	});
 	assert.equal(w.length, 0);
 });

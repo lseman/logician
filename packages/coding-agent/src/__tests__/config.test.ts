@@ -261,7 +261,6 @@ void test("validateConfig parses guard settings from the nested guardrails objec
 				duplicateToolThreshold: 5,
 				failureGuardEnabled: true,
 				toolFailureLoopThreshold: 7,
-				thinkingLoopDetectionEnabled: false,
 				budgetStopEnabled: true,
 			},
 		},
@@ -272,7 +271,6 @@ void test("validateConfig parses guard settings from the nested guardrails objec
 	assert.equal(cfg.duplicateToolThreshold, 5);
 	assert.equal(cfg.failureGuardEnabled, true);
 	assert.equal(cfg.toolFailureLoopThreshold, 7);
-	assert.equal(cfg.thinkingLoopDetectionEnabled, false);
 	assert.equal(cfg.budgetStopEnabled, true);
 	assert.deepEqual(warnings, []);
 });
